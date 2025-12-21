@@ -1,0 +1,89 @@
+[env]
+# macOS-specific configuration
+MACOSX_DEPLOYMENT_TARGET = "15.0"
+
+[build]
+rustflags = ["-Ctarget-cpu=native"]
+
+# macOS Apple Silicon (M1-M5) - using Accelerate framework
+[target.aarch64-apple-darwin]
+rustflags = [
+  "-C", 'target-cpu=native',
+  "-C", 'target-feature=+neon',
+  "-C", "link-arg=-mmacosx-version-min=15.0",
+  # cargo does not find them by default
+  "-C", "link-arg=-framework",
+  "-C", "link-arg=Accelerate",
+  "-C", "link-arg=-L /Applications/Xcode.app/Contents/Frameworks",
+  # for clang but why?
+  "-C", "link-arg=-L /opt/homebrew/Cellar/llvm/21.1.7/lib"
+]
+
+# macOS Intel - using Accelerate framework, untested
+[target.x86_64-apple-darwin]
+rustflags = [
+  "-C", "target-feature=+sse,+sse2,+sse3,+ssse3,+sse4.1,+sse4.2,+avx,+avx2",
+  "-C", "link-arg=-mmacosx-version-min=15.0",
+  "-C", "link-arg=-framework", "-C", "link-arg=Accelerate"
+]
+
+# Linux x86_64 configuration
+[target.x86_64-unknown-linux-gnu]
+rustflags = [
+  "-C", "target-feature=+sse,+sse2,+sse3,+ssse3,+sse4.1,+sse4.2,+avx,+avx2",
+  "-C", "link-arg=-L /usr/lib/x86_64-linux-gnu/openblas-pthread",
+  "-C", "link-arg=-lopenblas",
+]
+
+# Linux ARM64 configuration
+[target.aarch64-unknown-linux-gnu]
+rustflags = [
+  "-C", 'target-feature=+neon',
+  "-C", "link-arg=-L /usr/lib/aarch64-linux-gnu/openblas64-pthread",
+  "-C", "link-arg=-lopenblas64"
+]
+
+# Windows MSVC x86_64 configuration
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+  # Windows typically uses Intel MKL or OpenBLAS through vcpkg
+  # "-C", "-DCMAKE_TOOLCHAIN_FILE=C:/Users/pierr/source/repos/microsoft/vcpkg/scripts/buildsystems/vcpkg.cmake",
+  "-C", "target-feature=+sse,+sse2,+sse3,+ssse3,+sse4.1,+sse4.2,+avx,+avx2",
+  # Uncomment and adjust paths if using vcpkg OpenBLAS:
+  "-C", "link-arg=/LIBPATH:C:\\vcpkg\\installed\\x64-windows\\lib",
+  "-C", "link-arg=/LIBPATH:C:\\Users\\pierr\\source\\repos\\microsoft\\vcpkg\\installed\\x64-windows\\lib",
+  "-C", "link-arg=openblas.lib"
+]
+
+# Windows MSVC ARM configuration
+[target.aarch64-pc-windows-msvc]
+rustflags = [
+  "-C", 'target-feature=+neon',
+  # Windows typically uses Intel MKL or OpenBLAS through vcpkg
+  # Uncomment and adjust paths if using vcpkg OpenBLAS:
+  "-C", "link-arg=/LIBPATH:C:\\vcpkg\\installed\\arm64-windows\\lib",
+  "-C", "link-arg=/LIBPATH:C:\\Users\\pierr\\source\\repos\\microsoft\\vcpkg\\installed\\arm64-windows\\lib",
+  "-C", "link-arg=openblas.lib",
+  "-C", "link-arg=nlopt.lib"
+]
+
+# Windows GNU x86_64 configuration, untested
+[target.x86_64-pc-windows-gnu]
+rustflags = [
+  # For MinGW/MSYS2 with OpenBLAS
+  "-C", "link-arg=-lopenblas"
+]
+
+# Linux x86_64 musl configuration (static linking)
+[target.x86_64-unknown-linux-musl]
+rustflags = [
+  "-C", "target-feature=+crt-static",
+  "-C", "target-feature=+sse,+sse2,+sse3,+ssse3,+sse4.1,+sse4.2,+avx,+avx2",
+]
+
+# Linux ARM64 musl configuration (static linking)
+[target.aarch64-unknown-linux-musl]
+rustflags = [
+  "-C", "target-feature=+crt-static",
+  "-C", "target-feature=+neon",
+]

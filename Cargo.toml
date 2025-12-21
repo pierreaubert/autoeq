@@ -1,0 +1,205 @@
+[workspace]
+members = [
+    "autoeq",
+    "autoeq-cea2034",
+    "autoeq-env",
+    "autoeq-roomsim",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.2.435"
+authors = ["Pierre F. Aubert pierre@spinorama.org"]
+description = "Compute EQs for headphone, speakers and subwoofers"
+edition = "2024"
+documentation = "https://docs.rs/autoeq"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/pierreaubert/autoeq"
+
+[workspace.dependencies]
+
+# Serialization and data
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Async and networking
+# ideally we would use only threads or only tokio
+anyhow = { version = "1.0" }
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.21"
+signal-hook = "0.3"
+signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
+reqwest = { version = "0.12.24", features = ["json"] }
+urlencoding = "2.1"
+futures = "0.3"
+futures-util = "0.3"
+parking_lot = { version = "0.12.5", features = ["deadlock_detection"] }
+
+# CLI and system
+base64 = "0.22"
+byteorder = "1.5"
+chrono = "0.4"
+clap = { version = "4.5", features = ["derive"] }
+console_error_panic_hook = { version = "0.1" }
+csv = "1.4"
+ctrlc = "3.5"
+directories = "5"
+env = "1"
+env_logger = "0.11"
+getrandom = "0.2"
+hound = "3.5"
+libc = "0.2"
+log = "0.4"
+mimalloc = { version = "0.1" }
+notify = { version = "6.1", default-features = false, features = ["macos_kqueue"] }
+num_cpus = "1.17"
+regex = "1.12"
+rfd = "0.15"
+rusqlite = { version = "0.32", features = ["bundled"] }
+rust-embed = "8"
+smol = "2.0"
+strsim = "0.11"
+tempfile = "3.23"
+thiserror = "2.0.17"
+criterion = "0.5"
+which = "8"
+walkdir = "2"
+
+# Optimization and math
+ndarray = { version = "0.17", default-features = false, features = ["rayon", "blas", "serde"] }
+ndarray-linalg = { version = "0.18" }
+rand = "0.9.2"
+num-complex = "0.4"
+num-traits = "0.2"
+netcdf = "0.11"
+hdf5 = { package = "hdf5-metno", version = "0.10.1" }
+metaheuristics-nature = "10.1"
+rayon = "1.11"
+nlopt = "0.8.1"
+blas-src = {version="0.14"}
+rustfft = "6.4"
+realfft = "3.5"
+special = "0.11"  # Bessel, Hankel, Legendre functions
+spec_math = "0.1.6"
+
+autoeq = { path = "autoeq", version = "0.2" }
+autoeq-cea2034 = { path = "autoeq-cea2034", version = "0.2" }
+autoeq-env = { path = "autoeq-env", version = "0.2" }
+autoeq-roomsim = { path = "autoeq-roomsim", version = "0.1" }
+
+math-iir-fir = { version = "0.2" }
+math-differential-evolution = { version = "0.2" }
+math-test-functions = { version = "0.2" }
+math-fem = { version = "0.2" }
+math-bem = { version = "0.2" }
+math-solvers = { version = "0.2", default-features = false }
+math-wave = { version = "0.2" }
+math-xem-common = { version = "0.2" }
+
+# Plotting and visualization
+plotly = { version = "0.13.5" }
+plotly_static = { version = "0.1" }
+webdriver-downloader = "0.16.0"
+build_html = "2.7.0"
+
+# System and low-level
+objc = "0.2"
+cocoa = "0.26"
+dirs = "5.0"
+sysinfo = "0.37"
+memory-stats = "1.2"
+crossbeam = "0.8"
+
+# Graphics and Math (for head scanner and d3rs)
+nalgebra = { version = "0.33", features = ["serde-serialize"] }
+nalgebra-sparse = "0.10"
+parry3d = "0.17"
+bytemuck = "1.14"
+opencv = { version = "0.97", default-features = false, features = ["videoio", "imgproc", "calib3d", "features2d", "highgui", "objdetect"] }
+image = { version = "0.25", default-features = false }
+imageproc = "0.25"
+ort = { version = "2.0.0-rc.10", default-features = false, features = ["download-binaries", "coreml"] }
+kiddo = "4.2"
+delaunator = "1.0"
+indicatif = "0.17"
+wgpu = "23"
+glam = "0.29"
+pollster = "0.4"
+fontdue = "0.9"
+
+# Web/WASM
+wasm-bindgen = "0.2"
+wasm-bindgen-rayon = "1.2"
+wasm-bindgen-test = "0.3"
+
+# Build dependencies
+cbindgen = "0.29"
+
+# Utilities
+approx = "0.5"
+proptest = "1.9"
+unicode-normalization = "0.1"
+toml = "0.8"
+
+[workspace.lints.rust]
+ambiguous_negative_literals = "warn"
+missing_debug_implementations = "warn"
+redundant_imports = "warn"
+redundant_lifetimes = "warn"
+trivial_numeric_casts = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unused_lifetimes = "warn"
+
+[workspace.lints.clippy]
+cargo = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+correctness = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+# nursery = { level = "warn", priority = -1 }  # optional, might cause more false positives
+
+# These lints are from the `restriction` lint group and prevent specific
+# constructs being used in source code in order to drive up consistency,
+# quality, and brevity
+allow_attributes_without_reason = "warn"
+as_pointer_underscore = "warn"
+assertions_on_result_states = "warn"
+clone_on_ref_ptr = "warn"
+deref_by_slicing = "warn"
+disallowed_script_idents = "warn"
+empty_drop = "warn"
+empty_enum_variants_with_brackets = "warn"
+empty_structs_with_brackets = "warn"
+fn_to_numeric_cast_any = "warn"
+if_then_some_else_none = "warn"
+map_err_ignore = "warn"
+redundant_type_annotations = "warn"
+renamed_function_params = "warn"
+semicolon_outside_block = "warn"
+string_to_string = "warn"
+undocumented_unsafe_blocks = "warn"
+unnecessary_safety_comment = "warn"
+unnecessary_safety_doc = "warn"
+unneeded_field_pattern = "warn"
+unused_result_ok = "warn"
+
+# May cause issues with structured logging otherwise.
+literal_string_with_formatting_args = "allow"
+
+[patch.crates-io]
+webdriver-downloader = { version = "0.16.4", git = "https://github.com/pierreaubert/webdriver-downloader" }
+
+[profile.dev]
+# NOTE: Aggressive optimization settings (opt-level="z", lto=true, strip=true)
+# in debug mode cause segfaults in cpal/CoreAudio device enumeration on macOS.
+# Using standard debug settings instead.
+opt-level = 0
+panic = "unwind"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "unwind"  # Changed from "abort" to allow tests to run

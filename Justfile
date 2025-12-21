@@ -10,18 +10,8 @@ default:
 # Downloads
 # ----------------------------------------------------------------------
 
-download-once: download-spinorama download-sofa generate-audio-tests
-
-download-spinorama:
+download:
 	cargo run --bin autoeq-download-speakers --release
-
-download-sofa:
-	mkdir -p data_cached/org.sofacoustics/mit
-	wget -O data_cached/org.sofacoustics/mit/kemar_normal_pinna.sofa https://sofacoustics.org/data/database/mit/mit_kemar_normal_pinna.sofa
-	wget -O data_cached/org.sofacoustics/mit/kemar_large.sofa https://sofacoustics.org/data/database/mit/mit_kemar_large_pinna.sofa
-
-generate-audio-tests: prod-generate-audio-tests
-	cargo run --bin generate-audio-tests --release
 
 # ----------------------------------------------------------------------
 # TEST
@@ -49,16 +39,10 @@ fmt:
 
 alias build := prod
 
-prod: prod-workspace prod-autoeq prod-generate-audio-tests prod-roomeq
-	cargo build --release --bin download
-	cargo build --release --bin benchmark-autoeq-speaker
-	cargo build --release --bin benchmark-convergence
-
-prod-generate-audio-tests:
-	cargo build --release --bin generate-audio-tests -p sotf-audio-engine
-
-prod-workspace:
+prod: prod-autoeq prod-roomeq
 	cargo build --release --workspace
+	cargo build --release --bin benchmark-autoeq-speaker
+	cargo build --release --bin roomeq-fuzzer
 
 prod-autoeq:
 	cargo build --release --bin autoeq
@@ -213,9 +197,9 @@ install-ubuntu-arm64: install-ubuntu-common install-ubuntu-arm64-driver
 # ----------------------------------------------------------------------
 
 publish:
-	cd autoeq-testfunctions && cargo publish
-	cd autoeq-de && cargo publish
 	cd autoeq-cea2034 && cargo publish
+	cd autoeq && cargo publish
+	cd autoeq-roomsim && cargo publish
 
 # ----------------------------------------------------------------------
 # QA

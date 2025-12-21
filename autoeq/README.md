@@ -6,9 +6,9 @@
 
 The software can find the best EQ for you based on your measurements. There are extensive options to configure the optimiser via the command line.
 
-**Note:** A graphical desktop application is available in a separate repository: [autoeq-app](https://github.com/pierreaubert/autoeq-app)
+**Note:** A graphical desktop application is available in a separate repository: [SotF](https://github.com/pierreaubert/sotf)
 
-## Setting up a build developement
+## Setting up a build development
 
 ### Rust
 
@@ -38,6 +38,8 @@ will give you the list of possible commands:
 
 ```shell
 just prod
+just test
+just qa
 ```
 
 - Build the demos:
@@ -62,6 +64,7 @@ The repository includes a GitHub Actions workflow (`.github/workflows/build.yml`
 
 ```bash
 just test
+just qa
 ```
 
 ### Development Setup
@@ -78,7 +81,7 @@ cargo test --workspace --release
 
 This environment variable is used by the test infrastructure to determine where to write CSV trace files and other generated data.
 
-## Using the optimiser
+## Using AutoEQ
 
 There are a lot of options, so we will go after them one by one. You can either provide your own data or use spinorama.org data.
 
@@ -151,6 +154,21 @@ Currently autoEQ support 3 kind of loss functions:
 3. `mixed`: A mixed mode of 1. and 2.
 
 The first one is good for near field listening. The second one is likely good for a medium/far listening distance typical of a home.
+
+### Parameter: --peq-model
+
+Defines the structure of the equalizer filters.
+
+- `pk`: All filters are peak/bell filters (default).
+- `hp-pk`: First filter is a highpass, the rest are peak filters.
+- `hp-pk-lp`: First is highpass, last is lowpass, rest are peak.
+- `ls-pk-hs`: Low shelf, peak filters, high shelf.
+
+You can see the full list of available models with:
+
+```shell
+cargo run --bin autoeq --release -- --peq-model-list
+```
 
 ### Parameter: --algo
 
@@ -244,6 +262,50 @@ cargo run --bin autoeq --release -- --algo autoeq:de --strategy adaptivebin \
 ### Parameter: --refine
 
 If you have use a global optimiser they are good at exploring the search space but they are slow to converge. You should stop them early and finish with a local algorithm.
+
+## Using RoomEQ
+
+`roomeq` is a specialized tool for optimizing multi-channel speaker systems, including active crossovers, multi-subwoofer arrays, and Double Bass Arrays (DBA).
+
+### Features
+
+- **Single Speaker Optimization:** Supports IIR (PEQ), FIR, and Mixed (IIR + FIR) correction modes.
+- **Active Crossover Optimization:** Optimizes gain, delay, and crossover frequencies for multi-driver speakers.
+- **Multi-Subwoofer Optimization:** Aligns multiple subwoofers using gain and delay to minimize seat-to-seat variation and maximize bass smoothness.
+- **Double Bass Array (DBA):** Optimizes front/rear array gain and delay for active room mode cancellation.
+
+### Usage
+
+```shell
+cargo run --bin roomeq --release -- --config room_config.json --output dsp_chain.json
+```
+
+### Configuration
+
+`roomeq` requires a JSON configuration file defining the room, speakers, and optimization parameters.
+
+Example `room_config.json`:
+
+```json
+{
+  "speakers": {
+    "left": "path/to/measurement_left.csv",
+    "right": "path/to/measurement_right.csv"
+  },
+  "optimizer": {
+    "num_filters": 3,
+    "algorithm": "nlopt:cobyla",
+    "max_iter": 100,
+    "min_freq": 20.0,
+    "max_freq": 20000.0,
+    "min_q": 0.5,
+    "max_q": 10.0,
+    "min_db": -12.0,
+    "max_db": 12.0,
+    "loss_type": "flat"
+  }
+}
+```
 
 ## Improving the optimiser
 

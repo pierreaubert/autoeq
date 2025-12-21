@@ -42,7 +42,7 @@ Status: mature.
 
 ### autoeq
 
-A [CLI](autoeq/README.md) to optimise the response of your headset or headphone.
+A [CLI, see README](autoeq/README.md) to optimise the response of your headset or headphone.
 
 Status: good up to very good depending what you optimise for.
 

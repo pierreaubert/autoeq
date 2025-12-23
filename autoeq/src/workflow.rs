@@ -968,8 +968,16 @@ where
         phase: None,
     };
 
-    // 5. Setup objective
-    let spin_map = spin_data.as_ref().map(|s| s.curves.clone());
+    // 5. Setup objective - normalize spin data to same frequency grid
+    let spin_map = spin_data.as_ref().map(|s| {
+        s.curves
+            .iter()
+            .map(|(name, curve)| {
+                let normalized = read::normalize_and_interpolate_response(&standard_freq, curve);
+                (name.clone(), normalized)
+            })
+            .collect::<HashMap<String, Curve>>()
+    });
     let (objective_data, _) = setup_objective_data(
         args,
         &input_normalized,

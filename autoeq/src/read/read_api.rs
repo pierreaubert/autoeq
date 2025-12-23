@@ -13,6 +13,27 @@ use crate::read::interpolate::interpolate;
 use crate::read::plot::{normalize_plotly_json_from_str, normalize_plotly_value_with_suggestions};
 use crate::{Curve, DirectivityCurve, DirectivityData};
 
+/// CEA2034 spin data with all standard curves
+#[derive(Debug, Clone)]
+pub struct Cea2034Data {
+    /// On Axis response
+    pub on_axis: Curve,
+    /// Listening Window response
+    pub listening_window: Curve,
+    /// Early Reflections response
+    pub early_reflections: Curve,
+    /// Sound Power response
+    pub sound_power: Curve,
+    /// Estimated In-Room Response (PIR)
+    pub estimated_in_room: Curve,
+    /// Early Reflections Directivity Index (On Axis - ER)
+    pub er_di: Curve,
+    /// Sound Power Directivity Index (On Axis - SP)
+    pub sp_di: Curve,
+    /// All curves as HashMap (for backward compatibility)
+    pub curves: HashMap<String, Curve>,
+}
+
 /// Fetch a frequency response curve from the spinorama API
 ///
 /// # Arguments
@@ -177,11 +198,11 @@ pub fn extract_curve_by_name(
                     }
 
                     // Fallback: try plain array format
-                    if freqs.is_empty() {
-                        if let (Some(x_arr), Some(y_arr)) = (x_data.as_array(), y_data.as_array()) {
-                            freqs = x_arr.iter().filter_map(|v| v.as_f64()).collect();
-                            spls = y_arr.iter().filter_map(|v| v.as_f64()).collect();
-                        }
+                    if freqs.is_empty()
+                        && let (Some(x_arr), Some(y_arr)) = (x_data.as_array(), y_data.as_array())
+                    {
+                        freqs = x_arr.iter().filter_map(|v| v.as_f64()).collect();
+                        spls = y_arr.iter().filter_map(|v| v.as_f64()).collect();
                     }
                 }
                 if !freqs.is_empty() {
@@ -793,6 +814,97 @@ pub async fn fetch_contour_data(
 
     let plot_data = fetch_measurement_plot_data(speaker, version, measurement).await?;
     extract_contour_data(&plot_data)
+}
+
+/// Load spinorama measurement with full CEA2034 spin data
+///
+/// This fetches the requested curve and also extracts all CEA2034 curves
+/// when the measurement type is CEA2034.
+///
+/// # Arguments
+/// * `speaker` - Speaker name (e.g., "KEF R3")
+/// * `version` - Version (e.g., "asr")
+/// * `measurement` - Measurement type (e.g., "CEA2034")
+/// * `curve_name` - Specific curve to use as primary (e.g., "Listening Window")
+///
+/// # Returns
+/// Tuple of (primary curve, optional spin data)
+pub async fn load_spinorama_with_spin(
+    speaker: &str,
+    version: &str,
+    measurement: &str,
+    curve_name: &str,
+) -> Result<(Curve, Option<Cea2034Data>), Box<dyn Error>> {
+    // Handle Estimated In-Room Response specially
+    if measurement == "Estimated In-Room Response"
+        || (measurement == "CEA2034" && curve_name == "Estimated In-Room Response")
+    {
+        let plot_data = fetch_measurement_plot_data(speaker, version, "CEA2034").await?;
+        let curves = extract_cea2034_curves_original(&plot_data, "CEA2034")?;
+
+        let pir_curve = curves
+            .get("Estimated In-Room Response")
+            .ok_or_else(|| {
+                Box::<dyn Error>::from("Estimated In-Room Response curve not found in CEA2034 data")
+            })?
+            .clone();
+
+        let spin_data = build_cea2034_data(curves)?;
+        return Ok((pir_curve, Some(spin_data)));
+    }
+
+    // Standard curve fetch
+    let curve = read_spinorama(speaker, version, measurement, curve_name).await?;
+
+    // Extract spin data if CEA2034
+    let spin_data = if measurement == "CEA2034" {
+        let plot_data = fetch_measurement_plot_data(speaker, version, measurement).await?;
+        let curves = extract_cea2034_curves_original(&plot_data, "CEA2034")?;
+        Some(build_cea2034_data(curves)?)
+    } else {
+        None
+    };
+
+    Ok((curve, spin_data))
+}
+
+/// Build Cea2034Data from curves HashMap
+fn build_cea2034_data(curves: HashMap<String, Curve>) -> Result<Cea2034Data, Box<dyn Error>> {
+    let get_curve = |name: &str| -> Result<Curve, Box<dyn Error>> {
+        curves
+            .get(name)
+            .cloned()
+            .ok_or_else(|| Box::<dyn Error>::from(format!("Missing CEA2034 curve: {}", name)))
+    };
+
+    let on_axis = get_curve("On Axis")?;
+    let listening_window = get_curve("Listening Window")?;
+    let early_reflections = get_curve("Early Reflections")?;
+    let sound_power = get_curve("Sound Power")?;
+    let estimated_in_room = get_curve("Estimated In-Room Response")?;
+
+    // Compute directivity indices
+    let er_di = Curve {
+        freq: on_axis.freq.clone(),
+        spl: &on_axis.spl - &early_reflections.spl,
+        phase: None,
+    };
+    let sp_di = Curve {
+        freq: on_axis.freq.clone(),
+        spl: &on_axis.spl - &sound_power.spl,
+        phase: None,
+    };
+
+    Ok(Cea2034Data {
+        on_axis,
+        listening_window,
+        early_reflections,
+        sound_power,
+        estimated_in_room,
+        er_di,
+        sp_di,
+        curves,
+    })
 }
 
 /// Extract contour data from Plotly JSON (heatmap format)

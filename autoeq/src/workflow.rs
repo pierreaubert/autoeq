@@ -4,12 +4,12 @@
 //! building target curves, preparing objective data, and running optimization.
 
 use crate::{
-    Curve, cli::PeqModel, error::AutoeqError, loss::DriversLossData, loss::HeadphoneLossData,
-    loss::SpeakerLossData, optim, optim::ObjectiveData,
-    optim_de::optimize_filters_autoeq_with_callback, read,
+    Curve, cli::PeqModel, error::AutoeqError, iir::Biquad, loss::DriversLossData,
+    loss::HeadphoneLossData, loss::SpeakerLossData, optim, optim::ObjectiveData,
+    optim_de::optimize_filters_autoeq_with_callback, read, read::Cea2034Data, x2peq::x2peq,
 };
 use ndarray::Array1;
-use std::{collections::HashMap, error::Error};
+use std::{collections::HashMap, error::Error, path::PathBuf};
 
 /// Load the input curve from either local CSV (when no API params) or from
 /// cached/API Plotly JSON for a given `speaker`/`version`/`measurement`.
@@ -638,6 +638,491 @@ pub fn perform_optimization_with_callback(
     Ok(x)
 }
 
+/// Progress update sent to callback during optimization
+#[derive(Debug, Clone)]
+pub struct ProgressUpdate {
+    /// Current iteration number
+    pub iteration: usize,
+    /// Total expected iterations (maxeval)
+    pub max_iterations: usize,
+    /// Current loss/objective value (lower is better)
+    pub loss: f64,
+    /// Optional score value (higher is better, e.g., Harman speaker score)
+    /// Available when speaker_score_data was provided
+    pub score: Option<f64>,
+    /// Convergence metric (population standard deviation)
+    pub convergence: f64,
+    /// Raw optimizer parameters
+    pub params: Vec<f64>,
+    /// Decoded biquad filters (if include_biquads=true)
+    pub biquads: Vec<Biquad>,
+    /// Filter response at standard frequencies (if include_filter_response=true)
+    pub filter_response: Vec<f64>,
+}
+
+/// Configuration for progress callbacks
+#[derive(Debug, Clone)]
+pub struct ProgressCallbackConfig {
+    /// Report progress every N iterations (default: 25)
+    pub interval: usize,
+    /// Include decoded biquad filters in each update (default: true)
+    pub include_biquads: bool,
+    /// Include filter response curve in each update (default: true)
+    pub include_filter_response: bool,
+    /// Frequencies for filter response computation (if empty, uses standard 200-point grid)
+    pub frequencies: Vec<f64>,
+}
+
+impl Default for ProgressCallbackConfig {
+    fn default() -> Self {
+        Self {
+            interval: 25,
+            include_biquads: true,
+            include_filter_response: true,
+            frequencies: Vec::new(), // Will use standard grid
+        }
+    }
+}
+
+/// Output from optimization with progress tracking
+#[derive(Debug, Clone)]
+pub struct OptimizationOutput {
+    /// Raw filter parameters
+    pub params: Vec<f64>,
+    /// Optimization history: (iteration, loss)
+    pub history: Vec<(usize, f64)>,
+}
+
+/// Run optimization with progress callback at configurable intervals
+///
+/// This wraps `perform_optimization_with_callback` with:
+/// - Interval-based reporting (not every iteration)
+/// - Automatic biquad decoding from raw params
+/// - Filter response computation
+/// - Score calculation when speaker_score_data is available
+///
+/// # Arguments
+/// * `args` - Optimization arguments
+/// * `objective_data` - Objective data from setup_objective_data
+/// * `config` - Callback configuration (interval, what to include)
+/// * `callback` - User callback receiving ProgressUpdate
+///
+/// # Returns
+/// Optimization result with raw filter parameters and history
+pub fn perform_optimization_with_progress<F>(
+    args: &crate::cli::Args,
+    objective_data: &ObjectiveData,
+    config: ProgressCallbackConfig,
+    mut callback: F,
+) -> Result<OptimizationOutput, Box<dyn Error>>
+where
+    F: FnMut(&ProgressUpdate) -> crate::de::CallbackAction + Send + 'static,
+{
+    use std::sync::{Arc, Mutex};
+
+    let frequencies: Vec<f64> = if config.frequencies.is_empty() {
+        read::create_log_frequency_grid(200, 20.0, 20000.0)
+            .iter()
+            .copied()
+            .collect()
+    } else {
+        config.frequencies.clone()
+    };
+    let freq_array = Array1::from(frequencies.clone());
+    let speaker_score_data = objective_data.speaker_score_data.clone();
+    let sample_rate = args.sample_rate;
+    let peq_model = args.peq_model;
+    let maxeval = args.maxeval;
+
+    let last_reported = Arc::new(Mutex::new(0usize));
+    let history = Arc::new(Mutex::new(Vec::new()));
+
+    let last_reported_clone = Arc::clone(&last_reported);
+    let history_clone = Arc::clone(&history);
+    let freq_array_clone = freq_array.clone();
+    let frequencies_clone = frequencies.clone();
+
+    let de_callback = move |intermediate: &crate::de::DEIntermediate| -> crate::de::CallbackAction {
+        // Always record history
+        {
+            let mut hist = history_clone.lock().unwrap();
+            hist.push((intermediate.iter, intermediate.fun));
+        }
+
+        let mut last = last_reported_clone.lock().unwrap();
+
+        // Check if we should report
+        if intermediate.iter == 0 || intermediate.iter.saturating_sub(*last) >= config.interval {
+            *last = intermediate.iter;
+
+            // Decode biquads if requested
+            let biquads: Vec<Biquad> = if config.include_biquads {
+                x2peq(&intermediate.x.to_vec(), sample_rate, peq_model)
+                    .into_iter()
+                    .map(|(_, b)| b)
+                    .collect()
+            } else {
+                Vec::new()
+            };
+
+            // Compute filter response if requested
+            let filter_response: Vec<f64> =
+                if config.include_filter_response && !biquads.is_empty() {
+                    frequencies_clone
+                        .iter()
+                        .map(|&f| biquads.iter().map(|b| b.log_result(f)).sum())
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+
+            // Compute score if speaker_score_data available
+            let score = speaker_score_data.as_ref().map(|sd| {
+                let peq_response = if !filter_response.is_empty() {
+                    Array1::from(filter_response.clone())
+                } else {
+                    let bs = x2peq(&intermediate.x.to_vec(), sample_rate, peq_model);
+                    let resp: Vec<f64> = frequencies_clone
+                        .iter()
+                        .map(|&f| bs.iter().map(|(_, b)| b.log_result(f)).sum())
+                        .collect();
+                    Array1::from(resp)
+                };
+                crate::loss::speaker_score_loss(sd, &freq_array_clone, &peq_response)
+            });
+
+            let update = ProgressUpdate {
+                iteration: intermediate.iter,
+                max_iterations: maxeval,
+                loss: intermediate.fun,
+                score,
+                convergence: intermediate.convergence,
+                params: intermediate.x.to_vec(),
+                biquads,
+                filter_response,
+            };
+
+            callback(&update)
+        } else {
+            crate::de::CallbackAction::Continue
+        }
+    };
+
+    let params = perform_optimization_with_callback(args, objective_data, Box::new(de_callback))?;
+
+    let final_history = Arc::try_unwrap(history)
+        .map(|m| m.into_inner().unwrap())
+        .unwrap_or_default();
+
+    Ok(OptimizationOutput {
+        params,
+        history: final_history,
+    })
+}
+
+/// All curves needed for visualization after optimization
+#[derive(Debug, Clone)]
+pub struct VisualizationCurves {
+    /// Frequency points (Hz)
+    pub frequencies: Vec<f64>,
+    /// Input/measurement curve (dB)
+    pub input_curve: Vec<f64>,
+    /// Target curve (dB)
+    pub target_curve: Vec<f64>,
+    /// Deviation = target - input (dB)
+    pub deviation_curve: Vec<f64>,
+    /// Combined filter response (dB)
+    pub filter_response: Vec<f64>,
+    /// Error = deviation - filter_response (dB)
+    pub error_curve: Vec<f64>,
+    /// Corrected = input + filter_response (dB)
+    pub corrected_curve: Vec<f64>,
+    /// Individual filter responses (dB per filter)
+    pub individual_filter_responses: Vec<Vec<f64>>,
+}
+
+/// Compute all visualization curves from optimization result
+///
+/// # Arguments
+/// * `frequencies` - Frequency points (Hz)
+/// * `input_curve` - Input measurement curve
+/// * `target_curve` - Target curve
+/// * `biquads` - Optimized biquad filters
+///
+/// # Returns
+/// All curves needed for visualization
+pub fn compute_visualization_curves(
+    frequencies: &[f64],
+    input_curve: &Curve,
+    target_curve: &Curve,
+    biquads: &[Biquad],
+) -> VisualizationCurves {
+    let input_vec: Vec<f64> = input_curve.spl.iter().copied().collect();
+    let target_vec: Vec<f64> = target_curve.spl.iter().copied().collect();
+
+    // Deviation = target - input
+    let deviation_vec: Vec<f64> = target_vec
+        .iter()
+        .zip(input_vec.iter())
+        .map(|(t, i)| t - i)
+        .collect();
+
+    // Filter response
+    let filter_response: Vec<f64> = frequencies
+        .iter()
+        .map(|&freq| biquads.iter().map(|b| b.log_result(freq)).sum())
+        .collect();
+
+    // Individual filter responses
+    let individual_filter_responses: Vec<Vec<f64>> = biquads
+        .iter()
+        .map(|biquad| {
+            frequencies
+                .iter()
+                .map(|&freq| biquad.log_result(freq))
+                .collect()
+        })
+        .collect();
+
+    // Error = deviation - filter_response
+    let error_vec: Vec<f64> = deviation_vec
+        .iter()
+        .zip(filter_response.iter())
+        .map(|(d, f)| d - f)
+        .collect();
+
+    // Corrected = input + filter_response
+    let corrected_vec: Vec<f64> = input_vec
+        .iter()
+        .zip(filter_response.iter())
+        .map(|(i, f)| i + f)
+        .collect();
+
+    VisualizationCurves {
+        frequencies: frequencies.to_vec(),
+        input_curve: input_vec,
+        target_curve: target_vec,
+        deviation_curve: deviation_vec,
+        filter_response,
+        error_curve: error_vec,
+        corrected_curve: corrected_vec,
+        individual_filter_responses,
+    }
+}
+
+/// Complete speaker optimization result
+#[derive(Debug, Clone)]
+pub struct SpeakerOptResult {
+    /// Optimized biquad filters
+    pub biquads: Vec<Biquad>,
+    /// Visualization curves
+    pub curves: VisualizationCurves,
+    /// CEA2034 spin data (if available)
+    pub spin_data: Option<Cea2034Data>,
+    /// Optimization history: (iteration, loss)
+    pub history: Vec<(usize, f64)>,
+    /// Initial loss value
+    pub initial_loss: f64,
+    /// Final loss value
+    pub final_loss: f64,
+}
+
+/// Run complete speaker optimization from spinorama data
+///
+/// # Arguments
+/// * `speaker` - Speaker name
+/// * `version` - Version (e.g., "asr")
+/// * `measurement` - Measurement type (e.g., "CEA2034")
+/// * `args` - Optimization arguments (use `Args::speaker_defaults()` as base)
+/// * `progress_config` - Optional progress callback configuration
+/// * `progress_callback` - Optional progress callback
+///
+/// # Returns
+/// Complete optimization result with all curves
+pub async fn optimize_speaker<F>(
+    speaker: &str,
+    version: &str,
+    measurement: &str,
+    args: &crate::cli::Args,
+    progress_config: Option<ProgressCallbackConfig>,
+    progress_callback: Option<F>,
+) -> Result<SpeakerOptResult, Box<dyn Error>>
+where
+    F: FnMut(&ProgressUpdate) -> crate::de::CallbackAction + Send + 'static,
+{
+    // 1. Load measurement with spin data
+    let (input_curve, spin_data) =
+        read::load_spinorama_with_spin(speaker, version, measurement, &args.curve_name).await?;
+
+    // 2. Normalize to standard frequency grid
+    let standard_freq = read::create_log_frequency_grid(200, 20.0, 20000.0);
+    let input_normalized = read::normalize_and_interpolate_response(&standard_freq, &input_curve);
+
+    // 3. Build target curve
+    let target_curve = build_target_curve(args, &standard_freq, &input_normalized)?;
+
+    // 4. Create deviation curve
+    let deviation_curve = Curve {
+        freq: target_curve.freq.clone(),
+        spl: &target_curve.spl - &input_normalized.spl,
+        phase: None,
+    };
+
+    // 5. Setup objective
+    let spin_map = spin_data.as_ref().map(|s| s.curves.clone());
+    let (objective_data, _) = setup_objective_data(
+        args,
+        &input_normalized,
+        &target_curve,
+        &deviation_curve,
+        &spin_map,
+    )?;
+
+    // 6. Run optimization
+    let (params, history) = if let (Some(config), Some(callback)) =
+        (progress_config, progress_callback)
+    {
+        let output = perform_optimization_with_progress(args, &objective_data, config, callback)?;
+        (output.params, output.history)
+    } else {
+        let params = perform_optimization_with_callback(
+            args,
+            &objective_data,
+            Box::new(|_| crate::de::CallbackAction::Continue),
+        )?;
+        (params, Vec::new())
+    };
+
+    // 7. Convert to biquads
+    let biquads: Vec<Biquad> = x2peq(&params, args.sample_rate, args.peq_model)
+        .into_iter()
+        .map(|(_, b)| b)
+        .collect();
+
+    // 8. Compute visualization curves
+    let frequencies: Vec<f64> = standard_freq.iter().copied().collect();
+    let curves = compute_visualization_curves(
+        &frequencies,
+        &input_normalized,
+        &target_curve,
+        &biquads,
+    );
+
+    let initial_loss = history.first().map(|x| x.1).unwrap_or(0.0);
+    let final_loss = history.last().map(|x| x.1).unwrap_or(0.0);
+
+    Ok(SpeakerOptResult {
+        biquads,
+        curves,
+        spin_data,
+        history,
+        initial_loss,
+        final_loss,
+    })
+}
+
+/// Complete headphone optimization result
+#[derive(Debug, Clone)]
+pub struct HeadphoneOptResult {
+    /// Optimized biquad filters
+    pub biquads: Vec<Biquad>,
+    /// Visualization curves
+    pub curves: VisualizationCurves,
+    /// Optimization history: (iteration, loss)
+    pub history: Vec<(usize, f64)>,
+    /// Initial loss value
+    pub initial_loss: f64,
+    /// Final loss value
+    pub final_loss: f64,
+}
+
+/// Run complete headphone optimization from CSV measurement
+///
+/// # Arguments
+/// * `curve_path` - Path to headphone measurement CSV
+/// * `target_curve` - Target curve (use bundled Harman curves or custom)
+/// * `args` - Optimization arguments (use `Args::headphone_defaults()` as base)
+/// * `progress_config` - Optional progress callback configuration
+/// * `progress_callback` - Optional progress callback
+///
+/// # Returns
+/// Complete optimization result with all curves
+pub fn optimize_headphone<F>(
+    curve_path: &PathBuf,
+    target_curve: &Curve,
+    args: &crate::cli::Args,
+    progress_config: Option<ProgressCallbackConfig>,
+    progress_callback: Option<F>,
+) -> Result<HeadphoneOptResult, Box<dyn Error>>
+where
+    F: FnMut(&ProgressUpdate) -> crate::de::CallbackAction + Send + 'static,
+{
+    // 1. Load measurement
+    let input_curve = read::read_curve_from_csv(curve_path)?;
+
+    // 2. Normalize to standard frequency grid
+    let standard_freq = read::create_log_frequency_grid(200, 20.0, 20000.0);
+    let input_normalized = read::normalize_and_interpolate_response(&standard_freq, &input_curve);
+    let target_normalized = read::normalize_and_interpolate_response(&standard_freq, target_curve);
+
+    // 3. Create deviation curve
+    let deviation_curve = Curve {
+        freq: target_normalized.freq.clone(),
+        spl: &target_normalized.spl - &input_normalized.spl,
+        phase: None,
+    };
+
+    // 4. Setup objective
+    let (objective_data, _) = setup_objective_data(
+        args,
+        &input_normalized,
+        &target_normalized,
+        &deviation_curve,
+        &None,
+    )?;
+
+    // 5. Run optimization
+    let (params, history) = if let (Some(config), Some(callback)) =
+        (progress_config, progress_callback)
+    {
+        let output = perform_optimization_with_progress(args, &objective_data, config, callback)?;
+        (output.params, output.history)
+    } else {
+        let params = perform_optimization_with_callback(
+            args,
+            &objective_data,
+            Box::new(|_| crate::de::CallbackAction::Continue),
+        )?;
+        (params, Vec::new())
+    };
+
+    // 6. Convert to biquads
+    let biquads: Vec<Biquad> = x2peq(&params, args.sample_rate, args.peq_model)
+        .into_iter()
+        .map(|(_, b)| b)
+        .collect();
+
+    // 7. Compute visualization curves
+    let frequencies: Vec<f64> = standard_freq.iter().copied().collect();
+    let curves = compute_visualization_curves(
+        &frequencies,
+        &input_normalized,
+        &target_normalized,
+        &biquads,
+    );
+
+    let initial_loss = history.first().map(|x| x.1).unwrap_or(0.0);
+    let final_loss = history.last().map(|x| x.1).unwrap_or(0.0);
+
+    Ok(HeadphoneOptResult {
+        biquads,
+        curves,
+        history,
+        initial_loss,
+        final_loss,
+    })
+}
+
 /// Result of driver crossover optimization
 #[derive(Debug, Clone)]
 pub struct DriverOptimizationResult {
@@ -1131,5 +1616,125 @@ mod tests {
                 .expect("setup_objective_data should succeed with no spin data");
         assert!(!use_cea3);
         assert!(obj3.speaker_score_data.is_none());
+    }
+
+    #[test]
+    fn test_args_speaker_defaults() {
+        let args = Args::speaker_defaults();
+        assert_eq!(args.num_filters, 5);
+        assert_eq!(args.sample_rate, 48000.0);
+        assert_eq!(args.loss, crate::LossType::SpeakerFlat);
+        assert_eq!(args.algo, "autoeq:de");
+        assert_eq!(args.curve_name, "Listening Window");
+        assert_eq!(args.min_freq, 20.0);
+        assert_eq!(args.max_freq, 20000.0);
+    }
+
+    #[test]
+    fn test_args_headphone_defaults() {
+        let args = Args::headphone_defaults();
+        assert_eq!(args.num_filters, 7);
+        assert_eq!(args.loss, crate::LossType::HeadphoneScore);
+        // Should inherit other values from speaker_defaults
+        assert_eq!(args.sample_rate, 48000.0);
+        assert_eq!(args.algo, "autoeq:de");
+    }
+
+    #[test]
+    fn test_args_roomeq_defaults() {
+        let args = Args::roomeq_defaults();
+        assert_eq!(args.num_filters, 10);
+        assert_eq!(args.max_freq, 500.0); // Room EQ focuses on low frequencies
+        // Should inherit other values from speaker_defaults
+        assert_eq!(args.sample_rate, 48000.0);
+        assert_eq!(args.loss, crate::LossType::SpeakerFlat);
+    }
+
+    #[test]
+    fn test_progress_callback_config_default() {
+        let config = ProgressCallbackConfig::default();
+        assert_eq!(config.interval, 25);
+        assert!(config.include_biquads);
+        assert!(config.include_filter_response);
+        assert!(config.frequencies.is_empty());
+    }
+
+    #[test]
+    fn test_compute_visualization_curves() {
+        use crate::iir::BiquadFilterType;
+
+        let frequencies = vec![100.0, 1000.0, 10000.0];
+        let input_curve = Curve {
+            freq: Array1::from(frequencies.clone()),
+            spl: Array1::from(vec![80.0, 85.0, 82.0]),
+            phase: None,
+        };
+        let target_curve = Curve {
+            freq: Array1::from(frequencies.clone()),
+            spl: Array1::from(vec![80.0, 80.0, 80.0]),
+            phase: None,
+        };
+
+        // Create a simple peak filter
+        let biquad = Biquad::new(BiquadFilterType::Peak, 1000.0, 48000.0, 1.0, -5.0);
+        let biquads = vec![biquad];
+
+        let curves = compute_visualization_curves(&frequencies, &input_curve, &target_curve, &biquads);
+
+        // Check that all curves have the right length
+        assert_eq!(curves.frequencies.len(), 3);
+        assert_eq!(curves.input_curve.len(), 3);
+        assert_eq!(curves.target_curve.len(), 3);
+        assert_eq!(curves.deviation_curve.len(), 3);
+        assert_eq!(curves.filter_response.len(), 3);
+        assert_eq!(curves.error_curve.len(), 3);
+        assert_eq!(curves.corrected_curve.len(), 3);
+        assert_eq!(curves.individual_filter_responses.len(), 1);
+
+        // Check deviation = target - input
+        for i in 0..3 {
+            let expected_deviation = target_curve.spl[i] - input_curve.spl[i];
+            assert!((curves.deviation_curve[i] - expected_deviation).abs() < 1e-10);
+        }
+
+        // Check corrected = input + filter_response
+        for i in 0..3 {
+            let expected_corrected = input_curve.spl[i] + curves.filter_response[i];
+            assert!((curves.corrected_curve[i] - expected_corrected).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_visualization_curves_empty_biquads() {
+        let frequencies = vec![100.0, 1000.0, 10000.0];
+        let input_curve = Curve {
+            freq: Array1::from(frequencies.clone()),
+            spl: Array1::from(vec![80.0, 85.0, 82.0]),
+            phase: None,
+        };
+        let target_curve = Curve {
+            freq: Array1::from(frequencies.clone()),
+            spl: Array1::from(vec![80.0, 80.0, 80.0]),
+            phase: None,
+        };
+
+        let biquads: Vec<Biquad> = vec![];
+
+        let curves = compute_visualization_curves(&frequencies, &input_curve, &target_curve, &biquads);
+
+        // With no biquads, filter response should be all zeros
+        for &val in &curves.filter_response {
+            assert!((val - 0.0).abs() < 1e-10);
+        }
+
+        // Corrected should equal input when no filters
+        for i in 0..3 {
+            assert!((curves.corrected_curve[i] - input_curve.spl[i]).abs() < 1e-10);
+        }
+
+        // Error should equal deviation when no filters
+        for i in 0..3 {
+            assert!((curves.error_curve[i] - curves.deviation_curve[i]).abs() < 1e-10);
+        }
     }
 }

@@ -33,6 +33,8 @@ pub use directory::measurement_filename;
 pub use directory::sanitize_dir_name;
 pub use interpolate::*;
 pub use normalize::*;
+pub use read_api::Cea2034Data;
+pub use read_api::load_spinorama_with_spin;
 pub use read_api::*;
 pub use read_csv::load_driver_measurement;
 pub use read_csv::load_frequency_response;

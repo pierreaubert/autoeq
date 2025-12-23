@@ -72,9 +72,14 @@ pub mod x2peq;
 
 // Re-export commonly used items
 pub use cli::*;
-pub use loss::{HeadphoneLossData, LossType, SpeakerLossData};
+pub use loss::{CrossoverType, HeadphoneLossData, LossType, SpeakerLossData};
 pub use optim::*;
 pub use plot::*;
 pub use read::*;
+pub use workflow::{
+    HeadphoneOptResult, OptimizationOutput, ProgressCallbackConfig, ProgressUpdate,
+    SpeakerOptResult, VisualizationCurves, compute_visualization_curves, optimize_headphone,
+    optimize_speaker, perform_optimization_with_progress,
+};
 pub use workflow::*;
 pub use x2peq::x2peq;

@@ -295,6 +295,84 @@ impl Args {
             PeqModel::HpPk | PeqModel::HpPkLp
         )
     }
+
+    /// Create Args with speaker optimization defaults
+    ///
+    /// These defaults are tuned for typical speaker EQ optimization using
+    /// CEA2034 measurements from spinorama.org.
+    pub fn speaker_defaults() -> Self {
+        Self {
+            num_filters: 5,
+            sample_rate: 48000.0,
+            loss: LossType::SpeakerFlat,
+            algo: "autoeq:de".to_string(),
+            population: 50,
+            maxeval: 2000,
+            strategy: "currenttobest1bin".to_string(),
+            min_db: -12.0,
+            max_db: 12.0,
+            min_q: 0.5,
+            max_q: 10.0,
+            min_freq: 20.0,
+            max_freq: 20000.0,
+            min_spacing_oct: 0.5,
+            spacing_weight: 20.0,
+            smooth: true,
+            smooth_n: 1,
+            refine: false,
+            local_algo: "cobyla".to_string(),
+            tolerance: 1e-3,
+            atolerance: 1e-4,
+            recombination: 0.9,
+            adaptive_weight_f: 0.8,
+            adaptive_weight_cr: 0.7,
+            peq_model: PeqModel::Pk,
+            curve_name: "Listening Window".to_string(),
+            // File paths/flags default to None/false
+            curve: None,
+            target: None,
+            output: None,
+            speaker: None,
+            version: None,
+            measurement: None,
+            peq_model_list: false,
+            algo_list: false,
+            strategy_list: false,
+            no_parallel: false,
+            parallel_threads: 0,
+            seed: None,
+            qa: None,
+            driver1: None,
+            driver2: None,
+            driver3: None,
+            driver4: None,
+            crossover_type: "linkwitzriley4".to_string(),
+        }
+    }
+
+    /// Create Args with headphone optimization defaults
+    ///
+    /// These defaults are tuned for headphone EQ optimization using
+    /// frequency response measurements and Harman target curves.
+    pub fn headphone_defaults() -> Self {
+        Self {
+            loss: LossType::HeadphoneScore,
+            num_filters: 7,
+            ..Self::speaker_defaults()
+        }
+    }
+
+    /// Create Args with room EQ optimization defaults
+    ///
+    /// These defaults are tuned for room correction, focusing on
+    /// low frequencies where room modes are most problematic.
+    pub fn roomeq_defaults() -> Self {
+        Self {
+            num_filters: 10,
+            max_freq: 500.0, // Room EQ focuses on low frequencies
+            ..Self::speaker_defaults()
+        }
+    }
 }
 
 /// Display available optimization algorithms with descriptions and exit

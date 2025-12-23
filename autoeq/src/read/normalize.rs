@@ -66,6 +66,24 @@ pub fn normalize_and_interpolate_response(
     )
 }
 
+/// Interpolate a frequency response curve WITHOUT normalizing.
+///
+/// This preserves the original dB levels of the curve, only resampling
+/// to the standard frequency grid. Useful for CEA2034 visualization
+/// where curves should maintain their relative levels.
+///
+/// # Arguments
+///
+/// * `standard_freq` - Target frequency grid for interpolation
+/// * `curve` - Input frequency response curve
+///
+/// # Returns
+///
+/// Interpolated curve on the standard frequency grid (no normalization applied).
+pub fn interpolate_response(standard_freq: &ndarray::Array1<f64>, curve: &Curve) -> Curve {
+    interpolate_log_space(standard_freq, curve)
+}
+
 /// Normalize and interpolate response with custom normalization frequency range
 ///
 /// This is useful for multi-driver systems where each driver should be normalized

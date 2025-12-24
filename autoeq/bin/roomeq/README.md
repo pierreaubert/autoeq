@@ -169,6 +169,16 @@ See the `tests/data/roomeq/` directory for example configurations:
 - `test_config_stereo.json`: Simple stereo system
 - `test_config_multidriver.json`: Multi-driver speaker with crossover
 
+## Documentation
+
+Detailed format documentation with examples:
+- [`INPUT_FORMAT.md`](./INPUT_FORMAT.md): Complete input configuration format
+- [`OUTPUT_FORMAT.md`](./OUTPUT_FORMAT.md): Complete DSP chain output format
+
+JSON Schemas for validation:
+- [`input_schema.json`](./input_schema.json): Input configuration schema
+- [`output_schema.json`](./output_schema.json): Output DSP chain schema
+
 ## Testing
 
 Run the integration tests:

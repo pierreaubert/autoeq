@@ -22,10 +22,10 @@ pub fn optimize_group_delay(
     // We'll interpolate speaker to sub's frequencies for the calculation.
 
     let freq = &sub.freq;
-    
+
     // Interpolate speaker SPL and Phase to sub frequencies
     let speaker_interp = interpolate_curve(speaker, freq);
-    
+
     let sub_complex = curve_to_complex(sub);
     let speaker_complex = curve_to_complex(&speaker_interp);
 
@@ -80,7 +80,7 @@ fn evaluate_delay(
     // Apply delay to speaker: exp(-j * 2pi * f * delay)
     // delay is in ms, f in Hz.
     // delay_s = delay_ms / 1000.0
-    
+
     let delay_s = delay_ms / 1000.0;
     let mut combined_complex = Vec::with_capacity(freq.len());
 
@@ -89,7 +89,7 @@ fn evaluate_delay(
         let w = 2.0 * PI * f;
         let phase_shift = -w * delay_s;
         let rot = Complex64::from_polar(1.0, phase_shift);
-        
+
         let s_delayed = speaker[i] * rot;
         let sum = sub[i] + s_delayed;
         combined_complex.push(sum);
@@ -123,28 +123,28 @@ fn calculate_group_delay(freq: &Array1<f64>, complex: &[Complex64]) -> Vec<f64> 
     // GD = -d(phi)/dw
     // dw = 2pi * df
     // phi is unwrapped phase
-    
+
     let mut phases = Vec::with_capacity(complex.len());
     for c in complex {
         phases.push(c.arg());
     }
-    
+
     let unwrapped = unwrap_phase(&phases);
     let mut gd = vec![0.0; freq.len()];
 
     // Finite difference
-    for i in 0..freq.len()-1 {
-        let d_phi = unwrapped[i+1] - unwrapped[i];
-        let d_f = freq[i+1] - freq[i];
+    for i in 0..freq.len() - 1 {
+        let d_phi = unwrapped[i + 1] - unwrapped[i];
+        let d_f = freq[i + 1] - freq[i];
         let d_w = 2.0 * PI * d_f;
-        
+
         if d_w.abs() > 1e-9 {
             gd[i] = -d_phi / d_w; // Result in seconds
         }
     }
     // Fill last point
     if freq.len() > 1 {
-        gd[freq.len()-1] = gd[freq.len()-2];
+        gd[freq.len() - 1] = gd[freq.len() - 2];
     }
 
     // Convert to ms for easier reasoning, though for std dev it doesn't matter (just scaling)
@@ -189,7 +189,7 @@ fn curve_to_complex(curve: &Curve) -> Array1<Complex64> {
 fn interpolate_curve(curve: &Curve, target_freq: &Array1<f64>) -> Curve {
     // Simple linear interpolation
     // Assuming curve.freq is sorted
-    
+
     let mut spl = Array1::zeros(target_freq.len());
     let mut phase = Array1::zeros(target_freq.len());
     let has_phase = curve.phase.is_some();
@@ -217,7 +217,11 @@ fn interp_linear(x: &Array1<f64>, y: &Array1<f64>, target: f64) -> f64 {
     }
 
     // Binary search
-    let idx = match x.as_slice().unwrap().binary_search_by(|v| v.partial_cmp(&target).unwrap()) {
+    let idx = match x
+        .as_slice()
+        .unwrap()
+        .binary_search_by(|v| v.partial_cmp(&target).unwrap())
+    {
         Ok(i) => i,
         Err(i) => i - 1, // Insertion point is i, so we want i-1 and i
     };

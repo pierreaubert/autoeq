@@ -64,15 +64,23 @@ pub fn optimize_crossover(
         if freqs.len() != expected {
             return Err(format!(
                 "Expected {} crossover frequencies for {} drivers, got {}",
-                expected, n_drivers, freqs.len()
-            ).into());
+                expected,
+                n_drivers,
+                freqs.len()
+            )
+            .into());
         }
     }
 
     eprintln!(
         "  Optimizing crossover for {} drivers ({:?}){}",
-        n_drivers, crossover_type,
-        if fixed_freqs.is_some() { " with fixed frequencies" } else { "" }
+        n_drivers,
+        crossover_type,
+        if fixed_freqs.is_some() {
+            " with fixed frequencies"
+        } else {
+            ""
+        }
     );
 
     // Call library workflow to perform optimization

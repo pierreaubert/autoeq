@@ -119,7 +119,37 @@ struct RoomConfig {
     speakers: HashMap<String, SpeakerConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     crossovers: Option<HashMap<String, CrossoverConfig>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_curve: Option<TargetCurveConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    group_delay: Option<Vec<GroupDelayConfig>>,
     optimizer: OptimizerConfig,
+}
+
+/// Group delay optimization configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct GroupDelayConfig {
+    subwoofer: String,
+    speakers: Vec<String>,
+    #[serde(default = "default_group_delay_min_freq")]
+    min_freq: f64,
+    #[serde(default = "default_group_delay_max_freq")]
+    max_freq: f64,
+}
+
+fn default_group_delay_min_freq() -> f64 {
+    30.0
+}
+fn default_group_delay_max_freq() -> f64 {
+    120.0
+}
+
+/// Target curve configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum TargetCurveConfig {
+    Path(std::path::PathBuf),
+    Predefined(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,6 +198,12 @@ struct FirConfig {
 struct CrossoverConfig {
     #[serde(rename = "type")]
     crossover_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frequency: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frequencies: Option<Vec<f64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frequency_range: Option<(f64, f64)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -518,6 +554,63 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Generate crossover frequency configuration based on number of drivers
+/// Returns (frequency, frequencies, frequency_range) where only one should be Some
+#[allow(clippy::type_complexity)]
+fn generate_crossover_frequencies(
+    rng: &mut ChaCha8Rng,
+    num_drivers: usize,
+    verbose: bool,
+    channel_name: &str,
+) -> (Option<f64>, Option<Vec<f64>>, Option<(f64, f64)>) {
+    // 40% chance of fixed frequencies, 30% frequency range, 30% auto (all None)
+    let config_type = rng.random_range(0..100);
+
+    if config_type < 40 {
+        // Fixed frequencies based on driver count
+        if num_drivers == 2 {
+            // 2-way: single crossover frequency (800-3000 Hz typical)
+            let freq = rng.random_range(800.0..3000.0);
+            if verbose {
+                println!("      {}: fixed crossover at {:.0} Hz", channel_name, freq);
+            }
+            (Some(freq), None, None)
+        } else {
+            // 3-way or more: multiple crossover frequencies
+            let mut freqs = Vec::new();
+            // Generate sorted crossover points
+            let mut prev_freq: f64 = 200.0;
+            for _ in 0..(num_drivers - 1) {
+                let max_freq = (prev_freq * 5.0).min(15000.0);
+                let next_freq = rng.random_range(prev_freq * 2.0..max_freq);
+                freqs.push(next_freq);
+                prev_freq = next_freq;
+            }
+            if verbose {
+                println!("      {}: fixed crossovers at {:?} Hz", channel_name, freqs);
+            }
+            (None, Some(freqs), None)
+        }
+    } else if config_type < 70 {
+        // Frequency range for optimization
+        let min_freq = rng.random_range(200.0..500.0);
+        let max_freq = rng.random_range(5000.0..15000.0);
+        if verbose {
+            println!(
+                "      {}: crossover range {:.0}-{:.0} Hz",
+                channel_name, min_freq, max_freq
+            );
+        }
+        (None, None, Some((min_freq, max_freq)))
+    } else {
+        // Auto (let optimizer decide)
+        if verbose {
+            println!("      {}: auto crossover optimization", channel_name);
+        }
+        (None, None, None)
+    }
+}
+
 /// Generate random room configuration
 #[allow(clippy::type_complexity)]
 fn generate_random_config(
@@ -590,11 +683,24 @@ fn generate_random_config(
             }
 
             let crossover_name = format!("{}_crossover", channel_name);
-            let crossover_type = "LR24".to_string();
+            let crossover_type = match rng.random_range(0..3) {
+                0 => "LR24",
+                1 => "LR2",
+                _ => "Butterworth12",
+            }
+            .to_string();
+
+            // Generate crossover frequency configuration
+            let (frequency, frequencies, frequency_range) =
+                generate_crossover_frequencies(rng, num_drivers, verbose, &channel_name);
+
             crossovers.insert(
                 crossover_name.clone(),
                 CrossoverConfig {
                     crossover_type: crossover_type.clone(),
+                    frequency,
+                    frequencies,
+                    frequency_range,
                 },
             );
 
@@ -690,6 +796,65 @@ fn generate_random_config(
         }
     }
 
+    // Collect subwoofer channel names for group delay optimization
+    let subwoofer_channels: Vec<String> = speakers
+        .iter()
+        .filter_map(|(name, config)| match config {
+            SpeakerConfig::MultiSub(_) | SpeakerConfig::Dba(_) => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
+
+    // Collect single speaker channel names (potential targets for group delay alignment)
+    let single_speaker_channels: Vec<String> = speakers
+        .iter()
+        .filter_map(|(name, config)| match config {
+            SpeakerConfig::Single(_) | SpeakerConfig::Group(_) => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
+
+    // Generate group delay config if we have subwoofers and other speakers
+    let group_delay = if !subwoofer_channels.is_empty()
+        && !single_speaker_channels.is_empty()
+        && rng.random_bool(0.5)
+    {
+        if verbose {
+            println!("  Adding group delay optimization");
+        }
+        let configs: Vec<GroupDelayConfig> = subwoofer_channels
+            .iter()
+            .map(|sub| {
+                let min_freq = rng.random_range(20.0..50.0);
+                let max_freq = rng.random_range(80.0..150.0);
+                GroupDelayConfig {
+                    subwoofer: sub.clone(),
+                    speakers: single_speaker_channels.clone(),
+                    min_freq,
+                    max_freq,
+                }
+            })
+            .collect();
+        Some(configs)
+    } else {
+        None
+    };
+
+    // Generate target curve config (20% chance)
+    let target_curve = if rng.random_bool(0.2) {
+        let predefined = match rng.random_range(0..3) {
+            0 => "flat",
+            1 => "harman",
+            _ => "bk",
+        };
+        if verbose {
+            println!("  Using target curve: {}", predefined);
+        }
+        Some(TargetCurveConfig::Predefined(predefined.to_string()))
+    } else {
+        None
+    };
+
     // Randomize optimizer config
     let mode = match rng.random_range(0..3) {
         0 => "iir",
@@ -705,13 +870,32 @@ fn generate_random_config(
     }
     .to_string();
 
+    let algorithm = match rng.random_range(0..3) {
+        0 => "cobyla",
+        1 => "de",
+        _ => "nlopt:cobyla",
+    }
+    .to_string();
+
+    // Note: "score" loss type requires CEA2034 score data which synthetic measurements don't have
+    let loss_type = "flat".to_string();
+
+    let num_filters = rng.random_range(3..=12);
+    let min_freq = rng.random_range(20.0..100.0);
+    let max_freq = rng.random_range(10000.0..20000.0);
+    let max_iter = rng.random_range(200..=1000);
+
     let fir_config = if mode != "iir" {
         Some(FirConfig {
-            taps: 1024,
-            phase: if rng.random_bool(0.5) {
-                "linear".to_string()
-            } else {
-                "minimum".to_string()
+            taps: match rng.random_range(0..3) {
+                0 => 512,
+                1 => 1024,
+                _ => 2048,
+            },
+            phase: match rng.random_range(0..3) {
+                0 => "linear".to_string(),
+                1 => "minimum".to_string(),
+                _ => "kirkeby".to_string(),
             },
         })
     } else {
@@ -725,11 +909,22 @@ fn generate_random_config(
         } else {
             Some(crossovers)
         },
+        target_curve,
+        group_delay,
         optimizer: OptimizerConfig {
+            num_filters,
+            algorithm,
+            max_iter,
+            min_freq,
+            max_freq,
+            min_q: 0.5,
+            max_q: 10.0,
+            min_db: -12.0,
+            max_db: 12.0,
+            loss_type,
             peq_model,
             mode,
             fir: fir_config,
-            ..OptimizerConfig::default()
         },
     };
 

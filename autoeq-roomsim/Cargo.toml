@@ -6,7 +6,7 @@ authors = { workspace = true }
 description = "Room acoustic simulator"
 license = { workspace = true }
 repository = { workspace = true }
-keywords = ["bem", "boundary-element", "acoustics", "numerical", "room acoustics"]
+keywords = ["bem", "boundary-element", "acoustics", "numerical", "room-acoustics"]
 categories = ["science", "mathematics", "simulation", "hifi"]
 
 [lib]

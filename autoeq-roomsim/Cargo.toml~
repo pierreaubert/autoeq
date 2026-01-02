@@ -1,6 +1,6 @@
 [package]
 name = "autoeq-roomsim"
-version = "0.1.2"
+version = "0.3.0"
 edition = "2021"
 authors = { workspace = true }
 description = "Room acoustic simulator"
@@ -18,16 +18,14 @@ serde = { workspace=true , features = ["derive"] }
 serde_json = { workspace = true }
 num-complex = { workspace = true , features = ["serde"] }
 console_error_panic_hook = { workspace = true }
-getrandom = { workspace = true, features = ["js"] }
 ndarray = { workspace = true }
 rayon = { workspace = true }
 wasm-bindgen-rayon = { workspace = true }
 
 # Math-BEM with WASM-optimized parallel processing via wasm-bindgen-rayon
-math-bem = { path = "../math-bem", default-features = false, features = ["wasm"] }
+math-bem = { workspace = true , default-features = false, features = ["wasm"] }
 
 [dev-dependencies]
-wasm-bindgen-test = { workspace = true }
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = true

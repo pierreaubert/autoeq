@@ -53,7 +53,7 @@ pub struct RoomConfig {
 }
 
 pub fn default_config_version() -> String {
-    "1.0.0".to_string()
+    "1.1.0".to_string()
 }
 
 /// Group delay optimization configuration
@@ -142,9 +142,14 @@ pub struct CrossoverConfig {
     #[serde(rename = "type")]
     pub crossover_type: String,
 
-    /// Crossover frequency in Hz (if fixed)
+    /// Crossover frequency in Hz (for 2-way speakers)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frequency: Option<f64>,
+
+    /// Crossover frequencies in Hz (for 3-way and above)
+    /// e.g., [500, 3000] for woofer/mid at 500Hz, mid/tweeter at 3000Hz
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frequencies: Option<Vec<f64>>,
 
     /// Frequency range for automatic optimization
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -429,6 +434,7 @@ mod tests {
         let crossover = CrossoverConfig {
             crossover_type: "LR24".to_string(),
             frequency: Some(2500.0),
+            frequencies: None,
             frequency_range: None,
         };
 

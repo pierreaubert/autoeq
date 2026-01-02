@@ -216,6 +216,7 @@ pub fn setup_objective_data(
         },
         // Multi-driver data will be set separately
         drivers_data: None,
+        fixed_crossover_freqs: None,
         // Penalties default to zero; configured per algorithm in optimize_filters
         penalty_w_ceiling: 0.0,
         penalty_w_spacing: 0.0,
@@ -292,6 +293,7 @@ pub fn setup_drivers_objective_data(
         headphone_score_data: None,
         input_curve: None,
         drivers_data: Some(drivers_data),
+        fixed_crossover_freqs: None,
         penalty_w_ceiling: 0.0,
         penalty_w_spacing: 0.0,
         penalty_w_mingain: 0.0,
@@ -389,6 +391,71 @@ pub fn drivers_initial_guess(
         let xover_log10 = (lower_bounds[i] + upper_bounds[i]) / 2.0;
         x.push(xover_log10);
     }
+
+    x
+}
+
+/// Build optimization parameter bounds for multi-driver optimization with fixed crossover frequencies
+///
+/// When crossover frequencies are fixed, we only optimize gains and delays.
+///
+/// # Arguments
+/// * `args` - CLI arguments
+/// * `drivers_data` - Multi-driver measurement data
+///
+/// # Returns
+/// * Tuple of (lower_bounds, upper_bounds)
+///
+/// # Parameter Vector Layout
+/// For N drivers: [gain1, gain2, ..., gainN, delay1, delay2, ..., delayN]
+/// - Gains are in dB, bounded by [-max_db, max_db]
+/// - Delays are in ms, bounded by [-5, 5]
+pub fn setup_drivers_bounds_fixed_freqs(
+    args: &crate::cli::Args,
+    drivers_data: &DriversLossData,
+) -> (Vec<f64>, Vec<f64>) {
+    let n_drivers = drivers_data.drivers.len();
+    let n_params = n_drivers * 2; // N gains + N delays (no crossovers)
+
+    let mut lower_bounds = Vec::with_capacity(n_params);
+    let mut upper_bounds = Vec::with_capacity(n_params);
+
+    // Bounds for gains: [-max_db, max_db]
+    for _ in 0..n_drivers {
+        lower_bounds.push(-args.max_db);
+        upper_bounds.push(args.max_db);
+    }
+
+    // Bounds for delays: [-5.0, 5.0] ms
+    for _ in 0..n_drivers {
+        lower_bounds.push(-5.0);
+        upper_bounds.push(5.0);
+    }
+
+    (lower_bounds, upper_bounds)
+}
+
+/// Generate initial guess for multi-driver optimization with fixed crossover frequencies
+///
+/// # Arguments
+/// * `_lower_bounds` - Lower bounds for parameters (unused, for API consistency)
+/// * `_upper_bounds` - Upper bounds for parameters (unused, for API consistency)
+/// * `n_drivers` - Number of drivers
+///
+/// # Returns
+/// * Initial guess vector: [gains, delays]
+pub fn drivers_initial_guess_fixed_freqs(
+    _lower_bounds: &[f64],
+    _upper_bounds: &[f64],
+    n_drivers: usize,
+) -> Vec<f64> {
+    let mut x = Vec::new();
+
+    // Initial gains: start with 0 dB for all drivers
+    x.extend(vec![0.0; n_drivers]);
+
+    // Initial delays: start with 0 ms
+    x.extend(vec![0.0; n_drivers]);
 
     x
 }
@@ -1295,6 +1362,7 @@ pub fn optimize_drivers_crossover(
     max_iter: usize,
     min_db: f64,
     max_db: f64,
+    fixed_freqs: Option<Vec<f64>>,
 ) -> Result<DriverOptimizationResult, Box<dyn std::error::Error>> {
     let n_drivers = drivers_data.drivers.len();
 
@@ -1309,14 +1377,28 @@ pub fn optimize_drivers_crossover(
         max_db,
     );
 
-    // Setup objective data
-    let objective_data = setup_drivers_objective_data(&args, drivers_data.clone());
+    // Setup objective data with optional fixed frequencies
+    let objective_data = if let Some(ref freqs) = fixed_freqs {
+        let mut data = setup_drivers_objective_data(&args, drivers_data.clone());
+        data.fixed_crossover_freqs = Some(freqs.clone());
+        data
+    } else {
+        setup_drivers_objective_data(&args, drivers_data.clone())
+    };
 
-    // Setup bounds
-    let (lower_bounds, upper_bounds) = setup_drivers_bounds(&args, &drivers_data);
+    // Setup bounds (exclude crossover frequencies if fixed)
+    let (lower_bounds, upper_bounds) = if fixed_freqs.is_some() {
+        setup_drivers_bounds_fixed_freqs(&args, &drivers_data)
+    } else {
+        setup_drivers_bounds(&args, &drivers_data)
+    };
 
     // Generate initial guess
-    let mut x = drivers_initial_guess(&lower_bounds, &upper_bounds, n_drivers);
+    let mut x = if fixed_freqs.is_some() {
+        drivers_initial_guess_fixed_freqs(&lower_bounds, &upper_bounds, n_drivers)
+    } else {
+        drivers_initial_guess(&lower_bounds, &upper_bounds, n_drivers)
+    };
 
     // Compute pre-optimization objective
     let pre_objective = crate::optim::compute_base_fitness(&x, &objective_data);
@@ -1340,11 +1422,17 @@ pub fn optimize_drivers_crossover(
     let post_objective = crate::optim::compute_base_fitness(&x, &objective_data);
 
     // Extract results from parameter vector
-    // Parameter layout: [gains(N), delays(N), xovers(N-1)]
     let gains = x[0..n_drivers].to_vec();
     let delays = x[n_drivers..2 * n_drivers].to_vec();
-    let xover_freqs_log10 = &x[2 * n_drivers..];
-    let crossover_freqs: Vec<f64> = xover_freqs_log10.iter().map(|x| 10_f64.powf(*x)).collect();
+
+    // Crossover frequencies: from optimization or fixed
+    let crossover_freqs = if let Some(freqs) = fixed_freqs {
+        freqs
+    } else {
+        // Parameter layout: [gains(N), delays(N), xovers(N-1)]
+        let xover_freqs_log10 = &x[2 * n_drivers..];
+        xover_freqs_log10.iter().map(|x| 10_f64.powf(*x)).collect()
+    };
 
     Ok(DriverOptimizationResult {
         gains,
@@ -1500,6 +1588,7 @@ pub fn setup_multisub_objective_data(
         headphone_score_data: None,
         input_curve: None,
         drivers_data: Some(drivers_data),
+        fixed_crossover_freqs: None,
         penalty_w_ceiling: 0.0,
         penalty_w_spacing: 0.0,
         penalty_w_mingain: 0.0,

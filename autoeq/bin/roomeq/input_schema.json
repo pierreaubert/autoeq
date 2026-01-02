@@ -9,7 +9,7 @@
     "version": {
       "type": "string",
       "description": "Configuration version (semantic versioning)",
-      "default": "1.0.0",
+      "default": "1.1.0",
       "pattern": "^\\d+\\.\\d+\\.\\d+$"
     },
     "speakers": {
@@ -34,6 +34,13 @@
     "optimizer": {
       "$ref": "#/$defs/OptimizerConfig",
       "description": "Optimization parameters"
+    },
+    "group_delay": {
+      "type": "array",
+      "description": "Group delay optimization configurations for aligning subwoofers with speakers",
+      "items": {
+        "$ref": "#/$defs/GroupDelayConfig"
+      }
     }
   },
   "$defs": {
@@ -183,9 +190,19 @@
         },
         "frequency": {
           "type": "number",
-          "description": "Fixed crossover frequency in Hz",
+          "description": "Fixed crossover frequency in Hz (for 2-way speakers)",
           "minimum": 20,
           "maximum": 20000
+        },
+        "frequencies": {
+          "type": "array",
+          "description": "Fixed crossover frequencies in Hz (for 3-way and above, e.g., [500, 3000] for woofer/mid at 500Hz, mid/tweeter at 3000Hz)",
+          "items": {
+            "type": "number",
+            "minimum": 20,
+            "maximum": 20000
+          },
+          "minItems": 1
         },
         "frequency_range": {
           "type": "array",

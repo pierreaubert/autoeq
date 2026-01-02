@@ -511,6 +511,22 @@ fn process_speaker_group(
     let crossover_type = crossover_optim::parse_crossover_type(&crossover_config.crossover_type)
         .map_err(|e| anyhow!("{}", e))?;
 
+    // Extract fixed crossover frequencies if specified
+    let fixed_freqs: Option<Vec<f64>> = if let Some(ref freqs) = crossover_config.frequencies {
+        // Multiple frequencies specified (for 3-way and above)
+        Some(freqs.clone())
+    } else if let Some(freq) = crossover_config.frequency {
+        // Single frequency specified (for 2-way)
+        Some(vec![freq])
+    } else {
+        // No fixed frequencies - will be optimized
+        None
+    };
+
+    if let Some(ref freqs) = fixed_freqs {
+        info!("  Using fixed crossover frequencies: {:?} Hz", freqs);
+    }
+
     // Compute pre-score: use initial gains (0 dB) and geometric mean crossover frequencies
     let n_drivers = driver_curves.len();
     let initial_gains = vec![0.0; n_drivers];
@@ -557,6 +573,7 @@ fn process_speaker_group(
         crossover_type,
         sample_rate,
         &room_config.optimizer,
+        fixed_freqs,
     )
     .map_err(|e| anyhow!("Crossover optimization failed: {}", e))?;
 

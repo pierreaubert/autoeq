@@ -205,9 +205,7 @@ publish:
 # QA
 # ----------------------------------------------------------------------
 
-qa: prod-autoeq
-
-qa-autoeq: prod-autoeq \
+qa: prod-autoeq \
 	qa-ascilab-6b \
 	qa-jbl-m2-flat qa-jbl-m2-score \
 	qa-beyerdynamic-dt1990pro \

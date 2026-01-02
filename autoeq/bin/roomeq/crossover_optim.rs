@@ -33,6 +33,7 @@ use super::types::OptimizerConfig;
 /// * `crossover_type` - Type of crossover to use
 /// * `sample_rate` - Sample rate for filter design
 /// * `config` - Optimizer configuration
+/// * `fixed_freqs` - Optional fixed crossover frequencies (skips frequency optimization)
 ///
 /// # Returns
 /// * Tuple of (optimal_gains, optimal_delays, optimal_crossover_freqs, combined_curve)
@@ -42,6 +43,7 @@ pub fn optimize_crossover(
     crossover_type: CrossoverType,
     sample_rate: f64,
     config: &OptimizerConfig,
+    fixed_freqs: Option<Vec<f64>>,
 ) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, Curve), Box<dyn Error>> {
     // Convert Curve to DriverMeasurement
     let driver_measurements: Vec<DriverMeasurement> = drivers
@@ -56,9 +58,21 @@ pub fn optimize_crossover(
     let drivers_data = DriversLossData::new(driver_measurements, crossover_type);
     let n_drivers = drivers_data.drivers.len();
 
+    // Validate fixed frequencies if provided
+    if let Some(ref freqs) = fixed_freqs {
+        let expected = n_drivers - 1;
+        if freqs.len() != expected {
+            return Err(format!(
+                "Expected {} crossover frequencies for {} drivers, got {}",
+                expected, n_drivers, freqs.len()
+            ).into());
+        }
+    }
+
     eprintln!(
-        "  Optimizing crossover for {} drivers ({:?})",
-        n_drivers, crossover_type
+        "  Optimizing crossover for {} drivers ({:?}){}",
+        n_drivers, crossover_type,
+        if fixed_freqs.is_some() { " with fixed frequencies" } else { "" }
     );
 
     // Call library workflow to perform optimization
@@ -71,6 +85,7 @@ pub fn optimize_crossover(
         config.max_iter,
         config.min_db,
         config.max_db,
+        fixed_freqs,
     )?;
 
     // Compute the combined response

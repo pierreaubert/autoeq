@@ -36,6 +36,7 @@ fn create_test_objective_data() -> autoeq::optim::ObjectiveData {
         speaker_score_data: None,
         headphone_score_data: None,
         drivers_data: None,
+        fixed_crossover_freqs: None,
         penalty_w_ceiling: 0.0,
         penalty_w_spacing: 0.0,
         penalty_w_mingain: 0.0,

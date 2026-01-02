@@ -17,10 +17,11 @@ check-jsonschema --schemafile input_schema.json your_config.json
 
 ```json
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "speakers": { ... },
   "crossovers": { ... },
   "target_curve": "...",
+  "group_delay": [ ... ],
   "optimizer": { ... }
 }
 ```
@@ -29,10 +30,11 @@ check-jsonschema --schemafile input_schema.json your_config.json
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `version` | string | No | `"1.0.0"` | Configuration version (semantic versioning) |
+| `version` | string | No | `"1.1.0"` | Configuration version (semantic versioning) |
 | `speakers` | object | **Yes** | - | Map of channel names to speaker configurations |
 | `crossovers` | object | No | - | Crossover configurations referenced by multi-driver speakers |
 | `target_curve` | string or path | No | - | Target frequency response curve |
+| `group_delay` | array | No | - | Group delay optimization configurations |
 | `optimizer` | object | No | defaults | Optimization parameters |
 
 ---
@@ -225,7 +227,8 @@ Defines crossover types and frequencies for multi-driver speakers.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `type` | string | **Yes** | Crossover type (see below) |
-| `frequency` | number (Hz) | No | Fixed crossover frequency |
+| `frequency` | number (Hz) | No | Fixed crossover frequency (for 2-way speakers) |
+| `frequencies` | array (Hz) | No | Fixed crossover frequencies (for 3-way+, e.g., `[500, 3000]`) |
 | `frequency_range` | [min, max] | No | Frequency range for automatic optimization |
 
 **Supported Crossover Types:**
@@ -258,6 +261,36 @@ Optional target frequency response to match.
 ```
 
 Predefined options: `"flat"`, `"harman"`
+
+---
+
+## Group Delay Configuration
+
+Optimizes time alignment between subwoofers and main speakers in the crossover region. This minimizes group delay variation in the combined response, resulting in better transient response and smoother frequency transitions.
+
+```json
+{
+  "group_delay": [
+    {
+      "subwoofer": "sub",
+      "speakers": ["left", "right"],
+      "min_freq": 30.0,
+      "max_freq": 120.0
+    }
+  ]
+}
+```
+
+**GroupDelayConfig Fields:**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `subwoofer` | string | **Yes** | - | Channel name of the subwoofer to use as reference |
+| `speakers` | array | **Yes** | - | Array of speaker channel names to align with the subwoofer |
+| `min_freq` | number (Hz) | No | `30.0` | Minimum frequency for optimization |
+| `max_freq` | number (Hz) | No | `120.0` | Maximum frequency for optimization |
+
+The optimizer searches for the optimal delay (±30ms range) that minimizes group delay variation in the specified frequency range. Positive delays are applied to speakers. If the optimal delay is negative (meaning the subwoofer should be delayed), a warning is shown since this may affect other speaker alignments.
 
 ---
 
@@ -471,7 +504,7 @@ freq,spl,phase
   "crossovers": {
     "3way_fixed": {
       "type": "LR48",
-      "frequency": 500
+      "frequencies": [500, 3000]
     }
   },
   "optimizer": {
@@ -601,6 +634,31 @@ freq,spl,phase
   "optimizer": {
     "loss_type": "flat",
     "num_filters": 12,
+    "algorithm": "cobyla",
+    "max_iter": 10000
+  }
+}
+```
+
+### Example 10: Group Delay Alignment (2.1 System)
+
+```json
+{
+  "speakers": {
+    "sub": "measurements/subwoofer.csv",
+    "left": "measurements/left_speaker.csv",
+    "right": "measurements/right_speaker.csv"
+  },
+  "group_delay": [
+    {
+      "subwoofer": "sub",
+      "speakers": ["left", "right"],
+      "min_freq": 40.0,
+      "max_freq": 100.0
+    }
+  ],
+  "optimizer": {
+    "num_filters": 10,
     "algorithm": "cobyla",
     "max_iter": 10000
   }

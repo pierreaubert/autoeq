@@ -43,6 +43,10 @@ pub struct RoomConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_curve: Option<TargetCurveConfig>,
 
+    /// Optional group delay optimization configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_delay: Option<Vec<GroupDelayConfig>>,
+
     /// Optimizer configuration
     #[serde(default)]
     pub optimizer: OptimizerConfig,
@@ -50,6 +54,31 @@ pub struct RoomConfig {
 
 pub fn default_config_version() -> String {
     "1.0.0".to_string()
+}
+
+/// Group delay optimization configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GroupDelayConfig {
+    /// Subwoofer channel name
+    pub subwoofer: String,
+
+    /// List of speaker channel names to align with this subwoofer
+    pub speakers: Vec<String>,
+
+    /// Minimum frequency for optimization (Hz)
+    #[serde(default = "default_group_delay_min_freq")]
+    pub min_freq: f64,
+
+    /// Maximum frequency for optimization (Hz)
+    #[serde(default = "default_group_delay_max_freq")]
+    pub max_freq: f64,
+}
+
+fn default_group_delay_min_freq() -> f64 {
+    30.0
+}
+fn default_group_delay_max_freq() -> f64 {
+    120.0
 }
 
 /// Speaker configuration (can be single measurement or group)
@@ -370,6 +399,7 @@ mod tests {
             speakers,
             crossovers: None,
             target_curve: None,
+            group_delay: None,
             optimizer: OptimizerConfig::default(),
         };
 

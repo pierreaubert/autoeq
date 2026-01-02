@@ -29,6 +29,9 @@ mod dba_optim;
 mod eq_optim;
 mod fir_optim;
 use autoeq::read as load;
+use autoeq::Curve;
+use num_complex::Complex64;
+mod group_delay_optim;
 mod multisub_optim;
 mod output;
 mod types;
@@ -107,13 +110,13 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
     let mut post_scores = Vec::new();
 
     // Process in parallel
-    let results: Vec<Result<(String, ChannelDspChain, f64, f64)>> = room_config
+    let results: Vec<Result<(String, ChannelDspChain, f64, f64, Curve)>> = room_config
         .speakers
         .par_iter()
         .map(|(channel_name, speaker_config)| {
             info!("Processing channel: {}", channel_name);
 
-            let (chain, pre_score, post_score) = process_speaker(
+            let (chain, pre_score, post_score, final_curve) = process_speaker(
                 channel_name,
                 speaker_config,
                 &room_config,
@@ -121,16 +124,84 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
                 output_dir,
             )?;
 
-            Ok((channel_name.clone(), chain, pre_score, post_score))
+            Ok((channel_name.clone(), chain, pre_score, post_score, final_curve))
         })
         .collect();
 
+    let mut curves = HashMap::new();
+
     // Collect results
     for res in results {
-        let (channel_name, chain, pre_score, post_score) = res?;
-        channel_chains.insert(channel_name, chain);
+        let (channel_name, chain, pre_score, post_score, final_curve) = res?;
+        channel_chains.insert(channel_name.clone(), chain);
+        curves.insert(channel_name, final_curve);
         pre_scores.push(pre_score);
         post_scores.push(post_score);
+    }
+
+    // Group Delay Optimization
+    if let Some(gd_configs) = &room_config.group_delay {
+        info!("Optimizing group delay alignments...");
+        for gd_config in gd_configs {
+            let sub_curve = match curves.get(&gd_config.subwoofer) {
+                Some(c) => c,
+                None => {
+                    warn!("Subwoofer channel '{}' not found for group delay optimization", gd_config.subwoofer);
+                    continue;
+                }
+            };
+
+            for speaker_name in &gd_config.speakers {
+                if let Some(speaker_curve) = curves.get(speaker_name) {
+                    info!("  Aligning '{}' with '{}'", speaker_name, gd_config.subwoofer);
+                    let delay_res = group_delay_optim::optimize_group_delay(
+                        sub_curve,
+                        speaker_curve,
+                        gd_config.min_freq,
+                        gd_config.max_freq,
+                    );
+
+                    match delay_res {
+                        Ok(delay_ms) => {
+                            info!("    Optimal relative delay: {:.3} ms (positive = delay speaker)", delay_ms);
+                            
+                            // Apply delay
+                            // If delay > 0, delay speaker.
+                            // If delay < 0, delay subwoofer.
+                            // BUT, we have one subwoofer and multiple speakers.
+                            // And maybe multiple GD configs sharing the subwoofer.
+                            // Simpler approach: Apply delay to speaker relative to sub.
+                            // If speaker needs to be advanced (delay < 0), we delay the sub? 
+                            // This creates conflicts.
+                            // 
+                            // Robust approach: delay the speaker by `delay_ms` if > 0.
+                            // If < 0, we can't really do anything unless we delay the sub, which affects others.
+                            // For now, let's just apply positive delays to speakers, or if negative, warn user.
+                            // OR, we can add a 'global' sub delay if all speakers need it.
+                            
+                            if delay_ms > 0.0 {
+                                if let Some(chain) = channel_chains.get_mut(speaker_name) {
+                                    output::add_delay_plugin(chain, delay_ms);
+                                    info!("    Applied {:.3} ms delay to '{}'", delay_ms, speaker_name);
+                                }
+                            } else if delay_ms < 0.0 {
+                                // Try to delay sub?
+                                // Only if this sub is not used by others or we accept global shift.
+                                // For now, let's just warn.
+                                warn!("    Speaker '{}' should be advanced by {:.3} ms relative to sub. This requires delaying the sub, which is not automatically handled per-speaker pair.", speaker_name, -delay_ms);
+                                // Optional: Apply delay to sub if it's the only pair?
+                                // Better: Apply delay to sub and shift all other speakers? Too complex for now.
+                            }
+                        }
+                        Err(e) => {
+                            warn!("    Group delay optimization failed: {}", e);
+                        }
+                    }
+                } else {
+                    warn!("Speaker channel '{}' not found", speaker_name);
+                }
+            }
+        }
     }
 
     // Aggregate scores (average across channels)
@@ -183,7 +254,7 @@ fn process_speaker(
     room_config: &RoomConfig,
     sample_rate: f64,
     output_dir: &std::path::Path,
-) -> Result<(ChannelDspChain, f64, f64)> {
+) -> Result<(ChannelDspChain, f64, f64, Curve)> {
     match speaker_config {
         SpeakerConfig::Single(source) => {
             // Simple case: single measurement
@@ -213,7 +284,7 @@ fn process_single_speaker(
     room_config: &RoomConfig,
     sample_rate: f64,
     output_dir: &std::path::Path,
-) -> Result<(ChannelDspChain, f64, f64)> {
+) -> Result<(ChannelDspChain, f64, f64, Curve)> {
     // Load measurement
     let curve = load::load_source(source)
         .map_err(|e| anyhow!("{}", e))
@@ -270,7 +341,8 @@ fn process_single_speaker(
                 drivers: None,
             };
 
-            Ok((chain, pre_score, 0.0))
+            // TODO: Compute FIR response properly. For now returning input curve.
+            Ok((chain, pre_score, 0.0, curve))
         }
         "mixed" => {
             // Mixed mode
@@ -291,19 +363,11 @@ fn process_single_speaker(
             );
 
             // 2. Compute IIR response
-            use math_audio_iir_fir::Biquad;
-            // Need a way to compute PEQ response in dB.
-            let peq: Vec<(f64, Biquad)> = eq_filters.iter().map(|b| (1.0, b.clone())).collect();
-            let iir_response =
-                math_audio_iir_fir::compute_peq_response(&curve.freq, &peq, sample_rate);
+            let final_curve_iir = apply_filter_response(&curve, &eq_filters, sample_rate);
 
             // 3. Create residual curve (Measurement + IIR)
-            use autoeq::Curve;
-            let input_plus_iir = Curve {
-                freq: curve.freq.clone(),
-                spl: &curve.spl + &iir_response,
-                phase: curve.phase.clone(),
-            };
+            // apply_filter_response already returns Curve with updated SPL/Phase
+            let input_plus_iir = final_curve_iir.clone();
 
             // 4. Generate FIR for residual
             info!("  Generating FIR for residual...");
@@ -329,7 +393,8 @@ fn process_single_speaker(
                 output::build_channel_dsp_chain(channel_name, None, Vec::new(), &eq_filters);
             chain.plugins.push(conv_plugin);
 
-            Ok((chain, pre_score, 0.0))
+            // Returning IIR corrected curve for now, as FIR response calculation is missing
+            Ok((chain, pre_score, 0.0, final_curve_iir))
         }
         _ => {
             // Default IIR mode (existing logic)
@@ -351,8 +416,10 @@ fn process_single_speaker(
             // Build DSP chain (no gain, no crossover for simple speaker)
             let chain =
                 output::build_channel_dsp_chain(channel_name, None, Vec::new(), &eq_filters);
+                
+            let final_curve = apply_filter_response(&curve, &eq_filters, sample_rate);
 
-            Ok((chain, pre_score, post_score))
+            Ok((chain, pre_score, post_score, final_curve))
         }
     }
 }
@@ -366,7 +433,7 @@ fn process_speaker_group(
     room_config: &RoomConfig,
     sample_rate: f64,
     _output_dir: &std::path::Path,
-) -> Result<(ChannelDspChain, f64, f64)> {
+) -> Result<(ChannelDspChain, f64, f64, Curve)> {
     // Load all measurements in the group
     let mut driver_curves = Vec::new();
     for (i, source) in group.measurements.iter().enumerate() {
@@ -524,7 +591,9 @@ fn process_speaker_group(
         &eq_filters,
     );
 
-    Ok((chain, pre_score, post_score))
+    let final_curve = apply_filter_response(&combined_curve, &eq_filters, sample_rate);
+
+    Ok((chain, pre_score, post_score, final_curve))
 }
 
 fn process_multisub_group(
@@ -533,7 +602,7 @@ fn process_multisub_group(
     room_config: &RoomConfig,
     sample_rate: f64,
     _output_dir: &std::path::Path,
-) -> Result<(ChannelDspChain, f64, f64)> {
+) -> Result<(ChannelDspChain, f64, f64, Curve)> {
     // 1. Optimize multisub integration (gain + delay)
     let (result, combined_curve) =
         multisub_optim::optimize_multisub(&group.subwoofers, &room_config.optimizer, sample_rate)
@@ -568,7 +637,9 @@ fn process_multisub_group(
         &eq_filters,
     );
 
-    Ok((chain, result.pre_objective, post_score))
+    let final_curve = apply_filter_response(&combined_curve, &eq_filters, sample_rate);
+
+    Ok((chain, result.pre_objective, post_score, final_curve))
 }
 
 fn process_dba(
@@ -577,7 +648,7 @@ fn process_dba(
     room_config: &RoomConfig,
     sample_rate: f64,
     _output_dir: &std::path::Path,
-) -> Result<(ChannelDspChain, f64, f64)> {
+) -> Result<(ChannelDspChain, f64, f64, Curve)> {
     // 1. Optimize DBA
     let (result, combined_curve) =
         dba_optim::optimize_dba(dba_config, &room_config.optimizer, sample_rate)
@@ -607,5 +678,108 @@ fn process_dba(
     let chain =
         output::build_dba_dsp_chain(channel_name, &result.gains, &result.delays, &eq_filters);
 
-    Ok((chain, result.pre_objective, post_score))
+    let final_curve = apply_filter_response(&combined_curve, &eq_filters, sample_rate);
+
+    Ok((chain, result.pre_objective, post_score, final_curve))
 }
+    
+/// Compute complex response of PEQ filters
+fn compute_peq_complex_response(
+    filters: &[math_audio_iir_fir::Biquad],
+    freq: &ndarray::Array1<f64>,
+    sample_rate: f64,
+) -> Vec<Complex64> {
+    freq.iter()
+        .map(|&f| {
+            let w = 2.0 * std::f64::consts::PI * f / sample_rate;
+            let z_inv = Complex64::from_polar(1.0, -w);
+            let z_inv_2 = z_inv * z_inv;
+            
+            let mut total_h = Complex64::new(1.0, 0.0);
+            
+            for b in filters {
+                // Calculate coefficients based on parameters
+                // Using standard RBJ formulas as we cannot access private fields
+                let f0 = b.freq;
+                let fs = b.srate;
+                let q = b.q;
+                let db = b.db_gain;
+                
+                let w0 = 2.0 * std::f64::consts::PI * f0 / fs;
+                let cos_w0 = w0.cos();
+                let sin_w0 = w0.sin();
+                let alpha = sin_w0 / (2.0 * q);
+                let big_a = 10.0_f64.powf(db / 40.0);
+                
+                // Determine filter type from debug string (hacky but functional given private fields)
+                let type_name = format!("{:?}", b.filter_type);
+                
+                let (b0, b1, b2, a0, a1, a2) = if type_name.contains("Peaking") || type_name.contains("Pk") {
+                    let b0 = 1.0 + alpha * big_a;
+                    let b1 = -2.0 * cos_w0;
+                    let b2 = 1.0 - alpha * big_a;
+                    let a0 = 1.0 + alpha / big_a;
+                    let a1 = -2.0 * cos_w0;
+                    let a2 = 1.0 - alpha / big_a;
+                    (b0, b1, b2, a0, a1, a2)
+                } else if type_name.contains("LowShelf") || type_name.contains("Ls") {
+                    let sqrt_a = big_a.sqrt();
+                    let b0 = big_a * ((big_a + 1.0) - (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha);
+                    let b1 = 2.0 * big_a * ((big_a - 1.0) - (big_a + 1.0) * cos_w0);
+                    let b2 = big_a * ((big_a + 1.0) - (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha);
+                    let a0 = (big_a + 1.0) + (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha;
+                    let a1 = -2.0 * ((big_a - 1.0) + (big_a + 1.0) * cos_w0);
+                    let a2 = (big_a + 1.0) + (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha;
+                    (b0, b1, b2, a0, a1, a2)
+                } else if type_name.contains("HighShelf") || type_name.contains("Hs") {
+                    let sqrt_a = big_a.sqrt();
+                    let b0 = big_a * ((big_a + 1.0) + (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha);
+                    let b1 = -2.0 * big_a * ((big_a - 1.0) + (big_a + 1.0) * cos_w0);
+                    let b2 = big_a * ((big_a + 1.0) + (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha);
+                    let a0 = (big_a + 1.0) - (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha;
+                    let a1 = 2.0 * ((big_a - 1.0) - (big_a + 1.0) * cos_w0);
+                    let a2 = (big_a + 1.0) - (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha;
+                    (b0, b1, b2, a0, a1, a2)
+                } else {
+                    // Default / Identity / Unknown
+                    (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+                };
+
+                let num = Complex64::new(b0, 0.0) + Complex64::new(b1, 0.0) * z_inv + Complex64::new(b2, 0.0) * z_inv_2;
+                let den = Complex64::new(a0, 0.0) + Complex64::new(a1, 0.0) * z_inv + Complex64::new(a2, 0.0) * z_inv_2;
+                
+                if den.norm_sqr() > 1e-12 {
+                    total_h *= num / den;
+                }
+            }
+            total_h
+        })
+        .collect()
+}
+    
+    /// Apply filter response to a curve
+    fn apply_filter_response(curve: &Curve, filters: &[math_audio_iir_fir::Biquad], sample_rate: f64) -> Curve {
+        let complex_resp = compute_peq_complex_response(filters, &curve.freq, sample_rate);
+        
+        let mut new_spl = ndarray::Array1::zeros(curve.freq.len());
+        let mut new_phase = ndarray::Array1::zeros(curve.freq.len());
+        let old_phase = curve.phase.as_ref();
+        
+        for i in 0..curve.freq.len() {
+            let h = complex_resp[i];
+            let h_mag_db = 20.0 * h.norm().log10();
+            let h_phase_deg = h.arg().to_degrees();
+            
+            new_spl[i] = curve.spl[i] + h_mag_db;
+            let p_in = old_phase.map(|p| p[i]).unwrap_or(0.0);
+            new_phase[i] = p_in + h_phase_deg;
+        }
+        
+        Curve {
+            freq: curve.freq.clone(),
+            spl: new_spl,
+            phase: Some(new_phase),
+        }
+    }
+    
+    

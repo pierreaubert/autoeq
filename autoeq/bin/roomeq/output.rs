@@ -339,3 +339,10 @@ pub fn save_dsp_chain(
     std::fs::write(path, json)?;
     Ok(())
 }
+
+/// Add a delay plugin to an existing chain
+pub fn add_delay_plugin(chain: &mut ChannelDspChain, delay_ms: f64) {
+    let plugin = create_delay_plugin(delay_ms);
+    // Insert at the beginning to ensure it applies before other processing (though usually commutative with linear filters)
+    chain.plugins.insert(0, plugin);
+}

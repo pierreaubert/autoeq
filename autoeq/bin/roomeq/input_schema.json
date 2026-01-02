@@ -211,6 +211,36 @@
         }
       ]
     },
+    "GroupDelayConfig": {
+      "type": "object",
+      "description": "Configuration for group delay optimization between subwoofer and speakers",
+      "required": ["subwoofer", "speakers"],
+      "properties": {
+        "subwoofer": {
+          "type": "string",
+          "description": "Name of the subwoofer channel"
+        },
+        "speakers": {
+          "type": "array",
+          "description": "Names of speaker channels to align",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "min_freq": {
+          "type": "number",
+          "description": "Minimum frequency for optimization in Hz",
+          "default": 30.0
+        },
+        "max_freq": {
+          "type": "number",
+          "description": "Maximum frequency for optimization in Hz",
+          "default": 120.0
+        }
+      },
+      "additionalProperties": false
+    },
     "OptimizerConfig": {
       "type": "object",
       "description": "Optimization parameters",

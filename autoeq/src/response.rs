@@ -45,9 +45,11 @@ pub fn compute_peq_complex_response(
                     }
                     BiquadFilterType::Lowshelf => {
                         let sqrt_a = big_a.sqrt();
-                        let b0 = big_a * ((big_a + 1.0) - (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha);
+                        let b0 =
+                            big_a * ((big_a + 1.0) - (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha);
                         let b1 = 2.0 * big_a * ((big_a - 1.0) - (big_a + 1.0) * cos_w0);
-                        let b2 = big_a * ((big_a + 1.0) - (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha);
+                        let b2 =
+                            big_a * ((big_a + 1.0) - (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha);
                         let a0 = (big_a + 1.0) + (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha;
                         let a1 = -2.0 * ((big_a - 1.0) + (big_a + 1.0) * cos_w0);
                         let a2 = (big_a + 1.0) - (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha;
@@ -55,31 +57,33 @@ pub fn compute_peq_complex_response(
                     }
                     BiquadFilterType::Highshelf => {
                         let sqrt_a = big_a.sqrt();
-                        let b0 = big_a * ((big_a + 1.0) + (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha);
+                        let b0 =
+                            big_a * ((big_a + 1.0) + (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha);
                         let b1 = -2.0 * big_a * ((big_a - 1.0) + (big_a + 1.0) * cos_w0);
-                        let b2 = big_a * ((big_a + 1.0) + (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha);
+                        let b2 =
+                            big_a * ((big_a + 1.0) + (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha);
                         let a0 = (big_a + 1.0) - (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha;
                         let a1 = 2.0 * ((big_a - 1.0) - (big_a + 1.0) * cos_w0);
                         let a2 = (big_a + 1.0) - (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha;
                         (b0, b1, b2, a0, a1, a2)
                     }
                     BiquadFilterType::Lowpass => {
-                         let b0 = (1.0 - cos_w0) / 2.0;
-                         let b1 = 1.0 - cos_w0;
-                         let b2 = (1.0 - cos_w0) / 2.0;
-                         let a0 = 1.0 + alpha;
-                         let a1 = -2.0 * cos_w0;
-                         let a2 = 1.0 - alpha;
-                         (b0, b1, b2, a0, a1, a2)
+                        let b0 = (1.0 - cos_w0) / 2.0;
+                        let b1 = 1.0 - cos_w0;
+                        let b2 = (1.0 - cos_w0) / 2.0;
+                        let a0 = 1.0 + alpha;
+                        let a1 = -2.0 * cos_w0;
+                        let a2 = 1.0 - alpha;
+                        (b0, b1, b2, a0, a1, a2)
                     }
-                     BiquadFilterType::Highpass => {
-                         let b0 = (1.0 + cos_w0) / 2.0;
-                         let b1 = -(1.0 + cos_w0);
-                         let b2 = (1.0 + cos_w0) / 2.0;
-                         let a0 = 1.0 + alpha;
-                         let a1 = -2.0 * cos_w0;
-                         let a2 = 1.0 - alpha;
-                         (b0, b1, b2, a0, a1, a2)
+                    BiquadFilterType::Highpass => {
+                        let b0 = (1.0 + cos_w0) / 2.0;
+                        let b1 = -(1.0 + cos_w0);
+                        let b2 = (1.0 + cos_w0) / 2.0;
+                        let a0 = 1.0 + alpha;
+                        let a1 = -2.0 * cos_w0;
+                        let a2 = 1.0 - alpha;
+                        (b0, b1, b2, a0, a1, a2)
                     }
                     // TODO: Add other filter types as needed (HighPass, LowPass, BandPass etc.)
                     // For now, identity
@@ -110,23 +114,23 @@ pub fn compute_fir_complex_response(
 ) -> Vec<Complex64> {
     // Direct DFT calculation (O(N*M))
     // Appropriate for evaluation at specific log-spaced frequencies
-    freqs.iter().map(|&f| {
-        let w = 2.0 * PI * f / sample_rate;
-        let mut h = Complex64::new(0.0, 0.0);
-        
-        for (n, &val) in coeffs.iter().enumerate() {
-            let angle = -w * n as f64;
-            h += Complex64::from_polar(val, angle);
-        }
-        h
-    }).collect()
+    freqs
+        .iter()
+        .map(|&f| {
+            let w = 2.0 * PI * f / sample_rate;
+            let mut h = Complex64::new(0.0, 0.0);
+
+            for (n, &val) in coeffs.iter().enumerate() {
+                let angle = -w * n as f64;
+                h += Complex64::from_polar(val, angle);
+            }
+            h
+        })
+        .collect()
 }
 
 /// Apply complex filter response (magnitude and phase) to a curve
-pub fn apply_complex_response(
-    curve: &Curve,
-    response: &[Complex64],
-) -> Curve {
+pub fn apply_complex_response(curve: &Curve, response: &[Complex64]) -> Curve {
     let mut new_spl = Array1::zeros(curve.freq.len());
     let mut new_phase = Array1::zeros(curve.freq.len());
     let old_phase = curve.phase.as_ref();
@@ -160,9 +164,9 @@ mod tests {
         let coeffs = vec![1.0];
         let freqs = Array1::from(vec![100.0, 1000.0, 10000.0]);
         let sample_rate = 48000.0;
-        
+
         let response = compute_fir_complex_response(&coeffs, &freqs, sample_rate);
-        
+
         for h in response {
             assert!((h.norm() - 1.0).abs() < 1e-10);
             assert!(h.arg().abs() < 1e-10);
@@ -175,21 +179,21 @@ mod tests {
         let coeffs = vec![0.0, 1.0];
         let freqs = Array1::from(vec![100.0, 1000.0, 10000.0]);
         let sample_rate = 48000.0;
-        
+
         let response = compute_fir_complex_response(&coeffs, &freqs, sample_rate);
-        
+
         for (i, h) in response.iter().enumerate() {
             assert!((h.norm() - 1.0).abs() < 1e-10);
-            
+
             // Phase should be -w * delay
             // delay = 1 sample
             let w = 2.0 * PI * freqs[i] / sample_rate;
             let expected_phase = -w;
-            
+
             // Normalize phase to [-pi, pi]
             let phase = h.arg();
             let mut diff = (phase - expected_phase).abs();
-             while diff > PI {
+            while diff > PI {
                 diff -= 2.0 * PI;
             }
             assert!(diff.abs() < 1e-10);

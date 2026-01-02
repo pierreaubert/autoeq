@@ -213,15 +213,15 @@ mod tests {
         let freq = Array1::from(vec![100.0, 1000.0]);
         let spl = Array1::from(vec![80.0, 80.0]);
         let phase = Array1::from(vec![0.0, -90.0]);
-        
+
         let curve = Curve {
             freq: freq.clone(),
             spl: spl.clone(),
             phase: Some(phase.clone()),
         };
-        
+
         let inverted = invert_polarity(&curve);
-        
+
         let inv_phase = inverted.phase.unwrap();
         assert!((inv_phase[0] - 180.0).abs() < 1e-6);
         assert!((inv_phase[1] - 90.0).abs() < 1e-6); // -90 + 180 = 90

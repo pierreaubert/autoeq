@@ -148,7 +148,7 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
     // Group Delay Optimization
     if let Some(gd_configs) = &room_config.group_delay {
         info!("Optimizing group delay alignments...");
-        
+
         // Store calculated relative delays: (SubName, SpeakerName, RelativeDelayMs)
         let mut calculated_rel_delays = Vec::new();
         // Track the maximum negative shift required for each subwoofer
@@ -172,7 +172,7 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
                         "  Aligning '{}' with '{}'",
                         speaker_name, gd_config.subwoofer
                     );
-                    
+
                     let delay_res = group_delay_optim::optimize_group_delay(
                         sub_curve,
                         speaker_curve,
@@ -186,17 +186,18 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
                                 "    Optimal relative delay: {:.3} ms (positive = delay speaker)",
                                 delay_ms
                             );
-                            
+
                             calculated_rel_delays.push((
                                 gd_config.subwoofer.clone(),
                                 speaker_name.clone(),
-                                delay_ms
+                                delay_ms,
                             ));
-                            
+
                             // If delay_ms < 0, it means speaker is late (or sub is early).
                             // We need to delay the sub by at least -delay_ms to make speaker delay non-negative.
                             if delay_ms < 0.0 {
-                                let current_base = *sub_base_delays.get(&gd_config.subwoofer).unwrap_or(&0.0);
+                                let current_base =
+                                    *sub_base_delays.get(&gd_config.subwoofer).unwrap_or(&0.0);
                                 if -delay_ms > current_base {
                                     sub_base_delays.insert(gd_config.subwoofer.clone(), -delay_ms);
                                 }
@@ -211,25 +212,28 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
                 }
             }
         }
-        
+
         // Apply delays
         // 1. Apply base delays to subwoofers
         for (sub_name, base_delay) in &sub_base_delays {
             if *base_delay > 1e-3 {
                 if let Some(chain) = channel_chains.get_mut(sub_name) {
                     output::add_delay_plugin(chain, *base_delay);
-                    info!("    Applied base delay of {:.3} ms to subwoofer '{}'", base_delay, sub_name);
+                    info!(
+                        "    Applied base delay of {:.3} ms to subwoofer '{}'",
+                        base_delay, sub_name
+                    );
                 }
             }
         }
-        
+
         // 2. Apply adjusted delays to speakers
         for (sub_name, speaker_name, rel_delay) in calculated_rel_delays {
             let base_delay = *sub_base_delays.get(&sub_name).unwrap_or(&0.0);
             let final_speaker_delay = rel_delay + base_delay;
-            
+
             if final_speaker_delay > 1e-3 {
-                 if let Some(chain) = channel_chains.get_mut(&speaker_name) {
+                if let Some(chain) = channel_chains.get_mut(&speaker_name) {
                     output::add_delay_plugin(chain, final_speaker_delay);
                     info!(
                         "    Applied {:.3} ms delay to '{}' (rel: {:.3} + sub_base: {:.3})",
@@ -753,5 +757,3 @@ fn process_dba(
 
     Ok((chain, result.pre_objective, post_score, final_curve))
 }
-
-

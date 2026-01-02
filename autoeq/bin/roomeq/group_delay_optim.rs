@@ -189,7 +189,7 @@ fn curve_to_complex(curve: &Curve) -> Array1<Complex64> {
 fn interpolate_curve(curve: &Curve, target_freq: &Array1<f64>) -> Curve {
     // Interpolate in Complex domain to avoid phase wrapping issues
     let complex_in = curve_to_complex(curve);
-    
+
     let mut spl = Array1::zeros(target_freq.len());
     let mut phase = Array1::zeros(target_freq.len());
     let has_phase = curve.phase.is_some();
@@ -199,7 +199,7 @@ fn interpolate_curve(curve: &Curve, target_freq: &Array1<f64>) -> Curve {
         let re = interp_linear_complex(&curve.freq, &complex_in, f, |c| c.re);
         let im = interp_linear_complex(&curve.freq, &complex_in, f, |c| c.im);
         let c = Complex64::new(re, im);
-        
+
         spl[i] = 20.0 * c.norm().max(1e-12).log10();
         if has_phase {
             phase[i] = c.arg().to_degrees();
@@ -213,8 +213,14 @@ fn interpolate_curve(curve: &Curve, target_freq: &Array1<f64>) -> Curve {
     }
 }
 
-fn interp_linear_complex<F>(x: &Array1<f64>, y: &Array1<Complex64>, target: f64, extractor: F) -> f64 
-where F: Fn(&Complex64) -> f64
+fn interp_linear_complex<F>(
+    x: &Array1<f64>,
+    y: &Array1<Complex64>,
+    target: f64,
+    extractor: F,
+) -> f64
+where
+    F: Fn(&Complex64) -> f64,
 {
     if target <= x[0] {
         return extractor(&y[0]);
@@ -253,12 +259,22 @@ mod tests {
     fn test_unwrap_phase() {
         // -170, -175, 175 (wrap), 170
         // unwrapped: -170, -175, -185, -190
-        let phase = vec![-170.0_f64.to_radians(), -175.0_f64.to_radians(), 175.0_f64.to_radians(), 170.0_f64.to_radians()];
+        let phase = vec![
+            -170.0_f64.to_radians(),
+            -175.0_f64.to_radians(),
+            175.0_f64.to_radians(),
+            170.0_f64.to_radians(),
+        ];
         let unwrapped = unwrap_phase(&phase);
-        
+
         let expected = vec![-170.0, -175.0, -185.0, -190.0];
         for (u, e) in unwrapped.iter().zip(expected.iter()) {
-            assert!((u.to_degrees() - e).abs() < 1e-5, "Got {}, expected {}", u.to_degrees(), e);
+            assert!(
+                (u.to_degrees() - e).abs() < 1e-5,
+                "Got {}, expected {}",
+                u.to_degrees(),
+                e
+            );
         }
     }
 
@@ -269,15 +285,15 @@ mod tests {
         let delay_s = 0.010; // 10ms
         let freqs = Array1::linspace(20.0, 100.0, 10);
         let mut complex = Vec::new();
-        
+
         for &f in &freqs {
             let w = 2.0 * PI * f;
             let phi = -w * delay_s;
             complex.push(Complex64::from_polar(1.0, phi));
         }
-        
+
         let gd = calculate_group_delay(&freqs, &complex);
-        
+
         for &d in &gd {
             // gd is in ms
             assert!((d - 10.0).abs() < 0.1, "Expected 10ms, got {}", d);
@@ -286,37 +302,60 @@ mod tests {
 
     #[test]
     fn test_optimize_group_delay_alignment() {
-        // Sub is at t=0
-        // Speaker is delayed by 5ms
-        // Optimization should find delay = -5ms (advance speaker / delay sub)
-        
-        let freqs = Array1::linspace(20.0, 200.0, 50);
-        let sub_spl = Array1::zeros(freqs.len()); // 0dB
-        let mut sub_phase = Array1::zeros(freqs.len()); // 0 deg
-        
-        // Speaker delayed 5ms
-        let delay_s = 0.005;
-        let spk_spl = Array1::zeros(freqs.len());
+        // Simulate LR2 Crossover at 80 Hz
+        // LP: 1 / (1 + j f/fc)
+        // HP: (j f/fc) / (1 + j f/fc)
+        // Perfect sum = 1.
+        // If we delay HP, we get GD variance.
+
+        let fc = 80.0;
+        let freqs = Array1::linspace(20.0, 200.0, 100);
+        let mut sub_spl = Array1::zeros(freqs.len());
+        let mut sub_phase = Array1::zeros(freqs.len());
+        let mut spk_spl = Array1::zeros(freqs.len());
         let mut spk_phase = Array1::zeros(freqs.len());
-        
+
+        // Target delay to find: 5ms
+        // We simulate that the Speaker (HP) is physically EARLIER (0 delay)
+        // and the Sub (LP) is LATER (has extra 5ms delay on top of filter)
+        // Optimization should tell us to delay Speaker by 5ms.
+        let sub_extra_delay_s = 0.005;
+
         for i in 0..freqs.len() {
-            let w = 2.0 * PI * freqs[i];
-            spk_phase[i] = (-w * delay_s).to_degrees();
-        }
-        
-        // Wrap phases for realism
-        for p in &mut spk_phase {
-             while *p > 180.0 { *p -= 360.0; }
-             while *p < -180.0 { *p += 360.0; }
+            let f = freqs[i];
+            let w = 2.0 * PI * f;
+            let s = Complex64::new(0.0, f / fc);
+
+            // LP Filter
+            let lp = Complex64::new(1.0, 0.0) / (Complex64::new(1.0, 0.0) + s);
+            // Apply extra delay to sub
+            let sub_rot = Complex64::from_polar(1.0, -w * sub_extra_delay_s);
+            let sub_final = lp * sub_rot;
+
+            sub_spl[i] = 20.0 * sub_final.norm().log10();
+            sub_phase[i] = sub_final.arg().to_degrees();
+
+            // HP Filter (no extra delay)
+            let hp = s / (Complex64::new(1.0, 0.0) + s);
+            spk_spl[i] = 20.0 * hp.norm().log10();
+            spk_phase[i] = hp.arg().to_degrees();
         }
 
-        let sub = Curve { freq: freqs.clone(), spl: sub_spl, phase: Some(sub_phase) };
-        let spk = Curve { freq: freqs.clone(), spl: spk_spl, phase: Some(spk_phase) };
-        
-        let delay = optimize_group_delay(&sub, &spk, 30.0, 100.0).unwrap();
-        
-        // Should be approx -5.0
-        // Note: The optimizer uses coarse grid (0.5ms) then fine (0.05ms)
-        assert!((delay - (-5.0)).abs() < 0.2, "Expected -5.0ms, got {}", delay);
+        let sub = Curve {
+            freq: freqs.clone(),
+            spl: sub_spl,
+            phase: Some(sub_phase),
+        };
+        let spk = Curve {
+            freq: freqs.clone(),
+            spl: spk_spl,
+            phase: Some(spk_phase),
+        };
+
+        // Optimize in crossover region
+        let delay = optimize_group_delay(&sub, &spk, 40.0, 160.0).unwrap();
+
+        // Expect delay ~ 5.0ms
+        assert!((delay - 5.0).abs() < 0.25, "Expected 5.0ms, got {}", delay);
     }
 }

@@ -63,10 +63,10 @@ pub mod param_utils;
 pub mod plot;
 /// Data reading and parsing functions
 pub mod read;
-/// Signal processing utilities
-pub mod signal;
 /// Frequency response utilities
 pub mod response;
+/// Signal processing utilities
+pub mod signal;
 /// Shared workflow steps used by binaries
 pub mod workflow;
 /// Mapping

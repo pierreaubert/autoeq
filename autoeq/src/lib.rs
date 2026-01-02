@@ -65,6 +65,8 @@ pub mod plot;
 pub mod read;
 /// Signal processing utilities
 pub mod signal;
+/// Frequency response utilities
+pub mod response;
 /// Shared workflow steps used by binaries
 pub mod workflow;
 /// Mapping

@@ -187,17 +187,22 @@ fn curve_to_complex(curve: &Curve) -> Array1<Complex64> {
 }
 
 fn interpolate_curve(curve: &Curve, target_freq: &Array1<f64>) -> Curve {
-    // Simple linear interpolation
-    // Assuming curve.freq is sorted
-
+    // Interpolate in Complex domain to avoid phase wrapping issues
+    let complex_in = curve_to_complex(curve);
+    
     let mut spl = Array1::zeros(target_freq.len());
     let mut phase = Array1::zeros(target_freq.len());
     let has_phase = curve.phase.is_some();
 
     for (i, &f) in target_freq.iter().enumerate() {
-        spl[i] = interp_linear(&curve.freq, &curve.spl, f);
+        // Interpolate Real and Imaginary parts
+        let re = interp_linear_complex(&curve.freq, &complex_in, f, |c| c.re);
+        let im = interp_linear_complex(&curve.freq, &complex_in, f, |c| c.im);
+        let c = Complex64::new(re, im);
+        
+        spl[i] = 20.0 * c.norm().max(1e-12).log10();
         if has_phase {
-            phase[i] = interp_linear(&curve.freq, curve.phase.as_ref().unwrap(), f);
+            phase[i] = c.arg().to_degrees();
         }
     }
 
@@ -208,12 +213,14 @@ fn interpolate_curve(curve: &Curve, target_freq: &Array1<f64>) -> Curve {
     }
 }
 
-fn interp_linear(x: &Array1<f64>, y: &Array1<f64>, target: f64) -> f64 {
+fn interp_linear_complex<F>(x: &Array1<f64>, y: &Array1<Complex64>, target: f64, extractor: F) -> f64 
+where F: Fn(&Complex64) -> f64
+{
     if target <= x[0] {
-        return y[0];
+        return extractor(&y[0]);
     }
     if target >= x[x.len() - 1] {
-        return y[y.len() - 1];
+        return extractor(&y[y.len() - 1]);
     }
 
     // Binary search
@@ -223,13 +230,13 @@ fn interp_linear(x: &Array1<f64>, y: &Array1<f64>, target: f64) -> f64 {
         .binary_search_by(|v| v.partial_cmp(&target).unwrap())
     {
         Ok(i) => i,
-        Err(i) => i - 1, // Insertion point is i, so we want i-1 and i
+        Err(i) => i - 1,
     };
 
     let x0 = x[idx];
     let x1 = x[idx + 1];
-    let y0 = y[idx];
-    let y1 = y[idx + 1];
+    let y0 = extractor(&y[idx]);
+    let y1 = extractor(&y[idx + 1]);
 
     let t = (target - x0) / (x1 - x0);
     y0 + t * (y1 - y0)

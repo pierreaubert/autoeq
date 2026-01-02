@@ -30,7 +30,7 @@ mod eq_optim;
 mod fir_optim;
 use autoeq::Curve;
 use autoeq::read as load;
-use num_complex::Complex64;
+use autoeq::response;
 mod group_delay_optim;
 mod multisub_optim;
 mod output;
@@ -362,8 +362,12 @@ fn process_single_speaker(
                 drivers: None,
             };
 
-            // TODO: Compute FIR response properly. For now returning input curve.
-            Ok((chain, pre_score, 0.0, curve))
+            // Calculate FIR response
+            let complex_resp =
+                response::compute_fir_complex_response(&coeffs, &curve.freq, sample_rate);
+            let final_curve = response::apply_complex_response(&curve, &complex_resp);
+
+            Ok((chain, pre_score, 0.0, final_curve))
         }
         "mixed" => {
             // Mixed mode
@@ -384,10 +388,12 @@ fn process_single_speaker(
             );
 
             // 2. Compute IIR response
-            let final_curve_iir = apply_filter_response(&curve, &eq_filters, sample_rate);
+            let iir_resp =
+                response::compute_peq_complex_response(&eq_filters, &curve.freq, sample_rate);
+            let final_curve_iir = response::apply_complex_response(&curve, &iir_resp);
 
             // 3. Create residual curve (Measurement + IIR)
-            // apply_filter_response already returns Curve with updated SPL/Phase
+            // apply_complex_response already returns Curve with updated SPL/Phase
             let input_plus_iir = final_curve_iir.clone();
 
             // 4. Generate FIR for residual
@@ -414,8 +420,12 @@ fn process_single_speaker(
                 output::build_channel_dsp_chain(channel_name, None, Vec::new(), &eq_filters);
             chain.plugins.push(conv_plugin);
 
-            // Returning IIR corrected curve for now, as FIR response calculation is missing
-            Ok((chain, pre_score, 0.0, final_curve_iir))
+            // Calculate FIR response for the final curve
+            let fir_resp =
+                response::compute_fir_complex_response(&coeffs, &curve.freq, sample_rate);
+            let final_curve = response::apply_complex_response(&input_plus_iir, &fir_resp);
+
+            Ok((chain, pre_score, 0.0, final_curve))
         }
         _ => {
             // Default IIR mode (existing logic)
@@ -438,7 +448,9 @@ fn process_single_speaker(
             let chain =
                 output::build_channel_dsp_chain(channel_name, None, Vec::new(), &eq_filters);
 
-            let final_curve = apply_filter_response(&curve, &eq_filters, sample_rate);
+            let iir_resp =
+                response::compute_peq_complex_response(&eq_filters, &curve.freq, sample_rate);
+            let final_curve = response::apply_complex_response(&curve, &iir_resp);
 
             Ok((chain, pre_score, post_score, final_curve))
         }
@@ -629,7 +641,9 @@ fn process_speaker_group(
         &eq_filters,
     );
 
-    let final_curve = apply_filter_response(&combined_curve, &eq_filters, sample_rate);
+    let iir_resp =
+        response::compute_peq_complex_response(&eq_filters, &combined_curve.freq, sample_rate);
+    let final_curve = response::apply_complex_response(&combined_curve, &iir_resp);
 
     Ok((chain, pre_score, post_score, final_curve))
 }
@@ -675,7 +689,9 @@ fn process_multisub_group(
         &eq_filters,
     );
 
-    let final_curve = apply_filter_response(&combined_curve, &eq_filters, sample_rate);
+    let iir_resp =
+        response::compute_peq_complex_response(&eq_filters, &combined_curve.freq, sample_rate);
+    let final_curve = response::apply_complex_response(&combined_curve, &iir_resp);
 
     Ok((chain, result.pre_objective, post_score, final_curve))
 }
@@ -716,119 +732,11 @@ fn process_dba(
     let chain =
         output::build_dba_dsp_chain(channel_name, &result.gains, &result.delays, &eq_filters);
 
-    let final_curve = apply_filter_response(&combined_curve, &eq_filters, sample_rate);
+    let iir_resp =
+        response::compute_peq_complex_response(&eq_filters, &combined_curve.freq, sample_rate);
+    let final_curve = response::apply_complex_response(&combined_curve, &iir_resp);
 
     Ok((chain, result.pre_objective, post_score, final_curve))
 }
 
-/// Compute complex response of PEQ filters
-fn compute_peq_complex_response(
-    filters: &[math_audio_iir_fir::Biquad],
-    freq: &ndarray::Array1<f64>,
-    sample_rate: f64,
-) -> Vec<Complex64> {
-    freq.iter()
-        .map(|&f| {
-            let w = 2.0 * std::f64::consts::PI * f / sample_rate;
-            let z_inv = Complex64::from_polar(1.0, -w);
-            let z_inv_2 = z_inv * z_inv;
 
-            let mut total_h = Complex64::new(1.0, 0.0);
-
-            for b in filters {
-                // Calculate coefficients based on parameters
-                // Using standard RBJ formulas as we cannot access private fields
-                let f0 = b.freq;
-                let fs = b.srate;
-                let q = b.q;
-                let db = b.db_gain;
-
-                let w0 = 2.0 * std::f64::consts::PI * f0 / fs;
-                let cos_w0 = w0.cos();
-                let sin_w0 = w0.sin();
-                let alpha = sin_w0 / (2.0 * q);
-                let big_a = 10.0_f64.powf(db / 40.0);
-
-                // Determine filter type from debug string (hacky but functional given private fields)
-                let type_name = format!("{:?}", b.filter_type);
-
-                let (b0, b1, b2, a0, a1, a2) =
-                    if type_name.contains("Peaking") || type_name.contains("Pk") {
-                        let b0 = 1.0 + alpha * big_a;
-                        let b1 = -2.0 * cos_w0;
-                        let b2 = 1.0 - alpha * big_a;
-                        let a0 = 1.0 + alpha / big_a;
-                        let a1 = -2.0 * cos_w0;
-                        let a2 = 1.0 - alpha / big_a;
-                        (b0, b1, b2, a0, a1, a2)
-                    } else if type_name.contains("LowShelf") || type_name.contains("Ls") {
-                        let sqrt_a = big_a.sqrt();
-                        let b0 =
-                            big_a * ((big_a + 1.0) - (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha);
-                        let b1 = 2.0 * big_a * ((big_a - 1.0) - (big_a + 1.0) * cos_w0);
-                        let b2 =
-                            big_a * ((big_a + 1.0) - (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha);
-                        let a0 = (big_a + 1.0) + (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha;
-                        let a1 = -2.0 * ((big_a - 1.0) + (big_a + 1.0) * cos_w0);
-                        let a2 = (big_a + 1.0) + (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha;
-                        (b0, b1, b2, a0, a1, a2)
-                    } else if type_name.contains("HighShelf") || type_name.contains("Hs") {
-                        let sqrt_a = big_a.sqrt();
-                        let b0 =
-                            big_a * ((big_a + 1.0) + (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha);
-                        let b1 = -2.0 * big_a * ((big_a - 1.0) + (big_a + 1.0) * cos_w0);
-                        let b2 =
-                            big_a * ((big_a + 1.0) + (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha);
-                        let a0 = (big_a + 1.0) - (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha;
-                        let a1 = 2.0 * ((big_a - 1.0) - (big_a + 1.0) * cos_w0);
-                        let a2 = (big_a + 1.0) - (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha;
-                        (b0, b1, b2, a0, a1, a2)
-                    } else {
-                        // Default / Identity / Unknown
-                        (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
-                    };
-
-                let num = Complex64::new(b0, 0.0)
-                    + Complex64::new(b1, 0.0) * z_inv
-                    + Complex64::new(b2, 0.0) * z_inv_2;
-                let den = Complex64::new(a0, 0.0)
-                    + Complex64::new(a1, 0.0) * z_inv
-                    + Complex64::new(a2, 0.0) * z_inv_2;
-
-                if den.norm_sqr() > 1e-12 {
-                    total_h *= num / den;
-                }
-            }
-            total_h
-        })
-        .collect()
-}
-
-/// Apply filter response to a curve
-fn apply_filter_response(
-    curve: &Curve,
-    filters: &[math_audio_iir_fir::Biquad],
-    sample_rate: f64,
-) -> Curve {
-    let complex_resp = compute_peq_complex_response(filters, &curve.freq, sample_rate);
-
-    let mut new_spl = ndarray::Array1::zeros(curve.freq.len());
-    let mut new_phase = ndarray::Array1::zeros(curve.freq.len());
-    let old_phase = curve.phase.as_ref();
-
-    for i in 0..curve.freq.len() {
-        let h = complex_resp[i];
-        let h_mag_db = 20.0 * h.norm().log10();
-        let h_phase_deg = h.arg().to_degrees();
-
-        new_spl[i] = curve.spl[i] + h_mag_db;
-        let p_in = old_phase.map(|p| p[i]).unwrap_or(0.0);
-        new_phase[i] = p_in + h_phase_deg;
-    }
-
-    Curve {
-        freq: curve.freq.clone(),
-        spl: new_spl,
-        phase: Some(new_phase),
-    }
-}

@@ -7,7 +7,7 @@ description = "Room acoustic simulator"
 license = { workspace = true }
 repository = { workspace = true }
 keywords = ["bem", "boundary-element", "acoustics", "numerical", "room-acoustics"]
-categories = ["science", "mathematics", "simulation", "hifi"]
+categories = ["science", "mathematics", "simulation"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]

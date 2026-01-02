@@ -156,11 +156,8 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
         let spacing_str = if spacing_ok { "ok" } else { "ko" };
 
         // Use scores if available, otherwise use objective function values
-        let (pre_str, post_str) = if pre_score.is_some() && post_score.is_some() {
-            (
-                format!("{:.3}", pre_score.unwrap()),
-                format!("{:.3}", post_score.unwrap()),
-            )
+        let (pre_str, post_str) = if let (Some(pre), Some(post)) = (pre_score, post_score) {
+            (format!("{:.3}", pre), format!("{:.3}", post))
         } else {
             // Fall back to objective function values
             let pre_obj = opt_result.pre_objective.unwrap_or(f64::NAN);

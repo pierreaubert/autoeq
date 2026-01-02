@@ -26,8 +26,8 @@ macro_rules! qa_println {
 
 // Re-export external crate functionality
 pub use autoeq_cea2034 as cea2034;
-pub use autoeq_de as de;
-pub use autoeq_iir as iir;
+pub use math_audio_differential_evolution as de;
+pub use math_audio_iir_fir as iir;
 
 // Re-export types from CEA2034 crate to ensure type compatibility
 pub use autoeq_cea2034::{Curve, DirectivityCurve, DirectivityData};
@@ -76,10 +76,10 @@ pub use loss::{CrossoverType, HeadphoneLossData, LossType, SpeakerLossData};
 pub use optim::*;
 pub use plot::*;
 pub use read::*;
+pub use workflow::*;
 pub use workflow::{
     HeadphoneOptResult, OptimizationOutput, ProgressCallbackConfig, ProgressUpdate,
     SpeakerOptResult, VisualizationCurves, compute_visualization_curves, optimize_headphone,
     optimize_speaker, perform_optimization_with_progress,
 };
-pub use workflow::*;
 pub use x2peq::x2peq;

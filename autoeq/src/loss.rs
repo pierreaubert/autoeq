@@ -16,9 +16,9 @@
 //! You should have received a copy of the GNU General Public License
 //! along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use crate::error::{AutoeqError, Result};
 use crate::Curve;
 use crate::cea2034 as score;
+use crate::error::{AutoeqError, Result};
 use crate::read;
 use clap::ValueEnum;
 use ndarray::Array1;

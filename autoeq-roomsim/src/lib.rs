@@ -834,9 +834,9 @@ impl From<Point3DConfig> for Point3D {
     }
 }
 
-impl From<Point3DConfig> for bem::room_acoustics::Point3D {
+impl From<Point3DConfig> for math_audio_bem::room_acoustics::Point3D {
     fn from(p: Point3DConfig) -> Self {
-        bem::room_acoustics::Point3D::new(p.x, p.y, p.z)
+        math_audio_bem::room_acoustics::Point3D::new(p.x, p.y, p.z)
     }
 }
 

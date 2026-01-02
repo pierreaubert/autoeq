@@ -4,8 +4,8 @@ use autoeq::Curve;
 use autoeq::cli::{Args, PeqModel};
 use autoeq::loss::LossType;
 use autoeq::workflow::setup_objective_data;
-use autoeq_iir::Biquad;
 use clap::{Parser, ValueEnum};
+use math_audio_iir_fir::Biquad;
 use ndarray::Array1;
 use std::error::Error;
 

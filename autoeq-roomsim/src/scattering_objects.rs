@@ -8,7 +8,7 @@
 //! Each object is represented as a surface mesh that can be merged with
 //! the room boundary mesh for BEM simulation.
 
-use bem::room_acoustics::{Point3D as BemPoint3D, RoomMesh, SurfaceElement};
+use math_audio_bem::room_acoustics::{Point3D as BemPoint3D, RoomMesh, SurfaceElement};
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 

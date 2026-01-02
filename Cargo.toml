@@ -8,7 +8,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.2.437"
+version = "0.3.0"
 authors = ["Pierre F. Aubert pierre@spinorama.org"]
 description = "Compute EQs for headphone, speakers and subwoofers"
 edition = "2024"
@@ -26,7 +26,7 @@ serde_json = "1.0"
 # ideally we would use only threads or only tokio
 anyhow = { version = "1.0" }
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12.26", features = ["json"] }
+reqwest = { version = "0.13", features = ["json"] }
 urlencoding = "2.1"
 chrono = "0.4"
 clap = { version = "4.5", features = ["derive"] }
@@ -36,6 +36,7 @@ env_logger = "0.11"
 hound = "3.5"
 log = "0.4"
 num_cpus = "1.17"
+schemars = "1.2"
 strsim = "0.11"
 tempfile = "3.23"
 thiserror = "2.0.17"
@@ -48,12 +49,12 @@ metaheuristics-nature = "10.1"
 rayon = "1.11"
 nlopt = "0.8.1"
 rustfft = "6.4"
-autoeq-cea2034 = { path = "autoeq-cea2034", version = "0.2" }
-autoeq-env = { path = "autoeq-env", version = "0.2" }
+autoeq-cea2034 = { path = "autoeq-cea2034", version = "0.3" }
+autoeq-env = { path = "autoeq-env", version = "0.3" }
 
-math-iir-fir = { version = "0.2" }
-math-differential-evolution = { version = "0.2" }
-math-bem = { version = "0.2" }
+math-iir-fir = { version = "0.3" }
+math-differential-evolution = { version = "0.3" }
+math-bem = { version = "0.3", default-features = false }
 
 # Plotting and visualization
 plotly = { version = "0.13.5" }

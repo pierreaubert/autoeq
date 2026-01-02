@@ -291,10 +291,11 @@ fn process_single_speaker(
             );
 
             // 2. Compute IIR response
-            use autoeq_iir::Biquad;
+            use math_audio_iir_fir::Biquad;
             // Need a way to compute PEQ response in dB.
             let peq: Vec<(f64, Biquad)> = eq_filters.iter().map(|b| (1.0, b.clone())).collect();
-            let iir_response = autoeq_iir::compute_peq_response(&curve.freq, &peq, sample_rate);
+            let iir_response =
+                math_audio_iir_fir::compute_peq_response(&curve.freq, &peq, sample_rate);
 
             // 3. Create residual curve (Measurement + IIR)
             use autoeq::Curve;

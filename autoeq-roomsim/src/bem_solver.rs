@@ -15,7 +15,7 @@
 //! Note: BEM is computationally expensive compared to ISM/modal methods.
 //! Use hybrid mode for full frequency range (BEM for low freq, ISM for high freq).
 
-use bem::room_acoustics::{
+use math_audio_bem::room_acoustics::{
     Point3D as BemPoint3D, RectangularRoom as BemRectangularRoom, RoomGeometry as BemRoomGeometry,
     RoomMesh, Source as BemSource,
 };
@@ -43,18 +43,20 @@ pub fn from_bem_point(p: &BemPoint3D) -> Point3D {
 /// Convert our Source to math-bem's Source
 pub fn to_bem_source(source: &Source) -> BemSource {
     let bem_position = to_bem_point(&source.position);
-    let bem_directivity = bem::room_acoustics::DirectivityPattern::omnidirectional();
+    let bem_directivity = math_audio_bem::room_acoustics::DirectivityPattern::omnidirectional();
 
     let bem_crossover = match &source.crossover {
-        crate::CrossoverFilter::FullRange => bem::room_acoustics::CrossoverFilter::FullRange,
+        crate::CrossoverFilter::FullRange => {
+            math_audio_bem::room_acoustics::CrossoverFilter::FullRange
+        }
         crate::CrossoverFilter::Lowpass { cutoff_freq, order } => {
-            bem::room_acoustics::CrossoverFilter::Lowpass {
+            math_audio_bem::room_acoustics::CrossoverFilter::Lowpass {
                 cutoff_freq: *cutoff_freq,
                 order: *order,
             }
         }
         crate::CrossoverFilter::Highpass { cutoff_freq, order } => {
-            bem::room_acoustics::CrossoverFilter::Highpass {
+            math_audio_bem::room_acoustics::CrossoverFilter::Highpass {
                 cutoff_freq: *cutoff_freq,
                 order: *order,
             }
@@ -63,7 +65,7 @@ pub fn to_bem_source(source: &Source) -> BemSource {
             low_cutoff,
             high_cutoff,
             order,
-        } => bem::room_acoustics::CrossoverFilter::Bandpass {
+        } => math_audio_bem::room_acoustics::CrossoverFilter::Bandpass {
             low_cutoff: *low_cutoff,
             high_cutoff: *high_cutoff,
             order: *order,
@@ -85,9 +87,11 @@ pub fn to_bem_room_geometry(room: &RoomGeometry) -> BemRoomGeometry {
         RoomGeometry::Rectangular(r) => {
             BemRoomGeometry::Rectangular(BemRectangularRoom::new(r.width, r.depth, r.height))
         }
-        RoomGeometry::LShaped(l) => BemRoomGeometry::LShaped(
-            bem::room_acoustics::LShapedRoom::new(l.width1, l.depth1, l.width2, l.depth2, l.height),
-        ),
+        RoomGeometry::LShaped(l) => {
+            BemRoomGeometry::LShaped(math_audio_bem::room_acoustics::LShapedRoom::new(
+                l.width1, l.depth1, l.width2, l.depth2, l.height,
+            ))
+        }
     }
 }
 
@@ -673,8 +677,8 @@ pub fn solve_bem_with_scattering(
 // ============================================================================
 
 /// Convert autoeq-roomsim FmmConfig to math-bem FmmSolverConfig
-fn to_fmm_solver_config(config: &FmmConfig) -> bem::room_acoustics::FmmSolverConfig {
-    bem::room_acoustics::FmmSolverConfig {
+fn to_fmm_solver_config(config: &FmmConfig) -> math_audio_bem::room_acoustics::FmmSolverConfig {
+    math_audio_bem::room_acoustics::FmmSolverConfig {
         max_elements_per_leaf: config.max_elements_per_leaf,
         max_tree_depth: config.max_tree_depth,
         n_theta: config.n_theta,
@@ -790,7 +794,7 @@ fn solve_bem_dense(
     speed_of_sound: f64,
     _config: &BemConfig,
 ) -> Result<BemResult, String> {
-    use bem::room_acoustics::{calculate_field_pressure_bem_parallel, solve_bem_system};
+    use math_audio_bem::room_acoustics::{calculate_field_pressure_bem_parallel, solve_bem_system};
 
     let bem_sources: Vec<BemSource> = sources.iter().map(to_bem_source).collect();
     let k = 2.0 * PI * frequency / speed_of_sound;
@@ -832,7 +836,7 @@ fn solve_bem_fmm_ilu(
     speed_of_sound: f64,
     config: &BemConfig,
 ) -> Result<BemResult, String> {
-    use bem::room_acoustics::{
+    use math_audio_bem::room_acoustics::{
         calculate_field_pressure_bem_parallel, solve_bem_fmm_gmres_ilu_with_result,
     };
     let bem_sources: Vec<BemSource> = sources.iter().map(to_bem_source).collect();
@@ -884,7 +888,7 @@ fn solve_bem_fmm_hierarchical(
     speed_of_sound: f64,
     config: &BemConfig,
 ) -> Result<BemResult, String> {
-    use bem::room_acoustics::{
+    use math_audio_bem::room_acoustics::{
         calculate_field_pressure_bem_parallel,
         solve_bem_fmm_gmres_hierarchical as bem_solve_hierarchical,
     };

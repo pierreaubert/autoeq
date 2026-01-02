@@ -3,7 +3,7 @@
 use super::types::{
     ChannelDspChain, DriverDspChain, DspChainOutput, OptimizationMetadata, PluginConfigWrapper,
 };
-use autoeq_iir::Biquad;
+use math_audio_iir_fir::Biquad;
 use serde_json::json;
 use std::collections::HashMap;
 use std::error::Error;

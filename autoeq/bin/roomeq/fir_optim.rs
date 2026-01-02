@@ -203,12 +203,12 @@ fn generate_kirkeby_correction(
     // Apply windowing (Hann or similar) to the extracted segment to smooth edges
     // Extracted segment:
     let mut coeffs = vec![0.0; n_taps];
-    for i in 0..n_taps {
+    for (i, coeff) in coeffs.iter_mut().enumerate() {
         let src_idx = start_idx + i;
         if src_idx < impulse.len() {
             // Hann window
             let window = 0.5 * (1.0 - (2.0 * PI * i as f64 / (n_taps - 1) as f64).cos());
-            coeffs[i] = impulse[src_idx] * window;
+            *coeff = impulse[src_idx] * window;
         }
     }
 

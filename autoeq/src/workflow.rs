@@ -91,13 +91,15 @@ pub fn build_target_curve(
             std::env::current_dir()
         );
 
-        let target_curve = read::read_curve_from_csv(target_path).map_err(|e| {
-            AutoeqError::TargetCurveLoad {
+        let target_curve =
+            read::read_curve_from_csv(target_path).map_err(|e| AutoeqError::TargetCurveLoad {
                 path: target_path.display().to_string(),
                 message: e.to_string(),
-            }
-        })?;
-        Ok(read::normalize_and_interpolate_response(freqs, &target_curve))
+            })?;
+        Ok(read::normalize_and_interpolate_response(
+            freqs,
+            &target_curve,
+        ))
     } else {
         match args.curve_name.as_str() {
             "Listening Window" => {
@@ -802,15 +804,15 @@ where
             };
 
             // Compute filter response if requested
-            let filter_response: Vec<f64> =
-                if config.include_filter_response && !biquads.is_empty() {
-                    frequencies_clone
-                        .iter()
-                        .map(|&f| biquads.iter().map(|b| b.log_result(f)).sum())
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+            let filter_response: Vec<f64> = if config.include_filter_response && !biquads.is_empty()
+            {
+                frequencies_clone
+                    .iter()
+                    .map(|&f| biquads.iter().map(|b| b.log_result(f)).sum())
+                    .collect()
+            } else {
+                Vec::new()
+            };
 
             // Compute score if speaker_score_data available
             let score = speaker_score_data.as_ref().map(|sd| {
@@ -1045,12 +1047,8 @@ where
 
     // 8. Compute visualization curves
     let frequencies: Vec<f64> = standard_freq.iter().copied().collect();
-    let curves = compute_visualization_curves(
-        &frequencies,
-        &input_normalized,
-        &target_curve,
-        &biquads,
-    );
+    let curves =
+        compute_visualization_curves(&frequencies, &input_normalized, &target_curve, &biquads);
 
     let initial_loss = history.first().map(|x| x.1).unwrap_or(0.0);
     let final_loss = history.last().map(|x| x.1).unwrap_or(0.0);
@@ -1631,14 +1629,9 @@ mod tests {
         let spin_opt = Some(spin);
 
         // Case 1: spin_data is available -> speaker_score_data should be set
-        let (obj, use_cea) = super::setup_objective_data(
-            &args,
-            &input_curve,
-            &target,
-            &deviation,
-            &spin_opt,
-        )
-        .expect("setup_objective_data should succeed with valid spin data");
+        let (obj, use_cea) =
+            super::setup_objective_data(&args, &input_curve, &target, &deviation, &spin_opt)
+                .expect("setup_objective_data should succeed with valid spin data");
         assert!(use_cea);
         assert!(obj.speaker_score_data.is_some());
 
@@ -1647,14 +1640,9 @@ mod tests {
         // which curve is being optimized, not what loss functions are available)
         let mut args2 = args.clone();
         args2.measurement = Some("On Axis".to_string());
-        let (obj2, use_cea2) = super::setup_objective_data(
-            &args2,
-            &input_curve,
-            &target,
-            &deviation,
-            &spin_opt,
-        )
-        .expect("setup_objective_data should succeed with valid spin data");
+        let (obj2, use_cea2) =
+            super::setup_objective_data(&args2, &input_curve, &target, &deviation, &spin_opt)
+                .expect("setup_objective_data should succeed with valid spin data");
         assert!(use_cea2); // Changed: spin_data available means speaker score is possible
         assert!(obj2.speaker_score_data.is_some());
 
@@ -1727,7 +1715,8 @@ mod tests {
         let biquad = Biquad::new(BiquadFilterType::Peak, 1000.0, 48000.0, 1.0, -5.0);
         let biquads = vec![biquad];
 
-        let curves = compute_visualization_curves(&frequencies, &input_curve, &target_curve, &biquads);
+        let curves =
+            compute_visualization_curves(&frequencies, &input_curve, &target_curve, &biquads);
 
         // Check that all curves have the right length
         assert_eq!(curves.frequencies.len(), 3);
@@ -1768,7 +1757,8 @@ mod tests {
 
         let biquads: Vec<Biquad> = vec![];
 
-        let curves = compute_visualization_curves(&frequencies, &input_curve, &target_curve, &biquads);
+        let curves =
+            compute_visualization_curves(&frequencies, &input_curve, &target_curve, &biquads);
 
         // With no biquads, filter response should be all zeros
         for &val in &curves.filter_response {

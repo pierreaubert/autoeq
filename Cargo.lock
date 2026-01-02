@@ -224,7 +224,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-roomsim"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "console_error_panic_hook",
  "math-bem",
@@ -1817,9 +1817,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "math-bem"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c530b5240c494c9d978bb4003dfb28675912cf6723da93a6216dcb773c114d4"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1870,9 +1868,7 @@ dependencies = [
 
 [[package]]
 name = "math-solvers"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64acd40e7d9ec1fdd67865d0e2715dc3dadc1b7b1675449a2ba3731381bee0b8"
+version = "0.3.1"
 dependencies = [
  "log",
  "ndarray",
@@ -1896,8 +1892,6 @@ dependencies = [
 [[package]]
 name = "math-wave"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4a1544ba4ab9b78ff827cdcc4cfc101904e19883fc77a61a09803e61a8dfc94"
 dependencies = [
  "num-complex",
  "serde",
@@ -1908,8 +1902,6 @@ dependencies = [
 [[package]]
 name = "math-xem-common"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "674198aa423a14a79d76c653556ea4fef1a477f3b8ec36757c064209d3aafe34"
 dependencies = [
  "chrono",
  "ndarray",

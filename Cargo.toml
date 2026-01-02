@@ -114,6 +114,9 @@ literal_string_with_formatting_args = "allow"
 
 [patch.crates-io]
 webdriver-downloader = { version = "0.16.4", git = "https://github.com/pierreaubert/webdriver-downloader" }
+math-bem = { path = "/Users/pierrre/src.local/math-audio/math-bem" }
+math-solvers = { path = "/Users/pierrre/src.local/math-audio/math-solvers" }
+math-xem-common = { path = "/Users/pierrre/src.local/math-audio/math-xem-common" }
 
 [profile.dev]
 # NOTE: Aggressive optimization settings (opt-level="z", lto=true, strip=true)

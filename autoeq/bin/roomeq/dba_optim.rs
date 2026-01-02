@@ -72,23 +72,28 @@ pub fn optimize_dba(
     args.min_freq = config.min_freq;
     args.max_freq = config.max_freq;
     args.maxeval = config.max_iter;
-    args.algo = "nlopt:cobyla".to_string();
+    args.algo = config.algorithm.clone();
     args.loss = autoeq::LossType::MultiSubFlat;
 
     let objective_data =
         autoeq::workflow::setup_multisub_objective_data(&args, drivers_data.clone());
 
     // Custom bounds: [Gain1, Gain2, Delay1, Delay2]
-    // Index 0: Front Gain -> 0
-    // Index 1: Rear Gain -> -20 to 5 dB
-    // Index 2: Front Delay -> 0
+    // Index 0: Front Gain -> 0 (Locked)
+    // Index 1: Rear Gain -> config bounds (typically attenuated)
+    // Index 2: Front Delay -> 0 (Locked)
     // Index 3: Rear Delay -> 0 to 100 ms (approx 34m room)
 
-    let lower_bounds = vec![-0.01, -30.0, 0.0, 0.0];
-    let upper_bounds = vec![0.01, 5.0, 0.001, 100.0];
+    // Ensure bounds cover typical DBA range (-30dB to +5dB)
+    let min_gain = config.min_db.min(-30.0);
+    let max_gain = config.max_db.max(5.0);
+
+    let lower_bounds = vec![-0.01, min_gain, 0.0, 0.0];
+    let upper_bounds = vec![0.01, max_gain, 0.001, 100.0];
 
     // Initial guess
     // Rear delay guess: 10ms (~3.4m room)
+    // Rear gain guess: -3dB
     let mut x = vec![0.0, -3.0, 0.0, 10.0];
 
     // Optimize
@@ -196,4 +201,29 @@ fn invert_polarity(curve: &Curve) -> Curve {
         new_curve.phase = Some(Array1::from_elem(curve.freq.len(), 180.0));
     }
     new_curve
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::Array1;
+
+    #[test]
+    fn test_invert_polarity() {
+        let freq = Array1::from(vec![100.0, 1000.0]);
+        let spl = Array1::from(vec![80.0, 80.0]);
+        let phase = Array1::from(vec![0.0, -90.0]);
+        
+        let curve = Curve {
+            freq: freq.clone(),
+            spl: spl.clone(),
+            phase: Some(phase.clone()),
+        };
+        
+        let inverted = invert_polarity(&curve);
+        
+        let inv_phase = inverted.phase.unwrap();
+        assert!((inv_phase[0] - 180.0).abs() < 1e-6);
+        assert!((inv_phase[1] - 90.0).abs() < 1e-6); // -90 + 180 = 90
+    }
 }

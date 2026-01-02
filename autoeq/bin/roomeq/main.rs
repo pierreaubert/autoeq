@@ -148,6 +148,12 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
     // Group Delay Optimization
     if let Some(gd_configs) = &room_config.group_delay {
         info!("Optimizing group delay alignments...");
+        
+        // Store calculated relative delays: (SubName, SpeakerName, RelativeDelayMs)
+        let mut calculated_rel_delays = Vec::new();
+        // Track the maximum negative shift required for each subwoofer
+        let mut sub_base_delays: HashMap<String, f64> = HashMap::new();
+
         for gd_config in gd_configs {
             let sub_curve = match curves.get(&gd_config.subwoofer) {
                 Some(c) => c,
@@ -166,6 +172,7 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
                         "  Aligning '{}' with '{}'",
                         speaker_name, gd_config.subwoofer
                     );
+                    
                     let delay_res = group_delay_optim::optimize_group_delay(
                         sub_curve,
                         speaker_curve,
@@ -179,39 +186,20 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
                                 "    Optimal relative delay: {:.3} ms (positive = delay speaker)",
                                 delay_ms
                             );
-
-                            // Apply delay
-                            // If delay > 0, delay speaker.
-                            // If delay < 0, delay subwoofer.
-                            // BUT, we have one subwoofer and multiple speakers.
-                            // And maybe multiple GD configs sharing the subwoofer.
-                            // Simpler approach: Apply delay to speaker relative to sub.
-                            // If speaker needs to be advanced (delay < 0), we delay the sub?
-                            // This creates conflicts.
-                            //
-                            // Robust approach: delay the speaker by `delay_ms` if > 0.
-                            // If < 0, we can't really do anything unless we delay the sub, which affects others.
-                            // For now, let's just apply positive delays to speakers, or if negative, warn user.
-                            // OR, we can add a 'global' sub delay if all speakers need it.
-
-                            if delay_ms > 0.0 {
-                                if let Some(chain) = channel_chains.get_mut(speaker_name) {
-                                    output::add_delay_plugin(chain, delay_ms);
-                                    info!(
-                                        "    Applied {:.3} ms delay to '{}'",
-                                        delay_ms, speaker_name
-                                    );
+                            
+                            calculated_rel_delays.push((
+                                gd_config.subwoofer.clone(),
+                                speaker_name.clone(),
+                                delay_ms
+                            ));
+                            
+                            // If delay_ms < 0, it means speaker is late (or sub is early).
+                            // We need to delay the sub by at least -delay_ms to make speaker delay non-negative.
+                            if delay_ms < 0.0 {
+                                let current_base = *sub_base_delays.get(&gd_config.subwoofer).unwrap_or(&0.0);
+                                if -delay_ms > current_base {
+                                    sub_base_delays.insert(gd_config.subwoofer.clone(), -delay_ms);
                                 }
-                            } else if delay_ms < 0.0 {
-                                // Try to delay sub?
-                                // Only if this sub is not used by others or we accept global shift.
-                                // For now, let's just warn.
-                                warn!(
-                                    "    Speaker '{}' should be advanced by {:.3} ms relative to sub. This requires delaying the sub, which is not automatically handled per-speaker pair.",
-                                    speaker_name, -delay_ms
-                                );
-                                // Optional: Apply delay to sub if it's the only pair?
-                                // Better: Apply delay to sub and shift all other speakers? Too complex for now.
                             }
                         }
                         Err(e) => {
@@ -220,6 +208,33 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
                     }
                 } else {
                     warn!("Speaker channel '{}' not found", speaker_name);
+                }
+            }
+        }
+        
+        // Apply delays
+        // 1. Apply base delays to subwoofers
+        for (sub_name, base_delay) in &sub_base_delays {
+            if *base_delay > 1e-3 {
+                if let Some(chain) = channel_chains.get_mut(sub_name) {
+                    output::add_delay_plugin(chain, *base_delay);
+                    info!("    Applied base delay of {:.3} ms to subwoofer '{}'", base_delay, sub_name);
+                }
+            }
+        }
+        
+        // 2. Apply adjusted delays to speakers
+        for (sub_name, speaker_name, rel_delay) in calculated_rel_delays {
+            let base_delay = *sub_base_delays.get(&sub_name).unwrap_or(&0.0);
+            let final_speaker_delay = rel_delay + base_delay;
+            
+            if final_speaker_delay > 1e-3 {
+                 if let Some(chain) = channel_chains.get_mut(&speaker_name) {
+                    output::add_delay_plugin(chain, final_speaker_delay);
+                    info!(
+                        "    Applied {:.3} ms delay to '{}' (rel: {:.3} + sub_base: {:.3})",
+                        final_speaker_delay, speaker_name, rel_delay, base_delay
+                    );
                 }
             }
         }

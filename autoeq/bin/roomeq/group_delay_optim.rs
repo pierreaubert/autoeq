@@ -241,3 +241,82 @@ where F: Fn(&Complex64) -> f64
     let t = (target - x0) / (x1 - x0);
     y0 + t * (y1 - y0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::Array1;
+    use num_complex::Complex64;
+    use std::f64::consts::PI;
+
+    #[test]
+    fn test_unwrap_phase() {
+        // -170, -175, 175 (wrap), 170
+        // unwrapped: -170, -175, -185, -190
+        let phase = vec![-170.0_f64.to_radians(), -175.0_f64.to_radians(), 175.0_f64.to_radians(), 170.0_f64.to_radians()];
+        let unwrapped = unwrap_phase(&phase);
+        
+        let expected = vec![-170.0, -175.0, -185.0, -190.0];
+        for (u, e) in unwrapped.iter().zip(expected.iter()) {
+            assert!((u.to_degrees() - e).abs() < 1e-5, "Got {}, expected {}", u.to_degrees(), e);
+        }
+    }
+
+    #[test]
+    fn test_calculate_group_delay_constant() {
+        // Linear phase: phi = -w * T
+        // GD = T
+        let delay_s = 0.010; // 10ms
+        let freqs = Array1::linspace(20.0, 100.0, 10);
+        let mut complex = Vec::new();
+        
+        for &f in &freqs {
+            let w = 2.0 * PI * f;
+            let phi = -w * delay_s;
+            complex.push(Complex64::from_polar(1.0, phi));
+        }
+        
+        let gd = calculate_group_delay(&freqs, &complex);
+        
+        for &d in &gd {
+            // gd is in ms
+            assert!((d - 10.0).abs() < 0.1, "Expected 10ms, got {}", d);
+        }
+    }
+
+    #[test]
+    fn test_optimize_group_delay_alignment() {
+        // Sub is at t=0
+        // Speaker is delayed by 5ms
+        // Optimization should find delay = -5ms (advance speaker / delay sub)
+        
+        let freqs = Array1::linspace(20.0, 200.0, 50);
+        let sub_spl = Array1::zeros(freqs.len()); // 0dB
+        let mut sub_phase = Array1::zeros(freqs.len()); // 0 deg
+        
+        // Speaker delayed 5ms
+        let delay_s = 0.005;
+        let spk_spl = Array1::zeros(freqs.len());
+        let mut spk_phase = Array1::zeros(freqs.len());
+        
+        for i in 0..freqs.len() {
+            let w = 2.0 * PI * freqs[i];
+            spk_phase[i] = (-w * delay_s).to_degrees();
+        }
+        
+        // Wrap phases for realism
+        for p in &mut spk_phase {
+             while *p > 180.0 { *p -= 360.0; }
+             while *p < -180.0 { *p += 360.0; }
+        }
+
+        let sub = Curve { freq: freqs.clone(), spl: sub_spl, phase: Some(sub_phase) };
+        let spk = Curve { freq: freqs.clone(), spl: spk_spl, phase: Some(spk_phase) };
+        
+        let delay = optimize_group_delay(&sub, &spk, 30.0, 100.0).unwrap();
+        
+        // Should be approx -5.0
+        // Note: The optimizer uses coarse grid (0.5ms) then fine (0.05ms)
+        assert!((delay - (-5.0)).abs() < 0.2, "Expected -5.0ms, got {}", delay);
+    }
+}

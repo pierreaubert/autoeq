@@ -1,7 +1,50 @@
+use autoeq::cli::PeqModel;
 use autoeq::Curve;
 use autoeq::cea2034 as score;
 use autoeq::loss;
+use ndarray::Array1;
 use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+static PEQ_CACHE: OnceLock<Mutex<HashMap<String, Array1<f64>>>> = OnceLock::new();
+
+fn get_peq_cache() -> &'static Mutex<HashMap<String, Array1<f64>>> {
+    PEQ_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn compute_peq_cached(
+    freq: &Array1<f64>,
+    params: &[f64],
+    sample_rate: f64,
+    model: PeqModel,
+) -> Array1<f64> {
+    let cache = get_peq_cache();
+    let key = format!(
+        "{:?}-{:?}-{:?}-{:?}",
+        params.len(),
+        sample_rate,
+        model,
+        freq.len()
+    );
+
+    {
+        let guard = cache.lock().unwrap();
+        if let Some(cached) = guard.get(&key) {
+            return cached.clone();
+        }
+    }
+
+    let result = autoeq::x2peq::compute_peq_response_from_x(freq, params, sample_rate, model);
+
+    let mut guard = cache.lock().unwrap();
+    // Limit cache size to prevent unbounded growth
+    if guard.len() >= 100 {
+        guard.clear();
+    }
+    guard.insert(key, result.clone());
+
+    result
+}
 
 /// Post-optimization metrics for CEA2034 or headphone loss
 pub(super) struct PostOptMetrics {
@@ -30,7 +73,7 @@ pub(super) async fn compute_post_optimization_metrics(
 
     match objective_data.loss_type {
         autoeq::LossType::HeadphoneFlat | autoeq::LossType::HeadphoneScore => {
-            let peq_after = autoeq::x2peq::compute_peq_response_from_x(
+            let peq_after = compute_peq_cached(
                 standard_freq,
                 opt_params,
                 args.sample_rate,
@@ -49,7 +92,7 @@ pub(super) async fn compute_post_optimization_metrics(
         autoeq::LossType::SpeakerFlat | autoeq::LossType::SpeakerScore => {
             if use_cea {
                 let freq = &objective_data.freqs;
-                let peq_after = autoeq::x2peq::compute_peq_response_from_x(
+                let peq_after = compute_peq_cached(
                     freq,
                     opt_params,
                     args.sample_rate,

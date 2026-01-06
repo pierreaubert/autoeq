@@ -2,7 +2,12 @@
 
 # AutoEQ: a cli for computing EQ for headphones and speakers.
 
-The software helps you to get better sound from your speakers or your headsets. If you prefer a classical UI, please use [SotF](https://github.com/pierreaubert/sotf).
+The software helps you to get better sound from your speakers or your headsets. It is a CLI application that works in a terminal window. If you prefer
+a classical UI, please use [SotF](https://github.com/pierreaubert/sotf).
+
+How to use the software is described in [README](autoeq/README.md).
+
+If you are a developer, please read below:
 
 ## Install
 

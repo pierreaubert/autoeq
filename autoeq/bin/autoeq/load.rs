@@ -50,32 +50,45 @@ pub(super) async fn load_and_prepare(
         read::create_log_frequency_grid(num_points, 20.0, 20000.0)
     };
 
-    // Normalize and interpolate input curve
+    // Interpolate input curve first (needed for deviation calculation)
     let input_curve = read::normalize_and_interpolate_response(&standard_freq, &input_curve_raw);
 
-    // Build/Get target and interpolate it
-    let target_curve_raw =
-        autoeq::workflow::build_target_curve(args, &standard_freq, &input_curve_raw)?;
-    let target_curve = read::interpolate_log_space(&standard_freq, &target_curve_raw);
+    // Build target curve in parallel with spinorama interpolation
+    let (target_res, spin_data_res) = tokio::join!(
+        async {
+            let target_raw =
+                autoeq::workflow::build_target_curve(args, &standard_freq, &input_curve_raw)?;
+            Ok::<_, Box<dyn std::error::Error>>(read::interpolate_log_space(
+                &standard_freq,
+                &target_raw,
+            ))
+        },
+        async {
+            // Interpolate spinorama data if available
+            match spin_data_raw {
+                Some(spin_data) => {
+                    let interpolated: HashMap<String, Curve> = spin_data
+                        .into_iter()
+                        .map(|(name, curve)| {
+                            let interp = read::interpolate_log_space(&standard_freq, &curve);
+                            (name, interp)
+                        })
+                        .collect();
+                    Ok::<_, Box<dyn std::error::Error>>(Some(interpolated))
+                }
+                None => Ok::<_, Box<dyn std::error::Error>>(None),
+            }
+        }
+    );
 
-    // Compute and interpolate deviation curve
-    let deviation_curve_raw = Curve {
-        freq: target_curve.freq.clone(),
-        spl: target_curve.spl.clone() - &input_curve.spl,
+    // Unpack results and compute deviation
+    let target_curve = target_res?;
+    let deviation_curve = Curve {
+        freq: standard_freq.clone(),
+        spl: &target_curve.spl - &input_curve.spl,
         phase: None,
     };
-    let deviation_curve = read::interpolate_log_space(&standard_freq, &deviation_curve_raw);
-
-    // Interpolate spinorama data if available
-    let spin_data = spin_data_raw.map(|spin_data| {
-        spin_data
-            .into_iter()
-            .map(|(name, curve)| {
-                let interpolated = read::interpolate_log_space(&standard_freq, &curve);
-                (name, interpolated)
-            })
-            .collect()
-    });
+    let spin_data = spin_data_res?;
 
     Ok((
         standard_freq,

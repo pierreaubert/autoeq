@@ -3,16 +3,28 @@
 //! This module centralizes the common pipeline steps for loading input data,
 //! building target curves, preparing objective data, and running optimization.
 
-use crate::{
-    Curve, cli::PeqModel, error::AutoeqError, iir::Biquad, loss::DriversLossData,
-    loss::HeadphoneLossData, loss::SpeakerLossData, optim, optim::ObjectiveData,
-    optim_de::optimize_filters_autoeq_with_callback, read, read::Cea2034Data, x2peq::x2peq,
-};
+use crate::Curve;
+use crate::cli::Args;
+use crate::loss::{CrossoverType, DriverMeasurement};
+use crate::optim::{AlgorithmInfo, AlgorithmType, ObjectiveData, get_all_algorithms, optimize_filters_with_algo_override};
+use crate::optim_de::optimize_filters_autoeq_with_callback;
+use crate::read;
 use ndarray::Array1;
-use std::{collections::HashMap, error::Error, path::PathBuf};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::error::Error;
+use crate::AutoeqError;
+use crate::Cea2034Data;
+use crate::SpeakerLossData;
+use crate::HeadphoneLossData;
+use crate::loss::DriversLossData;
+use crate::PeqModel;
+use crate::x2peq;
+use crate::iir::Biquad;
 
-/// Load the input curve from either local CSV (when no API params) or from
-/// cached/API Plotly JSON for a given `speaker`/`version`/`measurement`.
+pub mod resume;
+
+/// Load input curve from file or standard input
 ///
 /// Returns the main input `Curve` and optional CEA2034 spinorama curves when
 /// the measurement requires them.
@@ -724,7 +736,7 @@ pub fn perform_optimization_with_callback(
     };
 
     if args.refine {
-        let local_result = optim::optimize_filters_with_algo_override(
+        let local_result = optimize_filters_with_algo_override(
             &mut x,
             &lower_bounds,
             &upper_bounds,

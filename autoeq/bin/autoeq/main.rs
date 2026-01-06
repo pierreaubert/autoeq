@@ -26,10 +26,24 @@ use std::path::PathBuf;
 mod load;
 mod postscore;
 mod prescore;
+mod progress;
 mod qa;
 mod runopt;
 mod save;
 mod spacing;
+
+#[cfg(test)]
+mod load_tests;
+#[cfg(test)]
+mod postscore_tests;
+#[cfg(test)]
+mod prescore_tests;
+#[cfg(test)]
+mod qa_tests;
+#[cfg(test)]
+mod save_tests;
+#[cfg(test)]
+mod spacing_tests;
 
 /// A command-line tool to find optimal IIR filters to match a frequency curve.
 #[tokio::main]

@@ -21,10 +21,14 @@ use crate::cea2034 as score;
 use crate::error::{AutoeqError, Result};
 use crate::read;
 use clap::ValueEnum;
-use ndarray::Array1;
+use ndarray::{Array1, Zip};
 use num_complex::Complex64;
 use std::collections::HashMap;
 use std::f64::consts::PI;
+
+pub mod enhanced_weights;
+pub mod bass_boost;
+pub mod phase_aware;
 
 /// The type of loss function to use during optimization
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -319,43 +323,32 @@ pub fn mixed_loss(
 /// for frequencies below and above 3000 Hz, with higher weight given to the lower frequency band.
 /// If the frequency range excludes all data points, returns 0.0.
 fn weighted_mse(freqs: &Array1<f64>, error: &Array1<f64>, min_freq: f64, max_freq: f64) -> f64 {
-    debug_assert_eq!(freqs.len(), error.len());
-    let mut ss1 = 0.0; // sum of squares for f < 3000 (within range)
-    let mut n1: usize = 0;
-    let mut ss2 = 0.0; // sum of squares for f >= 3000 (within range)
-    let mut n2: usize = 0;
+    // Create masks for frequency bands using ndarray's vectorized operations
+    let in_range = freqs.mapv(|f| f >= min_freq && f <= max_freq);
+    let bass_band = freqs.mapv(|f| f < 3000.0 && f >= min_freq && f <= max_freq);
+    let treble_band = freqs.mapv(|f| f >= 3000.0 && f >= min_freq && f <= max_freq);
 
-    for i in 0..freqs.len() {
-        let f = freqs[i];
-        // Only process frequencies within the specified range
-        if f >= min_freq && f <= max_freq {
-            let e = error[i];
-            if f < 3000.0 {
-                ss1 += e * e;
-                n1 += 1;
-            } else {
-                ss2 += e * e;
-                n2 += 1;
-            }
-        }
-    }
+    // Count points in each band
+    let n1: usize = bass_band.iter().filter(|&&b| b).count();
+    let n2: usize = treble_band.iter().filter(|&&b| b).count();
 
-    // Handle edge case where no frequencies are in the specified range
     if n1 == 0 && n2 == 0 {
         return 0.0;
     }
 
-    // RMS in each band: sqrt(mean of squares)
-    let err1 = if n1 > 0 {
-        (ss1 / n1 as f64).sqrt()
-    } else {
-        0.0
-    };
-    let err2 = if n2 > 0 {
-        (ss2 / n2 as f64).sqrt()
-    } else {
-        0.0
-    };
+    // Compute squared errors only for valid points
+    let squared_errors = error.mapv(|e| e * e);
+
+    let ss1: f64 = Zip::from(&bass_band)
+        .and(&squared_errors)
+        .fold(0.0, |acc, &mask, &err| if mask { acc + err } else { acc });
+
+    let ss2: f64 = Zip::from(&treble_band)
+        .and(&squared_errors)
+        .fold(0.0, |acc, &mask, &err| if mask { acc + err } else { acc });
+
+    let err1 = if n1 > 0 { (ss1 / n1 as f64).sqrt() } else { 0.0 };
+    let err2 = if n2 > 0 { (ss2 / n2 as f64).sqrt() } else { 0.0 };
     err1 + err2 / 3.0
 }
 

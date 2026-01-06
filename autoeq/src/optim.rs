@@ -32,6 +32,8 @@ use ndarray::Array1;
 use nlopt::Algorithm;
 use std::process;
 
+pub mod pareto;
+
 /// Algorithm metadata structure
 #[derive(Debug, Clone)]
 pub struct AlgorithmInfo {

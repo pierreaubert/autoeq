@@ -4,9 +4,37 @@ use autoeq::Curve;
 use autoeq::fir::{FirPhase, generate_fir_from_response};
 use ndarray::Array1;
 use num_complex::Complex;
-use rustfft::FftPlanner;
+use rustfft::{Fft, FftPlanner};
+use std::collections::HashMap;
 use std::error::Error;
 use std::f64::consts::PI;
+use std::sync::{Arc, Mutex, OnceLock};
+
+/// Global FFT planner cache for reuse across calls
+/// The planner caches plans internally, so reusing it improves performance
+static FFT_PLANNER: OnceLock<Mutex<FftPlanner<f64>>> = OnceLock::new();
+
+/// Type alias for the FFT cache to reduce complexity
+type FftCache = HashMap<usize, Arc<dyn Fft<f64>>>;
+
+/// Cache for planned FFTs by size
+static FFT_CACHE: OnceLock<Mutex<FftCache>> = OnceLock::new();
+
+/// Get or create an inverse FFT plan for the given size
+fn get_inverse_fft(fft_len: usize) -> Arc<dyn Fft<f64>> {
+    let cache = FFT_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut cache_guard = cache.lock().unwrap();
+
+    if let Some(fft) = cache_guard.get(&fft_len) {
+        return Arc::clone(fft);
+    }
+
+    let planner = FFT_PLANNER.get_or_init(|| Mutex::new(FftPlanner::new()));
+    let mut planner_guard = planner.lock().unwrap();
+    let fft = planner_guard.plan_fft_inverse(fft_len);
+    cache_guard.insert(fft_len, Arc::clone(&fft));
+    fft
+}
 
 use super::types::{OptimizerConfig, TargetCurveConfig};
 
@@ -173,9 +201,8 @@ fn generate_kirkeby_correction(
         spectrum[fft_len - i] = h_inv[i].conj();
     }
 
-    // Perform IFFT
-    let mut planner = FftPlanner::new();
-    let fft = planner.plan_fft_inverse(fft_len);
+    // Perform IFFT using cached planner for better performance
+    let fft = get_inverse_fft(fft_len);
     fft.process(&mut spectrum);
 
     // Normalize
@@ -200,17 +227,209 @@ fn generate_kirkeby_correction(
     // We want to extract `n_taps` centered around `shift`.
     let start_idx = shift - n_taps / 2;
 
-    // Apply windowing (Hann or similar) to the extracted segment to smooth edges
-    // Extracted segment:
+    // Apply windowing to the extracted segment to smooth edges
+    let window = hann_window(n_taps);
     let mut coeffs = vec![0.0; n_taps];
     for (i, coeff) in coeffs.iter_mut().enumerate() {
         let src_idx = start_idx + i;
         if src_idx < impulse.len() {
-            // Hann window
-            let window = 0.5 * (1.0 - (2.0 * PI * i as f64 / (n_taps - 1) as f64).cos());
-            *coeff = impulse[src_idx] * window;
+            *coeff = impulse[src_idx] * window[i];
         }
     }
 
     Ok(coeffs)
+}
+
+/// FIR window function type
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[allow(dead_code)]
+pub enum WindowType {
+    /// Rectangular window (no windowing)
+    Rectangular,
+    /// Hann window - good general purpose
+    #[default]
+    Hann,
+    /// Hamming window - slightly less sidelobe than Hann
+    Hamming,
+    /// Blackman window - even lower sidelobes
+    Blackman,
+    /// Kaiser window with parameter beta
+    Kaiser(f64),
+}
+
+/// Generate a rectangular window (no windowing)
+#[allow(dead_code)]
+pub fn rectangular_window(n: usize) -> Vec<f64> {
+    vec![1.0; n]
+}
+
+/// Generate a Hann window
+pub fn hann_window(n: usize) -> Vec<f64> {
+    (0..n)
+        .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f64 / (n - 1) as f64).cos()))
+        .collect()
+}
+
+/// Generate a Hamming window
+#[allow(dead_code)]
+pub fn hamming_window(n: usize) -> Vec<f64> {
+    (0..n)
+        .map(|i| 0.54 - 0.46 * (2.0 * PI * i as f64 / (n - 1) as f64).cos())
+        .collect()
+}
+
+/// Generate a Blackman window
+#[allow(dead_code)]
+pub fn blackman_window(n: usize) -> Vec<f64> {
+    (0..n)
+        .map(|i| {
+            let x = 2.0 * PI * i as f64 / (n - 1) as f64;
+            0.42 - 0.5 * x.cos() + 0.08 * (2.0 * x).cos()
+        })
+        .collect()
+}
+
+/// Generate a Kaiser window
+///
+/// # Arguments
+/// * `n` - Window length
+/// * `beta` - Shape parameter (higher = narrower main lobe, higher sidelobes)
+///   - beta = 0: rectangular window
+///   - beta ≈ 5.0: similar to Hamming
+///   - beta ≈ 6.0: similar to Hann
+///   - beta ≈ 8.6: similar to Blackman
+#[allow(dead_code)]
+pub fn kaiser_window(n: usize, beta: f64) -> Vec<f64> {
+    let denom = bessel_i0(beta);
+    (0..n)
+        .map(|i| {
+            let x = 2.0 * i as f64 / (n - 1) as f64 - 1.0; // -1 to +1
+            let arg = beta * (1.0 - x * x).max(0.0).sqrt();
+            bessel_i0(arg) / denom
+        })
+        .collect()
+}
+
+/// Modified Bessel function of the first kind, order 0
+/// Approximation using series expansion
+#[allow(dead_code)]
+fn bessel_i0(x: f64) -> f64 {
+    let mut sum = 1.0;
+    let mut term = 1.0;
+    let x_sq_4 = x * x / 4.0;
+
+    for k in 1..50 {
+        term *= x_sq_4 / (k * k) as f64;
+        sum += term;
+        if term.abs() < 1e-15 * sum.abs() {
+            break;
+        }
+    }
+
+    sum
+}
+
+/// Generate a window of the specified type
+#[allow(dead_code)]
+pub fn generate_window(window_type: WindowType, n: usize) -> Vec<f64> {
+    match window_type {
+        WindowType::Rectangular => rectangular_window(n),
+        WindowType::Hann => hann_window(n),
+        WindowType::Hamming => hamming_window(n),
+        WindowType::Blackman => blackman_window(n),
+        WindowType::Kaiser(beta) => kaiser_window(n, beta),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Assert that two floats are approximately equal
+    fn assert_approx_eq(a: f64, b: f64, epsilon: f64) {
+        assert!(
+            (a - b).abs() < epsilon,
+            "assertion failed: {} ≈ {} (diff = {}, epsilon = {})",
+            a,
+            b,
+            (a - b).abs(),
+            epsilon
+        );
+    }
+
+    #[test]
+    fn test_hann_window_symmetry() {
+        let window = hann_window(8);
+        assert_approx_eq(window[0], window[7], 0.01);
+        assert_approx_eq(window[1], window[6], 0.01);
+        assert_approx_eq(window[2], window[5], 0.01);
+        assert_approx_eq(window[3], window[4], 0.01);
+    }
+
+    #[test]
+    fn test_hann_window_endpoints() {
+        let window = hann_window(128);
+        // Hann should be 0 at endpoints
+        assert!(window[0] < 0.01);
+        assert!(window[127] < 0.01);
+        // Maximum should be at center
+        assert!(window[64] > 0.99);
+    }
+
+    #[test]
+    fn test_hamming_window_endpoints() {
+        let window = hamming_window(128);
+        // Hamming has non-zero endpoints (~0.08)
+        assert!(window[0] > 0.07 && window[0] < 0.09);
+        // Maximum at center
+        assert!(window[64] > 0.99);
+    }
+
+    #[test]
+    fn test_blackman_window_endpoints() {
+        let window = blackman_window(128);
+        // Blackman should be very close to 0 at endpoints
+        assert!(window[0] < 0.01);
+        // Maximum at center
+        assert!(window[64] > 0.99);
+    }
+
+    #[test]
+    fn test_kaiser_window_beta_0() {
+        // beta = 0 should give rectangular window
+        let window = kaiser_window(8, 0.0);
+        for w in window {
+            assert_approx_eq(w, 1.0, 0.01);
+        }
+    }
+
+    #[test]
+    fn test_rectangular_window() {
+        let window = rectangular_window(10);
+        assert_eq!(window.len(), 10);
+        for w in window {
+            assert_eq!(w, 1.0);
+        }
+    }
+
+    #[test]
+    fn test_bessel_i0() {
+        // Known values
+        assert_approx_eq(bessel_i0(0.0), 1.0, 1e-10);
+        assert_approx_eq(bessel_i0(1.0), 1.266065877752, 1e-6);
+        assert_approx_eq(bessel_i0(2.0), 2.279585302336, 1e-6);
+    }
+
+    #[test]
+    fn test_generate_window() {
+        let hann = generate_window(WindowType::Hann, 64);
+        let hamming = generate_window(WindowType::Hamming, 64);
+
+        assert_eq!(hann.len(), 64);
+        assert_eq!(hamming.len(), 64);
+
+        // Hann should have lower sidelobes (higher rolloff)
+        // This is a property test - Hann endpoints should be lower
+        assert!(hann[0] < hamming[0]);
+    }
 }

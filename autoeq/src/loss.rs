@@ -324,7 +324,7 @@ pub fn mixed_loss(
 /// If the frequency range excludes all data points, returns 0.0.
 fn weighted_mse(freqs: &Array1<f64>, error: &Array1<f64>, min_freq: f64, max_freq: f64) -> f64 {
     // Create masks for frequency bands using ndarray's vectorized operations
-    let in_range = freqs.mapv(|f| f >= min_freq && f <= max_freq);
+    let _in_range = freqs.mapv(|f| f >= min_freq && f <= max_freq);
     let bass_band = freqs.mapv(|f| f < 3000.0 && f >= min_freq && f <= max_freq);
     let treble_band = freqs.mapv(|f| f >= 3000.0 && f >= min_freq && f <= max_freq);
 

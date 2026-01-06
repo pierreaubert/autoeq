@@ -346,3 +346,334 @@ pub fn add_delay_plugin(chain: &mut ChannelDspChain, delay_ms: f64) {
     // Insert at the beginning to ensure it applies before other processing (though usually commutative with linear filters)
     chain.plugins.insert(0, plugin);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use math_audio_iir_fir::BiquadFilterType;
+
+    #[test]
+    fn test_create_gain_plugin() {
+        let plugin = create_gain_plugin(-3.5);
+        assert_eq!(plugin.plugin_type, "gain");
+        assert_eq!(
+            plugin.parameters.get("gain_db").unwrap().as_f64().unwrap(),
+            -3.5
+        );
+    }
+
+    #[test]
+    fn test_create_gain_plugin_with_invert() {
+        let plugin = create_gain_plugin_with_invert(-2.0, true);
+        assert_eq!(plugin.plugin_type, "gain");
+        assert_eq!(
+            plugin.parameters.get("gain_db").unwrap().as_f64().unwrap(),
+            -2.0
+        );
+        assert!(plugin.parameters.get("invert").unwrap().as_bool().unwrap());
+
+        let plugin_no_invert = create_gain_plugin_with_invert(1.5, false);
+        assert!(!plugin_no_invert
+            .parameters
+            .get("invert")
+            .unwrap()
+            .as_bool()
+            .unwrap());
+    }
+
+    #[test]
+    fn test_create_eq_plugin() {
+        let sample_rate = 48000.0;
+        let filters = vec![
+            Biquad::new(BiquadFilterType::Peak, 1000.0, sample_rate, 2.0, -3.0),
+            Biquad::new(BiquadFilterType::Peak, 4000.0, sample_rate, 1.5, 2.0),
+        ];
+
+        let plugin = create_eq_plugin(&filters);
+        assert_eq!(plugin.plugin_type, "eq");
+
+        let filters_arr = plugin.parameters.get("filters").unwrap().as_array().unwrap();
+        assert_eq!(filters_arr.len(), 2);
+
+        let first_filter = &filters_arr[0];
+        assert_eq!(first_filter.get("freq").unwrap().as_f64().unwrap(), 1000.0);
+        assert_eq!(first_filter.get("q").unwrap().as_f64().unwrap(), 2.0);
+        assert_eq!(first_filter.get("db_gain").unwrap().as_f64().unwrap(), -3.0);
+    }
+
+    #[test]
+    fn test_create_crossover_plugin() {
+        let plugin = create_crossover_plugin("LR24", 2500.0, "low");
+        assert_eq!(plugin.plugin_type, "crossover");
+        assert_eq!(
+            plugin.parameters.get("type").unwrap().as_str().unwrap(),
+            "LR24"
+        );
+        assert_eq!(
+            plugin
+                .parameters
+                .get("frequency")
+                .unwrap()
+                .as_f64()
+                .unwrap(),
+            2500.0
+        );
+        assert_eq!(
+            plugin.parameters.get("output").unwrap().as_str().unwrap(),
+            "low"
+        );
+    }
+
+    #[test]
+    fn test_create_delay_plugin() {
+        let plugin = create_delay_plugin(15.5);
+        assert_eq!(plugin.plugin_type, "delay");
+        assert_eq!(
+            plugin
+                .parameters
+                .get("delay_ms")
+                .unwrap()
+                .as_f64()
+                .unwrap(),
+            15.5
+        );
+    }
+
+    #[test]
+    fn test_create_convolution_plugin() {
+        let plugin = create_convolution_plugin("left_fir.wav");
+        assert_eq!(plugin.plugin_type, "convolution");
+        assert_eq!(
+            plugin.parameters.get("ir_file").unwrap().as_str().unwrap(),
+            "left_fir.wav"
+        );
+    }
+
+    #[test]
+    fn test_build_channel_dsp_chain_with_gain_and_eq() {
+        let sample_rate = 48000.0;
+        let filters = vec![Biquad::new(
+            BiquadFilterType::Peak,
+            1000.0,
+            sample_rate,
+            2.0,
+            -3.0,
+        )];
+
+        let chain = build_channel_dsp_chain("left", Some(-2.5), Vec::new(), &filters);
+
+        assert_eq!(chain.channel, "left");
+        assert_eq!(chain.plugins.len(), 2); // gain + eq
+        assert_eq!(chain.plugins[0].plugin_type, "gain");
+        assert_eq!(chain.plugins[1].plugin_type, "eq");
+        assert!(chain.drivers.is_none());
+    }
+
+    #[test]
+    fn test_build_channel_dsp_chain_zero_gain_not_added() {
+        // Gain of 0.0 should not add gain plugin
+        let chain = build_channel_dsp_chain("test", Some(0.0), Vec::new(), &[]);
+        assert!(!chain.plugins.iter().any(|p| p.plugin_type == "gain"));
+    }
+
+    #[test]
+    fn test_build_channel_dsp_chain_small_gain_not_added() {
+        // Gain < 0.01 should not be added
+        let chain = build_channel_dsp_chain("test", Some(0.005), Vec::new(), &[]);
+        assert!(!chain.plugins.iter().any(|p| p.plugin_type == "gain"));
+    }
+
+    #[test]
+    fn test_build_multidriver_dsp_chain_2way() {
+        let gains = vec![-3.0, 0.0];
+        let delays = vec![2.5, 0.0];
+        let crossover_freqs = vec![2500.0];
+
+        let chain =
+            build_multidriver_dsp_chain("left", &gains, &delays, &crossover_freqs, "LR24", &[]);
+
+        assert_eq!(chain.channel, "left");
+        assert!(chain.drivers.is_some());
+
+        let drivers = chain.drivers.as_ref().unwrap();
+        assert_eq!(drivers.len(), 2);
+
+        // Verify woofer (index 0)
+        let woofer = &drivers[0];
+        assert_eq!(woofer.name, "woofer");
+        assert_eq!(woofer.index, 0);
+        // Woofer should have: gain, delay, lowpass crossover
+        assert!(woofer.plugins.iter().any(|p| p.plugin_type == "gain"));
+        assert!(woofer.plugins.iter().any(|p| p.plugin_type == "delay"));
+        assert!(woofer.plugins.iter().any(|p| {
+            p.plugin_type == "crossover"
+                && p.parameters.get("output").unwrap().as_str().unwrap() == "low"
+        }));
+
+        // Verify tweeter (index 1)
+        let tweeter = &drivers[1];
+        assert_eq!(tweeter.name, "tweeter");
+        assert_eq!(tweeter.index, 1);
+        // Tweeter should have highpass crossover (no gain since it's 0)
+        assert!(tweeter.plugins.iter().any(|p| {
+            p.plugin_type == "crossover"
+                && p.parameters.get("output").unwrap().as_str().unwrap() == "high"
+        }));
+    }
+
+    #[test]
+    fn test_build_multidriver_dsp_chain_3way() {
+        let gains = vec![0.0, -2.0, 1.0];
+        let delays = vec![0.0, 1.0, 2.0];
+        let crossover_freqs = vec![500.0, 3000.0];
+
+        let chain =
+            build_multidriver_dsp_chain("center", &gains, &delays, &crossover_freqs, "LR24", &[]);
+
+        let drivers = chain.drivers.as_ref().unwrap();
+        assert_eq!(drivers.len(), 3);
+
+        assert_eq!(drivers[0].name, "woofer");
+        assert_eq!(drivers[1].name, "midrange");
+        assert_eq!(drivers[2].name, "tweeter");
+
+        // Midrange should have both highpass (from woofer) and lowpass (to tweeter)
+        let midrange = &drivers[1];
+        let has_highpass = midrange.plugins.iter().any(|p| {
+            p.plugin_type == "crossover"
+                && p.parameters.get("output").unwrap().as_str().unwrap() == "high"
+        });
+        let has_lowpass = midrange.plugins.iter().any(|p| {
+            p.plugin_type == "crossover"
+                && p.parameters.get("output").unwrap().as_str().unwrap() == "low"
+        });
+        assert!(has_highpass, "Midrange should have highpass crossover");
+        assert!(has_lowpass, "Midrange should have lowpass crossover");
+    }
+
+    #[test]
+    fn test_build_multisub_dsp_chain() {
+        let gains = vec![-2.0, 0.0, 1.0];
+        let delays = vec![0.0, 5.0, 10.0];
+
+        let chain = build_multisub_dsp_chain("lfe", "subs", 3, &gains, &delays, &[]);
+
+        assert_eq!(chain.channel, "lfe");
+        assert!(chain.drivers.is_some());
+
+        let drivers = chain.drivers.as_ref().unwrap();
+        assert_eq!(drivers.len(), 3);
+
+        assert_eq!(drivers[0].name, "subs_1");
+        assert_eq!(drivers[1].name, "subs_2");
+        assert_eq!(drivers[2].name, "subs_3");
+
+        // Sub 1 should have delay (5ms)
+        assert!(drivers[1].plugins.iter().any(|p| p.plugin_type == "delay"));
+    }
+
+    #[test]
+    fn test_build_dba_dsp_chain() {
+        let gains = vec![0.0, -3.0];
+        let delays = vec![0.0, 5.0];
+
+        let chain = build_dba_dsp_chain("dba", &gains, &delays, &[]);
+
+        assert_eq!(chain.channel, "dba");
+        assert!(chain.drivers.is_some());
+
+        let drivers = chain.drivers.as_ref().unwrap();
+        assert_eq!(drivers.len(), 2);
+
+        // Front array
+        let front = &drivers[0];
+        assert_eq!(front.name, "Front Array");
+        assert_eq!(front.index, 0);
+
+        // Rear array should have invert flag
+        let rear = &drivers[1];
+        assert_eq!(rear.name, "Rear Array");
+        assert_eq!(rear.index, 1);
+
+        let rear_gain = rear
+            .plugins
+            .iter()
+            .find(|p| p.plugin_type == "gain")
+            .expect("Rear should have gain plugin");
+        assert!(
+            rear_gain
+                .parameters
+                .get("invert")
+                .unwrap()
+                .as_bool()
+                .unwrap(),
+            "Rear should be inverted"
+        );
+
+        // Rear should have delay
+        assert!(rear.plugins.iter().any(|p| p.plugin_type == "delay"));
+    }
+
+    #[test]
+    fn test_add_delay_plugin() {
+        let mut chain = ChannelDspChain {
+            channel: "test".to_string(),
+            plugins: vec![create_gain_plugin(-3.0)],
+            drivers: None,
+        };
+
+        add_delay_plugin(&mut chain, 10.0);
+
+        // Delay should be inserted at the beginning
+        assert_eq!(chain.plugins.len(), 2);
+        assert_eq!(chain.plugins[0].plugin_type, "delay");
+        assert_eq!(chain.plugins[1].plugin_type, "gain");
+    }
+
+    #[test]
+    fn test_create_dsp_chain_output() {
+        let mut channels = HashMap::new();
+        channels.insert(
+            "left".to_string(),
+            build_channel_dsp_chain("left", Some(-2.0), Vec::new(), &[]),
+        );
+
+        let metadata = OptimizationMetadata {
+            pre_score: 5.0,
+            post_score: 2.0,
+            algorithm: "cobyla".to_string(),
+            iterations: 1000,
+            timestamp: "2025-01-01T00:00:00Z".to_string(),
+        };
+
+        let output = create_dsp_chain_output(channels, Some(metadata));
+
+        assert!(output.channels.contains_key("left"));
+        assert!(output.metadata.is_some());
+
+        let meta = output.metadata.unwrap();
+        assert_eq!(meta.pre_score, 5.0);
+        assert_eq!(meta.post_score, 2.0);
+    }
+
+    #[test]
+    fn test_get_driver_name() {
+        // 2-way
+        assert_eq!(get_driver_name(0, 2), "woofer");
+        assert_eq!(get_driver_name(1, 2), "tweeter");
+
+        // 3-way
+        assert_eq!(get_driver_name(0, 3), "woofer");
+        assert_eq!(get_driver_name(1, 3), "midrange");
+        assert_eq!(get_driver_name(2, 3), "tweeter");
+
+        // 4-way
+        assert_eq!(get_driver_name(0, 4), "woofer");
+        assert_eq!(get_driver_name(1, 4), "lower_midrange");
+        assert_eq!(get_driver_name(2, 4), "upper_midrange");
+        assert_eq!(get_driver_name(3, 4), "tweeter");
+
+        // Fallback
+        assert_eq!(get_driver_name(5, 8), "driver_5");
+    }
+}

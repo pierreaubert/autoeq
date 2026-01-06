@@ -24,6 +24,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 // Include roomeq modules
+mod config_validator;
 mod crossover_optim;
 mod dba_optim;
 mod eq_optim;
@@ -34,9 +35,15 @@ use autoeq::response;
 mod group_delay_optim;
 mod multisub_optim;
 mod output;
+mod phase_utils;
+mod progress_reporting;
 mod types;
+mod weighted_loss;
 
 use types::{ChannelDspChain, OptimizationMetadata, RoomConfig, SpeakerConfig};
+
+/// Result type for parallel speaker processing
+type SpeakerResult = Result<(String, ChannelDspChain, f64, f64, Curve)>;
 
 /// Room EQ - Optimize multi-channel speaker systems
 #[derive(Parser, Debug)]
@@ -100,6 +107,16 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
     let room_config: RoomConfig = serde_json::from_str(&config_json)
         .with_context(|| "Failed to parse room configuration JSON")?;
 
+    // Validate configuration before processing
+    let validation = config_validator::validate_room_config(&room_config);
+    validation.print_results();
+    if !validation.is_valid {
+        return Err(anyhow!(
+            "Configuration validation failed with {} errors",
+            validation.errors.len()
+        ));
+    }
+
     info!("Found {} speakers", room_config.speakers.len());
 
     let output_dir = output_path.parent().unwrap_or(std::path::Path::new("."));
@@ -110,7 +127,7 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
     let mut post_scores = Vec::new();
 
     // Process in parallel
-    let results: Vec<Result<(String, ChannelDspChain, f64, f64, Curve)>> = room_config
+    let results: Vec<SpeakerResult> = room_config
         .speakers
         .par_iter()
         .map(|(channel_name, speaker_config)| {
@@ -216,14 +233,14 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
         // Apply delays
         // 1. Apply base delays to subwoofers
         for (sub_name, base_delay) in &sub_base_delays {
-            if *base_delay > 1e-3 {
-                if let Some(chain) = channel_chains.get_mut(sub_name) {
-                    output::add_delay_plugin(chain, *base_delay);
-                    info!(
-                        "    Applied base delay of {:.3} ms to subwoofer '{}'",
-                        base_delay, sub_name
-                    );
-                }
+            if *base_delay > 1e-3
+                && let Some(chain) = channel_chains.get_mut(sub_name)
+            {
+                output::add_delay_plugin(chain, *base_delay);
+                info!(
+                    "    Applied base delay of {:.3} ms to subwoofer '{}'",
+                    base_delay, sub_name
+                );
             }
         }
 
@@ -232,14 +249,14 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
             let base_delay = *sub_base_delays.get(&sub_name).unwrap_or(&0.0);
             let final_speaker_delay = rel_delay + base_delay;
 
-            if final_speaker_delay > 1e-3 {
-                if let Some(chain) = channel_chains.get_mut(&speaker_name) {
-                    output::add_delay_plugin(chain, final_speaker_delay);
-                    info!(
-                        "    Applied {:.3} ms delay to '{}' (rel: {:.3} + sub_base: {:.3})",
-                        final_speaker_delay, speaker_name, rel_delay, base_delay
-                    );
-                }
+            if final_speaker_delay > 1e-3
+                && let Some(chain) = channel_chains.get_mut(&speaker_name)
+            {
+                output::add_delay_plugin(chain, final_speaker_delay);
+                info!(
+                    "    Applied {:.3} ms delay to '{}' (rel: {:.3} + sub_base: {:.3})",
+                    final_speaker_delay, speaker_name, rel_delay, base_delay
+                );
             }
         }
     }

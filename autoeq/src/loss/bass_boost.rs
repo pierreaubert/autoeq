@@ -94,9 +94,7 @@ fn compute_harman_bass_boost(f: f64, config: &BassBoostConfig) -> f64 {
 
     // Gaussian-like curve centered at peak_freq
     let z = (f - peak) / width;
-    let boost = config.max_boost_db * (-0.5 * z * z).exp();
-
-    boost
+    config.max_boost_db * (-0.5 * z * z).exp()
 }
 
 /// Create a combined target curve with bass boost

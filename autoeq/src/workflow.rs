@@ -4,14 +4,12 @@
 //! building target curves, preparing objective data, and running optimization.
 
 use crate::Curve;
-use crate::cli::Args;
-use crate::loss::{CrossoverType, DriverMeasurement};
-use crate::optim::{AlgorithmInfo, AlgorithmType, ObjectiveData, get_all_algorithms, optimize_filters_with_algo_override};
+use crate::optim::{ObjectiveData, optimize_filters_with_algo_override};
 use crate::optim_de::optimize_filters_autoeq_with_callback;
 use crate::read;
 use ndarray::Array1;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::error::Error;
 use crate::AutoeqError;
 use crate::Cea2034Data;

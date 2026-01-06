@@ -82,17 +82,20 @@ fn evaluate_delay(
     // delay_s = delay_ms / 1000.0
 
     let delay_s = delay_ms / 1000.0;
-    let mut combined_complex = Vec::with_capacity(freq.len());
+    // Pre-allocate the full vector to avoid repeated allocations in the loop
+    let mut combined_complex = vec![Complex64::new(0.0, 0.0); freq.len()];
 
-    for i in 0..freq.len() {
-        let f = freq[i];
+    for (i, ((&f, &sub_val), &speaker_val)) in freq
+        .iter()
+        .zip(sub.iter())
+        .zip(speaker.iter())
+        .enumerate()
+    {
         let w = 2.0 * PI * f;
         let phase_shift = -w * delay_s;
         let rot = Complex64::from_polar(1.0, phase_shift);
 
-        let s_delayed = speaker[i] * rot;
-        let sum = sub[i] + s_delayed;
-        combined_complex.push(sum);
+        combined_complex[i] = sub_val + speaker_val * rot;
     }
 
     // Calculate Group Delay of the sum
@@ -102,10 +105,8 @@ fn evaluate_delay(
     // Filter GD to range
     let mut values = Vec::new();
     for i in 0..freq.len() {
-        if freq[i] >= min_freq && freq[i] <= max_freq {
-            if gd[i].is_finite() {
-                values.push(gd[i]);
-            }
+        if freq[i] >= min_freq && freq[i] <= max_freq && gd[i].is_finite() {
+            values.push(gd[i]);
         }
     }
 

@@ -37,12 +37,11 @@ pub fn pareto_optimization(
 
         // Run optimization
         // We need to initialize x (params), lower_bounds, upper_bounds
-        let mut x = Vec::new();
         let (lower_bounds, upper_bounds) = crate::workflow::setup_bounds(&args_with_filters);
         // Initialize x with random/initial values or let optimizer handle it
         // The optimizer expects x to be initialized.
         // We can use setup_initial_guess from workflow
-        x = crate::workflow::initial_guess(&args_with_filters, &lower_bounds, &upper_bounds);
+        let mut x = crate::workflow::initial_guess(&args_with_filters, &lower_bounds, &upper_bounds);
 
         let result = crate::optim::optimize_filters(
             &mut x, // Will be filled by optimizer
@@ -84,7 +83,7 @@ pub fn extract_non_dominated(filters: &[ParetoFilter]) -> Vec<&ParetoFilter> {
     for candidate in filters {
         let mut is_dominated = false;
         for other in filters {
-            if other as *const _ == candidate as *const _ {
+            if std::ptr::eq(other, candidate) {
                 continue;
             }
             // other dominates candidate if:

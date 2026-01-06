@@ -232,6 +232,11 @@ pub struct OptimizerConfig {
     /// PEQ model (e.g., "pk", "ls-pk-hs", "free")
     #[serde(default = "default_peq_model")]
     pub peq_model: String,
+
+    /// Random seed for reproducible results (None for random)
+    /// When set, the optimizer will produce deterministic results
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u64>,
 }
 
 // Default values for OptimizerConfig
@@ -294,6 +299,7 @@ impl Default for OptimizerConfig {
             peq_model: default_peq_model(),
             mode: default_opt_mode(),
             fir: None,
+            seed: None,
         }
     }
 }

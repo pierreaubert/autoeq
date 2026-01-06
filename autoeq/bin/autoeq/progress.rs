@@ -1,5 +1,7 @@
 //! Progress reporting for long-running optimizations.
 
+#![allow(dead_code)]
+
 use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;

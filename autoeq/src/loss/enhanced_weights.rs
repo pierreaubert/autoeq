@@ -4,9 +4,7 @@
 //! - "Perceptually-Motivated Audio Equalization" (Kulkarni et al.)
 //! - "Frequency-Dependent Weighting in Audio Equalization" (Zölzer et al.)
 
-use crate::Curve;
 use ndarray::Array1;
-use std::f64::consts::PI;
 
 /// Frequency band configuration for weighted loss
 #[derive(Debug, Clone)]
@@ -96,7 +94,7 @@ pub fn band_weighted_loss(
     let mut treble_ss = 0.0;
     let mut treble_n = 0usize;
 
-    for ((&f, &e)) in freqs.iter().zip(error.iter()) {
+    for (&f, &e) in freqs.iter().zip(error.iter()) {
         if f >= bands.bass_min && f <= bands.bass_max {
             bass_ss += e * e;
             bass_n += 1;

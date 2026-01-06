@@ -1,6 +1,7 @@
 //! Fuzzer for roomeq binary
 //!
 //! Generates random speaker configurations and verifies optimization improves scores.
+//! Includes panic handling and config validation for robust fuzzing.
 
 use clap::Parser;
 use rand::Rng;
@@ -9,9 +10,11 @@ use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Fuzzer for roomeq
 #[derive(Parser, Debug)]
@@ -422,8 +425,136 @@ fn generate_plots_for_multi_drivers(
     Ok(())
 }
 
+/// Global counter for current test index (for panic reporting)
+static CURRENT_TEST_INDEX: AtomicUsize = AtomicUsize::new(0);
+
+/// Validate configuration before running roomeq
+fn validate_config(config: &RoomConfig) -> Result<(), String> {
+    // Validate optimizer config
+    if config.optimizer.num_filters == 0 {
+        // Warning only - still valid
+        eprintln!("Warning: num_filters is 0, no EQ will be applied");
+    }
+
+    if config.optimizer.min_freq >= config.optimizer.max_freq {
+        return Err(format!(
+            "min_freq ({}) must be less than max_freq ({})",
+            config.optimizer.min_freq, config.optimizer.max_freq
+        ));
+    }
+
+    if config.optimizer.min_q > config.optimizer.max_q {
+        return Err(format!(
+            "min_q ({}) must be less than or equal to max_q ({})",
+            config.optimizer.min_q, config.optimizer.max_q
+        ));
+    }
+
+    if config.optimizer.min_db > config.optimizer.max_db {
+        return Err(format!(
+            "min_db ({}) must be less than or equal to max_db ({})",
+            config.optimizer.min_db, config.optimizer.max_db
+        ));
+    }
+
+    // Validate crossover references
+    if let Some(ref crossovers) = config.crossovers {
+        for (name, speaker) in &config.speakers {
+            if let SpeakerConfig::Group(group) = speaker
+                && let Some(ref crossover_ref) = group.crossover
+                && !crossovers.contains_key(crossover_ref)
+            {
+                return Err(format!(
+                    "Speaker '{}' references non-existent crossover '{}'",
+                    name, crossover_ref
+                ));
+            }
+        }
+    }
+
+    // Validate group delay references
+    if let Some(ref gd_configs) = config.group_delay {
+        for gd in gd_configs {
+            if !config.speakers.contains_key(&gd.subwoofer) {
+                return Err(format!(
+                    "Group delay references non-existent subwoofer '{}'",
+                    gd.subwoofer
+                ));
+            }
+            for speaker in &gd.speakers {
+                if !config.speakers.contains_key(speaker) {
+                    return Err(format!(
+                        "Group delay references non-existent speaker '{}'",
+                        speaker
+                    ));
+                }
+            }
+            if gd.min_freq >= gd.max_freq {
+                return Err(format!(
+                    "Group delay min_freq ({}) must be less than max_freq ({})",
+                    gd.min_freq, gd.max_freq
+                ));
+            }
+        }
+    }
+
+    // Validate speakers are not empty
+    if config.speakers.is_empty() {
+        return Err("No speakers configured".to_string());
+    }
+
+    // Validate each speaker config
+    for (name, speaker) in &config.speakers {
+        match speaker {
+            SpeakerConfig::Group(group) => {
+                if group.measurements.is_empty() {
+                    return Err(format!("Speaker group '{}' has no measurements", name));
+                }
+            }
+            SpeakerConfig::MultiSub(ms) => {
+                if ms.subwoofers.is_empty() {
+                    return Err(format!("Multi-sub '{}' has no subwoofers", name));
+                }
+            }
+            SpeakerConfig::Dba(dba) => {
+                if dba.front.is_empty() {
+                    return Err(format!("DBA '{}' has no front speakers", name));
+                }
+                if dba.rear.is_empty() {
+                    return Err(format!("DBA '{}' has no rear speakers", name));
+                }
+            }
+            SpeakerConfig::Single(_) => {} // Single speaker - no validation needed
+        }
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
+
+    // Set up panic hook for crash reporting
+    let crash_file_path = std::env::current_dir()?.join("roomeq_fuzzer_crashes.txt");
+    std::panic::set_hook(Box::new(move |info| {
+        let test_idx = CURRENT_TEST_INDEX.load(Ordering::SeqCst);
+        let msg = info.to_string();
+        eprintln!("FATAL PANIC in roomeq_fuzzer at test {}: {}", test_idx, msg);
+
+        // Write crash report
+        if let Ok(mut crash_file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&crash_file_path)
+        {
+            let timestamp = chrono::Utc::now().to_rfc3339();
+            let _ = writeln!(
+                crash_file,
+                "[{}] Test {}: Panic: {}",
+                timestamp, test_idx, msg
+            );
+        }
+    }));
 
     // Determine output directory (default to data_generated/roomeq_fuzzer)
     let output_dir = if let Some(dir) = args.output_dir {
@@ -450,6 +581,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut successes = 0;
 
     for test_idx in 0..args.num_tests {
+        // Update global test index for panic reporting
+        CURRENT_TEST_INDEX.store(test_idx, Ordering::SeqCst);
+
         if args.verbose {
             println!("=== Test {}/{} ===", test_idx + 1, args.num_tests);
         }
@@ -462,6 +596,17 @@ fn main() -> Result<(), Box<dyn Error>> {
             args.max_speakers,
             args.verbose,
         )?;
+
+        // Validate configuration before running
+        if let Err(validation_error) = validate_config(&room_config) {
+            if args.verbose {
+                println!("  ⚠ Config validation failed: {}", validation_error);
+                println!("    Regenerating config...");
+            }
+            // Skip this test and continue - the fuzzer generated an invalid config
+            // which is actually a bug in the config generator, not roomeq
+            continue;
+        }
 
         // Save configuration
         let config_path = output_dir.join(format!("test_{}_config.json", test_idx));

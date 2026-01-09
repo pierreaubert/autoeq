@@ -21,22 +21,22 @@ fn get_autoeq_binary() -> PathBuf {
         path.push("target");
         let debug_path = path.join("debug/autoeq");
         let release_path = path.join("release/autoeq");
-         if debug_path.exists() {
+        if debug_path.exists() {
             debug_path
         } else if release_path.exists() {
             release_path
         } else {
-             // One last try: assume workspace target dir relative to current dir
-             let mut path = std::env::current_dir().unwrap();
-             path.push("target");
-             let debug_path = path.join("debug/autoeq");
-             let release_path = path.join("release/autoeq");
-             if debug_path.exists() {
+            // One last try: assume workspace target dir relative to current dir
+            let mut path = std::env::current_dir().unwrap();
+            path.push("target");
+            let debug_path = path.join("debug/autoeq");
+            let release_path = path.join("release/autoeq");
+            if debug_path.exists() {
                 debug_path
             } else if release_path.exists() {
                 release_path
             } else {
-                 panic!("autoeq binary not found. Please build with 'cargo build --bin autoeq'");
+                panic!("autoeq binary not found. Please build with 'cargo build --bin autoeq'");
             }
         }
     }
@@ -66,10 +66,14 @@ fn test_full_optimization_workflow_csv() {
 
     let output = Command::new(get_autoeq_binary())
         .args(&[
-            "--curve", &csv_path.to_string_lossy(),
-            "--output", &output_path.to_string_lossy(),
-            "--num-filters", "5",
-            "--max-iter", "100",
+            "--curve",
+            &csv_path.to_string_lossy(),
+            "--output",
+            &output_path.to_string_lossy(),
+            "--num-filters",
+            "5",
+            "--max-iter",
+            "100",
         ])
         .output()
         .expect("Failed to execute autoeq");
@@ -86,7 +90,7 @@ fn test_full_optimization_workflow_csv() {
 
     let content = std::fs::read_to_string(&apo_path).unwrap();
     assert!(content.contains("PEQ"));
-    assert!(content.contains("Filter"));  // Filter section
+    assert!(content.contains("Filter")); // Filter section
 }
 
 #[test]
@@ -120,17 +124,25 @@ fn test_multi_driver_optimization() {
 
     let output = Command::new(get_autoeq_binary())
         .args(&[
-            "--driver1", &woofer_path.to_string_lossy(),
-            "--driver2", &tweeter_path.to_string_lossy(),
-            "--output", &output_path.to_string_lossy(),
-            "--crossover-type", "linkwitzriley4",
-            "--max-iter", "500",
+            "--driver1",
+            &woofer_path.to_string_lossy(),
+            "--driver2",
+            &tweeter_path.to_string_lossy(),
+            "--output",
+            &output_path.to_string_lossy(),
+            "--crossover-type",
+            "linkwitzriley4",
+            "--max-iter",
+            "500",
         ])
         .output()
         .expect("Failed to execute autoeq");
 
-    assert!(output.status.success(), "Multi-driver should succeed: {}",
-        String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "Multi-driver should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     // Verify crossover results
     let output_str = String::from_utf8_lossy(&output.stdout);
@@ -156,8 +168,10 @@ fn test_output_format_validation() {
 
     let _ = Command::new(get_autoeq_binary())
         .args(&[
-            "--curve", &csv_path.to_string_lossy(),
-            "--output", &output_path.to_string_lossy(),
+            "--curve",
+            &csv_path.to_string_lossy(),
+            "--output",
+            &output_path.to_string_lossy(),
         ])
         .output()
         .expect("Failed to execute autoeq");
@@ -167,7 +181,7 @@ fn test_output_format_validation() {
     assert!(apo_path.exists());
     let apo = std::fs::read_to_string(&apo_path).unwrap();
     assert!(apo.contains("Filter"));
-    assert!(apo.contains("Type"));  // Filter type
+    assert!(apo.contains("Type")); // Filter type
 
     // Check RME format
     let rme_path = output_path.join("iir-autoeq-flat.tmreq");
@@ -197,8 +211,10 @@ fn test_invalid_input_handling() {
 
     let output = Command::new(get_autoeq_binary())
         .args(&[
-            "--curve", &csv_path.to_string_lossy(),
-            "--output", &output_path.to_string_lossy(),
+            "--curve",
+            &csv_path.to_string_lossy(),
+            "--output",
+            &output_path.to_string_lossy(),
         ])
         .output()
         .expect("Failed to execute autoeq");
@@ -222,10 +238,7 @@ fn test_qa_mode_output() {
     std::fs::write(&csv_path, csv_content).unwrap();
 
     let output = Command::new(get_autoeq_binary())
-        .args(&[
-            "--curve", &csv_path.to_string_lossy(),
-            "--qa", "0.5",
-        ])
+        .args(&["--curve", &csv_path.to_string_lossy(), "--qa", "0.5"])
         .output()
         .expect("Failed to execute autoeq");
 

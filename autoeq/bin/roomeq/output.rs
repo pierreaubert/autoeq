@@ -373,12 +373,14 @@ mod tests {
         assert!(plugin.parameters.get("invert").unwrap().as_bool().unwrap());
 
         let plugin_no_invert = create_gain_plugin_with_invert(1.5, false);
-        assert!(!plugin_no_invert
-            .parameters
-            .get("invert")
-            .unwrap()
-            .as_bool()
-            .unwrap());
+        assert!(
+            !plugin_no_invert
+                .parameters
+                .get("invert")
+                .unwrap()
+                .as_bool()
+                .unwrap()
+        );
     }
 
     #[test]
@@ -392,7 +394,12 @@ mod tests {
         let plugin = create_eq_plugin(&filters);
         assert_eq!(plugin.plugin_type, "eq");
 
-        let filters_arr = plugin.parameters.get("filters").unwrap().as_array().unwrap();
+        let filters_arr = plugin
+            .parameters
+            .get("filters")
+            .unwrap()
+            .as_array()
+            .unwrap();
         assert_eq!(filters_arr.len(), 2);
 
         let first_filter = &filters_arr[0];
@@ -429,12 +436,7 @@ mod tests {
         let plugin = create_delay_plugin(15.5);
         assert_eq!(plugin.plugin_type, "delay");
         assert_eq!(
-            plugin
-                .parameters
-                .get("delay_ms")
-                .unwrap()
-                .as_f64()
-                .unwrap(),
+            plugin.parameters.get("delay_ms").unwrap().as_f64().unwrap(),
             15.5
         );
     }

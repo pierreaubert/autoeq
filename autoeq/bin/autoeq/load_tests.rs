@@ -3,8 +3,8 @@ mod tests {
     use crate::load::load_and_prepare;
     use autoeq::cli::Args;
     use clap::Parser;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     #[tokio::test]
     async fn test_load_and_prepare_with_csv() {
@@ -17,8 +17,10 @@ mod tests {
 
         let args = Args::parse_from([
             "autoeq-test",
-            "--curve", &csv_path.to_string_lossy(),
-            "--num-filters", "5",
+            "--curve",
+            &csv_path.to_string_lossy(),
+            "--num-filters",
+            "5",
         ]);
 
         let result = load_and_prepare(&args).await;
@@ -51,9 +53,12 @@ mod tests {
 
         let args = Args::parse_from([
             "autoeq-test",
-            "--curve", &csv_path.to_string_lossy(),
-            "--loss", "headphone_flat",
-            "--num-filters", "8",
+            "--curve",
+            &csv_path.to_string_lossy(),
+            "--loss",
+            "headphone_flat",
+            "--num-filters",
+            "8",
         ]);
 
         let result = load_and_prepare(&args).await;

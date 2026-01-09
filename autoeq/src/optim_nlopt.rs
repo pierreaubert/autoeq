@@ -4,8 +4,7 @@ use super::constraints::{
     CeilingConstraintData, CrossoverMonotonicityConstraintData, MinGainConstraintData,
     constraint_ceiling, constraint_crossover_monotonicity, constraint_min_gain,
 };
-use super::optim::ObjectiveData;
-use super::optim::compute_fitness_penalties;
+use super::optim::{ObjectiveData, PenaltyMode, compute_fitness_penalties};
 use crate::LossType;
 use nlopt::{Algorithm, Nlopt, Target};
 
@@ -61,17 +60,14 @@ pub fn optimize_filters_nlopt(
         None
     };
 
-    // Configure penalty weights when needed
+    // Configure penalty weights based on algorithm capabilities
     let mut objective_data = objective_data;
-    if use_penalties {
-        objective_data.penalty_w_ceiling = 1e4;
-        objective_data.penalty_w_spacing = objective_data.spacing_weight.max(0.0) * 1e3;
-        objective_data.penalty_w_mingain = 1e3;
+    let penalty_mode = if use_penalties {
+        PenaltyMode::Standard
     } else {
-        objective_data.penalty_w_ceiling = 0.0;
-        objective_data.penalty_w_spacing = 0.0;
-        objective_data.penalty_w_mingain = 0.0;
-    }
+        PenaltyMode::Disabled
+    };
+    objective_data.configure_penalties(penalty_mode);
 
     // Now create optimizer and move objective_data
     let mut optimizer = Nlopt::new(

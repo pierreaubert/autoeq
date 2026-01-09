@@ -2,8 +2,8 @@
 mod tests {
     use crate::save::save_peq_to_file;
     use autoeq::cli::Args;
-    use clap::Parser;
     use autoeq::loss::LossType;
+    use clap::Parser;
     use std::fs;
     use tempfile::TempDir;
 
@@ -12,24 +12,16 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_path = temp_dir.path().join("test_output");
 
-        let args = Args::parse_from([
-            "autoeq-test",
-            "--loss", "flat",
-        ]);
+        let args = Args::parse_from(["autoeq-test", "--loss", "flat"]);
 
         // Example optimized parameters (3 filters)
         let x = vec![
-            500.0, 2.0, -3.0,   // Filter 1
-            1000.0, 5.0, 2.0,   // Filter 2
-            3000.0, 3.0, -1.0,  // Filter 3
+            500.0, 2.0, -3.0, // Filter 1
+            1000.0, 5.0, 2.0, // Filter 2
+            3000.0, 3.0, -1.0, // Filter 3
         ];
 
-        let result = save_peq_to_file(
-            &args,
-            &x,
-            &output_path,
-            &LossType::SpeakerFlat,
-        ).await;
+        let result = save_peq_to_file(&args, &x, &output_path, &LossType::SpeakerFlat).await;
 
         assert!(result.is_ok());
 
@@ -40,7 +32,7 @@ mod tests {
         // Verify content
         let content = fs::read_to_string(&apo_path).unwrap();
         assert!(content.contains("AutoEQ"));
-        assert!(content.contains("PEQ"));  // Filter type
+        assert!(content.contains("PEQ")); // Filter type
     }
 
     #[tokio::test]
@@ -48,19 +40,11 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_path = temp_dir.path().join("test_output");
 
-        let args = Args::parse_from([
-            "autoeq-test",
-            "--loss", "score",
-        ]);
+        let args = Args::parse_from(["autoeq-test", "--loss", "score"]);
 
         let x = vec![500.0, 2.0, -2.0];
 
-        let result = save_peq_to_file(
-            &args,
-            &x,
-            &output_path,
-            &LossType::SpeakerScore,
-        ).await;
+        let result = save_peq_to_file(&args, &x, &output_path, &LossType::SpeakerScore).await;
 
         assert!(result.is_ok());
 
@@ -74,22 +58,37 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_path = temp_dir.path().join("test_output");
 
-        let args = Args::parse_from([
-            "autoeq-test",
-            "--loss", "flat",
-        ]);
+        let args = Args::parse_from(["autoeq-test", "--loss", "flat"]);
 
         let x = vec![500.0, 2.0, -2.0];
 
         let _ = save_peq_to_file(&args, &x, &output_path, &LossType::SpeakerFlat).await;
 
         // Check APO format
-        assert!(output_path.parent().unwrap().join("iir-autoeq-flat.txt").exists());
+        assert!(
+            output_path
+                .parent()
+                .unwrap()
+                .join("iir-autoeq-flat.txt")
+                .exists()
+        );
 
         // Check RME format
-        assert!(output_path.parent().unwrap().join("iir-autoeq-flat.tmreq").exists());
+        assert!(
+            output_path
+                .parent()
+                .unwrap()
+                .join("iir-autoeq-flat.tmreq")
+                .exists()
+        );
 
         // Check Apple format
-        assert!(output_path.parent().unwrap().join("iir-autoeq-flat.aupreset").exists());
+        assert!(
+            output_path
+                .parent()
+                .unwrap()
+                .join("iir-autoeq-flat.aupreset")
+                .exists()
+        );
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "autoeq"
-version = "0.3.5"
+version = "0.3.7"
 description = "Automatic equalization for speakers, headphones and rooms!"
 edition = { workspace = true }
 repository = { workspace = true }
@@ -63,6 +63,17 @@ plotly_static = ["dep:plotly_static"]
 
 [target.'cfg(all(target_os = "windows", target_arch="aarch64"))'.dependencies]
 
+[target.'cfg(fuzzing)'.dependencies]
+libfuzzer-sys = "0.4"
+
+# [[bin]]
+# name = "autoeq_config"
+# path = "fuzz/fuzz_targets/autoeq_config.rs"
+
+# [[bin]]
+# name = "autoeq_csv"
+# path = "fuzz/fuzz_targets/autoeq_csv.rs"
+
 [[bin]]
 name = "autoeq"
 path = "bin/autoeq/main.rs"
@@ -89,3 +100,4 @@ path = "src/lib.rs"
 
 [dev-dependencies]
 tempfile = "3.23"
+assert_fs = "1.0"

@@ -71,7 +71,8 @@ pub fn erb_weighted_loss(freqs: &Array1<f64>, error: &Array1<f64>) -> f64 {
     }
 
     // Compute weighted mean squared error
-    let weighted_sum: f64 = error.iter()
+    let weighted_sum: f64 = error
+        .iter()
         .zip(weights.iter())
         .map(|(e, w)| e * e * w)
         .sum();
@@ -107,9 +108,21 @@ pub fn band_weighted_loss(
         }
     }
 
-    let bass_rms = if bass_n > 0 { (bass_ss / bass_n as f64).sqrt() } else { 0.0 };
-    let mid_rms = if mid_n > 0 { (mid_ss / mid_n as f64).sqrt() } else { 0.0 };
-    let treble_rms = if treble_n > 0 { (treble_ss / treble_n as f64).sqrt() } else { 0.0 };
+    let bass_rms = if bass_n > 0 {
+        (bass_ss / bass_n as f64).sqrt()
+    } else {
+        0.0
+    };
+    let mid_rms = if mid_n > 0 {
+        (mid_ss / mid_n as f64).sqrt()
+    } else {
+        0.0
+    };
+    let treble_rms = if treble_n > 0 {
+        (treble_ss / treble_n as f64).sqrt()
+    } else {
+        0.0
+    };
 
     bands.bass_weight * bass_rms + bands.mid_weight * mid_rms + bands.treble_weight * treble_rms
 }

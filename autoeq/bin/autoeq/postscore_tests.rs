@@ -1,20 +1,23 @@
 #[cfg(test)]
 mod tests {
-    use crate::postscore::{compute_post_optimization_metrics, PostOptMetrics};
-    use autoeq::cli::Args;
-    use clap::Parser;
-    use autoeq::loss::LossType;
-    use autoeq::cli::PeqModel;
+    use crate::postscore::{PostOptMetrics, compute_post_optimization_metrics};
     use autoeq::Curve;
+    use autoeq::cli::Args;
+    use autoeq::cli::PeqModel;
+    use autoeq::loss::LossType;
+    use clap::Parser;
     use ndarray::Array1;
 
     #[tokio::test]
     async fn test_compute_post_optimization_headphone() {
         let args = Args::try_parse_from([
             "autoeq-test",
-            "--loss", "headphone-flat",
-            "--sample-rate", "48000",
-        ]).unwrap();
+            "--loss",
+            "headphone-flat",
+            "--sample-rate",
+            "48000",
+        ])
+        .unwrap();
 
         let freqs = Array1::from_vec(vec![100.0, 500.0, 1000.0, 5000.0, 10000.0]);
         let target_spl = Array1::from_vec(vec![0.0; 5]);
@@ -69,7 +72,8 @@ mod tests {
             &None,
             None,
             None,
-        ).await;
+        )
+        .await;
 
         assert!(result.is_ok());
         let metrics = result.unwrap();

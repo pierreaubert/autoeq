@@ -1,15 +1,15 @@
 #[cfg(test)]
 mod tests {
-    use crate::qa::{perform_qa_analysis, display_qa_analysis, QaAnalysisResult};
+    use crate::qa::{QaAnalysisResult, display_qa_analysis, perform_qa_analysis};
 
     #[test]
     fn test_perform_qa_analysis_all_pass() {
         let result = perform_qa_analysis(
-            true,   // converged
-            true,   // spacing_ok
-            Some(5.0),  // pre_score
-            Some(6.0),  // post_score (improved)
-            0.5,    // threshold
+            true,      // converged
+            true,      // spacing_ok
+            Some(5.0), // pre_score
+            Some(6.0), // post_score (improved)
+            0.5,       // threshold
         );
 
         assert!(result.converge_ok);
@@ -23,7 +23,7 @@ mod tests {
             true,
             true,
             Some(5.0),
-            Some(5.2),  // Not enough improvement
+            Some(5.2), // Not enough improvement
             0.5,
         );
 
@@ -37,14 +37,14 @@ mod tests {
         let result = perform_qa_analysis(
             true,
             true,
-            None,  // pre_score is NaN
+            None, // pre_score is NaN
             Some(4.0),
             0.5,
         );
 
         // Should handle NaN gracefully
         assert!(result.pre_value.is_nan());
-        assert!(!result.improvement_ok);  // Won't pass with NaN
+        assert!(!result.improvement_ok); // Won't pass with NaN
     }
 
     #[test]

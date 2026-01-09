@@ -10,6 +10,33 @@ pub struct SpacingConstraintData {
     pub peq_model: PeqModel,
 }
 
+/// Compute the minimum octave spacing between any pair of filters.
+///
+/// Returns `f64::INFINITY` if there are 0 or 1 filters.
+fn compute_min_octave_spacing(xs: &[f64], peq_model: PeqModel, min_freq_hz: f64) -> f64 {
+    let n = param_utils::num_filters(xs, peq_model);
+    if n <= 1 {
+        return f64::INFINITY;
+    }
+
+    let mut min_dist = f64::INFINITY;
+    for i in 0..n {
+        let fi = param_utils::freq_from_log10_clamped(
+            param_utils::get_filter_params(xs, i, peq_model).freq,
+            min_freq_hz,
+        );
+        for j in (i + 1)..n {
+            let fj = param_utils::freq_from_log10_clamped(
+                param_utils::get_filter_params(xs, j, peq_model).freq,
+                min_freq_hz,
+            );
+            let d_oct = (fj / fi).log2().abs();
+            min_dist = min_dist.min(d_oct);
+        }
+    }
+    min_dist
+}
+
 /// Inequality constraint: spacing between any pair of center freqs must be at least min_spacing_oct.
 /// Returns fc(x) = min_spacing_oct - min_pair_distance. Feasible when <= 0.
 pub fn constraint_spacing(
@@ -17,23 +44,10 @@ pub fn constraint_spacing(
     _grad: Option<&mut [f64]>,
     data: &mut SpacingConstraintData,
 ) -> f64 {
-    let n = param_utils::num_filters(x, data.peq_model);
-    if n <= 1 || data.min_spacing_oct <= 0.0 {
+    if data.min_spacing_oct <= 0.0 {
         return 0.0;
     }
-    let mut min_dist = f64::INFINITY;
-    for i in 0..n {
-        let params_i = param_utils::get_filter_params(x, i, data.peq_model);
-        let fi = 10f64.powf(params_i.freq).max(1e-6);
-        for j in (i + 1)..n {
-            let params_j = param_utils::get_filter_params(x, j, data.peq_model);
-            let fj = 10f64.powf(params_j.freq).max(1e-6);
-            let d_oct = (fj / fi).log2().abs();
-            if d_oct < min_dist {
-                min_dist = d_oct;
-            }
-        }
-    }
+    let min_dist = compute_min_octave_spacing(x, data.peq_model, 1e-6);
     if min_dist.is_finite() {
         data.min_spacing_oct - min_dist
     } else {
@@ -54,26 +68,13 @@ pub fn constraint_spacing(
 /// # Returns
 /// Spacing violation amount (0.0 if no violation or disabled)
 pub fn viol_spacing_from_xs(xs: &[f64], peq_model: PeqModel, min_spacing_oct: f64) -> f64 {
-    let n = param_utils::num_filters(xs, peq_model);
-    if n <= 1 || min_spacing_oct <= 0.0 {
+    if min_spacing_oct <= 0.0 {
         return 0.0;
     }
-    let mut min_dist = f64::INFINITY;
-    for i in 0..n {
-        let params_i = param_utils::get_filter_params(xs, i, peq_model);
-        let fi = 10f64.powf(params_i.freq).max(1e-9);
-        for j in (i + 1)..n {
-            let params_j = param_utils::get_filter_params(xs, j, peq_model);
-            let fj = 10f64.powf(params_j.freq).max(1e-9);
-            let d_oct = (fj / fi).log2().abs();
-            if d_oct < min_dist {
-                min_dist = d_oct;
-            }
-        }
-    }
-    if !min_dist.is_finite() {
-        0.0
-    } else {
+    let min_dist = compute_min_octave_spacing(xs, peq_model, 1e-9);
+    if min_dist.is_finite() {
         (min_spacing_oct - min_dist).max(0.0)
+    } else {
+        0.0
     }
 }

@@ -1,6 +1,7 @@
 // Metaheuristics-specific optimization code
 
-use super::optim::{ObjectiveData, compute_fitness_penalties};
+use super::optim::{ObjectiveData, PenaltyMode, compute_fitness_penalties};
+use super::optim_callback::{ProgressTracker, format_param_summary};
 use ndarray::Array1;
 
 #[allow(unused_imports)]
@@ -86,45 +87,29 @@ pub fn create_mh_callback(
     algo_name: &str,
 ) -> Box<dyn FnMut(&MHIntermediate) -> CallbackAction + Send> {
     let name = algo_name.to_string();
-    let mut last_fitness = f64::INFINITY;
-    let mut stall_count = 0;
+    let mut tracker = ProgressTracker::default();
 
     Box::new(move |intermediate: &MHIntermediate| -> CallbackAction {
-        // Check for progress
-        let improvement = if intermediate.fun < last_fitness {
-            let delta = last_fitness - intermediate.fun;
-            last_fitness = intermediate.fun;
-            stall_count = 0;
-            format!("(-{:.2e})", delta)
-        } else {
-            stall_count += 1;
-            if stall_count >= 50 {
-                format!("(STALL:{})", stall_count)
-            } else {
-                "(--) ".to_string()
-            }
-        };
+        let (improvement, _) = tracker.update(intermediate.fun);
 
         // Print when stalling or periodically
-        if stall_count == 1 || stall_count % 25 == 0 || intermediate.iter.is_multiple_of(10) {
-            let msg = format!(
+        if tracker.just_started_stalling()
+            || tracker.stall_at_interval(25)
+            || intermediate.iter.is_multiple_of(10)
+        {
+            crate::qa_println!(
                 "{} iter {:4}  fitness={:.6e} {}",
-                name, intermediate.iter, intermediate.fun, improvement
+                name,
+                intermediate.iter,
+                intermediate.fun,
+                improvement
             );
-            crate::qa_println!("{}", msg);
         }
 
         // Show parameter details every 50 iterations
         if intermediate.iter > 0 && intermediate.iter.is_multiple_of(50) {
-            let param_summary: Vec<String> = (0..intermediate.x.len() / 3)
-                .map(|i| {
-                    let freq = 10f64.powf(intermediate.x[i * 3]);
-                    let q = intermediate.x[i * 3 + 1];
-                    let gain = intermediate.x[i * 3 + 2];
-                    format!("[f{:.0}Hz Q{:.2} G{:.2}dB]", freq, q, gain)
-                })
-                .collect();
-            crate::qa_println!("  --> Best params: {}", param_summary.join(" "));
+            let summary = format_param_summary(intermediate.x.as_slice().unwrap(), 3);
+            crate::qa_println!("  --> Best params: {}", summary);
         }
 
         CallbackAction::Continue
@@ -179,18 +164,14 @@ pub fn optimize_filters_mh_with_callback(
         bounds.push([lower_bounds[i], upper_bounds[i]]);
     }
 
-    // Create objective with penalties (metaheuristics don't support constraints)
+    // Create objective with penalties (metaheuristics don't support native constraints)
     let mut penalty_data = objective_data.clone();
-    // PSO needs balanced penalties - not too harsh to allow exploration,
-    // but strong enough to guide toward feasible solutions
-    let (ceiling_penalty, spacing_penalty, mingain_penalty) = if mh_name == "pso" {
-        (5e2, objective_data.spacing_weight.max(0.0) * 5e2, 50.0) // Moderate penalties
+    let penalty_mode = if mh_name == "pso" {
+        PenaltyMode::Pso
     } else {
-        (1e4, objective_data.spacing_weight.max(0.0) * 1e3, 1e3)
+        PenaltyMode::Standard
     };
-    penalty_data.penalty_w_ceiling = ceiling_penalty;
-    penalty_data.penalty_w_spacing = spacing_penalty;
-    penalty_data.penalty_w_mingain = mingain_penalty;
+    penalty_data.configure_penalties(penalty_mode);
 
     // Create callback state
     let callback_state = Arc::new(Mutex::new(CallbackState {

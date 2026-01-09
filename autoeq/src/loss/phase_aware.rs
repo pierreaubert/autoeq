@@ -79,11 +79,7 @@ pub fn phase_deviation(
 }
 
 /// Combined magnitude and phase loss
-pub fn magnitude_phase_loss(
-    magnitude_error: f64,
-    phase_error: f64,
-    phase_weight: f64,
-) -> f64 {
+pub fn magnitude_phase_loss(magnitude_error: f64, phase_error: f64, phase_weight: f64) -> f64 {
     magnitude_error + phase_weight * phase_error
 }
 

@@ -4,8 +4,8 @@
 //! "Multi-Objective Genetic Algorithms for Loudspeaker Equalization"
 //! "Pareto-Optimal Solutions for Loudspeaker System Design"
 
-use crate::optim::ObjectiveData;
 use crate::cli::Args;
+use crate::optim::ObjectiveData;
 
 /// Pareto-optimal filter solution
 #[derive(Debug, Clone)]
@@ -41,7 +41,8 @@ pub fn pareto_optimization(
         // Initialize x with random/initial values or let optimizer handle it
         // The optimizer expects x to be initialized.
         // We can use setup_initial_guess from workflow
-        let mut x = crate::workflow::initial_guess(&args_with_filters, &lower_bounds, &upper_bounds);
+        let mut x =
+            crate::workflow::initial_guess(&args_with_filters, &lower_bounds, &upper_bounds);
 
         let result = crate::optim::optimize_filters(
             &mut x, // Will be filled by optimizer

@@ -85,11 +85,8 @@ fn evaluate_delay(
     // Pre-allocate the full vector to avoid repeated allocations in the loop
     let mut combined_complex = vec![Complex64::new(0.0, 0.0); freq.len()];
 
-    for (i, ((&f, &sub_val), &speaker_val)) in freq
-        .iter()
-        .zip(sub.iter())
-        .zip(speaker.iter())
-        .enumerate()
+    for (i, ((&f, &sub_val), &speaker_val)) in
+        freq.iter().zip(sub.iter()).zip(speaker.iter()).enumerate()
     {
         let w = 2.0 * PI * f;
         let phase_shift = -w * delay_s;

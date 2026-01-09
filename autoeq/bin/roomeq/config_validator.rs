@@ -128,8 +128,17 @@ fn validate_optimizer_config(opt: &OptimizerConfig, result: &mut ValidationResul
     }
 
     // Validate algorithm choice
-    let valid_algorithms = ["cobyla", "de", "nlopt:cobyla", "nlopt:bobyqa", "nlopt:sbplx"];
-    if !valid_algorithms.iter().any(|&a| opt.algorithm.starts_with(a)) {
+    let valid_algorithms = [
+        "cobyla",
+        "de",
+        "nlopt:cobyla",
+        "nlopt:bobyqa",
+        "nlopt:sbplx",
+    ];
+    if !valid_algorithms
+        .iter()
+        .any(|&a| opt.algorithm.starts_with(a))
+    {
         result.add_warning(format!(
             "Unknown algorithm '{}', may not be supported",
             opt.algorithm
@@ -192,10 +201,7 @@ fn validate_optimizer_config(opt: &OptimizerConfig, result: &mut ValidationResul
 }
 
 /// Validate speaker configurations
-fn validate_speakers(
-    speakers: &HashMap<String, SpeakerConfig>,
-    result: &mut ValidationResult,
-) {
+fn validate_speakers(speakers: &HashMap<String, SpeakerConfig>, result: &mut ValidationResult) {
     if speakers.is_empty() {
         result.add_error("No speakers configured".to_string());
         return;
@@ -299,7 +305,11 @@ fn validate_crossovers(
         {
             result.add_error(format!(
                 "Crossover '{}' has {} frequencies but speaker '{}' needs {} for {} drivers",
-                crossover_ref, freqs.len(), name, expected_freqs, num_drivers
+                crossover_ref,
+                freqs.len(),
+                name,
+                expected_freqs,
+                num_drivers
             ));
         }
 
@@ -476,10 +486,12 @@ mod tests {
 
         let result = validate_room_config(&config);
         assert!(!result.is_valid);
-        assert!(result
-            .errors
-            .iter()
-            .any(|e| e.contains("non-existent crossover")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("non-existent crossover"))
+        );
     }
 
     #[test]
@@ -508,9 +520,11 @@ mod tests {
 
         let result = validate_room_config(&config);
         assert!(!result.is_valid);
-        assert!(result
-            .errors
-            .iter()
-            .any(|e| e.contains("non-existent subwoofer")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("non-existent subwoofer"))
+        );
     }
 }

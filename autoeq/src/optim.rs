@@ -309,6 +309,47 @@ pub struct ObjectiveData {
     pub integrality: Option<Vec<bool>>,
 }
 
+/// Penalty configuration mode for optimizers.
+///
+/// Different optimizers require different penalty weights depending on whether
+/// they support native constraints or need penalty-based enforcement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PenaltyMode {
+    /// Disable all penalties (use native constraints)
+    Disabled,
+    /// Standard penalty weights for most optimizers
+    Standard,
+    /// Moderate penalties for PSO (needs more exploration)
+    Pso,
+}
+
+impl ObjectiveData {
+    /// Configure penalty weights based on the optimizer's requirements.
+    ///
+    /// Call this before optimization to set appropriate penalty weights.
+    /// Use `PenaltyMode::Disabled` when the optimizer supports native constraints.
+    pub fn configure_penalties(&mut self, mode: PenaltyMode) {
+        match mode {
+            PenaltyMode::Disabled => {
+                self.penalty_w_ceiling = 0.0;
+                self.penalty_w_spacing = 0.0;
+                self.penalty_w_mingain = 0.0;
+            }
+            PenaltyMode::Standard => {
+                self.penalty_w_ceiling = 1e4;
+                self.penalty_w_spacing = self.spacing_weight.max(0.0) * 1e3;
+                self.penalty_w_mingain = 1e3;
+            }
+            PenaltyMode::Pso => {
+                // PSO needs balanced penalties - not too harsh to allow exploration
+                self.penalty_w_ceiling = 5e2;
+                self.penalty_w_spacing = self.spacing_weight.max(0.0) * 5e2;
+                self.penalty_w_mingain = 50.0;
+            }
+        }
+    }
+}
+
 /// Determine algorithm type and return normalized name
 #[derive(Debug, Clone)]
 pub enum AlgorithmCategory {

@@ -26,8 +26,8 @@ use num_complex::Complex64;
 use std::collections::HashMap;
 use std::f64::consts::PI;
 
-pub mod enhanced_weights;
 pub mod bass_boost;
+pub mod enhanced_weights;
 pub mod phase_aware;
 
 /// The type of loss function to use during optimization
@@ -347,8 +347,16 @@ fn weighted_mse(freqs: &Array1<f64>, error: &Array1<f64>, min_freq: f64, max_fre
         .and(&squared_errors)
         .fold(0.0, |acc, &mask, &err| if mask { acc + err } else { acc });
 
-    let err1 = if n1 > 0 { (ss1 / n1 as f64).sqrt() } else { 0.0 };
-    let err2 = if n2 > 0 { (ss2 / n2 as f64).sqrt() } else { 0.0 };
+    let err1 = if n1 > 0 {
+        (ss1 / n1 as f64).sqrt()
+    } else {
+        0.0
+    };
+    let err2 = if n2 > 0 {
+        (ss2 / n2 as f64).sqrt()
+    } else {
+        0.0
+    };
     err1 + err2 / 3.0
 }
 

@@ -2,9 +2,9 @@
 
 #![allow(dead_code)]
 
-use std::time::{Duration, Instant};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 /// Progress reporter for optimization
 pub struct ProgressReporter {

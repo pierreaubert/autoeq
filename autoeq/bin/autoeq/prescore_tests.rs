@@ -1,14 +1,13 @@
 #[cfg(test)]
 mod tests {
-    use crate::prescore::{compute_pre_optimization_metrics, PreOptMetrics};
+    use crate::prescore::compute_pre_optimization_metrics;
+    use autoeq::Curve;
     use autoeq::cli::Args;
-    use clap::Parser;
+    use autoeq::cli::PeqModel;
     use autoeq::loss::LossType;
     use autoeq::optim::ObjectiveData;
-    use autoeq::cli::PeqModel;
-    use autoeq::Curve;
+    use clap::Parser;
     use ndarray::Array1;
-    use std::collections::HashMap;
 
     fn create_test_objective_data(loss_type: LossType) -> ObjectiveData {
         let freqs = Array1::from_vec(vec![100.0, 500.0, 1000.0, 5000.0, 10000.0]);
@@ -51,13 +50,9 @@ mod tests {
             phase: None,
         };
 
-        let result = compute_pre_optimization_metrics(
-            &args,
-            &objective_data,
-            false,
-            &deviation,
-            &None,
-        ).await;
+        let result =
+            compute_pre_optimization_metrics(&args, &objective_data, false, &deviation, &None)
+                .await;
 
         assert!(result.is_ok());
         let metrics = result.unwrap();
@@ -85,7 +80,8 @@ mod tests {
             false, // no CEA data
             &deviation,
             &None,
-        ).await;
+        )
+        .await;
 
         assert!(result.is_ok());
         let metrics = result.unwrap();

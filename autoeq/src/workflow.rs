@@ -3,22 +3,22 @@
 //! This module centralizes the common pipeline steps for loading input data,
 //! building target curves, preparing objective data, and running optimization.
 
+use crate::AutoeqError;
+use crate::Cea2034Data;
 use crate::Curve;
+use crate::HeadphoneLossData;
+use crate::PeqModel;
+use crate::SpeakerLossData;
+use crate::iir::Biquad;
+use crate::loss::DriversLossData;
 use crate::optim::{ObjectiveData, optimize_filters_with_algo_override};
 use crate::optim_de::optimize_filters_autoeq_with_callback;
 use crate::read;
+use crate::x2peq;
 use ndarray::Array1;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::error::Error;
-use crate::AutoeqError;
-use crate::Cea2034Data;
-use crate::SpeakerLossData;
-use crate::HeadphoneLossData;
-use crate::loss::DriversLossData;
-use crate::PeqModel;
-use crate::x2peq;
-use crate::iir::Biquad;
+use std::path::PathBuf;
 
 pub mod resume;
 

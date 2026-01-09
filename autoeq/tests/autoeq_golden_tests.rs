@@ -1,5 +1,5 @@
-use assert_fs::prelude::*;
 use assert_fs::TempDir;
+use assert_fs::prelude::*;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -21,15 +21,19 @@ fn test_apo_output_format_golden() {
 
     // Create test measurement
     let csv = temp_dir.child("test.csv");
-    csv.write_str("freq,spl\n100,75.0\n500,78.0\n1000,80.0\n5000,75.0\n10000,72.0\n").unwrap();
+    csv.write_str("freq,spl\n100,75.0\n500,78.0\n1000,80.0\n5000,75.0\n10000,72.0\n")
+        .unwrap();
 
     let output = temp_dir.child("output");
 
     let status = Command::new(get_autoeq_binary())
         .args(&[
-            "--curve", csv.path().to_str().unwrap(),
-            "--output", output.path().to_str().unwrap(),
-            "--num-filters", "3",
+            "--curve",
+            csv.path().to_str().unwrap(),
+            "--output",
+            output.path().to_str().unwrap(),
+            "--num-filters",
+            "3",
         ])
         .status()
         .expect("Failed to run autoeq");
@@ -48,10 +52,10 @@ fn test_apo_output_format_golden() {
     assert!(content.contains("Filter 1"));
     assert!(content.contains("Filter 2"));
     assert!(content.contains("Filter 3"));
-    assert!(content.contains("Type"));  // Type column
-    assert!(content.contains("Freq"));  // Frequency column
-    assert!(content.contains("Q"));     // Q column
-    assert!(content.contains("Gain"));  // Gain column
+    assert!(content.contains("Type")); // Type column
+    assert!(content.contains("Freq")); // Frequency column
+    assert!(content.contains("Q")); // Q column
+    assert!(content.contains("Gain")); // Gain column
 }
 
 #[test]
@@ -60,15 +64,19 @@ fn test_peq_parameters_reasonable() {
 
     // Create measurement with a peak
     let csv = temp_dir.child("test.csv");
-    csv.write_str("freq,spl\n100,75.0\n200,80.0\n300,85.0\n400,82.0\n500,78.0\n1000,75.0\n").unwrap();
+    csv.write_str("freq,spl\n100,75.0\n200,80.0\n300,85.0\n400,82.0\n500,78.0\n1000,75.0\n")
+        .unwrap();
 
     let output = temp_dir.child("output");
 
     let _ = Command::new(get_autoeq_binary())
         .args(&[
-            "--curve", csv.path().to_str().unwrap(),
-            "--output", output.path().to_str().unwrap(),
-            "--num-filters", "2",
+            "--curve",
+            csv.path().to_str().unwrap(),
+            "--output",
+            output.path().to_str().unwrap(),
+            "--num-filters",
+            "2",
         ])
         .output()
         .expect("Failed to run autoeq");

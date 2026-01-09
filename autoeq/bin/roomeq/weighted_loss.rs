@@ -110,17 +110,15 @@ pub fn compute_weights(freq: &Array1<f64>, config: &WeightedLossConfig) -> Array
 
         FrequencyWeighting::AWeighting => freq.map(|&f| a_weighting_linear(f)),
 
-        FrequencyWeighting::BassEmphasis => {
-            freq.map(|&f| {
-                if f < 200.0 {
-                    config.bass_emphasis
-                } else if f < 2000.0 {
-                    config.midrange_emphasis
-                } else {
-                    config.treble_emphasis
-                }
-            })
-        }
+        FrequencyWeighting::BassEmphasis => freq.map(|&f| {
+            if f < 200.0 {
+                config.bass_emphasis
+            } else if f < 2000.0 {
+                config.midrange_emphasis
+            } else {
+                config.treble_emphasis
+            }
+        }),
 
         FrequencyWeighting::Custom => {
             freq.map(|&f| {
@@ -194,11 +192,7 @@ pub fn weighted_mae(error: &Array1<f64>, weights: &Array1<f64>) -> f64 {
 ///
 /// # Returns
 /// * Combined weighted loss
-pub fn weighted_combined_loss(
-    error: &Array1<f64>,
-    weights: &Array1<f64>,
-    peak_weight: f64,
-) -> f64 {
+pub fn weighted_combined_loss(error: &Array1<f64>, weights: &Array1<f64>, peak_weight: f64) -> f64 {
     let rms = weighted_rms_error(error, weights);
 
     // Find peak weighted error
@@ -222,11 +216,11 @@ pub fn bass_emphasis_config() -> WeightedLossConfig {
         midrange_emphasis: 1.0,
         treble_emphasis: 0.5,
         custom_bands: vec![
-            (20.0, 80.0, 2.5),    // Deep bass - highest weight
-            (80.0, 200.0, 2.0),   // Upper bass
-            (200.0, 500.0, 1.5),  // Lower midrange
-            (500.0, 2000.0, 1.0), // Midrange
-            (2000.0, 8000.0, 0.8), // Presence
+            (20.0, 80.0, 2.5),      // Deep bass - highest weight
+            (80.0, 200.0, 2.0),     // Upper bass
+            (200.0, 500.0, 1.5),    // Lower midrange
+            (500.0, 2000.0, 1.0),   // Midrange
+            (2000.0, 8000.0, 0.8),  // Presence
             (8000.0, 20000.0, 0.5), // Treble
         ],
     }
@@ -328,7 +322,11 @@ mod tests {
     fn test_custom_bands() {
         let config = WeightedLossConfig {
             weighting: FrequencyWeighting::Custom,
-            custom_bands: vec![(0.0, 100.0, 3.0), (100.0, 1000.0, 2.0), (1000.0, 20000.0, 1.0)],
+            custom_bands: vec![
+                (0.0, 100.0, 3.0),
+                (100.0, 1000.0, 2.0),
+                (1000.0, 20000.0, 1.0),
+            ],
             ..Default::default()
         };
 

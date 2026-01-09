@@ -183,3 +183,21 @@ pub fn encode_filter_type(filter_type: BiquadFilterType) -> f64 {
 pub fn filter_type_bounds() -> (f64, f64) {
     (0.0, 7.999) // Almost 8, but not quite to avoid edge cases
 }
+
+/// Convert log10 frequency parameter to Hz
+///
+/// Filter frequencies are stored as log10(Hz) in the optimization parameter vector.
+/// This function converts back to linear Hz.
+#[inline]
+pub fn freq_from_log10(log_freq: f64) -> f64 {
+    10f64.powf(log_freq)
+}
+
+/// Convert log10 frequency parameter to Hz with minimum value clamping
+///
+/// Like `freq_from_log10` but clamps the result to avoid numerical issues
+/// with very small or negative frequencies.
+#[inline]
+pub fn freq_from_log10_clamped(log_freq: f64, min_freq: f64) -> f64 {
+    10f64.powf(log_freq).max(min_freq)
+}

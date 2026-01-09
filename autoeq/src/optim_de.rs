@@ -9,9 +9,10 @@ use super::constraints::{
 };
 use super::init_sobol::init_sobol;
 use super::initial_guess::{SmartInitConfig, create_smart_initial_guesses};
-use super::optim::{ObjectiveData, compute_fitness_penalties};
+use super::optim::{ObjectiveData, PenaltyMode, compute_fitness_penalties};
+use super::optim_callback::{ProgressTracker, format_param_summary};
 use crate::de::{
-    CallbackAction, DEConfigBuilder, DEIntermediate, DEReport, Init, Mutation,
+    CallbackAction, DEConfig, DEConfigBuilder, DEIntermediate, DEReport, Init, Mutation,
     NonlinearConstraintHelper, ParallelConfig, Strategy, differential_evolution,
 };
 
@@ -62,11 +63,9 @@ pub fn setup_de_common(
     let pop_size = population.max(15); // minimum reasonable population
     let max_iter = maxeval.min(pop_size * 10);
 
-    // Set up objective data for DE with zero penalties since we use true constraints
+    // Set up objective data for DE with zero penalties since we use native constraints
     let mut penalty_data = objective_data.clone();
-    penalty_data.penalty_w_ceiling = 0.0;
-    penalty_data.penalty_w_spacing = 0.0;
-    penalty_data.penalty_w_mingain = 0.0;
+    penalty_data.configure_penalties(PenaltyMode::Disabled);
 
     // Log setup configuration (unless in QA mode)
     if !qa_mode {
@@ -117,27 +116,13 @@ pub fn create_de_callback(
     qa_mode: bool,
 ) -> Box<dyn FnMut(&DEIntermediate) -> CallbackAction + Send> {
     let name = algo_name.to_string();
-    let mut last_fitness = f64::INFINITY;
-    let mut stall_count = 0;
+    let mut tracker = ProgressTracker::default();
 
     Box::new(move |intermediate: &DEIntermediate| -> CallbackAction {
-        // Check for progress
-        let improvement = if intermediate.fun < last_fitness {
-            let delta = last_fitness - intermediate.fun;
-            last_fitness = intermediate.fun;
-            stall_count = 0;
-            format!("(-{:.2e})", delta)
-        } else {
-            stall_count += 1;
-            if stall_count >= 50 {
-                format!("(STALL:{})", stall_count)
-            } else {
-                "(--) ".to_string()
-            }
-        };
+        let (improvement, _) = tracker.update(intermediate.fun);
 
-        // print when stalling (unless in QA mode)
-        if !qa_mode && (stall_count == 1 || stall_count % 25 == 0) {
+        // Print when stalling (unless in QA mode)
+        if !qa_mode && (tracker.just_started_stalling() || tracker.stall_at_interval(25)) {
             eprintln!(
                 "{} iter {:4}  fitness={:.6e} {} conv={:.3e}",
                 name, intermediate.iter, intermediate.fun, improvement, intermediate.convergence
@@ -146,15 +131,8 @@ pub fn create_de_callback(
 
         // Show parameter details every 100 iterations (unless in QA mode)
         if !qa_mode && intermediate.iter.is_multiple_of(100) {
-            let param_summary: Vec<String> = (0..intermediate.x.len() / 3)
-                .map(|i| {
-                    let freq = 10f64.powf(intermediate.x[i * 3]);
-                    let q = intermediate.x[i * 3 + 1];
-                    let gain = intermediate.x[i * 3 + 2];
-                    format!("[f{:.0}Hz Q{:.2} G{:.2}dB]", freq, q, gain)
-                })
-                .collect();
-            eprintln!("  --> Best params: {}", param_summary.join(" "));
+            let summary = format_param_summary(intermediate.x.as_slice().unwrap(), 3);
+            eprintln!("  --> Best params: {}", summary);
         }
 
         CallbackAction::Continue
@@ -176,6 +154,32 @@ pub fn create_de_objective(penalty_data: ObjectiveData) -> impl Fn(&Array1<f64>)
         let mut data_copy = penalty_data.clone();
         compute_fitness_penalties(x_slice, None, &mut data_copy)
     }
+}
+
+/// Register a nonlinear inequality constraint with the DE config.
+///
+/// This helper reduces boilerplate when adding constraints to DE optimization.
+/// The constraint is feasible when the constraint function returns <= 0.
+///
+/// # Type Parameters
+/// * `T` - Constraint data type (must be Clone + Send + Sync + 'static)
+/// * `F` - Constraint function type
+fn register_de_constraint<T, F>(config: &mut DEConfig, constraint_fn: F, data: T)
+where
+    T: Clone + Send + Sync + 'static,
+    F: Fn(&[f64], Option<&mut [f64]>, &mut T) -> f64 + Send + Sync + 'static,
+{
+    let constraint = NonlinearConstraintHelper {
+        fun: Arc::new(move |x: &Array1<f64>| {
+            let mut result = Array1::zeros(1);
+            let mut data = data.clone();
+            result[0] = constraint_fn(x.as_slice().unwrap(), None, &mut data);
+            result
+        }),
+        lb: Array1::from(vec![-f64::INFINITY]),
+        ub: Array1::from(vec![0.0]),
+    };
+    constraint.apply_to(config, 1e3, 1e3);
 }
 
 /// Process DE optimization results
@@ -417,75 +421,40 @@ pub fn optimize_filters_autoeq_with_callback(
     // Add native nonlinear constraints
     let mut config = config_builder.build();
 
-    // Ceiling constraint (applies when max_db is set)
+    // Register nonlinear constraints using helper
     if setup.penalty_data.max_db > 0.0 {
-        let ceiling_data = CeilingConstraintData {
-            freqs: setup.penalty_data.freqs.clone(),
-            srate: setup.penalty_data.srate,
-            max_db: setup.penalty_data.max_db,
-            peq_model: setup.penalty_data.peq_model,
-        };
-
-        // Create nonlinear constraint helper for ceiling constraint
-        let ceiling_constraint = NonlinearConstraintHelper {
-            fun: Arc::new(move |x: &Array1<f64>| {
-                let mut result = Array1::zeros(1);
-                let mut data = ceiling_data.clone();
-                result[0] = constraint_ceiling(x.as_slice().unwrap(), None, &mut data);
-                result
-            }),
-            lb: Array1::from(vec![-f64::INFINITY]),
-            ub: Array1::from(vec![0.0]),
-        };
-
-        // Apply constraint with appropriate penalty weights
-        ceiling_constraint.apply_to(&mut config, 1e3, 1e3);
+        register_de_constraint(
+            &mut config,
+            constraint_ceiling,
+            CeilingConstraintData {
+                freqs: setup.penalty_data.freqs.clone(),
+                srate: setup.penalty_data.srate,
+                max_db: setup.penalty_data.max_db,
+                peq_model: setup.penalty_data.peq_model,
+            },
+        );
     }
 
-    // Minimum gain constraint (applies in all modes)
     if setup.penalty_data.min_db > 0.0 {
-        let min_gain_data = MinGainConstraintData {
-            min_db: setup.penalty_data.min_db,
-            peq_model: setup.penalty_data.peq_model,
-        };
-
-        // Create nonlinear constraint helper for minimum gain constraint
-        let min_gain_constraint = NonlinearConstraintHelper {
-            fun: Arc::new(move |x: &Array1<f64>| {
-                let mut result = Array1::zeros(1);
-                let mut data = min_gain_data;
-                result[0] = constraint_min_gain(x.as_slice().unwrap(), None, &mut data);
-                result
-            }),
-            lb: Array1::from(vec![-f64::INFINITY]),
-            ub: Array1::from(vec![0.0]),
-        };
-
-        // Apply constraint with appropriate penalty weights
-        min_gain_constraint.apply_to(&mut config, 1e3, 1e3);
+        register_de_constraint(
+            &mut config,
+            constraint_min_gain,
+            MinGainConstraintData {
+                min_db: setup.penalty_data.min_db,
+                peq_model: setup.penalty_data.peq_model,
+            },
+        );
     }
 
-    // Minimum spacing constraint (applies in all modes)
     if setup.penalty_data.min_spacing_oct > 0.0 {
-        let spacing_data = SpacingConstraintData {
-            min_spacing_oct: setup.penalty_data.min_spacing_oct,
-            peq_model: setup.penalty_data.peq_model,
-        };
-
-        // Create nonlinear constraint helper for minimum spacing constraint
-        let spacing_constraint = NonlinearConstraintHelper {
-            fun: Arc::new(move |x: &Array1<f64>| {
-                let mut result = Array1::zeros(1);
-                let mut data = spacing_data;
-                result[0] = constraint_spacing(x.as_slice().unwrap(), None, &mut data);
-                result
-            }),
-            lb: Array1::from(vec![-f64::INFINITY]),
-            ub: Array1::from(vec![0.0]),
-        };
-
-        // Apply constraint with appropriate penalty weights
-        spacing_constraint.apply_to(&mut config, 1e3, 1e3);
+        register_de_constraint(
+            &mut config,
+            constraint_spacing,
+            SpacingConstraintData {
+                min_spacing_oct: setup.penalty_data.min_spacing_oct,
+                peq_model: setup.penalty_data.peq_model,
+            },
+        );
     }
 
     let result = differential_evolution(&base_objective_fn, &setup.bounds, config)

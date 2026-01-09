@@ -50,6 +50,8 @@ pub mod initial_guess;
 pub mod loss;
 /// Optimization algorithms and objective functions
 pub mod optim;
+/// Shared callback utilities for optimization
+pub mod optim_callback;
 /// AutoEQ DE-specific optimization code
 pub mod optim_de;
 /// Metaheuristics-specific optimization code

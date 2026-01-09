@@ -89,10 +89,7 @@ fn hilbert_transform(signal: &[f64]) -> Vec<f64> {
     ifft.process(&mut spectrum);
 
     // Normalize and extract imaginary part (the Hilbert transform)
-    spectrum[..n]
-        .iter()
-        .map(|c| c.im / n_fft as f64)
-        .collect()
+    spectrum[..n].iter().map(|c| c.im / n_fft as f64).collect()
 }
 
 /// Compute excess phase from total phase and minimum phase.

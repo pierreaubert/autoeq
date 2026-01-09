@@ -419,7 +419,9 @@ pub fn optimize_filters_autoeq_with_callback(
     }
 
     // Add native nonlinear constraints
-    let mut config = config_builder.build();
+    let mut config = config_builder
+        .build()
+        .map_err(|e| (format!("DE config build failed: {:?}", e), f64::INFINITY))?;
 
     // Register nonlinear constraints using helper
     if setup.penalty_data.max_db > 0.0 {

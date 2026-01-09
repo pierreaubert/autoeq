@@ -52,9 +52,10 @@ rustfft = "6.4"
 autoeq-cea2034 = { path = "autoeq-cea2034", version = "0.3" }
 autoeq-env = { path = "autoeq-env", version = "0.3" }
 
-math-iir-fir = { version = "0.3" }
-math-differential-evolution = { version = "0.3" }
-math-bem = { version = "0.3", default-features = false }
+math-iir-fir = { version = "0.3.1" }
+math-differential-evolution = { version = "0.3.2" }
+math-solvers = { version = "0.3.4", default-features = false, features = ["cli", "native"] }
+math-bem = { version = "0.3.2", default-features = false, features = ["cli", "native", "parallel", "memory-optimized", "out-of-core"] }
 
 # Plotting and visualization
 plotly = { version = "0.13.5" }

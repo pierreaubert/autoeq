@@ -176,7 +176,9 @@ where
             result[0] = constraint_fn(x.as_slice().unwrap(), None, &mut data);
             result
         }),
-        lb: Array1::from(vec![-f64::INFINITY]),
+        // Use large finite value instead of -inf to avoid bug in apply_to()
+        // where inf tolerance causes incorrect equality constraint handling
+        lb: Array1::from(vec![-1e30]),
         ub: Array1::from(vec![0.0]),
     };
     constraint.apply_to(config, 1e3, 1e3);

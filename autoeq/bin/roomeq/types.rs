@@ -16,10 +16,56 @@
 //! along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 pub use autoeq::MeasurementSource;
+use autoeq_cea2034::Curve;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+
+// ============================================================================
+// Output Data Structures
+// ============================================================================
+
+/// Frequency response curve data for serialization
+///
+/// Represents a curve with frequency points and SPL values.
+/// SPL values are normalized (mean-subtracted in the 1000-2000 Hz range)
+/// for consistent comparison across measurements.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CurveData {
+    /// Frequency points in Hz
+    pub freq: Vec<f64>,
+    /// Sound Pressure Level in dB (normalized)
+    pub spl: Vec<f64>,
+}
+
+impl From<Curve> for CurveData {
+    fn from(curve: Curve) -> Self {
+        CurveData {
+            freq: curve.freq.to_vec(),
+            spl: curve.spl.to_vec(),
+        }
+    }
+}
+
+impl From<&Curve> for CurveData {
+    fn from(curve: &Curve) -> Self {
+        CurveData {
+            freq: curve.freq.to_vec(),
+            spl: curve.spl.to_vec(),
+        }
+    }
+}
+
+impl From<CurveData> for Curve {
+    fn from(data: CurveData) -> Self {
+        Curve {
+            freq: ndarray::Array1::from(data.freq),
+            spl: ndarray::Array1::from(data.spl),
+            phase: None,
+        }
+    }
+}
 
 // ============================================================================
 // Configuration Data Structures
@@ -335,6 +381,14 @@ pub struct ChannelDspChain {
     /// Per-driver DSP chains for active crossover (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub drivers: Option<Vec<DriverDspChain>>,
+
+    /// Initial frequency response curve before optimization (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_curve: Option<CurveData>,
+
+    /// Final frequency response curve after applying correction (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub final_curve: Option<CurveData>,
 }
 
 /// DSP chain for an individual driver in a multi-driver speaker

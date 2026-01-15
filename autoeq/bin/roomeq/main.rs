@@ -43,7 +43,7 @@ mod weighted_loss;
 use types::{ChannelDspChain, OptimizationMetadata, RoomConfig, SpeakerConfig};
 
 /// Result type for parallel speaker processing
-type SpeakerResult = Result<(String, ChannelDspChain, f64, f64, Curve)>;
+type SpeakerResult = Result<(String, ChannelDspChain, f64, f64, Curve, Curve)>;
 
 /// Room EQ - Optimize multi-channel speaker systems
 #[derive(Parser, Debug)]
@@ -133,7 +133,7 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
         .map(|(channel_name, speaker_config)| {
             info!("Processing channel: {}", channel_name);
 
-            let (chain, pre_score, post_score, final_curve) = process_speaker(
+            let (chain, pre_score, post_score, initial_curve, final_curve) = process_speaker(
                 channel_name,
                 speaker_config,
                 &room_config,
@@ -146,6 +146,7 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
                 chain,
                 pre_score,
                 post_score,
+                initial_curve,
                 final_curve,
             ))
         })
@@ -155,7 +156,7 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
 
     // Collect results
     for res in results {
-        let (channel_name, chain, pre_score, post_score, final_curve) = res?;
+        let (channel_name, chain, pre_score, post_score, _initial_curve, final_curve) = res?;
         channel_chains.insert(channel_name.clone(), chain);
         curves.insert(channel_name, final_curve);
         pre_scores.push(pre_score);
@@ -304,14 +305,14 @@ fn run(sample_rate: f64, config_path: PathBuf, output_path: PathBuf) -> Result<(
 
 /// Process a single speaker (simple or group)
 ///
-/// Returns: (DSP chain, pre_score, post_score)
+/// Returns: (DSP chain, pre_score, post_score, initial_curve, final_curve)
 fn process_speaker(
     channel_name: &str,
     speaker_config: &SpeakerConfig,
     room_config: &RoomConfig,
     sample_rate: f64,
     output_dir: &std::path::Path,
-) -> Result<(ChannelDspChain, f64, f64, Curve)> {
+) -> Result<(ChannelDspChain, f64, f64, Curve, Curve)> {
     match speaker_config {
         SpeakerConfig::Single(source) => {
             // Simple case: single measurement
@@ -334,14 +335,14 @@ fn process_speaker(
 
 /// Process a simple speaker with a single measurement
 ///
-/// Returns: (DSP chain, pre_score, post_score)
+/// Returns: (DSP chain, pre_score, post_score, initial_curve, final_curve)
 fn process_single_speaker(
     channel_name: &str,
     source: &types::MeasurementSource,
     room_config: &RoomConfig,
     sample_rate: f64,
     output_dir: &std::path::Path,
-) -> Result<(ChannelDspChain, f64, f64, Curve)> {
+) -> Result<(ChannelDspChain, f64, f64, Curve, Curve)> {
     // Load measurement
     let curve = load::load_source(source)
         .map_err(|e| anyhow!("{}", e))
@@ -392,18 +393,25 @@ fn process_single_speaker(
 
             // Build chain
             let plugin = output::create_convolution_plugin(&filename);
-            let chain = types::ChannelDspChain {
-                channel: channel_name.to_string(),
-                plugins: vec![plugin],
-                drivers: None,
-            };
+            let chain = output::build_channel_dsp_chain_with_curves(
+                channel_name,
+                None,
+                Vec::new(),
+                &[],
+                Some(&curve),
+                None, // final_curve will be set after FIR computation
+            );
 
             // Calculate FIR response
             let complex_resp =
                 response::compute_fir_complex_response(&coeffs, &curve.freq, sample_rate);
             let final_curve = response::apply_complex_response(&curve, &complex_resp);
 
-            Ok((chain, pre_score, 0.0, final_curve))
+            // Update chain with final curve
+            let mut chain = chain;
+            chain.final_curve = Some((&final_curve).into());
+
+            Ok((chain, pre_score, 0.0, curve.clone(), final_curve))
         }
         "mixed" => {
             // Mixed mode
@@ -461,7 +469,11 @@ fn process_single_speaker(
                 response::compute_fir_complex_response(&coeffs, &curve.freq, sample_rate);
             let final_curve = response::apply_complex_response(&input_plus_iir, &fir_resp);
 
-            Ok((chain, pre_score, 0.0, final_curve))
+            // Update chain with curves
+            chain.initial_curve = Some((&curve).into());
+            chain.final_curve = Some((&final_curve).into());
+
+            Ok((chain, pre_score, 0.0, curve.clone(), final_curve))
         }
         _ => {
             // Default IIR mode (existing logic)
@@ -481,28 +493,38 @@ fn process_single_speaker(
             );
 
             // Build DSP chain (no gain, no crossover for simple speaker)
-            let chain =
-                output::build_channel_dsp_chain(channel_name, None, Vec::new(), &eq_filters);
+            let chain = output::build_channel_dsp_chain_with_curves(
+                channel_name,
+                None,
+                Vec::new(),
+                &eq_filters,
+                Some(&curve),
+                None,
+            );
 
             let iir_resp =
                 response::compute_peq_complex_response(&eq_filters, &curve.freq, sample_rate);
             let final_curve = response::apply_complex_response(&curve, &iir_resp);
 
-            Ok((chain, pre_score, post_score, final_curve))
+            // Update chain with final curve
+            let mut chain = chain;
+            chain.final_curve = Some((&final_curve).into());
+
+            Ok((chain, pre_score, post_score, curve.clone(), final_curve))
         }
     }
 }
 
 /// Process a speaker group with multiple drivers and crossovers
 ///
-/// Returns: (DSP chain, pre_score, post_score)
+/// Returns: (DSP chain, pre_score, post_score, initial_curve, final_curve)
 fn process_speaker_group(
     channel_name: &str,
     group: &types::SpeakerGroup,
     room_config: &RoomConfig,
     sample_rate: f64,
     _output_dir: &std::path::Path,
-) -> Result<(ChannelDspChain, f64, f64, Curve)> {
+) -> Result<(ChannelDspChain, f64, f64, Curve, Curve)> {
     // Load all measurements in the group
     let mut driver_curves = Vec::new();
     for (i, source) in group.measurements.iter().enumerate() {
@@ -668,20 +690,32 @@ fn process_speaker_group(
     );
 
     // Build multi-driver DSP chain with per-driver crossovers
-    let chain = output::build_multidriver_dsp_chain(
+    let chain = output::build_multidriver_dsp_chain_with_curves(
         channel_name,
         &gains,
         &delays,
         &crossover_freqs,
         crossover_optim::crossover_type_to_string(&crossover_type),
         &eq_filters,
+        Some(&combined_curve),
+        None,
     );
 
     let iir_resp =
         response::compute_peq_complex_response(&eq_filters, &combined_curve.freq, sample_rate);
     let final_curve = response::apply_complex_response(&combined_curve, &iir_resp);
 
-    Ok((chain, pre_score, post_score, final_curve))
+    // Update chain with final curve
+    let mut chain = chain;
+    chain.final_curve = Some((&final_curve).into());
+
+    Ok((
+        chain,
+        pre_score,
+        post_score,
+        combined_curve.clone(),
+        final_curve,
+    ))
 }
 
 fn process_multisub_group(
@@ -690,7 +724,7 @@ fn process_multisub_group(
     room_config: &RoomConfig,
     sample_rate: f64,
     _output_dir: &std::path::Path,
-) -> Result<(ChannelDspChain, f64, f64, Curve)> {
+) -> Result<(ChannelDspChain, f64, f64, Curve, Curve)> {
     // 1. Optimize multisub integration (gain + delay)
     let (result, combined_curve) =
         multisub_optim::optimize_multisub(&group.subwoofers, &room_config.optimizer, sample_rate)
@@ -716,20 +750,32 @@ fn process_multisub_group(
         post_score
     );
 
-    let chain = output::build_multisub_dsp_chain(
+    let chain = output::build_multisub_dsp_chain_with_curves(
         channel_name,
         &group.name,
         group.subwoofers.len(),
         &result.gains,
         &result.delays,
         &eq_filters,
+        Some(&combined_curve),
+        None,
     );
 
     let iir_resp =
         response::compute_peq_complex_response(&eq_filters, &combined_curve.freq, sample_rate);
     let final_curve = response::apply_complex_response(&combined_curve, &iir_resp);
 
-    Ok((chain, result.pre_objective, post_score, final_curve))
+    // Update chain with final curve
+    let mut chain = chain;
+    chain.final_curve = Some((&final_curve).into());
+
+    Ok((
+        chain,
+        result.pre_objective,
+        post_score,
+        combined_curve.clone(),
+        final_curve,
+    ))
 }
 
 fn process_dba(
@@ -738,7 +784,7 @@ fn process_dba(
     room_config: &RoomConfig,
     sample_rate: f64,
     _output_dir: &std::path::Path,
-) -> Result<(ChannelDspChain, f64, f64, Curve)> {
+) -> Result<(ChannelDspChain, f64, f64, Curve, Curve)> {
     // 1. Optimize DBA
     let (result, combined_curve) =
         dba_optim::optimize_dba(dba_config, &room_config.optimizer, sample_rate)
@@ -765,12 +811,28 @@ fn process_dba(
     );
 
     // 3. Build Chain
-    let chain =
-        output::build_dba_dsp_chain(channel_name, &result.gains, &result.delays, &eq_filters);
+    let chain = output::build_dba_dsp_chain_with_curves(
+        channel_name,
+        &result.gains,
+        &result.delays,
+        &eq_filters,
+        Some(&combined_curve),
+        None,
+    );
 
     let iir_resp =
         response::compute_peq_complex_response(&eq_filters, &combined_curve.freq, sample_rate);
     let final_curve = response::apply_complex_response(&combined_curve, &iir_resp);
 
-    Ok((chain, result.pre_objective, post_score, final_curve))
+    // Update chain with final curve
+    let mut chain = chain;
+    chain.final_curve = Some((&final_curve).into());
+
+    Ok((
+        chain,
+        result.pre_objective,
+        post_score,
+        combined_curve.clone(),
+        final_curve,
+    ))
 }

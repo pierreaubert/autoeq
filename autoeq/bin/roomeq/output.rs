@@ -91,6 +91,18 @@ pub fn build_channel_dsp_chain(
     crossovers: Vec<PluginConfigWrapper>,
     eq_filters: &[Biquad],
 ) -> ChannelDspChain {
+    build_channel_dsp_chain_with_curves(channel_name, gain_db, crossovers, eq_filters, None, None)
+}
+
+/// Build a DSP chain for a single channel with optional curves
+pub fn build_channel_dsp_chain_with_curves(
+    channel_name: &str,
+    gain_db: Option<f64>,
+    crossovers: Vec<PluginConfigWrapper>,
+    eq_filters: &[Biquad],
+    initial_curve: Option<&autoeq::Curve>,
+    final_curve: Option<&autoeq::Curve>,
+) -> ChannelDspChain {
     let mut plugins = Vec::new();
 
     // Add gain if specified
@@ -112,7 +124,9 @@ pub fn build_channel_dsp_chain(
     ChannelDspChain {
         channel: channel_name.to_string(),
         plugins,
-        drivers: None, // Single speakers don't have per-driver chains
+        drivers: None,
+        initial_curve: initial_curve.map(|c| c.into()),
+        final_curve: final_curve.map(|c| c.into()),
     }
 }
 
@@ -155,6 +169,29 @@ pub fn build_multidriver_dsp_chain(
     crossover_freqs: &[f64],
     crossover_type: &str,
     eq_filters: &[Biquad],
+) -> ChannelDspChain {
+    build_multidriver_dsp_chain_with_curves(
+        channel_name,
+        gains,
+        delays,
+        crossover_freqs,
+        crossover_type,
+        eq_filters,
+        None,
+        None,
+    )
+}
+
+/// Build a DSP chain for a multi-driver speaker with curves
+pub fn build_multidriver_dsp_chain_with_curves(
+    channel_name: &str,
+    gains: &[f64],
+    delays: &[f64],
+    crossover_freqs: &[f64],
+    crossover_type: &str,
+    eq_filters: &[Biquad],
+    initial_curve: Option<&autoeq::Curve>,
+    final_curve: Option<&autoeq::Curve>,
 ) -> ChannelDspChain {
     let n_drivers = gains.len();
 
@@ -211,6 +248,8 @@ pub fn build_multidriver_dsp_chain(
         channel: channel_name.to_string(),
         plugins: combined_plugins,
         drivers: Some(driver_chains),
+        initial_curve: initial_curve.map(|c| c.into()),
+        final_curve: final_curve.map(|c| c.into()),
     }
 }
 
@@ -230,6 +269,29 @@ pub fn build_multisub_dsp_chain(
     gains: &[f64],
     delays: &[f64],
     eq_filters: &[Biquad],
+) -> ChannelDspChain {
+    build_multisub_dsp_chain_with_curves(
+        channel_name,
+        group_name,
+        n_subs,
+        gains,
+        delays,
+        eq_filters,
+        None,
+        None,
+    )
+}
+
+/// Build a DSP chain for a multi-subwoofer system with curves
+pub fn build_multisub_dsp_chain_with_curves(
+    channel_name: &str,
+    group_name: &str,
+    n_subs: usize,
+    gains: &[f64],
+    delays: &[f64],
+    eq_filters: &[Biquad],
+    initial_curve: Option<&autoeq::Curve>,
+    final_curve: Option<&autoeq::Curve>,
 ) -> ChannelDspChain {
     // Build per-sub chains
     let mut driver_chains = Vec::new();
@@ -264,6 +326,8 @@ pub fn build_multisub_dsp_chain(
         channel: channel_name.to_string(),
         plugins: combined_plugins,
         drivers: Some(driver_chains),
+        initial_curve: initial_curve.map(|c| c.into()),
+        final_curve: final_curve.map(|c| c.into()),
     }
 }
 
@@ -273,6 +337,18 @@ pub fn build_dba_dsp_chain(
     gains: &[f64],
     delays: &[f64],
     eq_filters: &[Biquad],
+) -> ChannelDspChain {
+    build_dba_dsp_chain_with_curves(channel_name, gains, delays, eq_filters, None, None)
+}
+
+/// Build a DSP chain for a DBA system with curves
+pub fn build_dba_dsp_chain_with_curves(
+    channel_name: &str,
+    gains: &[f64],
+    delays: &[f64],
+    eq_filters: &[Biquad],
+    initial_curve: Option<&autoeq::Curve>,
+    final_curve: Option<&autoeq::Curve>,
 ) -> ChannelDspChain {
     // 2 "drivers": Front and Rear
     let mut driver_chains = Vec::new();
@@ -315,6 +391,8 @@ pub fn build_dba_dsp_chain(
         channel: channel_name.to_string(),
         plugins: combined_plugins,
         drivers: Some(driver_chains),
+        initial_curve: initial_curve.map(|c| c.into()),
+        final_curve: final_curve.map(|c| c.into()),
     }
 }
 
@@ -622,6 +700,8 @@ mod tests {
             channel: "test".to_string(),
             plugins: vec![create_gain_plugin(-3.0)],
             drivers: None,
+            initial_curve: None,
+            final_curve: None,
         };
 
         add_delay_plugin(&mut chain, 10.0);

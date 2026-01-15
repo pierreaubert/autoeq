@@ -25,6 +25,29 @@
     }
   },
   "$defs": {
+    "CurveData": {
+      "type": "object",
+      "description": "Frequency response curve data",
+      "properties": {
+        "freq": {
+          "type": "array",
+          "description": "Frequency points in Hz",
+          "items": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "spl": {
+          "type": "array",
+          "description": "Sound Pressure Level in dB (normalized)",
+          "items": {
+            "type": "number"
+          }
+        }
+      },
+      "required": ["freq", "spl"],
+      "additionalProperties": false
+    },
     "ChannelDspChain": {
       "type": "object",
       "description": "DSP chain for a single channel",
@@ -52,6 +75,28 @@
               "items": {
                 "$ref": "#/$defs/DriverDspChain"
               }
+            }
+          ]
+        },
+        "initial_curve": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/CurveData",
+              "description": "Initial frequency response curve before optimization (normalized)"
+            }
+          ]
+        },
+        "final_curve": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/CurveData",
+              "description": "Final frequency response curve after applying correction (normalized)"
             }
           ]
         }

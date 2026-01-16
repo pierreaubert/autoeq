@@ -388,8 +388,8 @@ fn validate_group_delay(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::*;
-    use autoeq::{MeasurementRef, MeasurementSource};
+    use crate::roomeq::types::*;
+    use crate::{MeasurementRef, MeasurementSource};
     use std::path::PathBuf;
 
     #[test]

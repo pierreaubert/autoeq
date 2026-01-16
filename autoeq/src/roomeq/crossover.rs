@@ -1,7 +1,7 @@
 //! Crossover optimization for multi-driver groups
 
-use autoeq::Curve;
-use autoeq::loss::{CrossoverType, DriverMeasurement, DriversLossData};
+use crate::Curve;
+use crate::loss::{CrossoverType, DriverMeasurement, DriversLossData};
 use std::error::Error;
 
 /// Parse crossover type from string
@@ -84,7 +84,7 @@ pub fn optimize_crossover(
     );
 
     // Call library workflow to perform optimization
-    let result = autoeq::workflow::optimize_drivers_crossover(
+    let result = crate::workflow::optimize_drivers_crossover(
         drivers_data.clone(),
         config.min_freq,
         config.max_freq,
@@ -97,7 +97,7 @@ pub fn optimize_crossover(
     )?;
 
     // Compute the combined response
-    let combined_response = autoeq::loss::compute_drivers_combined_response(
+    let combined_response = crate::loss::compute_drivers_combined_response(
         &drivers_data,
         &result.gains,
         &result.crossover_freqs,

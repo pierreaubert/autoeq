@@ -100,8 +100,8 @@ pub fn build_channel_dsp_chain_with_curves(
     gain_db: Option<f64>,
     crossovers: Vec<PluginConfigWrapper>,
     eq_filters: &[Biquad],
-    initial_curve: Option<&autoeq::Curve>,
-    final_curve: Option<&autoeq::Curve>,
+    initial_curve: Option<&crate::Curve>,
+    final_curve: Option<&crate::Curve>,
 ) -> ChannelDspChain {
     let mut plugins = Vec::new();
 
@@ -190,8 +190,8 @@ pub fn build_multidriver_dsp_chain_with_curves(
     crossover_freqs: &[f64],
     crossover_type: &str,
     eq_filters: &[Biquad],
-    initial_curve: Option<&autoeq::Curve>,
-    final_curve: Option<&autoeq::Curve>,
+    initial_curve: Option<&crate::Curve>,
+    final_curve: Option<&crate::Curve>,
 ) -> ChannelDspChain {
     let n_drivers = gains.len();
 
@@ -290,8 +290,8 @@ pub fn build_multisub_dsp_chain_with_curves(
     gains: &[f64],
     delays: &[f64],
     eq_filters: &[Biquad],
-    initial_curve: Option<&autoeq::Curve>,
-    final_curve: Option<&autoeq::Curve>,
+    initial_curve: Option<&crate::Curve>,
+    final_curve: Option<&crate::Curve>,
 ) -> ChannelDspChain {
     // Build per-sub chains
     let mut driver_chains = Vec::new();
@@ -347,8 +347,8 @@ pub fn build_dba_dsp_chain_with_curves(
     gains: &[f64],
     delays: &[f64],
     eq_filters: &[Biquad],
-    initial_curve: Option<&autoeq::Curve>,
-    final_curve: Option<&autoeq::Curve>,
+    initial_curve: Option<&crate::Curve>,
+    final_curve: Option<&crate::Curve>,
 ) -> ChannelDspChain {
     // 2 "drivers": Front and Rear
     let mut driver_chains = Vec::new();

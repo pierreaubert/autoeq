@@ -5,7 +5,7 @@ mod tests {
     use clap::Parser;
 
     fn create_test_args() -> Args {
-        Args::parse_from(["autoeq-test", "--num-filters", "5", "--min-spacing", "0.2"])
+        Args::parse_from(["autoeq-test", "--num-filters", "5", "--min-spacing-oct", "0.2"])
     }
 
     #[test]

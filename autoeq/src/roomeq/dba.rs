@@ -1,14 +1,14 @@
 //! Double Bass Array (DBA) optimization
 
-use autoeq::Curve;
-use autoeq::loss::{CrossoverType, DriverMeasurement, DriversLossData};
-use autoeq::workflow::DriverOptimizationResult;
+use crate::Curve;
+use crate::loss::{CrossoverType, DriverMeasurement, DriversLossData};
+use crate::workflow::DriverOptimizationResult;
 use clap::Parser;
 use ndarray::Array1;
 use std::error::Error;
 
 use super::types::{DBAConfig, OptimizerConfig};
-use autoeq::read as load;
+use crate::read as load;
 
 /// Optimize Double Bass Array configuration
 ///
@@ -67,16 +67,16 @@ pub fn optimize_dba(
     // We'll reuse the workflow helpers but supply custom bounds.
 
     // Create Args
-    let mut args = autoeq::cli::Args::parse_from(["autoeq"]); // defaults
+    let mut args = crate::cli::Args::parse_from(["autoeq"]); // defaults
     args.sample_rate = sample_rate;
     args.min_freq = config.min_freq;
     args.max_freq = config.max_freq;
     args.maxeval = config.max_iter;
     args.algo = config.algorithm.clone();
-    args.loss = autoeq::LossType::MultiSubFlat;
+    args.loss = crate::LossType::MultiSubFlat;
 
     let objective_data =
-        autoeq::workflow::setup_multisub_objective_data(&args, drivers_data.clone());
+        crate::workflow::setup_multisub_objective_data(&args, drivers_data.clone());
 
     // Custom bounds: [Gain1, Gain2, Delay1, Delay2]
     // Index 0: Front Gain -> 0 (Locked)
@@ -97,7 +97,7 @@ pub fn optimize_dba(
     let mut x = vec![0.0, -3.0, 0.0, 10.0];
 
     // Optimize
-    let opt_result = autoeq::optim::optimize_filters(
+    let opt_result = crate::optim::optimize_filters(
         &mut x,
         &lower_bounds,
         &upper_bounds,
@@ -117,7 +117,7 @@ pub fn optimize_dba(
     let crossover_freqs = vec![];
 
     // Compute combined response
-    let combined_response = autoeq::loss::compute_drivers_combined_response(
+    let combined_response = crate::loss::compute_drivers_combined_response(
         &drivers_data,
         &gains,
         &crossover_freqs,
@@ -169,7 +169,7 @@ fn sum_array_response(
 
     for curve in &curves {
         // Interpolate to ref grid
-        let interp = autoeq::read::interpolate_log_space(&ref_freq, curve);
+        let interp = crate::read::interpolate_log_space(&ref_freq, curve);
 
         for i in 0..ref_freq.len() {
             let spl = interp.spl[i];
@@ -206,7 +206,6 @@ fn invert_polarity(curve: &Curve) -> Curve {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array1;
 
     #[test]
     fn test_invert_polarity() {

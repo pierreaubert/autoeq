@@ -15,8 +15,8 @@
 //! You should have received a copy of the GNU General Public License
 //! along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-pub use autoeq::MeasurementSource;
-use autoeq_cea2034::Curve;
+pub use crate::MeasurementSource;
+use crate::Curve;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -98,6 +98,7 @@ pub struct RoomConfig {
     pub optimizer: OptimizerConfig,
 }
 
+/// Default configuration version
 pub fn default_config_version() -> String {
     "1.1.0".to_string()
 }
@@ -433,7 +434,7 @@ pub struct OptimizationMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use autoeq::MeasurementRef;
+    use crate::MeasurementRef;
 
     #[test]
     fn test_measurement_ref_path() {

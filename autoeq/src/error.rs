@@ -72,6 +72,20 @@ pub enum AutoeqError {
         message: String,
     },
 
+    /// Invalid measurement data.
+    #[error("invalid measurement: {message}")]
+    InvalidMeasurement {
+        /// Error message describing the issue.
+        message: String,
+    },
+
+    /// Invalid configuration.
+    #[error("invalid configuration: {message}")]
+    InvalidConfiguration {
+        /// Error message describing the issue.
+        message: String,
+    },
+
     /// NLopt-specific error.
     #[cfg(feature = "nlopt")]
     #[error("NLopt error: {message}")]

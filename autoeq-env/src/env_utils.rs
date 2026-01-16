@@ -66,7 +66,22 @@ pub fn get_autoeq_dir() -> Result<PathBuf, EnvError> {
         return Ok(path);
     }
 
-    // If AUTOEQ_DIR is not set, try to guess the location
+    // Try current directory and its parent
+    if let Ok(current_dir) = env::current_dir() {
+        // Check if current dir looks like AutoEQ root (has Cargo.toml and autoeq directory or crate)
+        let candidates = vec![current_dir.clone(), current_dir.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("/"))];
+        
+        for dir in candidates {
+            if dir.join("Cargo.toml").exists() {
+                // Check for workspace members or specific file structure
+                if dir.join("autoeq").exists() || dir.join("GEMINI.md").exists() {
+                    return Ok(dir);
+                }
+            }
+        }
+    }
+
+    // If AUTOEQ_DIR is not set and current dir is not it, try to guess the location
     let home = env::var("HOME").map_err(|_| EnvError::AutoeqDirNotSet)?;
     let home_path = PathBuf::from(home);
 

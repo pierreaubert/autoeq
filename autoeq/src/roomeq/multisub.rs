@@ -1,12 +1,12 @@
 //! Multi-subwoofer optimization
 
-use autoeq::Curve;
-use autoeq::loss::{CrossoverType, DriverMeasurement, DriversLossData};
-use autoeq::workflow::DriverOptimizationResult;
+use crate::Curve;
+use crate::loss::{CrossoverType, DriverMeasurement, DriversLossData};
+use crate::workflow::DriverOptimizationResult;
 use std::error::Error;
 
 use super::types::{MeasurementSource, OptimizerConfig};
-use autoeq::read as load;
+use crate::read as load;
 
 /// Optimize multi-subwoofer configuration
 ///
@@ -36,7 +36,7 @@ pub fn optimize_multisub(
     // Create drivers data with NO crossover filtering
     let drivers_data = DriversLossData::new(driver_measurements, CrossoverType::None);
 
-    let result = autoeq::workflow::optimize_multisub(
+    let result = crate::workflow::optimize_multisub(
         drivers_data.clone(),
         config.min_freq,
         config.max_freq,
@@ -48,7 +48,7 @@ pub fn optimize_multisub(
     )?;
 
     // Compute combined response
-    let combined_response = autoeq::loss::compute_drivers_combined_response(
+    let combined_response = crate::loss::compute_drivers_combined_response(
         &drivers_data,
         &result.gains,
         &[], // no crossovers

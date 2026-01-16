@@ -1,9 +1,9 @@
 //! EQ optimization for individual channels
 
-use autoeq::Curve;
-use autoeq::cli::{Args, PeqModel};
-use autoeq::loss::LossType;
-use autoeq::workflow::setup_objective_data;
+use crate::Curve;
+use crate::cli::{Args, PeqModel};
+use crate::loss::LossType;
+use crate::workflow::setup_objective_data;
 use clap::{Parser, ValueEnum};
 use math_audio_iir_fir::Biquad;
 use ndarray::Array1;
@@ -35,8 +35,8 @@ pub fn optimize_channel_eq(
     let target_curve = match target_config {
         Some(TargetCurveConfig::Path(path)) => {
             // Load target from file
-            let target = autoeq::read::read_curve_from_csv(path)?;
-            autoeq::read::normalize_and_interpolate_response(&curve.freq, &target)
+            let target = crate::read::read_curve_from_csv(path)?;
+            crate::read::normalize_and_interpolate_response(&curve.freq, &target)
         }
         Some(TargetCurveConfig::Predefined(name)) => {
             // Generate predefined target
@@ -44,7 +44,7 @@ pub fn optimize_channel_eq(
             // For now, simpler to re-implement common targets or map to Args
             // We can construct minimal Args with curve_name
             let dummy_args = Args::parse_from(["autoeq", "--curve-name", name]);
-            autoeq::workflow::build_target_curve(&dummy_args, &curve.freq, curve)?
+            crate::workflow::build_target_curve(&dummy_args, &curve.freq, curve)?
         }
         None => {
             // Default flat target
@@ -164,13 +164,13 @@ pub fn optimize_channel_eq(
     .expect("setup_objective_data should not fail without spin data");
 
     // Setup bounds
-    let (lower_bounds, upper_bounds) = autoeq::workflow::setup_bounds(&args);
+    let (lower_bounds, upper_bounds) = crate::workflow::setup_bounds(&args);
 
     // Generate initial guess
-    let mut x = autoeq::workflow::initial_guess(&args, &lower_bounds, &upper_bounds);
+    let mut x = crate::workflow::initial_guess(&args, &lower_bounds, &upper_bounds);
 
     // Perform optimization
-    let opt_result = autoeq::optim::optimize_filters(
+    let opt_result = crate::optim::optimize_filters(
         &mut x,
         &lower_bounds,
         &upper_bounds,
@@ -189,7 +189,7 @@ pub fn optimize_channel_eq(
 
     // Convert params to Biquad filters using autoeq's x2peq
     // x2peq returns Vec<(f64, Biquad)> where f64 is the weight
-    let peq = autoeq::x2peq::x2peq(&x, sample_rate, args.peq_model);
+    let peq = crate::x2peq::x2peq(&x, sample_rate, args.peq_model);
 
     // Extract just the Biquad filters (ignore weights)
     let filters: Vec<Biquad> = peq.into_iter().map(|(_weight, biquad)| biquad).collect();

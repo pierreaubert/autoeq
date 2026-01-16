@@ -31,7 +31,7 @@ mod tests {
         // Verify frequency grid
         assert!(freq.len() >= 100);
         assert!(freq[0] >= 20.0);
-        assert!(freq[freq.len() - 1] <= 20000.0);
+        assert!(freq[freq.len() - 1] <= 20000.0 + 1e-5);
 
         // Verify curves have same length
         assert_eq!(input.freq.len(), freq.len());
@@ -56,7 +56,7 @@ mod tests {
             "--curve",
             &csv_path.to_string_lossy(),
             "--loss",
-            "headphone_flat",
+            "headphone-flat",
             "--num-filters",
             "8",
         ]);

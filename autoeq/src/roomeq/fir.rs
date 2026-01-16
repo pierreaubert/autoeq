@@ -1,7 +1,7 @@
 //! FIR filter optimization for room correction
 
-use autoeq::Curve;
-use autoeq::fir::{FirPhase, generate_fir_from_response};
+use crate::Curve;
+use crate::fir::{FirPhase, generate_fir_from_response};
 use ndarray::Array1;
 use num_complex::Complex;
 use rustfft::{Fft, FftPlanner};
@@ -48,14 +48,14 @@ pub fn generate_fir_correction(
     // 1. Determine Target Curve
     let target_curve = match target_config {
         Some(TargetCurveConfig::Path(path)) => {
-            let target = autoeq::read::read_curve_from_csv(path)?;
-            autoeq::read::normalize_and_interpolate_response(&measurement.freq, &target)
+            let target = crate::read::read_curve_from_csv(path)?;
+            crate::read::normalize_and_interpolate_response(&measurement.freq, &target)
         }
         Some(TargetCurveConfig::Predefined(name)) => {
-            use autoeq::cli::Args;
+            use crate::cli::Args;
             use clap::Parser;
             let dummy_args = Args::parse_from(["autoeq", "--curve-name", name]);
-            autoeq::workflow::build_target_curve(&dummy_args, &measurement.freq, measurement)?
+            crate::workflow::build_target_curve(&dummy_args, &measurement.freq, measurement)?
         }
         None => Curve {
             freq: measurement.freq.clone(),
@@ -119,8 +119,8 @@ fn generate_kirkeby_correction(
 
     // Interpolate measurement and target to linear grid
     // Note: We interpolate magnitude (dB) and phase separately
-    let meas_interp = autoeq::read::interpolate_log_space(&freqs_arr, measurement);
-    let target_interp = autoeq::read::interpolate_log_space(&freqs_arr, target);
+    let meas_interp = crate::read::interpolate_log_space(&freqs_arr, measurement);
+    let target_interp = crate::read::interpolate_log_space(&freqs_arr, target);
 
     // Regularization parameters
     // In-band regularization: keeps inversion stable (e.g. don't boost nulls infinitely)

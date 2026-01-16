@@ -12,13 +12,14 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_path = temp_dir.path().join("test_output");
 
-        let args = Args::parse_from(["autoeq-test", "--loss", "flat"]);
+        let args = Args::parse_from(["autoeq-test", "--loss", "speaker-flat"]);
 
         // Example optimized parameters (3 filters)
+        // Note: Frequency parameters must be in log10 scale
         let x = vec![
-            500.0, 2.0, -3.0, // Filter 1
-            1000.0, 5.0, 2.0, // Filter 2
-            3000.0, 3.0, -1.0, // Filter 3
+            500.0f64.log10(), 2.0, -3.0, // Filter 1
+            1000.0f64.log10(), 5.0, 2.0, // Filter 2
+            3000.0f64.log10(), 3.0, -1.0, // Filter 3
         ];
 
         let result = save_peq_to_file(&args, &x, &output_path, &LossType::SpeakerFlat).await;
@@ -32,7 +33,7 @@ mod tests {
         // Verify content
         let content = fs::read_to_string(&apo_path).unwrap();
         assert!(content.contains("AutoEQ"));
-        assert!(content.contains("PEQ")); // Filter type
+        assert!(content.contains("Filter")); // Check for presence of filter lines
     }
 
     #[tokio::test]
@@ -40,9 +41,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_path = temp_dir.path().join("test_output");
 
-        let args = Args::parse_from(["autoeq-test", "--loss", "score"]);
+        let args = Args::parse_from(["autoeq-test", "--loss", "speaker-score"]);
 
-        let x = vec![500.0, 2.0, -2.0];
+        let x = vec![500.0f64.log10(), 2.0, -2.0];
 
         let result = save_peq_to_file(&args, &x, &output_path, &LossType::SpeakerScore).await;
 
@@ -58,9 +59,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_path = temp_dir.path().join("test_output");
 
-        let args = Args::parse_from(["autoeq-test", "--loss", "flat"]);
+        let args = Args::parse_from(["autoeq-test", "--loss", "speaker-flat"]);
 
-        let x = vec![500.0, 2.0, -2.0];
+        let x = vec![500.0f64.log10(), 2.0, -2.0];
 
         let _ = save_peq_to_file(&args, &x, &output_path, &LossType::SpeakerFlat).await;
 

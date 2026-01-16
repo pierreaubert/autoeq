@@ -1,10 +1,10 @@
-use anyhow::Result;
-use autoeq::Curve;
+use crate::error::Result;
+use crate::Curve;
 use ndarray::Array1;
 use num_complex::Complex64;
 use std::f64::consts::PI;
 
-/// optimize group delay alignment between a subwoofer and a speaker
+/// Optimize group delay alignment between a subwoofer and a speaker
 ///
 /// Returns the optimal delay (in ms) to apply to the speaker to align it with the subwoofer.
 /// A positive value means the speaker should be delayed.
@@ -249,8 +249,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array1;
-    use num_complex::Complex64;
     use std::f64::consts::PI;
 
     #[test]

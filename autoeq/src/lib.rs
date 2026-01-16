@@ -74,6 +74,9 @@ pub mod workflow;
 /// Mapping
 pub mod x2peq;
 
+/// Room EQ multi-channel optimization
+pub mod roomeq;
+
 // Re-export commonly used items
 pub use cli::*;
 pub use loss::{CrossoverType, HeadphoneLossData, LossType, SpeakerLossData};
@@ -87,3 +90,9 @@ pub use workflow::{
     optimize_speaker, perform_optimization_with_progress,
 };
 pub use x2peq::x2peq;
+
+// Re-export commonly used roomeq types
+pub use roomeq::{
+    optimize_room, optimize_speaker as optimize_room_speaker, DspChainOutput, OptimizerConfig,
+    RoomConfig, RoomOptimizationProgress, RoomOptimizationResult, SpeakerConfig,
+};

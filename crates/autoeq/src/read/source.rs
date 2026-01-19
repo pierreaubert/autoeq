@@ -43,7 +43,7 @@ impl MeasurementRef {
     }
 }
 
-/// Source of measurements (single file or multiple files for averaging)
+/// Source of measurements (single file, multiple files for averaging, or in-memory curve)
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum MeasurementSource {
@@ -51,6 +51,10 @@ pub enum MeasurementSource {
     Single(MeasurementRef),
     /// Multiple measurement files to be averaged.
     Multiple(Vec<MeasurementRef>),
+    /// In-memory curve data (not serializable to JSON config files).
+    /// Use this when curves are already loaded in memory.
+    #[serde(skip)]
+    InMemory(Curve),
 }
 
 /// Load a single measurement from a CSV file
@@ -63,6 +67,7 @@ pub fn load_measurement(measurement: &MeasurementRef) -> Result<Curve, Box<dyn E
 pub fn load_source(source: &MeasurementSource) -> Result<Curve, Box<dyn Error>> {
     match source {
         MeasurementSource::Single(m) => load_measurement(m),
+        MeasurementSource::InMemory(curve) => Ok(curve.clone()),
         MeasurementSource::Multiple(measurements) => {
             if measurements.is_empty() {
                 return Err("Measurement list is empty".into());

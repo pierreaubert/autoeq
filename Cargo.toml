@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "autoeq",
-    "autoeq-cea2034",
-    "autoeq-env",
-    "autoeq-roomsim",
+    "crates/autoeq",
+    "crates/autoeq-cea2034",
+    "crates/autoeq-env",
+    "crates/autoeq-roomsim",
 ]
 resolver = "3"
 

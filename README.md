@@ -1,5 +1,7 @@
 <!-- markdownlint-disable-file MD013 -->
 
+# DEVELOPEMENT IS HAPPENING [HERE](https://github.com/pierreaubert/sotf) PLEASE JUMP THERE
+
 # AutoEQ: a cli for computing EQ for headphones and speakers.
 
 The software helps you to get better sound from your speakers or your headsets. It is a CLI application that works in a terminal window. If you prefer

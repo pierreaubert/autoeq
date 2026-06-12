@@ -1,129 +1,169 @@
-[workspace]
-members = [
-    "crates/autoeq",
-    "crates/autoeq-cea2034",
-    "crates/autoeq-env",
-    "crates/autoeq-roomsim",
-]
-resolver = "3"
-
-[workspace.package]
-version = "0.3.0"
-authors = ["Pierre F. Aubert pierre@spinorama.org"]
-description = "Compute EQs for headphone, speakers and subwoofers"
+[package]
+name = "autoeq"
+version = "0.4.45"
+description = "Automatic equalization for speakers, headphones and rooms!"
 edition = "2024"
-documentation = "https://docs.rs/autoeq"
-license = "GPL-3.0-or-later"
+keywords = ["audio", "dsp", "eq"]
+categories = ["multimedia::audio"]
 repository = "https://github.com/pierreaubert/autoeq"
+authors = ["Pierre F. Aubert pierre@spinorama.org"]
+license = "GPL-3.0-or-later"
+# Keep the published crate under crates.io's size cap. The excluded paths are
+# QA recordings, generated test fixtures, helper shell scripts, and editor
+# backups — none are needed to compile the library or the user-facing
+# binaries. The QA-only `roomeq-qa-features` binary and the
+# `roomeq_generated_data_test` integration test will fail at runtime against
+# a published copy because their fixtures are absent; they are meant to run
+# from a workspace checkout.
+exclude = [
+    "data_tests/**",
+    "data_generated/**",
+    "scripts/**",
+    "*~",
+    "**/*~",
+]
 
-[workspace.dependencies]
-
-# Serialization and data
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-
-# Async and networking
-# ideally we would use only threads or only tokio
-anyhow = { version = "1.0" }
-tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.13", features = ["json"] }
-urlencoding = "2.1"
+[dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+build_html = "2.7"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }
-console_error_panic_hook = { version = "0.1" }
 csv = "1.4"
+directories = "6"
 env_logger = "0.11"
-hound = "3.5"
 log = "0.4"
 num_cpus = "1.17"
+num-complex = "0.4"
+nalgebra = { version = "0.33", default-features = false, features = ["std"] }
+metaheuristics-nature = "10.1"
+rustfft = "6.4"
+hound = "3.5"
+# `plotly` is gated behind the `plotly` feature (off by default). Library code
+# under `src/plot/` and the `roomeq-fuzzer` binary require it; the main
+# `autoeq` binary degrades gracefully and skips chart generation when off.
+plotly = { version = "0.13", optional = true }
+rand = "0.9.2"
+rand_chacha = "0.9"
+reqwest = { version = "0.13", features = ["json"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = "1.0"
 schemars = "1.2"
 strsim = "0.11"
-tempfile = "3.23"
 thiserror = "2.0.17"
+tokio = { version = "1", features = ["rt-multi-thread", "fs", "macros", "io-util", "process", "signal"] }
+urlencoding = "2.1"
 
-# Optimization and math
-ndarray = { version = "0.17", default-features = false, features = ["rayon", "blas", "serde"] }
-rand = "0.9.2"
-num-complex = "0.4"
-metaheuristics-nature = "10.1"
+# Math-Audio crates from GitHub
+math-iir-fir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
+math-dsp = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
+math-optimisation = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
+math-rir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
+sofa-reader = "0.1.6"
+
+# Core numerical computing
+ndarray = { version = "0.17", default-features = false, features = ["rayon", "serde"] }
+oxiblas-ndarray = "0.2.1"
+
+# Optional features
+plotly_static = { version = "0.1", features = ["chromedriver", "webdriver_download"], optional = true }
 rayon = "1.11"
-nlopt = "0.8.1"
-rustfft = "6.4"
-autoeq-cea2034 = { path = "autoeq-cea2034", version = "0.3" }
-autoeq-env = { path = "autoeq-env", version = "0.3" }
 
-math-iir-fir = { version = "0.3.1" }
-math-differential-evolution = { version = "0.3.2" }
-math-solvers = { version = "0.3.4", default-features = false, features = ["cli", "native"] }
-math-bem = { version = "0.3.2", default-features = false, features = ["cli", "native", "parallel", "memory-optimized", "out-of-core"] }
+[features]
+default = []
+plotly = ["dep:plotly"]
+# Static PNG export needs both the plotly crate and the chrome-driver wrapper.
+plotly_static = ["plotly", "dep:plotly_static"]
 
-# Plotting and visualization
-plotly = { version = "0.13.5" }
-plotly_static = { version = "0.1" }
-build_html = "2.7.0"
+[target.'cfg(target_os = "macos")'.dependencies]
 
-# Web/WASM
-wasm-bindgen = "0.2"
-wasm-bindgen-rayon = "1.3"
+[target.'cfg(all(any(target_os = "ios", target_os="ios_sim"), target_arch = "aarch64"))'.dependencies]
 
-[workspace.lints.rust]
-ambiguous_negative_literals = "warn"
-missing_debug_implementations = "warn"
-redundant_imports = "warn"
-redundant_lifetimes = "warn"
-trivial_numeric_casts = "warn"
-unsafe_op_in_unsafe_fn = "warn"
-unused_lifetimes = "warn"
+[target.'cfg(all(target_os = "linux", target_arch="x86_64"))'.dependencies]
 
-[workspace.lints.clippy]
-cargo = { level = "warn", priority = -1 }
-complexity = { level = "warn", priority = -1 }
-correctness = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-perf = { level = "warn", priority = -1 }
-style = { level = "warn", priority = -1 }
-suspicious = { level = "warn", priority = -1 }
-# nursery = { level = "warn", priority = -1 }  # optional, might cause more false positives
+[target.'cfg(all(target_os = "linux", target_arch="aarch64"))'.dependencies]
 
-# These lints are from the `restriction` lint group and prevent specific
-# constructs being used in source code in order to drive up consistency,
-# quality, and brevity
-allow_attributes_without_reason = "warn"
-as_pointer_underscore = "warn"
-assertions_on_result_states = "warn"
-clone_on_ref_ptr = "warn"
-deref_by_slicing = "warn"
-disallowed_script_idents = "warn"
-empty_drop = "warn"
-empty_enum_variants_with_brackets = "warn"
-empty_structs_with_brackets = "warn"
-fn_to_numeric_cast_any = "warn"
-if_then_some_else_none = "warn"
-map_err_ignore = "warn"
-redundant_type_annotations = "warn"
-renamed_function_params = "warn"
-semicolon_outside_block = "warn"
-string_to_string = "warn"
-undocumented_unsafe_blocks = "warn"
-unnecessary_safety_comment = "warn"
-unnecessary_safety_doc = "warn"
-unneeded_field_pattern = "warn"
-unused_result_ok = "warn"
+[target.'cfg(all(target_os = "windows", target_arch="x86_64"))'.dependencies]
 
-# May cause issues with structured logging otherwise.
-literal_string_with_formatting_args = "allow"
+[target.'cfg(all(target_os = "windows", target_arch="aarch64"))'.dependencies]
 
+[[bin]]
+name = "autoeq"
+path = "src/bin/autoeq/main.rs"
+
+[[bin]]
+name = "benchmark-autoeq-speaker"
+path = "src/bin/autoeq_benchmark_speaker.rs"
+
+[[bin]]
+name = "autoeq-download-speakers"
+path = "src/bin/autoeq_download_speaker.rs"
+
+[[bin]]
+name = "roomeq"
+path = "src/bin/roomeq/main.rs"
+
+[[bin]]
+name = "roomeq-fuzzer"
+path = "src/bin/roomeq_fuzzer.rs"
+required-features = ["plotly"]
+
+[[bin]]
+name = "roomeq-qa-quality"
+path = "src/bin/roomeq_qa_quality.rs"
+
+[[bin]]
+name = "roomeq-qa-coverage"
+path = "src/bin/roomeq_qa_coverage.rs"
+
+[[bin]]
+name = "roomeq-qa-features"
+path = "src/bin/roomeq_qa_features.rs"
+
+[[bin]]
+name = "roomeq-qa-synthetic"
+path = "src/bin/roomeq_qa_synthetic.rs"
+
+[[bin]]
+name = "convert-recording"
+path = "src/bin/convert_recording.rs"
+
+[lib]
+name = "autoeq"
+path = "src/lib.rs"
+
+[[example]]
+name = "headphone_loss_demo"
+required-features = ["plotly"]
+
+[[example]]
+name = "headphone_loss_validation"
+
+[dev-dependencies]
+tempfile = "3.23"
+assert_fs = "1.0"
+serial_test = "3"
+
+# Plotly's `webdriver-downloader` dependency needs a small fix to build reliably
+# on recent Rust toolchains. math-audio applies the same patch.
 [patch.crates-io]
 webdriver-downloader = { version = "0.16.4", git = "https://github.com/pierreaubert/webdriver-downloader" }
 
-[profile.dev]
-# NOTE: Aggressive optimization settings (opt-level="z", lto=true, strip=true)
-# in debug mode cause segfaults in cpal/CoreAudio device enumeration on macOS.
-# Using standard debug settings instead.
-opt-level = 0
+[profile.release]
+# `release` is the everyday optimised profile — used by CI, `just prod-*`,
+# benchmarks, and local release iteration. Thin LTO keeps cross-crate inlining
+# without the serial bottleneck of fat LTO, and 14 codegen units balance
+# parallelism with optimiser visibility.
+lto = "thin"
+codegen-units = 14
 panic = "unwind"
 
-[profile.release]
-lto = true
+# `dist` is the "cut a release" profile. Inherits everything from `release`
+# and tightens for maximum runtime performance at the cost of much longer
+# compile time. Use via `cargo build --profile dist` — artifacts land in
+# `target/dist/` instead of `target/release/`.
+[profile.dist]
+inherits = "release"
+lto = "fat"
 codegen-units = 1
-panic = "unwind"  # Changed from "abort" to allow tests to run
+incremental = false

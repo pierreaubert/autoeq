@@ -1,65 +1,351 @@
 <!-- markdownlint-disable-file MD013 -->
 
-# DEVELOPEMENT IS HAPPENING [HERE](https://github.com/pierreaubert/sotf) PLEASE JUMP THERE
+# AutoEQ: Automatic Equalization for Speakers, Headphones, and Rooms
 
-# AutoEQ: a cli for computing EQ for headphones and speakers.
+## Introduction
 
-The software helps you to get better sound from your speakers or your headsets. It is a CLI application that works in a terminal window. If you prefer
-a classical UI, please use [SotF](https://github.com/pierreaubert/sotf).
+AutoEQ and RoomEQ are Rust CLIs for computing corrections.
 
-How to use the software is described in [README](autoeq/README.md).
+- AutoEQ does parametric EQ corrections for headphones and anechoic measurements of speakers (Spinorama or CEA2034).
+- RoomEQ does room correction for stereo systems up to multi-channel systems and multi-subwoofer systems. It can generate IIR, FIR and hybrid filters and optimise for single or multiple positions.
 
-If you are a developer, please read below:
+**Note:** A graphical desktop application is available in a separate repository: [SotF](https://github.com/pierreaubert/sotf)
 
-## Install
+## Capabilities
 
-### Cargo
+### Supported Use Cases
 
-Install [rustup](https://rustup.rs/) first.
+- **Speaker EQ:** Optimize parametric EQ for loudspeakers using CEA2034/Spinorama measurements from [spinorama.org](https://spinorama.org)
+- **Headphone EQ:** Generate EQ corrections for headphones targeting Harman curves or custom targets
+- **Multi-Channel Systems:** Optimize stereo, 2.1, and multi-driver configurations with crossover management
+- **Room Correction:** Multi-subwoofer alignment and Double Bass Array (DBA) optimization
 
-If you already have cargo / rustup, you can jump to:
+### Optimization Algorithms
 
-```shell
+| Library | Algorithms | Constraint Support |
+|---------|------------|-------------------|
+| **Metaheuristics** | DE, PSO, RGA, TLBO, Firefly | Penalty-based |
+| **AutoEQ Custom** | Adaptive Differential Evolution | Nonlinear constraints |
+| **Pure-Rust** | COBYLA, ISRES, CMA-ES | Nonlinear/bound constraints |
+
+### Loss Functions
+
+- `speaker-flat`: Minimize deviation from target curve (near-field listening)
+- `speaker-score`: Maximize Harman/Olive preference score (far-field listening)
+- `headphone-flat`: Flatten headphone response to target
+- `headphone-score`: Optimize headphone preference score
+- `drivers-flat`: Multi-driver crossover optimization
+- `multi-sub-flat`: Multi-subwoofer array optimization
+
+### PEQ Filter Models
+
+- `pk`: All peak/bell filters (default)
+- `hp-pk`: Highpass + peak filters
+- `hp-pk-lp`: Highpass + peaks + lowpass
+- `ls-pk-hs`: Low shelf + peaks + high shelf
+- `free`: All filters can be any type
+
+---
+
+## AutoEQ CLI
+
+The `autoeq` binary optimizes EQ for individual speakers or headphones.
+
+### Basic Usage
+
+```bash
+# From spinorama.org API data
+cargo run --bin autoeq --release -- \
+  --speaker="JBL M2" --version eac --measurement CEA2034 \
+  --algo autoeq:cobyla -n 7
+
+# From local CSV file (format: frequency,spl)
+cargo run --bin autoeq --release -- \
+  --curve measurements.csv --target harman.csv \
+  --algo autoeq:de -n 5
+```
+
+### Finding Speakers and Measurements
+
+```bash
+# List all speakers
+curl http://api.spinorama.org/v1/speakers
+
+# Get versions for a speaker
+curl "http://api.spinorama.org/v1/speakers/JBL%20M2/versions"
+
+# Get measurements for a speaker/version
+curl "http://api.spinorama.org/v1/speakers/JBL%20M2/versions/eac/measurements"
+```
+
+### Key Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `-n, --num-filters` | 7 | Number of IIR filters |
+| `--algo` | autoeq:cobyla | Optimization algorithm |
+| `--loss` | speaker-flat | Loss function |
+| `--peq-model` | pk | Filter structure model |
+| `--min-freq` / `--max-freq` | 60 / 16000 | Frequency range for filters |
+| `--min-q` / `--max-q` | 1 / 3 | Q factor limits |
+| `--min-db` / `--max-db` | 1 / 3 | Gain limits (dB) |
+| `--maxeval` | 2000 | Maximum optimizer evaluations |
+| `--refine` | false | Run local refinement after global optimization |
+
+### Algorithm Selection
+
+```bash
+# List all available algorithms
+cargo run --bin autoeq --release -- --algo-list
+
+# Recommended: global search + local refinement
+cargo run --bin autoeq --release -- \
+  --algo autoeq:isres --refine --local-algo cobyla \
+  --speaker="KEF R3" --version asr --measurement CEA2034
+```
+
+### Differential Evolution Options
+
+When using `autoeq:de`, additional parameters control the optimizer:
+
+```bash
+# List available strategies
+cargo run --bin autoeq --release -- --strategy-list
+
+# Use adaptive strategy
+cargo run --bin autoeq --release -- \
+  --algo autoeq:de --strategy adaptivebin \
+  --adaptive-weight-f 0.8 --adaptive-weight-cr 0.7 \
+  --speaker="KEF R3" --version asr --measurement CEA2034
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--strategy` | currenttobest1bin | DE mutation strategy |
+| `--population` | 300 | Population size |
+| `--tolerance` | 0.001 | Relative convergence tolerance |
+| `--atolerance` | 0.0001 | Absolute convergence tolerance |
+| `--recombination` | 0.9 | Crossover probability |
+| `--seed` | random | Random seed for reproducibility |
+
+### Headphone Example
+
+```bash
+cargo run --bin autoeq --release -- \
+  --curve headphone_measurement.csv \
+  --target harman-over-ear-2018.csv \
+  --loss headphone-score \
+  --algo mh:rga -n 5 --maxeval 20000 \
+  --min-freq 20 --max-freq 10000 --peq-model hp-pk-lp
+```
+
+---
+
+## RoomEQ CLI
+
+The `roomeq` binary optimizes multi-channel speaker systems with JSON configuration.
+
+### Basic Usage
+
+```bash
+cargo run --bin roomeq --release -- --config room_config.json --output dsp_chain.json
+```
+
+### Features (v2)
+
+- **Processing Modes:**
+  - `low_latency` (Mode A): IIR-only filters (< 5ms latency)
+  - `phase_linear` (Mode B): FIR filters for linear phase
+  - `hybrid` (Mode C): IIR for bass, FIR for mids/highs (best balance)
+- **Bass Management:** Unified configuration for Single Sub, Multi-Sub (MSO), and Double Bass Array (DBA) strategies.
+- **Advanced Calibration:**
+  - **Group Delay Optimization (GD-Opt):** Aligns subwoofer phase slope to mains.
+  - **Voice of God (VoG):** Timbre matches satellite channels to a reference.
+- **Multi-Driver Speakers:** Active crossover optimization with polarity inversion testing.
+
+### Configuration File Format (v2)
+
+**2.1 System with Bass Management (Hybrid Mode):**
+
+```json
+{
+  "version": "1.2.0",
+  "system": {
+    "model": "stereo",
+    "speakers": {
+      "L": "left", "R": "right", "LFE": "sub"
+    },
+    "subwoofers": {
+      "config": "single",
+      "crossover": "bass_xo",
+      "sub": "L"
+    }
+  },
+  "crossovers": {
+    "bass_xo": {
+      "type": "LR24",
+      "frequency": 80.0
+    }
+  },
+  "speakers": {
+    "left": { "path": "measurements/left.csv" },
+    "right": { "path": "measurements/right.csv" },
+    "sub": { "path": "measurements/subwoofer.csv" }
+  },
+  "optimizer": {
+    "processing_mode": "hybrid",
+    "loss_type": "flat",
+    "algorithm": "autoeq:de",
+    "num_filters": 10,
+    "min_q": 0.5, "max_q": 10.0,
+    "min_db": -12.0, "max_db": 12.0,
+    "min_freq": 20.0, "max_freq": 20000.0,
+    "max_iter": 10000
+  }
+}
+```
+
+**Double Bass Array (DBA):**
+
+```json
+{
+  "version": "1.2.0",
+  "system": {
+    "model": "stereo",
+    "speakers": { "L": "l", "R": "r", "LFE": "dba" },
+    "subwoofers": {
+      "config": "dba",
+      "crossover": "dba_xo"
+    }
+  },
+  "crossovers": {
+    "dba_xo": { "type": "LR24", "frequency": 100.0 }
+  },
+  "speakers": {
+    "l": { "path": "left.csv" },
+    "r": { "path": "right.csv" },
+    "dba": {
+      "name": "DBA",
+      "front": [ { "path": "front_sub1.csv" }, { "path": "front_sub2.csv" } ],
+      "rear": [ { "path": "rear_sub1.csv" }, { "path": "rear_sub2.csv" } ]
+    }
+  },
+  "optimizer": {
+    "processing_mode": "low_latency"
+  }
+}
+```
+
+### Output Schema
+
+```bash
+cargo run --bin roomeq --release -- --schema
+```
+
+---
+
+## Development
+
+### Prerequisites
+
+Install [rustup](https://rustup.rs/) and [just](https://github.com/casey/just):
+
+```bash
 cargo install just
-export AUTOEQ_DIR=`pwd`
-just
 ```
 
-Select the correct install just command for your platform:
-```shell
-just install-...
+### Build Commands
+
+```bash
+just                  # List available commands
+just prod             # Build all release binaries
+just prod-autoeq      # Build autoeq only
+just prod-roomeq      # Build roomeq only
+just dev              # Build debug binaries
 ```
 
-You can build or test with a simple:
-```shell
-just build
+### Testing
+
+```bash
+# Check all targets
+cargo check --lib --bins --tests --examples
+
+# Run all tests
 just test
-just qa
+
+# Run tests with nextest (faster)
+just ntest
+
+# Run specific test
+cargo test --lib test_name
+
+# Run tests for the autoeq package
+cargo test -p autoeq --lib
 ```
 
-and you are set up. See this [README](autoeq/README.md) for instructions on how to use it.
+### Fuzzing
 
-## Toolkit
+Fuzz targets are in `fuzz/fuzz_targets/` (if present):
 
-### autoeq-cea2034
+- `autoeq_config.rs`: Fuzzes configuration/CSV parsing
+- `autoeq_csv.rs`: Fuzzes CSV input handling
 
-A implementation of CEA2034 aka [Spinorama](https://spinorama.org): a set of metrics and curves that describe a loudspeaker performance.
+To run fuzzing (requires nightly Rust and cargo-fuzz):
 
-Status: mature.
+```bash
+cargo install cargo-fuzz
+cargo +nightly fuzz run autoeq_csv
+```
 
-### autoeq
+### Quality Assurance
 
-A [CLI, see README](autoeq/README.md) to optimise the response of your headset or headphone.
+The QA suite runs optimization scenarios with regression thresholds:
 
-Status: good up to very good depending what you optimise for.
+```bash
+just qa-autoeq
+just qa-roomeq
+```
 
-### autoeq-roomsim
+This executes predefined scenarios testing:
 
-A room simulator to help you to understand the response of your speakers on your room. [Available online](https://roomsim.spinorama.org) try it out!
+- Speaker optimization (flat and score loss)
+- Headphone optimization (multiple algorithms)
+- Various PEQ models and algorithm combinations
 
-Status: getting good.
+Each scenario has a `--qa <threshold>` flag that fails if the final loss exceeds the threshold.
 
-### autoeq-env
+Individual QA targets:
 
-A small set of functions and constants used by the other crates but you are unlikely to be interested.
+```bash
+just qa-ascilab-6b           # Speaker with score loss
+just qa-jbl-m2-flat          # Speaker with flat loss
+just qa-jbl-m2-score         # Speaker with score loss
+just qa-beyerdynamic-dt1990pro  # Headphone tests
+just qa-edifierw830nb        # Multiple algorithm comparison
+```
 
+### Benchmarking
+
+```bash
+# Download speaker data from spinorama.org
+just download-speakers
+
+# Run algorithm benchmarks
+just bench-autoeq-speaker
+```
+
+### Code Quality
+
+```bash
+just fmt              # Format code
+just lint             # Run clippy with warnings as errors
+cargo check --lib --bins --tests --examples
+cargo clippy --all -- -D warnings
+```
+
+---
+
+## Contributing
+
+- Open an issue on [GitHub](https://github.com/pierreaubert/autoeq)
+- Send a PR

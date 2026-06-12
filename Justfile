@@ -1,68 +1,104 @@
 # --------------------------------------------------------- -*- just -*-
 # How to install Just?
-#	  cargo install just
+#     cargo install just
 # ----------------------------------------------------------------------
 
-default:
+_default:
 	just --list
 
 # ----------------------------------------------------------------------
-# Downloads
+# BUILD
 # ----------------------------------------------------------------------
 
-download:
-	cargo run --bin autoeq-download-speakers --release
+# Build all release binaries.
+[group('build')]
+prod: prod-autoeq prod-roomeq
+
+[group('build')]
+prod-autoeq:
+	cargo build --release --bin autoeq
+	cargo build --release --bin benchmark-autoeq-speaker
+	cargo build --release --bin autoeq-download-speakers
+
+[group('build')]
+prod-roomeq:
+	cargo build --release --bin roomeq
+	cargo build --release --bin roomeq-qa-quality
+	cargo build --release --bin roomeq-qa-coverage
+	cargo build --release --bin roomeq-qa-features
+	cargo build --release --bin roomeq-qa-synthetic
+	cargo build --release --bin convert-recording
+
+[group('build')]
+dev:
+	cargo build --bins
 
 # ----------------------------------------------------------------------
 # TEST
 # ----------------------------------------------------------------------
 
+[group('test')]
+check:
+	cargo check --lib --bins --tests --examples
+
+[group('test')]
 test:
-	cargo check --workspace --all-targets
-	cargo test --workspace --lib
+	cargo test --lib --bins --tests --examples
 
+# Memory-capped integration test runner for autoeq.
+#
+# The BEM multimode tests spin up one optimizer per test × `cargo test`'s
+# worker count. Each optimizer internally forks rayon evaluators over all
+# cores, so the effective thread count is num_cpus × num_cpus. On small-
+# RAM boxes this OOMs. Cap via `RUST_TEST_THREADS` (default = 2 so BEM
+# tests still interleave but memory stays bounded). Override with
+# `just test-autoeq threads=N`.
+[group('test')]
+test-autoeq threads="2":
+	RUST_TEST_THREADS={{threads}} cargo test --tests --release
+
+[group('test')]
 ntest:
-	cargo nextest run --release --no-fail-fast --workspace --lib
+	cargo nextest run --release --no-fail-fast --lib --bins --examples
 
 # ----------------------------------------------------------------------
-# FORMAT
+# LINT / FORMAT
 # ----------------------------------------------------------------------
+
+[group('lint')]
+lint:
+	cargo clippy --all -- -D warnings
 
 alias format := fmt
 
+[group('lint')]
 fmt:
 	cargo fmt --all
 
 # ----------------------------------------------------------------------
-# PROD
+# DIST — release-cut profile (fat LTO + codegen-units = 1)
 # ----------------------------------------------------------------------
+# Artifacts land in `target/dist/` (NOT `target/release/`). Compile time is
+# noticeably longer than `prod-*`; only run these for actual release cuts.
 
-alias build := prod
+# Top-level umbrella — builds all shipping binaries, including the plot bins.
+[group('dist')]
+dist: dist-autoeq dist-roomeq dist-plot-bins
 
-prod: prod-autoeq prod-roomeq
-	cargo build --release --workspace
-	cargo build --release --bin benchmark-autoeq-speaker
-	cargo build --release --bin roomeq-fuzzer
+[group('dist')]
+dist-autoeq:
+	cargo build --profile dist --bin autoeq
+	cargo build --profile dist --bin benchmark-autoeq-speaker
+	cargo build --profile dist --bin autoeq-download-speakers
 
-prod-autoeq:
-	cargo build --release --bin autoeq
+[group('dist')]
+dist-roomeq:
+	cargo build --profile dist --bin roomeq
 
-prod-roomeq:
-	cargo build --release --bin roomeq
-
-# ----------------------------------------------------------------------
-# BENCH
-# ----------------------------------------------------------------------
-
-bench: bench-convergence bench-autoeq-speaker
-
-bench-convergence:
-	cargo run --release --bin benchmark-convergence
-
-bench-autoeq-speaker:
-	# either jobs=1 or --no-parallel ; or a mix if you have a lot of
-	# CPU cores
-	cargo run --release --bin benchmark-autoeq-speaker -- --qa --jobs 1
+# Plotly-gated bins (skipped by `--workspace` because of required-features).
+[group('dist')]
+dist-plot-bins:
+	cargo build --profile dist --bin roomeq-fuzzer --features plotly
 
 # ----------------------------------------------------------------------
 # CLEAN
@@ -71,218 +107,416 @@ bench-autoeq-speaker:
 clean:
 	cargo clean
 	find . -name '*~' -exec rm {} \; -print
-	find . -name 'Cargo.lock' -exec rm {} \; -print
-
 
 # ----------------------------------------------------------------------
-# DEV
+# DOWNLOAD
 # ----------------------------------------------------------------------
 
-dev:
-	cargo build --workspace
-	cargo build --bin autoeq
-	cargo build --bin plot-functions
-	cargo build --bin download
-	cargo build --bin benchmark-convergence
-	cargo build --bin benchmark-autoeq-speaker
+[group('download')]
+download-speakers:
+	cargo run --bin autoeq-download-speakers --release
 
 # ----------------------------------------------------------------------
-# UPDATE
+# BENCH
 # ----------------------------------------------------------------------
 
-update: update-rust update-pre-commit
+[group('bench')]
+bench-autoeq: bench-autoeq-speaker
 
-update-rust:
-	rustup update
-	cargo update
+[group('bench')]
+bench-autoeq-speaker:
+	# either jobs=1 or --no-parallel ; or a mix if you have a lot of
+	# CPU cores
+	cargo run --release --bin benchmark-autoeq-speaker -- --qa --jobs 1
 
-update-pre-commit:
-	pre-commit autoupdate
-
-# ----------------------------------------------------------------------
-# DEMO
-# ----------------------------------------------------------------------
-
-demo: demo-headphone-loss
-
-demo-headphone-loss:
-	cargo run --release --example headphone_loss_demo -- \
-	--spl "./data_tests/headphones/asr/bowerwilkins_p7/Bowers & Wilkins P7.csv" \
-	--target "./data_tests/targets/harman-over-ear-2018.csv"
+# The `benchmark-convergence` binary lives in the `math-optimisation` crate
+# (github.com/pierreaubert/math-audio). Clone that repository to run it.
+[group('bench')]
+bench-convergence:
+	@echo "Run from the math-audio repository:"
+	@echo "  cargo run --release --bin benchmark-convergence"
 
 # ----------------------------------------------------------------------
 # EXAMPLES
 # ----------------------------------------------------------------------
 
-examples:
+[group('examples')]
+examples-autoeq:
 	cargo run --release --example headphone_loss_validation
 
 # ----------------------------------------------------------------------
-# Install rustup
+# PUBLISH
 # ----------------------------------------------------------------------
 
-install-rustup:
-	curl https://sh.rustup.rs -sSf > ./scripts/install-rustup
-	chmod +x ./scripts/install-rustup
-	./scripts/install-rustup -y
-	~/.cargo/bin/rustup default stable
-	~/.cargo/bin/cargo install just
-	~/.cargo/bin/cargo install cargo-wizard
-	~/.cargo/bin/cargo install cargo-llvm-cov
-	~/.cargo/bin/cargo install cargo-bininstall
-	~/.cargo/bin/cargo binstall cargo-nextest --secure
+[group('publish')]
+publish-autoeq:
+	cargo publish
 
 # ----------------------------------------------------------------------
-# Install macos
+# DEMO
 # ----------------------------------------------------------------------
 
-install-macos-brew:
-	curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh > ./scripts/install-brew
-	chmod +x ./scripts/install-brew
-	NONINTERACTIVE=1 ./scripts/install-brew
-
-install-macos: install-macos-brew install-rustup
-	# need xcode
-	xcode-select --install
-	# need metal
-	xcodebuild -downloadComponent MetalToolchain
-	# chromedriver sheanigans
-	brew install chromedriver
-	xattr -d com.apple.quarantine $(which chromedriver)
-	# optimisation library
-	brew install nlopt cmake netcdf opencv
-
+[group('demo')]
+demo-headphone-loss:
+	cargo run --release --example headphone_loss_demo --features="plotly" -- \
+	--spl "./data_tests/headphones/asr/bowerwilkins_p7/Bowers & Wilkins P7.csv" \
+	--target "./data_tests/targets/harman-over-ear-2018.csv"
 
 # ----------------------------------------------------------------------
-# Install linux
+# QA AUTOEQ
 # ----------------------------------------------------------------------
 
-install-linux-root:
-	sudo apt update && sudo apt -y install \
-	   perl curl build-essential gcc g++ pkg-config cmake ninja-build gfortran \
-	   libssl-dev \
-	   ca-certificates \
-	   patchelf libopenblas-dev gfortran \
-	   chromium-browser chromium-chromedriver
-
-install-linux: install-linux-root install-rustup
-
-install-ubuntu-common:
-		sudo apt install -y \
-			 curl \
-			 build-essential gcc g++ \
-			 pkg-config \
-			 libssl-dev \
-			 ca-certificates \
-			 cmake \
-			 ninja-build \
-			 perl
-
-install-ubuntu-x86-driver :
-		sudo apt install -y \
-			 chromium-browser \
-			 chromium-chromedriver
-
-install-ubuntu-arm64-driver :
-		sudo apt install -y firefox
-		# where is the geckodriver ?
-
-install-ubuntu-x86: install-ubuntu-common install-ubuntu-x86-driver
-
-install-ubuntu-arm64: install-ubuntu-common install-ubuntu-arm64-driver
-
-
-# ----------------------------------------------------------------------
-# publish
-# ----------------------------------------------------------------------
-
-publish:
-	cd autoeq-cea2034 && cargo publish
-	cd autoeq && cargo publish
-	cd autoeq-roomsim && cargo publish
-
-# ----------------------------------------------------------------------
-# QA
-# ----------------------------------------------------------------------
-
-qa: prod-autoeq \
+[group('qa-autoeq')]
+qa-autoeq: prod-autoeq \
 	qa-ascilab-6b \
 	qa-jbl-m2-flat qa-jbl-m2-score \
 	qa-beyerdynamic-dt1990pro \
 	qa-edifierw830nb
 
+[group('qa-autoeq')]
 qa-ascilab-6b:
 	./target/release/autoeq --speaker="AsciLab F6B" --version asr --measurement CEA2034 \
 	--algo autoeq:de --loss speaker-score -n 7 --min-freq=30 --max-q=6 \
-	--qa 0.5
+	--maxeval 100000 --qa 0.5
 
+[group('qa-autoeq')]
 qa-jbl-m2-flat:
 	./target/release/autoeq --speaker="JBL M2" --version eac --measurement CEA2034 \
 	--algo autoeq:de --loss speaker-flat -n 7 --min-freq=20 --max-q=6 --peq-model hp-pk \
-	--qa 0.5
+	--maxeval 100000 --qa 0.5
 
+[group('qa-autoeq')]
 qa-jbl-m2-score:
 	./target/release/autoeq --speaker="JBL M2" --version eac --measurement CEA2034 \
 	--algo autoeq:de --loss speaker-score -n 7 --min-freq=20 --max-q=6 --peq-model hp-pk \
-	--qa 0.5
+	--maxeval 100000 --qa 0.5
 
+[group('qa-autoeq')]
 qa-beyerdynamic-dt1990pro: qa-beyerdynamic-dt1990pro-flat qa-beyerdynamic-dt1990pro-score	qa-beyerdynamic-dt1990pro-score2
 
+[group('qa-autoeq')]
 qa-beyerdynamic-dt1990pro-score:
 	./target/release/autoeq -n 5 \
 	--curve ./data_tests/headphones/asr/beyerdynamic_dt1990pro/Beyerdynamic\ DT1990\ Pro\ Headphone\ Frequency\ Response\ Measurement.csv \
 	--target ./data_tests/targets/harman-over-ear-2018.csv --loss headphone-score  \
-	--qa 3.0
+	--maxeval 100000 --qa 3.0
 
+[group('qa-autoeq')]
 qa-beyerdynamic-dt1990pro-score2:
 	./target/release/autoeq -n 7 \
 	--curve ./data_tests/headphones/asr/beyerdynamic_dt1990pro/Beyerdynamic\ DT1990\ Pro\ Headphone\ Frequency\ Response\ Measurement.csv \
 	--target ./data_tests/targets/harman-over-ear-2018.csv \
-	--loss headphone-score	--max-db 6 --max-q 6 --algo mh:rga --maxeval 20000 --min-freq=20 --max-freq 10000 --peq-model hp-pk-lp --min-q 0.6 --min-db 0.25 \
+	--loss headphone-score	--max-db 6 --max-q 6 --algo mh:rga --maxeval 100000 --min-freq=20 --max-freq 10000 --peq-model hp-pk-lp --min-q 0.6 --min-db 0.25 \
 	--qa 1.5
 
+[group('qa-autoeq')]
 qa-beyerdynamic-dt1990pro-flat:
 	./target/release/autoeq -n 5 \
 	--curve ./data_tests/headphones/asr/beyerdynamic_dt1990pro/Beyerdynamic\ DT1990\ Pro\ Headphone\ Frequency\ Response\ Measurement.csv \
 	--target ./data_tests/targets/harman-over-ear-2018.csv \
-	--loss headphone-flat  --max-db 6 --max-q 6 --maxeval 20000 --algo mh:pso --min-freq=20 --max-freq 10000 --peq-model pk \
+	--loss headphone-flat  --max-db 6 --max-q 6 --maxeval 100000 --algo mh:pso --min-freq=20 --max-freq 10000 --peq-model pk \
 	--qa 0.5
 
+[group('qa-autoeq')]
 qa-edifierw830nb: qa-edifierw830nb-autoeqde qa-edifierw830nb-mhrga qa-edifierw830nb-mhfirefly
 
+[group('qa-autoeq')]
 qa-edifierw830nb-autoeqde:
 	./target/release/autoeq -n 9 \
 	--curve data_tests/headphones/asr/edifierw830nb/Edifier\ W830NB.csv \
 	--target ./data_tests/targets/harman-over-ear-2018.csv \
 	--min-freq 50 --max-freq 16000 --max-q 8 --max-db 8 \
-	--loss headphone-score --min-spacing-oct 0.08 \
-	--algo autoeq:de --population 70 --maxeval 8000 --seed 42 \
-	--qa 14.0
+	--loss headphone-score \
+	--min-spacing-oct 0.08 \
+	--algo autoeq:de --population 70 --maxeval 80000 --seed 42 \
+	--qa 6.0
 
+[group('qa-autoeq')]
 qa-edifierw830nb-mhrga:
 	./target/release/autoeq -n 5 \
 	--curve data_tests/headphones/asr/edifierw830nb/Edifier\ W830NB.csv \
 	--target ./data_tests/targets/harman-over-ear-2018.csv \
 	--min-freq 50 --max-freq 16000 --max-q 8 --max-db 8 \
 	--loss headphone-score \
-	--min-spacing-oct 0.04 --atolerance 0.00000001 --tolerance 0.0000001 --algo mh:rga --population 100 --maxeval 30000 \
+	--min-spacing-oct 0.04 --atolerance 0.00000001 --tolerance 0.0000001 --algo mh:rga --population 100 --maxeval 80000 \
 	--qa 2.5
 
+[group('qa-autoeq')]
 qa-edifierw830nb-mhfirefly:
 	./target/release/autoeq -n 5 \
 	--curve data_tests/headphones/asr/edifierw830nb/Edifier\ W830NB.csv \
 	--target ./data_tests/targets/harman-over-ear-2018.csv \
 	--min-freq 50 --max-freq 16000 --max-q 8 --max-db 8 \
 	--loss headphone-score \
-	--min-spacing-oct 0.04 --atolerance 0.00000001 --tolerance 0.000000001 --algo mh:rga --population 80 --maxeval 30000 \
+	--min-spacing-oct 0.04 --atolerance 0.00000001 --tolerance 0.000000001 --algo mh:rga --population 80 --maxeval 80000 \
 	--qa 2.5
 
 # ----------------------------------------------------------------------
-# POST
+# QA ROOMEQ
 # ----------------------------------------------------------------------
 
-post-install:
-	$HOME/.cargo/bin/rustup default stable
-	$HOME/.cargo/bin/cargo install just
-	$HOME/.cargo/bin/cargo check
+# Ensure Python venv exists and has dependencies installed
+[group('setup')]
+ensure-venv:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	if [ ! -f ./venv/bin/python3 ]; then
+		echo "Creating Python venv..."
+		python3 -m venv ./venv
+	fi
+	if ! ./venv/bin/python3 -c "import plotly" 2>/dev/null; then
+		echo "Installing Python dependencies..."
+		./venv/bin/pip install -r ./scripts/requirements.txt
+	fi
 
+[group('qa-roomeq')]
+qa-roomeq: qa-roomeq-small-stereo-20 \
+	qa-roomeq-small-stereo-21 \
+	qa-roomeq-small-stereo-22 \
+	qa-roomeq-convergence \
+	qa-roomeq-coverage \
+	qa-roomeq-synthetic \
+	qa-roomeq-gd \
+	qa-roomeq-features
+
+# Memory-capped convergence run. The `--jobs` default in
+# `roomeq-qa-quality` is `num_cpus/2` so each outer test case still gets
+# parallel DE evaluators without OOM'ing the machine when 70+ cases are
+# scheduled. Override with `just qa-roomeq-convergence jobs=N` or run the
+# binary directly.
+[group('qa-roomeq')]
+qa-roomeq-convergence jobs="":
+	#!/usr/bin/env bash
+	set -euo pipefail
+	if [ -n "{{jobs}}" ]; then
+	  cargo run --bin roomeq-qa-quality --release -- --jobs {{jobs}}
+	else
+	  cargo run --bin roomeq-qa-quality --release
+	fi
+
+[group('qa-roomeq')]
+qa-roomeq-small-stereo-20: ensure-venv
+	@for method in iir fir mixed; do \
+	  for algo in fem; do \
+	      mkdir -p ./data_generated/roomeq/generated/$algo/small_stereo_2_0; \
+	      cargo run --bin roomeq --release -- \
+	        --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_0/config.json \
+		    --override-config ./data_tests/roomeq/generate/optimiser-config/small_stereo_2_0/optimiser-$method.json \
+		    --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_0/dsp_$method.json; \
+		  ./venv/bin/python3 ./scripts/display-roomeq.py \
+		                   ./data_generated/roomeq/generated/$algo/small_stereo_2_0/dsp_$method.json; \
+	  done \
+	done
+
+
+[group('qa-roomeq')]
+qa-roomeq-small-stereo-21: ensure-venv
+	@for method in iir fir mixed; do \
+	  for algo in fem; do \
+	    mkdir -p ./data_generated/roomeq/generated/$algo/small_stereo_2_1; \
+	    cargo run --bin roomeq --release -- \
+	        --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_1/config.json \
+		    --override-config ./data_tests/roomeq/generate/optimiser-config/small_stereo_2_1/optimiser-$method.json \
+		    --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_1/dsp_$method.json; \
+		./venv/bin/python3 ./scripts/display-roomeq.py \
+		                   ./data_generated/roomeq/generated/$algo/small_stereo_2_1/dsp_$method.json; \
+	  done \
+	done
+
+
+[group('qa-roomeq')]
+qa-roomeq-small-stereo-22: ensure-venv
+	@for method in iir fir mixed; do \
+	  for algo in fem; do \
+	    mkdir -p ./data_generated/roomeq/generated/$algo/small_stereo_2_2; \
+	    cargo run --bin roomeq --release -- \
+	        --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_2/config.json \
+		    --override-config ./data_tests/roomeq/generate/optimiser-config/small_stereo_2_2/optimiser-$method.json \
+		    --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_2/dsp_$method.json; \
+		./venv/bin/python3 ./scripts/display-roomeq.py \
+		                   ./data_generated/roomeq/generated/$algo/small_stereo_2_2/dsp_$method.json; \
+	  done \
+	done
+
+[group('qa-roomeq')]
+qa-roomeq-small-stereo-51: ensure-venv
+	@for method in iir fir mixed; do \
+	  for algo in fem; do \
+	    mkdir -p ./data_generated/roomeq/generated/$algo/medium_surround_5_1; \
+	    cargo run --bin roomeq --release -- \
+	        --config       ./data_tests/roomeq/generate/$algo/medium_surround_5_1/config.json \
+		    --override-config ./data_tests/roomeq/generate/optimiser-config/medium_surround_5_1/optimiser-$method.json \
+		    --output       ./data_generated/roomeq/generated/$algo/medium_surround_5_1/dsp_$method.json; \
+		./venv/bin/python3 ./scripts/display-roomeq.py \
+		                   ./data_generated/roomeq/generated/$algo/medium_surround_5_1/dsp_$method.json; \
+	  done \
+	done
+
+# ----------------------------------------------------------------------
+# QA ROOMEQ — Multi-Measurement (5 listening positions per speaker)
+# Tests the multi-objective optimization across all strategies.
+# Requires data generated with 5 LPs (run `just generate-roomeq-data` first).
+# ----------------------------------------------------------------------
+
+[group('qa-roomeq-multi')]
+qa-roomeq-multi-measurement: \
+	qa-roomeq-multi-small-stereo-20 \
+	qa-roomeq-multi-small-stereo-21 \
+	qa-roomeq-multi-small-stereo-22-mso
+
+[group('qa-roomeq-multi')]
+qa-roomeq-multi-small-stereo-20: ensure-venv
+	@for strategy in minimax weighted_sum variance_penalized; do \
+	  for algo in fem; do \
+	    mkdir -p ./data_generated/roomeq/generated/$algo/small_stereo_2_0; \
+	    echo "=== Multi-measurement $strategy ($algo) small_stereo_2_0 ==="; \
+	    cargo run --bin roomeq --release -- \
+	      --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_0/config.json \
+	      --override-config ./data_tests/roomeq/generate/optimiser-config/multi_measurement/$strategy.json \
+	      --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_0/dsp_iir_multi_$strategy.json; \
+	    ./venv/bin/python3 ./scripts/display-roomeq.py \
+	                     ./data_generated/roomeq/generated/$algo/small_stereo_2_0/dsp_iir_multi_$strategy.json; \
+	  done \
+	done
+
+[group('qa-roomeq-multi')]
+qa-roomeq-multi-small-stereo-21: ensure-venv
+	@for strategy in minimax weighted_sum variance_penalized; do \
+	  for algo in fem; do \
+	    mkdir -p ./data_generated/roomeq/generated/$algo/small_stereo_2_1; \
+	    echo "=== Multi-measurement $strategy ($algo) small_stereo_2_1 ==="; \
+	    cargo run --bin roomeq --release -- \
+	      --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_1/config.json \
+	      --override-config ./data_tests/roomeq/generate/optimiser-config/multi_measurement/$strategy.json \
+	      --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_1/dsp_iir_multi_$strategy.json; \
+	    ./venv/bin/python3 ./scripts/display-roomeq.py \
+	                     ./data_generated/roomeq/generated/$algo/small_stereo_2_1/dsp_iir_multi_$strategy.json; \
+	  done \
+	done
+
+[group('qa-roomeq-multi')]
+qa-roomeq-multi-small-stereo-22-mso: ensure-venv
+	@for strategy in minimax weighted_sum variance_penalized; do \
+	  for algo in fem; do \
+	    mkdir -p ./data_generated/roomeq/generated/$algo/small_stereo_2_2_mso; \
+	    echo "=== Multi-measurement $strategy ($algo) small_stereo_2_2_mso ==="; \
+	    cargo run --bin roomeq --release -- \
+	      --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_2_mso/config.json \
+	      --override-config ./data_tests/roomeq/generate/optimiser-config/multi_measurement/$strategy.json \
+	      --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_2_mso/dsp_iir_multi_$strategy.json; \
+	    ./venv/bin/python3 ./scripts/display-roomeq.py \
+	                     ./data_generated/roomeq/generated/$algo/small_stereo_2_2_mso/dsp_iir_multi_$strategy.json; \
+	  done \
+	done
+
+# New comprehensive QA using roomeq-qa-full binary
+[group('qa-roomeq')]
+qa-roomeq-coverage: prod-autoeq
+	cargo run --bin roomeq-qa-coverage --release
+
+[group('qa-roomeq')]
+qa-roomeq-quick: prod-autoeq
+	cargo run --bin roomeq-qa-coverage --release -- --quick --maxeval 200
+
+[group('qa-roomeq')]
+qa-roomeq-list:
+	cargo run --bin roomeq-qa-coverage --release -- --list
+
+[group('qa-roomeq')]
+qa-roomeq-matrix:
+	cargo run --bin roomeq-qa-coverage --release -- --matrix
+
+[group('qa-roomeq')]
+qa-roomeq-synthetic:
+	cargo run --bin roomeq-qa-synthetic --no-default-features --release
+
+[group('qa-roomeq')]
+qa-roomeq-multiseat-guards:
+	cargo run --bin roomeq-qa-synthetic --no-default-features --release -- --multiseat-guards-only
+
+[group('qa-roomeq')]
+qa-roomeq-home-cinema:
+	cargo test -p autoeq home_cinema --lib -- --nocapture
+	cargo test -p autoeq validate_bass_management --lib -- --nocapture
+	cargo test -p autoeq derives_all_channel_multiseat_primary_weights --lib -- --nocapture
+	cargo test -p autoeq skips_all_channel_multiseat_on_grid_mismatch --lib -- --nocapture
+	cargo test -p autoeq skips_all_channel_multiseat_on_invalid_weight_policy --lib -- --nocapture
+	cargo test -p autoeq reports_grid_mismatch_as_channel_skip --lib -- --nocapture
+	cargo test -p autoeq skips_all_channel_multiseat_when_primary_seat_is_invalid --lib -- --nocapture
+	cargo test -p autoeq rejects_all_channel_multiseat_when_constraints_fail --lib -- --nocapture
+	cargo test -p autoeq rejects_all_channel_multiseat_when_broadband_level_collapses --lib -- --nocapture
+	cargo test -p autoeq reports_guardrail_rejection_without_claiming_applied --lib -- --nocapture
+	cargo test -p autoeq home_cinema_all_channel_multiseat_guardrail_reruns_and_reports_rejection --lib -- --nocapture
+	cargo test -p autoeq reports_all_channel_multiseat_null_guard --lib -- --nocapture
+	cargo test -p autoeq reports_all_channel_multiseat_by_role_group_and_excludes_subs --lib -- --nocapture
+
+[group('qa-roomeq')]
+qa-roomeq-all-channel-multiseat:
+	cargo test -p autoeq derives_all_channel_multiseat_primary_weights --lib -- --nocapture
+	cargo test -p autoeq skips_all_channel_multiseat_on_grid_mismatch --lib -- --nocapture
+	cargo test -p autoeq skips_all_channel_multiseat_on_invalid_weight_policy --lib -- --nocapture
+	cargo test -p autoeq reports_grid_mismatch_as_channel_skip --lib -- --nocapture
+	cargo test -p autoeq skips_all_channel_multiseat_when_primary_seat_is_invalid --lib -- --nocapture
+	cargo test -p autoeq rejects_all_channel_multiseat_when_constraints_fail --lib -- --nocapture
+	cargo test -p autoeq rejects_all_channel_multiseat_when_broadband_level_collapses --lib -- --nocapture
+	cargo test -p autoeq reports_guardrail_rejection_without_claiming_applied --lib -- --nocapture
+	cargo test -p autoeq home_cinema_all_channel_multiseat_guardrail_reruns_and_reports_rejection --lib -- --nocapture
+	cargo test -p autoeq reports_all_channel_multiseat_null_guard --lib -- --nocapture
+	cargo test -p autoeq reports_all_channel_multiseat_by_role_group_and_excludes_subs --lib -- --nocapture
+
+[group('qa-roomeq')]
+qa-roomeq-bass-management:
+	cargo test -p autoeq home_cinema_bass_management --lib -- --nocapture
+	cargo test -p autoeq bass_headroom_uses_supplied_sample_rate_for_crossover_response --lib -- --nocapture
+	cargo test -p autoeq home_cinema_bass_management_sub_curve_is_predicted_from_routes --lib -- --nocapture
+	cargo test -p autoeq home_cinema_bass_bus_curve_is_predicted_across_multiple_sub_outputs --lib -- --nocapture
+	cargo test -p autoeq representative_bass_route_signature_uses_emitted_route_shape --lib -- --nocapture
+	cargo test -p autoeq home_cinema_bass_management_workflow_applies_configured_group_crossovers_when_optimization_disabled --lib -- --nocapture
+	cargo test -p autoeq validate_bass_management --lib -- --nocapture
+
+[group('qa-roomeq')]
+qa-roomeq-dsp-consistency:
+	cargo test -p autoeq reported_ --lib -- --nocapture
+	cargo test -p autoeq timing_diagnostics --lib -- --nocapture
+
+[group('qa-roomeq')]
+qa-roomeq-phase-critical:
+	cargo test -p autoeq gd_opt -- --nocapture
+	cargo test -p autoeq phase_linear_gd_target --lib -- --nocapture
+	cargo test -p autoeq frequency_grid --lib -- --nocapture
+	cargo run --bin roomeq-qa-synthetic --no-default-features --release -- --multiseat-guards-only
+
+[group('qa-roomeq')]
+qa-roomeq-perceptual:
+	cargo test -p autoeq perceptual_metrics --lib -- --nocapture
+	cargo test -p autoeq rejects_all_channel_multiseat_when_constraints_fail --lib -- --nocapture
+	cargo test -p autoeq rejects_all_channel_multiseat_when_broadband_level_collapses --lib -- --nocapture
+	cargo test -p autoeq reports_guardrail_rejection_without_claiming_applied --lib -- --nocapture
+	cargo test -p autoeq home_cinema_all_channel_multiseat_guardrail_reruns_and_reports_rejection --lib -- --nocapture
+	cargo test -p autoeq reports_all_channel_multiseat_null_guard --lib -- --nocapture
+
+[group('qa-roomeq')]
+qa-roomeq-gd:
+	cargo test -p autoeq gd_opt -- --nocapture
+	cargo test -p autoeq phase_linear_gd_target --lib -- --nocapture
+
+[group('qa-roomeq')]
+qa-roomeq-features:
+	cargo run --bin roomeq-qa-features --no-default-features --release
+
+# Compact CI-friendly QA run: bounded fuzzer + small coverage subset.
+# Typical wall time under 3 minutes on modern hardware.
+[group('qa-roomeq')]
+qa-roomeq-ci:
+	cargo run --bin roomeq-fuzzer --release  --features="plotly" -- -n 50
+	cargo run --bin roomeq-qa-coverage --release -- --quick --maxeval 200
+	cargo test -p autoeq reported_ --lib -- --nocapture
+	cargo test -p autoeq timing_diagnostics --lib -- --nocapture
+	cargo test -p autoeq gd_opt -- --nocapture
+	cargo test -p autoeq phase_linear_gd_target --lib -- --nocapture
+	cargo test -p autoeq frequency_grid --lib -- --nocapture
+	cargo run --bin roomeq-qa-synthetic --no-default-features --release -- --multiseat-guards-only
+	cargo test -p autoeq home_cinema --lib -- --nocapture
+	cargo test -p autoeq home_cinema_bass_management --lib -- --nocapture
+	cargo test -p autoeq validate_bass_management --lib -- --nocapture
+	cargo test -p autoeq perceptual_metrics --lib -- --nocapture

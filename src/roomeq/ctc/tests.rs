@@ -246,8 +246,8 @@ fn synthetic_measured_ctc_reconstructs_binaural_identity() {
         ]),
         subwoofers: None,
         bass_management: None,
-            ..Default::default()
-        };
+        ..Default::default()
+    };
 
     let report = maybe_generate_recommended_xtc(&cfg, &sys, 48_000.0, dir.path(), None)
         .unwrap()
@@ -306,16 +306,28 @@ fn parse_biquad_filter_type_round_trip() {
     let cases = [
         ("lowpass", math_audio_iir_fir::BiquadFilterType::Lowpass),
         ("highpass", math_audio_iir_fir::BiquadFilterType::Highpass),
-        ("highpassvariableq", math_audio_iir_fir::BiquadFilterType::HighpassVariableQ),
+        (
+            "highpassvariableq",
+            math_audio_iir_fir::BiquadFilterType::HighpassVariableQ,
+        ),
         ("bandpass", math_audio_iir_fir::BiquadFilterType::Bandpass),
         ("peak", math_audio_iir_fir::BiquadFilterType::Peak),
         ("notch", math_audio_iir_fir::BiquadFilterType::Notch),
         ("lowshelf", math_audio_iir_fir::BiquadFilterType::Lowshelf),
         ("highshelf", math_audio_iir_fir::BiquadFilterType::Highshelf),
         ("allpass", math_audio_iir_fir::BiquadFilterType::AllPass),
-        ("lowshelforf", math_audio_iir_fir::BiquadFilterType::LowshelfOrf),
-        ("highshelforf", math_audio_iir_fir::BiquadFilterType::HighshelfOrf),
-        ("peakmatched", math_audio_iir_fir::BiquadFilterType::PeakMatched),
+        (
+            "lowshelforf",
+            math_audio_iir_fir::BiquadFilterType::LowshelfOrf,
+        ),
+        (
+            "highshelforf",
+            math_audio_iir_fir::BiquadFilterType::HighshelfOrf,
+        ),
+        (
+            "peakmatched",
+            math_audio_iir_fir::BiquadFilterType::PeakMatched,
+        ),
     ];
     for (name, expected) in cases {
         assert_eq!(parse_biquad_filter_type(name), Some(expected));
@@ -336,11 +348,17 @@ fn biquad_filter_response_peak_and_errors() {
 
     let missing_type = serde_json::json!({"freq": 1000.0});
     let err = biquad_filter_response(&missing_type, 1000.0, 48_000.0).unwrap_err();
-    assert!(err.to_string().contains("unsupported RoomEQ biquad filter type"));
+    assert!(
+        err.to_string()
+            .contains("unsupported RoomEQ biquad filter type")
+    );
 
     let unsupported = serde_json::json!({"filter_type": "unknown"});
     let err = biquad_filter_response(&unsupported, 1000.0, 48_000.0).unwrap_err();
-    assert!(err.to_string().contains("unsupported RoomEQ biquad filter type"));
+    assert!(
+        err.to_string()
+            .contains("unsupported RoomEQ biquad filter type")
+    );
 
     // Defaults apply when fields are missing.
     let defaults = serde_json::json!({"filter_type": "peak"});
@@ -396,7 +414,10 @@ fn ir_to_half_spectrum_rejects_unknown_window() {
     };
     let ir = vec![0.0; 64];
     let err = ir_to_half_spectrum(&ir, &window, 48_000, 64).unwrap_err();
-    assert!(err.to_string().contains("unsupported ctc.window.window_type"));
+    assert!(
+        err.to_string()
+            .contains("unsupported ctc.window.window_type")
+    );
 }
 
 #[test]
@@ -463,7 +484,9 @@ fn read_wav_channels_f64_formats_and_errors() {
     header.extend_from_slice(&3u16.to_le_bytes()); // format = float
     header.extend_from_slice(&channels.to_le_bytes());
     header.extend_from_slice(&sample_rate.to_le_bytes());
-    header.extend_from_slice(&(sample_rate * channels as u32 * bits_per_sample as u32 / 8).to_le_bytes());
+    header.extend_from_slice(
+        &(sample_rate * channels as u32 * bits_per_sample as u32 / 8).to_le_bytes(),
+    );
     header.extend_from_slice(&(channels * bits_per_sample / 8).to_le_bytes());
     header.extend_from_slice(&bits_per_sample.to_le_bytes());
     header.extend_from_slice(b"data");
@@ -511,7 +534,10 @@ fn load_measured_spectrum_validation_and_success() {
         ..Default::default()
     };
     let err = load_measured_spectrum(&cfg, &bad_window, 48_000, 64).unwrap_err();
-    assert!(err.to_string().contains("unsupported ctc.window.window_type"));
+    assert!(
+        err.to_string()
+            .contains("unsupported ctc.window.window_type")
+    );
 
     // Non-two mics
     cfg.mics = vec!["only_one".to_string()];
@@ -530,7 +556,8 @@ fn load_two_channel_ir_spectrum_success() {
     let dir = tempdir().unwrap();
     let wav = dir.path().join("ir.wav");
     write_stereo_impulse(&wav, 10_000, 5_000);
-    let spectrum = load_two_channel_ir_spectrum(&wav, &CtcWindowConfig::default(), 48_000, 64).unwrap();
+    let spectrum =
+        load_two_channel_ir_spectrum(&wav, &CtcWindowConfig::default(), 48_000, 64).unwrap();
     assert_eq!(spectrum[0].len(), 33);
     assert_eq!(spectrum[1].len(), 33);
 }
@@ -596,11 +623,13 @@ fn load_raw_sweep_spectrum_validation_and_success() {
         ..cfg.clone()
     };
     let err = load_raw_sweep_spectrum(&measurements, &bad_cfg, 48_000, 64).unwrap_err();
-    assert!(err.to_string().contains("unsupported ctc.window.window_type"));
+    assert!(
+        err.to_string()
+            .contains("unsupported ctc.window.window_type")
+    );
 
     // Success
     let spectrum = load_raw_sweep_spectrum(&measurements, &cfg, 48_000, 64).unwrap();
     assert_eq!(spectrum.source, "raw_sweep");
     assert_eq!(spectrum.speakers, vec!["L", "R"]);
 }
-

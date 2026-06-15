@@ -304,14 +304,38 @@ mod tests {
     #[test]
     fn test_simple_preset_multi_position_strategies() {
         let strategies = [
-            ("weighted_sum", super::super::config::MultiMeasurementStrategy::WeightedSum),
-            ("minimax", super::super::config::MultiMeasurementStrategy::Minimax),
-            ("minmax", super::super::config::MultiMeasurementStrategy::Minimax),
-            ("variance_penalized", super::super::config::MultiMeasurementStrategy::VariancePenalized),
-            ("minimize_variance", super::super::config::MultiMeasurementStrategy::VariancePenalized),
-            ("spatial_robustness", super::super::config::MultiMeasurementStrategy::SpatialRobustness),
-            ("minimax_uncertainty", super::super::config::MultiMeasurementStrategy::MinimaxUncertainty),
-            ("minimax_bootstrap_uncertainty", super::super::config::MultiMeasurementStrategy::MinimaxUncertainty),
+            (
+                "weighted_sum",
+                super::super::config::MultiMeasurementStrategy::WeightedSum,
+            ),
+            (
+                "minimax",
+                super::super::config::MultiMeasurementStrategy::Minimax,
+            ),
+            (
+                "minmax",
+                super::super::config::MultiMeasurementStrategy::Minimax,
+            ),
+            (
+                "variance_penalized",
+                super::super::config::MultiMeasurementStrategy::VariancePenalized,
+            ),
+            (
+                "minimize_variance",
+                super::super::config::MultiMeasurementStrategy::VariancePenalized,
+            ),
+            (
+                "spatial_robustness",
+                super::super::config::MultiMeasurementStrategy::SpatialRobustness,
+            ),
+            (
+                "minimax_uncertainty",
+                super::super::config::MultiMeasurementStrategy::MinimaxUncertainty,
+            ),
+            (
+                "minimax_bootstrap_uncertainty",
+                super::super::config::MultiMeasurementStrategy::MinimaxUncertainty,
+            ),
         ];
         for (name, expected) in strategies {
             let preset = SimplePresetConfig {
@@ -359,12 +383,21 @@ mod tests {
     #[test]
     fn test_simple_processing_choice_labels() {
         assert_eq!(SimpleProcessingChoice::Iir.label(), "IIR (low latency)");
-        assert_eq!(SimpleProcessingChoice::MixedPhase.label(), "Mixed Phase (best quality)");
+        assert_eq!(
+            SimpleProcessingChoice::MixedPhase.label(),
+            "Mixed Phase (best quality)"
+        );
     }
 
     #[test]
     fn test_simple_crossover_choice_labels() {
-        assert_eq!(SimpleCrossoverChoice::Lr24.label(), "Linkwitz-Riley 24 dB/oct");
-        assert_eq!(SimpleCrossoverChoice::Lr48.label(), "Linkwitz-Riley 48 dB/oct");
+        assert_eq!(
+            SimpleCrossoverChoice::Lr24.label(),
+            "Linkwitz-Riley 24 dB/oct"
+        );
+        assert_eq!(
+            SimpleCrossoverChoice::Lr48.label(),
+            "Linkwitz-Riley 48 dB/oct"
+        );
     }
 }

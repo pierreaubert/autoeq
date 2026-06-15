@@ -116,10 +116,7 @@ mod tests {
             "base",
             r#"{"version":"1.0.0","speakers":{},"optimizer":{"min_freq":20.0,"max_freq":20000.0}}"#,
         );
-        let override_path = write_temp_config(
-            "override",
-            r#"{"optimizer":{"max_freq":16000.0}}"#,
-        );
+        let override_path = write_temp_config("override", r#"{"optimizer":{"max_freq":16000.0}}"#);
         let (config, dir) = load_config(&base, Some(&override_path)).unwrap();
         assert_eq!(config.optimizer.max_freq, 16000.0);
         assert_eq!(dir, base.parent().unwrap());

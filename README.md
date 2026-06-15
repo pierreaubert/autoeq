@@ -19,6 +19,7 @@ AutoEQ and RoomEQ are Rust CLIs for computing corrections.
 - **Headphone EQ:** Generate EQ corrections for headphones targeting Harman curves or custom targets
 - **Multi-Channel Systems:** Optimize stereo, 2.1, and multi-driver configurations with crossover management
 - **Room Correction:** Multi-subwoofer alignment and Double Bass Array (DBA) optimization
+- **Supporting-Source Room Compensation:** Use a delayed, decorrelated supporting loudspeaker to fill reverberant energy without altering the primary source's direct sound (Brooks-Park room compensation)
 
 ### Optimization Algorithms
 

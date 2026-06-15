@@ -249,8 +249,8 @@ mod tests {
                 speakers: HashMap::from([("Left".to_string(), "left".to_string())]),
                 subwoofers: None,
                 bass_management: None,
-            ..Default::default()
-        }),
+                ..Default::default()
+            }),
             speakers: HashMap::from([(
                 "left".to_string(),
                 SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
@@ -367,8 +367,8 @@ mod tests {
                 speakers: HashMap::from([("Left".to_string(), "left".to_string())]),
                 subwoofers: None,
                 bass_management: None,
-            ..Default::default()
-        }),
+                ..Default::default()
+            }),
             speakers: HashMap::from([(
                 "left".to_string(),
                 SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),

@@ -14,6 +14,7 @@
 - **Schroeder frequency split**: Separate EQ strategies for modal and statistical room behavior
 - **Phase alignment**: Subwoofer/speaker phase and polarity optimization
 - **Multi-seat optimization**: Minimize response variance across multiple listening positions
+- **Supporting-source room compensation**: Delayed, decorrelated supporting loudspeaker to fill reverberant energy while preserving the primary source's direct sound
 
 ## Usage
 
@@ -417,6 +418,66 @@ For multi-seat optimization, you need measurements of each subwoofer at each sea
   }
 }
 ```
+
+### Supporting-Source Room Compensation
+
+A supporting-source loudspeaker is a delayed, decorrelated loudspeaker placed in
+same room as the primary source. It adds reverberant energy to the primary
+source without altering its direct sound, improving apparent source width and
+room envelopment while preserving imaging (Brooks-Park et al., JASA 159(4),
+2026). RoomEQ computes a minimum-phase FIR for the supporting source that fills
+in the primary's room-induced spectral notches, subject to a precedence ceiling
+and a configurable compensation band.
+
+```json
+{
+  "system": {
+    "model": "stereo",
+    "speakers": {
+      "L": "left_pair",
+      "R": "right_pair"
+    }
+  },
+  "speakers": {
+    "left_pair": {
+      "name": "Left Main + Support",
+      "primary": "measurements/left_primary.csv",
+      "support": "measurements/left_support.csv",
+      "supporting_source": {
+        "delay_ms": 10.0,
+        "freq_range_hz": [70.0, 20000.0],
+        "decorrelation": "velvet_noise",
+        "fir_taps": 8192,
+        "velvet_noise_taps": 4096,
+        "precedence_limits": [
+          { "low_hz": 70.0, "high_hz": 500.0, "limit_db": 10.0 },
+          { "low_hz": 500.0, "high_hz": 20000.0, "limit_db": 6.0 }
+        ]
+      }
+    },
+    "right_pair": {
+      "name": "Right Main + Support",
+      "primary": "measurements/right_primary.csv",
+      "support": "measurements/right_support.csv",
+      "supporting_source": {
+        "delay_ms": 10.0
+      }
+    }
+  },
+  "optimizer": {
+    "processing_mode": "phase_linear",
+    "loss_type": "flat"
+  }
+}
+```
+
+For each `SupportingSourceGroup`, RoomEQ emits two output channels (e.g.
+`L` and `L_support`, or `WideLeft` and `WideLeft_support` in a home-cinema
+layout). The supporting channel contains a `convolution` plugin loading the
+generated FIR WAV file. A per-channel report is written to
+`metadata.supporting_source`, including DRR summaries, precedence-limit hits,
+and optional spatial-robustness advisories when the measurement contains a
+single position or high inter-position variance.
 
 ### Complete Configuration Examples
 

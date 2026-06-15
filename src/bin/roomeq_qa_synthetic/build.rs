@@ -13,7 +13,7 @@ use autoeq::roomeq::synthetic::{
 use autoeq::roomeq::{
     CardioidConfig, DBAConfig, SubwooferStrategy, SubwooferSystemConfig, SystemConfig,
 };
-use autoeq::roomeq::{MultiSubGroup, ProcessingMode, RoomConfig};
+use autoeq::roomeq::{MultiSubGroup, ProcessingMode, RoomConfig, default_config_version};
 use autoeq::{Curve, MeasurementSource};
 use std::collections::HashMap;
 
@@ -29,7 +29,7 @@ pub(super) fn build_config(degraded: &Curve, mode: ProcessingMode) -> RoomConfig
     );
 
     let mut config = RoomConfig {
-        version: "2.0.0".to_string(),
+        version: default_config_version(),
         system: None,
         speakers,
         crossovers: None,
@@ -93,7 +93,7 @@ pub(super) fn build_multisub_config(sub_curves: &[Curve], allpass: bool) -> Room
     );
 
     let mut config = RoomConfig {
-        version: "2.0.0".to_string(),
+        version: default_config_version(),
         system: None,
         speakers,
         crossovers: None,
@@ -334,7 +334,7 @@ pub(super) fn build_multichannel_config(
     };
 
     let mut config = RoomConfig {
-        version: "2.0.0".to_string(),
+        version: default_config_version(),
         system: Some(system),
         speakers,
         crossovers: crossovers_map,

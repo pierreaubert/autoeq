@@ -275,7 +275,14 @@ mod tests {
             min_spatial_depth: 0.5,
             phase_smoothing_octaves: 1.0 / 6.0,
         };
-        apply_phase_correction("left", &mut ch, &mut chain, &config, 48_000.0, Some(tmp.path()));
+        apply_phase_correction(
+            "left",
+            &mut ch,
+            &mut chain,
+            &config,
+            48_000.0,
+            Some(tmp.path()),
+        );
         assert!(ch.fir_coeffs.is_some());
         let wav_files: Vec<_> = std::fs::read_dir(tmp.path())
             .unwrap()

@@ -508,17 +508,20 @@ fn compute_crossover_complex_response_linear_phase_returns_non_empty() {
     use ndarray::Array1;
 
     let freqs = Array1::from(vec![20.0, 50.0, 100.0, 200.0, 500.0]);
-    let response = super::compute_crossover_complex_response("linearPhase", 100.0, 48000.0, true, &freqs);
+    let response =
+        super::compute_crossover_complex_response("linearPhase", 100.0, 48000.0, true, &freqs);
     assert_eq!(response.len(), freqs.len());
 }
 
 #[test]
 fn optimize_stereo_2_0_empty_config_errors() {
-    use crate::roomeq::types::{OptimizerConfig, RoomConfig, SystemConfig, SystemModel};
+    use crate::roomeq::types::{
+        OptimizerConfig, RoomConfig, SystemConfig, SystemModel, default_config_version,
+    };
     use std::collections::HashMap;
 
     let config = RoomConfig {
-        version: "2.0.0".to_string(),
+        version: default_config_version(),
         system: Some(SystemConfig {
             model: SystemModel::Stereo,
             speakers: HashMap::new(),
@@ -538,18 +541,24 @@ fn optimize_stereo_2_0_empty_config_errors() {
     let output_dir = std::env::temp_dir();
 
     let result = super::optimize_stereo_2_0(&config, sys, 48000.0, &output_dir);
-    assert!(result.is_ok(), "empty stereo config should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "empty stereo config should succeed: {:?}",
+        result.err()
+    );
     let opt = result.unwrap();
     assert!(opt.channels.is_empty());
 }
 
 #[test]
 fn optimize_home_cinema_empty_config_succeeds() {
-    use crate::roomeq::types::{OptimizerConfig, RoomConfig, SystemConfig, SystemModel};
+    use crate::roomeq::types::{
+        OptimizerConfig, RoomConfig, SystemConfig, SystemModel, default_config_version,
+    };
     use std::collections::HashMap;
 
     let config = RoomConfig {
-        version: "2.0.0".to_string(),
+        version: default_config_version(),
         system: Some(SystemConfig {
             model: SystemModel::HomeCinema,
             speakers: HashMap::new(),
@@ -569,5 +578,9 @@ fn optimize_home_cinema_empty_config_succeeds() {
     let output_dir = std::env::temp_dir();
 
     let result = super::optimize_home_cinema(&config, sys, 48000.0, &output_dir);
-    assert!(result.is_ok(), "empty home cinema config should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "empty home cinema config should succeed: {:?}",
+        result.err()
+    );
 }

@@ -377,7 +377,7 @@ mod bo_branch_tests {
     use super::super::backend::FilterOptimizer;
     use super::super::params::OptimParams;
     use super::{
-        parse_acquisition, should_refine, AutoeqBoBackend, BayesParetoSolution, BayesAcquisition,
+        AutoeqBoBackend, BayesAcquisition, BayesParetoSolution, parse_acquisition, should_refine,
     };
     use clap::Parser;
     use ndarray::Array1;

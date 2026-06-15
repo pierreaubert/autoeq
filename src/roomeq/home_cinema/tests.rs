@@ -421,14 +421,16 @@ mod coverage_tests {
     use super::super::role::role_score_band;
     use super::super::role::role_target_curve_shape_active;
     use super::super::target::analyze_layout;
+    use super::super::types::BassManagementOptimizationReport;
+    use super::super::types::EffectiveBassManagement;
+    use super::super::types::HomeCinemaRole;
     use super::super::types::add_slope_offset;
     use super::super::types::apply_role_target_adjustment;
     use super::super::types::role_slope_offset;
+    use crate::Curve;
+    use crate::MeasurementSource;
     use crate::roomeq::types::BassManagementConfig;
-    use super::super::types::BassManagementOptimizationReport;
     use crate::roomeq::types::CrossoverConfig;
-    use super::super::types::EffectiveBassManagement;
-    use super::super::types::HomeCinemaRole;
     use crate::roomeq::types::MultiSeatConfig;
     use crate::roomeq::types::OptimizerConfig;
     use crate::roomeq::types::RoleTargetConfig;
@@ -439,8 +441,6 @@ mod coverage_tests {
     use crate::roomeq::types::SystemModel;
     use crate::roomeq::types::TargetResponseConfig;
     use crate::roomeq::types::TargetShape;
-    use crate::Curve;
-    use crate::MeasurementSource;
     use ndarray::array;
     use std::collections::HashMap;
 
@@ -568,7 +568,10 @@ mod coverage_tests {
         let mut target = TargetResponseConfig::default();
         add_slope_offset(&mut target, 0.5);
         assert_eq!(target.shape, TargetShape::Custom);
-        assert_eq!(role_slope_offset(HomeCinemaRole::Unknown, &RoleTargetConfig::default()), 0.0);
+        assert_eq!(
+            role_slope_offset(HomeCinemaRole::Unknown, &RoleTargetConfig::default()),
+            0.0
+        );
     }
 
     #[test]
@@ -618,14 +621,22 @@ mod coverage_tests {
     #[test]
     fn measurement_counts() {
         let single = MeasurementSource::InMemory(flat_curve());
-        assert_eq!(speaker_measurement_count(&SpeakerConfig::Single(single.clone())), Some(1));
         assert_eq!(
-            speaker_measurement_count(&SpeakerConfig::MultiSub(crate::roomeq::types::MultiSubGroup {
-                name: "sub".to_string(),
-                speaker_name: None,
-                subwoofers: vec![single.clone(), MeasurementSource::InMemoryMultiple(vec![flat_curve(), flat_curve()])],
-                allpass_optimization: false,
-            })),
+            speaker_measurement_count(&SpeakerConfig::Single(single.clone())),
+            Some(1)
+        );
+        assert_eq!(
+            speaker_measurement_count(&SpeakerConfig::MultiSub(
+                crate::roomeq::types::MultiSubGroup {
+                    name: "sub".to_string(),
+                    speaker_name: None,
+                    subwoofers: vec![
+                        single.clone(),
+                        MeasurementSource::InMemoryMultiple(vec![flat_curve(), flat_curve()])
+                    ],
+                    allpass_optimization: false,
+                }
+            )),
             Some(2)
         );
     }
@@ -643,7 +654,11 @@ mod coverage_tests {
         let config = home_cinema_config();
         let report = multi_seat_correction_report(&config, &HashMap::new(), None);
         assert!(report.enabled);
-        assert!(report.advisories.contains(&"no_all_channel_multiseat_correction_applied".to_string()));
+        assert!(
+            report
+                .advisories
+                .contains(&"no_all_channel_multiseat_correction_applied".to_string())
+        );
     }
 
     #[test]
@@ -682,7 +697,8 @@ mod coverage_tests {
             biquads: Vec::new(),
             fir_coeffs: None,
         };
-        let acceptance = all_channel_multiseat_acceptance(&config, "LFE", &source, &flat_curve(), &flat_curve());
+        let acceptance =
+            all_channel_multiseat_acceptance(&config, "LFE", &source, &flat_curve(), &flat_curve());
         assert!(!acceptance.accepted);
     }
 
@@ -700,7 +716,14 @@ mod coverage_tests {
     fn effective_bass_management_test() {
         let mut config = home_cinema_config();
         assert!(effective_bass_management(&config).is_some());
-        config.system.as_mut().unwrap().bass_management.as_mut().unwrap().enabled = false;
+        config
+            .system
+            .as_mut()
+            .unwrap()
+            .bass_management
+            .as_mut()
+            .unwrap()
+            .enabled = false;
         assert!(effective_bass_management(&config).is_none());
     }
 
@@ -780,7 +803,11 @@ mod coverage_tests {
         };
         config.optimizer.target_response = Some(target);
         let report = analyze_layout(&config);
-        let front = report.channels.iter().find(|c| c.role == HomeCinemaRole::FrontLeft).unwrap();
+        let front = report
+            .channels
+            .iter()
+            .find(|c| c.role == HomeCinemaRole::FrontLeft)
+            .unwrap();
         assert!(front.target_profile.contains("role_target"));
         assert!(front.target_advisory.is_some());
     }

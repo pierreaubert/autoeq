@@ -2,7 +2,7 @@
 
 # References
 
-Foundational papers, standards, and patents behind the algorithms in `autoeq`. Citations are restricted to references actually invoked in the `src/` source comments — every entry below maps to at least one file/symbol in the crate.
+Foundational papers and standards behind the algorithms in `autoeq`. Citations are restricted to references actually invoked in the `src/` source comments — every entry below maps to at least one file/symbol in the crate.
 
 ## Source-file index
 
@@ -292,7 +292,7 @@ Foundational papers, standards, and patents behind the algorithms in `autoeq`. C
 
 ## Brännmark & Sternad — robust room correction
 
-`roomeq/spatial_robustness.rs` and `roomeq/mixed_phase.rs` cite both the AES paper and the patent. The pre-ringing constraint side is in `math-iir-fir`.
+`roomeq/spatial_robustness.rs` and `roomeq/mixed_phase.rs` cite the AES paper.
 
 ```bibtex
 @inproceedings{brannmark2008robust,
@@ -301,14 +301,6 @@ Foundational papers, standards, and patents behind the algorithms in `autoeq`. C
   booktitle = {Audio Engineering Society Convention 124},
   year      = {2008},
   url       = {https://www.aes.org/e-lib/browse.cfm?elib=14529}
-}
-
-@misc{brannmark2009preringing_autoeq,
-  author       = {Br{\"a}nnmark, Lars-Johan and Sternad, Mikael},
-  title        = {{Method and apparatus for designing low-pre-ringing inverse filters}},
-  howpublished = {European Patent EP2104374B1},
-  year         = {2009},
-  note         = {Spatial zero clustering and pre-ringing envelope constraints.}
 }
 ```
 
@@ -449,6 +441,27 @@ Foundational papers, standards, and patents behind the algorithms in `autoeq`. C
   title     = {Multiobjective Genetic Algorithm Optimization of Linkwitz-Riley Crossovers Using Group Delay and Magnitude Response Criteria},
   booktitle = {Audio Engineering Society Convention 121},
   year      = {2006}
+}
+```
+
+## Brooks-Park et al. — room compensation with supporting source
+
+Candidate reference for `roomeq/` spatial room compensation. The paper proposes modifying the direct-to-reverberant ratio in a frequency-selective manner using a delayed secondary supporting source, with perceptual evaluation against a commercial room-compensation algorithm.
+
+```bibtex
+@article{Brooks_Park_2026,
+  title={Room compensation for loudspeaker reproduction using a supporting source},
+  volume={159},
+  ISSN={1520-8524},
+  url={http://dx.doi.org/10.1121/10.0043238},
+  DOI={10.1121/10.0043238},
+  number={4},
+  journal={The Journal of the Acoustical Society of America},
+  publisher={Acoustical Society of America (ASA)},
+  author={Brooks-Park, James and Bech, S{\o}ren and {\O}stergaard, Jan and van de Par, Steven},
+  year={2026},
+  month=Apr,
+  pages={3006--3017}
 }
 ```
 

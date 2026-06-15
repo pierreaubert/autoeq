@@ -101,7 +101,7 @@ pub use progress::{MultiStageProgress, ProgressReporter};
 // Supporting-source room compensation (Brooks-Park)
 mod supporting_source;
 pub use supporting_source::{
-    compute_supporting_source_filter, generate_velvet_noise, SupportingSourceFilter,
+    SupportingSourceFilter, compute_supporting_source_filter, generate_velvet_noise,
 };
 
 // Spectral channel alignment (shelf filters + gain)

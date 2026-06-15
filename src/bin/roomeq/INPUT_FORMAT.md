@@ -17,7 +17,7 @@ check-jsonschema --schemafile input_schema.json your_config.json
 
 ```json
 {
-  "version": "3.0.0",
+  "version": "2.1.0",
   "system": { ... },
   "speakers": { ... },
   "crossovers": { ... },
@@ -32,7 +32,7 @@ check-jsonschema --schemafile input_schema.json your_config.json
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `version` | string | No | `"3.0.0"` | Configuration version (semantic versioning) |
+| `version` | string | No | `"2.1.0"` | Configuration version (semantic versioning) |
 | `system` | object | No | - | System topology and logical channel mapping |
 | `speakers` | object | **Yes** | - | Map of channel names to speaker configurations |
 | `crossovers` | object | No | - | Crossover configurations referenced by multi-driver speakers |
@@ -164,6 +164,7 @@ The `system` section decouples logical channel roles (e.g., "L", "R", "LFE") fro
 | `model` | string | No | `"custom"` | Topology model: `"stereo"`, `"home_cinema"`, `"custom"` |
 | `speakers` | map | **Yes** | - | Map of Logical Role → Measurement Key. The key must exist in the root `speakers` object. |
 | `subwoofers` | object | No | - | Subwoofer configuration and alignment mapping |
+| `supporting_source_outputs` | object | No | `{"suffix": "_support"}` | Naming convention for supporting-source physical outputs |
 
 ### Subwoofers Configuration
 
@@ -179,12 +180,13 @@ The `system` section decouples logical channel roles (e.g., "L", "R", "LFE") fro
 
 The `speakers` field is a map where keys are channel names (e.g., `"left"`, `"right"`, `"center"`, `"lfe"`) and values are speaker configurations.
 
-RoomEQ supports five speaker types:
+RoomEQ supports six speaker types:
 1. **Single** - A single speaker measurement
 2. **Group** - Multi-driver speaker with crossover optimization
 3. **MultiSub** - Multiple subwoofers with gain/delay optimization
 4. **DBA** - Double Bass Array with front/rear optimization
 5. **Cardioid** - Gradient Cardioid configuration (2 subs)
+6. **SupportingSource** - Primary loudspeaker plus a delayed, decorrelated supporting loudspeaker for room compensation
 
 ### Measurement References
 
@@ -447,6 +449,82 @@ For optimizing a pair of subwoofers in a gradient cardioid configuration (e.g., 
 | `front` | source | **Yes** | Measurement for the front (primary) subwoofer |
 | `rear` | source | **Yes** | Measurement for the rear (cancellation) subwoofer |
 | `separation_meters` | number | **Yes** | Physical separation distance between acoustic centers (meters) |
+
+### Supporting Source (Primary + Support)
+
+For Brooks-Park-style room compensation: a delayed, decorrelated supporting
+loudspeaker fills reverberant energy around the primary source without altering
+its direct sound. The primary and supporting loudspeakers are measured
+separately; RoomEQ computes a minimum-phase FIR for the support channel.
+
+Supporting-source channels can be used in both the stereo 2.0 workflow and the
+home-cinema workflow. In home cinema, supporting-source roles are partitioned
+from single-source mains, processed after bass management / post-EQ, and emit
+both the primary role channel and a named support channel (default suffix
+`_support`). Multiple measurement positions may be supplied for either the
+primary or support source; the resulting report will include spatial-robustness
+advisories when measurement variance is notable.
+
+```json
+{
+  "speakers": {
+    "left_pair": {
+      "name": "Left Main + Support",
+      "primary": "measurements/left_primary.csv",
+      "support": "measurements/left_support.csv",
+      "supporting_source": {
+        "delay_ms": 10.0,
+        "freq_range_hz": [70.0, 20000.0],
+        "decorrelation": "velvet_noise",
+        "fir_taps": 8192,
+        "velvet_noise_taps": 4096,
+        "precedence_limits": [
+          { "low_hz": 70.0, "high_hz": 500.0, "limit_db": 10.0 },
+          { "low_hz": 500.0, "high_hz": 20000.0, "limit_db": 6.0 }
+        ]
+      }
+    }
+  }
+}
+```
+
+**SupportingSourceGroup Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | **Yes** | Human-readable name for the primary/support pair |
+| `speaker_name` | string | No | Speaker model name |
+| `primary` | source | **Yes** | Measurement source for the primary loudspeaker |
+| `support` | source | **Yes** | Measurement source for the supporting loudspeaker |
+| `supporting_source` | object | No | Supporting-source processing configuration (see below) |
+
+**SupportingSourceConfig Fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `delay_ms` | number | `10.0` | Delay of the supporting source relative to the primary at the listening position (ms) |
+| `freq_range_hz` | [min, max] | `[70.0, 20000.0]` | Compensation band; the support FIR is muted outside this band |
+| `decorrelation` | string | `"velvet_noise"` | Decorrelation strategy: `"velvet_noise"` or `"none"` |
+| `fir_taps` | integer | `8192` | Length of the generated support FIR (taps) |
+| `velvet_noise_taps` | integer | `4096` | Length of the velvet-noise sequence when decorrelation is enabled |
+| `precedence_limits` | array | see below | Frequency-dependent ceiling on support level above the primary |
+| `target_response` | string | - | Optional named target response override (defaults to room-level `target_curve`) |
+
+**PrecedenceLimitBand Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `low_hz` | number | Lower edge of the band in Hz (inclusive) |
+| `high_hz` | number | Upper edge of the band in Hz (inclusive) |
+| `limit_db` | number | Maximum lagging-source level above the primary in this band (dB) |
+
+Default `precedence_limits`:
+```json
+[
+  { "low_hz": 70.0, "high_hz": 500.0, "limit_db": 10.0 },
+  { "low_hz": 500.0, "high_hz": 20000.0, "limit_db": 6.0 }
+]
+```
 
 ---
 

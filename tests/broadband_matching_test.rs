@@ -1,3 +1,4 @@
+use autoeq::roomeq::default_config_version;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -31,7 +32,7 @@ fn test_broadband_matching() {
 
     // 2. Create config with broadband pre-correction enabled via target_response.
     let config = serde_json::json!({
-        "version": "2.0.0",
+        "version": default_config_version(),
         "speakers": {
             "left": {
                 "path": measurement_path.to_str().unwrap()

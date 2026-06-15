@@ -692,8 +692,8 @@ mod tests {
                     mapping: [("lfe".to_string(), "Left".to_string())].into(),
                 }),
                 bass_management: None,
-            ..Default::default()
-        }),
+                ..Default::default()
+            }),
             ..room_config_with_speakers(speakers)
         };
         assert!(is_subwoofer_channel(&config, "lfe"));
@@ -718,8 +718,8 @@ mod tests {
                     mapping: [("lfe".to_string(), "Left".to_string())].into(),
                 }),
                 bass_management: None,
-            ..Default::default()
-        }),
+                ..Default::default()
+            }),
             ..room_config_with_speakers(speakers)
         };
         let curves = HashMap::from([
@@ -791,8 +791,8 @@ mod tests {
                 ]),
                 subwoofers: None,
                 bass_management: None,
-            ..Default::default()
-        }),
+                ..Default::default()
+            }),
             ..room_config_with_speakers(speakers)
         };
         let channels = channels_for_generic_optimization(&config);

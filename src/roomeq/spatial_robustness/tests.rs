@@ -169,7 +169,11 @@ fn make_spatial_curve(spl_offset: f64) -> crate::Curve {
 fn analyze_spatial_robustness_basic() {
     use super::analyze::analyze_spatial_robustness;
 
-    let curves = vec![make_spatial_curve(0.0), make_spatial_curve(1.0), make_spatial_curve(-1.0)];
+    let curves = vec![
+        make_spatial_curve(0.0),
+        make_spatial_curve(1.0),
+        make_spatial_curve(-1.0),
+    ];
     let config = SpatialRobustnessConfig::default();
     let result = analyze_spatial_robustness(&curves, &config).unwrap();
     assert_eq!(result.averaged_curve.freq.len(), curves[0].freq.len());
@@ -193,14 +197,19 @@ fn analyze_spatial_robustness_with_bootstrap() {
     use super::analyze::analyze_spatial_robustness_with_bootstrap;
     use super::bootstrap_config::BootstrapConfig;
 
-    let curves = vec![make_spatial_curve(0.0), make_spatial_curve(1.0), make_spatial_curve(-1.0)];
+    let curves = vec![
+        make_spatial_curve(0.0),
+        make_spatial_curve(1.0),
+        make_spatial_curve(-1.0),
+    ];
     let config = SpatialRobustnessConfig::default();
     let bootstrap = BootstrapConfig {
         num_resamples: 50,
         alpha: 0.10,
         seed: 1,
     };
-    let result = analyze_spatial_robustness_with_bootstrap(&curves, &config, &bootstrap, None).unwrap();
+    let result =
+        analyze_spatial_robustness_with_bootstrap(&curves, &config, &bootstrap, None).unwrap();
     assert!(result.bootstrap.is_some());
 }
 
@@ -260,11 +269,20 @@ fn validate_spatial_curves_errors() {
 fn is_valid_spatial_frequency_grid_checks() {
     use super::misc::is_valid_spatial_frequency_grid;
 
-    assert!(is_valid_spatial_frequency_grid(&Array1::from_vec(vec![100.0, 200.0, 400.0])));
+    assert!(is_valid_spatial_frequency_grid(&Array1::from_vec(vec![
+        100.0, 200.0, 400.0
+    ])));
     assert!(!is_valid_spatial_frequency_grid(&Array1::from_vec(vec![])));
-    assert!(!is_valid_spatial_frequency_grid(&Array1::from_vec(vec![100.0, 50.0])));
-    assert!(!is_valid_spatial_frequency_grid(&Array1::from_vec(vec![100.0, f64::NAN])));
-    assert!(!is_valid_spatial_frequency_grid(&Array1::from_vec(vec![-100.0, 200.0])));
+    assert!(!is_valid_spatial_frequency_grid(&Array1::from_vec(vec![
+        100.0, 50.0
+    ])));
+    assert!(!is_valid_spatial_frequency_grid(&Array1::from_vec(vec![
+        100.0,
+        f64::NAN
+    ])));
+    assert!(!is_valid_spatial_frequency_grid(&Array1::from_vec(vec![
+        -100.0, 200.0
+    ])));
 }
 
 #[test]

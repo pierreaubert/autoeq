@@ -26,6 +26,7 @@ use super::misc::normalize_crossover_delays;
 use super::run::run_channel_via_generic_path;
 use super::run::run_post_eq;
 use super::types::{WorkflowAssembly, WorkflowExecutor};
+use super::supporting_source::process_supporting_source_channels;
 use super::workflow::workflow_progress_callback;
 use super::workflow::workflow_stage_event;
 use crate::Curve;
@@ -60,13 +61,9 @@ impl WorkflowExecutor for HomeCinemaExecutor {
             .cloned()
             .collect();
 
-        info!(
-            "Running Home Cinema Optimization Workflow ({} mains{})",
-            main_roles.len(),
-            if has_sub { " + bass-managed sub" } else { "" }
-        );
-
-        // 1. Load main channel measurements
+        // Partition mains into single-source and supporting-source channels.
+        let mut single_roles: Vec<String> = Vec::new();
+        let mut supporting_roles: Vec<String> = Vec::new();
         let mut curves = HashMap::new();
         for role in &main_roles {
             let meas_key = sys
@@ -81,22 +78,35 @@ impl WorkflowExecutor for HomeCinemaExecutor {
                 .ok_or(AutoeqError::InvalidConfiguration {
                     message: format!("Missing speaker config for key '{}'", meas_key),
                 })?;
-            let source = match cfg {
-                SpeakerConfig::Single(s) => s,
+            match cfg {
+                SpeakerConfig::Single(s) => {
+                    let curve =
+                        load_source(s).map_err(|e| AutoeqError::InvalidMeasurement {
+                            message: e.to_string(),
+                        })?;
+                    curves.insert(role.clone(), curve);
+                    single_roles.push(role.clone());
+                }
+                SpeakerConfig::SupportingSource(_) => {
+                    supporting_roles.push(role.clone());
+                }
                 _ => {
                     return Err(AutoeqError::InvalidConfiguration {
                         message: format!(
-                            "'{}' must be a Single speaker config in home cinema workflow",
+                            "'{}' must be a Single or SupportingSource speaker config in home cinema workflow",
                             role
                         ),
                     });
                 }
             };
-            let curve = load_source(source).map_err(|e| AutoeqError::InvalidMeasurement {
-                message: e.to_string(),
-            })?;
-            curves.insert(role.clone(), curve);
         }
+
+        info!(
+            "Running Home Cinema Optimization Workflow ({} single mains, {} supporting sources{})",
+            single_roles.len(),
+            supporting_roles.len(),
+            if has_sub { " + bass-managed sub" } else { "" }
+        );
 
         // Load bass output if present (handles Single, MultiSub/MSO, Cardioid, DBA)
         let sub_preprocess = if has_sub {
@@ -134,12 +144,12 @@ impl WorkflowExecutor for HomeCinemaExecutor {
             None
         };
 
-        if has_sub {
-            let total_channels = main_roles.len() + 1;
+        let mut result = if has_sub {
+            let total_channels = single_roles.len() + 1;
             optimize_home_cinema_with_sub(
                 config,
                 sys,
-                &main_roles,
+                &single_roles,
                 &curves,
                 sub_preprocess.unwrap(),
                 sample_rate,
@@ -148,18 +158,36 @@ impl WorkflowExecutor for HomeCinemaExecutor {
                 total_channels,
             )
         } else {
-            let total_channels = main_roles.len();
+            let total_channels = single_roles.len();
             optimize_home_cinema_no_sub(
                 config,
                 sys,
-                &main_roles,
+                &single_roles,
                 &curves,
                 sample_rate,
                 output_dir,
                 assembly,
                 total_channels,
             )
+        }?;
+
+        if !supporting_roles.is_empty() {
+            info!(
+                "Processing {} supporting-source channel(s) after mains",
+                supporting_roles.len()
+            );
+            process_supporting_source_channels(
+                config,
+                sys,
+                sample_rate,
+                output_dir,
+                &mut result.channels,
+                &mut result.channel_results,
+                &mut result.metadata,
+            )?;
         }
+
+        Ok(result)
     }
 }
 
@@ -1344,7 +1372,8 @@ mod tests {
     use crate::roomeq::types::{
         BassManagementConfig, CrossoverConfig, MultiMeasurementStrategy, MultiSeatConfig,
         OptimizerConfig, ProcessingMode, RoomConfig, SpeakerConfig, SubwooferStrategy,
-        SubwooferSystemConfig, SystemConfig, SystemModel, TargetCurveConfig,
+        SubwooferSystemConfig, SupportingSourceConfig, SupportingSourceDecorrelation,
+        SupportingSourceGroup, SystemConfig, SystemModel, TargetCurveConfig,
     };
     use crate::roomeq::workflows::executor_tests::{
         flat_curve, flat_curve_with_phase, make_assembly,
@@ -1566,6 +1595,68 @@ mod tests {
     }
 
     #[test]
+    fn home_cinema_no_sub_with_supporting_source_runs() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut speakers = stereo_speakers();
+        speakers.insert(
+            "left_ss".to_string(),
+            SpeakerConfig::SupportingSource(SupportingSourceGroup {
+                name: "Left wide".to_string(),
+                speaker_name: None,
+                primary: MeasurementSource::InMemory(flat_curve()),
+                support: MeasurementSource::InMemory(flat_curve()),
+                supporting_source: SupportingSourceConfig {
+                    delay_ms: 2.0,
+                    fir_taps: 128,
+                    decorrelation: SupportingSourceDecorrelation::None,
+                    ..Default::default()
+                },
+            }),
+        );
+        let sys = SystemConfig {
+            model: SystemModel::HomeCinema,
+            speakers: HashMap::from([
+                ("Left".to_string(), "left".to_string()),
+                ("Right".to_string(), "right".to_string()),
+                ("WideLeft".to_string(), "left_ss".to_string()),
+            ]),
+            subwoofers: None,
+            bass_management: None,
+            ..Default::default()
+        };
+        let mut optimizer = tiny_optimizer();
+        optimizer.max_freq = 2_000.0;
+        let config = room_config(speakers, &sys, optimizer, None, None);
+        let mut assembly = super::super::types::WorkflowAssembly {
+            config: &config,
+            sys: &sys,
+            sample_rate: 48000.0,
+            output_dir: temp_dir.path(),
+            progress_factory: None,
+            stage_callback: None,
+        };
+        let result = HomeCinemaExecutor.execute(&mut assembly);
+        assert!(
+            result.is_ok(),
+            "home-cinema no-sub with supporting source should run: {:?}",
+            result.err()
+        );
+        let result = result.unwrap();
+        assert!(result.channels.contains_key("Left"));
+        assert!(result.channels.contains_key("Right"));
+        assert!(result.channels.contains_key("WideLeft"));
+        assert!(result.channels.contains_key("WideLeft_support"));
+        assert!(
+            result
+                .metadata
+                .supporting_source
+                .as_ref()
+                .unwrap()
+                .contains_key("WideLeft")
+        );
+    }
+
+    #[test]
     fn home_cinema_with_sub_lfe_gain_applied_runs() {
         let sys = home_cinema_sys_with_sub();
         let mut speakers = stereo_speakers_with_phase();
@@ -1695,7 +1786,11 @@ mod tests {
         };
         let mut assembly = make_assembly(&config, config.system.as_ref().unwrap());
         let result = HomeCinemaExecutor.execute(&mut assembly);
-        assert!(result.is_ok(), "optimize_groups=true with phase should run: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "optimize_groups=true with phase should run: {:?}",
+            result.err()
+        );
         let result = result.unwrap();
         assert_eq!(result.channels.len(), 3);
     }
@@ -1742,7 +1837,11 @@ mod tests {
         };
         let mut assembly = make_assembly(&config, config.system.as_ref().unwrap());
         let result = HomeCinemaExecutor.execute(&mut assembly);
-        assert!(result.is_ok(), "frequency_range crossover should run: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "frequency_range crossover should run: {:?}",
+            result.err()
+        );
         let result = result.unwrap();
         assert_eq!(result.channels.len(), 3);
     }
@@ -1779,10 +1878,17 @@ mod tests {
         };
         let mut assembly = make_assembly(&config, config.system.as_ref().unwrap());
         let result = HomeCinemaExecutor.execute(&mut assembly);
-        assert!(result.is_ok(), "no-phase home cinema should run: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "no-phase home cinema should run: {:?}",
+            result.err()
+        );
         let result = result.unwrap();
         assert_eq!(result.channels.len(), 3);
-        let bass_report = result.metadata.bass_management.expect("bass management report");
+        let bass_report = result
+            .metadata
+            .bass_management
+            .expect("bass management report");
         let optimization = bass_report
             .optimization
             .expect("bass management optimization report");
@@ -1803,7 +1909,11 @@ mod tests {
         );
         let mut assembly = make_assembly(&config, &sys);
         let result = HomeCinemaExecutor.execute(&mut assembly);
-        assert!(result.is_ok(), "home-cinema with target curve should run: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "home-cinema with target curve should run: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -1857,7 +1967,11 @@ mod tests {
         };
         let mut assembly = make_assembly(&config, config.system.as_ref().unwrap());
         let result = HomeCinemaExecutor.execute(&mut assembly);
-        assert!(result.is_ok(), "home-cinema sub multiseat rejection should recover: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "home-cinema sub multiseat rejection should recover: {:?}",
+            result.err()
+        );
         let result = result.unwrap();
         assert_eq!(result.channels.len(), 3);
     }

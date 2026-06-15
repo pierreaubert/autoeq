@@ -1239,7 +1239,8 @@ mod tests {
             strategy: MultiSeatStrategy::Average,
             ..Default::default()
         };
-        let result = optimize_multiseat(&ms, &config, (20.0, 120.0), 48000.0).expect("should optimize");
+        let result =
+            optimize_multiseat(&ms, &config, (20.0, 120.0), 48000.0).expect("should optimize");
         assert_eq!(result.strategy, MultiSeatStrategy::Average);
         assert_eq!(result.gains.len(), 2);
         assert!(result.objective_before.is_finite());
@@ -1256,7 +1257,8 @@ mod tests {
             max_deviation_db: 6.0,
             ..Default::default()
         };
-        let result = optimize_multiseat(&ms, &config, (20.0, 120.0), 48000.0).expect("should optimize");
+        let result =
+            optimize_multiseat(&ms, &config, (20.0, 120.0), 48000.0).expect("should optimize");
         assert_eq!(result.strategy, MultiSeatStrategy::PrimaryWithConstraints);
         assert_eq!(result.gains.len(), 2);
     }
@@ -1269,7 +1271,8 @@ mod tests {
             strategy: MultiSeatStrategy::ModalBasis,
             ..Default::default()
         };
-        let result = optimize_multiseat(&ms, &config, (20.0, 120.0), 48000.0).expect("should optimize");
+        let result =
+            optimize_multiseat(&ms, &config, (20.0, 120.0), 48000.0).expect("should optimize");
         assert_eq!(result.strategy, MultiSeatStrategy::ModalBasis);
         assert_eq!(result.gains.len(), 2);
     }
@@ -1285,7 +1288,10 @@ mod tests {
                 bounds: vec![(0.0, 1.0)],
                 seat_positions: vec![vec![0.0], vec![1.0]],
                 prior: AreaPriorKind::Uniform,
-                quadrature: AreaQuadratureKind::Sobol { num_points: 8, seed: 0 },
+                quadrature: AreaQuadratureKind::Sobol {
+                    num_points: 8,
+                    seed: 0,
+                },
                 scalarisation: AreaScalarisationKind::WorstCase {
                     inner_maxiter: 20,
                     inner_seed: 1,
@@ -1311,7 +1317,10 @@ mod tests {
                 bounds: vec![(0.0, 1.0)],
                 seat_positions: vec![vec![0.0], vec![1.0]],
                 prior: AreaPriorKind::Uniform,
-                quadrature: AreaQuadratureKind::Sobol { num_points: 8, seed: 0 },
+                quadrature: AreaQuadratureKind::Sobol {
+                    num_points: 8,
+                    seed: 0,
+                },
                 scalarisation: AreaScalarisationKind::Cvar { alpha: 0.25 },
                 idw_power: 2.0,
             }),
@@ -1338,7 +1347,10 @@ mod tests {
                     cov_diag: vec![0.1],
                     truncation_sigmas: 2.0,
                 },
-                quadrature: AreaQuadratureKind::Sobol { num_points: 8, seed: 0 },
+                quadrature: AreaQuadratureKind::Sobol {
+                    num_points: 8,
+                    seed: 0,
+                },
                 scalarisation: AreaScalarisationKind::ExpectedValue,
                 idw_power: 2.0,
             }),
@@ -1360,7 +1372,8 @@ mod tests {
             allpass_filters_per_sub: 1,
             ..Default::default()
         };
-        let result = optimize_multiseat(&ms, &config, (20.0, 120.0), 48000.0).expect("should optimize");
+        let result =
+            optimize_multiseat(&ms, &config, (20.0, 120.0), 48000.0).expect("should optimize");
         assert_eq!(result.polarities.len(), 2);
         assert_eq!(result.allpass_filters.len(), 2);
     }

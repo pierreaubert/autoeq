@@ -400,6 +400,8 @@ mod coverage_tests {
     use super::super::process::process_mixed_mode_crossover;
     use super::super::process::process_multisub_group;
     use super::super::process::process_speaker_group;
+    use crate::Curve;
+    use crate::MeasurementSource;
     use crate::roomeq::types::DBAConfig;
     use crate::roomeq::types::MixedModeConfig;
     use crate::roomeq::types::MultiSeatConfig;
@@ -407,8 +409,6 @@ mod coverage_tests {
     use crate::roomeq::types::OptimizerConfig;
     use crate::roomeq::types::RoomConfig;
     use crate::roomeq::types::SpeakerGroup;
-    use crate::Curve;
-    use crate::MeasurementSource;
     use ndarray::array;
     use std::collections::HashMap;
     use std::path::Path;

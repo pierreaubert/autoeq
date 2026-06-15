@@ -67,7 +67,7 @@ ntest:
 
 [group('lint')]
 lint:
-	cargo clippy --all -- -D warnings
+	cargo clippy --all --features plotly -- -D warnings
 
 alias format := fmt
 
@@ -414,6 +414,13 @@ qa-roomeq-multi-small-stereo-22-mso: ensure-venv
 qa-roomeq-coverage: prod-autoeq
 	cargo run --bin roomeq-qa-coverage --release
 
+# Hard unit-test line-coverage gate for the library.  The full 897-test suite
+# is slow under LLVM instrumentation, so `--release` is used.  Once the crate
+# reaches 90 % line coverage this target becomes the canonical gate.
+[group('qa-roomeq')]
+qa-roomeq-coverage-gate:
+	cargo llvm-cov --lib --summary-only --release --fail-under-lines 90
+
 [group('qa-roomeq')]
 qa-roomeq-quick: prod-autoeq
 	cargo run --bin roomeq-qa-coverage --release -- --quick --maxeval 200
@@ -481,7 +488,7 @@ qa-roomeq-dsp-consistency:
 
 [group('qa-roomeq')]
 qa-roomeq-phase-critical:
-	cargo test -p autoeq gd_opt -- --nocapture
+	cargo test -p autoeq gd_opt --lib -- --nocapture
 	cargo test -p autoeq phase_linear_gd_target --lib -- --nocapture
 	cargo test -p autoeq frequency_grid --lib -- --nocapture
 	cargo run --bin roomeq-qa-synthetic --no-default-features --release -- --multiseat-guards-only
@@ -504,15 +511,21 @@ qa-roomeq-gd:
 qa-roomeq-features:
 	cargo run --bin roomeq-qa-features --no-default-features --release
 
+# Supporting-source room compensation QA: integration test + targeted lib tests.
+[group('qa-roomeq')]
+qa-roomeq-supporting-source:
+	cargo test -p autoeq --test roomeq_supporting_source -- --nocapture
+	cargo test -p autoeq supporting_source --lib -- --nocapture
+
 # Compact CI-friendly QA run: bounded fuzzer + small coverage subset.
 # Typical wall time under 3 minutes on modern hardware.
 [group('qa-roomeq')]
 qa-roomeq-ci:
-	cargo run --bin roomeq-fuzzer --release  --features="plotly" -- -n 50
+	cargo run --bin roomeq-fuzzer --release  --features="plotly" -- -n 50 --seed 42 --skip-kautz-modal
 	cargo run --bin roomeq-qa-coverage --release -- --quick --maxeval 200
 	cargo test -p autoeq reported_ --lib -- --nocapture
 	cargo test -p autoeq timing_diagnostics --lib -- --nocapture
-	cargo test -p autoeq gd_opt -- --nocapture
+	cargo test -p autoeq gd_opt --lib -- --nocapture
 	cargo test -p autoeq phase_linear_gd_target --lib -- --nocapture
 	cargo test -p autoeq frequency_grid --lib -- --nocapture
 	cargo run --bin roomeq-qa-synthetic --no-default-features --release -- --multiseat-guards-only

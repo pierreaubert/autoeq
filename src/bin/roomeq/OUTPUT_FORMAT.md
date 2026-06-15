@@ -17,7 +17,7 @@ check-jsonschema --schemafile output_schema.json dsp_chain.json
 
 ```json
 {
-  "version": "1.4.0",
+  "version": "2.1.0",
   "channels": { ... },
   "metadata": { ... }
 }
@@ -463,6 +463,7 @@ Information about the optimization process.
 | `perceptual_metrics.fir_pre_ringing_audible_db` | number or null | Worst FIR pre-ringing audible energy across channels, dB relative to each FIR main impulse peak. |
 | `perceptual_metrics.fir_post_ringing_audible_db` | number or null | Worst FIR post-ringing audible energy across channels, dB relative to each FIR main impulse peak. |
 | `perceptual_metrics.fir_temporal_masking_penalty` | number or null | Worst scalar FIR temporal masking penalty across channels. |
+| `supporting_source` | object or null | Per-channel supporting-source room-compensation reports. Present when at least one `SupportingSourceGroup` was processed. |
 
 ### EPA Per-Channel Metrics
 
@@ -505,6 +506,48 @@ Measures how closely all channels match each other in SPL after optimization. Co
 | `midrange_peak_db` | number (dB) | Maximum single-point deviation in midrange |
 | `midrange_peak_freq` | number (Hz) | Frequency of maximum midrange deviation |
 
+### Supporting-Source Report
+
+When a `SupportingSourceGroup` is processed, `metadata.supporting_source` is a
+map from logical channel role to a per-channel report describing the computed
+support FIR and its effect on direct-to-reverberant ratio (DRR).
+
+```json
+{
+  "metadata": {
+    "supporting_source": {
+      "L": {
+        "enabled": true,
+        "primary_output": "L",
+        "support_output": "L_support",
+        "delay_ms": 10.0,
+        "fir_length": 8192,
+        "compensation_band_hz": [70.0, 20000.0],
+        "drr_before_db": { "mean": 12.5, "std": 3.1 },
+        "drr_after_db": { "mean": 15.2, "std": 2.8 },
+        "target_constraints_active": true,
+        "precedence_limit_hits": 4,
+        "advisories": ["primary:high_spatial_variance"]
+      }
+    }
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | boolean | Whether supporting-source processing was enabled for this logical channel |
+| `primary_output` | string | Name of the primary output channel |
+| `support_output` | string | Name of the supporting output channel |
+| `delay_ms` | number | Delay applied to the supporting source (ms) |
+| `fir_length` | integer | Length of the generated support FIR (taps) |
+| `compensation_band_hz` | [min, max] | Compensation band in Hz |
+| `drr_before_db` | object | DRR summary before compensation (`mean`, `std`) |
+| `drr_after_db` | object | DRR summary after compensation (`mean`, `std`) |
+| `target_constraints_active` | boolean | Whether target floor/ceiling constraints were active |
+| `precedence_limit_hits` | integer | Number of frequency bins where the precedence ceiling was hit |
+| `advisories` | array of strings | Optional spatial-robustness or measurement advisories (e.g. `primary:high_spatial_variance`, `support:single_position_measurement`) |
+
 ---
 
 ## Complete Output Examples
@@ -515,7 +558,7 @@ Output for a basic stereo system with EQ filters only.
 
 ```json
 {
-  "version": "1.4.0",
+  "version": "2.1.0",
   "channels": {
     "left": {
       "channel": "left",
@@ -580,7 +623,7 @@ Output for a 2-way speaker with crossover and per-driver processing.
 
 ```json
 {
-  "version": "1.4.0",
+  "version": "2.1.0",
   "channels": {
     "left": {
       "channel": "left",
@@ -667,7 +710,7 @@ Output for FIR mode, where each channel gets a WAV impulse response file.
 
 ```json
 {
-  "version": "1.4.0",
+  "version": "2.1.0",
   "channels": {
     "left": {
       "channel": "left",
@@ -708,7 +751,7 @@ Output for mixed mode where FIR handles low frequencies and IIR handles high fre
 
 ```json
 {
-  "version": "1.4.0",
+  "version": "2.1.0",
   "channels": {
     "left": {
       "channel": "left",

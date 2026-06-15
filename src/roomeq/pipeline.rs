@@ -308,13 +308,16 @@ mod tests {
 
     #[test]
     fn pipeline_event_with_methods() {
-        let event = PipelineEvent::new(PipelineStepId::GenericChannelOptimization, PipelineStepStatus::InProgress)
-            .with_channel("left")
-            .with_channels(0, 2)
-            .with_iteration(5, 20)
-            .with_loss(0.42)
-            .with_overall_progress(0.5)
-            .with_epa_preference(Some(0.7));
+        let event = PipelineEvent::new(
+            PipelineStepId::GenericChannelOptimization,
+            PipelineStepStatus::InProgress,
+        )
+        .with_channel("left")
+        .with_channels(0, 2)
+        .with_iteration(5, 20)
+        .with_loss(0.42)
+        .with_overall_progress(0.5)
+        .with_epa_preference(Some(0.7));
 
         assert_eq!(event.channel, Some("left".to_string()));
         assert_eq!(event.channel_index, Some(0));
@@ -341,7 +344,7 @@ mod tests {
     #[test]
     fn room_pipeline_new_and_run_error_branch() {
         let config = RoomConfig {
-            version: "2.0.0".to_string(),
+            version: crate::roomeq::types::default_config_version(),
             system: None,
             speakers: std::collections::HashMap::new(),
             crossovers: None,

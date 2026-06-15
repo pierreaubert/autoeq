@@ -400,11 +400,11 @@ fn multi_measurement_strategy_name(strategy: &MultiMeasurementStrategy) -> &'sta
 #[cfg(test)]
 mod multi_seat_branch_tests {
     use super::{
-        multi_seat_correction_report, multi_seat_coverage, multi_seat_recommended_scope,
-        multi_seat_role_group_reports, multi_seat_coverage_advisories,
+        multi_seat_correction_report, multi_seat_coverage, multi_seat_coverage_advisories,
+        multi_seat_recommended_scope, multi_seat_role_group_reports,
     };
-    use crate::roomeq::optimize::ChannelOptimizationResult;
     use crate::roomeq::home_cinema::types::HomeCinemaRoleGroup;
+    use crate::roomeq::optimize::ChannelOptimizationResult;
     use crate::roomeq::types::{
         CrossoverConfig, MultiSeatConfig, OptimizerConfig, RoomConfig, SpeakerConfig,
         SubwooferSystemConfig, SystemConfig, SystemModel,
@@ -494,27 +494,47 @@ mod multi_seat_branch_tests {
         assert_eq!(report.max_seat_count, 2);
         assert!(report.all_channel_correction_ready);
         assert_eq!(report.recommended_scope, "all_channel_reporting_ready");
-        assert!(report.advisories.contains(&"all_channel_multi_seat_reporting_ready".to_string()));
+        assert!(
+            report
+                .advisories
+                .contains(&"all_channel_multi_seat_reporting_ready".to_string())
+        );
     }
 
     #[test]
     fn multi_seat_coverage_partial_and_sub_only() {
         let mut config = home_cinema_config();
         // only L has multi-seat
-        config.speakers.insert("R".to_string(), SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())));
-        config.speakers.insert("C".to_string(), SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())));
+        config.speakers.insert(
+            "R".to_string(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
+        );
+        config.speakers.insert(
+            "C".to_string(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
+        );
         let report = multi_seat_coverage(&config);
         assert_eq!(report.channels_with_multiple_measurements, 1);
         assert_eq!(report.recommended_scope, "partial_non_sub_reporting_only");
-        assert!(report.advisories.contains(&"partial_non_sub_multi_seat_coverage".to_string()));
+        assert!(
+            report
+                .advisories
+                .contains(&"partial_non_sub_multi_seat_coverage".to_string())
+        );
 
         // only sub has multi-seat (drop system mapping so logical_speaker_configs sees Sub)
         config.system = None;
         config.speakers.clear();
-        config.speakers.insert("Sub".to_string(), SpeakerConfig::Single(multi_source()));
+        config
+            .speakers
+            .insert("Sub".to_string(), SpeakerConfig::Single(multi_source()));
         let report = multi_seat_coverage(&config);
         assert_eq!(report.recommended_scope, "sub_or_partial_only");
-        assert!(report.advisories.contains(&"multi_seat_sub_only".to_string()));
+        assert!(
+            report
+                .advisories
+                .contains(&"multi_seat_sub_only".to_string())
+        );
     }
 
     #[test]
@@ -540,14 +560,8 @@ mod multi_seat_branch_tests {
             multi_seat_recommended_scope(0, 2, 1),
             "partial_non_sub_reporting_only"
         );
-        assert_eq!(
-            multi_seat_recommended_scope(1, 0, 0),
-            "sub_or_partial_only"
-        );
-        assert_eq!(
-            multi_seat_recommended_scope(0, 0, 0),
-            "single_seat_only"
-        );
+        assert_eq!(multi_seat_recommended_scope(1, 0, 0), "sub_or_partial_only");
+        assert_eq!(multi_seat_recommended_scope(0, 0, 0), "single_seat_only");
     }
 
     #[test]
@@ -559,7 +573,11 @@ mod multi_seat_branch_tests {
         });
         let report = multi_seat_correction_report(&config, &HashMap::new(), None);
         assert!(!report.enabled);
-        assert!(report.advisories.contains(&"all_channel_multiseat_disabled".to_string()));
+        assert!(
+            report
+                .advisories
+                .contains(&"all_channel_multiseat_disabled".to_string())
+        );
         assert!(report.channels.iter().all(|c| c.status == "disabled"));
     }
 
@@ -577,7 +595,12 @@ mod multi_seat_branch_tests {
             SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
         );
         let report = multi_seat_correction_report(&config, &HashMap::new(), None);
-        assert!(report.channels.iter().any(|c| c.channel == "L" && c.status == "single_seat_only"));
+        assert!(
+            report
+                .channels
+                .iter()
+                .any(|c| c.channel == "L" && c.status == "single_seat_only")
+        );
     }
 
     #[test]
@@ -593,7 +616,12 @@ mod multi_seat_branch_tests {
             }),
         );
         let report = multi_seat_correction_report(&config, &HashMap::new(), None);
-        assert!(report.channels.iter().any(|c| c.channel == "L" && c.status == "unsupported_speaker_topology"));
+        assert!(
+            report
+                .channels
+                .iter()
+                .any(|c| c.channel == "L" && c.status == "unsupported_speaker_topology")
+        );
     }
 
     #[test]
@@ -606,8 +634,18 @@ mod multi_seat_branch_tests {
         let mut results = HashMap::new();
         results.insert("L".to_string(), channel_result("L", 0.0));
         let report = multi_seat_correction_report(&config, &results, None);
-        assert!(report.channels.iter().any(|c| c.channel == "L" && c.status == "invalid_policy_skipped"));
-        assert!(report.channels.iter().any(|c| c.channel == "L" && c.advisories.iter().any(|a| a.contains("seat_weights_length_mismatch"))));
+        assert!(
+            report
+                .channels
+                .iter()
+                .any(|c| c.channel == "L" && c.status == "invalid_policy_skipped")
+        );
+        assert!(report.channels.iter().any(|c| {
+            c.channel == "L"
+                && c.advisories
+                    .iter()
+                    .any(|a| a.contains("seat_weights_length_mismatch"))
+        }));
     }
 
     #[test]
@@ -620,8 +658,18 @@ mod multi_seat_branch_tests {
         let mut results = HashMap::new();
         results.insert("L".to_string(), channel_result("L", 0.0));
         let report = multi_seat_correction_report(&config, &results, None);
-        assert!(report.channels.iter().any(|c| c.channel == "L" && c.status == "invalid_policy_skipped"));
-        assert!(report.channels.iter().any(|c| c.channel == "L" && c.advisories.iter().any(|a| a == "primary_seat_out_of_range")));
+        assert!(
+            report
+                .channels
+                .iter()
+                .any(|c| c.channel == "L" && c.status == "invalid_policy_skipped")
+        );
+        assert!(report.channels.iter().any(|c| {
+            c.channel == "L"
+                && c.advisories
+                    .iter()
+                    .any(|a| a == "primary_seat_out_of_range")
+        }));
     }
 
     #[test]
@@ -632,8 +680,17 @@ mod multi_seat_branch_tests {
         let mut rejected = HashMap::new();
         rejected.insert("L".to_string(), vec!["guardrail".to_string()]);
         let report = multi_seat_correction_report(&config, &results, Some(&rejected));
-        assert!(report.channels.iter().any(|c| c.channel == "L" && c.status == "rejected_guardrails"));
-        assert!(report.advisories.contains(&"all_channel_corrections_rejected_by_guardrails".to_string()));
+        assert!(
+            report
+                .channels
+                .iter()
+                .any(|c| c.channel == "L" && c.status == "rejected_guardrails")
+        );
+        assert!(
+            report
+                .advisories
+                .contains(&"all_channel_corrections_rejected_by_guardrails".to_string())
+        );
     }
 
     #[test]
@@ -663,7 +720,11 @@ mod multi_seat_branch_tests {
         let report = multi_seat_correction_report(&config, &results, None);
         let channel = report.channels.iter().find(|c| c.channel == "L").unwrap();
         assert_eq!(channel.status, "failed_constraints");
-        assert!(report.advisories.contains(&"seat_specific_nulls_were_not_overcorrected".to_string()));
+        assert!(
+            report
+                .advisories
+                .contains(&"seat_specific_nulls_were_not_overcorrected".to_string())
+        );
     }
 
     #[test]
@@ -679,7 +740,12 @@ mod multi_seat_branch_tests {
         let mut results = HashMap::new();
         results.insert("L".to_string(), channel_result("L", 0.0));
         let report = multi_seat_correction_report(&config, &results, None);
-        assert!(report.channels.iter().any(|c| c.channel == "L" && c.status == "frequency_grid_mismatch_skipped"));
+        assert!(
+            report
+                .channels
+                .iter()
+                .any(|c| c.channel == "L" && c.status == "frequency_grid_mismatch_skipped")
+        );
     }
 
     #[test]
@@ -696,7 +762,12 @@ mod multi_seat_branch_tests {
         let mut results = HashMap::new();
         results.insert("L".to_string(), channel_result("L", 0.0));
         let report = multi_seat_correction_report(&config, &results, None);
-        assert!(report.channels.iter().any(|c| c.channel == "L" && c.status == "spatial_robustness_invalid_skipped"));
+        assert!(
+            report
+                .channels
+                .iter()
+                .any(|c| c.channel == "L" && c.status == "spatial_robustness_invalid_skipped")
+        );
     }
 
     #[test]
@@ -707,11 +778,18 @@ mod multi_seat_branch_tests {
             "speaker_name": null,
         }))
         .unwrap();
-        config.speakers.insert("L".to_string(), SpeakerConfig::Single(source));
+        config
+            .speakers
+            .insert("L".to_string(), SpeakerConfig::Single(source));
         let mut results = HashMap::new();
         results.insert("L".to_string(), channel_result("L", 0.0));
         let report = multi_seat_correction_report(&config, &results, None);
-        assert!(report.channels.iter().any(|c| c.channel == "L" && c.status == "measurement_load_failed"));
+        assert!(
+            report
+                .channels
+                .iter()
+                .any(|c| c.channel == "L" && c.status == "measurement_load_failed")
+        );
     }
 
     fn channel_report(
@@ -742,19 +820,47 @@ mod multi_seat_branch_tests {
     #[test]
     fn role_group_reports_pass_and_fail() {
         let channels = vec![
-            channel_report("L", HomeCinemaRoleGroup::FrontLr, "applied", Some(true), Some(true)),
-            channel_report("R", HomeCinemaRoleGroup::FrontLr, "applied", Some(true), Some(true)),
+            channel_report(
+                "L",
+                HomeCinemaRoleGroup::FrontLr,
+                "applied",
+                Some(true),
+                Some(true),
+            ),
+            channel_report(
+                "R",
+                HomeCinemaRoleGroup::FrontLr,
+                "applied",
+                Some(true),
+                Some(true),
+            ),
         ];
         let groups = multi_seat_role_group_reports(&channels);
         assert_eq!(groups.len(), 1);
         assert!(groups[0].pass);
 
         let channels = vec![
-            channel_report("L", HomeCinemaRoleGroup::FrontLr, "applied", Some(true), Some(true)),
-            channel_report("R", HomeCinemaRoleGroup::FrontLr, "applied", Some(false), Some(false)),
+            channel_report(
+                "L",
+                HomeCinemaRoleGroup::FrontLr,
+                "applied",
+                Some(true),
+                Some(true),
+            ),
+            channel_report(
+                "R",
+                HomeCinemaRoleGroup::FrontLr,
+                "applied",
+                Some(false),
+                Some(false),
+            ),
         ];
         let groups = multi_seat_role_group_reports(&channels);
         assert!(!groups[0].pass);
-        assert!(groups[0].advisories.contains(&"seat_constraint_failed".to_string()));
+        assert!(
+            groups[0]
+                .advisories
+                .contains(&"seat_constraint_failed".to_string())
+        );
     }
 }

@@ -9,8 +9,8 @@ use super::{try_run_gd_opt, try_run_phase_linear_fir_gd};
 use crate::roomeq::gd_opt::{ChannelGdResult, GroupDelayOptResult};
 use crate::roomeq::optimize::types::ChannelOptimizationResult;
 use crate::roomeq::types::{
-    ChannelDspChain, GroupDelayOptimizationConfig, OptimizerConfig, PluginConfigWrapper, RoomConfig,
-    SpeakerConfig,
+    ChannelDspChain, GroupDelayOptimizationConfig, OptimizerConfig, PluginConfigWrapper,
+    RoomConfig, SpeakerConfig,
 };
 use crate::{Curve, MeasurementSource};
 use math_audio_iir_fir::{Biquad, BiquadFilterType};
@@ -169,7 +169,10 @@ fn source_for_output_channel_system_role_map() {
     let curve = flat_curve(8);
     let source = MeasurementSource::InMemory(curve);
     let mut speakers = HashMap::new();
-    speakers.insert("left_meas".to_string(), SpeakerConfig::Single(source.clone()));
+    speakers.insert(
+        "left_meas".to_string(),
+        SpeakerConfig::Single(source.clone()),
+    );
     let config = RoomConfig {
         system: Some(crate::roomeq::types::SystemConfig {
             model: crate::roomeq::types::SystemModel::Stereo,
@@ -268,9 +271,12 @@ fn build_gd_sweep_realisations_with_multiple_sweeps() {
     results.insert("left".to_string(), channel_result("left", 0.0));
     results.insert("right".to_string(), channel_result("right", 0.0));
 
-    let realisations =
-        build_gd_sweep_realisations(&config, &results, &["left".to_string(), "right".to_string()])
-            .unwrap();
+    let realisations = build_gd_sweep_realisations(
+        &config,
+        &results,
+        &["left".to_string(), "right".to_string()],
+    )
+    .unwrap();
     assert_eq!(realisations.len(), 2);
     for sweep in &realisations {
         assert_eq!(sweep.len(), 2);
@@ -289,8 +295,12 @@ fn build_gd_sweep_realisations_missing_channel_returns_none() {
     results.insert("left".to_string(), channel_result("left", 0.0));
 
     assert!(
-        build_gd_sweep_realisations(&config, &results, &["left".to_string(), "right".to_string()])
-            .is_none()
+        build_gd_sweep_realisations(
+            &config,
+            &results,
+            &["left".to_string(), "right".to_string()]
+        )
+        .is_none()
     );
 }
 
@@ -333,7 +343,14 @@ fn apply_gd_opt_result_inserts_delay_polarity_and_ap_plugins() {
     assert!(chain.plugins.iter().any(|p| p.plugin_type == "gain"));
     assert!(chain.plugins.iter().any(|p| p.plugin_type == "delay"));
     assert!(chain.plugins.iter().any(|p| p.plugin_type == "eq"));
-    assert!(channel_results.get("left").unwrap().final_curve.phase.is_some());
+    assert!(
+        channel_results
+            .get("left")
+            .unwrap()
+            .final_curve
+            .phase
+            .is_some()
+    );
 }
 
 #[test]
@@ -425,9 +442,7 @@ fn try_run_gd_opt_disabled_returns_none() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    assert!(
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).is_none()
-    );
+    assert!(try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).is_none());
 }
 
 #[test]
@@ -475,9 +490,7 @@ fn try_run_gd_opt_single_channel_returns_none() {
     let mut channel_chains = HashMap::new();
     channel_chains.insert("left".to_string(), dsp_chain("left"));
 
-    assert!(
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).is_none()
-    );
+    assert!(try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).is_none());
 }
 
 #[test]
@@ -816,9 +829,7 @@ fn try_run_gd_opt_hybrid_mode_band_exceeds_crossover_advisory() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    assert!(
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).is_none()
-    );
+    assert!(try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).is_none());
 }
 
 #[test]

@@ -3,6 +3,7 @@
 /docs
 /coverage
 mutants.out
+fuzzer_output
 
 # generated data
 /data
@@ -23,6 +24,10 @@ mutants.out
 .jekyll-cache
 .jekyll-metadata
 _site
+[a-z]*.md
+
+# python
+__pycache__
 
 # MCP
 /.chunkhound
@@ -32,6 +37,8 @@ bugs.md
 src/unused.rs
 /plans
 check_output_*.txt
+.qwen
+.tokensave
 
 # Logs
 logs
@@ -61,5 +68,3 @@ CTAGS
 *#
 .#*
 .idea
-.qwen
-.tokensave

@@ -140,6 +140,11 @@ mod tests {
         curves.insert("On Axis".to_string(), make_curve(&[80.0, 82.0, 81.0]));
         let result = build_cea2034_data(curves);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Missing CEA2034 curve"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Missing CEA2034 curve")
+        );
     }
 }

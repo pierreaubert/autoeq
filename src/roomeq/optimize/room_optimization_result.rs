@@ -286,8 +286,8 @@ mod tests {
                 speakers: HashMap::from([("Left".to_string(), "left".to_string())]),
                 subwoofers: None,
                 bass_management: None,
-            ..Default::default()
-        }),
+                ..Default::default()
+            }),
             speakers: HashMap::new(),
             crossovers: None,
             target_curve: None,

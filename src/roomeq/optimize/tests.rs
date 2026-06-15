@@ -324,8 +324,8 @@ fn select_topology_route_stereo_2_0() {
         ]),
         subwoofers: None,
         bass_management: None,
-            ..Default::default()
-        };
+        ..Default::default()
+    };
     let config = base_room_config(speakers, Some(system));
     let route = select_topology_route(&config, &observer_none()).unwrap();
     assert_eq!(route, TopologyRoute::Stereo2_0);
@@ -351,8 +351,8 @@ fn select_topology_route_stereo_2_1() {
             mapping: [("sub".to_string(), "Left".to_string())].into(),
         }),
         bass_management: None,
-            ..Default::default()
-        };
+        ..Default::default()
+    };
     let config = base_room_config(speakers, Some(system));
     let route = select_topology_route(&config, &observer_none()).unwrap();
     assert_eq!(route, TopologyRoute::Stereo2_1);
@@ -383,8 +383,8 @@ fn select_topology_route_home_cinema_with_sub() {
             mapping: [("lfe".to_string(), "Center".to_string())].into(),
         }),
         bass_management: None,
-            ..Default::default()
-        };
+        ..Default::default()
+    };
     let config = base_room_config(speakers, Some(system));
     let route = select_topology_route(&config, &observer_none()).unwrap();
     assert_eq!(route, TopologyRoute::HomeCinema);
@@ -406,8 +406,8 @@ fn select_topology_route_home_cinema_without_sub() {
         ]),
         subwoofers: None,
         bass_management: None,
-            ..Default::default()
-        };
+        ..Default::default()
+    };
     let config = base_room_config(speakers, Some(system));
     let route = select_topology_route(&config, &observer_none()).unwrap();
     assert_eq!(route, TopologyRoute::HomeCinema);
@@ -424,8 +424,8 @@ fn select_topology_route_custom_is_generic() {
         ]),
         subwoofers: None,
         bass_management: None,
-            ..Default::default()
-        };
+        ..Default::default()
+    };
     let config = base_room_config(speakers, Some(system));
     let route = select_topology_route(&config, &observer_none()).unwrap();
     assert_eq!(route, TopologyRoute::Generic);
@@ -463,8 +463,8 @@ fn select_topology_route_speaker_group_falls_back_to_generic() {
         ]),
         subwoofers: None,
         bass_management: None,
-            ..Default::default()
-        };
+        ..Default::default()
+    };
     let config = base_room_config(speakers, Some(system));
     let route = select_topology_route(&config, &observer_none()).unwrap();
     assert_eq!(route, TopologyRoute::Generic);
@@ -677,8 +677,8 @@ fn assemble_workflow_result_persists_channels() {
         ]),
         subwoofers: None,
         bass_management: None,
-            ..Default::default()
-        };
+        ..Default::default()
+    };
     let config = base_room_config(speakers, Some(system.clone()));
     let result = single_channel_result("left");
     let sys = config.system.as_ref().unwrap();
@@ -799,8 +799,8 @@ fn prepare_room_optimization_with_system_and_bass_management_succeeds() {
             enabled: true,
             ..BassManagementConfig::default()
         }),
-            ..Default::default()
-        };
+        ..Default::default()
+    };
     let config = room_config_with_optimizer(speakers, Some(system), tiny_optimizer());
 
     let (_observer, prepared) = prepare_room_optimization(&config, None).unwrap();
@@ -1015,8 +1015,8 @@ fn assemble_workflow_result_empty_channels_succeeds() {
         ]),
         subwoofers: None,
         bass_management: None,
-            ..Default::default()
-        };
+        ..Default::default()
+    };
     let config = room_config_with_optimizer(speakers, Some(system), tiny_optimizer());
     let sys = config.system.as_ref().unwrap();
     let result = RoomOptimizationResult {
@@ -1367,8 +1367,8 @@ fn optimize_room_impl_home_cinema_workflow_succeeds() {
         ]),
         subwoofers: None,
         bass_management: None,
-            ..Default::default()
-        };
+        ..Default::default()
+    };
     let config = room_config_with_optimizer(speakers, Some(system), tiny_optimizer());
 
     let result = optimize_room_impl(&config, 48000.0, None, None, None);
@@ -1448,12 +1448,10 @@ fn shared_stop_on_observer(
 fn counting_observer() -> (SharedPipelineObserver, Arc<AtomicUsize>) {
     let count = Arc::new(AtomicUsize::new(0));
     let c = Arc::clone(&count);
-    let observer = Arc::new(Mutex::new(Some(
-        Box::new(move |_event: &PipelineEvent| {
-            c.fetch_add(1, Ordering::SeqCst);
-            PipelineControl::Continue
-        }) as Box<dyn PipelineObserver>,
-    )));
+    let observer = Arc::new(Mutex::new(Some(Box::new(move |_event: &PipelineEvent| {
+        c.fetch_add(1, Ordering::SeqCst);
+        PipelineControl::Continue
+    }) as Box<dyn PipelineObserver>)));
     (observer, count)
 }
 
@@ -1492,16 +1490,24 @@ fn optimize_room_pipeline_impl_direct_call() {
 #[test]
 fn prepare_room_optimization_observer_stop_on_started() {
     let config = minimal_room_config(ProcessingMode::LowLatency);
-    let observer = stop_on_observer(PipelineStepId::ConfigPreparation, PipelineStepStatus::Started);
+    let observer = stop_on_observer(
+        PipelineStepId::ConfigPreparation,
+        PipelineStepStatus::Started,
+    );
     let result = prepare_room_optimization(&config, observer);
-    assert!(result.is_err(), "observer stop on preparation started should error");
+    assert!(
+        result.is_err(),
+        "observer stop on preparation started should error"
+    );
 }
 
 #[test]
 fn prepare_room_optimization_observer_stop_on_completed() {
     let config = minimal_room_config(ProcessingMode::LowLatency);
-    let observer =
-        stop_on_observer(PipelineStepId::ConfigPreparation, PipelineStepStatus::Completed);
+    let observer = stop_on_observer(
+        PipelineStepId::ConfigPreparation,
+        PipelineStepStatus::Completed,
+    );
     let result = prepare_room_optimization(&config, observer);
     assert!(
         result.is_err(),
@@ -1514,7 +1520,10 @@ fn validate_room_optimization_observer_stop_on_started() {
     let config = minimal_room_config(ProcessingMode::LowLatency);
     let observer = shared_stop_on_observer(PipelineStepId::Validation, PipelineStepStatus::Started);
     let result = validate_room_optimization(&config, &observer);
-    assert!(result.is_err(), "observer stop on validation started should error");
+    assert!(
+        result.is_err(),
+        "observer stop on validation started should error"
+    );
 }
 
 #[test]
@@ -1544,8 +1553,10 @@ fn select_topology_route_observer_emits_events() {
 #[test]
 fn select_topology_route_observer_stop_on_started() {
     let config = stereo_2_0_config();
-    let observer =
-        shared_stop_on_observer(PipelineStepId::TopologyRouteSelection, PipelineStepStatus::Started);
+    let observer = shared_stop_on_observer(
+        PipelineStepId::TopologyRouteSelection,
+        PipelineStepStatus::Started,
+    );
     let result = select_topology_route(&config, &observer);
     assert!(
         result.is_err(),
@@ -1728,11 +1739,13 @@ fn assemble_generic_result_with_observer_emits_events() {
     let config = room_config_with_optimizer(speakers, None, optimizer);
     let generic = two_channel_generic_collection();
     let (observer, count) = counting_observer();
-    let result =
-        assemble_generic_result(generic, 2, &config, 48000.0, None, &observer).unwrap();
+    let result = assemble_generic_result(generic, 2, &config, 48000.0, None, &observer).unwrap();
     assert!(result.channel_results.contains_key("left"));
     assert!(result.channel_results.contains_key("right"));
-    assert!(count.load(Ordering::SeqCst) > 0, "observer should receive events");
+    assert!(
+        count.load(Ordering::SeqCst) > 0,
+        "observer should receive events"
+    );
 }
 
 #[test]
@@ -1750,8 +1763,8 @@ fn assemble_generic_result_multiple_channels_time_alignment() {
     optimizer.allow_delay = Some(true);
     let config = room_config_with_optimizer(speakers, None, optimizer);
     let generic = two_channel_generic_collection();
-    let result = assemble_generic_result(generic, 2, &config, 48000.0, None, &observer_none())
-        .unwrap();
+    let result =
+        assemble_generic_result(generic, 2, &config, 48000.0, None, &observer_none()).unwrap();
     assert!(result.channels.contains_key("left"));
     assert!(result.channels.contains_key("right"));
 }
@@ -1800,10 +1813,7 @@ fn optimize_speaker_group_no_measurements_fails() {
         crossover: None,
     });
     let result = optimize_speaker("group", &group, &tiny_optimizer(), None, 48000.0, None);
-    assert!(
-        result.is_err(),
-        "group with no measurements should fail"
-    );
+    assert!(result.is_err(), "group with no measurements should fail");
 }
 
 #[test]
@@ -1904,7 +1914,11 @@ fn optimize_room_with_group_delay_enabled_succeeds() {
         ..Default::default()
     });
     let result = optimize_room(&config, 48000.0, None, None);
-    assert!(result.is_ok(), "optimize_room with GD enabled should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "optimize_room with GD enabled should succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -1916,7 +1930,11 @@ fn optimize_room_with_phase_alignment_enabled_succeeds() {
         ..Default::default()
     });
     let result = optimize_room(&config, 48000.0, None, None);
-    assert!(result.is_ok(), "optimize_room with phase alignment should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "optimize_room with phase alignment should succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -1927,15 +1945,25 @@ fn optimize_room_with_vog_enabled_succeeds() {
         reference_channel: "Left".to_string(),
     });
     let result = optimize_room(&config, 48000.0, None, None);
-    assert!(result.is_ok(), "optimize_room with VoG should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "optimize_room with VoG should succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
 fn optimize_room_with_target_curve_succeeds() {
     let mut config = stereo_2_0_config();
-    config.target_curve = Some(crate::roomeq::types::TargetCurveConfig::Predefined("flat".to_string()));
+    config.target_curve = Some(crate::roomeq::types::TargetCurveConfig::Predefined(
+        "flat".to_string(),
+    ));
     let result = optimize_room(&config, 48000.0, None, None);
-    assert!(result.is_ok(), "optimize_room with target curve should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "optimize_room with target curve should succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -1943,7 +1971,11 @@ fn optimize_room_with_psychoacoustic_smoothing_succeeds() {
     let mut config = stereo_2_0_config();
     config.optimizer.psychoacoustic = true;
     let result = optimize_room(&config, 48000.0, None, None);
-    assert!(result.is_ok(), "optimize_room with psychoacoustic smoothing should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "optimize_room with psychoacoustic smoothing should succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -1951,7 +1983,11 @@ fn optimize_room_with_refine_succeeds() {
     let mut config = stereo_2_0_config();
     config.optimizer.refine = true;
     let result = optimize_room(&config, 48000.0, None, None);
-    assert!(result.is_ok(), "optimize_room with refine should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "optimize_room with refine should succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -1959,19 +1995,33 @@ fn optimize_room_with_cobyla_algorithm_succeeds() {
     let mut config = stereo_2_0_config();
     config.optimizer.algorithm = "autoeq:cobyla".to_string();
     let result = optimize_room(&config, 48000.0, None, None);
-    assert!(result.is_ok(), "optimize_room with cobyla should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "optimize_room with cobyla should succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
 fn optimize_room_generic_with_time_alignment_succeeds() {
     let mut speakers = HashMap::new();
-    speakers.insert("left".to_string(), SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())));
-    speakers.insert("right".to_string(), SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())));
+    speakers.insert(
+        "left".to_string(),
+        SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
+    );
+    speakers.insert(
+        "right".to_string(),
+        SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
+    );
     let mut optimizer = tiny_optimizer();
     optimizer.allow_delay = Some(true);
     let config = room_config_with_optimizer(speakers, None, optimizer);
     let result = optimize_room(&config, 48000.0, None, None);
-    assert!(result.is_ok(), "generic optimize_room with time alignment should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "generic optimize_room with time alignment should succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -1979,7 +2029,10 @@ fn optimize_room_with_multi_measurement_weighted_succeeds() {
     let mut speakers = HashMap::new();
     speakers.insert(
         "left".to_string(),
-        SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(vec![flat_curve(), flat_curve()])),
+        SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(vec![
+            flat_curve(),
+            flat_curve(),
+        ])),
     );
     let mut optimizer = tiny_optimizer();
     optimizer.multi_measurement = Some(MultiMeasurementConfig {
@@ -1989,6 +2042,9 @@ fn optimize_room_with_multi_measurement_weighted_succeeds() {
     });
     let config = room_config_with_optimizer(speakers, None, optimizer);
     let result = optimize_room(&config, 48000.0, None, None);
-    assert!(result.is_ok(), "optimize_room with multi-measurement weighted should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "optimize_room with multi-measurement weighted should succeed: {:?}",
+        result.err()
+    );
 }
-

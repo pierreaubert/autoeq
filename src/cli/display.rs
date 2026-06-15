@@ -53,7 +53,10 @@ pub fn render_algorithm_list() -> String {
         }
 
         if !global.is_empty() {
-            let _ = writeln!(out, "   🌍 Global Optimizers (best for exploring solution space):");
+            let _ = writeln!(
+                out,
+                "   🌍 Global Optimizers (best for exploring solution space):"
+            );
             for algo in global {
                 let _ = write!(out, "   - {:<20}", algo.name);
                 let _ = write!(out, " | Constraints: ");
@@ -81,7 +84,10 @@ pub fn render_algorithm_list() -> String {
         }
 
         if !local.is_empty() {
-            let _ = writeln!(out, "   🎯 Local Optimizers (fast refinement from good starting points):");
+            let _ = writeln!(
+                out,
+                "   🎯 Local Optimizers (fast refinement from good starting points):"
+            );
             for algo in local {
                 let _ = write!(out, "   - {:<20}", algo.name);
                 let _ = write!(out, " | Constraints: ");
@@ -106,7 +112,10 @@ pub fn render_algorithm_list() -> String {
     // Display Metaheuristics algorithms
     if !metaheuristics_algos.is_empty() {
         let _ = writeln!(out, "🧬 Metaheuristics Library Algorithms:");
-        let _ = writeln!(out, "   Nature-inspired global optimization (penalty-based constraints)\n");
+        let _ = writeln!(
+            out,
+            "   Nature-inspired global optimization (penalty-based constraints)\n"
+        );
 
         for algo in metaheuristics_algos {
             let _ = write!(out, "   - {:<20}", algo.name);
@@ -126,7 +135,10 @@ pub fn render_algorithm_list() -> String {
     // Display AutoEQ algorithms
     if !autoeq_algos.is_empty() {
         let _ = writeln!(out, "🎵 AutoEQ Custom Algorithms:");
-        let _ = writeln!(out, "   Specialized algorithms developed for audio filter optimization\n");
+        let _ = writeln!(
+            out,
+            "   Specialized algorithms developed for audio filter optimization\n"
+        );
 
         for algo in autoeq_algos {
             let _ = write!(out, "   - {:<20}", algo.name);
@@ -163,8 +175,14 @@ pub fn render_algorithm_list() -> String {
         out,
         "  🎯 For best results: nlopt:isres (global) + --refine with nlopt:cobyla (local)"
     );
-    let _ = writeln!(out, "  ⚡ For speed: nlopt:cobyla (if you have a good initial guess)");
-    let _ = writeln!(out, "  🧪 For experimentation: mh:de or mh:pso from metaheuristics library");
+    let _ = writeln!(
+        out,
+        "  ⚡ For speed: nlopt:cobyla (if you have a good initial guess)"
+    );
+    let _ = writeln!(
+        out,
+        "  🧪 For experimentation: mh:de or mh:pso from metaheuristics library"
+    );
     let _ = writeln!(
         out,
         "  ⚖️  For constrained problems: Prefer algorithms with ✅ Nonlinear constraint support"
@@ -285,7 +303,10 @@ pub fn render_strategy_list() -> String {
         let _ = writeln!(out);
     }
 
-    let _ = writeln!(out, "🧬 Adaptive DE Strategies (experimental, research-based):");
+    let _ = writeln!(
+        out,
+        "🧬 Adaptive DE Strategies (experimental, research-based):"
+    );
     for &(name, _enum_name, description, recommendation) in strategies.iter() {
         if !name.starts_with("adaptive") {
             continue;
@@ -302,9 +323,18 @@ pub fn render_strategy_list() -> String {
 
     let _ = writeln!(out, "Strategy Naming Conventions:");
     let _ = writeln!(out, "==========================\n");
-    let _ = writeln!(out, "  • 'bin' = Binomial (uniform) crossover - each gene has equal probability");
-    let _ = writeln!(out, "  • 'exp' = Exponential crossover - contiguous segments are more likely");
-    let _ = writeln!(out, "  • Numbers (1, 2) indicate how many difference vectors are used\n");
+    let _ = writeln!(
+        out,
+        "  • 'bin' = Binomial (uniform) crossover - each gene has equal probability"
+    );
+    let _ = writeln!(
+        out,
+        "  • 'exp' = Exponential crossover - contiguous segments are more likely"
+    );
+    let _ = writeln!(
+        out,
+        "  • Numbers (1, 2) indicate how many difference vectors are used\n"
+    );
 
     let _ = writeln!(out, "Usage Examples:");
     let _ = writeln!(out, "==============\n");
@@ -319,7 +349,10 @@ pub fn render_strategy_list() -> String {
         "  autoeq --algo autoeq:de --strategy adaptivebin --adaptive-weight-f 0.8 --adaptive-weight-cr 0.7\n"
     );
     let _ = writeln!(out, "  # Use classic exploration strategy:");
-    let _ = writeln!(out, "  autoeq --algo autoeq:de --strategy rand1bin --curve input.csv\n");
+    let _ = writeln!(
+        out,
+        "  autoeq --algo autoeq:de --strategy rand1bin --curve input.csv\n"
+    );
 
     let _ = writeln!(out, "Recommendations:");
     let _ = writeln!(out, "===============\n");
@@ -327,8 +360,14 @@ pub fn render_strategy_list() -> String {
         out,
         "  ⭐ For general use: currenttobest1bin (good balance of exploration and exploitation)"
     );
-    let _ = writeln!(out, "  🚀 For fast convergence: best1bin or best2bin (may get trapped in local optima)");
-    let _ = writeln!(out, "  🌍 For thorough exploration: rand1bin or rand2bin (slower but more robust)");
+    let _ = writeln!(
+        out,
+        "  🚀 For fast convergence: best1bin or best2bin (may get trapped in local optima)"
+    );
+    let _ = writeln!(
+        out,
+        "  🌍 For thorough exploration: rand1bin or rand2bin (slower but more robust)"
+    );
     let _ = writeln!(
         out,
         "  🧪 For research/experimentation: adaptivebin or adaptiveexp (requires parameter tuning)"
@@ -349,7 +388,10 @@ pub fn render_peq_model_list() -> String {
     let _ = writeln!(out, "Available PEQ Models");
     let _ = writeln!(out, "===================");
     let _ = writeln!(out);
-    let _ = writeln!(out, "The PEQ model defines the structure and constraints of the equalizer filters.");
+    let _ = writeln!(
+        out,
+        "The PEQ model defines the structure and constraints of the equalizer filters."
+    );
     let _ = writeln!(out);
 
     for model in PeqModel::all() {
@@ -359,9 +401,15 @@ pub fn render_peq_model_list() -> String {
     }
 
     let _ = writeln!(out, "Examples:");
-    let _ = writeln!(out, "  autoeq --peq-model pk           # All peak filters (default)");
+    let _ = writeln!(
+        out,
+        "  autoeq --peq-model pk           # All peak filters (default)"
+    );
     let _ = writeln!(out, "  autoeq --peq-model hp-pk        # Highpass + peaks");
-    let _ = writeln!(out, "  autoeq --peq-model hp-pk-lp     # Highpass + peaks + lowpass");
+    let _ = writeln!(
+        out,
+        "  autoeq --peq-model hp-pk-lp     # Highpass + peaks + lowpass"
+    );
 
     out
 }

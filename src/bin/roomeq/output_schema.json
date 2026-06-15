@@ -32,7 +32,7 @@
     "version": {
       "description": "Output version",
       "type": "string",
-      "default": "2.0.0"
+      "default": "2.1.0"
     }
   },
   "required": [
@@ -2705,6 +2705,13 @@
       "description": "Per-channel supporting-source report.",
       "type": "object",
       "properties": {
+        "advisories": {
+          "description": "Optional advisories raised during processing (e.g. spatial robustness).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "compensation_band_hz": {
           "description": "Compensation band in Hz.",
           "type": "array",

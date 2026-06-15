@@ -816,7 +816,12 @@ mod optimizer_rule_tests {
             high_freq: 1000.0,
         });
         let result = run_rule(rule_psychoacoustic_smoothing, &config);
-        assert!(result.errors.iter().any(|e| e.contains("low_freq_n/high_freq_n must be at least 1")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("low_freq_n/high_freq_n must be at least 1"))
+        );
 
         let mut config = default_config();
         config.psychoacoustic_smoothing = Some(crate::read::PsychoacousticSmoothingConfig {
@@ -826,7 +831,12 @@ mod optimizer_rule_tests {
             high_freq: 100.0,
         });
         let result = run_rule(rule_psychoacoustic_smoothing, &config);
-        assert!(result.errors.iter().any(|e| e.contains("0 < low_freq < high_freq")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("0 < low_freq < high_freq"))
+        );
     }
 
     #[test]
@@ -840,8 +850,18 @@ mod optimizer_rule_tests {
             bass_dip_weight: 1.0,
         });
         let result = run_rule(rule_asymmetric_loss, &config);
-        assert!(result.errors.iter().any(|e| e.contains("transition_freq") && e.contains("must be positive")));
-        assert!(result.errors.iter().any(|e| e.contains("weights must be non-negative")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("transition_freq") && e.contains("must be positive"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("weights must be non-negative"))
+        );
     }
 
     #[test]
@@ -857,26 +877,62 @@ mod optimizer_rule_tests {
             ..Default::default()
         });
         let result = run_rule(rule_audibility_deadband, &config);
-        assert!(result.errors.iter().any(|e| e.contains("thresholds must be non-negative")));
-        assert!(result.errors.iter().any(|e| e.contains("0 < bass_mid_hz < mid_treble_hz")));
-        assert!(result.errors.iter().any(|e| e.contains("schroeder_hz") && e.contains("must be positive")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("thresholds must be non-negative"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("0 < bass_mid_hz < mid_treble_hz"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("schroeder_hz") && e.contains("must be positive"))
+        );
     }
 
     #[test]
     fn rule_high_frequency_correction_errors() {
         let mut config = default_config();
-        config.high_frequency_correction = Some(crate::roomeq::types::HighFrequencyCorrectionConfig {
-            enabled: true,
-            start_hz: 0.0,
-            extra_deadband_db: -1.0,
-            smoothing_n: 0,
-            max_q: 0.0,
-        });
+        config.high_frequency_correction =
+            Some(crate::roomeq::types::HighFrequencyCorrectionConfig {
+                enabled: true,
+                start_hz: 0.0,
+                extra_deadband_db: -1.0,
+                smoothing_n: 0,
+                max_q: 0.0,
+            });
         let result = run_rule(rule_high_frequency_correction, &config);
-        assert!(result.errors.iter().any(|e| e.contains("start_hz") && e.contains("must be positive")));
-        assert!(result.errors.iter().any(|e| e.contains("extra_deadband_db") && e.contains("must be non-negative")));
-        assert!(result.errors.iter().any(|e| e.contains("smoothing_n must be at least 1")));
-        assert!(result.errors.iter().any(|e| e.contains("max_q") && e.contains("must be positive")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("start_hz") && e.contains("must be positive"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("extra_deadband_db") && e.contains("must be non-negative"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("smoothing_n must be at least 1"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("max_q") && e.contains("must be positive"))
+        );
     }
 
     #[test]
@@ -890,8 +946,18 @@ mod optimizer_rule_tests {
             ..Default::default()
         });
         let result = run_rule(rule_early_late_correction, &config);
-        assert!(result.errors.iter().any(|e| e.contains("0 < direct < early < late")));
-        assert!(result.errors.iter().any(|e| e.contains("early_cue_risk_db must be finite")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("0 < direct < early < late"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("early_cue_risk_db must be finite"))
+        );
     }
 
     #[test]
@@ -902,7 +968,12 @@ mod optimizer_rule_tests {
             ..Default::default()
         });
         let result = run_rule(rule_validation_bundle, &config);
-        assert!(result.errors.iter().any(|e| e.contains("target_lufs must be finite")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("target_lufs must be finite"))
+        );
     }
 
     #[test]
@@ -914,7 +985,12 @@ mod optimizer_rule_tests {
             ..Default::default()
         });
         let result = run_rule(rule_excursion_protection, &config);
-        assert!(result.errors.iter().any(|e| e.contains("F3 reference band") && e.contains("0 < min < max")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("F3 reference band") && e.contains("0 < min < max"))
+        );
     }
 
     #[test]
@@ -929,9 +1005,24 @@ mod optimizer_rule_tests {
             gain_bounds: false,
         });
         let result = run_rule(rule_auto_optimizer, &config);
-        assert!(result.errors.iter().any(|e| e.contains("min_filters must be at least 1")));
-        assert!(result.errors.iter().any(|e| e.contains("max_filters must be at least 1")));
-        assert!(result.warnings.iter().any(|w| w.contains("all automatic selection flags are disabled")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("min_filters must be at least 1"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("max_filters must be at least 1"))
+        );
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("all automatic selection flags are disabled"))
+        );
 
         // max_filters < 2 with schroeder_split enabled
         let mut config = default_config();
@@ -948,7 +1039,13 @@ mod optimizer_rule_tests {
             ..Default::default()
         });
         let result = run_rule(rule_auto_optimizer, &config);
-        assert!(result.errors.iter().any(|e| e.contains("max_filters must be at least 2 when schroeder_split is enabled")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e
+                    .contains("max_filters must be at least 2 when schroeder_split is enabled"))
+        );
 
         // min_filters > max_filters
         let mut config = default_config();
@@ -961,7 +1058,12 @@ mod optimizer_rule_tests {
             gain_bounds: true,
         });
         let result = run_rule(rule_auto_optimizer, &config);
-        assert!(result.errors.iter().any(|e| e.contains("min_filters (5) must be <= max_filters (2)")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("min_filters (5) must be <= max_filters (2)"))
+        );
     }
 
     #[test]
@@ -975,9 +1077,24 @@ mod optimizer_rule_tests {
             ..Default::default()
         });
         let result = run_rule(rule_multi_seat, &config);
-        assert!(result.errors.iter().any(|e| e.contains("max_deviation_db") && e.contains("must be non-negative")));
-        assert!(result.errors.iter().any(|e| e.contains("primary_seat_weight") && e.contains("must be positive")));
-        assert!(result.errors.iter().any(|e| e.contains("seat_weights[1]") && e.contains("must be finite")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("max_deviation_db") && e.contains("must be non-negative"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("primary_seat_weight") && e.contains("must be positive"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("seat_weights[1]") && e.contains("must be finite"))
+        );
 
         // empty seat_weights
         let mut config = default_config();
@@ -987,7 +1104,12 @@ mod optimizer_rule_tests {
             ..Default::default()
         });
         let result = run_rule(rule_multi_seat, &config);
-        assert!(result.errors.iter().any(|e| e.contains("seat_weights must not be empty")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("seat_weights must not be empty"))
+        );
     }
 
     #[test]
@@ -1004,12 +1126,42 @@ mod optimizer_rule_tests {
             ..Default::default()
         });
         let result = run_rule(rule_cea2034_correction, &config);
-        assert!(result.errors.iter().any(|e| e.contains("num_filters") && e.contains("range [1..20]")));
-        assert!(result.errors.iter().any(|e| e.contains("max_q") && e.contains("must be positive")));
-        assert!(result.warnings.iter().any(|w| w.contains("min_db") && w.contains("non-negative")));
-        assert!(result.errors.iter().any(|e| e.contains("max_db") && e.contains("must be >= min_db")));
-        assert!(result.errors.iter().any(|e| e.contains("score is not supported")));
-        assert!(result.errors.iter().any(|e| e.contains("nearfield_threshold_m") && e.contains("must be positive")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("num_filters") && e.contains("range [1..20]"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("max_q") && e.contains("must be positive"))
+        );
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("min_db") && w.contains("non-negative"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("max_db") && e.contains("must be >= min_db"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("score is not supported"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("nearfield_threshold_m") && e.contains("must be positive"))
+        );
     }
 
     #[test]
@@ -1018,7 +1170,12 @@ mod optimizer_rule_tests {
         config.processing_mode = crate::roomeq::types::ProcessingMode::PhaseLinear;
         config.fir = None;
         let result = run_rule(rule_fir_config, &config);
-        assert!(result.warnings.iter().any(|w| w.contains("requires FIR configuration")));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("requires FIR configuration"))
+        );
 
         let mut config = default_config();
         config.fir = Some(crate::roomeq::types::FirConfig {
@@ -1027,7 +1184,12 @@ mod optimizer_rule_tests {
             ..Default::default()
         });
         let result = run_rule(rule_fir_config, &config);
-        assert!(result.warnings.iter().any(|w| w.contains("FIR taps (128) is low")));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("FIR taps (128) is low"))
+        );
     }
 
     #[test]
@@ -1042,7 +1204,9 @@ mod optimizer_rule_tests {
             ..Default::default()
         });
         let result = run_rule(rule_schroeder_split, &config);
-        assert!(result.warnings.iter().any(|w| w.contains("schroeder_split is enabled together with a non-zero target slope")));
+        assert!(result.warnings.iter().any(|w| {
+            w.contains("schroeder_split is enabled together with a non-zero target slope")
+        }));
     }
 
     #[test]
@@ -1057,7 +1221,12 @@ mod optimizer_rule_tests {
         config.min_freq = 20.0;
         config.max_freq = 20000.0;
         let result = run_rule(rule_mixed_config, &config);
-        assert!(result.errors.iter().any(|e| e.contains("crossover_freq (0) must be positive")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("crossover_freq (0) must be positive"))
+        );
 
         let mut config = default_config();
         config.mixed_config = Some(crate::roomeq::types::MixedModeConfig {
@@ -1069,7 +1238,12 @@ mod optimizer_rule_tests {
         config.min_freq = 20.0;
         config.max_freq = 20000.0;
         let result = run_rule(rule_mixed_config, &config);
-        assert!(result.errors.iter().any(|e| e.contains("Unknown mixed_config.crossover_type")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("Unknown mixed_config.crossover_type"))
+        );
 
         let mut config = default_config();
         config.mixed_config = Some(crate::roomeq::types::MixedModeConfig {
@@ -1081,7 +1255,12 @@ mod optimizer_rule_tests {
         config.min_freq = 20.0;
         config.max_freq = 20000.0;
         let result = run_rule(rule_mixed_config, &config);
-        assert!(result.errors.iter().any(|e| e.contains("Unknown mixed_config.fir_band")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("Unknown mixed_config.fir_band"))
+        );
 
         // warnings for crossover outside frequency range
         let mut config = default_config();
@@ -1094,7 +1273,12 @@ mod optimizer_rule_tests {
         config.min_freq = 20.0;
         config.max_freq = 20000.0;
         let result = run_rule(rule_mixed_config, &config);
-        assert!(result.warnings.iter().any(|w| w.contains("crossover_freq (10) is below min_freq")));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("crossover_freq (10) is below min_freq"))
+        );
 
         let mut config = default_config();
         config.mixed_config = Some(crate::roomeq::types::MixedModeConfig {
@@ -1106,12 +1290,22 @@ mod optimizer_rule_tests {
         config.min_freq = 20.0;
         config.max_freq = 20000.0;
         let result = run_rule(rule_mixed_config, &config);
-        assert!(result.warnings.iter().any(|w| w.contains("crossover_freq (25000) is above max_freq")));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("crossover_freq (25000) is above max_freq"))
+        );
 
         // non-hybrid warning
         let mut config = default_config();
         config.mixed_config = Some(crate::roomeq::types::MixedModeConfig::default());
         let result = run_rule(rule_mixed_config, &config);
-        assert!(result.warnings.iter().any(|w| w.contains("mixed_config specified but processing_mode is not Hybrid")));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("mixed_config specified but processing_mode is not Hybrid"))
+        );
     }
 }

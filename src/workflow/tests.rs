@@ -345,7 +345,11 @@ fn build_target_curve_by_name_covers_variants() {
         .expect("Listening Window should build");
     assert_eq!(listening_window.freq.len(), freqs.len());
 
-    for name in ["Sound Power", "Early Reflections", "Estimated In-Room Response"] {
+    for name in [
+        "Sound Power",
+        "Early Reflections",
+        "Estimated In-Room Response",
+    ] {
         let target = super::build_target_curve_by_name(name, &freqs, &input)
             .expect("{name} target should build");
         assert_eq!(target.freq.len(), freqs.len());
@@ -389,7 +393,15 @@ fn build_target_curve_loads_from_csv_path() {
 #[test]
 fn create_driver_optimization_args_has_expected_values() {
     let args = super::misc::create_driver_optimization_args(
-        50.0, 5000.0, 48000.0, "autoeq:de", 20, 6, -6.0, 6.0, Some(1),
+        50.0,
+        5000.0,
+        48000.0,
+        "autoeq:de",
+        20,
+        6,
+        -6.0,
+        6.0,
+        Some(1),
     );
     assert_eq!(args.min_freq, 50.0);
     assert_eq!(args.max_freq, 5000.0);
@@ -439,8 +451,14 @@ fn interpolate_cea2034_data_preserves_keys() {
 
 fn write_headphone_csv(path: &PathBuf) {
     let mut contents = String::from("frequency,spl\n");
-    for f in [20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0] {
-        contents.push_str(&format!("{},{:.2}\n", f, 80.0 + 2.0 * f64::sin(f / 1000.0_f64)));
+    for f in [
+        20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0,
+    ] {
+        contents.push_str(&format!(
+            "{},{:.2}\n",
+            f,
+            80.0 + 2.0 * f64::sin(f / 1000.0_f64)
+        ));
     }
     std::fs::write(path, contents).unwrap();
 }
@@ -468,8 +486,13 @@ fn optimize_headphone_with_csv_runs() {
     args.min_freq = 100.0;
     args.max_freq = 10000.0;
 
-    let result = super::optimize_headphone(&curve_path, &target_curve, &args, None, None::<fn(&_) -> _>);
-    assert!(result.is_ok(), "optimize_headphone failed: {:?}", result.err());
+    let result =
+        super::optimize_headphone(&curve_path, &target_curve, &args, None, None::<fn(&_) -> _>);
+    assert!(
+        result.is_ok(),
+        "optimize_headphone failed: {:?}",
+        result.err()
+    );
     let opt = result.unwrap();
     assert!(!opt.biquads.is_empty());
 
@@ -477,7 +500,9 @@ fn optimize_headphone_with_csv_runs() {
 }
 
 fn make_two_drivers() -> crate::loss::DriversLossData {
-    let freq = Array1::from(vec![20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0]);
+    let freq = Array1::from(vec![
+        20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0,
+    ]);
     let woofer = crate::loss::DriverMeasurement::new(
         freq.clone(),
         Array1::from(vec![80.0, 82.0, 85.0, 84.0, 82.0, 78.0, 70.0, 60.0, 50.0]),
@@ -559,15 +584,26 @@ fn optimize_multisub_runs() {
         Array1::from(vec![81.0, 80.0, 82.0, 81.0]),
         None,
     );
-    let drivers_data = crate::loss::DriversLossData::new(
-        vec![sub1, sub2],
-        crate::loss::CrossoverType::None,
-    );
+    let drivers_data =
+        crate::loss::DriversLossData::new(vec![sub1, sub2], crate::loss::CrossoverType::None);
 
     let result = super::optimize_multisub(
-        drivers_data, 20.0, 200.0, 48000.0, "autoeq:de", 20, 6, -12.0, 12.0, Some(1),
+        drivers_data,
+        20.0,
+        200.0,
+        48000.0,
+        "autoeq:de",
+        20,
+        6,
+        -12.0,
+        12.0,
+        Some(1),
     );
-    assert!(result.is_ok(), "optimize_multisub failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "optimize_multisub failed: {:?}",
+        result.err()
+    );
     let opt = result.unwrap();
     assert_eq!(opt.gains.len(), 2);
     assert_eq!(opt.delays.len(), 2);
@@ -577,10 +613,7 @@ fn optimize_multisub_runs() {
 fn write_speaker_cache(speaker: &str, _version: &str, measurement: &str) -> PathBuf {
     use serde_json::json;
 
-    let cache_root = std::env::temp_dir().join(format!(
-        "autoeq-test-{}-cache",
-        std::process::id()
-    ));
+    let cache_root = std::env::temp_dir().join(format!("autoeq-test-{}-cache", std::process::id()));
     let cache_dir = cache_root
         .join("speakers")
         .join("org.spinorama")
@@ -645,7 +678,11 @@ fn optimize_speaker_with_local_cache_runs() {
     unsafe { std::env::remove_var("SOTF_CACHE_DIR") };
     std::fs::remove_dir_all(&cache_root).ok();
 
-    assert!(result.is_ok(), "optimize_speaker failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "optimize_speaker failed: {:?}",
+        result.err()
+    );
     let opt = result.unwrap();
     assert!(!opt.biquads.is_empty());
     assert!(opt.spin_data.is_some());

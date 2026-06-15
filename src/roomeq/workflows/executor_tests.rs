@@ -146,8 +146,8 @@ fn stereo_2_0_executor_runs() {
         ]),
         subwoofers: None,
         bass_management: None,
-            ..Default::default()
-        };
+        ..Default::default()
+    };
     let config = RoomConfig {
         version: crate::roomeq::types::default_config_version(),
         system: Some(sys.clone()),
@@ -189,8 +189,8 @@ fn home_cinema_executor_without_sub_runs() {
         ]),
         subwoofers: None,
         bass_management: None,
-            ..Default::default()
-        };
+        ..Default::default()
+    };
     let config = RoomConfig {
         version: crate::roomeq::types::default_config_version(),
         system: Some(sys.clone()),
@@ -229,8 +229,8 @@ fn generic_executor_single_speaker_runs() {
         speakers: HashMap::from([("Left".to_string(), "left".to_string())]),
         subwoofers: None,
         bass_management: None,
-            ..Default::default()
-        };
+        ..Default::default()
+    };
     let config = RoomConfig {
         version: crate::roomeq::types::default_config_version(),
         system: Some(sys.clone()),
@@ -280,8 +280,8 @@ fn home_cinema_executor_with_sub_runs() {
             mapping: HashMap::from([("sub".to_string(), "Left".to_string())]),
         }),
         bass_management: None,
-            ..Default::default()
-        };
+        ..Default::default()
+    };
     let mut crossovers = HashMap::new();
     crossovers.insert(
         "bass_xo".to_string(),
@@ -333,8 +333,8 @@ fn multiseat_executor_disabled_skips() {
         speakers: HashMap::from([("Left".to_string(), "left".to_string())]),
         subwoofers: None,
         bass_management: None,
-            ..Default::default()
-        };
+        ..Default::default()
+    };
     let config = RoomConfig {
         version: crate::roomeq::types::default_config_version(),
         system: Some(sys.clone()),
@@ -381,8 +381,8 @@ fn stereo_2_1_executor_runs() {
             mapping: HashMap::from([("sub".to_string(), "L".to_string())]),
         }),
         bass_management: None,
-            ..Default::default()
-        };
+        ..Default::default()
+    };
     let mut crossovers = HashMap::new();
     crossovers.insert(
         "bass_xo".to_string(),

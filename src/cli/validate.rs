@@ -393,7 +393,11 @@ mod tests {
             args.driver1 = Some(PathBuf::from("d1.csv"));
             args.driver2 = Some(PathBuf::from("d2.csv"));
             args.crossover_type = ct.to_string();
-            assert!(validate_args(&args).is_ok(), "crossover {} should be valid", ct);
+            assert!(
+                validate_args(&args).is_ok(),
+                "crossover {} should be valid",
+                ct
+            );
         }
     }
 }

@@ -342,6 +342,9 @@ pub struct SupportingSourceReport {
     pub target_constraints_active: bool,
     /// Number of frequency bins where the precedence ceiling was hit.
     pub precedence_limit_hits: usize,
+    /// Optional advisories raised during processing (e.g. spatial robustness).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub advisories: Vec<String>,
 }
 
 /// Optimization metadata

@@ -1516,7 +1516,11 @@ mod multi_eq_tests {
         };
 
         let result = optimize_channel_eq(&curve, &config, None, 48000.0);
-        assert!(result.is_ok(), "adaptive filter selection should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "adaptive filter selection should succeed: {:?}",
+            result.err()
+        );
         let (filters, loss) = result.unwrap();
         assert!(!filters.is_empty());
         assert!(loss.is_finite());
@@ -1553,7 +1557,8 @@ mod multi_eq_tests {
             ..OptimizerConfig::default()
         };
         let multi_config = MultiMeasurementConfig::default();
-        let target_config = crate::roomeq::types::TargetCurveConfig::Path(tmpfile.path().to_path_buf());
+        let target_config =
+            crate::roomeq::types::TargetCurveConfig::Path(tmpfile.path().to_path_buf());
 
         let result = optimize_channel_eq_multi(
             &[curve1, curve2],

@@ -1,6 +1,6 @@
 [package]
 name = "autoeq"
-version = "0.4.45"
+version = "0.4.46"
 description = "Automatic equalization for speakers, headphones and rooms!"
 edition = "2024"
 keywords = ["audio", "dsp", "eq"]

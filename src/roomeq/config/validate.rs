@@ -129,13 +129,54 @@ fn validate_speakers(speakers: &HashMap<String, SpeakerConfig>, result: &mut Val
             }
             SpeakerConfig::SupportingSource(s) => {
                 // Supporting source requires both primary and support measurements.
-                if s.primary.speaker_name().is_some() && s.support.speaker_name().is_some()
+                if s.primary.speaker_name().is_some()
+                    && s.support.speaker_name().is_some()
                     && s.primary.speaker_name() == s.support.speaker_name()
                 {
                     result.add_warning(format!(
                         "Supporting source '{}' uses the same speaker_name for primary and support",
                         name
                     ));
+                }
+
+                let cfg = &s.supporting_source;
+                if !(1.0..=50.0).contains(&cfg.delay_ms) {
+                    result.add_error(format!(
+                        "Supporting source '{}' delay_ms must be in [1.0, 50.0], got {:.2}",
+                        name, cfg.delay_ms
+                    ));
+                }
+                if cfg.fir_taps == 0 || cfg.fir_taps > 65536 || cfg.fir_taps % 2 != 0 {
+                    result.add_error(format!(
+                        "Supporting source '{}' fir_taps must be even and in [2, 65536], got {}",
+                        name, cfg.fir_taps
+                    ));
+                }
+                if cfg.velvet_noise_taps >= cfg.fir_taps {
+                    result.add_warning(format!(
+                        "Supporting source '{}' velvet_noise_taps ({}) should be < fir_taps ({})",
+                        name, cfg.velvet_noise_taps, cfg.fir_taps
+                    ));
+                }
+                if cfg.freq_range_hz.0 >= cfg.freq_range_hz.1 {
+                    result.add_error(format!(
+                        "Supporting source '{}' freq_range_hz must satisfy low < high, got {:?}",
+                        name, cfg.freq_range_hz
+                    ));
+                }
+                for (i, band) in cfg.precedence_limits.iter().enumerate() {
+                    if band.low_hz >= band.high_hz {
+                        result.add_error(format!(
+                            "Supporting source '{}' precedence_limits[{}]: low_hz must be < high_hz",
+                            name, i
+                        ));
+                    }
+                    if band.limit_db <= 0.0 {
+                        result.add_warning(format!(
+                            "Supporting source '{}' precedence_limits[{}]: limit_db <= 0 dB will prevent compensation",
+                            name, i
+                        ));
+                    }
                 }
             }
             SpeakerConfig::Single(_) => {
@@ -889,9 +930,7 @@ mod room_config_validation_tests {
         SpeakerConfig, SpeakerGroup, SupportingSourceGroup, SystemConfig, SystemModel,
         TargetResponseConfig, TargetShape,
     };
-    use crate::{
-        Curve, MeasurementRef, MeasurementSingle, MeasurementSource,
-    };
+    use crate::{Curve, MeasurementRef, MeasurementSingle, MeasurementSource};
     use std::collections::HashMap;
     use std::path::PathBuf;
 
@@ -927,10 +966,18 @@ mod room_config_validation_tests {
             slope_db_per_octave: 0.0,
             ..Default::default()
         });
-        config.speakers.insert("L".to_string(), SpeakerConfig::Single(single_source("l.csv", None)));
+        config.speakers.insert(
+            "L".to_string(),
+            SpeakerConfig::Single(single_source("l.csv", None)),
+        );
         let result = validate_room_config(&config);
         assert!(result.is_valid);
-        assert!(result.warnings.iter().any(|w| w.contains("target_response takes precedence")));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("target_response takes precedence"))
+        );
     }
 
     #[test]
@@ -947,7 +994,12 @@ mod room_config_validation_tests {
             }),
         );
         let result = validate_room_config(&config);
-        assert!(result.errors.iter().any(|e| e.contains("has no measurements")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("has no measurements"))
+        );
 
         // Single measurement group warns
         let mut config = default_room();
@@ -961,7 +1013,12 @@ mod room_config_validation_tests {
             }),
         );
         let result = validate_room_config(&config);
-        assert!(result.warnings.iter().any(|w| w.contains("has only 1 measurement")));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("has only 1 measurement"))
+        );
 
         // Two measurements without crossover error
         let mut config = default_room();
@@ -975,7 +1032,12 @@ mod room_config_validation_tests {
             }),
         );
         let result = validate_room_config(&config);
-        assert!(result.errors.iter().any(|e| e.contains("has multiple drivers but no crossover specified")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("has multiple drivers but no crossover specified"))
+        );
 
         // Multi-sub empty / single
         let mut config = default_room();
@@ -989,7 +1051,12 @@ mod room_config_validation_tests {
             }),
         );
         let result = validate_room_config(&config);
-        assert!(result.errors.iter().any(|e| e.contains("has no subwoofers")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("has no subwoofers"))
+        );
 
         let mut config = default_room();
         config.speakers.insert(
@@ -1002,7 +1069,12 @@ mod room_config_validation_tests {
             }),
         );
         let result = validate_room_config(&config);
-        assert!(result.warnings.iter().any(|w| w.contains("only 1 subwoofer")));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("only 1 subwoofer"))
+        );
 
         // DBA empty front/rear
         let mut config = default_room();
@@ -1016,7 +1088,12 @@ mod room_config_validation_tests {
             }),
         );
         let result = validate_room_config(&config);
-        assert!(result.errors.iter().any(|e| e.contains("no front speakers")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("no front speakers"))
+        );
         assert!(result.errors.iter().any(|e| e.contains("no rear speakers")));
 
         // Cardioid invalid separation
@@ -1032,7 +1109,12 @@ mod room_config_validation_tests {
             })),
         );
         let result = validate_room_config(&config);
-        assert!(result.errors.iter().any(|e| e.contains("separation") && e.contains("must be > 0")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("separation") && e.contains("must be > 0"))
+        );
 
         // Supporting source same speaker_name warning
         let mut config = default_room();
@@ -1047,7 +1129,48 @@ mod room_config_validation_tests {
             }),
         );
         let result = validate_room_config(&config);
-        assert!(result.warnings.iter().any(|w| w.contains("same speaker_name for primary and support")));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("same speaker_name for primary and support"))
+        );
+
+        // Supporting source invalid delay
+        let mut config = default_room();
+        config.speakers.insert(
+            "Support".to_string(),
+            SpeakerConfig::SupportingSource(SupportingSourceGroup {
+                name: "Support".to_string(),
+                speaker_name: None,
+                primary: single_source("p.csv", None),
+                support: single_source("s.csv", None),
+                supporting_source: crate::roomeq::types::SupportingSourceConfig {
+                    delay_ms: 100.0,
+                    ..Default::default()
+                },
+            }),
+        );
+        let result = validate_room_config(&config);
+        assert!(result.errors.iter().any(|e| e.contains("delay_ms")));
+
+        // Supporting source invalid tap count
+        let mut config = default_room();
+        config.speakers.insert(
+            "Support".to_string(),
+            SpeakerConfig::SupportingSource(SupportingSourceGroup {
+                name: "Support".to_string(),
+                speaker_name: None,
+                primary: single_source("p.csv", None),
+                support: single_source("s.csv", None),
+                supporting_source: crate::roomeq::types::SupportingSourceConfig {
+                    fir_taps: 3,
+                    ..Default::default()
+                },
+            }),
+        );
+        let result = validate_room_config(&config);
+        assert!(result.errors.iter().any(|e| e.contains("fir_taps")));
     }
 
     #[test]
@@ -1064,7 +1187,12 @@ mod room_config_validation_tests {
             }),
         );
         let result = validate_room_config(&config);
-        assert!(result.errors.iter().any(|e| e.contains("no crossovers defined")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("no crossovers defined"))
+        );
 
         // Non-existent crossover
         let mut config = default_room();
@@ -1079,7 +1207,12 @@ mod room_config_validation_tests {
         );
         config.crossovers = Some(HashMap::new());
         let result = validate_room_config(&config);
-        assert!(result.errors.iter().any(|e| e.contains("non-existent crossover")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("non-existent crossover"))
+        );
 
         // Single frequency with 3 drivers -> warning
         let mut config = default_room();
@@ -1106,7 +1239,12 @@ mod room_config_validation_tests {
             },
         )]));
         let result = validate_room_config(&config);
-        assert!(result.warnings.iter().any(|w| w.contains("single frequency but speaker") && w.contains("has 3 drivers")));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("single frequency but speaker") && w.contains("has 3 drivers"))
+        );
 
         // Wrong number of frequencies for 3 drivers (need 2)
         let mut config = default_room();
@@ -1133,7 +1271,12 @@ mod room_config_validation_tests {
             },
         )]));
         let result = validate_room_config(&config);
-        assert!(result.errors.iter().any(|e| e.contains("needs 2 for 3 drivers")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("needs 2 for 3 drivers"))
+        );
 
         // Auto-optimized crossover warns
         let mut config = default_room();
@@ -1156,7 +1299,12 @@ mod room_config_validation_tests {
             },
         )]));
         let result = validate_room_config(&config);
-        assert!(result.warnings.iter().any(|w| w.contains("will be auto-optimized")));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("will be auto-optimized"))
+        );
     }
 
     #[test]
@@ -1165,9 +1313,24 @@ mod room_config_validation_tests {
         config.speakers.insert(
             "L".to_string(),
             SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(vec![
-                Curve { freq: ndarray::array![20.0, 100.0], spl: ndarray::array![0.0, 0.0], phase: None, ..Default::default() },
-                Curve { freq: ndarray::array![20.0, 100.0], spl: ndarray::array![0.0, 0.0], phase: None, ..Default::default() },
-                Curve { freq: ndarray::array![20.0, 100.0], spl: ndarray::array![0.0, 0.0], phase: None, ..Default::default() },
+                Curve {
+                    freq: ndarray::array![20.0, 100.0],
+                    spl: ndarray::array![0.0, 0.0],
+                    phase: None,
+                    ..Default::default()
+                },
+                Curve {
+                    freq: ndarray::array![20.0, 100.0],
+                    spl: ndarray::array![0.0, 0.0],
+                    phase: None,
+                    ..Default::default()
+                },
+                Curve {
+                    freq: ndarray::array![20.0, 100.0],
+                    spl: ndarray::array![0.0, 0.0],
+                    phase: None,
+                    ..Default::default()
+                },
             ])),
         );
         config.optimizer.multi_measurement = Some(crate::roomeq::types::MultiMeasurementConfig {
@@ -1175,13 +1338,22 @@ mod room_config_validation_tests {
             ..Default::default()
         });
         let result = validate_room_config(&config);
-        assert!(result.errors.iter().any(|e| e.contains("multi_measurement.weights has 2 entries") && e.contains("has 3 measurements")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("multi_measurement.weights has 2 entries")
+                    && e.contains("has 3 measurements"))
+        );
     }
 
     #[test]
     fn bootstrap_uncertainty_validation_errors() {
         let mut config = default_room();
-        config.speakers.insert("L".to_string(), SpeakerConfig::Single(single_source("l.csv", None)));
+        config.speakers.insert(
+            "L".to_string(),
+            SpeakerConfig::Single(single_source("l.csv", None)),
+        );
         config.optimizer.multi_measurement = Some(crate::roomeq::types::MultiMeasurementConfig {
             strategy: crate::roomeq::types::MultiMeasurementStrategy::MinimaxUncertainty,
             bootstrap_uncertainty: Some(BootstrapUncertaintyConfig {
@@ -1194,16 +1366,34 @@ mod room_config_validation_tests {
             ..Default::default()
         });
         let result = validate_room_config(&config);
-        assert!(result.errors.iter().any(|e| e.contains("num_resamples must be > 0")));
-        assert!(result.errors.iter().any(|e| e.contains("alpha must be in (0, 1)") && e.contains("got 0")));
-        assert!(result.errors.iter().any(|e| e.contains("cvar_alpha must be in (0, 1]") && e.contains("got 0")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("num_resamples must be > 0"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("alpha must be in (0, 1)") && e.contains("got 0"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("cvar_alpha must be in (0, 1]") && e.contains("got 0"))
+        );
     }
 
     #[test]
     fn continuous_listening_area_validation_errors() {
         let make_config = |area: ContinuousListeningAreaConfig| {
             let mut config = default_room();
-            config.speakers.insert("L".to_string(), SpeakerConfig::Single(single_source("l.csv", None)));
+            config.speakers.insert(
+                "L".to_string(),
+                SpeakerConfig::Single(single_source("l.csv", None)),
+            );
             config.optimizer.multi_seat = Some(MultiSeatConfig {
                 enabled: true,
                 strategy: MultiSeatStrategy::ContinuousArea,
@@ -1215,7 +1405,10 @@ mod room_config_validation_tests {
 
         // Missing continuous_area
         let mut config = default_room();
-        config.speakers.insert("L".to_string(), SpeakerConfig::Single(single_source("l.csv", None)));
+        config.speakers.insert(
+            "L".to_string(),
+            SpeakerConfig::Single(single_source("l.csv", None)),
+        );
         config.optimizer.multi_seat = Some(MultiSeatConfig {
             enabled: true,
             strategy: MultiSeatStrategy::ContinuousArea,
@@ -1223,7 +1416,12 @@ mod room_config_validation_tests {
             ..Default::default()
         });
         let result = validate_room_config(&config);
-        assert!(result.errors.iter().any(|e| e.contains("continuous_area to be set")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("continuous_area to be set"))
+        );
 
         // Bad dimensions
         let result = validate_room_config(&make_config(ContinuousListeningAreaConfig {
@@ -1231,11 +1429,19 @@ mod room_config_validation_tests {
             bounds: vec![(0.0, 1.0)],
             seat_positions: vec![vec![0.5]],
             prior: AreaPriorKind::Uniform,
-            quadrature: AreaQuadratureKind::Sobol { num_points: 1, seed: 0 },
+            quadrature: AreaQuadratureKind::Sobol {
+                num_points: 1,
+                seed: 0,
+            },
             scalarisation: AreaScalarisationKind::ExpectedValue,
             idw_power: 2.0,
         }));
-        assert!(result.errors.iter().any(|e| e.contains("dimensions must be 1, 2, or 3")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("dimensions must be 1, 2, or 3"))
+        );
 
         // Bounds/seats mismatch
         let result = validate_room_config(&make_config(ContinuousListeningAreaConfig {
@@ -1243,11 +1449,19 @@ mod room_config_validation_tests {
             bounds: vec![(0.0, 1.0)],
             seat_positions: vec![vec![0.5, 0.5]],
             prior: AreaPriorKind::Uniform,
-            quadrature: AreaQuadratureKind::Sobol { num_points: 1, seed: 0 },
+            quadrature: AreaQuadratureKind::Sobol {
+                num_points: 1,
+                seed: 0,
+            },
             scalarisation: AreaScalarisationKind::ExpectedValue,
             idw_power: 2.0,
         }));
-        assert!(result.errors.iter().any(|e| e.contains("bounds length 1 must equal dimensions 2")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("bounds length 1 must equal dimensions 2"))
+        );
 
         // Degenerate bounds
         let result = validate_room_config(&make_config(ContinuousListeningAreaConfig {
@@ -1255,11 +1469,19 @@ mod room_config_validation_tests {
             bounds: vec![(1.0, 1.0)],
             seat_positions: vec![vec![0.5]],
             prior: AreaPriorKind::Uniform,
-            quadrature: AreaQuadratureKind::Sobol { num_points: 1, seed: 0 },
+            quadrature: AreaQuadratureKind::Sobol {
+                num_points: 1,
+                seed: 0,
+            },
             scalarisation: AreaScalarisationKind::ExpectedValue,
             idw_power: 2.0,
         }));
-        assert!(result.errors.iter().any(|e| e.contains("bounds[0] = (1, 1) is degenerate")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("bounds[0] = (1, 1) is degenerate"))
+        );
 
         // No seat positions
         let result = validate_room_config(&make_config(ContinuousListeningAreaConfig {
@@ -1267,11 +1489,19 @@ mod room_config_validation_tests {
             bounds: vec![(0.0, 1.0)],
             seat_positions: vec![],
             prior: AreaPriorKind::Uniform,
-            quadrature: AreaQuadratureKind::Sobol { num_points: 1, seed: 0 },
+            quadrature: AreaQuadratureKind::Sobol {
+                num_points: 1,
+                seed: 0,
+            },
             scalarisation: AreaScalarisationKind::ExpectedValue,
             idw_power: 2.0,
         }));
-        assert!(result.errors.iter().any(|e| e.contains("seat_positions must contain at least one position")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("seat_positions must contain at least one position"))
+        );
 
         // Seat row length mismatch
         let result = validate_room_config(&make_config(ContinuousListeningAreaConfig {
@@ -1279,11 +1509,19 @@ mod room_config_validation_tests {
             bounds: vec![(0.0, 1.0)],
             seat_positions: vec![vec![0.5, 0.5]],
             prior: AreaPriorKind::Uniform,
-            quadrature: AreaQuadratureKind::Sobol { num_points: 1, seed: 0 },
+            quadrature: AreaQuadratureKind::Sobol {
+                num_points: 1,
+                seed: 0,
+            },
             scalarisation: AreaScalarisationKind::ExpectedValue,
             idw_power: 2.0,
         }));
-        assert!(result.errors.iter().any(|e| e.contains("seat_positions[0] has length 2 (expected 1)")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("seat_positions[0] has length 2 (expected 1)"))
+        );
 
         // Non-positive idw_power
         let result = validate_room_config(&make_config(ContinuousListeningAreaConfig {
@@ -1291,11 +1529,19 @@ mod room_config_validation_tests {
             bounds: vec![(0.0, 1.0)],
             seat_positions: vec![vec![0.5]],
             prior: AreaPriorKind::Uniform,
-            quadrature: AreaQuadratureKind::Sobol { num_points: 1, seed: 0 },
+            quadrature: AreaQuadratureKind::Sobol {
+                num_points: 1,
+                seed: 0,
+            },
             scalarisation: AreaScalarisationKind::ExpectedValue,
             idw_power: 0.0,
         }));
-        assert!(result.errors.iter().any(|e| e.contains("idw_power must be > 0")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("idw_power must be > 0"))
+        );
 
         // Gaussian prior mismatches / bad cov_diag
         let result = validate_room_config(&make_config(ContinuousListeningAreaConfig {
@@ -1307,11 +1553,19 @@ mod room_config_validation_tests {
                 cov_diag: vec![0.1],
                 truncation_sigmas: 4.0,
             },
-            quadrature: AreaQuadratureKind::Sobol { num_points: 1, seed: 0 },
+            quadrature: AreaQuadratureKind::Sobol {
+                num_points: 1,
+                seed: 0,
+            },
             scalarisation: AreaScalarisationKind::ExpectedValue,
             idw_power: 2.0,
         }));
-        assert!(result.errors.iter().any(|e| e.contains("prior.gaussian.mean length 2 must equal dimensions 1")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("prior.gaussian.mean length 2 must equal dimensions 1"))
+        );
 
         let result = validate_room_config(&make_config(ContinuousListeningAreaConfig {
             dimensions: 1,
@@ -1322,11 +1576,19 @@ mod room_config_validation_tests {
                 cov_diag: vec![-0.1],
                 truncation_sigmas: 4.0,
             },
-            quadrature: AreaQuadratureKind::Sobol { num_points: 1, seed: 0 },
+            quadrature: AreaQuadratureKind::Sobol {
+                num_points: 1,
+                seed: 0,
+            },
             scalarisation: AreaScalarisationKind::ExpectedValue,
             idw_power: 2.0,
         }));
-        assert!(result.errors.iter().any(|e| e.contains("prior.gaussian.cov_diag[0] must be > 0")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("prior.gaussian.cov_diag[0] must be > 0"))
+        );
 
         let result = validate_room_config(&make_config(ContinuousListeningAreaConfig {
             dimensions: 1,
@@ -1337,11 +1599,19 @@ mod room_config_validation_tests {
                 cov_diag: vec![0.1],
                 truncation_sigmas: 0.0,
             },
-            quadrature: AreaQuadratureKind::Sobol { num_points: 1, seed: 0 },
+            quadrature: AreaQuadratureKind::Sobol {
+                num_points: 1,
+                seed: 0,
+            },
             scalarisation: AreaScalarisationKind::ExpectedValue,
             idw_power: 2.0,
         }));
-        assert!(result.errors.iter().any(|e| e.contains("prior.gaussian.truncation_sigmas must be > 0")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("prior.gaussian.truncation_sigmas must be > 0"))
+        );
 
         // Quadrature num_points == 0
         let result = validate_room_config(&make_config(ContinuousListeningAreaConfig {
@@ -1349,11 +1619,19 @@ mod room_config_validation_tests {
             bounds: vec![(0.0, 1.0)],
             seat_positions: vec![vec![0.5]],
             prior: AreaPriorKind::Uniform,
-            quadrature: AreaQuadratureKind::Sobol { num_points: 0, seed: 0 },
+            quadrature: AreaQuadratureKind::Sobol {
+                num_points: 0,
+                seed: 0,
+            },
             scalarisation: AreaScalarisationKind::ExpectedValue,
             idw_power: 2.0,
         }));
-        assert!(result.errors.iter().any(|e| e.contains("quadrature.num_points must be > 0")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("quadrature.num_points must be > 0"))
+        );
 
         let result = validate_room_config(&make_config(ContinuousListeningAreaConfig {
             dimensions: 1,
@@ -1364,7 +1642,12 @@ mod room_config_validation_tests {
             scalarisation: AreaScalarisationKind::ExpectedValue,
             idw_power: 2.0,
         }));
-        assert!(result.errors.iter().any(|e| e.contains("quadrature.points_per_axis must be > 0")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("quadrature.points_per_axis must be > 0"))
+        );
 
         // Worst-case inner_maxiter == 0
         let result = validate_room_config(&make_config(ContinuousListeningAreaConfig {
@@ -1372,11 +1655,22 @@ mod room_config_validation_tests {
             bounds: vec![(0.0, 1.0)],
             seat_positions: vec![vec![0.5]],
             prior: AreaPriorKind::Uniform,
-            quadrature: AreaQuadratureKind::Sobol { num_points: 1, seed: 0 },
-            scalarisation: AreaScalarisationKind::WorstCase { inner_maxiter: 0, inner_seed: 0 },
+            quadrature: AreaQuadratureKind::Sobol {
+                num_points: 1,
+                seed: 0,
+            },
+            scalarisation: AreaScalarisationKind::WorstCase {
+                inner_maxiter: 0,
+                inner_seed: 0,
+            },
             idw_power: 2.0,
         }));
-        assert!(result.errors.iter().any(|e| e.contains("worst_case.inner_maxiter must be > 0")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("worst_case.inner_maxiter must be > 0"))
+        );
 
         // CVaR alpha out of range
         let result = validate_room_config(&make_config(ContinuousListeningAreaConfig {
@@ -1384,29 +1678,45 @@ mod room_config_validation_tests {
             bounds: vec![(0.0, 1.0)],
             seat_positions: vec![vec![0.5]],
             prior: AreaPriorKind::Uniform,
-            quadrature: AreaQuadratureKind::Sobol { num_points: 1, seed: 0 },
+            quadrature: AreaQuadratureKind::Sobol {
+                num_points: 1,
+                seed: 0,
+            },
             scalarisation: AreaScalarisationKind::Cvar { alpha: 0.0 },
             idw_power: 2.0,
         }));
-        assert!(result.errors.iter().any(|e| e.contains("scalarisation.cvar.alpha must be in (0, 1]")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("scalarisation.cvar.alpha must be in (0, 1]"))
+        );
     }
 
     #[test]
     fn cea2034_correction_plausibility_warning() {
         let mut config = default_room();
-        config.speakers.insert("L".to_string(), SpeakerConfig::Single(single_source("inroom.csv", None)));
+        config.speakers.insert(
+            "L".to_string(),
+            SpeakerConfig::Single(single_source("inroom.csv", None)),
+        );
         config.optimizer.cea2034_correction = Some(crate::roomeq::types::Cea2034CorrectionConfig {
             enabled: true,
             ..Default::default()
         });
         let result = validate_room_config(&config);
-        assert!(result.warnings.iter().any(|w| w.contains("cea2034_correction is enabled but no speaker looks like a CEA2034/spinorama")));
+        assert!(result.warnings.iter().any(|w| w.contains(
+            "cea2034_correction is enabled but no speaker looks like a CEA2034/spinorama"
+        )));
     }
 
     #[test]
     fn bass_management_validation() {
         let mut config = default_room();
-        config.speakers.insert("Sub".to_string(), SpeakerConfig::Single(single_source("sub.csv", None)));
+        config.speakers.insert(
+            "Sub".to_string(),
+            SpeakerConfig::Single(single_source("sub.csv", None)),
+        );
         config.system = Some(SystemConfig {
             model: SystemModel::HomeCinema,
             speakers: HashMap::new(),
@@ -1423,17 +1733,45 @@ mod room_config_validation_tests {
             supporting_source_outputs: None,
         });
         let result = validate_room_config(&config);
-        assert!(result.warnings.iter().any(|w| w.contains("bass_management is enabled but system.subwoofers is missing")));
-        assert!(result.warnings.iter().any(|w| w.contains("apply_lfe_gain_to_chain=true while redirect_bass=true")));
-        assert!(result.errors.iter().any(|e| e.contains("lfe_playback_gain_db") && e.contains("outside the safe")));
-        assert!(result.errors.iter().any(|e| e.contains("max_sub_boost_db") && e.contains("must be non-negative")));
-        assert!(result.errors.iter().any(|e| e.contains("headroom_margin_db") && e.contains("must be non-negative")));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("bass_management is enabled but system.subwoofers is missing"))
+        );
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("apply_lfe_gain_to_chain=true while redirect_bass=true"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("lfe_playback_gain_db") && e.contains("outside the safe"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("max_sub_boost_db") && e.contains("must be non-negative"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("headroom_margin_db") && e.contains("must be non-negative"))
+        );
     }
 
     #[test]
     fn role_targets_validation() {
         let mut config = default_room();
-        config.speakers.insert("C".to_string(), SpeakerConfig::Single(single_source("c.csv", None)));
+        config.speakers.insert(
+            "C".to_string(),
+            SpeakerConfig::Single(single_source("c.csv", None)),
+        );
         config.optimizer.target_response = Some(TargetResponseConfig {
             role_targets: Some(crate::roomeq::types::RoleTargetConfig {
                 enabled: true,
@@ -1447,9 +1785,28 @@ mod room_config_validation_tests {
             ..Default::default()
         });
         let result = validate_room_config(&config);
-        assert!(result.errors.iter().any(|e| e.contains("center dialog band")));
-        assert!(result.errors.iter().any(|e| e.contains("cinema_x_curve_start_hz") && e.contains("must be positive")));
-        assert!(result.errors.iter().any(|e| e.contains("listening_distance_m") && e.contains("must be positive")));
-        assert!(result.errors.iter().any(|e| e.contains("cinema_reference_distance_m") && e.contains("must be positive")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("center dialog band"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("cinema_x_curve_start_hz") && e.contains("must be positive"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("listening_distance_m") && e.contains("must be positive"))
+        );
+        assert!(
+            result.errors.iter().any(
+                |e| e.contains("cinema_reference_distance_m") && e.contains("must be positive")
+            )
+        );
     }
 }

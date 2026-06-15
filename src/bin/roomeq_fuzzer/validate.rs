@@ -59,6 +59,33 @@ pub(super) fn validate_roomeq_output(output_json_path: &Path) -> Result<(), Stri
         return Err("output JSON contains no channels".to_string());
     }
 
+    // If any channel looks like a supporting-source output, ensure a Convolution
+    // plugin was emitted for it.
+    let support_channels: Vec<&String> = channels
+        .keys()
+        .filter(|k| k.ends_with("_support"))
+        .collect();
+    if !support_channels.is_empty() {
+        let has_convolution = channels.values().any(|ch| {
+            ch.get("plugins")
+                .and_then(|p| p.as_array())
+                .map(|plugins| {
+                    plugins.iter().any(|plugin| {
+                        plugin
+                            .get("plugin_type")
+                            .and_then(|t| t.as_str())
+                            == Some("convolution")
+                    })
+                })
+                .unwrap_or(false)
+        });
+        if !has_convolution {
+            return Err(
+                "supporting-source channels present but no Convolution plugin found".to_string(),
+            );
+        }
+    }
+
     if let Some(metadata) = output.get("metadata").and_then(|value| value.as_object()) {
         for key in ["pre_score", "post_score"] {
             if let Some(value) = metadata.get(key) {

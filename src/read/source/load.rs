@@ -242,7 +242,11 @@ mod tests {
     fn sample_curve(spl_offset: f64) -> Curve {
         Curve {
             freq: Array1::from(vec![100.0, 1000.0, 10000.0]),
-            spl: Array1::from(vec![80.0 + spl_offset, 75.0 + spl_offset, 70.0 + spl_offset]),
+            spl: Array1::from(vec![
+                80.0 + spl_offset,
+                75.0 + spl_offset,
+                70.0 + spl_offset,
+            ]),
             phase: None,
             ..Default::default()
         }
@@ -271,7 +275,12 @@ mod tests {
         inline.magnitude_db.push(65.0);
         let result = load_measurement(&MeasurementRef::Inline(inline));
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("mismatched lengths"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("mismatched lengths")
+        );
     }
 
     #[test]
@@ -324,7 +333,8 @@ mod tests {
         let avg = load_source(&source).unwrap();
         assert_eq!(avg.freq.len(), 3);
         // Averaging in power domain: 3 dB difference => average ~81.76 dB at first point
-        let expected = 10.0 * ((10.0_f64.powf(80.0 / 10.0) + 10.0_f64.powf(83.0 / 10.0)) / 2.0).log10();
+        let expected =
+            10.0 * ((10.0_f64.powf(80.0 / 10.0) + 10.0_f64.powf(83.0 / 10.0)) / 2.0).log10();
         assert!((avg.spl[0] - expected).abs() < 1e-6);
     }
 

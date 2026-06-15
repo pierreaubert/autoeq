@@ -27,6 +27,7 @@ pub(super) enum ScenarioKind {
     MultiMeasurementSpatialRobustness,
     ChannelMatching,
     GroupDelay,
+    SupportingSource,
     RandomMixed,
 }
 
@@ -51,6 +52,7 @@ pub(super) const REQUIRED_SCENARIOS: &[ScenarioKind] = &[
     ScenarioKind::MultiMeasurementSpatialRobustness,
     ScenarioKind::ChannelMatching,
     ScenarioKind::GroupDelay,
+    ScenarioKind::SupportingSource,
 ];
 
 pub(super) fn required_scenarios(skip_kautz_modal: bool) -> Vec<ScenarioKind> {
@@ -104,6 +106,7 @@ impl ScenarioKind {
             }
             ScenarioKind::ChannelMatching => "channel_matching",
             ScenarioKind::GroupDelay => "group_delay",
+            ScenarioKind::SupportingSource => "supporting_source",
             ScenarioKind::RandomMixed => "random_mixed",
         }
     }

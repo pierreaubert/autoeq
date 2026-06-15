@@ -6,7 +6,7 @@ use super::types::MultiMeasurementStrategy;
 
 /// Configuration version (semantic versioning)
 pub fn default_config_version() -> String {
-    "2.0.0".to_string()
+    "2.1.0".to_string()
 }
 
 pub(super) fn default_bass_management_enabled() -> bool {

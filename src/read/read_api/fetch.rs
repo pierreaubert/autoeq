@@ -298,12 +298,19 @@ mod tests {
         let speaker = "cache-speaker";
         let measurement = "CEA2034";
         let cache_file = data_dir_for(speaker).join(measurement_filename(measurement));
-        tokio::fs::create_dir_all(cache_file.parent().unwrap()).await.unwrap();
-        tokio::fs::write(&cache_file, serde_json::to_string(&plotly_object()).unwrap())
+        tokio::fs::create_dir_all(cache_file.parent().unwrap())
             .await
             .unwrap();
+        tokio::fs::write(
+            &cache_file,
+            serde_json::to_string(&plotly_object()).unwrap(),
+        )
+        .await
+        .unwrap();
 
-        let plot = fetch_measurement_plot_data(speaker, "asr", measurement).await.unwrap();
+        let plot = fetch_measurement_plot_data(speaker, "asr", measurement)
+            .await
+            .unwrap();
         assert!(plot.get("data").is_some());
     }
 
@@ -313,10 +320,15 @@ mod tests {
         let _tmp = setup_cache().await;
         let speaker = "curve-speaker";
         let cache_file = data_dir_for(speaker).join(measurement_filename("CEA2034"));
-        tokio::fs::create_dir_all(cache_file.parent().unwrap()).await.unwrap();
-        tokio::fs::write(&cache_file, serde_json::to_string(&plotly_object()).unwrap())
+        tokio::fs::create_dir_all(cache_file.parent().unwrap())
             .await
             .unwrap();
+        tokio::fs::write(
+            &cache_file,
+            serde_json::to_string(&plotly_object()).unwrap(),
+        )
+        .await
+        .unwrap();
 
         let curve = fetch_curve_from_api(speaker, "asr", "CEA2034", "On Axis")
             .await
@@ -331,7 +343,9 @@ mod tests {
         let speaker = "dir-speaker";
         for measurement in ["SPL Horizontal", "SPL Vertical"] {
             let cache_file = data_dir_for(speaker).join(measurement_filename(measurement));
-            tokio::fs::create_dir_all(cache_file.parent().unwrap()).await.unwrap();
+            tokio::fs::create_dir_all(cache_file.parent().unwrap())
+                .await
+                .unwrap();
             let plot = json!({
                 "data": [
                     {"name": "-10°", "x": {"dtype": "f8", "bdata": ""}, "y": {"dtype": "f8", "bdata": ""}},
@@ -353,7 +367,9 @@ mod tests {
         let _tmp = setup_cache().await;
         let speaker = "contour-speaker";
         let cache_file = data_dir_for(speaker).join(measurement_filename("SPL Horizontal Contour"));
-        tokio::fs::create_dir_all(cache_file.parent().unwrap()).await.unwrap();
+        tokio::fs::create_dir_all(cache_file.parent().unwrap())
+            .await
+            .unwrap();
         let plot = json!({
             "data": [{
                 "x": [100.0, 1000.0],
@@ -365,7 +381,9 @@ mod tests {
             .await
             .unwrap();
 
-        let contour = fetch_contour_data(speaker, "asr", "horizontal").await.unwrap();
+        let contour = fetch_contour_data(speaker, "asr", "horizontal")
+            .await
+            .unwrap();
         assert_eq!(contour.freq_count, 2);
         assert_eq!(contour.angle_count, 3);
     }

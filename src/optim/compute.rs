@@ -678,15 +678,15 @@ mod smoothness_penalty_edge_tests {
 #[cfg(test)]
 mod multi_objective_and_base_fitness_tests {
     use super::{
-        compute_base_fitness, compute_base_fitness_single, compute_fitness_penalties,
-        compute_fitness_penalties_ref, compute_multi_objective_fitness, compute_pareto_objectives,
-        compute_sorted_freqs_and_adjacent_octave_spacings, ObjectiveData,
+        ObjectiveData, compute_base_fitness, compute_base_fitness_single,
+        compute_fitness_penalties, compute_fitness_penalties_ref, compute_multi_objective_fitness,
+        compute_pareto_objectives, compute_sorted_freqs_and_adjacent_octave_spacings,
     };
-    use crate::cli::PeqModel;
-    use crate::loss::{AsymmetricLossConfig, HeadphoneLossData, LossType, SpeakerLossData};
-    use crate::loss::epa::score::EpaConfig;
-    use crate::roomeq::MultiMeasurementStrategy;
     use crate::MultiObjectiveData;
+    use crate::cli::PeqModel;
+    use crate::loss::epa::score::EpaConfig;
+    use crate::loss::{AsymmetricLossConfig, HeadphoneLossData, LossType, SpeakerLossData};
+    use crate::roomeq::MultiMeasurementStrategy;
     use ndarray::Array1;
 
     fn freqs() -> Array1<f64> {
@@ -870,7 +870,10 @@ mod multi_objective_and_base_fitness_tests {
         // Drivers loss skips PEQ-specific penalties.
         obj.loss_type = LossType::DriversFlat;
         let drivers_penalized = compute_fitness_penalties_ref(&x(), &obj);
-        assert!(drivers_penalized.is_infinite() || drivers_penalized == compute_base_fitness(&x(), &obj));
+        assert!(
+            drivers_penalized.is_infinite()
+                || drivers_penalized == compute_base_fitness(&x(), &obj)
+        );
     }
 
     #[test]
@@ -883,7 +886,8 @@ mod multi_objective_and_base_fitness_tests {
 
     #[test]
     fn sorted_freqs_and_spacings_one_filter() {
-        let (freqs, spacings) = compute_sorted_freqs_and_adjacent_octave_spacings(&x(), PeqModel::Pk);
+        let (freqs, spacings) =
+            compute_sorted_freqs_and_adjacent_octave_spacings(&x(), PeqModel::Pk);
         assert_eq!(freqs.len(), 1);
         assert!(spacings.is_empty());
     }
@@ -892,7 +896,8 @@ mod multi_objective_and_base_fitness_tests {
     fn sorted_freqs_and_spacings_two_filters() {
         // two peak filters at 100 Hz and 400 Hz
         let params = vec![100f64.log10(), 1.0, 0.0, 400f64.log10(), 1.0, 0.0];
-        let (freqs, spacings) = compute_sorted_freqs_and_adjacent_octave_spacings(&params, PeqModel::Pk);
+        let (freqs, spacings) =
+            compute_sorted_freqs_and_adjacent_octave_spacings(&params, PeqModel::Pk);
         assert_eq!(freqs.len(), 2);
         assert_eq!(spacings.len(), 1);
         assert!((spacings[0] - 2.0).abs() < 1e-12);

@@ -472,10 +472,7 @@ mod tests {
     use serde_json::json;
 
     fn f8_typed_array(values: &[f64]) -> Value {
-        let bytes: Vec<u8> = values
-            .iter()
-            .flat_map(|v| v.to_le_bytes())
-            .collect();
+        let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
         json!({"dtype": "f8", "bdata": base64::engine::general_purpose::STANDARD.encode(&bytes)})
     }
 
@@ -520,7 +517,10 @@ mod tests {
     fn extract_curve_by_name_missing_curve_errors() {
         let plot = json!({"data": []});
         let err = extract_curve_by_name(&plot, "CEA2034", "On Axis").unwrap_err();
-        assert!(err.to_string().contains("Failed to extract frequency and SPL data"));
+        assert!(
+            err.to_string()
+                .contains("Failed to extract frequency and SPL data")
+        );
     }
 
     #[test]
@@ -539,8 +539,12 @@ mod tests {
     #[test]
     fn extract_cea2034_curves_original_computes_pir() {
         let names = [
-            "On Axis", "Listening Window", "Early Reflections",
-            "Sound Power", "Early Reflections DI", "Sound Power DI",
+            "On Axis",
+            "Listening Window",
+            "Early Reflections",
+            "Sound Power",
+            "Early Reflections DI",
+            "Sound Power DI",
         ];
         let traces: Vec<Value> = names
             .iter()
@@ -555,8 +559,12 @@ mod tests {
     #[test]
     fn extract_cea2034_curves_interpolates_to_grid() {
         let names = [
-            "On Axis", "Listening Window", "Early Reflections",
-            "Sound Power", "Early Reflections DI", "Sound Power DI",
+            "On Axis",
+            "Listening Window",
+            "Early Reflections",
+            "Sound Power",
+            "Early Reflections DI",
+            "Sound Power DI",
         ];
         let traces: Vec<Value> = names
             .iter()

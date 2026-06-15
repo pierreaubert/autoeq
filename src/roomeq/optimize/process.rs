@@ -249,11 +249,13 @@ pub(super) fn process_speaker_internal(
         SpeakerConfig::Cardioid(config) => {
             process_cardioid(channel_name, config, room_config, sample_rate, output_dir)
         }
-        SpeakerConfig::SupportingSource(_group) => Err(crate::error::AutoeqError::InvalidConfiguration {
-            message: format!(
-                "Supporting source channel '{}' must be processed by the supporting-source workflow, not the generic single-speaker path",
-                channel_name
-            ),
-        }),
+        SpeakerConfig::SupportingSource(_group) => {
+            Err(crate::error::AutoeqError::InvalidConfiguration {
+                message: format!(
+                    "Supporting source channel '{}' must be processed by the supporting-source workflow, not the generic single-speaker path",
+                    channel_name
+                ),
+            })
+        }
     }
 }

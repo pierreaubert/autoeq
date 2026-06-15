@@ -4,12 +4,12 @@
 use super::super::types::{ChannelDspChain, DriverDspChain, MixedModeConfig, PluginConfigWrapper};
 use super::create::create_band_merge_plugin;
 use super::create::create_band_split_plugin;
+use super::create::create_convolution_plugin;
 use super::create::create_crossover_plugin;
 use super::create::create_delay_plugin;
 use super::create::create_eq_plugin;
 use super::create::create_gain_plugin;
 use super::create::create_gain_plugin_with_invert;
-use super::create::create_convolution_plugin;
 use super::create::create_labeled_eq_plugin;
 use super::misc::get_driver_name;
 use math_audio_iir_fir::Biquad;

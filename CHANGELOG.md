@@ -1,7 +1,62 @@
 # Unreleased
 
+## New features
+
+- Added supporting-source room compensation for RoomEQ stereo workflows
+  (Brooks-Park et al. JASA 159(4), 2026). A delayed, decorrelated supporting
+  loudspeaker can fill reverberant energy without altering the primary
+  loudspeaker's direct sound. New config types include
+  `SpeakerConfig::SupportingSource`, `SupportingSourceGroup`, and
+  `SupportingSourceConfig`; processing lives under `src/roomeq/supporting_source/`
+  and is wired into the stereo 2.0 workflow. `bin/roomeq/input_schema.json` and
+  `bin/roomeq/output_schema.json` were regenerated to include the new speaker
+  type and the `metadata.supporting_source` report block.
+- Extended supporting-source processing to the home-cinema workflow: logical
+  channels mapped to `SpeakerConfig::SupportingSource` are partitioned from
+  single-source mains, optimized after bass-management/post-EQ, and produce
+  both primary and `_support` output channels with FIR convolution plugins.
+- Added spatial-robustness advisories for supporting-source channels. When a
+  primary or support measurement contains a single position the report carries
+  a `single_position_measurement` advisory; multiple positions with >3 dB or
+  >6 dB of mean spatial variance inside the compensation band trigger
+  `moderate_spatial_variance` or `high_spatial_variance` advisories,
+  respectively. The advisory list is exposed as
+  `metadata.supporting_source.{role}.advisories`.
+- Added a `supporting_source` scenario bucket to `roomeq-fuzzer`. It generates a
+  home-cinema config with two single-source mains and one supporting-source
+  wide channel, validates that the output contains both primary/support
+  channels, and checks that a `Convolution` plugin is emitted.
+- Added integration tests in `tests/roomeq_supporting_source.rs` for the stereo
+  workflow, home-cinema workflow, and spatial-robustness advisory reporting.
+- Bumped crate version to **0.4.46** and RoomEQ input/output schema version to
+  **2.1.0** to reflect the new supporting-source fields.
+
 ## Fixes
 
+- `roomeq-fuzzer` now supports `--skip-kautz-modal` to avoid flaky synthetic
+  flat/noise failures in the `single_kautz_modal` scenario; `just qa-roomeq-ci`
+  uses it and limits `gd_opt` tests to the library test suite.
+- Added unit tests for the stereo 2.1 and home-cinema-with-sub workflow
+  executors, plus coverage for bass-management objective/selection and
+  workflow apply helpers.
+- Phase 3 coverage push: added tests for previously 0 %-covered optimizer
+  backends (`isres`, `mh`, `bo`, `nsga`, `pareto`, `setup/perform`), shared
+  CLI parsers and binary argument parsers, and the orchestration modules
+  `stereo_sub`, `bass_management/{preprocess,optimize}`, `multiseat::optimize`,
+  and `multisub::optimize`. Library line coverage rose from ~62.37 % to
+  74.52 %.
+- Continued Phase 3 coverage closure: added config-type round-trip tests,
+  additional workflow/home-cinema/run tests, and targeted tests for the
+  remaining largest uncovered modules (`roomeq/optimize.rs`,
+  `roomeq/speaker_eq/*`, `roomeq/optimize/gd/*`, `workflow/*`, and small
+  roomeq helpers). Library line coverage reached **84.21 %**; work toward the
+  90 % gate is in progress.
+- Phase 3 coverage gate reached: the whole-crate library line coverage is
+  **90.59 %** (regions 90.52 %, functions 91.29 %) on the `--release`
+  `cargo llvm-cov --lib` run. `cargo test -p autoeq --lib` passes with
+  **1654 passed, 0 failed, 1 ignored**, and `just qa-roomeq-ci` passes
+  end-to-end. Remaining clippy warnings in the newly covered test/orchestration
+  code were cleaned up.
 - Spinorama directivity angle parsing now accepts `ON` as the 0-degree trace and
   handles Unicode minus signs in angle labels.
 

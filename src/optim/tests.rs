@@ -493,7 +493,11 @@ mod backend_tests {
         args.local_algo = "autoeq:cobyla".to_string();
         args.maxeval = 60;
         let result = perform_optimization(&args, &obj);
-        assert!(result.is_ok(), "DE + cobyla refine should run: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "DE + cobyla refine should run: {:?}",
+            result
+        );
         assert!(!result.unwrap().is_empty());
     }
 
@@ -512,7 +516,11 @@ mod backend_tests {
         let result = perform_optimization_with_progress(&args, &obj, config, |_update| {
             crate::de::CallbackAction::Continue
         });
-        assert!(result.is_ok(), "minimal progress config should run: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "minimal progress config should run: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -526,7 +534,11 @@ mod backend_tests {
             &obj,
             Box::new(|_intermediate| crate::de::CallbackAction::Continue),
         );
-        assert!(result.is_ok(), "CMAES callback path should run: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "CMAES callback path should run: {:?}",
+            result
+        );
     }
 
     #[test]

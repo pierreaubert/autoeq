@@ -1,4 +1,4 @@
-# autoeq (crate: `autoeq`, version: 0.4.42)
+# autoeq (crate: `autoeq`, version: 0.4.46)
 
 Core automatic equalization stack for speakers, headphones, and RoomEQ workflows.
 
@@ -55,6 +55,7 @@ Main tree: `src/roomeq/`.
   - `average`
   - `modal_basis` (complex-domain SFM modal-basis optimization)
 - Multi-measurement strategies include weighted/minimax/variance-penalized paths and spatial robustness mode.
+- Supporting-source room compensation (Brooks-Park): a delayed, decorrelated supporting loudspeaker fills reverberant energy without altering the primary source's direct sound. Config type: `SpeakerConfig::SupportingSource`, module tree under `src/roomeq/supporting_source/`, wired into the stereo 2.0 and home-cinema workflows. Reports include DRR summaries, precedence-limit hits, and spatial-robustness advisories for single-position or high-variance measurements.
 - Bass-management and routed export logic live under `roomeq/optimize`, `roomeq/workflows`, and `roomeq/output`.
 
 ## Binary entry points
@@ -85,6 +86,7 @@ RoomEQ QA:
 ```bash
 just qa-roomeq
 just qa-roomeq-convergence
+just qa-roomeq-coverage-gate  # hard 90% library line-coverage gate
 ```
 
 Targeted RoomEQ run:

@@ -356,7 +356,7 @@ pub(super) fn generic_channel_progress_iterations(config: &RoomConfig) -> usize 
         let capped = computed_generations.max(1);
         if config.optimizer.max_iter > 0 && capped < DE_GENERATIONS_FLOOR {
             warn!(
-                "DE budget: max_iter={} with population_size={} is below the {} generation floor × pop. \
+                "Optimizer budget: max_iter={} with population_size={} is below the {} generation floor × pop. \
                  Running {} generations — expect degraded convergence. Raise max_iter to {} to regain the floor.",
                 config.optimizer.max_iter,
                 population_size,
@@ -368,7 +368,7 @@ pub(super) fn generic_channel_progress_iterations(config: &RoomConfig) -> usize 
         capped
     };
     info!(
-        "DE budget: {} params, population_size={}, max_generations={} (from max_iter={}, floor={} when budget allows)",
+        "Optimizer budget: {} params, population_size={}, max_generations={} (from max_iter={}, floor={} when budget allows)",
         n_params, population_size, max_iterations, config.optimizer.max_iter, DE_GENERATIONS_FLOOR,
     );
     max_iterations

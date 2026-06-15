@@ -580,7 +580,7 @@ pub(super) fn run_option_effect_test(
     let baseline_scorecard = compute_scorecard(&baseline_result);
 
     let convergence_margin = match options.len() {
-        0..=1 => option_result.combined_pre_score * 0.01, // 1% — DE budget is tight, allow noise
+        0..=1 => option_result.combined_pre_score * 0.01, // 1% — optimizer budget is tight, allow noise
         2..=3 => option_result.combined_pre_score * 0.05, // 5% for 2-3 options
         _ => option_result.combined_pre_score * 0.15,     // 15% for 4+ options
     };

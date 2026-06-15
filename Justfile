@@ -281,7 +281,7 @@ qa-roomeq: qa-roomeq-small-stereo-20 \
 
 # Memory-capped convergence run. The `--jobs` default in
 # `roomeq-qa-quality` is `num_cpus/2` so each outer test case still gets
-# parallel DE evaluators without OOM'ing the machine when 70+ cases are
+# parallel CMA-ES evaluators without OOM'ing the machine when 70+ cases are
 # scheduled. Override with `just qa-roomeq-convergence jobs=N` or run the
 # binary directly.
 [group('qa-roomeq')]

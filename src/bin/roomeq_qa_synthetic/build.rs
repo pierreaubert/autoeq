@@ -40,7 +40,7 @@ pub(super) fn build_config(degraded: &Curve, mode: ProcessingMode) -> RoomConfig
         cea2034_cache: None,
     };
 
-    config.optimizer.algorithm = "autoeq:de".to_string();
+    config.optimizer.algorithm = "autoeq:cmaes".to_string();
     config.optimizer.max_iter = QA_MAXEVAL;
     config.optimizer.population = 50;
     config.optimizer.refine = false;
@@ -104,7 +104,7 @@ pub(super) fn build_multisub_config(sub_curves: &[Curve], allpass: bool) -> Room
         cea2034_cache: None,
     };
 
-    config.optimizer.algorithm = "autoeq:de".to_string();
+    config.optimizer.algorithm = "autoeq:cmaes".to_string();
     config.optimizer.max_iter = QA_MAXEVAL;
     config.optimizer.population = 50;
     config.optimizer.refine = false;
@@ -345,7 +345,7 @@ pub(super) fn build_multichannel_config(
         cea2034_cache: None,
     };
 
-    config.optimizer.algorithm = "autoeq:de".to_string();
+    config.optimizer.algorithm = "autoeq:cmaes".to_string();
     config.optimizer.max_iter = QA_MAXEVAL;
     config.optimizer.population = 50;
     config.optimizer.refine = false;

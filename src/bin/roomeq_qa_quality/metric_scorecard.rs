@@ -8,7 +8,7 @@ use super::consts::SCORECARD_GD_TOLERANCE;
 use super::consts::SCORECARD_PEAK_ABSOLUTE_DB;
 use super::consts::SCORECARD_PEAK_TOLERANCE;
 use super::consts::SCORECARD_ROUGHNESS_MAX;
-use super::consts::SCORECARD_ROUGHNESS_REGRESSION_EPSILON;
+use super::consts::SCORECARD_ROUGHNESS_TOLERANCE;
 use super::consts::SCORECARD_SHARPNESS_EPSILON;
 use super::consts::SCORECARD_SHARPNESS_MAX;
 use super::consts::SCORECARD_SHARPNESS_MIN;
@@ -172,18 +172,21 @@ pub(super) fn compare_scorecards(
         ));
     }
 
-    // 5. Roughness: absolute ceiling, but skip if baseline already violates
+    // 5. Roughness: absolute ceiling plus relative regression tolerance.
+    //    The EPA model itself penalizes roughness above ~0.5 asper; this gate
+    //    catches large regressions (e.g., 50% worse than baseline) while still
+    //    allowing +taps mutations that intentionally trade smoothness for FR fit.
     if let (Some(c_rough), Some(b_rough)) = (candidate.epa_roughness, baseline.epa_roughness) {
         let below_max = c_rough <= SCORECARD_ROUGHNESS_MAX;
         let baseline_already_violated = b_rough > SCORECARD_ROUGHNESS_MAX;
-        let no_worse = c_rough <= b_rough + SCORECARD_ROUGHNESS_REGRESSION_EPSILON;
-        let rough_ok = below_max || (baseline_already_violated && no_worse);
+        let no_worse = c_rough <= b_rough * SCORECARD_ROUGHNESS_TOLERANCE;
+        let rough_ok = (below_max && no_worse) || (baseline_already_violated && no_worse);
         checks.push((
             "roughness",
             rough_ok,
             format!(
-                "{:.2} (max {:.1}, baseline {:.2}, epsilon {:.2})",
-                c_rough, SCORECARD_ROUGHNESS_MAX, b_rough, SCORECARD_ROUGHNESS_REGRESSION_EPSILON
+                "{:.2} (max {:.1}, baseline {:.2}, tol {:.2}x)",
+                c_rough, SCORECARD_ROUGHNESS_MAX, b_rough, SCORECARD_ROUGHNESS_TOLERANCE
             ),
         ));
     }

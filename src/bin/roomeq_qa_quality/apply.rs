@@ -15,8 +15,7 @@ use autoeq::roomeq::{
 use std::collections::HashMap;
 
 pub(super) fn apply_qa_overrides(config: &mut RoomConfig, seed_label: &str) {
-    config.optimizer.algorithm = "autoeq:de".to_string();
-    config.optimizer.strategy = "lshade".to_string();
+    config.optimizer.algorithm = "autoeq:cmaes".to_string();
     config.optimizer.max_iter = QA_MAXEVAL;
     config.optimizer.population = 50;
     config.optimizer.num_filters = 5;

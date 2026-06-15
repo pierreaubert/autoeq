@@ -151,7 +151,7 @@ fn scorecard_allows_small_roughness_regression_when_baseline_already_violates_li
         peak_residual_db: 1.0,
         epa_preference: None,
         epa_sharpness: None,
-        epa_roughness: Some(0.86),
+        epa_roughness: Some(0.95),
         group_delay_std_ms: None,
     };
     let candidate = MetricScorecard {
@@ -159,7 +159,7 @@ fn scorecard_allows_small_roughness_regression_when_baseline_already_violates_li
         peak_residual_db: 1.0,
         epa_preference: None,
         epa_sharpness: None,
-        epa_roughness: Some(0.89),
+        epa_roughness: Some(0.99),
         group_delay_std_ms: None,
     };
 

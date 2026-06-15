@@ -216,20 +216,21 @@ pub(super) fn default_parallel_jobs() -> usize {
         .max(1)
 }
 
-/// Find the project root by looking for Cargo.toml with \[workspace\]
+/// Find the project root by looking for a Cargo.toml that declares this
+/// crate (either `[workspace]` or `[package]`).
 pub(super) fn find_project_root() -> Result<PathBuf> {
     let mut dir = std::env::current_dir()?;
     loop {
         let cargo_toml = dir.join("Cargo.toml");
         if cargo_toml.exists() {
             let content = std::fs::read_to_string(&cargo_toml)?;
-            if content.contains("[workspace]") {
+            if content.contains("[workspace]") || content.contains("[package]") {
                 return Ok(dir);
             }
         }
         if !dir.pop() {
             return Err(anyhow!(
-                "Could not find project root (Cargo.toml with [workspace])"
+                "Could not find project root (Cargo.toml with [workspace] or [package])"
             ));
         }
     }

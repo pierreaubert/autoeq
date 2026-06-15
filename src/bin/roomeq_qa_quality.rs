@@ -5,7 +5,7 @@
 //! that IIR/FIR/Mixed modes converge to similar frequency responses,
 //! and that each optimizer option has its expected effect.
 //!
-//! Uses autoeq:de with LSHADE strategy and fixed seed for deterministic results.
+//! Uses autoeq:cmaes with fixed seed for deterministic results.
 //! Test cases run in parallel for maximum throughput.
 //!
 //! Usage:
@@ -117,7 +117,7 @@ fn main() -> Result<()> {
     }
 
     println!(
-        "=== RoomEQ QA: Convergence, Monotonicity & Invariants (DE/LSHADE, seed={}, parallel) ===",
+        "=== RoomEQ QA: Convergence, Monotonicity & Invariants (CMA-ES, seed={}, parallel) ===",
         SEED
     );
 

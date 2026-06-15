@@ -39,7 +39,7 @@ pub(super) fn make_baseline(config: &RoomConfig, with_tilt: bool) -> RoomConfig 
     c.optimizer.schroeder_split = None;
 
     // QA optimizer overrides
-    c.optimizer.algorithm = "autoeq:de".to_string();
+    c.optimizer.algorithm = "autoeq:cmaes".to_string();
     c.optimizer.max_iter = QA_MAX_ITER;
     c.optimizer.population = QA_POPULATION;
     c.optimizer.seed = Some(SEED);

@@ -48,6 +48,7 @@ pub(super) fn interpolate_cea2034_data(
 /// Create minimal Args struct for driver optimization
 ///
 /// This avoids requiring full CLI args when calling from library code.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn create_driver_optimization_args(
     min_freq: f64,
     max_freq: f64,

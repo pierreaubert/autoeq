@@ -382,5 +382,37 @@ fn collect_measurement_paths(
             paths.extend(extract_paths_from_source(&cardioid.rear));
             paths
         }
+        SpeakerConfig::SupportingSource(group) => {
+            let mut paths = Vec::new();
+            paths.extend(extract_paths_from_source(&group.primary));
+            paths.extend(extract_paths_from_source(&group.support));
+            paths
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::Args;
+
+    #[test]
+    fn schema_input_succeeds() {
+        let args = Args::try_parse_from(["roomeq", "--schema", "input"]);
+        assert!(args.is_ok(), "{args:?}");
+        assert_eq!(args.unwrap().schema, Some("input".to_string()));
+    }
+
+    #[test]
+    fn missing_required_config_and_output_fails() {
+        let args = Args::try_parse_from(["roomeq"]);
+        assert!(args.is_err());
+    }
+
+    #[test]
+    fn sample_rate_default_is_48000() {
+        let args = Args::try_parse_from(["roomeq", "--schema", "input"]).unwrap();
+        assert_eq!(args.sample_rate, 48000.0);
     }
 }

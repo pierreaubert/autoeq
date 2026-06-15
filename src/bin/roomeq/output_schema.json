@@ -4,16 +4,18 @@
   "description": "DSP chain output (AudioEngine PluginConfig format)",
   "type": "object",
   "properties": {
-    "version": {
-      "description": "Output version",
-      "type": "string",
-      "default": "1.4.0"
-    },
     "channels": {
       "description": "Per-channel DSP chains",
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/ChannelDspChain"
+      }
+    },
+    "global_plugins": {
+      "description": "Global graph-level plugins, e.g. matrix routing that combines several\nprogramme inputs before per-output correction chains.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PluginConfigWrapper"
       }
     },
     "metadata": {
@@ -26,12 +28,842 @@
           "type": "null"
         }
       ]
+    },
+    "version": {
+      "description": "Output version",
+      "type": "string",
+      "default": "2.0.0"
     }
   },
   "required": [
     "channels"
   ],
   "$defs": {
+    "AudibilityDeadbandConfig": {
+      "description": "Audibility/JND deadband applied to spectral objective residuals after\nperceptual or octave smoothing.",
+      "type": "object",
+      "properties": {
+        "bass_db": {
+          "description": "Bass threshold in dB.",
+          "type": "number",
+          "format": "double",
+          "default": 0.25
+        },
+        "bass_mid_hz": {
+          "description": "Bass/mid transition frequency.",
+          "type": "number",
+          "format": "double",
+          "default": 250.0
+        },
+        "disable_below_schroeder": {
+          "description": "Do not apply the deadband below the resolved Schroeder/modal region.",
+          "type": "boolean",
+          "default": true
+        },
+        "enabled": {
+          "description": "Enable the deadband.",
+          "type": "boolean",
+          "default": true
+        },
+        "mid_db": {
+          "description": "Midrange threshold in dB.",
+          "type": "number",
+          "format": "double",
+          "default": 0.75
+        },
+        "mid_treble_hz": {
+          "description": "Mid/treble transition frequency.",
+          "type": "number",
+          "format": "double",
+          "default": 2000.0
+        },
+        "schroeder_hz": {
+          "description": "Schroeder fallback used when no measured value is available.",
+          "type": "number",
+          "format": "double",
+          "default": 250.0
+        },
+        "treble_db": {
+          "description": "Treble threshold in dB.",
+          "type": "number",
+          "format": "double",
+          "default": 1.0
+        }
+      }
+    },
+    "BassBusHeadroomSimulationReport": {
+      "type": "object",
+      "properties": {
+        "coherent_peak_gain_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "frequency_range_hz": {
+          "type": "array",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number",
+              "format": "double"
+            },
+            {
+              "type": "number",
+              "format": "double"
+            }
+          ]
+        },
+        "headroom_margin_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "lfe_contribution_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "margin_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "model": {
+          "type": "string"
+        },
+        "pass": {
+          "type": "boolean"
+        },
+        "per_output": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BassBusOutputHeadroomReport"
+          }
+        },
+        "rms_bus_gain_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "worst_frequency_hz": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "model",
+        "frequency_range_hz",
+        "rms_bus_gain_db",
+        "coherent_peak_gain_db",
+        "lfe_contribution_db",
+        "headroom_margin_db",
+        "pass",
+        "margin_db",
+        "worst_frequency_hz",
+        "per_output"
+      ]
+    },
+    "BassBusOutputHeadroomReport": {
+      "type": "object",
+      "properties": {
+        "coherent_peak_gain_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "lfe_contribution_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "margin_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "output_role": {
+          "type": "string"
+        },
+        "pass": {
+          "type": "boolean"
+        },
+        "rms_bus_gain_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "worst_frequency_hz": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "output_role",
+        "rms_bus_gain_db",
+        "coherent_peak_gain_db",
+        "lfe_contribution_db",
+        "pass",
+        "margin_db",
+        "worst_frequency_hz"
+      ]
+    },
+    "BassManagementGroupReport": {
+      "type": "object",
+      "properties": {
+        "advisories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "bass_route_delay_ms": {
+          "type": "number",
+          "format": "double"
+        },
+        "configured_crossover_hz": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "crossover_type": {
+          "type": "string"
+        },
+        "group_id": {
+          "type": "string"
+        },
+        "main_delay_ms": {
+          "type": "number",
+          "format": "double"
+        },
+        "objective_after": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "objective_before": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "polarity_inverted": {
+          "type": "boolean"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "selected_crossover_hz": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "trim_db": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "group_id",
+        "roles",
+        "crossover_type",
+        "main_delay_ms",
+        "bass_route_delay_ms",
+        "polarity_inverted",
+        "trim_db",
+        "advisories"
+      ]
+    },
+    "BassManagementMatrix": {
+      "type": "object",
+      "properties": {
+        "input_channel_map": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          }
+        },
+        "matrix": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          }
+        },
+        "output_channel_map": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          }
+        },
+        "route_count": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "input_channel_map",
+        "output_channel_map",
+        "matrix",
+        "route_count"
+      ]
+    },
+    "BassManagementOptimizationReport": {
+      "type": "object",
+      "properties": {
+        "advisories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "applied": {
+          "type": "boolean"
+        },
+        "applied_sub_gain_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "configured_crossover_hz": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "crossover_range_hz": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number",
+              "format": "double"
+            },
+            {
+              "type": "number",
+              "format": "double"
+            }
+          ]
+        },
+        "crossover_type": {
+          "type": "string"
+        },
+        "estimated_bass_bus_peak_gain_db": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "gain_limited": {
+          "type": "boolean"
+        },
+        "group_results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BassManagementGroupReport"
+          }
+        },
+        "main_delay_ms": {
+          "type": "number",
+          "format": "double"
+        },
+        "objective_after": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "objective_before": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "optimized_crossover_hz": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "phase_available": {
+          "type": "boolean"
+        },
+        "phase_required": {
+          "type": "boolean"
+        },
+        "relative_sub_delay_ms": {
+          "type": "number",
+          "format": "double"
+        },
+        "requested_sub_gain_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "sub_delay_ms": {
+          "type": "number",
+          "format": "double"
+        },
+        "sub_output_results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BassManagementSubOutputReport"
+          }
+        },
+        "sub_polarity_inverted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "applied",
+        "phase_required",
+        "phase_available",
+        "crossover_type",
+        "main_delay_ms",
+        "sub_delay_ms",
+        "relative_sub_delay_ms",
+        "sub_polarity_inverted",
+        "requested_sub_gain_db",
+        "applied_sub_gain_db",
+        "gain_limited",
+        "advisories"
+      ]
+    },
+    "BassManagementReport": {
+      "type": "object",
+      "properties": {
+        "advisory": {
+          "type": "string"
+        },
+        "applied_sub_gain_db": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "crossover_frequency_hz": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "crossover_type": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "gain_limited": {
+          "type": "boolean"
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BassManagementGroupReport"
+          }
+        },
+        "headroom_margin_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "headroom_simulation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BassBusHeadroomSimulationReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lfe_channel": {
+          "type": "string"
+        },
+        "lfe_gain_applied_to_chain": {
+          "type": "boolean"
+        },
+        "lfe_headroom_required_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "lfe_playback_gain_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "main_high_pass_hz": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "max_sub_boost_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "optimization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BassManagementOptimizationReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "physical_sub_output": {
+          "type": "string"
+        },
+        "redirected_bass_channel_count": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "redirected_bass_enabled": {
+          "type": "boolean"
+        },
+        "routing_graph": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BassManagementRoutingGraph"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "signal_flow": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BassManagementSignalFlowEntry"
+          }
+        },
+        "signal_flow_advisories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sub_low_pass_hz": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "sub_outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BassManagementSubOutputReport"
+          }
+        },
+        "sub_trim_db": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "enabled",
+        "crossover_type",
+        "redirected_bass_enabled",
+        "lfe_channel",
+        "lfe_playback_gain_db",
+        "lfe_gain_applied_to_chain",
+        "sub_trim_db",
+        "max_sub_boost_db",
+        "headroom_margin_db",
+        "gain_limited",
+        "physical_sub_output",
+        "redirected_bass_channel_count",
+        "lfe_headroom_required_db",
+        "signal_flow",
+        "signal_flow_advisories",
+        "advisory"
+      ]
+    },
+    "BassManagementRoute": {
+      "type": "object",
+      "properties": {
+        "crossover_type": {
+          "type": "string"
+        },
+        "delay_ms": {
+          "type": "number",
+          "format": "double"
+        },
+        "destination": {
+          "type": "string"
+        },
+        "destination_index": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "gain_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "gain_linear": {
+          "type": "number",
+          "format": "double"
+        },
+        "group_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "high_pass_hz": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "low_pass_hz": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "matrix_gain": {
+          "type": "number",
+          "format": "double",
+          "default": 1.0
+        },
+        "polarity_inverted": {
+          "type": "boolean"
+        },
+        "post_chain_channel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pre_chain_channel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "route_kind": {
+          "type": "string"
+        },
+        "source_channel": {
+          "type": "string"
+        },
+        "source_index": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "source_channel",
+        "source_index",
+        "destination",
+        "destination_index",
+        "route_kind",
+        "crossover_type",
+        "gain_db",
+        "gain_linear",
+        "delay_ms",
+        "polarity_inverted"
+      ]
+    },
+    "BassManagementRoutingGraph": {
+      "type": "object",
+      "properties": {
+        "advisories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "input_channels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "matrix": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BassManagementMatrix"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "output_channels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "physical_sub_output": {
+          "type": "string"
+        },
+        "routes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BassManagementRoute"
+          }
+        }
+      },
+      "required": [
+        "physical_sub_output",
+        "input_channels",
+        "output_channels",
+        "routes",
+        "advisories"
+      ]
+    },
+    "BassManagementSignalFlowEntry": {
+      "type": "object",
+      "properties": {
+        "destination": {
+          "type": "string"
+        },
+        "high_pass_hz": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "lfe_gain_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "low_pass_hz": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "redirects_bass": {
+          "type": "boolean"
+        },
+        "role": {
+          "$ref": "#/$defs/HomeCinemaRole"
+        },
+        "source_channel": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_channel",
+        "role",
+        "destination",
+        "lfe_gain_db",
+        "redirects_bass"
+      ]
+    },
+    "BassManagementSubOutputReport": {
+      "type": "object",
+      "properties": {
+        "delay_ms": {
+          "type": "number",
+          "format": "double"
+        },
+        "gain_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "headroom_contribution_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "output_role": {
+          "type": "string"
+        },
+        "polarity_inverted": {
+          "type": "boolean"
+        },
+        "strategy_source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "output_role",
+        "gain_db",
+        "delay_ms",
+        "polarity_inverted",
+        "strategy_source",
+        "headroom_contribution_db"
+      ]
+    },
+    "BootstrapScalarisation": {
+      "description": "How to scalarise the per-bootstrap-resample losses into one outer-loop loss.",
+      "oneOf": [
+        {
+          "description": "Pure worst-case: max loss across the B resamples. Most conservative; can be\ndriven by a single outlier resample.",
+          "type": "string",
+          "const": "worst_case"
+        },
+        {
+          "description": "Mean of the worst α-fraction of resamples (CVaR). Smoother, less sensitive\nto a single freak resample than `WorstCase`.",
+          "type": "string",
+          "const": "cvar"
+        }
+      ]
+    },
+    "BootstrapUncertaintyReport": {
+      "description": "Bootstrap uncertainty reporting summary.",
+      "type": "object",
+      "properties": {
+        "alpha": {
+          "description": "Two-sided alpha used for confidence bands.",
+          "type": "number",
+          "format": "double"
+        },
+        "cvar_alpha": {
+          "description": "CVaR tail fraction when scalarisation is CVaR.",
+          "type": "number",
+          "format": "double"
+        },
+        "num_resamples": {
+          "description": "Number of case-bootstrap resamples.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "scalarisation": {
+          "description": "Scalarisation used for uncertainty-aware optimization.",
+          "$ref": "#/$defs/BootstrapScalarisation"
+        },
+        "used_for_correction_depth_mask": {
+          "description": "Whether bootstrap confidence width was folded into correction-depth masks.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "num_resamples",
+        "alpha",
+        "scalarisation",
+        "cvar_alpha",
+        "used_for_correction_depth_mask"
+      ]
+    },
     "ChannelDspChain": {
       "description": "DSP chain for a single channel",
       "type": "object",
@@ -40,12 +872,16 @@
           "description": "Channel name",
           "type": "string"
         },
-        "plugins": {
-          "description": "Ordered list of plugins (AudioEngine PluginConfig format)",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/PluginConfigWrapper"
-          }
+        "direct_early_late_correction": {
+          "description": "Direct/early/late correction-energy metrics (optional, FIR/phase modes\nor any channel with phase-derived IRs).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DirectEarlyLateCorrectionMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "drivers": {
           "description": "Per-driver DSP chains for active crossover (optional)",
@@ -57,8 +893,8 @@
             "$ref": "#/$defs/DriverDspChain"
           }
         },
-        "initial_curve": {
-          "description": "Initial frequency response curve before optimization (optional)",
+        "eq_response": {
+          "description": "EQ filter response curve (correction magnitude in dB) (optional)",
           "anyOf": [
             {
               "$ref": "#/$defs/CurveData"
@@ -79,8 +915,19 @@
             }
           ]
         },
-        "eq_response": {
-          "description": "EQ filter response curve (correction magnitude in dB) (optional)",
+        "fir_temporal_masking": {
+          "description": "FIR impulse-response temporal masking metrics (optional, FIR/phase modes)",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TemporalIrMaskingMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "initial_curve": {
+          "description": "Initial frequency response curve before optimization (optional)",
           "anyOf": [
             {
               "$ref": "#/$defs/CurveData"
@@ -90,11 +937,18 @@
             }
           ]
         },
-        "target_curve": {
-          "description": "Effective target curve the optimizer worked against (optional).\nThis is the mean-shifted + tilt target in absolute SPL coordinates,\nso the frontend can display what the optimizer was actually aiming for.",
+        "plugins": {
+          "description": "Ordered list of plugins (AudioEngine PluginConfig format)",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PluginConfigWrapper"
+          }
+        },
+        "post_ir": {
+          "description": "Impulse response after correction (optional, requires phase data)",
           "anyOf": [
             {
-              "$ref": "#/$defs/CurveData"
+              "$ref": "#/$defs/IrWaveform"
             },
             {
               "type": "null"
@@ -112,22 +966,11 @@
             }
           ]
         },
-        "post_ir": {
-          "description": "Impulse response after correction (optional, requires phase data)",
+        "target_curve": {
+          "description": "Effective target curve the optimizer worked against (optional)",
           "anyOf": [
             {
-              "$ref": "#/$defs/IrWaveform"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "fir_temporal_masking": {
-          "description": "FIR impulse-response temporal masking metrics (optional, FIR/phase modes)",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TemporalIrMaskingMetrics"
+              "$ref": "#/$defs/CurveData"
             },
             {
               "type": "null"
@@ -140,57 +983,260 @@
         "plugins"
       ]
     },
-    "PluginConfigWrapper": {
-      "description": "Wrapper for AudioEngine PluginConfig (re-exported from src-audio)",
+    "ChannelTimingReport": {
       "type": "object",
       "properties": {
-        "plugin_type": {
+        "acoustic_distance_m": {
+          "type": "number",
+          "format": "double"
+        },
+        "applied_delay_ms": {
+          "type": "number",
+          "format": "double"
+        },
+        "final_arrival_ms": {
+          "type": "number",
+          "format": "double"
+        },
+        "final_offset_from_reference_ms": {
+          "type": "number",
+          "format": "double"
+        },
+        "measured_arrival_ms": {
+          "type": "number",
+          "format": "double"
+        },
+        "name": {
           "type": "string"
         },
-        "parameters": true
+        "role": {
+          "$ref": "#/$defs/HomeCinemaRole"
+        }
       },
       "required": [
-        "plugin_type",
-        "parameters"
+        "name",
+        "role",
+        "measured_arrival_ms",
+        "acoustic_distance_m",
+        "applied_delay_ms",
+        "final_arrival_ms",
+        "final_offset_from_reference_ms"
       ]
     },
-    "DriverDspChain": {
-      "description": "DSP chain for an individual driver in a multi-driver speaker",
+    "CtcBinauralDiagnostics": {
       "type": "object",
       "properties": {
-        "name": {
-          "description": "Driver name (e.g., \"woofer\", \"tweeter\")",
+        "cue_deviation_score": {
+          "type": "number",
+          "format": "double"
+        },
+        "externalization_risk": {
           "type": "string"
         },
-        "index": {
-          "description": "Driver index in the array (0 = lowest frequency)",
-          "type": "integer",
-          "format": "uint",
-          "minimum": 0
-        },
-        "plugins": {
-          "description": "Ordered list of plugins for this driver (gain, crossover filters)",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/PluginConfigWrapper"
-          }
-        },
-        "initial_curve": {
-          "description": "Initial frequency response curve for this driver before optimization (optional)",
+        "hrtf_candidate_comparison": {
           "anyOf": [
             {
-              "$ref": "#/$defs/CurveData"
+              "$ref": "#/$defs/CtcHrtfCandidateComparison"
             },
             {
               "type": "null"
             }
           ]
+        },
+        "ild_error_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "imaging_risk": {
+          "type": "string"
+        },
+        "itd_error_proxy_us": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
         }
       },
       "required": [
-        "name",
-        "index",
-        "plugins"
+        "ild_error_db",
+        "cue_deviation_score",
+        "externalization_risk",
+        "imaging_risk"
+      ]
+    },
+    "CtcDeliveredResponseMetrics": {
+      "type": "object",
+      "properties": {
+        "mean_channel_balance_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "mean_crosstalk_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "mean_target_error": {
+          "type": "number",
+          "format": "double"
+        },
+        "worst_crosstalk_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "worst_target_error": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "mean_target_error",
+        "worst_target_error",
+        "mean_crosstalk_db",
+        "worst_crosstalk_db",
+        "mean_channel_balance_db"
+      ]
+    },
+    "CtcHrtfCandidateComparison": {
+      "type": "object",
+      "properties": {
+        "advisory": {
+          "type": "string"
+        },
+        "candidate_count": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "selected_source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_count",
+        "selected_source",
+        "advisory"
+      ]
+    },
+    "CtcReport": {
+      "type": "object",
+      "properties": {
+        "artifact": {
+          "type": "string"
+        },
+        "binaural_diagnostics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CtcBinauralDiagnostics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "delivered_response": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CtcDeliveredResponseMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "driver_headroom_limited": {
+          "type": "boolean"
+        },
+        "ears": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "fir_taps": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "head_positions": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "latency_ms": {
+          "type": "number",
+          "format": "double"
+        },
+        "latency_samples": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "max_condition_number": {
+          "type": "number",
+          "format": "double"
+        },
+        "max_electrical_sum_gain_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "max_filter_gain_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "mean_crosstalk_residual_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "mean_reconstruction_error": {
+          "type": "number",
+          "format": "double"
+        },
+        "room_eq_correction_applied": {
+          "type": "boolean"
+        },
+        "room_eq_correction_channels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source": {
+          "type": "string"
+        },
+        "speakers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "worst_position_error": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "enabled",
+        "source",
+        "artifact",
+        "speakers",
+        "ears",
+        "head_positions",
+        "fir_taps",
+        "latency_samples",
+        "latency_ms",
+        "max_filter_gain_db",
+        "max_condition_number",
+        "mean_reconstruction_error",
+        "worst_position_error",
+        "mean_crosstalk_residual_db",
+        "max_electrical_sum_gain_db",
+        "driver_headroom_limited",
+        "room_eq_correction_applied",
+        "room_eq_correction_channels"
       ]
     },
     "CurveData": {
@@ -205,13 +1251,24 @@
             "format": "double"
           }
         },
-        "spl": {
-          "description": "Sound Pressure Level in dB (normalized)",
-          "type": "array",
-          "items": {
-            "type": "number",
-            "format": "double"
-          }
+        "norm_range": {
+          "description": "Optional frequency range used for normalization",
+          "type": [
+            "array",
+            "null"
+          ],
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number",
+              "format": "double"
+            },
+            {
+              "type": "number",
+              "format": "double"
+            }
+          ]
         },
         "phase": {
           "description": "Phase in degrees (optional)",
@@ -224,12 +1281,226 @@
             "format": "double"
           }
         },
-        "norm_range": {
-          "description": "Optional frequency range used for normalization",
-          "type": [
-            "array",
-            "null"
-          ],
+        "spl": {
+          "description": "Sound Pressure Level in dB (normalized)",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "required": [
+        "freq",
+        "spl"
+      ]
+    },
+    "DirectEarlyLateCorrectionMetrics": {
+      "description": "Correction-energy split across direct, early, and late IR windows.",
+      "type": "object",
+      "properties": {
+        "advisory": {
+          "description": "Advisory when FIR/mixed-phase correction may be altering direct/early cues.",
+          "type": "string"
+        },
+        "direct_energy_db": {
+          "description": "Correction energy in the direct window, dB relative to total correction energy.",
+          "type": "number",
+          "format": "double"
+        },
+        "direct_plus_early_energy_db": {
+          "description": "Direct + early correction energy, dB relative to total correction energy.",
+          "type": "number",
+          "format": "double"
+        },
+        "direct_window_ms": {
+          "description": "Direct-sound window end in milliseconds.",
+          "type": "number",
+          "format": "double"
+        },
+        "early_energy_db": {
+          "description": "Correction energy in the early window, dB relative to total correction energy.",
+          "type": "number",
+          "format": "double"
+        },
+        "early_window_ms": {
+          "description": "Early-reflection window end in milliseconds.",
+          "type": "number",
+          "format": "double"
+        },
+        "late_energy_db": {
+          "description": "Correction energy in the late window, dB relative to total correction energy.",
+          "type": "number",
+          "format": "double"
+        },
+        "late_window_ms": {
+          "description": "Late summary window end in milliseconds.",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "direct_window_ms",
+        "early_window_ms",
+        "late_window_ms",
+        "direct_energy_db",
+        "early_energy_db",
+        "late_energy_db",
+        "direct_plus_early_energy_db",
+        "advisory"
+      ]
+    },
+    "DriverDspChain": {
+      "description": "DSP chain for an individual driver in a multi-driver speaker",
+      "type": "object",
+      "properties": {
+        "index": {
+          "description": "Driver index in the array (0 = lowest frequency)",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "initial_curve": {
+          "description": "Initial frequency response curve for this driver before optimization (optional)",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CurveData"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "description": "Driver name (e.g. \"woofer\", \"tweeter\")",
+          "type": "string"
+        },
+        "plugins": {
+          "description": "Ordered list of plugins for this driver (gain, crossover filters)",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PluginConfigWrapper"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "index",
+        "plugins"
+      ]
+    },
+    "EpaChannelMetrics": {
+      "description": "Per-channel EPA psychoacoustic metrics computed on the initial\n(pre-EQ) and final (post-EQ) frequency responses.\n\nSee [`crate::loss::epa::score::EpaScore`] for the individual fields.",
+      "type": "object",
+      "properties": {
+        "post": {
+          "description": "EPA score computed from the final (post-EQ) response.",
+          "$ref": "#/$defs/EpaScore"
+        },
+        "pre": {
+          "description": "EPA score computed from the initial (pre-EQ) response.",
+          "$ref": "#/$defs/EpaScore"
+        }
+      },
+      "required": [
+        "pre",
+        "post"
+      ]
+    },
+    "EpaMultichannelMetrics": {
+      "description": "Aggregate EPA metrics for the whole reproduced channel set.\n\nChannels are combined with BS.1770-style energy weights before EPA scoring:\nfront/main channels use unit weight, surround channels use +1.5 dB energy\nweight, and LFE/subwoofer channels are excluded.",
+      "type": "object",
+      "properties": {
+        "post": {
+          "description": "EPA score computed from the aggregate final (post-EQ) response.",
+          "$ref": "#/$defs/EpaScore"
+        },
+        "pre": {
+          "description": "EPA score computed from the aggregate initial (pre-EQ) response.",
+          "$ref": "#/$defs/EpaScore"
+        },
+        "standard": {
+          "description": "Human-readable aggregation standard/approximation.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pre",
+        "post",
+        "standard"
+      ]
+    },
+    "EpaScore": {
+      "description": "EPA dimensions computed from a frequency response.",
+      "type": "object",
+      "properties": {
+        "activity": {
+          "description": "Activity: temporal complexity (lower = calmer, 0-10 scale)",
+          "type": "number",
+          "format": "double"
+        },
+        "evaluation": {
+          "description": "Evaluation: general quality (higher = better, 0-10 scale)",
+          "type": "number",
+          "format": "double"
+        },
+        "loudness_balance": {
+          "type": "number",
+          "format": "double"
+        },
+        "potency": {
+          "description": "Potency: perceived energy/strength (0-10 scale)",
+          "type": "number",
+          "format": "double"
+        },
+        "preference": {
+          "description": "Composite preference (weighted combination, higher = better)",
+          "type": "number",
+          "format": "double"
+        },
+        "roughness": {
+          "type": "number",
+          "format": "double"
+        },
+        "sharpness_acum": {
+          "description": "Individual metric values for diagnostics",
+          "type": "number",
+          "format": "double"
+        },
+        "total_loudness_sone": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "evaluation",
+        "potency",
+        "activity",
+        "preference",
+        "sharpness_acum",
+        "roughness",
+        "total_loudness_sone",
+        "loudness_balance"
+      ]
+    },
+    "GroupDelayOptSummary": {
+      "description": "Serialisable summary of GD-Opt results for report plumbing (GD-4).",
+      "type": "object",
+      "properties": {
+        "advisory": {
+          "description": "Advisory outcome.",
+          "type": "string"
+        },
+        "applied": {
+          "description": "Whether the reported GD controls were inserted into the exported DSP.",
+          "type": "boolean",
+          "default": false
+        },
+        "band": {
+          "description": "Optimisation band (Hz).",
+          "type": "array",
+          "maxItems": 2,
+          "minItems": 2,
           "prefixItems": [
             {
               "type": "number",
@@ -239,30 +1510,310 @@
               "type": "number",
               "format": "double"
             }
-          ],
-          "minItems": 2,
-          "maxItems": 2
-        }
-      },
-      "required": [
-        "freq",
-        "spl"
-      ]
-    },
-    "IrWaveform": {
-      "description": "Impulse response waveform (time-domain)",
-      "type": "object",
-      "properties": {
-        "time_ms": {
-          "description": "Time axis in milliseconds",
+          ]
+        },
+        "channel_names": {
+          "description": "Channel names in the same order as the per-channel vectors.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "improvement_db": {
+          "description": "Improvement in dB: 20*log10(pre/post).",
+          "type": "number",
+          "format": "double"
+        },
+        "mean_coherence": {
+          "description": "Mean coherence in-band.",
+          "type": "number",
+          "format": "double"
+        },
+        "per_channel_ap_count": {
+          "description": "Number of all-pass filters per channel.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          }
+        },
+        "per_channel_delay_ms": {
+          "description": "Per-channel delays applied (ms).",
           "type": "array",
           "items": {
             "type": "number",
             "format": "double"
           }
         },
+        "per_channel_polarity_inverted": {
+          "description": "Per-channel polarity inversions.",
+          "type": "array",
+          "items": {
+            "type": "boolean"
+          }
+        },
+        "sum_gd_post_rms_ms": {
+          "description": "Sum GD RMS after optimisation (ms).",
+          "type": "number",
+          "format": "double"
+        },
+        "sum_gd_pre_rms_ms": {
+          "description": "Sum GD RMS before optimisation (ms).",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "band",
+        "per_channel_delay_ms",
+        "per_channel_polarity_inverted",
+        "per_channel_ap_count",
+        "sum_gd_pre_rms_ms",
+        "sum_gd_post_rms_ms",
+        "mean_coherence",
+        "improvement_db",
+        "advisory"
+      ]
+    },
+    "HighFrequencyCorrectionConfig": {
+      "description": "Safer high-frequency correction behavior when users opt above the\nconservative RoomEQ correction ceiling.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable the high-frequency safeguard.",
+          "type": "boolean",
+          "default": true
+        },
+        "extra_deadband_db": {
+          "description": "Minimum extra deadband added above `start_hz`.",
+          "type": "number",
+          "format": "double",
+          "default": 0.75
+        },
+        "max_q": {
+          "description": "If the global Q bound is still at/above this value, cap it when the\npolicy is applied. Frequency-selective Q caps are not available in the\ncurrent PEQ parameterization, so this is intentionally conservative.",
+          "type": "number",
+          "format": "double",
+          "default": 2.0
+        },
+        "smoothing_n": {
+          "description": "Stronger psychoacoustic smoothing resolution above the guard start,\nexpressed as 1/N octave. Lower N means broader smoothing.",
+          "type": "integer",
+          "format": "uint",
+          "default": 3,
+          "minimum": 0
+        },
+        "start_hz": {
+          "description": "Frequency above which the safeguard is considered active.",
+          "type": "number",
+          "format": "double",
+          "default": 1600.0
+        }
+      }
+    },
+    "HomeCinemaChannelReport": {
+      "type": "object",
+      "properties": {
+        "is_bass_managed": {
+          "type": "boolean"
+        },
+        "matching_group": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/HomeCinemaRole"
+        },
+        "role_group": {
+          "$ref": "#/$defs/HomeCinemaRoleGroup"
+        },
+        "target_advisory": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target_band_hz": {
+          "type": "array",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number",
+              "format": "double"
+            },
+            {
+              "type": "number",
+              "format": "double"
+            }
+          ]
+        },
+        "target_profile": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "role",
+        "role_group",
+        "is_bass_managed",
+        "target_band_hz",
+        "target_profile"
+      ]
+    },
+    "HomeCinemaLayoutReport": {
+      "type": "object",
+      "properties": {
+        "bed_channels": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "channels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HomeCinemaChannelReport"
+          }
+        },
+        "height_channels": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "layout": {
+          "type": "string"
+        },
+        "lfe_channels": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "subwoofer_channels": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "layout",
+        "bed_channels",
+        "lfe_channels",
+        "height_channels",
+        "subwoofer_channels",
+        "channels"
+      ]
+    },
+    "HomeCinemaRole": {
+      "type": "string",
+      "enum": [
+        "front_left",
+        "front_right",
+        "center",
+        "lfe",
+        "side_surround_left",
+        "side_surround_right",
+        "rear_surround_left",
+        "rear_surround_right",
+        "wide_left",
+        "wide_right",
+        "top_front_left",
+        "top_front_right",
+        "top_middle_left",
+        "top_middle_right",
+        "top_rear_left",
+        "top_rear_right",
+        "subwoofer",
+        "unknown"
+      ]
+    },
+    "HomeCinemaRoleGroup": {
+      "type": "string",
+      "enum": [
+        "front_lr",
+        "center",
+        "lfe",
+        "subwoofer",
+        "side_surrounds",
+        "rear_surrounds",
+        "wides",
+        "top_front",
+        "top_middle",
+        "top_rear",
+        "unknown"
+      ]
+    },
+    "InterChannelDeviation": {
+      "description": "Measurement of inter-channel SPL consistency after optimization",
+      "type": "object",
+      "properties": {
+        "deviation_per_freq": {
+          "description": "Per-frequency max deviation (freq_hz, spread_db)",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number",
+                "format": "double"
+              },
+              {
+                "type": "number",
+                "format": "double"
+              }
+            ]
+          }
+        },
+        "midrange_peak_db": {
+          "description": "Maximum single-point deviation in midrange",
+          "type": "number",
+          "format": "double"
+        },
+        "midrange_peak_freq": {
+          "description": "Frequency of maximum midrange deviation",
+          "type": "number",
+          "format": "double"
+        },
+        "midrange_rms_db": {
+          "description": "RMS of deviation in the midrange (200-4000 Hz)",
+          "type": "number",
+          "format": "double"
+        },
+        "passband_rms_db": {
+          "description": "RMS of deviation from F3 to 10 kHz",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "deviation_per_freq",
+        "midrange_rms_db",
+        "passband_rms_db",
+        "midrange_peak_db",
+        "midrange_peak_freq"
+      ]
+    },
+    "IrWaveform": {
+      "description": "Impulse response waveform (time-domain)",
+      "type": "object",
+      "properties": {
         "amplitude": {
           "description": "Amplitude (normalized so pre-IR peak = 1.0)",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "time_ms": {
+          "description": "Time axis in milliseconds",
           "type": "array",
           "items": {
             "type": "number",
@@ -275,33 +1826,391 @@
         "amplitude"
       ]
     },
-    "OptimizationMetadata": {
-      "description": "Optimization metadata",
+    "MultiSeatChannelCorrectionReport": {
       "type": "object",
       "properties": {
-        "pre_score": {
-          "description": "Pre-optimization score",
-          "type": "number",
-          "format": "double"
+        "advisories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
-        "post_score": {
-          "description": "Post-optimization score",
-          "type": "number",
-          "format": "double"
-        },
-        "algorithm": {
-          "description": "Optimization algorithm used",
+        "channel": {
           "type": "string"
         },
-        "iterations": {
-          "description": "Number of iterations",
+        "max_abs_deviation_db": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "min_correction_depth": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "non_primary_pass": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "primary_pass": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "rms_target_error_db": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "role": {
+          "$ref": "#/$defs/HomeCinemaRole"
+        },
+        "role_group": {
+          "$ref": "#/$defs/HomeCinemaRoleGroup"
+        },
+        "seat_count": {
           "type": "integer",
           "format": "uint",
           "minimum": 0
         },
-        "timestamp": {
-          "description": "Timestamp",
+        "seats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MultiSeatPredictionReport"
+          }
+        },
+        "spatial_variance_peak_db": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "status": {
           "type": "string"
+        },
+        "target_band_hz": {
+          "type": "array",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number",
+              "format": "double"
+            },
+            {
+              "type": "number",
+              "format": "double"
+            }
+          ]
+        }
+      },
+      "required": [
+        "channel",
+        "role",
+        "role_group",
+        "status",
+        "seat_count",
+        "target_band_hz",
+        "seats",
+        "advisories"
+      ]
+    },
+    "MultiSeatCorrectionReport": {
+      "type": "object",
+      "properties": {
+        "advisories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "applied": {
+          "type": "boolean"
+        },
+        "channels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MultiSeatChannelCorrectionReport"
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "primary_seat": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "role_groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MultiSeatRoleGroupCorrectionReport"
+          }
+        },
+        "seat_count": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "seat_weights": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "strategy": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "applied",
+        "strategy",
+        "seat_count",
+        "primary_seat",
+        "seat_weights",
+        "channels",
+        "role_groups",
+        "advisories"
+      ]
+    },
+    "MultiSeatCoverageReport": {
+      "type": "object",
+      "properties": {
+        "advisories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "all_channel_correction_ready": {
+          "type": "boolean"
+        },
+        "by_role_group": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          }
+        },
+        "channels_with_multiple_measurements": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "max_seat_count": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "non_sub_channel_count": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "non_sub_channels_with_multiple_measurements": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "recommended_scope": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "channels_with_multiple_measurements",
+        "non_sub_channel_count",
+        "non_sub_channels_with_multiple_measurements",
+        "max_seat_count",
+        "by_role_group",
+        "all_channel_correction_ready",
+        "recommended_scope",
+        "advisories"
+      ]
+    },
+    "MultiSeatPredictionReport": {
+      "type": "object",
+      "properties": {
+        "is_primary": {
+          "type": "boolean"
+        },
+        "max_abs_deviation_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "null_risk": {
+          "type": "boolean"
+        },
+        "pass": {
+          "type": "boolean"
+        },
+        "rms_target_error_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "seat_index": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "weight": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "seat_index",
+        "weight",
+        "is_primary",
+        "rms_target_error_db",
+        "max_abs_deviation_db",
+        "pass",
+        "null_risk"
+      ]
+    },
+    "MultiSeatRoleGroupCorrectionReport": {
+      "type": "object",
+      "properties": {
+        "advisories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "applied_channel_count": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "channel_count": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "pass": {
+          "type": "boolean"
+        },
+        "role_group": {
+          "$ref": "#/$defs/HomeCinemaRoleGroup"
+        },
+        "worst_max_abs_deviation_db": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "worst_rms_target_error_db": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "required": [
+        "role_group",
+        "channel_count",
+        "applied_channel_count",
+        "pass",
+        "advisories"
+      ]
+    },
+    "OptimizationMetadata": {
+      "description": "Optimization metadata",
+      "type": "object",
+      "properties": {
+        "algorithm": {
+          "description": "Optimization algorithm used",
+          "type": "string"
+        },
+        "bass_management": {
+          "description": "Bass-management policy and applied trim/headroom summary.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BassManagementReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bootstrap_uncertainty": {
+          "description": "Bootstrap uncertainty summary.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BootstrapUncertaintyReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ctc": {
+          "description": "Cross-talk cancellation / binaural-aware correction artifact summary.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CtcReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epa_multichannel": {
+          "description": "Whole-system EPA psychoacoustic metrics computed after BS.1770-style\nchannel-energy aggregation.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EpaMultichannelMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epa_per_channel": {
+          "description": "Per-channel EPA psychoacoustic metrics (pre-EQ and post-EQ).\nComputed from each channel's initial and final frequency responses\nusing the configured `EpaConfig` (or defaults when unset).",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/EpaChannelMetrics"
+          }
+        },
+        "group_delay": {
+          "description": "Group delay optimisation summary (GD-Opt v2, Phase GD-4).\nPresent when GD-Opt was attempted (success or skip with advisory).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GroupDelayOptSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "home_cinema_layout": {
+          "description": "Home-cinema role/layout interpretation used by role-aware scoring.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HomeCinemaLayoutReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "inter_channel_deviation": {
           "description": "Inter-channel deviation metric (computed when >1 channel)",
@@ -314,11 +2223,103 @@
             }
           ]
         },
+        "iterations": {
+          "description": "Number of iterations",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "loss_type": {
+          "description": "Loss function that the optimizer minimized.\nOne of `\"flat\"`, `\"score\"`, `\"epa\"`.\n\nNote: `pre_score` and `post_score` are *not* values of this loss\nfunction — they are always computed by\n`crate::roomeq::workflows::compute_flat_loss` over the\n`[min_freq, max_freq]` evaluation window so that runs with\ndifferent `loss_type` values stay on the same scale and can be\ncompared directly. To compare *perceptual* outcomes across\nloss types use `epa_per_channel.{pre,post}.preference` instead,\nwhich is computed identically for every run.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "multi_seat_correction": {
+          "description": "All-channel multi-seat correction summary for non-sub home-cinema channels.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MultiSeatCorrectionReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "multi_seat_coverage": {
+          "description": "Coverage summary for multi-position measurements beyond sub-only MSO.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MultiSeatCoverageReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "perceptual_metrics": {
           "description": "Perceptual scorecard computed from final exported curves/DSP.",
           "anyOf": [
             {
               "$ref": "#/$defs/PerceptualMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "perceptual_policy": {
+          "description": "Resolved perceptual policy metadata.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PerceptualPolicyReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "post_score": {
+          "description": "Post-optimization score",
+          "type": "number",
+          "format": "double"
+        },
+        "pre_score": {
+          "description": "Pre-optimization score",
+          "type": "number",
+          "format": "double"
+        },
+        "supporting_source": {
+          "description": "Supporting-source room-compensation reports, keyed by logical channel.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/SupportingSourceReport"
+          }
+        },
+        "timestamp": {
+          "description": "Timestamp",
+          "type": "string"
+        },
+        "timing_diagnostics": {
+          "description": "Timing/localization diagnostics derived from measured arrivals and\nfinal exported delay plugins.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimingDiagnosticsReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "validation_bundle": {
+          "description": "Validation/listening-test bundle descriptor.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValidationBundleReport"
             },
             {
               "type": "null"
@@ -338,8 +2339,47 @@
       "description": "Compact perceptual scorecard for downstream QA and UIs.",
       "type": "object",
       "properties": {
-        "epa_preference_pre": {
-          "description": "Average EPA preference before correction.",
+        "bass_consistency_rms_db": {
+          "description": "Bass-seat/output consistency RMS across sub/LFE outputs in the\nmodal/crossover band. Lower is better.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "channel_matching_midrange_rms_db": {
+          "description": "Midrange inter-channel deviation in dB when more than one comparable\nchannel exists.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "dialog_band_roughness_rms_db": {
+          "description": "Center-channel dialog-band roughness after removing the local mean.\nLower is better for speech intelligibility.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "direct_plus_early_correction_energy_db": {
+          "description": "Maximum direct + early correction energy across channels, dB relative\nto total correction energy.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "early_cue_advisory": {
+          "description": "Worst direct/early cue advisory across channels.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "epa_preference_delta": {
+          "description": "EPA preference delta, positive means perceptual improvement.",
           "type": "number",
           "format": "double"
         },
@@ -348,21 +2388,21 @@
           "type": "number",
           "format": "double"
         },
-        "epa_preference_delta": {
-          "description": "EPA preference delta, positive means perceptual improvement.",
+        "epa_preference_pre": {
+          "description": "Average EPA preference before correction.",
           "type": "number",
           "format": "double"
         },
-        "fir_pre_ringing_audible_db": {
-          "description": "Maximum FIR pre-ringing audible energy across channels, dB relative to each FIR's main impulse peak.",
+        "fir_post_ringing_audible_db": {
+          "description": "Maximum FIR post-ringing audible energy across channels, dB relative to\neach FIR's main impulse peak.",
           "type": [
             "number",
             "null"
           ],
           "format": "double"
         },
-        "fir_post_ringing_audible_db": {
-          "description": "Maximum FIR post-ringing audible energy across channels, dB relative to each FIR's main impulse peak.",
+        "fir_pre_ringing_audible_db": {
+          "description": "Maximum FIR pre-ringing audible energy across channels, dB relative to\neach FIR's main impulse peak.",
           "type": [
             "number",
             "null"
@@ -376,12 +2416,450 @@
             "null"
           ],
           "format": "double"
+        },
+        "headroom_peak_boost_db": {
+          "description": "Peak positive gain requested by exported gain/EQ plugins. High values\nare a clipping/headroom risk even when the final curve looks smooth.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "headroom_risk": {
+          "description": "Advisory derived from `headroom_peak_boost_db`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role_channel_matching_rms_db": {
+          "description": "Role-aware channel matching RMS, computed only inside comparable\nchannel groups such as L/R, surrounds, or matching height pairs.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "timing_confidence": {
+          "description": "Human-readable timing/GD confidence label.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "epa_preference_pre",
         "epa_preference_post",
         "epa_preference_delta"
+      ]
+    },
+    "PerceptualPolicyPreset": {
+      "description": "Product-level perceptual policy preset.\n\nPolicies fill in coherent defaults for the lower-level RoomEQ knobs. Omitted\npolicies preserve the historical optimizer defaults.",
+      "oneOf": [
+        {
+          "description": "Conservative reference correction with strong early-cue preservation.",
+          "type": "string",
+          "const": "reference"
+        },
+        {
+          "description": "Music listening target with broad in-room tilt and robust LF correction.",
+          "type": "string",
+          "const": "music"
+        },
+        {
+          "description": "Home-cinema target policy with role-aware dialog and X-curve shaping.",
+          "type": "string",
+          "const": "cinema"
+        },
+        {
+          "description": "Quiet-listening policy with headroom/bass restraint and dialog emphasis.",
+          "type": "string",
+          "const": "night"
+        },
+        {
+          "description": "Speech-intelligibility policy with stronger dialog-band correction.",
+          "type": "string",
+          "const": "speech"
+        }
+      ]
+    },
+    "PerceptualPolicyReport": {
+      "description": "Resolved perceptual policy metadata.",
+      "type": "object",
+      "properties": {
+        "audibility_deadband": {
+          "description": "Effective audibility deadband.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AudibilityDeadbandConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "high_frequency_correction": {
+          "description": "Effective high-frequency safeguard.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HighFrequencyCorrectionConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "loss_type": {
+          "description": "Effective loss type after policy resolution.",
+          "type": "string"
+        },
+        "preset": {
+          "description": "Policy preset requested by the user or UI.",
+          "$ref": "#/$defs/PerceptualPolicyPreset"
+        },
+        "target_response": {
+          "description": "Effective target response after policy resolution.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TargetResponseConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "preset",
+        "loss_type"
+      ]
+    },
+    "PluginConfigWrapper": {
+      "description": "Wrapper for AudioEngine PluginConfig (re-exported from src-audio)",
+      "type": "object",
+      "properties": {
+        "parameters": true,
+        "plugin_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "plugin_type",
+        "parameters"
+      ]
+    },
+    "RoleTargetConfig": {
+      "description": "Optional role-aware target adjustments for home-cinema layouts.\n\nThese are deliberately explicit and default to zero change: enabling the\nblock makes the target semantics role-aware without silently changing\nexisting RoomEQ output. The adjustments layer on top of\n[`TargetResponseConfig::preference`].",
+      "type": "object",
+      "properties": {
+        "center_dialog_boost_db": {
+          "description": "Broad, smooth center-channel dialog-band target lift/cut in dB.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "center_dialog_high_hz": {
+          "description": "Upper edge of the center dialog emphasis band.",
+          "type": "number",
+          "format": "double",
+          "default": 4000.0
+        },
+        "center_dialog_low_hz": {
+          "description": "Lower edge of the center dialog emphasis band.",
+          "type": "number",
+          "format": "double",
+          "default": 300.0
+        },
+        "center_slope_offset_db_per_octave": {
+          "description": "Extra broadband slope for the center channel, in dB/octave.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "center_treble_shelf_db": {
+          "description": "Additional treble shelf applied only to the centre channel.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "cinema_reference_distance_m": {
+          "description": "Reference distance for distance-compensated treble rolloff.",
+          "type": "number",
+          "format": "double",
+          "default": 3.0
+        },
+        "cinema_x_curve_db_per_octave": {
+          "description": "Additional high-frequency slope above `cinema_x_curve_start_hz`, in dB/octave.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "cinema_x_curve_enabled": {
+          "description": "Enable cinema/X-curve style high-frequency rolloff shaping.",
+          "type": "boolean",
+          "default": false
+        },
+        "cinema_x_curve_start_hz": {
+          "description": "Frequency where cinema/X-curve high-frequency shaping starts.",
+          "type": "number",
+          "format": "double",
+          "default": 2000.0
+        },
+        "distance_treble_rolloff_db_per_doubling": {
+          "description": "Additional HF rolloff per distance doubling beyond the reference distance.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "enabled": {
+          "description": "Enable role-aware target adjustment.",
+          "type": "boolean",
+          "default": true
+        },
+        "front_slope_offset_db_per_octave": {
+          "description": "Extra broadband slope for front L/R channels, in dB/octave.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "height_slope_offset_db_per_octave": {
+          "description": "Extra broadband slope for height channels, in dB/octave.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "height_treble_shelf_db": {
+          "description": "Additional treble shelf applied to height channels.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "lfe_bass_shelf_db": {
+          "description": "Additional bass shelf applied to LFE channels.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "lfe_slope_offset_db_per_octave": {
+          "description": "Extra broadband slope for LFE channels, in dB/octave.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "listening_distance_m": {
+          "description": "Listening distance used for optional distance-compensated treble rolloff.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "subwoofer_bass_shelf_db": {
+          "description": "Additional bass shelf applied to subwoofer channels.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "subwoofer_slope_offset_db_per_octave": {
+          "description": "Extra broadband slope for subwoofer channels, in dB/octave.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "surround_slope_offset_db_per_octave": {
+          "description": "Extra broadband slope for surround and wide channels, in dB/octave.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "surround_treble_shelf_db": {
+          "description": "Additional treble shelf applied to side/rear/wide surrounds.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        }
+      }
+    },
+    "StatisticalSummary": {
+      "description": "Simple statistical summary for reporting.",
+      "type": "object",
+      "properties": {
+        "mean": {
+          "description": "Arithmetic mean.",
+          "type": "number",
+          "format": "double"
+        },
+        "std": {
+          "description": "Standard deviation.",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "mean",
+        "std"
+      ]
+    },
+    "SupportingSourceReport": {
+      "description": "Per-channel supporting-source report.",
+      "type": "object",
+      "properties": {
+        "compensation_band_hz": {
+          "description": "Compensation band in Hz.",
+          "type": "array",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number",
+              "format": "double"
+            },
+            {
+              "type": "number",
+              "format": "double"
+            }
+          ]
+        },
+        "delay_ms": {
+          "description": "Delay applied to the supporting source in ms.",
+          "type": "number",
+          "format": "double"
+        },
+        "drr_after_db": {
+          "description": "DRR after compensation (dB) summary.",
+          "$ref": "#/$defs/StatisticalSummary"
+        },
+        "drr_before_db": {
+          "description": "DRR before compensation (dB) summary.",
+          "$ref": "#/$defs/StatisticalSummary"
+        },
+        "enabled": {
+          "description": "Whether supporting-source processing was enabled for this logical channel.",
+          "type": "boolean"
+        },
+        "fir_length": {
+          "description": "Length of the supporting-source FIR in taps.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "precedence_limit_hits": {
+          "description": "Number of frequency bins where the precedence ceiling was hit.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "primary_output": {
+          "description": "Name of the primary output channel.",
+          "type": "string"
+        },
+        "support_output": {
+          "description": "Name of the supporting output channel.",
+          "type": "string"
+        },
+        "target_constraints_active": {
+          "description": "Whether target constraints (floor/ceiling) were active.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled",
+        "primary_output",
+        "support_output",
+        "delay_ms",
+        "fir_length",
+        "compensation_band_hz",
+        "drr_before_db",
+        "drr_after_db",
+        "target_constraints_active",
+        "precedence_limit_hits"
+      ]
+    },
+    "TargetResponseConfig": {
+      "description": "Unified target response configuration for room correction",
+      "type": "object",
+      "properties": {
+        "broadband_precorrection": {
+          "description": "Enable broadband pre-correction (shelf+gain fit before fine EQ)",
+          "type": "boolean",
+          "default": false
+        },
+        "curve_path": {
+          "description": "Path to custom target curve CSV (used when shape == File)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "preference": {
+          "description": "User preference adjustments (layered ON TOP of the target shape)",
+          "$ref": "#/$defs/UserPreference",
+          "default": {
+            "bass_shelf_db": 0.0,
+            "bass_shelf_freq": 200.0,
+            "treble_shelf_db": 0.0,
+            "treble_shelf_freq": 8000.0
+          }
+        },
+        "reference_freq": {
+          "description": "Reference frequency where target shape equals 0 dB (Hz)",
+          "type": "number",
+          "format": "double",
+          "default": 1000.0
+        },
+        "role_targets": {
+          "description": "Optional home-cinema role-aware target adjustments.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RoleTargetConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "shape": {
+          "description": "Target shape preset",
+          "$ref": "#/$defs/TargetShape",
+          "default": "flat"
+        },
+        "slope_db_per_octave": {
+          "description": "Slope in dB per octave (used when shape == Custom)",
+          "type": "number",
+          "format": "double",
+          "default": -0.8
+        }
+      }
+    },
+    "TargetShape": {
+      "description": "Target response shape preset",
+      "oneOf": [
+        {
+          "description": "Flat in-room response (no tilt)",
+          "type": "string",
+          "const": "flat"
+        },
+        {
+          "description": "Harman preferred in-room curve (-0.8 dB/octave from 1 kHz reference)",
+          "type": "string",
+          "const": "harman"
+        },
+        {
+          "description": "Custom slope specified by `slope_db_per_octave`",
+          "type": "string",
+          "const": "custom"
+        },
+        {
+          "description": "Load target curve from external CSV file (`curve_path` must be set)",
+          "type": "string",
+          "const": "file"
+        },
+        {
+          "description": "Derive slope from the input measurement curve at optimization time",
+          "type": "string",
+          "const": "from_measurement"
+        }
       ]
     },
     "TemporalIrMaskingMetrics": {
@@ -399,8 +2877,13 @@
           "type": "number",
           "format": "double"
         },
-        "pre_ringing_peak_db": {
-          "description": "Peak pre-ringing level before the main impulse, dB relative to main.",
+        "penalty": {
+          "description": "Scalar penalty using the configured material profile and IR weights.",
+          "type": "number",
+          "format": "double"
+        },
+        "post_ringing_audible_db": {
+          "description": "Post-masked audible post-ringing energy, dB relative to main peak energy.",
           "type": "number",
           "format": "double"
         },
@@ -414,13 +2897,8 @@
           "type": "number",
           "format": "double"
         },
-        "post_ringing_audible_db": {
-          "description": "Post-masked audible post-ringing energy, dB relative to main peak energy.",
-          "type": "number",
-          "format": "double"
-        },
-        "penalty": {
-          "description": "Scalar penalty using the configured material profile and IR weights.",
+        "pre_ringing_peak_db": {
+          "description": "Peak pre-ringing level before the main impulse, dB relative to main.",
           "type": "number",
           "format": "double"
         }
@@ -435,56 +2913,120 @@
         "penalty"
       ]
     },
-    "InterChannelDeviation": {
-      "description": "Measurement of inter-channel SPL consistency after optimization.\n\nAt each frequency, the max-min spread across all channels is computed.\nRMS and peak statistics summarize the deviation in key frequency bands.",
+    "TimingDiagnosticsReport": {
       "type": "object",
       "properties": {
-        "deviation_per_freq": {
-          "description": "Per-frequency max deviation (freq_hz, spread_db) — sampled at measurement points",
+        "advisories": {
           "type": "array",
           "items": {
-            "type": "array",
-            "prefixItems": [
-              {
-                "type": "number",
-                "format": "double"
-              },
-              {
-                "type": "number",
-                "format": "double"
-              }
-            ],
-            "minItems": 2,
-            "maxItems": 2
+            "type": "string"
           }
         },
-        "midrange_rms_db": {
-          "description": "RMS of deviation in the midrange (200-4000 Hz)",
+        "arrival_spread_after_ms": {
           "type": "number",
           "format": "double"
         },
-        "passband_rms_db": {
-          "description": "RMS of deviation from F3 to 10 kHz",
+        "arrival_spread_before_ms": {
           "type": "number",
           "format": "double"
         },
-        "midrange_peak_db": {
-          "description": "Maximum single-point deviation in midrange",
-          "type": "number",
+        "channels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ChannelTimingReport"
+          }
+        },
+        "reference_arrival_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
           "format": "double"
         },
-        "midrange_peak_freq": {
-          "description": "Frequency of maximum midrange deviation",
+        "reference_channel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "arrival_spread_before_ms",
+        "arrival_spread_after_ms",
+        "channels",
+        "advisories"
+      ]
+    },
+    "UserPreference": {
+      "description": "User preference adjustments layered on top of the target shape",
+      "type": "object",
+      "properties": {
+        "bass_shelf_db": {
+          "description": "Bass shelf boost/cut in dB (applied below `bass_shelf_freq`)",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "bass_shelf_freq": {
+          "description": "Bass shelf frequency in Hz",
+          "type": "number",
+          "format": "double",
+          "default": 200.0
+        },
+        "treble_shelf_db": {
+          "description": "Treble shelf boost/cut in dB (applied above `treble_shelf_freq`)",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "treble_shelf_freq": {
+          "description": "Treble shelf frequency in Hz",
+          "type": "number",
+          "format": "double",
+          "default": 8000.0
+        }
+      }
+    },
+    "ValidationBundleReport": {
+      "description": "Validation/listening-test bundle descriptor.",
+      "type": "object",
+      "properties": {
+        "abx": {
+          "description": "ABX descriptor included.",
+          "type": "boolean"
+        },
+        "advisories": {
+          "description": "Bundle advisories.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "artifact": {
+          "description": "JSON artifact path.",
+          "type": "string"
+        },
+        "mushra": {
+          "description": "MUSHRA descriptor included.",
+          "type": "boolean"
+        },
+        "perceptual_regression_summary": {
+          "description": "Perceptual regression summary included.",
+          "type": "boolean"
+        },
+        "target_lufs": {
+          "description": "Target loudness for matched validation assets.",
           "type": "number",
           "format": "double"
         }
       },
       "required": [
-        "deviation_per_freq",
-        "midrange_rms_db",
-        "passband_rms_db",
-        "midrange_peak_db",
-        "midrange_peak_freq"
+        "artifact",
+        "target_lufs",
+        "abx",
+        "mushra",
+        "perceptual_regression_summary",
+        "advisories"
       ]
     }
   }

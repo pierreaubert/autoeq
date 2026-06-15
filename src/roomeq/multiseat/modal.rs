@@ -3,9 +3,9 @@
 use super::consts::SFM_EPS;
 use super::consts::SFM_MAX_MODES;
 use super::consts::SFM_MODAL_LOSS_WEIGHT;
-use super::mso::mso_resource_penalty;
 use super::mso_objective_context::MsoObjectiveContext;
 use super::types::ModalBasis;
+use super::types::mso_resource_penalty;
 use num_complex::Complex64;
 
 pub(super) fn modal_basis_mode_cap(num_seats: usize, num_subs: usize) -> usize {

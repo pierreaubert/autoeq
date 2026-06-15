@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Complete room configuration
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct RoomConfig {
     /// Configuration version (semantic versioning, e.g. "1.0.0")
     #[serde(default = "default_config_version")]

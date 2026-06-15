@@ -77,7 +77,8 @@ pub(super) fn find_project_root() -> Result<PathBuf> {
         let cargo_toml = dir.join("Cargo.toml");
         if cargo_toml.exists() {
             let content = std::fs::read_to_string(&cargo_toml)?;
-            if content.contains("[workspace]") {
+            // Accept either a workspace root or the autoeq package root.
+            if content.contains("[workspace]") || content.contains("name = \"autoeq\"") {
                 return Ok(dir);
             }
         }

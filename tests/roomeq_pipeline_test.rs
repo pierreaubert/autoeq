@@ -69,6 +69,7 @@ fn workflow_stereo_config() -> RoomConfig {
         ]),
         subwoofers: None,
         bass_management: None,
+        supporting_source_outputs: None,
     });
     config
 }
@@ -330,6 +331,7 @@ fn optimize_room_with_ctc_writes_metadata_and_artifact() {
         ]),
         subwoofers: None,
         bass_management: None,
+        supporting_source_outputs: None,
     });
     config.ctc = Some(CtcConfig {
         enabled: true,

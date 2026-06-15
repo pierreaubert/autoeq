@@ -420,8 +420,29 @@ pub enum BassHeadroomModelKind {
     CinemaCorrelated,
 }
 
-/// Explicit system configuration mapping logical roles to measurements
+/// Naming convention for supporting-source physical outputs.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SupportingSourceOutputNaming {
+    /// Suffix appended to the logical role for the supporting output.
+    /// Default: "_support".
+    #[serde(default = "default_supporting_source_suffix")]
+    pub suffix: String,
+}
+
+impl Default for SupportingSourceOutputNaming {
+    fn default() -> Self {
+        Self {
+            suffix: default_supporting_source_suffix(),
+        }
+    }
+}
+
+fn default_supporting_source_suffix() -> String {
+    "_support".to_string()
+}
+
+/// Explicit system configuration mapping logical roles to measurements
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct SystemConfig {
     /// System topology model
     #[serde(default)]
@@ -434,6 +455,9 @@ pub struct SystemConfig {
     /// Home-cinema bass-management policy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bass_management: Option<BassManagementConfig>,
+    /// Naming convention for supporting-source physical outputs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supporting_source_outputs: Option<SupportingSourceOutputNaming>,
 }
 
 /// Crossover configuration
@@ -709,7 +733,7 @@ pub enum PerceptualPolicyPreset {
 }
 
 /// Configuration for Voice of God (Timbre Matching)
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct VoiceOfGodConfig {
     /// Enable Voice of God optimization
     #[serde(default)]
@@ -754,4 +778,32 @@ pub struct CtcHrtfSpeakerConfig {
     pub elevation_deg: f64,
     #[serde(default = "default_ctc_hrtf_distance_m")]
     pub distance_m: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supporting_source_output_naming_default_suffix() {
+        let naming = SupportingSourceOutputNaming::default();
+        assert_eq!(naming.suffix, "_support");
+    }
+
+    #[test]
+    fn supporting_source_output_naming_json_roundtrip() {
+        let naming = SupportingSourceOutputNaming {
+            suffix: "_room".to_string(),
+        };
+        let json = serde_json::to_string(&naming).unwrap();
+        assert!(json.contains("_room"));
+        let back: SupportingSourceOutputNaming = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.suffix, "_room");
+    }
+
+    #[test]
+    fn supporting_source_output_naming_deserializes_default() {
+        let back: SupportingSourceOutputNaming = serde_json::from_str("{}").unwrap();
+        assert_eq!(back.suffix, "_support");
+    }
 }

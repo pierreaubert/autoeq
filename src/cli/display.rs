@@ -2,12 +2,24 @@
 
 use super::super::optim::{AlgorithmType, get_all_algorithms};
 use super::peq_model::PeqModel;
+use std::fmt::Write as _;
 use std::process;
 
-/// Display available optimization algorithms with descriptions and exit
-pub fn display_algorithm_list() -> ! {
-    println!("Available Optimization Algorithms");
-    println!("=================================\n");
+fn constraint_label(algo: &crate::optim::AlgorithmInfo) -> &'static str {
+    if algo.supports_nonlinear_constraints {
+        "✅ Nonlinear"
+    } else if algo.supports_linear_constraints {
+        "🔶 Linear only"
+    } else {
+        "❌ None"
+    }
+}
+
+/// Render the algorithm list to a string (used by tests and by the CLI printer).
+pub fn render_algorithm_list() -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "Available Optimization Algorithms");
+    let _ = writeln!(out, "=================================\n");
 
     let algorithms = get_all_algorithms();
 
@@ -27,7 +39,7 @@ pub fn display_algorithm_list() -> ! {
 
     // Display NLOPT algorithms
     if !nlopt_algos.is_empty() {
-        println!("📊 NLOPT Library Algorithms:");
+        let _ = writeln!(out, "📊 NLOPT Library Algorithms:");
 
         // Separate global and local algorithms
         let mut global = Vec::new();
@@ -41,17 +53,11 @@ pub fn display_algorithm_list() -> ! {
         }
 
         if !global.is_empty() {
-            println!("   🌍 Global Optimizers (best for exploring solution space):");
+            let _ = writeln!(out, "   🌍 Global Optimizers (best for exploring solution space):");
             for algo in global {
-                print!("   - {:<20}", algo.name);
-                print!(" | Constraints: ");
-                if algo.supports_nonlinear_constraints {
-                    print!("✅ Nonlinear");
-                } else if algo.supports_linear_constraints {
-                    print!("🔶 Linear only");
-                } else {
-                    print!("❌ None");
-                }
+                let _ = write!(out, "   - {:<20}", algo.name);
+                let _ = write!(out, " | Constraints: ");
+                let _ = write!(out, "{}", constraint_label(algo));
 
                 // Add specific descriptions
                 let description = match algo.name {
@@ -69,23 +75,17 @@ pub fn display_algorithm_list() -> ! {
                     "nlopt:stogorand" => " | StoGO with randomized search",
                     _ => "",
                 };
-                println!("{}", description);
+                let _ = writeln!(out, "{}", description);
             }
-            println!();
+            let _ = writeln!(out);
         }
 
         if !local.is_empty() {
-            println!("   🎯 Local Optimizers (fast refinement from good starting points):");
+            let _ = writeln!(out, "   🎯 Local Optimizers (fast refinement from good starting points):");
             for algo in local {
-                print!("   - {:<20}", algo.name);
-                print!(" | Constraints: ");
-                if algo.supports_nonlinear_constraints {
-                    print!("✅ Nonlinear");
-                } else if algo.supports_linear_constraints {
-                    print!("🔶 Linear only");
-                } else {
-                    print!("❌ None");
-                }
+                let _ = write!(out, "   - {:<20}", algo.name);
+                let _ = write!(out, " | Constraints: ");
+                let _ = write!(out, "{}", constraint_label(algo));
 
                 let description = match algo.name {
                     "nlopt:cobyla" => {
@@ -97,19 +97,19 @@ pub fn display_algorithm_list() -> ! {
                     "nlopt:slsqp" => " | Sequential Least SQuares Programming",
                     _ => "",
                 };
-                println!("{}", description);
+                let _ = writeln!(out, "{}", description);
             }
-            println!();
+            let _ = writeln!(out);
         }
     }
 
     // Display Metaheuristics algorithms
     if !metaheuristics_algos.is_empty() {
-        println!("🧬 Metaheuristics Library Algorithms:");
-        println!("   Nature-inspired global optimization (penalty-based constraints)\n");
+        let _ = writeln!(out, "🧬 Metaheuristics Library Algorithms:");
+        let _ = writeln!(out, "   Nature-inspired global optimization (penalty-based constraints)\n");
 
         for algo in metaheuristics_algos {
-            print!("   - {:<20}", algo.name);
+            let _ = write!(out, "   - {:<20}", algo.name);
             let description = match algo.name {
                 "mh:de" => " | Differential Evolution (robust, good convergence)",
                 "mh:pso" => " | Particle Swarm Optimization (fast exploration)",
@@ -118,61 +118,72 @@ pub fn display_algorithm_list() -> ! {
                 "mh:firefly" => " | Firefly Algorithm (multi-modal problems)",
                 _ => "",
             };
-            println!("{}", description);
+            let _ = writeln!(out, "{}", description);
         }
-        println!();
+        let _ = writeln!(out);
     }
 
     // Display AutoEQ algorithms
     if !autoeq_algos.is_empty() {
-        println!("🎵 AutoEQ Custom Algorithms:");
-        println!("   Specialized algorithms developed for audio filter optimization\n");
+        let _ = writeln!(out, "🎵 AutoEQ Custom Algorithms:");
+        let _ = writeln!(out, "   Specialized algorithms developed for audio filter optimization\n");
 
         for algo in autoeq_algos {
-            print!("   - {:<20}", algo.name);
-            print!(" | Constraints: ");
+            let _ = write!(out, "   - {:<20}", algo.name);
+            let _ = write!(out, " | Constraints: ");
             if algo.supports_nonlinear_constraints {
-                print!("✅ Nonlinear");
+                let _ = write!(out, "✅ Nonlinear");
             } else {
-                print!("❌ Penalty-based");
+                let _ = write!(out, "❌ Penalty-based");
             }
 
             let description = match algo.name {
                 "autoeq:de" => " | Adaptive DE with constraint handling (experimental)",
                 _ => "",
             };
-            println!("{}", description);
+            let _ = writeln!(out, "{}", description);
         }
-        println!();
+        let _ = writeln!(out);
     }
 
-    println!("Usage Examples:");
-    println!("==============\n");
-    println!("  # Use ISRES (recommended global optimizer):");
-    println!("  autoeq --algo nlopt:isres --curve input.csv\n");
-    println!("  # Use COBYLA (fast local optimizer):");
-    println!("  autoeq --algo nlopt:cobyla --curve input.csv\n");
-    println!("  # Use Differential Evolution from metaheuristics:");
-    println!("  autoeq --algo mh:de --curve input.csv\n");
-    println!("  # Backward compatibility (maps to nlopt:cobyla):");
-    println!("  autoeq --algo cobyla --curve input.csv\n");
+    let _ = writeln!(out, "Usage Examples:");
+    let _ = writeln!(out, "==============\n");
+    let _ = writeln!(out, "  # Use ISRES (recommended global optimizer):");
+    let _ = writeln!(out, "  autoeq --algo nlopt:isres --curve input.csv\n");
+    let _ = writeln!(out, "  # Use COBYLA (fast local optimizer):");
+    let _ = writeln!(out, "  autoeq --algo nlopt:cobyla --curve input.csv\n");
+    let _ = writeln!(out, "  # Use Differential Evolution from metaheuristics:");
+    let _ = writeln!(out, "  autoeq --algo mh:de --curve input.csv\n");
+    let _ = writeln!(out, "  # Backward compatibility (maps to nlopt:cobyla):");
+    let _ = writeln!(out, "  autoeq --algo cobyla --curve input.csv\n");
 
-    println!("Recommendations:");
-    println!("===============\n");
-    println!("  🎯 For best results: nlopt:isres (global) + --refine with nlopt:cobyla (local)");
-    println!("  ⚡ For speed: nlopt:cobyla (if you have a good initial guess)");
-    println!("  🧪 For experimentation: mh:de or mh:pso from metaheuristics library");
-    println!(
+    let _ = writeln!(out, "Recommendations:");
+    let _ = writeln!(out, "===============\n");
+    let _ = writeln!(
+        out,
+        "  🎯 For best results: nlopt:isres (global) + --refine with nlopt:cobyla (local)"
+    );
+    let _ = writeln!(out, "  ⚡ For speed: nlopt:cobyla (if you have a good initial guess)");
+    let _ = writeln!(out, "  🧪 For experimentation: mh:de or mh:pso from metaheuristics library");
+    let _ = writeln!(
+        out,
         "  ⚖️  For constrained problems: Prefer algorithms with ✅ Nonlinear constraint support"
     );
 
+    out
+}
+
+/// Display available optimization algorithms with descriptions and exit
+pub fn display_algorithm_list() -> ! {
+    print!("{}", render_algorithm_list());
     process::exit(0);
 }
 
-/// Display available DE strategies with descriptions and exit
-pub fn display_strategy_list() -> ! {
-    println!("Available Differential Evolution (DE) Strategies");
-    println!("===============================================\n");
+/// Render the DE strategy list to a string.
+pub fn render_strategy_list() -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "Available Differential Evolution (DE) Strategies");
+    let _ = writeln!(out, "===============================================\n");
 
     let strategies = [
         (
@@ -261,82 +272,135 @@ pub fn display_strategy_list() -> ! {
         ),
     ];
 
-    println!("🎯 Classic DE Strategies (well-tested, reliable):");
+    let _ = writeln!(out, "🎯 Classic DE Strategies (well-tested, reliable):");
     for &(name, _enum_name, description, recommendation) in strategies.iter().take(12) {
         if name.starts_with("adaptive") {
             continue;
         }
-        println!("   - {:<20} | {}", name, description);
-        println!("     {:<20} | 💡 {}", "", recommendation);
+        let _ = writeln!(out, "   - {:<20} | {}", name, description);
+        let _ = writeln!(out, "     {:<20} | 💡 {}", "", recommendation);
         if name == "currenttobest1bin" {
-            println!("     {:<20} | ⭐ Recommended default strategy", "");
+            let _ = writeln!(out, "     {:<20} | ⭐ Recommended default strategy", "");
         }
-        println!();
+        let _ = writeln!(out);
     }
 
-    println!("🧬 Adaptive DE Strategies (experimental, research-based):");
+    let _ = writeln!(out, "🧬 Adaptive DE Strategies (experimental, research-based):");
     for &(name, _enum_name, description, recommendation) in strategies.iter() {
         if !name.starts_with("adaptive") {
             continue;
         }
-        println!("   - {:<20} | {}", name, description);
-        println!("     {:<20} | 💡 {}", "", recommendation);
-        println!(
+        let _ = writeln!(out, "   - {:<20} | {}", name, description);
+        let _ = writeln!(out, "     {:<20} | 💡 {}", "", recommendation);
+        let _ = writeln!(
+            out,
             "     {:<20} | 🔧 Requires --adaptive-weight-f and --adaptive-weight-cr",
             ""
         );
-        println!();
+        let _ = writeln!(out);
     }
 
-    println!("Strategy Naming Conventions:");
-    println!("==========================\n");
-    println!("  • 'bin' = Binomial (uniform) crossover - each gene has equal probability");
-    println!("  • 'exp' = Exponential crossover - contiguous segments are more likely");
-    println!("  • Numbers (1, 2) indicate how many difference vectors are used\n");
+    let _ = writeln!(out, "Strategy Naming Conventions:");
+    let _ = writeln!(out, "==========================\n");
+    let _ = writeln!(out, "  • 'bin' = Binomial (uniform) crossover - each gene has equal probability");
+    let _ = writeln!(out, "  • 'exp' = Exponential crossover - contiguous segments are more likely");
+    let _ = writeln!(out, "  • Numbers (1, 2) indicate how many difference vectors are used\n");
 
-    println!("Usage Examples:");
-    println!("==============\n");
-    println!("  # Use recommended default strategy:");
-    println!("  autoeq --algo autoeq:de --strategy currenttobest1bin --curve input.csv\n");
-    println!("  # Use adaptive strategy with custom weights:");
-    println!(
+    let _ = writeln!(out, "Usage Examples:");
+    let _ = writeln!(out, "==============\n");
+    let _ = writeln!(out, "  # Use recommended default strategy:");
+    let _ = writeln!(
+        out,
+        "  autoeq --algo autoeq:de --strategy currenttobest1bin --curve input.csv\n"
+    );
+    let _ = writeln!(out, "  # Use adaptive strategy with custom weights:");
+    let _ = writeln!(
+        out,
         "  autoeq --algo autoeq:de --strategy adaptivebin --adaptive-weight-f 0.8 --adaptive-weight-cr 0.7\n"
     );
-    println!("  # Use classic exploration strategy:");
-    println!("  autoeq --algo autoeq:de --strategy rand1bin --curve input.csv\n");
+    let _ = writeln!(out, "  # Use classic exploration strategy:");
+    let _ = writeln!(out, "  autoeq --algo autoeq:de --strategy rand1bin --curve input.csv\n");
 
-    println!("Recommendations:");
-    println!("===============\n");
-    println!(
+    let _ = writeln!(out, "Recommendations:");
+    let _ = writeln!(out, "===============\n");
+    let _ = writeln!(
+        out,
         "  ⭐ For general use: currenttobest1bin (good balance of exploration and exploitation)"
     );
-    println!("  🚀 For fast convergence: best1bin or best2bin (may get trapped in local optima)");
-    println!("  🌍 For thorough exploration: rand1bin or rand2bin (slower but more robust)");
-    println!(
+    let _ = writeln!(out, "  🚀 For fast convergence: best1bin or best2bin (may get trapped in local optima)");
+    let _ = writeln!(out, "  🌍 For thorough exploration: rand1bin or rand2bin (slower but more robust)");
+    let _ = writeln!(
+        out,
         "  🧪 For research/experimentation: adaptivebin or adaptiveexp (requires parameter tuning)"
     );
 
+    out
+}
+
+/// Display available DE strategies with descriptions and exit
+pub fn display_strategy_list() -> ! {
+    print!("{}", render_strategy_list());
     process::exit(0);
+}
+
+/// Render the PEQ model list to a string.
+pub fn render_peq_model_list() -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "Available PEQ Models");
+    let _ = writeln!(out, "===================");
+    let _ = writeln!(out);
+    let _ = writeln!(out, "The PEQ model defines the structure and constraints of the equalizer filters.");
+    let _ = writeln!(out);
+
+    for model in PeqModel::all() {
+        let _ = writeln!(out, "  --peq-model {}", model);
+        let _ = writeln!(out, "    {}", model.description());
+        let _ = writeln!(out);
+    }
+
+    let _ = writeln!(out, "Examples:");
+    let _ = writeln!(out, "  autoeq --peq-model pk           # All peak filters (default)");
+    let _ = writeln!(out, "  autoeq --peq-model hp-pk        # Highpass + peaks");
+    let _ = writeln!(out, "  autoeq --peq-model hp-pk-lp     # Highpass + peaks + lowpass");
+
+    out
 }
 
 /// Display available PEQ models with descriptions and exit
 pub fn display_peq_model_list() -> ! {
-    println!("Available PEQ Models");
-    println!("===================");
-    println!();
-    println!("The PEQ model defines the structure and constraints of the equalizer filters.");
-    println!();
+    print!("{}", render_peq_model_list());
+    process::exit(0);
+}
 
-    for model in PeqModel::all() {
-        println!("  --peq-model {}", model);
-        println!("    {}", model.description());
-        println!();
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_algorithm_list_contains_headers_and_known_algorithms() {
+        let s = render_algorithm_list();
+        assert!(s.contains("Available Optimization Algorithms"));
+        assert!(s.contains("autoeq:de") || s.contains("mh:de"));
+        assert!(s.contains("Usage Examples"));
+        assert!(s.contains("Recommendations"));
     }
 
-    println!("Examples:");
-    println!("  autoeq --peq-model pk           # All peak filters (default)");
-    println!("  autoeq --peq-model hp-pk        # Highpass + peaks");
-    println!("  autoeq --peq-model hp-pk-lp     # Highpass + peaks + lowpass");
+    #[test]
+    fn render_strategy_list_contains_recommended_strategy() {
+        let s = render_strategy_list();
+        assert!(s.contains("Available Differential Evolution"));
+        assert!(s.contains("currenttobest1bin"));
+        assert!(s.contains("Recommended default strategy"));
+        assert!(s.contains("adaptivebin"));
+    }
 
-    process::exit(0);
+    #[test]
+    fn render_peq_model_list_contains_all_models() {
+        let s = render_peq_model_list();
+        assert!(s.contains("Available PEQ Models"));
+        for model in PeqModel::all() {
+            assert!(s.contains(&format!("--peq-model {}", model)));
+            assert!(s.contains(model.description()));
+        }
+    }
 }

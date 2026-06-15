@@ -5,38 +5,8 @@ use super::gd_opt_config::GdOptConfig;
 use super::gd_opt_config::param_count;
 use super::types::ChannelGdResult;
 use super::types::ChannelMeasurementInput;
-use super::types::ChannelParams;
+use super::types::decode_channel_params;
 use math_audio_iir_fir::{Biquad, BiquadFilterType};
-
-pub(super) fn decode_channel_params(
-    params: &[f64],
-    ch: usize,
-    config: &GdOptConfig,
-) -> ChannelParams {
-    let per_ch = 1 + config.ap_per_channel * 2 + if config.optimize_polarity { 1 } else { 0 };
-    let offset = ch * per_ch;
-
-    let delay_ms = params[offset];
-
-    let mut ap_filters = Vec::with_capacity(config.ap_per_channel);
-    for i in 0..config.ap_per_channel {
-        let freq = params[offset + 1 + i * 2];
-        let q = params[offset + 1 + i * 2 + 1];
-        ap_filters.push((freq, q));
-    }
-
-    let polarity_inverted = if config.optimize_polarity {
-        params[offset + 1 + config.ap_per_channel * 2] > 0.5
-    } else {
-        false
-    };
-
-    ChannelParams {
-        delay_ms,
-        ap_filters,
-        polarity_inverted,
-    }
-}
 
 /// Decode the DE solution into per-channel results with pre/post GD RMS.
 pub(super) fn decode_per_channel(

@@ -100,3 +100,46 @@ pub fn build_cea2034_data(curves: HashMap<String, Curve>) -> Result<Cea2034Data,
         curves,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Curve;
+    use ndarray::Array1;
+
+    fn make_curve(spl: &[f64]) -> Curve {
+        Curve {
+            freq: Array1::from_vec(vec![100.0, 500.0, 1000.0]),
+            spl: Array1::from_vec(spl.to_vec()),
+            phase: None,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn build_cea2034_data_computes_indices() {
+        let mut curves = HashMap::new();
+        for name in [
+            "On Axis",
+            "Listening Window",
+            "Early Reflections",
+            "Sound Power",
+            "Estimated In-Room Response",
+        ] {
+            curves.insert(name.to_string(), make_curve(&[80.0, 82.0, 81.0]));
+        }
+        let data = build_cea2034_data(curves).unwrap();
+        assert_eq!(data.on_axis.freq.len(), 3);
+        assert_eq!(data.er_di.spl.len(), 3);
+        assert_eq!(data.sp_di.spl.len(), 3);
+    }
+
+    #[test]
+    fn build_cea2034_data_missing_curve_errors() {
+        let mut curves = HashMap::new();
+        curves.insert("On Axis".to_string(), make_curve(&[80.0, 82.0, 81.0]));
+        let result = build_cea2034_data(curves);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Missing CEA2034 curve"));
+    }
+}

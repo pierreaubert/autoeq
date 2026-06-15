@@ -432,3 +432,119 @@ impl Args {
         process::exit(0);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::peq_model::PeqModel;
+    use super::Args;
+    use crate::LossType;
+    use clap::Parser;
+
+    fn parsed_base() -> Args {
+        Args::try_parse_from::<&[&str], _>(&["prog"]).unwrap()
+    }
+
+    #[test]
+    fn speaker_defaults_match_expected_values() {
+        let args = Args::speaker_defaults();
+        assert_eq!(args.num_filters, 5);
+        assert_eq!(args.sample_rate, 48000.0);
+        assert_eq!(args.loss, LossType::SpeakerFlat);
+        assert_eq!(args.algo, "autoeq:de");
+        assert_eq!(args.population, 300);
+        assert_eq!(args.maxeval, 50000);
+        assert_eq!(args.strategy, "lshade");
+        assert_eq!(args.min_db, -12.0);
+        assert_eq!(args.max_db, 12.0);
+        assert_eq!(args.min_q, 0.5);
+        assert_eq!(args.max_q, 10.0);
+        assert_eq!(args.min_freq, 20.0);
+        assert_eq!(args.max_freq, 20000.0);
+        assert_eq!(args.min_spacing_oct, 0.5);
+        assert_eq!(args.smoothness_weight, 0.0);
+        assert_eq!(args.smoothness_exponent, 1.0);
+        assert_eq!(args.smoothness_modal_scale, 0.1);
+        assert!(args.smooth);
+        assert_eq!(args.smooth_n, 1);
+        assert!(!args.refine);
+        assert_eq!(args.peq_model, PeqModel::Pk);
+    }
+
+    #[test]
+    fn headphone_defaults_use_headphone_score_loss() {
+        let args = Args::headphone_defaults();
+        assert_eq!(args.loss, LossType::HeadphoneScore);
+        assert_eq!(args.num_filters, 7);
+        assert_eq!(args.sample_rate, 48000.0);
+    }
+
+    #[test]
+    fn roomeq_defaults_set_num_filters_and_max_freq() {
+        let args = Args::roomeq_defaults();
+        assert_eq!(args.num_filters, 10);
+        assert_eq!(args.max_freq, 500.0);
+    }
+
+    #[test]
+    fn apply_preset_quick_sets_expected_fields() {
+        let mut args = parsed_base();
+        args.preset = Some("quick".to_string());
+        args.apply_preset();
+        assert_eq!(args.num_filters, 5);
+        assert_eq!(args.population, 40);
+        assert_eq!(args.maxeval, 2000);
+        assert!(!args.refine);
+        assert_eq!(args.min_q, 0.5);
+        assert_eq!(args.max_q, 6.0);
+        assert_eq!(args.min_db, -12.0);
+        assert_eq!(args.max_db, 6.0);
+    }
+
+    #[test]
+    fn apply_preset_balanced_sets_expected_fields() {
+        let mut args = parsed_base();
+        args.preset = Some("balanced".to_string());
+        args.apply_preset();
+        assert_eq!(args.num_filters, 7);
+        assert_eq!(args.population, 80);
+        assert_eq!(args.maxeval, 5000);
+        assert!(args.refine);
+        assert_eq!(args.min_q, 0.5);
+        assert_eq!(args.max_q, 6.0);
+    }
+
+    #[test]
+    fn apply_preset_max_quality_sets_expected_fields() {
+        let mut args = parsed_base();
+        args.preset = Some("max-quality".to_string());
+        args.apply_preset();
+        assert_eq!(args.num_filters, 10);
+        assert_eq!(args.peq_model, PeqModel::LsPkHs);
+        assert_eq!(args.population, 200);
+        assert_eq!(args.maxeval, 20000);
+        assert!(args.refine);
+    }
+
+    #[test]
+    fn apply_preset_score_sets_expected_fields() {
+        let mut args = parsed_base();
+        args.preset = Some("score".to_string());
+        args.apply_preset();
+        assert_eq!(args.num_filters, 7);
+        assert_eq!(args.loss, LossType::SpeakerScore);
+        assert_eq!(args.population, 100);
+        assert_eq!(args.maxeval, 10000);
+        assert!(args.refine);
+    }
+
+    #[test]
+    fn apply_preset_unknown_does_not_panic() {
+        let result = std::panic::catch_unwind(|| {
+            let mut args = parsed_base();
+            args.preset = Some("unknown-preset".to_string());
+            args.apply_preset();
+            args.num_filters
+        });
+        assert!(result.is_ok());
+    }
+}

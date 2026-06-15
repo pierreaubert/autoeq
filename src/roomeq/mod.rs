@@ -88,14 +88,21 @@ pub use output::{
     build_dba_dsp_chain, build_dba_dsp_chain_with_curves, build_multidriver_dsp_chain,
     build_multidriver_dsp_chain_with_curves, build_multisub_dsp_chain,
     build_multisub_dsp_chain_with_allpass, build_multisub_dsp_chain_with_curves,
-    create_convolution_plugin, create_crossover_plugin, create_delay_plugin,
-    create_dsp_chain_output, create_eq_plugin, create_gain_plugin, create_gain_plugin_with_invert,
-    create_labeled_eq_plugin, create_sparse_matrix_plugin, save_dsp_chain,
+    build_supporting_source_dsp_chains, create_convolution_plugin, create_crossover_plugin,
+    create_delay_plugin, create_dsp_chain_output, create_eq_plugin, create_gain_plugin,
+    create_gain_plugin_with_invert, create_labeled_eq_plugin, create_sparse_matrix_plugin,
+    save_dsp_chain,
 };
 
 // Progress reporting
 mod progress;
 pub use progress::{MultiStageProgress, ProgressReporter};
+
+// Supporting-source room compensation (Brooks-Park)
+mod supporting_source;
+pub use supporting_source::{
+    compute_supporting_source_filter, generate_velvet_noise, SupportingSourceFilter,
+};
 
 // Spectral channel alignment (shelf filters + gain)
 mod spectral_align;

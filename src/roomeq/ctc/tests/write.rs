@@ -68,7 +68,8 @@ fn measured_ctc_writes_recommended_artifact() {
         ]),
         subwoofers: None,
         bass_management: None,
-    };
+            ..Default::default()
+        };
 
     let report = maybe_generate_recommended_xtc(&cfg, &sys, 48_000.0, dir.path(), None)
         .unwrap()
@@ -145,7 +146,8 @@ fn joint_room_eq_path_folds_channel_gain_into_ctc_solve() {
         ]),
         subwoofers: None,
         bass_management: None,
-    };
+            ..Default::default()
+        };
     let channels = HashMap::from([
         (
             "left".to_string(),
@@ -249,7 +251,8 @@ fn raw_sweep_ctc_writes_recommended_artifact() {
         ]),
         subwoofers: None,
         bass_management: None,
-    };
+            ..Default::default()
+        };
 
     let report = maybe_generate_recommended_xtc(&cfg, &sys, 48_000.0, dir.path(), None)
         .unwrap()
@@ -332,7 +335,8 @@ fn raw_sweep_direct_window_tracks_delayed_acoustic_arrival() {
         ]),
         subwoofers: None,
         bass_management: None,
-    };
+            ..Default::default()
+        };
 
     let report = maybe_generate_recommended_xtc(&cfg, &sys, 48_000.0, dir.path(), None)
         .unwrap()
@@ -352,7 +356,7 @@ fn raw_sweep_direct_window_tracks_delayed_acoustic_arrival() {
     );
 }
 
-fn write_mono_impulse(path: &Path, value: i16) {
+pub(super) fn write_mono_impulse(path: &Path, value: i16) {
     let spec = hound::WavSpec {
         channels: 1,
         sample_rate: 48_000,
@@ -425,7 +429,7 @@ fn write_stereo_delayed_impulse(path: &Path, delay: usize, left: i16, right: i16
     writer.finalize().unwrap();
 }
 
-fn write_stereo_impulse(path: &Path, left: i16, right: i16) {
+pub(super) fn write_stereo_impulse(path: &Path, left: i16, right: i16) {
     let spec = hound::WavSpec {
         channels: 2,
         sample_rate: 48_000,

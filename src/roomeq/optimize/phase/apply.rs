@@ -94,29 +94,6 @@ pub(in super::super) fn apply_phase_correction(
     }
 }
 
-pub(in super::super) fn apply_phase_only_adjustment_to_reported_curve(
-    curve: &mut Curve,
-    delay_ms: f64,
-    invert_polarity: bool,
-) {
-    if curve.freq.is_empty() {
-        return;
-    }
-
-    let base_phase = curve
-        .phase
-        .clone()
-        .unwrap_or_else(|| ndarray::Array1::zeros(curve.freq.len()));
-    let inversion_phase = if invert_polarity { 180.0 } else { 0.0 };
-    let delay_s = delay_ms / 1000.0;
-
-    let phase =
-        ndarray::Array1::from_iter(curve.freq.iter().zip(base_phase.iter()).map(
-            |(&freq_hz, &phase_deg)| phase_deg + inversion_phase - (360.0 * freq_hz * delay_s),
-        ));
-    curve.phase = Some(phase);
-}
-
 pub(in super::super) fn apply_phase_alignment_delay_schedule(
     phase_alignment_results: &HashMap<String, (f64, bool, String)>,
     channel_results: &mut HashMap<String, ChannelOptimizationResult>,
@@ -148,4 +125,163 @@ pub(in super::super) fn apply_phase_alignment_delay_schedule(
     }
 
     schedule
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::roomeq::ChannelOptimizationResult;
+    use crate::roomeq::types::{ChannelDspChain, CurveData};
+    use ndarray::Array1;
+    use std::collections::HashMap;
+
+    fn small_curve() -> crate::Curve {
+        crate::Curve {
+            freq: Array1::logspace(10.0, f64::log10(20.0), f64::log10(20_000.0), 16),
+            spl: Array1::from_elem(16, 80.0),
+            phase: Some(Array1::from_elem(16, 0.0)),
+            ..Default::default()
+        }
+    }
+
+    fn small_curve_no_phase() -> crate::Curve {
+        crate::Curve {
+            freq: Array1::logspace(10.0, f64::log10(20.0), f64::log10(20_000.0), 16),
+            spl: Array1::from_elem(16, 80.0),
+            phase: None,
+            ..Default::default()
+        }
+    }
+
+    fn curve_data(curve: &crate::Curve) -> CurveData {
+        CurveData {
+            freq: curve.freq.to_vec(),
+            spl: curve.spl.to_vec(),
+            phase: curve.phase.as_ref().map(|p| p.to_vec()),
+            norm_range: None,
+        }
+    }
+
+    fn make_channel(
+        name: &str,
+        curve: crate::Curve,
+    ) -> (ChannelOptimizationResult, ChannelDspChain) {
+        let ch = ChannelOptimizationResult {
+            name: name.to_string(),
+            pre_score: 0.0,
+            post_score: 0.0,
+            initial_curve: curve.clone(),
+            final_curve: curve.clone(),
+            biquads: Vec::new(),
+            fir_coeffs: None,
+        };
+        let chain = ChannelDspChain {
+            channel: name.to_string(),
+            plugins: Vec::new(),
+            drivers: None,
+            initial_curve: None,
+            final_curve: Some(curve_data(&curve)),
+            eq_response: None,
+            target_curve: None,
+            pre_ir: None,
+            post_ir: None,
+            fir_temporal_masking: None,
+            direct_early_late_correction: None,
+        };
+        (ch, chain)
+    }
+
+    #[test]
+    fn apply_phase_correction_skips_without_phase() {
+        let (mut ch, mut chain) = make_channel("left", small_curve_no_phase());
+        let config = crate::roomeq::types::MixedPhaseSerdeConfig {
+            max_fir_length_ms: 10.0,
+            pre_ringing_threshold_db: -30.0,
+            min_spatial_depth: 0.5,
+            phase_smoothing_octaves: 1.0 / 6.0,
+        };
+        apply_phase_correction("left", &mut ch, &mut chain, &config, 48_000.0, None);
+        assert!(chain.plugins.is_empty());
+        assert!(ch.fir_coeffs.is_none());
+    }
+
+    #[test]
+    fn apply_phase_alignment_delay_schedule_adds_delay_plugins() {
+        let (l_ch, l_chain) = make_channel("L", small_curve());
+        let (r_ch, r_chain) = make_channel("R", small_curve());
+        let (sub_ch, sub_chain) = make_channel("Sub", small_curve());
+        let mut results = HashMap::from([
+            ("L".to_string(), l_ch),
+            ("R".to_string(), r_ch),
+            ("Sub".to_string(), sub_ch),
+        ]);
+        let mut chains = HashMap::from([
+            ("L".to_string(), l_chain),
+            ("R".to_string(), r_chain),
+            ("Sub".to_string(), sub_chain),
+        ]);
+        let phase_results = HashMap::from([
+            ("L".to_string(), (-2.0, false, "Sub".to_string())),
+            ("R".to_string(), (1.0, false, "Sub".to_string())),
+        ]);
+        let schedule =
+            apply_phase_alignment_delay_schedule(&phase_results, &mut results, &mut chains);
+        assert!(schedule.contains_key("Sub"));
+        assert!(schedule.contains_key("R"));
+        assert!(!schedule.contains_key("L"));
+        assert!(
+            chains["Sub"]
+                .plugins
+                .iter()
+                .any(|p| p.plugin_type == "delay")
+        );
+        assert!(chains["R"].plugins.iter().any(|p| p.plugin_type == "delay"));
+        assert!(!chains["L"].plugins.iter().any(|p| p.plugin_type == "delay"));
+    }
+
+    #[test]
+    fn apply_phase_alignment_delay_schedule_empty_results_empty_schedule() {
+        let mut results = HashMap::<String, ChannelOptimizationResult>::new();
+        let mut chains = HashMap::<String, ChannelDspChain>::new();
+        let schedule =
+            apply_phase_alignment_delay_schedule(&HashMap::new(), &mut results, &mut chains);
+        assert!(schedule.is_empty());
+    }
+
+    #[test]
+    fn apply_phase_correction_generates_fir_without_output_dir() {
+        let (mut ch, mut chain) = make_channel("left", small_curve());
+        let config = crate::roomeq::types::MixedPhaseSerdeConfig {
+            max_fir_length_ms: 5.0,
+            pre_ringing_threshold_db: -30.0,
+            min_spatial_depth: 0.5,
+            phase_smoothing_octaves: 1.0 / 6.0,
+        };
+        apply_phase_correction("left", &mut ch, &mut chain, &config, 48_000.0, None);
+        assert!(ch.fir_coeffs.is_some());
+        assert!(
+            chain.plugins.iter().any(|p| p.plugin_type == "convolution"),
+            "phase correction should add a convolution plugin"
+        );
+    }
+
+    #[test]
+    fn apply_phase_correction_saves_wav_when_output_dir_provided() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let (mut ch, mut chain) = make_channel("left", small_curve());
+        let config = crate::roomeq::types::MixedPhaseSerdeConfig {
+            max_fir_length_ms: 5.0,
+            pre_ringing_threshold_db: -30.0,
+            min_spatial_depth: 0.5,
+            phase_smoothing_octaves: 1.0 / 6.0,
+        };
+        apply_phase_correction("left", &mut ch, &mut chain, &config, 48_000.0, Some(tmp.path()));
+        assert!(ch.fir_coeffs.is_some());
+        let wav_files: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "wav"))
+            .collect();
+        assert!(!wav_files.is_empty(), "phase FIR WAV should be saved");
+    }
 }

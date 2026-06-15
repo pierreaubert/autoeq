@@ -108,7 +108,6 @@ mod tests {
     use super::*;
     use ndarray::Array1;
     use num_complex::Complex64;
-    use std::f64::consts::PI;
 
     #[test]
     fn compute_phase_basic() {

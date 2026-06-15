@@ -277,3 +277,174 @@ pub fn optimize_multisub_with_allpass(
         combined_curve,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{optimize_multisub, optimize_multisub_with_allpass};
+    use crate::{Curve, MeasurementSource, OptimizerConfig};
+    use ndarray::Array1;
+
+    fn log_freq_grid(n: usize, lo: f64, hi: f64) -> Array1<f64> {
+        Array1::from_vec(
+            (0..n)
+                .map(|i| lo * (hi / lo).powf(i as f64 / (n - 1) as f64))
+                .collect(),
+        )
+    }
+
+    fn flat_sub_curve(phase: Option<Array1<f64>>) -> Curve {
+        let n = 16;
+        let freq = log_freq_grid(n, 20.0, 200.0);
+        let spl = Array1::from_elem(n, 75.0_f64);
+        Curve {
+            freq,
+            spl,
+            phase,
+            ..Default::default()
+        }
+    }
+
+    fn tiny_optimizer_config() -> OptimizerConfig {
+        OptimizerConfig {
+            min_freq: 20.0,
+            max_freq: 200.0,
+            algorithm: "autoeq:de".to_string(),
+            max_iter: 20,
+            population: 10,
+            seed: Some(1),
+            min_db: -12.0,
+            max_db: 12.0,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn optimize_multisub_happy_path_with_phase() {
+        let phase = Some(Array1::from_elem(16, 0.0_f64));
+        let c1 = flat_sub_curve(phase.clone());
+        let c2 = flat_sub_curve(phase);
+        let sources = vec![
+            MeasurementSource::InMemory(c1),
+            MeasurementSource::InMemory(c2),
+        ];
+        let config = tiny_optimizer_config();
+
+        let result = optimize_multisub(&sources, &config, 48000.0);
+        assert!(
+            result.is_ok(),
+            "optimize_multisub should return Ok for in-memory curves with phase: {:?}",
+            result.err()
+        );
+
+        let (_, combined) = result.unwrap();
+        assert!(
+            !combined.freq.is_empty(),
+            "combined curve frequency grid must not be empty"
+        );
+        assert!(
+            !combined.spl.is_empty(),
+            "combined curve SPL must not be empty"
+        );
+        assert!(
+            combined.spl.iter().all(|v| v.is_finite()),
+            "combined SPL must be finite"
+        );
+    }
+
+    #[test]
+    fn optimize_multisub_missing_phase_returns_ok() {
+        let c1 = flat_sub_curve(None);
+        let c2 = flat_sub_curve(None);
+        let sources = vec![
+            MeasurementSource::InMemory(c1),
+            MeasurementSource::InMemory(c2),
+        ];
+        let config = tiny_optimizer_config();
+
+        let result = optimize_multisub(&sources, &config, 48000.0);
+        assert!(
+            result.is_ok(),
+            "optimize_multisub should return Ok even when phase is missing: {:?}",
+            result.err()
+        );
+
+        let (_, combined) = result.unwrap();
+        assert!(
+            !combined.freq.is_empty(),
+            "combined curve frequency grid must not be empty"
+        );
+        assert!(
+            !combined.spl.is_empty(),
+            "combined curve SPL must not be empty"
+        );
+        assert!(
+            combined.spl.iter().all(|v| v.is_finite()),
+            "combined SPL must be finite"
+        );
+    }
+
+    #[test]
+    fn optimize_multisub_with_allpass_happy_path() {
+        let phase = Some(Array1::from_elem(16, 0.0_f64));
+        let c1 = flat_sub_curve(phase.clone());
+        let c2 = flat_sub_curve(phase);
+        let sources = vec![
+            MeasurementSource::InMemory(c1),
+            MeasurementSource::InMemory(c2),
+        ];
+        let config = tiny_optimizer_config();
+
+        let result = optimize_multisub_with_allpass(&sources, &config, 48000.0);
+        assert!(
+            result.is_ok(),
+            "optimize_multisub_with_allpass should return Ok: {:?}",
+            result.err()
+        );
+
+        let res = result.unwrap();
+        assert!(
+            !res.combined_curve.freq.is_empty(),
+            "combined curve frequency grid must not be empty"
+        );
+        assert!(
+            !res.combined_curve.spl.is_empty(),
+            "combined curve SPL must not be empty"
+        );
+        assert!(
+            res.combined_curve.spl.iter().all(|v| v.is_finite()),
+            "combined SPL must be finite"
+        );
+        assert_eq!(
+            res.allpass_filters.len(),
+            2,
+            "should have one all-pass filter per sub"
+        );
+    }
+
+    #[test]
+    fn optimize_multisub_with_allpass_zero_width_range_errors() {
+        let phase = Some(Array1::from_elem(16, 0.0_f64));
+        let c1 = flat_sub_curve(phase.clone());
+        let c2 = flat_sub_curve(phase);
+        let sources = vec![
+            MeasurementSource::InMemory(c1),
+            MeasurementSource::InMemory(c2),
+        ];
+        let mut config = tiny_optimizer_config();
+        config.min_freq = 200.0;
+        config.max_freq = 200.0;
+
+        let result = optimize_multisub_with_allpass(&sources, &config, 48000.0);
+        assert!(
+            result.is_err(),
+            "zero-width allpass frequency range should produce an error"
+        );
+
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("non-zero frequency range"),
+            "error should mention non-zero frequency range: {}",
+            err
+        );
+    }
+}

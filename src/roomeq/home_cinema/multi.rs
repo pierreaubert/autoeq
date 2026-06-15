@@ -396,3 +396,365 @@ fn multi_measurement_strategy_name(strategy: &MultiMeasurementStrategy) -> &'sta
         MultiMeasurementStrategy::MinimaxUncertainty => "minimax_uncertainty",
     }
 }
+
+#[cfg(test)]
+mod multi_seat_branch_tests {
+    use super::{
+        multi_seat_correction_report, multi_seat_coverage, multi_seat_recommended_scope,
+        multi_seat_role_group_reports, multi_seat_coverage_advisories,
+    };
+    use crate::roomeq::optimize::ChannelOptimizationResult;
+    use crate::roomeq::home_cinema::types::HomeCinemaRoleGroup;
+    use crate::roomeq::types::{
+        CrossoverConfig, MultiSeatConfig, OptimizerConfig, RoomConfig, SpeakerConfig,
+        SubwooferSystemConfig, SystemConfig, SystemModel,
+    };
+    use crate::{Curve, MeasurementSource};
+    use ndarray::Array1;
+    use std::collections::HashMap;
+
+    fn flat_curve() -> Curve {
+        Curve {
+            freq: Array1::logspace(10.0, f64::log10(20.0), f64::log10(20_000.0), 32),
+            spl: Array1::from_elem(32, 80.0),
+            phase: None,
+            ..Default::default()
+        }
+    }
+
+    fn multi_seat_curve() -> Curve {
+        let mut c = flat_curve();
+        c.spl = Array1::from_elem(c.freq.len(), 80.0);
+        c
+    }
+
+    fn multi_source() -> MeasurementSource {
+        MeasurementSource::InMemoryMultiple(vec![multi_seat_curve(), multi_seat_curve()])
+    }
+
+    fn home_cinema_config() -> RoomConfig {
+        let mut speakers = HashMap::new();
+        speakers.insert("L".to_string(), SpeakerConfig::Single(multi_source()));
+        speakers.insert("R".to_string(), SpeakerConfig::Single(multi_source()));
+        speakers.insert("C".to_string(), SpeakerConfig::Single(multi_source()));
+        RoomConfig {
+            version: crate::roomeq::types::default_config_version(),
+            system: Some(SystemConfig {
+                model: SystemModel::HomeCinema,
+                speakers: HashMap::from([
+                    ("L".to_string(), "L".to_string()),
+                    ("R".to_string(), "R".to_string()),
+                    ("C".to_string(), "C".to_string()),
+                ]),
+                subwoofers: Some(SubwooferSystemConfig {
+                    config: Default::default(),
+                    crossover: Some("sub".to_string()),
+                    mapping: HashMap::new(),
+                }),
+                bass_management: Some(crate::roomeq::types::BassManagementConfig::default()),
+                supporting_source_outputs: None,
+            }),
+            speakers,
+            crossovers: Some(HashMap::from([(
+                "sub".to_string(),
+                CrossoverConfig {
+                    crossover_type: "LR24".to_string(),
+                    frequency: Some(80.0),
+                    frequencies: None,
+                    frequency_range: None,
+                },
+            )])),
+            target_curve: None,
+            optimizer: OptimizerConfig::default(),
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        }
+    }
+
+    fn channel_result(name: &str, final_delta_db: f64) -> ChannelOptimizationResult {
+        let initial = flat_curve();
+        let mut final_curve = initial.clone();
+        final_curve.spl += final_delta_db;
+        ChannelOptimizationResult {
+            name: name.to_string(),
+            pre_score: 0.0,
+            post_score: 0.0,
+            initial_curve: initial,
+            final_curve,
+            biquads: Vec::new(),
+            fir_coeffs: None,
+        }
+    }
+
+    #[test]
+    fn multi_seat_coverage_all_channels_ready() {
+        let report = multi_seat_coverage(&home_cinema_config());
+        assert_eq!(report.channels_with_multiple_measurements, 3);
+        assert_eq!(report.max_seat_count, 2);
+        assert!(report.all_channel_correction_ready);
+        assert_eq!(report.recommended_scope, "all_channel_reporting_ready");
+        assert!(report.advisories.contains(&"all_channel_multi_seat_reporting_ready".to_string()));
+    }
+
+    #[test]
+    fn multi_seat_coverage_partial_and_sub_only() {
+        let mut config = home_cinema_config();
+        // only L has multi-seat
+        config.speakers.insert("R".to_string(), SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())));
+        config.speakers.insert("C".to_string(), SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())));
+        let report = multi_seat_coverage(&config);
+        assert_eq!(report.channels_with_multiple_measurements, 1);
+        assert_eq!(report.recommended_scope, "partial_non_sub_reporting_only");
+        assert!(report.advisories.contains(&"partial_non_sub_multi_seat_coverage".to_string()));
+
+        // only sub has multi-seat (drop system mapping so logical_speaker_configs sees Sub)
+        config.system = None;
+        config.speakers.clear();
+        config.speakers.insert("Sub".to_string(), SpeakerConfig::Single(multi_source()));
+        let report = multi_seat_coverage(&config);
+        assert_eq!(report.recommended_scope, "sub_or_partial_only");
+        assert!(report.advisories.contains(&"multi_seat_sub_only".to_string()));
+    }
+
+    #[test]
+    fn multi_seat_coverage_advisories_branches() {
+        let a = multi_seat_coverage_advisories(0, 2, 0, 1);
+        assert!(a.contains(&"no_multi_seat_measurements".to_string()));
+        assert!(a.contains(&"insufficient_seats".to_string()));
+
+        let a = multi_seat_coverage_advisories(1, 3, 1, 2);
+        assert!(a.contains(&"only_one_non_sub_channel_has_multi_seat_data".to_string()));
+
+        let a = multi_seat_coverage_advisories(2, 3, 1, 2);
+        assert!(a.contains(&"partial_non_sub_multi_seat_coverage".to_string()));
+    }
+
+    #[test]
+    fn recommended_scope_branches() {
+        assert_eq!(
+            multi_seat_recommended_scope(0, 2, 2),
+            "all_channel_reporting_ready"
+        );
+        assert_eq!(
+            multi_seat_recommended_scope(0, 2, 1),
+            "partial_non_sub_reporting_only"
+        );
+        assert_eq!(
+            multi_seat_recommended_scope(1, 0, 0),
+            "sub_or_partial_only"
+        );
+        assert_eq!(
+            multi_seat_recommended_scope(0, 0, 0),
+            "single_seat_only"
+        );
+    }
+
+    #[test]
+    fn correction_report_disabled() {
+        let mut config = home_cinema_config();
+        config.optimizer.multi_seat = Some(MultiSeatConfig {
+            all_channel_enabled: false,
+            ..Default::default()
+        });
+        let report = multi_seat_correction_report(&config, &HashMap::new(), None);
+        assert!(!report.enabled);
+        assert!(report.advisories.contains(&"all_channel_multiseat_disabled".to_string()));
+        assert!(report.channels.iter().all(|c| c.status == "disabled"));
+    }
+
+    #[test]
+    fn correction_report_not_optimized() {
+        let report = multi_seat_correction_report(&home_cinema_config(), &HashMap::new(), None);
+        assert!(report.channels.iter().any(|c| c.status == "not_optimized"));
+    }
+
+    #[test]
+    fn correction_report_single_seat_skipped() {
+        let mut config = home_cinema_config();
+        config.speakers.insert(
+            "L".to_string(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
+        );
+        let report = multi_seat_correction_report(&config, &HashMap::new(), None);
+        assert!(report.channels.iter().any(|c| c.channel == "L" && c.status == "single_seat_only"));
+    }
+
+    #[test]
+    fn correction_report_unsupported_topology() {
+        let mut config = home_cinema_config();
+        config.speakers.insert(
+            "L".to_string(),
+            SpeakerConfig::Group(crate::roomeq::types::SpeakerGroup {
+                name: "pair".to_string(),
+                speaker_name: None,
+                measurements: Vec::new(),
+                crossover: None,
+            }),
+        );
+        let report = multi_seat_correction_report(&config, &HashMap::new(), None);
+        assert!(report.channels.iter().any(|c| c.channel == "L" && c.status == "unsupported_speaker_topology"));
+    }
+
+    #[test]
+    fn correction_report_invalid_policy_weights_advisory() {
+        let mut config = home_cinema_config();
+        config.optimizer.multi_seat = Some(MultiSeatConfig {
+            seat_weights: Some(vec![1.0]),
+            ..Default::default()
+        });
+        let mut results = HashMap::new();
+        results.insert("L".to_string(), channel_result("L", 0.0));
+        let report = multi_seat_correction_report(&config, &results, None);
+        assert!(report.channels.iter().any(|c| c.channel == "L" && c.status == "invalid_policy_skipped"));
+        assert!(report.channels.iter().any(|c| c.channel == "L" && c.advisories.iter().any(|a| a.contains("seat_weights_length_mismatch"))));
+    }
+
+    #[test]
+    fn correction_report_primary_seat_out_of_range() {
+        let mut config = home_cinema_config();
+        config.optimizer.multi_seat = Some(MultiSeatConfig {
+            primary_seat: 5,
+            ..Default::default()
+        });
+        let mut results = HashMap::new();
+        results.insert("L".to_string(), channel_result("L", 0.0));
+        let report = multi_seat_correction_report(&config, &results, None);
+        assert!(report.channels.iter().any(|c| c.channel == "L" && c.status == "invalid_policy_skipped"));
+        assert!(report.channels.iter().any(|c| c.channel == "L" && c.advisories.iter().any(|a| a == "primary_seat_out_of_range")));
+    }
+
+    #[test]
+    fn correction_report_rejected_guardrails() {
+        let config = home_cinema_config();
+        let mut results = HashMap::new();
+        results.insert("L".to_string(), channel_result("L", 0.0));
+        let mut rejected = HashMap::new();
+        rejected.insert("L".to_string(), vec!["guardrail".to_string()]);
+        let report = multi_seat_correction_report(&config, &results, Some(&rejected));
+        assert!(report.channels.iter().any(|c| c.channel == "L" && c.status == "rejected_guardrails"));
+        assert!(report.advisories.contains(&"all_channel_corrections_rejected_by_guardrails".to_string()));
+    }
+
+    #[test]
+    fn correction_report_applied_pass() {
+        let config = home_cinema_config();
+        let mut results = HashMap::new();
+        results.insert("L".to_string(), channel_result("L", 0.0));
+        let report = multi_seat_correction_report(&config, &results, None);
+        assert!(report.applied);
+        let channel = report.channels.iter().find(|c| c.channel == "L").unwrap();
+        assert_eq!(channel.status, "applied");
+        assert!(channel.primary_pass.unwrap_or(false));
+        assert!(channel.non_primary_pass.unwrap_or(false));
+    }
+
+    #[test]
+    fn correction_report_failed_constraints_and_null_advisory() {
+        let config = home_cinema_config();
+        let mut results = HashMap::new();
+        // A flat level shift leaves zero deviation from the mean, so use a
+        // large ripple instead to exceed max_deviation_db and create null risk.
+        let mut result = channel_result("L", 0.0);
+        for (i, spl) in result.final_curve.spl.iter_mut().enumerate() {
+            *spl += if i % 2 == 0 { 12.0 } else { -12.0 };
+        }
+        results.insert("L".to_string(), result);
+        let report = multi_seat_correction_report(&config, &results, None);
+        let channel = report.channels.iter().find(|c| c.channel == "L").unwrap();
+        assert_eq!(channel.status, "failed_constraints");
+        assert!(report.advisories.contains(&"seat_specific_nulls_were_not_overcorrected".to_string()));
+    }
+
+    #[test]
+    fn correction_report_frequency_grid_mismatch() {
+        let mut config = home_cinema_config();
+        let c1 = multi_seat_curve();
+        let mut c2 = multi_seat_curve();
+        c2.freq = Array1::from_vec(vec![50.0, 100.0, 200.0, 400.0, 800.0, 1600.0]);
+        config.speakers.insert(
+            "L".to_string(),
+            SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(vec![c1, c2])),
+        );
+        let mut results = HashMap::new();
+        results.insert("L".to_string(), channel_result("L", 0.0));
+        let report = multi_seat_correction_report(&config, &results, None);
+        assert!(report.channels.iter().any(|c| c.channel == "L" && c.status == "frequency_grid_mismatch_skipped"));
+    }
+
+    #[test]
+    fn correction_report_spatial_robustness_invalid() {
+        let mut config = home_cinema_config();
+        // first curve has mismatched spl length → analyze will error after grid check
+        let mut c1 = multi_seat_curve();
+        c1.spl = Array1::from_vec(vec![80.0; c1.freq.len() - 1]);
+        let c2 = multi_seat_curve();
+        config.speakers.insert(
+            "L".to_string(),
+            SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(vec![c1, c2])),
+        );
+        let mut results = HashMap::new();
+        results.insert("L".to_string(), channel_result("L", 0.0));
+        let report = multi_seat_correction_report(&config, &results, None);
+        assert!(report.channels.iter().any(|c| c.channel == "L" && c.status == "spatial_robustness_invalid_skipped"));
+    }
+
+    #[test]
+    fn correction_report_measurement_load_failed() {
+        let mut config = home_cinema_config();
+        let source: MeasurementSource = serde_json::from_value(serde_json::json!({
+            "measurements": ["/nonexistent/measurement.csv", "/nonexistent/measurement2.csv"],
+            "speaker_name": null,
+        }))
+        .unwrap();
+        config.speakers.insert("L".to_string(), SpeakerConfig::Single(source));
+        let mut results = HashMap::new();
+        results.insert("L".to_string(), channel_result("L", 0.0));
+        let report = multi_seat_correction_report(&config, &results, None);
+        assert!(report.channels.iter().any(|c| c.channel == "L" && c.status == "measurement_load_failed"));
+    }
+
+    fn channel_report(
+        channel: &str,
+        role_group: HomeCinemaRoleGroup,
+        status: &str,
+        primary_pass: Option<bool>,
+        non_primary_pass: Option<bool>,
+    ) -> crate::roomeq::home_cinema::types::MultiSeatChannelCorrectionReport {
+        crate::roomeq::home_cinema::types::MultiSeatChannelCorrectionReport {
+            channel: channel.to_string(),
+            role: crate::roomeq::home_cinema::role::role_for_channel(channel),
+            role_group,
+            status: status.to_string(),
+            seat_count: 2,
+            target_band_hz: (80.0, 16_000.0),
+            rms_target_error_db: None,
+            max_abs_deviation_db: None,
+            primary_pass,
+            non_primary_pass,
+            spatial_variance_peak_db: None,
+            min_correction_depth: None,
+            seats: Vec::new(),
+            advisories: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn role_group_reports_pass_and_fail() {
+        let channels = vec![
+            channel_report("L", HomeCinemaRoleGroup::FrontLr, "applied", Some(true), Some(true)),
+            channel_report("R", HomeCinemaRoleGroup::FrontLr, "applied", Some(true), Some(true)),
+        ];
+        let groups = multi_seat_role_group_reports(&channels);
+        assert_eq!(groups.len(), 1);
+        assert!(groups[0].pass);
+
+        let channels = vec![
+            channel_report("L", HomeCinemaRoleGroup::FrontLr, "applied", Some(true), Some(true)),
+            channel_report("R", HomeCinemaRoleGroup::FrontLr, "applied", Some(false), Some(false)),
+        ];
+        let groups = multi_seat_role_group_reports(&channels);
+        assert!(!groups[0].pass);
+        assert!(groups[0].advisories.contains(&"seat_constraint_failed".to_string()));
+    }
+}

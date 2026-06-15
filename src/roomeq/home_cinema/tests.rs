@@ -301,3 +301,576 @@ fn role_for_channel_role_score_band_clamps_to_config() {
     assert_eq!(min, 50.0); // clamped to config.min_freq
     assert_eq!(max, 10_000.0); // clamped to config.max_freq
 }
+
+mod apply_tests {
+    use super::super::apply::*;
+    use ndarray::Array1;
+
+    fn flat_curve() -> crate::Curve {
+        crate::Curve {
+            freq: Array1::logspace(10.0, f64::log10(20.0), f64::log10(20000.0), 96),
+            spl: Array1::from_elem(96, 80.0),
+            phase: None,
+            ..Default::default()
+        }
+    }
+
+    fn flat_result() -> crate::roomeq::optimize::ChannelOptimizationResult {
+        crate::roomeq::optimize::ChannelOptimizationResult {
+            name: "test".to_string(),
+            pre_score: 1.0,
+            post_score: 0.5,
+            initial_curve: flat_curve(),
+            final_curve: flat_curve(),
+            biquads: Vec::new(),
+            fir_coeffs: None,
+        }
+    }
+
+    #[test]
+    fn apply_result_delta_to_seat_adds_delta() {
+        let seat = flat_curve();
+        let initial = flat_curve();
+        let mut final_curve = flat_curve();
+        final_curve.spl += 2.0;
+        let predicted = apply_result_delta_to_seat(&seat, &initial, &final_curve);
+        assert!((predicted.spl[50] - 82.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn apply_role_target_curve_shape_center_dialog_boost() {
+        let mut curve = flat_curve();
+        let target = crate::roomeq::types::TargetResponseConfig {
+            role_targets: Some(crate::roomeq::types::RoleTargetConfig {
+                enabled: true,
+                center_dialog_boost_db: 3.0,
+                center_dialog_low_hz: 100.0,
+                center_dialog_high_hz: 1000.0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        apply_role_target_curve_shape("Center", &mut curve, &target);
+        let mid = curve.spl.len() / 2;
+        assert!(curve.spl[mid] > 80.0);
+    }
+
+    #[test]
+    fn apply_role_target_curve_shape_disabled_does_nothing() {
+        let mut curve = flat_curve();
+        let target = crate::roomeq::types::TargetResponseConfig {
+            role_targets: Some(crate::roomeq::types::RoleTargetConfig {
+                enabled: false,
+                center_dialog_boost_db: 3.0,
+                center_dialog_low_hz: 100.0,
+                center_dialog_high_hz: 1000.0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        apply_role_target_curve_shape("Center", &mut curve, &target);
+        assert!(curve.spl.iter().all(|&v| (v - 80.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn apply_role_target_curve_shape_cinema_x_curve() {
+        let mut curve = flat_curve();
+        let target = crate::roomeq::types::TargetResponseConfig {
+            role_targets: Some(crate::roomeq::types::RoleTargetConfig {
+                enabled: true,
+                cinema_x_curve_enabled: true,
+                cinema_x_curve_start_hz: 1000.0,
+                cinema_x_curve_db_per_octave: -1.0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        apply_role_target_curve_shape("Left", &mut curve, &target);
+        let last = curve.spl.len() - 1;
+        assert!(curve.spl[last] < 80.0);
+    }
+
+    #[test]
+    fn predicted_seat_report_passes_when_within_deviation() {
+        let seat = flat_curve();
+        let result = flat_result();
+        let report = predicted_seat_report(0, &seat, &result, (100.0, 2000.0), 0, 1.0, 5.0);
+        assert!(report.is_some());
+        let report = report.unwrap();
+        assert!(report.pass);
+        assert!(report.is_primary);
+    }
+}
+
+mod coverage_tests {
+    use super::super::all::*;
+    use super::super::apply::apply_role_target_curve_shape;
+    use super::super::crossover::crossover_advisory;
+    use super::super::crossover::crossover_filters_for_headroom;
+    use super::super::estimated::estimated_bass_bus_peak_gain_db;
+    use super::super::matching::matching_group_key;
+    use super::super::misc::*;
+    use super::super::multi::*;
+    use super::super::resolve::effective_bass_management;
+    use super::super::resolve::resolve_all_channel_seat_weights;
+    use super::super::resolved::resolved_bass_sub_outputs;
+    use super::super::resolved::resolved_group_crossover;
+    use super::super::resolved::resolved_group_route_settings;
+    use super::super::role::role_for_channel;
+    use super::super::role::role_profile_base;
+    use super::super::role::role_score_band;
+    use super::super::role::role_target_curve_shape_active;
+    use super::super::target::analyze_layout;
+    use super::super::types::add_slope_offset;
+    use super::super::types::apply_role_target_adjustment;
+    use super::super::types::role_slope_offset;
+    use crate::roomeq::types::BassManagementConfig;
+    use super::super::types::BassManagementOptimizationReport;
+    use crate::roomeq::types::CrossoverConfig;
+    use super::super::types::EffectiveBassManagement;
+    use super::super::types::HomeCinemaRole;
+    use crate::roomeq::types::MultiSeatConfig;
+    use crate::roomeq::types::OptimizerConfig;
+    use crate::roomeq::types::RoleTargetConfig;
+    use crate::roomeq::types::RoomConfig;
+    use crate::roomeq::types::SpeakerConfig;
+    use crate::roomeq::types::SubwooferSystemConfig;
+    use crate::roomeq::types::SystemConfig;
+    use crate::roomeq::types::SystemModel;
+    use crate::roomeq::types::TargetResponseConfig;
+    use crate::roomeq::types::TargetShape;
+    use crate::Curve;
+    use crate::MeasurementSource;
+    use ndarray::array;
+    use std::collections::HashMap;
+
+    fn flat_curve() -> Curve {
+        Curve {
+            freq: array![100.0, 200.0, 400.0, 800.0, 1600.0],
+            spl: array![80.0, 80.0, 80.0, 80.0, 80.0],
+            phase: None,
+            ..Default::default()
+        }
+    }
+
+    fn room_config() -> RoomConfig {
+        RoomConfig {
+            version: crate::roomeq::types::default_config_version(),
+            system: None,
+            speakers: HashMap::new(),
+            crossovers: None,
+            target_curve: None,
+            optimizer: OptimizerConfig::default(),
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        }
+    }
+
+    fn home_cinema_config() -> RoomConfig {
+        let mut speakers = HashMap::new();
+        speakers.insert(
+            "L".to_string(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
+        );
+        speakers.insert(
+            "R".to_string(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
+        );
+        speakers.insert(
+            "C".to_string(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
+        );
+        RoomConfig {
+            version: crate::roomeq::types::default_config_version(),
+            system: Some(SystemConfig {
+                model: SystemModel::HomeCinema,
+                speakers: HashMap::from([
+                    ("L".to_string(), "L".to_string()),
+                    ("R".to_string(), "R".to_string()),
+                    ("C".to_string(), "C".to_string()),
+                ]),
+                subwoofers: Some(SubwooferSystemConfig {
+                    config: Default::default(),
+                    crossover: Some("sub".to_string()),
+                    mapping: HashMap::new(),
+                }),
+                bass_management: Some(BassManagementConfig::default()),
+                supporting_source_outputs: None,
+            }),
+            speakers,
+            crossovers: Some(HashMap::from([(
+                "sub".to_string(),
+                CrossoverConfig {
+                    crossover_type: "LR24".to_string(),
+                    frequency: Some(80.0),
+                    frequencies: None,
+                    frequency_range: None,
+                },
+            )])),
+            target_curve: None,
+            optimizer: OptimizerConfig::default(),
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        }
+    }
+
+    #[test]
+    fn role_for_channel_and_group_basics() {
+        assert_eq!(role_for_channel("L"), HomeCinemaRole::FrontLeft);
+        assert_eq!(role_for_channel("sub1"), HomeCinemaRole::Subwoofer);
+        assert_eq!(role_for_channel("unknown"), HomeCinemaRole::Unknown);
+        assert_eq!(role_profile_base(HomeCinemaRole::Center), "center_dialog");
+    }
+
+    #[test]
+    fn role_score_band_clamps() {
+        let mut config = room_config();
+        config.optimizer.min_freq = 50.0;
+        config.optimizer.max_freq = 10000.0;
+        let (min, max) = role_score_band(&config, "L");
+        assert!(min >= 50.0);
+        assert!(max <= 10000.0);
+    }
+
+    #[test]
+    fn role_target_adjustments_apply() {
+        let mut target = TargetResponseConfig::default();
+        let role_targets = RoleTargetConfig {
+            enabled: true,
+            front_slope_offset_db_per_octave: 0.5,
+            center_treble_shelf_db: 1.0,
+            ..Default::default()
+        };
+        apply_role_target_adjustment(HomeCinemaRole::FrontLeft, &role_targets, &mut target);
+        assert_eq!(target.shape, TargetShape::Custom);
+        apply_role_target_adjustment(HomeCinemaRole::Center, &role_targets, &mut target);
+        assert!(target.preference.treble_shelf_db > 0.0);
+    }
+
+    #[test]
+    fn role_target_curve_shape_active_detects() {
+        let target = TargetResponseConfig {
+            role_targets: Some(RoleTargetConfig {
+                enabled: true,
+                center_dialog_boost_db: 1.0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(role_target_curve_shape_active("Center", &target));
+        assert!(!role_target_curve_shape_active("L", &target));
+    }
+
+    #[test]
+    fn slope_offset_helpers() {
+        let mut target = TargetResponseConfig::default();
+        add_slope_offset(&mut target, 0.5);
+        assert_eq!(target.shape, TargetShape::Custom);
+        assert_eq!(role_slope_offset(HomeCinemaRole::Unknown, &RoleTargetConfig::default()), 0.0);
+    }
+
+    #[test]
+    fn misc_helpers() {
+        assert_eq!(group_id_for_role(HomeCinemaRole::FrontLeft), "lcr");
+        assert_eq!(group_id_for_role(HomeCinemaRole::Subwoofer), "sub");
+        assert!(is_linear_phase_crossover_type("linear_phase"));
+        assert!(!is_linear_phase_crossover_type("LR24"));
+        assert_eq!(linear_to_db(1.0), 0.0);
+        assert_eq!(home_cinema_role_sort_index(HomeCinemaRole::FrontLeft), 0);
+        assert_eq!(home_cinema_role_sort_index(HomeCinemaRole::Unknown), 99);
+        assert_eq!(normalize_channel_name("  Front-Left  "), "frontleft");
+        assert!(curves_share_frequency_grid(&[flat_curve(), flat_curve()]));
+        assert!(curves_share_frequency_grid(&[]));
+        let metrics = band_metrics(&flat_curve(), (100.0, 1000.0)).unwrap();
+        assert!(metrics.0 < 1e-6);
+        assert_eq!(optional_max([1.0, 3.0, 2.0].into_iter()), Some(3.0));
+        assert_eq!(optional_max(std::iter::empty()), None);
+        let single = SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve()));
+        assert!(single_measurement_source(&single).is_some());
+    }
+
+    #[test]
+    fn limited_sub_gain_caps_and_applies_trim() {
+        let bm = EffectiveBassManagement {
+            config: BassManagementConfig {
+                sub_trim_db: 2.0,
+                max_sub_boost_db: 5.0,
+                ..Default::default()
+            },
+            crossover_type: "LR24".to_string(),
+            crossover_frequency_hz: Some(80.0),
+            advisory: "ok".to_string(),
+        };
+        assert_eq!(limited_sub_gain(3.0, None), (3.0, false));
+        assert_eq!(limited_sub_gain(3.0, Some(&bm)), (5.0, false));
+        assert_eq!(limited_sub_gain(10.0, Some(&bm)), (5.0, true));
+    }
+
+    #[test]
+    fn spatial_robustness_config_roundtrip() {
+        let serde = default_all_channel_spatial_robustness();
+        let cfg = spatial_robustness_config_from(&serde);
+        assert_eq!(cfg.variance_threshold_db, serde.variance_threshold_db);
+    }
+
+    #[test]
+    fn measurement_counts() {
+        let single = MeasurementSource::InMemory(flat_curve());
+        assert_eq!(speaker_measurement_count(&SpeakerConfig::Single(single.clone())), Some(1));
+        assert_eq!(
+            speaker_measurement_count(&SpeakerConfig::MultiSub(crate::roomeq::types::MultiSubGroup {
+                name: "sub".to_string(),
+                speaker_name: None,
+                subwoofers: vec![single.clone(), MeasurementSource::InMemoryMultiple(vec![flat_curve(), flat_curve()])],
+                allpass_optimization: false,
+            })),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn multi_seat_coverage_reports() {
+        let config = home_cinema_config();
+        let report = multi_seat_coverage(&config);
+        assert_eq!(report.channels_with_multiple_measurements, 0);
+        assert!(!report.all_channel_correction_ready);
+    }
+
+    #[test]
+    fn multi_seat_correction_report_shows_advisories_when_no_channels_apply() {
+        let config = home_cinema_config();
+        let report = multi_seat_correction_report(&config, &HashMap::new(), None);
+        assert!(report.enabled);
+        assert!(report.advisories.contains(&"no_all_channel_multiseat_correction_applied".to_string()));
+    }
+
+    #[test]
+    fn multi_measurement_strategy_names() {
+        let report = multi_seat_correction_report(&home_cinema_config(), &HashMap::new(), None);
+        assert_eq!(report.strategy, "spatial_robustness");
+    }
+
+    #[test]
+    fn all_channel_multiseat_helpers() {
+        let config = home_cinema_config();
+        assert!(all_channel_multiseat_enabled(&config));
+        assert!(all_channel_multiseat_policy(&config).all_channel_enabled);
+        let mut disabled = config.clone();
+        disabled.system.as_mut().unwrap().model = SystemModel::Custom;
+        assert!(!all_channel_multiseat_enabled(&disabled));
+    }
+
+    #[test]
+    fn derive_all_channel_multiseat_config_returns_none_when_disabled() {
+        let config = home_cinema_config();
+        let source = MeasurementSource::InMemory(flat_curve());
+        assert!(derive_all_channel_multiseat_config(&config, "L", &source).is_none());
+    }
+
+    #[test]
+    fn all_channel_multiseat_acceptance_rejects_subs() {
+        let config = home_cinema_config();
+        let source = MeasurementSource::InMemory(flat_curve());
+        let _result = crate::roomeq::optimize::ChannelOptimizationResult {
+            name: "LFE".to_string(),
+            pre_score: 0.0,
+            post_score: 0.0,
+            initial_curve: flat_curve(),
+            final_curve: flat_curve(),
+            biquads: Vec::new(),
+            fir_coeffs: None,
+        };
+        let acceptance = all_channel_multiseat_acceptance(&config, "LFE", &source, &flat_curve(), &flat_curve());
+        assert!(!acceptance.accepted);
+    }
+
+    #[test]
+    fn resolve_all_channel_seat_weights_test() {
+        let policy = MultiSeatConfig::default();
+        let (weights, advisories) = resolve_all_channel_seat_weights(&policy, 3);
+        assert_eq!(weights.len(), 3);
+        assert!(advisories.is_empty());
+        let (weights, _advisories) = resolve_all_channel_seat_weights(&policy, 0);
+        assert!(weights.is_empty());
+    }
+
+    #[test]
+    fn effective_bass_management_test() {
+        let mut config = home_cinema_config();
+        assert!(effective_bass_management(&config).is_some());
+        config.system.as_mut().unwrap().bass_management.as_mut().unwrap().enabled = false;
+        assert!(effective_bass_management(&config).is_none());
+    }
+
+    #[test]
+    fn resolved_group_crossover_and_routes() {
+        let config = home_cinema_config();
+        let effective = effective_bass_management(&config).unwrap();
+        let resolved = resolved_group_crossover(&config, "lcr", &effective, None);
+        assert_eq!(resolved.crossover_type, "LR24");
+        let routes = resolved_group_route_settings("lcr", None);
+        assert_eq!(routes.main_delay_ms, 0.0);
+        let outputs = resolved_bass_sub_outputs("sub", None);
+        assert_eq!(outputs.len(), 1);
+    }
+
+    #[test]
+    fn resolved_group_crossover_uses_optimization_result() {
+        let optimization = BassManagementOptimizationReport {
+            applied: true,
+            phase_required: false,
+            phase_available: false,
+            configured_crossover_hz: Some(80.0),
+            optimized_crossover_hz: Some(90.0),
+            crossover_range_hz: None,
+            crossover_type: "LR24".to_string(),
+            main_delay_ms: 1.0,
+            sub_delay_ms: 2.0,
+            relative_sub_delay_ms: 2.0,
+            sub_polarity_inverted: false,
+            requested_sub_gain_db: 0.0,
+            applied_sub_gain_db: 0.0,
+            gain_limited: false,
+            estimated_bass_bus_peak_gain_db: None,
+            objective_before: None,
+            objective_after: None,
+            group_results: vec![super::super::types::BassManagementGroupReport {
+                group_id: "lcr".to_string(),
+                roles: vec!["L".to_string(), "R".to_string(), "C".to_string()],
+                crossover_type: "LR24".to_string(),
+                selected_crossover_hz: Some(85.0),
+                configured_crossover_hz: Some(80.0),
+                main_delay_ms: 0.0,
+                bass_route_delay_ms: 0.0,
+                polarity_inverted: false,
+                trim_db: 0.0,
+                objective_before: None,
+                objective_after: None,
+                advisories: Vec::new(),
+            }],
+            sub_output_results: Vec::new(),
+            advisories: Vec::new(),
+        };
+        let config = home_cinema_config();
+        let effective = effective_bass_management(&config).unwrap();
+        let resolved = resolved_group_crossover(&config, "lcr", &effective, Some(&optimization));
+        assert_eq!(resolved.frequency_hz, Some(85.0));
+    }
+
+    #[test]
+    fn analyze_layout_reports() {
+        let config = home_cinema_config();
+        let report = analyze_layout(&config);
+        assert_eq!(report.bed_channels, 3);
+        assert_eq!(report.lfe_channels, 0);
+    }
+
+    #[test]
+    fn target_profile_and_advisory() {
+        let mut config = home_cinema_config();
+        let target = TargetResponseConfig {
+            role_targets: Some(RoleTargetConfig {
+                enabled: true,
+                front_slope_offset_db_per_octave: 0.5,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        config.optimizer.target_response = Some(target);
+        let report = analyze_layout(&config);
+        let front = report.channels.iter().find(|c| c.role == HomeCinemaRole::FrontLeft).unwrap();
+        assert!(front.target_profile.contains("role_target"));
+        assert!(front.target_advisory.is_some());
+    }
+
+    #[test]
+    fn matching_group_keys() {
+        assert_eq!(matching_group_key("L"), Some("front_lr"));
+        assert_eq!(matching_group_key("C"), None);
+        assert_eq!(matching_group_key("Sub"), None);
+    }
+
+    #[test]
+    fn crossover_filters_and_advisory() {
+        let filters = crossover_filters_for_headroom("LR24", 80.0, true, 48000.0);
+        assert!(!filters.is_empty());
+        let filters = crossover_filters_for_headroom("none", 80.0, true, 48000.0);
+        assert!(filters.is_empty());
+        let cfg = CrossoverConfig {
+            crossover_type: "LR24".to_string(),
+            frequency: Some(80.0),
+            frequencies: None,
+            frequency_range: None,
+        };
+        assert_eq!(crossover_advisory(&cfg), "ok");
+        let cfg = CrossoverConfig {
+            crossover_type: "LR24".to_string(),
+            frequency: None,
+            frequencies: None,
+            frequency_range: None,
+        };
+        assert_eq!(crossover_advisory(&cfg), "missing_crossover_frequency");
+    }
+
+    #[test]
+    fn estimated_bass_bus_peak_gain() {
+        let graph = super::super::types::BassManagementRoutingGraph {
+            physical_sub_output: "sub".to_string(),
+            input_channels: vec!["L".to_string()],
+            output_channels: vec!["sub".to_string()],
+            routes: vec![super::super::types::BassManagementRoute {
+                group_id: None,
+                source_channel: "L".to_string(),
+                source_index: 0,
+                destination: "sub".to_string(),
+                destination_index: 0,
+                pre_chain_channel: None,
+                post_chain_channel: None,
+                route_kind: "redirect".to_string(),
+                crossover_type: "LR24".to_string(),
+                high_pass_hz: Some(80.0),
+                low_pass_hz: Some(80.0),
+                gain_db: 0.0,
+                gain_linear: 1.0,
+                matrix_gain: 1.0,
+                delay_ms: 0.0,
+                polarity_inverted: false,
+            }],
+            matrix: None,
+            advisories: Vec::new(),
+        };
+        let peak = estimated_bass_bus_peak_gain_db(Some(&graph), 0.0);
+        assert!(peak.is_some());
+        assert!((peak.unwrap() - 0.0).abs() < 1e-6);
+        assert!(estimated_bass_bus_peak_gain_db(None, 0.0).is_none());
+    }
+
+    #[test]
+    fn apply_role_target_curve_shape_distance_rolloff() {
+        use ndarray::Array1;
+        let mut curve = Curve {
+            freq: Array1::logspace(10.0, f64::log10(20.0), f64::log10(20000.0), 96),
+            spl: Array1::from_elem(96, 80.0),
+            phase: None,
+            ..Default::default()
+        };
+        let target = TargetResponseConfig {
+            role_targets: Some(RoleTargetConfig {
+                enabled: true,
+                cinema_x_curve_enabled: true,
+                cinema_x_curve_start_hz: 1000.0,
+                cinema_x_curve_db_per_octave: -1.0,
+                listening_distance_m: Some(8.0),
+                cinema_reference_distance_m: 4.0,
+                distance_treble_rolloff_db_per_doubling: 2.0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        apply_role_target_curve_shape("L", &mut curve, &target);
+        let last = curve.spl.len() - 1;
+        assert!(curve.spl[last] < 80.0);
+    }
+}

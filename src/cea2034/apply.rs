@@ -131,3 +131,51 @@ pub(super) fn apply_weighted_rms(
 pub fn cea2034(spl: &Array2<f64>, idx: &[Vec<usize>], weights: &Array1<f64>) -> Array2<f64> {
     cea2034_array(spl, idx, weights)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::{Array1, Array2};
+
+    fn sample_spl(rows: usize, cols: usize) -> Array2<f64> {
+        Array2::from_shape_fn((rows, cols), |(_, c)| 80.0 + c as f64 * 0.5)
+    }
+
+    #[test]
+    fn apply_rms_averages_rows() {
+        let p2 = Array2::from_shape_fn((3, 5), |(r, _)| (r + 1) as f64 * 4.0);
+        let rms = apply_rms(&p2, &[0, 1, 2]);
+        assert_eq!(rms.len(), 5);
+        // avg = (4+8+12)/3 = 8, sqrt = 2.828, pressure2spl(2.828) ~ 99.03 dB
+        assert!(rms[0] > 90.0);
+    }
+
+    #[test]
+    fn apply_weighted_rms_uses_weights() {
+        let p2 = Array2::from_shape_fn((2, 4), |(r, _)| (r + 1) as f64 * 9.0);
+        let weights = Array1::from(vec![1.0, 3.0]);
+        let rms = apply_weighted_rms(&p2, &[0, 1], &weights);
+        assert_eq!(rms.len(), 4);
+        // weighted avg = (9*1 + 18*3)/4 = 15.75, sqrt ~3.97, spl ~111.97
+        assert!(rms[0] > 100.0);
+    }
+
+    #[test]
+    fn cea2034_array_produces_expected_shape() {
+        let spl = sample_spl(8, 10);
+        let idx: Vec<Vec<usize>> = (0..8).map(|i| vec![i]).collect();
+        let weights = Array1::ones(8);
+        let cea = cea2034_array(&spl, &idx, &weights);
+        assert_eq!(cea.shape(), &[idx.len() + 1, 10]);
+    }
+
+    #[test]
+    fn cea2034_public_wrapper_matches_array() {
+        let spl = sample_spl(8, 10);
+        let idx: Vec<Vec<usize>> = (0..8).map(|i| vec![i]).collect();
+        let weights = Array1::ones(8);
+        let a = cea2034_array(&spl, &idx, &weights);
+        let b = cea2034(&spl, &idx, &weights);
+        assert_eq!(a, b);
+    }
+}

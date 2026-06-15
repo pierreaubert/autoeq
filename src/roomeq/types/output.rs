@@ -310,6 +310,40 @@ pub struct PerceptualMetrics {
     pub early_cue_advisory: Option<String>,
 }
 
+/// Simple statistical summary for reporting.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct StatisticalSummary {
+    /// Arithmetic mean.
+    pub mean: f64,
+    /// Standard deviation.
+    pub std: f64,
+}
+
+/// Per-channel supporting-source report.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SupportingSourceReport {
+    /// Whether supporting-source processing was enabled for this logical channel.
+    pub enabled: bool,
+    /// Name of the primary output channel.
+    pub primary_output: String,
+    /// Name of the supporting output channel.
+    pub support_output: String,
+    /// Delay applied to the supporting source in ms.
+    pub delay_ms: f64,
+    /// Length of the supporting-source FIR in taps.
+    pub fir_length: usize,
+    /// Compensation band in Hz.
+    pub compensation_band_hz: (f64, f64),
+    /// DRR before compensation (dB) summary.
+    pub drr_before_db: StatisticalSummary,
+    /// DRR after compensation (dB) summary.
+    pub drr_after_db: StatisticalSummary,
+    /// Whether target constraints (floor/ceiling) were active.
+    pub target_constraints_active: bool,
+    /// Number of frequency bins where the precedence ceiling was hit.
+    pub precedence_limit_hits: usize,
+}
+
 /// Optimization metadata
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct OptimizationMetadata {
@@ -383,4 +417,70 @@ pub struct OptimizationMetadata {
     /// Validation/listening-test bundle descriptor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub validation_bundle: Option<ValidationBundleReport>,
+    /// Supporting-source room-compensation reports, keyed by logical channel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supporting_source: Option<HashMap<String, SupportingSourceReport>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::Array1;
+
+    fn sample_curve() -> Curve {
+        Curve {
+            freq: Array1::from(vec![100.0, 1000.0, 10000.0]),
+            spl: Array1::from(vec![80.0, 82.0, 81.0]),
+            phase: Some(Array1::from(vec![0.0, 45.0, 90.0])),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn curve_data_from_curve_owned() {
+        let curve = sample_curve();
+        let data = CurveData::from(curve.clone());
+        assert_eq!(data.freq, vec![100.0, 1000.0, 10000.0]);
+        assert_eq!(data.spl, vec![80.0, 82.0, 81.0]);
+        assert_eq!(data.phase, Some(vec![0.0, 45.0, 90.0]));
+        assert!(data.norm_range.is_none());
+    }
+
+    #[test]
+    fn curve_data_from_curve_ref() {
+        let curve = sample_curve();
+        let data = CurveData::from(&curve);
+        assert_eq!(data.freq, vec![100.0, 1000.0, 10000.0]);
+        assert_eq!(data.spl, vec![80.0, 82.0, 81.0]);
+        assert_eq!(data.phase, Some(vec![0.0, 45.0, 90.0]));
+    }
+
+    #[test]
+    fn curve_data_roundtrips_to_curve() {
+        let data = CurveData {
+            freq: vec![100.0, 1000.0, 10000.0],
+            spl: vec![80.0, 82.0, 81.0],
+            phase: Some(vec![0.0, 45.0, 90.0]),
+            norm_range: Some((1000.0, 2000.0)),
+        };
+        let curve: Curve = data.clone().into();
+        assert_eq!(curve.freq.to_vec(), data.freq);
+        assert_eq!(curve.spl.to_vec(), data.spl);
+        assert_eq!(curve.phase.as_ref().map(|p| p.to_vec()), data.phase);
+    }
+
+    #[test]
+    fn curve_data_json_roundtrip() {
+        let data = CurveData {
+            freq: vec![100.0, 1000.0],
+            spl: vec![80.0, 82.0],
+            phase: None,
+            norm_range: None,
+        };
+        let json = serde_json::to_string(&data).unwrap();
+        let back: CurveData = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.freq, data.freq);
+        assert_eq!(back.spl, data.spl);
+        assert_eq!(back.phase, data.phase);
+    }
 }

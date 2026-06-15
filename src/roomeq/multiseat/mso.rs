@@ -17,7 +17,6 @@ use super::modal::modal_projection_loss;
 use super::mso_objective_context::MsoObjectiveContext;
 use super::mso_objective_context::headroom_pressure_penalty;
 use super::mso_objective_context::null_deficit_penalty_from_responses;
-use super::mso_objective_context::output_preservation_penalty;
 use super::mso_search_options::MsoSearchOptions;
 use super::primary::primary_flatness_and_constraint;
 use super::types::ModalBasis;
@@ -28,12 +27,6 @@ pub(super) fn mso_objective_regressed(objective_before: f64, objective_after: f6
     !objective_after.is_finite()
         || (objective_before.is_finite()
             && objective_after > objective_before + MSO_OBJECTIVE_REGRESSION_TOLERANCE)
-}
-
-pub(super) fn mso_resource_penalty(responses: &[Vec<f64>], context: &MsoObjectiveContext) -> f64 {
-    output_preservation_penalty(responses, context)
-        + headroom_pressure_penalty(responses, context)
-        + extension_preservation_penalty(responses, context)
 }
 
 pub(super) fn mso_objective_breakdown(

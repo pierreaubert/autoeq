@@ -427,6 +427,7 @@ pub(super) fn optimize_continuous_mso(
 }
 
 /// Optimize for minimum variance across seats
+#[allow(clippy::too_many_arguments)]
 pub(super) fn optimize_minimize_variance(
     interpolated: &[Vec<Vec<Complex64>>],
     freqs: &Array1<f64>,
@@ -461,6 +462,7 @@ pub(super) fn optimize_minimize_variance(
 /// Optimize for flattest average response across seats.
 /// Unlike `MinimizeVariance` (which makes all seats match each other),
 /// this minimizes spectral deviation of the *mean* response so the
+#[allow(clippy::too_many_arguments)]
 /// average listener hears a tonally flat result.
 fn optimize_average_response(
     interpolated: &[Vec<Vec<Complex64>>],
@@ -495,6 +497,7 @@ fn optimize_average_response(
 
 /// Optimize for primary seat with constraints on other seats.
 /// Minimizes spectral flatness at `primary_seat` while penalizing
+#[allow(clippy::too_many_arguments)]
 /// configurations where any other seat deviates from the primary
 /// by more than `max_deviation_db` at any frequency.
 fn optimize_primary_with_constraints(
@@ -538,6 +541,7 @@ fn optimize_primary_with_constraints(
 /// Optimize a complex modal-basis SFM objective.
 ///
 /// The modal term suppresses non-common complex seat-pressure components
+#[allow(clippy::too_many_arguments)]
 /// projected onto the dominant room modes extracted from the per-sub/per-seat
 /// transfer matrix. Resource penalties preserve output, extension, and
 /// headroom so the optimizer cannot win by simply reducing bass energy.
@@ -642,6 +646,14 @@ pub fn optimize_multiseat_continuous_area(
                 ),
             });
         }
+    }
+
+    if config.strategy != MultiSeatStrategy::ContinuousArea {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: "optimize_multiseat_continuous_area requires \
+                      MultiSeatConfig::strategy = ContinuousArea"
+                .to_string(),
+        });
     }
 
     match area_cfg.dimensions {
@@ -982,4 +994,374 @@ fn optimize_continuous_area_dispatch<const D: usize>(
         variance_improvement_db: 0.0,
         improvement_db: improvement,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Curve;
+    use crate::roomeq::multiseat::MultiSeatMeasurements;
+    use crate::roomeq::types::{
+        AreaPriorKind, AreaQuadratureKind, AreaScalarisationKind, ContinuousListeningAreaConfig,
+        MultiSeatConfig, MultiSeatStrategy,
+    };
+    use ndarray::Array1;
+
+    /// Build a small log-spaced test curve with constant SPL and optional constant phase.
+    fn create_test_curve(spl_offset_db: f64, phase_deg: f64) -> Curve {
+        let freqs: Vec<f64> = (0..20)
+            .map(|i| 20.0 * (200.0 / 20.0_f64).powf(i as f64 / 19.0))
+            .collect();
+        let spl: Vec<f64> = freqs.iter().map(|_| 90.0 + spl_offset_db).collect();
+        let phase: Vec<f64> = freqs.iter().map(|_| phase_deg).collect();
+        Curve {
+            freq: Array1::from(freqs),
+            spl: Array1::from(spl),
+            phase: Some(Array1::from(phase)),
+            ..Default::default()
+        }
+    }
+
+    fn two_sub_two_seat_measurements() -> MultiSeatMeasurements {
+        let measurements = vec![
+            vec![create_test_curve(0.0, 0.0), create_test_curve(0.0, 90.0)],
+            vec![create_test_curve(0.0, 90.0), create_test_curve(0.0, 0.0)],
+        ];
+        MultiSeatMeasurements::new(measurements).expect("valid two-sub two-seat measurements")
+    }
+
+    #[test]
+    fn test_optimize_multiseat_continuous_area_rejects_wrong_strategy() {
+        let ms = two_sub_two_seat_measurements();
+        let config = MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::MinimizeVariance,
+            continuous_area: Some(ContinuousListeningAreaConfig {
+                dimensions: 1,
+                bounds: vec![(0.0, 1.0)],
+                seat_positions: vec![vec![0.0], vec![1.0]],
+                prior: AreaPriorKind::Uniform,
+                quadrature: AreaQuadratureKind::Sobol {
+                    num_points: 8,
+                    seed: 0,
+                },
+                scalarisation: AreaScalarisationKind::ExpectedValue,
+                idw_power: 2.0,
+            }),
+            ..Default::default()
+        };
+
+        let err =
+            optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48000.0).unwrap_err();
+
+        assert!(
+            err.to_string().contains("ContinuousArea"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_optimize_multiseat_continuous_area_rejects_mismatched_bounds() {
+        let ms = two_sub_two_seat_measurements();
+        let config = MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::ContinuousArea,
+            continuous_area: Some(ContinuousListeningAreaConfig {
+                dimensions: 1,
+                bounds: vec![(0.0, 1.0), (0.0, 1.0)], // should be length 1
+                seat_positions: vec![vec![0.0], vec![1.0]],
+                prior: AreaPriorKind::Uniform,
+                quadrature: AreaQuadratureKind::Sobol {
+                    num_points: 8,
+                    seed: 0,
+                },
+                scalarisation: AreaScalarisationKind::ExpectedValue,
+                idw_power: 2.0,
+            }),
+            ..Default::default()
+        };
+
+        let err =
+            optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48000.0).unwrap_err();
+
+        assert!(
+            err.to_string().contains("bounds"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_optimize_multiseat_continuous_area_rejects_mismatched_seat_count() {
+        let ms = two_sub_two_seat_measurements();
+        let config = MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::ContinuousArea,
+            continuous_area: Some(ContinuousListeningAreaConfig {
+                dimensions: 1,
+                bounds: vec![(0.0, 1.0)],
+                seat_positions: vec![vec![0.0], vec![1.0], vec![0.5]], // 3 positions, 2 seats
+                prior: AreaPriorKind::Uniform,
+                quadrature: AreaQuadratureKind::Sobol {
+                    num_points: 8,
+                    seed: 0,
+                },
+                scalarisation: AreaScalarisationKind::ExpectedValue,
+                idw_power: 2.0,
+            }),
+            ..Default::default()
+        };
+
+        let err =
+            optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48000.0).unwrap_err();
+
+        assert!(
+            err.to_string().contains("seat_positions"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_optimize_multiseat_continuous_area_rejects_mismatched_row_dimension() {
+        let ms = two_sub_two_seat_measurements();
+        let config = MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::ContinuousArea,
+            continuous_area: Some(ContinuousListeningAreaConfig {
+                dimensions: 1,
+                bounds: vec![(0.0, 1.0)],
+                seat_positions: vec![vec![0.0, 0.0], vec![1.0, 0.0]], // rows length 2, expected 1
+                prior: AreaPriorKind::Uniform,
+                quadrature: AreaQuadratureKind::Sobol {
+                    num_points: 8,
+                    seed: 0,
+                },
+                scalarisation: AreaScalarisationKind::ExpectedValue,
+                idw_power: 2.0,
+            }),
+            ..Default::default()
+        };
+
+        let err =
+            optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48000.0).unwrap_err();
+
+        assert!(
+            err.to_string().contains("seat_positions"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_optimize_multiseat_continuous_area_d1_uniform_prior() {
+        let ms = two_sub_two_seat_measurements();
+        let config = MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::ContinuousArea,
+            continuous_area: Some(ContinuousListeningAreaConfig {
+                dimensions: 1,
+                bounds: vec![(0.0, 1.0)],
+                seat_positions: vec![vec![0.0], vec![1.0]],
+                prior: AreaPriorKind::Uniform,
+                quadrature: AreaQuadratureKind::Sobol {
+                    num_points: 8,
+                    seed: 0,
+                },
+                scalarisation: AreaScalarisationKind::ExpectedValue,
+                idw_power: 2.0,
+            }),
+            ..Default::default()
+        };
+
+        let result = optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48000.0)
+            .expect("should optimize continuous area");
+
+        assert_eq!(result.strategy, MultiSeatStrategy::ContinuousArea);
+        assert_eq!(result.objective_name, "continuous_area");
+        assert_eq!(result.gains.len(), 2);
+        assert_eq!(result.delays.len(), 2);
+        assert!(result.objective_before.is_finite());
+        assert!(result.objective_after.is_finite());
+    }
+
+    #[test]
+    fn test_optimize_multiseat_reverts_when_identity_optimal() {
+        // Build measurements where the identity solution already equalises the
+        // combined magnitude across seats. Any gain deviation from 0 dB is the
+        // unique optimum for the second sub; delay leaves the objective
+        // unchanged, so the DE keeps the identity individual it seeds in the
+        // first population slot.
+        //
+        // Complex amplitudes (relative to a 90 dB reference):
+        //   seat 0: sub0 = sqrt(2)∠0°,  sub1 = 1∠90°  → |combined|² = 3
+        //   seat 1: sub0 = 1∠0°,        sub1 = sqrt(2)∠90° → |combined|² = 3
+        const AMP2_DB: f64 = 3.010299956639812; // 20*log10(sqrt(2))
+        let measurements = vec![
+            vec![
+                create_test_curve(AMP2_DB, 0.0),
+                create_test_curve(0.0, 90.0),
+            ],
+            vec![
+                create_test_curve(0.0, 90.0),
+                create_test_curve(AMP2_DB, 0.0),
+            ],
+        ];
+        let ms = MultiSeatMeasurements::new(measurements).expect("valid measurements");
+
+        let config = MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::MinimizeVariance,
+            ..Default::default()
+        };
+
+        let result =
+            optimize_multiseat(&ms, &config, (20.0, 120.0), 48000.0).expect("should optimize");
+
+        assert_eq!(result.gains.len(), 2);
+        assert_eq!(result.delays.len(), 2);
+        assert_eq!(result.gains[0], 0.0);
+        assert_eq!(result.delays[0], 0.0);
+        assert!(
+            result.gains[1].abs() < 1e-3,
+            "gain[1] should revert to near zero, got {}",
+            result.gains[1]
+        );
+        assert!(
+            result.delays[1].abs() < 1e-3,
+            "delay[1] should revert to near zero, got {}",
+            result.delays[1]
+        );
+    }
+
+    #[test]
+    fn test_optimize_multiseat_average_strategy() {
+        let ms = two_sub_two_seat_measurements();
+        let config = MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::Average,
+            ..Default::default()
+        };
+        let result = optimize_multiseat(&ms, &config, (20.0, 120.0), 48000.0).expect("should optimize");
+        assert_eq!(result.strategy, MultiSeatStrategy::Average);
+        assert_eq!(result.gains.len(), 2);
+        assert!(result.objective_before.is_finite());
+        assert!(result.objective_after.is_finite());
+    }
+
+    #[test]
+    fn test_optimize_multiseat_primary_with_constraints() {
+        let ms = two_sub_two_seat_measurements();
+        let config = MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::PrimaryWithConstraints,
+            primary_seat: 0,
+            max_deviation_db: 6.0,
+            ..Default::default()
+        };
+        let result = optimize_multiseat(&ms, &config, (20.0, 120.0), 48000.0).expect("should optimize");
+        assert_eq!(result.strategy, MultiSeatStrategy::PrimaryWithConstraints);
+        assert_eq!(result.gains.len(), 2);
+    }
+
+    #[test]
+    fn test_optimize_multiseat_modal_basis() {
+        let ms = two_sub_two_seat_measurements();
+        let config = MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::ModalBasis,
+            ..Default::default()
+        };
+        let result = optimize_multiseat(&ms, &config, (20.0, 120.0), 48000.0).expect("should optimize");
+        assert_eq!(result.strategy, MultiSeatStrategy::ModalBasis);
+        assert_eq!(result.gains.len(), 2);
+    }
+
+    #[test]
+    fn test_optimize_multiseat_continuous_area_worst_case() {
+        let ms = two_sub_two_seat_measurements();
+        let config = MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::ContinuousArea,
+            continuous_area: Some(ContinuousListeningAreaConfig {
+                dimensions: 1,
+                bounds: vec![(0.0, 1.0)],
+                seat_positions: vec![vec![0.0], vec![1.0]],
+                prior: AreaPriorKind::Uniform,
+                quadrature: AreaQuadratureKind::Sobol { num_points: 8, seed: 0 },
+                scalarisation: AreaScalarisationKind::WorstCase {
+                    inner_maxiter: 20,
+                    inner_seed: 1,
+                },
+                idw_power: 2.0,
+            }),
+            ..Default::default()
+        };
+        let result = optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48000.0)
+            .expect("should optimize continuous area");
+        assert_eq!(result.strategy, MultiSeatStrategy::ContinuousArea);
+        assert_eq!(result.gains.len(), 2);
+    }
+
+    #[test]
+    fn test_optimize_multiseat_continuous_area_cvar() {
+        let ms = two_sub_two_seat_measurements();
+        let config = MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::ContinuousArea,
+            continuous_area: Some(ContinuousListeningAreaConfig {
+                dimensions: 1,
+                bounds: vec![(0.0, 1.0)],
+                seat_positions: vec![vec![0.0], vec![1.0]],
+                prior: AreaPriorKind::Uniform,
+                quadrature: AreaQuadratureKind::Sobol { num_points: 8, seed: 0 },
+                scalarisation: AreaScalarisationKind::Cvar { alpha: 0.25 },
+                idw_power: 2.0,
+            }),
+            ..Default::default()
+        };
+        let result = optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48000.0)
+            .expect("should optimize continuous area");
+        assert_eq!(result.strategy, MultiSeatStrategy::ContinuousArea);
+        assert_eq!(result.gains.len(), 2);
+    }
+
+    #[test]
+    fn test_optimize_multiseat_continuous_area_gaussian_prior() {
+        let ms = two_sub_two_seat_measurements();
+        let config = MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::ContinuousArea,
+            continuous_area: Some(ContinuousListeningAreaConfig {
+                dimensions: 1,
+                bounds: vec![(0.0, 1.0)],
+                seat_positions: vec![vec![0.0], vec![1.0]],
+                prior: AreaPriorKind::Gaussian {
+                    mean: vec![0.5],
+                    cov_diag: vec![0.1],
+                    truncation_sigmas: 2.0,
+                },
+                quadrature: AreaQuadratureKind::Sobol { num_points: 8, seed: 0 },
+                scalarisation: AreaScalarisationKind::ExpectedValue,
+                idw_power: 2.0,
+            }),
+            ..Default::default()
+        };
+        let result = optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48000.0)
+            .expect("should optimize continuous area");
+        assert_eq!(result.strategy, MultiSeatStrategy::ContinuousArea);
+        assert_eq!(result.gains.len(), 2);
+    }
+
+    #[test]
+    fn test_optimize_multiseat_with_polarity_and_allpass_options() {
+        let ms = two_sub_two_seat_measurements();
+        let config = MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::MinimizeVariance,
+            optimize_polarity: true,
+            allpass_filters_per_sub: 1,
+            ..Default::default()
+        };
+        let result = optimize_multiseat(&ms, &config, (20.0, 120.0), 48000.0).expect("should optimize");
+        assert_eq!(result.polarities.len(), 2);
+        assert_eq!(result.allpass_filters.len(), 2);
+    }
 }

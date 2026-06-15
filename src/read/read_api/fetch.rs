@@ -260,3 +260,131 @@ async fn fetch_headphone_csv_from_api(
 
     Ok(body)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::read::{data_dir_for, measurement_filename};
+    use serde_json::json;
+    use std::env;
+    use tempfile::TempDir;
+    use tokio::sync::Mutex;
+
+    static CACHE_LOCK: Mutex<()> = Mutex::const_new(());
+
+    fn plotly_object() -> Value {
+        json!({
+            "data": [
+                {"name": "On Axis", "x": [100.0, 1000.0], "y": [80.0, 81.0]},
+                {"name": "Listening Window", "x": [100.0, 1000.0], "y": [82.0, 83.0]},
+                {"name": "Early Reflections", "x": [100.0, 1000.0], "y": [81.0, 82.0]},
+                {"name": "Sound Power", "x": [100.0, 1000.0], "y": [80.5, 81.5]},
+                {"name": "Early Reflections DI", "x": [100.0, 1000.0], "y": [1.0, 1.0]},
+                {"name": "Sound Power DI", "x": [100.0, 1000.0], "y": [0.5, 0.5]},
+            ]
+        })
+    }
+
+    async fn setup_cache() -> TempDir {
+        let tmp = TempDir::new().unwrap();
+        unsafe { env::set_var("SOTF_CACHE_DIR", tmp.path().as_os_str()) };
+        tmp
+    }
+
+    #[tokio::test]
+    async fn fetch_measurement_plot_data_uses_local_cache() {
+        let _guard = CACHE_LOCK.lock().await;
+        let _tmp = setup_cache().await;
+        let speaker = "cache-speaker";
+        let measurement = "CEA2034";
+        let cache_file = data_dir_for(speaker).join(measurement_filename(measurement));
+        tokio::fs::create_dir_all(cache_file.parent().unwrap()).await.unwrap();
+        tokio::fs::write(&cache_file, serde_json::to_string(&plotly_object()).unwrap())
+            .await
+            .unwrap();
+
+        let plot = fetch_measurement_plot_data(speaker, "asr", measurement).await.unwrap();
+        assert!(plot.get("data").is_some());
+    }
+
+    #[tokio::test]
+    async fn fetch_curve_from_api_uses_cache() {
+        let _guard = CACHE_LOCK.lock().await;
+        let _tmp = setup_cache().await;
+        let speaker = "curve-speaker";
+        let cache_file = data_dir_for(speaker).join(measurement_filename("CEA2034"));
+        tokio::fs::create_dir_all(cache_file.parent().unwrap()).await.unwrap();
+        tokio::fs::write(&cache_file, serde_json::to_string(&plotly_object()).unwrap())
+            .await
+            .unwrap();
+
+        let curve = fetch_curve_from_api(speaker, "asr", "CEA2034", "On Axis")
+            .await
+            .unwrap();
+        assert_eq!(curve.freq.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn fetch_directivity_data_uses_cache() {
+        let _guard = CACHE_LOCK.lock().await;
+        let _tmp = setup_cache().await;
+        let speaker = "dir-speaker";
+        for measurement in ["SPL Horizontal", "SPL Vertical"] {
+            let cache_file = data_dir_for(speaker).join(measurement_filename(measurement));
+            tokio::fs::create_dir_all(cache_file.parent().unwrap()).await.unwrap();
+            let plot = json!({
+                "data": [
+                    {"name": "-10°", "x": {"dtype": "f8", "bdata": ""}, "y": {"dtype": "f8", "bdata": ""}},
+                ]
+            });
+            tokio::fs::write(&cache_file, serde_json::to_string(&plot).unwrap())
+                .await
+                .unwrap();
+        }
+
+        let result = fetch_directivity_data(speaker, "asr").await;
+        // Empty base64 decodes to no curves, so this returns an error about missing curves.
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn fetch_contour_data_uses_cache() {
+        let _guard = CACHE_LOCK.lock().await;
+        let _tmp = setup_cache().await;
+        let speaker = "contour-speaker";
+        let cache_file = data_dir_for(speaker).join(measurement_filename("SPL Horizontal Contour"));
+        tokio::fs::create_dir_all(cache_file.parent().unwrap()).await.unwrap();
+        let plot = json!({
+            "data": [{
+                "x": [100.0, 1000.0],
+                "y": [-10.0, 0.0, 10.0],
+                "z": [[80.0, 81.0], [82.0, 83.0], [84.0, 85.0]],
+            }]
+        });
+        tokio::fs::write(&cache_file, serde_json::to_string(&plot).unwrap())
+            .await
+            .unwrap();
+
+        let contour = fetch_contour_data(speaker, "asr", "horizontal").await.unwrap();
+        assert_eq!(contour.freq_count, 2);
+        assert_eq!(contour.angle_count, 3);
+    }
+
+    #[tokio::test]
+    async fn fetch_headphone_frequency_response_uses_cache() {
+        let _guard = CACHE_LOCK.lock().await;
+        let _tmp = setup_cache().await;
+        let headphone = "test-headphone";
+        let cache_dir = headphone_cache_dir(headphone);
+        tokio::fs::create_dir_all(&cache_dir).await.unwrap();
+        let csv = "20,100,20,104\n100,90,100,92\n";
+        tokio::fs::write(cache_dir.join("frequency_response_raw.csv"), csv)
+            .await
+            .unwrap();
+
+        let (path, curve) = fetch_headphone_frequency_response(headphone).await.unwrap();
+        assert!(path.contains("measurement.csv"));
+        assert_eq!(curve.freq.len(), 2);
+        assert!((curve.spl[0] - 102.0).abs() < 1e-9);
+    }
+}

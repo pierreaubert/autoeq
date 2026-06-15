@@ -114,6 +114,7 @@ fn make_test_output() -> DspChainOutput {
             perceptual_policy: None,
             bootstrap_uncertainty: None,
             validation_bundle: None,
+            supporting_source: None,
         }),
     }
 }

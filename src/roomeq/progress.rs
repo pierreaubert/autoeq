@@ -332,4 +332,71 @@ mod tests {
         progress.start_stage("Optimize");
         assert_eq!(progress.current_stage, 1);
     }
+
+    #[test]
+    fn test_progress_reporter_report_respects_interval() {
+        let mut reporter = ProgressReporter::new("Test", 100)
+            .with_verbose(true)
+            .with_interval(Duration::from_secs(0));
+
+        // With a zero interval every report should print; just ensure no panic
+        // and that internal state is updated.
+        reporter.report(10, 5.0);
+        assert_eq!(reporter.current_iteration(), 10);
+        assert_eq!(reporter.best_loss(), 5.0);
+
+        // Best loss should still not increase
+        reporter.report(20, 7.0);
+        assert_eq!(reporter.best_loss(), 5.0);
+    }
+
+    #[test]
+    fn test_progress_reporter_force_report_updates_state() {
+        let mut reporter = ProgressReporter::new("Test", 100).with_verbose(true);
+        reporter.force_report(42, 1.5);
+        assert_eq!(reporter.current_iteration(), 42);
+        assert_eq!(reporter.best_loss(), 1.5);
+    }
+
+    #[test]
+    fn test_progress_reporter_finish_with_improvement() {
+        let mut reporter = ProgressReporter::new("Test", 100).with_verbose(true);
+        reporter.report(10, 5.0);
+        // final_loss < best_loss produces an improvement string
+        reporter.finish(3.0);
+    }
+
+    #[test]
+    fn test_progress_reporter_finish_without_improvement() {
+        // When best_loss is INFINITY no improvement string is produced
+        let reporter = ProgressReporter::new("Test", 100).with_verbose(true);
+        reporter.finish(1.0);
+    }
+
+    #[test]
+    fn test_multi_stage_start_stage_not_found() {
+        let stages = vec![("Load".to_string(), 1.0)];
+        let mut progress = MultiStageProgress::new("Test", stages).with_verbose(false);
+        progress.start_stage("Missing");
+        // current_stage should remain unchanged
+        assert_eq!(progress.current_stage, 0);
+    }
+
+    #[test]
+    fn test_multi_stage_complete_stage_overflow() {
+        let stages = vec![("Load".to_string(), 1.0)];
+        let mut progress = MultiStageProgress::new("Test", stages).with_verbose(false);
+        progress.complete_stage();
+        assert_eq!(progress.current_stage, 1);
+        // Completing again when past the end should be a no-op
+        progress.complete_stage();
+        assert_eq!(progress.current_stage, 1);
+    }
+
+    #[test]
+    fn test_multi_stage_finish() {
+        let stages = vec![("Load".to_string(), 1.0)];
+        let progress = MultiStageProgress::new("Test", stages).with_verbose(false);
+        progress.finish();
+    }
 }

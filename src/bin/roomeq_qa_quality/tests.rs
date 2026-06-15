@@ -92,6 +92,7 @@ fn result_with_channel_slopes(
             perceptual_policy: None,
             bootstrap_uncertainty: None,
             validation_bundle: None,
+            supporting_source: None,
         },
     }
 }

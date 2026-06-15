@@ -15,10 +15,10 @@ use super::pipeline::{
 };
 use super::types::{
     ChannelDspChain, MeasurementSource, OptimizationMetadata, OptimizerConfig, PerceptualMetrics,
-    ProcessingMode, RoomConfig, SpeakerConfig, SystemModel, TargetCurveConfig,
+    ProcessingMode, RoomConfig, SpeakerConfig, SystemConfig, SystemModel, TargetCurveConfig,
 };
 use crate::Curve;
-use crate::error::Result;
+use crate::error::{AutoeqError, Result};
 use gd::*;
 use log::{debug, info, warn};
 use math_audio_dsp::analysis::compute_average_response;
@@ -47,6 +47,8 @@ mod room_optimization_result;
 #[cfg(test)]
 mod tests;
 mod types;
+
+pub(in crate::roomeq) mod supporting_source;
 
 pub(in crate::roomeq) use detect::*;
 pub(in crate::roomeq) use misc::*;
@@ -137,13 +139,10 @@ pub(super) fn optimize_room_pipeline_impl(
     )
 }
 
-fn optimize_room_impl(
+fn prepare_room_optimization(
     config: &RoomConfig,
-    sample_rate: f64,
-    output_dir: Option<&Path>,
-    probe_arrival_overrides: Option<&HashMap<String, f64>>,
     observer: Option<Box<dyn PipelineObserver>>,
-) -> Result<RoomOptimizationResult> {
+) -> Result<(SharedPipelineObserver, RoomConfig)> {
     let observer_shared: SharedPipelineObserver = Arc::new(Mutex::new(observer));
 
     emit_pipeline_event(
@@ -164,711 +163,260 @@ fn optimize_room_impl(
         ),
     )?;
 
-    let config = &config;
+    Ok((observer_shared, config))
+}
 
-    // Validate configuration
+fn validate_room_optimization(
+    config: &RoomConfig,
+    observer_shared: &SharedPipelineObserver,
+) -> Result<()> {
     emit_pipeline_event(
-        &observer_shared,
+        observer_shared,
         PipelineEvent::started(PipelineStepId::Validation, "Validating room configuration"),
     )?;
     validate_room_config_or_fail(config)?;
     emit_pipeline_event(
-        &observer_shared,
+        observer_shared,
         PipelineEvent::completed(PipelineStepId::Validation, "Room configuration validated"),
     )?;
+    Ok(())
+}
 
+fn select_topology_route(
+    config: &RoomConfig,
+    observer_shared: &SharedPipelineObserver,
+) -> Result<TopologyRoute> {
     emit_pipeline_event(
-        &observer_shared,
+        observer_shared,
         PipelineEvent::started(
             PipelineStepId::TopologyRouteSelection,
             "Selecting Room EQ topology route",
         ),
     )?;
 
-    // Dispatch to specific workflows based on topology
-    if let Some(sys) = &config.system {
-        // If any channel uses SpeakerConfig::Group, fall through to the generic path
-        // which handles Groups via process_speaker_group.
-        let has_group = sys
-            .speakers
-            .values()
-            .any(|key| matches!(config.speakers.get(key), Some(SpeakerConfig::Group(_))));
+    let Some(sys) = &config.system else {
+        return Ok(TopologyRoute::Generic);
+    };
 
-        // Phase 3: workflows route per-channel EQ through
-        // `process_single_speaker` (via `run_channel_via_generic_path`)
-        // so excursion / target_response / broadband / CEA2034 apply
-        // uniformly across Stereo 2.0, Stereo 2.1, HomeCinema-no-sub, and
-        // HomeCinema-with-sub. The previous `use_generic_for_stereo`
-        // fallback and Phase 3a's "features not honoured" warning are
-        // both retired — the workflows are now feature-complete.
+    // If any channel uses SpeakerConfig::Group, fall through to the generic path
+    // which handles Groups via process_speaker_group.
+    let has_group = sys
+        .speakers
+        .values()
+        .any(|key| matches!(config.speakers.get(key), Some(SpeakerConfig::Group(_))));
 
-        if !has_group {
-            let workflow_name = match sys.model {
-                SystemModel::Stereo => {
-                    if sys.subwoofers.is_some() {
-                        "Stereo 2.1"
-                    } else {
-                        "Stereo 2.0"
-                    }
-                }
-                SystemModel::HomeCinema => "Home Cinema",
-                SystemModel::Custom => "Custom",
-            };
-
-            // Send pre-workflow progress message
-            if sys.model != SystemModel::Custom {
-                emit_pipeline_event(
-                    &observer_shared,
-                    PipelineEvent::completed(
-                        PipelineStepId::TopologyRouteSelection,
-                        format!("Selected {} workflow", workflow_name),
-                    ),
-                )?;
-                send_progress(
-                    &observer_shared,
-                    PipelineStepId::TopologyWorkflowExecution,
-                    PipelineStepStatus::Started,
-                    &RoomOptimizationProgress {
-                        current_speaker: String::new(),
-                        speaker_index: 0,
-                        total_speakers: sys.speakers.len(),
-                        iteration: 0,
-                        max_iterations: 0,
-                        loss: 0.0,
-                        overall_progress: 0.0,
-                        message: Some(format!(
-                            "Starting {} workflow ({} channels)",
-                            workflow_name,
-                            sys.speakers.len()
-                        )),
-                        epa_preference: None,
-                        step_id: None,
-                        step_status: None,
-                    },
-                )?;
-                send_progress(
-                    &observer_shared,
-                    PipelineStepId::GenericChannelOptimization,
-                    PipelineStepStatus::Started,
-                    &RoomOptimizationProgress {
-                        current_speaker: String::new(),
-                        speaker_index: 0,
-                        total_speakers: sys.speakers.len(),
-                        iteration: 0,
-                        max_iterations: 0,
-                        loss: 0.0,
-                        overall_progress: 0.0,
-                        message: Some(format!(
-                            "Starting channel optimization for {} workflow",
-                            workflow_name
-                        )),
-                        epa_preference: None,
-                        step_id: None,
-                        step_status: None,
-                    },
-                )?;
-            }
-
-            let workflow_max_iterations = optimizer_progress_iterations(config);
-            let mut workflow_progress_factory = {
-                let observer = Arc::clone(&observer_shared);
-                move |channel_name: &str,
-                      speaker_idx: usize,
-                      total_speakers: usize,
-                      _max_iterations: usize|
-                      -> Option<super::workflows::WorkflowProgressCallback> {
-                    let observer = Arc::clone(&observer);
-                    let name = channel_name.to_string();
-                    let total = total_speakers.max(1);
-                    let max_iterations = workflow_max_iterations;
-                    let stopped = Arc::new(AtomicBool::new(false));
-                    let stopped_for_callback = Arc::clone(&stopped);
-                    let callback: crate::optim::OptimProgressCallback =
-                        Box::new(move |iter: usize, loss: f64, epa: Option<f64>| {
-                            let base_progress = speaker_idx as f64 / total as f64;
-                            let speaker_progress = if max_iterations > 0 {
-                                iter as f64 / max_iterations as f64
-                            } else {
-                                0.0
-                            };
-                            // Workflow-local channel optimization occupies the first
-                            // 90% of the pipeline; final report/FIR/IR stages fill the
-                            // remaining coarse progress events.
-                            let overall = ((base_progress + speaker_progress / total as f64)
-                                * 0.90)
-                                .min(0.90);
-
-                            match send_progress(
-                                &observer,
-                                PipelineStepId::GenericChannelOptimization,
-                                PipelineStepStatus::InProgress,
-                                &RoomOptimizationProgress {
-                                    current_speaker: name.clone(),
-                                    speaker_index: speaker_idx,
-                                    total_speakers,
-                                    iteration: iter,
-                                    max_iterations,
-                                    loss,
-                                    overall_progress: overall,
-                                    message: None,
-                                    epa_preference: epa,
-                                    step_id: None,
-                                    step_status: None,
-                                },
-                            ) {
-                                Ok(()) => crate::de::CallbackAction::Continue,
-                                Err(_) => {
-                                    stopped_for_callback.store(true, Ordering::Relaxed);
-                                    crate::de::CallbackAction::Stop
-                                }
-                            }
-                        });
-                    Some(super::workflows::WorkflowProgressCallback { callback, stopped })
-                }
-            };
-            let mut workflow_stage_callback = {
-                let observer = Arc::clone(&observer_shared);
-                move |step_id: PipelineStepId,
-                      status: PipelineStepStatus,
-                      message: &str,
-                      overall_progress: f64|
-                      -> Result<()> {
-                    emit_pipeline_event(
-                        &observer,
-                        PipelineEvent::new(step_id, status)
-                            .with_message(message)
-                            .with_overall_progress(overall_progress),
-                    )
-                }
-            };
-
-            let workflow_result = match sys.model {
-                SystemModel::Stereo => {
-                    if sys.subwoofers.is_some() {
-                        Some(super::workflows::optimize_stereo_2_1_with_progress(
-                            config,
-                            sys,
-                            sample_rate,
-                            output_dir.unwrap_or(Path::new(".")),
-                            Some(&mut workflow_progress_factory),
-                            Some(&mut workflow_stage_callback),
-                        ))
-                    } else {
-                        Some(super::workflows::optimize_stereo_2_0_with_progress(
-                            config,
-                            sys,
-                            sample_rate,
-                            output_dir.unwrap_or(Path::new(".")),
-                            Some(&mut workflow_progress_factory),
-                            Some(&mut workflow_stage_callback),
-                        ))
-                    }
-                }
-                SystemModel::HomeCinema => {
-                    Some(super::workflows::optimize_home_cinema_with_progress(
-                        config,
-                        sys,
-                        sample_rate,
-                        output_dir.unwrap_or(Path::new(".")),
-                        Some(&mut workflow_progress_factory),
-                        Some(&mut workflow_stage_callback),
-                    ))
-                }
-                SystemModel::Custom => None, // Fall through to generic path
-            };
-
-            if let Some(result) = workflow_result {
-                let mut result = result?;
-                let mut workflow_refresh_needed = false;
-
-                // Send post-workflow summary
-                let summary: Vec<String> = result
-                    .channel_results
-                    .iter()
-                    .map(|(name, ch)| {
-                        format!("  {}: {:.4} -> {:.4}", name, ch.pre_score, ch.post_score)
-                    })
-                    .collect();
-                send_progress(
-                    &observer_shared,
-                    PipelineStepId::TopologyWorkflowExecution,
-                    PipelineStepStatus::Completed,
-                    &RoomOptimizationProgress {
-                        current_speaker: String::new(),
-                        speaker_index: result.channel_results.len(),
-                        total_speakers: result.channel_results.len(),
-                        iteration: 0,
-                        max_iterations: 0,
-                        loss: result.combined_post_score,
-                        overall_progress: 0.90,
-                        message: Some(format!(
-                            "{} workflow complete:\n{}",
-                            workflow_name,
-                            summary.join("\n")
-                        )),
-                        epa_preference: None,
-                        step_id: None,
-                        step_status: None,
-                    },
-                )?;
-                // Workflows only do IIR. If FIR/Hybrid mode is requested, post-generate
-                // full FIR coefficients for each channel.
-                if matches!(
-                    config.optimizer.processing_mode,
-                    ProcessingMode::PhaseLinear | ProcessingMode::Hybrid
-                ) {
-                    send_progress(
-                        &observer_shared,
-                        PipelineStepId::FirGeneration,
-                        PipelineStepStatus::Started,
-                        &RoomOptimizationProgress {
-                            current_speaker: "FIR generation".to_string(),
-                            speaker_index: 0,
-                            total_speakers: result.channel_results.len(),
-                            iteration: 0,
-                            max_iterations: 0,
-                            loss: 0.0,
-                            overall_progress: 0.95,
-                            message: Some("Generating FIR coefficients...".to_string()),
-                            epa_preference: None,
-                            step_id: None,
-                            step_status: None,
-                        },
-                    )?;
-                    let out_dir = output_dir.unwrap_or(Path::new("."));
-                    let names: Vec<String> = result.channel_results.keys().cloned().collect();
-                    for name in names {
-                        let generated = if let Some(ch) = result.channel_results.get_mut(&name) {
-                            if ch.fir_coeffs.is_some() {
-                                None
-                            } else {
-                                let generated = post_generate_fir(
-                                    &name,
-                                    &ch.initial_curve,
-                                    &ch.final_curve,
-                                    &config.optimizer,
-                                    config.target_curve.as_ref(),
-                                    sample_rate,
-                                    Some(out_dir),
-                                );
-                                if let Some(generated) = &generated {
-                                    ch.fir_coeffs = Some(generated.coeffs.clone());
-                                }
-                                generated
-                            }
-                        } else {
-                            None
-                        };
-
-                        let Some(generated) = generated else {
-                            continue;
-                        };
-
-                        if let Some(chain) = result.channels.get_mut(&name) {
-                            chain.plugins.push(super::output::create_convolution_plugin(
-                                &generated.filename,
-                            ));
-                        }
-                        sync_reported_fir_adjustment(
-                            &name,
-                            &mut result.channel_results,
-                            &mut result.channels,
-                            &generated.coeffs,
-                            sample_rate,
-                        );
-                        workflow_refresh_needed = true;
-                    }
-                    emit_pipeline_event(
-                        &observer_shared,
-                        PipelineEvent::completed(
-                            PipelineStepId::FirGeneration,
-                            "FIR coefficients generated",
-                        )
-                        .with_overall_progress(0.95),
-                    )?;
-                } else {
-                    emit_pipeline_event(
-                        &observer_shared,
-                        PipelineEvent::skipped(
-                            PipelineStepId::FirGeneration,
-                            "FIR generation not needed",
-                        )
-                        .with_overall_progress(0.95),
-                    )?;
-                }
-                // MixedPhase: post-generate short excess-phase FIR for each channel
-                // and add convolution plugin to the DSP chain.
-                if config.optimizer.processing_mode == ProcessingMode::MixedPhase {
-                    send_progress(
-                        &observer_shared,
-                        PipelineStepId::MixedPhaseFirGeneration,
-                        PipelineStepStatus::Started,
-                        &RoomOptimizationProgress {
-                            current_speaker: "Mixed-phase FIR".to_string(),
-                            speaker_index: 0,
-                            total_speakers: result.channel_results.len(),
-                            iteration: 0,
-                            max_iterations: 0,
-                            loss: 0.0,
-                            overall_progress: 0.95,
-                            message: Some("Generating mixed-phase FIR...".to_string()),
-                            epa_preference: None,
-                            step_id: None,
-                            step_status: None,
-                        },
-                    )?;
-                    let out_dir = output_dir.unwrap_or(Path::new("."));
-                    let names: Vec<String> = result.channel_results.keys().cloned().collect();
-                    for name in names {
-                        let generated = if let Some(ch) = result.channel_results.get_mut(&name) {
-                            if ch.fir_coeffs.is_some() {
-                                None
-                            } else {
-                                let generated = post_generate_mixed_phase_fir(
-                                    &name,
-                                    &ch.initial_curve,
-                                    &config.optimizer,
-                                    sample_rate,
-                                    Some(out_dir),
-                                );
-                                if let Some(generated) = &generated {
-                                    ch.fir_coeffs = Some(generated.coeffs.clone());
-                                }
-                                generated
-                            }
-                        } else {
-                            None
-                        };
-
-                        let Some(generated) = generated else {
-                            continue;
-                        };
-
-                        if let Some(chain) = result.channels.get_mut(&name) {
-                            chain.plugins.push(super::output::create_convolution_plugin(
-                                &generated.filename,
-                            ));
-                        }
-                        sync_reported_fir_adjustment(
-                            &name,
-                            &mut result.channel_results,
-                            &mut result.channels,
-                            &generated.coeffs,
-                            sample_rate,
-                        );
-                        workflow_refresh_needed = true;
-                    }
-                    emit_pipeline_event(
-                        &observer_shared,
-                        PipelineEvent::completed(
-                            PipelineStepId::MixedPhaseFirGeneration,
-                            "Mixed-phase FIR generated",
-                        )
-                        .with_overall_progress(0.955),
-                    )?;
-                } else {
-                    emit_pipeline_event(
-                        &observer_shared,
-                        PipelineEvent::skipped(
-                            PipelineStepId::MixedPhaseFirGeneration,
-                            "Mixed-phase FIR not needed",
-                        )
-                        .with_overall_progress(0.955),
-                    )?;
-                }
-                // Standalone phase correction (rePhase-style)
-                if config.optimizer.phase_correction.is_some() {
-                    send_progress(
-                        &observer_shared,
-                        PipelineStepId::PhaseCorrection,
-                        PipelineStepStatus::Started,
-                        &RoomOptimizationProgress {
-                            current_speaker: "Phase correction".to_string(),
-                            speaker_index: 0,
-                            total_speakers: result.channel_results.len(),
-                            iteration: 0,
-                            max_iterations: 0,
-                            loss: 0.0,
-                            overall_progress: 0.96,
-                            message: Some("Phase correction...".to_string()),
-                            epa_preference: None,
-                            step_id: None,
-                            step_status: None,
-                        },
-                    )?;
-                }
-                if let Some(ref pc_config) = config.optimizer.phase_correction {
-                    let out_dir = output_dir.unwrap_or(Path::new("."));
-                    let names: Vec<String> = result.channel_results.keys().cloned().collect();
-                    for name in &names {
-                        if let Some(ch) = result.channel_results.get_mut(name)
-                            && let Some(chain) = result.channels.get_mut(name)
-                        {
-                            let before_plugins = chain.plugins.len();
-                            apply_phase_correction(
-                                name,
-                                ch,
-                                chain,
-                                pc_config,
-                                sample_rate,
-                                Some(out_dir),
-                            );
-                            workflow_refresh_needed |= chain.plugins.len() != before_plugins;
-                        }
-                    }
-                    emit_pipeline_event(
-                        &observer_shared,
-                        PipelineEvent::completed(
-                            PipelineStepId::PhaseCorrection,
-                            "Phase correction complete",
-                        )
-                        .with_overall_progress(0.96),
-                    )?;
-                } else {
-                    emit_pipeline_event(
-                        &observer_shared,
-                        PipelineEvent::skipped(
-                            PipelineStepId::PhaseCorrection,
-                            "Phase correction not enabled",
-                        )
-                        .with_overall_progress(0.96),
-                    )?;
-                }
-
-                emit_pipeline_event(
-                    &observer_shared,
-                    PipelineEvent::started(
-                        PipelineStepId::GroupDelayOptimization,
-                        "Running GD optimization",
-                    )
-                    .with_overall_progress(0.965),
-                )?;
-                // Heartbeat: GD optimization can take several seconds on
-                // wide configurations. Without this InProgress event the
-                // UI stays on "Running GD optimization" Started state for
-                // the whole duration which reads as a hang.
-                emit_pipeline_event(
-                    &observer_shared,
-                    PipelineEvent::new(
-                        PipelineStepId::GroupDelayOptimization,
-                        PipelineStepStatus::InProgress,
-                    )
-                    .with_message(
-                        if config.optimizer.processing_mode == ProcessingMode::PhaseLinear {
-                            "Phase-linear FIR group-delay optimization..."
-                        } else {
-                            "Group-delay optimization..."
-                        },
-                    )
-                    .with_overall_progress(0.965),
-                )?;
-                let workflow_group_delay_summary =
-                    if config.optimizer.processing_mode == ProcessingMode::PhaseLinear {
-                        try_run_phase_linear_fir_gd(
-                            config,
-                            &mut result.channel_results,
-                            &mut result.channels,
-                            sample_rate,
-                            output_dir,
-                        )
-                    } else {
-                        try_run_gd_opt(
-                            config,
-                            &mut result.channel_results,
-                            &mut result.channels,
-                            sample_rate,
-                        )
-                    };
-                if let Some(summary) = workflow_group_delay_summary {
-                    workflow_refresh_needed |= summary.applied;
-                    result.metadata.group_delay = Some(summary);
-                }
-                emit_pipeline_event(
-                    &observer_shared,
-                    PipelineEvent::completed(
-                        PipelineStepId::GroupDelayOptimization,
-                        "GD optimization complete",
-                    )
-                    .with_overall_progress(0.965),
-                )?;
-
-                // Compute IR waveforms for the workflow result
-                send_progress(
-                    &observer_shared,
-                    PipelineStepId::ImpulseResponseComputation,
-                    PipelineStepStatus::Started,
-                    &RoomOptimizationProgress {
-                        current_speaker: "IR computation".to_string(),
-                        speaker_index: 0,
-                        total_speakers: result.channel_results.len(),
-                        iteration: 0,
-                        max_iterations: 0,
-                        loss: 0.0,
-                        overall_progress: 0.97,
-                        message: Some("Computing impulse responses...".to_string()),
-                        epa_preference: None,
-                        step_id: None,
-                        step_status: None,
-                    },
-                )?;
-                let ir_total = result.channel_results.len();
-                let ir_names: Vec<String> = result.channel_results.keys().cloned().collect();
-                for (ir_index, channel_name) in ir_names.iter().enumerate() {
-                    // Per-channel heartbeat: long IR convolutions can run
-                    // for hundreds of milliseconds each, so users see one
-                    // chip moving instead of a single "Started" stuck for
-                    // the whole loop.
-                    emit_pipeline_event(
-                        &observer_shared,
-                        PipelineEvent::new(
-                            PipelineStepId::ImpulseResponseComputation,
-                            PipelineStepStatus::InProgress,
-                        )
-                        .with_channel(channel_name.clone())
-                        .with_channels(ir_index, ir_total)
-                        .with_message(format!("Computing impulse response for {channel_name}"))
-                        .with_overall_progress(0.97),
-                    )?;
-                    let ch_result = match result.channel_results.get(channel_name) {
-                        Some(ch) => ch,
-                        None => continue,
-                    };
-                    let delay_ms = result
-                        .channels
-                        .get(channel_name)
-                        .map(total_chain_delay_ms)
-                        .unwrap_or(0.0);
-                    let initial_curve = ch_result.initial_curve.clone();
-                    let biquads = ch_result.biquads.clone();
-                    let fir_coeffs = ch_result.fir_coeffs.clone();
-                    if let Some((pre_ir, post_ir)) =
-                        super::ir_waveform::compute_channel_ir_waveforms(
-                            &initial_curve,
-                            &biquads,
-                            fir_coeffs.as_deref(),
-                            delay_ms,
-                            sample_rate,
-                        )
-                        && let Some(chain) = result.channels.get_mut(channel_name)
-                    {
-                        chain.pre_ir = Some(pre_ir);
-                        chain.post_ir = Some(post_ir);
-                    }
-                }
-                emit_pipeline_event(
-                    &observer_shared,
-                    PipelineEvent::completed(
-                        PipelineStepId::ImpulseResponseComputation,
-                        "Impulse responses computed",
-                    )
-                    .with_overall_progress(0.97),
-                )?;
-
-                // Compute inter-channel deviation and optionally correct it
-                if result.channel_results.len() > 1 {
-                    send_progress(
-                        &observer_shared,
-                        PipelineStepId::ChannelMatching,
-                        PipelineStepStatus::Started,
-                        &RoomOptimizationProgress {
-                            current_speaker: "Channel matching".to_string(),
-                            speaker_index: 0,
-                            total_speakers: result.channel_results.len(),
-                            iteration: 0,
-                            max_iterations: 0,
-                            loss: 0.0,
-                            overall_progress: 0.98,
-                            message: Some("Channel matching analysis...".to_string()),
-                            epa_preference: None,
-                            step_id: None,
-                            step_status: None,
-                        },
-                    )?;
-                    let plugin_count_before_icd: usize = result
-                        .channels
-                        .values()
-                        .map(|chain| chain.plugins.len())
-                        .sum();
-                    compute_and_correct_icd(&mut result, config, sample_rate);
-                    let plugin_count_after_icd: usize = result
-                        .channels
-                        .values()
-                        .map(|chain| chain.plugins.len())
-                        .sum();
-                    workflow_refresh_needed |= plugin_count_after_icd != plugin_count_before_icd;
-                    emit_pipeline_event(
-                        &observer_shared,
-                        PipelineEvent::completed(
-                            PipelineStepId::ChannelMatching,
-                            "Channel matching complete",
-                        )
-                        .with_overall_progress(0.98),
-                    )?;
-                } else {
-                    emit_pipeline_event(
-                        &observer_shared,
-                        PipelineEvent::skipped(
-                            PipelineStepId::ChannelMatching,
-                            "Channel matching not needed",
-                        )
-                        .with_overall_progress(0.98),
-                    )?;
-                }
-                emit_pipeline_event(
-                    &observer_shared,
-                    PipelineEvent::started(PipelineStepId::MetadataRefresh, "Refreshing reports")
-                        .with_overall_progress(0.99),
-                )?;
-                if workflow_refresh_needed {
-                    log::debug!("Refreshing reports after workflow DSP mutations");
-                    refresh_final_reports(&mut result, config, sample_rate);
-                } else {
-                    refresh_direct_early_late_reports(&mut result, config);
-                    refresh_perceptual_policy_reports(&mut result, config);
-                }
-                update_perceptual_metrics(
-                    &mut result.metadata,
-                    Some(&result.channels),
-                    Some(config),
-                );
-                apply_ctc_if_enabled(&mut result, config, sample_rate, output_dir)?;
-                generate_validation_bundle_report(&mut result, config, output_dir)?;
-                emit_pipeline_event(
-                    &observer_shared,
-                    PipelineEvent::completed(PipelineStepId::MetadataRefresh, "Reports refreshed")
-                        .with_overall_progress(0.99),
-                )?;
-
-                emit_pipeline_event(
-                    &observer_shared,
-                    PipelineEvent::started(
-                        PipelineStepId::SanityCheck,
-                        "Checking final optimization result",
-                    )
-                    .with_overall_progress(1.0),
-                )?;
-                sanity_check_result(&result)?;
-                emit_pipeline_event(
-                    &observer_shared,
-                    PipelineEvent::completed(
-                        PipelineStepId::SanityCheck,
-                        "Final optimization result checked",
-                    )
-                    .with_overall_progress(1.0),
-                )?;
-                return Ok(result);
-            }
-        }
+    if has_group {
+        return Ok(TopologyRoute::Generic);
     }
 
-    emit_pipeline_event(
-        &observer_shared,
-        PipelineEvent::completed(
-            PipelineStepId::TopologyRouteSelection,
-            "Selected generic channel optimization",
-        ),
-    )?;
+    match sys.model {
+        SystemModel::Stereo => {
+            let workflow_name = if sys.subwoofers.is_some() {
+                "Stereo 2.1"
+            } else {
+                "Stereo 2.0"
+            };
+            emit_pipeline_event(
+                observer_shared,
+                PipelineEvent::completed(
+                    PipelineStepId::TopologyRouteSelection,
+                    format!("Selected {} workflow", workflow_name),
+                ),
+            )?;
+            if sys.subwoofers.is_some() {
+                Ok(TopologyRoute::Stereo2_1)
+            } else {
+                Ok(TopologyRoute::Stereo2_0)
+            }
+        }
+        SystemModel::HomeCinema => {
+            emit_pipeline_event(
+                observer_shared,
+                PipelineEvent::completed(
+                    PipelineStepId::TopologyRouteSelection,
+                    "Selected Home Cinema workflow",
+                ),
+            )?;
+            Ok(TopologyRoute::HomeCinema)
+        }
+        SystemModel::Custom => Ok(TopologyRoute::Generic),
+    }
+}
 
+fn execute_topology_workflow(
+    config: &RoomConfig,
+    sys: &SystemConfig,
+    sample_rate: f64,
+    output_dir: Option<&Path>,
+    observer_shared: &SharedPipelineObserver,
+    route: TopologyRoute,
+) -> Result<RoomOptimizationResult> {
+    let workflow_name = match sys.model {
+        SystemModel::Stereo => {
+            if sys.subwoofers.is_some() {
+                "Stereo 2.1"
+            } else {
+                "Stereo 2.0"
+            }
+        }
+        SystemModel::HomeCinema => "Home Cinema",
+        SystemModel::Custom => "Custom",
+    };
+
+    // Send pre-workflow progress message
+    if sys.model != SystemModel::Custom {
+        send_progress(
+            observer_shared,
+            PipelineStepId::TopologyWorkflowExecution,
+            PipelineStepStatus::Started,
+            &RoomOptimizationProgress {
+                current_speaker: String::new(),
+                speaker_index: 0,
+                total_speakers: sys.speakers.len(),
+                iteration: 0,
+                max_iterations: 0,
+                loss: 0.0,
+                overall_progress: 0.0,
+                message: Some(format!(
+                    "Starting {} workflow ({} channels)",
+                    workflow_name,
+                    sys.speakers.len()
+                )),
+                epa_preference: None,
+                step_id: None,
+                step_status: None,
+            },
+        )?;
+        send_progress(
+            observer_shared,
+            PipelineStepId::GenericChannelOptimization,
+            PipelineStepStatus::Started,
+            &RoomOptimizationProgress {
+                current_speaker: String::new(),
+                speaker_index: 0,
+                total_speakers: sys.speakers.len(),
+                iteration: 0,
+                max_iterations: 0,
+                loss: 0.0,
+                overall_progress: 0.0,
+                message: Some(format!(
+                    "Starting channel optimization for {} workflow",
+                    workflow_name
+                )),
+                epa_preference: None,
+                step_id: None,
+                step_status: None,
+            },
+        )?;
+    }
+
+    let workflow_max_iterations = optimizer_progress_iterations(config);
+    let mut workflow_progress_factory = {
+        let observer = Arc::clone(observer_shared);
+        move |channel_name: &str,
+              speaker_idx: usize,
+              total_speakers: usize,
+              _max_iterations: usize|
+              -> Option<super::workflows::WorkflowProgressCallback> {
+            let observer = Arc::clone(&observer);
+            let name = channel_name.to_string();
+            let total = total_speakers.max(1);
+            let max_iterations = workflow_max_iterations;
+            let stopped = Arc::new(AtomicBool::new(false));
+            let stopped_for_callback = Arc::clone(&stopped);
+            let callback: crate::optim::OptimProgressCallback =
+                Box::new(move |iter: usize, loss: f64, epa: Option<f64>| {
+                    let base_progress = speaker_idx as f64 / total as f64;
+                    let speaker_progress = if max_iterations > 0 {
+                        iter as f64 / max_iterations as f64
+                    } else {
+                        0.0
+                    };
+                    let overall =
+                        ((base_progress + speaker_progress / total as f64) * 0.90).min(0.90);
+
+                    match send_progress(
+                        &observer,
+                        PipelineStepId::GenericChannelOptimization,
+                        PipelineStepStatus::InProgress,
+                        &RoomOptimizationProgress {
+                            current_speaker: name.clone(),
+                            speaker_index: speaker_idx,
+                            total_speakers,
+                            iteration: iter,
+                            max_iterations,
+                            loss,
+                            overall_progress: overall,
+                            message: None,
+                            epa_preference: epa,
+                            step_id: None,
+                            step_status: None,
+                        },
+                    ) {
+                        Ok(()) => crate::de::CallbackAction::Continue,
+                        Err(_) => {
+                            stopped_for_callback.store(true, Ordering::Relaxed);
+                            crate::de::CallbackAction::Stop
+                        }
+                    }
+                });
+            Some(super::workflows::WorkflowProgressCallback { callback, stopped })
+        }
+    };
+    let mut workflow_stage_callback = {
+        let observer = Arc::clone(observer_shared);
+        move |step_id: PipelineStepId,
+              status: PipelineStepStatus,
+              message: &str,
+              overall_progress: f64|
+              -> Result<()> {
+            emit_pipeline_event(
+                &observer,
+                PipelineEvent::new(step_id, status)
+                    .with_message(message)
+                    .with_overall_progress(overall_progress),
+            )
+        }
+    };
+
+    match route {
+        TopologyRoute::Stereo2_0 => super::workflows::optimize_stereo_2_0_with_progress(
+            config,
+            sys,
+            sample_rate,
+            output_dir.unwrap_or(Path::new(".")),
+            Some(&mut workflow_progress_factory),
+            Some(&mut workflow_stage_callback),
+        ),
+        TopologyRoute::Stereo2_1 => super::workflows::optimize_stereo_2_1_with_progress(
+            config,
+            sys,
+            sample_rate,
+            output_dir.unwrap_or(Path::new(".")),
+            Some(&mut workflow_progress_factory),
+            Some(&mut workflow_stage_callback),
+        ),
+        TopologyRoute::HomeCinema => super::workflows::optimize_home_cinema_with_progress(
+            config,
+            sys,
+            sample_rate,
+            output_dir.unwrap_or(Path::new(".")),
+            Some(&mut workflow_progress_factory),
+            Some(&mut workflow_stage_callback),
+        ),
+        TopologyRoute::Generic => Err(AutoeqError::InvalidConfiguration {
+            message: "execute_topology_workflow called with generic route".to_string(),
+        }),
+    }
+}
+
+fn execute_generic_channels(
+    config: &RoomConfig,
+    sample_rate: f64,
+    output_dir: Option<&Path>,
+    probe_arrival_overrides: Option<&HashMap<String, f64>>,
+    observer_shared: &SharedPipelineObserver,
+) -> Result<(GenericChannelCollection, usize)> {
     let channels_to_process = channels_for_generic_optimization(config);
     let total_speakers = channels_to_process.len();
     info!("Processing {} channels", total_speakers);
@@ -881,9 +429,565 @@ fn optimize_room_impl(
         output_dir,
         shared_mean_spl,
         probe_arrival_overrides,
-        &observer_shared,
+        observer_shared,
     )?;
 
+    let collection = collect_generic_channel_results(
+        results,
+        config,
+        sample_rate,
+        output_dir,
+        total_speakers,
+        observer_shared,
+    )?;
+
+    Ok((collection, total_speakers))
+}
+
+fn optimize_room_impl(
+    config: &RoomConfig,
+    sample_rate: f64,
+    output_dir: Option<&Path>,
+    probe_arrival_overrides: Option<&HashMap<String, f64>>,
+    observer: Option<Box<dyn PipelineObserver>>,
+) -> Result<RoomOptimizationResult> {
+    let (observer_shared, config) = prepare_room_optimization(config, observer)?;
+    validate_room_optimization(&config, &observer_shared)?;
+    let route = select_topology_route(&config, &observer_shared)?;
+    let config = &config;
+
+    let result = match route {
+        TopologyRoute::Stereo2_0 | TopologyRoute::Stereo2_1 | TopologyRoute::HomeCinema => {
+            let sys = config
+                .system
+                .as_ref()
+                .expect("specific route requires system");
+            let workflow_result = execute_topology_workflow(
+                config,
+                sys,
+                sample_rate,
+                output_dir,
+                &observer_shared,
+                route,
+            )?;
+            assemble_workflow_result(
+                workflow_result,
+                config,
+                sys,
+                sample_rate,
+                output_dir,
+                &observer_shared,
+            )?
+        }
+        TopologyRoute::Generic => {
+            emit_pipeline_event(
+                &observer_shared,
+                PipelineEvent::completed(
+                    PipelineStepId::TopologyRouteSelection,
+                    "Selected generic channel optimization",
+                ),
+            )?;
+            let (generic, total_speakers) = execute_generic_channels(
+                config,
+                sample_rate,
+                output_dir,
+                probe_arrival_overrides,
+                &observer_shared,
+            )?;
+            assemble_generic_result(
+                generic,
+                total_speakers,
+                config,
+                sample_rate,
+                output_dir,
+                &observer_shared,
+            )?
+        }
+    };
+
+    emit_pipeline_event(
+        &observer_shared,
+        PipelineEvent::started(
+            PipelineStepId::SanityCheck,
+            "Checking final optimization result",
+        )
+        .with_overall_progress(1.0),
+    )?;
+    sanity_check_result(&result)?;
+    emit_pipeline_event(
+        &observer_shared,
+        PipelineEvent::completed(
+            PipelineStepId::SanityCheck,
+            "Final optimization result checked",
+        )
+        .with_overall_progress(1.0),
+    )?;
+    Ok(result)
+}
+
+fn assemble_workflow_result(
+    mut result: RoomOptimizationResult,
+    config: &RoomConfig,
+    sys: &SystemConfig,
+    sample_rate: f64,
+    output_dir: Option<&Path>,
+    observer_shared: &SharedPipelineObserver,
+) -> Result<RoomOptimizationResult> {
+    let workflow_name = match sys.model {
+        SystemModel::Stereo => {
+            if sys.subwoofers.is_some() {
+                "Stereo 2.1"
+            } else {
+                "Stereo 2.0"
+            }
+        }
+        SystemModel::HomeCinema => "Home Cinema",
+        SystemModel::Custom => "Custom",
+    };
+    let mut workflow_refresh_needed = false;
+
+    // Send post-workflow summary
+    let summary: Vec<String> = result
+        .channel_results
+        .iter()
+        .map(|(name, ch)| format!("  {}: {:.4} -> {:.4}", name, ch.pre_score, ch.post_score))
+        .collect();
+    send_progress(
+        observer_shared,
+        PipelineStepId::TopologyWorkflowExecution,
+        PipelineStepStatus::Completed,
+        &RoomOptimizationProgress {
+            current_speaker: String::new(),
+            speaker_index: result.channel_results.len(),
+            total_speakers: result.channel_results.len(),
+            iteration: 0,
+            max_iterations: 0,
+            loss: result.combined_post_score,
+            overall_progress: 0.90,
+            message: Some(format!(
+                "{} workflow complete:\n{}",
+                workflow_name,
+                summary.join("\n")
+            )),
+            epa_preference: None,
+            step_id: None,
+            step_status: None,
+        },
+    )?;
+    // Workflows only do IIR. If FIR/Hybrid mode is requested, post-generate
+    // full FIR coefficients for each channel.
+    if matches!(
+        config.optimizer.processing_mode,
+        ProcessingMode::PhaseLinear | ProcessingMode::Hybrid
+    ) {
+        send_progress(
+            observer_shared,
+            PipelineStepId::FirGeneration,
+            PipelineStepStatus::Started,
+            &RoomOptimizationProgress {
+                current_speaker: "FIR generation".to_string(),
+                speaker_index: 0,
+                total_speakers: result.channel_results.len(),
+                iteration: 0,
+                max_iterations: 0,
+                loss: 0.0,
+                overall_progress: 0.95,
+                message: Some("Generating FIR coefficients...".to_string()),
+                epa_preference: None,
+                step_id: None,
+                step_status: None,
+            },
+        )?;
+        let out_dir = output_dir.unwrap_or(Path::new("."));
+        let names: Vec<String> = result.channel_results.keys().cloned().collect();
+        for name in names {
+            let generated = if let Some(ch) = result.channel_results.get_mut(&name) {
+                if ch.fir_coeffs.is_some() {
+                    None
+                } else {
+                    let generated = post_generate_fir(
+                        &name,
+                        &ch.initial_curve,
+                        &ch.final_curve,
+                        &config.optimizer,
+                        config.target_curve.as_ref(),
+                        sample_rate,
+                        Some(out_dir),
+                    );
+                    if let Some(generated) = &generated {
+                        ch.fir_coeffs = Some(generated.coeffs.clone());
+                    }
+                    generated
+                }
+            } else {
+                None
+            };
+
+            let Some(generated) = generated else {
+                continue;
+            };
+
+            if let Some(chain) = result.channels.get_mut(&name) {
+                chain.plugins.push(super::output::create_convolution_plugin(
+                    &generated.filename,
+                ));
+            }
+            sync_reported_fir_adjustment(
+                &name,
+                &mut result.channel_results,
+                &mut result.channels,
+                &generated.coeffs,
+                sample_rate,
+            );
+            workflow_refresh_needed = true;
+        }
+        emit_pipeline_event(
+            observer_shared,
+            PipelineEvent::completed(PipelineStepId::FirGeneration, "FIR coefficients generated")
+                .with_overall_progress(0.95),
+        )?;
+    } else {
+        emit_pipeline_event(
+            observer_shared,
+            PipelineEvent::skipped(PipelineStepId::FirGeneration, "FIR generation not needed")
+                .with_overall_progress(0.95),
+        )?;
+    }
+    // MixedPhase: post-generate short excess-phase FIR for each channel
+    // and add convolution plugin to the DSP chain.
+    if config.optimizer.processing_mode == ProcessingMode::MixedPhase {
+        send_progress(
+            observer_shared,
+            PipelineStepId::MixedPhaseFirGeneration,
+            PipelineStepStatus::Started,
+            &RoomOptimizationProgress {
+                current_speaker: "Mixed-phase FIR".to_string(),
+                speaker_index: 0,
+                total_speakers: result.channel_results.len(),
+                iteration: 0,
+                max_iterations: 0,
+                loss: 0.0,
+                overall_progress: 0.95,
+                message: Some("Generating mixed-phase FIR...".to_string()),
+                epa_preference: None,
+                step_id: None,
+                step_status: None,
+            },
+        )?;
+        let out_dir = output_dir.unwrap_or(Path::new("."));
+        let names: Vec<String> = result.channel_results.keys().cloned().collect();
+        for name in names {
+            let generated = if let Some(ch) = result.channel_results.get_mut(&name) {
+                if ch.fir_coeffs.is_some() {
+                    None
+                } else {
+                    let generated = post_generate_mixed_phase_fir(
+                        &name,
+                        &ch.initial_curve,
+                        &config.optimizer,
+                        sample_rate,
+                        Some(out_dir),
+                    );
+                    if let Some(generated) = &generated {
+                        ch.fir_coeffs = Some(generated.coeffs.clone());
+                    }
+                    generated
+                }
+            } else {
+                None
+            };
+
+            let Some(generated) = generated else {
+                continue;
+            };
+
+            if let Some(chain) = result.channels.get_mut(&name) {
+                chain.plugins.push(super::output::create_convolution_plugin(
+                    &generated.filename,
+                ));
+            }
+            sync_reported_fir_adjustment(
+                &name,
+                &mut result.channel_results,
+                &mut result.channels,
+                &generated.coeffs,
+                sample_rate,
+            );
+            workflow_refresh_needed = true;
+        }
+        emit_pipeline_event(
+            observer_shared,
+            PipelineEvent::completed(
+                PipelineStepId::MixedPhaseFirGeneration,
+                "Mixed-phase FIR generated",
+            )
+            .with_overall_progress(0.955),
+        )?;
+    } else {
+        emit_pipeline_event(
+            observer_shared,
+            PipelineEvent::skipped(
+                PipelineStepId::MixedPhaseFirGeneration,
+                "Mixed-phase FIR not needed",
+            )
+            .with_overall_progress(0.955),
+        )?;
+    }
+    // Standalone phase correction (rePhase-style)
+    if config.optimizer.phase_correction.is_some() {
+        send_progress(
+            observer_shared,
+            PipelineStepId::PhaseCorrection,
+            PipelineStepStatus::Started,
+            &RoomOptimizationProgress {
+                current_speaker: "Phase correction".to_string(),
+                speaker_index: 0,
+                total_speakers: result.channel_results.len(),
+                iteration: 0,
+                max_iterations: 0,
+                loss: 0.0,
+                overall_progress: 0.96,
+                message: Some("Phase correction...".to_string()),
+                epa_preference: None,
+                step_id: None,
+                step_status: None,
+            },
+        )?;
+    }
+    if let Some(ref pc_config) = config.optimizer.phase_correction {
+        let out_dir = output_dir.unwrap_or(Path::new("."));
+        let names: Vec<String> = result.channel_results.keys().cloned().collect();
+        for name in &names {
+            if let Some(ch) = result.channel_results.get_mut(name)
+                && let Some(chain) = result.channels.get_mut(name)
+            {
+                let before_plugins = chain.plugins.len();
+                apply_phase_correction(name, ch, chain, pc_config, sample_rate, Some(out_dir));
+                workflow_refresh_needed |= chain.plugins.len() != before_plugins;
+            }
+        }
+        emit_pipeline_event(
+            observer_shared,
+            PipelineEvent::completed(PipelineStepId::PhaseCorrection, "Phase correction complete")
+                .with_overall_progress(0.96),
+        )?;
+    } else {
+        emit_pipeline_event(
+            observer_shared,
+            PipelineEvent::skipped(
+                PipelineStepId::PhaseCorrection,
+                "Phase correction not enabled",
+            )
+            .with_overall_progress(0.96),
+        )?;
+    }
+
+    emit_pipeline_event(
+        observer_shared,
+        PipelineEvent::started(
+            PipelineStepId::GroupDelayOptimization,
+            "Running GD optimization",
+        )
+        .with_overall_progress(0.965),
+    )?;
+    // Heartbeat: GD optimization can take several seconds on
+    // wide configurations. Without this InProgress event the
+    // UI stays on "Running GD optimization" Started state for
+    // the whole duration which reads as a hang.
+    emit_pipeline_event(
+        observer_shared,
+        PipelineEvent::new(
+            PipelineStepId::GroupDelayOptimization,
+            PipelineStepStatus::InProgress,
+        )
+        .with_message(
+            if config.optimizer.processing_mode == ProcessingMode::PhaseLinear {
+                "Phase-linear FIR group-delay optimization..."
+            } else {
+                "Group-delay optimization..."
+            },
+        )
+        .with_overall_progress(0.965),
+    )?;
+    let workflow_group_delay_summary =
+        if config.optimizer.processing_mode == ProcessingMode::PhaseLinear {
+            try_run_phase_linear_fir_gd(
+                config,
+                &mut result.channel_results,
+                &mut result.channels,
+                sample_rate,
+                output_dir,
+            )
+        } else {
+            try_run_gd_opt(
+                config,
+                &mut result.channel_results,
+                &mut result.channels,
+                sample_rate,
+            )
+        };
+    if let Some(summary) = workflow_group_delay_summary {
+        workflow_refresh_needed |= summary.applied;
+        result.metadata.group_delay = Some(summary);
+    }
+    emit_pipeline_event(
+        observer_shared,
+        PipelineEvent::completed(
+            PipelineStepId::GroupDelayOptimization,
+            "GD optimization complete",
+        )
+        .with_overall_progress(0.965),
+    )?;
+
+    // Compute IR waveforms for the workflow result
+    send_progress(
+        observer_shared,
+        PipelineStepId::ImpulseResponseComputation,
+        PipelineStepStatus::Started,
+        &RoomOptimizationProgress {
+            current_speaker: "IR computation".to_string(),
+            speaker_index: 0,
+            total_speakers: result.channel_results.len(),
+            iteration: 0,
+            max_iterations: 0,
+            loss: 0.0,
+            overall_progress: 0.97,
+            message: Some("Computing impulse responses...".to_string()),
+            epa_preference: None,
+            step_id: None,
+            step_status: None,
+        },
+    )?;
+    let ir_total = result.channel_results.len();
+    let ir_names: Vec<String> = result.channel_results.keys().cloned().collect();
+    for (ir_index, channel_name) in ir_names.iter().enumerate() {
+        // Per-channel heartbeat: long IR convolutions can run
+        // for hundreds of milliseconds each, so users see one
+        // chip moving instead of a single "Started" stuck for
+        // the whole loop.
+        emit_pipeline_event(
+            observer_shared,
+            PipelineEvent::new(
+                PipelineStepId::ImpulseResponseComputation,
+                PipelineStepStatus::InProgress,
+            )
+            .with_channel(channel_name.clone())
+            .with_channels(ir_index, ir_total)
+            .with_message(format!("Computing impulse response for {channel_name}"))
+            .with_overall_progress(0.97),
+        )?;
+        let ch_result = match result.channel_results.get(channel_name) {
+            Some(ch) => ch,
+            None => continue,
+        };
+        let delay_ms = result
+            .channels
+            .get(channel_name)
+            .map(total_chain_delay_ms)
+            .unwrap_or(0.0);
+        let initial_curve = ch_result.initial_curve.clone();
+        let biquads = ch_result.biquads.clone();
+        let fir_coeffs = ch_result.fir_coeffs.clone();
+        if let Some((pre_ir, post_ir)) = super::ir_waveform::compute_channel_ir_waveforms(
+            &initial_curve,
+            &biquads,
+            fir_coeffs.as_deref(),
+            delay_ms,
+            sample_rate,
+        ) && let Some(chain) = result.channels.get_mut(channel_name)
+        {
+            chain.pre_ir = Some(pre_ir);
+            chain.post_ir = Some(post_ir);
+        }
+    }
+    emit_pipeline_event(
+        observer_shared,
+        PipelineEvent::completed(
+            PipelineStepId::ImpulseResponseComputation,
+            "Impulse responses computed",
+        )
+        .with_overall_progress(0.97),
+    )?;
+
+    // Compute inter-channel deviation and optionally correct it
+    if result.channel_results.len() > 1 {
+        send_progress(
+            observer_shared,
+            PipelineStepId::ChannelMatching,
+            PipelineStepStatus::Started,
+            &RoomOptimizationProgress {
+                current_speaker: "Channel matching".to_string(),
+                speaker_index: 0,
+                total_speakers: result.channel_results.len(),
+                iteration: 0,
+                max_iterations: 0,
+                loss: 0.0,
+                overall_progress: 0.98,
+                message: Some("Channel matching analysis...".to_string()),
+                epa_preference: None,
+                step_id: None,
+                step_status: None,
+            },
+        )?;
+        let plugin_count_before_icd: usize = result
+            .channels
+            .values()
+            .map(|chain| chain.plugins.len())
+            .sum();
+        compute_and_correct_icd(&mut result, config, sample_rate);
+        let plugin_count_after_icd: usize = result
+            .channels
+            .values()
+            .map(|chain| chain.plugins.len())
+            .sum();
+        workflow_refresh_needed |= plugin_count_after_icd != plugin_count_before_icd;
+        emit_pipeline_event(
+            observer_shared,
+            PipelineEvent::completed(PipelineStepId::ChannelMatching, "Channel matching complete")
+                .with_overall_progress(0.98),
+        )?;
+    } else {
+        emit_pipeline_event(
+            observer_shared,
+            PipelineEvent::skipped(
+                PipelineStepId::ChannelMatching,
+                "Channel matching not needed",
+            )
+            .with_overall_progress(0.98),
+        )?;
+    }
+    emit_pipeline_event(
+        observer_shared,
+        PipelineEvent::started(PipelineStepId::MetadataRefresh, "Refreshing reports")
+            .with_overall_progress(0.99),
+    )?;
+    if workflow_refresh_needed {
+        log::debug!("Refreshing reports after workflow DSP mutations");
+        refresh_final_reports(&mut result, config, sample_rate);
+    } else {
+        refresh_direct_early_late_reports(&mut result, config);
+        refresh_perceptual_policy_reports(&mut result, config);
+    }
+    update_perceptual_metrics(&mut result.metadata, Some(&result.channels), Some(config));
+    apply_ctc_if_enabled(&mut result, config, sample_rate, output_dir)?;
+    generate_validation_bundle_report(&mut result, config, output_dir)?;
+    emit_pipeline_event(
+        observer_shared,
+        PipelineEvent::completed(PipelineStepId::MetadataRefresh, "Reports refreshed")
+            .with_overall_progress(0.99),
+    )?;
+
+    Ok(result)
+}
+
+fn assemble_generic_result(
+    generic: GenericChannelCollection,
+    total_speakers: usize,
+    config: &RoomConfig,
+    sample_rate: f64,
+    output_dir: Option<&Path>,
+    observer_shared: &SharedPipelineObserver,
+) -> Result<RoomOptimizationResult> {
     let GenericChannelCollection {
         mut channel_chains,
         mut channel_results,
@@ -892,14 +996,7 @@ fn optimize_room_impl(
         mut curves,
         channel_means,
         mut channel_arrivals,
-    } = collect_generic_channel_results(
-        results,
-        config,
-        sample_rate,
-        output_dir,
-        total_speakers,
-        &observer_shared,
-    )?;
+    } = generic;
 
     // Auto IR sync: if no WAV-based arrivals were collected, estimate from phase data.
     // Runs unconditionally (does not require allow_delay = true).
@@ -962,7 +1059,7 @@ fn optimize_room_impl(
     // This is done PRE-EQ by inserting at the beginning of the plugin chain
     if (config.optimizer.allow_delay() || phase_ir_sync) && channel_arrivals.len() > 1 {
         emit_pipeline_event(
-            &observer_shared,
+            observer_shared,
             PipelineEvent::started(PipelineStepId::TimeAlignment, "Aligning channel timing"),
         )?;
         let arrivals: Vec<f64> = channel_arrivals.values().copied().collect();
@@ -1015,13 +1112,13 @@ fn optimize_room_impl(
         }
         curves = collect_current_final_curves(&channel_results);
         emit_pipeline_event(
-            &observer_shared,
+            observer_shared,
             PipelineEvent::completed(PipelineStepId::TimeAlignment, "Channel timing aligned"),
         )?;
     } else if channel_arrivals.is_empty() && config.speakers.len() > 1 {
         info!("No arrival time data (WAV or phase) available for time alignment. Skipping.");
         emit_pipeline_event(
-            &observer_shared,
+            observer_shared,
             PipelineEvent::skipped(
                 PipelineStepId::TimeAlignment,
                 "No arrival time data available for time alignment",
@@ -1029,7 +1126,7 @@ fn optimize_room_impl(
         )?;
     } else {
         emit_pipeline_event(
-            &observer_shared,
+            observer_shared,
             PipelineEvent::skipped(PipelineStepId::TimeAlignment, "Time alignment not needed"),
         )?;
     }
@@ -1044,7 +1141,7 @@ fn optimize_room_impl(
         .collect();
     if spectral_curves.len() > 1 {
         send_progress(
-            &observer_shared,
+            observer_shared,
             PipelineStepId::SpectralAlignment,
             PipelineStepStatus::Started,
             &RoomOptimizationProgress {
@@ -1177,7 +1274,7 @@ fn optimize_room_impl(
         }
         curves = collect_current_final_curves(&channel_results);
         emit_pipeline_event(
-            &observer_shared,
+            observer_shared,
             PipelineEvent::completed(
                 PipelineStepId::SpectralAlignment,
                 "Spectral channel alignment complete",
@@ -1185,7 +1282,7 @@ fn optimize_room_impl(
         )?;
     } else {
         emit_pipeline_event(
-            &observer_shared,
+            observer_shared,
             PipelineEvent::skipped(
                 PipelineStepId::SpectralAlignment,
                 "Spectral channel alignment not needed",
@@ -1200,7 +1297,7 @@ fn optimize_room_impl(
         && vog_config.enabled
     {
         send_progress(
-            &observer_shared,
+            observer_shared,
             PipelineStepId::VoiceOfGodAlignment,
             PipelineStepStatus::Started,
             &RoomOptimizationProgress {
@@ -1279,7 +1376,7 @@ fn optimize_room_impl(
     }
     if config.optimizer.vog.as_ref().is_some_and(|v| v.enabled) {
         emit_pipeline_event(
-            &observer_shared,
+            observer_shared,
             PipelineEvent::completed(
                 PipelineStepId::VoiceOfGodAlignment,
                 "Voice of God alignment complete",
@@ -1287,7 +1384,7 @@ fn optimize_room_impl(
         )?;
     } else {
         emit_pipeline_event(
-            &observer_shared,
+            observer_shared,
             PipelineEvent::skipped(
                 PipelineStepId::VoiceOfGodAlignment,
                 "Voice of God alignment not enabled",
@@ -1315,7 +1412,7 @@ fn optimize_room_impl(
         } else {
             info!("Running phase alignment optimization...");
             send_progress(
-                &observer_shared,
+                observer_shared,
                 PipelineStepId::PhaseAlignment,
                 PipelineStepStatus::Started,
                 &RoomOptimizationProgress {
@@ -1422,12 +1519,12 @@ fn optimize_room_impl(
     if !phase_alignment_results.is_empty() {
         curves = collect_current_final_curves(&channel_results);
         emit_pipeline_event(
-            &observer_shared,
+            observer_shared,
             PipelineEvent::completed(PipelineStepId::PhaseAlignment, "Phase alignment complete"),
         )?;
     } else {
         emit_pipeline_event(
-            &observer_shared,
+            observer_shared,
             PipelineEvent::skipped(
                 PipelineStepId::PhaseAlignment,
                 "Phase alignment not applied",
@@ -1442,7 +1539,7 @@ fn optimize_room_impl(
     // Standalone phase correction (rePhase-style)
     if config.optimizer.phase_correction.is_some() {
         send_progress(
-            &observer_shared,
+            observer_shared,
             PipelineStepId::PhaseCorrection,
             PipelineStepStatus::Started,
             &RoomOptimizationProgress {
@@ -1470,12 +1567,12 @@ fn optimize_room_impl(
             }
         }
         emit_pipeline_event(
-            &observer_shared,
+            observer_shared,
             PipelineEvent::completed(PipelineStepId::PhaseCorrection, "Phase correction complete"),
         )?;
     } else {
         emit_pipeline_event(
-            &observer_shared,
+            observer_shared,
             PipelineEvent::skipped(
                 PipelineStepId::PhaseCorrection,
                 "Phase correction not enabled",
@@ -1487,14 +1584,14 @@ fn optimize_room_impl(
     // Run after all earlier phase/EQ stages have updated final_curve, but
     // before IR/EPA/metadata so exported reports reflect the audible chain.
     emit_pipeline_event(
-        &observer_shared,
+        observer_shared,
         PipelineEvent::started(
             PipelineStepId::GroupDelayOptimization,
             "Running GD optimization",
         ),
     )?;
     emit_pipeline_event(
-        &observer_shared,
+        observer_shared,
         PipelineEvent::new(
             PipelineStepId::GroupDelayOptimization,
             PipelineStepStatus::InProgress,
@@ -1524,7 +1621,7 @@ fn optimize_room_impl(
         )
     };
     emit_pipeline_event(
-        &observer_shared,
+        observer_shared,
         PipelineEvent::completed(
             PipelineStepId::GroupDelayOptimization,
             "GD optimization complete",
@@ -1539,7 +1636,7 @@ fn optimize_room_impl(
 
     // Compute IR waveforms (pre- and post-correction) for each channel
     send_progress(
-        &observer_shared,
+        observer_shared,
         PipelineStepId::ImpulseResponseComputation,
         PipelineStepStatus::Started,
         &RoomOptimizationProgress {
@@ -1559,7 +1656,7 @@ fn optimize_room_impl(
     let ir_total = channel_results.len();
     for (ir_index, (channel_name, result)) in channel_results.iter().enumerate() {
         emit_pipeline_event(
-            &observer_shared,
+            observer_shared,
             PipelineEvent::new(
                 PipelineStepId::ImpulseResponseComputation,
                 PipelineStepStatus::InProgress,
@@ -1587,7 +1684,7 @@ fn optimize_room_impl(
         }
     }
     emit_pipeline_event(
-        &observer_shared,
+        observer_shared,
         PipelineEvent::completed(
             PipelineStepId::ImpulseResponseComputation,
             "Impulse responses computed",
@@ -1648,6 +1745,7 @@ fn optimize_room_impl(
         perceptual_policy: None,
         bootstrap_uncertainty: None,
         validation_bundle: None,
+        supporting_source: None,
     };
 
     let mut result = RoomOptimizationResult {
@@ -1661,7 +1759,7 @@ fn optimize_room_impl(
     // Compute inter-channel deviation and optionally correct it
     if curves.len() > 1 {
         send_progress(
-            &observer_shared,
+            observer_shared,
             PipelineStepId::ChannelMatching,
             PipelineStepStatus::Started,
             &RoomOptimizationProgress {
@@ -1680,12 +1778,12 @@ fn optimize_room_impl(
         )?;
         compute_and_correct_icd(&mut result, config, sample_rate);
         emit_pipeline_event(
-            &observer_shared,
+            observer_shared,
             PipelineEvent::completed(PipelineStepId::ChannelMatching, "Channel matching complete"),
         )?;
     } else {
         emit_pipeline_event(
-            &observer_shared,
+            observer_shared,
             PipelineEvent::skipped(
                 PipelineStepId::ChannelMatching,
                 "Channel matching not needed",
@@ -1694,32 +1792,17 @@ fn optimize_room_impl(
     }
 
     emit_pipeline_event(
-        &observer_shared,
+        observer_shared,
         PipelineEvent::started(PipelineStepId::MetadataRefresh, "Refreshing reports"),
     )?;
     refresh_final_reports(&mut result, config, sample_rate);
     apply_ctc_if_enabled(&mut result, config, sample_rate, output_dir)?;
     generate_validation_bundle_report(&mut result, config, output_dir)?;
     emit_pipeline_event(
-        &observer_shared,
+        observer_shared,
         PipelineEvent::completed(PipelineStepId::MetadataRefresh, "Reports refreshed"),
     )?;
 
-    emit_pipeline_event(
-        &observer_shared,
-        PipelineEvent::started(
-            PipelineStepId::SanityCheck,
-            "Checking final optimization result",
-        ),
-    )?;
-    sanity_check_result(&result)?;
-    emit_pipeline_event(
-        &observer_shared,
-        PipelineEvent::completed(
-            PipelineStepId::SanityCheck,
-            "Final optimization result checked",
-        ),
-    )?;
     Ok(result)
 }
 

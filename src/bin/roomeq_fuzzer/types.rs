@@ -32,6 +32,14 @@ pub(super) struct Args {
     /// Verbose output
     #[arg(short, long)]
     pub(super) verbose: bool,
+
+    /// Skip the kautz_modal scenario bucket.
+    ///
+    /// Synthetic flat/noise measurements often lack clear room modes, which
+    /// makes kautz_modal fail non-deterministically. Use this flag in CI to
+    /// keep the fuzzer stable; full QA still exercises kautz_modal.
+    #[arg(long)]
+    pub(super) skip_kautz_modal: bool,
 }
 
 /// Filter type for synthetic speaker generation
@@ -88,4 +96,40 @@ pub(super) struct PluginOutput {
 pub(super) struct Metadata {
     pub(super) pre_score: f64,
     pub(super) post_score: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::Args;
+
+    #[test]
+    fn defaults_are_expected() {
+        let args = Args::try_parse_from(["roomeq-fuzzer"]).unwrap();
+        assert_eq!(args.num_tests, 100);
+        assert_eq!(args.sample_rate, 48000.0);
+        assert_eq!(args.max_speakers, 4);
+        assert!(!args.skip_kautz_modal);
+        assert!(args.seed.is_none());
+        assert!(!args.verbose);
+    }
+
+    #[test]
+    fn num_tests_flag_overrides_default() {
+        let args = Args::try_parse_from(["roomeq-fuzzer", "--num-tests", "42"]).unwrap();
+        assert_eq!(args.num_tests, 42);
+    }
+
+    #[test]
+    fn seed_flag_sets_seed() {
+        let args = Args::try_parse_from(["roomeq-fuzzer", "--seed", "12345"]).unwrap();
+        assert_eq!(args.seed, Some(12345));
+    }
+
+    #[test]
+    fn skip_kautz_modal_flag_is_recognized() {
+        let args = Args::try_parse_from(["roomeq-fuzzer", "--skip-kautz-modal"]).unwrap();
+        assert!(args.skip_kautz_modal);
+    }
 }

@@ -271,6 +271,7 @@ fn validate_bass_management_rejects_negative_headroom_and_boost() {
                 headroom_margin_db: -3.0,
                 ..Default::default()
             }),
+            ..Default::default()
         }),
         speakers,
         crossovers: Some(HashMap::from([(

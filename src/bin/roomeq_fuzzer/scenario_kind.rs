@@ -53,14 +53,28 @@ pub(super) const REQUIRED_SCENARIOS: &[ScenarioKind] = &[
     ScenarioKind::GroupDelay,
 ];
 
+pub(super) fn required_scenarios(skip_kautz_modal: bool) -> Vec<ScenarioKind> {
+    if skip_kautz_modal {
+        REQUIRED_SCENARIOS
+            .iter()
+            .copied()
+            .filter(|s| *s != ScenarioKind::SingleKautzModal)
+            .collect()
+    } else {
+        REQUIRED_SCENARIOS.to_vec()
+    }
+}
+
 impl ScenarioKind {
-    pub(super) fn for_test(test_idx: usize, rng: &mut ChaCha8Rng) -> Self {
-        if test_idx < REQUIRED_SCENARIOS.len() {
-            REQUIRED_SCENARIOS[test_idx]
+    pub(super) fn for_test(test_idx: usize, rng: &mut ChaCha8Rng, skip_kautz_modal: bool) -> Self {
+        let required = required_scenarios(skip_kautz_modal);
+
+        if test_idx < required.len() {
+            required[test_idx]
         } else if rng.random_bool(0.2) {
             ScenarioKind::RandomMixed
         } else {
-            *REQUIRED_SCENARIOS.choose(rng).unwrap()
+            *required.choose(rng).unwrap()
         }
     }
 

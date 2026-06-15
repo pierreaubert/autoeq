@@ -80,6 +80,12 @@ pub(super) fn apply_ctc_if_enabled(
 /// `Err` so fuzz / QA runs report divergence instead of shipping a
 /// corrupted DSP chain.
 pub(super) fn sanity_check_result(result: &RoomOptimizationResult) -> Result<()> {
+    if result.channel_results.is_empty() {
+        return Err(AutoeqError::OptimizationFailed {
+            message: "no channel results produced".to_string(),
+        });
+    }
+
     for (name, ch) in &result.channel_results {
         if ch.initial_curve.freq.len() != ch.initial_curve.spl.len() {
             let msg = format!(
@@ -117,4 +123,216 @@ pub(super) fn sanity_check_result(result: &RoomOptimizationResult) -> Result<()>
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Curve;
+    use crate::roomeq::types::{
+        CtcConfig, OptimizationMetadata, RoomConfig, SystemConfig, SystemModel,
+    };
+    use ndarray::Array1;
+    use std::collections::HashMap;
+
+    fn flat_curve() -> Curve {
+        Curve {
+            freq: Array1::logspace(10.0, f64::log10(20.0), f64::log10(20000.0), 32),
+            spl: Array1::from_elem(32, 80.0),
+            phase: None,
+            ..Default::default()
+        }
+    }
+
+    fn empty_metadata() -> OptimizationMetadata {
+        OptimizationMetadata {
+            pre_score: 0.0,
+            post_score: 0.0,
+            algorithm: "de".to_string(),
+            loss_type: None,
+            iterations: 0,
+            timestamp: String::new(),
+            inter_channel_deviation: None,
+            epa_per_channel: None,
+            epa_multichannel: None,
+            group_delay: None,
+            perceptual_metrics: None,
+            home_cinema_layout: None,
+            multi_seat_coverage: None,
+            multi_seat_correction: None,
+            bass_management: None,
+            timing_diagnostics: None,
+            ctc: None,
+            perceptual_policy: None,
+            bootstrap_uncertainty: None,
+            validation_bundle: None,
+            supporting_source: None,
+        }
+    }
+
+    fn single_channel_result(channel_name: &str) -> RoomOptimizationResult {
+        let curve = flat_curve();
+        let mut channels = HashMap::new();
+        channels.insert(
+            channel_name.to_string(),
+            ChannelDspChain {
+                channel: channel_name.to_string(),
+                plugins: Vec::new(),
+                drivers: None,
+                initial_curve: None,
+                final_curve: None,
+                eq_response: None,
+                target_curve: None,
+                pre_ir: None,
+                post_ir: None,
+                fir_temporal_masking: None,
+                direct_early_late_correction: None,
+            },
+        );
+        let mut channel_results = HashMap::new();
+        channel_results.insert(
+            channel_name.to_string(),
+            ChannelOptimizationResult {
+                name: channel_name.to_string(),
+                pre_score: 0.5,
+                post_score: 0.9,
+                initial_curve: curve.clone(),
+                final_curve: curve,
+                biquads: Vec::new(),
+                fir_coeffs: None,
+            },
+        );
+        RoomOptimizationResult {
+            channels,
+            channel_results,
+            combined_pre_score: 0.5,
+            combined_post_score: 0.9,
+            metadata: empty_metadata(),
+        }
+    }
+
+    #[test]
+    fn to_dsp_chain_output_includes_channels_and_metadata() {
+        let result = single_channel_result("left");
+        let output = result.to_dsp_chain_output();
+        assert!(output.channels.contains_key("left"));
+        assert!(output.metadata.is_some());
+    }
+
+    #[test]
+    fn apply_ctc_if_enabled_disabled_leaves_none() {
+        let mut result = single_channel_result("left");
+        let config = RoomConfig {
+            version: crate::roomeq::types::default_config_version(),
+            system: None,
+            speakers: HashMap::new(),
+            crossovers: None,
+            target_curve: None,
+            optimizer: crate::roomeq::types::OptimizerConfig::default(),
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        };
+        apply_ctc_if_enabled(&mut result, &config, 48000.0, None).unwrap();
+        assert!(result.metadata.ctc.is_none());
+    }
+
+    #[test]
+    fn apply_ctc_if_enabled_disabled_explicitly_leaves_none() {
+        let mut result = single_channel_result("left");
+        let mut config = RoomConfig {
+            version: crate::roomeq::types::default_config_version(),
+            system: None,
+            speakers: HashMap::new(),
+            crossovers: None,
+            target_curve: None,
+            optimizer: crate::roomeq::types::OptimizerConfig::default(),
+            recording_config: None,
+            ctc: Some(CtcConfig::default()),
+            cea2034_cache: None,
+        };
+        config.ctc.as_mut().unwrap().enabled = false;
+        apply_ctc_if_enabled(&mut result, &config, 48000.0, None).unwrap();
+        assert!(result.metadata.ctc.is_none());
+    }
+
+    #[test]
+    fn apply_ctc_if_enabled_without_system_errors() {
+        let mut result = single_channel_result("left");
+        let mut config = RoomConfig {
+            version: crate::roomeq::types::default_config_version(),
+            system: None,
+            speakers: HashMap::new(),
+            crossovers: None,
+            target_curve: None,
+            optimizer: crate::roomeq::types::OptimizerConfig::default(),
+            recording_config: None,
+            ctc: Some(CtcConfig::default()),
+            cea2034_cache: None,
+        };
+        config.ctc.as_mut().unwrap().enabled = true;
+        let err = apply_ctc_if_enabled(&mut result, &config, 48000.0, None).unwrap_err();
+        let err_str = format!("{:?}", err);
+        assert!(err_str.contains("ctc.enabled requires system"));
+    }
+
+    #[test]
+    fn apply_ctc_if_enabled_with_system_runs() {
+        let mut result = single_channel_result("left");
+        let mut config = RoomConfig {
+            version: crate::roomeq::types::default_config_version(),
+            system: Some(SystemConfig {
+                model: SystemModel::Stereo,
+                speakers: HashMap::from([("Left".to_string(), "left".to_string())]),
+                subwoofers: None,
+                bass_management: None,
+            ..Default::default()
+        }),
+            speakers: HashMap::new(),
+            crossovers: None,
+            target_curve: None,
+            optimizer: crate::roomeq::types::OptimizerConfig::default(),
+            recording_config: None,
+            ctc: Some(CtcConfig::default()),
+            cea2034_cache: None,
+        };
+        config.ctc.as_mut().unwrap().enabled = true;
+        // CTC may generate a report or return None depending on configuration.
+        // The important part is that the enabled + system branch does not error
+        // on configuration validation.
+        let _ = apply_ctc_if_enabled(&mut result, &config, 48000.0, None);
+    }
+
+    #[test]
+    fn sanity_check_result_non_empty_ok() {
+        let result = single_channel_result("left");
+        assert!(sanity_check_result(&result).is_ok());
+    }
+
+    #[test]
+    fn sanity_check_result_empty_errors() {
+        let result = RoomOptimizationResult {
+            channels: HashMap::new(),
+            channel_results: HashMap::new(),
+            combined_pre_score: 0.0,
+            combined_post_score: 0.0,
+            metadata: empty_metadata(),
+        };
+        assert!(sanity_check_result(&result).is_err());
+    }
+
+    // In debug builds `sanity_check_result` panics on invariant violations via
+    // `debug_assert!`; the error-return branch is only reachable in release.
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn sanity_check_result_detects_non_finite_spl() {
+        let mut result = single_channel_result("left");
+        result
+            .channel_results
+            .get_mut("left")
+            .unwrap()
+            .final_curve
+            .spl[0] = f64::NAN;
+        assert!(sanity_check_result(&result).is_err());
+    }
 }

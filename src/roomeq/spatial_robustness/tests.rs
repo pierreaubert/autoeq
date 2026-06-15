@@ -146,6 +146,147 @@ fn test_smooth_log_frequency_preserves_constant() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Tests for spatial_robustness/analyze.rs
+// ---------------------------------------------------------------------------
+
+fn make_spatial_curve(spl_offset: f64) -> crate::Curve {
+    crate::Curve {
+        freq: Array1::from_vec(vec![100.0, 200.0, 400.0, 800.0, 1600.0]),
+        spl: Array1::from_vec(vec![
+            80.0 + spl_offset,
+            82.0 + spl_offset,
+            81.0 + spl_offset,
+            83.0 + spl_offset,
+            80.0 + spl_offset,
+        ]),
+        phase: None,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn analyze_spatial_robustness_basic() {
+    use super::analyze::analyze_spatial_robustness;
+
+    let curves = vec![make_spatial_curve(0.0), make_spatial_curve(1.0), make_spatial_curve(-1.0)];
+    let config = SpatialRobustnessConfig::default();
+    let result = analyze_spatial_robustness(&curves, &config).unwrap();
+    assert_eq!(result.averaged_curve.freq.len(), curves[0].freq.len());
+    assert_eq!(result.spatial_variance.len(), curves[0].freq.len());
+    assert_eq!(result.correction_depth.len(), curves[0].freq.len());
+}
+
+#[test]
+fn analyze_spatial_robustness_weighted() {
+    use super::analyze::analyze_spatial_robustness_weighted;
+
+    let curves = vec![make_spatial_curve(0.0), make_spatial_curve(2.0)];
+    let config = SpatialRobustnessConfig::default();
+    let weights = [0.25, 0.75];
+    let result = analyze_spatial_robustness_weighted(&curves, &config, Some(&weights)).unwrap();
+    assert_eq!(result.averaged_curve.freq.len(), curves[0].freq.len());
+}
+
+#[test]
+fn analyze_spatial_robustness_with_bootstrap() {
+    use super::analyze::analyze_spatial_robustness_with_bootstrap;
+    use super::bootstrap_config::BootstrapConfig;
+
+    let curves = vec![make_spatial_curve(0.0), make_spatial_curve(1.0), make_spatial_curve(-1.0)];
+    let config = SpatialRobustnessConfig::default();
+    let bootstrap = BootstrapConfig {
+        num_resamples: 50,
+        alpha: 0.10,
+        seed: 1,
+    };
+    let result = analyze_spatial_robustness_with_bootstrap(&curves, &config, &bootstrap, None).unwrap();
+    assert!(result.bootstrap.is_some());
+}
+
+// ---------------------------------------------------------------------------
+// Tests for spatial_robustness/bootstrap_config.rs
+// ---------------------------------------------------------------------------
+
+#[test]
+fn bootstrap_config_default_values() {
+    use super::bootstrap_config::BootstrapConfig;
+
+    let config = BootstrapConfig::default();
+    assert_eq!(config.num_resamples, 500);
+    assert!((config.alpha - 0.10).abs() < 1e-9);
+    assert_eq!(config.seed, 0xC0FFEE);
+}
+
+// ---------------------------------------------------------------------------
+// Tests for spatial_robustness/misc.rs
+// ---------------------------------------------------------------------------
+
+#[test]
+fn percentile_sorted_edge_cases() {
+    use super::misc::percentile_sorted;
+
+    assert!(percentile_sorted(&[], 0.5).is_nan());
+    assert_eq!(percentile_sorted(&[5.0], 0.5), 5.0);
+    assert_eq!(percentile_sorted(&[1.0, 3.0], 0.0), 1.0);
+    assert_eq!(percentile_sorted(&[1.0, 3.0], 1.0), 3.0);
+    let mid = percentile_sorted(&[1.0, 3.0], 0.5);
+    assert!((mid - 2.0).abs() < 1e-9);
+    assert_eq!(percentile_sorted(&[1.0, 3.0], -1.0), 1.0);
+    assert_eq!(percentile_sorted(&[1.0, 3.0], 2.0), 3.0);
+}
+
+#[test]
+fn validate_spatial_curves_errors() {
+    use super::misc::validate_spatial_curves;
+
+    assert!(validate_spatial_curves(&[]).is_err());
+
+    let bad = crate::Curve {
+        freq: Array1::from_vec(vec![100.0, 50.0]),
+        spl: Array1::from_vec(vec![80.0, 82.0]),
+        phase: None,
+        ..Default::default()
+    };
+    assert!(validate_spatial_curves(std::slice::from_ref(&bad)).is_err());
+
+    let c1 = make_spatial_curve(0.0);
+    let mut c2 = make_spatial_curve(1.0);
+    c2.freq = Array1::from_vec(vec![100.0, 200.0, 400.0, 800.0, 2000.0]);
+    assert!(validate_spatial_curves(&[c1, c2]).is_err());
+}
+
+#[test]
+fn is_valid_spatial_frequency_grid_checks() {
+    use super::misc::is_valid_spatial_frequency_grid;
+
+    assert!(is_valid_spatial_frequency_grid(&Array1::from_vec(vec![100.0, 200.0, 400.0])));
+    assert!(!is_valid_spatial_frequency_grid(&Array1::from_vec(vec![])));
+    assert!(!is_valid_spatial_frequency_grid(&Array1::from_vec(vec![100.0, 50.0])));
+    assert!(!is_valid_spatial_frequency_grid(&Array1::from_vec(vec![100.0, f64::NAN])));
+    assert!(!is_valid_spatial_frequency_grid(&Array1::from_vec(vec![-100.0, 200.0])));
+}
+
+#[test]
+fn normalized_weights_cases() {
+    use super::misc::normalized_weights;
+
+    let uniform = normalized_weights(4, None);
+    assert_eq!(uniform, vec![0.25; 4]);
+
+    let valid = normalized_weights(2, Some(&[1.0, 1.0]));
+    assert_eq!(valid, vec![0.5, 0.5]);
+
+    let wrong_len = normalized_weights(2, Some(&[1.0]));
+    assert_eq!(wrong_len, vec![0.5, 0.5]);
+
+    let non_finite = normalized_weights(2, Some(&[f64::NAN, 1.0]));
+    assert_eq!(non_finite, vec![0.0, 1.0]);
+
+    let zero_sum = normalized_weights(2, Some(&[0.0, 0.0]));
+    assert_eq!(zero_sum, vec![0.5, 0.5]);
+}
+
 #[test]
 fn test_correction_depth_with_smoothing_enabled() {
     // Test that smoothing doesn't produce NaN or out-of-range values

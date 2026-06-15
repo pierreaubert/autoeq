@@ -602,3 +602,382 @@ pub(in super::super) fn extract_wav_path(source: &MeasurementSource) -> Option<S
         MeasurementSource::InMemory(_) | MeasurementSource::InMemoryMultiple(_) => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::MeasurementSource;
+    use crate::roomeq::types::{
+        OptimizerConfig, SubwooferStrategy, SubwooferSystemConfig, SystemConfig,
+    };
+    use crate::{InlineMeasurement, MeasurementMultiple, MeasurementRef, MeasurementSingle};
+    use ndarray::Array1;
+
+    fn small_curve() -> crate::Curve {
+        crate::Curve {
+            freq: Array1::logspace(10.0, f64::log10(20.0), f64::log10(20_000.0), 32),
+            spl: Array1::from_elem(32, 80.0),
+            phase: None,
+            ..Default::default()
+        }
+    }
+
+    fn single_source() -> MeasurementSource {
+        MeasurementSource::InMemory(small_curve())
+    }
+
+    fn room_config_with_speakers(speakers: HashMap<String, SpeakerConfig>) -> RoomConfig {
+        RoomConfig {
+            version: crate::roomeq::types::default_config_version(),
+            system: None,
+            speakers,
+            crossovers: None,
+            target_curve: None,
+            optimizer: OptimizerConfig::default(),
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        }
+    }
+
+    #[test]
+    fn interp_threshold_crossing_basic() {
+        assert!((interp_threshold_crossing(100.0, 200.0, 0.0, 10.0, 5.0) - 150.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn interp_threshold_crossing_clamps_to_segment() {
+        assert_eq!(
+            interp_threshold_crossing(100.0, 200.0, 0.0, 10.0, -5.0),
+            100.0
+        );
+        assert_eq!(
+            interp_threshold_crossing(100.0, 200.0, 0.0, 10.0, 15.0),
+            200.0
+        );
+    }
+
+    #[test]
+    fn interp_threshold_crossing_horizontal_returns_f0() {
+        assert_eq!(
+            interp_threshold_crossing(100.0, 200.0, 5.0, 5.0, 5.0),
+            100.0
+        );
+    }
+
+    #[test]
+    fn is_subwoofer_channel_by_name() {
+        let config = room_config_with_speakers(HashMap::new());
+        assert!(is_subwoofer_channel(&config, "lfe"));
+        assert!(is_subwoofer_channel(&config, "Sub"));
+        assert!(is_subwoofer_channel(&config, "subwoofer"));
+        assert!(!is_subwoofer_channel(&config, "left"));
+    }
+
+    #[test]
+    fn is_subwoofer_channel_by_system_mapping() {
+        let mut speakers = HashMap::new();
+        speakers.insert("left".to_string(), SpeakerConfig::Single(single_source()));
+        speakers.insert("lfe".to_string(), SpeakerConfig::Single(single_source()));
+        let config = RoomConfig {
+            system: Some(SystemConfig {
+                model: crate::roomeq::types::SystemModel::HomeCinema,
+                speakers: HashMap::from([
+                    ("Left".to_string(), "left".to_string()),
+                    ("LFE".to_string(), "lfe".to_string()),
+                ]),
+                subwoofers: Some(SubwooferSystemConfig {
+                    config: SubwooferStrategy::Single,
+                    crossover: None,
+                    mapping: [("lfe".to_string(), "Left".to_string())].into(),
+                }),
+                bass_management: None,
+            ..Default::default()
+        }),
+            ..room_config_with_speakers(speakers)
+        };
+        assert!(is_subwoofer_channel(&config, "lfe"));
+        assert!(!is_subwoofer_channel(&config, "left"));
+    }
+
+    #[test]
+    fn find_sub_main_pairings_explicit_system() {
+        let mut speakers = HashMap::new();
+        speakers.insert("left".to_string(), SpeakerConfig::Single(single_source()));
+        speakers.insert("lfe".to_string(), SpeakerConfig::Single(single_source()));
+        let config = RoomConfig {
+            system: Some(SystemConfig {
+                model: crate::roomeq::types::SystemModel::HomeCinema,
+                speakers: HashMap::from([
+                    ("Left".to_string(), "left".to_string()),
+                    ("LFE".to_string(), "lfe".to_string()),
+                ]),
+                subwoofers: Some(SubwooferSystemConfig {
+                    config: SubwooferStrategy::Single,
+                    crossover: None,
+                    mapping: [("lfe".to_string(), "Left".to_string())].into(),
+                }),
+                bass_management: None,
+            ..Default::default()
+        }),
+            ..room_config_with_speakers(speakers)
+        };
+        let curves = HashMap::from([
+            ("left".to_string(), small_curve()),
+            ("lfe".to_string(), small_curve()),
+        ]);
+        let pairings = find_sub_main_pairings(&config, &curves);
+        assert_eq!(pairings, vec![("LFE".to_string(), "Left".to_string())]);
+    }
+
+    #[test]
+    fn find_sub_main_pairings_legacy_heuristic() {
+        let mut speakers = HashMap::new();
+        speakers.insert("left".to_string(), SpeakerConfig::Single(single_source()));
+        speakers.insert("sub".to_string(), SpeakerConfig::Single(single_source()));
+        let config = room_config_with_speakers(speakers);
+        let curves = HashMap::from([
+            ("left".to_string(), small_curve()),
+            ("sub".to_string(), small_curve()),
+        ]);
+        let mut pairings = find_sub_main_pairings(&config, &curves);
+        pairings.sort();
+        assert_eq!(pairings, vec![("sub".to_string(), "left".to_string())]);
+    }
+
+    #[test]
+    fn pipeline_stopped_error_includes_step() {
+        let err = pipeline_stopped_error(crate::roomeq::pipeline::PipelineStepId::Validation);
+        let msg = format!("{:?}", err);
+        assert!(msg.contains("Validation"));
+        assert!(msg.contains("stopped by observer"));
+    }
+
+    #[test]
+    fn optimizer_progress_iterations_is_positive() {
+        let mut speakers = HashMap::new();
+        speakers.insert("left".to_string(), SpeakerConfig::Single(single_source()));
+        let mut config = room_config_with_speakers(speakers);
+        config.optimizer.num_filters = 2;
+        config.optimizer.max_iter = 1_000;
+        config.optimizer.population = 10;
+        let iters = optimizer_progress_iterations(&config);
+        assert!(iters > 0);
+    }
+
+    #[test]
+    fn channels_for_generic_optimization_without_system() {
+        let mut speakers = HashMap::new();
+        speakers.insert("left".to_string(), SpeakerConfig::Single(single_source()));
+        speakers.insert("right".to_string(), SpeakerConfig::Single(single_source()));
+        let config = room_config_with_speakers(speakers);
+        let channels = channels_for_generic_optimization(&config);
+        let names: Vec<_> = channels.iter().map(|(n, _)| n.clone()).collect();
+        assert!(names.contains(&"left".to_string()));
+        assert!(names.contains(&"right".to_string()));
+    }
+
+    #[test]
+    fn channels_for_generic_optimization_with_system() {
+        let mut speakers = HashMap::new();
+        speakers.insert("left".to_string(), SpeakerConfig::Single(single_source()));
+        speakers.insert("right".to_string(), SpeakerConfig::Single(single_source()));
+        let config = RoomConfig {
+            system: Some(SystemConfig {
+                model: crate::roomeq::types::SystemModel::Stereo,
+                speakers: HashMap::from([
+                    ("Left".to_string(), "left".to_string()),
+                    ("Right".to_string(), "right".to_string()),
+                ]),
+                subwoofers: None,
+                bass_management: None,
+            ..Default::default()
+        }),
+            ..room_config_with_speakers(speakers)
+        };
+        let channels = channels_for_generic_optimization(&config);
+        let names: Vec<_> = channels.iter().map(|(n, _)| n.clone()).collect();
+        assert!(names.contains(&"Left".to_string()));
+        assert!(names.contains(&"Right".to_string()));
+    }
+
+    #[test]
+    fn compute_shared_mean_spl_with_two_channels() {
+        let channels = vec![
+            ("left".to_string(), SpeakerConfig::Single(single_source())),
+            ("right".to_string(), SpeakerConfig::Single(single_source())),
+        ];
+        let config = room_config_with_speakers(HashMap::new());
+        let mean = compute_shared_mean_spl(&config, &channels);
+        assert!(mean.is_some_and(|m| (m - 80.0).abs() < 1.0));
+    }
+
+    #[test]
+    fn compute_shared_mean_spl_single_channel_returns_none() {
+        let channels = vec![("left".to_string(), SpeakerConfig::Single(single_source()))];
+        let config = room_config_with_speakers(HashMap::new());
+        assert!(compute_shared_mean_spl(&config, &channels).is_none());
+    }
+
+    #[test]
+    fn generic_channel_progress_iterations_positive() {
+        let mut speakers = HashMap::new();
+        speakers.insert("left".to_string(), SpeakerConfig::Single(single_source()));
+        let mut config = room_config_with_speakers(speakers);
+        config.optimizer.num_filters = 1;
+        config.optimizer.max_iter = 100;
+        config.optimizer.population = 8;
+        let iters = generic_channel_progress_iterations(&config);
+        assert!(iters > 0);
+    }
+
+    #[test]
+    fn bed_channel_priority_front_left_highest() {
+        use crate::roomeq::home_cinema::HomeCinemaRole;
+        assert_eq!(bed_channel_priority(HomeCinemaRole::FrontLeft), Some(0));
+        assert_eq!(bed_channel_priority(HomeCinemaRole::Center), Some(2));
+        assert_eq!(bed_channel_priority(HomeCinemaRole::Lfe), None);
+    }
+
+    #[test]
+    fn resolve_from_measurement_slope_flat_bed_channels_is_zero() {
+        let mut speakers = HashMap::new();
+        speakers.insert("left".to_string(), SpeakerConfig::Single(single_source()));
+        speakers.insert("right".to_string(), SpeakerConfig::Single(single_source()));
+        speakers.insert("lfe".to_string(), SpeakerConfig::Single(single_source()));
+        let config = room_config_with_speakers(speakers);
+        let slope = resolve_from_measurement_slope(&config);
+        assert!(slope.abs() < 0.1, "expected ~0 dB/oct, got {}", slope);
+    }
+
+    #[test]
+    fn identify_acoustic_groups_explicit_speaker_name() {
+        let mut speakers = HashMap::new();
+        speakers.insert(
+            "left".to_string(),
+            SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
+                measurement: MeasurementRef::Inline(InlineMeasurement {
+                    frequencies: vec![100.0],
+                    magnitude_db: vec![80.0],
+                    phase_deg: None,
+                    name: None,
+                    wav_path: None,
+                    csv_path: None,
+                }),
+                speaker_name: Some("MySpeaker".to_string()),
+            })),
+        );
+        speakers.insert(
+            "right".to_string(),
+            SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
+                measurement: MeasurementRef::Inline(InlineMeasurement {
+                    frequencies: vec![100.0],
+                    magnitude_db: vec![80.0],
+                    phase_deg: None,
+                    name: None,
+                    wav_path: None,
+                    csv_path: None,
+                }),
+                speaker_name: Some("MySpeaker".to_string()),
+            })),
+        );
+        let config = room_config_with_speakers(speakers);
+        let groups = identify_acoustic_groups(&config);
+        assert_eq!(groups.get("MySpeaker").map(|v| v.len()), Some(2));
+    }
+
+    #[test]
+    fn identify_acoustic_groups_positional_lr_pair() {
+        let mut speakers = HashMap::new();
+        speakers.insert("L".to_string(), SpeakerConfig::Single(single_source()));
+        speakers.insert("R".to_string(), SpeakerConfig::Single(single_source()));
+        let config = room_config_with_speakers(speakers);
+        let groups = identify_acoustic_groups(&config);
+        assert!(groups.contains_key("L-R"));
+    }
+
+    #[test]
+    fn shared_target_level_median_odd() {
+        assert_eq!(shared_target_level(&[70.0, 80.0, 90.0]), 80.0);
+    }
+
+    #[test]
+    fn shared_target_level_average_even() {
+        assert_eq!(shared_target_level(&[70.0, 90.0]), 80.0);
+    }
+
+    #[test]
+    fn shared_target_level_ignores_non_finite() {
+        assert_eq!(shared_target_level(&[70.0, f64::NAN, 90.0]), 80.0);
+    }
+
+    #[test]
+    fn shared_target_level_empty_returns_zero() {
+        assert_eq!(shared_target_level(&[]), 0.0);
+    }
+
+    #[test]
+    fn extract_wav_path_single_inline() {
+        let source = MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Inline(InlineMeasurement {
+                frequencies: vec![100.0],
+                magnitude_db: vec![80.0],
+                phase_deg: None,
+                name: None,
+                wav_path: Some("ir.wav".to_string()),
+                csv_path: None,
+            }),
+            speaker_name: None,
+        });
+        assert_eq!(extract_wav_path(&source), Some("ir.wav".to_string()));
+    }
+
+    #[test]
+    fn extract_wav_path_multiple_uses_first() {
+        let source = MeasurementSource::Multiple(MeasurementMultiple {
+            measurements: vec![
+                MeasurementRef::Inline(InlineMeasurement {
+                    frequencies: vec![100.0],
+                    magnitude_db: vec![80.0],
+                    phase_deg: None,
+                    name: None,
+                    wav_path: Some("first.wav".to_string()),
+                    csv_path: None,
+                }),
+                MeasurementRef::Inline(InlineMeasurement {
+                    frequencies: vec![100.0],
+                    magnitude_db: vec![80.0],
+                    phase_deg: None,
+                    name: None,
+                    wav_path: Some("second.wav".to_string()),
+                    csv_path: None,
+                }),
+            ],
+            speaker_name: None,
+        });
+        assert_eq!(extract_wav_path(&source), Some("first.wav".to_string()));
+    }
+
+    #[test]
+    fn extract_wav_path_in_memory_returns_none() {
+        assert!(extract_wav_path(&single_source()).is_none());
+    }
+
+    #[test]
+    fn warn_if_optimizer_bounds_exceed_data_empty_curve_is_noop() {
+        let curve = crate::Curve {
+            freq: Array1::from_vec(vec![]),
+            spl: Array1::from_vec(vec![]),
+            phase: None,
+            ..Default::default()
+        };
+        let opt = OptimizerConfig::default();
+        warn_if_optimizer_bounds_exceed_data("left", &curve, &opt);
+    }
+
+    #[test]
+    fn validate_room_config_or_fail_empty_speakers_fails() {
+        let config = room_config_with_speakers(HashMap::new());
+        assert!(validate_room_config_or_fail(&config).is_err());
+    }
+}

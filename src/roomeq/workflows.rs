@@ -5,7 +5,6 @@
 
 use super::crossover;
 use super::dba;
-use super::multisub;
 use super::types::{
     CardioidConfig, CrossoverConfig, DBAConfig, MultiSubGroup, RoomConfig, SpeakerConfig,
     SubwooferStrategy, SystemConfig,
@@ -25,14 +24,24 @@ mod all;
 mod apply;
 mod bass;
 mod compute;
+#[cfg(test)]
+mod executor_tests;
+mod generic;
+mod home_cinema;
 mod mark;
 mod misc;
+mod multiseat;
+mod multisub;
 mod optimize;
 mod run;
+mod stereo;
+mod stereo_sub;
 #[cfg(test)]
 mod tests;
 mod types;
 mod workflow;
+
+mod supporting_source;
 
 pub use misc::*;
 pub use optimize::*;

@@ -17,3 +17,51 @@ pub(super) fn all_curves_share_frequency_grid(curves: &[&Curve]) -> bool {
                 && super::super::frequency_grid::same_frequency_grid(&reference.freq, &curve.freq)
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use ndarray::Array1;
+
+    fn make_curve(freq: Vec<f64>, spl: Vec<f64>, phase: Option<Vec<f64>>) -> crate::Curve {
+        crate::Curve {
+            freq: Array1::from_vec(freq),
+            spl: Array1::from_vec(spl),
+            phase: phase.map(Array1::from_vec),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn all_curves_have_usable_phase_true_when_all_have_finite_phase() {
+        let c1 = make_curve(vec![100.0, 200.0], vec![80.0, 80.0], Some(vec![0.0, 0.0]));
+        let c2 = make_curve(vec![100.0, 200.0], vec![80.0, 80.0], Some(vec![0.0, 0.0]));
+        assert!(super::all_curves_have_usable_phase(&[&c1, &c2]));
+    }
+
+    #[test]
+    fn all_curves_have_usable_phase_false_when_one_missing_phase() {
+        let c1 = make_curve(vec![100.0, 200.0], vec![80.0, 80.0], Some(vec![0.0, 0.0]));
+        let c2 = make_curve(vec![100.0, 200.0], vec![80.0, 80.0], None);
+        assert!(!super::all_curves_have_usable_phase(&[&c1, &c2]));
+    }
+
+    #[test]
+    fn all_curves_share_frequency_grid_true_for_same_grid() {
+        let c1 = make_curve(vec![100.0, 200.0, 400.0], vec![80.0, 80.0, 80.0], None);
+        let c2 = make_curve(vec![100.0, 200.0, 400.0], vec![80.0, 80.0, 80.0], None);
+        assert!(super::all_curves_share_frequency_grid(&[&c1, &c2]));
+    }
+
+    #[test]
+    fn all_curves_share_frequency_grid_false_for_different_grids() {
+        let c1 = make_curve(vec![100.0, 200.0, 400.0], vec![80.0, 80.0, 80.0], None);
+        let c2 = make_curve(vec![100.0, 250.0, 400.0], vec![80.0, 80.0, 80.0], None);
+        assert!(!super::all_curves_share_frequency_grid(&[&c1, &c2]));
+    }
+
+    #[test]
+    fn all_curves_share_frequency_grid_false_for_empty() {
+        let curves: &[&crate::Curve] = &[];
+        assert!(!super::all_curves_share_frequency_grid(curves));
+    }
+}

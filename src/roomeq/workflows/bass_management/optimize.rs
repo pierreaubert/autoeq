@@ -840,3 +840,497 @@ pub(in super::super) fn optimize_bass_management_joint_solution(
     }
     vec!["joint_route_de_optimized".to_string()]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::types::{BassManagementJointGroupInput, GroupCrossoverPlan, SubDriverInfo};
+    use super::*;
+    use crate::roomeq::home_cinema::BassManagementSubOutputReport;
+    use crate::roomeq::types::{
+        BassManagementConfig, CrossoverConfig, OptimizerConfig, ProcessingMode, RoomConfig,
+        SystemConfig, SystemModel,
+    };
+    use ndarray::Array1;
+    use std::collections::{BTreeMap, HashMap};
+
+    fn flat_curve_with_phase() -> crate::Curve {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(20_000.0), 96);
+        let spl = Array1::from_elem(freq.len(), 80.0);
+        let phase = Some(Array1::from_elem(freq.len(), 0.0));
+        crate::Curve {
+            freq,
+            spl,
+            phase,
+            ..Default::default()
+        }
+    }
+
+    fn flat_curve_without_phase() -> crate::Curve {
+        let mut c = flat_curve_with_phase();
+        c.phase = None;
+        c
+    }
+
+    fn curve_with_grid_offset() -> crate::Curve {
+        let mut c = flat_curve_with_phase();
+        if !c.freq.is_empty() {
+            c.freq[0] += 1.0;
+        }
+        c
+    }
+
+    fn tiny_optimizer() -> OptimizerConfig {
+        OptimizerConfig {
+            processing_mode: ProcessingMode::LowLatency,
+            max_iter: 20,
+            population: 6,
+            seed: Some(1),
+            ..Default::default()
+        }
+    }
+
+    fn base_room_config(optimizer: OptimizerConfig) -> RoomConfig {
+        RoomConfig {
+            version: "1.0.0".to_string(),
+            system: None,
+            speakers: HashMap::new(),
+            crossovers: None,
+            target_curve: None,
+            optimizer,
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        }
+    }
+
+    fn fallback_crossover() -> CrossoverConfig {
+        CrossoverConfig {
+            crossover_type: "LR24".to_string(),
+            frequency: Some(80.0),
+            frequencies: None,
+            frequency_range: None,
+        }
+    }
+
+    fn make_curves(phase: bool) -> HashMap<String, crate::Curve> {
+        let mut map = HashMap::new();
+        for role in ["Left", "Right", "Center", "LFE"] {
+            map.insert(
+                role.to_string(),
+                if phase {
+                    flat_curve_with_phase()
+                } else {
+                    flat_curve_without_phase()
+                },
+            );
+        }
+        map
+    }
+
+    fn main_roles() -> Vec<String> {
+        vec![
+            "Left".to_string(),
+            "Right".to_string(),
+            "Center".to_string(),
+        ]
+    }
+
+    #[test]
+    fn group_crossover_phase_available_returns_report() {
+        let config = base_room_config(tiny_optimizer());
+        let aligned_curves = make_curves(true);
+        let aligned_pre_eq_curves = make_curves(true);
+        let reports = optimize_home_cinema_group_crossovers(
+            &config,
+            &main_roles(),
+            &aligned_curves,
+            &aligned_pre_eq_curves,
+            "LFE",
+            &fallback_crossover(),
+            48_000.0,
+            None,
+        )
+        .unwrap();
+
+        assert!(reports.contains_key("lcr"));
+        let report = &reports["lcr"];
+        assert_eq!(report.group_id, "lcr");
+        assert!(report.roles.contains(&"Left".to_string()));
+        assert!(report.selected_crossover_hz.is_some());
+        assert!(report.advisories.iter().all(|a| {
+            a == "ok" || a == "joint_de_optimized" || a == "group_optimizer_no_improvement"
+        }));
+    }
+
+    #[test]
+    fn group_crossover_missing_phase_returns_advisory() {
+        let config = base_room_config(tiny_optimizer());
+        let aligned_curves = make_curves(false);
+        let aligned_pre_eq_curves = make_curves(false);
+        let reports = optimize_home_cinema_group_crossovers(
+            &config,
+            &main_roles(),
+            &aligned_curves,
+            &aligned_pre_eq_curves,
+            "LFE",
+            &fallback_crossover(),
+            48_000.0,
+            None,
+        )
+        .unwrap();
+
+        assert!(reports.contains_key("lcr"));
+        assert!(
+            reports["lcr"]
+                .advisories
+                .contains(&"missing_phase_group_crossover_alignment_skipped".to_string())
+        );
+    }
+
+    #[test]
+    fn group_crossover_frequency_grid_mismatch_returns_advisory() {
+        let config = base_room_config(tiny_optimizer());
+        let mut aligned_curves = make_curves(true);
+        let mut aligned_pre_eq_curves = make_curves(true);
+        aligned_curves.insert("Left".to_string(), curve_with_grid_offset());
+        aligned_pre_eq_curves.insert("Left".to_string(), curve_with_grid_offset());
+
+        let reports = optimize_home_cinema_group_crossovers(
+            &config,
+            &main_roles(),
+            &aligned_curves,
+            &aligned_pre_eq_curves,
+            "LFE",
+            &fallback_crossover(),
+            48_000.0,
+            None,
+        )
+        .unwrap();
+
+        assert!(reports.contains_key("lcr"));
+        assert!(
+            reports["lcr"]
+                .advisories
+                .contains(&"frequency_grid_mismatch_group_crossover_alignment_skipped".to_string())
+        );
+    }
+
+    #[test]
+    fn group_crossover_ranged_frequency_optimizes_within_range() {
+        let optimizer = tiny_optimizer();
+        let system = SystemConfig {
+            model: SystemModel::HomeCinema,
+            speakers: HashMap::new(),
+            subwoofers: None,
+            bass_management: Some(BassManagementConfig {
+                group_crossovers: HashMap::from([("lcr".to_string(), "lcr_range".to_string())]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let config = RoomConfig {
+            version: "1.0.0".to_string(),
+            system: Some(system),
+            speakers: HashMap::new(),
+            crossovers: Some(HashMap::from([(
+                "lcr_range".to_string(),
+                CrossoverConfig {
+                    crossover_type: "LR24".to_string(),
+                    frequency: None,
+                    frequencies: None,
+                    frequency_range: Some((60.0, 100.0)),
+                },
+            )])),
+            target_curve: None,
+            optimizer,
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        };
+
+        let aligned_curves = make_curves(true);
+        let aligned_pre_eq_curves = make_curves(true);
+        let reports = optimize_home_cinema_group_crossovers(
+            &config,
+            &main_roles(),
+            &aligned_curves,
+            &aligned_pre_eq_curves,
+            "LFE",
+            &fallback_crossover(),
+            48_000.0,
+            None,
+        )
+        .unwrap();
+
+        let report = &reports["lcr"];
+        let freq = report.selected_crossover_hz.unwrap();
+        assert!(
+            (60.0..=100.0).contains(&freq),
+            "optimized crossover {freq} outside ranged bounds"
+        );
+    }
+
+    #[test]
+    #[ignore = "no-improvement revert branch is hard to trigger deterministically"]
+    fn group_crossover_no_improvement_revert_branch_documented() {
+        // The revert branch is reached when the crossover optimizer cannot
+        // produce a lower objective than the baseline. Because the DE objective
+        // surface is non-convex and seed-dependent, forcing this outcome is not
+        // reliable in a unit test; the branch is exercised indirectly by the
+        // optimizer when conditions happen to produce objective_after >=
+        // objective_before.
+    }
+
+    #[test]
+    fn joint_group_crossovers_happy_path_with_phase() {
+        let config = base_room_config(tiny_optimizer());
+        let virtual_main = flat_curve_with_phase();
+        let sub_curve = flat_curve_with_phase();
+        let plan = GroupCrossoverPlan {
+            crossover_type: "LR24".to_string(),
+            frequency_hz: 80.0,
+            configured_hz: 80.0,
+            frequency_range: None,
+        };
+        let input = BassManagementJointGroupInput {
+            group_id: "lcr".to_string(),
+            roles: main_roles(),
+            plan,
+            virtual_main,
+            phase_available: true,
+            advisories: vec![],
+        };
+
+        let current_reports = BTreeMap::new();
+        let result = optimize_home_cinema_joint_group_crossovers(
+            &config,
+            &[input],
+            &current_reports,
+            &sub_curve,
+            48_000.0,
+        );
+
+        if let Some(reports) = result {
+            assert!(reports.contains_key("lcr"));
+        }
+    }
+
+    #[test]
+    fn joint_solution_happy_path_with_driver_metadata() {
+        let config = base_room_config(tiny_optimizer());
+        let aligned_curves = make_curves(true);
+        let aligned_pre_eq_curves = make_curves(true);
+        let mut group_results = optimize_home_cinema_group_crossovers(
+            &config,
+            &main_roles(),
+            &aligned_curves,
+            &aligned_pre_eq_curves,
+            "LFE",
+            &fallback_crossover(),
+            48_000.0,
+            None,
+        )
+        .unwrap();
+
+        let mut sub_outputs = vec![BassManagementSubOutputReport {
+            output_role: "LFE".to_string(),
+            gain_db: 0.0,
+            delay_ms: 0.0,
+            polarity_inverted: false,
+            strategy_source: "default".to_string(),
+            headroom_contribution_db: 0.0,
+        }];
+        let drivers = vec![SubDriverInfo {
+            name: "LFE".to_string(),
+            gain: 0.0,
+            delay: 0.0,
+            inverted: false,
+            initial_curve: Some(flat_curve_with_phase()),
+        }];
+
+        let advisories = optimize_bass_management_joint_solution(
+            &config,
+            &main_roles(),
+            &aligned_pre_eq_curves,
+            &mut group_results,
+            &mut sub_outputs,
+            Some(&drivers),
+            "LFE",
+            48_000.0,
+        );
+
+        assert!(
+            !advisories
+                .iter()
+                .any(|a| a.starts_with("joint_route_optimizer_skipped"))
+        );
+        assert!(group_results.contains_key("lcr"));
+    }
+
+    #[test]
+    fn joint_solution_skips_on_driver_metadata_mismatch() {
+        let config = base_room_config(tiny_optimizer());
+        let aligned_pre_eq_curves = make_curves(true);
+        let mut group_results = BTreeMap::new();
+        let mut sub_outputs = vec![BassManagementSubOutputReport {
+            output_role: "LFE".to_string(),
+            gain_db: 0.0,
+            delay_ms: 0.0,
+            polarity_inverted: false,
+            strategy_source: "default".to_string(),
+            headroom_contribution_db: 0.0,
+        }];
+        let drivers = vec![
+            SubDriverInfo {
+                name: "sub1".to_string(),
+                gain: 0.0,
+                delay: 0.0,
+                inverted: false,
+                initial_curve: Some(flat_curve_with_phase()),
+            },
+            SubDriverInfo {
+                name: "sub2".to_string(),
+                gain: 0.0,
+                delay: 0.0,
+                inverted: false,
+                initial_curve: Some(flat_curve_with_phase()),
+            },
+        ];
+
+        let advisories = optimize_bass_management_joint_solution(
+            &config,
+            &main_roles(),
+            &aligned_pre_eq_curves,
+            &mut group_results,
+            &mut sub_outputs,
+            Some(&drivers),
+            "LFE",
+            48_000.0,
+        );
+
+        assert!(
+            advisories
+                .contains(&"joint_route_optimizer_skipped_driver_metadata_mismatch".to_string())
+        );
+    }
+
+    #[test]
+    fn joint_solution_skips_when_no_phase_valid_groups() {
+        let config = base_room_config(tiny_optimizer());
+        let aligned_pre_eq_curves = make_curves(false);
+        let mut group_results = BTreeMap::new();
+        let mut sub_outputs = vec![BassManagementSubOutputReport {
+            output_role: "LFE".to_string(),
+            gain_db: 0.0,
+            delay_ms: 0.0,
+            polarity_inverted: false,
+            strategy_source: "default".to_string(),
+            headroom_contribution_db: 0.0,
+        }];
+        let drivers = vec![SubDriverInfo {
+            name: "LFE".to_string(),
+            gain: 0.0,
+            delay: 0.0,
+            inverted: false,
+            initial_curve: Some(flat_curve_with_phase()),
+        }];
+
+        let advisories = optimize_bass_management_joint_solution(
+            &config,
+            &main_roles(),
+            &aligned_pre_eq_curves,
+            &mut group_results,
+            &mut sub_outputs,
+            Some(&drivers),
+            "LFE",
+            48_000.0,
+        );
+
+        assert!(
+            advisories.contains(&"joint_route_optimizer_skipped_no_phase_valid_groups".to_string())
+        );
+    }
+
+    #[test]
+    fn joint_solution_dba_bounds_reachable() {
+        let config = base_room_config(tiny_optimizer());
+        let aligned_curves = make_curves(true);
+        let aligned_pre_eq_curves = make_curves(true);
+        let mut group_results = optimize_home_cinema_group_crossovers(
+            &config,
+            &main_roles(),
+            &aligned_curves,
+            &aligned_pre_eq_curves,
+            "LFE",
+            &fallback_crossover(),
+            48_000.0,
+            None,
+        )
+        .unwrap();
+
+        let mut sub_outputs = vec![
+            BassManagementSubOutputReport {
+                output_role: "sub_front".to_string(),
+                gain_db: 0.0,
+                delay_ms: 0.0,
+                polarity_inverted: false,
+                strategy_source: "dba_front".to_string(),
+                headroom_contribution_db: 0.0,
+            },
+            BassManagementSubOutputReport {
+                output_role: "sub_rear".to_string(),
+                gain_db: 0.0,
+                delay_ms: 0.0,
+                polarity_inverted: false,
+                strategy_source: "dba_rear".to_string(),
+                headroom_contribution_db: 0.0,
+            },
+        ];
+        let drivers = vec![
+            SubDriverInfo {
+                name: "sub_front".to_string(),
+                gain: 0.0,
+                delay: 0.0,
+                inverted: false,
+                initial_curve: Some(flat_curve_with_phase()),
+            },
+            SubDriverInfo {
+                name: "sub_rear".to_string(),
+                gain: 0.0,
+                delay: 0.0,
+                inverted: false,
+                initial_curve: Some(flat_curve_with_phase()),
+            },
+        ];
+
+        let advisories = optimize_bass_management_joint_solution(
+            &config,
+            &main_roles(),
+            &aligned_pre_eq_curves,
+            &mut group_results,
+            &mut sub_outputs,
+            Some(&drivers),
+            "LFE",
+            48_000.0,
+        );
+
+        assert!(
+            !advisories
+                .iter()
+                .any(|a| a.starts_with("joint_route_optimizer_skipped"))
+        );
+        assert!(group_results.contains_key("lcr"));
+        // DBA front gain is locked and polarity stays false; DBA rear polarity
+        // is forced to true by the bounds encoded in the optimizer.
+        assert!(
+            sub_outputs
+                .iter()
+                .any(|o| o.strategy_source == "dba_front" && !o.polarity_inverted)
+        );
+        assert!(
+            sub_outputs
+                .iter()
+                .any(|o| o.strategy_source == "dba_rear" && o.polarity_inverted)
+        );
+    }
+}

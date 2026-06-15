@@ -4,9 +4,9 @@ use super::super::types::MultiSeatStrategy;
 use super::average::average_flatness_from_responses;
 use super::average::average_perceptual_from_responses;
 use super::misc::variance_from_responses;
-use super::mso::mso_resource_penalty;
 use super::mso_objective_context::MsoObjectiveContext;
 use super::primary::primary_constrained_from_responses;
+use super::types::mso_resource_penalty;
 
 pub(super) fn objective_name(strategy: MultiSeatStrategy) -> &'static str {
     match strategy {

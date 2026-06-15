@@ -331,4 +331,105 @@ mod tests {
     fn de_solves_bounded_scalar_quadratic() {
         assert_solves_quadratic("autoeq:de");
     }
+
+    #[test]
+    fn cobyla_solves_bounded_scalar_quadratic() {
+        assert_solves_quadratic("autoeq:cobyla");
+    }
+
+    #[test]
+    fn isres_solves_bounded_scalar_quadratic() {
+        assert_solves_quadratic("autoeq:isres");
+    }
+
+    #[test]
+    fn invalid_algorithm_returns_error() {
+        let result = optimize_bounded_scalar(
+            &[(0.0, 1.0)],
+            &[0.5],
+            &ScalarOptimConfig {
+                algorithm: "autoeq:nsga2".to_string(),
+                ..Default::default()
+            },
+            |x| x[0],
+        );
+        assert!(result.is_err(), "NSGA2 should not be supported for scalar");
+        assert!(result.unwrap_err().contains("not supported"));
+    }
+
+    #[test]
+    fn unknown_algorithm_returns_error() {
+        let result = optimize_bounded_scalar(
+            &[(0.0, 1.0)],
+            &[0.5],
+            &ScalarOptimConfig {
+                algorithm: "no-such-algo".to_string(),
+                ..Default::default()
+            },
+            |x| x[0],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown algorithm"));
+    }
+
+    #[test]
+    fn validate_problem_rejects_empty_bounds() {
+        let result = optimize_bounded_scalar(
+            &[],
+            &[],
+            &ScalarOptimConfig {
+                algorithm: "autoeq:de".to_string(),
+                ..Default::default()
+            },
+            |x| x[0],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("at least one parameter"));
+    }
+
+    #[test]
+    fn validate_problem_rejects_dimension_mismatch() {
+        let result = optimize_bounded_scalar(
+            &[(0.0, 1.0)],
+            &[0.5, 0.5],
+            &ScalarOptimConfig {
+                algorithm: "autoeq:de".to_string(),
+                ..Default::default()
+            },
+            |x| x[0],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("dimension mismatch"));
+    }
+
+    #[test]
+    fn validate_problem_rejects_reversed_bounds() {
+        let result = optimize_bounded_scalar(
+            &[(1.0, 0.0)],
+            &[0.5],
+            &ScalarOptimConfig {
+                algorithm: "autoeq:de".to_string(),
+                ..Default::default()
+            },
+            |x| x[0],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("invalid scalar optimizer bounds"));
+    }
+
+    #[test]
+    fn clamp_initial_clamps_out_of_bounds() {
+        let result = optimize_bounded_scalar(
+            &[(0.0, 1.0), (-1.0, 0.0)],
+            &[-5.0, 5.0],
+            &ScalarOptimConfig {
+                algorithm: "autoeq:cobyla".to_string(),
+                max_iter: 100,
+                ..Default::default()
+            },
+            |x| (x[0] - 0.5).powi(2) + (x[1] + 0.5).powi(2),
+        )
+        .expect("optimizer should run");
+        assert!(result.fun < 1e-2);
+    }
 }

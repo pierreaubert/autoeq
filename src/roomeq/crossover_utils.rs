@@ -214,3 +214,94 @@ pub(super) fn check_octave_consistency(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::array;
+
+    fn flat_curve() -> Curve {
+        Curve {
+            freq: array![20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0],
+            spl: array![80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0],
+            phase: None,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn split_curve_at_frequency_splits_low_and_high_bands() {
+        let curve = flat_curve();
+        let (low, high) = split_curve_at_frequency(&curve, 1000.0);
+        // Low band starts at the lowest frequency and extends past the crossover
+        assert_eq!(low.freq[0], curve.freq[0]);
+        assert!(low.freq.len() > 5);
+        // High band starts before the crossover and extends to the end
+        assert_eq!(*high.freq.last().unwrap(), *curve.freq.last().unwrap());
+        assert!(high.freq.len() > 5);
+        // Overlap means the total sliced points exceed the original length
+        assert!(low.freq.len() + high.freq.len() > curve.freq.len());
+    }
+
+    #[test]
+    fn split_curve_at_frequency_below_all_returns_full_low_curve() {
+        let curve = flat_curve();
+        let (low, high) = split_curve_at_frequency(&curve, 10.0);
+        // Crossover below all frequencies: low band gets the first few overlap points,
+        // high band contains the full original curve.
+        assert_eq!(low.freq.len(), 3);
+        assert_eq!(high.freq.len(), curve.freq.len());
+    }
+
+    #[test]
+    fn compute_lr24_crossover_responses_have_opposite_slopes() {
+        let freqs = ndarray::Array1::from_vec(vec![100.0, 1000.0, 10000.0]);
+        let (lp, hp) = compute_lr24_crossover_responses(&freqs, 1000.0, 48000.0);
+        assert_eq!(lp.len(), freqs.len());
+        assert_eq!(hp.len(), freqs.len());
+        // At low frequency, lowpass should be near unity and highpass near zero
+        assert!(lp[0].norm() > hp[0].norm());
+        // At high frequency, highpass should be near unity and lowpass near zero
+        assert!(hp[2].norm() > lp[2].norm());
+    }
+
+    #[test]
+    fn check_group_consistency_skips_small_groups() {
+        let mut means = HashMap::new();
+        let mut curves = HashMap::new();
+        means.insert("L".to_string(), 80.0);
+        curves.insert("L".to_string(), flat_curve());
+        // Single channel should not panic or warn
+        check_group_consistency("test", &["L".to_string()], &means, &curves);
+    }
+
+    #[test]
+    fn check_group_consistency_warns_when_range_diff_exceeds_threshold() {
+        let mut means = HashMap::new();
+        means.insert("L".to_string(), 80.0);
+        means.insert("R".to_string(), 90.0);
+        let curves = HashMap::from([
+            ("L".to_string(), flat_curve()),
+            ("R".to_string(), flat_curve()),
+        ]);
+        check_group_consistency("test", &["L".to_string(), "R".to_string()], &means, &curves);
+    }
+
+    #[test]
+    fn check_octave_consistency_skips_non_overlapping_octaves() {
+        let c1 = Curve {
+            freq: array![1000.0, 2000.0],
+            spl: array![80.0, 80.0],
+            phase: None,
+            ..Default::default()
+        };
+        let c2 = Curve {
+            freq: array![1000.0, 2000.0],
+            spl: array![90.0, 90.0],
+            phase: None,
+            ..Default::default()
+        };
+        // Octaves with no overlap should not trigger warnings
+        check_octave_consistency("test", "L", "R", &c1, &c2);
+    }
+}

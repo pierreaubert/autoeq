@@ -91,6 +91,7 @@ pub fn compute_multiseat_combined_curves(
 /// Compute combined SPL response at each seat for given gains/delays.
 /// Returns `responses[seat_idx][freq_idx]` in dB SPL, only for frequencies
 /// within `[min_freq, max_freq]`.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn compute_combined_responses(
     interpolated: &[Vec<Vec<Complex64>>], // [sub][seat][freq]
     freqs: &Array1<f64>,
@@ -115,7 +116,7 @@ pub(super) fn compute_combined_responses(
     );
     spl_from_complex_responses(&complex)
 }
-
+#[allow(clippy::too_many_arguments)]
 pub(super) fn compute_combined_complex_responses(
     interpolated: &[Vec<Vec<Complex64>>], // [sub][seat][freq]
     freqs: &Array1<f64>,

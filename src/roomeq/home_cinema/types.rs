@@ -1,4 +1,6 @@
-use crate::roomeq::types::BassManagementConfig;
+use crate::roomeq::types::{
+    BassManagementConfig, RoleTargetConfig, TargetResponseConfig, TargetShape, UserPreference,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -252,6 +254,16 @@ fn default_route_matrix_gain() -> f64 {
     1.0
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_route_matrix_gain_is_unity() {
+        assert_eq!(default_route_matrix_gain(), 1.0);
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct BassManagementGroupReport {
     pub group_id: String,
@@ -340,4 +352,81 @@ pub struct EffectiveBassManagement {
     pub crossover_type: String,
     pub crossover_frequency_hz: Option<f64>,
     pub advisory: String,
+}
+
+pub(super) fn add_slope_offset(target: &mut TargetResponseConfig, slope_offset_db_per_octave: f64) {
+    let base_slope = match target.shape {
+        TargetShape::Flat => 0.0,
+        TargetShape::Harman => -0.8,
+        TargetShape::Custom => target.slope_db_per_octave,
+        TargetShape::File | TargetShape::FromMeasurement => target.slope_db_per_octave,
+    };
+    target.shape = TargetShape::Custom;
+    target.slope_db_per_octave = base_slope + slope_offset_db_per_octave;
+}
+
+pub(super) fn apply_role_target_adjustment(
+    role: HomeCinemaRole,
+    role_targets: &RoleTargetConfig,
+    target: &mut TargetResponseConfig,
+) {
+    let slope_offset = role_slope_offset(role, role_targets);
+    if slope_offset.abs() > 0.001 {
+        add_slope_offset(target, slope_offset);
+    }
+
+    match role {
+        HomeCinemaRole::Center => {
+            target.preference.treble_shelf_db += role_targets.center_treble_shelf_db;
+        }
+        HomeCinemaRole::SideSurroundLeft
+        | HomeCinemaRole::SideSurroundRight
+        | HomeCinemaRole::RearSurroundLeft
+        | HomeCinemaRole::RearSurroundRight
+        | HomeCinemaRole::WideLeft
+        | HomeCinemaRole::WideRight => {
+            target.preference.treble_shelf_db += role_targets.surround_treble_shelf_db;
+        }
+        role if role.is_height() => {
+            target.preference.treble_shelf_db += role_targets.height_treble_shelf_db;
+        }
+        HomeCinemaRole::Lfe => {
+            target.preference.bass_shelf_db += role_targets.lfe_bass_shelf_db;
+        }
+        HomeCinemaRole::Subwoofer => {
+            target.preference.bass_shelf_db += role_targets.subwoofer_bass_shelf_db;
+        }
+        _ => {}
+    }
+
+    if target.preference.treble_shelf_freq <= 0.0 {
+        target.preference.treble_shelf_freq = UserPreference::default().treble_shelf_freq;
+    }
+    if target.preference.bass_shelf_freq <= 0.0 {
+        target.preference.bass_shelf_freq = UserPreference::default().bass_shelf_freq;
+    }
+}
+
+pub(super) fn role_slope_offset(role: HomeCinemaRole, role_targets: &RoleTargetConfig) -> f64 {
+    match role {
+        HomeCinemaRole::FrontLeft | HomeCinemaRole::FrontRight => {
+            role_targets.front_slope_offset_db_per_octave
+        }
+        HomeCinemaRole::Center => role_targets.center_slope_offset_db_per_octave,
+        HomeCinemaRole::SideSurroundLeft
+        | HomeCinemaRole::SideSurroundRight
+        | HomeCinemaRole::RearSurroundLeft
+        | HomeCinemaRole::RearSurroundRight
+        | HomeCinemaRole::WideLeft
+        | HomeCinemaRole::WideRight => role_targets.surround_slope_offset_db_per_octave,
+        HomeCinemaRole::TopFrontLeft
+        | HomeCinemaRole::TopFrontRight
+        | HomeCinemaRole::TopMiddleLeft
+        | HomeCinemaRole::TopMiddleRight
+        | HomeCinemaRole::TopRearLeft
+        | HomeCinemaRole::TopRearRight => role_targets.height_slope_offset_db_per_octave,
+        HomeCinemaRole::Subwoofer => role_targets.subwoofer_slope_offset_db_per_octave,
+        HomeCinemaRole::Lfe => role_targets.lfe_slope_offset_db_per_octave,
+        HomeCinemaRole::Unknown => 0.0,
+    }
 }

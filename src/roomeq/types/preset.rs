@@ -300,4 +300,71 @@ mod tests {
             super::super::config::MultiMeasurementStrategy::VariancePenalized
         );
     }
+
+    #[test]
+    fn test_simple_preset_multi_position_strategies() {
+        let strategies = [
+            ("weighted_sum", super::super::config::MultiMeasurementStrategy::WeightedSum),
+            ("minimax", super::super::config::MultiMeasurementStrategy::Minimax),
+            ("minmax", super::super::config::MultiMeasurementStrategy::Minimax),
+            ("variance_penalized", super::super::config::MultiMeasurementStrategy::VariancePenalized),
+            ("minimize_variance", super::super::config::MultiMeasurementStrategy::VariancePenalized),
+            ("spatial_robustness", super::super::config::MultiMeasurementStrategy::SpatialRobustness),
+            ("minimax_uncertainty", super::super::config::MultiMeasurementStrategy::MinimaxUncertainty),
+            ("minimax_bootstrap_uncertainty", super::super::config::MultiMeasurementStrategy::MinimaxUncertainty),
+        ];
+        for (name, expected) in strategies {
+            let preset = SimplePresetConfig {
+                multi_position_strategy: name.to_string(),
+                ..Default::default()
+            };
+            let config = preset.to_optimizer_config();
+            assert_eq!(
+                config.multi_measurement.unwrap().strategy,
+                expected,
+                "strategy '{}' should map to {:?}",
+                name,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn test_simple_preset_unknown_multi_position_falls_back() {
+        let preset = SimplePresetConfig {
+            multi_position_strategy: "not_a_strategy".to_string(),
+            ..Default::default()
+        };
+        let config = preset.to_optimizer_config();
+        assert_eq!(
+            config.multi_measurement.unwrap().strategy,
+            super::super::config::MultiMeasurementStrategy::Average
+        );
+    }
+
+    #[test]
+    fn test_speaker_tier_labels_and_all() {
+        assert_eq!(SpeakerTier::NearField.label(), "Near-field (<1.5m)");
+        assert_eq!(SpeakerTier::MidField.label(), "Mid-field (1.5–3m)");
+        assert_eq!(SpeakerTier::FarField.label(), "Far-field (>3m)");
+        assert_eq!(SpeakerTier::all().len(), 3);
+    }
+
+    #[test]
+    fn test_simple_loss_choice_labels() {
+        assert_eq!(SimpleLossChoice::Flat.label(), "Flat (minimize deviation)");
+        assert_eq!(SimpleLossChoice::Epa.label(), "EPA (perceptual quality)");
+    }
+
+    #[test]
+    fn test_simple_processing_choice_labels() {
+        assert_eq!(SimpleProcessingChoice::Iir.label(), "IIR (low latency)");
+        assert_eq!(SimpleProcessingChoice::MixedPhase.label(), "Mixed Phase (best quality)");
+    }
+
+    #[test]
+    fn test_simple_crossover_choice_labels() {
+        assert_eq!(SimpleCrossoverChoice::Lr24.label(), "Linkwitz-Riley 24 dB/oct");
+        assert_eq!(SimpleCrossoverChoice::Lr48.label(), "Linkwitz-Riley 48 dB/oct");
+    }
 }

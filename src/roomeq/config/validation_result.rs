@@ -56,3 +56,31 @@ impl Default for ValidationResult {
         Self::valid()
     }
 }
+
+/// Shared context passed to each independent validation rule.
+///
+/// This type is the decomposition scaffolding for `validate_optimizer_config`.
+/// Each rule receives the optimizer config and a mutable result, allowing rules
+/// to be unit-tested in isolation.
+#[derive(Debug)]
+pub struct ValidationContext<'a> {
+    pub opt: &'a crate::roomeq::types::OptimizerConfig,
+    pub result: &'a mut ValidationResult,
+}
+
+impl<'a> ValidationContext<'a> {
+    pub fn new(
+        opt: &'a crate::roomeq::types::OptimizerConfig,
+        result: &'a mut ValidationResult,
+    ) -> Self {
+        Self { opt, result }
+    }
+
+    pub fn add_error(&mut self, error: impl Into<String>) {
+        self.result.add_error(error.into());
+    }
+
+    pub fn add_warning(&mut self, warning: impl Into<String>) {
+        self.result.add_warning(warning.into());
+    }
+}

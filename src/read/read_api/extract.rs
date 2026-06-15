@@ -464,3 +464,136 @@ pub(super) fn extract_contour_data(plot_data: &Value) -> Result<ContourPlotData,
 
     Err("Failed to extract contour data from plot data".into())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::Engine as _;
+    use serde_json::json;
+
+    fn f8_typed_array(values: &[f64]) -> Value {
+        let bytes: Vec<u8> = values
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        json!({"dtype": "f8", "bdata": base64::engine::general_purpose::STANDARD.encode(&bytes)})
+    }
+
+    fn plain_curve_trace(name: &str, freq: &[f64], spl: &[f64]) -> Value {
+        json!({
+            "name": name,
+            "x": freq,
+            "y": spl,
+        })
+    }
+
+    fn typed_curve_trace(name: &str, freq: &[f64], spl: &[f64]) -> Value {
+        json!({
+            "name": name,
+            "x": f8_typed_array(freq),
+            "y": f8_typed_array(spl),
+        })
+    }
+
+    #[test]
+    fn extract_curve_by_name_plain_arrays() {
+        let plot = json!({
+            "data": [plain_curve_trace("On Axis", &[20.0, 100.0, 1000.0], &[80.0, 85.0, 82.0])]
+        });
+        let curve = extract_curve_by_name(&plot, "CEA2034", "On Axis").unwrap();
+        assert_eq!(curve.freq.len(), 3);
+        assert!((curve.spl[1] - 85.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn extract_curve_by_name_typed_arrays() {
+        let plot = json!({
+            "data": [typed_curve_trace("On Axis", &[20.0, 100.0, 1000.0], &[80.0, 85.0, 82.0])]
+        });
+        let curve = extract_curve_by_name(&plot, "CEA2034", "On Axis").unwrap();
+        assert_eq!(curve.freq.len(), 3);
+        assert!((curve.freq[2] - 1000.0).abs() < 1e-9);
+        assert!((curve.spl[0] - 80.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn extract_curve_by_name_missing_curve_errors() {
+        let plot = json!({"data": []});
+        let err = extract_curve_by_name(&plot, "CEA2034", "On Axis").unwrap_err();
+        assert!(err.to_string().contains("Failed to extract frequency and SPL data"));
+    }
+
+    #[test]
+    fn extract_curve_by_name_extracts_phase() {
+        let plot = json!({
+            "data": [
+                plain_curve_trace("On Axis", &[20.0, 100.0], &[80.0, 85.0]),
+                {"name": "On Axis Phase", "y": [0.0, 10.0]},
+            ]
+        });
+        let curve = extract_curve_by_name(&plot, "CEA2034", "On Axis").unwrap();
+        assert!(curve.phase.is_some());
+        assert_eq!(curve.phase.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn extract_cea2034_curves_original_computes_pir() {
+        let names = [
+            "On Axis", "Listening Window", "Early Reflections",
+            "Sound Power", "Early Reflections DI", "Sound Power DI",
+        ];
+        let traces: Vec<Value> = names
+            .iter()
+            .map(|n| plain_curve_trace(n, &[100.0, 500.0, 1000.0], &[80.0, 82.0, 81.0]))
+            .collect();
+        let plot = json!({"data": traces});
+        let curves = extract_cea2034_curves_original(&plot, "CEA2034").unwrap();
+        assert!(curves.contains_key("Estimated In-Room Response"));
+        assert_eq!(curves["Estimated In-Room Response"].freq.len(), 3);
+    }
+
+    #[test]
+    fn extract_cea2034_curves_interpolates_to_grid() {
+        let names = [
+            "On Axis", "Listening Window", "Early Reflections",
+            "Sound Power", "Early Reflections DI", "Sound Power DI",
+        ];
+        let traces: Vec<Value> = names
+            .iter()
+            .map(|n| plain_curve_trace(n, &[100.0, 500.0, 1000.0], &[80.0, 82.0, 81.0]))
+            .collect();
+        let plot = json!({"data": traces});
+        let target = Array1::from_vec(vec![100.0, 1000.0]);
+        let curves = extract_cea2034_curves(&plot, "CEA2034", &target).unwrap();
+        assert_eq!(curves["On Axis"].freq.len(), 2);
+        assert_eq!(curves["Estimated In-Room Response"].freq.len(), 2);
+    }
+
+    #[test]
+    fn extract_directivity_curves_parses_typed_arrays() {
+        let plot = json!({
+            "data": [
+                typed_curve_trace("-10°", &[100.0, 1000.0], &[80.0, 81.0]),
+                typed_curve_trace("10°", &[100.0, 1000.0], &[82.0, 83.0]),
+            ]
+        });
+        let curves = extract_directivity_curves(&plot).unwrap();
+        assert_eq!(curves.len(), 2);
+        assert!(curves[0].angle < curves[1].angle);
+    }
+
+    #[test]
+    fn extract_contour_data_from_nested_arrays() {
+        let plot = json!({
+            "data": [{
+                "x": [100.0, 1000.0],
+                "y": [-10.0, 0.0, 10.0],
+                "z": [[80.0, 81.0], [82.0, 83.0], [84.0, 85.0]],
+            }]
+        });
+        let contour = extract_contour_data(&plot).unwrap();
+        assert_eq!(contour.freq_count, 2);
+        assert_eq!(contour.angle_count, 3);
+        assert_eq!(contour.spl.len(), 6);
+    }
+}

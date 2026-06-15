@@ -276,3 +276,90 @@ where
         self(event)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::roomeq::types::{OptimizerConfig, RoomConfig};
+
+    #[test]
+    fn pipeline_step_id_all_and_label() {
+        assert!(!PipelineStepId::ALL.is_empty());
+        for step in PipelineStepId::ALL {
+            assert!(!step.label().is_empty());
+        }
+        assert_eq!(PipelineStepId::ConfigPreparation.label(), "Config");
+        assert_eq!(PipelineStepId::Validation.label(), "Validate");
+    }
+
+    #[test]
+    fn pipeline_event_constructors() {
+        let started = PipelineEvent::started(PipelineStepId::ConfigPreparation, "begin");
+        assert_eq!(started.step_id, PipelineStepId::ConfigPreparation);
+        assert_eq!(started.status, PipelineStepStatus::Started);
+        assert_eq!(started.message, Some("begin".to_string()));
+
+        let completed = PipelineEvent::completed(PipelineStepId::FirGeneration, "done");
+        assert_eq!(completed.status, PipelineStepStatus::Completed);
+
+        let skipped = PipelineEvent::skipped(PipelineStepId::PhaseCorrection, "skip");
+        assert_eq!(skipped.status, PipelineStepStatus::Skipped);
+    }
+
+    #[test]
+    fn pipeline_event_with_methods() {
+        let event = PipelineEvent::new(PipelineStepId::GenericChannelOptimization, PipelineStepStatus::InProgress)
+            .with_channel("left")
+            .with_channels(0, 2)
+            .with_iteration(5, 20)
+            .with_loss(0.42)
+            .with_overall_progress(0.5)
+            .with_epa_preference(Some(0.7));
+
+        assert_eq!(event.channel, Some("left".to_string()));
+        assert_eq!(event.channel_index, Some(0));
+        assert_eq!(event.total_channels, Some(2));
+        assert_eq!(event.iteration, Some(5));
+        assert_eq!(event.max_iterations, Some(20));
+        assert_eq!(event.loss, Some(0.42));
+        assert!((event.overall_progress - 0.5).abs() < 1e-9);
+        assert_eq!(event.epa_preference, Some(0.7));
+    }
+
+    #[test]
+    fn pipeline_observer_closure() {
+        let mut received = 0;
+        let mut observer = |_: &PipelineEvent| -> PipelineControl {
+            received += 1;
+            PipelineControl::Continue
+        };
+        let event = PipelineEvent::new(PipelineStepId::Validation, PipelineStepStatus::Started);
+        assert_eq!(observer.on_event(&event), PipelineControl::Continue);
+        assert_eq!(received, 1);
+    }
+
+    #[test]
+    fn room_pipeline_new_and_run_error_branch() {
+        let config = RoomConfig {
+            version: "2.0.0".to_string(),
+            system: None,
+            speakers: std::collections::HashMap::new(),
+            crossovers: None,
+            target_curve: None,
+            optimizer: OptimizerConfig::default(),
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        };
+        let request = RoomPipelineRequest {
+            config: &config,
+            sample_rate: 48000.0,
+            output_dir: None,
+            probe_arrival_overrides: None,
+        };
+        let pipeline = RoomPipeline::new(request);
+        let result = pipeline.run(None);
+        // Empty config should fail at validation/loading.
+        assert!(result.is_err(), "empty config should produce an error");
+    }
+}

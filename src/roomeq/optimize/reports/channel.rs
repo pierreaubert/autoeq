@@ -10,10 +10,6 @@ use super::misc::recompute_curve_flatness_score;
 use super::role::role_aware_channel_matching_groups_with_keys;
 use super::types::RoleChannelMatchingProfile;
 
-pub(in super::super) fn channel_matching_role_key(channel_name: &str) -> Option<&'static str> {
-    crate::roomeq::home_cinema::matching_group_key(channel_name)
-}
-
 pub(in super::super) fn channel_matching_profile_for_role_key(
     role_key: &str,
     base_threshold_db: f64,
@@ -223,5 +219,252 @@ pub(in super::super) fn compute_and_correct_icd(
         result.metadata.inter_channel_deviation = Some(icd_after);
     } else {
         result.metadata.inter_channel_deviation = Some(icd);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::roomeq::spectral_align::ChannelMatchingCorrectionProfile;
+    use crate::roomeq::types::{ChannelMatchingConfig, InterChannelDeviation, OptimizerConfig};
+    use crate::roomeq::{ChannelOptimizationResult, RoomOptimizationResult};
+    use ndarray::Array1;
+    use std::collections::HashMap;
+
+    fn small_curve() -> crate::Curve {
+        crate::Curve {
+            freq: Array1::logspace(10.0, f64::log10(20.0), f64::log10(20_000.0), 32),
+            spl: Array1::from_elem(32, 80.0),
+            phase: None,
+            ..Default::default()
+        }
+    }
+
+    fn wavy_curve() -> crate::Curve {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(20_000.0), 32);
+        let spl: Vec<f64> = freq
+            .iter()
+            .enumerate()
+            .map(|(i, _)| 80.0 + (i as f64 % 5.0) * 2.0)
+            .collect();
+        crate::Curve {
+            freq,
+            spl: Array1::from(spl),
+            phase: None,
+            ..Default::default()
+        }
+    }
+
+    fn empty_metadata() -> crate::roomeq::types::OptimizationMetadata {
+        crate::roomeq::types::OptimizationMetadata {
+            pre_score: 0.0,
+            post_score: 0.0,
+            algorithm: "de".to_string(),
+            loss_type: None,
+            iterations: 0,
+            timestamp: String::new(),
+            inter_channel_deviation: None,
+            epa_per_channel: None,
+            epa_multichannel: None,
+            group_delay: None,
+            perceptual_metrics: None,
+            home_cinema_layout: None,
+            multi_seat_coverage: None,
+            multi_seat_correction: None,
+            bass_management: None,
+            timing_diagnostics: None,
+            ctc: None,
+            perceptual_policy: None,
+            bootstrap_uncertainty: None,
+            validation_bundle: None,
+            supporting_source: None,
+        }
+    }
+
+    fn result_with_channel(name: &str, curve: crate::Curve) -> RoomOptimizationResult {
+        let ch = ChannelOptimizationResult {
+            name: name.to_string(),
+            pre_score: 0.5,
+            post_score: 0.1,
+            initial_curve: curve.clone(),
+            final_curve: curve,
+            biquads: Vec::new(),
+            fir_coeffs: None,
+        };
+        RoomOptimizationResult {
+            channels: HashMap::new(),
+            channel_results: HashMap::from([(name.to_string(), ch)]),
+            combined_pre_score: 0.5,
+            combined_post_score: 0.1,
+            metadata: empty_metadata(),
+        }
+    }
+
+    fn config_with_channel_matching(enabled: bool) -> RoomConfig {
+        RoomConfig {
+            version: crate::roomeq::types::default_config_version(),
+            system: None,
+            speakers: HashMap::new(),
+            crossovers: None,
+            target_curve: None,
+            optimizer: OptimizerConfig {
+                channel_matching: Some(ChannelMatchingConfig {
+                    enabled,
+                    ..ChannelMatchingConfig::default()
+                }),
+                ..OptimizerConfig::default()
+            },
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        }
+    }
+
+    #[test]
+    fn channel_matching_profile_front_lr_scaled() {
+        let profile = channel_matching_profile_for_role_key("front_lr", 3.0);
+        assert!((profile.rms_threshold_db - 2.0).abs() < 1e-9);
+        assert_eq!(profile.correction.min_freq_hz, 80.0);
+        assert_eq!(profile.correction.max_freq_hz, 16_000.0);
+    }
+
+    #[test]
+    fn channel_matching_profile_unknown_uses_default_band() {
+        let profile = channel_matching_profile_for_role_key("unknown", 3.0);
+        assert!((profile.rms_threshold_db - 3.0).abs() < 1e-9);
+        assert_eq!(profile.correction.min_freq_hz, 200.0);
+    }
+
+    #[test]
+    fn channel_matching_profile_threshold_clamped_positive() {
+        let profile = channel_matching_profile_for_role_key("front_lr", -1.0);
+        assert!(profile.rms_threshold_db > 0.0);
+    }
+
+    #[test]
+    fn channel_matching_band_rms_db_computes_band() {
+        let icd = InterChannelDeviation {
+            deviation_per_freq: vec![(100.0, 1.0), (1000.0, 3.0), (5000.0, 2.0)],
+            midrange_rms_db: 99.0,
+            passband_rms_db: 2.0,
+            midrange_peak_db: 3.0,
+            midrange_peak_freq: 1000.0,
+        };
+        let rms = channel_matching_band_rms_db(&icd, (500.0, 4_000.0));
+        assert!((rms - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn channel_matching_band_rms_db_empty_band_fallback() {
+        let icd = InterChannelDeviation {
+            deviation_per_freq: vec![(10_000.0, 1.0)],
+            midrange_rms_db: 2.5,
+            passband_rms_db: 1.0,
+            midrange_peak_db: 1.0,
+            midrange_peak_freq: 10_000.0,
+        };
+        assert_eq!(channel_matching_band_rms_db(&icd, (100.0, 200.0)), 2.5);
+    }
+
+    #[test]
+    fn channel_matching_worsens_reported_scores_detects_regression() {
+        let mut result = result_with_channel("left", wavy_curve());
+        result.channel_results.get_mut("left").unwrap().post_score = 0.0;
+        let baseline = result.channel_results.clone();
+        let config = config_with_channel_matching(false);
+        let regression = channel_matching_worsens_reported_scores(&result, &config, &baseline);
+        assert!(regression.is_some());
+        let (name, before, after) = regression.unwrap();
+        assert_eq!(name, "left");
+        assert_eq!(before, 0.0);
+        assert!(after > before);
+    }
+
+    #[test]
+    fn channel_matching_worsens_reported_scores_no_regression() {
+        let mut result = result_with_channel("left", small_curve());
+        result.channel_results.get_mut("left").unwrap().post_score = 100.0;
+        let baseline = result.channel_results.clone();
+        let config = config_with_channel_matching(false);
+        let regression = channel_matching_worsens_reported_scores(&result, &config, &baseline);
+        assert!(regression.is_none());
+    }
+
+    #[test]
+    fn compute_and_correct_icd_disabled_sets_metadata() {
+        let mut result = RoomOptimizationResult {
+            channels: HashMap::new(),
+            channel_results: HashMap::from([
+                (
+                    "left".to_string(),
+                    ChannelOptimizationResult {
+                        name: "left".to_string(),
+                        pre_score: 0.5,
+                        post_score: 0.1,
+                        initial_curve: small_curve(),
+                        final_curve: small_curve(),
+                        biquads: Vec::new(),
+                        fir_coeffs: None,
+                    },
+                ),
+                (
+                    "right".to_string(),
+                    ChannelOptimizationResult {
+                        name: "right".to_string(),
+                        pre_score: 0.5,
+                        post_score: 0.1,
+                        initial_curve: small_curve(),
+                        final_curve: small_curve(),
+                        biquads: Vec::new(),
+                        fir_coeffs: None,
+                    },
+                ),
+            ]),
+            combined_pre_score: 0.5,
+            combined_post_score: 0.1,
+            metadata: empty_metadata(),
+        };
+        let config = config_with_channel_matching(false);
+        compute_and_correct_icd(&mut result, &config, 48_000.0);
+        assert!(result.metadata.inter_channel_deviation.is_some());
+    }
+
+    #[test]
+    fn compute_and_correct_icd_single_channel_clears_metadata() {
+        let mut result = result_with_channel("left", small_curve());
+        let config = config_with_channel_matching(false);
+        compute_and_correct_icd(&mut result, &config, 48_000.0);
+        assert!(result.metadata.inter_channel_deviation.is_none());
+    }
+
+    #[test]
+    fn role_aware_groups_front_lr_pair() {
+        let curves = HashMap::from([
+            ("left".to_string(), small_curve()),
+            ("right".to_string(), small_curve()),
+        ]);
+        let groups =
+            crate::roomeq::optimize::reports::role::role_aware_channel_matching_groups_with_keys(
+                &curves,
+            );
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].role_key, "front_lr");
+        assert!(groups[0].curves.contains_key("left"));
+    }
+
+    #[test]
+    fn matching_band_from_profile_uses_f3_floor() {
+        let profile = RoleChannelMatchingProfile {
+            rms_threshold_db: 1.0,
+            correction: ChannelMatchingCorrectionProfile {
+                peak_tolerance_db: 1.0,
+                correction_weight: 1.0,
+                min_freq_hz: 100.0,
+                max_freq_hz: 10_000.0,
+            },
+        };
+        let (min, max) = profile.correction.matching_band(150.0);
+        assert_eq!(min, 150.0);
+        assert_eq!(max, 10_000.0);
     }
 }

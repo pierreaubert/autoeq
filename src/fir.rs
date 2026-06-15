@@ -128,6 +128,7 @@ pub fn generate_kirkeby_correction_with_phase(
 ///
 /// # Returns
 /// * Vector of FIR coefficients
+#[allow(clippy::too_many_arguments)]
 pub fn generate_kirkeby_correction_with_smoothing(
     measurement: &Curve,
     target: &Curve,

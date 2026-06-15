@@ -57,3 +57,51 @@ pub fn get_available_angles(directivity: &DirectivityData, plane: &str) -> Vec<f
 
     curves.iter().map(|c| c.angle).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cea2034::{DirectivityCurve, DirectivityData};
+    use ndarray::Array1;
+
+    fn sample_directivity() -> DirectivityData {
+        let curve = |angle| DirectivityCurve {
+            angle,
+            freq: Array1::from_vec(vec![100.0, 1000.0]),
+            spl: Array1::from_vec(vec![80.0, 81.0]),
+        };
+        DirectivityData {
+            horizontal: vec![curve(-10.0), curve(0.0), curve(10.0)],
+            vertical: vec![curve(-20.0), curve(20.0)],
+        }
+    }
+
+    #[test]
+    fn get_directivity_at_angle_finds_horizontal() {
+        let d = sample_directivity();
+        let c = get_directivity_at_angle(&d, 0.0, "horizontal").unwrap();
+        assert!((c.angle).abs() < 0.01);
+    }
+
+    #[test]
+    fn get_directivity_at_angle_unknown_plane_returns_none() {
+        let d = sample_directivity();
+        assert!(get_directivity_at_angle(&d, 0.0, "diagonal").is_none());
+    }
+
+    #[test]
+    fn get_on_axis_horizontal() {
+        let d = sample_directivity();
+        let c = get_on_axis(&d, "h").unwrap();
+        assert!((c.angle).abs() < 0.01);
+    }
+
+    #[test]
+    fn get_available_angles_lists_all() {
+        let d = sample_directivity();
+        let angles = get_available_angles(&d, "vertical");
+        assert_eq!(angles.len(), 2);
+        assert!(angles.contains(&-20.0));
+        assert!(angles.contains(&20.0));
+    }
+}

@@ -3,6 +3,30 @@
 use super::super::types::ChannelOptimizationResult;
 use super::super::*;
 
+/// Apply a pure delay/polarity adjustment to the phase of a reported curve.
+pub(in super::super) fn apply_phase_only_adjustment_to_reported_curve(
+    curve: &mut Curve,
+    delay_ms: f64,
+    invert_polarity: bool,
+) {
+    if curve.freq.is_empty() {
+        return;
+    }
+
+    let base_phase = curve
+        .phase
+        .clone()
+        .unwrap_or_else(|| ndarray::Array1::zeros(curve.freq.len()));
+    let inversion_phase = if invert_polarity { 180.0 } else { 0.0 };
+    let delay_s = delay_ms / 1000.0;
+
+    let phase =
+        ndarray::Array1::from_iter(curve.freq.iter().zip(base_phase.iter()).map(
+            |(&freq_hz, &phase_deg)| phase_deg + inversion_phase - (360.0 * freq_hz * delay_s),
+        ));
+    curve.phase = Some(phase);
+}
+
 /// Linear convolution of two FIR filters.
 pub(in super::super) fn convolve(a: &[f64], b: &[f64]) -> Vec<f64> {
     let len = a.len() + b.len() - 1;
@@ -152,5 +176,60 @@ mod tests {
             b,
             (a - b).abs()
         );
+    }
+
+    #[test]
+    fn convolve_simple() {
+        let a = vec![1.0, 2.0];
+        let b = vec![3.0, 4.0];
+        let result = super::super::convolve(&a, &b);
+        assert_eq!(result, vec![3.0, 10.0, 8.0]);
+    }
+
+    #[test]
+    fn apply_phase_only_adjustment_adds_delay_and_inversion() {
+        use ndarray::Array1;
+        let mut curve = crate::Curve {
+            freq: Array1::from_vec(vec![100.0, 200.0]),
+            spl: Array1::from_vec(vec![80.0, 80.0]),
+            phase: Some(Array1::from_vec(vec![0.0, 0.0])),
+            ..Default::default()
+        };
+        super::super::apply_phase_only_adjustment_to_reported_curve(&mut curve, 1.0, true);
+        let phase = curve.phase.unwrap();
+        // 1 ms at 100 Hz -> -36 deg, plus 180 inversion
+        assert!((phase[0] - (180.0 - 36.0)).abs() < 1.0);
+    }
+
+    #[test]
+    fn total_chain_delay_ms_sums_delay_plugins() {
+        use serde_json::json;
+        let chain = crate::roomeq::types::ChannelDspChain {
+            channel: "test".to_string(),
+            plugins: vec![
+                crate::roomeq::types::PluginConfigWrapper {
+                    plugin_type: "delay".to_string(),
+                    parameters: json!({"delay_ms": 2.5}),
+                },
+                crate::roomeq::types::PluginConfigWrapper {
+                    plugin_type: "gain".to_string(),
+                    parameters: json!({"gain_db": 0.0}),
+                },
+                crate::roomeq::types::PluginConfigWrapper {
+                    plugin_type: "delay".to_string(),
+                    parameters: json!({"delay_ms": 1.5}),
+                },
+            ],
+            drivers: None,
+            initial_curve: None,
+            final_curve: None,
+            eq_response: None,
+            target_curve: None,
+            pre_ir: None,
+            post_ir: None,
+            fir_temporal_masking: None,
+            direct_early_late_correction: None,
+        };
+        assert_eq!(super::super::total_chain_delay_ms(&chain), 4.0);
     }
 }

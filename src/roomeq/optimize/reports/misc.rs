@@ -496,3 +496,589 @@ pub(in super::super) fn apply_channel_matching_correction(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::roomeq::ChannelOptimizationResult;
+    use crate::roomeq::home_cinema::{ChannelTimingReport, HomeCinemaRole};
+    use crate::roomeq::spectral_align::ChannelMatchingResult;
+    use crate::roomeq::types::{
+        ChannelDspChain, CurveData, EarlyLateCorrectionConfig, IrWaveform, OptimizationMetadata,
+        PerceptualMetrics, PluginConfigWrapper, ValidationBundleReport,
+    };
+    use crate::roomeq::types::{OptimizerConfig, RoomConfig};
+    use math_audio_iir_fir::{Biquad, BiquadFilterType};
+    use ndarray::Array1;
+    use serde_json::json;
+    use std::collections::HashMap;
+    use tempfile::tempdir;
+
+    fn small_curve() -> crate::Curve {
+        crate::Curve {
+            freq: Array1::logspace(10.0, f64::log10(20.0), f64::log10(20_000.0), 32),
+            spl: Array1::from_elem(32, 80.0),
+            phase: None,
+            ..Default::default()
+        }
+    }
+
+    fn curve_data_from(curve: &crate::Curve) -> CurveData {
+        CurveData {
+            freq: curve.freq.to_vec(),
+            spl: curve.spl.to_vec(),
+            phase: curve.phase.as_ref().map(|p| p.to_vec()),
+            norm_range: None,
+        }
+    }
+
+    fn empty_metadata() -> OptimizationMetadata {
+        OptimizationMetadata {
+            pre_score: 0.0,
+            post_score: 0.0,
+            algorithm: "de".to_string(),
+            loss_type: None,
+            iterations: 0,
+            timestamp: String::new(),
+            inter_channel_deviation: None,
+            epa_per_channel: None,
+            epa_multichannel: None,
+            group_delay: None,
+            perceptual_metrics: None,
+            home_cinema_layout: None,
+            multi_seat_coverage: None,
+            multi_seat_correction: None,
+            bass_management: None,
+            timing_diagnostics: None,
+            ctc: None,
+            perceptual_policy: None,
+            bootstrap_uncertainty: None,
+            validation_bundle: None,
+            supporting_source: None,
+        }
+    }
+
+    fn room_config_with_validation_bundle() -> RoomConfig {
+        RoomConfig {
+            version: crate::roomeq::types::default_config_version(),
+            system: None,
+            speakers: HashMap::new(),
+            crossovers: None,
+            target_curve: None,
+            optimizer: OptimizerConfig {
+                validation_bundle: Some(crate::roomeq::types::ValidationBundleConfig::default()),
+                ..OptimizerConfig::default()
+            },
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        }
+    }
+
+    fn room_config_default() -> RoomConfig {
+        RoomConfig {
+            version: crate::roomeq::types::default_config_version(),
+            system: None,
+            speakers: HashMap::new(),
+            crossovers: None,
+            target_curve: None,
+            optimizer: OptimizerConfig::default(),
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        }
+    }
+
+    fn single_channel_result(name: &str) -> (ChannelOptimizationResult, ChannelDspChain) {
+        let curve = small_curve();
+        let ch = ChannelOptimizationResult {
+            name: name.to_string(),
+            pre_score: 0.5,
+            post_score: 0.1,
+            initial_curve: curve.clone(),
+            final_curve: curve.clone(),
+            biquads: Vec::new(),
+            fir_coeffs: None,
+        };
+        let chain = ChannelDspChain {
+            channel: name.to_string(),
+            plugins: Vec::new(),
+            drivers: None,
+            initial_curve: None,
+            final_curve: Some(curve_data_from(&curve)),
+            eq_response: None,
+            target_curve: None,
+            pre_ir: None,
+            post_ir: None,
+            fir_temporal_masking: None,
+            direct_early_late_correction: None,
+        };
+        (ch, chain)
+    }
+
+    fn result_with_channel(name: &str) -> RoomOptimizationResult {
+        let (ch, chain) = single_channel_result(name);
+        RoomOptimizationResult {
+            channels: HashMap::from([(name.to_string(), chain)]),
+            channel_results: HashMap::from([(name.to_string(), ch)]),
+            combined_pre_score: 0.5,
+            combined_post_score: 0.1,
+            metadata: empty_metadata(),
+        }
+    }
+
+    #[test]
+    fn recompute_curve_flatness_score_flat_is_low() {
+        let curve = small_curve();
+        let score = recompute_curve_flatness_score(&curve, 20.0, 20_000.0);
+        assert!(
+            score < 1.0,
+            "flat curve should have low flatness score: {}",
+            score
+        );
+    }
+
+    #[test]
+    fn should_apply_spectral_shelves_empty_filters_false() {
+        let curves = HashMap::from([("left".to_string(), small_curve())]);
+        assert!(!should_apply_spectral_shelves(
+            &curves,
+            "left",
+            &[],
+            48_000.0,
+            20.0,
+            20_000.0
+        ));
+    }
+
+    #[test]
+    fn should_apply_spectral_shelves_missing_channel_false() {
+        let curves = HashMap::new();
+        let shelf = vec![Biquad::new(
+            BiquadFilterType::Lowshelf,
+            100.0,
+            48_000.0,
+            0.707,
+            2.0,
+        )];
+        assert!(!should_apply_spectral_shelves(
+            &curves, "left", &shelf, 48_000.0, 20.0, 20_000.0
+        ));
+    }
+
+    #[test]
+    fn final_score_band_no_system_uses_optimizer_range() {
+        let config = room_config_default();
+        let (min, max) = final_score_band_for_channel(&config, "left");
+        assert_eq!(min, config.optimizer.min_freq);
+        assert_eq!(max, config.optimizer.max_freq);
+    }
+
+    #[test]
+    fn energy_ratio_to_db_extreme_low_ratio() {
+        assert_eq!(energy_ratio_to_db(1e-31), -300.0);
+    }
+
+    #[test]
+    fn energy_ratio_to_db_unity() {
+        assert!((energy_ratio_to_db(1.0) - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn direct_early_late_metrics_basic() {
+        let pre = IrWaveform {
+            time_ms: vec![0.0, 1.0, 2.0, 5.0],
+            amplitude: vec![0.0, 0.0, 0.0, 0.0],
+        };
+        let post = IrWaveform {
+            time_ms: vec![0.0, 1.0, 2.0, 5.0],
+            amplitude: vec![1.0, 1.0, 1.0, 1.0],
+        };
+        let config = EarlyLateCorrectionConfig {
+            enabled: true,
+            direct_window_ms: 0.5,
+            early_window_ms: 2.0,
+            late_window_ms: 5.0,
+            early_cue_risk_db: 10.0,
+        };
+        let metrics = direct_early_late_correction_metrics(&pre, &post, &config).unwrap();
+        assert!((metrics.direct_energy_db - (-6.0)).abs() < 1.0);
+        assert_eq!(metrics.advisory, "ok");
+    }
+
+    #[test]
+    fn direct_early_late_metrics_mismatched_lengths_none() {
+        let pre = IrWaveform {
+            time_ms: vec![0.0, 1.0],
+            amplitude: vec![0.0, 0.0],
+        };
+        let post = IrWaveform {
+            time_ms: vec![0.0],
+            amplitude: vec![1.0],
+        };
+        let config = EarlyLateCorrectionConfig::default();
+        assert!(direct_early_late_correction_metrics(&pre, &post, &config).is_none());
+    }
+
+    #[test]
+    fn lcr_timing_advisory_spread_above_threshold() {
+        let channels = vec![
+            ChannelTimingReport {
+                name: "L".to_string(),
+                role: HomeCinemaRole::FrontLeft,
+                measured_arrival_ms: 0.0,
+                acoustic_distance_m: 0.0,
+                applied_delay_ms: 0.0,
+                final_arrival_ms: 0.0,
+                final_offset_from_reference_ms: 0.0,
+            },
+            ChannelTimingReport {
+                name: "R".to_string(),
+                role: HomeCinemaRole::FrontRight,
+                measured_arrival_ms: 0.0,
+                acoustic_distance_m: 0.0,
+                applied_delay_ms: 0.0,
+                final_arrival_ms: 1.0,
+                final_offset_from_reference_ms: 0.0,
+            },
+        ];
+        assert_eq!(
+            lcr_timing_advisory(&channels),
+            Some("lcr_imaging_timing_spread".to_string())
+        );
+    }
+
+    #[test]
+    fn lcr_timing_advisory_single_channel_none() {
+        let channels = vec![ChannelTimingReport {
+            name: "L".to_string(),
+            role: HomeCinemaRole::FrontLeft,
+            measured_arrival_ms: 0.0,
+            acoustic_distance_m: 0.0,
+            applied_delay_ms: 0.0,
+            final_arrival_ms: 0.0,
+            final_offset_from_reference_ms: 0.0,
+        }];
+        assert!(lcr_timing_advisory(&channels).is_none());
+    }
+
+    #[test]
+    fn surround_precedence_risk_detects_early_surround() {
+        let channels = vec![
+            ChannelTimingReport {
+                name: "L".to_string(),
+                role: HomeCinemaRole::FrontLeft,
+                measured_arrival_ms: 0.0,
+                acoustic_distance_m: 0.0,
+                applied_delay_ms: 0.0,
+                final_arrival_ms: 2.0,
+                final_offset_from_reference_ms: 0.0,
+            },
+            ChannelTimingReport {
+                name: "SL".to_string(),
+                role: HomeCinemaRole::SideSurroundLeft,
+                measured_arrival_ms: 0.0,
+                acoustic_distance_m: 0.0,
+                applied_delay_ms: 0.0,
+                final_arrival_ms: 1.0,
+                final_offset_from_reference_ms: 0.0,
+            },
+        ];
+        assert!(surround_or_height_precedence_risk(&channels));
+    }
+
+    #[test]
+    fn spread_basic() {
+        assert_eq!(spread(&[3.0, 1.0, 5.0]), Some(4.0));
+        assert!(spread(&[]).is_none());
+    }
+
+    #[test]
+    fn max_optional_skips_non_finite() {
+        assert_eq!(
+            max_optional([1.0, f64::NAN, 3.0, 2.0].into_iter()),
+            Some(3.0)
+        );
+        assert!(max_optional([f64::NAN].into_iter()).is_none());
+    }
+
+    #[test]
+    fn mean_and_rms_helpers() {
+        assert_eq!(mean(&[1.0, 2.0, 3.0]), Some(2.0));
+        assert!(mean(&[]).is_none());
+        let r = rms(&[3.0, 4.0]).unwrap();
+        assert!((r - 3.5355).abs() < 1e-3);
+        assert!(rms(&[]).is_none());
+    }
+
+    #[test]
+    fn curve_roughness_rms_db_nonzero() {
+        let curve = CurveData {
+            freq: vec![250.0, 500.0, 1000.0, 2000.0, 4000.0],
+            spl: vec![0.0, 5.0, 0.0, 5.0, 0.0],
+            phase: None,
+            norm_range: None,
+        };
+        let rough = curve_roughness_rms_db(&curve, (300.0, 4_000.0)).unwrap();
+        assert!(rough > 0.0);
+    }
+
+    #[test]
+    fn headroom_peak_boost_db_reads_gain_and_eq() {
+        let chain = ChannelDspChain {
+            channel: "left".to_string(),
+            plugins: vec![
+                PluginConfigWrapper {
+                    plugin_type: "gain".to_string(),
+                    parameters: json!({"gain_db": 3.5}),
+                },
+                PluginConfigWrapper {
+                    plugin_type: "eq".to_string(),
+                    parameters: json!({"filters": [{"db_gain": 5.0}]}),
+                },
+            ],
+            drivers: None,
+            initial_curve: None,
+            final_curve: None,
+            eq_response: None,
+            target_curve: None,
+            pre_ir: None,
+            post_ir: None,
+            fir_temporal_masking: None,
+            direct_early_late_correction: None,
+        };
+        assert_eq!(
+            headroom_peak_boost_db(&HashMap::from([("left".to_string(), chain)])),
+            Some(5.0)
+        );
+    }
+
+    #[test]
+    fn headroom_peak_boost_db_no_plugins_none() {
+        let chain = ChannelDspChain {
+            channel: "left".to_string(),
+            plugins: Vec::new(),
+            drivers: None,
+            initial_curve: None,
+            final_curve: None,
+            eq_response: None,
+            target_curve: None,
+            pre_ir: None,
+            post_ir: None,
+            fir_temporal_masking: None,
+            direct_early_late_correction: None,
+        };
+        assert!(headroom_peak_boost_db(&HashMap::from([("left".to_string(), chain)])).is_none());
+    }
+
+    #[test]
+    fn bass_consistency_rms_db_with_two_subs() {
+        let curve = small_curve();
+        let data = curve_data_from(&curve);
+        let lfe = ChannelDspChain {
+            channel: "lfe".to_string(),
+            plugins: Vec::new(),
+            drivers: None,
+            initial_curve: None,
+            final_curve: Some(data.clone()),
+            eq_response: None,
+            target_curve: None,
+            pre_ir: None,
+            post_ir: None,
+            fir_temporal_masking: None,
+            direct_early_late_correction: None,
+        };
+        let sub = ChannelDspChain {
+            channel: "sub".to_string(),
+            ..lfe.clone()
+        };
+        let rms = bass_consistency_rms_db(&HashMap::from([
+            ("lfe".to_string(), lfe),
+            ("sub".to_string(), sub),
+        ]));
+        assert!(rms.is_some_and(|v| v.abs() < 1e-3));
+    }
+
+    #[test]
+    fn dialog_band_roughness_center_channel() {
+        let curve = CurveData {
+            freq: vec![250.0, 500.0, 1000.0, 2000.0, 4000.0],
+            spl: vec![0.0, 5.0, 0.0, 5.0, 0.0],
+            phase: None,
+            norm_range: None,
+        };
+        let chain = ChannelDspChain {
+            channel: "center".to_string(),
+            plugins: Vec::new(),
+            drivers: None,
+            initial_curve: None,
+            final_curve: Some(curve),
+            eq_response: None,
+            target_curve: None,
+            pre_ir: None,
+            post_ir: None,
+            fir_temporal_masking: None,
+            direct_early_late_correction: None,
+        };
+        let rough = dialog_band_roughness_rms_db(&HashMap::from([("center".to_string(), chain)]));
+        assert!(rough.is_some_and(|v| v > 0.0));
+    }
+
+    #[test]
+    fn group_mean_deviation_rms_db_identical_curves_zero() {
+        let curve = small_curve();
+        let data = curve_data_from(&curve);
+        let a = ChannelDspChain {
+            channel: "a".to_string(),
+            plugins: Vec::new(),
+            drivers: None,
+            initial_curve: None,
+            final_curve: Some(data.clone()),
+            eq_response: None,
+            target_curve: None,
+            pre_ir: None,
+            post_ir: None,
+            fir_temporal_masking: None,
+            direct_early_late_correction: None,
+        };
+        let b = ChannelDspChain {
+            channel: "b".to_string(),
+            ..a.clone()
+        };
+        let rms = group_mean_deviation_rms_db(&[&a, &b], (20.0, 20_000.0));
+        assert!(rms.is_some_and(|v| v.abs() < 1e-3));
+    }
+
+    #[test]
+    fn group_mean_deviation_rms_db_mismatched_grids_none() {
+        let a = ChannelDspChain {
+            channel: "a".to_string(),
+            plugins: Vec::new(),
+            drivers: None,
+            initial_curve: None,
+            final_curve: Some(CurveData {
+                freq: vec![100.0, 200.0],
+                spl: vec![80.0, 80.0],
+                phase: None,
+                norm_range: None,
+            }),
+            eq_response: None,
+            target_curve: None,
+            pre_ir: None,
+            post_ir: None,
+            fir_temporal_masking: None,
+            direct_early_late_correction: None,
+        };
+        let b = ChannelDspChain {
+            channel: "b".to_string(),
+            plugins: Vec::new(),
+            drivers: None,
+            initial_curve: None,
+            final_curve: Some(CurveData {
+                freq: vec![100.0, 200.0, 300.0],
+                spl: vec![80.0, 80.0, 80.0],
+                phase: None,
+                norm_range: None,
+            }),
+            eq_response: None,
+            target_curve: None,
+            pre_ir: None,
+            post_ir: None,
+            fir_temporal_masking: None,
+            direct_early_late_correction: None,
+        };
+        let rms = group_mean_deviation_rms_db(&[&a, &b], (20.0, 20_000.0));
+        assert!(rms.is_none());
+    }
+
+    #[test]
+    fn apply_channel_matching_correction_adds_plugin_and_updates_curve() {
+        let mut result = result_with_channel("left");
+        let filter = Biquad::new(BiquadFilterType::Peak, 1000.0, 48_000.0, 1.0, 3.0);
+        let correction = ChannelMatchingResult {
+            channel_name: "left".to_string(),
+            filters: vec![filter],
+            plugin: Some(PluginConfigWrapper {
+                plugin_type: "eq".to_string(),
+                parameters: json!({"filters": []}),
+            }),
+        };
+        let before = result.channel_results["left"].final_curve.spl[10];
+        apply_channel_matching_correction(&mut result, &correction, 48_000.0);
+        let after = result.channel_results["left"].final_curve.spl[10];
+        assert!(
+            (after - before).abs() > 1e-6,
+            "curve should change after applying filter"
+        );
+        assert_eq!(result.channels["left"].plugins.len(), 1);
+    }
+
+    #[test]
+    fn generate_validation_bundle_report_creates_json() {
+        let mut result = RoomOptimizationResult {
+            channels: HashMap::new(),
+            channel_results: HashMap::new(),
+            combined_pre_score: 0.4,
+            combined_post_score: 0.2,
+            metadata: OptimizationMetadata {
+                perceptual_metrics: Some(PerceptualMetrics {
+                    epa_preference_pre: 0.5,
+                    epa_preference_post: 0.4,
+                    epa_preference_delta: -0.1,
+                    channel_matching_midrange_rms_db: None,
+                    role_channel_matching_rms_db: None,
+                    bass_consistency_rms_db: None,
+                    dialog_band_roughness_rms_db: None,
+                    headroom_peak_boost_db: None,
+                    headroom_risk: None,
+                    timing_confidence: None,
+                    fir_pre_ringing_audible_db: None,
+                    fir_post_ringing_audible_db: None,
+                    fir_temporal_masking_penalty: None,
+                    direct_plus_early_correction_energy_db: None,
+                    early_cue_advisory: Some("early_cue_risk".to_string()),
+                }),
+                supporting_source: None,
+                ..empty_metadata()
+            },
+        };
+        let dir = tempdir().unwrap();
+        let config = room_config_with_validation_bundle();
+        generate_validation_bundle_report(&mut result, &config, Some(dir.path())).unwrap();
+        assert!(result.metadata.validation_bundle.is_some());
+        let bundle = result.metadata.validation_bundle.as_ref().unwrap();
+        assert!(
+            bundle
+                .advisories
+                .contains(&"perceptual_metric_regressed".to_string())
+        );
+        assert!(bundle.advisories.contains(&"early_cue_risk".to_string()));
+        assert!(
+            std::fs::read_to_string(dir.path().join("roomeq_validation_bundle.json"))
+                .unwrap()
+                .contains("roomeq-validation-bundle-v1")
+        );
+    }
+
+    #[test]
+    fn generate_validation_bundle_report_disabled_clears_metadata() {
+        let mut result = RoomOptimizationResult {
+            channels: HashMap::new(),
+            channel_results: HashMap::new(),
+            combined_pre_score: 0.0,
+            combined_post_score: 0.0,
+            metadata: empty_metadata(),
+        };
+        result.metadata.validation_bundle = Some(ValidationBundleReport {
+            artifact: String::new(),
+            target_lufs: -23.0,
+            abx: false,
+            mushra: false,
+            perceptual_regression_summary: false,
+            advisories: Vec::new(),
+        });
+        let config = room_config_default();
+        generate_validation_bundle_report(&mut result, &config, None).unwrap();
+        assert!(result.metadata.validation_bundle.is_none());
+    }
+}

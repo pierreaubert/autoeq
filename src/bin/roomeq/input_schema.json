@@ -2938,6 +2938,32 @@
         }
       }
     },
+    "PrecedenceLimitBand": {
+      "description": "A single precedence-limit band.",
+      "type": "object",
+      "properties": {
+        "high_hz": {
+          "description": "Upper edge of the band in Hz (inclusive).",
+          "type": "number",
+          "format": "double"
+        },
+        "limit_db": {
+          "description": "Maximum lagging-source level above the primary in this band, in dB.",
+          "type": "number",
+          "format": "double"
+        },
+        "low_hz": {
+          "description": "Lower edge of the band in Hz (inclusive).",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "low_hz",
+        "high_hz",
+        "limit_db"
+      ]
+    },
     "ProbeChannelResultLegacy": {
       "description": "Per-channel probe result (mirror of `ProbeDelayChannelResult`).",
       "type": "object",
@@ -3667,8 +3693,12 @@
       }
     },
     "SpeakerConfig": {
-      "description": "Speaker configuration (can be single measurement or group)\n\nVariant order matters for serde untagged deserialization: serde tries each variant\nin order. Group/MultiSub/Dba all require a `name` field that `MeasurementSource`\ndoesn't have, so they are tried first. `Single` is last as a catch-all.",
+      "description": "Speaker configuration (can be single measurement or group)\n\nVariant order matters for serde untagged deserialization: serde tries each variant\nin order. `SupportingSource` is first because it requires the unique `primary` and\n`support` fields. Group/MultiSub/Dba all require a `name` field that `MeasurementSource`\ndoesn't have, so they are tried before `Single`. `Single` is last as a catch-all.",
       "anyOf": [
+        {
+          "description": "Supporting-source room compensation (primary + delayed support loudspeaker).",
+          "$ref": "#/$defs/SupportingSourceGroup"
+        },
         {
           "description": "Group of measurements (multi-driver case)",
           "$ref": "#/$defs/SpeakerGroup"
@@ -3836,6 +3866,165 @@
         "type": "string"
       }
     },
+    "SupportingSourceConfig": {
+      "description": "Configuration for a single supporting-source loudspeaker channel.",
+      "type": "object",
+      "properties": {
+        "decorrelation": {
+          "description": "Decorrelator applied to the supporting source path.",
+          "$ref": "#/$defs/SupportingSourceDecorrelation",
+          "default": "velvet_noise"
+        },
+        "delay_ms": {
+          "description": "Delay of the supporting source relative to the primary at the listening position.",
+          "type": "number",
+          "format": "double",
+          "default": 10.0
+        },
+        "fir_taps": {
+          "description": "FIR length in taps. Default follows Brooks-Park (≈186 ms at 44.1 kHz).",
+          "type": "integer",
+          "format": "uint",
+          "default": 8192,
+          "minimum": 0
+        },
+        "freq_range_hz": {
+          "description": "Compensation band. Outside this band the supporting source is muted.",
+          "type": "array",
+          "default": [
+            70.0,
+            20000.0
+          ],
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number",
+              "format": "double"
+            },
+            {
+              "type": "number",
+              "format": "double"
+            }
+          ]
+        },
+        "precedence_limits": {
+          "description": "Frequency-dependent precedence limits. The first matching band wins.",
+          "type": "array",
+          "default": [
+            {
+              "high_hz": 500.0,
+              "limit_db": 10.0,
+              "low_hz": 70.0
+            },
+            {
+              "high_hz": 20000.0,
+              "limit_db": 6.0,
+              "low_hz": 500.0
+            }
+          ],
+          "items": {
+            "$ref": "#/$defs/PrecedenceLimitBand"
+          }
+        },
+        "target_response": {
+          "description": "Target response to match. Defaults to the room-level `target_curve`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "velvet_noise_taps": {
+          "description": "Velvet-noise sequence length when decorrelation is enabled.",
+          "type": "integer",
+          "format": "uint",
+          "default": 4096,
+          "minimum": 0
+        }
+      }
+    },
+    "SupportingSourceDecorrelation": {
+      "description": "Decorrelation strategy for the supporting source path.",
+      "oneOf": [
+        {
+          "description": "Apply a velvet-noise sequence to the supporting source.",
+          "type": "string",
+          "const": "velvet_noise"
+        },
+        {
+          "description": "No decorrelation.",
+          "type": "string",
+          "const": "none"
+        }
+      ]
+    },
+    "SupportingSourceGroup": {
+      "description": "A speaker group representing a primary loudspeaker plus a delayed,\ndecorrelated supporting loudspeaker for room compensation.\n\nThis variant is distinguished from other `SpeakerConfig` variants by the\npresence of the `primary` and `support` fields.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Human-readable name for this primary/support pair.",
+          "type": "string"
+        },
+        "primary": {
+          "description": "Measurement source for the primary loudspeaker.",
+          "$ref": "#/$defs/MeasurementSource"
+        },
+        "speaker_name": {
+          "description": "Optional speaker model string.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "support": {
+          "description": "Measurement source for the supporting loudspeaker.",
+          "$ref": "#/$defs/MeasurementSource"
+        },
+        "supporting_source": {
+          "description": "Supporting-source processing configuration.",
+          "$ref": "#/$defs/SupportingSourceConfig",
+          "default": {
+            "decorrelation": "velvet_noise",
+            "delay_ms": 10.0,
+            "fir_taps": 8192,
+            "freq_range_hz": [
+              70.0,
+              20000.0
+            ],
+            "precedence_limits": [
+              {
+                "high_hz": 500.0,
+                "limit_db": 10.0,
+                "low_hz": 70.0
+              },
+              {
+                "high_hz": 20000.0,
+                "limit_db": 6.0,
+                "low_hz": 500.0
+              }
+            ],
+            "velvet_noise_taps": 4096
+          }
+        }
+      },
+      "required": [
+        "name",
+        "primary",
+        "support"
+      ]
+    },
+    "SupportingSourceOutputNaming": {
+      "description": "Naming convention for supporting-source physical outputs.",
+      "type": "object",
+      "properties": {
+        "suffix": {
+          "description": "Suffix appended to the logical role for the supporting output.\nDefault: \"_support\".",
+          "type": "string",
+          "default": "_support"
+        }
+      }
+    },
     "SystemConfig": {
       "description": "Explicit system configuration mapping logical roles to measurements",
       "type": "object",
@@ -3868,6 +4057,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/SubwooferSystemConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "supporting_source_outputs": {
+          "description": "Naming convention for supporting-source physical outputs.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SupportingSourceOutputNaming"
             },
             {
               "type": "null"

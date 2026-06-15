@@ -4,6 +4,7 @@ use super::cardioid_config::CardioidConfig;
 use super::dbaconfig::DBAConfig;
 use super::multi_sub_group::MultiSubGroup;
 use super::speaker_group::SpeakerGroup;
+use super::supporting_source_group::SupportingSourceGroup;
 use crate::MeasurementSource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -11,8 +12,9 @@ use serde::{Deserialize, Serialize};
 /// Speaker configuration (can be single measurement or group)
 ///
 /// Variant order matters for serde untagged deserialization: serde tries each variant
-/// in order. Group/MultiSub/Dba all require a `name` field that `MeasurementSource`
-/// doesn't have, so they are tried first. `Single` is last as a catch-all.
+/// in order. `SupportingSource` is first because it requires the unique `primary` and
+/// `support` fields. Group/MultiSub/Dba all require a `name` field that `MeasurementSource`
+/// doesn't have, so they are tried before `Single`. `Single` is last as a catch-all.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 #[allow(
@@ -20,6 +22,8 @@ use serde::{Deserialize, Serialize};
     reason = "SpeakerConfig::Single is the dominant variant in 100+ call sites; boxing would create churn for marginal memory savings"
 )]
 pub enum SpeakerConfig {
+    /// Supporting-source room compensation (primary + delayed support loudspeaker).
+    SupportingSource(SupportingSourceGroup),
     /// Group of measurements (multi-driver case)
     Group(SpeakerGroup),
     /// Multiple subwoofers optimization
@@ -35,6 +39,7 @@ pub enum SpeakerConfig {
 impl SpeakerConfig {
     pub fn speaker_name(&self) -> Option<&str> {
         match self {
+            SpeakerConfig::SupportingSource(group) => group.speaker_name.as_deref(),
             SpeakerConfig::Single(source) => source.speaker_name(),
             SpeakerConfig::Group(group) => group.speaker_name.as_deref(),
             SpeakerConfig::MultiSub(ms) => ms.speaker_name.as_deref(),
@@ -45,6 +50,7 @@ impl SpeakerConfig {
 
     pub fn resolve_paths(&mut self, base_dir: &std::path::Path) {
         match self {
+            SpeakerConfig::SupportingSource(group) => group.resolve_paths(base_dir),
             SpeakerConfig::Single(source) => source.resolve_paths(base_dir),
             SpeakerConfig::Group(group) => group.resolve_paths(base_dir),
             SpeakerConfig::MultiSub(group) => group.resolve_paths(base_dir),

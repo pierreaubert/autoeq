@@ -31,31 +31,6 @@ pub(in super::super) fn resolve_single_source<'a>(
     }
 }
 
-/// Helper to load curves for all logical channels
-pub(in super::super) fn load_logical_channels(
-    config: &RoomConfig,
-    sys: &SystemConfig,
-) -> Result<HashMap<String, Curve>> {
-    let mut curves = HashMap::new();
-    for (role, meas_key) in &sys.speakers {
-        if let Some(cfg) = config.speakers.get(meas_key) {
-            let source = match cfg {
-                SpeakerConfig::Single(s) => s,
-                _ => {
-                    return Err(AutoeqError::InvalidConfiguration {
-                        message: format!("Workflow requires Single speaker config for '{}'", role),
-                    });
-                }
-            };
-            let curve = load_source(source).map_err(|e| AutoeqError::InvalidMeasurement {
-                message: e.to_string(),
-            })?;
-            curves.insert(role.clone(), curve);
-        }
-    }
-    Ok(curves)
-}
-
 pub(in super::super) fn grouped_home_cinema_roles(
     main_roles: &[String],
 ) -> BTreeMap<String, Vec<String>> {

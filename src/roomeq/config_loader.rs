@@ -68,3 +68,72 @@ pub fn load_config(
 
     Ok((room_config, config_dir))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn write_temp_config(name: &str, content: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("autoeq_test_{}.json", name));
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+        path
+    }
+
+    #[test]
+    fn merge_json_objects_shallow_merges_optimizer() {
+        let mut base = serde_json::json!({
+            "optimizer": { "min_freq": 20.0, "max_freq": 20000.0 },
+            "speakers": { "left": {} }
+        });
+        let overrides = serde_json::json!({
+            "optimizer": { "max_freq": 16000.0 },
+            "speakers": { "right": {} }
+        });
+        merge_json_objects(&mut base, &overrides);
+        let optimizer = base.get("optimizer").unwrap();
+        assert_eq!(optimizer["min_freq"], 20.0);
+        assert_eq!(optimizer["max_freq"], 16000.0);
+        // speakers should be replaced entirely, not merged
+        let speakers = base.get("speakers").unwrap();
+        assert!(speakers.get("right").is_some());
+        assert!(speakers.get("left").is_none());
+    }
+
+    #[test]
+    fn merge_json_objects_replaces_non_shallow_keys() {
+        let mut base = serde_json::json!({ "speakers": { "left": { "path": "a.csv" } } });
+        let overrides = serde_json::json!({ "speakers": { "right": { "path": "b.csv" } } });
+        merge_json_objects(&mut base, &overrides);
+        assert!(base["speakers"].get("right").is_some());
+        assert!(base["speakers"].get("left").is_none());
+    }
+
+    #[test]
+    fn load_config_reads_base_and_override() {
+        let base = write_temp_config(
+            "base",
+            r#"{"version":"1.0.0","speakers":{},"optimizer":{"min_freq":20.0,"max_freq":20000.0}}"#,
+        );
+        let override_path = write_temp_config(
+            "override",
+            r#"{"optimizer":{"max_freq":16000.0}}"#,
+        );
+        let (config, dir) = load_config(&base, Some(&override_path)).unwrap();
+        assert_eq!(config.optimizer.max_freq, 16000.0);
+        assert_eq!(dir, base.parent().unwrap());
+    }
+
+    #[test]
+    fn load_config_returns_error_for_missing_file() {
+        let path = std::env::temp_dir().join("autoeq_missing_config_xyz.json");
+        assert!(load_config(&path, None).is_err());
+    }
+
+    #[test]
+    fn load_config_returns_error_for_invalid_json() {
+        let path = write_temp_config("invalid", "not json");
+        assert!(load_config(&path, None).is_err());
+    }
+}

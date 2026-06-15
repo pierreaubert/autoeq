@@ -19,6 +19,7 @@ pub(super) struct TestResult {
 }
 
 impl TestResult {
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn success(
         name: &str,
         scenario: &str,

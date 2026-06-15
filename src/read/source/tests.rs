@@ -224,3 +224,99 @@ fn load_source_individual_in_memory_multiple() {
     let curves = load_source_individual(&source).unwrap();
     assert_eq!(curves.len(), 2);
 }
+
+    #[test]
+    fn measurement_ref_path_and_name_helpers() {
+        let path_ref = MeasurementRef::Path(PathBuf::from("a.csv"));
+        assert_eq!(path_ref.path().unwrap(), &PathBuf::from("a.csv"));
+        assert!(path_ref.name().is_none());
+        assert!(!path_ref.is_inline());
+
+        let named = MeasurementRef::Named {
+            path: PathBuf::from("b.csv"),
+            name: Some("mic".to_string()),
+        };
+        assert_eq!(named.name(), Some("mic"));
+        assert!(named.inline_data().is_none());
+    }
+
+    #[test]
+    fn measurement_ref_resolve_paths() {
+        let base = PathBuf::from("/base");
+        let mut named = MeasurementRef::Named {
+            path: PathBuf::from("rel.csv"),
+            name: None,
+        };
+        named.resolve_paths(&base);
+        assert_eq!(named.path().unwrap(), &PathBuf::from("/base/rel.csv"));
+
+        let mut abs = MeasurementRef::Path(PathBuf::from("/abs.csv"));
+        abs.resolve_paths(&base);
+        assert_eq!(abs.path().unwrap(), &PathBuf::from("/abs.csv"));
+    }
+
+    #[test]
+    fn measurement_source_speaker_name_and_resolve_paths() {
+        let single = MeasurementSource::Single(super::measurement_single::MeasurementSingle {
+            measurement: MeasurementRef::Path(PathBuf::from("spk.csv")),
+            speaker_name: Some("Genelec".to_string()),
+        });
+        assert_eq!(single.speaker_name(), Some("Genelec"));
+
+        let mut source = single;
+        source.resolve_paths(&PathBuf::from("/data"));
+        match source {
+            MeasurementSource::Single(s) => {
+                assert_eq!(s.measurement.path().unwrap(), &PathBuf::from("/data/spk.csv"));
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn inline_measurement_resolve_paths() {
+        let mut inline = super::inline_measurement::InlineMeasurement {
+            frequencies: vec![20.0, 100.0],
+            magnitude_db: vec![80.0, 85.0],
+            phase_deg: None,
+            name: None,
+            wav_path: Some("rel.wav".to_string()),
+            csv_path: Some("/abs.csv".to_string()),
+        };
+        inline.resolve_paths(&PathBuf::from("/base"));
+        assert_eq!(inline.wav_path.as_ref().unwrap(), &"/base/rel.wav".to_string());
+        assert_eq!(inline.csv_path.as_ref().unwrap(), &"/abs.csv".to_string());
+    }
+
+    #[test]
+    fn measurement_single_serializes_and_deserializes() {
+        let single = super::measurement_single::MeasurementSingle {
+            measurement: MeasurementRef::Path(PathBuf::from("a.csv")),
+            speaker_name: Some("X".to_string()),
+        };
+        let json = serde_json::to_value(&single).unwrap();
+        assert_eq!(json["path"], "a.csv");
+        assert_eq!(json["speaker_name"], "X");
+
+        let de: super::measurement_single::MeasurementSingle =
+            serde_json::from_value(json).unwrap();
+        assert_eq!(de.speaker_name, Some("X".to_string()));
+
+        // Bare string path
+        let de: super::measurement_single::MeasurementSingle =
+            serde_json::from_value(serde_json::json!("bare.csv")).unwrap();
+        match de.measurement {
+            MeasurementRef::Path(p) => assert_eq!(p, PathBuf::from("bare.csv")),
+            _ => panic!("expected bare path"),
+        }
+    }
+
+    #[test]
+    fn load_measurement_named_path() {
+        let named = MeasurementRef::Named {
+            path: PathBuf::from("/nonexistent/named.csv"),
+            name: Some("test".to_string()),
+        };
+        assert!(load_measurement(&named).is_err());
+    }
+

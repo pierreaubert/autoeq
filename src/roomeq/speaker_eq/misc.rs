@@ -56,6 +56,7 @@ pub(super) fn matched_reference_from_recording_config(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(in super::super) fn optimize_eq_maybe_multi(
     source: &MeasurementSource,
     optimization_curve: &Curve,

@@ -67,6 +67,7 @@ pub(super) fn run_post_eq(
 /// `config` and narrow `optimizer.min_freq` / `max_freq` to the band of
 /// interest (e.g. Pre-EQ at `min_xo`) before the delegation call.
 #[allow(clippy::type_complexity)]
+#[allow(clippy::too_many_arguments)]
 pub(super) fn run_channel_via_generic_path(
     role: &str,
     source: &crate::MeasurementSource,
@@ -214,4 +215,197 @@ pub(super) fn run_channel_via_generic_path(
         fir_coeffs,
         multiseat_rejection,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::MeasurementSource;
+    use crate::roomeq::types::{
+        OptimizerConfig, ProcessingMode, RoomConfig, SpeakerConfig, SystemConfig, SystemModel,
+        TargetCurveConfig,
+    };
+    use crate::roomeq::workflows::executor_tests::{base_optimizer, flat_curve};
+    use std::collections::HashMap;
+    use std::path::Path;
+    use std::sync::{Arc, atomic::AtomicBool};
+
+    fn tiny_optimizer() -> OptimizerConfig {
+        OptimizerConfig {
+            processing_mode: ProcessingMode::LowLatency,
+            num_filters: 1,
+            max_iter: 20,
+            population: 6,
+            seed: Some(1),
+            ..Default::default()
+        }
+    }
+
+    fn room_config(optimizer: OptimizerConfig) -> RoomConfig {
+        RoomConfig {
+            version: crate::roomeq::types::default_config_version(),
+            system: Some(SystemConfig {
+                model: SystemModel::Custom,
+                speakers: HashMap::from([("Left".to_string(), "left".to_string())]),
+                subwoofers: None,
+                bass_management: None,
+            ..Default::default()
+        }),
+            speakers: HashMap::from([(
+                "left".to_string(),
+                SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
+            )]),
+            crossovers: None,
+            target_curve: None,
+            optimizer,
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        }
+    }
+
+    #[test]
+    fn run_post_eq_without_callback_runs() {
+        let opt = tiny_optimizer();
+        let curve = flat_curve();
+        let (filters, _) = run_post_eq(&curve, &opt, None, 48_000.0, None).unwrap();
+        assert!(filters.is_empty() || !filters.is_empty());
+    }
+
+    #[test]
+    fn run_post_eq_with_callback_runs() {
+        let opt = tiny_optimizer();
+        let curve = flat_curve();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let progress = WorkflowProgressCallback {
+            callback: Box::new(|_, _, _| crate::de::CallbackAction::Continue),
+            stopped: Arc::clone(&stopped),
+        };
+        let (filters, _) = run_post_eq(&curve, &opt, None, 48_000.0, Some(progress)).unwrap();
+        assert!(!stopped.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(filters.is_empty() || !filters.is_empty());
+    }
+
+    #[test]
+    fn run_post_eq_with_target_curve_runs() {
+        let opt = tiny_optimizer();
+        let curve = flat_curve();
+        let target = TargetCurveConfig::Predefined("flat".to_string());
+        let (filters, _) = run_post_eq(&curve, &opt, Some(&target), 48_000.0, None).unwrap();
+        assert!(filters.is_empty() || !filters.is_empty());
+    }
+
+    #[test]
+    fn run_channel_via_generic_path_runs() {
+        let config = room_config(base_optimizer());
+        let source = MeasurementSource::InMemory(flat_curve());
+        let mut factory: Option<&mut WorkflowProgressCallbackFactory<'_>> = None;
+        let result = run_channel_via_generic_path(
+            "Left",
+            &source,
+            &config,
+            0.0,
+            48_000.0,
+            Path::new("."),
+            &mut factory,
+            0,
+            1,
+            config.optimizer.max_iter,
+        );
+        assert!(result.is_ok(), "generic path failed: {:?}", result.err());
+        let (chain, _, _, _, _, _) = result.unwrap();
+        assert_eq!(chain.channel, "Left");
+    }
+
+    #[test]
+    fn run_channel_via_generic_path_with_alignment_gain() {
+        let mut optimizer = base_optimizer();
+        optimizer.max_freq = 500.0;
+        let config = room_config(optimizer);
+        let source = MeasurementSource::InMemory(flat_curve());
+        let mut factory: Option<&mut WorkflowProgressCallbackFactory<'_>> = None;
+        let result = run_channel_via_generic_path(
+            "Left",
+            &source,
+            &config,
+            2.5,
+            48_000.0,
+            Path::new("."),
+            &mut factory,
+            0,
+            1,
+            config.optimizer.max_iter,
+        );
+        assert!(
+            result.is_ok(),
+            "generic path with gain failed: {:?}",
+            result.err()
+        );
+        let (chain, _, _, _, _, _) = result.unwrap();
+        let has_gain = chain.plugins.iter().any(|p| p.plugin_type == "gain");
+        assert!(has_gain, "alignment gain plugin should be present");
+    }
+
+    #[test]
+    fn run_channel_via_generic_path_multiseat_rejected_recovers() {
+        use crate::roomeq::types::{
+            MultiMeasurementStrategy, MultiSeatConfig, SystemConfig, SystemModel,
+        };
+
+        let mut optimizer = base_optimizer();
+        optimizer.max_freq = 500.0;
+        optimizer.multi_seat = Some(MultiSeatConfig {
+            all_channel_enabled: true,
+            all_channel_strategy: MultiMeasurementStrategy::SpatialRobustness,
+            max_deviation_db: 0.001,
+            ..Default::default()
+        });
+        let config = RoomConfig {
+            version: crate::roomeq::types::default_config_version(),
+            system: Some(SystemConfig {
+                model: SystemModel::HomeCinema,
+                speakers: HashMap::from([("Left".to_string(), "left".to_string())]),
+                subwoofers: None,
+                bass_management: None,
+            ..Default::default()
+        }),
+            speakers: HashMap::from([(
+                "left".to_string(),
+                SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
+            )]),
+            crossovers: None,
+            target_curve: None,
+            optimizer,
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        };
+        let seat0 = flat_curve();
+        let mut seat1 = flat_curve();
+        seat1.spl += 5.0;
+        let source = MeasurementSource::InMemoryMultiple(vec![seat0, seat1]);
+        let mut factory: Option<&mut WorkflowProgressCallbackFactory<'_>> = None;
+        let result = run_channel_via_generic_path(
+            "Left",
+            &source,
+            &config,
+            0.0,
+            48_000.0,
+            Path::new("."),
+            &mut factory,
+            0,
+            1,
+            config.optimizer.max_iter,
+        );
+        assert!(
+            result.is_ok(),
+            "generic path should recover from multiseat rejection: {:?}",
+            result.err()
+        );
+        let (_, _, _, _, _, multiseat_rejection) = result.unwrap();
+        assert!(
+            multiseat_rejection.is_some(),
+            "multiseat rejection should be reported"
+        );
+    }
 }

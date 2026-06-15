@@ -2,10 +2,10 @@
 
 use super::compute::compute_sum_gd;
 use super::gd_opt_config::GdOptConfig;
-use super::gd_opt_config::encode_result_as_params;
 use super::types::ChannelMeasurementInput;
 use super::types::GdAlignmentTarget;
 use super::types::GroupDelayOptResult;
+use super::types::encode_result_as_params;
 use ndarray::Array1;
 
 /// Build a `GdAlignmentTarget` from a `GroupDelayOptResult`.

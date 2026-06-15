@@ -6,6 +6,7 @@ use crate::iir::Biquad;
 pub use crate::optim::setup::*;
 use ndarray::Array1;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use crate::cli::Args;
 use clap::Parser;
@@ -324,4 +325,410 @@ fn setup_bounds_gain_scales_with_max_db() {
             gain_lower
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Tests for workflow/build.rs
+// ---------------------------------------------------------------------------
+
+#[test]
+fn build_target_curve_by_name_covers_variants() {
+    let freqs = Array1::from(vec![50.0, 200.0, 1000.0, 5000.0, 15000.0]);
+    let input = Curve {
+        freq: freqs.clone(),
+        spl: Array1::zeros(freqs.len()),
+        phase: None,
+        ..Default::default()
+    };
+
+    let listening_window = super::build_target_curve_by_name("Listening Window", &freqs, &input)
+        .expect("Listening Window should build");
+    assert_eq!(listening_window.freq.len(), freqs.len());
+
+    for name in ["Sound Power", "Early Reflections", "Estimated In-Room Response"] {
+        let target = super::build_target_curve_by_name(name, &freqs, &input)
+            .expect("{name} target should build");
+        assert_eq!(target.freq.len(), freqs.len());
+    }
+
+    let default = super::build_target_curve_by_name("On Axis", &freqs, &input)
+        .expect("default target should build");
+    assert!(default.spl.iter().all(|v| *v == 0.0));
+}
+
+#[test]
+fn build_target_curve_loads_from_csv_path() {
+    let dir = std::env::temp_dir().join(format!("autoeq-test-{}-csv", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("target.csv");
+    std::fs::write(&path, "frequency,spl\n100,0\n1000,-1\n10000,-2\n").unwrap();
+
+    let mut args = Args::speaker_defaults();
+    args.target = Some(path.clone());
+    args.curve_name = "On Axis".to_string();
+
+    let freqs = Array1::from(vec![100.0, 1000.0, 10000.0]);
+    let input = Curve {
+        freq: freqs.clone(),
+        spl: Array1::zeros(freqs.len()),
+        phase: None,
+        ..Default::default()
+    };
+
+    let target = super::build_target_curve(&args, &freqs, &input)
+        .expect("build_target_curve should load CSV");
+    assert_eq!(target.freq.len(), freqs.len());
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// ---------------------------------------------------------------------------
+// Tests for workflow/misc.rs
+// ---------------------------------------------------------------------------
+
+#[test]
+fn create_driver_optimization_args_has_expected_values() {
+    let args = super::misc::create_driver_optimization_args(
+        50.0, 5000.0, 48000.0, "autoeq:de", 20, 6, -6.0, 6.0, Some(1),
+    );
+    assert_eq!(args.min_freq, 50.0);
+    assert_eq!(args.max_freq, 5000.0);
+    assert_eq!(args.sample_rate, 48000.0);
+    assert_eq!(args.algo, "autoeq:de");
+    assert_eq!(args.maxeval, 20);
+    assert_eq!(args.population, 6);
+    assert_eq!(args.min_db, -6.0);
+    assert_eq!(args.max_db, 6.0);
+    assert_eq!(args.seed, Some(1));
+    assert_eq!(args.loss, crate::LossType::DriversFlat);
+}
+
+#[test]
+fn interpolate_cea2034_data_preserves_keys() {
+    use crate::Cea2034Data;
+
+    let freqs = Array1::from(vec![100.0, 1000.0, 10000.0]);
+    let curve = |offset: f64| Curve {
+        freq: freqs.clone(),
+        spl: Array1::from(vec![offset, offset + 1.0, offset + 2.0]),
+        phase: None,
+        ..Default::default()
+    };
+
+    let spin = Cea2034Data {
+        on_axis: curve(0.0),
+        listening_window: curve(1.0),
+        early_reflections: curve(2.0),
+        sound_power: curve(3.0),
+        estimated_in_room: curve(4.0),
+        er_di: curve(5.0),
+        sp_di: curve(6.0),
+        curves: HashMap::new(),
+    };
+
+    let standard_freq = Array1::from(vec![200.0, 2000.0, 8000.0]);
+    let interpolated = super::misc::interpolate_cea2034_data(&spin, &standard_freq);
+    assert_eq!(interpolated.on_axis.freq.len(), standard_freq.len());
+    assert!(interpolated.curves.contains_key("On Axis"));
+    assert!(interpolated.curves.contains_key("Listening Window"));
+}
+
+// ---------------------------------------------------------------------------
+// Tests for workflow/optimize.rs
+// ---------------------------------------------------------------------------
+
+fn write_headphone_csv(path: &PathBuf) {
+    let mut contents = String::from("frequency,spl\n");
+    for f in [20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0] {
+        contents.push_str(&format!("{},{:.2}\n", f, 80.0 + 2.0 * f64::sin(f / 1000.0_f64)));
+    }
+    std::fs::write(path, contents).unwrap();
+}
+
+#[test]
+fn optimize_headphone_with_csv_runs() {
+    let dir = std::env::temp_dir().join(format!("autoeq-test-{}-hp", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let curve_path = dir.join("headphone.csv");
+    write_headphone_csv(&curve_path);
+
+    let target_curve = Curve {
+        freq: Array1::from(vec![20.0, 100.0, 1000.0, 10000.0, 20000.0]),
+        spl: Array1::from(vec![0.0, 0.0, 0.0, 0.0, 0.0]),
+        phase: None,
+        ..Default::default()
+    };
+
+    let mut args = Args::headphone_defaults();
+    args.algo = "autoeq:de".to_string();
+    args.maxeval = 20;
+    args.population = 6;
+    args.seed = Some(1);
+    args.num_filters = 3;
+    args.min_freq = 100.0;
+    args.max_freq = 10000.0;
+
+    let result = super::optimize_headphone(&curve_path, &target_curve, &args, None, None::<fn(&_) -> _>);
+    assert!(result.is_ok(), "optimize_headphone failed: {:?}", result.err());
+    let opt = result.unwrap();
+    assert!(!opt.biquads.is_empty());
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+fn make_two_drivers() -> crate::loss::DriversLossData {
+    let freq = Array1::from(vec![20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0]);
+    let woofer = crate::loss::DriverMeasurement::new(
+        freq.clone(),
+        Array1::from(vec![80.0, 82.0, 85.0, 84.0, 82.0, 78.0, 70.0, 60.0, 50.0]),
+        None,
+    );
+    let tweeter = crate::loss::DriverMeasurement::new(
+        freq.clone(),
+        Array1::from(vec![40.0, 45.0, 50.0, 55.0, 60.0, 70.0, 80.0, 82.0, 80.0]),
+        None,
+    );
+    crate::loss::DriversLossData::new(
+        vec![woofer, tweeter],
+        crate::loss::CrossoverType::LinkwitzRiley4,
+    )
+}
+
+#[test]
+fn optimize_drivers_crossover_runs() {
+    let drivers_data = make_two_drivers();
+    let result = super::optimize_drivers_crossover(
+        drivers_data,
+        50.0,
+        8000.0,
+        48000.0,
+        "autoeq:de",
+        20,
+        6,
+        -12.0,
+        12.0,
+        None,
+        Some(1),
+    );
+    assert!(
+        result.is_ok(),
+        "optimize_drivers_crossover failed: {:?}",
+        result.err()
+    );
+    let opt = result.unwrap();
+    assert_eq!(opt.gains.len(), 2);
+    assert_eq!(opt.delays.len(), 2);
+    assert_eq!(opt.crossover_freqs.len(), 1);
+}
+
+#[test]
+fn optimize_drivers_crossover_fixed_freqs_runs() {
+    let drivers_data = make_two_drivers();
+    let result = super::optimize_drivers_crossover(
+        drivers_data,
+        50.0,
+        8000.0,
+        48000.0,
+        "autoeq:de",
+        20,
+        6,
+        -12.0,
+        12.0,
+        Some(vec![1000.0]),
+        Some(1),
+    );
+    assert!(
+        result.is_ok(),
+        "optimize_drivers_crossover fixed failed: {:?}",
+        result.err()
+    );
+    let opt = result.unwrap();
+    assert_eq!(opt.crossover_freqs, vec![1000.0]);
+}
+
+#[test]
+fn optimize_multisub_runs() {
+    let freq = Array1::from(vec![20.0, 50.0, 100.0, 200.0]);
+    let sub1 = crate::loss::DriverMeasurement::new(
+        freq.clone(),
+        Array1::from(vec![80.0, 82.0, 81.0, 80.0]),
+        None,
+    );
+    let sub2 = crate::loss::DriverMeasurement::new(
+        freq.clone(),
+        Array1::from(vec![81.0, 80.0, 82.0, 81.0]),
+        None,
+    );
+    let drivers_data = crate::loss::DriversLossData::new(
+        vec![sub1, sub2],
+        crate::loss::CrossoverType::None,
+    );
+
+    let result = super::optimize_multisub(
+        drivers_data, 20.0, 200.0, 48000.0, "autoeq:de", 20, 6, -12.0, 12.0, Some(1),
+    );
+    assert!(result.is_ok(), "optimize_multisub failed: {:?}", result.err());
+    let opt = result.unwrap();
+    assert_eq!(opt.gains.len(), 2);
+    assert_eq!(opt.delays.len(), 2);
+    assert!(opt.crossover_freqs.is_empty());
+}
+
+fn write_speaker_cache(speaker: &str, _version: &str, measurement: &str) -> PathBuf {
+    use serde_json::json;
+
+    let cache_root = std::env::temp_dir().join(format!(
+        "autoeq-test-{}-cache",
+        std::process::id()
+    ));
+    let cache_dir = cache_root
+        .join("speakers")
+        .join("org.spinorama")
+        .join(crate::read::sanitize_dir_name(speaker));
+    std::fs::create_dir_all(&cache_dir).unwrap();
+
+    let freqs: Vec<f64> = vec![20.0, 100.0, 1000.0, 5000.0, 10000.0, 20000.0];
+    let spl: Vec<f64> = vec![75.0, 78.0, 80.0, 82.0, 81.0, 79.0];
+    let make_trace = |name: &str| {
+        json!({
+            "name": name,
+            "x": freqs,
+            "y": spl,
+        })
+    };
+
+    let plot_data = json!({
+        "data": [
+            make_trace("On Axis"),
+            make_trace("Listening Window"),
+            make_trace("Early Reflections"),
+            make_trace("Sound Power"),
+            make_trace("Early Reflections DI"),
+            make_trace("Sound Power DI"),
+        ]
+    });
+
+    let cache_file = cache_dir.join(crate::read::measurement_filename(measurement));
+    std::fs::write(&cache_file, serde_json::to_string(&plot_data).unwrap()).unwrap();
+    cache_root
+}
+
+#[test]
+#[serial_test::serial]
+fn optimize_speaker_with_local_cache_runs() {
+    let speaker = format!("Test Speaker {}", std::process::id());
+    let version = "asr";
+    let measurement = "CEA2034";
+    let cache_root = write_speaker_cache(&speaker, version, measurement);
+    unsafe { std::env::set_var("SOTF_CACHE_DIR", cache_root.to_str().unwrap()) };
+
+    let mut args = Args::speaker_defaults();
+    args.algo = "autoeq:de".to_string();
+    args.maxeval = 20;
+    args.population = 6;
+    args.seed = Some(1);
+    args.num_filters = 3;
+    args.min_freq = 100.0;
+    args.max_freq = 10000.0;
+    args.curve_name = "Listening Window".to_string();
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let result = rt.block_on(super::optimize_speaker(
+        &speaker,
+        version,
+        measurement,
+        &args,
+        None,
+        None::<fn(&_) -> _>,
+    ));
+
+    unsafe { std::env::remove_var("SOTF_CACHE_DIR") };
+    std::fs::remove_dir_all(&cache_root).ok();
+
+    assert!(result.is_ok(), "optimize_speaker failed: {:?}", result.err());
+    let opt = result.unwrap();
+    assert!(!opt.biquads.is_empty());
+    assert!(opt.spin_data.is_some());
+}
+
+// ---------------------------------------------------------------------------
+// Tests for workflow/load.rs
+// ---------------------------------------------------------------------------
+
+#[test]
+fn load_driver_measurements_from_files_loads_csvs() {
+    let dir = std::env::temp_dir().join(format!("autoeq-test-{}-drivers", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for name in ["woofer.csv", "tweeter.csv"] {
+        let path = dir.join(name);
+        std::fs::write(&path, "frequency,spl\n100,80\n1000,82\n10000,78\n").unwrap();
+    }
+
+    let paths: Vec<PathBuf> = vec![dir.join("woofer.csv"), dir.join("tweeter.csv")];
+    let result = super::load_driver_measurements_from_files(&paths);
+    assert!(
+        result.is_ok(),
+        "load_driver_measurements_from_files failed: {:?}",
+        result.err()
+    );
+    let measurements = result.unwrap();
+    assert_eq!(measurements.len(), 2);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn load_driver_measurements_from_files_reports_error() {
+    let dir = std::env::temp_dir().join(format!("autoeq-test-{}-bad", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("missing.csv");
+
+    let result = super::load_driver_measurements_from_files(&[path]);
+    assert!(result.is_err());
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// ---------------------------------------------------------------------------
+// Tests for workflow/resume.rs
+// ---------------------------------------------------------------------------
+
+#[test]
+fn optimizer_state_save_load_roundtrip() {
+    let dir = std::env::temp_dir().join(format!("autoeq-test-{}-resume", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("optimizer_state.json");
+
+    let state = super::resume::OptimizerState {
+        best_params: vec![1.0, 2.0, 3.0],
+        current_params: vec![1.1, 2.1, 3.1],
+        best_loss: 0.42,
+        iteration: 10,
+        total_iterations: 100,
+        converged: false,
+        seed: Some(7),
+        timestamp: chrono::Utc::now(),
+    };
+
+    super::resume::save_optimizer_state(&state, &path).unwrap();
+    assert!(path.exists());
+
+    let loaded = super::resume::load_optimizer_state(&path)
+        .unwrap()
+        .expect("state should load");
+    assert_eq!(loaded.best_params, state.best_params);
+    assert_eq!(loaded.current_params, state.current_params);
+    assert!((loaded.best_loss - state.best_loss).abs() < 1e-9);
+    assert_eq!(loaded.iteration, state.iteration);
+    assert_eq!(loaded.total_iterations, state.total_iterations);
+    assert_eq!(loaded.converged, state.converged);
+    assert_eq!(loaded.seed, state.seed);
+
+    let missing = super::resume::load_optimizer_state(&dir.join("missing.json")).unwrap();
+    assert!(missing.is_none());
+
+    let default_path = super::resume::get_state_file_path(&dir);
+    assert_eq!(default_path, dir.join("optimizer_state.json"));
+
+    std::fs::remove_dir_all(&dir).ok();
 }

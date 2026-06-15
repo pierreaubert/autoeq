@@ -9,6 +9,7 @@ use super::create::create_delay_plugin;
 use super::create::create_eq_plugin;
 use super::create::create_gain_plugin;
 use super::create::create_gain_plugin_with_invert;
+use super::create::create_convolution_plugin;
 use super::create::create_labeled_eq_plugin;
 use super::misc::get_driver_name;
 use math_audio_iir_fir::Biquad;
@@ -247,6 +248,7 @@ pub fn build_multisub_dsp_chain(
 ///
 /// # Arguments
 /// * `driver_initial_curves` - Optional per-sub initial curves (extended to full range).
+#[allow(clippy::too_many_arguments)]
 pub fn build_multisub_dsp_chain_with_curves(
     channel_name: &str,
     group_name: &str,
@@ -273,6 +275,7 @@ pub fn build_multisub_dsp_chain_with_curves(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Build a DSP chain for multi-sub optimization with optional per-sub all-pass filters.
 pub fn build_multisub_dsp_chain_with_allpass(
     channel_name: &str,
@@ -652,4 +655,55 @@ pub fn build_mixed_mode_crossover_chain(
         direct_early_late_correction: None,
         target_curve: None,
     }
+}
+
+/// Build the DSP chains for a supporting-source channel pair.
+///
+/// Returns `(primary_chain, support_chain)`. The primary chain is left empty
+/// (direct sound untouched) and the support chain contains the delay and the
+/// convolution plugin referencing the FIR WAV file.
+pub fn build_supporting_source_dsp_chains(
+    logical_channel: &str,
+    support_channel_name: &str,
+    delay_ms: f64,
+    fir_wav_path: &str,
+    primary_initial: Option<&crate::Curve>,
+    support_initial: Option<&crate::Curve>,
+    constrained_target: Option<&crate::Curve>,
+) -> (ChannelDspChain, ChannelDspChain) {
+    let primary = ChannelDspChain {
+        channel: logical_channel.to_string(),
+        plugins: vec![],
+        drivers: None,
+        initial_curve: primary_initial.map(|c| c.into()),
+        final_curve: primary_initial.map(|c| c.into()), // unchanged
+        eq_response: None,
+        pre_ir: None,
+        post_ir: None,
+        fir_temporal_masking: None,
+        direct_early_late_correction: None,
+        target_curve: constrained_target.map(|c| c.into()),
+    };
+
+    let mut support_plugins = Vec::new();
+    if delay_ms.abs() > 0.001 {
+        support_plugins.push(create_delay_plugin(delay_ms));
+    }
+    support_plugins.push(create_convolution_plugin(fir_wav_path));
+
+    let support = ChannelDspChain {
+        channel: support_channel_name.to_string(),
+        plugins: support_plugins,
+        drivers: None,
+        initial_curve: support_initial.map(|c| c.into()),
+        final_curve: None,
+        eq_response: None,
+        pre_ir: None,
+        post_ir: None,
+        fir_temporal_masking: None,
+        direct_early_late_correction: None,
+        target_curve: constrained_target.map(|c| c.into()),
+    };
+
+    (primary, support)
 }

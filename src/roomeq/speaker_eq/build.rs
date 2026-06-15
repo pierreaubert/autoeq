@@ -109,6 +109,7 @@ pub(super) fn build_target_tilt_curve(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn build_clamped_optimizer(
     channel_name: &str,
     source: &MeasurementSource,

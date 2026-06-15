@@ -64,6 +64,18 @@ pub fn sanitize_dir_name(name: &str) -> String {
     out.trim().trim_matches('_').to_string()
 }
 
+/// Return the cache directory for a headphone under
+/// `<cache_root>/headphones/org.spinorama/<sanitized name>`.
+#[cfg(test)]
+#[allow(dead_code)]
+pub fn headphone_cache_dir(headphone: &str) -> PathBuf {
+    let mut p = cache_root();
+    p.push("headphones");
+    p.push("org.spinorama");
+    p.push(sanitize_dir_name(headphone));
+    p
+}
+
 /// Return the cache filename for a measurement, neutralizing any path
 /// separators. For example, "Estimated In-Room Response" becomes
 /// "Estimated In-Room Response.json" and "A/B" becomes "A-B.json".

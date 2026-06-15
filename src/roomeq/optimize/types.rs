@@ -114,6 +114,16 @@ pub struct SpeakerOptimizationResult {
 
 pub(super) type SharedPipelineObserver = Arc<Mutex<Option<Box<dyn PipelineObserver>>>>;
 
+/// Selected high-level Room EQ topology route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::roomeq) enum TopologyRoute {
+    Stereo2_0,
+    Stereo2_1,
+    HomeCinema,
+    /// Fallback when no specific workflow applies (Custom layout or speaker groups).
+    Generic,
+}
+
 pub(super) fn emit_pipeline_event(
     observer: &SharedPipelineObserver,
     event: PipelineEvent,

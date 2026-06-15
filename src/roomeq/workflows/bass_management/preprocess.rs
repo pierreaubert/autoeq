@@ -44,6 +44,10 @@ pub(in super::super) fn preprocess_sub(
             message: "Group speaker config should not reach stereo sub workflow; use generic path"
                 .to_string(),
         }),
+        SpeakerConfig::SupportingSource(_) => Err(AutoeqError::InvalidConfiguration {
+            message: "Supporting source config cannot be used as an LFE/subwoofer channel"
+                .to_string(),
+        }),
     }
 }
 
@@ -55,10 +59,11 @@ pub(in super::super) fn preprocess_multisub_mso(
 ) -> Result<SubPreprocessResult> {
     info!("  MSO optimization for {} subwoofers", ms.subwoofers.len());
 
-    let (result, combined) = multisub::optimize_multisub(&ms.subwoofers, optimizer, sample_rate)
-        .map_err(|e| AutoeqError::OptimizationFailed {
-            message: format!("MSO optimization failed: {}", e),
-        })?;
+    let (result, combined) =
+        crate::roomeq::multisub::optimize_multisub(&ms.subwoofers, optimizer, sample_rate)
+            .map_err(|e| AutoeqError::OptimizationFailed {
+                message: format!("MSO optimization failed: {}", e),
+            })?;
 
     info!(
         "  MSO result: gains={:?}, delays={:?}",
@@ -295,4 +300,206 @@ pub(in super::super) fn preprocess_dba(
         combined_curve: combined,
         drivers: Some(drivers),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Curve;
+    use crate::MeasurementSource;
+    use crate::roomeq::types::{
+        CardioidConfig, DBAConfig, MultiSubGroup, OptimizerConfig, SpeakerConfig, SpeakerGroup,
+        SubwooferStrategy,
+    };
+
+    fn make_curve(freq_count: usize, spl_db: f64, phase_deg: Option<f64>) -> Curve {
+        let freq = ndarray::Array1::logspace(10.0, f64::log10(20.0), f64::log10(200.0), freq_count);
+        let spl = ndarray::Array1::from_elem(freq_count, spl_db);
+        let phase = phase_deg.map(|p| ndarray::Array1::from_elem(freq_count, p));
+        Curve {
+            freq,
+            spl,
+            phase,
+            ..Default::default()
+        }
+    }
+
+    fn tiny_optimizer() -> OptimizerConfig {
+        OptimizerConfig {
+            algorithm: "autoeq:cobyla".to_string(),
+            max_iter: 20,
+            population: 6,
+            min_freq: 20.0,
+            max_freq: 200.0,
+            seed: Some(1),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn preprocess_sub_single_returns_finite_combined_curve() {
+        let curve = make_curve(16, 80.0, None);
+        let config = SpeakerConfig::Single(MeasurementSource::InMemory(curve));
+        let result = preprocess_sub(
+            &config,
+            &SubwooferStrategy::Single,
+            &tiny_optimizer(),
+            48000.0,
+        );
+        assert!(result.is_ok(), "expected Ok, got Err: {:?}", result.err());
+        let result = result.unwrap();
+        assert!(result.drivers.is_none());
+        assert!(result.combined_curve.spl.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn preprocess_sub_multisub_mso_returns_drivers() {
+        let subs = MultiSubGroup {
+            name: "subs".to_string(),
+            speaker_name: None,
+            subwoofers: vec![
+                MeasurementSource::InMemory(make_curve(16, 80.0, Some(0.0))),
+                MeasurementSource::InMemory(make_curve(16, 80.0, Some(0.0))),
+            ],
+            allpass_optimization: false,
+        };
+        let config = SpeakerConfig::MultiSub(subs);
+        let result = preprocess_sub(&config, &SubwooferStrategy::Mso, &tiny_optimizer(), 48000.0);
+        assert!(result.is_ok(), "expected Ok, got Err: {:?}", result.err());
+        let result = result.unwrap();
+        assert!(result.drivers.is_some());
+        let drivers = result.drivers.unwrap();
+        assert!(!drivers.is_empty());
+        assert!(result.combined_curve.spl.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn preprocess_sub_multisub_single_averages_subs() {
+        let subs = MultiSubGroup {
+            name: "subs".to_string(),
+            speaker_name: None,
+            subwoofers: vec![
+                MeasurementSource::InMemory(make_curve(16, 80.0, None)),
+                MeasurementSource::InMemory(make_curve(16, 80.0, None)),
+            ],
+            allpass_optimization: false,
+        };
+        let config = SpeakerConfig::MultiSub(subs);
+        let result = preprocess_sub(
+            &config,
+            &SubwooferStrategy::Single,
+            &tiny_optimizer(),
+            48000.0,
+        );
+        assert!(result.is_ok(), "expected Ok, got Err: {:?}", result.err());
+        let result = result.unwrap();
+        assert!(result.drivers.is_some());
+        let drivers = result.drivers.unwrap();
+        assert_eq!(drivers.len(), 2);
+        assert!(drivers.iter().all(|d| d.gain == 0.0 && d.delay == 0.0));
+        assert!(result.combined_curve.spl.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn preprocess_sub_group_returns_error() {
+        let group = SpeakerGroup {
+            name: "group".to_string(),
+            speaker_name: None,
+            measurements: vec![MeasurementSource::InMemory(make_curve(16, 80.0, None))],
+            crossover: None,
+        };
+        let config = SpeakerConfig::Group(group);
+        let result = preprocess_sub(
+            &config,
+            &SubwooferStrategy::Single,
+            &tiny_optimizer(),
+            48000.0,
+        );
+        assert!(result.is_err(), "expected Err for Group config");
+    }
+
+    #[test]
+    fn preprocess_cardioid_happy_path_with_phase() {
+        let front = make_curve(16, 80.0, Some(0.0));
+        let rear = make_curve(16, 80.0, Some(0.0));
+        let config = CardioidConfig {
+            name: "cardioid".to_string(),
+            speaker_name: None,
+            front: MeasurementSource::InMemory(front),
+            rear: MeasurementSource::InMemory(rear),
+            separation_meters: 1.0,
+        };
+        let result = preprocess_cardioid(&config);
+        assert!(result.is_ok(), "expected Ok, got Err: {:?}", result.err());
+        let result = result.unwrap();
+        assert!(result.drivers.is_some());
+        assert_eq!(result.drivers.as_ref().unwrap().len(), 2);
+        assert!(result.combined_curve.spl.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn preprocess_cardioid_errors_on_mismatched_frequency_grids() {
+        let mut front = make_curve(16, 80.0, Some(0.0));
+        let rear = make_curve(16, 80.0, Some(0.0));
+        front.freq = ndarray::Array1::logspace(10.0, f64::log10(25.0), f64::log10(205.0), 16);
+        let config = CardioidConfig {
+            name: "cardioid".to_string(),
+            speaker_name: None,
+            front: MeasurementSource::InMemory(front),
+            rear: MeasurementSource::InMemory(rear),
+            separation_meters: 1.0,
+        };
+        let result = preprocess_cardioid(&config);
+        assert!(result.is_err(), "expected Err for mismatched grids");
+    }
+
+    #[test]
+    fn preprocess_cardioid_errors_on_mismatched_spl_lengths() {
+        let mut front = make_curve(16, 80.0, Some(0.0));
+        front.spl = ndarray::Array1::from_elem(8, 80.0);
+        let rear = make_curve(16, 80.0, Some(0.0));
+        let config = CardioidConfig {
+            name: "cardioid".to_string(),
+            speaker_name: None,
+            front: MeasurementSource::InMemory(front),
+            rear: MeasurementSource::InMemory(rear),
+            separation_meters: 1.0,
+        };
+        let result = preprocess_cardioid(&config);
+        assert!(result.is_err(), "expected Err for mismatched SPL lengths");
+    }
+
+    #[test]
+    fn preprocess_cardioid_errors_on_mismatched_phase_lengths() {
+        let mut front = make_curve(16, 80.0, Some(0.0));
+        front.phase = Some(ndarray::Array1::from_elem(8, 0.0));
+        let rear = make_curve(16, 80.0, Some(0.0));
+        let config = CardioidConfig {
+            name: "cardioid".to_string(),
+            speaker_name: None,
+            front: MeasurementSource::InMemory(front),
+            rear: MeasurementSource::InMemory(rear),
+            separation_meters: 1.0,
+        };
+        let result = preprocess_cardioid(&config);
+        assert!(result.is_err(), "expected Err for mismatched phase lengths");
+    }
+
+    #[test]
+    fn preprocess_dba_happy_path() {
+        let front_curve = make_curve(16, 80.0, Some(0.0));
+        let rear_curve = make_curve(16, 80.0, Some(0.0));
+        let config = DBAConfig {
+            name: "dba".to_string(),
+            speaker_name: None,
+            front: vec![MeasurementSource::InMemory(front_curve)],
+            rear: vec![MeasurementSource::InMemory(rear_curve)],
+        };
+        let result = preprocess_dba(&config, &tiny_optimizer(), 48000.0);
+        assert!(result.is_ok(), "expected Ok, got Err: {:?}", result.err());
+        let result = result.unwrap();
+        assert!(result.drivers.is_some());
+        assert_eq!(result.drivers.as_ref().unwrap().len(), 2);
+        assert!(result.combined_curve.spl.iter().all(|v| v.is_finite()));
+    }
 }

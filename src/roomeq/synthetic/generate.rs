@@ -242,6 +242,7 @@ pub fn generate_sub_curve_with_phase(
 /// * `noise_rms` - Measurement noise RMS in dB
 /// * `seed` - Base seed for deterministic generation
 /// * `sample_rate` - Sample rate for biquad computation
+#[allow(clippy::too_many_arguments)]
 pub fn generate_multisub_scenario(
     name: &str,
     n_subs: usize,
@@ -366,6 +367,7 @@ pub fn generate_cardioid_scenario(
 /// Generate a synthetic DBA scenario.
 ///
 /// Front subs are at ~0 ms delay, rear subs are delayed (simulating room depth).
+#[allow(clippy::too_many_arguments)]
 /// Both arrays share room modes but get independent noise.
 pub fn generate_dba_scenario(
     name: &str,

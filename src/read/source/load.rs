@@ -217,3 +217,168 @@ pub fn load_source(source: &MeasurementSource) -> Result<Curve, Box<dyn Error>> 
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::inline_measurement::InlineMeasurement;
+    use super::super::measurement_ref::MeasurementRef;
+    use super::super::measurement_single::MeasurementSingle;
+    use super::super::measurement_source::MeasurementSource;
+    use super::super::types::MeasurementMultiple;
+    use super::*;
+    use ndarray::Array1;
+
+    fn sample_inline() -> InlineMeasurement {
+        InlineMeasurement {
+            frequencies: vec![100.0, 1000.0, 10000.0],
+            magnitude_db: vec![80.0, 75.0, 70.0],
+            phase_deg: Some(vec![0.0, 45.0, 90.0]),
+            name: Some("inline".to_string()),
+            wav_path: None,
+            csv_path: None,
+        }
+    }
+
+    fn sample_curve(spl_offset: f64) -> Curve {
+        Curve {
+            freq: Array1::from(vec![100.0, 1000.0, 10000.0]),
+            spl: Array1::from(vec![80.0 + spl_offset, 75.0 + spl_offset, 70.0 + spl_offset]),
+            phase: None,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn load_measurement_inline_ok() {
+        let m = MeasurementRef::Inline(sample_inline());
+        let curve = load_measurement(&m).unwrap();
+        assert_eq!(curve.freq.len(), 3);
+        assert_eq!(curve.spl[0], 80.0);
+        assert!(curve.phase.is_some());
+    }
+
+    #[test]
+    fn load_measurement_inline_ignores_mismatched_phase() {
+        let mut inline = sample_inline();
+        inline.phase_deg = Some(vec![0.0, 45.0]);
+        let curve = load_measurement(&MeasurementRef::Inline(inline)).unwrap();
+        assert!(curve.phase.is_none());
+    }
+
+    #[test]
+    fn load_measurement_inline_rejects_mismatched_lengths() {
+        let mut inline = sample_inline();
+        inline.magnitude_db.push(65.0);
+        let result = load_measurement(&MeasurementRef::Inline(inline));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("mismatched lengths"));
+    }
+
+    #[test]
+    fn load_measurement_inline_empty_rejects_without_csv_path() {
+        let inline = InlineMeasurement {
+            frequencies: vec![],
+            magnitude_db: vec![],
+            phase_deg: None,
+            name: Some("empty".to_string()),
+            wav_path: None,
+            csv_path: None,
+        };
+        let result = load_measurement(&MeasurementRef::Inline(inline));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_measurement_named_missing_file_returns_error() {
+        let m = MeasurementRef::Named {
+            path: std::path::PathBuf::from("/tmp/does_not_exist_abc123.csv"),
+            name: Some("missing".to_string()),
+        };
+        assert!(load_measurement(&m).is_err());
+    }
+
+    #[test]
+    fn load_source_single_inline() {
+        let source = MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Inline(sample_inline()),
+            speaker_name: Some("L".to_string()),
+        });
+        let curve = load_source(&source).unwrap();
+        assert_eq!(curve.freq.len(), 3);
+        assert_eq!(source.speaker_name(), Some("L"));
+    }
+
+    #[test]
+    fn load_source_in_memory_returns_clone() {
+        let curve = sample_curve(0.0);
+        let source = MeasurementSource::InMemory(curve.clone());
+        let loaded = load_source(&source).unwrap();
+        assert_eq!(loaded.spl[0], curve.spl[0]);
+    }
+
+    #[test]
+    fn load_source_in_memory_multiple_averages() {
+        let c1 = sample_curve(0.0);
+        let c2 = sample_curve(3.0);
+        let source = MeasurementSource::InMemoryMultiple(vec![c1, c2]);
+        let avg = load_source(&source).unwrap();
+        assert_eq!(avg.freq.len(), 3);
+        // Averaging in power domain: 3 dB difference => average ~81.76 dB at first point
+        let expected = 10.0 * ((10.0_f64.powf(80.0 / 10.0) + 10.0_f64.powf(83.0 / 10.0)) / 2.0).log10();
+        assert!((avg.spl[0] - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn load_source_individual_multiple_interpolates_to_first_grid() {
+        let c1 = sample_curve(0.0);
+        let mut c2 = sample_curve(3.0);
+        // Different grid to exercise interpolation path
+        c2.freq = Array1::from(vec![120.0, 1100.0, 9000.0]);
+        let source = MeasurementSource::Multiple(MeasurementMultiple {
+            measurements: vec![
+                MeasurementRef::Inline(InlineMeasurement {
+                    frequencies: c1.freq.to_vec(),
+                    magnitude_db: c1.spl.to_vec(),
+                    phase_deg: None,
+                    name: None,
+                    wav_path: None,
+                    csv_path: None,
+                }),
+                MeasurementRef::Inline(InlineMeasurement {
+                    frequencies: c2.freq.to_vec(),
+                    magnitude_db: c2.spl.to_vec(),
+                    phase_deg: None,
+                    name: None,
+                    wav_path: None,
+                    csv_path: None,
+                }),
+            ],
+            speaker_name: None,
+        });
+        let curves = load_source_individual(&source).unwrap();
+        assert_eq!(curves.len(), 2);
+        assert_eq!(curves[0].freq[0], 100.0);
+    }
+
+    #[test]
+    fn load_source_individual_empty_multiple_errors() {
+        let source = MeasurementSource::Multiple(MeasurementMultiple {
+            measurements: vec![],
+            speaker_name: None,
+        });
+        assert!(load_source_individual(&source).is_err());
+    }
+
+    #[test]
+    fn load_source_multiple_skips_failed_measurements() {
+        let source = MeasurementSource::Multiple(MeasurementMultiple {
+            measurements: vec![
+                MeasurementRef::Inline(sample_inline()),
+                MeasurementRef::Path(std::path::PathBuf::from("/tmp/missing.csv")),
+            ],
+            speaker_name: None,
+        });
+        let curve = load_source(&source).unwrap();
+        assert_eq!(curve.freq.len(), 3);
+    }
+}

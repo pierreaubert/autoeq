@@ -146,3 +146,394 @@ mod smoothness_penalty_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod backend_tests {
+    use ndarray::Array1;
+
+    use super::super::ObjectiveData;
+    use super::super::backend::FilterOptimizer;
+    use super::super::bo::AutoeqBoBackend;
+    use super::super::isres::AutoeqIsresBackend;
+    use super::super::mh::MhBackend;
+    use super::super::nsga::AutoeqNsgaBackend;
+    use super::super::params::OptimParams;
+    use super::super::pareto::{
+        ParetoFilter, extract_non_dominated, pareto_optimization, print_pareto_front,
+    };
+    use super::super::setup::{
+        ProgressCallbackConfig, initial_guess, perform_optimization,
+        perform_optimization_with_callback, perform_optimization_with_progress, setup_bounds,
+        setup_objective_data,
+    };
+    use super::super::types::MultiObjectiveData;
+    use crate::Curve;
+    use crate::cli::Args;
+    use clap::Parser;
+
+    fn small_args() -> Args {
+        let mut args = Args::parse_from(["autoeq"]);
+        args.num_filters = 1;
+        args.population = 6;
+        args.maxeval = 60;
+        args.seed = Some(1);
+        args.min_freq = 20.0;
+        args.max_freq = 20000.0;
+        args.min_db = -12.0;
+        args.max_db = 12.0;
+        args
+    }
+
+    fn scalar_objective() -> (ObjectiveData, OptimParams, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let freqs = Array1::from(vec![
+            20.0, 40.0, 80.0, 160.0, 320.0, 640.0, 1280.0, 2560.0, 5120.0, 10240.0,
+        ]);
+        let input_curve = Curve {
+            freq: freqs.clone(),
+            spl: Array1::from_elem(freqs.len(), 5.0),
+            phase: None,
+            ..Default::default()
+        };
+        let target_curve = Curve {
+            freq: freqs.clone(),
+            spl: Array1::zeros(freqs.len()),
+            phase: None,
+            ..Default::default()
+        };
+        let deviation_curve = Curve {
+            freq: freqs.clone(),
+            spl: Array1::from_elem(freqs.len(), 5.0),
+            phase: None,
+            ..Default::default()
+        };
+        let args = small_args();
+        let params = OptimParams::from(&args);
+        let (obj, _use_cea) = setup_objective_data(
+            &params,
+            &input_curve,
+            &target_curve,
+            &deviation_curve,
+            &None,
+        )
+        .unwrap();
+        let (lower, upper) = setup_bounds(&params);
+        let x = initial_guess(&params, &lower, &upper);
+        (obj, params, lower, upper, x)
+    }
+
+    fn multi_objective() -> (ObjectiveData, OptimParams, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let (mut obj, params, lower, upper, x) = scalar_objective();
+        let obj2 = obj.clone();
+        obj.multi_objective = Some(MultiObjectiveData {
+            objectives: vec![obj.clone(), obj2],
+            strategy: crate::roomeq::MultiMeasurementStrategy::WeightedSum,
+            weights: vec![0.5, 0.5],
+            variance_lambda: 0.0,
+            uncertainty_cvar_alpha: None,
+        });
+        (obj, params, lower, upper, x)
+    }
+
+    #[test]
+    fn isres_backend_optimizes_scalar() {
+        let (obj, params, lower, upper, mut x) = scalar_objective();
+        let backend = AutoeqIsresBackend::new("autoeq:isres");
+        let result = backend.optimize(&mut x, &lower, &upper, obj, &params, None);
+        assert!(result.is_ok(), "ISRES should converge: {:?}", result);
+        let (status, loss) = result.unwrap();
+        assert!(loss.is_finite(), "loss must be finite, got {}", loss);
+        assert!(
+            status.contains("ISRES"),
+            "status should mention ISRES: {}",
+            status
+        );
+    }
+
+    #[test]
+    fn mh_backends_optimizes_scalar() {
+        let configs = vec![
+            MhBackend::new_de("mh:de"),
+            MhBackend::new_pso("mh:pso"),
+            MhBackend::new_rga("mh:rga"),
+            MhBackend::new_tlbo("mh:tlbo"),
+            MhBackend::new_firefly("mh:firefly"),
+        ];
+        for backend in configs {
+            let (obj, params, lower, upper, mut x) = scalar_objective();
+            let result = backend.optimize(&mut x, &lower, &upper, obj, &params, None);
+            assert!(
+                result.is_ok(),
+                "{} should converge: {:?}",
+                backend.name(),
+                result
+            );
+            let (status, loss) = result.unwrap();
+            assert!(loss.is_finite(), "{} loss must be finite", backend.name());
+            assert!(
+                status.contains("Metaheuristics"),
+                "{} status should mention Metaheuristics: {}",
+                backend.name(),
+                status
+            );
+        }
+    }
+
+    #[test]
+    fn bo_backend_optimizes_scalar() {
+        let (obj, mut params, lower, upper, mut x) = scalar_objective();
+        params.bo_ehvi = false;
+        params.maxeval = 20;
+        params.bo_initial_samples = 5;
+        let backend = AutoeqBoBackend::new("autoeq:bo");
+        let result = backend.optimize(&mut x, &lower, &upper, obj, &params, None);
+        assert!(result.is_ok(), "BO scalar should run: {:?}", result);
+        let (status, loss) = result.unwrap();
+        assert!(loss.is_finite(), "BO loss must be finite");
+        assert!(
+            status.contains("BO"),
+            "status should mention BO: {}",
+            status
+        );
+    }
+
+    #[test]
+    fn bo_backend_optimizes_multi_objective() {
+        let (obj, mut params, lower, upper, mut x) = multi_objective();
+        params.bo_ehvi = true;
+        params.maxeval = 20;
+        params.bo_initial_samples = 5;
+        let backend = AutoeqBoBackend::new("autoeq:bo");
+        let result = backend.optimize(&mut x, &lower, &upper, obj, &params, None);
+        assert!(result.is_ok(), "BO-EHVI should run: {:?}", result);
+        let (status, loss) = result.unwrap();
+        assert!(loss.is_finite(), "BO-EHVI loss must be finite");
+        assert!(
+            status.contains("EHVI"),
+            "status should mention EHVI: {}",
+            status
+        );
+    }
+
+    #[test]
+    fn bo_backend_refine_path_runs() {
+        let (obj, mut params, lower, upper, mut x) = scalar_objective();
+        params.refine = true;
+        params.local_algo = "autoeq:cobyla".to_string();
+        params.maxeval = 20;
+        params.bo_initial_samples = 5;
+        let backend = AutoeqBoBackend::new("autoeq:bo");
+        let result = backend.optimize(&mut x, &lower, &upper, obj, &params, None);
+        assert!(result.is_ok(), "BO refine should run: {:?}", result);
+        let (status, loss) = result.unwrap();
+        assert!(loss.is_finite(), "BO refine loss must be finite");
+        assert!(
+            status.contains("refine") || status.contains("BO"),
+            "status: {}",
+            status
+        );
+    }
+
+    #[test]
+    fn nsga_backends_optimizes_scalar() {
+        for backend in [
+            AutoeqNsgaBackend::new_nsga2("autoeq:nsga2"),
+            AutoeqNsgaBackend::new_nsga3("autoeq:nsga3"),
+        ] {
+            let (obj, params, lower, upper, mut x) = scalar_objective();
+            let result = backend.optimize(&mut x, &lower, &upper, obj, &params, None);
+            assert!(
+                result.is_ok(),
+                "{} should converge: {:?}",
+                backend.name(),
+                result
+            );
+            let (status, loss) = result.unwrap();
+            assert!(loss.is_finite(), "{} loss must be finite", backend.name());
+            assert!(
+                status.contains("NSGA"),
+                "{} status should mention NSGA: {}",
+                backend.name(),
+                status
+            );
+        }
+    }
+
+    #[test]
+    fn nsga_backends_optimizes_multi_objective() {
+        for backend in [
+            AutoeqNsgaBackend::new_nsga2("autoeq:nsga2"),
+            AutoeqNsgaBackend::new_nsga3("autoeq:nsga3"),
+        ] {
+            let (obj, mut params, lower, upper, mut x) = multi_objective();
+            params.population = 16;
+            params.maxeval = 64;
+            let result = backend.optimize(&mut x, &lower, &upper, obj, &params, None);
+            assert!(
+                result.is_ok(),
+                "{} multi-objective should run: {:?}",
+                backend.name(),
+                result
+            );
+            let (_status, loss) = result.unwrap();
+            assert!(
+                loss.is_finite(),
+                "{} multi loss must be finite",
+                backend.name()
+            );
+        }
+    }
+
+    #[test]
+    fn pareto_helpers_and_integration() {
+        let filters = vec![
+            ParetoFilter {
+                params: vec![1.0, 2.0, 3.0],
+                flatness_loss: 10.0,
+                score_loss: None,
+                num_filters: 1,
+                converged: true,
+            },
+            ParetoFilter {
+                params: vec![1.0, 2.0, 3.0],
+                flatness_loss: 5.0,
+                score_loss: None,
+                num_filters: 2,
+                converged: true,
+            },
+            ParetoFilter {
+                params: vec![1.0, 2.0, 3.0],
+                flatness_loss: 20.0,
+                score_loss: None,
+                num_filters: 3,
+                converged: false,
+            },
+        ];
+        let non_dominated = extract_non_dominated(&filters);
+        assert!(
+            !non_dominated.is_empty(),
+            "non-dominated set should not be empty"
+        );
+        // Just exercise the printer; it logs, should not panic.
+        print_pareto_front(&filters);
+
+        let (obj, _params, _lower, _upper, _x) = scalar_objective();
+        let mut args = small_args();
+        args.num_filters = 1;
+        args.population = 6;
+        args.maxeval = 60;
+        args.algo = "autoeq:de".to_string();
+        let front = pareto_optimization(&obj, &args, vec![1, 2]);
+        assert_eq!(
+            front.len(),
+            2,
+            "pareto_optimization should return one entry per filter count"
+        );
+    }
+
+    #[test]
+    fn perform_optimization_non_de_backend() {
+        let (obj, _params, _lower, _upper, _x) = scalar_objective();
+        let mut args = small_args();
+        args.algo = "autoeq:cobyla".to_string();
+        args.maxeval = 200;
+        let result = perform_optimization(&args, &obj);
+        assert!(
+            result.is_ok(),
+            "perform_optimization cobyla should run: {:?}",
+            result
+        );
+        assert!(
+            !result.unwrap().is_empty(),
+            "should return parameter vector"
+        );
+    }
+
+    #[test]
+    fn perform_optimization_with_callback_de() {
+        let (obj, _params, _lower, _upper, _x) = scalar_objective();
+        let mut args = small_args();
+        args.algo = "autoeq:de".to_string();
+        args.maxeval = 60;
+        let mut iterations = Vec::new();
+        let result = perform_optimization_with_callback(
+            &args,
+            &obj,
+            Box::new(move |im: &crate::de::DEIntermediate| {
+                iterations.push(im.iter);
+                crate::de::CallbackAction::Continue
+            }),
+        );
+        assert!(result.is_ok(), "DE callback path should run: {:?}", result);
+    }
+
+    #[test]
+    fn perform_optimization_with_progress_runs() {
+        let (obj, _params, _lower, _upper, _x) = scalar_objective();
+        let mut args = small_args();
+        args.algo = "autoeq:de".to_string();
+        args.maxeval = 60;
+        let config = ProgressCallbackConfig {
+            interval: 10,
+            include_biquads: true,
+            include_filter_response: true,
+            frequencies: vec![100.0, 1000.0],
+        };
+        let result = perform_optimization_with_progress(&args, &obj, config, |_update| {
+            crate::de::CallbackAction::Continue
+        });
+        assert!(result.is_ok(), "progress path should run: {:?}", result);
+    }
+
+    #[test]
+    fn perform_optimization_refine_runs() {
+        let (obj, _params, _lower, _upper, _x) = scalar_objective();
+        let mut args = small_args();
+        args.algo = "autoeq:de".to_string();
+        args.refine = true;
+        args.local_algo = "autoeq:cobyla".to_string();
+        args.maxeval = 60;
+        let result = perform_optimization(&args, &obj);
+        assert!(result.is_ok(), "DE + cobyla refine should run: {:?}", result);
+        assert!(!result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn perform_optimization_with_progress_minimal_config_runs() {
+        let (obj, _params, _lower, _upper, _x) = scalar_objective();
+        let mut args = small_args();
+        args.algo = "autoeq:de".to_string();
+        args.maxeval = 60;
+        let config = ProgressCallbackConfig {
+            interval: 5,
+            include_biquads: false,
+            include_filter_response: false,
+            frequencies: vec![],
+        };
+        let result = perform_optimization_with_progress(&args, &obj, config, |_update| {
+            crate::de::CallbackAction::Continue
+        });
+        assert!(result.is_ok(), "minimal progress config should run: {:?}", result);
+    }
+
+    #[test]
+    fn perform_optimization_with_callback_non_de_runs() {
+        let (obj, _params, _lower, _upper, _x) = scalar_objective();
+        let mut args = small_args();
+        args.algo = "autoeq:cmaes".to_string();
+        args.maxeval = 200;
+        let result = perform_optimization_with_callback(
+            &args,
+            &obj,
+            Box::new(|_intermediate| crate::de::CallbackAction::Continue),
+        );
+        assert!(result.is_ok(), "CMAES callback path should run: {:?}", result);
+    }
+
+    #[test]
+    fn compute_fitness_penalties_wrapper_matches_ref() {
+        let (mut obj, _params, _lower, _upper, x) = scalar_objective();
+        let ref_val = super::super::compute_fitness_penalties_ref(&x, &obj);
+        let wrapped_val = super::super::compute_fitness_penalties(&x, None, &mut obj);
+        assert_eq!(ref_val, wrapped_val);
+    }
+}

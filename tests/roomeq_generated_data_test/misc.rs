@@ -136,6 +136,7 @@ fn test_mixedphase_with_phase_data() {
             speakers: system_speakers,
             subwoofers: None,
             bass_management: None,
+            supporting_source_outputs: None,
         }),
         speakers,
         crossovers: None,

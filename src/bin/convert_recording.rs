@@ -252,17 +252,18 @@ fn parse_dsp_chain_output_with_latest_version(json: &str) -> Result<DspChainOutp
     Ok(output)
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = std::env::args().collect();
-
+fn parse_recording_args(args: &[String]) -> Result<(PathBuf, PathBuf), String> {
     if args.len() < 2 {
-        eprintln!("Usage: {} <input.json> [output.json]", args[0]);
-        eprintln!();
-        eprintln!("Converts legacy recording.json files to the new RoomConfig format.");
-        eprintln!();
-        eprintln!("If output is not specified, the input file is overwritten");
-        eprintln!("and a .bak backup is created.");
-        std::process::exit(1);
+        let prog = args
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("convert_recording");
+        return Err(format!(
+            "Usage: {prog} <input.json> [output.json]\n\n\
+             Converts legacy recording.json files to the new RoomConfig format.\n\n\
+             If output is not specified, the input file is overwritten\n\
+             and a .bak backup is created."
+        ));
     }
 
     let input_path = PathBuf::from(&args[1]);
@@ -270,6 +271,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         PathBuf::from(&args[2])
     } else {
         input_path.clone()
+    };
+    Ok((input_path, output_path))
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().collect();
+
+    let (input_path, output_path) = match parse_recording_args(&args) {
+        Ok(paths) => paths,
+        Err(msg) => {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
     };
 
     // Read input file
@@ -335,4 +349,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Conversion complete!");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_recording_args;
+    use std::path::PathBuf;
+
+    #[test]
+    fn single_input_uses_input_as_output() {
+        let args = vec!["prog".to_string(), "in.json".to_string()];
+        let (input, output) = parse_recording_args(&args).unwrap();
+        assert_eq!(input, PathBuf::from("in.json"));
+        assert_eq!(output, PathBuf::from("in.json"));
+    }
+
+    #[test]
+    fn input_and_output_use_both_paths() {
+        let args = vec![
+            "prog".to_string(),
+            "in.json".to_string(),
+            "out.json".to_string(),
+        ];
+        let (input, output) = parse_recording_args(&args).unwrap();
+        assert_eq!(input, PathBuf::from("in.json"));
+        assert_eq!(output, PathBuf::from("out.json"));
+    }
+
+    #[test]
+    fn missing_input_errors() {
+        let args = vec!["prog".to_string()];
+        assert!(parse_recording_args(&args).is_err());
+    }
 }

@@ -93,4 +93,33 @@ mod tests {
         assert_eq!(parse_angle_from_trace_name("ON"), Some(0.0));
         assert_eq!(parse_angle_from_trace_name("10°"), Some(10.0));
     }
+
+    #[test]
+    fn parse_headphone_csv_averages_left_right() {
+        let csv = r#""Frequency Response",,,
+"Left",,Right,
+X,Y,X,Y
+Hz,dBSPL,Hz,dBSPL
+20,100,20,104
+100,90,100,92
+"#;
+        let curve = parse_headphone_csv(csv).unwrap();
+        assert_eq!(curve.freq.len(), 2);
+        assert!((curve.spl[0] - 102.0).abs() < 1e-9);
+        assert!((curve.spl[1] - 91.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_headphone_csv_two_column() {
+        let csv = "freq,spl\n20,100\n100,90\n";
+        let curve = parse_headphone_csv(csv).unwrap();
+        assert_eq!(curve.freq.len(), 2);
+        assert!((curve.spl[1] - 90.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_headphone_csv_no_data_errors() {
+        let csv = "header,header\n";
+        assert!(parse_headphone_csv(csv).is_err());
+    }
 }

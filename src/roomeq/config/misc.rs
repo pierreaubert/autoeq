@@ -12,6 +12,7 @@ pub(super) const PHASE_LINEAR_RECOMMENDED_MAX_FREQ_HZ: f64 = 2000.0;
 /// can inspect counts, paths, and speaker-name metadata uniformly.
 pub(super) fn collect_sources(speaker: &SpeakerConfig) -> Vec<&MeasurementSource> {
     match speaker {
+        SpeakerConfig::SupportingSource(s) => vec![&s.primary, &s.support],
         SpeakerConfig::Single(s) => vec![s],
         SpeakerConfig::Group(g) => g.measurements.iter().collect(),
         SpeakerConfig::MultiSub(m) => m.subwoofers.iter().collect(),

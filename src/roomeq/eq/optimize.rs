@@ -1460,4 +1460,205 @@ mod multi_eq_tests {
             result.err()
         );
     }
+
+    #[test]
+    fn optimize_channel_eq_multi_minimax_uncertainty() {
+        let curve1 = make_simple_room_curve();
+        let mut curve2 = curve1.clone();
+        curve2.spl = curve2.spl.mapv(|s| s + 1.0);
+
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 2,
+            max_iter: 1000,
+            population: 8,
+            seed: Some(42),
+            min_filter_improvement: 0.0,
+            ..OptimizerConfig::default()
+        };
+        let multi_config = MultiMeasurementConfig {
+            strategy: MultiMeasurementStrategy::MinimaxUncertainty,
+            bootstrap_uncertainty: Some(crate::roomeq::types::BootstrapUncertaintyConfig {
+                num_resamples: 4,
+                alpha: 0.05,
+                seed: 1,
+                scalarisation: crate::roomeq::types::BootstrapScalarisation::WorstCase,
+                cvar_alpha: 0.25,
+            }),
+            ..MultiMeasurementConfig::default()
+        };
+
+        let result =
+            optimize_channel_eq_multi(&[curve1, curve2], &config, &multi_config, None, 48000.0);
+        assert!(
+            result.is_ok(),
+            "minimax uncertainty should succeed: {:?}",
+            result.err()
+        );
+        let (filters, loss) = result.unwrap();
+        assert!(!filters.is_empty());
+        assert!(loss.is_finite());
+    }
+
+    #[test]
+    fn optimize_channel_eq_adaptive_filter_selection() {
+        let curve = make_simple_room_curve();
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 4,
+            max_iter: 1000,
+            population: 8,
+            seed: Some(42),
+            min_filter_improvement: 0.001,
+            ..OptimizerConfig::default()
+        };
+
+        let result = optimize_channel_eq(&curve, &config, None, 48000.0);
+        assert!(result.is_ok(), "adaptive filter selection should succeed: {:?}", result.err());
+        let (filters, loss) = result.unwrap();
+        assert!(!filters.is_empty());
+        assert!(loss.is_finite());
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_with_target_curve() {
+        let curve1 = make_simple_room_curve();
+        let mut curve2 = curve1.clone();
+        curve2.spl = curve2.spl.mapv(|s| s + 1.0);
+
+        let target = Curve {
+            freq: curve1.freq.clone(),
+            spl: Array1::zeros(curve1.freq.len()),
+            phase: None,
+            ..Default::default()
+        };
+        let mut tmpfile = tempfile::NamedTempFile::new().unwrap();
+        use std::io::Write;
+        writeln!(tmpfile, "frequency,spl").unwrap();
+        for i in 0..target.freq.len() {
+            writeln!(tmpfile, "{}, {}", target.freq[i], target.spl[i]).unwrap();
+        }
+        tmpfile.flush().unwrap();
+
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 2,
+            max_iter: 1000,
+            population: 8,
+            seed: Some(42),
+            min_filter_improvement: 0.0,
+            ..OptimizerConfig::default()
+        };
+        let multi_config = MultiMeasurementConfig::default();
+        let target_config = crate::roomeq::types::TargetCurveConfig::Path(tmpfile.path().to_path_buf());
+
+        let result = optimize_channel_eq_multi(
+            &[curve1, curve2],
+            &config,
+            &multi_config,
+            Some(&target_config),
+            48000.0,
+        );
+        assert!(
+            result.is_ok(),
+            "multi with target curve should succeed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_with_psychoacoustic() {
+        let curve1 = make_simple_room_curve();
+        let mut curve2 = curve1.clone();
+        curve2.spl = curve2.spl.mapv(|s| s + 1.0);
+
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 2,
+            max_iter: 1000,
+            population: 8,
+            seed: Some(42),
+            psychoacoustic: true,
+            min_filter_improvement: 0.0,
+            ..OptimizerConfig::default()
+        };
+        let multi_config = MultiMeasurementConfig::default();
+
+        let result =
+            optimize_channel_eq_multi(&[curve1, curve2], &config, &multi_config, None, 48000.0);
+        assert!(
+            result.is_ok(),
+            "multi with psychoacoustic should succeed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_with_refine() {
+        let curve1 = make_simple_room_curve();
+        let mut curve2 = curve1.clone();
+        curve2.spl = curve2.spl.mapv(|s| s + 1.0);
+
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 2,
+            max_iter: 1000,
+            population: 8,
+            seed: Some(42),
+            refine: true,
+            min_filter_improvement: 0.0,
+            ..OptimizerConfig::default()
+        };
+        let multi_config = MultiMeasurementConfig::default();
+
+        let result =
+            optimize_channel_eq_multi(&[curve1, curve2], &config, &multi_config, None, 48000.0);
+        assert!(
+            result.is_ok(),
+            "multi with refine should succeed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn optimize_channel_eq_spatial_robustness_with_bootstrap() {
+        let curve1 = make_simple_room_curve();
+        let mut curve2 = curve1.clone();
+        curve2.spl = curve2.spl.mapv(|s| s + 2.0);
+
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 2,
+            max_iter: 1000,
+            population: 8,
+            seed: Some(42),
+            min_filter_improvement: 0.0,
+            ..OptimizerConfig::default()
+        };
+        let multi_config = MultiMeasurementConfig {
+            strategy: MultiMeasurementStrategy::SpatialRobustness,
+            bootstrap_uncertainty: Some(crate::roomeq::types::BootstrapUncertaintyConfig {
+                num_resamples: 4,
+                alpha: 0.05,
+                seed: 1,
+                scalarisation: crate::roomeq::types::BootstrapScalarisation::Cvar,
+                cvar_alpha: 0.25,
+            }),
+            ..MultiMeasurementConfig::default()
+        };
+
+        let result =
+            optimize_channel_eq_multi(&[curve1, curve2], &config, &multi_config, None, 48000.0);
+        assert!(
+            result.is_ok(),
+            "spatial robustness with bootstrap should succeed: {:?}",
+            result.err()
+        );
+    }
 }

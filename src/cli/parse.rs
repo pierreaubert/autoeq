@@ -26,3 +26,57 @@ pub(super) fn parse_recombination_probability(s: &str) -> Result<f64, String> {
         Err("recombination probability must be between 0.0 and 1.0".to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_nonnegative_f64_accepts_zero_and_positive() {
+        assert_eq!(parse_nonnegative_f64("0").unwrap(), 0.0);
+        assert_eq!(parse_nonnegative_f64("0.0").unwrap(), 0.0);
+        assert_eq!(parse_nonnegative_f64("3.5").unwrap(), 3.5);
+        assert_eq!(parse_nonnegative_f64("1e3").unwrap(), 1000.0);
+    }
+
+    #[test]
+    fn parse_nonnegative_f64_rejects_negative_and_invalid() {
+        assert!(parse_nonnegative_f64("-1").is_err());
+        assert!(parse_nonnegative_f64("-0.001").is_err());
+        assert!(parse_nonnegative_f64("not-a-number").is_err());
+        assert!(parse_nonnegative_f64("").is_err());
+    }
+
+    #[test]
+    fn parse_strictly_positive_f64_accepts_positive_only() {
+        assert_eq!(parse_strictly_positive_f64("0.001").unwrap(), 0.001);
+        assert_eq!(parse_strictly_positive_f64("1").unwrap(), 1.0);
+        assert_eq!(parse_strictly_positive_f64("3.5").unwrap(), 3.5);
+    }
+
+    #[test]
+    fn parse_strictly_positive_f64_rejects_non_positive_and_invalid() {
+        assert!(parse_strictly_positive_f64("0").is_err());
+        assert!(parse_strictly_positive_f64("-1").is_err());
+        assert!(parse_strictly_positive_f64("abc").is_err());
+        assert!(parse_strictly_positive_f64("").is_err());
+    }
+
+    #[test]
+    fn parse_recombination_probability_accepts_valid_range() {
+        assert_eq!(parse_recombination_probability("0").unwrap(), 0.0);
+        assert_eq!(parse_recombination_probability("1").unwrap(), 1.0);
+        assert_eq!(parse_recombination_probability("0.5").unwrap(), 0.5);
+        assert_eq!(parse_recombination_probability("0.0").unwrap(), 0.0);
+        assert_eq!(parse_recombination_probability("1.0").unwrap(), 1.0);
+    }
+
+    #[test]
+    fn parse_recombination_probability_rejects_out_of_range_and_invalid() {
+        assert!(parse_recombination_probability("-0.1").is_err());
+        assert!(parse_recombination_probability("1.0001").is_err());
+        assert!(parse_recombination_probability("2").is_err());
+        assert!(parse_recombination_probability("foo").is_err());
+        assert!(parse_recombination_probability("").is_err());
+    }
+}

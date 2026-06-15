@@ -674,3 +674,227 @@ mod smoothness_penalty_edge_tests {
         assert_eq!(p, 0.0, "outside range should produce zero penalty");
     }
 }
+
+#[cfg(test)]
+mod multi_objective_and_base_fitness_tests {
+    use super::{
+        compute_base_fitness, compute_base_fitness_single, compute_fitness_penalties,
+        compute_fitness_penalties_ref, compute_multi_objective_fitness, compute_pareto_objectives,
+        compute_sorted_freqs_and_adjacent_octave_spacings, ObjectiveData,
+    };
+    use crate::cli::PeqModel;
+    use crate::loss::{AsymmetricLossConfig, HeadphoneLossData, LossType, SpeakerLossData};
+    use crate::loss::epa::score::EpaConfig;
+    use crate::roomeq::MultiMeasurementStrategy;
+    use crate::MultiObjectiveData;
+    use ndarray::Array1;
+
+    fn freqs() -> Array1<f64> {
+        Array1::from_vec(vec![100.0, 200.0, 400.0, 800.0, 1600.0])
+    }
+
+    fn x() -> Vec<f64> {
+        // one peak filter at 500 Hz, Q=1, gain=0 (neutral)
+        vec![500f64.log10(), 1.0, 0.0]
+    }
+
+    fn base_objective(loss_type: LossType) -> ObjectiveData {
+        let f = freqs();
+        let n = f.len();
+        ObjectiveData {
+            freqs: f,
+            target: Array1::from_elem(n, 80.0),
+            deviation: Array1::from_elem(n, 5.0),
+            srate: 48000.0,
+            min_spacing_oct: 0.5,
+            spacing_weight: 0.0,
+            max_db: 12.0,
+            min_db: 0.0,
+            min_freq: 20.0,
+            max_freq: 20000.0,
+            peq_model: PeqModel::Pk,
+            loss_type,
+            speaker_score_data: None,
+            headphone_score_data: None,
+            input_curve: None,
+            drivers_data: None,
+            fixed_crossover_freqs: None,
+            penalty_w_ceiling: 0.0,
+            penalty_w_spacing: 0.0,
+            penalty_w_mingain: 0.0,
+            integrality: None,
+            multi_objective: None,
+            smooth: false,
+            smooth_n: 0,
+            max_boost_envelope: None,
+            min_cut_envelope: None,
+            epa_config: None,
+            temporal_masking_modes: Vec::new(),
+            detected_problems: Vec::new(),
+            null_suppression: None,
+            asymmetric_loss_config: AsymmetricLossConfig::default(),
+            smoothness_penalty: None,
+            audibility_deadband: None,
+        }
+    }
+
+    fn multi_objective(strategy: MultiMeasurementStrategy) -> MultiObjectiveData {
+        let obj = base_objective(LossType::SpeakerFlat);
+        MultiObjectiveData {
+            objectives: vec![obj.clone(), obj.clone()],
+            strategy,
+            weights: vec![0.4, 0.6],
+            variance_lambda: 0.5,
+            uncertainty_cvar_alpha: Some(0.5),
+        }
+    }
+
+    #[test]
+    fn multi_objective_strategies() {
+        let mo = multi_objective(MultiMeasurementStrategy::Average);
+        let avg = compute_multi_objective_fitness(&x(), &mo);
+        assert!(avg.is_finite());
+
+        let mo = multi_objective(MultiMeasurementStrategy::WeightedSum);
+        let ws = compute_multi_objective_fitness(&x(), &mo);
+        assert!(ws.is_finite());
+
+        let mo = multi_objective(MultiMeasurementStrategy::Minimax);
+        let mm = compute_multi_objective_fitness(&x(), &mo);
+        assert!(mm.is_finite());
+
+        let mo = multi_objective(MultiMeasurementStrategy::VariancePenalized);
+        let vp = compute_multi_objective_fitness(&x(), &mo);
+        assert!(vp.is_finite());
+
+        let mo = multi_objective(MultiMeasurementStrategy::MinimaxUncertainty);
+        let mmu = compute_multi_objective_fitness(&x(), &mo);
+        assert!(mmu.is_finite());
+    }
+
+    #[test]
+    fn compute_pareto_objectives_scalar_and_multi() {
+        let obj = base_objective(LossType::SpeakerFlat);
+        let scalar = compute_pareto_objectives(&x(), &obj);
+        assert_eq!(scalar.len(), 1);
+
+        let mut multi = obj.clone();
+        multi.multi_objective = Some(multi_objective(MultiMeasurementStrategy::WeightedSum));
+        let vec = compute_pareto_objectives(&x(), &multi);
+        assert_eq!(vec.len(), 2);
+    }
+
+    #[test]
+    fn base_fitness_speaker_flat_and_asymmetric() {
+        let obj = base_objective(LossType::SpeakerFlat);
+        assert!(compute_base_fitness_single(&x(), &obj).is_finite());
+
+        let mut asym = base_objective(LossType::SpeakerFlatAsymmetric);
+        asym.null_suppression = Some(Array1::from_elem(asym.freqs.len(), 1.0));
+        assert!(compute_base_fitness_single(&x(), &asym).is_finite());
+    }
+
+    #[test]
+    fn base_fitness_missing_data_returns_infinity() {
+        let drivers = base_objective(LossType::DriversFlat);
+        assert!(compute_base_fitness_single(&x(), &drivers).is_infinite());
+
+        let multisub = base_objective(LossType::MultiSubFlat);
+        assert!(compute_base_fitness_single(&x(), &multisub).is_infinite());
+
+        let speaker_score = base_objective(LossType::SpeakerScore);
+        assert!(compute_base_fitness_single(&x(), &speaker_score).is_infinite());
+
+        let headphone_score = base_objective(LossType::HeadphoneScore);
+        assert!(compute_base_fitness_single(&x(), &headphone_score).is_infinite());
+    }
+
+    #[test]
+    fn base_fitness_speaker_score_and_headphone_score() {
+        let f = Array1::from_vec(vec![100.0, 1000.0, 10000.0]);
+        let n = f.len();
+        let x = vec![2.0, 1.0, 0.0];
+
+        let mut speaker = base_objective(LossType::SpeakerScore);
+        speaker.freqs = f.clone();
+        speaker.target = Array1::from_elem(n, 80.0);
+        speaker.deviation = Array1::from_elem(n, 5.0);
+        speaker.speaker_score_data = Some(SpeakerLossData {
+            on: Array1::from_vec(vec![80.0, 85.0, 82.0]),
+            lw: Array1::from_vec(vec![81.0, 84.0, 83.0]),
+            sp: Array1::from_vec(vec![78.0, 82.0, 80.0]),
+            pir: Array1::from_vec(vec![80.5, 84.0, 82.5]),
+        });
+        assert!(compute_base_fitness_single(&x, &speaker).is_finite());
+
+        let mut headphone = base_objective(LossType::HeadphoneScore);
+        headphone.freqs = f.clone();
+        headphone.target = Array1::from_elem(n, 80.0);
+        headphone.deviation = Array1::from_elem(n, 5.0);
+        headphone.headphone_score_data = Some(HeadphoneLossData::new(false, 0));
+        headphone.input_curve = Some(crate::Curve {
+            freq: f.clone(),
+            spl: Array1::from_elem(n, 80.0),
+            phase: None,
+            ..Default::default()
+        });
+        assert!(compute_base_fitness_single(&x, &headphone).is_finite());
+    }
+
+    #[test]
+    fn base_fitness_epa() {
+        let mut epa = base_objective(LossType::Epa);
+        epa.epa_config = Some(EpaConfig::default());
+        assert!(compute_base_fitness_single(&x(), &epa).is_finite());
+    }
+
+    #[test]
+    fn base_fitness_multi_objective_delegation() {
+        let mut obj = base_objective(LossType::SpeakerFlat);
+        obj.multi_objective = Some(multi_objective(MultiMeasurementStrategy::Minimax));
+        let loss = compute_base_fitness(&x(), &obj);
+        assert!(loss.is_finite());
+    }
+
+    #[test]
+    fn fitness_penalties_add_penalty_terms() {
+        let mut obj = base_objective(LossType::SpeakerFlat);
+        obj.penalty_w_ceiling = 1.0;
+        obj.penalty_w_spacing = 1.0;
+        obj.min_db = 1.0;
+        obj.penalty_w_mingain = 1.0;
+        let penalized = compute_fitness_penalties_ref(&x(), &obj);
+        let base = compute_base_fitness(&x(), &obj);
+        assert!(penalized >= base);
+
+        // Drivers loss skips PEQ-specific penalties.
+        obj.loss_type = LossType::DriversFlat;
+        let drivers_penalized = compute_fitness_penalties_ref(&x(), &obj);
+        assert!(drivers_penalized.is_infinite() || drivers_penalized == compute_base_fitness(&x(), &obj));
+    }
+
+    #[test]
+    fn fitness_penalties_wrapper_matches_ref() {
+        let mut obj = base_objective(LossType::SpeakerFlat);
+        let ref_val = compute_fitness_penalties_ref(&x(), &obj);
+        let wrapped_val = compute_fitness_penalties(&x(), None, &mut obj);
+        assert_eq!(ref_val, wrapped_val);
+    }
+
+    #[test]
+    fn sorted_freqs_and_spacings_one_filter() {
+        let (freqs, spacings) = compute_sorted_freqs_and_adjacent_octave_spacings(&x(), PeqModel::Pk);
+        assert_eq!(freqs.len(), 1);
+        assert!(spacings.is_empty());
+    }
+
+    #[test]
+    fn sorted_freqs_and_spacings_two_filters() {
+        // two peak filters at 100 Hz and 400 Hz
+        let params = vec![100f64.log10(), 1.0, 0.0, 400f64.log10(), 1.0, 0.0];
+        let (freqs, spacings) = compute_sorted_freqs_and_adjacent_octave_spacings(&params, PeqModel::Pk);
+        assert_eq!(freqs.len(), 2);
+        assert_eq!(spacings.len(), 1);
+        assert!((spacings[0] - 2.0).abs() < 1e-12);
+    }
+}

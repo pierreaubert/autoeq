@@ -123,7 +123,6 @@ mod audibility_deadband_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Curve;
     use ndarray::Array1;
 
     #[test]

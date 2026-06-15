@@ -371,3 +371,205 @@ fn compromise_distance(
         .sum::<f64>()
         .sqrt()
 }
+
+#[cfg(test)]
+mod bo_branch_tests {
+    use super::super::backend::FilterOptimizer;
+    use super::super::params::OptimParams;
+    use super::{
+        parse_acquisition, should_refine, AutoeqBoBackend, BayesParetoSolution, BayesAcquisition,
+    };
+    use clap::Parser;
+    use ndarray::Array1;
+
+    fn small_params() -> OptimParams {
+        let mut args = crate::cli::Args::parse_from(["autoeq"]);
+        args.num_filters = 1;
+        args.population = 4;
+        args.maxeval = 12;
+        args.seed = Some(1);
+        args.bo_initial_samples = 4;
+        args.bo_ehvi = false;
+        OptimParams::from(&args)
+    }
+
+    fn scalar_objective() -> (super::super::ObjectiveData, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let freqs = Array1::from(vec![
+            20.0, 40.0, 80.0, 160.0, 320.0, 640.0, 1280.0, 2560.0, 5120.0, 10240.0,
+        ]);
+        let input_curve = crate::Curve {
+            freq: freqs.clone(),
+            spl: Array1::from_elem(freqs.len(), 5.0),
+            phase: None,
+            ..Default::default()
+        };
+        let target_curve = crate::Curve {
+            freq: freqs.clone(),
+            spl: Array1::zeros(freqs.len()),
+            phase: None,
+            ..Default::default()
+        };
+        let deviation_curve = crate::Curve {
+            freq: freqs.clone(),
+            spl: Array1::from_elem(freqs.len(), 5.0),
+            phase: None,
+            ..Default::default()
+        };
+        let params = small_params();
+        let (obj, _use_cea) = super::super::setup::setup_objective_data(
+            &params,
+            &input_curve,
+            &target_curve,
+            &deviation_curve,
+            &None,
+        )
+        .unwrap();
+        let (lower, upper) = super::super::setup::setup_bounds(&params);
+        let x = super::super::setup::initial_guess(&params, &lower, &upper);
+        (obj, lower, upper, x)
+    }
+
+    #[test]
+    fn parse_acquisition_variants() {
+        assert!(matches!(
+            parse_acquisition("ei"),
+            BayesAcquisition::ExpectedImprovement
+        ));
+        assert!(matches!(
+            parse_acquisition("expected-improvement"),
+            BayesAcquisition::ExpectedImprovement
+        ));
+        assert!(matches!(
+            parse_acquisition("THOMPSON"),
+            BayesAcquisition::Thompson
+        ));
+        assert!(matches!(
+            parse_acquisition("ts"),
+            BayesAcquisition::Thompson
+        ));
+        assert!(matches!(
+            parse_acquisition("qei"),
+            BayesAcquisition::QExpectedImprovement
+        ));
+        assert!(matches!(
+            parse_acquisition("unknown"),
+            BayesAcquisition::QExpectedImprovement
+        ));
+    }
+
+    #[test]
+    fn should_refine_branches() {
+        let mut params = small_params();
+        params.refine = false;
+        assert!(!should_refine(&params, 1e-9));
+
+        params.refine = true;
+        params.bo_posterior_std_threshold = 0.0;
+        assert!(should_refine(&params, 1e-3));
+
+        params.bo_posterior_std_threshold = 1e-2;
+        assert!(should_refine(&params, 5e-3));
+        assert!(!should_refine(&params, 5e-2));
+    }
+
+    #[test]
+    fn optimize_bounds_dimension_mismatch_returns_error() {
+        let (obj, _lower, upper, mut x) = scalar_objective();
+        let params = small_params();
+        let backend = AutoeqBoBackend::new("autoeq:bo");
+        let result = backend.optimize(&mut x[..1], &upper[..1], &upper, obj, &params, None);
+        assert!(result.is_err());
+        let (msg, loss) = result.unwrap_err();
+        assert!(msg.contains("dimension mismatch"));
+        assert!(loss.is_infinite());
+    }
+
+    #[test]
+    fn optimize_with_local_algo_same_as_bo_skips_refine() {
+        let (obj, lower, upper, mut x) = scalar_objective();
+        let mut params = small_params();
+        params.refine = true;
+        params.local_algo = "autoeq:bo".to_string();
+        let backend = AutoeqBoBackend::new("autoeq:bo");
+        let result = backend.optimize(&mut x, &lower, &upper, obj, &params, None);
+        assert!(result.is_ok());
+        let (status, loss) = result.unwrap();
+        assert!(loss.is_finite());
+        assert!(
+            status.contains("refine skipped") || status.contains("BO"),
+            "status: {}",
+            status
+        );
+    }
+
+    #[test]
+    fn optimize_with_unknown_local_algo_returns_error() {
+        let (obj, lower, upper, mut x) = scalar_objective();
+        let mut params = small_params();
+        params.refine = true;
+        params.local_algo = "not-a-real-algo".to_string();
+        let backend = AutoeqBoBackend::new("autoeq:bo");
+        let result = backend.optimize(&mut x, &lower, &upper, obj, &params, None);
+        assert!(result.is_err());
+        let (msg, _loss) = result.unwrap_err();
+        assert!(msg.contains("Unknown local algorithm"));
+    }
+
+    #[test]
+    fn choose_compromise_empty_returns_none() {
+        let obj = scalar_objective().0;
+        assert!(super::super::bo::choose_compromise(&[], &obj).is_none());
+    }
+
+    #[test]
+    fn choose_compromise_zero_objectives_returns_first() {
+        let obj = scalar_objective().0;
+        let front = vec![BayesParetoSolution {
+            x: Array1::from_elem(3, 0.0),
+            objectives: vec![],
+        }];
+        let best = super::super::bo::choose_compromise(&front, &obj).unwrap();
+        assert_eq!(best.x.len(), 3);
+    }
+
+    #[test]
+    fn choose_compromise_uses_equal_weights_when_mismatch() {
+        let mut obj = scalar_objective().0;
+        obj.multi_objective = Some(super::super::types::MultiObjectiveData {
+            objectives: vec![obj.clone(), obj.clone()],
+            strategy: crate::roomeq::MultiMeasurementStrategy::WeightedSum,
+            weights: vec![0.1],
+            variance_lambda: 0.0,
+            uncertainty_cvar_alpha: None,
+        });
+        let front = vec![
+            BayesParetoSolution {
+                x: Array1::from_elem(3, 0.0),
+                objectives: vec![1.0, 0.0],
+            },
+            BayesParetoSolution {
+                x: Array1::from_elem(3, 0.0),
+                objectives: vec![0.0, 1.0],
+            },
+        ];
+        let _best = super::super::bo::choose_compromise(&front, &obj).unwrap();
+    }
+
+    #[test]
+    fn choose_compromise_distance_with_zero_or_infinite_span() {
+        use super::super::bo::compromise_distance;
+        let sol = BayesParetoSolution {
+            x: Array1::from_elem(3, 0.0),
+            objectives: vec![5.0],
+        };
+        // zero span
+        let d1 = compromise_distance(&sol, &[5.0], &[5.0], &[1.0]);
+        assert_eq!(d1, 0.0);
+        // infinite span
+        let d2 = compromise_distance(&sol, &[f64::NEG_INFINITY], &[f64::INFINITY], &[1.0]);
+        assert_eq!(d2, 0.0);
+        // normal span
+        let d3 = compromise_distance(&sol, &[0.0], &[10.0], &[1.0]);
+        assert!((d3 - 0.5).abs() < 1e-12);
+    }
+}

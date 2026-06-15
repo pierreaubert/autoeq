@@ -266,3 +266,272 @@ pub(in super::super) fn sum_sub_output_responses_on_grid(
         ..Default::default()
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::roomeq::home_cinema::BassManagementSubOutputReport;
+    use crate::roomeq::types::{
+        BassManagementConfig, OptimizerConfig, ProcessingMode, RoomConfig, SystemConfig,
+        SystemModel,
+    };
+    use ndarray::Array1;
+    use std::collections::{BTreeMap, HashMap};
+
+    fn flat_curve_with_phase() -> crate::Curve {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(20_000.0), 32);
+        let spl = Array1::from_elem(freq.len(), 80.0);
+        let phase = Some(Array1::from_elem(freq.len(), 0.0));
+        crate::Curve {
+            freq,
+            spl,
+            phase,
+            ..Default::default()
+        }
+    }
+
+    fn flat_curve_without_phase() -> crate::Curve {
+        let mut c = flat_curve_with_phase();
+        c.phase = None;
+        c
+    }
+
+    fn driver(name: &str, curve: Option<crate::Curve>, inverted: bool) -> SubDriverInfo {
+        SubDriverInfo {
+            name: name.to_string(),
+            gain: 0.0,
+            delay: 0.0,
+            inverted,
+            initial_curve: curve,
+        }
+    }
+
+    fn output(
+        name: &str,
+        gain_db: f64,
+        delay_ms: f64,
+        inverted: bool,
+        source: &str,
+    ) -> BassManagementSubOutputReport {
+        BassManagementSubOutputReport {
+            output_role: name.to_string(),
+            gain_db,
+            delay_ms,
+            polarity_inverted: inverted,
+            strategy_source: source.to_string(),
+            headroom_contribution_db: gain_db,
+        }
+    }
+
+    fn tiny_optimizer() -> OptimizerConfig {
+        OptimizerConfig {
+            processing_mode: ProcessingMode::LowLatency,
+            max_iter: 20,
+            population: 6,
+            seed: Some(1),
+            ..Default::default()
+        }
+    }
+
+    fn base_room_config() -> RoomConfig {
+        RoomConfig {
+            version: crate::roomeq::types::default_config_version(),
+            system: Some(SystemConfig {
+                model: SystemModel::HomeCinema,
+                speakers: HashMap::new(),
+                subwoofers: None,
+                bass_management: Some(BassManagementConfig {
+                    enabled: true,
+                    optimize_groups: true,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            speakers: HashMap::new(),
+            crossovers: None,
+            target_curve: None,
+            optimizer: tiny_optimizer(),
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        }
+    }
+
+    #[test]
+    fn sum_sub_output_responses_empty_returns_none() {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(200.0), 8);
+        assert!(sum_sub_output_responses_on_grid(&freq, &[], &[]).is_none());
+    }
+
+    #[test]
+    fn sum_sub_output_responses_mismatch_returns_none() {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(200.0), 8);
+        let drivers = vec![driver("sub1", Some(flat_curve_with_phase()), false)];
+        let outputs = vec![
+            output("sub1", 0.0, 0.0, false, "default"),
+            output("sub2", 0.0, 0.0, false, "default"),
+        ];
+        assert!(sum_sub_output_responses_on_grid(&freq, &drivers, &outputs).is_none());
+    }
+
+    #[test]
+    fn sum_sub_output_responses_missing_phase_returns_none() {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(200.0), 8);
+        let drivers = vec![driver("sub1", Some(flat_curve_without_phase()), false)];
+        let outputs = vec![output("sub1", 0.0, 0.0, false, "default")];
+        assert!(sum_sub_output_responses_on_grid(&freq, &drivers, &outputs).is_none());
+    }
+
+    #[test]
+    fn sum_sub_output_responses_combines_in_phase() {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(200.0), 8);
+        let drivers = vec![
+            driver("sub1", Some(flat_curve_with_phase()), false),
+            driver("sub2", Some(flat_curve_with_phase()), false),
+        ];
+        let outputs = vec![
+            output("sub1", 0.0, 0.0, false, "default"),
+            output("sub2", 0.0, 0.0, false, "default"),
+        ];
+        let sum = sum_sub_output_responses_on_grid(&freq, &drivers, &outputs);
+        assert!(sum.is_some());
+        let sum = sum.unwrap();
+        assert_eq!(sum.freq.len(), freq.len());
+        assert!(sum.phase.is_some());
+        // Two identical in-phase 80 dB sources sum to ~86 dB.
+        assert!((sum.spl[0] - 86.02).abs() < 0.1);
+    }
+
+    #[test]
+    fn sum_sub_output_respects_polarity_and_delay() {
+        let freq = Array1::from_vec(vec![100.0]);
+        let mut curve = flat_curve_with_phase();
+        curve.freq = freq.clone();
+        curve.spl = Array1::from_elem(1, 80.0);
+        curve.phase = Some(Array1::from_elem(1, 0.0));
+
+        let drivers = vec![driver("sub1", Some(curve.clone()), false)];
+        let inverted = output("sub1", 0.0, 0.0, true, "default");
+        let inverted_sum = sum_sub_output_responses_on_grid(&freq, &drivers, &[inverted]).unwrap();
+        assert!((inverted_sum.phase.unwrap()[0] - 180.0).abs() < 0.01);
+
+        let delayed = output("sub1", 0.0, 1.0, false, "default");
+        let delayed_sum = sum_sub_output_responses_on_grid(&freq, &drivers, &[delayed]).unwrap();
+        // 1 ms delay at 100 Hz is -36 degrees.
+        assert!((delayed_sum.phase.unwrap()[0] - (-36.0)).abs() < 0.1);
+    }
+
+    #[test]
+    fn refine_with_none_drivers_returns_empty() {
+        let config = base_room_config();
+        let mut group_results = BTreeMap::new();
+        let mut outputs = vec![output("LFE", 0.0, 0.0, false, "default")];
+        let advisories = refine_bass_management_sub_outputs(
+            &config,
+            &["Left".to_string()],
+            &HashMap::new(),
+            &mut group_results,
+            &mut outputs,
+            None,
+            48_000.0,
+        );
+        assert!(advisories.is_empty());
+    }
+
+    #[test]
+    fn refine_mismatch_returns_advisory() {
+        let config = base_room_config();
+        let mut group_results = BTreeMap::new();
+        let mut outputs = vec![output("LFE", 0.0, 0.0, false, "default")];
+        let drivers = vec![
+            driver("sub1", Some(flat_curve_with_phase()), false),
+            driver("sub2", Some(flat_curve_with_phase()), false),
+        ];
+        let advisories = refine_bass_management_sub_outputs(
+            &config,
+            &["Left".to_string()],
+            &HashMap::new(),
+            &mut group_results,
+            &mut outputs,
+            Some(&drivers),
+            48_000.0,
+        );
+        assert!(
+            advisories.contains(&"joint_sub_output_skipped_driver_metadata_mismatch".to_string())
+        );
+    }
+
+    #[test]
+    fn refine_missing_phase_returns_advisory() {
+        let config = base_room_config();
+        let mut group_results = BTreeMap::new();
+        let mut outputs = vec![output("LFE", 0.0, 0.0, false, "default")];
+        let drivers = vec![driver("sub1", Some(flat_curve_without_phase()), false)];
+        let advisories = refine_bass_management_sub_outputs(
+            &config,
+            &["Left".to_string()],
+            &HashMap::new(),
+            &mut group_results,
+            &mut outputs,
+            Some(&drivers),
+            48_000.0,
+        );
+        assert!(advisories.contains(&"joint_sub_output_skipped_missing_phase".to_string()));
+    }
+
+    #[test]
+    fn refine_no_valid_groups_returns_advisory() {
+        let config = base_room_config();
+        let mut group_results = BTreeMap::new();
+        let mut outputs = vec![output("LFE", 0.0, 0.0, false, "default")];
+        let drivers = vec![driver("sub1", Some(flat_curve_with_phase()), false)];
+        let advisories = refine_bass_management_sub_outputs(
+            &config,
+            &["Left".to_string()],
+            &HashMap::new(),
+            &mut group_results,
+            &mut outputs,
+            Some(&drivers),
+            48_000.0,
+        );
+        assert!(advisories.contains(&"joint_sub_output_skipped_no_phase_valid_groups".to_string()));
+    }
+
+    #[test]
+    fn refine_runs_with_valid_group() {
+        let config = base_room_config();
+        let mut group_results = BTreeMap::new();
+        group_results.insert(
+            "lcr".to_string(),
+            crate::roomeq::home_cinema::BassManagementGroupReport {
+                group_id: "lcr".to_string(),
+                roles: vec!["Left".to_string()],
+                crossover_type: "LR24".to_string(),
+                selected_crossover_hz: Some(80.0),
+                configured_crossover_hz: Some(80.0),
+                main_delay_ms: 0.0,
+                bass_route_delay_ms: 0.0,
+                polarity_inverted: false,
+                trim_db: 0.0,
+                objective_before: Some(1.0),
+                objective_after: Some(1.0),
+                advisories: vec!["ok".to_string()],
+            },
+        );
+        let mut aligned = HashMap::new();
+        aligned.insert("Left".to_string(), flat_curve_with_phase());
+        let mut outputs = vec![output("LFE", 0.0, 0.0, false, "default")];
+        let drivers = vec![driver("LFE", Some(flat_curve_with_phase()), false)];
+        let advisories = refine_bass_management_sub_outputs(
+            &config,
+            &["Left".to_string()],
+            &aligned,
+            &mut group_results,
+            &mut outputs,
+            Some(&drivers),
+            48_000.0,
+        );
+        // With identical flat curves the optimizer finds no improvement.
+        assert!(advisories.contains(&"joint_sub_output_no_improvement".to_string()));
+    }
+}

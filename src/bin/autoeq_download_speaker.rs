@@ -196,6 +196,9 @@ async fn write_json(path: &PathBuf, value: &Value) -> Result<(), Box<dyn Error>>
 #[cfg(test)]
 mod tests {
     use autoeq::read;
+    use clap::Parser;
+
+    use super::Args;
 
     #[test]
     fn sanitize_replaces_forbidden() {
@@ -215,5 +218,30 @@ mod tests {
         let expected =
             std::path::Path::new("data_cached").join("speakers/org.spinorama/KEF LS50 Meta");
         assert!(p.ends_with(expected), "path was: {p:?}");
+    }
+
+    #[test]
+    fn force_flag_defaults_to_false() {
+        let args = Args::try_parse_from(["autoeq-download-speakers"]).unwrap();
+        assert!(!args.force);
+    }
+
+    #[test]
+    fn force_flag_can_be_enabled() {
+        let args = Args::try_parse_from(["autoeq-download-speakers", "--force"]).unwrap();
+        assert!(args.force);
+    }
+
+    #[test]
+    fn speaker_filter_defaults_to_none() {
+        let args = Args::try_parse_from(["autoeq-download-speakers"]).unwrap();
+        assert!(args.speaker.is_none());
+    }
+
+    #[test]
+    fn speaker_filter_can_be_set() {
+        let args = Args::try_parse_from(["autoeq-download-speakers", "--speaker", "KEF LS50 Meta"])
+            .unwrap();
+        assert_eq!(args.speaker.as_deref(), Some("KEF LS50 Meta"));
     }
 }

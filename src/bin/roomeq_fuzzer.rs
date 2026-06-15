@@ -18,7 +18,6 @@ use autoeq::roomeq::{
 use clap::Parser;
 use rand::Rng;
 use rand::SeedableRng;
-use rand::seq::IndexedRandom;
 use rand_chacha::ChaCha8Rng;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap};
@@ -81,7 +80,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     for i in 0..args.num_tests {
         CURRENT_TEST_INDEX.store(i, Ordering::SeqCst);
         println!("Running test {}/{}...", i + 1, args.num_tests);
-        let scenario_kind = ScenarioKind::for_test(i, &mut rng);
+        let scenario_kind = ScenarioKind::for_test(i, &mut rng, args.skip_kautz_modal);
         println!("  Scenario bucket: {}", scenario_kind.name());
 
         // Create a subdirectory for this test
@@ -181,9 +180,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("\nFuzzing complete!");
     println!("Successful tests: {}", successful_tests);
     println!("Failed tests: {}", failed_tests);
-    coverage.print();
+    coverage.print(args.skip_kautz_modal);
 
-    let missing_required = coverage.missing_required(args.num_tests);
+    let missing_required = coverage.missing_required(args.num_tests, args.skip_kautz_modal);
     if !missing_required.is_empty() {
         println!("\nMissing required coverage buckets:");
         for name in missing_required {

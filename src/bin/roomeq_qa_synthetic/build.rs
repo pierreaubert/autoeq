@@ -330,6 +330,7 @@ pub(super) fn build_multichannel_config(
         speakers: sys_speakers,
         subwoofers: sub_config,
         bass_management: None,
+        supporting_source_outputs: None,
     };
 
     let mut config = RoomConfig {

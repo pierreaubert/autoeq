@@ -251,7 +251,7 @@ fn prepare_single_channel_eq_basic() {
         .expect("basic prepare should succeed");
     assert!(!prep.objective_data.freqs.is_empty());
     assert_eq!(prep.peq_model, crate::cli::PeqModel::Pk);
-    assert!(prep.objective_data.deviation.len() > 0);
+    assert!(!prep.objective_data.deviation.is_empty());
 }
 
 #[test]
@@ -261,7 +261,7 @@ fn prepare_single_channel_eq_clamps_freq_range() {
     let mask: Vec<bool> = curve
         .freq
         .iter()
-        .map(|&f| f >= 100.0 && f <= 10000.0)
+        .map(|&f| (100.0..=10000.0).contains(&f))
         .collect();
     curve.freq = Array1::from(
         curve
@@ -430,4 +430,53 @@ fn prepare_single_channel_eq_empty_curve_panics() {
         ..OptimizerConfig::default()
     };
     let _ = prepare_single_channel_eq(&curve, &config, None, 48000.0);
+}
+
+#[test]
+fn interpolate_spl_at_frequency_clamps_below_min() {
+    use super::misc::interpolate_spl_at_frequency;
+    let curve = Curve {
+        freq: Array1::from_vec(vec![100.0, 200.0, 400.0]),
+        spl: Array1::from_vec(vec![80.0, 85.0, 90.0]),
+        phase: None,
+        ..Default::default()
+    };
+    assert_eq!(interpolate_spl_at_frequency(&curve, 50.0), 80.0);
+}
+
+#[test]
+fn interpolate_spl_at_frequency_clamps_above_max() {
+    use super::misc::interpolate_spl_at_frequency;
+    let curve = Curve {
+        freq: Array1::from_vec(vec![100.0, 200.0, 400.0]),
+        spl: Array1::from_vec(vec![80.0, 85.0, 90.0]),
+        phase: None,
+        ..Default::default()
+    };
+    assert_eq!(interpolate_spl_at_frequency(&curve, 1000.0), 90.0);
+}
+
+#[test]
+fn interpolate_spl_at_frequency_interpolates_log() {
+    use super::misc::interpolate_spl_at_frequency;
+    let curve = Curve {
+        freq: Array1::from_vec(vec![100.0, 200.0, 400.0]),
+        spl: Array1::from_vec(vec![80.0, 85.0, 90.0]),
+        phase: None,
+        ..Default::default()
+    };
+    let spl = interpolate_spl_at_frequency(&curve, 141.421);
+    assert!(spl > 80.0 && spl < 85.0);
+}
+
+#[test]
+fn interpolate_spl_at_frequency_empty_curve_returns_zero() {
+    use super::misc::interpolate_spl_at_frequency;
+    let curve = Curve {
+        freq: Array1::from_vec(vec![]),
+        spl: Array1::from_vec(vec![]),
+        phase: None,
+        ..Default::default()
+    };
+    assert_eq!(interpolate_spl_at_frequency(&curve, 100.0), 0.0);
 }

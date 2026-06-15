@@ -478,4 +478,48 @@ freq,spl,phase,coherence,noise_floor_db
         let nf = result.4.unwrap();
         assert!((nf[1] + 50.0).abs() < 1e-9);
     }
+
+    #[test]
+    fn load_frequency_response_two_column_csv() {
+        let csv = "frequency,spl\n20,80.0\n200,85.0\n# comment\n2000,82.0\n";
+        let f = write_tmp(csv);
+        let (freq, spl) = load_frequency_response(&f.path().to_path_buf()).unwrap();
+        assert_eq!(freq.len(), 3);
+        assert!((spl[1] - 85.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn load_frequency_response_four_column_averages_spl() {
+        let csv = "20,80.0,20,84.0\n200,85.0,200,87.0\n";
+        let f = write_tmp(csv);
+        let (freq, spl) = load_frequency_response(&f.path().to_path_buf()).unwrap();
+        assert_eq!(freq.len(), 2);
+        assert!((spl[0] - 82.0).abs() < 1e-9);
+        assert!((spl[1] - 86.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn load_frequency_response_whitespace_separator() {
+        let csv = "20 80.0\n200 85.0\n";
+        let f = write_tmp(csv);
+        let (freq, _spl) = load_frequency_response(&f.path().to_path_buf()).unwrap();
+        assert_eq!(freq.len(), 2);
+        assert!((freq[1] - 200.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn load_frequency_response_empty_errors() {
+        let f = write_tmp("");
+        assert!(load_frequency_response(&f.path().to_path_buf()).is_err());
+    }
+
+    #[test]
+    fn read_curve_from_csv_fallback_to_frequency_response() {
+        // No recognized driver header, so it falls back to load_frequency_response.
+        let csv = "100,80.0\n1000,82.0\n";
+        let f = write_tmp(csv);
+        let curve = read_curve_from_csv(&f.path().to_path_buf()).unwrap();
+        assert_eq!(curve.freq.len(), 2);
+        assert!((curve.spl[1] - 82.0).abs() < 1e-9);
+    }
 }

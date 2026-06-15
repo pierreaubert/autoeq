@@ -387,3 +387,322 @@ fn production_multiseat_path_emits_per_sub_and_global_eq_when_enabled() {
         "per_sub_peq=true should export per-driver EQ plugins"
     );
 }
+
+mod coverage_tests {
+    use super::super::check::check_group_consistency;
+    use super::super::check::check_octave_consistency;
+    use super::super::misc::apply_per_sub_filters;
+    use super::super::misc::compute_lr24_crossover_responses;
+    use super::super::misc::load_multisub_seat_measurements;
+    use super::super::misc::multiseat_peq_config;
+    use super::super::misc::split_curve_at_frequency;
+    use super::super::process::process_dba;
+    use super::super::process::process_mixed_mode_crossover;
+    use super::super::process::process_multisub_group;
+    use super::super::process::process_speaker_group;
+    use crate::roomeq::types::DBAConfig;
+    use crate::roomeq::types::MixedModeConfig;
+    use crate::roomeq::types::MultiSeatConfig;
+    use crate::roomeq::types::MultiSubGroup;
+    use crate::roomeq::types::OptimizerConfig;
+    use crate::roomeq::types::RoomConfig;
+    use crate::roomeq::types::SpeakerGroup;
+    use crate::Curve;
+    use crate::MeasurementSource;
+    use ndarray::array;
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    fn flat_curve() -> Curve {
+        Curve {
+            freq: array![100.0, 200.0, 400.0, 800.0, 1600.0],
+            spl: array![80.0, 80.0, 80.0, 80.0, 80.0],
+            phase: None,
+            ..Default::default()
+        }
+    }
+
+    fn sub_optimizer() -> OptimizerConfig {
+        OptimizerConfig {
+            min_freq: 20.0,
+            max_freq: 160.0,
+            num_filters: 1,
+            max_iter: 3,
+            population: 4,
+            seed: Some(1),
+            refine: false,
+            ..Default::default()
+        }
+    }
+
+    fn room_config_with_optimizer(optimizer: OptimizerConfig) -> RoomConfig {
+        RoomConfig {
+            version: crate::roomeq::types::default_config_version(),
+            system: None,
+            speakers: HashMap::new(),
+            crossovers: None,
+            target_curve: None,
+            optimizer,
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        }
+    }
+
+    #[test]
+    fn check_group_consistency_exercises_all_branches() {
+        let mut means = HashMap::new();
+        let curves = HashMap::from([
+            ("L".to_string(), flat_curve()),
+            ("R".to_string(), flat_curve()),
+        ]);
+        // Fewer than 2 channels: early return
+        check_group_consistency("pair", &[], &means, &curves);
+        check_group_consistency("pair", &["L".to_string()], &means, &curves);
+        // Missing mean entries are skipped
+        check_group_consistency("pair", &["L".to_string(), "R".to_string()], &means, &curves);
+        // Range difference below and above threshold
+        means.insert("L".to_string(), 80.0);
+        means.insert("R".to_string(), 83.0);
+        check_group_consistency("pair", &["L".to_string(), "R".to_string()], &means, &curves);
+        means.insert("R".to_string(), 90.0);
+        check_group_consistency("pair", &["L".to_string(), "R".to_string()], &means, &curves);
+    }
+
+    #[test]
+    fn check_octave_consistency_exercises_overlap_and_diff_branches() {
+        let c1 = flat_curve();
+        let mut c2 = flat_curve();
+        c2.spl += 10.0;
+        // Curves overlap and differ by more than 6 dB in some octaves
+        check_octave_consistency("pair", "L", "R", &c1, &c2);
+        // Non-overlapping high octave
+        let c_high = Curve {
+            freq: array![20000.0, 40000.0],
+            spl: array![80.0, 80.0],
+            phase: None,
+            ..Default::default()
+        };
+        check_octave_consistency("pair", "L", "R", &c1, &c_high);
+    }
+
+    #[test]
+    fn load_multisub_seat_measurements_rejects_inconsistent_seats() {
+        let group = MultiSubGroup {
+            name: "subs".to_string(),
+            speaker_name: None,
+            subwoofers: vec![
+                MeasurementSource::InMemoryMultiple(vec![flat_curve(), flat_curve()]),
+                MeasurementSource::InMemoryMultiple(vec![flat_curve()]),
+            ],
+            allpass_optimization: false,
+        };
+        let err = load_multisub_seat_measurements(&group).unwrap_err();
+        assert!(err.to_string().contains("inconsistent seat counts"));
+    }
+
+    #[test]
+    fn load_multisub_seat_measurements_returns_none_for_single_seat() {
+        let group = MultiSubGroup {
+            name: "subs".to_string(),
+            speaker_name: None,
+            subwoofers: vec![
+                MeasurementSource::InMemoryMultiple(vec![flat_curve()]),
+                MeasurementSource::InMemoryMultiple(vec![flat_curve()]),
+            ],
+            allpass_optimization: false,
+        };
+        assert!(load_multisub_seat_measurements(&group).unwrap().is_none());
+    }
+
+    #[test]
+    fn multiseat_peq_config_normalizes_weights_and_handles_primary() {
+        let policy = MultiSeatConfig {
+            enabled: true,
+            strategy: crate::roomeq::types::MultiSeatStrategy::PrimaryWithConstraints,
+            primary_seat: 0,
+            max_deviation_db: 3.0,
+            seat_weights: Some(vec![1.0, 1.0]),
+            primary_seat_weight: 2.0,
+            ..Default::default()
+        };
+        let config = multiseat_peq_config(&policy, 2);
+        assert_eq!(config.weights.as_ref().unwrap().len(), 2);
+        assert!(config.weights.as_ref().unwrap()[0] > config.weights.as_ref().unwrap()[1]);
+    }
+
+    #[test]
+    fn multiseat_peq_config_falls_back_on_invalid_weights() {
+        let policy = MultiSeatConfig {
+            enabled: true,
+            strategy: crate::roomeq::types::MultiSeatStrategy::MinimizeVariance,
+            seat_weights: Some(vec![1.0, f64::NAN, -1.0]),
+            ..Default::default()
+        };
+        let config = multiseat_peq_config(&policy, 3);
+        let weights = config.weights.unwrap();
+        assert!(weights.iter().all(|w| w.is_finite() && *w >= 0.0));
+    }
+
+    #[test]
+    fn apply_per_sub_filters_preserves_empty_filters() {
+        let seat = flat_curve();
+        let measurements = vec![vec![seat.clone()], vec![seat.clone()]];
+        let filters: Vec<Vec<math_audio_iir_fir::Biquad>> = vec![vec![], vec![]];
+        let result = apply_per_sub_filters(&measurements, &filters, 48000.0);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0][0].spl, seat.spl);
+    }
+
+    #[test]
+    fn split_curve_at_frequency_and_lr24_responses_work() {
+        let curve = flat_curve();
+        let (low, high) = split_curve_at_frequency(&curve, 400.0);
+        assert!(!low.freq.is_empty());
+        assert!(!high.freq.is_empty());
+        let (lp, hp) = compute_lr24_crossover_responses(&curve.freq, 400.0, 48000.0);
+        assert_eq!(lp.len(), curve.freq.len());
+        assert_eq!(hp.len(), curve.freq.len());
+    }
+
+    #[test]
+    fn process_speaker_group_rejects_missing_crossover() {
+        let group = SpeakerGroup {
+            name: "test".to_string(),
+            speaker_name: None,
+            measurements: vec![MeasurementSource::InMemory(flat_curve())],
+            crossover: None,
+        };
+        let config = room_config_with_optimizer(OptimizerConfig::default());
+        let err = process_speaker_group("L", &group, &config, 48000.0, Path::new(".")).unwrap_err();
+        assert!(err.to_string().contains("requires crossover configuration"));
+    }
+
+    #[test]
+    fn process_speaker_group_rejects_unknown_crossover() {
+        let group = SpeakerGroup {
+            name: "test".to_string(),
+            speaker_name: None,
+            measurements: vec![MeasurementSource::InMemory(flat_curve())],
+            crossover: Some("missing".to_string()),
+        };
+        let config = room_config_with_optimizer(OptimizerConfig::default());
+        let err = process_speaker_group("L", &group, &config, 48000.0, Path::new(".")).unwrap_err();
+        assert!(err.to_string().contains("Crossover configuration"));
+    }
+
+    #[test]
+    fn process_speaker_group_two_way_succeeds() {
+        let mut woofer = flat_curve();
+        woofer.freq = array![50.0, 100.0, 200.0, 400.0];
+        woofer.spl = array![80.0, 80.0, 80.0, 80.0];
+        let mut tweeter = flat_curve();
+        tweeter.freq = array![1000.0, 2000.0, 4000.0, 8000.0];
+        tweeter.spl = array![80.0, 80.0, 80.0, 80.0];
+        let group = SpeakerGroup {
+            name: "test".to_string(),
+            speaker_name: None,
+            measurements: vec![
+                MeasurementSource::InMemory(tweeter),
+                MeasurementSource::InMemory(woofer),
+            ],
+            crossover: Some("xover".to_string()),
+        };
+        let mut config = room_config_with_optimizer(OptimizerConfig {
+            min_freq: 50.0,
+            max_freq: 8000.0,
+            num_filters: 1,
+            max_iter: 3,
+            population: 4,
+            seed: Some(3),
+            refine: false,
+            ..Default::default()
+        });
+        config.crossovers = Some(HashMap::from([(
+            "xover".to_string(),
+            crate::roomeq::types::CrossoverConfig {
+                crossover_type: "LR24".to_string(),
+                frequency: Some(800.0),
+                frequencies: None,
+                frequency_range: None,
+            },
+        )]));
+        let result = process_speaker_group("L", &group, &config, 48000.0, Path::new("."));
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn process_multisub_group_standard_path_succeeds() {
+        let group = MultiSubGroup {
+            name: "subs".to_string(),
+            speaker_name: None,
+            subwoofers: vec![
+                MeasurementSource::InMemory(flat_curve()),
+                MeasurementSource::InMemory(flat_curve()),
+            ],
+            allpass_optimization: false,
+        };
+        let config = room_config_with_optimizer(sub_optimizer());
+        let result = process_multisub_group("LFE", &group, &config, 48000.0, Path::new("."));
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    fn phased_curve() -> Curve {
+        Curve {
+            freq: array![100.0, 200.0, 400.0, 800.0, 1600.0],
+            spl: array![80.0, 80.0, 80.0, 80.0, 80.0],
+            phase: Some(array![0.0, 0.0, 0.0, 0.0, 0.0]),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn process_dba_succeeds_with_flat_arrays() {
+        let dba = DBAConfig {
+            name: "dba".to_string(),
+            speaker_name: None,
+            front: vec![MeasurementSource::InMemory(phased_curve())],
+            rear: vec![MeasurementSource::InMemory(phased_curve())],
+        };
+        let config = room_config_with_optimizer(sub_optimizer());
+        let result = process_dba("LFE", &dba, &config, 48000.0, Path::new("."));
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn process_mixed_mode_crossover_succeeds_with_low_fir() {
+        let curve = flat_curve();
+        let mixed = MixedModeConfig {
+            crossover_freq: 500.0,
+            fir_band: "low".to_string(),
+            ..Default::default()
+        };
+        let config = room_config_with_optimizer(OptimizerConfig {
+            min_freq: 100.0,
+            max_freq: 1600.0,
+            num_filters: 1,
+            max_iter: 3,
+            population: 4,
+            seed: Some(2),
+            refine: false,
+            fir: Some(crate::roomeq::types::FirConfig::default()),
+            ..Default::default()
+        });
+        let output_dir = std::env::temp_dir();
+        let result = process_mixed_mode_crossover(
+            "L",
+            &curve,
+            &config,
+            &mixed,
+            48000.0,
+            &output_dir,
+            100.0,
+            1600.0,
+            80.0,
+            1.0,
+            None,
+            None,
+        );
+        assert!(result.is_ok(), "{result:?}");
+    }
+}

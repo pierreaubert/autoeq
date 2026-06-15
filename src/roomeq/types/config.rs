@@ -45,6 +45,8 @@ mod schroeder_split_config;
 mod speaker_config;
 mod speaker_group;
 mod spl_calibration;
+mod supporting_source_config;
+mod supporting_source_group;
 mod sub_optimizer_config;
 mod target_response_config;
 #[cfg(test)]
@@ -92,6 +94,8 @@ pub use schroeder_split_config::*;
 pub use speaker_config::*;
 pub use speaker_group::*;
 pub use spl_calibration::*;
+pub use supporting_source_config::*;
+pub use supporting_source_group::*;
 pub use sub_optimizer_config::*;
 pub use target_response_config::*;
 pub use types::*;

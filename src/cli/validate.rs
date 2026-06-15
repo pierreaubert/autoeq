@@ -185,3 +185,215 @@ pub fn validate_args_or_exit(args: &Args) {
         process::exit(1);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::args::Args;
+    use super::validate_args;
+    use crate::LossType;
+    use clap::Parser;
+    use std::path::PathBuf;
+
+    fn valid_args() -> Args {
+        Args::try_parse_from::<&[&str], _>(&["prog"]).unwrap()
+    }
+
+    #[test]
+    fn valid_default_args_pass() {
+        let args = valid_args();
+        assert!(validate_args(&args).is_ok());
+    }
+
+    #[test]
+    fn min_q_greater_than_max_q_fails() {
+        let mut args = valid_args();
+        args.min_q = 5.0;
+        args.max_q = 1.0;
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("min_q"));
+        assert!(err.contains("max_q"));
+    }
+
+    #[test]
+    fn min_freq_greater_than_max_freq_fails() {
+        let mut args = valid_args();
+        args.min_freq = 200.0;
+        args.max_freq = 100.0;
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("min_freq"));
+        assert!(err.contains("max_freq"));
+    }
+
+    #[test]
+    fn max_freq_above_nyquist_fails() {
+        let mut args = valid_args();
+        args.sample_rate = 1000.0;
+        args.max_freq = 600.0;
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("Nyquist"));
+    }
+
+    #[test]
+    fn driver_args_without_drivers_flat_loss_fails() {
+        let mut args = valid_args();
+        args.loss = LossType::SpeakerFlat;
+        args.driver1 = Some(PathBuf::from("d1.csv"));
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("Driver arguments"));
+    }
+
+    #[test]
+    fn drivers_flat_without_drivers_fails() {
+        let mut args = valid_args();
+        args.loss = LossType::DriversFlat;
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("requires at least --driver1 and --driver2"));
+    }
+
+    #[test]
+    fn drivers_flat_with_invalid_crossover_type_fails() {
+        let mut args = valid_args();
+        args.loss = LossType::DriversFlat;
+        args.driver1 = Some(PathBuf::from("d1.csv"));
+        args.driver2 = Some(PathBuf::from("d2.csv"));
+        args.crossover_type = "invalid".to_string();
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("Invalid crossover type"));
+    }
+
+    #[test]
+    fn drivers_flat_with_valid_crossover_passes() {
+        let mut args = valid_args();
+        args.loss = LossType::DriversFlat;
+        args.driver1 = Some(PathBuf::from("d1.csv"));
+        args.driver2 = Some(PathBuf::from("d2.csv"));
+        args.crossover_type = "linkwitzriley4".to_string();
+        assert!(validate_args(&args).is_ok());
+    }
+
+    #[test]
+    fn refine_with_unknown_local_algo_fails() {
+        let mut args = valid_args();
+        args.refine = true;
+        args.local_algo = "unknown".to_string();
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("Unknown local algorithm"));
+    }
+
+    #[test]
+    fn min_freq_below_reasonable_range_fails() {
+        let mut args = valid_args();
+        args.min_freq = 10.0;
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("Must be >= 20 Hz"));
+    }
+
+    #[test]
+    fn max_freq_above_reasonable_range_fails() {
+        let mut args = valid_args();
+        args.max_freq = 25000.0;
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("Must be <= 20,000 Hz"));
+    }
+
+    #[test]
+    fn smooth_n_out_of_range_fails() {
+        let mut args = valid_args();
+        args.smooth_n = 0;
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("smooth_n"));
+
+        let mut args = valid_args();
+        args.smooth_n = 25;
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("smooth_n"));
+    }
+
+    #[test]
+    fn population_zero_fails() {
+        let mut args = valid_args();
+        args.population = 0;
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("Population size"));
+    }
+
+    #[test]
+    fn maxeval_zero_fails() {
+        let mut args = valid_args();
+        args.maxeval = 0;
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("Maximum evaluations"));
+    }
+
+    #[test]
+    fn num_filters_zero_or_too_high_fails() {
+        let mut args = valid_args();
+        args.num_filters = 0;
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("Number of filters"));
+
+        let mut args = valid_args();
+        args.num_filters = 51;
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("<= 50 filters"));
+    }
+
+    #[test]
+    fn tolerance_non_positive_fails() {
+        let mut args = valid_args();
+        args.tolerance = 0.0;
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("Tolerance"));
+    }
+
+    #[test]
+    fn atolerance_negative_fails() {
+        let mut args = valid_args();
+        args.atolerance = -1.0;
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("Absolute tolerance"));
+    }
+
+    #[test]
+    fn adaptive_weights_out_of_range_fails() {
+        let mut args = valid_args();
+        args.adaptive_weight_f = 1.5;
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("Adaptive weight for F"));
+
+        let mut args = valid_args();
+        args.adaptive_weight_cr = -0.1;
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("Adaptive weight for CR"));
+    }
+
+    #[test]
+    fn invalid_de_strategy_fails() {
+        let mut args = valid_args();
+        args.algo = "autoeq:de".to_string();
+        args.strategy = "not-a-strategy".to_string();
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("Invalid DE strategy"));
+    }
+
+    #[test]
+    fn drivers_flat_with_too_few_drivers_fails() {
+        let mut args = valid_args();
+        args.loss = LossType::DriversFlat;
+        args.driver1 = Some(PathBuf::from("d1.csv"));
+        let err = validate_args(&args).unwrap_err();
+        assert!(err.contains("requires at least --driver1 and --driver2"));
+    }
+
+    #[test]
+    fn drivers_flat_accepts_all_valid_crossover_types() {
+        for ct in ["butterworth2", "linkwitzriley2", "linkwitzriley4"] {
+            let mut args = valid_args();
+            args.loss = LossType::DriversFlat;
+            args.driver1 = Some(PathBuf::from("d1.csv"));
+            args.driver2 = Some(PathBuf::from("d2.csv"));
+            args.crossover_type = ct.to_string();
+            assert!(validate_args(&args).is_ok(), "crossover {} should be valid", ct);
+        }
+    }
+}

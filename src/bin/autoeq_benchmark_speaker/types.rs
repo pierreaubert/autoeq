@@ -56,3 +56,19 @@ pub(super) fn distribution_summary(data: &[f64]) -> Option<DistributionSummary> 
         max: sorted[sorted.len() - 1],
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::BenchArgs;
+
+    #[test]
+    fn bench_args_parses_with_jobs_and_smoke_test() {
+        let args =
+            BenchArgs::try_parse_from(["benchmark-autoeq-speaker", "--jobs", "4", "--smoke-test"])
+                .unwrap();
+        assert_eq!(args.jobs, 4);
+        assert!(args.smoke_test);
+    }
+}

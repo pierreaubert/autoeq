@@ -59,7 +59,7 @@ math-iir-fir = { git = "https://github.com/pierreaubert/math-audio", version = "
 math-dsp = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
 math-optimisation = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
 math-rir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
-sofa-reader = "0.1.6"
+sofa-reader = "0.1"
 
 # Core numerical computing
 ndarray = { version = "0.17", default-features = false, features = ["rayon", "serde"] }

@@ -1,4 +1,4 @@
-use super::super::cli::PeqModel;
+use crate::PeqModel;
 use crate::param_utils;
 
 /// Data needed by the nonlinear minimum gain constraint callback.
@@ -69,7 +69,7 @@ pub fn viol_min_gain_from_xs(xs: &[f64], peq_model: PeqModel, min_db: f64) -> f6
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::PeqModel;
+    use crate::PeqModel;
 
     #[test]
     fn viol_min_gain_no_filters() {

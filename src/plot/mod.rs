@@ -15,6 +15,7 @@
 //! You should have received a copy of the GNU General Public License
 //! along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+mod config;
 mod filter_color;
 mod plot_drivers;
 mod plot_filters;
@@ -23,6 +24,7 @@ mod plot_spin;
 mod ref_lines;
 mod trend_lines;
 
+pub use config::PlotConfig;
 pub use filter_color::filter_color;
 pub use plot_drivers::{plot_drivers, plot_drivers_results};
 pub use plot_filters::plot_filters;

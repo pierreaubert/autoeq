@@ -6,7 +6,7 @@ use super::types::setup_de_common;
 use ndarray::Array1;
 
 use crate::LossType;
-use crate::cli::PeqModel;
+use crate::PeqModel;
 use ndarray::array;
 
 fn test_objective_data() -> ObjectiveData {

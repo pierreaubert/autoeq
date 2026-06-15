@@ -250,7 +250,7 @@ fn prepare_single_channel_eq_basic() {
     let prep = prepare_single_channel_eq(&curve, &config, None, 48000.0)
         .expect("basic prepare should succeed");
     assert!(!prep.objective_data.freqs.is_empty());
-    assert_eq!(prep.peq_model, crate::cli::PeqModel::Pk);
+    assert_eq!(prep.peq_model, crate::PeqModel::Pk);
     assert!(!prep.objective_data.deviation.is_empty());
 }
 

@@ -9,7 +9,7 @@ use super::super::misc::try_ssir_analysis;
 use super::super::representative::measure_bass_rt60;
 use super::super::types::PreparedSingleChannelEq;
 use crate::Curve;
-use crate::cli::PeqModel;
+use crate::PeqModel;
 use crate::loss::LossType;
 use crate::workflow::setup_objective_data;
 use clap::ValueEnum;

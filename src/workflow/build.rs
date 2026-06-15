@@ -14,11 +14,11 @@ use ndarray::Array1;
 ///
 /// Returns `AutoeqError::TargetCurveLoad` if loading from a CSV file fails.
 pub fn build_target_curve(
-    args: &crate::cli::Args,
+    target: &crate::workflow::TargetConfig,
     freqs: &Array1<f64>,
     input_curve: &Curve,
 ) -> Result<Curve, AutoeqError> {
-    if let Some(ref target_path) = args.target {
+    if let Some(ref target_path) = target.target_path {
         log::debug!(
             "[RUST DEBUG] Loading target curve from path: {}",
             target_path.display()
@@ -34,7 +34,7 @@ pub fn build_target_curve(
             &target_curve,
         ))
     } else {
-        build_target_curve_by_name(&args.curve_name, freqs, input_curve)
+        build_target_curve_by_name(&target.curve_name, freqs, input_curve)
     }
 }
 

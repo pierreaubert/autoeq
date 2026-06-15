@@ -128,7 +128,7 @@ pub fn create_smart_initial_guesses(
     num_filters: usize,
     bounds: &[(f64, f64)],
     config: &SmartInitConfig,
-    peq_model: crate::cli::PeqModel,
+    peq_model: crate::PeqModel,
 ) -> Vec<Vec<f64>> {
     // Create RNG based on config seed
     let mut main_rng: Box<dyn rand::RngCore> = if let Some(seed) = config.seed {
@@ -251,11 +251,11 @@ pub fn create_smart_initial_guesses(
 
             // Convert to log10(freq) and constrain to bounds based on model
             match peq_model {
-                crate::cli::PeqModel::Pk
-                | crate::cli::PeqModel::HpPk
-                | crate::cli::PeqModel::HpPkLp
-                | crate::cli::PeqModel::LsPk
-                | crate::cli::PeqModel::LsPkHs => {
+                crate::PeqModel::Pk
+                | crate::PeqModel::HpPk
+                | crate::PeqModel::HpPkLp
+                | crate::PeqModel::LsPk
+                | crate::PeqModel::LsPkHs => {
                     // Fixed filter types: [freq, Q, gain]
                     let base_idx = i * 3;
                     let log_freq = freq_var
@@ -270,7 +270,7 @@ pub fn create_smart_initial_guesses(
                         .min(bounds[base_idx + 2].1);
                     guess.extend_from_slice(&[log_freq, q_constrained, gain_constrained]);
                 }
-                crate::cli::PeqModel::FreePkFree | crate::cli::PeqModel::Free => {
+                crate::PeqModel::FreePkFree | crate::PeqModel::Free => {
                     // Free filter types: [type, freq, Q, gain]
                     let base_idx = i * 4;
                     let filter_type = 0.0; // Default to Peak filter
@@ -359,7 +359,7 @@ mod tests {
 
     #[test]
     fn test_create_smart_initial_guesses() {
-        use crate::cli::PeqModel;
+        use crate::PeqModel;
 
         // Create a simple test case with a peak and dip
         let target_response = Array1::from(vec![0.0, 3.0, 0.0, -2.0, 0.0]);
@@ -392,7 +392,7 @@ mod tests {
 
     #[test]
     fn test_create_smart_initial_guesses_stable_across_grid_density() {
-        use crate::cli::PeqModel;
+        use crate::PeqModel;
 
         let coarse_freq_grid = Array1::from(vec![100.0, 300.0, 1000.0, 3000.0, 10000.0]);
         let coarse_response = Array1::from(vec![0.0, 0.0, 6.0, 0.0, 0.0]);
@@ -442,7 +442,7 @@ mod tests {
 
     #[test]
     fn test_create_smart_initial_guesses_with_pre_detected_problems() {
-        use crate::cli::PeqModel;
+        use crate::PeqModel;
         let target_response = Array1::from(vec![0.0, 0.0, 0.0]);
         let freq_grid = Array1::from(vec![100.0, 1000.0, 10000.0]);
         let bounds = vec![
@@ -475,7 +475,7 @@ mod tests {
 
     #[test]
     fn test_create_smart_initial_guesses_empty_response() {
-        use crate::cli::PeqModel;
+        use crate::PeqModel;
         let target_response = Array1::from(vec![0.0, 0.0, 0.0]);
         let freq_grid = Array1::from(vec![100.0, 1000.0, 10000.0]);
         // 2 filters * 3 params = 6 bounds entries

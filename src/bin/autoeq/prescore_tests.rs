@@ -3,7 +3,7 @@ mod tests {
     use crate::prescore::compute_pre_optimization_metrics;
     use autoeq::Curve;
     use autoeq::cli::Args;
-    use autoeq::cli::PeqModel;
+    use autoeq::PeqModel;
     use autoeq::loss::LossType;
     use autoeq::optim::ObjectiveData;
     use clap::Parser;

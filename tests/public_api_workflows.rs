@@ -12,7 +12,8 @@ use std::sync::Arc;
 use std::task::{Context, Poll, Wake};
 
 use autoeq::Curve;
-use autoeq::cli::{Args, PeqModel};
+use autoeq::cli::Args;
+use autoeq::PeqModel;
 use autoeq::iir::{Biquad, BiquadFilterType};
 use autoeq::loss::{CrossoverType, DriverMeasurement, DriversLossData};
 use autoeq::read::{
@@ -93,7 +94,7 @@ fn test_optimize_headphone_happy_path() {
     args.min_db = 1.0;
     args.max_db = 6.0;
 
-    let result = optimize_headphone(&csv_path, &target, &args, None, None::<fn(&_) -> _>)
+    let result = optimize_headphone(&csv_path, &target, &autoeq::OptimParams::from(&args), None, None::<fn(&_) -> _>)
         .expect("headphone optimization should succeed");
 
     assert!(
@@ -136,7 +137,7 @@ fn test_optimize_headphone_missing_file_error_path() {
     };
     let args = Args::headphone_defaults();
 
-    let result = optimize_headphone(&missing, &target, &args, None, None::<fn(&_) -> _>);
+    let result = optimize_headphone(&missing, &target, &autoeq::OptimParams::from(&args), None, None::<fn(&_) -> _>);
     assert!(
         result.is_err(),
         "optimizing a missing measurement should return an error"
@@ -472,7 +473,7 @@ fn test_plot_results_writes_html() {
     let cea2034_curves: Option<HashMap<String, Curve>> = None;
 
     let result = block_on(autoeq::plot::plot_results(
-        &args,
+        &autoeq::plot::PlotConfig::from(&args),
         &optimized_params,
         &input,
         &target,

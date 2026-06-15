@@ -1,7 +1,8 @@
 //! Tests for free filter type functionality
 
 use autoeq::OptimParams;
-use autoeq::cli::{Args, PeqModel};
+use autoeq::cli::Args;
+use autoeq::PeqModel;
 use autoeq::param_utils::{self};
 use autoeq::x2peq::{peq2x, x2peq};
 use clap::Parser;

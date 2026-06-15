@@ -45,7 +45,7 @@ pub(super) fn interpolate_cea2034_data(
     }
 }
 
-/// Create minimal Args struct for driver optimization
+/// Create minimal optimization parameters for driver/multi-sub optimization.
 ///
 /// This avoids requiring full CLI args when calling from library code.
 #[allow(clippy::too_many_arguments)]
@@ -59,18 +59,13 @@ pub(super) fn create_driver_optimization_args(
     min_db: f64,
     max_db: f64,
     seed: Option<u64>,
-) -> crate::cli::Args {
+) -> crate::OptimParams {
     use crate::LossType;
-    use crate::cli::{Args, PeqModel};
+    use crate::PeqModel;
 
-    Args {
+    crate::OptimParams {
         num_filters: 0, // Not used for driver optimization
-        curve: None,
-        target: None,
-        speaker: None,
-        version: None,
-        measurement: None,
-        curve_name: "On Axis".to_string(),
+        peq_model: PeqModel::Pk,
         sample_rate,
         min_freq,
         max_freq,
@@ -78,12 +73,14 @@ pub(super) fn create_driver_optimization_args(
         max_q: 10.0,
         min_db,
         max_db,
+        loss: LossType::DriversFlat,
+        smooth: false,
+        smooth_n: 1,
+        min_spacing_oct: 0.0,
+        spacing_weight: 0.0,
+        smoothness_penalty: None,
+        audibility_deadband: None,
         algo: algorithm.to_string(),
-        strategy: "currenttobest1bin".to_string(),
-        algo_list: false,
-        strategy_list: false,
-        peq_model: PeqModel::Pk,
-        peq_model_list: false,
         population,
         maxeval: max_iter,
         refine: false,
@@ -93,30 +90,15 @@ pub(super) fn create_driver_optimization_args(
         bo_posterior_std_threshold: 0.0,
         bo_acquisition: "qei".to_string(),
         bo_ehvi: false,
-        min_spacing_oct: 0.0,
-        spacing_weight: 0.0,
-        smoothness_weight: 0.0,
-        smoothness_exponent: 1.0,
-        smoothness_schroeder_hz: None,
-        smoothness_modal_scale: 0.1,
-        smooth: false,
-        smooth_n: 1,
-        loss: LossType::DriversFlat,
+        strategy: "currenttobest1bin".to_string(),
         tolerance: 1e-3,
         atolerance: 1e-4,
         recombination: 0.9,
         adaptive_weight_f: 0.9,
         adaptive_weight_cr: 0.9,
         no_parallel: false,
-        output: None,
-        driver1: None,
-        driver2: None,
-        driver3: None,
-        driver4: None,
-        crossover_type: "linkwitzriley4".to_string(),
         parallel_threads: num_cpus::get(),
         seed,
-        qa: None,
-        preset: None,
+        quiet: false,
     }
 }

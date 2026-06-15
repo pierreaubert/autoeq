@@ -1,4 +1,4 @@
-use super::super::cli::PeqModel;
+use crate::PeqModel;
 use super::super::x2peq::x2spl;
 use ndarray::Array1;
 

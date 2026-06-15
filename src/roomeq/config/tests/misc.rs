@@ -85,7 +85,7 @@ fn test_unknown_algorithm_warns_not_errors() {
 
 #[test]
 fn test_all_peq_models_accepted() {
-    use crate::cli::PeqModel;
+    use crate::PeqModel;
     for model in PeqModel::all() {
         let mut config = config_with_algorithm("autoeq:de");
         config.optimizer.peq_model = model.to_string();

@@ -29,10 +29,8 @@ use std::path::PathBuf;
 /// # Returns
 /// Complete optimization result with all curves
 pub async fn optimize_speaker<F>(
-    speaker: &str,
-    version: &str,
-    measurement: &str,
-    args: &crate::cli::Args,
+    input: &crate::workflow::InputConfig,
+    params: &crate::OptimParams,
     progress_config: Option<ProgressCallbackConfig>,
     progress_callback: Option<F>,
 ) -> Result<SpeakerOptResult, Box<dyn Error>>
@@ -40,15 +38,25 @@ where
     F: FnMut(&ProgressUpdate) -> crate::de::CallbackAction + Send + 'static,
 {
     // 1. Load measurement with spin data
+    let speaker = input.speaker.as_deref().unwrap_or("");
+    let version = input.version.as_deref().unwrap_or("");
+    let measurement = input.measurement.as_deref().unwrap_or("");
     let (input_curve, spin_data) =
-        read::load_spinorama_with_spin(speaker, version, measurement, &args.curve_name).await?;
+        read::load_spinorama_with_spin(speaker, version, measurement, &input.curve_name).await?;
 
     // 2. Normalize to standard frequency grid
     let standard_freq = read::create_log_frequency_grid(200, 20.0, 20000.0);
     let input_normalized = read::normalize_and_interpolate_response(&standard_freq, &input_curve);
 
     // 3. Build target curve
-    let target_curve = build_target_curve(args, &standard_freq, &input_normalized)?;
+    let target_curve = build_target_curve(
+        &crate::workflow::TargetConfig {
+            target_path: None,
+            curve_name: input.curve_name.clone(),
+        },
+        &standard_freq,
+        &input_normalized,
+    )?;
 
     // 4. Create deviation curve
     let deviation_curve = Curve {
@@ -68,9 +76,8 @@ where
             })
             .collect::<HashMap<String, Curve>>()
     });
-    let optim_params = crate::OptimParams::from(args);
     let (objective_data, _) = setup_objective_data(
-        &optim_params,
+        params,
         &input_normalized,
         &target_curve,
         &deviation_curve,
@@ -78,22 +85,22 @@ where
     )?;
 
     // 6. Run optimization
-    let (params, history) = if let (Some(config), Some(callback)) =
+    let (opt_params, history) = if let (Some(config), Some(callback)) =
         (progress_config, progress_callback)
     {
-        let output = perform_optimization_with_progress(args, &objective_data, config, callback)?;
+        let output = perform_optimization_with_progress(params, &objective_data, config, callback)?;
         (output.params, output.history)
     } else {
-        let params = perform_optimization_with_callback(
-            args,
+        let p = perform_optimization_with_callback(
+            params,
             &objective_data,
             Box::new(|_| crate::de::CallbackAction::Continue),
         )?;
-        (params, Vec::new())
+        (p, Vec::new())
     };
 
     // 7. Convert to biquads
-    let biquads: Vec<Biquad> = x2peq(&params, args.sample_rate, args.peq_model)
+    let biquads: Vec<Biquad> = x2peq(&opt_params, params.sample_rate, params.peq_model)
         .into_iter()
         .map(|(_, b)| b)
         .collect();
@@ -134,7 +141,7 @@ where
 pub fn optimize_headphone<F>(
     curve_path: &PathBuf,
     target_curve: &Curve,
-    args: &crate::cli::Args,
+    params: &crate::OptimParams,
     progress_config: Option<ProgressCallbackConfig>,
     progress_callback: Option<F>,
 ) -> Result<HeadphoneOptResult, Box<dyn Error>>
@@ -158,9 +165,8 @@ where
     };
 
     // 4. Setup objective
-    let optim_params = crate::OptimParams::from(args);
     let (objective_data, _) = setup_objective_data(
-        &optim_params,
+        params,
         &input_normalized,
         &target_normalized,
         &deviation_curve,
@@ -168,22 +174,22 @@ where
     )?;
 
     // 5. Run optimization
-    let (params, history) = if let (Some(config), Some(callback)) =
+    let (opt_params, history) = if let (Some(config), Some(callback)) =
         (progress_config, progress_callback)
     {
-        let output = perform_optimization_with_progress(args, &objective_data, config, callback)?;
+        let output = perform_optimization_with_progress(params, &objective_data, config, callback)?;
         (output.params, output.history)
     } else {
-        let params = perform_optimization_with_callback(
-            args,
+        let p = perform_optimization_with_callback(
+            params,
             &objective_data,
             Box::new(|_| crate::de::CallbackAction::Continue),
         )?;
-        (params, Vec::new())
+        (p, Vec::new())
     };
 
     // 6. Convert to biquads
-    let biquads: Vec<Biquad> = x2peq(&params, args.sample_rate, args.peq_model)
+    let biquads: Vec<Biquad> = x2peq(&opt_params, params.sample_rate, params.peq_model)
         .into_iter()
         .map(|(_, b)| b)
         .collect();
@@ -263,8 +269,8 @@ pub fn optimize_drivers_crossover(
 ) -> Result<DriverOptimizationResult, Box<dyn std::error::Error>> {
     let n_drivers = drivers_data.drivers.len();
 
-    // Create Args structure needed for optimization
-    let args = create_driver_optimization_args(
+    // Create optimization parameters for driver optimization
+    let params = create_driver_optimization_args(
         min_freq,
         max_freq,
         sample_rate,
@@ -277,20 +283,19 @@ pub fn optimize_drivers_crossover(
     );
 
     // Setup objective data with optional fixed frequencies
-    let optim_params = crate::OptimParams::from(&args);
     let objective_data = if let Some(ref freqs) = fixed_freqs {
-        let mut data = setup_drivers_objective_data(&optim_params, drivers_data.clone());
+        let mut data = setup_drivers_objective_data(&params, drivers_data.clone());
         data.fixed_crossover_freqs = Some(freqs.clone());
         data
     } else {
-        setup_drivers_objective_data(&optim_params, drivers_data.clone())
+        setup_drivers_objective_data(&params, drivers_data.clone())
     };
 
     // Setup bounds (exclude crossover frequencies if fixed)
     let (lower_bounds, upper_bounds) = if fixed_freqs.is_some() {
-        setup_drivers_bounds_fixed_freqs(&optim_params, &drivers_data)
+        setup_drivers_bounds_fixed_freqs(&params, &drivers_data)
     } else {
-        setup_drivers_bounds(&optim_params, &drivers_data)
+        setup_drivers_bounds(&params, &drivers_data)
     };
 
     // Generate initial guess
@@ -309,7 +314,7 @@ pub fn optimize_drivers_crossover(
         &lower_bounds,
         &upper_bounds,
         objective_data.clone(),
-        &optim_params,
+        &params,
     );
 
     // Check optimization result
@@ -360,8 +365,8 @@ pub fn optimize_multisub(
 ) -> Result<DriverOptimizationResult, Box<dyn std::error::Error>> {
     let n_drivers = drivers_data.drivers.len();
 
-    // Create Args
-    let mut args = create_driver_optimization_args(
+    // Create optimization parameters for multi-sub optimization
+    let mut params = create_driver_optimization_args(
         min_freq,
         max_freq,
         sample_rate,
@@ -372,14 +377,13 @@ pub fn optimize_multisub(
         max_db,
         seed,
     );
-    args.loss = crate::LossType::MultiSubFlat;
+    params.loss = crate::LossType::MultiSubFlat;
 
     // Setup objective data
-    let optim_params = crate::OptimParams::from(&args);
-    let objective_data = setup_multisub_objective_data(&optim_params, drivers_data.clone());
+    let objective_data = setup_multisub_objective_data(&params, drivers_data.clone());
 
     // Setup bounds (gains + delays)
-    let (lower_bounds, upper_bounds) = setup_multisub_bounds(&optim_params, n_drivers);
+    let (lower_bounds, upper_bounds) = setup_multisub_bounds(&params, n_drivers);
 
     // Initial guess
     let mut x = multisub_initial_guess(n_drivers);
@@ -393,7 +397,7 @@ pub fn optimize_multisub(
         &lower_bounds,
         &upper_bounds,
         objective_data.clone(),
-        &optim_params,
+        &params,
     );
 
     let converged = opt_result.is_ok();

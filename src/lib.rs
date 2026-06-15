@@ -76,7 +76,7 @@ pub use optim::params as optim_params;
 // Re-export commonly used items
 pub use cli::*;
 pub use loss::{CrossoverType, HeadphoneLossData, LossType, SpeakerLossData};
-pub use optim::params::OptimParams;
+pub use optim::params::{OptimParams, PeqModel};
 pub use optim::*;
 #[cfg(feature = "plotly")]
 pub use plot::*;

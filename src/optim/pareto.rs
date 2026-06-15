@@ -4,8 +4,8 @@
 //! "Multi-Objective Genetic Algorithms for Loudspeaker Equalization"
 //! "Pareto-Optimal Solutions for Loudspeaker System Design"
 
-use crate::cli::Args;
 use crate::optim::ObjectiveData;
+use crate::OptimParams;
 
 /// Pareto-optimal filter solution
 #[derive(Debug, Clone)]
@@ -25,19 +25,18 @@ pub struct ParetoFilter {
 /// Run optimization for different filter counts and collect Pareto front
 pub fn pareto_optimization(
     objective_data: &ObjectiveData,
-    args: &Args,
+    params: &OptimParams,
     filter_counts: Vec<usize>,
 ) -> Vec<ParetoFilter> {
     let mut pareto_front = Vec::new();
 
     for &n_filters in &filter_counts {
-        // Clone args with different filter count
-        let mut args_with_filters = args.clone();
-        args_with_filters.num_filters = n_filters;
+        // Clone params with different filter count
+        let mut params_with_filters = params.clone();
+        params_with_filters.num_filters = n_filters;
 
         // Run optimization
         // We need to initialize x (params), lower_bounds, upper_bounds
-        let params_with_filters = crate::OptimParams::from(&args_with_filters);
         let (lower_bounds, upper_bounds) = crate::workflow::setup_bounds(&params_with_filters);
         // Initialize x with random/initial values or let optimizer handle it
         // The optimizer expects x to be initialized.

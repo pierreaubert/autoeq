@@ -1,6 +1,6 @@
 use autoeq::Curve;
 use autoeq::cea2034 as score;
-use autoeq::cli::PeqModel;
+use autoeq::PeqModel;
 use autoeq::loss;
 use ndarray::Array1;
 use std::collections::HashMap;

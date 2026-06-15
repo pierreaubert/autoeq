@@ -15,7 +15,7 @@
 //! You should have received a copy of the GNU General Public License
 //! along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use crate::cli::PeqModel;
+use crate::PeqModel;
 use crate::iir::{Biquad, Peq};
 use crate::param_utils::{self, FilterParams};
 use ndarray::Array1;
@@ -187,7 +187,7 @@ pub fn peq_print_from_x(x: &[f64], srate: f64, peq_model: PeqModel) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::PeqModel;
+    use crate::PeqModel;
     use ndarray::Array1;
 
     #[test]

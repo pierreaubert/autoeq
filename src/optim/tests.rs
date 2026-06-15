@@ -422,7 +422,7 @@ mod backend_tests {
         args.population = 6;
         args.maxeval = 60;
         args.algo = "autoeq:de".to_string();
-        let front = pareto_optimization(&obj, &args, vec![1, 2]);
+        let front = pareto_optimization(&obj, &crate::OptimParams::from(&args), vec![1, 2]);
         assert_eq!(
             front.len(),
             2,
@@ -436,7 +436,7 @@ mod backend_tests {
         let mut args = small_args();
         args.algo = "autoeq:cobyla".to_string();
         args.maxeval = 200;
-        let result = perform_optimization(&args, &obj);
+        let result = perform_optimization(&crate::OptimParams::from(&args), &obj);
         assert!(
             result.is_ok(),
             "perform_optimization cobyla should run: {:?}",
@@ -456,7 +456,7 @@ mod backend_tests {
         args.maxeval = 60;
         let mut iterations = Vec::new();
         let result = perform_optimization_with_callback(
-            &args,
+            &crate::OptimParams::from(&args),
             &obj,
             Box::new(move |im: &crate::de::DEIntermediate| {
                 iterations.push(im.iter);
@@ -478,7 +478,7 @@ mod backend_tests {
             include_filter_response: true,
             frequencies: vec![100.0, 1000.0],
         };
-        let result = perform_optimization_with_progress(&args, &obj, config, |_update| {
+        let result = perform_optimization_with_progress(&crate::OptimParams::from(&args), &obj, config, |_update| {
             crate::de::CallbackAction::Continue
         });
         assert!(result.is_ok(), "progress path should run: {:?}", result);
@@ -492,7 +492,7 @@ mod backend_tests {
         args.refine = true;
         args.local_algo = "autoeq:cobyla".to_string();
         args.maxeval = 60;
-        let result = perform_optimization(&args, &obj);
+        let result = perform_optimization(&crate::OptimParams::from(&args), &obj);
         assert!(
             result.is_ok(),
             "DE + cobyla refine should run: {:?}",
@@ -513,7 +513,7 @@ mod backend_tests {
             include_filter_response: false,
             frequencies: vec![],
         };
-        let result = perform_optimization_with_progress(&args, &obj, config, |_update| {
+        let result = perform_optimization_with_progress(&crate::OptimParams::from(&args), &obj, config, |_update| {
             crate::de::CallbackAction::Continue
         });
         assert!(
@@ -530,7 +530,7 @@ mod backend_tests {
         args.algo = "autoeq:cmaes".to_string();
         args.maxeval = 200;
         let result = perform_optimization_with_callback(
-            &args,
+            &crate::OptimParams::from(&args),
             &obj,
             Box::new(|_intermediate| crate::de::CallbackAction::Continue),
         );

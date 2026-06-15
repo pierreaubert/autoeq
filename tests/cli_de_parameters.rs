@@ -5,7 +5,8 @@
 
 use autoeq::LossType;
 use autoeq::OptimParams;
-use autoeq::cli::{Args, PeqModel};
+use autoeq::cli::Args;
+use autoeq::PeqModel;
 use autoeq::de::Strategy;
 use autoeq::optim::optimize_filters;
 use autoeq::workflow::{initial_guess, setup_bounds};

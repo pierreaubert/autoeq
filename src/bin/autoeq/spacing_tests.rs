@@ -28,7 +28,7 @@ mod tests {
             3.5, 1.0, 0.5, // ~3162 Hz
         ];
 
-        let result = check_spacing_constraints(&x, &args);
+        let result = check_spacing_constraints(&x, &autoeq::OptimParams::from(&args));
         assert!(result);
     }
 
@@ -44,7 +44,7 @@ mod tests {
             3.2, 3.0, 1.0, 3.3, 1.0, 0.5,
         ];
 
-        let result = check_spacing_constraints(&x, &args);
+        let result = check_spacing_constraints(&x, &autoeq::OptimParams::from(&args));
         assert!(!result);
     }
 
@@ -55,7 +55,7 @@ mod tests {
         // Empty params (no filters)
         let x: Vec<f64> = vec![];
 
-        let result = check_spacing_constraints(&x, &args);
+        let result = check_spacing_constraints(&x, &autoeq::OptimParams::from(&args));
         assert!(!result); // No filters = no spacing
     }
 
@@ -70,6 +70,6 @@ mod tests {
         ];
 
         // Should not panic
-        print_freq_spacing(&x, &args, "test");
+        print_freq_spacing(&x, &autoeq::OptimParams::from(&args), "test");
     }
 }

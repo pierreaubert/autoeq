@@ -263,7 +263,7 @@ pub fn setup_drivers_bounds_fixed_freqs(
 
 /// Build optimization parameter bounds for the optimizer.
 pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
-    use crate::cli::PeqModel;
+    use crate::PeqModel;
 
     let model = params.peq_model;
     let ppf = crate::param_utils::params_per_filter(model);

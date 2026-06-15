@@ -31,7 +31,7 @@ fn build_target_curve_respects_smoothing_flag() {
     // No smoothing
     args.smooth = false;
     let freqs = Array1::from(vec![100.0, 1000.0, 10000.0]);
-    let _target_curve = super::build_target_curve(&args, &freqs, &curve)
+    let _target_curve = super::build_target_curve(&super::TargetConfig::from(&args), &freqs, &curve)
         .expect("build_target_curve should succeed");
     let smoothed_none: Option<Curve> = None;
     assert!(smoothed_none.is_none());
@@ -39,7 +39,7 @@ fn build_target_curve_respects_smoothing_flag() {
     // With smoothing
     args.smooth = true;
     let freqs = Array1::from(vec![100.0, 1000.0, 10000.0]);
-    let target_curve = super::build_target_curve(&args, &freqs, &curve)
+    let target_curve = super::build_target_curve(&super::TargetConfig::from(&args), &freqs, &curve)
         .expect("build_target_curve should succeed");
     let inv_smooth = target_curve.clone();
     let s = target_curve;
@@ -379,7 +379,7 @@ fn build_target_curve_loads_from_csv_path() {
         ..Default::default()
     };
 
-    let target = super::build_target_curve(&args, &freqs, &input)
+    let target = super::build_target_curve(&super::TargetConfig::from(&args), &freqs, &input)
         .expect("build_target_curve should load CSV");
     assert_eq!(target.freq.len(), freqs.len());
 
@@ -487,7 +487,7 @@ fn optimize_headphone_with_csv_runs() {
     args.max_freq = 10000.0;
 
     let result =
-        super::optimize_headphone(&curve_path, &target_curve, &args, None, None::<fn(&_) -> _>);
+        super::optimize_headphone(&curve_path, &target_curve, &crate::OptimParams::from(&args), None, None::<fn(&_) -> _>);
     assert!(
         result.is_ok(),
         "optimize_headphone failed: {:?}",
@@ -666,11 +666,16 @@ fn optimize_speaker_with_local_cache_runs() {
     args.curve_name = "Listening Window".to_string();
 
     let rt = tokio::runtime::Runtime::new().unwrap();
+    let input = super::InputConfig {
+        speaker: Some(speaker.clone()),
+        version: Some(version.to_string()),
+        measurement: Some(measurement.to_string()),
+        curve_name: args.curve_name.clone(),
+        curve_path: None,
+    };
     let result = rt.block_on(super::optimize_speaker(
-        &speaker,
-        version,
-        measurement,
-        &args,
+        &input,
+        &crate::OptimParams::from(&args),
         None,
         None::<fn(&_) -> _>,
     ));

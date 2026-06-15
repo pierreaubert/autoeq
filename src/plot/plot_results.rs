@@ -14,7 +14,7 @@ use crate::plot::plot_spin::{plot_spin, plot_spin_details, plot_spin_tonal};
 use crate::x2peq::compute_peq_response_from_x;
 
 pub async fn plot_compute(
-    args: &crate::cli::Args,
+    config: &crate::plot::PlotConfig,
     optimized_params: &[f64],
     input_curve: &crate::Curve,
     target_curve: &crate::Curve,
@@ -25,7 +25,7 @@ pub async fn plot_compute(
 
     // gather all subplots
     let plot_filters = plot_filters(
-        args,
+        config,
         input_curve,
         target_curve,
         deviation_curve,
@@ -35,8 +35,8 @@ pub async fn plot_compute(
     let eq_response = compute_peq_response_from_x(
         &freqs,
         optimized_params,
-        args.sample_rate,
-        args.effective_peq_model(),
+        config.sample_rate,
+        config.peq_model,
     );
     let plot_spin_details = if cea2034_curves.is_some() {
         Some(plot_spin_details(
@@ -82,7 +82,7 @@ pub async fn plot_compute(
 /// # Returns
 /// * Result indicating success or failure
 pub async fn plot_results(
-    args: &crate::cli::Args,
+    config: &crate::plot::PlotConfig,
     optimized_params: &[f64],
     input_curve: &crate::Curve,
     target_curve: &crate::Curve,
@@ -90,9 +90,9 @@ pub async fn plot_results(
     cea2034_curves: &Option<HashMap<String, crate::Curve>>,
     output_path: &Path,
 ) -> Result<(), Box<dyn Error>> {
-    let speaker = args.speaker.as_deref();
+    let speaker = config.speaker_name.as_deref();
     let (plot_filters, plot_spin_details, plot_spin_tonal, plot_spin_opt) = plot_compute(
-        args,
+        config,
         optimized_params,
         input_curve,
         target_curve,
@@ -103,7 +103,7 @@ pub async fn plot_results(
 
     // Title with optional speaker name
     let title_text = match speaker {
-        Some(s) if !s.is_empty() => format!("{} -- #{} peq(s)", s, args.num_filters),
+        Some(s) if !s.is_empty() => format!("{} -- #{} peq(s)", s, config.num_filters),
         _ => "IIR Filter Optimization Results".to_string(),
     };
 

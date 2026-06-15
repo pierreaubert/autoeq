@@ -2,7 +2,8 @@
 
 use autoeq::LossType;
 use autoeq::OptimParams;
-use autoeq::cli::{Args, PeqModel};
+use autoeq::cli::Args;
+use autoeq::PeqModel;
 use autoeq::de::CallbackAction;
 use autoeq::optim_mh::{MHIntermediate, create_mh_callback, optimize_filters_mh_with_callback};
 use autoeq::workflow::{initial_guess, setup_bounds};

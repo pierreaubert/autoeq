@@ -159,7 +159,8 @@ pub(super) async fn run_one(
         return Err("Task cancelled before optimization".into());
     }
 
-    let x = perform_optimization(args, &objective_data, Arc::clone(&shutdown))
+    let params = autoeq::OptimParams::from(args);
+    let x = perform_optimization(&params, &objective_data, Arc::clone(&shutdown))
         .await
         .map_err(|e| e.to_string())?;
 
@@ -184,7 +185,7 @@ pub(super) async fn run_one(
 pub(super) async fn load_input_curve(
     args: &autoeq::cli::Args,
 ) -> Result<(autoeq::Curve, Option<HashMap<String, autoeq::Curve>>), String> {
-    autoeq::workflow::load_input_curve(args)
+    autoeq::workflow::load_input_curve(&autoeq::workflow::InputConfig::from(args))
         .await
         .map_err(|e| e.to_string())
 }
@@ -194,7 +195,11 @@ pub(super) fn build_target_curve(
     standard_freq: &Array1<f64>,
     input_curve: &autoeq::Curve,
 ) -> Result<autoeq::Curve, autoeq::AutoeqError> {
-    autoeq::workflow::build_target_curve(args, standard_freq, input_curve)
+    autoeq::workflow::build_target_curve(
+        &autoeq::workflow::TargetConfig::from(args),
+        standard_freq,
+        input_curve,
+    )
 }
 
 pub(super) fn setup_objective_data(
@@ -215,7 +220,7 @@ pub(super) fn setup_objective_data(
 }
 
 pub(super) async fn perform_optimization(
-    args: &autoeq::cli::Args,
+    params: &autoeq::OptimParams,
     objective_data: &ObjectiveData,
     shutdown: Arc<AtomicBool>,
 ) -> Result<Vec<f64>, String> {
@@ -223,11 +228,11 @@ pub(super) async fn perform_optimization(
         return Err("Optimization cancelled by shutdown".to_string());
     }
 
-    let args_clone = args.clone();
+    let params_clone = params.clone();
     let objective_data_clone = objective_data.clone();
 
     let mut optimization_task = tokio::task::spawn_blocking(move || {
-        autoeq::workflow::perform_optimization(&args_clone, &objective_data_clone)
+        autoeq::workflow::perform_optimization(&params_clone, &objective_data_clone)
             .map_err(|e| e.to_string())
     });
 

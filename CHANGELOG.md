@@ -60,6 +60,17 @@
 - Spinorama directivity angle parsing now accepts `ON` as the 0-degree trace and
   handles Unicode minus signs in angle labels.
 
+## Refactor
+
+- Moved `PeqModel` from `src/cli/peq_model.rs` to `src/optim/params.rs` and
+  kept `cli::PeqModel` as a thin re-export for backward compatibility.
+- Removed `&cli::Args` from library APIs in `optim/setup/perform.rs`,
+  `workflow/optimize.rs`, `workflow/load.rs`, `workflow/build.rs`,
+  `plot/plot_results.rs`, and `plot/plot_filters.rs`.  Callers now pass
+  `&OptimParams`, `InputConfig`, `TargetConfig`, or `PlotConfig`, which are
+  themselves constructible `From<&cli::Args>`.
+- Deleted the orphan binary module `src/bin/autoeq/optim.rs`.
+
 # 0.4.45
 
 ## New features

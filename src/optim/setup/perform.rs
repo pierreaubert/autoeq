@@ -16,11 +16,11 @@ use std::error::Error;
 
 /// Run global (and optional local refine) optimization and return the parameter vector.
 pub fn perform_optimization(
-    args: &crate::cli::Args,
+    params: &crate::OptimParams,
     objective_data: &ObjectiveData,
 ) -> Result<Vec<f64>, Box<dyn Error>> {
     perform_optimization_with_callback(
-        args,
+        params,
         objective_data,
         Box::new(|_intermediate| crate::de::CallbackAction::Continue),
     )
@@ -28,15 +28,12 @@ pub fn perform_optimization(
 
 /// Run optimization with a DE progress callback (only used for AutoEQ DE).
 pub fn perform_optimization_with_callback(
-    args: &crate::cli::Args,
+    params: &crate::OptimParams,
     objective_data: &ObjectiveData,
     callback: Box<dyn FnMut(&crate::de::DEIntermediate) -> crate::de::CallbackAction + Send>,
 ) -> Result<Vec<f64>, Box<dyn Error>> {
-    // TODO: Change signature to accept &OptimParams directly once
-    // callers in workflow.rs (optimize_speaker, optimize_headphone) are updated.
-    let params = crate::OptimParams::from(args);
-    let (lower_bounds, upper_bounds) = setup_bounds(&params);
-    let mut x = initial_guess(&params, &lower_bounds, &upper_bounds);
+    let (lower_bounds, upper_bounds) = setup_bounds(params);
+    let mut x = initial_guess(params, &lower_bounds, &upper_bounds);
 
     let result = if resolves_to_backend(&params.algo, "autoeq:de") {
         optimize_filters_autoeq_with_callback(
@@ -45,7 +42,7 @@ pub fn perform_optimization_with_callback(
             &upper_bounds,
             objective_data.clone(),
             &params.algo,
-            &params,
+            params,
             callback,
         )
     } else {
@@ -54,7 +51,7 @@ pub fn perform_optimization_with_callback(
             &lower_bounds,
             &upper_bounds,
             objective_data.clone(),
-            &params,
+            params,
             None,
         )
     };
@@ -78,7 +75,7 @@ pub fn perform_optimization_with_callback(
             &lower_bounds,
             &upper_bounds,
             objective_data.clone(),
-            &params,
+            params,
             Some(&params.local_algo),
         );
         match local_result {
@@ -121,7 +118,7 @@ pub fn perform_optimization_with_callback(
 /// # Returns
 /// Optimization result with raw filter parameters and history
 pub fn perform_optimization_with_progress<F>(
-    args: &crate::cli::Args,
+    params: &crate::OptimParams,
     objective_data: &ObjectiveData,
     config: ProgressCallbackConfig,
     mut callback: F,
@@ -141,9 +138,9 @@ where
     };
     let freq_array = Array1::from(frequencies.clone());
     let speaker_score_data = objective_data.speaker_score_data.clone();
-    let sample_rate = args.sample_rate;
-    let peq_model = args.peq_model;
-    let maxeval = args.maxeval;
+    let sample_rate = params.sample_rate;
+    let peq_model = params.peq_model;
+    let maxeval = params.maxeval;
 
     let last_reported = Arc::new(Mutex::new(0usize));
     let history = Arc::new(Mutex::new(Vec::new()));
@@ -219,7 +216,7 @@ where
         }
     };
 
-    let params = perform_optimization_with_callback(args, objective_data, Box::new(de_callback))?;
+    let params = perform_optimization_with_callback(params, objective_data, Box::new(de_callback))?;
 
     let final_history = Arc::try_unwrap(history)
         .map(|m| m.into_inner().unwrap())

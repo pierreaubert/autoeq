@@ -1,7 +1,7 @@
 //! Tests for multi-measurement optimization strategies.
 
 use autoeq::LossType;
-use autoeq::cli::PeqModel;
+use autoeq::PeqModel;
 use autoeq::optim::{
     MultiObjectiveData, ObjectiveData, compute_base_fitness, compute_pareto_objectives,
 };

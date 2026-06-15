@@ -10,12 +10,12 @@ use std::error::Error;
 /// Returns the main input `Curve` and optional CEA2034 spinorama curves when
 /// the measurement requires them.
 pub async fn load_input_curve(
-    args: &crate::cli::Args,
+    input: &crate::workflow::InputConfig,
 ) -> Result<(Curve, Option<HashMap<String, Curve>>), Box<dyn Error>> {
     let mut spin_data: Option<HashMap<String, Curve>> = None;
 
     let input_curve = if let (Some(speaker), Some(version), Some(measurement)) =
-        (&args.speaker, &args.version, &args.measurement)
+        (&input.speaker, &input.version, &input.measurement)
     {
         // Handle Estimated In-Room Response specially - it needs to be calculated from CEA2034
         if measurement == "Estimated In-Room Response" {
@@ -40,7 +40,7 @@ pub async fn load_input_curve(
             let plot_data =
                 read::fetch_measurement_plot_data(speaker, version, measurement).await?;
             let extracted_curve =
-                read::extract_curve_by_name(&plot_data, measurement, &args.curve_name)?;
+                read::extract_curve_by_name(&plot_data, measurement, &input.curve_name)?;
 
             // If it's CEA2034, also extract spin data using original frequency grid
             if measurement == "CEA2034" {
@@ -52,7 +52,7 @@ pub async fn load_input_curve(
         }
     } else {
         // No API params -> expect a CSV path
-        let curve_path = args.curve.as_ref().ok_or(
+        let curve_path = input.curve_path.as_ref().ok_or(
             "Either --curve or all of --speaker, --version, and --measurement must be provided",
         )?;
         read::read_curve_from_csv(curve_path)?

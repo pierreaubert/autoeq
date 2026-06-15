@@ -31,7 +31,7 @@ pub fn restrict_boost_above_schroeder(
     params: &crate::OptimParams,
     schroeder_hz: f64,
 ) {
-    use crate::cli::PeqModel;
+    use crate::PeqModel;
     if schroeder_hz <= 0.0 {
         return;
     }

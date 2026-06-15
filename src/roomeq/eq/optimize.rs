@@ -13,7 +13,7 @@ use super::multi_eq_auto_optimizer_context::resolve_multi_measurement_auto_optim
 use super::prepared_single_channel_eq::prepare_single_channel_eq;
 use super::prepared_single_channel_eq::run_optimization_pass;
 use crate::Curve;
-use crate::cli::PeqModel;
+use crate::PeqModel;
 use crate::loss::LossType;
 use crate::optim::MultiObjectiveData;
 use crate::workflow::setup_objective_data;

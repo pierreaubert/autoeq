@@ -69,7 +69,7 @@ fn make_freq_range_shapes(min_freq: f64, max_freq: f64) -> Vec<Shape> {
 /// Generates a multi-subplot visualization showing the input measurement,
 /// target curve, deviation, individual filter responses, and combined EQ response.
 pub fn plot_filters(
-    args: &crate::cli::Args,
+    config: &crate::plot::PlotConfig,
     input_curve: &crate::Curve,
     target_curve: &crate::Curve,
     deviation_curve: &crate::Curve,
@@ -79,7 +79,7 @@ pub fn plot_filters(
     let mut plot = Plot::new();
 
     // Compute combined response on the same frequency grid as input_curve for the new subplots
-    let mut filters: Vec<(usize, f64, f64, f64)> = (0..args.num_filters)
+    let mut filters: Vec<(usize, f64, f64, f64)> = (0..config.num_filters)
         .map(|i| {
             (
                 i,
@@ -93,10 +93,10 @@ pub fn plot_filters(
 
     // For the first subplot (individual filters), compute responses on plot_freqs
     let mut combined_response: Array1<f64> = Array1::zeros(freqs.len());
-    let peq_model = args.effective_peq_model();
+    let peq_model = config.peq_model;
     for (display_idx, (orig_i, f0, q, gain)) in filters.iter().enumerate() {
-        let ftype = determine_filter_type(*orig_i, args.num_filters, peq_model, None);
-        let filter = Biquad::new(ftype, *f0, args.sample_rate, *q, *gain);
+        let ftype = determine_filter_type(*orig_i, config.num_filters, peq_model, None);
+        let filter = Biquad::new(ftype, *f0, config.sample_rate, *q, *gain);
         // Compute filter response on plot_freqs for the first subplot
         let filter_response = filter.np_log_result(&freqs);
         combined_response += &filter_response;
@@ -312,7 +312,7 @@ pub fn plot_filters(
     );
 
     // Add frequency range shapes to highlight regions outside optimization bounds
-    let freq_shapes = make_freq_range_shapes(args.min_freq, args.max_freq);
+    let freq_shapes = make_freq_range_shapes(config.min_freq, config.max_freq);
     for shape in freq_shapes {
         layout.add_shape(shape);
     }

@@ -16,7 +16,8 @@ pub(super) async fn load_and_prepare(
     Box<dyn std::error::Error>,
 > {
     // Load input data
-    let (input_curve_raw, spin_data_raw) = autoeq::workflow::load_input_curve(args).await?;
+    let (input_curve_raw, spin_data_raw) =
+        autoeq::workflow::load_input_curve(&autoeq::workflow::InputConfig::from(args)).await?;
 
     // Determine if this is headphone or speaker optimization
     let is_headphone = matches!(
@@ -56,8 +57,11 @@ pub(super) async fn load_and_prepare(
     // Build target curve in parallel with spinorama interpolation
     let (target_res, spin_data_res) = tokio::join!(
         async {
-            let target_raw =
-                autoeq::workflow::build_target_curve(args, &standard_freq, &input_curve_raw)?;
+            let target_raw = autoeq::workflow::build_target_curve(
+                &autoeq::workflow::TargetConfig::from(args),
+                &standard_freq,
+                &input_curve_raw,
+            )?;
             Ok::<_, Box<dyn std::error::Error>>(read::interpolate_log_space(
                 &standard_freq,
                 &target_raw,

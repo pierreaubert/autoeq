@@ -3,7 +3,7 @@
 //! This module provides utilities for working with parameter vectors that may have
 //! different layouts depending on the PEQ model being used.
 
-use crate::cli::PeqModel;
+use crate::PeqModel;
 use crate::iir::BiquadFilterType;
 
 /// Get the number of parameters per filter for a given PEQ model
@@ -211,7 +211,7 @@ pub fn freq_from_log10_clamped(log_freq: f64, min_freq: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::PeqModel;
+    use crate::PeqModel;
     use crate::iir::BiquadFilterType;
 
     #[test]

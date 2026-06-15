@@ -2,7 +2,7 @@
 
 use super::super::types::OptimizerConfig;
 use crate::Curve;
-use crate::cli::PeqModel;
+use crate::PeqModel;
 use crate::loss::LossType;
 use hound;
 

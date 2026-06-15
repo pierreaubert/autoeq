@@ -124,7 +124,7 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
 
     // Optimize
     info!("🚀 Starting optimization...");
-    let opt_result = runopt::perform_optimization(&args, &objective_data)
+    let opt_result = runopt::perform_optimization(&optim_params, &objective_data)
         .map_err(|e| anyhow!("{}", e))
         .context("Optimization failed")?;
 
@@ -172,7 +172,7 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
     };
 
     // Check spacing constraints
-    let spacing_ok = spacing::check_spacing_constraints(&opt_result.params, &args);
+    let spacing_ok = spacing::check_spacing_constraints(&opt_result.params, &optim_params);
 
     // Output QA summary if in QA mode
     if let Some(qa_threshold) = args.qa {
@@ -231,7 +231,7 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
     {
         info!("📊 Generating plots: {}", output_path.display());
         if let Err(e) = plot::plot_results(
-            &args,
+            &autoeq::plot::PlotConfig::from(&args),
             &opt_result.params,
             &input_curve,
             &target_curve,
@@ -432,7 +432,7 @@ mod tests {
 
     #[test]
     fn setup_bounds_hp_pk_mode_overrides_first_triplet() {
-        use autoeq::cli::PeqModel;
+        use autoeq::PeqModel;
         let mut args = Args::parse_from(["autoeq-test"]);
         args.num_filters = 2;
         args.min_freq = 30.0;
@@ -467,7 +467,7 @@ mod tests {
 
     #[test]
     fn listening_window_target_profile() {
-        use autoeq::cli::PeqModel;
+        use autoeq::PeqModel;
         let mut args = Args::parse_from(["autoeq-test"]);
         // Ensure we hit the custom target branch and avoid clamping negatives
         args.curve_name = "Listening Window".to_string();
@@ -482,7 +482,11 @@ mod tests {
             ..Default::default()
         };
 
-        let target_curve = autoeq::workflow::build_target_curve(&args, &freqs, &curve)
+        let target_curve = autoeq::workflow::build_target_curve(
+                &autoeq::workflow::TargetConfig::from(&args),
+                &freqs,
+                &curve,
+            )
             .expect("build_target_curve should succeed");
         // Since SPL is zero, target_curve.spl == base_target
         assert!((target_curve.spl[0] - 0.0).abs() < 1e-12);

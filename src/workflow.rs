@@ -11,6 +11,7 @@ pub use crate::optim::setup::*;
 pub mod resume;
 
 mod build;
+mod config;
 mod load;
 mod misc;
 mod optimize;
@@ -19,6 +20,7 @@ mod tests;
 mod types;
 
 pub use build::*;
+pub use config::*;
 pub use load::*;
 pub use optimize::*;
 pub use types::*;

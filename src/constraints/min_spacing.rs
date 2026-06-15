@@ -1,4 +1,4 @@
-use crate::cli::PeqModel;
+use crate::PeqModel;
 use crate::param_utils;
 
 /// Data needed by the nonlinear spacing constraint callback.
@@ -82,7 +82,7 @@ pub fn viol_spacing_from_xs(xs: &[f64], peq_model: PeqModel, min_spacing_oct: f6
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::PeqModel;
+    use crate::PeqModel;
 
     #[test]
     fn viol_spacing_no_filters() {

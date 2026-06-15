@@ -282,10 +282,13 @@ pub fn optimize_drivers_crossover(
         seed,
     );
 
-    // Setup objective data with optional fixed frequencies
+    // Setup objective data with optional fixed frequencies.
+    // When fixed crossover frequencies are supplied we must rebuild the cached
+    // objective strategy so it sees the fixed frequencies.
     let objective_data = if let Some(ref freqs) = fixed_freqs {
         let mut data = setup_drivers_objective_data(&params, drivers_data.clone());
         data.fixed_crossover_freqs = Some(freqs.clone());
+        data.objective = Some(data.build_objective());
         data
     } else {
         setup_drivers_objective_data(&params, drivers_data.clone())

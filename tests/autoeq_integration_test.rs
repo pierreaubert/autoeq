@@ -1,15 +1,10 @@
-use std::path::PathBuf;
-use std::process::Command;
-use tempfile::TempDir;
+mod common;
 
-/// Get the path to the autoeq binary
-fn get_autoeq_binary() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_autoeq"))
-}
+use common::binary_runner::run_autoeq;
 
 #[test]
 fn test_full_optimization_workflow_csv() {
-    let temp_dir = TempDir::new().unwrap();
+    let temp_dir = tempfile::TempDir::new().unwrap();
 
     // Create test CSV
     let csv_content = r#"freq,spl
@@ -29,19 +24,16 @@ fn test_full_optimization_workflow_csv() {
 
     let output_path = temp_dir.path().join("results");
 
-    let output = Command::new(get_autoeq_binary())
-        .args([
-            "--curve",
-            &csv_path.to_string_lossy(),
-            "--output",
-            &output_path.to_string_lossy(),
-            "--num-filters",
-            "5",
-            "--maxeval",
-            "100",
-        ])
-        .output()
-        .expect("Failed to execute autoeq");
+    let output = run_autoeq(&[
+        "--curve",
+        csv_path.to_str().unwrap(),
+        "--output",
+        output_path.to_str().unwrap(),
+        "--num-filters",
+        "5",
+        "--maxeval",
+        "100",
+    ]);
 
     if !output.status.success() {
         eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
@@ -64,7 +56,7 @@ fn test_full_optimization_workflow_csv() {
 
 #[test]
 fn test_multi_driver_optimization() {
-    let temp_dir = TempDir::new().unwrap();
+    let temp_dir = tempfile::TempDir::new().unwrap();
 
     // Create driver CSVs
     let woofer_content = r#"freq,spl
@@ -91,23 +83,20 @@ fn test_multi_driver_optimization() {
 
     let output_path = temp_dir.path().join("driver_results");
 
-    let output = Command::new(get_autoeq_binary())
-        .args([
-            "--loss",
-            "drivers-flat", // Must specify loss type for drivers
-            "--driver1",
-            &woofer_path.to_string_lossy(),
-            "--driver2",
-            &tweeter_path.to_string_lossy(),
-            "--output",
-            &output_path.to_string_lossy(),
-            "--crossover-type",
-            "linkwitzriley4",
-            "--maxeval",
-            "500",
-        ])
-        .output()
-        .expect("Failed to execute autoeq");
+    let output = run_autoeq(&[
+        "--loss",
+        "drivers-flat", // Must specify loss type for drivers
+        "--driver1",
+        woofer_path.to_str().unwrap(),
+        "--driver2",
+        tweeter_path.to_str().unwrap(),
+        "--output",
+        output_path.to_str().unwrap(),
+        "--crossover-type",
+        "linkwitzriley4",
+        "--maxeval",
+        "500",
+    ]);
 
     assert!(
         output.status.success(),
@@ -123,7 +112,7 @@ fn test_multi_driver_optimization() {
 
 #[test]
 fn test_output_format_validation() {
-    let temp_dir = TempDir::new().unwrap();
+    let temp_dir = tempfile::TempDir::new().unwrap();
 
     let csv_content = r#"freq,spl
 100,75.0
@@ -137,15 +126,12 @@ fn test_output_format_validation() {
 
     let output_path = temp_dir.path().join("output");
 
-    let _ = Command::new(get_autoeq_binary())
-        .args([
-            "--curve",
-            &csv_path.to_string_lossy(),
-            "--output",
-            &output_path.to_string_lossy(),
-        ])
-        .output()
-        .expect("Failed to execute autoeq");
+    let _ = run_autoeq(&[
+        "--curve",
+        csv_path.to_str().unwrap(),
+        "--output",
+        output_path.to_str().unwrap(),
+    ]);
 
     // Check APO format
     // Same parent dir logic
@@ -171,7 +157,7 @@ fn test_output_format_validation() {
 
 #[test]
 fn test_invalid_input_handling() {
-    let temp_dir = TempDir::new().unwrap();
+    let temp_dir = tempfile::TempDir::new().unwrap();
 
     // Create definitely invalid CSV (garbage)
     let invalid_csv = "This is not a CSV file and contains no numbers";
@@ -180,15 +166,12 @@ fn test_invalid_input_handling() {
 
     let output_path = temp_dir.path().join("output");
 
-    let output = Command::new(get_autoeq_binary())
-        .args([
-            "--curve",
-            &csv_path.to_string_lossy(),
-            "--output",
-            &output_path.to_string_lossy(),
-        ])
-        .output()
-        .expect("Failed to execute autoeq");
+    let output = run_autoeq(&[
+        "--curve",
+        csv_path.to_str().unwrap(),
+        "--output",
+        output_path.to_str().unwrap(),
+    ]);
 
     // Should fail
     assert!(!output.status.success());
@@ -196,7 +179,7 @@ fn test_invalid_input_handling() {
 
 #[test]
 fn test_qa_mode_output() {
-    let temp_dir = TempDir::new().unwrap();
+    let temp_dir = tempfile::TempDir::new().unwrap();
 
     let csv_content = r#"freq,spl
 100,75.0
@@ -208,10 +191,7 @@ fn test_qa_mode_output() {
     let csv_path = temp_dir.path().join("test.csv");
     std::fs::write(&csv_path, csv_content).unwrap();
 
-    let output = Command::new(get_autoeq_binary())
-        .args(["--curve", &csv_path.to_string_lossy(), "--qa", "0.5"])
-        .output()
-        .expect("Failed to execute autoeq");
+    let output = run_autoeq(&["--curve", csv_path.to_str().unwrap(), "--qa", "0.5"]);
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
@@ -223,10 +203,7 @@ fn test_qa_mode_output() {
 
 #[test]
 fn test_algorithm_list_flag() {
-    let output = Command::new(get_autoeq_binary())
-        .arg("--algo-list")
-        .output()
-        .expect("Failed to execute autoeq");
+    let output = run_autoeq(&["--algo-list"]);
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("nlopt"));
@@ -235,10 +212,7 @@ fn test_algorithm_list_flag() {
 
 #[test]
 fn test_help_flag() {
-    let output = Command::new(get_autoeq_binary())
-        .arg("--help")
-        .output()
-        .expect("Failed to execute autoeq");
+    let output = run_autoeq(&["--help"]);
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Usage") || stdout.contains("autoeq"));

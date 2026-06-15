@@ -36,6 +36,8 @@ pub mod constraints_install;
 pub mod de;
 /// Pure-Rust ISRES backend.
 pub mod isres;
+/// Strategy-based objective functions.
+pub mod loss;
 /// Metaheuristics-specific optimization code
 pub mod mh;
 /// Pure-Rust NSGA-II/III Pareto backends.
@@ -50,12 +52,15 @@ pub mod registry;
 pub mod scalar;
 /// Shared optimization setup (bounds, initial guess, objective data)
 pub mod setup;
+/// Testable high-level optimizer seam for EQ pipelines.
+pub mod optimizer_backend;
 
 mod algorithm_info;
 mod clamp;
 mod compute;
 mod misc;
 mod objective_data;
+mod objective_data_builder;
 mod optimize;
 mod penalty_mode;
 mod smoothness_penalty_config;
@@ -67,7 +72,9 @@ pub use algorithm_info::*;
 pub use clamp::*;
 pub use compute::*;
 pub use objective_data::*;
+pub use objective_data_builder::*;
 pub use optimize::*;
+pub use optimizer_backend::*;
 pub use penalty_mode::*;
 pub use smoothness_penalty_config::*;
 pub use types::*;

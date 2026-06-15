@@ -8,7 +8,6 @@ use log::warn;
 use math_audio_dsp::analysis::compute_average_response;
 use std::collections::HashMap;
 
-#[allow(dead_code)]
 pub(super) fn split_curve_at_frequency(curve: &Curve, crossover_freq: f64) -> (Curve, Curve) {
     // Find the index where frequency exceeds crossover
     let split_idx = curve
@@ -52,7 +51,6 @@ pub(super) fn split_curve_at_frequency(curve: &Curve, crossover_freq: f64) -> (C
 /// LR24 consists of two cascaded 2nd-order Butterworth filters.
 /// This implementation computes the actual complex response including phase,
 /// which is critical for accurate band summation in hybrid mode.
-#[allow(dead_code)]
 pub(super) fn compute_lr24_crossover_responses(
     frequencies: &ndarray::Array1<f64>,
     crossover_freq: f64,

@@ -25,6 +25,7 @@ exclude = [
 
 [dependencies]
 anyhow = "1.0"
+async-trait = "0.1"
 base64 = "0.22"
 build_html = "2.7"
 chrono = { version = "0.4", features = ["serde"] }

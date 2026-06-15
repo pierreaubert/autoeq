@@ -64,6 +64,9 @@ mod crossover_utils;
 mod group_processing; // Multi-speaker groups, multisub, DBA, cardioid, mixed-mode
 mod speaker_eq; // Single-speaker EQ optimization // Crossover and group consistency utilities
 
+#[cfg(test)]
+pub mod test_fixtures;
+
 // Individual optimization modules
 mod crossover;
 mod dba;

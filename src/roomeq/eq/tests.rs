@@ -331,7 +331,7 @@ fn prepare_single_channel_eq_flat_loss_type() {
 }
 
 #[test]
-fn prepare_single_channel_eq_score_loss_type() {
+fn prepare_single_channel_eq_score_loss_type_requires_spin_data() {
     let curve = make_simple_test_curve();
     let config = OptimizerConfig {
         loss_type: "score".to_string(),
@@ -340,12 +340,10 @@ fn prepare_single_channel_eq_score_loss_type() {
         seed: Some(42),
         ..OptimizerConfig::default()
     };
-    let prep = prepare_single_channel_eq(&curve, &config, None, 48000.0)
-        .expect("score loss prepare should succeed");
-    assert!(matches!(
-        prep.objective_data.loss_type,
-        crate::loss::LossType::SpeakerScore
-    ));
+    // Speaker-score loss requires spinorama data; without it the builder rejects
+    // the configuration instead of silently producing an infinite objective.
+    let result = prepare_single_channel_eq(&curve, &config, None, 48000.0);
+    assert!(result.is_err(), "score loss without spin data must error");
 }
 
 #[test]

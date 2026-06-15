@@ -106,6 +106,47 @@ pub fn load_source_individual(source: &MeasurementSource) -> Result<Vec<Curve>, 
     }
 }
 
+/// Average a set of curves in the power domain after interpolating to the
+/// first curve's frequency grid.
+///
+/// All curves must be non-empty; callers are responsible for checking.
+fn average_curves_power_domain(curves: &[Curve]) -> Curve {
+    let ref_curve = &curves[0];
+    let freqs = ref_curve.freq.clone();
+
+    let mut power_sum = Array1::<f64>::zeros(freqs.len());
+    let mut coherence_sum = curves
+        .iter()
+        .all(|curve| curve.coherence.is_some())
+        .then(|| Array1::<f64>::zeros(freqs.len()));
+
+    for curve in curves {
+        let interpolated = interpolate_log_space(&freqs, curve);
+        // Convert SPL to power (proportional to pressure squared)
+        // Power = 10^(SPL/10)
+        let p = interpolated.spl.mapv(|spl| 10.0_f64.powf(spl / 10.0));
+        power_sum = power_sum + p;
+        if let (Some(sum), Some(coherence)) =
+            (coherence_sum.as_mut(), interpolated.coherence.as_ref())
+        {
+            *sum = sum.clone() + coherence;
+        }
+    }
+
+    let avg_power = power_sum / (curves.len() as f64);
+    let avg_spl = avg_power.mapv(|p| 10.0 * p.log10());
+    let phase = ref_curve.phase.clone();
+    let coherence = coherence_sum.map(|sum| sum / curves.len() as f64);
+
+    Curve {
+        freq: freqs,
+        spl: avg_spl,
+        phase,
+        coherence,
+        ..Default::default()
+    }
+}
+
 /// Load measurement(s) from a source and average if necessary
 pub fn load_source(source: &MeasurementSource) -> Result<Curve, Box<dyn Error>> {
     match source {
@@ -118,35 +159,7 @@ pub fn load_source(source: &MeasurementSource) -> Result<Curve, Box<dyn Error>> 
             if curves.len() == 1 {
                 return Ok(curves[0].clone());
             }
-            // Average: same logic as Multiple below
-            let ref_curve = &curves[0];
-            let freqs = ref_curve.freq.clone();
-            let mut power_sum = Array1::<f64>::zeros(freqs.len());
-            let mut coherence_sum = curves
-                .iter()
-                .all(|curve| curve.coherence.is_some())
-                .then(|| Array1::<f64>::zeros(freqs.len()));
-            for curve in curves {
-                let interpolated = interpolate_log_space(&freqs, curve);
-                let p = interpolated.spl.mapv(|spl| 10.0_f64.powf(spl / 10.0));
-                power_sum = power_sum + p;
-                if let (Some(sum), Some(coherence)) =
-                    (coherence_sum.as_mut(), interpolated.coherence.as_ref())
-                {
-                    *sum = sum.clone() + coherence;
-                }
-            }
-            let avg_power = power_sum / (curves.len() as f64);
-            let avg_spl = avg_power.mapv(|p| 10.0 * p.log10());
-            let phase = ref_curve.phase.clone();
-            let coherence = coherence_sum.map(|sum| sum / curves.len() as f64);
-            Ok(Curve {
-                freq: freqs,
-                spl: avg_spl,
-                phase,
-                coherence,
-                ..Default::default()
-            })
+            Ok(average_curves_power_domain(curves))
         }
         MeasurementSource::Multiple(m) => {
             if m.measurements.is_empty() {
@@ -173,47 +186,7 @@ pub fn load_source(source: &MeasurementSource) -> Result<Curve, Box<dyn Error>> 
                 return Err("No valid measurements loaded".into());
             }
 
-            // Use first curve as reference grid
-            let ref_curve = &curves[0];
-            let freqs = ref_curve.freq.clone();
-
-            // Interpolate all to reference grid and sum power
-            let mut power_sum = Array1::<f64>::zeros(freqs.len());
-            let mut coherence_sum = curves
-                .iter()
-                .all(|curve| curve.coherence.is_some())
-                .then(|| Array1::<f64>::zeros(freqs.len()));
-
-            for curve in &curves {
-                let interpolated = interpolate_log_space(&freqs, curve);
-                // Convert SPL to power (proportional to pressure squared)
-                // Power = 10^(SPL/10)
-                let p = interpolated.spl.mapv(|spl| 10.0_f64.powf(spl / 10.0));
-                power_sum = power_sum + p;
-                if let (Some(sum), Some(coherence)) =
-                    (coherence_sum.as_mut(), interpolated.coherence.as_ref())
-                {
-                    *sum = sum.clone() + coherence;
-                }
-            }
-
-            // Average power
-            let avg_power = power_sum / (curves.len() as f64);
-
-            // Convert back to SPL
-            let avg_spl = avg_power.mapv(|p| 10.0 * p.log10());
-
-            // Use phase from first measurement (primary position)
-            let phase = ref_curve.phase.clone();
-            let coherence = coherence_sum.map(|sum| sum / curves.len() as f64);
-
-            Ok(Curve {
-                freq: freqs,
-                spl: avg_spl,
-                phase,
-                coherence,
-                ..Default::default()
-            })
+            Ok(average_curves_power_domain(&curves))
         }
     }
 }

@@ -4,12 +4,13 @@
 use super::types::{CallbackAction, ChannelOptimizationResult, GenericChannelCollection};
 use super::*;
 use crate::MeasurementSource;
+use crate::roomeq::test_fixtures::{empty_metadata, single_channel_room_result};
 use crate::roomeq::pipeline::{
     PipelineControl, PipelineEvent, PipelineObserver, PipelineStepId, PipelineStepStatus,
 };
 use crate::roomeq::types::{
     BassManagementConfig, ChannelDspChain, CrossoverConfig, MultiMeasurementConfig,
-    MultiMeasurementStrategy, OptimizationMetadata, OptimizerConfig, ProcessingMode, RoomConfig,
+    MultiMeasurementStrategy, OptimizerConfig, ProcessingMode, RoomConfig,
     SpeakerConfig, SpeakerGroup, SubwooferStrategy, SubwooferSystemConfig, SystemConfig,
     SystemModel,
 };
@@ -599,72 +600,6 @@ fn execute_generic_channels_single_speaker() {
     );
 }
 
-fn empty_metadata() -> OptimizationMetadata {
-    OptimizationMetadata {
-        pre_score: 0.0,
-        post_score: 0.0,
-        algorithm: "de".to_string(),
-        loss_type: None,
-        iterations: 0,
-        timestamp: String::new(),
-        inter_channel_deviation: None,
-        epa_per_channel: None,
-        epa_multichannel: None,
-        group_delay: None,
-        perceptual_metrics: None,
-        home_cinema_layout: None,
-        multi_seat_coverage: None,
-        multi_seat_correction: None,
-        bass_management: None,
-        timing_diagnostics: None,
-        ctc: None,
-        perceptual_policy: None,
-        bootstrap_uncertainty: None,
-        validation_bundle: None,
-        supporting_source: None,
-    }
-}
-
-fn single_channel_result(channel_name: &str) -> RoomOptimizationResult {
-    let curve = flat_curve();
-    let mut channels = HashMap::new();
-    channels.insert(
-        channel_name.to_string(),
-        ChannelDspChain {
-            channel: channel_name.to_string(),
-            plugins: Vec::new(),
-            drivers: None,
-            initial_curve: None,
-            final_curve: None,
-            eq_response: None,
-            target_curve: None,
-            pre_ir: None,
-            post_ir: None,
-            fir_temporal_masking: None,
-            direct_early_late_correction: None,
-        },
-    );
-    let mut channel_results = HashMap::new();
-    channel_results.insert(
-        channel_name.to_string(),
-        ChannelOptimizationResult {
-            name: channel_name.to_string(),
-            pre_score: 0.5,
-            post_score: 0.9,
-            initial_curve: curve.clone(),
-            final_curve: curve,
-            biquads: Vec::new(),
-            fir_coeffs: None,
-        },
-    );
-    RoomOptimizationResult {
-        channels,
-        channel_results,
-        combined_pre_score: 0.5,
-        combined_post_score: 0.9,
-        metadata: empty_metadata(),
-    }
-}
 
 #[test]
 fn assemble_workflow_result_persists_channels() {
@@ -680,10 +615,10 @@ fn assemble_workflow_result_persists_channels() {
         ..Default::default()
     };
     let config = base_room_config(speakers, Some(system.clone()));
-    let result = single_channel_result("left");
+    let result = single_channel_room_result("left");
     let sys = config.system.as_ref().unwrap();
 
-    let assembled = assemble_workflow_result(result, &config, sys, 48000.0, None, &observer_none());
+    let assembled = assemble_workflow_result(result, &config, sys, 48000.0, None, &observer_none(), &crate::MemoryArtifactStore::new());
     assert!(
         assembled.is_ok(),
         "workflow assembly should succeed: {:?}",
@@ -709,7 +644,7 @@ fn assemble_generic_result_empty_channels_fails() {
         channel_arrivals: HashMap::new(),
     };
 
-    let assembled = assemble_generic_result(generic, 0, &config, 48000.0, None, &observer_none());
+    let assembled = assemble_generic_result(generic, 0, &config, 48000.0, None, &observer_none(), &crate::MemoryArtifactStore::new());
     assert!(
         assembled.is_err() || assembled.as_ref().unwrap().channel_results.is_empty(),
         "generic assembly with no channels should error or produce no channels"
@@ -1028,7 +963,7 @@ fn assemble_workflow_result_empty_channels_succeeds() {
     };
 
     let assembled =
-        assemble_workflow_result(result, &config, sys, 48000.0, None, &observer_none()).unwrap();
+        assemble_workflow_result(result, &config, sys, 48000.0, None, &observer_none(), &crate::MemoryArtifactStore::new()).unwrap();
     assert!(assembled.channel_results.is_empty());
 }
 
@@ -1088,7 +1023,7 @@ fn assemble_generic_result_non_empty_success() {
     };
 
     let assembled =
-        assemble_generic_result(generic, 1, &config, 48000.0, None, &observer_none()).unwrap();
+        assemble_generic_result(generic, 1, &config, 48000.0, None, &observer_none(), &crate::MemoryArtifactStore::new()).unwrap();
     assert!(
         assembled.channel_results.contains_key("left"),
         "assembled generic result should preserve channel results"
@@ -1099,7 +1034,7 @@ fn assemble_generic_result_non_empty_success() {
 
 #[test]
 fn sanity_check_result_non_empty_ok() {
-    let result = single_channel_result("left");
+    let result = single_channel_room_result("left");
     assert!(
         sanity_check_result(&result).is_ok(),
         "sanity check should pass for non-empty results"
@@ -1117,7 +1052,7 @@ fn optimize_room_impl_without_probe_arrivals_succeeds() {
     );
     let config = room_config_with_optimizer(speakers, None, tiny_optimizer());
 
-    let result = optimize_room_impl(&config, 48000.0, None, None, None);
+    let result = optimize_room_impl(&config, 48000.0, None, None, None, &crate::MemoryArtifactStore::new());
     assert!(
         result.is_ok(),
         "optimize_room_impl without probe arrivals should succeed: {:?}",
@@ -1136,7 +1071,7 @@ fn optimize_room_impl_with_probe_arrivals_succeeds() {
     let mut probe = HashMap::new();
     probe.insert("left".to_string(), 5.0);
 
-    let result = optimize_room_impl(&config, 48000.0, None, Some(&probe), None);
+    let result = optimize_room_impl(&config, 48000.0, None, Some(&probe), None, &crate::MemoryArtifactStore::new());
     assert!(
         result.is_ok(),
         "optimize_room_impl with probe arrivals should succeed: {:?}",
@@ -1162,7 +1097,7 @@ fn optimize_room_impl_progress_callback_receives_updates() {
         });
     let observer = callback_pipeline_observer(callback);
 
-    let result = optimize_room_impl(&config, 48000.0, None, None, Some(observer));
+    let result = optimize_room_impl(&config, 48000.0, None, None, Some(observer), &crate::MemoryArtifactStore::new());
     assert!(
         result.is_ok(),
         "optimize_room_impl with progress callback should succeed: {:?}",
@@ -1184,7 +1119,7 @@ fn optimize_room_impl_pipeline_observer_stop_halts() {
     let config = room_config_with_optimizer(speakers, None, tiny_optimizer());
     let observer = Box::new(|_event: &PipelineEvent| -> PipelineControl { PipelineControl::Stop });
 
-    let result = optimize_room_impl(&config, 48000.0, None, None, Some(observer));
+    let result = optimize_room_impl(&config, 48000.0, None, None, Some(observer), &crate::MemoryArtifactStore::new());
     assert!(
         result.is_err(),
         "optimize_room_impl should halt when observer requests stop"
@@ -1259,7 +1194,7 @@ fn stereo_config_for_mode(processing_mode: ProcessingMode) -> RoomConfig {
 #[test]
 fn optimize_room_impl_workflow_phase_linear_succeeds() {
     let config = stereo_config_for_mode(ProcessingMode::PhaseLinear);
-    let result = optimize_room_impl(&config, 48000.0, None, None, None);
+    let result = optimize_room_impl(&config, 48000.0, None, None, None, &crate::MemoryArtifactStore::new());
     assert!(
         result.is_ok(),
         "phase-linear stereo workflow should succeed: {:?}",
@@ -1272,7 +1207,7 @@ fn optimize_room_impl_workflow_phase_linear_succeeds() {
 #[test]
 fn optimize_room_impl_workflow_hybrid_succeeds() {
     let config = stereo_config_for_mode(ProcessingMode::Hybrid);
-    let result = optimize_room_impl(&config, 48000.0, None, None, None);
+    let result = optimize_room_impl(&config, 48000.0, None, None, None, &crate::MemoryArtifactStore::new());
     assert!(
         result.is_ok(),
         "hybrid stereo workflow should succeed: {:?}",
@@ -1285,7 +1220,7 @@ fn optimize_room_impl_workflow_hybrid_succeeds() {
 #[test]
 fn optimize_room_impl_workflow_mixed_phase_succeeds() {
     let config = stereo_config_for_mode(ProcessingMode::MixedPhase);
-    let result = optimize_room_impl(&config, 48000.0, None, None, None);
+    let result = optimize_room_impl(&config, 48000.0, None, None, None, &crate::MemoryArtifactStore::new());
     assert!(
         result.is_ok(),
         "mixed-phase stereo workflow should succeed: {:?}",
@@ -1304,7 +1239,7 @@ fn optimize_room_impl_workflow_phase_correction_succeeds() {
         min_spatial_depth: 0.5,
         phase_smoothing_octaves: 1.0 / 6.0,
     });
-    let result = optimize_room_impl(&config, 48000.0, None, None, None);
+    let result = optimize_room_impl(&config, 48000.0, None, None, None, &crate::MemoryArtifactStore::new());
     assert!(
         result.is_ok(),
         "workflow with phase correction should succeed: {:?}",
@@ -1333,7 +1268,7 @@ fn optimize_room_impl_generic_multiple_channels_phase_linear_succeeds() {
     });
     let config = room_config_with_optimizer(speakers, None, optimizer);
 
-    let result = optimize_room_impl(&config, 48000.0, None, None, None);
+    let result = optimize_room_impl(&config, 48000.0, None, None, None, &crate::MemoryArtifactStore::new());
     assert!(
         result.is_ok(),
         "generic multi-channel phase-linear optimization should succeed: {:?}",
@@ -1371,7 +1306,7 @@ fn optimize_room_impl_home_cinema_workflow_succeeds() {
     };
     let config = room_config_with_optimizer(speakers, Some(system), tiny_optimizer());
 
-    let result = optimize_room_impl(&config, 48000.0, None, None, None);
+    let result = optimize_room_impl(&config, 48000.0, None, None, None, &crate::MemoryArtifactStore::new());
     assert!(
         result.is_ok(),
         "home cinema workflow should succeed: {:?}",
@@ -1651,7 +1586,7 @@ fn assemble_workflow_result_observer_stop_on_summary() {
         PipelineStepId::TopologyWorkflowExecution,
         PipelineStepStatus::Completed,
     );
-    let assembled = assemble_workflow_result(result, &config, sys, 48000.0, None, &observer);
+    let assembled = assemble_workflow_result(result, &config, sys, 48000.0, None, &observer, &crate::MemoryArtifactStore::new());
     assert!(
         assembled.is_err(),
         "observer stop on workflow summary should error"
@@ -1739,7 +1674,7 @@ fn assemble_generic_result_with_observer_emits_events() {
     let config = room_config_with_optimizer(speakers, None, optimizer);
     let generic = two_channel_generic_collection();
     let (observer, count) = counting_observer();
-    let result = assemble_generic_result(generic, 2, &config, 48000.0, None, &observer).unwrap();
+    let result = assemble_generic_result(generic, 2, &config, 48000.0, None, &observer, &crate::MemoryArtifactStore::new()).unwrap();
     assert!(result.channel_results.contains_key("left"));
     assert!(result.channel_results.contains_key("right"));
     assert!(
@@ -1764,7 +1699,7 @@ fn assemble_generic_result_multiple_channels_time_alignment() {
     let config = room_config_with_optimizer(speakers, None, optimizer);
     let generic = two_channel_generic_collection();
     let result =
-        assemble_generic_result(generic, 2, &config, 48000.0, None, &observer_none()).unwrap();
+        assemble_generic_result(generic, 2, &config, 48000.0, None, &observer_none(), &crate::MemoryArtifactStore::new()).unwrap();
     assert!(result.channels.contains_key("left"));
     assert!(result.channels.contains_key("right"));
 }
@@ -1819,7 +1754,7 @@ fn optimize_speaker_group_no_measurements_fails() {
 #[test]
 fn optimize_room_impl_stereo_2_1_workflow_succeeds() {
     let config = stereo_2_1_config();
-    let result = optimize_room_impl(&config, 48000.0, None, None, None);
+    let result = optimize_room_impl(&config, 48000.0, None, None, None, &crate::MemoryArtifactStore::new());
     assert!(
         result.is_ok(),
         "stereo 2.1 workflow should succeed: {:?}",

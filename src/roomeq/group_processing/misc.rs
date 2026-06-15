@@ -12,6 +12,12 @@ use ndarray::Array1;
 
 pub(super) const GLOBAL_EQ_REGRESSION_TOLERANCE: f64 = 1e-6;
 
+// Re-export shared crossover helpers from the sibling `crossover_utils` module
+// so group_processing does not duplicate them.
+pub(super) use super::super::crossover_utils::{
+    compute_lr24_crossover_responses, split_curve_at_frequency,
+};
+
 pub(super) fn load_multisub_seat_measurements(
     group: &MultiSubGroup,
 ) -> Result<Option<Vec<Vec<Curve>>>> {
@@ -235,115 +241,3 @@ pub(super) fn identity_multiseat_result(
     }
 }
 
-/// Split a frequency response curve at a specified frequency
-pub(super) fn split_curve_at_frequency(curve: &Curve, crossover_freq: f64) -> (Curve, Curve) {
-    // Find the index where frequency exceeds crossover
-    let split_idx = curve
-        .freq
-        .iter()
-        .position(|&f| f >= crossover_freq)
-        .unwrap_or(curve.freq.len());
-
-    // Include some overlap around crossover for better optimization
-    let overlap_points = 3; // Include a few points on each side
-    let low_end = (split_idx + overlap_points).min(curve.freq.len());
-    let high_start = split_idx.saturating_sub(overlap_points);
-
-    let low_curve = Curve {
-        freq: curve.freq.slice(ndarray::s![..low_end]).to_owned(),
-        spl: curve.spl.slice(ndarray::s![..low_end]).to_owned(),
-        phase: curve
-            .phase
-            .as_ref()
-            .map(|p| p.slice(ndarray::s![..low_end]).to_owned()),
-        ..Default::default()
-    };
-
-    let high_curve = Curve {
-        freq: curve.freq.slice(ndarray::s![high_start..]).to_owned(),
-        spl: curve.spl.slice(ndarray::s![high_start..]).to_owned(),
-        phase: curve
-            .phase
-            .as_ref()
-            .map(|p| p.slice(ndarray::s![high_start..]).to_owned()),
-        ..Default::default()
-    };
-
-    (low_curve, high_curve)
-}
-
-/// Compute Linkwitz-Riley 24dB/oct crossover filter responses
-///
-/// Returns (lowpass_response, highpass_response) as complex vectors
-///
-/// LR24 consists of two cascaded 2nd-order Butterworth filters.
-/// This implementation computes the actual complex response including phase,
-/// which is critical for accurate band summation in hybrid mode.
-pub(super) fn compute_lr24_crossover_responses(
-    frequencies: &ndarray::Array1<f64>,
-    crossover_freq: f64,
-    sample_rate: f64,
-) -> (
-    Vec<num_complex::Complex<f64>>,
-    Vec<num_complex::Complex<f64>>,
-) {
-    use math_audio_iir_fir::{Biquad, BiquadFilterType};
-
-    // LR24 = two cascaded Butterworth LP2 filters (Q = 0.7071 each)
-    // For LR24 lowpass: two 2nd-order Butterworth lowpass filters in series
-    // For LR24 highpass: two 2nd-order Butterworth highpass filters in series
-
-    let q = std::f64::consts::FRAC_1_SQRT_2; // Q = 0.7071 for Butterworth
-
-    // Create biquad filters for lowpass (2 cascaded)
-    let lp1 = Biquad::new(
-        BiquadFilterType::Lowpass,
-        crossover_freq,
-        sample_rate,
-        q,
-        0.0,
-    );
-    let lp2 = Biquad::new(
-        BiquadFilterType::Lowpass,
-        crossover_freq,
-        sample_rate,
-        q,
-        0.0,
-    );
-
-    // Create biquad filters for highpass (2 cascaded)
-    let hp1 = Biquad::new(
-        BiquadFilterType::Highpass,
-        crossover_freq,
-        sample_rate,
-        q,
-        0.0,
-    );
-    let hp2 = Biquad::new(
-        BiquadFilterType::Highpass,
-        crossover_freq,
-        sample_rate,
-        q,
-        0.0,
-    );
-
-    let mut lp_resp = Vec::with_capacity(frequencies.len());
-    let mut hp_resp = Vec::with_capacity(frequencies.len());
-
-    for &freq in frequencies.iter() {
-        // Compute cascaded response: H_lp = H_lp1 * H_lp2
-        let lp1_resp = lp1.complex_response(freq);
-        let lp2_resp = lp2.complex_response(freq);
-        let lp_total = lp1_resp * lp2_resp;
-
-        // Compute cascaded response: H_hp = H_hp1 * H_hp2
-        let hp1_resp = hp1.complex_response(freq);
-        let hp2_resp = hp2.complex_response(freq);
-        let hp_total = hp1_resp * hp2_resp;
-
-        lp_resp.push(lp_total);
-        hp_resp.push(hp_total);
-    }
-
-    (lp_resp, hp_resp)
-}

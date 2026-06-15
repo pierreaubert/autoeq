@@ -5,7 +5,7 @@ mod tests {
     use autoeq::cli::Args;
     use autoeq::PeqModel;
     use autoeq::loss::LossType;
-    use autoeq::optim::ObjectiveData;
+    use autoeq::optim::{ObjectiveData, ObjectiveDataBuilder};
     use clap::Parser;
     use ndarray::Array1;
 
@@ -14,41 +14,14 @@ mod tests {
         let deviation = Array1::from_vec(vec![2.0, 1.5, 1.0, 1.2, 0.8]);
         let target = Array1::zeros(freqs.len());
 
-        ObjectiveData {
-            freqs,
-            target,
-            deviation,
-            srate: 48000.0,
-            min_spacing_oct: 0.1,
-            spacing_weight: 0.0,
-            max_db: 10.0,
-            min_db: -10.0,
-            min_freq: 20.0,
-            max_freq: 20000.0,
-            peq_model: PeqModel::Pk,
-            loss_type,
-            speaker_score_data: None,
-            headphone_score_data: None,
-            input_curve: None,
-            drivers_data: None,
-            fixed_crossover_freqs: None,
-            penalty_w_ceiling: 0.0,
-            penalty_w_spacing: 0.0,
-            penalty_w_mingain: 0.0,
-            integrality: None,
-            multi_objective: None,
-            smooth: false,
-            smooth_n: 3,
-            max_boost_envelope: None,
-            min_cut_envelope: None,
-            epa_config: None,
-            temporal_masking_modes: Vec::new(),
-            detected_problems: Vec::new(),
-            null_suppression: None,
-            asymmetric_loss_config: autoeq::loss::AsymmetricLossConfig::default(),
-            smoothness_penalty: None,
-            audibility_deadband: None,
-        }
+        ObjectiveDataBuilder::new(freqs, target, deviation, 48000.0, PeqModel::Pk, loss_type)
+            .min_spacing_oct(0.1)
+            .max_db(10.0)
+            .min_db(-10.0)
+            .freq_range(20.0, 20000.0)
+            .smoothing(false, 3)
+            .build()
+            .expect("valid test objective data")
     }
 
     #[tokio::test]

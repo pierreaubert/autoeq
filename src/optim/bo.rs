@@ -344,32 +344,9 @@ fn choose_compromise<'a>(
     }
 
     front.iter().min_by(|a, b| {
-        compromise_distance(a, &ideal, &nadir, &weights)
-            .total_cmp(&compromise_distance(b, &ideal, &nadir, &weights))
+        super::misc::compromise_distance(&a.objectives, &ideal, &nadir, &weights)
+            .total_cmp(&super::misc::compromise_distance(&b.objectives, &ideal, &nadir, &weights))
     })
-}
-
-fn compromise_distance(
-    solution: &BayesParetoSolution,
-    ideal: &[f64],
-    nadir: &[f64],
-    weights: &[f64],
-) -> f64 {
-    solution
-        .objectives
-        .iter()
-        .enumerate()
-        .map(|(i, &v)| {
-            let span = nadir[i] - ideal[i];
-            let norm = if span > 0.0 && span.is_finite() {
-                (v - ideal[i]) / span
-            } else {
-                0.0
-            };
-            weights[i] * norm * norm
-        })
-        .sum::<f64>()
-        .sqrt()
 }
 
 #[cfg(test)]
@@ -557,19 +534,19 @@ mod bo_branch_tests {
 
     #[test]
     fn choose_compromise_distance_with_zero_or_infinite_span() {
-        use super::super::bo::compromise_distance;
+        use super::super::misc::compromise_distance;
         let sol = BayesParetoSolution {
             x: Array1::from_elem(3, 0.0),
             objectives: vec![5.0],
         };
         // zero span
-        let d1 = compromise_distance(&sol, &[5.0], &[5.0], &[1.0]);
+        let d1 = compromise_distance(&sol.objectives, &[5.0], &[5.0], &[1.0]);
         assert_eq!(d1, 0.0);
         // infinite span
-        let d2 = compromise_distance(&sol, &[f64::NEG_INFINITY], &[f64::INFINITY], &[1.0]);
+        let d2 = compromise_distance(&sol.objectives, &[f64::NEG_INFINITY], &[f64::INFINITY], &[1.0]);
         assert_eq!(d2, 0.0);
         // normal span
-        let d3 = compromise_distance(&sol, &[0.0], &[10.0], &[1.0]);
+        let d3 = compromise_distance(&sol.objectives, &[0.0], &[10.0], &[1.0]);
         assert!((d3 - 0.5).abs() < 1e-12);
     }
 }

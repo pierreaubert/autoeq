@@ -26,7 +26,7 @@ pub(super) fn interpolate_boost_envelope(envelope: &[(f64, f64)], freq_hz: f64) 
     envelope[last].1
 }
 
-pub(super) fn maybe_smooth_error(
+pub fn maybe_smooth_error(
     freqs: &Array1<f64>,
     error: Array1<f64>,
     smooth: bool,
@@ -44,7 +44,7 @@ pub(super) fn maybe_smooth_error(
     crate::read::smooth_one_over_n_octave(&curve, smooth_n).spl
 }
 
-pub(super) fn apply_audibility_deadband(
+pub fn apply_audibility_deadband(
     freqs: &Array1<f64>,
     error: &Array1<f64>,
     min_freq: f64,
@@ -118,6 +118,33 @@ mod audibility_deadband_tests {
         assert_eq!(out[1], 0.0, "midrange residual below JND is ignored");
         assert!(out[2] < 0.0 && out[2].abs() < error[2].abs());
     }
+}
+
+/// Weighted Euclidean compromise distance from the ideal point.
+///
+/// Each objective is normalised by the ideal-nadir span before the weighted
+/// sum of squares is computed.  This is shared between the NSGA and Bayesian
+/// Pareto selection code.
+pub(super) fn compromise_distance(
+    objectives: &[f64],
+    ideal: &[f64],
+    nadir: &[f64],
+    weights: &[f64],
+) -> f64 {
+    objectives
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| {
+            let span = nadir[i] - ideal[i];
+            let norm = if span > 0.0 && span.is_finite() {
+                (v - ideal[i]) / span
+            } else {
+                0.0
+            };
+            weights[i] * norm * norm
+        })
+        .sum::<f64>()
+        .sqrt()
 }
 
 #[cfg(test)]

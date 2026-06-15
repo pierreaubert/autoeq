@@ -6,68 +6,237 @@
 use crate::PeqModel;
 use crate::iir::BiquadFilterType;
 
+/// Position of each parameter inside a filter's parameter group.
+#[derive(Debug, Clone, Copy)]
+pub struct ParamLayout {
+    /// Index of the encoded filter type, if present.
+    pub type_idx: Option<usize>,
+    /// Index of the log10 frequency parameter.
+    pub freq_idx: usize,
+    /// Index of the Q parameter.
+    pub q_idx: usize,
+    /// Index of the gain parameter.
+    pub gain_idx: usize,
+}
+
+/// Strategy trait that encapsulates the parameter-vector layout for a PEQ model.
+///
+/// Implementations describe how many parameters each filter consumes, where each
+/// semantic parameter lives, and how to convert between the flat vector and filter
+/// descriptors.
+pub trait PeqLayout {
+    /// Number of scalar parameters stored for each filter.
+    fn params_per_filter(&self) -> usize;
+
+    /// Position of each semantic parameter within a filter group.
+    fn layout(&self) -> ParamLayout;
+
+    /// Number of filters represented by a parameter vector.
+    fn num_filters(&self, x: &[f64]) -> usize {
+        x.len() / self.params_per_filter()
+    }
+
+    /// Extract the parameters for the `i`-th filter.
+    fn get_filter_params(&self, x: &[f64], i: usize) -> FilterParams;
+
+    /// Write the parameters for the `i`-th filter into an existing vector.
+    fn set_filter_params(&self, x: &mut [f64], i: usize, params: &FilterParams);
+
+    /// Append a filter's parameters to a vector (used when building a vector from
+    /// scratch, e.g. `peq2x`).
+    fn append_filter_params(&self, x: &mut Vec<f64>, params: &FilterParams) {
+        let l = self.layout();
+        if let Some(type_idx) = l.type_idx {
+            x.push(params.filter_type.unwrap_or(0.0));
+            // Only fixed/free layout is supported; assert indices line up.
+            assert_eq!(l.freq_idx, type_idx + 1);
+        }
+        x.push(params.freq);
+        x.push(params.q);
+        x.push(params.gain);
+    }
+
+    /// Determine the biquad type for filter `i` given the model and optional type
+    /// parameter.
+    fn determine_filter_type(
+        &self,
+        i: usize,
+        num_filters: usize,
+        type_param: Option<f64>,
+    ) -> BiquadFilterType;
+
+    /// Build an initial-guess parameter group for filter `i`.
+    fn initial_guess_filter(
+        &self,
+        i: usize,
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        min_db: f64,
+        max_freq: f64,
+    ) -> Vec<f64>;
+}
+
+impl PeqLayout for PeqModel {
+    fn params_per_filter(&self) -> usize {
+        match self {
+            PeqModel::Pk
+            | PeqModel::HpPk
+            | PeqModel::HpPkLp
+            | PeqModel::LsPk
+            | PeqModel::LsPkHs => 3,
+            PeqModel::FreePkFree | PeqModel::Free => 4,
+        }
+    }
+
+    fn layout(&self) -> ParamLayout {
+        match self {
+            PeqModel::Pk
+            | PeqModel::HpPk
+            | PeqModel::HpPkLp
+            | PeqModel::LsPk
+            | PeqModel::LsPkHs => ParamLayout {
+                type_idx: None,
+                freq_idx: 0,
+                q_idx: 1,
+                gain_idx: 2,
+            },
+            PeqModel::FreePkFree | PeqModel::Free => ParamLayout {
+                type_idx: Some(0),
+                freq_idx: 1,
+                q_idx: 2,
+                gain_idx: 3,
+            },
+        }
+    }
+
+    fn get_filter_params(&self, x: &[f64], i: usize) -> FilterParams {
+        let l = self.layout();
+        let offset = i * self.params_per_filter();
+        FilterParams {
+            filter_type: l.type_idx.map(|idx| x[offset + idx]),
+            freq: x[offset + l.freq_idx],
+            q: x[offset + l.q_idx],
+            gain: x[offset + l.gain_idx],
+        }
+    }
+
+    fn set_filter_params(&self, x: &mut [f64], i: usize, params: &FilterParams) {
+        let l = self.layout();
+        let offset = i * self.params_per_filter();
+        if let Some(type_idx) = l.type_idx {
+            x[offset + type_idx] = params.filter_type.unwrap_or(0.0);
+        }
+        x[offset + l.freq_idx] = params.freq;
+        x[offset + l.q_idx] = params.q;
+        x[offset + l.gain_idx] = params.gain;
+    }
+
+    fn determine_filter_type(
+        &self,
+        i: usize,
+        num_filters: usize,
+        type_param: Option<f64>,
+    ) -> BiquadFilterType {
+        match self {
+            PeqModel::Pk => BiquadFilterType::Peak,
+            PeqModel::HpPk => {
+                if i == 0 {
+                    BiquadFilterType::HighpassVariableQ
+                } else {
+                    BiquadFilterType::Peak
+                }
+            }
+            PeqModel::HpPkLp => {
+                if i == 0 {
+                    BiquadFilterType::HighpassVariableQ
+                } else if i == num_filters - 1 {
+                    BiquadFilterType::Lowpass
+                } else {
+                    BiquadFilterType::Peak
+                }
+            }
+            PeqModel::LsPk => {
+                if i == 0 {
+                    BiquadFilterType::Lowshelf
+                } else {
+                    BiquadFilterType::Peak
+                }
+            }
+            PeqModel::LsPkHs => {
+                if i == 0 {
+                    BiquadFilterType::Lowshelf
+                } else if i == num_filters - 1 {
+                    BiquadFilterType::Highshelf
+                } else {
+                    BiquadFilterType::Peak
+                }
+            }
+            PeqModel::FreePkFree => {
+                if i == 0 || i == num_filters - 1 {
+                    decode_filter_type(type_param.unwrap_or(0.0))
+                } else {
+                    BiquadFilterType::Peak
+                }
+            }
+            PeqModel::Free => decode_filter_type(type_param.unwrap_or(0.0)),
+        }
+    }
+
+    fn initial_guess_filter(
+        &self,
+        i: usize,
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        min_db: f64,
+        max_freq: f64,
+    ) -> Vec<f64> {
+        let l = self.layout();
+        let mut group = Vec::with_capacity(self.params_per_filter());
+        let sign = if i.is_multiple_of(2) { 0.5 } else { -0.5 };
+
+        if let Some(type_idx) = l.type_idx {
+            group.push(0.0_f64.clamp(
+                lower_bounds[type_idx],
+                upper_bounds[type_idx],
+            ));
+        }
+
+        let freq = lower_bounds[l.freq_idx]
+            .min(max_freq.log10())
+            .clamp(lower_bounds[l.freq_idx], upper_bounds[l.freq_idx]);
+        group.push(freq);
+
+        let q = (upper_bounds[l.q_idx] * lower_bounds[l.q_idx])
+            .sqrt()
+            .clamp(lower_bounds[l.q_idx], upper_bounds[l.q_idx]);
+        group.push(q);
+
+        let gain = (sign * upper_bounds[l.gain_idx].max(min_db))
+            .clamp(lower_bounds[l.gain_idx], upper_bounds[l.gain_idx]);
+        group.push(gain);
+
+        group
+    }
+}
+
 /// Get the number of parameters per filter for a given PEQ model
 pub fn params_per_filter(peq_model: PeqModel) -> usize {
-    match peq_model {
-        // Fixed filter types use 3 parameters: freq, Q, gain
-        PeqModel::Pk | PeqModel::HpPk | PeqModel::HpPkLp | PeqModel::LsPk | PeqModel::LsPkHs => 3,
-        // Free filter types use 4 parameters: type, freq, Q, gain
-        PeqModel::FreePkFree | PeqModel::Free => 4,
-    }
+    peq_model.params_per_filter()
 }
 
 /// Get the number of filters from a parameter vector
 pub fn num_filters(x: &[f64], peq_model: PeqModel) -> usize {
-    x.len() / params_per_filter(peq_model)
+    peq_model.num_filters(x)
 }
 
 /// Extract filter parameters for the i-th filter
 pub fn get_filter_params(x: &[f64], i: usize, peq_model: PeqModel) -> FilterParams {
-    let ppf = params_per_filter(peq_model);
-    let offset = i * ppf;
-
-    match peq_model {
-        PeqModel::Pk | PeqModel::HpPk | PeqModel::HpPkLp | PeqModel::LsPk | PeqModel::LsPkHs => {
-            // Fixed filter types: parameters are [freq, Q, gain]
-            FilterParams {
-                filter_type: None,
-                freq: x[offset],
-                q: x[offset + 1],
-                gain: x[offset + 2],
-            }
-        }
-        PeqModel::FreePkFree | PeqModel::Free => {
-            // Free filter types: parameters are [type, freq, Q, gain]
-            FilterParams {
-                filter_type: Some(x[offset]),
-                freq: x[offset + 1],
-                q: x[offset + 2],
-                gain: x[offset + 3],
-            }
-        }
-    }
+    peq_model.get_filter_params(x, i)
 }
 
 /// Set filter parameters for the i-th filter
 pub fn set_filter_params(x: &mut [f64], i: usize, params: &FilterParams, peq_model: PeqModel) {
-    let ppf = params_per_filter(peq_model);
-    let offset = i * ppf;
-
-    match peq_model {
-        PeqModel::Pk | PeqModel::HpPk | PeqModel::HpPkLp | PeqModel::LsPk | PeqModel::LsPkHs => {
-            // Fixed filter types: parameters are [freq, Q, gain]
-            x[offset] = params.freq;
-            x[offset + 1] = params.q;
-            x[offset + 2] = params.gain;
-        }
-        PeqModel::FreePkFree | PeqModel::Free => {
-            // Free filter types: parameters are [type, freq, Q, gain]
-            x[offset] = params.filter_type.unwrap_or(0.0);
-            x[offset + 1] = params.freq;
-            x[offset + 2] = params.q;
-            x[offset + 3] = params.gain;
-        }
-    }
+    peq_model.set_filter_params(x, i, params);
 }
 
 /// Container for filter parameters
@@ -90,53 +259,7 @@ pub fn determine_filter_type(
     peq_model: PeqModel,
     type_param: Option<f64>,
 ) -> BiquadFilterType {
-    match peq_model {
-        PeqModel::Pk => BiquadFilterType::Peak,
-        PeqModel::HpPk => {
-            if i == 0 {
-                BiquadFilterType::HighpassVariableQ
-            } else {
-                BiquadFilterType::Peak
-            }
-        }
-        PeqModel::HpPkLp => {
-            if i == 0 {
-                BiquadFilterType::HighpassVariableQ
-            } else if i == num_filters - 1 {
-                BiquadFilterType::Lowpass
-            } else {
-                BiquadFilterType::Peak
-            }
-        }
-        PeqModel::LsPk => {
-            if i == 0 {
-                BiquadFilterType::Lowshelf
-            } else {
-                BiquadFilterType::Peak
-            }
-        }
-        PeqModel::LsPkHs => {
-            if i == 0 {
-                BiquadFilterType::Lowshelf
-            } else if i == num_filters - 1 {
-                BiquadFilterType::Highshelf
-            } else {
-                BiquadFilterType::Peak
-            }
-        }
-        PeqModel::FreePkFree => {
-            // First and last filters are free, middle are peak
-            if i == 0 || i == num_filters - 1 {
-                decode_filter_type(type_param.unwrap_or(0.0))
-            } else {
-                BiquadFilterType::Peak
-            }
-        }
-        PeqModel::Free => {
-            // All filters are free
-            decode_filter_type(type_param.unwrap_or(0.0))
-        }
-    }
+    peq_model.determine_filter_type(i, num_filters, type_param)
 }
 
 /// Decode filter type from parameter value

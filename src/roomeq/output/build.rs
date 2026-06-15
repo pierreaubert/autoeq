@@ -423,12 +423,12 @@ pub fn build_dba_dsp_chain(
     build_dba_dsp_chain_with_curves(channel_name, gains, delays, eq_filters, None, None, None)
 }
 
-/// Build a DSP chain for a DBA system with curves
+/// Shared implementation for two-driver array DSP chains (DBA / cardioid).
 ///
-/// # Arguments
-/// * `driver_initial_curves` - Optional per-array initial curves (extended to full range).
-///   Index 0 = Front Array, Index 1 = Rear Array.
-pub fn build_dba_dsp_chain_with_curves(
+/// Both topologies have a front driver and an inverted rear driver; the only
+/// differences are the human-readable driver names.
+#[allow(clippy::too_many_arguments)]
+fn build_dual_driver_array_chain(
     channel_name: &str,
     gains: &[f64],
     delays: &[f64],
@@ -436,6 +436,8 @@ pub fn build_dba_dsp_chain_with_curves(
     initial_curve: Option<&crate::Curve>,
     final_curve: Option<&crate::Curve>,
     driver_initial_curves: Option<&[crate::Curve]>,
+    front_name: &str,
+    rear_name: &str,
 ) -> ChannelDspChain {
     // 2 "drivers": Front and Rear
     let mut driver_chains = Vec::new();
@@ -452,7 +454,7 @@ pub fn build_dba_dsp_chain_with_curves(
         .and_then(|curves| curves.first())
         .map(|c| c.into());
     driver_chains.push(DriverDspChain {
-        name: "Front Array".to_string(),
+        name: front_name.to_string(),
         index: 0,
         plugins: front_plugins,
         initial_curve: front_curve,
@@ -470,7 +472,7 @@ pub fn build_dba_dsp_chain_with_curves(
         .and_then(|curves| curves.get(1))
         .map(|c| c.into());
     driver_chains.push(DriverDspChain {
-        name: "Rear Array".to_string(),
+        name: rear_name.to_string(),
         index: 1,
         plugins: rear_plugins,
         initial_curve: rear_curve,
@@ -497,6 +499,33 @@ pub fn build_dba_dsp_chain_with_curves(
     }
 }
 
+/// Build a DSP chain for a DBA system with curves
+///
+/// # Arguments
+/// * `driver_initial_curves` - Optional per-array initial curves (extended to full range).
+///   Index 0 = Front Array, Index 1 = Rear Array.
+pub fn build_dba_dsp_chain_with_curves(
+    channel_name: &str,
+    gains: &[f64],
+    delays: &[f64],
+    eq_filters: &[Biquad],
+    initial_curve: Option<&crate::Curve>,
+    final_curve: Option<&crate::Curve>,
+    driver_initial_curves: Option<&[crate::Curve]>,
+) -> ChannelDspChain {
+    build_dual_driver_array_chain(
+        channel_name,
+        gains,
+        delays,
+        eq_filters,
+        initial_curve,
+        final_curve,
+        driver_initial_curves,
+        "Front Array",
+        "Rear Array",
+    )
+}
+
 /// Build a DSP chain for a Gradient Cardioid subwoofer system with curves
 ///
 /// # Arguments
@@ -511,65 +540,17 @@ pub fn build_cardioid_dsp_chain_with_curves(
     final_curve: Option<&crate::Curve>,
     driver_initial_curves: Option<&[crate::Curve]>,
 ) -> ChannelDspChain {
-    // 2 "drivers": Front and Rear
-    let mut driver_chains = Vec::new();
-
-    // Front (Index 0) - Primary
-    let mut front_plugins = Vec::new();
-    if gains[0].abs() > 0.01 {
-        front_plugins.push(create_gain_plugin(gains[0]));
-    }
-    if delays[0].abs() > 0.001 {
-        front_plugins.push(create_delay_plugin(delays[0]));
-    }
-    let front_curve = driver_initial_curves
-        .and_then(|curves| curves.first())
-        .map(|c| c.into());
-    driver_chains.push(DriverDspChain {
-        name: "Front Sub".to_string(),
-        index: 0,
-        plugins: front_plugins,
-        initial_curve: front_curve,
-    });
-
-    // Rear (Index 1) - Cancellation (Inverted + Delayed)
-    let mut rear_plugins = Vec::new();
-
-    // Always add gain plugin to handle inversion
-    rear_plugins.push(create_gain_plugin_with_invert(gains[1], true));
-
-    if delays[1].abs() > 0.001 {
-        rear_plugins.push(create_delay_plugin(delays[1]));
-    }
-    let rear_curve = driver_initial_curves
-        .and_then(|curves| curves.get(1))
-        .map(|c| c.into());
-    driver_chains.push(DriverDspChain {
-        name: "Rear Sub".to_string(),
-        index: 1,
-        plugins: rear_plugins,
-        initial_curve: rear_curve,
-    });
-
-    // Combined EQ
-    let mut combined_plugins = Vec::new();
-    if !eq_filters.is_empty() {
-        combined_plugins.push(create_eq_plugin(eq_filters));
-    }
-
-    ChannelDspChain {
-        channel: channel_name.to_string(),
-        plugins: combined_plugins,
-        drivers: Some(driver_chains),
-        initial_curve: initial_curve.map(|c| c.into()),
-        final_curve: final_curve.map(|c| c.into()),
-        eq_response: None,
-        pre_ir: None,
-        post_ir: None,
-        fir_temporal_masking: None,
-        direct_early_late_correction: None,
-        target_curve: None,
-    }
+    build_dual_driver_array_chain(
+        channel_name,
+        gains,
+        delays,
+        eq_filters,
+        initial_curve,
+        final_curve,
+        driver_initial_curves,
+        "Front Sub",
+        "Rear Sub",
+    )
 }
 
 /// Build a DSP chain for frequency-based mixed mode crossover

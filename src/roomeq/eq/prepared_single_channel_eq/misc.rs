@@ -11,6 +11,7 @@ use super::super::types::PreparedSingleChannelEq;
 use crate::Curve;
 use crate::PeqModel;
 use crate::loss::LossType;
+use crate::optim::OptimizerBackend;
 use crate::workflow::setup_objective_data;
 use clap::ValueEnum;
 use log::debug;
@@ -384,15 +385,16 @@ pub(in super::super) fn prepare_single_channel_eq(
         log::info!("{}", diag);
     }
 
-    // Setup objective data
+    // Setup objective data. This can now fail at construction time if the
+    // chosen loss type requires data that was not provided (e.g. speaker-score
+    // loss without spinorama curves).
     let (mut objective_data, _use_cea) = setup_objective_data(
         &args_template,
         &normalized_curve,
         &target_curve,
         &deviation_curve,
         &None,
-    )
-    .expect("setup_objective_data should not fail without spin data");
+    )?;
 
     // Propagate frequency-dependent boost/cut envelopes for per-filter gain clamping
     objective_data.max_boost_envelope = config.max_boost_envelope.clone();
@@ -448,6 +450,7 @@ pub(in super::super) fn run_optimization_pass(
     max_iter: usize,
     config: &OptimizerConfig,
     callback: Option<crate::optim::OptimProgressCallback>,
+    backend: &dyn OptimizerBackend,
 ) -> Result<(Vec<Biquad>, f64, Vec<f64>), Box<dyn Error>> {
     let mut optim_params = prep.args_template.clone();
     optim_params.num_filters = num_filters;
@@ -489,7 +492,7 @@ pub(in super::super) fn run_optimization_pass(
 
     // Global optimization
     let opt_result = if let Some(cb) = callback {
-        crate::optim::optimize_filters_with_callback(
+        backend.optimize_filters_with_callback(
             &mut x,
             &lower_bounds,
             &upper_bounds,
@@ -498,7 +501,7 @@ pub(in super::super) fn run_optimization_pass(
             cb,
         )
     } else {
-        crate::optim::optimize_filters(
+        backend.optimize_filters(
             &mut x,
             &lower_bounds,
             &upper_bounds,
@@ -528,7 +531,7 @@ pub(in super::super) fn run_optimization_pass(
             global_loss
         );
         let x_before_refine = x.to_vec();
-        let local_result = crate::optim::optimize_filters_with_algo_override(
+        let local_result = backend.optimize_filters_with_algo_override(
             &mut x,
             &lower_bounds,
             &upper_bounds,

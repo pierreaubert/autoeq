@@ -70,6 +70,45 @@
   `&OptimParams`, `InputConfig`, `TargetConfig`, or `PlotConfig`, which are
   themselves constructible `From<&cli::Args>`.
 - Deleted the orphan binary module `src/bin/autoeq/optim.rs`.
+- Introduced an `Objective` strategy trait under `src/optim/loss/` and moved
+  every scalar loss computation (`SpeakerFlat`, `SpeakerFlatAsymmetric`,
+  `SpeakerScore`, `HeadphoneScore`, `DriversFlat`, `MultiSubFlat`, `Epa`) into
+  its own strategy. `compute_base_fitness_single` now builds an
+  `ObjectiveContext` and dispatches through the trait; `ObjectiveData` caches
+  the strategy so it is built once per optimization.
+- Introduced a `PeqLayout` strategy trait in `src/param_utils.rs` and
+  implemented it for `PeqModel`. `params_per_filter`, `num_filters`,
+  `get_filter_params`, `set_filter_params`, and `determine_filter_type` now
+  delegate to the trait; `x2peq::peq2x` and `optim::setup::misc` use layout
+  helpers instead of repeating `match peq_model` blocks.
+- Introduced a `ChannelProcessingStrategy` trait in
+  `src/roomeq/speaker_eq/strategies.rs` and moved each `ProcessingMode` arm
+  (`PhaseLinear`, `Hybrid`, `MixedPhase`, `LowLatency`, `WarpedIir`,
+  `KautzModal`) into its own strategy. `apply.rs` now dispatches via
+  `strategy_for_mode(...).process(...)` instead of a large match.
+- Phase 4 testability seams: added an `ArtifactStore` trait (`FsArtifactStore`
+  and `MemoryArtifactStore`) and routed RoomEQ report/artifact writes through
+  it; added `MeasurementBackend`/`MeasurementCache` async traits in
+  `src/read/read_api/backend.rs` so network and filesystem dependencies can be
+  mocked; added `OptimizerBackend` (`RealOptimizerBackend` and
+  `MockOptimizerBackend`) and injected it through the RoomEQ EQ optimization
+  paths; and added a `BinaryRunner` trait plus shared helpers in
+  `tests/common/binary_runner.rs` for integration-test binary execution.
+- Phase 5 duplication cleanup: moved `split_curve_at_frequency` and
+  `compute_lr24_crossover_responses` to `src/roomeq/crossover_utils.rs` and
+  re-exported them from `group_processing`; shared `empty_metadata` and
+  `single_channel_room_result` via `src/roomeq/test_fixtures.rs`; extracted
+  `compromise_distance` into `src/optim/misc.rs` for use by `nsga` and `bo`;
+  parameterised `build_cardioid_dsp_chain_with_curves` and
+  `build_dba_dsp_chain_with_curves` behind a shared
+  `build_dual_driver_array_chain` helper; and extracted
+  `average_curves_power_domain` in `src/read/source/load.rs` for the
+  `Multiple` and `InMemoryMultiple` averaging paths.
+- Phase 6 crate-split evaluation: decided to keep `autoeq` as a single crate
+  for now.  Added `docs/crate_split_adr.md` documenting build-time metrics,
+  remaining core → roomeq / core → CLI reverse dependencies, and the
+  preconditions for revisiting a split into `autoeq-core` / `autoeq-roomeq` /
+  `autoeq-cli`.
 
 # 0.4.45
 

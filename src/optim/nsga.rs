@@ -171,8 +171,8 @@ fn choose_compromise<'a>(
     }
 
     front.iter().min_by(|a, b| {
-        compromise_distance(a, &ideal, &nadir, &weights)
-            .total_cmp(&compromise_distance(b, &ideal, &nadir, &weights))
+        super::misc::compromise_distance(&a.objectives, &ideal, &nadir, &weights)
+            .total_cmp(&super::misc::compromise_distance(&b.objectives, &ideal, &nadir, &weights))
     })
 }
 
@@ -183,29 +183,6 @@ fn pareto_weights(objective: &ObjectiveData, m: usize) -> Vec<f64> {
         return mo.weights.clone();
     }
     vec![1.0 / m as f64; m]
-}
-
-fn compromise_distance(
-    solution: &ParetoSolution,
-    ideal: &[f64],
-    nadir: &[f64],
-    weights: &[f64],
-) -> f64 {
-    solution
-        .objectives
-        .iter()
-        .enumerate()
-        .map(|(i, &v)| {
-            let span = nadir[i] - ideal[i];
-            let norm = if span > 0.0 && span.is_finite() {
-                (v - ideal[i]) / span
-            } else {
-                0.0
-            };
-            weights[i] * norm * norm
-        })
-        .sum::<f64>()
-        .sqrt()
 }
 
 fn log_pareto_front(name: &str, front: &[ParetoSolution], selected: &ParetoSolution) {

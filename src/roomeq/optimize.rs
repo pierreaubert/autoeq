@@ -130,12 +130,14 @@ pub(super) fn optimize_room_pipeline_impl(
     request: RoomPipelineRequest<'_>,
     observer: Option<Box<dyn PipelineObserver>>,
 ) -> Result<RoomOptimizationResult> {
+    let store = crate::FsArtifactStore::new();
     optimize_room_impl(
         request.config,
         request.sample_rate,
         request.output_dir,
         request.probe_arrival_overrides,
         observer,
+        &store,
     )
 }
 
@@ -450,6 +452,7 @@ fn optimize_room_impl(
     output_dir: Option<&Path>,
     probe_arrival_overrides: Option<&HashMap<String, f64>>,
     observer: Option<Box<dyn PipelineObserver>>,
+    store: &dyn crate::ArtifactStore,
 ) -> Result<RoomOptimizationResult> {
     let (observer_shared, config) = prepare_room_optimization(config, observer)?;
     validate_room_optimization(&config, &observer_shared)?;
@@ -477,6 +480,7 @@ fn optimize_room_impl(
                 sample_rate,
                 output_dir,
                 &observer_shared,
+                store,
             )?
         }
         TopologyRoute::Generic => {
@@ -501,6 +505,7 @@ fn optimize_room_impl(
                 sample_rate,
                 output_dir,
                 &observer_shared,
+                store,
             )?
         }
     };
@@ -532,6 +537,7 @@ fn assemble_workflow_result(
     sample_rate: f64,
     output_dir: Option<&Path>,
     observer_shared: &SharedPipelineObserver,
+    store: &dyn crate::ArtifactStore,
 ) -> Result<RoomOptimizationResult> {
     let workflow_name = match sys.model {
         SystemModel::Stereo => {
@@ -970,7 +976,7 @@ fn assemble_workflow_result(
     }
     update_perceptual_metrics(&mut result.metadata, Some(&result.channels), Some(config));
     apply_ctc_if_enabled(&mut result, config, sample_rate, output_dir)?;
-    generate_validation_bundle_report(&mut result, config, output_dir)?;
+    generate_validation_bundle_report(&mut result, config, output_dir, store)?;
     emit_pipeline_event(
         observer_shared,
         PipelineEvent::completed(PipelineStepId::MetadataRefresh, "Reports refreshed")
@@ -987,6 +993,7 @@ fn assemble_generic_result(
     sample_rate: f64,
     output_dir: Option<&Path>,
     observer_shared: &SharedPipelineObserver,
+    store: &dyn crate::ArtifactStore,
 ) -> Result<RoomOptimizationResult> {
     let GenericChannelCollection {
         mut channel_chains,
@@ -1797,7 +1804,7 @@ fn assemble_generic_result(
     )?;
     refresh_final_reports(&mut result, config, sample_rate);
     apply_ctc_if_enabled(&mut result, config, sample_rate, output_dir)?;
-    generate_validation_bundle_report(&mut result, config, output_dir)?;
+    generate_validation_bundle_report(&mut result, config, output_dir, store)?;
     emit_pipeline_event(
         observer_shared,
         PipelineEvent::completed(PipelineStepId::MetadataRefresh, "Reports refreshed"),

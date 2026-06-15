@@ -61,6 +61,8 @@ pub fn peq2x(peq: &Peq, peq_model: PeqModel) -> Vec<f64> {
     let ppf = param_utils::params_per_filter(peq_model);
     let mut x = Vec::with_capacity(peq.len() * ppf);
 
+    use crate::param_utils::PeqLayout;
+
     for (_weight, filter) in peq {
         let params = FilterParams {
             filter_type: if ppf == 4 {
@@ -73,24 +75,7 @@ pub fn peq2x(peq: &Peq, peq_model: PeqModel) -> Vec<f64> {
             gain: filter.db_gain,
         };
 
-        // Add parameters based on model
-        match peq_model {
-            PeqModel::Pk
-            | PeqModel::HpPk
-            | PeqModel::HpPkLp
-            | PeqModel::LsPk
-            | PeqModel::LsPkHs => {
-                x.push(params.freq);
-                x.push(params.q);
-                x.push(params.gain);
-            }
-            PeqModel::FreePkFree | PeqModel::Free => {
-                x.push(params.filter_type.unwrap_or(0.0));
-                x.push(params.freq);
-                x.push(params.q);
-                x.push(params.gain);
-            }
-        }
+        peq_model.append_filter_params(&mut x, &params);
     }
 
     x

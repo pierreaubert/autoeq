@@ -32,7 +32,9 @@ pub use math_audio_optimisation as de;
 pub mod cea2034;
 
 // Re-export types from CEA2034 module to ensure type compatibility
-pub use cea2034::{Curve, DirectivityCurve, DirectivityData};
+pub use cea2034::{
+    Curve, DirectivityCurve, DirectivityData, SpinoramaBundle, SpinoramaBundleBuilder,
+};
 
 /// Error types for autoeq operations.
 pub mod error;
@@ -64,6 +66,10 @@ pub mod workflow;
 /// Mapping
 pub mod x2peq;
 
+/// Artifact storage abstraction for reports, exports, and sidecars.
+pub mod artifact_store;
+pub use artifact_store::{ArtifactStore, FsArtifactStore, MemoryArtifactStore};
+
 /// Room EQ multi-channel optimization
 pub mod roomeq;
 
@@ -91,7 +97,7 @@ pub use x2peq::x2peq;
 
 // Re-export commonly used roomeq types
 pub use roomeq::{
-    DspChainOutput, OptimizerConfig, RecordingConfiguration, RoomConfig, RoomOptimizationProgress,
-    RoomOptimizationResult, SpeakerConfig, optimize_room,
-    optimize_speaker as optimize_room_speaker,
+    DspChainOutput, OptimizerConfig, OptimizerConfigBuilder, RecordingConfiguration, RoomConfig,
+    RoomConfigBuilder, RoomOptimizationProgress, RoomOptimizationResult, SpeakerConfig,
+    optimize_room, optimize_speaker as optimize_room_speaker,
 };

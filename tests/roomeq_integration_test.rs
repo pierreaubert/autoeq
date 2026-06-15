@@ -2,32 +2,33 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
-use tempfile::TempDir;
 
-/// Get the path to the roomeq binary
-fn get_roomeq_binary() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_roomeq"))
-}
+mod common;
+
+use common::binary_runner::{run_roomeq, BinaryRunner, ProcessBinaryRunner};
 
 #[test]
 fn test_roomeq_stereo_config() {
-    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let temp_dir = tempfile::TempDir::new().expect("Failed to create temp dir");
     let output_path = temp_dir.path().join("output.json");
 
     let config_path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/roomeq/test_config_stereo.json");
 
     // Run roomeq binary
-    let output = Command::new(get_roomeq_binary())
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .arg("--config")
-        .arg(&config_path)
-        .arg("--output")
-        .arg(&output_path)
-        .arg("--sample-rate")
-        .arg("48000")
-        .output()
+    let runner = ProcessBinaryRunner::new();
+    let output = runner
+        .run(
+            "roomeq",
+            &[
+                "--config",
+                config_path.to_str().unwrap(),
+                "--output",
+                output_path.to_str().unwrap(),
+                "--sample-rate",
+                "48000",
+            ],
+        )
         .expect("Failed to execute roomeq");
 
     // Check that it ran successfully
@@ -59,10 +60,7 @@ fn test_roomeq_stereo_config() {
 
     // Validate left channel has plugins
     let left_channel = &channels["left"];
-    assert!(
-        left_channel.get("channel").is_some(),
-        "Missing channel name"
-    );
+    assert!(left_channel.get("channel").is_some(), "Missing channel name");
     assert!(left_channel.get("plugins").is_some(), "Missing plugins");
 
     let plugins = left_channel["plugins"]
@@ -84,24 +82,22 @@ fn test_roomeq_stereo_config() {
 
 #[test]
 fn test_roomeq_multidriver_config() {
-    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let temp_dir = tempfile::TempDir::new().expect("Failed to create temp dir");
     let output_path = temp_dir.path().join("output_multidriver.json");
 
     let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/data/roomeq/test_config_multidriver.json");
 
     // Run roomeq binary
-    let output = Command::new(get_roomeq_binary())
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .arg("--config")
-        .arg(&config_path)
-        .arg("--output")
-        .arg(&output_path)
-        .arg("--sample-rate")
-        .arg("48000")
-        .arg("--verbose")
-        .output()
-        .expect("Failed to execute roomeq");
+    let output = run_roomeq(&[
+        "--config",
+        config_path.to_str().unwrap(),
+        "--output",
+        output_path.to_str().unwrap(),
+        "--sample-rate",
+        "48000",
+        "--verbose",
+    ]);
 
     // Check that it ran successfully
     if !output.status.success() {
@@ -177,7 +173,7 @@ fn test_roomeq_multidriver_config() {
 
 #[test]
 fn test_roomeq_invalid_config() {
-    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let temp_dir = tempfile::TempDir::new().expect("Failed to create temp dir");
     let output_path = temp_dir.path().join("output_invalid.json");
     let config_path = temp_dir.path().join("invalid_config.json");
 
@@ -185,13 +181,12 @@ fn test_roomeq_invalid_config() {
     fs::write(&config_path, r#"{"invalid": "config"}"#).expect("Failed to write invalid config");
 
     // Run roomeq binary - should fail
-    let output = Command::new(get_roomeq_binary())
-        .arg("--config")
-        .arg(&config_path)
-        .arg("--output")
-        .arg(&output_path)
-        .output()
-        .expect("Failed to execute roomeq");
+    let output = run_roomeq(&[
+        "--config",
+        config_path.to_str().unwrap(),
+        "--output",
+        output_path.to_str().unwrap(),
+    ]);
 
     // Should fail
     assert!(
@@ -202,7 +197,7 @@ fn test_roomeq_invalid_config() {
 
 #[test]
 fn test_roomeq_missing_measurement() {
-    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let temp_dir = tempfile::TempDir::new().expect("Failed to create temp dir");
     let output_path = temp_dir.path().join("output_missing.json");
     let config_path = temp_dir.path().join("missing_measurement_config.json");
 
@@ -229,13 +224,12 @@ fn test_roomeq_missing_measurement() {
         .expect("Failed to write config");
 
     // Run roomeq binary - should fail
-    let output = Command::new(get_roomeq_binary())
-        .arg("--config")
-        .arg(&config_path)
-        .arg("--output")
-        .arg(&output_path)
-        .output()
-        .expect("Failed to execute roomeq");
+    let output = run_roomeq(&[
+        "--config",
+        config_path.to_str().unwrap(),
+        "--output",
+        output_path.to_str().unwrap(),
+    ]);
 
     // Should fail
     assert!(
@@ -247,10 +241,7 @@ fn test_roomeq_missing_measurement() {
 #[test]
 fn test_roomeq_help() {
     // Test that --help works
-    let output = Command::new(get_roomeq_binary())
-        .arg("--help")
-        .output()
-        .expect("Failed to execute roomeq --help");
+    let output = run_roomeq(&["--help"]);
 
     assert!(output.status.success(), "roomeq --help should succeed");
 

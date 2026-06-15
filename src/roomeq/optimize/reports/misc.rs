@@ -105,6 +105,7 @@ pub(in super::super) fn generate_validation_bundle_report(
     result: &mut RoomOptimizationResult,
     config: &RoomConfig,
     output_dir: Option<&Path>,
+    store: &dyn crate::ArtifactStore,
 ) -> Result<()> {
     let Some(bundle) = config.optimizer.validation_bundle_config() else {
         result.metadata.validation_bundle = None;
@@ -112,7 +113,7 @@ pub(in super::super) fn generate_validation_bundle_report(
     };
 
     let output_dir = output_dir.unwrap_or(Path::new("."));
-    std::fs::create_dir_all(output_dir)?;
+    store.create_dir_all(output_dir)?;
     let artifact_path = output_dir.join("roomeq_validation_bundle.json");
     let mut advisories = Vec::new();
 
@@ -160,7 +161,7 @@ pub(in super::super) fn generate_validation_bundle_report(
         })),
         "advisories": advisories,
     });
-    std::fs::write(&artifact_path, serde_json::to_vec_pretty(&payload)?)?;
+    store.write(&artifact_path, &serde_json::to_vec_pretty(&payload)?)?;
 
     result.metadata.validation_bundle = Some(crate::roomeq::types::ValidationBundleReport {
         artifact: artifact_path.to_string_lossy().to_string(),
@@ -503,6 +504,7 @@ mod tests {
     use crate::roomeq::ChannelOptimizationResult;
     use crate::roomeq::home_cinema::{ChannelTimingReport, HomeCinemaRole};
     use crate::roomeq::spectral_align::ChannelMatchingResult;
+    use crate::roomeq::test_fixtures::empty_metadata;
     use crate::roomeq::types::{
         ChannelDspChain, CurveData, EarlyLateCorrectionConfig, IrWaveform, OptimizationMetadata,
         PerceptualMetrics, PluginConfigWrapper, ValidationBundleReport,
@@ -512,7 +514,6 @@ mod tests {
     use ndarray::Array1;
     use serde_json::json;
     use std::collections::HashMap;
-    use tempfile::tempdir;
 
     fn small_curve() -> crate::Curve {
         crate::Curve {
@@ -529,32 +530,6 @@ mod tests {
             spl: curve.spl.to_vec(),
             phase: curve.phase.as_ref().map(|p| p.to_vec()),
             norm_range: None,
-        }
-    }
-
-    fn empty_metadata() -> OptimizationMetadata {
-        OptimizationMetadata {
-            pre_score: 0.0,
-            post_score: 0.0,
-            algorithm: "de".to_string(),
-            loss_type: None,
-            iterations: 0,
-            timestamp: String::new(),
-            inter_channel_deviation: None,
-            epa_per_channel: None,
-            epa_multichannel: None,
-            group_delay: None,
-            perceptual_metrics: None,
-            home_cinema_layout: None,
-            multi_seat_coverage: None,
-            multi_seat_correction: None,
-            bass_management: None,
-            timing_diagnostics: None,
-            ctc: None,
-            perceptual_policy: None,
-            bootstrap_uncertainty: None,
-            validation_bundle: None,
-            supporting_source: None,
         }
     }
 
@@ -1042,9 +1017,10 @@ mod tests {
                 ..empty_metadata()
             },
         };
-        let dir = tempdir().unwrap();
+        let dir = Path::new("reports/test");
         let config = room_config_with_validation_bundle();
-        generate_validation_bundle_report(&mut result, &config, Some(dir.path())).unwrap();
+        let store = crate::MemoryArtifactStore::new();
+        generate_validation_bundle_report(&mut result, &config, Some(dir), &store).unwrap();
         assert!(result.metadata.validation_bundle.is_some());
         let bundle = result.metadata.validation_bundle.as_ref().unwrap();
         assert!(
@@ -1053,11 +1029,12 @@ mod tests {
                 .contains(&"perceptual_metric_regressed".to_string())
         );
         assert!(bundle.advisories.contains(&"early_cue_risk".to_string()));
-        assert!(
-            std::fs::read_to_string(dir.path().join("roomeq_validation_bundle.json"))
-                .unwrap()
-                .contains("roomeq-validation-bundle-v1")
-        );
+        let written = store
+            .get(&dir.join("roomeq_validation_bundle.json"))
+            .expect("validation bundle should be written to the store");
+        assert!(String::from_utf8(written)
+            .unwrap()
+            .contains("roomeq-validation-bundle-v1"));
     }
 
     #[test]
@@ -1078,7 +1055,8 @@ mod tests {
             advisories: Vec::new(),
         });
         let config = room_config_default();
-        generate_validation_bundle_report(&mut result, &config, None).unwrap();
+        let store = crate::MemoryArtifactStore::new();
+        generate_validation_bundle_report(&mut result, &config, None, &store).unwrap();
         assert!(result.metadata.validation_bundle.is_none());
     }
 }

@@ -13,7 +13,6 @@ use crate::Curve;
 use crate::HeadphoneLossData;
 use crate::SpeakerLossData;
 use crate::loss::DriversLossData;
-use ndarray::Array1;
 use std::collections::HashMap;
 
 mod drivers;
@@ -63,49 +62,34 @@ pub fn setup_objective_data(
         None
     };
 
-    let objective_data = ObjectiveData {
-        freqs: input_curve.freq.clone(),
-        target: target_curve.spl.clone(),
-        deviation: deviation_curve.spl.clone(), // This is the deviation to be corrected
-        srate: params.sample_rate,
-        min_spacing_oct: params.min_spacing_oct,
-        spacing_weight: params.spacing_weight,
-        max_db: params.max_db,
-        min_db: params.min_db,
-        min_freq: params.min_freq,
-        max_freq: params.max_freq,
-        peq_model: params.peq_model,
-        loss_type: params.loss,
-        speaker_score_data: speaker_score_data_opt,
-        headphone_score_data: headphone_score_data_opt,
-        // Store input curve for headphone loss calculation
-        input_curve: if !use_cea {
-            Some(input_curve.clone())
-        } else {
-            None
-        },
-        // Multi-driver data will be set separately
-        drivers_data: None,
-        fixed_crossover_freqs: None,
-        // Penalties default to zero; configured per algorithm in optimize_filters
-        penalty_w_ceiling: 0.0,
-        penalty_w_spacing: 0.0,
-        penalty_w_mingain: 0.0,
-        // Integrality constraints - none for continuous optimization
-        integrality: None,
-        multi_objective: None,
-        smooth: params.smooth,
-        smooth_n: params.smooth_n,
-        max_boost_envelope: None,
-        min_cut_envelope: None,
-        epa_config: None,
-        temporal_masking_modes: Vec::new(),
-        detected_problems: Vec::new(),
-        null_suppression: None,
-        asymmetric_loss_config: crate::loss::AsymmetricLossConfig::default(),
-        smoothness_penalty: params.smoothness_penalty.clone(),
-        audibility_deadband: params.audibility_deadband,
-    };
+    let mut builder = crate::optim::ObjectiveDataBuilder::new(
+        input_curve.freq.clone(),
+        target_curve.spl.clone(),
+        deviation_curve.spl.clone(), // This is the deviation to be corrected
+        params.sample_rate,
+        params.peq_model,
+        params.loss,
+    )
+    .min_spacing_oct(params.min_spacing_oct)
+    .spacing_weight(params.spacing_weight)
+    .max_db(params.max_db)
+    .min_db(params.min_db)
+    .freq_range(params.min_freq, params.max_freq)
+    .smoothing(params.smooth, params.smooth_n)
+    .smoothness_penalty_opt(params.smoothness_penalty.clone())
+    .audibility_deadband_opt(params.audibility_deadband);
+
+    if let Some(sd) = speaker_score_data_opt {
+        builder = builder.speaker_score_data(sd);
+    }
+    if let Some(hd) = headphone_score_data_opt {
+        builder = builder.headphone_score_data(hd);
+    }
+    if !use_cea {
+        builder = builder.input_curve(input_curve.clone());
+    }
+
+    let objective_data = builder.build()?;
 
     Ok((objective_data, use_cea))
 }
@@ -122,41 +106,19 @@ pub fn setup_drivers_objective_data(
     params: &crate::OptimParams,
     drivers_data: DriversLossData,
 ) -> ObjectiveData {
-    ObjectiveData {
-        freqs: drivers_data.freq_grid.clone(),
-        target: Array1::zeros(drivers_data.freq_grid.len()),
-        deviation: Array1::zeros(drivers_data.freq_grid.len()),
-        srate: params.sample_rate,
-        min_spacing_oct: 0.0, // Not applicable for crossover optimization
-        spacing_weight: 0.0,
-        max_db: params.max_db,
-        min_db: params.min_db,
-        min_freq: params.min_freq,
-        max_freq: params.max_freq,
-        peq_model: params.peq_model,
-        loss_type: crate::LossType::DriversFlat,
-        speaker_score_data: None,
-        headphone_score_data: None,
-        input_curve: None,
-        drivers_data: Some(drivers_data),
-        fixed_crossover_freqs: None,
-        penalty_w_ceiling: 0.0,
-        penalty_w_spacing: 0.0,
-        penalty_w_mingain: 0.0,
-        integrality: None,
-        multi_objective: None,
-        smooth: false, // Not applicable for crossover optimization
-        smooth_n: 1,
-        max_boost_envelope: None,
-        min_cut_envelope: None,
-        epa_config: None,
-        temporal_masking_modes: Vec::new(),
-        detected_problems: Vec::new(),
-        null_suppression: None,
-        asymmetric_loss_config: crate::loss::AsymmetricLossConfig::default(),
-        smoothness_penalty: params.smoothness_penalty.clone(),
-        audibility_deadband: params.audibility_deadband,
-    }
+    crate::optim::ObjectiveDataBuilder::drivers_flat(
+        drivers_data.freq_grid.clone(),
+        params.sample_rate,
+        params.peq_model,
+        drivers_data,
+    )
+    .max_db(params.max_db)
+    .min_db(params.min_db)
+    .freq_range(params.min_freq, params.max_freq)
+    .smoothness_penalty_opt(params.smoothness_penalty.clone())
+    .audibility_deadband_opt(params.audibility_deadband)
+    .build()
+    .expect("invariant: drivers_flat builder has all required data")
 }
 
 /// Build optimization parameter bounds for multi-driver crossover optimization
@@ -480,41 +442,19 @@ pub fn setup_multisub_objective_data(
     params: &crate::OptimParams,
     drivers_data: DriversLossData,
 ) -> ObjectiveData {
-    ObjectiveData {
-        freqs: drivers_data.freq_grid.clone(),
-        target: Array1::zeros(drivers_data.freq_grid.len()),
-        deviation: Array1::zeros(drivers_data.freq_grid.len()),
-        srate: params.sample_rate,
-        min_spacing_oct: 0.0,
-        spacing_weight: 0.0,
-        max_db: params.max_db,
-        min_db: params.min_db,
-        min_freq: params.min_freq,
-        max_freq: params.max_freq,
-        peq_model: params.peq_model,
-        loss_type: crate::LossType::MultiSubFlat,
-        speaker_score_data: None,
-        headphone_score_data: None,
-        input_curve: None,
-        drivers_data: Some(drivers_data),
-        fixed_crossover_freqs: None,
-        penalty_w_ceiling: 0.0,
-        penalty_w_spacing: 0.0,
-        penalty_w_mingain: 0.0,
-        integrality: None,
-        multi_objective: None,
-        smooth: false, // Not applicable for multi-sub optimization
-        smooth_n: 1,
-        max_boost_envelope: None,
-        min_cut_envelope: None,
-        epa_config: None,
-        temporal_masking_modes: Vec::new(),
-        detected_problems: Vec::new(),
-        null_suppression: None,
-        asymmetric_loss_config: crate::loss::AsymmetricLossConfig::default(),
-        smoothness_penalty: params.smoothness_penalty.clone(),
-        audibility_deadband: params.audibility_deadband,
-    }
+    crate::optim::ObjectiveDataBuilder::multi_sub_flat(
+        drivers_data.freq_grid.clone(),
+        params.sample_rate,
+        params.peq_model,
+        drivers_data,
+    )
+    .max_db(params.max_db)
+    .min_db(params.min_db)
+    .freq_range(params.min_freq, params.max_freq)
+    .smoothness_penalty_opt(params.smoothness_penalty.clone())
+    .audibility_deadband_opt(params.audibility_deadband)
+    .build()
+    .expect("invariant: multi-sub-flat builder has all required data")
 }
 
 /// Set up parameter bounds for multi-subwoofer optimization.

@@ -1,12 +1,9 @@
 use assert_fs::TempDir;
 use assert_fs::prelude::*;
-use std::path::PathBuf;
-use std::process::Command;
 
-/// Get the path to the autoeq binary
-fn get_autoeq_binary() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_autoeq"))
-}
+mod common;
+
+use common::binary_runner::run_autoeq;
 
 #[test]
 fn test_apo_output_format_golden() {
@@ -19,19 +16,16 @@ fn test_apo_output_format_golden() {
 
     let output = temp_dir.child("output");
 
-    let status = Command::new(get_autoeq_binary())
-        .args([
-            "--curve",
-            csv.path().to_str().unwrap(),
-            "--output",
-            output.path().to_str().unwrap(),
-            "--num-filters",
-            "3",
-        ])
-        .status()
-        .expect("Failed to run autoeq");
+    let output = run_autoeq(&[
+        "--curve",
+        csv.path().to_str().unwrap(),
+        "--output",
+        output.path().to_str().unwrap(),
+        "--num-filters",
+        "3",
+    ]);
 
-    assert!(status.success());
+    assert!(output.status.success());
 
     // Check APO file structure
     // The output file is generated in the same directory as the plot output
@@ -69,17 +63,14 @@ fn test_peq_parameters_reasonable() {
 
     let output = temp_dir.child("output");
 
-    let _ = Command::new(get_autoeq_binary())
-        .args([
-            "--curve",
-            csv.path().to_str().unwrap(),
-            "--output",
-            output.path().to_str().unwrap(),
-            "--num-filters",
-            "2",
-        ])
-        .output()
-        .expect("Failed to run autoeq");
+    let _ = run_autoeq(&[
+        "--curve",
+        csv.path().to_str().unwrap(),
+        "--output",
+        output.path().to_str().unwrap(),
+        "--num-filters",
+        "2",
+    ]);
 
     let apo = temp_dir.child("iir-autoeq-flat.txt");
     let content = std::fs::read_to_string(apo.path()).unwrap();
@@ -123,15 +114,15 @@ fn test_peq_parameters_reasonable() {
         // Check Gain
         let gain_str = parts[gain_idx.unwrap() + 1];
         let gain: f64 = gain_str.parse().expect("Failed to parse gain");
-        assert!(
-            (-20.0..=20.0).contains(&gain),
-            "Gain out of range: {}",
-            gain
-        );
+        assert!(gain.abs() <= 20.0, "Gain out of range: {}", gain);
 
         // Check Q
         let q_str = parts[q_idx.unwrap() + 1];
         let q: f64 = q_str.parse().expect("Failed to parse Q");
-        assert!((0.1..=50.0).contains(&q), "Q out of range: {}", q);
+        assert!(
+            (0.1..=10.0).contains(&q),
+            "Q out of range: {}",
+            q
+        );
     }
 }

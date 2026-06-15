@@ -15,7 +15,7 @@ use super::prepared_single_channel_eq::run_optimization_pass;
 use crate::Curve;
 use crate::PeqModel;
 use crate::loss::LossType;
-use crate::optim::MultiObjectiveData;
+use crate::optim::{MultiObjectiveData, OptimizerBackend, RealOptimizerBackend};
 use crate::workflow::setup_objective_data;
 use clap::ValueEnum;
 use math_audio_iir_fir::Biquad;
@@ -38,7 +38,14 @@ pub fn optimize_channel_eq(
     target_config: Option<&TargetCurveConfig>,
     sample_rate: f64,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
-    optimize_channel_eq_inner(curve, config, target_config, sample_rate, None)
+    optimize_channel_eq_inner(
+        curve,
+        config,
+        target_config,
+        sample_rate,
+        None,
+        &RealOptimizerBackend::new(),
+    )
 }
 
 /// Optimize EQ filters for a single channel with per-iteration progress callback
@@ -49,7 +56,14 @@ pub fn optimize_channel_eq_with_callback(
     sample_rate: f64,
     callback: crate::optim::OptimProgressCallback,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
-    optimize_channel_eq_inner(curve, config, target_config, sample_rate, Some(callback))
+    optimize_channel_eq_inner(
+        curve,
+        config,
+        target_config,
+        sample_rate,
+        Some(callback),
+        &RealOptimizerBackend::new(),
+    )
 }
 
 /// Forward iterative optimization: try 1..=max_filters, stop when improvement stalls.
@@ -58,6 +72,7 @@ fn optimize_channel_eq_adaptive(
     config: &OptimizerConfig,
     target_config: Option<&TargetCurveConfig>,
     sample_rate: f64,
+    backend: &dyn OptimizerBackend,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
     let prep = prepare_single_channel_eq(curve, config, target_config, sample_rate)?;
     let max_filters = config.num_filters;
@@ -75,7 +90,8 @@ fn optimize_channel_eq_adaptive(
 
     for k in 1..=max_filters {
         let budget_per_step = adaptive_budget_for_step(config.max_iter, max_filters, k);
-        let (filters, loss, _x) = run_optimization_pass(&prep, k, budget_per_step, config, None)?;
+        let (filters, loss, _x) =
+            run_optimization_pass(&prep, k, budget_per_step, config, None, backend)?;
 
         let improvement = best_loss - loss;
         log::info!(
@@ -127,16 +143,23 @@ fn optimize_channel_eq_inner(
     target_config: Option<&TargetCurveConfig>,
     sample_rate: f64,
     callback: Option<crate::optim::OptimProgressCallback>,
+    backend: &dyn OptimizerBackend,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
     // Use adaptive filter selection when enabled and no callback
     if config.min_filter_improvement > 0.0 && config.num_filters > 1 && callback.is_none() {
-        return optimize_channel_eq_adaptive(curve, config, target_config, sample_rate);
+        return optimize_channel_eq_adaptive(curve, config, target_config, sample_rate, backend);
     }
 
     // Single-pass optimization (legacy path or callback path)
     let prep = prepare_single_channel_eq(curve, config, target_config, sample_rate)?;
-    let (filters, loss, _x) =
-        run_optimization_pass(&prep, config.num_filters, config.max_iter, config, callback)?;
+    let (filters, loss, _x) = run_optimization_pass(
+        &prep,
+        config.num_filters,
+        config.max_iter,
+        config,
+        callback,
+        backend,
+    )?;
 
     log::info!(
         "EQ optimization: {} filters, final loss={:.6}",
@@ -175,6 +198,7 @@ pub fn optimize_channel_eq_multi(
         target_config,
         sample_rate,
         None,
+        &RealOptimizerBackend::new(),
     )
 }
 
@@ -195,6 +219,7 @@ pub(in super::super) fn optimize_channel_eq_multi_with_auto_optimizer(
         target_config,
         sample_rate,
         None,
+        &RealOptimizerBackend::new(),
     )
 }
 
@@ -214,6 +239,7 @@ pub fn optimize_channel_eq_multi_with_callback(
         target_config,
         sample_rate,
         Some(callback),
+        &RealOptimizerBackend::new(),
     )
 }
 
@@ -225,6 +251,7 @@ fn optimize_channel_eq_multi_inner(
     target_config: Option<&TargetCurveConfig>,
     sample_rate: f64,
     callback: Option<crate::optim::OptimProgressCallback>,
+    backend: &dyn OptimizerBackend,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
     assert!(!curves.is_empty(), "curves must not be empty");
 
@@ -240,6 +267,7 @@ fn optimize_channel_eq_multi_inner(
             target_config,
             sample_rate,
             callback,
+            backend,
         );
     }
 
@@ -473,7 +501,7 @@ fn optimize_channel_eq_multi_inner(
 
     // Run global optimization
     let opt_result = if let Some(cb) = callback {
-        crate::optim::optimize_filters_with_callback(
+        backend.optimize_filters_with_callback(
             &mut x,
             &lower_bounds,
             &upper_bounds,
@@ -482,7 +510,7 @@ fn optimize_channel_eq_multi_inner(
             cb,
         )
     } else {
-        crate::optim::optimize_filters(&mut x, &lower_bounds, &upper_bounds, primary, &optim_params)
+        backend.optimize_filters(&mut x, &lower_bounds, &upper_bounds, primary, &optim_params)
     };
 
     let (_converged_msg, global_loss) = match opt_result {
@@ -511,7 +539,7 @@ fn optimize_channel_eq_multi_inner(
             global_loss
         );
         let x_before_refine = x.to_vec();
-        let local_result = crate::optim::optimize_filters_with_algo_override(
+        let local_result = backend.optimize_filters_with_algo_override(
             &mut x,
             &lower_bounds,
             &upper_bounds,
@@ -582,6 +610,7 @@ fn optimize_spatial_robustness(
     target_config: Option<&TargetCurveConfig>,
     sample_rate: f64,
     callback: Option<crate::optim::OptimProgressCallback>,
+    backend: &dyn OptimizerBackend,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
     // Build spatial robustness config from serde config or defaults
     let sr_config = match &multi_config.spatial_robustness {
@@ -791,7 +820,7 @@ fn optimize_spatial_robustness(
     let mut x = crate::workflow::initial_guess(&optim_params, &lower_bounds, &upper_bounds);
 
     let opt_result = if let Some(cb) = callback {
-        crate::optim::optimize_filters_with_callback(
+        backend.optimize_filters_with_callback(
             &mut x,
             &lower_bounds,
             &upper_bounds,
@@ -800,7 +829,7 @@ fn optimize_spatial_robustness(
             cb,
         )
     } else {
-        crate::optim::optimize_filters(
+        backend.optimize_filters(
             &mut x,
             &lower_bounds,
             &upper_bounds,

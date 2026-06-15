@@ -62,43 +62,9 @@ pub async fn load_spinorama_with_spin(
 
 /// Build Cea2034Data from curves HashMap
 pub fn build_cea2034_data(curves: HashMap<String, Curve>) -> Result<Cea2034Data, Box<dyn Error>> {
-    let get_curve = |name: &str| -> Result<Curve, Box<dyn Error>> {
-        curves
-            .get(name)
-            .cloned()
-            .ok_or_else(|| Box::<dyn Error>::from(format!("Missing CEA2034 curve: {}", name)))
-    };
-
-    let on_axis = get_curve("On Axis")?;
-    let listening_window = get_curve("Listening Window")?;
-    let early_reflections = get_curve("Early Reflections")?;
-    let sound_power = get_curve("Sound Power")?;
-    let estimated_in_room = get_curve("Estimated In-Room Response")?;
-
-    // Compute directivity indices
-    let er_di = Curve {
-        freq: on_axis.freq.clone(),
-        spl: &on_axis.spl - &early_reflections.spl,
-        phase: None,
-        ..Default::default()
-    };
-    let sp_di = Curve {
-        freq: on_axis.freq.clone(),
-        spl: &on_axis.spl - &sound_power.spl,
-        phase: None,
-        ..Default::default()
-    };
-
-    Ok(Cea2034Data {
-        on_axis,
-        listening_window,
-        early_reflections,
-        sound_power,
-        estimated_in_room,
-        er_di,
-        sp_di,
-        curves,
-    })
+    Ok(crate::cea2034::SpinoramaBundleBuilder::new()
+        .curves(curves)
+        .build()?)
 }
 
 #[cfg(test)]

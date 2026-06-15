@@ -226,6 +226,7 @@ pub(in super::super) fn compute_and_correct_icd(
 mod tests {
     use super::*;
     use crate::roomeq::spectral_align::ChannelMatchingCorrectionProfile;
+    use crate::roomeq::test_fixtures::empty_metadata;
     use crate::roomeq::types::{ChannelMatchingConfig, InterChannelDeviation, OptimizerConfig};
     use crate::roomeq::{ChannelOptimizationResult, RoomOptimizationResult};
     use ndarray::Array1;
@@ -252,32 +253,6 @@ mod tests {
             spl: Array1::from(spl),
             phase: None,
             ..Default::default()
-        }
-    }
-
-    fn empty_metadata() -> crate::roomeq::types::OptimizationMetadata {
-        crate::roomeq::types::OptimizationMetadata {
-            pre_score: 0.0,
-            post_score: 0.0,
-            algorithm: "de".to_string(),
-            loss_type: None,
-            iterations: 0,
-            timestamp: String::new(),
-            inter_channel_deviation: None,
-            epa_per_channel: None,
-            epa_multichannel: None,
-            group_delay: None,
-            perceptual_metrics: None,
-            home_cinema_layout: None,
-            multi_seat_coverage: None,
-            multi_seat_correction: None,
-            bass_management: None,
-            timing_diagnostics: None,
-            ctc: None,
-            perceptual_policy: None,
-            bootstrap_uncertainty: None,
-            validation_bundle: None,
-            supporting_source: None,
         }
     }
 

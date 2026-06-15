@@ -5,7 +5,7 @@ use super::misc::decode_typed_array;
 use super::misc::is_target_trace_name;
 use super::parse::parse_angle_from_trace_name;
 use super::types::ContourPlotData;
-use crate::cea2034 as score;
+use crate::cea2034::SpinoramaBundleBuilder;
 use crate::read::interpolate::interpolate;
 use crate::{Curve, DirectivityCurve};
 use ndarray::Array1;
@@ -182,34 +182,13 @@ pub fn extract_cea2034_curves_original(
         }
     }
 
-    // Ensure required curves exist for PIR computation
-    let lw_curve = curves.get("Listening Window").ok_or_else(|| {
-        std::io::Error::other("Missing 'Listening Window' curve after extraction")
-    })?;
-    let er_curve = curves.get("Early Reflections").ok_or_else(|| {
-        std::io::Error::other("Missing 'Early Reflections' curve after extraction")
-    })?;
-    let sp_curve = curves
-        .get("Sound Power")
-        .ok_or_else(|| std::io::Error::other("Missing 'Sound Power' curve after extraction"))?;
-
-    let freq = &lw_curve.freq;
-    let lw = &lw_curve.spl;
-    let er = &er_curve.spl;
-    let sp = &sp_curve.spl;
-    let pir = score::compute_pir_from_lw_er_sp(lw, er, sp);
-
-    curves.insert(
-        "Estimated In-Room Response".to_string(),
-        Curve {
-            freq: freq.clone(),
-            spl: pir,
-            phase: None,
-            ..Default::default()
-        },
-    );
-
-    Ok(curves)
+    // Compute the PIR and derived directivity indices through the spinorama
+    // bundle builder, then return the complete curve map.
+    let bundle = SpinoramaBundleBuilder::new()
+        .curves(curves)
+        .build()
+        .map_err(|e| -> Box<dyn Error> { e.into() })?;
+    Ok(bundle.curves)
 }
 
 /// Extract all CEA2034 curves from plot data and interpolate to target frequency grid
@@ -269,32 +248,13 @@ pub fn extract_cea2034_curves(
         }
     }
 
-    // Ensure required curves exist for PIR computation
-    let lw_curve = curves.get("Listening Window").ok_or_else(|| {
-        std::io::Error::other("Missing 'Listening Window' curve after extraction")
-    })?;
-    let er_curve = curves.get("Early Reflections").ok_or_else(|| {
-        std::io::Error::other("Missing 'Early Reflections' curve after extraction")
-    })?;
-    let sp_curve = curves
-        .get("Sound Power")
-        .ok_or_else(|| std::io::Error::other("Missing 'Sound Power' curve after extraction"))?;
-
-    let lw = &lw_curve.spl;
-    let er = &er_curve.spl;
-    let sp = &sp_curve.spl;
-    let pir = score::compute_pir_from_lw_er_sp(lw, er, sp);
-    curves.insert(
-        "Estimated In-Room Response".to_string(),
-        Curve {
-            freq: freq.clone(),
-            spl: pir,
-            phase: None,
-            ..Default::default()
-        },
-    );
-
-    Ok(curves)
+    // Compute the PIR and derived directivity indices through the spinorama
+    // bundle builder, then return the complete curve map.
+    let bundle = SpinoramaBundleBuilder::new()
+        .curves(curves)
+        .build()
+        .map_err(|e| -> Box<dyn Error> { e.into() })?;
+    Ok(bundle.curves)
 }
 
 /// Extract all directivity curves from a measurement plot

@@ -1,9 +1,9 @@
 //! Tests for multi-measurement optimization strategies.
 
-use autoeq::LossType;
 use autoeq::PeqModel;
 use autoeq::optim::{
-    MultiObjectiveData, ObjectiveData, compute_base_fitness, compute_pareto_objectives,
+    MultiObjectiveData, ObjectiveData, ObjectiveDataBuilder, compute_base_fitness,
+    compute_pareto_objectives,
 };
 use autoeq::roomeq::MultiMeasurementStrategy;
 use ndarray::{Array1, array};
@@ -12,41 +12,13 @@ use ndarray::{Array1, array};
 fn make_objective(deviation: Array1<f64>) -> ObjectiveData {
     let n = deviation.len();
     let freqs = Array1::logspace(10.0, 1.3, 3.3, n); // ~20 Hz to ~2000 Hz
-    ObjectiveData {
-        freqs,
-        target: Array1::zeros(n),
-        deviation,
-        srate: 48000.0,
-        min_spacing_oct: 0.0,
-        spacing_weight: 0.0,
-        max_db: 6.0,
-        min_db: -12.0,
-        min_freq: 20.0,
-        max_freq: 2000.0,
-        peq_model: PeqModel::Pk,
-        loss_type: LossType::SpeakerFlat,
-        speaker_score_data: None,
-        headphone_score_data: None,
-        input_curve: None,
-        drivers_data: None,
-        fixed_crossover_freqs: None,
-        penalty_w_ceiling: 0.0,
-        penalty_w_spacing: 0.0,
-        penalty_w_mingain: 0.0,
-        integrality: None,
-        multi_objective: None,
-        smooth: false,
-        smooth_n: 3,
-        max_boost_envelope: None,
-        min_cut_envelope: None,
-        epa_config: None,
-        temporal_masking_modes: Vec::new(),
-        detected_problems: Vec::new(),
-        null_suppression: None,
-        asymmetric_loss_config: autoeq::loss::AsymmetricLossConfig::default(),
-        smoothness_penalty: None,
-        audibility_deadband: None,
-    }
+    ObjectiveDataBuilder::speaker_flat(freqs, Array1::zeros(n), deviation, 48000.0, PeqModel::Pk)
+        .max_db(6.0)
+        .min_db(-12.0)
+        .freq_range(20.0, 2000.0)
+        .smoothing(false, 3)
+        .build()
+        .expect("valid test objective data")
 }
 
 /// Zero-gain filters: x = [log10(freq), Q, gain_db] with gain=0 → no correction.

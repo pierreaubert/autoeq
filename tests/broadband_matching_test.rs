@@ -1,17 +1,13 @@
 use autoeq::roomeq::default_config_version;
 use std::fs;
-use std::path::PathBuf;
-use std::process::Command;
-use tempfile::TempDir;
 
-/// Get the path to the roomeq binary
-fn get_roomeq_binary() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_roomeq"))
-}
+mod common;
+
+use common::binary_runner::run_roomeq;
 
 #[test]
 fn test_broadband_matching() {
-    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let temp_dir = tempfile::TempDir::new().expect("Failed to create temp dir");
     let output_path = temp_dir.path().join("output.json");
     let measurement_path = temp_dir.path().join("measurement.csv");
     let config_path = temp_dir.path().join("config.json");
@@ -52,15 +48,14 @@ fn test_broadband_matching() {
         .expect("Failed to write config");
 
     // 3. Run roomeq
-    let output = Command::new(get_roomeq_binary())
-        .arg("--config")
-        .arg(&config_path)
-        .arg("--output")
-        .arg(&output_path)
-        .arg("--sample-rate")
-        .arg("48000")
-        .output()
-        .expect("Failed to execute roomeq");
+    let output = run_roomeq(&[
+        "--config",
+        config_path.to_str().unwrap(),
+        "--output",
+        output_path.to_str().unwrap(),
+        "--sample-rate",
+        "48000",
+    ]);
 
     if !output.status.success() {
         eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
@@ -106,7 +101,7 @@ fn test_broadband_matching() {
         // at the measurement's mean SPL, the correction should be small (< 10dB).
         assert!(
             gain_db.abs() < 10.0,
-            "Broadband gain correction should be small, got {:.1}dB",
+            "Broadband gain correction should be small, got {:.1} dB",
             gain_db
         );
     }
@@ -126,11 +121,6 @@ fn test_broadband_matching() {
         .as_array()
         .expect("filters array");
     eprintln!("Found {} filters in first EQ plugin", filters.len());
-
-    // We expect at least the 2 broadband filters.
-    // If optimize_channel_eq ran with num_filters=0, it might return empty filters or not add a plugin?
-    // roomeq optimize.rs adds broadband_plugins distinct from optimizer chain.
-    // So we should see broadband plugins.
 
     assert!(
         filters.len() >= 2,

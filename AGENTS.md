@@ -40,6 +40,11 @@ Notes:
 
 - `ObjectiveData` carries single-curve and multi-objective paths.
 - `multi_objective` delegates scalarization over per-curve objectives.
+- The scalar objective is selected through the `Objective` strategy trait
+  (`src/optim/loss/`). `ObjectiveData` caches the strategy so it is built once.
+- `PeqLayout` (`src/param_utils.rs`) abstracts the parameter-vector layout for
+  each `PeqModel`; filter extraction/encoding and initial-guess generation
+  delegate to the trait instead of repeating `match peq_model` blocks.
 - `smoothness_penalty` (TV² curvature regularizer in log-frequency) is optional and supported in PEQ-based branches.
   - Config fields: `tv2_weight`, `schroeder_hz`, `modal_weight_scale`, `exponent`.
   - CLI flags: `--smoothness-weight`, `--smoothness-exponent`, `--smoothness-schroeder-hz`, `--smoothness-modal-scale`.
@@ -57,6 +62,9 @@ Main tree: `src/roomeq/`.
 - Multi-measurement strategies include weighted/minimax/variance-penalized paths and spatial robustness mode.
 - Supporting-source room compensation (Brooks-Park): a delayed, decorrelated supporting loudspeaker fills reverberant energy without altering the primary source's direct sound. Config type: `SpeakerConfig::SupportingSource`, module tree under `src/roomeq/supporting_source/`, wired into the stereo 2.0 and home-cinema workflows. Reports include DRR summaries, precedence-limit hits, and spatial-robustness advisories for single-position or high-variance measurements.
 - Bass-management and routed export logic live under `roomeq/optimize`, `roomeq/workflows`, and `roomeq/output`.
+- Single-speaker processing modes are selected through the
+  `ChannelProcessingStrategy` trait (`src/roomeq/speaker_eq/strategies.rs`);
+  `apply.rs` dispatches to the strategy for the configured `ProcessingMode`.
 
 ## Binary entry points
 

@@ -3,7 +3,6 @@
 //! These tests verify that the new CLI parameters actually change
 //! the behavior of the differential evolution algorithm.
 
-use autoeq::LossType;
 use autoeq::OptimParams;
 use autoeq::cli::Args;
 use autoeq::PeqModel;
@@ -21,41 +20,15 @@ fn create_test_objective_data() -> autoeq::optim::ObjectiveData {
     let target = Array1::from(vec![1.0, 1.0, 1.0]); // Small deviation to optimize
     let deviation = Array1::from(vec![0.5, 0.5, 0.5]); // Small deviation
 
-    autoeq::optim::ObjectiveData {
-        freqs: freqs.clone(),
-        target,
-        deviation,
-        input_curve: None,
-        srate: 48000.0,
-        min_spacing_oct: 0.5,
-        spacing_weight: 20.0,
-        max_db: 3.0,
-        min_db: 1.0,
-        min_freq: 60.0,
-        max_freq: 16000.0,
-        peq_model: PeqModel::Pk,
-        loss_type: LossType::SpeakerFlat,
-        speaker_score_data: None,
-        headphone_score_data: None,
-        drivers_data: None,
-        fixed_crossover_freqs: None,
-        penalty_w_ceiling: 0.0,
-        penalty_w_spacing: 0.0,
-        penalty_w_mingain: 0.0,
-        integrality: None,
-        multi_objective: None,
-        smooth: false,
-        smooth_n: 3,
-        max_boost_envelope: None,
-        min_cut_envelope: None,
-        epa_config: None,
-        temporal_masking_modes: Vec::new(),
-        detected_problems: Vec::new(),
-        null_suppression: None,
-        asymmetric_loss_config: autoeq::loss::AsymmetricLossConfig::default(),
-        smoothness_penalty: None,
-        audibility_deadband: None,
-    }
+    autoeq::optim::ObjectiveDataBuilder::speaker_flat(freqs, target, deviation, 48000.0, PeqModel::Pk)
+        .min_spacing_oct(0.5)
+        .spacing_weight(20.0)
+        .max_db(3.0)
+        .min_db(1.0)
+        .freq_range(60.0, 16000.0)
+        .smoothing(false, 3)
+        .build()
+        .expect("valid test objective data")
 }
 
 #[test]

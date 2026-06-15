@@ -4,7 +4,6 @@ mod tests {
     use autoeq::Curve;
     use autoeq::cli::Args;
     use autoeq::PeqModel;
-    use autoeq::loss::LossType;
     use clap::Parser;
     use ndarray::Array1;
 
@@ -37,41 +36,20 @@ mod tests {
             ..Default::default()
         };
 
-        let objective_data = autoeq::optim::ObjectiveData {
-            freqs: freqs.clone(),
-            deviation: &input_spl - &target_spl,
-            target: target_spl.clone(),
-            srate: 48000.0,
-            min_spacing_oct: 0.1,
-            spacing_weight: 0.0,
-            max_db: 10.0,
-            min_db: -10.0,
-            min_freq: 20.0,
-            max_freq: 20000.0,
-            peq_model: PeqModel::Pk,
-            loss_type: LossType::HeadphoneFlat,
-            speaker_score_data: None,
-            headphone_score_data: None,
-            input_curve: None,
-            drivers_data: None,
-            fixed_crossover_freqs: None,
-            penalty_w_ceiling: 0.0,
-            penalty_w_spacing: 0.0,
-            penalty_w_mingain: 0.0,
-            integrality: None,
-            multi_objective: None,
-            smooth: false,
-            smooth_n: 3,
-            max_boost_envelope: None,
-            min_cut_envelope: None,
-            epa_config: None,
-            temporal_masking_modes: Vec::new(),
-            detected_problems: Vec::new(),
-            null_suppression: None,
-            asymmetric_loss_config: autoeq::loss::AsymmetricLossConfig::default(),
-            smoothness_penalty: None,
-            audibility_deadband: None,
-        };
+        let objective_data = autoeq::optim::ObjectiveDataBuilder::headphone_flat(
+            freqs.clone(),
+            target_spl.clone(),
+            &input_spl - &target_spl,
+            48000.0,
+            PeqModel::Pk,
+        )
+        .min_spacing_oct(0.1)
+        .max_db(10.0)
+        .min_db(-10.0)
+        .freq_range(20.0, 20000.0)
+        .smoothing(false, 3)
+        .build()
+        .expect("valid test objective data");
 
         let opt_params = vec![500.0, 2.0, -2.0]; // Example PEQ params
 

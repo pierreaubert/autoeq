@@ -180,7 +180,7 @@ pub(super) fn compare_scorecards(
         let below_max = c_rough <= SCORECARD_ROUGHNESS_MAX;
         let baseline_already_violated = b_rough > SCORECARD_ROUGHNESS_MAX;
         let no_worse = c_rough <= b_rough * SCORECARD_ROUGHNESS_TOLERANCE;
-        let rough_ok = (below_max && no_worse) || (baseline_already_violated && no_worse);
+        let rough_ok = (baseline_already_violated || below_max) && no_worse;
         checks.push((
             "roughness",
             rough_ok,

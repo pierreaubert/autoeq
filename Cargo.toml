@@ -144,6 +144,7 @@ name = "headphone_loss_validation"
 tempfile = "3.23"
 assert_fs = "1.0"
 serial_test = "3"
+tokio = { version = "1", features = ["rt-multi-thread"] }
 
 # Plotly's `webdriver-downloader` dependency needs a small fix to build reliably
 # on recent Rust toolchains. math-audio applies the same patch.

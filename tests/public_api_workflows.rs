@@ -6,10 +6,6 @@
 //! from `data_tests/` so they can run from a workspace checkout.
 
 use std::path::PathBuf;
-#[cfg(feature = "plotly")]
-use std::sync::Arc;
-#[cfg(feature = "plotly")]
-use std::task::{Context, Poll, Wake};
 
 use autoeq::Curve;
 use autoeq::cli::Args;
@@ -26,26 +22,14 @@ use autoeq::workflow::{
 use autoeq::x2peq::{peq2x, x2peq};
 use ndarray::Array1;
 
-/// Minimal spin-lock executor for the one `async` public function we exercise.
-/// The futures involved are effectively synchronous (they do not rely on a
-/// reactor), so busy-polling until `Ready` is sufficient for testing.
+/// Run the one `async` public function we exercise on a Tokio runtime.
+///
+/// `plot_results` is normally synchronous for the `plotly` feature, but the
+/// optional `plotly_static` PNG-export path needs a Tokio reactor, so we use a
+/// real runtime here instead of a hand-rolled executor.
 #[cfg(feature = "plotly")]
 fn block_on<F: std::future::Future>(fut: F) -> F::Output {
-    struct DummyWaker;
-    impl Wake for DummyWaker {
-        fn wake(self: Arc<Self>) {}
-    }
-
-    let waker = Arc::new(DummyWaker).into();
-    let mut context = Context::from_waker(&waker);
-    let mut pinned = Box::pin(fut);
-
-    loop {
-        match pinned.as_mut().poll(&mut context) {
-            Poll::Ready(value) => return value,
-            Poll::Pending => std::thread::yield_now(),
-        }
-    }
+    tokio::runtime::Runtime::new().unwrap().block_on(fut)
 }
 
 /// Build a headphone-style measurement with a mild bass bump.

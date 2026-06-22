@@ -8,8 +8,8 @@
 use std::path::PathBuf;
 
 use autoeq::Curve;
-use autoeq::cli::Args;
 use autoeq::PeqModel;
+use autoeq::cli::Args;
 use autoeq::iir::{Biquad, BiquadFilterType};
 use autoeq::loss::{CrossoverType, DriverMeasurement, DriversLossData};
 use autoeq::read::{
@@ -78,8 +78,14 @@ fn test_optimize_headphone_happy_path() {
     args.min_db = 1.0;
     args.max_db = 6.0;
 
-    let result = optimize_headphone(&csv_path, &target, &autoeq::OptimParams::from(&args), None, None::<fn(&_) -> _>)
-        .expect("headphone optimization should succeed");
+    let result = optimize_headphone(
+        &csv_path,
+        &target,
+        &autoeq::OptimParams::from(&args),
+        None,
+        None::<fn(&_) -> _>,
+    )
+    .expect("headphone optimization should succeed");
 
     assert!(
         !result.biquads.is_empty(),
@@ -121,7 +127,13 @@ fn test_optimize_headphone_missing_file_error_path() {
     };
     let args = Args::headphone_defaults();
 
-    let result = optimize_headphone(&missing, &target, &autoeq::OptimParams::from(&args), None, None::<fn(&_) -> _>);
+    let result = optimize_headphone(
+        &missing,
+        &target,
+        &autoeq::OptimParams::from(&args),
+        None,
+        None::<fn(&_) -> _>,
+    );
     assert!(
         result.is_err(),
         "optimizing a missing measurement should return an error"

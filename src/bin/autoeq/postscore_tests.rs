@@ -2,8 +2,8 @@
 mod tests {
     use crate::postscore::{PostOptMetrics, compute_peq_cached, compute_post_optimization_metrics};
     use autoeq::Curve;
-    use autoeq::cli::Args;
     use autoeq::PeqModel;
+    use autoeq::cli::Args;
     use clap::Parser;
     use ndarray::Array1;
 

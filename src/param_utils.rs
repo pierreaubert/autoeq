@@ -195,10 +195,7 @@ impl PeqLayout for PeqModel {
         let sign = if i.is_multiple_of(2) { 0.5 } else { -0.5 };
 
         if let Some(type_idx) = l.type_idx {
-            group.push(0.0_f64.clamp(
-                lower_bounds[type_idx],
-                upper_bounds[type_idx],
-            ));
+            group.push(0.0_f64.clamp(lower_bounds[type_idx], upper_bounds[type_idx]));
         }
 
         let freq = lower_bounds[l.freq_idx]

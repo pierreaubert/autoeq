@@ -1,8 +1,8 @@
 //! Test metaheuristics callback support
 
 use autoeq::OptimParams;
-use autoeq::cli::Args;
 use autoeq::PeqModel;
+use autoeq::cli::Args;
 use autoeq::de::CallbackAction;
 use autoeq::optim_mh::{MHIntermediate, create_mh_callback, optimize_filters_mh_with_callback};
 use autoeq::workflow::{initial_guess, setup_bounds};
@@ -17,15 +17,21 @@ fn create_test_objective_data() -> autoeq::optim::ObjectiveData {
     let target = Array1::from(vec![1.0, 1.0, 1.0]);
     let deviation = Array1::from(vec![0.5, 0.5, 0.5]);
 
-    autoeq::optim::ObjectiveDataBuilder::speaker_flat(freqs, target, deviation, 48000.0, PeqModel::Pk)
-        .min_spacing_oct(0.5)
-        .spacing_weight(20.0)
-        .max_db(3.0)
-        .min_db(1.0)
-        .freq_range(60.0, 16000.0)
-        .smoothing(false, 3)
-        .build()
-        .expect("valid test objective data")
+    autoeq::optim::ObjectiveDataBuilder::speaker_flat(
+        freqs,
+        target,
+        deviation,
+        48000.0,
+        PeqModel::Pk,
+    )
+    .min_spacing_oct(0.5)
+    .spacing_weight(20.0)
+    .max_db(3.0)
+    .min_db(1.0)
+    .freq_range(60.0, 16000.0)
+    .smoothing(false, 3)
+    .build()
+    .expect("valid test objective data")
 }
 
 #[test]

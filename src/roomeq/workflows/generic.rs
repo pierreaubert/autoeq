@@ -1,4 +1,3 @@
-// r2factor:facade — do not pass this file back into r2factor
 // Generic/custom workflow executor.
 //
 // This is a minimal, testable executor for ad-hoc/custom layouts. It

@@ -60,13 +60,7 @@ impl ObjectiveContext<'_> {
     pub fn smoothness_penalty(&self, peq_spl: &Array1<f64>) -> f64 {
         self.smoothness_penalty
             .map(|cfg| {
-                compute_smoothness_penalty(
-                    peq_spl,
-                    self.freqs,
-                    self.min_freq,
-                    self.max_freq,
-                    cfg,
-                )
+                compute_smoothness_penalty(peq_spl, self.freqs, self.min_freq, self.max_freq, cfg)
             })
             .unwrap_or(0.0)
     }

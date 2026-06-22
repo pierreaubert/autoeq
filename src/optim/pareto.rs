@@ -4,8 +4,8 @@
 //! "Multi-Objective Genetic Algorithms for Loudspeaker Equalization"
 //! "Pareto-Optimal Solutions for Loudspeaker System Design"
 
-use crate::optim::ObjectiveData;
 use crate::OptimParams;
+use crate::optim::ObjectiveData;
 
 /// Pareto-optimal filter solution
 #[derive(Debug, Clone)]

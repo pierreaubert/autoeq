@@ -35,6 +35,7 @@ dev:
 
 # ----------------------------------------------------------------------
 # TEST
+# we use --release (faster overall since the tests do some computations)
 # ----------------------------------------------------------------------
 
 [group('test')]
@@ -43,12 +44,9 @@ check:
 
 [group('test')]
 test:
-	cargo test --lib --bins --tests --examples
+	cargo test --lib --bins --tests --examples --release
 
-# Memory-capped integration test runner for autoeq.
-#
-# The BEM multimode tests spin up one optimizer per test × `cargo test`'s
-# worker count. Each optimizer internally forks rayon evaluators over all
+# Each optimizer internally forks rayon evaluators over all
 # cores, so the effective thread count is num_cpus × num_cpus. On small-
 # RAM boxes this OOMs. Cap via `RUST_TEST_THREADS` (default = 2 so BEM
 # tests still interleave but memory stays bounded). Override with
@@ -107,6 +105,7 @@ dist-plot-bins:
 clean:
 	cargo clean
 	find . -name '*~' -exec rm {} \; -print
+	rm -f *.wav
 
 # ----------------------------------------------------------------------
 # DOWNLOAD

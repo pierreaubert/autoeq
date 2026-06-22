@@ -1,4 +1,10 @@
-# 0.4.46 - Unreleased
+# 0.4.47 -- unreleased
+
+## Fixes
+
+- Cleanup
+
+# 0.4.46
 
 ## New features
 

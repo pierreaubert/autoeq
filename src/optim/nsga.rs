@@ -171,8 +171,9 @@ fn choose_compromise<'a>(
     }
 
     front.iter().min_by(|a, b| {
-        super::misc::compromise_distance(&a.objectives, &ideal, &nadir, &weights)
-            .total_cmp(&super::misc::compromise_distance(&b.objectives, &ideal, &nadir, &weights))
+        super::misc::compromise_distance(&a.objectives, &ideal, &nadir, &weights).total_cmp(
+            &super::misc::compromise_distance(&b.objectives, &ideal, &nadir, &weights),
+        )
     })
 }
 

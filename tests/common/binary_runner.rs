@@ -55,7 +55,9 @@ impl Default for ProcessBinaryRunner {
 
 impl BinaryRunner for ProcessBinaryRunner {
     fn run(&self, binary_name: &str, args: &[&str]) -> std::io::Result<Output> {
-        Command::new(self.bin_dir.join(binary_name)).args(args).output()
+        Command::new(self.bin_dir.join(binary_name))
+            .args(args)
+            .output()
     }
 }
 
@@ -66,10 +68,7 @@ impl BinaryRunner for ProcessBinaryRunner {
 #[derive(Debug, Default, Clone)]
 pub struct MockBinaryRunner {
     /// Key: binary name. Value: list of (argument list, desired output).
-    pub responses: std::collections::HashMap<
-        String,
-        Vec<(Vec<String>, std::process::Output)>,
-    >,
+    pub responses: std::collections::HashMap<String, Vec<(Vec<String>, std::process::Output)>>,
 }
 
 impl MockBinaryRunner {

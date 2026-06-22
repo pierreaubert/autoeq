@@ -154,10 +154,7 @@ impl MockOptimizerBackend {
     }
 
     /// Set a separate result for local-refinement calls.
-    pub fn with_refine_result(
-        mut self,
-        result: Result<(String, f64), (String, f64)>,
-    ) -> Self {
+    pub fn with_refine_result(mut self, result: Result<(String, f64), (String, f64)>) -> Self {
         self.refine_result = Some(result);
         self
     }
@@ -196,6 +193,8 @@ impl OptimizerBackend for MockOptimizerBackend {
         _params: &OptimParams,
         _algo_override: Option<&str>,
     ) -> Result<(String, f64), (String, f64)> {
-        self.refine_result.clone().unwrap_or_else(|| self.result.clone())
+        self.refine_result
+            .clone()
+            .unwrap_or_else(|| self.result.clone())
     }
 }

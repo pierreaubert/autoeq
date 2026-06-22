@@ -1,4 +1,4 @@
-//! Bass phase confidence gate — GD-Opt v2 Phase GD-1g.
+//! Bass phase confidence gate — GD-Opt v2
 //!
 //! The gate decides whether the measured phase in a batch of
 //! [`Curve`]s is trustworthy enough for the GD-Opt v2 bass-band

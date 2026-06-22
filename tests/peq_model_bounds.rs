@@ -4,8 +4,8 @@
 //! for the filter parameters according to its specification.
 
 use autoeq::OptimParams;
-use autoeq::cli::Args;
 use autoeq::PeqModel;
+use autoeq::cli::Args;
 use autoeq::workflow::setup_bounds;
 use clap::Parser;
 

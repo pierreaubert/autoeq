@@ -1,4 +1,3 @@
-// r2factor:facade — do not pass this file back into r2factor
 // Integration tests for route-specific workflow executors.
 
 use super::generic::GenericExecutor;

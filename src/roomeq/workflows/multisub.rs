@@ -1,4 +1,3 @@
-// r2factor:facade — do not pass this file back into r2factor
 // Multi-sub workflow executor.
 //
 // Placeholder executor for configurations with multiple physical subwoofers.

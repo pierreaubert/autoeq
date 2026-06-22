@@ -1,5 +1,5 @@
-use crate::PeqModel;
 use super::super::x2peq::x2spl;
+use crate::PeqModel;
 use ndarray::Array1;
 
 /// Data needed by the nonlinear ceiling constraint callback.

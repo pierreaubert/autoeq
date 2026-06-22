@@ -1,4 +1,3 @@
-// r2factor:facade — do not pass this file back into r2factor
 // Stereo 2.0 workflow executor.
 
 use super::super::optimize::RoomOptimizationResult;

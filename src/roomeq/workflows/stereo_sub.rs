@@ -1,4 +1,3 @@
-// r2factor:facade — do not pass this file back into r2factor
 // Stereo 2.1 workflow executor.
 
 use super::super::crossover;

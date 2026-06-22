@@ -108,7 +108,10 @@ impl InMemoryMeasurementCache {
 
     /// Pre-seed a cache entry.
     pub fn insert(&self, path: impl Into<PathBuf>, content: impl Into<String>) {
-        self.files.lock().unwrap().insert(path.into(), content.into());
+        self.files
+            .lock()
+            .unwrap()
+            .insert(path.into(), content.into());
     }
 
     /// Return the content stored under `path`, if any.

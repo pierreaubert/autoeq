@@ -251,7 +251,10 @@ fn spatial_robustness_advisories_raised_for_multiple_measurements() {
         .get("L")
         .unwrap();
     assert!(
-        report.advisories.iter().any(|a| a.contains("spatial_variance")),
+        report
+            .advisories
+            .iter()
+            .any(|a| a.contains("spatial_variance")),
         "should raise a spatial-robustness advisory for multiple measurements: {:?}",
         report.advisories
     );

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 mod common;
 
-use common::binary_runner::{run_roomeq, BinaryRunner, ProcessBinaryRunner};
+use common::binary_runner::{BinaryRunner, ProcessBinaryRunner, run_roomeq};
 
 #[test]
 fn test_roomeq_stereo_config() {
@@ -60,7 +60,10 @@ fn test_roomeq_stereo_config() {
 
     // Validate left channel has plugins
     let left_channel = &channels["left"];
-    assert!(left_channel.get("channel").is_some(), "Missing channel name");
+    assert!(
+        left_channel.get("channel").is_some(),
+        "Missing channel name"
+    );
     assert!(left_channel.get("plugins").is_some(), "Missing plugins");
 
     let plugins = left_channel["plugins"]

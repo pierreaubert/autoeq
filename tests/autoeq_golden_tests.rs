@@ -119,10 +119,6 @@ fn test_peq_parameters_reasonable() {
         // Check Q
         let q_str = parts[q_idx.unwrap() + 1];
         let q: f64 = q_str.parse().expect("Failed to parse Q");
-        assert!(
-            (0.1..=10.0).contains(&q),
-            "Q out of range: {}",
-            q
-        );
+        assert!((0.1..=10.0).contains(&q), "Q out of range: {}", q);
     }
 }

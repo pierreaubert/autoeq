@@ -483,11 +483,11 @@ mod tests {
         };
 
         let target_curve = autoeq::workflow::build_target_curve(
-                &autoeq::workflow::TargetConfig::from(&args),
-                &freqs,
-                &curve,
-            )
-            .expect("build_target_curve should succeed");
+            &autoeq::workflow::TargetConfig::from(&args),
+            &freqs,
+            &curve,
+        )
+        .expect("build_target_curve should succeed");
         // Since SPL is zero, target_curve.spl == base_target
         assert!((target_curve.spl[0] - 0.0).abs() < 1e-12);
         assert!((target_curve.spl[1] - 0.0).abs() < 1e-12);

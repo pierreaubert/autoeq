@@ -344,8 +344,9 @@ fn choose_compromise<'a>(
     }
 
     front.iter().min_by(|a, b| {
-        super::misc::compromise_distance(&a.objectives, &ideal, &nadir, &weights)
-            .total_cmp(&super::misc::compromise_distance(&b.objectives, &ideal, &nadir, &weights))
+        super::misc::compromise_distance(&a.objectives, &ideal, &nadir, &weights).total_cmp(
+            &super::misc::compromise_distance(&b.objectives, &ideal, &nadir, &weights),
+        )
     })
 }
 
@@ -543,7 +544,12 @@ mod bo_branch_tests {
         let d1 = compromise_distance(&sol.objectives, &[5.0], &[5.0], &[1.0]);
         assert_eq!(d1, 0.0);
         // infinite span
-        let d2 = compromise_distance(&sol.objectives, &[f64::NEG_INFINITY], &[f64::INFINITY], &[1.0]);
+        let d2 = compromise_distance(
+            &sol.objectives,
+            &[f64::NEG_INFINITY],
+            &[f64::INFINITY],
+            &[1.0],
+        );
         assert_eq!(d2, 0.0);
         // normal span
         let d3 = compromise_distance(&sol.objectives, &[0.0], &[10.0], &[1.0]);

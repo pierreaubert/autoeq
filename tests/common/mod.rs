@@ -12,8 +12,6 @@ use autoeq::roomeq::types::{
 };
 use autoeq::{Curve, MeasurementSource};
 
-
-
 /// A fast, deterministic optimizer configuration for unit-style integration
 /// tests. It uses tiny population/iteration limits and disables refinement so
 /// the test suite stays fast.

@@ -1,5 +1,7 @@
 use crate::Curve;
-use crate::loss::{HeadphoneLossData, SpeakerLossData, flat_loss, headphone_loss, speaker_score_loss};
+use crate::loss::{
+    HeadphoneLossData, SpeakerLossData, flat_loss, headphone_loss, speaker_score_loss,
+};
 use crate::optim::loss::{Objective, ObjectiveContext};
 
 /// Speaker preference-score objective for [`LossType::SpeakerScore`].

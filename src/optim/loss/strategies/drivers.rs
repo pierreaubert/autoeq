@@ -31,7 +31,10 @@ impl Objective for DriversStrategy {
                     fixed.clone()
                 } else {
                     let xover_freqs_log10 = &x[2 * n_drivers..];
-                    xover_freqs_log10.iter().map(|f| 10.0_f64.powf(*f)).collect()
+                    xover_freqs_log10
+                        .iter()
+                        .map(|f| 10.0_f64.powf(*f))
+                        .collect()
                 };
                 drivers_flat_loss(
                     &self.data,
@@ -43,9 +46,14 @@ impl Objective for DriversStrategy {
                     ctx.max_freq,
                 )
             }
-            DriversMode::MultiSub => {
-                multisub_flat_loss(&self.data, gains, delays, ctx.srate, ctx.min_freq, ctx.max_freq)
-            }
+            DriversMode::MultiSub => multisub_flat_loss(
+                &self.data,
+                gains,
+                delays,
+                ctx.srate,
+                ctx.min_freq,
+                ctx.max_freq,
+            ),
         }
     }
 }

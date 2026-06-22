@@ -1,4 +1,3 @@
-// r2factor:facade — do not pass this file back into r2factor
 // Multi-seat workflow executor.
 //
 // Currently a high-level dispatcher: when multi-seat optimization is disabled

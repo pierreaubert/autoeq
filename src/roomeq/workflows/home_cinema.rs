@@ -1,4 +1,3 @@
-// r2factor:facade — do not pass this file back into r2factor
 // Home-cinema workflow executor (X.0 / X.1, any channel count).
 
 use super::super::crossover;
@@ -25,8 +24,8 @@ use super::misc::complex_sum_mains;
 use super::misc::normalize_crossover_delays;
 use super::run::run_channel_via_generic_path;
 use super::run::run_post_eq;
-use super::types::{WorkflowAssembly, WorkflowExecutor};
 use super::supporting_source::process_supporting_source_channels;
+use super::types::{WorkflowAssembly, WorkflowExecutor};
 use super::workflow::workflow_progress_callback;
 use super::workflow::workflow_stage_event;
 use crate::Curve;
@@ -80,10 +79,9 @@ impl WorkflowExecutor for HomeCinemaExecutor {
                 })?;
             match cfg {
                 SpeakerConfig::Single(s) => {
-                    let curve =
-                        load_source(s).map_err(|e| AutoeqError::InvalidMeasurement {
-                            message: e.to_string(),
-                        })?;
+                    let curve = load_source(s).map_err(|e| AutoeqError::InvalidMeasurement {
+                        message: e.to_string(),
+                    })?;
                     curves.insert(role.clone(), curve);
                     single_roles.push(role.clone());
                 }

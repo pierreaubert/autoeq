@@ -33,7 +33,7 @@ clap = { version = "4.5", features = ["derive"] }
 csv = "1.4"
 directories = "6"
 env_logger = "0.11"
-log = "0.4"
+log = "0.4.28"
 num_cpus = "1.17"
 num-complex = "0.4"
 nalgebra = { version = "0.33", default-features = false, features = ["std"] }

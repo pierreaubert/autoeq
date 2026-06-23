@@ -11,6 +11,23 @@ AutoEQ and RoomEQ are Rust CLIs for computing corrections.
 
 **Note:** A graphical desktop application is available in a separate repository: [SotF](https://github.com/pierreaubert/sotf)
 
+## Documentation
+
+### AutoEQ
+
+- [AutoEQ Manual](docs/AUTOEQ_MANUAL.md) — user guide for speaker and headphone EQ
+
+### RoomEQ
+
+- [RoomEQ 101](docs/ROOMEQ_101.md) — getting started with RoomEQ concepts and workflow
+- [RoomEQ Manual](docs/ROOMEQ_MANUAL.md) — complete user guide for multi-channel room correction
+- [RoomEQ Input Format](docs/ROOMEQ_INPUT_FORMAT.md) — JSON configuration schema and examples
+- [RoomEQ Output Format](docs/ROOMEQ_OUTPUT_FORMAT.md) — filter output and DSP chain description
+
+### General
+
+- [References](docs/REFERENCES.md) — papers, algorithms, and measurement resources
+
 ## Capabilities
 
 ### Supported Use Cases
@@ -50,95 +67,9 @@ AutoEQ and RoomEQ are Rust CLIs for computing corrections.
 
 ## AutoEQ CLI
 
-The `autoeq` binary optimizes EQ for individual speakers or headphones.
+The `autoeq` binary optimizes EQ for individual speakers (anechoic) or headphones.
 
-### Basic Usage
-
-```bash
-# From spinorama.org API data
-cargo run --bin autoeq --release -- \
-  --speaker="JBL M2" --version eac --measurement CEA2034 \
-  --algo autoeq:cobyla -n 7
-
-# From local CSV file (format: frequency,spl)
-cargo run --bin autoeq --release -- \
-  --curve measurements.csv --target harman.csv \
-  --algo autoeq:de -n 5
-```
-
-### Finding Speakers and Measurements
-
-```bash
-# List all speakers
-curl http://api.spinorama.org/v1/speakers
-
-# Get versions for a speaker
-curl "http://api.spinorama.org/v1/speakers/JBL%20M2/versions"
-
-# Get measurements for a speaker/version
-curl "http://api.spinorama.org/v1/speakers/JBL%20M2/versions/eac/measurements"
-```
-
-### Key Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `-n, --num-filters` | 7 | Number of IIR filters |
-| `--algo` | autoeq:cobyla | Optimization algorithm |
-| `--loss` | speaker-flat | Loss function |
-| `--peq-model` | pk | Filter structure model |
-| `--min-freq` / `--max-freq` | 60 / 16000 | Frequency range for filters |
-| `--min-q` / `--max-q` | 1 / 3 | Q factor limits |
-| `--min-db` / `--max-db` | 1 / 3 | Gain limits (dB) |
-| `--maxeval` | 2000 | Maximum optimizer evaluations |
-| `--refine` | false | Run local refinement after global optimization |
-
-### Algorithm Selection
-
-```bash
-# List all available algorithms
-cargo run --bin autoeq --release -- --algo-list
-
-# Recommended: global search + local refinement
-cargo run --bin autoeq --release -- \
-  --algo autoeq:isres --refine --local-algo cobyla \
-  --speaker="KEF R3" --version asr --measurement CEA2034
-```
-
-### Differential Evolution Options
-
-When using `autoeq:de`, additional parameters control the optimizer:
-
-```bash
-# List available strategies
-cargo run --bin autoeq --release -- --strategy-list
-
-# Use adaptive strategy
-cargo run --bin autoeq --release -- \
-  --algo autoeq:de --strategy adaptivebin \
-  --adaptive-weight-f 0.8 --adaptive-weight-cr 0.7 \
-  --speaker="KEF R3" --version asr --measurement CEA2034
-```
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--strategy` | currenttobest1bin | DE mutation strategy |
-| `--population` | 300 | Population size |
-| `--tolerance` | 0.001 | Relative convergence tolerance |
-| `--atolerance` | 0.0001 | Absolute convergence tolerance |
-| `--recombination` | 0.9 | Crossover probability |
-| `--seed` | random | Random seed for reproducibility |
-
-### Headphone Example
-
-```bash
-cargo run --bin autoeq --release -- \
-  --curve headphone_measurement.csv \
-  --target harman-over-ear-2018.csv \
-  --loss headphone-score \
-  --algo mh:rga -n 5 --maxeval 20000 \
-  --min-freq 20 --max-freq 10000 --peq-model hp-pk-lp
-```
+See the [AutoEQ Manual](docs/AUTOEQ_MANUAL.md) for usage, parameters, algorithm selection, and examples.
 
 ---
 
@@ -146,104 +77,22 @@ cargo run --bin autoeq --release -- \
 
 The `roomeq` binary optimizes multi-channel speaker systems with JSON configuration.
 
-### Basic Usage
-
-```bash
-cargo run --bin roomeq --release -- --config room_config.json --output dsp_chain.json
-```
-
-### Features (v2)
-
-- **Processing Modes:**
-  - `low_latency` (Mode A): IIR-only filters (< 5ms latency)
-  - `phase_linear` (Mode B): FIR filters for linear phase
-  - `hybrid` (Mode C): IIR for bass, FIR for mids/highs (best balance)
-- **Bass Management:** Unified configuration for Single Sub, Multi-Sub (MSO), and Double Bass Array (DBA) strategies.
-- **Advanced Calibration:**
-  - **Group Delay Optimization (GD-Opt):** Aligns subwoofer phase slope to mains.
-  - **Voice of God (VoG):** Timbre matches satellite channels to a reference.
-- **Multi-Driver Speakers:** Active crossover optimization with polarity inversion testing.
-
-### Configuration File Format (v2)
-
-**2.1 System with Bass Management (Hybrid Mode):**
-
-```json
-{
-  "version": "1.2.0",
-  "system": {
-    "model": "stereo",
-    "speakers": {
-      "L": "left", "R": "right", "LFE": "sub"
-    },
-    "subwoofers": {
-      "config": "single",
-      "crossover": "bass_xo",
-      "sub": "L"
-    }
-  },
-  "crossovers": {
-    "bass_xo": {
-      "type": "LR24",
-      "frequency": 80.0
-    }
-  },
-  "speakers": {
-    "left": { "path": "measurements/left.csv" },
-    "right": { "path": "measurements/right.csv" },
-    "sub": { "path": "measurements/subwoofer.csv" }
-  },
-  "optimizer": {
-    "processing_mode": "hybrid",
-    "loss_type": "flat",
-    "algorithm": "autoeq:de",
-    "num_filters": 10,
-    "min_q": 0.5, "max_q": 10.0,
-    "min_db": -12.0, "max_db": 12.0,
-    "min_freq": 20.0, "max_freq": 20000.0,
-    "max_iter": 10000
-  }
-}
-```
-
-**Double Bass Array (DBA):**
-
-```json
-{
-  "version": "1.2.0",
-  "system": {
-    "model": "stereo",
-    "speakers": { "L": "l", "R": "r", "LFE": "dba" },
-    "subwoofers": {
-      "config": "dba",
-      "crossover": "dba_xo"
-    }
-  },
-  "crossovers": {
-    "dba_xo": { "type": "LR24", "frequency": 100.0 }
-  },
-  "speakers": {
-    "l": { "path": "left.csv" },
-    "r": { "path": "right.csv" },
-    "dba": {
-      "name": "DBA",
-      "front": [ { "path": "front_sub1.csv" }, { "path": "front_sub2.csv" } ],
-      "rear": [ { "path": "rear_sub1.csv" }, { "path": "rear_sub2.csv" } ]
-    }
-  },
-  "optimizer": {
-    "processing_mode": "low_latency"
-  }
-}
-```
-
-### Output Schema
-
-```bash
-cargo run --bin roomeq --release -- --schema
-```
+See the [RoomEQ Manual](docs/ROOMEQ_MANUAL.md), [Input Format](docs/ROOMEQ_INPUT_FORMAT.md), and [Output Format](docs/ROOMEQ_OUTPUT_FORMAT.md) for complete documentation.
 
 ---
+
+## Installation
+
+If you do not have cargo already, install it with [rustup](https://rustup.rs/). Cargo is a Rust package manager.
+Then:
+
+```bash
+cargo install autoeq \
+   --bin autoeq \
+   --bin roomeq \
+   --bin autoeq-download-speakers \
+   --bin convert-recording
+```
 
 ## Development
 

@@ -106,6 +106,8 @@ clean:
 	cargo clean
 	find . -name '*~' -exec rm {} \; -print
 	rm -f *.wav
+	rm -fr fuzzer_output
+	rm -fr data_generated
 
 # ----------------------------------------------------------------------
 # DOWNLOAD

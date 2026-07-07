@@ -58,7 +58,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install Just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v4
 
       - name: Run RoomEQ CI QA
         run: just qa-roomeq-ci

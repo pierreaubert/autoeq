@@ -36,7 +36,7 @@ env_logger = "0.11"
 log = "0.4.28"
 num_cpus = "1.17"
 num-complex = "0.4"
-nalgebra = { version = "0.33", default-features = false, features = ["std"] }
+nalgebra = { version = "0.35", default-features = false, features = ["std"] }
 metaheuristics-nature = "10.1"
 rustfft = "6.4"
 hound = "3.5"

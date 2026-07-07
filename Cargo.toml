@@ -45,7 +45,7 @@ hound = "3.5"
 # `autoeq` binary degrades gracefully and skips chart generation when off.
 plotly = { version = "0.13", optional = true }
 rand = "0.9.2"
-rand_chacha = "0.9"
+rand_chacha = "0.10"
 reqwest = { version = "0.13", features = ["json"] }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"

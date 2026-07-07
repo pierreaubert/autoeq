@@ -218,7 +218,7 @@ dependencies = [
  "oxiblas-ndarray",
  "plotly",
  "plotly_static",
- "rand 0.9.4",
+ "rand 0.10.2",
  "rand_chacha 0.9.0",
  "rayon",
  "reqwest 0.13.4",

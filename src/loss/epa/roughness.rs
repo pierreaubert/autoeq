@@ -61,6 +61,21 @@ mod tests {
     }
 
     #[test]
+    fn within_critical_band_pair_is_rougher_than_widely_separated_pair() {
+        let n = 3000;
+        let freqs: Vec<f64> = (0..n)
+            .map(|i| 20.0 + (3000.0 - 20.0) * i as f64 / n as f64)
+            .collect();
+        let close = spectral_roughness(&freqs, &peaked_response(&freqs, &[1000.0, 1070.0]));
+        let separated = spectral_roughness(&freqs, &peaked_response(&freqs, &[1000.0, 1500.0]));
+
+        assert!(
+            close > separated + 0.01,
+            "within-band pair should be rougher: close={close}, separated={separated}"
+        );
+    }
+
+    #[test]
     fn test_many_peaks_higher_roughness() {
         let n = 2000;
         let freqs: Vec<f64> = (0..n)

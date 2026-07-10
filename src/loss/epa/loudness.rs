@@ -1,5 +1,10 @@
 pub use math_audio_dsp::psychoacoustics::{OUTER_EAR_TF, THRESHOLD_IN_QUIET, excitation_pattern};
 
+/// Calibration for the simplified 24-Bark-band model so the defining
+/// 1 kHz / 40 phon stimulus integrates to 1 sone. Scaling every specific-
+/// loudness band preserves spectral shape, sharpness, and phon ratios.
+const ZWICKER_SONE_REFERENCE_SCALE: f64 = 1.882_627_955_030_44;
+
 /// Compute specific loudness (sone/Bark) for each of 24 Bark bands.
 ///
 /// Steps:
@@ -11,7 +16,12 @@ pub use math_audio_dsp::psychoacoustics::{OUTER_EAR_TF, THRESHOLD_IN_QUIET, exci
 /// `freqs` and `spl_db` define the frequency response. The response is
 /// calibrated so its interpolated 1 kHz level equals `listening_level_phon`.
 pub fn specific_loudness(freqs: &[f64], spl_db: &[f64], listening_level_phon: f64) -> [f64; 24] {
-    math_audio_dsp::psychoacoustics::specific_loudness(freqs, spl_db, listening_level_phon)
+    let mut specific =
+        math_audio_dsp::psychoacoustics::specific_loudness(freqs, spl_db, listening_level_phon);
+    for value in &mut specific {
+        *value *= ZWICKER_SONE_REFERENCE_SCALE;
+    }
+    specific
 }
 
 /// Total loudness in sone: integral of specific loudness across all Bark bands.
@@ -23,6 +33,7 @@ pub fn total_loudness(specific: &[f64; 24]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::loss::epa::bark::BARK_CENTER_FREQUENCIES;
 
     fn make_flat_response(level_db: f64) -> (Vec<f64>, Vec<f64>) {
         let n = 1000;
@@ -30,6 +41,17 @@ mod tests {
             .map(|i| 20.0 + (16000.0 - 20.0) * i as f64 / n as f64)
             .collect();
         let spl = vec![level_db; n];
+        (freqs, spl)
+    }
+
+    fn make_one_khz_tone(level_db: f64) -> (Vec<f64>, Vec<f64>) {
+        let freqs = BARK_CENTER_FREQUENCIES.to_vec();
+        let mut spl = vec![-100.0; freqs.len()];
+        let one_khz_band = freqs
+            .iter()
+            .position(|frequency| (*frequency - 1_000.0).abs() < f64::EPSILON)
+            .expect("1 kHz Bark center");
+        spl[one_khz_band] = level_db;
         (freqs, spl)
     }
 
@@ -80,6 +102,31 @@ mod tests {
         assert!(
             (2000.0..=5000.0).contains(&peak_freq),
             "Peak specific loudness at band {max_band} ({peak_freq} Hz), expected 2-5 kHz"
+        );
+    }
+
+    #[test]
+    fn one_khz_40_phon_reference_is_about_one_sone() {
+        let (freqs, spl) = make_one_khz_tone(40.0);
+        let loudness = total_loudness(&specific_loudness(&freqs, &spl, 40.0));
+
+        assert!(
+            (0.9..=1.1).contains(&loudness),
+            "40 phon at 1 kHz is the 1-sone reference, got {loudness} sone"
+        );
+    }
+
+    #[test]
+    fn ten_phon_increase_approximately_doubles_loudness() {
+        let (freqs40, spl40) = make_one_khz_tone(40.0);
+        let (freqs50, spl50) = make_one_khz_tone(50.0);
+        let loudness40 = total_loudness(&specific_loudness(&freqs40, &spl40, 40.0));
+        let loudness50 = total_loudness(&specific_loudness(&freqs50, &spl50, 50.0));
+        let ratio = loudness50 / loudness40;
+
+        assert!(
+            (1.6..=2.5).contains(&ratio),
+            "+10 phon should approximately double loudness, got {ratio}x"
         );
     }
 }

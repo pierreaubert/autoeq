@@ -315,8 +315,8 @@ pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
             // First filter is highpass - fixed 3-param layout
             lower_bounds[0] = 20.0_f64.max(params.min_freq).log10();
             upper_bounds[0] = 120.0_f64.min(params.min_freq + 20.0).log10();
-            lower_bounds[1] = 1.0;
-            upper_bounds[1] = 1.5; // could be tuned as a function of max_db
+            lower_bounds[1] = 1.0_f64.max(q_lower).min(params.max_q);
+            upper_bounds[1] = 1.5_f64.max(lower_bounds[1]).min(params.max_q);
             lower_bounds[2] = 0.0;
             upper_bounds[2] = 0.0;
         }
@@ -339,8 +339,9 @@ pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
             if ppf == 3 {
                 lower_bounds[last_idx] = (params.max_freq - 2000.0).max(5000.0).log10();
                 upper_bounds[last_idx] = params.max_freq.log10();
-                lower_bounds[last_idx + 1] = 1.0;
-                upper_bounds[last_idx + 1] = 1.5;
+                lower_bounds[last_idx + 1] = 1.0_f64.max(q_lower).min(params.max_q);
+                upper_bounds[last_idx + 1] =
+                    1.5_f64.max(lower_bounds[last_idx + 1]).min(params.max_q);
                 lower_bounds[last_idx + 2] = 0.0;
                 upper_bounds[last_idx + 2] = 0.0;
             }
@@ -360,12 +361,15 @@ pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
         }
     }
 
-    // Model-specific fixed HP/LP/shelf constraints above can push anchor
-    // frequencies outside narrow optimization ranges (for example a high
-    // shelf in a 20-400 Hz driver-linearization pass). Keep every frequency
-    // dimension valid so initial guesses and optimizers cannot panic.
+    // Model-specific fixed HP/LP/shelf anchors must not escape the measured
+    // optimization band. Clamp both ends before repairing any collapsed range
+    // so every candidate remains meaningful for the available data.
+    let min_log_freq = params.min_freq.log10();
+    let max_log_freq = params.max_freq.log10();
     for i in 0..params.num_filters {
         let freq_idx = if ppf == 3 { i * ppf } else { i * ppf + 1 };
+        lower_bounds[freq_idx] = lower_bounds[freq_idx].clamp(min_log_freq, max_log_freq);
+        upper_bounds[freq_idx] = upper_bounds[freq_idx].clamp(min_log_freq, max_log_freq);
         if lower_bounds[freq_idx] > upper_bounds[freq_idx] {
             upper_bounds[freq_idx] = lower_bounds[freq_idx];
         }

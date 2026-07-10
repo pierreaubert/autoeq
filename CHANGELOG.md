@@ -38,6 +38,13 @@
 - Added property-based regression coverage across every PEQ model for parameter
   layout and biquad round-trips, finite checked responses, and generated
   optimizer-bound/initial-candidate invariants.
+- Added standards-anchored psychoacoustic checks for the 1-sone and 1-acum
+  references, phon-to-loudness scaling, and critical-band roughness; calibrated
+  the 24-band loudness model to its defining 1 kHz reference. RoomEQ QA now
+  rejects candidates that omit EPA metrics, and special-filter optimizer bounds
+  remain inside the measurement frequency and configured Q ranges. The
+  perceptual QA recipe now runs the current EPA and multiseat guardrail tests
+  through nextest and fails when a stale filter selects no tests.
 
 ## Fixes
 

@@ -601,12 +601,11 @@ qa-roomeq-phase-critical:
 
 [group('qa-roomeq')]
 qa-roomeq-perceptual:
-	cargo test -p autoeq perceptual_metrics --lib -- --nocapture
-	cargo test -p autoeq rejects_all_channel_multiseat_when_constraints_fail --lib -- --nocapture
-	cargo test -p autoeq rejects_all_channel_multiseat_when_broadband_level_collapses --lib -- --nocapture
-	cargo test -p autoeq reports_guardrail_rejection_without_claiming_applied --lib -- --nocapture
-	cargo test -p autoeq home_cinema_all_channel_multiseat_guardrail_reruns_and_reports_rejection --lib -- --nocapture
-	cargo test -p autoeq reports_all_channel_multiseat_null_guard --lib -- --nocapture
+	# nextest's explicit no-test failure prevents stale filters from producing a false-green QA run.
+	cargo nextest run -p autoeq --lib --no-tests fail -E 'test(/loss::epa::/)'
+	cargo nextest run -p autoeq --lib --no-tests fail -E 'test(/generate_validation_bundle_report_creates_json|correction_report_(rejected_guardrails|failed_constraints_and_null_advisory)/)'
+	cargo nextest run -p autoeq --lib --no-tests fail -E 'test(/home_cinema_(no_sub|with_sub)_multiseat_rejection_reports|run_channel_via_generic_path_multiseat_rejected_recovers|all_channel_multiseat_acceptance_rejects_subs/)'
+	cargo nextest run -p autoeq --bin roomeq-qa-quality --no-tests fail -E 'test(/scorecard_/)'
 
 [group('qa-roomeq')]
 qa-roomeq-gd:
@@ -638,4 +637,4 @@ qa-roomeq-ci:
 	cargo test -p autoeq home_cinema --lib -- --nocapture
 	cargo test -p autoeq home_cinema_bass_management --lib -- --nocapture
 	cargo test -p autoeq validate_bass_management --lib -- --nocapture
-	cargo test -p autoeq perceptual_metrics --lib -- --nocapture
+	just qa-roomeq-perceptual

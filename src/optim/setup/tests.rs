@@ -8,23 +8,32 @@ use crate::OptimParams;
 use crate::roomeq::OptimizerConfig;
 
 #[test]
-fn setup_bounds_keeps_shelf_filters_valid_in_narrow_ranges() {
-    let config = OptimizerConfig {
-        peq_model: "ls-pk-hs".to_string(),
-        num_filters: 2,
-        min_freq: 20.0,
-        max_freq: 400.0,
-        ..OptimizerConfig::default()
-    };
-    let params = OptimParams::from(&config);
-    let (lower_bounds, upper_bounds) = setup_bounds(&params);
+fn setup_bounds_keeps_special_filters_inside_narrow_measurement_ranges() {
+    for peq_model in ["ls-pk-hs", "hp-pk-lp"] {
+        let config = OptimizerConfig {
+            peq_model: peq_model.to_string(),
+            num_filters: 2,
+            min_freq: 20.0,
+            max_freq: 400.0,
+            min_q: 0.5,
+            max_q: 0.8,
+            ..OptimizerConfig::default()
+        };
+        let params = OptimParams::from(&config);
+        let (lower_bounds, upper_bounds) = setup_bounds(&params);
 
-    for (lower, upper) in lower_bounds.iter().zip(&upper_bounds) {
-        assert!(lower <= upper, "inverted bound: {lower} > {upper}");
+        for filter in 0..params.num_filters {
+            let offset = filter * 3;
+            assert!(lower_bounds[offset] >= params.min_freq.log10());
+            assert!(upper_bounds[offset] <= params.max_freq.log10());
+            assert!(lower_bounds[offset] <= upper_bounds[offset]);
+            assert!(lower_bounds[offset + 1] >= params.min_q);
+            assert!(upper_bounds[offset + 1] <= params.max_q);
+        }
+
+        let guess = initial_guess(&params, &lower_bounds, &upper_bounds);
+        assert_eq!(guess.len(), params.num_filters * 3);
     }
-
-    let guess = initial_guess(&params, &lower_bounds, &upper_bounds);
-    assert_eq!(guess.len(), params.num_filters * 3);
 }
 
 #[test]

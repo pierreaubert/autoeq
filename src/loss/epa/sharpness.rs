@@ -82,4 +82,16 @@ mod tests {
             "Broadband signal should have moderate sharpness, got {s} acum"
         );
     }
+
+    #[test]
+    fn one_khz_narrowband_reference_is_one_acum() {
+        let mut specific = [0.0; 24];
+        specific[8] = 1.0; // Ninth Bark band is centered at 1 kHz.
+        let value = sharpness(&specific);
+
+        assert!(
+            (value - 1.0).abs() <= 0.05,
+            "1 kHz narrowband reference should be 1 acum, got {value}"
+        );
+    }
 }

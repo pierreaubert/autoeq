@@ -170,6 +170,52 @@ fn scorecard_allows_small_roughness_regression_when_baseline_already_violates_li
     assert!(roughness.1, "{}", roughness.2);
 }
 
+fn scorecard_with_epa(
+    preference: Option<f64>,
+    sharpness: Option<f64>,
+    roughness: Option<f64>,
+) -> MetricScorecard {
+    MetricScorecard {
+        flat_loss: 1.0,
+        peak_residual_db: 1.0,
+        epa_preference: preference,
+        epa_sharpness: sharpness,
+        epa_roughness: roughness,
+        group_delay_std_ms: None,
+    }
+}
+
+#[test]
+fn scorecard_rejects_missing_candidate_psychoacoustic_metrics() {
+    let baseline = scorecard_with_epa(Some(8.0), Some(1.2), Some(0.3));
+    let candidate = scorecard_with_epa(None, None, None);
+    let checks = compare_scorecards(&baseline, &candidate);
+
+    for metric in ["epa_preference", "sharpness", "roughness"] {
+        let check = checks
+            .iter()
+            .find(|(name, _, _)| *name == metric)
+            .unwrap_or_else(|| panic!("missing {metric} QA check"));
+        assert!(!check.1, "{metric} omission passed: {}", check.2);
+        assert!(check.2.contains("omitted"), "{}", check.2);
+    }
+}
+
+#[test]
+fn scorecard_rejects_large_psychoacoustic_regressions() {
+    let baseline = scorecard_with_epa(Some(8.0), Some(1.2), Some(0.3));
+    let candidate = scorecard_with_epa(Some(4.0), Some(2.5), Some(1.1));
+    let checks = compare_scorecards(&baseline, &candidate);
+
+    for metric in ["epa_preference", "sharpness", "roughness"] {
+        let check = checks
+            .iter()
+            .find(|(name, _, _)| *name == metric)
+            .unwrap_or_else(|| panic!("missing {metric} QA check"));
+        assert!(!check.1, "{metric} regression passed: {}", check.2);
+    }
+}
+
 #[test]
 fn qa_seed_is_stable_and_label_specific() {
     assert_eq!(qa_seed("case:a"), qa_seed("case:a"));

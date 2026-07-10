@@ -1,7 +1,7 @@
 //! Generated regression tests for PEQ layouts and optimizer setup invariants.
 
 use crate::cli::Args;
-use crate::param_utils;
+use crate::param_utils::{self, PeqLayout};
 use crate::workflow::{initial_guess, setup_bounds};
 use crate::x2peq::{peq2x, try_x2spl, x2peq};
 use crate::{OptimParams, PeqModel};
@@ -125,6 +125,15 @@ proptest! {
         let (lower, upper) = setup_bounds(&params);
         let candidate = initial_guess(&params, &lower, &upper);
         let expected_len = num_filters * param_utils::params_per_filter(model);
+        let layout = model.layout();
+        let parameters_per_filter = model.params_per_filter();
+        let min_log_frequency = args.min_freq.log10();
+        let max_log_frequency = args.max_freq.log10();
+        let effective_gain_min = if args.min_db < 0.0 {
+            args.min_db
+        } else {
+            -3.0 * args.max_db
+        };
 
         prop_assert_eq!(lower.len(), expected_len);
         prop_assert_eq!(upper.len(), expected_len);
@@ -144,6 +153,20 @@ proptest! {
                 value >= lower && value <= upper,
                 "initial value {index}={value} is outside [{lower}, {upper}]"
             );
+        }
+
+        for filter in 0..num_filters {
+            let offset = filter * parameters_per_filter;
+            let frequency_index = offset + layout.freq_idx;
+            let q_index = offset + layout.q_idx;
+            let gain_index = offset + layout.gain_idx;
+
+            prop_assert!(lower[frequency_index] >= min_log_frequency);
+            prop_assert!(upper[frequency_index] <= max_log_frequency);
+            prop_assert!(lower[q_index] >= args.min_q.max(0.1));
+            prop_assert!(upper[q_index] <= args.max_q);
+            prop_assert!(lower[gain_index] >= effective_gain_min);
+            prop_assert!(upper[gain_index] <= args.max_db);
         }
     }
 }

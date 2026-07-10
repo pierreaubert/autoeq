@@ -13,6 +13,7 @@ use crate::Curve;
 use crate::PeqModel;
 use crate::loss::LossType;
 use crate::optim::{MultiObjectiveData, OptimizerBackend, RealOptimizerBackend};
+use crate::roomeq::rir_prototype::build_weighted_prototype;
 use crate::workflow::setup_objective_data;
 use clap::ValueEnum;
 use math_audio_iir_fir::Biquad;
@@ -251,6 +252,24 @@ fn optimize_channel_eq_multi_inner(
     backend: &dyn OptimizerBackend,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
     assert!(!curves.is_empty(), "curves must not be empty");
+
+    // Optionally collapse multiple measurements into a distance- and
+    // directivity-weighted prototype before applying the chosen strategy.
+    let mut prototype_holder: Vec<Curve> = Vec::with_capacity(1);
+    let curves: &[Curve] = if let Some(rir_cfg) = &multi_config.rir_prototype {
+        log::info!(
+            "Building RIR prototype from {} measurements (distance_mode={:?}, directivity={:?})",
+            curves.len(),
+            rir_cfg.distance_mode,
+            rir_cfg.directivity,
+        );
+        let prototype = build_weighted_prototype(curves, rir_cfg)
+            .map_err(|e| format!("Failed to build RIR prototype: {}", e))?;
+        prototype_holder.push(prototype.curve);
+        &prototype_holder
+    } else {
+        curves
+    };
 
     // =========================================================================
     // SpatialRobustness strategy: early return with single-curve optimization

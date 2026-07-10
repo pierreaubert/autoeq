@@ -1,4 +1,4 @@
-# 0.4.48 -- unreleased
+# 0.4.47 -- unreleased
 
 ## Fixes
 

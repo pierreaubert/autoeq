@@ -1,0 +1,21 @@
+target/
+target-static/
+.docker-target/
+dist/
+.git/
+data_cached/
+data_generated/
+data_tests/
+!data_tests/
+!data_tests/targets/
+!data_tests/targets/*.csv
+venv/
+*.md
+# AI assistant / code-graph state — large, machine-specific, never needed in
+# the build container.
+.claude/
+.tokensave/
+.serena/
+# Per-arch Xcode DerivedData for the AU plugins (host-arch binaries +
+# intermediates; never relevant inside a Linux/Windows build container).
+crates/sotf-plugins/crates/plugins-au/build/

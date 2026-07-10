@@ -1,0 +1,46 @@
+# Multi-stage build: Builder stage
+FROM ubuntu:24.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Etc/UTC
+
+# Install Rust 1.90 and build dependencies - combined into single layer
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    curl \
+    git \
+    build-essential \
+    gcc \
+    g++ \
+    pkg-config \
+    ca-certificates \
+    cmake \
+    ninja-build \
+    perl \
+    libssl-dev \
+    libsqlite3-dev \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp*
+
+# Install Rust 1.90 (pinned version for compatibility)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --default-toolchain 1.90.0 --profile minimal && \
+    rm -rf /root/.cargo/registry /root/.cargo/git
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Add the target
+RUN rustup target add x86_64-unknown-linux-gnu
+
+# Install just (command runner)
+RUN cargo install just --locked && \
+    rm -rf /root/.cargo/registry /root/.cargo/git
+
+WORKDIR /project
+
+# Copy source with .dockerignore in place
+COPY . .
+
+# Build release binary
+RUN cargo build --release --target x86_64-unknown-linux-gnu && \
+    find target/x86_64-unknown-linux-gnu/release -maxdepth 1 -type f -executable | xargs strip -v 2>/dev/null || true && \
+    rm -rf target/.rustc_info.json target/.fingerprint target/x86_64-unknown-linux-gnu/release/deps/*.d

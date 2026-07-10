@@ -10,6 +10,9 @@ fn interpolate_log_space_vals(
     let n_out = log_freq_out.len();
     let n_in = log_freq_in.len();
     let mut vals_out = Array1::zeros(n_out);
+    if n_in == 0 {
+        return vals_out;
+    }
 
     for i in 0..n_out {
         let target_log_freq = log_freq_out[i];
@@ -44,10 +47,8 @@ fn interpolate_log_space_vals(
             }
         } else {
             // Linear interpolation between surrounding points
-            let mut j = 0;
-            while j < n_in - 1 && log_freq_in[j + 1] < target_log_freq {
-                j += 1;
-            }
+            let upper = log_freq_in.partition_point(|&frequency| frequency < target_log_freq);
+            let j = upper.saturating_sub(1).min(n_in - 2);
 
             // Interpolate between j and j+1
             let denom = log_freq_in[j + 1] - log_freq_in[j];
@@ -73,10 +74,34 @@ fn interpolate_log_space_vals(
 /// * Interpolated SPL values on the target grid
 pub fn interpolate_log_space(freq_out: &Array1<f64>, curve: &Curve) -> Curve {
     let freq_in = &curve.freq;
+    debug_assert!(
+        freq_in
+            .as_slice()
+            .is_none_or(|frequencies| frequencies.windows(2).all(|w| w[0] <= w[1])),
+        "interpolate_log_space() requires sorted frequencies"
+    );
 
-    // Convert to log space for interpolation (clamp to 1e-6 to avoid ln(0) = -inf)
-    let log_freq_in: Vec<f64> = freq_in.iter().map(|&f| f.max(1e-6).ln()).collect();
-    let log_freq_out: Vec<f64> = freq_out.iter().map(|&f| f.max(1e-6).ln()).collect();
+    // A logarithm has no DC value. If either grid reaches DC, use a
+    // continuous hybrid axis: linear from DC to the first positive input bin,
+    // logarithmic above it. For strictly positive grids, retain ordinary
+    // log-frequency interpolation.
+    let needs_dc_axis = freq_in.first().is_some_and(|frequency| *frequency <= 0.0)
+        || freq_out.iter().any(|frequency| *frequency <= 0.0);
+    let first_positive = freq_in.iter().copied().find(|frequency| *frequency > 0.0);
+    let transform = |frequency: f64| match (needs_dc_axis, first_positive) {
+        (true, Some(pivot)) if frequency <= pivot => frequency / pivot,
+        (true, Some(pivot)) => 1.0 + (frequency / pivot).ln(),
+        (true, None) => frequency,
+        (false, _) => frequency.ln(),
+    };
+    let log_freq_in: Vec<f64> = freq_in
+        .iter()
+        .map(|&frequency| transform(frequency))
+        .collect();
+    let log_freq_out: Vec<f64> = freq_out
+        .iter()
+        .map(|&frequency| transform(frequency))
+        .collect();
 
     let spl_out = interpolate_log_space_vals(&log_freq_out, &log_freq_in, &curve.spl);
 
@@ -190,21 +215,17 @@ mod tests {
     #[test]
     fn test_interpolate_log_space_zero_freq() {
         let curve = Curve {
-            freq: Array1::from_vec(vec![0.0, 100.0, 1000.0, 10000.0]),
-            spl: Array1::from_vec(vec![80.0, 85.0, 90.0, 88.0]),
-            phase: None,
+            freq: Array1::from_vec(vec![0.0, 100.0]),
+            spl: Array1::from_vec(vec![0.0, 100.0]),
+            phase: Some(Array1::from_vec(vec![0.0, 50.0])),
             ..Default::default()
         };
-        let freq_out = Array1::from_vec(vec![50.0, 500.0, 5000.0]);
+        let freq_out = Array1::from_vec(vec![0.0, 50.0, 100.0]);
         let result = interpolate_log_space(&freq_out, &curve);
-        // No NaN or Inf in output
-        for &v in result.spl.iter() {
-            assert!(
-                v.is_finite(),
-                "interpolate_log_space produced non-finite value: {}",
-                v
-            );
-        }
+        // DC cannot participate in logarithmic interpolation. The segment
+        // from DC to the first positive bin must therefore be linear.
+        assert_eq!(result.spl.to_vec(), vec![0.0, 50.0, 100.0]);
+        assert_eq!(result.phase.unwrap().to_vec(), vec![0.0, 25.0, 50.0]);
     }
 
     #[test]

@@ -265,6 +265,18 @@ fn optimize_channel_eq_multi_inner(
         );
         let prototype = build_weighted_prototype(curves, rir_cfg)
             .map_err(|e| format!("Failed to build RIR prototype: {}", e))?;
+        if matches!(
+            multi_config.strategy,
+            MultiMeasurementStrategy::SpatialRobustness
+                | MultiMeasurementStrategy::MinimaxUncertainty
+        ) {
+            log::warn!(
+                "rir_prototype collapses {} measurements into one curve; \
+                 {:?} strategy will operate on the prototype only",
+                curves.len(),
+                multi_config.strategy
+            );
+        }
         prototype_holder.push(prototype.curve);
         &prototype_holder
     } else {

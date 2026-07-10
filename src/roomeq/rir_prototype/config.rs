@@ -21,10 +21,11 @@ pub struct RirPrototypeConfig {
     pub frequency_dependent_directivity: bool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum DistanceWeightMode {
     /// w = 1 / d^2, clipped at a minimum distance to avoid infinities.
+    #[default]
     InverseSquare,
     /// w = exp(-d^2 / (2 * sigma^2)).
     Gaussian { sigma_m: f64 },
@@ -32,23 +33,12 @@ pub enum DistanceWeightMode {
     Uniform,
 }
 
-impl Default for DistanceWeightMode {
-    fn default() -> Self {
-        Self::InverseSquare
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum DirectivityModel {
     /// No directivity correction.
+    #[default]
     Omnidirectional,
     /// Rigid-sphere head-shadow approximation.
     SphericalHead { radius_m: f64 },
-}
-
-impl Default for DirectivityModel {
-    fn default() -> Self {
-        Self::Omnidirectional
-    }
 }

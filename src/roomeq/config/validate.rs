@@ -44,6 +44,7 @@ pub fn validate_room_config(config: &RoomConfig) -> ValidationResult {
 
     // Validate speaker configurations
     validate_speakers(&config.speakers, &mut result);
+    validate_system_speaker_references(config, &mut result);
 
     // Validate crossover references
     validate_crossovers(&config.speakers, config.crossovers.as_ref(), &mut result);
@@ -184,11 +185,39 @@ fn validate_speakers(speakers: &HashMap<String, SpeakerConfig>, result: &mut Val
 }
 
 /// Validate crossover references
+fn validate_system_speaker_references(config: &RoomConfig, result: &mut ValidationResult) {
+    let Some(system) = &config.system else {
+        return;
+    };
+    for (role, measurement_key) in &system.speakers {
+        if !config.speakers.contains_key(measurement_key) {
+            result.add_error(format!(
+                "system.speakers role '{role}' references missing speaker measurement '{measurement_key}'"
+            ));
+        }
+    }
+}
+
 fn validate_crossovers(
     speakers: &HashMap<String, SpeakerConfig>,
     crossovers: Option<&HashMap<String, super::super::types::CrossoverConfig>>,
     result: &mut ValidationResult,
 ) {
+    if let Some(crossovers) = crossovers {
+        for (name, crossover) in crossovers {
+            if crossover
+                .crossover_type
+                .parse::<crate::loss::CrossoverType>()
+                .is_err()
+            {
+                result.add_error(format!(
+                    "Crossover '{name}' has unsupported type '{}'",
+                    crossover.crossover_type
+                ));
+            }
+        }
+    }
+
     for (name, config) in speakers {
         let SpeakerConfig::Group(group) = config else {
             continue;
@@ -1804,6 +1833,78 @@ mod room_config_validation_tests {
             result.errors.iter().any(
                 |e| e.contains("cinema_reference_distance_m") && e.contains("must be positive")
             )
+        );
+    }
+
+    #[test]
+    fn audit_optimizer_numeric_bounds_must_be_finite() {
+        let mut config = default_room();
+        config.optimizer.min_freq = f64::NAN;
+        config.optimizer.max_q = f64::INFINITY;
+        let result = validate_room_config(&config);
+
+        assert!(result.errors.iter().any(|e| e.contains("min_freq") && e.contains("finite")));
+        assert!(result.errors.iter().any(|e| e.contains("max_q") && e.contains("finite")));
+    }
+
+    #[test]
+    fn audit_boost_envelope_must_be_finite_positive_and_strictly_sorted() {
+        let mut config = default_room();
+        config.optimizer.max_boost_envelope =
+            Some(vec![(20.0, 6.0), (200.0, 3.0), (200.0, 2.0)]);
+        let result = validate_room_config(&config);
+
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("max_boost_envelope") && e.contains("strictly increasing"))
+        );
+    }
+
+    #[test]
+    fn audit_system_speaker_mapping_must_reference_existing_measurement() {
+        let mut config = default_room();
+        config.speakers.insert(
+            "LeftMeasurement".to_string(),
+            SpeakerConfig::Single(single_source("left.csv", None)),
+        );
+        config.system = Some(SystemConfig {
+            model: SystemModel::Stereo,
+            speakers: HashMap::from([("L".to_string(), "Typo".to_string())]),
+            subwoofers: None,
+            bass_management: None,
+            supporting_source_outputs: None,
+        });
+        let result = validate_room_config(&config);
+
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("system.speakers") && e.contains("Typo"))
+        );
+    }
+
+    #[test]
+    fn audit_crossover_type_is_validated_at_config_load() {
+        let mut config = default_room();
+        config.crossovers = Some(HashMap::from([(
+            "main".to_string(),
+            CrossoverConfig {
+                crossover_type: "not-a-crossover".to_string(),
+                frequency: Some(80.0),
+                frequencies: None,
+                frequency_range: None,
+            },
+        )]));
+        let result = validate_room_config(&config);
+
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("Crossover 'main'") && e.contains("unsupported type"))
         );
     }
 }

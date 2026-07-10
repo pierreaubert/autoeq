@@ -6,6 +6,9 @@ use ndarray::Array1;
 use num_complex::Complex64;
 use std::f64::consts::PI;
 
+/// Lowest response magnitude exposed to optimization and reporting.
+pub const MIN_FILTER_RESPONSE_DB: f64 = -40.0;
+
 /// Compute complex frequency response of a list of Biquad filters
 pub fn compute_peq_complex_response(
     filters: &[Biquad],
@@ -64,13 +67,22 @@ pub fn compute_fir_complex_response(
 
 /// Apply complex filter response (magnitude and phase) to a curve
 pub fn apply_complex_response(curve: &Curve, response: &[Complex64]) -> Curve {
-    let mut new_spl = Array1::zeros(curve.freq.len());
-    let mut new_phase = Array1::zeros(curve.freq.len());
-    let old_phase = curve.phase.as_ref();
+    if response.len() != curve.freq.len() {
+        log::warn!(
+            "Complex response length {} does not match curve length {}; unmatched bins are preserved",
+            response.len(),
+            curve.freq.len()
+        );
+    }
 
-    for i in 0..curve.freq.len() {
-        let h = response[i];
-        let h_mag_db = 20.0 * h.norm().log10();
+    let mut new_spl = curve.spl.clone();
+    let old_phase = curve.phase.as_ref();
+    let mut new_phase = old_phase
+        .cloned()
+        .unwrap_or_else(|| Array1::zeros(curve.freq.len()));
+
+    for (i, &h) in response.iter().take(curve.freq.len()).enumerate() {
+        let h_mag_db = (20.0 * h.norm().log10()).max(MIN_FILTER_RESPONSE_DB);
         let h_phase_deg = h.arg().to_degrees();
 
         new_spl[i] = curve.spl[i] + h_mag_db;
@@ -224,5 +236,36 @@ mod tests {
             "got {}",
             out.spl[0]
         );
+    }
+
+    #[test]
+    fn audit_zero_complex_response_is_limited_to_minus_40_db() {
+        let curve = Curve {
+            freq: Array1::from(vec![1000.0]),
+            spl: Array1::from(vec![0.0]),
+            phase: None,
+            ..Default::default()
+        };
+        let out = apply_complex_response(&curve, &[Complex64::new(0.0, 0.0)]);
+
+        assert!(out.spl[0].is_finite());
+        assert_eq!(out.spl[0], -40.0);
+    }
+
+    #[test]
+    fn audit_mismatched_complex_response_preserves_unmatched_bins() {
+        let curve = Curve {
+            freq: Array1::from(vec![100.0, 1000.0]),
+            spl: Array1::from(vec![1.0, 2.0]),
+            phase: None,
+            ..Default::default()
+        };
+        let outcome = std::panic::catch_unwind(|| {
+            apply_complex_response(&curve, &[Complex64::new(1.0, 0.0)])
+        });
+
+        assert!(outcome.is_ok(), "mismatched response must not panic");
+        let out = outcome.unwrap();
+        assert_eq!(out.spl.to_vec(), vec![1.0, 2.0]);
     }
 }

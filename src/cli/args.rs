@@ -34,7 +34,7 @@ pub struct Args {
     pub max_db: f64,
 
     /// Minimum absolute dB gain allowed for each filter.
-    #[arg(long, default_value_t = 1.0, value_parser = parse_strictly_positive_f64)]
+    #[arg(long, default_value_t = 0.5, value_parser = parse_strictly_positive_f64)]
     pub min_db: f64,
 
     /// Maximum Q factor allowed for each filter.
@@ -270,7 +270,7 @@ impl Args {
             population: 300,
             maxeval: 50000,
             strategy: "lshade".to_string(),
-            min_db: -12.0,
+            min_db: 0.5,
             max_db: 12.0,
             min_q: 0.5,
             max_q: 10.0,
@@ -373,7 +373,7 @@ impl Args {
                 self.refine = false;
                 self.min_q = 0.5;
                 self.max_q = 6.0;
-                self.min_db = -12.0;
+                self.min_db = 0.5;
                 self.max_db = 6.0;
             }
             "balanced" => {
@@ -383,7 +383,7 @@ impl Args {
                 self.refine = true;
                 self.min_q = 0.5;
                 self.max_q = 6.0;
-                self.min_db = -12.0;
+                self.min_db = 0.5;
                 self.max_db = 6.0;
             }
             "max-quality" => {
@@ -394,7 +394,7 @@ impl Args {
                 self.refine = true;
                 self.min_q = 0.5;
                 self.max_q = 6.0;
-                self.min_db = -12.0;
+                self.min_db = 0.5;
                 self.max_db = 6.0;
             }
             "score" => {
@@ -405,7 +405,7 @@ impl Args {
                 self.refine = true;
                 self.min_q = 0.5;
                 self.max_q = 6.0;
-                self.min_db = -12.0;
+                self.min_db = 0.5;
                 self.max_db = 6.0;
             }
             other => {
@@ -452,7 +452,7 @@ mod tests {
         assert_eq!(args.population, 300);
         assert_eq!(args.maxeval, 50000);
         assert_eq!(args.strategy, "lshade");
-        assert_eq!(args.min_db, -12.0);
+        assert_eq!(args.min_db, 0.5);
         assert_eq!(args.max_db, 12.0);
         assert_eq!(args.min_q, 0.5);
         assert_eq!(args.max_q, 10.0);
@@ -494,7 +494,7 @@ mod tests {
         assert!(!args.refine);
         assert_eq!(args.min_q, 0.5);
         assert_eq!(args.max_q, 6.0);
-        assert_eq!(args.min_db, -12.0);
+        assert_eq!(args.min_db, 0.5);
         assert_eq!(args.max_db, 6.0);
     }
 
@@ -544,5 +544,19 @@ mod tests {
             args.num_filters
         });
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn audit_cli_min_db_is_positive_audibility_threshold() {
+        assert_eq!(Args::speaker_defaults().min_db, 0.5);
+
+        for preset in ["quick", "balanced", "max-quality", "score"] {
+            let mut args = parsed_base();
+            args.preset = Some(preset.to_string());
+            args.apply_preset();
+            assert_eq!(args.min_db, 0.5, "preset {preset}");
+        }
+
+        assert!(Args::try_parse_from(["autoeq", "--min-db", "-12"]).is_err());
     }
 }

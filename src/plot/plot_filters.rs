@@ -7,9 +7,10 @@ use plotly::layout::{
 use plotly::{Layout, Plot, Scatter};
 
 use crate::iir::{Biquad, BiquadFilterType};
-use crate::param_utils::determine_filter_type;
+use crate::param_utils::{determine_filter_type, get_filter_params, num_filters};
 use crate::plot::filter_color::filter_color;
 use crate::plot::ref_lines::make_ref_lines;
+use crate::response::MIN_FILTER_RESPONSE_DB;
 
 /// Create semi-transparent green rectangles to highlight frequency ranges
 /// outside the optimization bounds (min_freq to max_freq)
@@ -79,33 +80,39 @@ pub fn plot_filters(
     let mut plot = Plot::new();
 
     // Compute combined response on the same frequency grid as input_curve for the new subplots
-    let mut filters: Vec<(usize, f64, f64, f64)> = (0..config.num_filters)
+    let peq_model = config.peq_model;
+    let filter_count = config
+        .num_filters
+        .min(num_filters(optimized_params, peq_model));
+    let mut filters: Vec<(usize, BiquadFilterType, f64, f64, f64)> = (0..filter_count)
         .map(|i| {
+            let params = get_filter_params(optimized_params, i, peq_model);
             (
                 i,
-                10f64.powf(optimized_params[i * 3]),
-                optimized_params[i * 3 + 1],
-                optimized_params[i * 3 + 2],
+                determine_filter_type(i, filter_count, peq_model, params.filter_type),
+                10f64.powf(params.freq),
+                params.q,
+                params.gain,
             )
         })
         .collect();
-    filters.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    filters.sort_by(|a, b| a.2.total_cmp(&b.2));
 
     // For the first subplot (individual filters), compute responses on plot_freqs
     let mut combined_response: Array1<f64> = Array1::zeros(freqs.len());
-    let peq_model = config.peq_model;
-    for (display_idx, (orig_i, f0, q, gain)) in filters.iter().enumerate() {
-        let ftype = determine_filter_type(*orig_i, config.num_filters, peq_model, None);
-        let filter = Biquad::new(ftype, *f0, config.sample_rate, *q, *gain);
+    for (display_idx, (orig_i, ftype, f0, q, gain)) in filters.iter().enumerate() {
+        let filter = Biquad::new(*ftype, *f0, config.sample_rate, *q, *gain);
         // Compute filter response on plot_freqs for the first subplot
-        let filter_response = filter.np_log_result(&freqs);
+        let filter_response = filter
+            .np_log_result(&freqs)
+            .mapv(|db| db.max(MIN_FILTER_RESPONSE_DB));
         combined_response += &filter_response;
 
-        let label = match ftype {
+        let label = match *ftype {
             BiquadFilterType::Highpass | BiquadFilterType::HighpassVariableQ => "HPQ",
             BiquadFilterType::Lowpass => "LP",
-            BiquadFilterType::Lowshelf => "LS",
-            BiquadFilterType::Highshelf => "HS",
+            BiquadFilterType::Lowshelf | BiquadFilterType::LowshelfOrf => "LS",
+            BiquadFilterType::Highshelf | BiquadFilterType::HighshelfOrf => "HS",
             BiquadFilterType::Bandpass => "BP",
             BiquadFilterType::Notch => "NO",
             _ => "PK",
@@ -134,7 +141,7 @@ pub fn plot_filters(
         .show_legend(false)
         .x_axis("x2")
         .y_axis("y2")
-        .line(plotly::common::Line::new().color("000000").width(2.0));
+        .line(plotly::common::Line::new().color("#000000").width(2.0));
     plot.add_trace(iir_trace2);
 
     // Interpolate deviation_curve to plot_freqs for the second subplot
@@ -320,4 +327,43 @@ pub fn plot_filters(
     plot.set_layout(layout);
 
     plot
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::param_utils::encode_filter_type;
+    use crate::plot::PlotConfig;
+    use crate::{Curve, PeqModel};
+
+    #[test]
+    fn audit_plot_filters_decodes_free_model_layout() {
+        let curve = Curve {
+            freq: Array1::from_vec(vec![500.0, 1000.0, 2000.0]),
+            spl: Array1::zeros(3),
+            phase: None,
+            ..Default::default()
+        };
+        let config = PlotConfig {
+            speaker_name: None,
+            num_filters: 1,
+            sample_rate: 48_000.0,
+            peq_model: PeqModel::Free,
+            min_freq: 20.0,
+            max_freq: 20_000.0,
+        };
+        let params = vec![
+            encode_filter_type(BiquadFilterType::LowshelfOrf),
+            1000.0_f64.log10(),
+            0.7,
+            3.0,
+        ];
+        let plot = plot_filters(&config, &curve, &curve, &curve, &params);
+        let json: serde_json::Value =
+            serde_json::from_str(&plot.to_json()).expect("valid Plotly JSON");
+        let name = json["data"][0]["name"].as_str().expect("trace name");
+
+        assert!(name.starts_with("LS 1 at"), "unexpected trace name: {name}");
+        assert!(name.ends_with("1000Hz"), "unexpected trace name: {name}");
+    }
 }

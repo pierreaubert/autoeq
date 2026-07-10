@@ -23,6 +23,25 @@
   avoiding symmetric post-windowing.
 - Handled DC explicitly during log-frequency interpolation and replaced the
   per-target linear bracket scan with binary search.
+- Restored the CLI `min_db` contract as a positive minimum active-filter gain:
+  defaults and presets now use 0.5 dB, while negative CLI values remain
+  rejected. Corrected EPA optimization to reconstruct measured SPL as
+  `target - deviation`, and made metaheuristic backends honor the configured
+  random seed and return errors for parameter/bounds dimension mismatches.
+- Made free PEQ models decode and optimize every encodable biquad type,
+  including Orfanidis shelves and matched peaks. Notch and other zero-magnitude
+  responses are limited to -40 dB throughout optimization, response
+  application, and plotting instead of producing `-inf`; mismatched complex
+  responses preserve unmatched curve bins rather than panicking.
+- Made filter plots respect each `PeqModel` parameter layout and filter type,
+  and fixed the secondary combined-response color. F3 detection now uses the
+  requested fractional-octave smoothing width and safely handles flat
+  interpolation segments.
+- Hardened RoomEQ configuration validation by rejecting non-finite optimizer
+  bounds, invalid or unsorted gain envelopes, missing system speaker
+  references, and unsupported crossover types. Home-cinema role inference no
+  longer classifies incidental substrings such as `subtle` or `shelfed` as
+  subwoofer/LFE channels.
 
 # 0.4.46
 

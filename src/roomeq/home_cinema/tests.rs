@@ -166,6 +166,14 @@ fn role_for_channel_heuristic_fallthrough() {
 }
 
 #[test]
+fn audit_role_for_channel_does_not_match_incidental_substrings() {
+    assert_eq!(role_for_channel("subtle"), HomeCinemaRole::Unknown);
+    assert_eq!(role_for_channel("shelfed"), HomeCinemaRole::Unknown);
+    assert_eq!(role_for_channel("sub3"), HomeCinemaRole::Subwoofer);
+    assert_eq!(role_for_channel("lfe3"), HomeCinemaRole::Lfe);
+}
+
+#[test]
 fn role_for_channel_case_and_whitespace_insensitive() {
     assert_eq!(role_for_channel("  l  "), HomeCinemaRole::FrontLeft);
     assert_eq!(role_for_channel("LEFT"), HomeCinemaRole::FrontLeft);

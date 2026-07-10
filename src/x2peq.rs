@@ -96,7 +96,13 @@ pub fn peq2x(peq: &Peq, peq_model: PeqModel) -> Vec<f64> {
 /// Frequency response in dB SPL at the specified frequency points
 pub fn x2spl(freqs: &Array1<f64>, x: &[f64], srate: f64, peq_model: PeqModel) -> Array1<f64> {
     let peq = x2peq(x, srate, peq_model);
-    crate::iir::compute_peq_response(freqs, &peq, srate)
+    crate::iir::compute_peq_response(freqs, &peq, srate).mapv(|db| {
+        if db.is_nan() {
+            db
+        } else {
+            db.max(crate::response::MIN_FILTER_RESPONSE_DB)
+        }
+    })
 }
 
 /// Compute the combined PEQ response from parameter vector
@@ -190,6 +196,16 @@ mod tests {
         let x = vec![3.0, 1.0, 0.0]; // log10(1000)=3, Q=1, gain=0
         let spl = x2spl(&freqs, &x, 48000.0, PeqModel::Pk);
         assert!((spl[0] - 0.0).abs() < 1e-6, "got {}", spl[0]);
+    }
+
+    #[test]
+    fn audit_free_notch_response_is_limited_to_minus_40_db() {
+        let freqs = Array1::from_vec(vec![1000.0]);
+        let x = vec![7.0, 3.0, 1.0, 0.0];
+        let spl = x2spl(&freqs, &x, 48_000.0, PeqModel::Free);
+
+        assert!(spl[0].is_finite(), "notch response must be finite");
+        assert!(spl[0] >= -40.0, "notch response was {} dB", spl[0]);
     }
 
     #[test]

@@ -257,6 +257,12 @@ fn optimize_channel_eq_multi_inner(
     // directivity-weighted prototype before applying the chosen strategy.
     let mut prototype_holder: Vec<Curve> = Vec::with_capacity(1);
     let curves: &[Curve] = if let Some(rir_cfg) = &multi_config.rir_prototype {
+        if multi_config.weights.is_some() {
+            log::warn!(
+                "multi_measurement.weights is ignored when rir_prototype is enabled; \
+                 the prototype builder has already collapsed the measurements into a single curve"
+            );
+        }
         log::info!(
             "Building RIR prototype from {} measurements (distance_mode={:?}, directivity={:?})",
             curves.len(),

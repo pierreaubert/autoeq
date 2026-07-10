@@ -88,4 +88,7 @@ Enable the prototype by adding a `rir_prototype` block inside the speaker's
   frequency values within tolerance). RoomEQ rejects mismatched grids.
 - The prototype is built in the magnitude (SPL) domain. Phase and any other
   metadata from the first measurement are carried over unchanged.
+- If `multi_measurement.weights` is supplied, it is ignored when `rir_prototype`
+  is enabled, because the prototype builder has already collapsed the
+  measurements into a single curve.
 - Time-domain / IR averaging is not supported in this iteration.

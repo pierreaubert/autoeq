@@ -55,7 +55,7 @@ pub(crate) fn directivity_weight(freq_hz: f64, angle_rad: f64, model: Directivit
 }
 
 /// Compute Euclidean distance from each microphone to the reference position.
-pub fn compute_distances(reference: &[f64; 3], microphones: &[[f64; 3]]) -> Vec<f64> {
+pub(crate) fn compute_distances(reference: &[f64; 3], microphones: &[[f64; 3]]) -> Vec<f64> {
     microphones
         .iter()
         .map(|m| {
@@ -68,7 +68,10 @@ pub fn compute_distances(reference: &[f64; 3], microphones: &[[f64; 3]]) -> Vec<
 }
 
 /// Compute the angle between source→reference and source→microphone for each mic.
-pub fn compute_angles(
+///
+/// If a microphone is coincident with the source, its angle falls back to 0.0
+/// (on-axis) because no meaningful direction can be inferred.
+pub(crate) fn compute_angles(
     source: &[f64; 3],
     reference: &[f64; 3],
     microphones: &[[f64; 3]],
@@ -104,7 +107,7 @@ pub fn compute_angles(
 }
 
 /// Build a [measurement × frequency] weight matrix and normalize per frequency.
-pub fn normalized_weights(
+pub(crate) fn normalized_weights(
     distances: &[f64],
     angles_rad: &[f64],
     freq_hz: &Array1<f64>,

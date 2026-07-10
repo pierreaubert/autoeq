@@ -22,8 +22,8 @@ pub enum RirPrototypeError {
     #[error("microphone_positions length ({0}) must match curves length ({1})")]
     MismatchedCounts(usize, usize),
     /// The source and reference positions are too close to define a directivity axis.
-    #[error("source and reference positions must differ: {0}")]
-    SourceReferenceTooClose(String),
+    #[error("source and reference positions must differ")]
+    SourceReferenceTooClose,
     /// A curve's frequency grid has a different length than the first curve.
     #[error(
         "curve {index} frequency grid length ({got}) does not match expected grid length ({expected})"
@@ -69,7 +69,7 @@ pub struct WeightedPrototype {
 ///
 /// All curves must share the same frequency grid (same length and same values
 /// within [`FREQ_GRID_TOLERANCE`]). Callers typically use
-/// `read::load_source_individual` first, which interpolates all curves to the
+/// `crate::read::load_source_individual` first, which interpolates all curves to the
 /// first curve's grid.
 ///
 /// The returned `WeightedPrototype.curve` is a clone of the first input curve
@@ -142,7 +142,7 @@ pub fn build_weighted_prototype(
         &config.reference_position,
         &config.microphone_positions,
     )
-    .map_err(|e| RirPrototypeError::SourceReferenceTooClose(e.to_string()))?;
+    .map_err(|_e| RirPrototypeError::SourceReferenceTooClose)?;
 
     let freqs = curves[0].freq.clone();
     let weights = normalized_weights(&distances, &angles, &freqs, config);

@@ -5,8 +5,7 @@
 
 pub mod config;
 pub mod prototype;
-pub mod weights;
+pub(crate) mod weights;
 
 pub use config::{DirectivityModel, DistanceWeightMode, RirPrototypeConfig};
 pub use prototype::{WeightedPrototype, build_weighted_prototype};
-pub use weights::{compute_angles, compute_distances, normalized_weights};

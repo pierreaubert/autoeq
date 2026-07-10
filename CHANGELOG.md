@@ -1,8 +1,19 @@
-# 0.4.47 -- unreleased
+# 0.4.48 -- unreleased
 
 ## Fixes
 
-- Cleanup
+- Fixed various exports to support proper graphs.
+- Evaluated PEQ responses from each `Biquad`'s canonical normalized
+  coefficients, so band-pass, notch, all-pass, Orfanidis shelf, matched-peak,
+  and variable-Q high-pass filters are no longer treated as identity filters.
+- Corrected phase-aware analysis by unwrapping phase before group-delay
+  differentiation and removing constant/linear delay terms from phase-shape
+  deviation.
+- Replaced the zero-phase minimum-phase placeholder with the validated RoomEQ
+  reconstruction and preserved the leading impulse of minimum-phase FIRs by
+  avoiding symmetric post-windowing.
+- Handled DC explicitly during log-frequency interpolation and replaced the
+  per-target linear bracket scan with binary search.
 
 # 0.4.46
 

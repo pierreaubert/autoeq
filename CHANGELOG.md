@@ -35,6 +35,9 @@
 - Kept the smallest FEM convergence scenario in the default suite and made the
   remaining strict 2,000-iteration convergence/multimode matrix explicit
   long-running tests with a documented `--ignored` command.
+- Added property-based regression coverage across every PEQ model for parameter
+  layout and biquad round-trips, finite checked responses, and generated
+  optimizer-bound/initial-candidate invariants.
 
 ## Fixes
 

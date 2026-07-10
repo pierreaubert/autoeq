@@ -39,9 +39,7 @@ pub fn role_for_channel(channel_name: &str) -> HomeCinemaRole {
         "tbr" | "trr" | "rhr" | "topbackright" | "toprearright" | "rearheightright" => {
             HomeCinemaRole::TopRearRight
         }
-        _ if normalized.starts_with("subwoofer")
-            || has_supported_suffix(&normalized, "sub") =>
-        {
+        _ if normalized.starts_with("subwoofer") || has_supported_suffix(&normalized, "sub") => {
             HomeCinemaRole::Subwoofer
         }
         _ if has_supported_suffix(&normalized, "lfe") => HomeCinemaRole::Lfe,

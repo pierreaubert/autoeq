@@ -73,10 +73,7 @@ fn envelope_error(name: &str, envelope: Option<&[(f64, f64)]>) -> Option<String>
             return Some(format!("{name} gains must be finite, got {gain}"));
         }
     }
-    if envelope
-        .windows(2)
-        .any(|points| points[0].0 >= points[1].0)
-    {
+    if envelope.windows(2).any(|points| points[0].0 >= points[1].0) {
         return Some(format!(
             "{name} frequencies must be strictly increasing without duplicates"
         ));
@@ -85,15 +82,11 @@ fn envelope_error(name: &str, envelope: Option<&[(f64, f64)]>) -> Option<String>
 }
 
 pub fn rule_gain_envelopes(ctx: &mut ValidationContext<'_>) {
-    if let Some(error) = envelope_error(
-        "max_boost_envelope",
-        ctx.opt.max_boost_envelope.as_deref(),
-    ) {
+    if let Some(error) = envelope_error("max_boost_envelope", ctx.opt.max_boost_envelope.as_deref())
+    {
         ctx.add_error(error);
     }
-    if let Some(error) =
-        envelope_error("min_cut_envelope", ctx.opt.min_cut_envelope.as_deref())
-    {
+    if let Some(error) = envelope_error("min_cut_envelope", ctx.opt.min_cut_envelope.as_deref()) {
         ctx.add_error(error);
     }
 }

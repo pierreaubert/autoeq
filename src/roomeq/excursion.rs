@@ -499,8 +499,8 @@ mod tests {
             phase: None,
             ..Default::default()
         };
-        let result = detect_f3_with_reference_band(&curve, Some(0.01), 100.0, 200.0)
-            .expect("F3 detection");
+        let result =
+            detect_f3_with_reference_band(&curve, Some(0.01), 100.0, 200.0).expect("F3 detection");
 
         assert!(result.f3_hz.is_finite(), "F3 must be finite");
         assert!(result.f3_hz > 0.0);

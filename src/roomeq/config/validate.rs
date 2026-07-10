@@ -1843,15 +1843,24 @@ mod room_config_validation_tests {
         config.optimizer.max_q = f64::INFINITY;
         let result = validate_room_config(&config);
 
-        assert!(result.errors.iter().any(|e| e.contains("min_freq") && e.contains("finite")));
-        assert!(result.errors.iter().any(|e| e.contains("max_q") && e.contains("finite")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("min_freq") && e.contains("finite"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("max_q") && e.contains("finite"))
+        );
     }
 
     #[test]
     fn audit_boost_envelope_must_be_finite_positive_and_strictly_sorted() {
         let mut config = default_room();
-        config.optimizer.max_boost_envelope =
-            Some(vec![(20.0, 6.0), (200.0, 3.0), (200.0, 2.0)]);
+        config.optimizer.max_boost_envelope = Some(vec![(20.0, 6.0), (200.0, 3.0), (200.0, 2.0)]);
         let result = validate_room_config(&config);
 
         assert!(

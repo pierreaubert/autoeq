@@ -1,6 +1,8 @@
 use ndarray::Array1;
 use serde::{Deserialize, Serialize};
 
+use crate::error::{AutoeqError, Result};
+
 /// A struct to hold frequency and SPL data.
 /// Re-exported from the main autoeq crate for compatibility.
 ///
@@ -69,6 +71,107 @@ impl Default for Curve {
 }
 
 impl Curve {
+    /// Validate a frequency grid used by public DSP and optimization APIs.
+    pub fn validate_frequency_grid(freq: &Array1<f64>, context: &str) -> Result<()> {
+        if freq.len() < 2 {
+            return Err(AutoeqError::InvalidMeasurement {
+                message: format!("{context} needs at least two frequency points"),
+            });
+        }
+        if let Some((index, value)) = freq
+            .iter()
+            .copied()
+            .enumerate()
+            .find(|(_, value)| !value.is_finite() || *value <= 0.0)
+        {
+            return Err(AutoeqError::InvalidMeasurement {
+                message: format!(
+                    "{context} frequency at index {index} must be finite and positive, got {value}"
+                ),
+            });
+        }
+        if let Some((index, pair)) = freq
+            .windows(2)
+            .into_iter()
+            .enumerate()
+            .find(|(_, pair)| pair[0] >= pair[1])
+        {
+            return Err(AutoeqError::InvalidMeasurement {
+                message: format!(
+                    "{context} frequencies must be strictly increasing; indices {index} and {} contain {} then {}",
+                    index + 1,
+                    pair[0],
+                    pair[1]
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    /// Validate the core and optional arrays of a measurement curve.
+    pub fn validate(&self, context: &str) -> Result<()> {
+        Self::validate_frequency_grid(&self.freq, context)?;
+        let expected = self.freq.len();
+        if self.spl.len() != expected {
+            return Err(AutoeqError::InvalidMeasurement {
+                message: format!(
+                    "{context} has mismatched frequency/SPL lengths: {expected} and {}",
+                    self.spl.len()
+                ),
+            });
+        }
+        if let Some((index, value)) = self
+            .spl
+            .iter()
+            .copied()
+            .enumerate()
+            .find(|(_, value)| !value.is_finite())
+        {
+            return Err(AutoeqError::InvalidMeasurement {
+                message: format!("{context} SPL at index {index} must be finite, got {value}"),
+            });
+        }
+
+        for (name, values) in [
+            ("phase", self.phase.as_ref()),
+            ("coherence", self.coherence.as_ref()),
+            ("noise_floor_db", self.noise_floor_db.as_ref()),
+            ("min_phase", self.min_phase.as_ref()),
+            ("excess_phase", self.excess_phase.as_ref()),
+        ] {
+            let Some(values) = values else {
+                continue;
+            };
+            if values.len() != expected {
+                return Err(AutoeqError::InvalidMeasurement {
+                    message: format!(
+                        "{context} {name} length {} does not match frequency length {expected}",
+                        values.len()
+                    ),
+                });
+            }
+            if let Some((index, value)) = values
+                .iter()
+                .copied()
+                .enumerate()
+                .find(|(_, value)| !value.is_finite())
+            {
+                return Err(AutoeqError::InvalidMeasurement {
+                    message: format!(
+                        "{context} {name} at index {index} must be finite, got {value}"
+                    ),
+                });
+            }
+        }
+
+        if self.excess_delay_ms.is_some_and(|value| !value.is_finite()) {
+            return Err(AutoeqError::InvalidMeasurement {
+                message: format!("{context} excess_delay_ms must be finite"),
+            });
+        }
+        Ok(())
+    }
+
     /// Populate `min_phase`, `excess_phase`, and `excess_delay_ms` from the
     /// measured magnitude + phase via Hilbert-on-log-magnitude decomposition
     /// (§2.3 of `docs/gd_opt_v2_plan.md`).
@@ -128,6 +231,77 @@ impl Curve {
         self.min_phase = Some(min_phase);
         self.excess_phase = Some(excess_phase);
         self.excess_delay_ms = Some(delay_ms);
+    }
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+
+    fn valid_curve() -> Curve {
+        Curve {
+            freq: Array1::from_vec(vec![20.0, 100.0, 1_000.0]),
+            spl: Array1::from_vec(vec![80.0, 81.0, 79.0]),
+            phase: Some(Array1::from_vec(vec![0.0, -5.0, -20.0])),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn curve_validation_accepts_finite_matching_data() {
+        valid_curve().validate("test curve").unwrap();
+    }
+
+    #[test]
+    fn curve_validation_rejects_empty_and_single_bin_curves() {
+        for curve in [
+            Curve::default(),
+            Curve {
+                freq: Array1::from_vec(vec![100.0]),
+                spl: Array1::from_vec(vec![80.0]),
+                ..Default::default()
+            },
+        ] {
+            assert!(matches!(
+                curve.validate("test curve"),
+                Err(AutoeqError::InvalidMeasurement { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn curve_validation_rejects_non_finite_or_unsorted_frequencies() {
+        for frequencies in [
+            vec![20.0, f64::NAN],
+            vec![20.0, f64::INFINITY],
+            vec![20.0, 0.0],
+            vec![100.0, 20.0],
+            vec![20.0, 20.0],
+        ] {
+            let mut curve = valid_curve();
+            curve.freq = Array1::from_vec(frequencies);
+            curve.spl = Array1::zeros(curve.freq.len());
+            curve.phase = None;
+            assert!(matches!(
+                curve.validate("test curve"),
+                Err(AutoeqError::InvalidMeasurement { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn curve_validation_rejects_non_finite_spl_and_mismatched_arrays() {
+        let mut non_finite = valid_curve();
+        non_finite.spl[1] = f64::NEG_INFINITY;
+        assert!(non_finite.validate("test curve").is_err());
+
+        let mut spl_mismatch = valid_curve();
+        spl_mismatch.spl = Array1::zeros(2);
+        assert!(spl_mismatch.validate("test curve").is_err());
+
+        let mut phase_mismatch = valid_curve();
+        phase_mismatch.phase = Some(Array1::zeros(2));
+        assert!(phase_mismatch.validate("test curve").is_err());
     }
 }
 

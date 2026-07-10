@@ -1,5 +1,41 @@
 # 0.4.47 -- unreleased
 
+## Audit follow-up: numeric robustness and test quality
+
+- Fixed the group-delay weighted-median fallback so unusable weights cannot
+  reintroduce NaN/infinite targets or select the wrong finite median.
+- Fixed bass-management differential evolution so non-finite objective values
+  are treated as invalid minimization candidates instead of becoming an
+  incumbent that blocks every finite trial.
+- Fixed Equalizer APO export so integer-Hz center frequencies are rounded
+  instead of being biased downward by floating-point truncation.
+- Removed contiguous-memory assumptions from minimum-phase reconstruction,
+  mixed-phase FIR generation, and microphone calibration interpolation so
+  valid strided `Array1` inputs no longer panic.
+- Added finite-positive sample-rate validation at the public RoomEQ, driver,
+  and multisub optimization boundaries so zero, negative, NaN, and infinite
+  rates fail descriptively.
+- Added a shared measurement-curve contract plus checked response and PEQ
+  entry points so empty/single-bin curves, non-finite data, unsorted grids,
+  mismatched arrays, and invalid sample rates fail before DSP evaluation.
+- Added do-no-harm acceptance gates to public driver and multisub optimization
+  so non-finite or worsening candidates restore the initial alignment.
+- Added strict DBA exact-cancellation coverage requiring the documented
+  -240 dB magnitude floor and a finite phase result.
+- Strengthened system-routing integration tests to require the exact logical
+  channel set and isolated them from unrelated filter optimization, reducing
+  the focused suite from roughly 153 seconds in the audit to 0.02 seconds.
+- Split oversized RoomEQ optimization, configuration, and export test modules
+  into focused include files without changing their assertions or scope.
+- Strengthened integration tests to parse exported filters, assert score
+  improvement and filter bounds, compare seeded DE behavior, and verify exact
+  broadband shelf behavior instead of relying on file or substring smoke tests.
+- Made external PCM/export validator contracts optional when their environment
+  variables are unset, keeping minimal-checkout test runs self-contained.
+- Kept the smallest FEM convergence scenario in the default suite and made the
+  remaining strict 2,000-iteration convergence/multimode matrix explicit
+  long-running tests with a documented `--ignored` command.
+
 ## Fixes
 
 - Hardened external DSP exports so routed home-cinema bass-management graphs

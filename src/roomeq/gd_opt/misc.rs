@@ -36,12 +36,19 @@ pub(super) fn weighted_median(values: &[f64], weights: &[f64]) -> f64 {
         .collect();
 
     if pairs.is_empty() {
-        let mut sorted = values.to_vec();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let mut sorted: Vec<f64> = values
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite())
+            .collect();
+        if sorted.is_empty() {
+            return 0.0;
+        }
+        sorted.sort_by(f64::total_cmp);
         return sorted[sorted.len() / 2];
     }
 
-    pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
     let total_weight: f64 = pairs.iter().map(|(_, weight)| *weight).sum();
     let midpoint = total_weight * 0.5;
     let mut cumulative = 0.0;

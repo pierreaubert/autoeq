@@ -92,6 +92,11 @@ pub fn optimize_room(
     callback: Option<RoomOptimizationCallback>,
     output_dir: Option<&Path>,
 ) -> Result<RoomOptimizationResult> {
+    if !sample_rate.is_finite() || sample_rate <= 0.0 {
+        return Err(crate::AutoeqError::InvalidConfiguration {
+            message: format!("sample rate must be finite and positive, got {sample_rate}"),
+        });
+    }
     RoomPipeline::new(RoomPipelineRequest {
         config,
         sample_rate,

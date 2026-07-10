@@ -244,6 +244,26 @@ fn test_gd_target_uses_coherence_weighted_median() {
 }
 
 #[test]
+fn weighted_median_ignores_non_finite_values_when_weights_are_unusable() {
+    let target = weighted_median(
+        &[5.0, 1.0, 4.0, 2.0, 3.0, f64::NAN],
+        &[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    );
+
+    assert_eq!(target, 3.0);
+}
+
+#[test]
+fn weighted_median_returns_zero_when_no_finite_value_exists() {
+    let target = weighted_median(
+        &[f64::NAN, f64::INFINITY, f64::NEG_INFINITY],
+        &[0.0, 0.0, 0.0],
+    );
+
+    assert_eq!(target, 0.0);
+}
+
+#[test]
 fn test_minimum_channels() {
     let freq = log_freq_grid(20.0, 300.0, 50);
     let ch0 = make_delayed_channel(&freq, 0.0, 0.95);

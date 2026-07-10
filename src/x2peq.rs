@@ -16,6 +16,7 @@
 //! along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use crate::PeqModel;
+use crate::error::{AutoeqError, Result};
 use crate::iir::{Biquad, Peq};
 use crate::param_utils::{self, FilterParams};
 use ndarray::Array1;
@@ -105,6 +106,37 @@ pub fn x2spl(freqs: &Array1<f64>, x: &[f64], srate: f64, peq_model: PeqModel) ->
     })
 }
 
+/// Checked parameter-to-response entry point for untrusted public inputs.
+pub fn try_x2spl(
+    freqs: &Array1<f64>,
+    x: &[f64],
+    sample_rate: f64,
+    peq_model: PeqModel,
+) -> Result<Array1<f64>> {
+    crate::Curve::validate_frequency_grid(freqs, "PEQ parameter response")?;
+    if !sample_rate.is_finite() || sample_rate <= 0.0 {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!("sample rate must be finite and positive, got {sample_rate}"),
+        });
+    }
+    let parameters_per_filter = param_utils::params_per_filter(peq_model);
+    if !x.len().is_multiple_of(parameters_per_filter) || x.iter().any(|value| !value.is_finite()) {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "PEQ parameter vector must contain finite complete {parameters_per_filter}-value filters"
+            ),
+        });
+    }
+
+    let response = x2spl(freqs, x, sample_rate, peq_model);
+    if response.iter().any(|value| !value.is_finite()) {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: "PEQ parameters produced a non-finite response".to_string(),
+        });
+    }
+    Ok(response)
+}
+
 /// Compute the combined PEQ response from parameter vector
 ///
 /// This is an alias for x2spl, provided for compatibility
@@ -115,6 +147,16 @@ pub fn compute_peq_response_from_x(
     peq_model: PeqModel,
 ) -> Array1<f64> {
     x2spl(freqs, x, sample_rate, peq_model)
+}
+
+/// Checked alias for [`try_x2spl`].
+pub fn try_compute_peq_response_from_x(
+    freqs: &Array1<f64>,
+    x: &[f64],
+    sample_rate: f64,
+    peq_model: PeqModel,
+) -> Result<Array1<f64>> {
+    try_x2spl(freqs, x, sample_rate, peq_model)
 }
 
 /// Build a vector of sorted filter rows from optimization parameters
@@ -206,6 +248,41 @@ mod tests {
 
         assert!(spl[0].is_finite(), "notch response must be finite");
         assert!(spl[0] >= -40.0, "notch response was {} dB", spl[0]);
+    }
+
+    #[test]
+    fn checked_x2spl_rejects_invalid_frequency_grids_and_sample_rates() {
+        let valid = Array1::from_vec(vec![100.0, 1_000.0]);
+        for sample_rate in [0.0, -48_000.0, f64::NAN, f64::INFINITY] {
+            assert!(matches!(
+                try_x2spl(&valid, &[], sample_rate, PeqModel::Pk),
+                Err(AutoeqError::InvalidConfiguration { .. })
+            ));
+        }
+
+        for invalid in [
+            Array1::from_vec(vec![]),
+            Array1::from_vec(vec![1_000.0]),
+            Array1::from_vec(vec![100.0, f64::NAN]),
+            Array1::from_vec(vec![100.0, f64::INFINITY]),
+            Array1::from_vec(vec![1_000.0, 100.0]),
+        ] {
+            assert!(matches!(
+                try_x2spl(&invalid, &[], 48_000.0, PeqModel::Pk),
+                Err(AutoeqError::InvalidMeasurement { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn checked_x2spl_rejects_incomplete_or_non_finite_parameters() {
+        let frequencies = Array1::from_vec(vec![100.0, 1_000.0]);
+        for parameters in [vec![3.0, 1.0], vec![3.0, 1.0, f64::NAN]] {
+            assert!(matches!(
+                try_x2spl(&frequencies, &parameters, 48_000.0, PeqModel::Pk),
+                Err(AutoeqError::InvalidConfiguration { .. })
+            ));
+        }
     }
 
     #[test]

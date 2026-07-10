@@ -5,6 +5,7 @@
 
 #![allow(dead_code)]
 
+pub mod apo;
 pub mod binary_runner;
 
 use autoeq::roomeq::types::{

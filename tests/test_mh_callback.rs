@@ -230,5 +230,8 @@ fn audit_mh_dimension_mismatch_returns_error_instead_of_panicking() {
     }));
 
     assert!(outcome.is_ok(), "dimension mismatch must not panic");
-    assert!(outcome.unwrap().is_err(), "dimension mismatch must return Err");
+    assert!(
+        outcome.unwrap().is_err(),
+        "dimension mismatch must return Err"
+    );
 }

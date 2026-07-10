@@ -90,7 +90,15 @@ pub fn generate_excess_phase_fir_with_depth(
     // Generate FIR from unity magnitude with the correction phase
     // Use the standard FIR generation shape with phase override. Since
     // FirPhase::Minimum uses magnitude-derived phase, this needs a custom path.
-    generate_phase_only_fir(freq.as_slice().unwrap(), &correction_phase_deg, &fir_config)
+    let freq_owned;
+    let freq_slice = match freq.as_slice() {
+        Some(slice) => slice,
+        None => {
+            freq_owned = freq.iter().copied().collect::<Vec<_>>();
+            &freq_owned
+        }
+    };
+    generate_phase_only_fir(freq_slice, &correction_phase_deg, &fir_config)
 }
 
 /// Generate a phase-only FIR filter (unity magnitude, specified phase).

@@ -252,6 +252,7 @@ pub fn optimize_filters_mh(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn optimize_filters_mh_seeded(
     x: &mut [f64],
     lower_bounds: &[f64],

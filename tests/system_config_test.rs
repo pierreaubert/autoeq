@@ -5,7 +5,7 @@ mod tests {
         CrossoverConfig, OptimizerConfig, RoomConfig, SpeakerConfig, SubwooferStrategy,
         SystemConfig, SystemModel, optimize_room,
     };
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     // Helper to create a dummy curve in memory
     fn make_test_curve(base_level: f64) -> autoeq::Curve {
@@ -21,6 +21,17 @@ mod tests {
             freq: ndarray::Array1::from_vec(freq),
             spl: ndarray::Array1::from_vec(spl),
             phase: None,
+            ..Default::default()
+        }
+    }
+
+    fn routing_only_optimizer() -> OptimizerConfig {
+        OptimizerConfig {
+            num_filters: 0,
+            max_iter: 1,
+            population: 4,
+            refine: false,
+            decomposed_correction: None,
             ..Default::default()
         }
     }
@@ -54,7 +65,7 @@ mod tests {
             speakers,
             crossovers: None,
             target_curve: None,
-            optimizer: OptimizerConfig::default(),
+            optimizer: routing_only_optimizer(),
             recording_config: None,
             ctc: None,
             cea2034_cache: None,
@@ -62,10 +73,8 @@ mod tests {
 
         let result = optimize_room(&config, 48000.0, None, None).expect("Optimization failed");
 
-        // Verify output channels match logical roles
-        assert!(result.channels.contains_key("L"));
-        assert!(result.channels.contains_key("R"));
-        assert!(!result.channels.contains_key("left_meas"));
+        let channel_names: HashSet<&str> = result.channels.keys().map(String::as_str).collect();
+        assert_eq!(channel_names, HashSet::from(["L", "R"]));
     }
 
     #[test]
@@ -120,7 +129,7 @@ mod tests {
             speakers,
             crossovers: Some(crossovers),
             target_curve: None,
-            optimizer: OptimizerConfig::default(),
+            optimizer: routing_only_optimizer(),
             recording_config: None,
             ctc: None,
             cea2034_cache: None,
@@ -128,8 +137,35 @@ mod tests {
 
         let result = optimize_room(&config, 48000.0, None, None).expect("Optimization failed");
 
-        assert!(result.channels.contains_key("L"));
-        assert!(result.channels.contains_key("R"));
-        assert!(result.channels.contains_key("LFE"));
+        let channel_names: HashSet<&str> = result.channels.keys().map(String::as_str).collect();
+        assert_eq!(channel_names, HashSet::from(["L", "R", "LFE"]));
+    }
+
+    #[test]
+    fn optimize_room_rejects_invalid_sample_rates() {
+        let config = RoomConfig {
+            version: "1.2.0".to_string(),
+            system: None,
+            speakers: HashMap::from([(
+                "left".to_string(),
+                SpeakerConfig::Single(MeasurementSource::InMemory(make_test_curve(80.0))),
+            )]),
+            crossovers: None,
+            target_curve: None,
+            optimizer: routing_only_optimizer(),
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        };
+
+        for sample_rate in [0.0, -48_000.0, f64::NAN, f64::INFINITY] {
+            let error = optimize_room(&config, sample_rate, None, None)
+                .expect_err("invalid sample rate must be rejected");
+            let message = error.to_string();
+            assert!(
+                message.contains("sample rate") && message.contains("finite and positive"),
+                "sample_rate={sample_rate}: unexpected error: {message}"
+            );
+        }
     }
 }

@@ -273,6 +273,26 @@ fn test_phase_only_fir_produces_real_output() {
 }
 
 #[test]
+fn generate_excess_phase_fir_accepts_non_contiguous_arrays() {
+    let freq = Array1::from_vec(vec![20.0, -1.0, 200.0, -1.0, 2_000.0, -1.0])
+        .slice_move(ndarray::s![..;2]);
+    let residual_phase =
+        Array1::from_vec(vec![0.0, -1.0, -15.0, -1.0, -30.0, -1.0]).slice_move(ndarray::s![..;2]);
+    assert!(freq.as_slice().is_none());
+    assert!(residual_phase.as_slice().is_none());
+
+    let fir = generate_excess_phase_fir(
+        &freq,
+        &residual_phase,
+        &MixedPhaseConfig::default(),
+        48_000.0,
+    );
+
+    assert!(!fir.is_empty());
+    assert!(fir.iter().all(|value| value.is_finite()));
+}
+
+#[test]
 fn test_decompose_phase_with_delay() {
     // Known delay → decompose should recover it
     let n = 128;

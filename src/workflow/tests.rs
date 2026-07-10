@@ -170,7 +170,8 @@ fn test_compute_visualization_curves() {
     let biquad = Biquad::new(BiquadFilterType::Peak, 1000.0, 48000.0, 1.0, -5.0);
     let biquads = vec![biquad];
 
-    let curves = compute_visualization_curves(&frequencies, &input_curve, &target_curve, &biquads);
+    let curves =
+        compute_visualization_curves(&frequencies, &input_curve, &target_curve, &biquads).unwrap();
 
     // Check that all curves have the right length
     assert_eq!(curves.frequencies.len(), 3);
@@ -213,7 +214,8 @@ fn test_visualization_curves_empty_biquads() {
 
     let biquads: Vec<Biquad> = vec![];
 
-    let curves = compute_visualization_curves(&frequencies, &input_curve, &target_curve, &biquads);
+    let curves =
+        compute_visualization_curves(&frequencies, &input_curve, &target_curve, &biquads).unwrap();
 
     // With no biquads, filter response should be all zeros
     for &val in &curves.filter_response {
@@ -229,6 +231,71 @@ fn test_visualization_curves_empty_biquads() {
     for i in 0..3 {
         assert!((curves.error_curve[i] - curves.deviation_curve[i]).abs() < 1e-10);
     }
+}
+
+#[test]
+fn visualization_curves_reject_invalid_curve_data() {
+    let frequencies = vec![100.0, 1_000.0];
+    let valid = Curve {
+        freq: Array1::from_vec(frequencies.clone()),
+        spl: Array1::from_vec(vec![80.0, 81.0]),
+        ..Default::default()
+    };
+
+    let invalid_curves = [
+        Curve::default(),
+        Curve {
+            freq: Array1::from_vec(vec![100.0]),
+            spl: Array1::from_vec(vec![80.0]),
+            ..Default::default()
+        },
+        Curve {
+            freq: Array1::from_vec(frequencies.clone()),
+            spl: Array1::from_vec(vec![80.0]),
+            ..Default::default()
+        },
+        Curve {
+            freq: Array1::from_vec(vec![100.0, f64::NAN]),
+            spl: Array1::from_vec(vec![80.0, 81.0]),
+            ..Default::default()
+        },
+        Curve {
+            freq: Array1::from_vec(frequencies.clone()),
+            spl: Array1::from_vec(vec![80.0, f64::INFINITY]),
+            ..Default::default()
+        },
+    ];
+
+    for invalid in invalid_curves {
+        let result = compute_visualization_curves(&frequencies, &invalid, &valid, &[]);
+        assert!(matches!(
+            result,
+            Err(crate::AutoeqError::InvalidMeasurement { .. })
+        ));
+    }
+}
+
+#[test]
+fn visualization_curves_reject_mismatched_frequency_grids() {
+    let input = Curve {
+        freq: Array1::from_vec(vec![100.0, 1_000.0]),
+        spl: Array1::from_vec(vec![80.0, 81.0]),
+        ..Default::default()
+    };
+    let target = Curve {
+        freq: Array1::from_vec(vec![100.0, 2_000.0]),
+        spl: Array1::from_vec(vec![80.0, 80.0]),
+        ..Default::default()
+    };
+
+    assert!(matches!(
+        compute_visualization_curves(&[100.0, 1_000.0], &input, &target, &[]),
+        Err(crate::AutoeqError::InvalidMeasurement { .. })
+    ));
+    assert!(matches!(
+        compute_visualization_curves(&[100.0, 900.0], &input, &input, &[]),
+        Err(crate::AutoeqError::InvalidMeasurement { .. })
+    ));
 }
 
 #[test]
@@ -499,6 +566,19 @@ fn optimize_headphone_with_csv_runs() {
     );
     let opt = result.unwrap();
     assert!(!opt.biquads.is_empty());
+    assert!(opt.initial_loss.is_finite() && opt.final_loss.is_finite());
+    assert!(
+        opt.final_loss <= opt.initial_loss,
+        "headphone loss worsened: {} -> {}",
+        opt.initial_loss,
+        opt.final_loss
+    );
+    assert!(opt.biquads.iter().all(|filter| {
+        filter.freq.is_finite()
+            && filter.q.is_finite()
+            && filter.db_gain.is_finite()
+            && (args.min_freq..=args.max_freq).contains(&filter.freq)
+    }));
 
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -521,6 +601,52 @@ fn make_two_drivers() -> crate::loss::DriversLossData {
         vec![woofer, tweeter],
         crate::loss::CrossoverType::LinkwitzRiley4,
     )
+}
+
+#[test]
+fn public_driver_workflows_reject_invalid_sample_rates() {
+    for sample_rate in [0.0, -48_000.0, f64::NAN, f64::INFINITY] {
+        let driver_error = super::optimize_drivers_crossover(
+            make_two_drivers(),
+            50.0,
+            8_000.0,
+            sample_rate,
+            "autoeq:de",
+            20,
+            6,
+            -12.0,
+            12.0,
+            None,
+            Some(1),
+        )
+        .expect_err("invalid driver sample rate must be rejected");
+        assert!(
+            driver_error
+                .to_string()
+                .contains("sample rate must be finite and positive"),
+            "sample_rate={sample_rate}: unexpected driver error: {driver_error}"
+        );
+
+        let multisub_error = super::optimize_multisub(
+            make_two_drivers(),
+            20.0,
+            200.0,
+            sample_rate,
+            "autoeq:de",
+            20,
+            6,
+            -12.0,
+            12.0,
+            Some(1),
+        )
+        .expect_err("invalid multisub sample rate must be rejected");
+        assert!(
+            multisub_error
+                .to_string()
+                .contains("sample rate must be finite and positive"),
+            "sample_rate={sample_rate}: unexpected multisub error: {multisub_error}"
+        );
+    }
 }
 
 #[test]
@@ -548,6 +674,16 @@ fn optimize_drivers_crossover_runs() {
     assert_eq!(opt.gains.len(), 2);
     assert_eq!(opt.delays.len(), 2);
     assert_eq!(opt.crossover_freqs.len(), 1);
+    assert!(opt.converged);
+    assert!(opt.pre_objective.is_finite() && opt.post_objective.is_finite());
+    assert!(opt.post_objective <= opt.pre_objective);
+    assert!(
+        opt.gains
+            .iter()
+            .all(|gain| gain.is_finite() && (-12.0..=12.0).contains(gain))
+    );
+    assert!(opt.delays.iter().all(|delay| delay.is_finite()));
+    assert!((50.0..=8_000.0).contains(&opt.crossover_freqs[0]));
 }
 
 #[test]
@@ -573,6 +709,15 @@ fn optimize_drivers_crossover_fixed_freqs_runs() {
     );
     let opt = result.unwrap();
     assert_eq!(opt.crossover_freqs, vec![1000.0]);
+    assert!(opt.converged);
+    assert!(opt.pre_objective.is_finite() && opt.post_objective.is_finite());
+    assert!(opt.post_objective <= opt.pre_objective);
+    assert!(
+        opt.gains
+            .iter()
+            .all(|gain| gain.is_finite() && (-12.0..=12.0).contains(gain))
+    );
+    assert!(opt.delays.iter().all(|delay| delay.is_finite()));
 }
 
 #[test]
@@ -612,6 +757,15 @@ fn optimize_multisub_runs() {
     assert_eq!(opt.gains.len(), 2);
     assert_eq!(opt.delays.len(), 2);
     assert!(opt.crossover_freqs.is_empty());
+    assert!(opt.converged);
+    assert!(opt.pre_objective.is_finite() && opt.post_objective.is_finite());
+    assert!(opt.post_objective <= opt.pre_objective);
+    assert!(
+        opt.gains
+            .iter()
+            .all(|gain| gain.is_finite() && (-12.0..=12.0).contains(gain))
+    );
+    assert!(opt.delays.iter().all(|delay| delay.is_finite()));
 }
 
 fn write_speaker_cache(speaker: &str, _version: &str, measurement: &str) -> PathBuf {
@@ -695,6 +849,19 @@ fn optimize_speaker_with_local_cache_runs() {
     let opt = result.unwrap();
     assert!(!opt.biquads.is_empty());
     assert!(opt.spin_data.is_some());
+    assert!(opt.initial_loss.is_finite() && opt.final_loss.is_finite());
+    assert!(
+        opt.final_loss <= opt.initial_loss,
+        "speaker loss worsened: {} -> {}",
+        opt.initial_loss,
+        opt.final_loss
+    );
+    assert!(opt.biquads.iter().all(|filter| {
+        filter.freq.is_finite()
+            && filter.q.is_finite()
+            && filter.db_gain.is_finite()
+            && (args.min_freq..=args.max_freq).contains(&filter.freq)
+    }));
 }
 
 // ---------------------------------------------------------------------------

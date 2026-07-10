@@ -49,8 +49,14 @@ pub(super) async fn save_peq_to_file(
         chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
     );
 
-    // Format the PEQ as APO string
-    let apo_content = iir::peq_format_apo(&comment, &peq);
+    // Equalizer APO export uses integer-Hz center frequencies. The upstream
+    // formatter casts frequencies to i32, so round first to avoid turning a
+    // log-space round-trip such as 499.999... Hz into 499 Hz.
+    let mut apo_peq = peq.clone();
+    for (_, filter) in &mut apo_peq {
+        filter.freq = filter.freq.round();
+    }
+    let apo_content = iir::peq_format_apo(&comment, &apo_peq);
 
     // Ensure parent directory exists
     if let Some(parent) = file_path.parent() {

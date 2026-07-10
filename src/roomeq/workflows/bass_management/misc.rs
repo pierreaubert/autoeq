@@ -82,13 +82,20 @@ where
     }
     let mut scores: Vec<f64> = population
         .iter()
-        .map(|candidate| objective(candidate))
+        .map(|candidate| {
+            let score = objective(candidate);
+            if score.is_finite() {
+                score
+            } else {
+                f64::INFINITY
+            }
+        })
         .collect();
     let mut evals = population_size;
     let mut best_idx = scores
         .iter()
         .enumerate()
-        .min_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .min_by(|a, b| a.1.total_cmp(b.1))
         .map(|(idx, _)| idx)
         .unwrap_or(0);
 
@@ -128,6 +135,11 @@ where
                 }
             }
             let trial_score = objective(&trial);
+            let trial_score = if trial_score.is_finite() {
+                trial_score
+            } else {
+                f64::INFINITY
+            };
             evals += 1;
             if trial_score < scores[target_idx] {
                 population[target_idx] = trial;
@@ -235,4 +247,27 @@ pub(in super::super) fn representative_bass_route_signature(
                 .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
         })
         .unwrap_or_else(|| (fallback_type.to_string(), fallback_hz))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn differential_evolution_discards_non_finite_objective_scores() {
+        let objective = |candidate: &[f64]| {
+            if candidate[0] == 0.0 {
+                f64::NAN
+            } else {
+                (candidate[0] - 0.25).powi(2)
+            }
+        };
+
+        let (candidate, score) =
+            differential_evolution_minimize(&[-1.0], &[1.0], &[0.0], &objective, 12, 96, 7);
+
+        assert!(score.is_finite(), "optimizer returned score {score}");
+        assert!((-1.0..=1.0).contains(&candidate[0]));
+        assert_eq!(score, objective(&candidate));
+    }
 }

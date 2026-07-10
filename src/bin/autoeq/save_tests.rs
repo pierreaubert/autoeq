@@ -1,5 +1,10 @@
 #[cfg(test)]
+#[path = "../../../tests/common/apo.rs"]
+mod apo;
+
+#[cfg(test)]
 mod tests {
+    use super::apo::parse_apo_filters;
     use crate::save::save_peq_to_file;
     use autoeq::cli::Args;
     use autoeq::loss::LossType;
@@ -28,9 +33,9 @@ mod tests {
             -1.0, // Filter 3
         ];
 
-        let result = save_peq_to_file(&args, &x, &output_path, &LossType::SpeakerFlat).await;
-
-        assert!(result.is_ok());
+        save_peq_to_file(&args, &x, &output_path, &LossType::SpeakerFlat)
+            .await
+            .expect("speaker-flat filters should save");
 
         // Verify file was created
         let apo_path = output_path.parent().unwrap().join("iir-autoeq-flat.txt");
@@ -39,7 +44,31 @@ mod tests {
         // Verify content
         let content = fs::read_to_string(&apo_path).unwrap();
         assert!(content.contains("AutoEQ"));
-        assert!(content.contains("Filter")); // Check for presence of filter lines
+        let filters = parse_apo_filters(&content).expect("generated APO must parse");
+        assert_eq!(filters.len(), 3);
+        for (actual, (index, freq_hz, gain_db, q)) in filters.iter().zip([
+            (1, 500.0, -3.0, 2.0),
+            (2, 1000.0, 2.0, 5.0),
+            (3, 3000.0, -1.0, 3.0),
+        ]) {
+            assert_eq!(actual.index, index);
+            assert_eq!(actual.kind, "PK");
+            assert!(
+                (actual.freq_hz - freq_hz).abs() < 1e-9,
+                "frequency: actual={}, expected={freq_hz}",
+                actual.freq_hz
+            );
+            assert!(
+                (actual.gain_db - gain_db).abs() < 1e-9,
+                "gain: actual={}, expected={gain_db}",
+                actual.gain_db
+            );
+            assert!(
+                (actual.q - q).abs() < 1e-9,
+                "Q: actual={}, expected={q}",
+                actual.q
+            );
+        }
     }
 
     #[tokio::test]
@@ -51,13 +80,24 @@ mod tests {
 
         let x = vec![500.0f64.log10(), 2.0, -2.0];
 
-        let result = save_peq_to_file(&args, &x, &output_path, &LossType::SpeakerScore).await;
-
-        assert!(result.is_ok());
+        save_peq_to_file(&args, &x, &output_path, &LossType::SpeakerScore)
+            .await
+            .expect("speaker-score filters should save");
 
         // Verify filename for score loss
         let apo_path = output_path.parent().unwrap().join("iir-autoeq-score.txt");
         assert!(apo_path.exists());
+        let content = fs::read_to_string(&apo_path).unwrap();
+        let filters = parse_apo_filters(&content).expect("generated APO must parse");
+        assert_eq!(filters.len(), 1);
+        assert_eq!(filters[0].kind, "PK");
+        assert!(
+            (filters[0].freq_hz - 500.0).abs() < 1e-9,
+            "frequency: actual={}, expected=500",
+            filters[0].freq_hz
+        );
+        assert!((filters[0].gain_db + 2.0).abs() < 1e-9);
+        assert!((filters[0].q - 2.0).abs() < 1e-9);
     }
 
     #[tokio::test]
@@ -69,7 +109,9 @@ mod tests {
 
         let x = vec![500.0f64.log10(), 2.0, -2.0];
 
-        let _ = save_peq_to_file(&args, &x, &output_path, &LossType::SpeakerFlat).await;
+        save_peq_to_file(&args, &x, &output_path, &LossType::SpeakerFlat)
+            .await
+            .expect("all configured filter formats should save");
 
         // Check APO format
         assert!(

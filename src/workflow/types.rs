@@ -1,5 +1,6 @@
 use crate::Cea2034Data;
 use crate::Curve;
+use crate::error::{AutoeqError, Result};
 use crate::iir::Biquad;
 
 /// All curves needed for visualization after optimization
@@ -32,13 +33,41 @@ pub struct VisualizationCurves {
 /// * `biquads` - Optimized biquad filters
 ///
 /// # Returns
-/// All curves needed for visualization
+/// All curves needed for visualization, or an invalid-measurement error when
+/// the supplied curves do not share one finite frequency grid.
 pub fn compute_visualization_curves(
     frequencies: &[f64],
     input_curve: &Curve,
     target_curve: &Curve,
     biquads: &[Biquad],
-) -> VisualizationCurves {
+) -> Result<VisualizationCurves> {
+    input_curve.validate("visualization input curve")?;
+    target_curve.validate("visualization target curve")?;
+    let expected = input_curve.freq.len();
+    if target_curve.freq.len() != expected
+        || input_curve
+            .freq
+            .iter()
+            .zip(target_curve.freq.iter())
+            .any(|(input, target)| input != target)
+    {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: "visualization input and target curves must share the same frequency grid"
+                .to_string(),
+        });
+    }
+    if frequencies.len() != expected
+        || input_curve
+            .freq
+            .iter()
+            .zip(frequencies)
+            .any(|(curve, requested)| curve != requested)
+    {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: "visualization frequencies must match the curve frequency grid".to_string(),
+        });
+    }
+
     let input_vec: Vec<f64> = input_curve.spl.iter().copied().collect();
     let target_vec: Vec<f64> = target_curve.spl.iter().copied().collect();
 
@@ -80,7 +109,18 @@ pub fn compute_visualization_curves(
         .map(|(i, f)| i + f)
         .collect();
 
-    VisualizationCurves {
+    if filter_response.iter().any(|value| !value.is_finite())
+        || individual_filter_responses
+            .iter()
+            .flatten()
+            .any(|value| !value.is_finite())
+    {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: "visualization filters produced a non-finite response".to_string(),
+        });
+    }
+
+    Ok(VisualizationCurves {
         frequencies: frequencies.to_vec(),
         input_curve: input_vec,
         target_curve: target_vec,
@@ -89,7 +129,7 @@ pub fn compute_visualization_curves(
         error_curve: error_vec,
         corrected_curve: corrected_vec,
         individual_filter_responses,
-    }
+    })
 }
 
 /// Complete speaker optimization result

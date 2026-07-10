@@ -78,8 +78,7 @@ mod tests {
             .zip(deviation.iter())
             .map(|(&target, &deviation)| target - deviation)
             .collect();
-        let expected =
-            epa_loss_normalized(&freqs.to_vec(), &corrected, &config, flatness);
+        let expected = epa_loss_normalized(&freqs.to_vec(), &corrected, &config, flatness);
         let actual = strategy.compute(&[], &ctx);
 
         assert!(

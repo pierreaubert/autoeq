@@ -3,6 +3,7 @@ use assert_fs::prelude::*;
 
 mod common;
 
+use common::apo::parse_apo_filters;
 use common::binary_runner::run_autoeq;
 
 #[test]
@@ -35,21 +36,19 @@ fn test_apo_output_format_golden() {
 
     let content = std::fs::read_to_string(apo.path()).unwrap();
 
-    // Golden assertions - structure should not change
+    // Golden assertions: parse every emitted filter instead of only checking
+    // that marker words occur in the file.
     assert!(content.starts_with("# AutoEQ"));
-    assert!(content.contains("Filter"));
-    assert!(content.contains("ON PK")); // Check for standard APO filter format
-
-    // Check that we have 3 filters (count occurrences of "Filter")
-    let filter_count = content
-        .lines()
-        .filter(|l| l.trim().starts_with("Filter"))
-        .count();
-    assert_eq!(filter_count, 3, "Should have exactly 3 filters");
-
-    assert!(content.contains("Fc")); // Frequency marker
-    assert!(content.contains("Q")); // Q marker
-    assert!(content.contains("Gain")); // Gain marker
+    let filters = parse_apo_filters(&content).expect("valid APO filter output");
+    assert_eq!(filters.len(), 3, "Should have exactly 3 filters");
+    for (expected_index, filter) in (1..=3).zip(&filters) {
+        assert_eq!(filter.index, expected_index);
+        assert_eq!(filter.kind, "PK");
+        assert!((60.0..=16_000.0).contains(&filter.freq_hz));
+        assert!((-9.0..=3.0).contains(&filter.gain_db));
+        assert!((1.0..=3.0).contains(&filter.q));
+        assert!(filter.gain_db.abs() < 0.1 || filter.gain_db.abs() >= 0.5);
+    }
 }
 
 #[test]
@@ -63,62 +62,35 @@ fn test_peq_parameters_reasonable() {
 
     let output = temp_dir.child("output");
 
-    let _ = run_autoeq(&[
+    let process = run_autoeq(&[
         "--curve",
         csv.path().to_str().unwrap(),
         "--output",
         output.path().to_str().unwrap(),
         "--num-filters",
         "2",
+        "--seed",
+        "42",
     ]);
+    assert!(
+        process.status.success(),
+        "autoeq failed: {}",
+        String::from_utf8_lossy(&process.stderr)
+    );
 
     let apo = temp_dir.child("iir-autoeq-flat.txt");
     let content = std::fs::read_to_string(apo.path()).unwrap();
 
-    // Parse PEQ parameters and verify they are reasonable
-    let lines: Vec<&str> = content.lines().collect();
-
-    // Find filter lines (starts with "Filter")
-    let mut filter_lines = Vec::new();
-    for line in &lines {
-        if line.starts_with("Filter") && line.contains("ON PK") {
-            filter_lines.push(*line);
-        }
-    }
-
-    assert!(filter_lines.len() >= 2, "Should have at least 2 filters");
-
-    // Verify each filter has valid parameters
-    // Format example: "Filter  1: ON PK Fc 300.00 Hz Gain -4.00 dB Q 2.00"
-    for filter_line in filter_lines {
-        let parts: Vec<&str> = filter_line.split_whitespace().collect();
-
-        // Find indices of parameters
-        let fc_idx = parts.iter().position(|&r| r == "Fc");
-        let gain_idx = parts.iter().position(|&r| r == "Gain");
-        let q_idx = parts.iter().position(|&r| r == "Q");
-
-        assert!(fc_idx.is_some(), "Missing Fc parameter");
-        assert!(gain_idx.is_some(), "Missing Gain parameter");
-        assert!(q_idx.is_some(), "Missing Q parameter");
-
-        // Check Frequency
-        let freq_str = parts[fc_idx.unwrap() + 1];
-        let freq: f64 = freq_str.parse().expect("Failed to parse frequency");
-        assert!(
-            (20.0..=20000.0).contains(&freq),
-            "Frequency out of range: {}",
-            freq
-        );
-
-        // Check Gain
-        let gain_str = parts[gain_idx.unwrap() + 1];
-        let gain: f64 = gain_str.parse().expect("Failed to parse gain");
-        assert!(gain.abs() <= 20.0, "Gain out of range: {}", gain);
-
-        // Check Q
-        let q_str = parts[q_idx.unwrap() + 1];
-        let q: f64 = q_str.parse().expect("Failed to parse Q");
-        assert!((0.1..=10.0).contains(&q), "Q out of range: {}", q);
+    let filters = parse_apo_filters(&content).expect("valid APO filter output");
+    assert_eq!(filters.len(), 2);
+    assert!(
+        filters.iter().any(|filter| filter.gain_db <= -0.5),
+        "the synthetic 300 Hz peak should produce at least one audible cut: {filters:?}"
+    );
+    for filter in filters {
+        assert_eq!(filter.kind, "PK");
+        assert!((60.0..=16_000.0).contains(&filter.freq_hz));
+        assert!((-9.0..=3.0).contains(&filter.gain_db));
+        assert!((1.0..=3.0).contains(&filter.q));
     }
 }

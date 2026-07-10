@@ -114,66 +114,77 @@ fn test_roomeq_small_stereo_2_0() {
 
 #[test]
 #[serial]
+#[ignore = "full FEM convergence matrix; run the documented --ignored command"]
 fn test_roomeq_medium_stereo_2_0() {
     run_roomeq_on_generated("medium_stereo_2_0");
 }
 
 #[test]
 #[serial]
+#[ignore = "full FEM convergence matrix; run the documented --ignored command"]
 fn test_roomeq_large_stereo_2_0() {
     run_roomeq_on_generated("large_stereo_2_0");
 }
 
 #[test]
 #[serial]
+#[ignore = "full FEM convergence matrix; run the documented --ignored command"]
 fn test_roomeq_small_stereo_2_1() {
     run_roomeq_on_generated("small_stereo_2_1");
 }
 
 #[test]
 #[serial]
+#[ignore = "full FEM convergence matrix; run the documented --ignored command"]
 fn test_roomeq_medium_stereo_2_1() {
     run_roomeq_on_generated("medium_stereo_2_1");
 }
 
 #[test]
 #[serial]
+#[ignore = "full FEM convergence matrix; run the documented --ignored command"]
 fn test_roomeq_large_stereo_2_1() {
     run_roomeq_on_generated("large_stereo_2_1");
 }
 
 #[test]
 #[serial]
+#[ignore = "full FEM convergence matrix; run the documented --ignored command"]
 fn test_roomeq_medium_multi_seat() {
     run_roomeq_on_generated("medium_multi_seat");
 }
 
 #[test]
 #[serial]
+#[ignore = "full FEM convergence matrix; run the documented --ignored command"]
 fn test_roomeq_small_multi_sub_2() {
     run_roomeq_on_generated("small_stereo_2_2_mso");
 }
 
 #[test]
 #[serial]
+#[ignore = "full FEM convergence matrix; run the documented --ignored command"]
 fn test_roomeq_medium_multi_sub_4() {
     run_roomeq_on_generated("medium_multi_sub_4");
 }
 
 #[test]
 #[serial]
+#[ignore = "full FEM convergence matrix; run the documented --ignored command"]
 fn test_roomeq_large_multi_sub_4() {
     run_roomeq_on_generated("large_multi_sub_4");
 }
 
 #[test]
 #[serial]
+#[ignore = "full FEM convergence matrix; run the documented --ignored command"]
 fn test_roomeq_large_multi_seat_2_1() {
     run_roomeq_on_generated("large_multi_seat_2_1");
 }
 
 #[test]
 #[serial]
+#[ignore = "full FEM convergence matrix; run the documented --ignored command"]
 fn test_roomeq_medium_multi_sub_multi_seat() {
     run_roomeq_on_generated("medium_multi_sub_multi_seat");
 }
@@ -443,18 +454,21 @@ fn run_multimode_comparison(scenario_name: &str) {
 
 #[test]
 #[serial]
+#[ignore = "full FEM multimode matrix; run the documented --ignored command"]
 fn test_multimode_comparison_small_stereo_2_0() {
     run_multimode_comparison("small_stereo_2_0");
 }
 
 #[test]
 #[serial]
+#[ignore = "full FEM multimode matrix; run the documented --ignored command"]
 fn test_multimode_comparison_medium_stereo_2_0() {
     run_multimode_comparison("medium_stereo_2_0");
 }
 
 #[test]
 #[serial]
+#[ignore = "full FEM multimode matrix; run the documented --ignored command"]
 fn test_multimode_comparison_large_stereo_2_0() {
     run_multimode_comparison("large_stereo_2_0");
 }

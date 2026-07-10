@@ -325,15 +325,6 @@ pub fn compute_target_alignment(
     let hs_gain = (-hs_fit).clamp(-MAX_SHELF_GAIN_DB, MAX_SHELF_GAIN_DB);
     let flat_gain = (-flat_fit).clamp(-MAX_FLAT_GAIN_DB, MAX_FLAT_GAIN_DB);
 
-    // If the flat-gain correction is clamped to its safety limit, the fit is
-    // trying to correct a level offset far outside the intended broadband
-    // range (e.g. an inappropriate target level or a severe measurement
-    // mismatch). Treat it as no correction rather than applying a large,
-    // likely-wrong shift.
-    if flat_gain.abs() >= MAX_FLAT_GAIN_DB - 1e-6 {
-        return None;
-    }
-
     // If corrections are negligible, return None
     if ls_gain.abs() < MIN_CORRECTION_DB
         && hs_gain.abs() < MIN_CORRECTION_DB

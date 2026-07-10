@@ -238,6 +238,7 @@ fn config_serialization_roundtrip() {
         variance_lambda: 2.5,
         spatial_robustness: None,
         bootstrap_uncertainty: None,
+        rir_prototype: None,
     };
 
     let json = serde_json::to_string(&config).unwrap();

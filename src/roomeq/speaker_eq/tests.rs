@@ -970,8 +970,10 @@ fn apply_broadband_precorrection_enabled_flat_curve() {
 }
 
 #[test]
-fn apply_broadband_precorrection_rejects_worsening_result() {
-    // Curve with a steep rolloff: shelf fit will likely make things worse
+fn apply_broadband_precorrection_respects_worsening_limit() {
+    // A steep rolloff stresses the shelf fit. Depending on the fitted
+    // response it may be rejected, but an accepted correction must satisfy
+    // the same measured-loss gate as the production path.
     let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(20000.0), 96);
     let spl: Vec<f64> = freq
         .iter()
@@ -998,11 +1000,24 @@ fn apply_broadband_precorrection_rejects_worsening_result() {
     let bb = super::apply::apply_broadband_precorrection(
         &config, &curve, None, 80.0, 20.0, 500.0, 48000.0,
     );
-    // Either rejected (identity) or tiny correction
-    assert!(
-        bb.curve_for_optim.spl == curve.spl || bb.mean_shift.abs() < 0.1,
-        "correction should be rejected or near-zero"
+    let target = Array1::from_elem(curve.freq.len(), 80.0);
+    let pre_score = crate::loss::flat_loss(&curve.freq, &(&curve.spl - &target), 20.0, 500.0);
+    let post_score = crate::loss::flat_loss(
+        &bb.curve_for_optim.freq,
+        &(&bb.curve_for_optim.spl - &target),
+        20.0,
+        500.0,
     );
+    if bb.curve_for_optim.spl == curve.spl {
+        assert!(bb.plugins.is_empty());
+        assert!(bb.biquads.is_empty());
+        assert_eq!(bb.mean_shift, 0.0);
+    } else {
+        assert!(
+            !super::broadband_correction_rejected(pre_score, post_score),
+            "accepted correction exceeded worsening limit: {pre_score} -> {post_score}"
+        );
+    }
 }
 
 #[test]

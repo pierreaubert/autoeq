@@ -1711,4 +1711,93 @@ mod multi_eq_tests {
             result.err()
         );
     }
+
+    use crate::roomeq::rir_prototype::{DirectivityModel, DistanceWeightMode, RirPrototypeConfig};
+
+    #[test]
+    fn optimize_channel_eq_multi_rir_prototype_runs() {
+        let reference = make_simple_room_curve();
+        let mut far = reference.clone();
+        far.spl = far.spl.mapv(|s| s + 2.0);
+        let mut off_axis = reference.clone();
+        off_axis.spl = off_axis.spl.mapv(|s| s - 2.0);
+
+        let multi_config = MultiMeasurementConfig {
+            strategy: MultiMeasurementStrategy::Average,
+            weights: None,
+            variance_lambda: 1.0,
+            spatial_robustness: None,
+            bootstrap_uncertainty: None,
+            rir_prototype: Some(RirPrototypeConfig {
+                reference_position: [0.0, 0.0, 0.0],
+                source_position: [0.0, 2.5, 0.0],
+                microphone_positions: vec![[0.0, 0.0, 0.0], [0.5, 0.1, 0.0], [-0.5, 0.1, 0.0]],
+                distance_mode: DistanceWeightMode::InverseSquare,
+                directivity: DirectivityModel::Omnidirectional,
+                frequency_dependent_directivity: false,
+            }),
+        };
+
+        let config = OptimizerConfig {
+            loss_type: "flat".to_string(),
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 3,
+            max_iter: 500,
+            population: 8,
+            seed: Some(42),
+            ..OptimizerConfig::default()
+        };
+
+        let result = optimize_channel_eq_multi(
+            &[reference, far, off_axis],
+            &config,
+            &multi_config,
+            None,
+            48000.0,
+        );
+
+        assert!(result.is_ok(), "optimization failed: {:?}", result.err());
+        let (filters, loss) = result.unwrap();
+        assert!(!filters.is_empty());
+        assert!(loss.is_finite(), "loss should be finite, got {}", loss);
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_rir_prototype_none_uses_plain_average_path() {
+        let c1 = make_simple_room_curve();
+        let mut c2 = c1.clone();
+        c2.spl = c2.spl.mapv(|s| s + 1.5);
+
+        let multi_config = MultiMeasurementConfig {
+            strategy: MultiMeasurementStrategy::Average,
+            weights: None,
+            variance_lambda: 1.0,
+            spatial_robustness: None,
+            bootstrap_uncertainty: None,
+            rir_prototype: None,
+        };
+
+        let config = OptimizerConfig {
+            loss_type: "flat".to_string(),
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 2,
+            max_iter: 500,
+            population: 8,
+            seed: Some(42),
+            ..OptimizerConfig::default()
+        };
+
+        let result = optimize_channel_eq_multi(&[c1, c2], &config, &multi_config, None, 48000.0);
+
+        assert!(
+            result.is_ok(),
+            "plain average path failed: {:?}",
+            result.err()
+        );
+        let (filters, loss) = result.unwrap();
+        assert!(!filters.is_empty());
+        assert!(loss.is_finite());
+    }
 }

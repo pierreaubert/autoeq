@@ -276,6 +276,88 @@ ensure-venv:
 		./venv/bin/pip install -r ./scripts/requirements.txt
 	fi
 
+[group('setup')]
+export-test-systems-help:
+	@echo "RoomEQ external-export validator setup"
+	@echo "======================================"
+	@echo
+	@echo "Structural checks, no external tools required:"
+	@echo "  cargo test -p autoeq export::tests"
+	@echo
+	@echo "Install helper:"
+	@echo "  just install-export-test-systems"
+	@echo
+	@echo "Optional validator environment variables:"
+	@echo "  ROOMEQ_CAMILLADSP_VALIDATE_CMD"
+	@echo "  ROOMEQ_EQUALIZER_APO_VALIDATE_CMD"
+	@echo "  ROOMEQ_EASYEFFECTS_VALIDATE_CMD"
+	@echo "  ROOMEQ_WAVELET_VALIDATE_CMD"
+	@echo "  ROOMEQ_PIPEWIRE_VALIDATE_CMD"
+	@echo "  ROOMEQ_ROON_VALIDATE_CMD"
+	@echo
+	@echo "Each command may use {config} or {file} as the generated export path."
+	@echo "If no placeholder is present, the path is appended as the final argument."
+	@echo
+	@echo "Examples:"
+	@echo "  ROOMEQ_CAMILLADSP_VALIDATE_CMD='path/to/validate-camilladsp {config}' cargo test -p autoeq tool_contract_camilladsp"
+	@echo "  ROOMEQ_PIPEWIRE_VALIDATE_CMD='path/to/validate-pipewire {config}' cargo test -p autoeq tool_contract_pipewire"
+	@echo "  ROOMEQ_EASYEFFECTS_VALIDATE_CMD='path/to/validate-easyeffects {config}' cargo test -p autoeq tool_contract_easyeffects"
+	@echo
+	@echo "Manual/application-backed validators:"
+	@echo "  Equalizer APO: install on Windows and point ROOMEQ_EQUALIZER_APO_VALIDATE_CMD at an import/syntax-check script."
+	@echo "  Wavelet: Android app; keep structural tests unless you provide a custom validator script."
+	@echo "  Roon: normally manual import/configuration; keep structural JSON tests unless you provide a custom validator script."
+
+[group('setup')]
+install-export-test-systems:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	echo "Installing optional RoomEQ export validation tools where this platform supports them."
+	echo "These are only needed for env-var-backed smoke tests; structural tests need no extra tools."
+	echo
+	if command -v cargo >/dev/null 2>&1; then
+		echo "Installing CamillaDSP with cargo..."
+		cargo install camilladsp --locked || {
+			echo "cargo install camilladsp failed; install CamillaDSP manually and set ROOMEQ_CAMILLADSP_VALIDATE_CMD."
+		}
+	else
+		echo "cargo not found; install Rust first if you want the CamillaDSP CLI via cargo."
+	fi
+	case "$(uname -s)" in
+		Darwin)
+			if command -v brew >/dev/null 2>&1; then
+				echo "Installing PipeWire tools with Homebrew..."
+				brew install pipewire || true
+			else
+				echo "Homebrew not found; install PipeWire manually if you want ROOMEQ_PIPEWIRE_VALIDATE_CMD."
+			fi
+			echo "EasyEffects is primarily a Linux desktop app; skipping automatic macOS install."
+			;;
+		Linux)
+			if command -v apt-get >/dev/null 2>&1; then
+				echo "Installing PipeWire and EasyEffects with apt..."
+				sudo apt-get update
+				sudo apt-get install -y pipewire-bin easyeffects
+			elif command -v dnf >/dev/null 2>&1; then
+				echo "Installing PipeWire and EasyEffects with dnf..."
+				sudo dnf install -y pipewire easyeffects
+			elif command -v pacman >/dev/null 2>&1; then
+				echo "Installing PipeWire and EasyEffects with pacman..."
+				sudo pacman -S --needed pipewire easyeffects
+			else
+				echo "No supported Linux package manager detected; install pipewire/pw-cli and EasyEffects manually."
+			fi
+			;;
+		*)
+			echo "Unsupported OS for automatic installs. Use export-test-systems-help for manual setup."
+			;;
+	esac
+	echo
+	echo "Next:"
+	echo "  1. Run: just export-test-systems-help"
+	echo "  2. Set ROOMEQ_*_VALIDATE_CMD variables for real tool smoke tests."
+	echo "  3. Run: cargo test -p autoeq export::tests"
+
 [group('qa-roomeq')]
 qa-roomeq: qa-roomeq-small-stereo-20 \
 	qa-roomeq-small-stereo-21 \

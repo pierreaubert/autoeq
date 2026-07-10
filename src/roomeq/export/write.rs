@@ -28,6 +28,7 @@ pub(super) fn write_camilladsp_filters_for_plugins(
     let mut gain_idx = 0;
     let mut delay_idx = 0;
     let mut conv_idx = 0;
+    let mut crossover_idx = 0;
 
     for plugin in plugins {
         match plugin.plugin_type.as_str() {
@@ -73,6 +74,30 @@ pub(super) fn write_camilladsp_filters_for_plugins(
                 writeln!(out, "      delay: {delay_ms:.3}")?;
                 writeln!(out, "      unit: ms")?;
                 delay_idx += 1;
+            }
+            "crossover" => {
+                let crossover_type = plugin
+                    .parameters
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("LR24");
+                let freq = plugin
+                    .parameters
+                    .get("frequency")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(80.0);
+                let output = plugin
+                    .parameters
+                    .get("output")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("high");
+                let name = if crossover_idx == 0 {
+                    format!("{prefix}_crossover")
+                } else {
+                    format!("{prefix}_crossover_{crossover_idx}")
+                };
+                write_camilladsp_crossover_filter(out, &name, crossover_type, freq, output)?;
+                crossover_idx += 1;
             }
             "eq" => {
                 if let Some(filters) = plugin.parameters.get("filters").and_then(|v| v.as_array()) {
@@ -120,4 +145,65 @@ pub(super) fn write_camilladsp_filters_for_plugins(
         }
     }
     Ok(())
+}
+
+pub(super) fn write_camilladsp_crossover_filter(
+    out: &mut String,
+    name: &str,
+    crossover_type: &str,
+    freq: f64,
+    output: &str,
+) -> anyhow::Result<()> {
+    let (filter_type, order) = camilladsp_crossover_filter_type(crossover_type, output)?;
+    writeln!(out, "  {name}:")?;
+    writeln!(out, "    type: BiquadCombo")?;
+    writeln!(out, "    parameters:")?;
+    writeln!(out, "      type: {filter_type}")?;
+    writeln!(out, "      freq: {freq:.6}")?;
+    writeln!(out, "      order: {order}")?;
+    Ok(())
+}
+
+pub(super) fn write_camilladsp_delay_filter(
+    out: &mut String,
+    name: &str,
+    delay_ms: f64,
+) -> anyhow::Result<()> {
+    writeln!(out, "  {name}:")?;
+    writeln!(out, "    type: Delay")?;
+    writeln!(out, "    parameters:")?;
+    writeln!(out, "      delay: {delay_ms:.3}")?;
+    writeln!(out, "      unit: ms")?;
+    Ok(())
+}
+
+fn camilladsp_crossover_filter_type(
+    crossover_type: &str,
+    output: &str,
+) -> anyhow::Result<(&'static str, u32)> {
+    let suffix = match output.to_ascii_lowercase().as_str() {
+        "low" | "lowpass" => "Lowpass",
+        "high" | "highpass" => "Highpass",
+        other => anyhow::bail!("Unsupported crossover output '{other}'"),
+    };
+    let (family, order) = match crossover_type.to_ascii_lowercase().as_str() {
+        "lr24" | "lr4" | "linkwitzriley24" | "linkwitz-riley24" => ("LinkwitzRiley", 4),
+        "lr48" | "lr8" | "linkwitzriley48" | "linkwitz-riley48" => ("LinkwitzRiley", 8),
+        "butterworth12" | "bw12" => ("Butterworth", 2),
+        "butterworth24" | "bw24" => ("Butterworth", 4),
+        "linearphase" | "linear_phase" | "linear-phase" | "linearphasefir" | "fir" | "lpfir" => {
+            anyhow::bail!("CamillaDSP external export does not support FIR crossover plugins yet")
+        }
+        other => anyhow::bail!("Unsupported crossover type '{other}' for CamillaDSP export"),
+    };
+    Ok((
+        match (family, suffix) {
+            ("LinkwitzRiley", "Lowpass") => "LinkwitzRileyLowpass",
+            ("LinkwitzRiley", "Highpass") => "LinkwitzRileyHighpass",
+            ("Butterworth", "Lowpass") => "ButterworthLowpass",
+            ("Butterworth", "Highpass") => "ButterworthHighpass",
+            _ => unreachable!(),
+        },
+        order,
+    ))
 }

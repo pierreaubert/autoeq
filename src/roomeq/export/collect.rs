@@ -22,6 +22,7 @@ pub(super) fn collect_camilladsp_filter_names(
     let mut gain_idx = 0;
     let mut delay_idx = 0;
     let mut conv_idx = 0;
+    let mut crossover_idx = 0;
 
     for plugin in plugins {
         match plugin.plugin_type.as_str() {
@@ -40,6 +41,14 @@ pub(super) fn collect_camilladsp_filter_names(
                     format!("{prefix}_delay_{delay_idx}")
                 });
                 delay_idx += 1;
+            }
+            "crossover" => {
+                names.push(if crossover_idx == 0 {
+                    format!("{prefix}_crossover")
+                } else {
+                    format!("{prefix}_crossover_{crossover_idx}")
+                });
+                crossover_idx += 1;
             }
             "eq" => {
                 if let Some(filters) = plugin.parameters.get("filters").and_then(|v| v.as_array()) {

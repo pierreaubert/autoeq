@@ -1,5 +1,16 @@
 # 0.4.48 -- unreleased
 
+## New features
+
+- Added a distance- and directivity-weighted RIR prototype for RoomEQ
+  multi-measurement workflows. Multiple microphone positions can now be
+  collapsed into a single prototype curve before optimization, controlled by
+  the new `RirPrototypeConfig` block inside `optimizer.multi_measurement`.
+  Supported distance weights are `uniform`, `inverse_square`, and `gaussian`;
+  supported directivity models are `omnidirectional` and `spherical_head`.
+  The prototype averaging is performed in the magnitude (SPL) domain; phase
+  and other metadata are carried over from the first measurement.
+
 ## Fixes
 
 - Hardened external DSP exports so routed home-cinema bass-management graphs

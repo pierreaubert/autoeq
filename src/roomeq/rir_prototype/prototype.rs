@@ -9,6 +9,55 @@ use crate::roomeq::rir_prototype::weights::{
 };
 use ndarray::Array1;
 
+/// Tolerance for comparing frequency-grid values (relative or absolute).
+const FREQ_GRID_TOLERANCE: f64 = 1e-6;
+
+/// Errors that can occur while building a weighted RIR prototype.
+#[derive(Debug, thiserror::Error)]
+pub enum RirPrototypeError {
+    /// No curves were provided.
+    #[error("build_weighted_prototype: no curves provided")]
+    NoCurves,
+    /// The number of microphone positions does not match the number of curves.
+    #[error("microphone_positions length ({0}) must match curves length ({1})")]
+    MismatchedCounts(usize, usize),
+    /// The source and reference positions are too close to define a directivity axis.
+    #[error("source and reference positions must differ: {0}")]
+    SourceReferenceTooClose(String),
+    /// A curve's frequency grid has a different length than the first curve.
+    #[error(
+        "curve {index} frequency grid length ({got}) does not match expected grid length ({expected})"
+    )]
+    MismatchedFreqLength {
+        index: usize,
+        got: usize,
+        expected: usize,
+    },
+    /// A curve's SPL array has a different length than the first curve's frequency grid.
+    #[error("curve {index} SPL length ({got}) does not match expected grid length ({expected})")]
+    MismatchedSplLength {
+        index: usize,
+        got: usize,
+        expected: usize,
+    },
+    /// A curve's frequency grid differs from the first curve's grid at a specific bin.
+    #[error(
+        "curve {index} frequency value at bin {bin} differs from reference: {got} vs {expected}"
+    )]
+    MismatchedFreqValue {
+        index: usize,
+        bin: usize,
+        got: f64,
+        expected: f64,
+    },
+    /// The Gaussian distance weight mode was given a non-positive sigma.
+    #[error("Gaussian distance weight requires positive sigma_m, got {0}")]
+    InvalidGaussianSigma(f64),
+    /// The spherical-head directivity model was given a non-positive radius.
+    #[error("SphericalHead directivity requires positive radius_m, got {0}")]
+    InvalidSphericalHeadRadius(f64),
+}
+
 /// Result of building a weighted RIR prototype.
 #[derive(Debug, Clone)]
 pub struct WeightedPrototype {
@@ -18,65 +67,68 @@ pub struct WeightedPrototype {
 
 /// Build a single prototype curve from multiple measurement curves and positions.
 ///
-/// All curves must share the same frequency grid. Callers typically use
+/// All curves must share the same frequency grid (same length and same values
+/// within [`FREQ_GRID_TOLERANCE`]). Callers typically use
 /// `read::load_source_individual` first, which interpolates all curves to the
 /// first curve's grid.
+///
+/// The returned `WeightedPrototype.curve` carries over `phase` and all other
+/// metadata from the first input curve; only `freq` and `spl` are recomputed.
 pub fn build_weighted_prototype(
     curves: &[Curve],
     config: &RirPrototypeConfig,
-) -> Result<WeightedPrototype, Box<dyn std::error::Error>> {
+) -> Result<WeightedPrototype, RirPrototypeError> {
     if curves.is_empty() {
-        return Err("build_weighted_prototype: no curves provided".into());
+        return Err(RirPrototypeError::NoCurves);
     }
     if config.microphone_positions.len() != curves.len() {
-        return Err(format!(
-            "microphone_positions length ({}) must match curves length ({})",
+        return Err(RirPrototypeError::MismatchedCounts(
             config.microphone_positions.len(),
-            curves.len()
-        )
-        .into());
+            curves.len(),
+        ));
     }
 
     let expected_len = curves[0].freq.len();
+    let reference_freq = &curves[0].freq;
     for (i, curve) in curves.iter().enumerate() {
         if curve.freq.len() != expected_len {
-            return Err(format!(
-                "curve {} frequency grid length ({}) does not match expected grid length ({})",
-                i,
-                curve.freq.len(),
-                expected_len
-            )
-            .into());
+            return Err(RirPrototypeError::MismatchedFreqLength {
+                index: i,
+                got: curve.freq.len(),
+                expected: expected_len,
+            });
         }
         if curve.spl.len() != expected_len {
-            return Err(format!(
-                "curve {} SPL length ({}) does not match expected grid length ({})",
-                i,
-                curve.spl.len(),
-                expected_len
-            )
-            .into());
+            return Err(RirPrototypeError::MismatchedSplLength {
+                index: i,
+                got: curve.spl.len(),
+                expected: expected_len,
+            });
+        }
+        for (bin, (&got, &expected)) in curve.freq.iter().zip(reference_freq.iter()).enumerate() {
+            if (got - expected).abs() > FREQ_GRID_TOLERANCE
+                && ((got - expected).abs() / expected.abs()) > FREQ_GRID_TOLERANCE
+            {
+                return Err(RirPrototypeError::MismatchedFreqValue {
+                    index: i,
+                    bin,
+                    got,
+                    expected,
+                });
+            }
         }
     }
 
     if let DistanceWeightMode::Gaussian { sigma_m } = config.distance_mode
         && sigma_m <= 0.0
     {
-        return Err(format!(
-            "Gaussian distance weight requires positive sigma_m, got {}",
-            sigma_m
-        )
-        .into());
+        return Err(RirPrototypeError::InvalidGaussianSigma(sigma_m));
     }
 
     if let DirectivityModel::SphericalHead { radius_m } = config.directivity
         && radius_m <= 0.0
     {
-        return Err(format!(
-            "SphericalHead directivity requires positive radius_m, got {}",
-            radius_m
-        )
-        .into());
+        return Err(RirPrototypeError::InvalidSphericalHeadRadius(radius_m));
     }
 
     let distances = compute_distances(&config.reference_position, &config.microphone_positions);
@@ -84,7 +136,8 @@ pub fn build_weighted_prototype(
         &config.source_position,
         &config.reference_position,
         &config.microphone_positions,
-    )?;
+    )
+    .map_err(|e| RirPrototypeError::SourceReferenceTooClose(e.to_string()))?;
 
     let freqs = curves[0].freq.clone();
     let weights = normalized_weights(&distances, &angles, &freqs, config);
@@ -197,6 +250,46 @@ mod tests {
         c2.freq = Array1::from_vec(vec![100.0, 1000.0]);
         c2.spl = Array1::from_vec(vec![86.0, 86.0]);
         assert!(build_weighted_prototype(&[c1, c2], &config).is_err());
+    }
+
+    #[test]
+    fn prototype_rejects_mismatched_grid_values() {
+        let config = RirPrototypeConfig {
+            reference_position: [0.0, 0.0, 0.0],
+            source_position: [0.0, 2.0, 0.0],
+            microphone_positions: vec![[0.0, 0.0, 0.0], [0.3, 0.0, 0.0]],
+            distance_mode: DistanceWeightMode::Uniform,
+            directivity: DirectivityModel::Omnidirectional,
+            frequency_dependent_directivity: false,
+        };
+        let c1 = flat_curve(80.0);
+        let mut c2 = flat_curve(86.0);
+        // Same length as c1, but shifted by more than the tolerance.
+        c2.freq = Array1::from_vec(vec![100.01, 1000.0, 10000.0]);
+        let err = build_weighted_prototype(&[c1, c2], &config).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("frequency value at bin 0 differs"),
+            "expected mismatched frequency value error, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn prototype_accepts_equal_grid_values() {
+        let config = RirPrototypeConfig {
+            reference_position: [0.0, 0.0, 0.0],
+            source_position: [0.0, 2.0, 0.0],
+            microphone_positions: vec![[0.0, 0.0, 0.0], [0.3, 0.0, 0.0]],
+            distance_mode: DistanceWeightMode::Uniform,
+            directivity: DirectivityModel::Omnidirectional,
+            frequency_dependent_directivity: false,
+        };
+        let c1 = flat_curve(80.0);
+        let mut c2 = flat_curve(86.0);
+        // Tiny shift within tolerance.
+        c2.freq = Array1::from_vec(vec![100.0 + 1e-7, 1000.0, 10000.0]);
+        assert!(build_weighted_prototype(&[c1, c2], &config).is_ok());
     }
 
     #[test]

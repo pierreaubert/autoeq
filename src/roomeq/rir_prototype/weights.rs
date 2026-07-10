@@ -9,6 +9,10 @@ const SOUND_SPEED_MPS: f64 = 343.0;
 const MIN_DISTANCE_M: f64 = 1e-6;
 
 /// Compute a scalar distance weight.
+///
+/// For `Gaussian`, a non-positive `sigma_m` falls back to `1.0`. Callers that
+/// need this to be an error should validate the parameter first (e.g. via
+/// `build_weighted_prototype`).
 pub fn distance_weight(distance_m: f64, mode: DistanceWeightMode) -> f64 {
     match mode {
         DistanceWeightMode::InverseSquare => {
@@ -29,6 +33,10 @@ pub fn distance_weight(distance_m: f64, mode: DistanceWeightMode) -> f64 {
 ///
 /// `angle_rad` is the angle between the source axis and the microphone direction,
 /// as seen from the source. 0 = on-axis, π = directly behind the source.
+///
+/// For `SphericalHead`, a non-positive `radius_m` falls back to `1.0` (omnidirectional).
+/// Callers that need this to be an error should validate the parameter first
+/// (e.g. via `build_weighted_prototype`).
 pub fn directivity_weight(freq_hz: f64, angle_rad: f64, model: DirectivityModel) -> f64 {
     match model {
         DirectivityModel::Omnidirectional => 1.0,

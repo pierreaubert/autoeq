@@ -1427,6 +1427,73 @@
         }
       }
     },
+    "DirectivityModel": {
+      "oneOf": [
+        {
+          "description": "No directivity correction.",
+          "type": "string",
+          "const": "omnidirectional"
+        },
+        {
+          "description": "Rigid-sphere head-shadow approximation.",
+          "type": "object",
+          "properties": {
+            "spherical_head": {
+              "type": "object",
+              "properties": {
+                "radius_m": {
+                  "type": "number",
+                  "format": "double"
+                }
+              },
+              "required": [
+                "radius_m"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "spherical_head"
+          ]
+        }
+      ]
+    },
+    "DistanceWeightMode": {
+      "oneOf": [
+        {
+          "description": "w = 1 / d^2, clipped at a minimum distance to avoid infinities.",
+          "type": "string",
+          "const": "inverse_square"
+        },
+        {
+          "description": "w = exp(-d^2 / (2 * sigma^2)).",
+          "type": "object",
+          "properties": {
+            "gaussian": {
+              "type": "object",
+              "properties": {
+                "sigma_m": {
+                  "type": "number",
+                  "format": "double"
+                }
+              },
+              "required": [
+                "sigma_m"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "gaussian"
+          ]
+        },
+        {
+          "description": "All microphones weighted equally (useful for baselines).",
+          "type": "string",
+          "const": "uniform"
+        }
+      ]
+    },
     "EarlyLateCorrectionConfig": {
       "description": "Direct/early/late impulse-response reporting windows for FIR and\nmixed-phase modes.",
       "type": "object",
@@ -2082,6 +2149,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/BootstrapUncertaintyConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rir_prototype": {
+          "description": "Optional distance- and directivity-weighted RIR prototype.\nWhen set, measurements are collapsed into a single prototype before\nthe multi-measurement strategy is applied.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RirPrototypeConfig"
             },
             {
               "type": "null"
@@ -3426,6 +3504,65 @@
           "format": "float"
         }
       }
+    },
+    "RirPrototypeConfig": {
+      "description": "Configuration for building a distance- and directivity-weighted RIR prototype.",
+      "type": "object",
+      "properties": {
+        "directivity": {
+          "description": "Which directivity model to apply.",
+          "$ref": "#/$defs/DirectivityModel",
+          "default": "omnidirectional"
+        },
+        "distance_mode": {
+          "description": "How distance translates into a weight.",
+          "$ref": "#/$defs/DistanceWeightMode",
+          "default": "inverse_square"
+        },
+        "frequency_dependent_directivity": {
+          "description": "If true, apply directivity per frequency bin; otherwise use a broadband factor at 1 kHz.",
+          "type": "boolean",
+          "default": false
+        },
+        "microphone_positions": {
+          "description": "Position of each microphone, in the same order as the measurements.",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "maxItems": 3,
+            "minItems": 3
+          }
+        },
+        "reference_position": {
+          "description": "Optimal listening position (e.g., center of the head at the main seat).",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "source_position": {
+          "description": "Position of the main loudspeaker that defines the forward/directivity axis.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        }
+      },
+      "required": [
+        "reference_position",
+        "source_position",
+        "microphone_positions"
+      ]
     },
     "RoleTargetConfig": {
       "description": "Optional role-aware target adjustments for home-cinema layouts.\n\nThese are deliberately explicit and default to zero change: enabling the\nblock makes the target semantics role-aware without silently changing\nexisting RoomEQ output. The adjustments layer on top of\n[`TargetResponseConfig::preference`].",

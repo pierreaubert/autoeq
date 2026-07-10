@@ -89,11 +89,7 @@ mod tests {
         let config = RirPrototypeConfig {
             reference_position: [0.0, 0.0, 0.0],
             source_position: [0.0, 2.0, 0.0],
-            microphone_positions: vec![
-                [0.0, 0.0, 0.0],
-                [0.4, 0.1, 0.0],
-                [-0.4, 0.1, 0.0],
-            ],
+            microphone_positions: vec![[0.0, 0.0, 0.0], [0.4, 0.1, 0.0], [-0.4, 0.1, 0.0]],
             distance_mode: DistanceWeightMode::InverseSquare,
             directivity: DirectivityModel::Omnidirectional,
             frequency_dependent_directivity: false,
@@ -137,7 +133,8 @@ mod tests {
         let c2 = flat_curve(86.0);
         let prototype = build_weighted_prototype(&[c1, c2], &config).unwrap();
         // 6 dB difference => power average ~81.76 dB.
-        let expected = 10.0 * ((10.0_f64.powf(80.0 / 10.0) + 10.0_f64.powf(86.0 / 10.0)) / 2.0).log10();
+        let expected =
+            10.0 * ((10.0_f64.powf(80.0 / 10.0) + 10.0_f64.powf(86.0 / 10.0)) / 2.0).log10();
         assert!((prototype.curve.spl[0] - expected).abs() < 1e-6);
     }
 }

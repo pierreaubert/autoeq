@@ -1,6 +1,8 @@
 //! Distance and directivity weight calculations.
 
-use crate::roomeq::rir_prototype::config::{DirectivityModel, DistanceWeightMode, RirPrototypeConfig};
+use crate::roomeq::rir_prototype::config::{
+    DirectivityModel, DistanceWeightMode, RirPrototypeConfig,
+};
 use ndarray::{Array1, Array2};
 
 const SOUND_SPEED_MPS: f64 = 343.0;

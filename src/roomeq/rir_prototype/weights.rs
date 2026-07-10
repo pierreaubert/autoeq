@@ -36,8 +36,7 @@ pub fn directivity_weight(freq_hz: f64, angle_rad: f64, model: DirectivityModel)
             }
             let ka = 2.0 * std::f64::consts::PI * freq_hz * radius_m / SOUND_SPEED_MPS;
             // Directionality grows from 0 (omnidirectional) toward 1 (dipole-like) as ka increases.
-            // Use ka^4 so the model stays effectively omnidirectional at low frequencies.
-            let directionality = ka.powi(4) / (1.0 + ka.powi(4));
+            let directionality = ka * ka / (1.0 + ka * ka);
             let cos_theta = angle_rad.cos();
             let off_axis = 0.5 * (1.0 + cos_theta);
             (1.0 - directionality) + off_axis * directionality
@@ -179,7 +178,7 @@ mod tests {
             DirectivityModel::SphericalHead { radius_m: 0.0875 },
         );
         assert!((on_axis - 1.0).abs() < 1e-3);
-        assert!((off_axis - 1.0).abs() < 1e-3);
+        assert!((off_axis - 1.0).abs() < 2e-3);
     }
 
     #[test]

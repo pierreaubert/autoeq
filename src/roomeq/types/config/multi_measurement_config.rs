@@ -1,7 +1,7 @@
 use super::bootstrap_uncertainty_config::BootstrapUncertaintyConfig;
 use super::default::default_variance_lambda;
-use super::types::MultiMeasurementStrategy;
-use super::types::SpatialRobustnessSerdeConfig;
+use super::types::{MultiMeasurementStrategy, SpatialRobustnessSerdeConfig};
+use crate::roomeq::rir_prototype::RirPrototypeConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -23,6 +23,11 @@ pub struct MultiMeasurementConfig {
     /// Bootstrap uncertainty configuration (used when strategy = MinimaxUncertainty).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bootstrap_uncertainty: Option<BootstrapUncertaintyConfig>,
+    /// Optional distance- and directivity-weighted RIR prototype.
+    /// When set, measurements are collapsed into a single prototype before
+    /// the multi-measurement strategy is applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rir_prototype: Option<RirPrototypeConfig>,
 }
 
 impl Default for MultiMeasurementConfig {
@@ -33,6 +38,7 @@ impl Default for MultiMeasurementConfig {
             variance_lambda: default_variance_lambda(),
             spatial_robustness: None,
             bootstrap_uncertainty: None,
+            rir_prototype: None,
         }
     }
 }

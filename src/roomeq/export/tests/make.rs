@@ -19,7 +19,7 @@ use crate::roomeq::types::*;
 use serde_json::json;
 
 /// Build a test DspChainOutput with 2 channels, each having gain + 3 PEQ + delay
-fn make_test_output() -> DspChainOutput {
+pub(super) fn make_test_output() -> DspChainOutput {
     let mut channels = HashMap::new();
 
     // Left channel: gain -2.5 dB, delay 1.5 ms, 3 PEQ bands
@@ -160,7 +160,7 @@ fn make_single_filter_output(filter_type: &str, gain_db: f64) -> DspChainOutput 
     }
 }
 
-fn make_routed_bass_output() -> DspChainOutput {
+pub(super) fn make_routed_bass_output() -> DspChainOutput {
     let mut channels = HashMap::new();
     for channel in ["L", "R", "LFE"] {
         let post_filter = if channel == "LFE" {
@@ -530,7 +530,7 @@ fn export_with_convolution_sidecars_uses_selected_sample_rate() {
 
     let yaml = std::fs::read_to_string(&export_path).unwrap();
     assert!(yaml.contains("samplerate: 96000"));
-    assert!(yaml.contains("filename: L_fir_96000hz.wav"));
+    assert!(yaml.contains("filename: \"L_fir_96000hz.wav\""));
     assert!(dest_dir.path().join("L_fir_96000hz.wav").is_file());
 }
 
@@ -562,8 +562,8 @@ fn test_export_camilladsp_routed_bass_management_graph() {
     let result = export_camilladsp(&output, 48000.0).unwrap();
 
     assert!(result.contains("# Routed bass-management graph export"));
-    assert!(result.contains("capture:\n    type: File\n    channels: 3"));
-    assert!(result.contains("playback:\n    type: File\n    channels: 3"));
+    assert!(result.contains("capture:\n    type: Stdin\n    channels: 3"));
+    assert!(result.contains("playback:\n    type: Stdout\n    channels: 3"));
     assert!(result.contains("mixers:"));
     assert!(result.contains("  roomeq_route_matrix:"));
     assert!(result.contains("  roomeq_route_sum:"));

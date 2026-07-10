@@ -283,6 +283,7 @@ export-test-systems-help:
 	@echo
 	@echo "Structural checks, no external tools required:"
 	@echo "  cargo test -p autoeq export::tests"
+	@echo "  just qa-export-camilladsp  # requires the real CamillaDSP binary"
 	@echo
 	@echo "Install helper:"
 	@echo "  just install-export-test-systems"
@@ -299,7 +300,7 @@ export-test-systems-help:
 	@echo "If no placeholder is present, the path is appended as the final argument."
 	@echo
 	@echo "Examples:"
-	@echo "  ROOMEQ_CAMILLADSP_VALIDATE_CMD='path/to/validate-camilladsp {config}' cargo test -p autoeq tool_contract_camilladsp"
+	@echo "  ROOMEQ_CAMILLADSP_VALIDATE_CMD='camilladsp --check {config}' cargo test -p autoeq tool_contract_camilladsp"
 	@echo "  ROOMEQ_PIPEWIRE_VALIDATE_CMD='path/to/validate-pipewire {config}' cargo test -p autoeq tool_contract_pipewire"
 	@echo "  ROOMEQ_EASYEFFECTS_VALIDATE_CMD='path/to/validate-easyeffects {config}' cargo test -p autoeq tool_contract_easyeffects"
 	@echo
@@ -316,8 +317,9 @@ install-export-test-systems:
 	echo "These are only needed for env-var-backed smoke tests; structural tests need no extra tools."
 	echo
 	if command -v cargo >/dev/null 2>&1; then
-		echo "Installing CamillaDSP with cargo..."
-		cargo install camilladsp --locked || {
+		echo "Installing CamillaDSP from its official repository..."
+		cargo install --git https://github.com/HEnquist/camilladsp.git \
+			--rev 05e9cfcdf43c0dfe078ed3feb8af4c8bd701fd74 --locked || {
 			echo "cargo install camilladsp failed; install CamillaDSP manually and set ROOMEQ_CAMILLADSP_VALIDATE_CMD."
 		}
 	else
@@ -357,6 +359,19 @@ install-export-test-systems:
 	echo "  1. Run: just export-test-systems-help"
 	echo "  2. Set ROOMEQ_*_VALIDATE_CMD variables for real tool smoke tests."
 	echo "  3. Run: cargo test -p autoeq export::tests"
+
+[group('qa')]
+qa-export-camilladsp:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	validator="${ROOMEQ_CAMILLADSP_BIN:-camilladsp}"
+	if ! command -v "$validator" >/dev/null 2>&1; then
+		echo "CamillaDSP validator not found: $validator" >&2
+		echo "Run 'just install-export-test-systems' or set ROOMEQ_CAMILLADSP_BIN." >&2
+		exit 1
+	fi
+	ROOMEQ_CAMILLADSP_VALIDATE_CMD="$validator --check {config}" \
+		cargo test -p autoeq tool_contract_camilladsp -- --nocapture
 
 [group('qa-roomeq')]
 qa-roomeq: qa-roomeq-small-stereo-20 \

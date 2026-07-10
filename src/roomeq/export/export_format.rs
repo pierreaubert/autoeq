@@ -1,4 +1,5 @@
 use super::super::types::DspChainOutput;
+use super::conformance::validate_camilladsp_input;
 use std::path::{Path, PathBuf};
 
 /// Supported export formats for DSP chain output
@@ -71,14 +72,26 @@ pub(super) fn ensure_external_export_supported(
     output: &DspChainOutput,
     format: ExportFormat,
 ) -> anyhow::Result<()> {
-    if !has_routed_bass_management(output) && output.global_plugins.is_empty() {
+    let has_routed_bass_management = has_routed_bass_management(output);
+    let has_global_plugins = !output.global_plugins.is_empty();
+
+    if matches!(format, ExportFormat::CamillaDsp) {
+        if (has_routed_bass_management || has_global_plugins)
+            && !has_only_bass_management_matrix(output)
+        {
+            return unsupported_graph_error(format);
+        }
+        return validate_camilladsp_input(output, None);
+    }
+
+    if !has_routed_bass_management && !has_global_plugins {
         return Ok(());
     }
 
-    if matches!(format, ExportFormat::CamillaDsp) && has_only_bass_management_matrix(output) {
-        return Ok(());
-    }
+    unsupported_graph_error(format)
+}
 
+fn unsupported_graph_error(format: ExportFormat) -> anyhow::Result<()> {
     anyhow::bail!(
         "{format:?} export cannot represent routed home-cinema bass management safely. \
          Use SotF JSON or Apply as Graph so global_plugins and route-level bass-management DSP are preserved."

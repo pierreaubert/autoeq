@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use crate::roomeq::types::*;
 use serde_json::json;
 
+mod conformance;
 mod make;
 
 #[test]
@@ -361,12 +362,14 @@ fn test_export_with_drivers() {
         metadata: None,
     };
 
-    // CamillaDSP should include driver filters
-    let cdsp = export_camilladsp(&output, 48000.0).unwrap();
-    assert!(cdsp.contains("left_woofer_gain:"));
-    assert!(cdsp.contains("left_woofer_delay:"));
-    assert!(cdsp.contains("left_tweeter_gain:"));
-    assert!(cdsp.contains("inverted: true"));
+    // CamillaDSP cannot represent these parallel branches yet. It must fail
+    // instead of serializing the driver filters onto the same channel.
+    let error = export_camilladsp(&output, 48000.0).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("cannot represent active-crossover driver branches")
+    );
 
     // APO should include driver gain and delay
     let apo = export_equalizer_apo(&output).unwrap();

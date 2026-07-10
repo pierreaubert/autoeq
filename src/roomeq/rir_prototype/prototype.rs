@@ -72,8 +72,10 @@ pub struct WeightedPrototype {
 /// `read::load_source_individual` first, which interpolates all curves to the
 /// first curve's grid.
 ///
-/// The returned `WeightedPrototype.curve` carries over `phase` and all other
-/// metadata from the first input curve; only `freq` and `spl` are recomputed.
+/// The returned `WeightedPrototype.curve` is a clone of the first input curve
+/// with only `freq` and `spl` overwritten. All other metadata — including
+/// `coherence`, `noise_floor_db`, `phase`, and the cached phase-decomposition
+/// fields — are preserved.
 pub fn build_weighted_prototype(
     curves: &[Curve],
     config: &RirPrototypeConfig,
@@ -106,6 +108,9 @@ pub fn build_weighted_prototype(
             });
         }
         for (bin, (&got, &expected)) in curve.freq.iter().zip(reference_freq.iter()).enumerate() {
+            // Reject a grid value only if it fails BOTH the absolute and the
+            // relative tolerance checks; either check passing means the bin is
+            // close enough for prototype averaging.
             if (got - expected).abs() > FREQ_GRID_TOLERANCE
                 && ((got - expected).abs() / expected.abs()) > FREQ_GRID_TOLERANCE
             {
@@ -152,15 +157,15 @@ pub fn build_weighted_prototype(
     }
 
     let avg_spl = power_sum.mapv(|p| 10.0 * p.max(1e-12).log10());
-    let phase = curves[0].phase.clone();
+
+    // Preserve all metadata (coherence, noise_floor_db, phase, delay cache, etc.)
+    // from the first input curve; only the frequency grid and SPL are recomputed.
+    let mut prototype = curves[0].clone();
+    prototype.freq = freqs;
+    prototype.spl = avg_spl;
 
     Ok(WeightedPrototype {
-        curve: Curve {
-            freq: freqs,
-            spl: avg_spl,
-            phase,
-            ..Default::default()
-        },
+        curve: prototype,
         weights,
     })
 }

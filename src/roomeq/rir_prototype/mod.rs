@@ -9,6 +9,4 @@ pub mod weights;
 
 pub use config::{DirectivityModel, DistanceWeightMode, RirPrototypeConfig};
 pub use prototype::{WeightedPrototype, build_weighted_prototype};
-pub use weights::{
-    compute_angles, compute_distances, directivity_weight, distance_weight, normalized_weights,
-};
+pub use weights::{compute_angles, compute_distances, normalized_weights};

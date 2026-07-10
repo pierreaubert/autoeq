@@ -9,7 +9,10 @@
   Supported distance weights are `uniform`, `inverse_square`, and `gaussian`;
   supported directivity models are `omnidirectional` and `spherical_head`.
   The prototype averaging is performed in the magnitude (SPL) domain; phase
-  and other metadata are carried over from the first measurement.
+  and other metadata are carried over from the first measurement. Using
+  `rir_prototype` together with the `SpatialRobustness` or `MinimaxUncertainty`
+  strategies logs a warning because the prototype collapses multiple
+  measurements into one curve before those strategies run.
 
 ## Fixes
 

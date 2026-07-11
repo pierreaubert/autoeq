@@ -108,7 +108,14 @@ pub fn reconstruct_minimum_phase(freq: &Array1<f64>, spl: &Array1<f64>) -> Array
     // slope as ln|H|(f) = ln|H|(f_max) + slope · ln(f / f_max) gives a
     // smooth tail that matches any order of analytic rolloff exactly in
     // the asymptotic limit (−6 dB/oct for 1st-order lowpass, etc.).
-    let freq_slice = freq.as_slice().expect("freq must be contiguous");
+    let freq_owned;
+    let freq_slice = match freq.as_slice() {
+        Some(slice) => slice,
+        None => {
+            freq_owned = freq.iter().copied().collect::<Vec<_>>();
+            &freq_owned
+        }
+    };
     let high_slope = final_octave_log_slope(freq_slice, &ln_mag_input);
 
     // Interpolate ln|H| onto the linear grid:
@@ -482,6 +489,22 @@ mod tests {
             "flat-magnitude max |phase| should be < 0.5°, got {:.4}°",
             max_abs
         );
+    }
+
+    #[test]
+    fn reconstruct_minimum_phase_accepts_non_contiguous_arrays() {
+        let freq = Array1::from_vec(vec![20.0, -1.0, 200.0, -1.0, 2_000.0, -1.0])
+            .slice_move(ndarray::s![..;2]);
+        let spl = Array1::from_vec(vec![80.0, -1.0, 80.0, -1.0, 80.0, -1.0])
+            .slice_move(ndarray::s![..;2]);
+        assert!(freq.as_slice().is_none());
+        assert!(spl.as_slice().is_none());
+
+        let phase = reconstruct_minimum_phase(&freq, &spl);
+
+        assert_eq!(phase.len(), freq.len());
+        assert!(phase.iter().all(|value| value.is_finite()));
+        assert!(phase.iter().all(|value| value.abs() < 0.5));
     }
 
     #[test]

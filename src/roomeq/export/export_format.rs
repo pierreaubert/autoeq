@@ -84,6 +84,13 @@ pub(super) fn ensure_external_export_supported(
         return validate_camilladsp_input(output, None);
     }
 
+    // Equalizer APO has its own graph renderer. It performs stricter
+    // capability checks at render time because some static Channel/Copy
+    // routings are representable while arbitrary graphs are not.
+    if matches!(format, ExportFormat::EqualizerApo) {
+        return Ok(());
+    }
+
     if !has_routed_bass_management && !has_global_plugins {
         return Ok(());
     }

@@ -53,7 +53,7 @@ mod tests {
 
         let opt_params = vec![500.0, 2.0, -2.0]; // Example PEQ params
 
-        let result = compute_post_optimization_metrics(
+        let metrics = compute_post_optimization_metrics(
             &args,
             &objective_data,
             false,
@@ -65,11 +65,10 @@ mod tests {
             None,
             None,
         )
-        .await;
-
-        assert!(result.is_ok());
-        let metrics = result.unwrap();
-        assert!(metrics.headphone_loss.is_some());
+        .await
+        .expect("headphone post-optimization metrics should compute");
+        assert!(metrics.headphone_loss.unwrap().is_finite());
+        assert!(metrics.cea2034_metrics.is_none());
     }
 
     #[test]

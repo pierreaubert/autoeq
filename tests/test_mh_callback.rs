@@ -167,3 +167,71 @@ fn test_default_mh_callback_works() {
 
     println!("✅ Default callback works without crashing");
 }
+
+fn run_mh_backend_with_seed(seed: u64) -> Vec<f64> {
+    let mut args = Args::parse_from([
+        "autoeq-test",
+        "--algo",
+        "mh:de",
+        "--num-filters",
+        "2",
+        "--population",
+        "12",
+        "--maxeval",
+        "24",
+    ]);
+    args.seed = Some(seed);
+    let params = OptimParams::from(&args);
+    let objective_data = create_test_objective_data();
+    let (lower_bounds, upper_bounds) = setup_bounds(&params);
+    let mut x = initial_guess(&params, &lower_bounds, &upper_bounds);
+    let backend = autoeq::optim::registry::resolve("mh:de").expect("MH backend");
+
+    backend
+        .optimize(
+            &mut x,
+            &lower_bounds,
+            &upper_bounds,
+            objective_data,
+            &params,
+            None,
+        )
+        .expect("MH optimization");
+    x
+}
+
+#[test]
+fn audit_mh_backend_honors_user_seed() {
+    let first = run_mh_backend_with_seed(7);
+    let repeated = run_mh_backend_with_seed(7);
+    let different = run_mh_backend_with_seed(19);
+
+    assert_eq!(first, repeated, "same seed must reproduce parameters");
+    assert_ne!(first, different, "different seeds must reach the solver");
+}
+
+#[test]
+fn audit_mh_dimension_mismatch_returns_error_instead_of_panicking() {
+    let objective_data = create_test_objective_data();
+    let mut x = vec![3.0, 1.0, 0.0];
+    let lower_bounds = vec![2.0, 0.5];
+    let upper_bounds = vec![4.0, 10.0, 3.0];
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        optimize_filters_mh_with_callback(
+            &mut x,
+            &lower_bounds,
+            &upper_bounds,
+            objective_data,
+            "de",
+            4,
+            4,
+            Box::new(|_| CallbackAction::Continue),
+        )
+    }));
+
+    assert!(outcome.is_ok(), "dimension mismatch must not panic");
+    assert!(
+        outcome.unwrap().is_err(),
+        "dimension mismatch must return Err"
+    );
+}

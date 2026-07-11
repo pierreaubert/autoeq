@@ -238,6 +238,15 @@ pub(super) fn process_speaker_internal(
         SpeakerConfig::Group(group) => {
             process_speaker_group(channel_name, group, room_config, sample_rate, output_dir)
         }
+        SpeakerConfig::Topology(topology) => {
+            super::super::group_processing::process_speaker_topology(
+                channel_name,
+                topology,
+                room_config,
+                sample_rate,
+                output_dir,
+            )
+        }
         SpeakerConfig::MultiSub(group) => {
             process_multisub_group(channel_name, group, room_config, sample_rate, output_dir)
         }

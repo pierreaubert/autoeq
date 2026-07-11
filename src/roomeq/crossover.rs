@@ -67,6 +67,48 @@ pub fn optimize_crossover(
     fixed_freqs: Option<Vec<f64>>,
     crossover_freq_range: Option<(f64, f64)>,
 ) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, Curve, Vec<bool>), Box<dyn Error>> {
+    optimize_crossover_impl(
+        drivers,
+        crossover_type,
+        sample_rate,
+        config,
+        fixed_freqs,
+        crossover_freq_range,
+        false,
+    )
+}
+
+/// Optimize a crossover while preserving an explicitly declared low-to-high order.
+#[allow(clippy::type_complexity)]
+pub fn optimize_crossover_ordered(
+    drivers: Vec<Curve>,
+    crossover_type: CrossoverType,
+    sample_rate: f64,
+    config: &OptimizerConfig,
+    fixed_freqs: Option<Vec<f64>>,
+    crossover_freq_range: Option<(f64, f64)>,
+) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, Curve, Vec<bool>), Box<dyn Error>> {
+    optimize_crossover_impl(
+        drivers,
+        crossover_type,
+        sample_rate,
+        config,
+        fixed_freqs,
+        crossover_freq_range,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn optimize_crossover_impl(
+    drivers: Vec<Curve>,
+    crossover_type: CrossoverType,
+    sample_rate: f64,
+    config: &OptimizerConfig,
+    fixed_freqs: Option<Vec<f64>>,
+    crossover_freq_range: Option<(f64, f64)>,
+    preserve_order: bool,
+) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, Curve, Vec<bool>), Box<dyn Error>> {
     // Check for missing phase data and warn
     let missing_phase_count = drivers.iter().filter(|c| c.phase.is_none()).count();
     if missing_phase_count > 0 {
@@ -95,11 +137,13 @@ pub fn optimize_crossover(
         (min_f * max_f).sqrt()
     };
 
-    permutation.sort_by(|&a, &b| {
-        get_mean_freq(&drivers[a])
-            .partial_cmp(&get_mean_freq(&drivers[b]))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    if !preserve_order {
+        permutation.sort_by(|&a, &b| {
+            get_mean_freq(&drivers[a])
+                .partial_cmp(&get_mean_freq(&drivers[b]))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
 
     let sorted_drivers: Vec<Curve> = permutation.iter().map(|&i| drivers[i].clone()).collect();
 
@@ -150,8 +194,7 @@ pub fn optimize_crossover(
             .map(|(idx, curve)| apply_polarity_inversion_to_driver(curve, inversions[idx]))
             .collect();
 
-        // Note: DriversLossData::new sorts internally, but we already sorted, so order is preserved.
-        let drivers_data = DriversLossData::new(modified_drivers, crossover_type);
+        let drivers_data = DriversLossData::new_ordered(modified_drivers, crossover_type);
 
         // Run optimization
         let result = crate::workflow::optimize_drivers_crossover(

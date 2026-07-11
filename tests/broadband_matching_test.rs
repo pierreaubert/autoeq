@@ -5,6 +5,27 @@ mod common;
 
 use common::binary_runner::run_roomeq;
 
+fn mean_spl_in_band(curve: &serde_json::Value, min_hz: f64, max_hz: f64) -> f64 {
+    let freq = curve["freq"].as_array().expect("curve.freq array");
+    let spl = curve["spl"].as_array().expect("curve.spl array");
+    let values: Vec<f64> = freq
+        .iter()
+        .zip(spl)
+        .filter_map(|(freq, spl)| {
+            let freq = freq.as_f64()?;
+            (min_hz..=max_hz)
+                .contains(&freq)
+                .then(|| spl.as_f64())
+                .flatten()
+        })
+        .collect();
+    assert!(
+        !values.is_empty(),
+        "no curve points in {min_hz}..={max_hz} Hz"
+    );
+    values.iter().sum::<f64>() / values.len() as f64
+}
+
 #[test]
 fn test_broadband_matching() {
     let temp_dir = tempfile::TempDir::new().expect("Failed to create temp dir");
@@ -39,7 +60,11 @@ fn test_broadband_matching() {
                 "shape": "flat",
                 "broadband_precorrection": true
             },
-            "num_filters": 3, // Allow a few filters for broadband matching to produce EQ plugins
+            "algorithm": "autoeq:de",
+            "num_filters": 0,
+            "max_iter": 1,
+            "population": 8,
+            "refine": false,
             "min_freq": 20.0,
             "max_freq": 20000.0
         }
@@ -65,65 +90,44 @@ fn test_broadband_matching() {
 
     // 4. Verify output
     let json_str = fs::read_to_string(&output_path).expect("Failed to read output file");
-    eprintln!("Output JSON: {}", json_str);
     let json: serde_json::Value =
         serde_json::from_str(&json_str).expect("Failed to parse output JSON");
 
     let left = &json["channels"]["left"];
     let plugins = left["plugins"].as_array().expect("plugins array");
 
-    // We expect a gain plugin and/or EQ plugin from broadband matching.
-    // Since we boosted bass by 10dB, we expect a LowShelf cut (negative gain).
-
-    // Find EQ plugins
-    let eq_plugins: Vec<&serde_json::Value> = plugins
+    let broadband = plugins
         .iter()
-        .filter(|p| p["plugin_type"] == "eq")
-        .collect();
-
-    assert!(
-        !eq_plugins.is_empty(),
-        "Should have at least one EQ plugin (broadband or optimizer)"
-    );
-
-    // Check for Gain plugin (optional — broadband may fold gain into EQ filters)
-    let gain_plugins: Vec<&serde_json::Value> = plugins
-        .iter()
-        .filter(|p| p["plugin_type"] == "gain")
-        .collect();
-    if !gain_plugins.is_empty() {
-        let gain_db = gain_plugins[0]["parameters"]["gain_db"]
-            .as_f64()
-            .expect("gain_db");
-        eprintln!("Found gain: {} dB", gain_db);
-        // The broadband flat_gain_db is a *correction* gain (relative adjustment),
-        // NOT an absolute target level. For a measurement at ~80dB with a flat target
-        // at the measurement's mean SPL, the correction should be small (< 10dB).
-        assert!(
-            gain_db.abs() < 10.0,
-            "Broadband gain correction should be small, got {:.1} dB",
-            gain_db
-        );
-    }
-
-    // Check for EQ plugin (broadband matching should add LS + HS = 2 filters)
-    // Note: Biquads serialize as coefficients, so we can't check "type".
-    // But we know broadband matching adds exactly 2 filters in one plugin if enabled.
-    let eq_plugins: Vec<&serde_json::Value> = plugins
-        .iter()
-        .filter(|p| p["plugin_type"] == "eq")
-        .collect();
-    assert!(!eq_plugins.is_empty(), "Should have an EQ plugin");
-
-    // The broadband EQ plugin should be the first EQ plugin (or unique if num_filters=0)
-    let bb_plugin = eq_plugins[0];
-    let filters = bb_plugin["parameters"]["filters"]
+        .find(|plugin| {
+            plugin["plugin_type"] == "eq" && plugin["parameters"]["label"] == "broadband"
+        })
+        .expect("labeled broadband EQ plugin");
+    let filters = broadband["parameters"]["filters"]
         .as_array()
         .expect("filters array");
-    eprintln!("Found {} filters in first EQ plugin", filters.len());
-
     assert!(
-        filters.len() >= 2,
-        "Expected at least 2 filters (LS + HS) from broadband matching"
+        filters.iter().any(|filter| {
+            let kind = filter["filter_type"]
+                .as_str()
+                .unwrap_or_default()
+                .replace(' ', "");
+            kind.contains("lowshelf") && filter["db_gain"].as_f64().is_some_and(|gain| gain < -0.5)
+        }),
+        "the +10 dB bass shelf must produce a low-shelf cut: {filters:?}"
+    );
+
+    let initial = &left["initial_curve"];
+    let final_curve = &left["final_curve"];
+    let initial_tilt =
+        mean_spl_in_band(initial, 20.0, 180.0) - mean_spl_in_band(initial, 400.0, 1_000.0);
+    let final_tilt =
+        mean_spl_in_band(final_curve, 20.0, 180.0) - mean_spl_in_band(final_curve, 400.0, 1_000.0);
+    assert!(
+        initial_tilt > 8.0,
+        "fixture lost its bass shelf: {initial_tilt}"
+    );
+    assert!(
+        final_tilt.abs() < initial_tilt.abs(),
+        "broadband correction did not reduce the bass shelf: {initial_tilt} -> {final_tilt}"
     );
 }

@@ -262,7 +262,7 @@ fn test_compute_visualization_curves() {
         Biquad::new(BiquadFilterType::Peak, 4000.0, 48000.0, 2.0, -4.0),
     ];
 
-    let curves = compute_visualization_curves(&grid.to_vec(), &input, &target, &biquads);
+    let curves = compute_visualization_curves(&grid.to_vec(), &input, &target, &biquads).unwrap();
 
     assert_eq!(curves.frequencies.len(), grid.len());
     assert_eq!(curves.input_curve.len(), grid.len());

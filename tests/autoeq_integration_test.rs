@@ -1,6 +1,27 @@
 mod common;
 
+use common::apo::parse_apo_filters;
 use common::binary_runner::run_autoeq;
+
+fn parse_qa_summary(stdout: &str) -> (bool, f64, f64) {
+    let line = stdout
+        .lines()
+        .find(|line| line.starts_with("Converge:"))
+        .expect("missing QA summary line");
+    let fields: Vec<&str> = line.split('|').map(str::trim).collect();
+    let value = |label: &str| {
+        fields
+            .iter()
+            .find_map(|field| field.strip_prefix(label))
+            .map(str::trim)
+            .unwrap_or_else(|| panic!("missing {label} in QA summary: {line}"))
+    };
+    (
+        value("Converge:").parse().expect("boolean Converge value"),
+        value("Pre:").parse().expect("numeric Pre value"),
+        value("Post:").parse().expect("numeric Post value"),
+    )
+}
 
 #[test]
 fn test_full_optimization_workflow_csv() {
@@ -51,7 +72,16 @@ fn test_full_optimization_workflow_csv() {
     );
 
     let content = std::fs::read_to_string(&apo_path).unwrap();
-    assert!(content.contains("Filter")); // Filter section
+    let filters = parse_apo_filters(&content).expect("valid APO output");
+    assert_eq!(filters.len(), 5);
+    assert!(filters.iter().all(|filter| {
+        filter.freq_hz.is_finite()
+            && filter.gain_db.is_finite()
+            && filter.q.is_finite()
+            && (60.0..=16_000.0).contains(&filter.freq_hz)
+            && (-9.0..=3.0).contains(&filter.gain_db)
+            && (1.0..=3.0).contains(&filter.q)
+    }));
 }
 
 #[test]
@@ -96,6 +126,8 @@ fn test_multi_driver_optimization() {
         "linkwitzriley4",
         "--maxeval",
         "500",
+        "--qa",
+        "0.0",
     ]);
 
     assert!(
@@ -104,10 +136,13 @@ fn test_multi_driver_optimization() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    // Verify crossover results
-    // Output from log::info! goes to stderr
-    let output_str = String::from_utf8_lossy(&output.stderr);
-    assert!(output_str.contains("Driver Gains") || output_str.contains("Crossover"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Driver Gains:"));
+    assert!(stderr.contains("Crossover Frequencies:"));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let (_, pre, post) = parse_qa_summary(&stdout);
+    assert!(pre.is_finite() && post.is_finite());
+    assert!(post <= pre, "multi-driver loss worsened: {pre} -> {post}");
 }
 
 #[test]
@@ -126,12 +161,17 @@ fn test_output_format_validation() {
 
     let output_path = temp_dir.path().join("output");
 
-    let _ = run_autoeq(&[
+    let output = run_autoeq(&[
         "--curve",
         csv_path.to_str().unwrap(),
         "--output",
         output_path.to_str().unwrap(),
     ]);
+    assert!(
+        output.status.success(),
+        "autoeq failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     // Check APO format
     // Same parent dir logic
@@ -139,8 +179,9 @@ fn test_output_format_validation() {
     let apo_path = parent.join("iir-autoeq-flat.txt");
     assert!(apo_path.exists(), "APO path not found: {:?}", apo_path);
     let apo = std::fs::read_to_string(&apo_path).unwrap();
-    assert!(apo.contains("Filter"));
-    assert!(apo.contains("Type") || apo.contains("PK")); // Filter type
+    let filters = parse_apo_filters(&apo).expect("valid APO output");
+    assert!(!filters.is_empty());
+    assert!(filters.iter().all(|filter| filter.kind == "PK"));
 
     // Check RME format
     let rme_path = parent.join("iir-autoeq-flat.tmreq");
@@ -175,6 +216,12 @@ fn test_invalid_input_handling() {
 
     // Should fail
     assert!(!output.status.success());
+    assert!(!output_path.exists());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .to_ascii_lowercase()
+            .contains("error")
+    );
 }
 
 #[test]
@@ -193,27 +240,36 @@ fn test_qa_mode_output() {
 
     let output = run_autoeq(&["--curve", csv_path.to_str().unwrap(), "--qa", "0.5"]);
 
+    assert!(
+        output.status.success(),
+        "QA run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-
-    // QA mode should output specific format
-    // Converge might not be present if it's too fast, but Pre/Post usually are
-    // Or check for "Improvement:"
-    assert!(stdout.contains("Pre:") || stdout.contains("Pre-optimization"));
+    let (_, pre, post) = parse_qa_summary(&stdout);
+    assert!(pre.is_finite() && post.is_finite());
+    assert!(post <= pre, "QA loss worsened: {pre} -> {post}");
 }
 
 #[test]
 fn test_algorithm_list_flag() {
     let output = run_autoeq(&["--algo-list"]);
 
+    assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("nlopt"));
-    assert!(stdout.contains("de"));
+    assert!(stdout.contains("autoeq:de"));
+    assert!(stdout.contains("autoeq:cobyla"));
+    assert!(stdout.contains("autoeq:isres"));
 }
 
 #[test]
 fn test_help_flag() {
     let output = run_autoeq(&["--help"]);
 
+    assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Usage") || stdout.contains("autoeq"));
+    assert!(stdout.contains("Usage:"));
+    assert!(stdout.contains("--curve"));
+    assert!(stdout.contains("--min-db"));
+    assert!(stdout.contains("--peq-model"));
 }

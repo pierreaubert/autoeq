@@ -1,7 +1,8 @@
 use super::consts::qa_seed;
 use super::metric_scorecard::MetricScorecard;
 use super::metric_scorecard::compare_scorecards;
-use super::validate::validate_target_tilt;
+use super::option_override::OptionOverride;
+use super::validate::{validate_option_effect, validate_target_tilt};
 use autoeq::Curve;
 use autoeq::roomeq::RoomConfig;
 use std::collections::HashMap;
@@ -91,6 +92,7 @@ fn result_with_channel_slopes(
             bootstrap_uncertainty: None,
             validation_bundle: None,
             supporting_source: None,
+            stage_outcomes: Vec::new(),
         },
     }
 }
@@ -107,6 +109,40 @@ fn empty_room_config() -> RoomConfig {
         ctc: None,
         cea2034_cache: None,
     }
+}
+
+fn result_with_inter_channel_slope(channel_slope_db_per_octave: f64) -> RoomOptimizationResult {
+    let mut result = result_with_channel_slopes(0.0, 0.0, 0.0);
+    let reference_curve = curve_with_slope(0.0);
+    let channel_curve = curve_with_slope(channel_slope_db_per_octave);
+    result.channel_results = HashMap::from([
+        (
+            "C".to_string(),
+            ChannelOptimizationResult {
+                name: "C".to_string(),
+                pre_score: 0.0,
+                post_score: 0.0,
+                initial_curve: reference_curve.clone(),
+                final_curve: reference_curve,
+                biquads: Vec::new(),
+                fir_coeffs: None,
+            },
+        ),
+        (
+            "L".to_string(),
+            ChannelOptimizationResult {
+                name: "L".to_string(),
+                pre_score: 0.0,
+                post_score: 0.0,
+                initial_curve: channel_curve.clone(),
+                final_curve: channel_curve,
+                biquads: Vec::new(),
+                fir_coeffs: None,
+            },
+        ),
+    ]);
+    result.combined_post_score = 1.0;
+    result
 }
 
 #[test]
@@ -143,6 +179,48 @@ fn target_tilt_validator_rejects_wrong_target_curve_slope() {
 }
 
 #[test]
+fn timbre_matching_validator_requires_reduced_normalized_spread() {
+    let baseline = result_with_inter_channel_slope(3.0);
+    let option = result_with_inter_channel_slope(1.0);
+    let config = empty_room_config();
+    let override_option = OptionOverride::InterChannelTimbreMatching {
+        reference_channel: "C".to_string(),
+    };
+
+    let (pass, detail) = validate_option_effect(
+        &override_option,
+        &config,
+        &baseline,
+        &config,
+        &option,
+        std::slice::from_ref(&override_option),
+    );
+
+    assert!(pass, "{detail}");
+}
+
+#[test]
+fn timbre_matching_validator_rejects_increased_normalized_spread() {
+    let baseline = result_with_inter_channel_slope(1.0);
+    let option = result_with_inter_channel_slope(3.0);
+    let config = empty_room_config();
+    let override_option = OptionOverride::InterChannelTimbreMatching {
+        reference_channel: "C".to_string(),
+    };
+
+    let (pass, _) = validate_option_effect(
+        &override_option,
+        &config,
+        &baseline,
+        &config,
+        &option,
+        std::slice::from_ref(&override_option),
+    );
+
+    assert!(!pass);
+}
+
+#[test]
 fn scorecard_allows_small_roughness_regression_when_baseline_already_violates_limit() {
     let baseline = MetricScorecard {
         flat_loss: 10.0,
@@ -168,6 +246,52 @@ fn scorecard_allows_small_roughness_regression_when_baseline_already_violates_li
         .expect("roughness check");
 
     assert!(roughness.1, "{}", roughness.2);
+}
+
+fn scorecard_with_epa(
+    preference: Option<f64>,
+    sharpness: Option<f64>,
+    roughness: Option<f64>,
+) -> MetricScorecard {
+    MetricScorecard {
+        flat_loss: 1.0,
+        peak_residual_db: 1.0,
+        epa_preference: preference,
+        epa_sharpness: sharpness,
+        epa_roughness: roughness,
+        group_delay_std_ms: None,
+    }
+}
+
+#[test]
+fn scorecard_rejects_missing_candidate_psychoacoustic_metrics() {
+    let baseline = scorecard_with_epa(Some(8.0), Some(1.2), Some(0.3));
+    let candidate = scorecard_with_epa(None, None, None);
+    let checks = compare_scorecards(&baseline, &candidate);
+
+    for metric in ["epa_preference", "sharpness", "roughness"] {
+        let check = checks
+            .iter()
+            .find(|(name, _, _)| *name == metric)
+            .unwrap_or_else(|| panic!("missing {metric} QA check"));
+        assert!(!check.1, "{metric} omission passed: {}", check.2);
+        assert!(check.2.contains("omitted"), "{}", check.2);
+    }
+}
+
+#[test]
+fn scorecard_rejects_large_psychoacoustic_regressions() {
+    let baseline = scorecard_with_epa(Some(8.0), Some(1.2), Some(0.3));
+    let candidate = scorecard_with_epa(Some(4.0), Some(2.5), Some(1.1));
+    let checks = compare_scorecards(&baseline, &candidate);
+
+    for metric in ["epa_preference", "sharpness", "roughness"] {
+        let check = checks
+            .iter()
+            .find(|(name, _, _)| *name == metric)
+            .unwrap_or_else(|| panic!("missing {metric} QA check"));
+        assert!(!check.1, "{metric} regression passed: {}", check.2);
+    }
 }
 
 #[test]

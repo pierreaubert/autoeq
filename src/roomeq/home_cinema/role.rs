@@ -2,6 +2,15 @@ use super::super::types::{RoomConfig, TargetResponseConfig};
 use super::misc::normalize_channel_name;
 pub use super::types::*;
 
+fn has_supported_suffix(value: &str, prefix: &str) -> bool {
+    let Some(suffix) = value.strip_prefix(prefix) else {
+        return false;
+    };
+    !suffix.is_empty()
+        && (suffix.chars().all(|c| c.is_ascii_digit())
+            || matches!(suffix, "rear" | "front" | "left" | "right"))
+}
+
 pub fn role_for_channel(channel_name: &str) -> HomeCinemaRole {
     let normalized = normalize_channel_name(channel_name);
     match normalized.as_str() {
@@ -30,8 +39,10 @@ pub fn role_for_channel(channel_name: &str) -> HomeCinemaRole {
         "tbr" | "trr" | "rhr" | "topbackright" | "toprearright" | "rearheightright" => {
             HomeCinemaRole::TopRearRight
         }
-        _ if normalized.contains("sub") => HomeCinemaRole::Subwoofer,
-        _ if normalized.contains("lfe") => HomeCinemaRole::Lfe,
+        _ if normalized.starts_with("subwoofer") || has_supported_suffix(&normalized, "sub") => {
+            HomeCinemaRole::Subwoofer
+        }
+        _ if has_supported_suffix(&normalized, "lfe") => HomeCinemaRole::Lfe,
         _ => HomeCinemaRole::Unknown,
     }
 }

@@ -10,8 +10,8 @@ use ndarray::Array1;
 fn main() {
     println!("=== Headphone Loss Function Validation ===\n");
 
-    // Test 1: Validate slope calculation with known linear response
-    println!("Test 1: Slope Calculation Validation");
+    // Test 1: Validate slope penalties on deviation from the target.
+    println!("Test 1: Deviation Slope Validation");
     validate_slope_calculation();
 
     // Test 2: Validate frequency band RMS calculations
@@ -32,10 +32,12 @@ fn main() {
 }
 
 fn validate_slope_calculation() {
-    // Test with perfectly linear responses to verify slope calculation
+    // headphone_loss consumes deviation from target and returns a preference
+    // rating, so a flat zero-deviation curve is the ideal input and higher is
+    // better.
     let freq = Array1::logspace(10.0, 1.301, 4.301, 50); // 20Hz to 20kHz, 50 points
 
-    // Test 1: Flat response (0 dB/octave)
+    // Test 1: Perfect target match (flat zero deviation)
     let flat_response = Array1::zeros(50);
     let flat_curve = Curve {
         freq: freq.clone(),
@@ -44,9 +46,9 @@ fn validate_slope_calculation() {
         ..Default::default()
     };
     let flat_score = headphone_loss(&flat_curve);
-    println!("  Flat response (0 dB/oct) score: {:.3}", flat_score);
+    println!("  Perfect target match score: {:.3}", flat_score);
 
-    // Test 2: Ideal -1 dB/octave response
+    // Test 2: -1 dB/octave deviation from target
     let ideal_response = freq.mapv(|f: f64| -f.log2() + 10.0);
     let ideal_curve = Curve {
         freq: freq.clone(),
@@ -55,9 +57,9 @@ fn validate_slope_calculation() {
         ..Default::default()
     };
     let ideal_score = headphone_loss(&ideal_curve);
-    println!("  Ideal -1 dB/oct response score: {:.3}", ideal_score);
+    println!("  -1 dB/oct deviation score: {:.3}", ideal_score);
 
-    // Test 3: -2 dB/octave response (too steep)
+    // Test 3: -2 dB/octave deviation from target
     let steep_response = freq.mapv(|f: f64| -2.0 * f.log2() + 10.0);
     let steep_curve = Curve {
         freq: freq.clone(),
@@ -66,20 +68,18 @@ fn validate_slope_calculation() {
         ..Default::default()
     };
     let steep_score = headphone_loss(&steep_curve);
-    println!("  Steep -2 dB/oct response score: {:.3}", steep_score);
+    println!("  -2 dB/oct deviation score: {:.3}", steep_score);
 
-    // Verify that ideal slope gets the best score for the slope component
-    if ideal_score < flat_score {
-        println!("  ✓ Ideal slope scores better than flat");
-    } else {
-        println!("  ⚠ Ideal slope should score better than flat");
-    }
-
-    if steep_score > ideal_score {
-        println!("  ✓ Too steep slope scores worse than ideal");
-    } else {
-        println!("  ⚠ Too steep slope should score worse than ideal");
-    }
+    assert!(
+        flat_score > ideal_score,
+        "perfect target match should outrank -1 dB/oct deviation: {flat_score} <= {ideal_score}"
+    );
+    println!("  ✓ Perfect target match outranks -1 dB/oct deviation");
+    assert!(
+        ideal_score > steep_score,
+        "-1 dB/oct deviation should outrank -2 dB/oct deviation: {ideal_score} <= {steep_score}"
+    );
+    println!("  ✓ Larger slope deviation receives a lower preference rating");
 }
 
 fn validate_band_rms_calculation() {
@@ -114,11 +114,11 @@ fn validate_band_rms_calculation() {
     println!("  Flat response score: {:.3}", flat_score);
     println!("  Midrange peak (3dB, 500-1000Hz) score: {:.3}", peak_score);
 
-    if peak_score > flat_score {
-        println!("  ✓ Peak correctly penalized");
-    } else {
-        println!("  ⚠ Peak should be penalized more than flat response");
-    }
+    assert!(
+        flat_score > peak_score,
+        "midrange peak should lower preference: {flat_score} <= {peak_score}"
+    );
+    println!("  ✓ Peak correctly penalized");
 
     // Test different band penalties
     test_band_specific_penalties();
@@ -163,7 +163,7 @@ fn test_band_specific_penalties() {
             ..Default::default()
         };
         let test_score = headphone_loss(&test_curve);
-        let penalty = test_score - baseline_score;
+        let penalty = baseline_score - test_score;
 
         println!(
             "    {} ({:.0}-{:.0} Hz): penalty = {:.3}",
@@ -186,6 +186,7 @@ fn validate_edge_cases() {
     };
     let empty_score = headphone_loss(&empty_curve);
     println!("  Empty curve score: {:.3}", empty_score);
+    assert!(empty_score.is_finite());
 
     // Test 2: Very high deviation
     let extreme_response = Array1::from_elem(100, 20.0); // 20dB everywhere
@@ -197,6 +198,7 @@ fn validate_edge_cases() {
     };
     let extreme_score = headphone_loss(&extreme_curve);
     println!("  Extreme +20dB response score: {:.3}", extreme_score);
+    assert!(extreme_score.is_finite());
 
     // Test 3: Very low deviation
     let negative_response = Array1::from_elem(100, -20.0); // -20dB everywhere
@@ -208,6 +210,7 @@ fn validate_edge_cases() {
     };
     let negative_score = headphone_loss(&negative_curve);
     println!("  Extreme -20dB response score: {:.3}", negative_score);
+    assert!(negative_score.is_finite());
 }
 
 fn validate_reference_behavior() {
@@ -257,17 +260,17 @@ fn validate_reference_behavior() {
     let treble_score = headphone_loss(&treble_curve);
     let flat_score = headphone_loss(&flat_curve);
 
-    let bass_penalty = bass_score - flat_score;
-    let treble_penalty = treble_score - flat_score;
+    let bass_penalty = flat_score - bass_score;
+    let treble_penalty = flat_score - treble_score;
 
     println!("  Bass deviation penalty: {:.3}", bass_penalty);
     println!("  Treble deviation penalty: {:.3}", treble_penalty);
 
-    if bass_penalty > treble_penalty {
-        println!("  ✓ Bass deviations penalized more than treble (expected)");
-    } else {
-        println!("  ⚠ Bass should be penalized more than treble according to the paper");
-    }
+    assert!(
+        bass_penalty > treble_penalty,
+        "bass deviation should cost more than treble: {bass_penalty} <= {treble_penalty}"
+    );
+    println!("  ✓ Bass deviations penalized more than treble (expected)");
 }
 
 fn analyze_weighting_factors() {
@@ -315,7 +318,7 @@ fn test_component_impacts() {
         phase: None,
         ..Default::default()
     };
-    let slope_impact = headphone_loss(&slope_curve) - baseline;
+    let slope_impact = baseline - headphone_loss(&slope_curve);
     println!("    0.5 dB/oct slope deviation impact: {:.3}", slope_impact);
 
     // Band RMS impact: 1 dB RMS in midrange
@@ -331,7 +334,7 @@ fn test_component_impacts() {
         phase: None,
         ..Default::default()
     };
-    let rms_impact = headphone_loss(&rms_curve) - baseline;
+    let rms_impact = baseline - headphone_loss(&rms_curve);
     println!("    1 dB RMS midrange deviation impact: {:.3}", rms_impact);
 
     // Peak-to-peak impact: 8 dB peak-to-peak in one band
@@ -352,6 +355,6 @@ fn test_component_impacts() {
         phase: None,
         ..Default::default()
     };
-    let pp_impact = headphone_loss(&pp_curve) - baseline;
+    let pp_impact = baseline - headphone_loss(&pp_curve);
     println!("    8 dB peak-to-peak variation impact: {:.3}", pp_impact);
 }

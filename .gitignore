@@ -40,6 +40,8 @@ src/unused.rs
 check_output_*.txt
 .qwen
 .tokensave
+.superpowers
+/docs/superpowers
 
 # Logs
 logs

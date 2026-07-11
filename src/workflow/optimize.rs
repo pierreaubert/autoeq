@@ -106,7 +106,7 @@ where
     // 8. Compute visualization curves
     let frequencies: Vec<f64> = standard_freq.iter().copied().collect();
     let curves =
-        compute_visualization_curves(&frequencies, &input_normalized, &target_curve, &biquads);
+        compute_visualization_curves(&frequencies, &input_normalized, &target_curve, &biquads)?;
 
     let initial_loss = history.first().map(|x| x.1).unwrap_or(0.0);
     let final_loss = history.last().map(|x| x.1).unwrap_or(0.0);
@@ -199,7 +199,7 @@ where
         &input_normalized,
         &target_normalized,
         &biquads,
-    );
+    )?;
 
     let initial_loss = history.first().map(|x| x.1).unwrap_or(0.0);
     let final_loss = history.last().map(|x| x.1).unwrap_or(0.0);
@@ -251,6 +251,13 @@ where
 /// log::info!("Gains: {:?}", result.gains);
 /// log::info!("Crossover freqs: {:?}", result.crossover_freqs);
 /// ```
+fn validate_workflow_sample_rate(sample_rate: f64) -> Result<(), Box<dyn std::error::Error>> {
+    if !sample_rate.is_finite() || sample_rate <= 0.0 {
+        return Err(format!("sample rate must be finite and positive, got {sample_rate}").into());
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn optimize_drivers_crossover(
     drivers_data: crate::loss::DriversLossData,
@@ -265,6 +272,7 @@ pub fn optimize_drivers_crossover(
     fixed_freqs: Option<Vec<f64>>,
     seed: Option<u64>,
 ) -> Result<DriverOptimizationResult, Box<dyn std::error::Error>> {
+    validate_workflow_sample_rate(sample_rate)?;
     let n_drivers = drivers_data.drivers.len();
 
     // Create optimization parameters for driver optimization
@@ -305,6 +313,7 @@ pub fn optimize_drivers_crossover(
     } else {
         drivers_initial_guess(&lower_bounds, &upper_bounds, n_drivers)
     };
+    let initial_x = x.clone();
 
     // Compute pre-optimization objective
     let pre_objective = crate::optim::compute_base_fitness(&x, &objective_data);
@@ -325,7 +334,11 @@ pub fn optimize_drivers_crossover(
     };
 
     // Compute post-optimization objective
-    let post_objective = crate::optim::compute_base_fitness(&x, &objective_data);
+    let mut post_objective = crate::optim::compute_base_fitness(&x, &objective_data);
+    if !post_objective.is_finite() || post_objective > pre_objective {
+        x = initial_x;
+        post_objective = pre_objective;
+    }
 
     // Extract results from parameter vector
     let gains = x[0..n_drivers].to_vec();
@@ -364,6 +377,7 @@ pub fn optimize_multisub(
     max_db: f64,
     seed: Option<u64>,
 ) -> Result<DriverOptimizationResult, Box<dyn std::error::Error>> {
+    validate_workflow_sample_rate(sample_rate)?;
     let n_drivers = drivers_data.drivers.len();
 
     // Create optimization parameters for multi-sub optimization
@@ -388,6 +402,7 @@ pub fn optimize_multisub(
 
     // Initial guess
     let mut x = multisub_initial_guess(n_drivers);
+    let initial_x = x.clone();
 
     // Pre-objective
     let pre_objective = crate::optim::compute_base_fitness(&x, &objective_data);
@@ -403,7 +418,11 @@ pub fn optimize_multisub(
 
     let converged = opt_result.is_ok();
 
-    let post_objective = crate::optim::compute_base_fitness(&x, &objective_data);
+    let mut post_objective = crate::optim::compute_base_fitness(&x, &objective_data);
+    if !post_objective.is_finite() || post_objective > pre_objective {
+        x = initial_x;
+        post_objective = pre_objective;
+    }
 
     // Extract results: [gains(N), delays(N)]
     let gains = x[0..n_drivers].to_vec();

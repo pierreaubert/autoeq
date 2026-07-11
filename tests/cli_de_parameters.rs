@@ -1,7 +1,4 @@
-//! Integration tests for new DE CLI parameters
-//!
-//! These tests verify that the new CLI parameters actually change
-//! the behavior of the differential evolution algorithm.
+//! Deterministic integration tests for DE CLI parameter propagation and behavior.
 
 use autoeq::OptimParams;
 use autoeq::PeqModel;
@@ -13,210 +10,143 @@ use clap::Parser;
 use ndarray::Array1;
 use std::str::FromStr;
 
-/// Create a simple test objective data structure
 fn create_test_objective_data() -> autoeq::optim::ObjectiveData {
-    // Create simple test curves
-    let freqs = Array1::from(vec![100.0, 1000.0, 10000.0]);
-    let target = Array1::from(vec![1.0, 1.0, 1.0]); // Small deviation to optimize
-    let deviation = Array1::from(vec![0.5, 0.5, 0.5]); // Small deviation
+    let freqs = Array1::from(vec![
+        80.0, 120.0, 250.0, 500.0, 1_000.0, 2_000.0, 5_000.0, 10_000.0,
+    ]);
+    let target = Array1::zeros(freqs.len());
+    let deviation = Array1::from(vec![4.0, 2.0, -3.0, 5.0, -2.0, 3.5, -4.0, 1.5]);
 
     autoeq::optim::ObjectiveDataBuilder::speaker_flat(
         freqs,
         target,
         deviation,
-        48000.0,
+        48_000.0,
         PeqModel::Pk,
     )
-    .min_spacing_oct(0.5)
+    .min_spacing_oct(0.2)
     .spacing_weight(20.0)
     .max_db(3.0)
-    .min_db(1.0)
-    .freq_range(60.0, 16000.0)
+    .min_db(0.5)
+    .freq_range(60.0, 16_000.0)
     .smoothing(false, 3)
     .build()
     .expect("valid test objective data")
 }
 
-#[test]
-fn test_tolerance_parameter_affects_optimization() {
-    // Create two Args with different tolerance values
-    let mut args_high_tol = Args::parse_from([
-        "autoeq-test",
-        "--algo",
-        "autoeq:de",
-        "--tolerance",
-        "0.1", // High tolerance (loose)
-        "--num-filters",
-        "2",
-    ]);
-
-    let mut args_low_tol = Args::parse_from([
-        "autoeq-test",
-        "--algo",
-        "autoeq:de",
-        "--tolerance",
-        "0.0001", // Low tolerance (strict)
-        "--num-filters",
-        "2",
-    ]);
-
-    // Ensure they have different tolerance values
-    assert_ne!(args_high_tol.tolerance, args_low_tol.tolerance);
-    assert_eq!(args_high_tol.tolerance, 0.1);
-    assert_eq!(args_low_tol.tolerance, 0.0001);
-
-    // Both should use the same strategy and other parameters for fair comparison
-    args_high_tol.strategy = "best1bin".to_string();
-    args_low_tol.strategy = "best1bin".to_string();
-    args_high_tol.maxeval = 50; // Very limited evaluations for fast test
-    args_low_tol.maxeval = 50;
-    args_high_tol.population = 20; // Small population for fast test
-    args_low_tol.population = 20;
-
-    let objective_data = create_test_objective_data();
-    let (lower_bounds, upper_bounds) = setup_bounds(&OptimParams::from(&args_high_tol));
-
-    // Test that both configurations can create valid DE configs
-    let mut x1 = initial_guess(
-        &OptimParams::from(&args_high_tol),
-        &lower_bounds,
-        &upper_bounds,
-    );
-    let mut x2 = initial_guess(
-        &OptimParams::from(&args_low_tol),
-        &lower_bounds,
-        &upper_bounds,
-    );
-
-    // The optimization should handle different tolerance values without crashing
-    let params_high_tol = OptimParams::from(&args_high_tol);
-    let result1 = optimize_filters(
-        &mut x1,
-        &lower_bounds,
-        &upper_bounds,
-        objective_data.clone(),
-        &params_high_tol,
-    );
-
-    let params_low_tol = OptimParams::from(&args_low_tol);
-    let result2 = optimize_filters(
-        &mut x2,
-        &lower_bounds,
-        &upper_bounds,
-        objective_data,
-        &params_low_tol,
-    );
-
-    // Both optimizations should succeed
-    assert!(
-        result1.is_ok(),
-        "High tolerance optimization failed: {:?}",
-        result1
-    );
-    assert!(
-        result2.is_ok(),
-        "Low tolerance optimization failed: {:?}",
-        result2
-    );
+#[derive(Debug)]
+struct DeRun {
+    params: Vec<f64>,
+    initial: Vec<f64>,
+    fitness: f64,
 }
 
-#[test]
-fn test_strategy_parameter_affects_optimization() {
-    // Test that different strategies can be parsed and used
-    let strategies = ["best1bin", "rand1bin", "currenttobest1bin"];
+fn run_seeded_de(mut args: Args) -> DeRun {
+    args.seed = Some(0x5eed);
+    args.no_parallel = true;
+    args.population = 12;
+    args.maxeval = 24;
+    args.num_filters = 2;
 
-    for strategy_name in strategies.iter() {
-        let mut args = Args::parse_from([
-            "autoeq-test",
-            "--algo",
-            "autoeq:de",
-            "--strategy",
-            strategy_name,
-            "--num-filters",
-            "2",
-        ]);
-        args.population = 10; // Small population for fast test
-        args.maxeval = 30; // Small evaluations for fast test
+    let params = OptimParams::from(&args);
+    let (lower, upper) = setup_bounds(&params);
+    let initial = initial_guess(&params, &lower, &upper);
+    let mut x = initial.clone();
+    let (_, fitness) = optimize_filters(
+        &mut x,
+        &lower,
+        &upper,
+        create_test_objective_data(),
+        &params,
+    )
+    .expect("seeded DE optimization");
 
-        // Verify the strategy is correctly set
-        assert_eq!(args.strategy, *strategy_name);
+    assert!(fitness.is_finite());
+    assert_eq!(x.len(), lower.len());
+    assert!(
+        x.iter()
+            .zip(lower.iter().zip(&upper))
+            .all(|(value, (lower, upper))| value.is_finite() && value >= lower && value <= upper)
+    );
 
-        // Verify the strategy can be parsed by the DE module
-        let strategy = Strategy::from_str(&args.strategy);
-        assert!(
-            strategy.is_ok(),
-            "Failed to parse strategy: {}",
-            strategy_name
-        );
-
-        // Test that optimization works with this strategy
-        let objective_data = create_test_objective_data();
-        let (lower_bounds, upper_bounds) = setup_bounds(&OptimParams::from(&args));
-        let mut x = initial_guess(&OptimParams::from(&args), &lower_bounds, &upper_bounds);
-
-        let params = OptimParams::from(&args);
-        let result = optimize_filters(
-            &mut x,
-            &lower_bounds,
-            &upper_bounds,
-            objective_data,
-            &params,
-        );
-
-        assert!(
-            result.is_ok(),
-            "Strategy {} optimization failed: {:?}",
-            strategy_name,
-            result
-        );
+    DeRun {
+        params: x,
+        initial,
+        fitness,
     }
 }
 
 #[test]
-fn test_recombination_parameter_affects_optimization() {
-    let recombination_values = [0.1, 0.5, 0.9];
+fn tolerance_parameters_propagate_to_optimizer_params() {
+    let args = Args::parse_from([
+        "autoeq-test",
+        "--algo",
+        "autoeq:de",
+        "--tolerance",
+        "0.0001",
+        "--atolerance",
+        "0.000001",
+    ]);
+    let params = OptimParams::from(&args);
 
-    for recomb in recombination_values.iter() {
-        let mut args = Args::parse_from([
-            "autoeq-test",
-            "--algo",
-            "autoeq:de",
-            "--recombination",
-            &recomb.to_string(),
-            "--num-filters",
-            "2",
-        ]);
-        args.population = 10; // Small population for fast test
-        args.maxeval = 30; // Small evaluations for fast test
-
-        // Verify the recombination value is correctly set
-        assert_eq!(args.recombination, *recomb);
-
-        let objective_data = create_test_objective_data();
-        let (lower_bounds, upper_bounds) = setup_bounds(&OptimParams::from(&args));
-        let mut x = initial_guess(&OptimParams::from(&args), &lower_bounds, &upper_bounds);
-
-        let params = OptimParams::from(&args);
-        let result = optimize_filters(
-            &mut x,
-            &lower_bounds,
-            &upper_bounds,
-            objective_data,
-            &params,
-        );
-
-        assert!(
-            result.is_ok(),
-            "Recombination {} optimization failed: {:?}",
-            recomb,
-            result
-        );
-    }
+    assert_eq!(params.tolerance, 0.0001);
+    assert_eq!(params.atolerance, 0.000001);
 }
 
 #[test]
-fn test_adaptive_strategy_with_weights() {
-    let mut args = Args::parse_from([
+fn strategy_parameter_changes_seeded_search_trajectory() {
+    let runs: Vec<DeRun> = ["best1bin", "rand1bin", "currenttobest1bin"]
+        .into_iter()
+        .map(|strategy| {
+            assert!(Strategy::from_str(strategy).is_ok());
+            run_seeded_de(Args::parse_from([
+                "autoeq-test",
+                "--algo",
+                "autoeq:de",
+                "--strategy",
+                strategy,
+            ]))
+        })
+        .collect();
+
+    assert!(
+        runs.windows(2).any(|pair| {
+            pair[0].params != pair[1].params || (pair[0].fitness - pair[1].fitness).abs() > 1e-12
+        }),
+        "different DE strategies produced identical seeded trajectories: {runs:?}"
+    );
+}
+
+#[test]
+fn recombination_parameter_changes_seeded_search_trajectory() {
+    let low = run_seeded_de(Args::parse_from([
+        "autoeq-test",
+        "--algo",
+        "autoeq:de",
+        "--strategy",
+        "rand1bin",
+        "--recombination",
+        "0.1",
+    ]));
+    let high = run_seeded_de(Args::parse_from([
+        "autoeq-test",
+        "--algo",
+        "autoeq:de",
+        "--strategy",
+        "rand1bin",
+        "--recombination",
+        "0.9",
+    ]));
+
+    assert!(
+        low.params != high.params || (low.fitness - high.fitness).abs() > 1e-12,
+        "recombination did not reach the seeded DE solver"
+    );
+}
+
+#[test]
+fn adaptive_strategy_produces_a_finite_bounded_candidate() {
+    let run = run_seeded_de(Args::parse_from([
         "autoeq-test",
         "--algo",
         "autoeq:de",
@@ -226,41 +156,17 @@ fn test_adaptive_strategy_with_weights() {
         "0.8",
         "--adaptive-weight-cr",
         "0.7",
-        "--num-filters",
-        "2",
-    ]);
-    args.population = 15; // Small population for fast test
-    args.maxeval = 40; // Small evaluations for fast test
+    ]));
 
-    // Verify adaptive parameters are correctly set
-    assert_eq!(args.strategy, "adaptivebin");
-    assert_eq!(args.adaptive_weight_f, 0.8);
-    assert_eq!(args.adaptive_weight_cr, 0.7);
-
-    let objective_data = create_test_objective_data();
-    let (lower_bounds, upper_bounds) = setup_bounds(&OptimParams::from(&args));
-    let mut x = initial_guess(&OptimParams::from(&args), &lower_bounds, &upper_bounds);
-
-    let params = OptimParams::from(&args);
-    let result = optimize_filters(
-        &mut x,
-        &lower_bounds,
-        &upper_bounds,
-        objective_data,
-        &params,
-    );
-
-    assert!(
-        result.is_ok(),
-        "Adaptive strategy optimization failed: {:?}",
-        result
+    assert_ne!(
+        run.params, run.initial,
+        "adaptive DE should evaluate and select a candidate"
     );
 }
 
 #[test]
-fn test_parameter_validation_with_de_algorithm() {
-    // Test that validation catches invalid parameters when using DE
-    let test_cases = vec![
+fn invalid_de_parameters_are_rejected_with_specific_errors() {
+    let test_cases = [
         (
             vec![
                 "autoeq-test",
@@ -300,18 +206,12 @@ fn test_parameter_validation_with_de_algorithm() {
         ),
     ];
 
-    for (args_vec, expected_error) in test_cases {
-        let args = Args::parse_from(args_vec.clone());
-        let result = autoeq::cli::validate_args(&args);
+    for (args, expected_error) in test_cases {
+        let error = autoeq::cli::validate_args(&Args::parse_from(args.clone()))
+            .expect_err("invalid DE arguments must fail validation");
         assert!(
-            result.is_err(),
-            "Expected validation error for args: {:?}",
-            args_vec
-        );
-        assert!(
-            result.unwrap_err().contains(expected_error),
-            "Error message should contain: {}",
-            expected_error
+            error.contains(expected_error),
+            "expected '{expected_error}' for {args:?}, got '{error}'"
         );
     }
 }

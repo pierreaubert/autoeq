@@ -211,6 +211,93 @@ pub fn build_multidriver_dsp_chain_with_curves(
     }
 }
 
+/// Build per-driver DSP for an explicit topology whose acoustic bands may
+/// contain multiple parallel drivers.
+#[allow(clippy::too_many_arguments)]
+pub fn build_topology_dsp_chain_with_curves(
+    channel_name: &str,
+    driver_names: &[String],
+    driver_band_indices: &[usize],
+    driver_gains: &[f64],
+    driver_delays: &[f64],
+    driver_inverts: &[bool],
+    crossover_freqs: &[f64],
+    crossover_type: &str,
+    eq_filters: &[Biquad],
+    driver_eqs: &[Vec<Biquad>],
+    driver_initial_curves: &[crate::Curve],
+) -> ChannelDspChain {
+    debug_assert_eq!(driver_names.len(), driver_band_indices.len());
+    debug_assert_eq!(driver_names.len(), driver_gains.len());
+    debug_assert_eq!(driver_names.len(), driver_delays.len());
+    debug_assert_eq!(driver_names.len(), driver_inverts.len());
+    debug_assert_eq!(driver_names.len(), driver_eqs.len());
+    debug_assert_eq!(driver_names.len(), driver_initial_curves.len());
+    let band_count = crossover_freqs.len() + 1;
+
+    let drivers = driver_names
+        .iter()
+        .enumerate()
+        .map(|(driver_index, name)| {
+            let band_index = driver_band_indices[driver_index];
+            let gain = driver_gains[driver_index];
+            let delay = driver_delays[driver_index];
+            let invert = driver_inverts[driver_index];
+            let mut plugins = Vec::new();
+            if invert || gain.abs() > 0.01 {
+                plugins.push(if invert {
+                    create_gain_plugin_with_invert(gain, true)
+                } else {
+                    create_gain_plugin(gain)
+                });
+            }
+            if delay.abs() > 0.001 {
+                plugins.push(create_delay_plugin(delay));
+            }
+            if !driver_eqs[driver_index].is_empty() {
+                plugins.push(create_eq_plugin(&driver_eqs[driver_index]));
+            }
+            if band_index > 0 {
+                plugins.push(create_crossover_plugin(
+                    crossover_type,
+                    crossover_freqs[band_index - 1],
+                    "high",
+                ));
+            }
+            if band_index + 1 < band_count {
+                plugins.push(create_crossover_plugin(
+                    crossover_type,
+                    crossover_freqs[band_index],
+                    "low",
+                ));
+            }
+            DriverDspChain {
+                name: name.clone(),
+                index: driver_index,
+                plugins,
+                initial_curve: Some((&driver_initial_curves[driver_index]).into()),
+            }
+        })
+        .collect();
+
+    ChannelDspChain {
+        channel: channel_name.to_string(),
+        plugins: (!eq_filters.is_empty())
+            .then(|| create_eq_plugin(eq_filters))
+            .into_iter()
+            .collect(),
+        drivers: Some(drivers),
+        initial_curve: None,
+        final_curve: None,
+        eq_response: None,
+        pre_ir: None,
+        post_ir: None,
+        fir_temporal_masking: None,
+        direct_early_late_correction: None,
+        target_curve: None,
+    }
+}
+
 /// Build a DSP chain for a multi-subwoofer system
 ///
 /// # Arguments

@@ -39,6 +39,9 @@ pub use types::RecordingConfiguration;
 mod config_loader;
 pub use config_loader::{SHALLOW_MERGE_KEYS, load_config, merge_json_objects};
 
+// Analytic acoustic ground truth and multi-dimensional QA metrics.
+pub mod acoustic_qa;
+
 // Configuration validation
 mod config;
 pub use config::{ValidationResult, validate_room_config};
@@ -114,9 +117,17 @@ pub use spectral_align::{
     create_alignment_plugins, log_spectral_alignment,
 };
 
-// Voice of God (timbre matching between channels)
-mod voice_of_god;
-pub use voice_of_god::{VoGResult, compute_voice_of_god, create_vog_plugins};
+mod inter_channel_timbre_matching;
+pub use inter_channel_timbre_matching::{
+    InterChannelTimbreMatchingResult, TimbreMatchingChannelStatus,
+    compute_inter_channel_timbre_matching, compute_inter_channel_timbre_matching_with_threshold,
+    create_timbre_matching_plugins, pairwise_normalized_timbre_spread_db,
+};
+
+mod height_channel_alignment;
+pub use height_channel_alignment::{
+    HeightAlignmentStatus, HeightChannelAlignmentResult, compute_height_channel_alignment,
+};
 
 // Spatial robustness (multi-position analysis)
 pub mod spatial_robustness;

@@ -144,6 +144,7 @@ impl WorkflowExecutor for GenericExecutor {
                 bootstrap_uncertainty: None,
                 validation_bundle: None,
                 supporting_source: None,
+                stage_outcomes: Vec::new(),
             },
         })
     }

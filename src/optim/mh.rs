@@ -82,6 +82,7 @@ impl FilterOptimizer for MhBackend {
         callback: Option<OptimProgressCallback>,
     ) -> Result<(String, f64), (String, f64)> {
         let mut objective = objective;
+        let seed = params.seed.unwrap_or(0);
         // MH has no native nonlinear constraints — install_constraints will
         // configure penalty weights matching `self.fallback_mode`.
         let _ = install_constraints(self.capabilities(), &mut objective);
@@ -93,7 +94,7 @@ impl FilterOptimizer for MhBackend {
                 // AutoEQ DE path computes EPA mid-run).
                 let mh_cb: Box<dyn FnMut(&MHIntermediate) -> CallbackAction + Send> =
                     Box::new(move |im| user_cb(im.iter, im.fun, None));
-                optimize_filters_mh_with_callback(
+                optimize_filters_mh_with_callback_seeded(
                     x,
                     lower,
                     upper,
@@ -102,9 +103,10 @@ impl FilterOptimizer for MhBackend {
                     params.population,
                     params.maxeval,
                     mh_cb,
+                    seed,
                 )
             }
-            None => optimize_filters_mh(
+            None => optimize_filters_mh_seeded(
                 x,
                 lower,
                 upper,
@@ -112,6 +114,7 @@ impl FilterOptimizer for MhBackend {
                 self.algo_suffix,
                 params.population,
                 params.maxeval,
+                seed,
             ),
         }
     }
@@ -237,11 +240,34 @@ pub fn optimize_filters_mh(
     population: usize,
     maxeval: usize,
 ) -> Result<(String, f64), (String, f64)> {
+    optimize_filters_mh_seeded(
+        x,
+        lower_bounds,
+        upper_bounds,
+        objective_data,
+        mh_name,
+        population,
+        maxeval,
+        0,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn optimize_filters_mh_seeded(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective_data: ObjectiveData,
+    mh_name: &str,
+    population: usize,
+    maxeval: usize,
+    seed: u64,
+) -> Result<(String, f64), (String, f64)> {
     // Create default callback for terminal output
     let callback = create_mh_callback(&format!("mh::{}", mh_name));
 
     // Delegate to callback version
-    optimize_filters_mh_with_callback(
+    optimize_filters_mh_with_callback_seeded(
         x,
         lower_bounds,
         upper_bounds,
@@ -250,6 +276,7 @@ pub fn optimize_filters_mh(
         population,
         maxeval,
         callback,
+        seed,
     )
 }
 
@@ -263,13 +290,47 @@ pub fn optimize_filters_mh_with_callback(
     mh_name: &str,
     population: usize,
     maxeval: usize,
+    callback: Box<dyn FnMut(&MHIntermediate) -> CallbackAction + Send>,
+) -> Result<(String, f64), (String, f64)> {
+    optimize_filters_mh_with_callback_seeded(
+        x,
+        lower_bounds,
+        upper_bounds,
+        objective_data,
+        mh_name,
+        population,
+        maxeval,
+        callback,
+        0,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn optimize_filters_mh_with_callback_seeded(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective_data: ObjectiveData,
+    mh_name: &str,
+    population: usize,
+    maxeval: usize,
     mut callback: Box<dyn FnMut(&MHIntermediate) -> CallbackAction + Send>,
+    seed: u64,
 ) -> Result<(String, f64), (String, f64)> {
     let num_params = x.len();
 
     // Build bounds for metaheuristics (as pairs)
-    assert_eq!(lower_bounds.len(), num_params);
-    assert_eq!(upper_bounds.len(), num_params);
+    if lower_bounds.len() != num_params || upper_bounds.len() != num_params {
+        return Err((
+            format!(
+                "Metaheuristics dimension mismatch: x={}, lower={}, upper={}",
+                num_params,
+                lower_bounds.len(),
+                upper_bounds.len()
+            ),
+            f64::INFINITY,
+        ));
+    }
     let mut bounds: Vec<[f64; 2]> = Vec::with_capacity(num_params);
     for i in 0..num_params {
         bounds.push([lower_bounds[i], upper_bounds[i]]);
@@ -346,7 +407,7 @@ pub fn optimize_filters_mh_with_callback(
     let report_interval = 100; // Report every N evaluations
 
     let solver = builder
-        .seed(0)
+        .seed(seed)
         .pop_num(pop)
         .task(move |_ctx| {
             current_iter += 1;

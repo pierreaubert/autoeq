@@ -35,6 +35,20 @@ impl DriversLossData {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
+        Self::from_ordered(drivers, crossover_type)
+    }
+
+    /// Create loss data while preserving the caller's explicit acoustic-band order.
+    pub fn new_ordered(drivers: Vec<DriverMeasurement>, crossover_type: CrossoverType) -> Self {
+        assert!(
+            drivers.len() >= 2 && drivers.len() <= 4,
+            "Must have 2-4 drivers, got {}",
+            drivers.len()
+        );
+        Self::from_ordered(drivers, crossover_type)
+    }
+
+    fn from_ordered(drivers: Vec<DriverMeasurement>, crossover_type: CrossoverType) -> Self {
         // Create a common frequency grid spanning all drivers
         // Use logarithmic spacing from lowest to highest frequency
         let min_freq = drivers

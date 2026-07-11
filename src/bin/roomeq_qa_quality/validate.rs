@@ -3,7 +3,7 @@ use super::consts::OPTION_SCORE_TOLERANCE;
 use super::consts::PSYCHOACOUSTIC_SCORE_TOLERANCE;
 use super::consts::TARGET_CURVE_SLOPE_TOLERANCE;
 use super::consts::TILT_SLOPE_TOLERANCE;
-use super::consts::VOG_SCORE_TOLERANCE;
+use super::consts::TIMBRE_MATCHING_SCORE_TOLERANCE;
 use super::count::count_exported_allpass_filters;
 use super::count::count_exported_plugins;
 use super::group_delay_qa_profile::GroupDelayQaProfile;
@@ -18,7 +18,33 @@ use super::residual::residual_slope_to_curve;
 use super::residual::residual_slope_to_target;
 use autoeq::MeasurementSource;
 use autoeq::loss::regression_slope_per_octave_in_range;
-use autoeq::roomeq::{ProcessingMode, RoomConfig, RoomOptimizationResult, SpeakerConfig};
+use autoeq::roomeq::{
+    ProcessingMode, RoomConfig, RoomOptimizationResult, SpeakerConfig,
+    pairwise_normalized_timbre_spread_db,
+};
+
+fn normalized_room_timbre_spread(
+    result: &RoomOptimizationResult,
+    reference_channel: &str,
+    min_freq: f64,
+    max_freq: f64,
+) -> Option<f64> {
+    let reference = &result.channel_results.get(reference_channel)?.final_curve;
+    let spreads = result
+        .channel_results
+        .iter()
+        .filter(|(channel_name, _)| channel_name.as_str() != reference_channel)
+        .filter_map(|(_, channel)| {
+            pairwise_normalized_timbre_spread_db(
+                &channel.final_curve,
+                reference,
+                min_freq,
+                max_freq,
+            )
+        })
+        .collect::<Vec<_>>();
+    (!spreads.is_empty()).then(|| spreads.iter().sum::<f64>() / spreads.len() as f64)
+}
 
 /// Per-option validation logic.
 /// `all_options` is the full set of simultaneously active options — validators
@@ -80,20 +106,34 @@ pub(super) fn validate_option_effect(
         OptionOverride::ProductionMultiSubMultiSeat => {
             validate_production_multisub_multiseat(option_config, option_result)
         }
-        OptionOverride::VoiceOfGod { .. } => {
-            // VoG: combined score should not be significantly worse than baseline.
-            // It may trade raw flatness for spatial/timing consistency, so use a
-            // feature-level tolerance instead of the stricter generic option gate.
+        OptionOverride::InterChannelTimbreMatching { reference_channel } => {
+            let baseline_spread = normalized_room_timbre_spread(
+                baseline_result,
+                reference_channel,
+                option_config.optimizer.min_freq,
+                option_config.optimizer.max_freq,
+            );
+            let option_spread = normalized_room_timbre_spread(
+                option_result,
+                reference_channel,
+                option_config.optimizer.min_freq,
+                option_config.optimizer.max_freq,
+            );
+            let spread_ok = baseline_spread
+                .zip(option_spread)
+                .is_some_and(|(baseline, option)| option + 1e-6 < baseline);
             let score_ok = option_result.combined_post_score
-                <= VOG_SCORE_TOLERANCE * baseline_result.combined_post_score;
+                <= TIMBRE_MATCHING_SCORE_TOLERANCE * baseline_result.combined_post_score;
 
-            if !score_ok {
+            if !spread_ok || !score_ok {
                 (
                     false,
                     format!(
-                        "VoG score {:.3} > {:.1}x baseline {:.3}",
+                        "timbre matching failed: normalized spread {:?} -> {:?}, score {:.3} (limit {:.1}x baseline {:.3})",
+                        baseline_spread,
+                        option_spread,
                         option_result.combined_post_score,
-                        VOG_SCORE_TOLERANCE,
+                        TIMBRE_MATCHING_SCORE_TOLERANCE,
                         baseline_result.combined_post_score,
                     ),
                 )
@@ -101,8 +141,11 @@ pub(super) fn validate_option_effect(
                 (
                     true,
                     format!(
-                        "VoG OK: score {:.3} vs baseline {:.3}",
-                        option_result.combined_post_score, baseline_result.combined_post_score,
+                        "timbre matching OK: normalized spread {:.3} -> {:.3} dB, score {:.3} vs baseline {:.3}",
+                        baseline_spread.unwrap_or_default(),
+                        option_spread.unwrap_or_default(),
+                        option_result.combined_post_score,
+                        baseline_result.combined_post_score,
                     ),
                 )
             }

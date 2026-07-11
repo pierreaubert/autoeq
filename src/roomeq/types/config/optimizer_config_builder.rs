@@ -108,7 +108,14 @@ impl OptimizerConfigBuilder {
     setter!(phase_alignment, Option<super::PhaseAlignmentConfig>);
     setter!(group_delay, Option<super::GroupDelayOptimizationConfig>);
     setter!(multi_seat, Option<super::MultiSeatConfig>);
-    setter!(vog, Option<super::VoiceOfGodConfig>);
+    setter!(
+        inter_channel_timbre_matching,
+        Option<super::InterChannelTimbreMatchingConfig>
+    );
+    setter!(
+        height_channel_alignment,
+        Option<super::HeightChannelAlignmentConfig>
+    );
     setter!(multi_measurement, Option<super::MultiMeasurementConfig>);
     setter!(
         decomposed_correction,

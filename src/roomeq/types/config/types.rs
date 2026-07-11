@@ -729,14 +729,88 @@ pub enum PerceptualPolicyPreset {
     Speech,
 }
 
-/// Configuration for Voice of God (Timbre Matching)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-pub struct VoiceOfGodConfig {
-    /// Enable Voice of God optimization
+fn default_timbre_improvement_db() -> f64 {
+    0.05
+}
+
+fn default_height_match_timbre() -> bool {
+    true
+}
+
+fn default_height_match_level() -> bool {
+    true
+}
+
+fn default_height_match_arrival() -> bool {
+    true
+}
+
+fn default_height_max_delay_ms() -> f64 {
+    20.0
+}
+
+/// Broadband timbre matching between corrected channels.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct InterChannelTimbreMatchingConfig {
+    /// Enable inter-channel timbre matching.
     #[serde(default)]
     pub enabled: bool,
-    /// Reference channel name (e.g. "Center" or "Left")
+    /// Reference channel name (e.g. "Center" or "Left").
     pub reference_channel: String,
+    /// Minimum reduction in normalized timbre spread required before applying DSP.
+    #[serde(default = "default_timbre_improvement_db")]
+    pub min_improvement_db: f64,
+}
+
+impl Default for InterChannelTimbreMatchingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            reference_channel: String::new(),
+            min_improvement_db: default_timbre_improvement_db(),
+        }
+    }
+}
+
+/// Role-aware alignment policy for overhead/height channels.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct HeightChannelAlignmentConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Optional reference overrides keyed by height channel name or role group
+    /// (`top_front`, `top_middle`, or `top_rear`).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub reference_channels: HashMap<String, String>,
+    #[serde(default = "default_height_match_timbre")]
+    pub match_timbre: bool,
+    #[serde(default = "default_height_match_level")]
+    pub match_level: bool,
+    #[serde(default = "default_height_match_arrival")]
+    pub match_arrival_time: bool,
+    /// Require candidate DSP not to worsen phase consistency when trustworthy
+    /// phase and coherence are available. This is an optional safety gate, not
+    /// a standalone correction objective.
+    #[serde(default)]
+    pub match_phase: bool,
+    #[serde(default = "default_timbre_improvement_db")]
+    pub min_timbre_improvement_db: f64,
+    #[serde(default = "default_height_max_delay_ms")]
+    pub max_delay_ms: f64,
+}
+
+impl Default for HeightChannelAlignmentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            reference_channels: HashMap::new(),
+            match_timbre: true,
+            match_level: true,
+            match_arrival_time: true,
+            match_phase: false,
+            min_timbre_improvement_db: default_timbre_improvement_db(),
+            max_delay_ms: default_height_max_delay_ms(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

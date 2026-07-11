@@ -8,52 +8,63 @@ use std::path::PathBuf;
 
 /// Load a single measurement from a file or inline data
 pub fn load_measurement(measurement: &MeasurementRef) -> Result<Curve, Box<dyn Error>> {
-    match measurement {
-        MeasurementRef::Path(path) => read_curve_from_csv(path),
-        MeasurementRef::Named { path, .. } => read_curve_from_csv(path),
+    let curve = match measurement {
+        MeasurementRef::Path(path) => {
+            read_curve_from_csv(path).map_err(|error| -> Box<dyn Error> {
+                format!("Failed to load measurement '{}': {error}", path.display()).into()
+            })?
+        }
+        MeasurementRef::Named { path, .. } => {
+            read_curve_from_csv(path).map_err(|error| -> Box<dyn Error> {
+                format!("Failed to load measurement '{}': {error}", path.display()).into()
+            })?
+        }
         MeasurementRef::Inline(inline) => {
             // If inline data is empty but csv_path is provided, load from CSV
             if inline.frequencies.is_empty() || inline.magnitude_db.is_empty() {
                 if let Some(ref csv_path) = inline.csv_path {
-                    return read_curve_from_csv(&PathBuf::from(csv_path));
-                }
-                return Err(format!(
-                    "Inline measurement has empty data and no csv_path to fall back to (name: {:?})",
-                    inline.name
-                )
-                .into());
-            }
-
-            if inline.frequencies.len() != inline.magnitude_db.len() {
-                return Err(format!(
-                    "Inline measurement has mismatched lengths: {} frequencies, {} magnitude values",
-                    inline.frequencies.len(),
-                    inline.magnitude_db.len()
-                )
-                .into());
-            }
-
-            let phase = inline.phase_deg.as_ref().and_then(|p| {
-                if p.len() != inline.frequencies.len() {
-                    log::debug!(
-                        "Warning: phase array length ({}) doesn't match frequencies ({}), ignoring phase",
-                        p.len(),
-                        inline.frequencies.len()
-                    );
-                    None
+                    read_curve_from_csv(&PathBuf::from(csv_path))?
                 } else {
-                    Some(Array1::from(p.clone()))
+                    return Err(format!(
+                        "Inline measurement has empty data and no csv_path to fall back to (name: {:?})",
+                        inline.name
+                    )
+                    .into());
                 }
-            });
+            } else {
+                if inline.frequencies.len() != inline.magnitude_db.len() {
+                    return Err(format!(
+                        "Inline measurement has mismatched lengths: {} frequencies, {} magnitude values",
+                        inline.frequencies.len(),
+                        inline.magnitude_db.len()
+                    )
+                    .into());
+                }
 
-            Ok(Curve {
-                freq: Array1::from(inline.frequencies.clone()),
-                spl: Array1::from(inline.magnitude_db.clone()),
-                phase,
-                ..Default::default()
-            })
+                let phase = inline.phase_deg.as_ref().and_then(|p| {
+                    if p.len() != inline.frequencies.len() {
+                        log::debug!(
+                            "Warning: phase array length ({}) doesn't match frequencies ({}), ignoring phase",
+                            p.len(),
+                            inline.frequencies.len()
+                        );
+                        None
+                    } else {
+                        Some(Array1::from(p.clone()))
+                    }
+                });
+
+                Curve {
+                    freq: Array1::from(inline.frequencies.clone()),
+                    spl: Array1::from(inline.magnitude_db.clone()),
+                    phase,
+                    ..Default::default()
+                }
+            }
         }
-    }
+    };
+    curve.validate("measurement")?;
+    Ok(curve)
 }
 
 /// Load individual measurement curves from a source without averaging.
@@ -67,8 +78,19 @@ pub fn load_source_individual(source: &MeasurementSource) -> Result<Vec<Curve>, 
             let curve = load_measurement(&s.measurement)?;
             Ok(vec![curve])
         }
-        MeasurementSource::InMemory(curve) => Ok(vec![curve.clone()]),
-        MeasurementSource::InMemoryMultiple(curves) => Ok(curves.clone()),
+        MeasurementSource::InMemory(curve) => {
+            curve.validate("in-memory measurement")?;
+            Ok(vec![curve.clone()])
+        }
+        MeasurementSource::InMemoryMultiple(curves) => {
+            if curves.is_empty() {
+                return Err("In-memory measurement list is empty".into());
+            }
+            for (index, curve) in curves.iter().enumerate() {
+                curve.validate(&format!("in-memory measurement {index}"))?;
+            }
+            Ok(curves.clone())
+        }
         MeasurementSource::Multiple(m) => {
             if m.measurements.is_empty() {
                 return Err("Measurement list is empty".into());
@@ -255,6 +277,36 @@ mod tests {
     }
 
     #[test]
+    fn load_measurement_rejects_single_bin_and_non_finite_inline_data() {
+        for (frequencies, magnitude_db) in [
+            (vec![100.0], vec![80.0]),
+            (vec![100.0, f64::NAN], vec![80.0, 81.0]),
+            (vec![100.0, f64::INFINITY], vec![80.0, 81.0]),
+            (vec![100.0, 1_000.0], vec![80.0, f64::NEG_INFINITY]),
+        ] {
+            let inline = InlineMeasurement {
+                frequencies,
+                magnitude_db,
+                phase_deg: None,
+                name: Some("invalid".to_string()),
+                wav_path: None,
+                csv_path: None,
+            };
+            assert!(load_measurement(&MeasurementRef::Inline(inline)).is_err());
+        }
+    }
+
+    #[test]
+    fn load_source_rejects_invalid_in_memory_curve() {
+        let source = MeasurementSource::InMemory(Curve {
+            freq: Array1::from_vec(vec![100.0, 1_000.0]),
+            spl: Array1::from_vec(vec![80.0]),
+            ..Default::default()
+        });
+        assert!(load_source_individual(&source).is_err());
+    }
+
+    #[test]
     fn load_measurement_inline_empty_rejects_without_csv_path() {
         let inline = InlineMeasurement {
             frequencies: vec![],
@@ -270,11 +322,16 @@ mod tests {
 
     #[test]
     fn load_measurement_named_missing_file_returns_error() {
+        let path = std::path::PathBuf::from("/tmp/does_not_exist_abc123.csv");
         let m = MeasurementRef::Named {
-            path: std::path::PathBuf::from("/tmp/does_not_exist_abc123.csv"),
+            path: path.clone(),
             name: Some("missing".to_string()),
         };
-        assert!(load_measurement(&m).is_err());
+        let error = load_measurement(&m).expect_err("missing measurement must fail");
+        assert!(
+            error.to_string().contains(&path.display().to_string()),
+            "missing path was not preserved in error: {error}"
+        );
     }
 
     #[test]

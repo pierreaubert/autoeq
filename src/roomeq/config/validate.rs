@@ -44,6 +44,7 @@ pub fn validate_room_config(config: &RoomConfig) -> ValidationResult {
 
     // Validate speaker configurations
     validate_speakers(&config.speakers, &mut result);
+    validate_system_speaker_references(config, &mut result);
 
     // Validate crossover references
     validate_crossovers(&config.speakers, config.crossovers.as_ref(), &mut result);
@@ -59,6 +60,55 @@ pub fn validate_room_config(config: &RoomConfig) -> ValidationResult {
 fn validate_optimizer_config(opt: &OptimizerConfig, result: &mut ValidationResult) {
     let mut ctx = ValidationContext::new(opt, result);
     run_optimizer_validation_rules(&mut ctx);
+    validate_channel_alignment_config(opt, result);
+}
+
+fn validate_channel_alignment_config(opt: &OptimizerConfig, result: &mut ValidationResult) {
+    if let Some(config) = &opt.inter_channel_timbre_matching {
+        let path = "optimizer.inter_channel_timbre_matching";
+        if config.enabled && config.reference_channel.trim().is_empty() {
+            result.add_error(format!(
+                "{path}.reference_channel must not be empty when enabled"
+            ));
+        }
+        if !config.min_improvement_db.is_finite() || config.min_improvement_db < 0.0 {
+            result.add_error(format!(
+                "{path}.min_improvement_db must be finite and non-negative"
+            ));
+        }
+    }
+
+    if let Some(config) = &opt.height_channel_alignment {
+        if !config.min_timbre_improvement_db.is_finite() || config.min_timbre_improvement_db < 0.0 {
+            result.add_error(
+                "optimizer.height_channel_alignment.min_timbre_improvement_db must be finite and non-negative"
+                    .to_string(),
+            );
+        }
+        if !config.max_delay_ms.is_finite() || config.max_delay_ms <= 0.0 {
+            result.add_error(
+                "optimizer.height_channel_alignment.max_delay_ms must be finite and positive"
+                    .to_string(),
+            );
+        }
+        if config.enabled
+            && !(config.match_timbre || config.match_level || config.match_arrival_time)
+        {
+            result.add_error(
+                "optimizer.height_channel_alignment requires at least one actionable timbre, level, or arrival-time objective"
+                    .to_string(),
+            );
+        }
+        for (role, reference) in &config.reference_channels {
+            if role.trim().is_empty() || reference.trim().is_empty() {
+                result.add_error(
+                    "optimizer.height_channel_alignment.reference_channels keys and values must not be empty"
+                        .to_string(),
+                );
+                break;
+            }
+        }
+    }
 }
 
 /// Validate speaker configurations
@@ -80,7 +130,26 @@ fn validate_speakers(speakers: &HashMap<String, SpeakerConfig>, result: &mut Val
         }
 
         match config {
+            SpeakerConfig::Topology(topology) => {
+                if let Err(message) = topology.validate() {
+                    result.add_error(format!("Speaker topology '{}': {message}", name));
+                }
+                let band_count = topology
+                    .acoustic_bands()
+                    .map(|bands| bands.len())
+                    .unwrap_or_default();
+                if topology.crossover.is_none() && band_count > 1 {
+                    result.add_error(format!(
+                        "Speaker topology '{}' has multiple acoustic bands but no crossover specified",
+                        name
+                    ));
+                }
+            }
             SpeakerConfig::Group(group) => {
+                result.add_warning(format!(
+                    "Speaker group '{}' uses deprecated measurements input; migrate to explicit drivers topology",
+                    name
+                ));
                 if group.measurements.is_empty() {
                     result.add_error(format!("Speaker group '{}' has no measurements", name));
                 }
@@ -184,17 +253,58 @@ fn validate_speakers(speakers: &HashMap<String, SpeakerConfig>, result: &mut Val
 }
 
 /// Validate crossover references
+fn validate_system_speaker_references(config: &RoomConfig, result: &mut ValidationResult) {
+    let Some(system) = &config.system else {
+        return;
+    };
+    for (role, measurement_key) in &system.speakers {
+        if !config.speakers.contains_key(measurement_key) {
+            result.add_error(format!(
+                "system.speakers role '{role}' references missing speaker measurement '{measurement_key}'"
+            ));
+        }
+    }
+}
+
 fn validate_crossovers(
     speakers: &HashMap<String, SpeakerConfig>,
     crossovers: Option<&HashMap<String, super::super::types::CrossoverConfig>>,
     result: &mut ValidationResult,
 ) {
+    if let Some(crossovers) = crossovers {
+        for (name, crossover) in crossovers {
+            if crossover
+                .crossover_type
+                .parse::<crate::loss::CrossoverType>()
+                .is_err()
+            {
+                result.add_error(format!(
+                    "Crossover '{name}' has unsupported type '{}'",
+                    crossover.crossover_type
+                ));
+            }
+        }
+    }
+
     for (name, config) in speakers {
-        let SpeakerConfig::Group(group) = config else {
-            continue;
-        };
-        let Some(ref crossover_ref) = group.crossover else {
-            continue;
+        let (crossover_ref, num_drivers) = match config {
+            SpeakerConfig::Group(group) => {
+                let Some(crossover_ref) = group.crossover.as_ref() else {
+                    continue;
+                };
+                (crossover_ref, group.measurements.len())
+            }
+            SpeakerConfig::Topology(topology) => {
+                let Some(crossover_ref) = topology.crossover.as_ref() else {
+                    continue;
+                };
+                let band_count = topology
+                    .acoustic_bands()
+                    .map(|bands| bands.len())
+                    .unwrap_or_default();
+                (crossover_ref, band_count)
+            }
+            _ => continue,
         };
 
         let Some(crossovers) = crossovers else {
@@ -215,7 +325,6 @@ fn validate_crossovers(
 
         // Validate crossover config
         let crossover = &crossovers[crossover_ref];
-        let num_drivers = group.measurements.len();
         let expected_freqs = num_drivers.saturating_sub(1);
 
         // Check frequency specification
@@ -610,6 +719,73 @@ mod validate_optimizer_tests {
             result.is_valid,
             "default config should be valid: {:?}",
             result.errors
+        );
+    }
+
+    #[test]
+    fn validate_enabled_timbre_matching_requires_reference_and_finite_threshold() {
+        let mut config = default_config();
+        config.inter_channel_timbre_matching =
+            Some(crate::roomeq::types::InterChannelTimbreMatchingConfig {
+                enabled: true,
+                reference_channel: " ".to_string(),
+                min_improvement_db: f64::NAN,
+            });
+        let mut result = ValidationResult::valid();
+
+        validate_optimizer_config(&config, &mut result);
+
+        assert!(!result.is_valid);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.contains("reference_channel"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.contains("min_improvement_db"))
+        );
+    }
+
+    #[test]
+    fn validate_height_alignment_requires_valid_bounds_and_an_objective() {
+        let mut config = default_config();
+        config.height_channel_alignment =
+            Some(crate::roomeq::types::HeightChannelAlignmentConfig {
+                enabled: true,
+                match_timbre: false,
+                match_level: false,
+                match_arrival_time: false,
+                match_phase: false,
+                min_timbre_improvement_db: -1.0,
+                max_delay_ms: f64::INFINITY,
+                ..Default::default()
+            });
+        let mut result = ValidationResult::valid();
+
+        validate_optimizer_config(&config, &mut result);
+
+        assert!(!result.is_valid);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.contains("min_timbre_improvement_db"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.contains("max_delay_ms"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.contains("at least one actionable"))
         );
     }
 
@@ -1804,6 +1980,87 @@ mod room_config_validation_tests {
             result.errors.iter().any(
                 |e| e.contains("cinema_reference_distance_m") && e.contains("must be positive")
             )
+        );
+    }
+
+    #[test]
+    fn audit_optimizer_numeric_bounds_must_be_finite() {
+        let mut config = default_room();
+        config.optimizer.min_freq = f64::NAN;
+        config.optimizer.max_q = f64::INFINITY;
+        let result = validate_room_config(&config);
+
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("min_freq") && e.contains("finite"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("max_q") && e.contains("finite"))
+        );
+    }
+
+    #[test]
+    fn audit_boost_envelope_must_be_finite_positive_and_strictly_sorted() {
+        let mut config = default_room();
+        config.optimizer.max_boost_envelope = Some(vec![(20.0, 6.0), (200.0, 3.0), (200.0, 2.0)]);
+        let result = validate_room_config(&config);
+
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("max_boost_envelope") && e.contains("strictly increasing"))
+        );
+    }
+
+    #[test]
+    fn audit_system_speaker_mapping_must_reference_existing_measurement() {
+        let mut config = default_room();
+        config.speakers.insert(
+            "LeftMeasurement".to_string(),
+            SpeakerConfig::Single(single_source("left.csv", None)),
+        );
+        config.system = Some(SystemConfig {
+            model: SystemModel::Stereo,
+            speakers: HashMap::from([("L".to_string(), "Typo".to_string())]),
+            subwoofers: None,
+            bass_management: None,
+            supporting_source_outputs: None,
+        });
+        let result = validate_room_config(&config);
+
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("system.speakers") && e.contains("Typo"))
+        );
+    }
+
+    #[test]
+    fn audit_crossover_type_is_validated_at_config_load() {
+        let mut config = default_room();
+        config.crossovers = Some(HashMap::from([(
+            "main".to_string(),
+            CrossoverConfig {
+                crossover_type: "not-a-crossover".to_string(),
+                frequency: Some(80.0),
+                frequencies: None,
+                frequency_range: None,
+            },
+        )]));
+        let result = validate_room_config(&config);
+
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("Crossover 'main'") && e.contains("unsupported type"))
         );
     }
 }

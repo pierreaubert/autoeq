@@ -44,6 +44,53 @@ pub fn rule_q_range(ctx: &mut ValidationContext<'_>) {
     }
 }
 
+pub fn rule_finite_numeric_bounds(ctx: &mut ValidationContext<'_>) {
+    for (name, value) in [
+        ("min_freq", ctx.opt.min_freq),
+        ("max_freq", ctx.opt.max_freq),
+        ("min_q", ctx.opt.min_q),
+        ("max_q", ctx.opt.max_q),
+        ("min_db", ctx.opt.min_db),
+        ("max_db", ctx.opt.max_db),
+        ("tolerance", ctx.opt.tolerance),
+        ("atolerance", ctx.opt.atolerance),
+    ] {
+        if !value.is_finite() {
+            ctx.add_error(format!("{name} must be finite, got {value}"));
+        }
+    }
+}
+
+fn envelope_error(name: &str, envelope: Option<&[(f64, f64)]>) -> Option<String> {
+    let envelope = envelope?;
+    for &(frequency, gain) in envelope {
+        if !frequency.is_finite() || frequency <= 0.0 {
+            return Some(format!(
+                "{name} frequencies must be finite and positive, got {frequency}"
+            ));
+        }
+        if !gain.is_finite() {
+            return Some(format!("{name} gains must be finite, got {gain}"));
+        }
+    }
+    if envelope.windows(2).any(|points| points[0].0 >= points[1].0) {
+        return Some(format!(
+            "{name} frequencies must be strictly increasing without duplicates"
+        ));
+    }
+    None
+}
+
+pub fn rule_gain_envelopes(ctx: &mut ValidationContext<'_>) {
+    if let Some(error) = envelope_error("max_boost_envelope", ctx.opt.max_boost_envelope.as_deref())
+    {
+        ctx.add_error(error);
+    }
+    if let Some(error) = envelope_error("min_cut_envelope", ctx.opt.min_cut_envelope.as_deref()) {
+        ctx.add_error(error);
+    }
+}
+
 pub fn rule_smooth_n(ctx: &mut ValidationContext<'_>) {
     if !(1..=48).contains(&ctx.opt.smooth_n) {
         ctx.add_error(format!(
@@ -511,6 +558,7 @@ pub fn rule_mixed_config(ctx: &mut ValidationContext<'_>) {
 /// This is the orchestrator used by `validate_optimizer_config`.
 pub fn run_optimizer_validation_rules(ctx: &mut ValidationContext<'_>) {
     rule_num_filters(ctx);
+    rule_finite_numeric_bounds(ctx);
     rule_freq_range(ctx);
     rule_q_range(ctx);
     rule_smooth_n(ctx);
@@ -521,6 +569,7 @@ pub fn run_optimizer_validation_rules(ctx: &mut ValidationContext<'_>) {
     rule_early_late_correction(ctx);
     rule_validation_bundle(ctx);
     rule_gain_bounds(ctx);
+    rule_gain_envelopes(ctx);
     rule_excursion_protection(ctx);
     rule_auto_optimizer(ctx);
     rule_multi_seat(ctx);

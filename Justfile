@@ -1,6 +1,8 @@
 # --------------------------------------------------------- -*- just -*-
 # How to install Just?
-#     cargo install just
+# cargo install just
+# ----------------------------------------------------------------------
+import 'builds/cross.just'
 # ----------------------------------------------------------------------
 
 _default:
@@ -284,6 +286,8 @@ export-test-systems-help:
 	@echo "Structural checks, no external tools required:"
 	@echo "  cargo test -p autoeq export::tests"
 	@echo "  just qa-export-camilladsp  # requires the real CamillaDSP binary"
+	@echo "  just qa-export-pipewire    # runs PipeWire validation in Docker"
+	@echo "  just qa-export-equalizer-apo  # requires a Windows VM validator command"
 	@echo
 	@echo "Install helper:"
 	@echo "  just install-export-test-systems"
@@ -371,7 +375,59 @@ qa-export-camilladsp:
 		exit 1
 	fi
 	ROOMEQ_CAMILLADSP_VALIDATE_CMD="$validator --check {config}" \
-		cargo test -p autoeq tool_contract_camilladsp -- --nocapture
+		cargo nextest run -p autoeq --lib --no-tests fail -E 'test(/camilladsp/)'
+
+[group('qa')]
+qa-export-equalizer-apo:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	validator="${ROOMEQ_EQUALIZER_APO_VALIDATE_CMD:-}"
+	if [[ -z "$validator" ]]; then
+		echo "A Windows Equalizer APO validator is required." >&2
+		echo "Set ROOMEQ_EQUALIZER_APO_VALIDATE_CMD to a command that accepts {config}." >&2
+		echo "The command should copy the generated file into a Windows VM and validate it with the installed Equalizer APO tooling." >&2
+		exit 1
+	fi
+	ROOMEQ_EQUALIZER_APO_VALIDATE_CMD="$validator" \
+		cargo nextest run -p autoeq --lib --no-tests fail -E 'test(/equalizer_apo/)'
+
+[group('qa')]
+qa-export-pipewire:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	if ! command -v docker >/dev/null 2>&1; then
+		echo "Docker is required for Linux PipeWire export validation." >&2
+		exit 1
+	fi
+	if ! docker info >/dev/null 2>&1; then
+		echo "Docker is installed but its daemon is not available." >&2
+		exit 1
+	fi
+	requested_base_image="${AUTOEQ_PIPEWIRE_BASE_IMAGE:-math-audio-base-linux-arm64:latest}"
+	if [[ -z "$(docker image ls "$requested_base_image" -q | head -n 1)" ]]; then
+		echo "AutoEQ Linux test base image not found: $requested_base_image" >&2
+		echo "Set AUTOEQ_PIPEWIRE_BASE_IMAGE to an existing Linux test image." >&2
+		exit 1
+	fi
+	base_image="$requested_base_image"
+	toolchain="$(docker run --rm --entrypoint bash "$base_image" -lc 'rustup toolchain list | sed -n "s/ (active.*//p" | head -n 1')"
+	if [[ -z "$toolchain" ]]; then
+		echo "Could not determine the active Rust toolchain in $base_image." >&2
+		exit 1
+	fi
+	docker build --build-arg BASE_IMAGE="$base_image" -t autoeq-qa-pipewire -f builds/qa/Dockerfile.pipewire .
+	docker run --rm \
+		-v "$(pwd)":/workspace \
+		-v autoeq-pipewire-cargo-registry:/root/.cargo/registry \
+		-v autoeq-pipewire-cargo-git:/root/.cargo/git \
+		-v autoeq-pipewire-target:/target \
+		-w /workspace \
+		-e CARGO_TARGET_DIR=/target \
+		-e RUSTUP_TOOLCHAIN="$toolchain" \
+		-e CARGO_HTTP_MULTIPLEXING=false \
+		-e CARGO_NET_RETRY=10 \
+		autoeq-qa-pipewire \
+		bash -lc 'ROOMEQ_PIPEWIRE_VALIDATE_CMD="bash scripts/validate-pipewire-config.sh {config}" bash scripts/run-pipewire-export-tests.sh'
 
 [group('qa-roomeq')]
 qa-roomeq: qa-roomeq-small-stereo-20 \
@@ -599,12 +655,11 @@ qa-roomeq-phase-critical:
 
 [group('qa-roomeq')]
 qa-roomeq-perceptual:
-	cargo test -p autoeq perceptual_metrics --lib -- --nocapture
-	cargo test -p autoeq rejects_all_channel_multiseat_when_constraints_fail --lib -- --nocapture
-	cargo test -p autoeq rejects_all_channel_multiseat_when_broadband_level_collapses --lib -- --nocapture
-	cargo test -p autoeq reports_guardrail_rejection_without_claiming_applied --lib -- --nocapture
-	cargo test -p autoeq home_cinema_all_channel_multiseat_guardrail_reruns_and_reports_rejection --lib -- --nocapture
-	cargo test -p autoeq reports_all_channel_multiseat_null_guard --lib -- --nocapture
+	# nextest's explicit no-test failure prevents stale filters from producing a false-green QA run.
+	cargo nextest run -p autoeq --lib --no-tests fail -E 'test(/loss::epa::/)'
+	cargo nextest run -p autoeq --lib --no-tests fail -E 'test(/generate_validation_bundle_report_creates_json|correction_report_(rejected_guardrails|failed_constraints_and_null_advisory)/)'
+	cargo nextest run -p autoeq --lib --no-tests fail -E 'test(/home_cinema_(no_sub|with_sub)_multiseat_rejection_reports|run_channel_via_generic_path_multiseat_rejected_recovers|all_channel_multiseat_acceptance_rejects_subs/)'
+	cargo nextest run -p autoeq --bin roomeq-qa-quality --no-tests fail -E 'test(/scorecard_/)'
 
 [group('qa-roomeq')]
 qa-roomeq-gd:
@@ -636,4 +691,4 @@ qa-roomeq-ci:
 	cargo test -p autoeq home_cinema --lib -- --nocapture
 	cargo test -p autoeq home_cinema_bass_management --lib -- --nocapture
 	cargo test -p autoeq validate_bass_management --lib -- --nocapture
-	cargo test -p autoeq perceptual_metrics --lib -- --nocapture
+	just qa-roomeq-perceptual

@@ -7,7 +7,10 @@
 AutoEQ and RoomEQ are Rust CLIs for computing corrections.
 
 - AutoEQ does parametric EQ corrections for headphones and anechoic measurements of speakers (Spinorama or CEA2034).
-- RoomEQ does room correction for stereo systems up to multi-channel systems and multi-subwoofer systems. It can generate IIR, FIR and hybrid filters and optimise for single or multiple positions.
+- RoomEQ is the room-correction engine for stereo, multi-channel, multi-driver,
+  and multi-subwoofer systems. It combines magnitude, phase, timing,
+  psychoacoustic, routing, and export optimization in one reproducible JSON
+  workflow.
 
 **Note:** A graphical desktop application is available in a separate repository: [SotF](https://github.com/pierreaubert/sotf)
 
@@ -19,14 +22,47 @@ AutoEQ and RoomEQ are Rust CLIs for computing corrections.
 
 ### RoomEQ
 
-- [RoomEQ 101](docs/ROOMEQ_101.md) — getting started with RoomEQ concepts and workflow
-- [RoomEQ Manual](docs/ROOMEQ_MANUAL.md) — complete user guide for multi-channel room correction
-- [RoomEQ Input Format](docs/ROOMEQ_INPUT_FORMAT.md) — JSON configuration schema and examples
-- [RoomEQ Output Format](docs/ROOMEQ_OUTPUT_FORMAT.md) — filter output and DSP chain description
+- [RoomEQ 101](docs/ROOMEQ_101.md) — architecture, signal flow, topology
+  workflows, and the acoustic rationale behind each correction stage
+- [RoomEQ manual](docs/ROOMEQ_MANUAL.md) — installation, configuration,
+  algorithms, correction modes, API usage, and complete examples
+- [RoomEQ input configuration guide](docs/ROOMEQ_INPUT_FORMAT.md) — detailed
+  field-by-field reference and complete system examples
+- [RoomEQ output DSP-chain guide](docs/ROOMEQ_OUTPUT_FORMAT.md) — filters,
+  per-driver chains, routing, curves, metadata, and export examples
+- [Focused configuration examples](src/bin/roomeq/INPUT_FORMAT.md) — timbre
+  matching, height alignment, and RIR prototypes
+- [RoomEQ input schema](src/bin/roomeq/input_schema.json) — complete
+  machine-readable configuration contract
+- [RoomEQ output schema](src/bin/roomeq/output_schema.json) — generated filters,
+  routing, reports, and metadata contract
+- [RIR prototype design](docs/superpowers/specs/2026-07-10-roomeq-rir-prototype-design.md)
+  — distance/directivity weighting model and validation rules
 
-### General
+### Research and references
 
-- [References](docs/REFERENCES.md) — papers, algorithms, and measurement resources
+- [References](docs/REFERENCES.md) — standards, papers, algorithms, and
+  measurement resources used by AutoEQ and RoomEQ
+- [ASR 2026 research notes](docs/asr-202604.md) — annotated research survey
+  and implementation ideas
+
+## RoomEQ Highlights
+
+| Area | Capabilities |
+|------|--------------|
+| Systems | Stereo 2.0/2.1, home cinema, multi-way speakers, parallel drivers, multi-sub arrays, DBA, and supporting-source room compensation |
+| Listening area | Single or multiple measurements, weighted/minimax/variance strategies, continuous listening-area priors, modal-basis optimization, and distance/directivity-weighted RIR prototypes |
+| Correction | Parametric IIR, FIR, mixed/hybrid phase, warped IIR, decomposed correction, frequency-dependent windowing, and TV² smoothness control |
+| Time and phase | Driver alignment, sub/main phase alignment, polarity and delay search, all-pass optimization, group-delay correction, and phase-confidence safety gates |
+| Perceptual quality | EPA loudness/sharpness/roughness scoring, audibility deadbands, role-aware targets, inter-channel timbre matching, and height-channel alignment |
+| Home cinema | Role-aware bass management, crossover optimization, physical sub routing, headroom simulation, and topology-aware reporting |
+| Safety | Measurement-grid validation, bounded filters, null and headroom protection, do-no-harm acceptance gates, and structured applied/skipped/degraded/failed outcomes |
+| Export | SotF DSP graphs, CamillaDSP, Equalizer APO, PipeWire, Roon, Wavelet, EasyEffects, convolution WAV sidecars, and explicit rejection when a target format cannot preserve the routing graph |
+
+RoomEQ keeps the full DSP chain and its evidence together: corrected responses,
+filter stages, routing graphs, perceptual scores, timing diagnostics, advisories,
+and export artifacts are represented in the output rather than hidden behind a
+single aggregate score.
 
 ## Capabilities
 
@@ -34,8 +70,10 @@ AutoEQ and RoomEQ are Rust CLIs for computing corrections.
 
 - **Speaker EQ:** Optimize parametric EQ for loudspeakers using CEA2034/Spinorama measurements from [spinorama.org](https://spinorama.org)
 - **Headphone EQ:** Generate EQ corrections for headphones targeting Harman curves or custom targets
-- **Multi-Channel Systems:** Optimize stereo, 2.1, and multi-driver configurations with crossover management
-- **Room Correction:** Multi-subwoofer alignment and Double Bass Array (DBA) optimization
+- **Multi-Channel Systems:** Optimize stereo, 2.1, home-cinema, and
+  multi-driver configurations with crossover and role-aware channel management
+- **Room Correction:** Optimize single-seat or listening-area responses,
+  multi-subwoofer alignment, and Double Bass Array (DBA) behavior
 - **Supporting-Source Room Compensation:** Use a delayed, decorrelated supporting loudspeaker to fill reverberant energy without altering the primary source's direct sound (Brooks-Park room compensation)
 
 ### Optimization Algorithms
@@ -75,9 +113,19 @@ See the [AutoEQ Manual](docs/AUTOEQ_MANUAL.md) for usage, parameters, algorithm 
 
 ## RoomEQ CLI
 
-The `roomeq` binary optimizes multi-channel speaker systems with JSON configuration.
+The `roomeq` binary runs the complete RoomEQ pipeline from a versioned JSON
+configuration and writes a structured result suitable for reporting, export,
+or direct application by SotF:
 
-See the [RoomEQ Manual](docs/ROOMEQ_MANUAL.md), [Input Format](docs/ROOMEQ_INPUT_FORMAT.md), and [Output Format](docs/ROOMEQ_OUTPUT_FORMAT.md) for complete documentation.
+```bash
+cargo run --release --bin roomeq -- \
+  --config path/to/room.json \
+  --output path/to/result.json
+```
+
+Start with the [input-format examples](src/bin/roomeq/INPUT_FORMAT.md), then use
+the [input schema](src/bin/roomeq/input_schema.json) and
+[output schema](src/bin/roomeq/output_schema.json) as the complete contracts.
 
 ---
 

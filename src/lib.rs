@@ -66,6 +66,9 @@ pub mod workflow;
 /// Mapping
 pub mod x2peq;
 
+#[cfg(test)]
+mod property_tests;
+
 /// Artifact storage abstraction for reports, exports, and sidecars.
 pub mod artifact_store;
 pub use artifact_store::{ArtifactStore, FsArtifactStore, MemoryArtifactStore};

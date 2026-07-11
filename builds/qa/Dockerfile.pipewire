@@ -1,0 +1,12 @@
+ARG BASE_IMAGE=math-audio-base-linux-arm64:latest
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# PipeWire runs only inside this isolated test container. Rust and the project
+# build dependencies come from the existing AutoEQ Linux test base image.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        pipewire \
+        pipewire-bin \
+        && rm -rf /var/lib/apt/lists/*

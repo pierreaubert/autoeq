@@ -347,6 +347,32 @@ pub struct SupportingSourceReport {
     pub advisories: Vec<String>,
 }
 
+/// Final outcome of an optional RoomEQ processing stage.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StageStatus {
+    /// The stage applied a material change.
+    Applied,
+    /// The stage was not applicable or no material change was needed.
+    Skipped,
+    /// The stage ran with reduced capabilities.
+    Degraded,
+    /// Invalid data or an internal error prevented the stage from running.
+    Failed,
+}
+
+/// Structured stage status and machine-readable advisories.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct StageOutcome {
+    /// Stable snake_case stage identifier.
+    pub stage: String,
+    /// Final stage status.
+    pub status: StageStatus,
+    /// Machine-readable reasons, warnings, or migration notices.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub advisories: Vec<String>,
+}
+
 /// Optimization metadata
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct OptimizationMetadata {
@@ -423,6 +449,9 @@ pub struct OptimizationMetadata {
     /// Supporting-source room-compensation reports, keyed by logical channel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supporting_source: Option<HashMap<String, SupportingSourceReport>>,
+    /// Structured outcomes for optional/degradable processing stages.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stage_outcomes: Vec<StageOutcome>,
 }
 
 #[cfg(test)]

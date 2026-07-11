@@ -77,8 +77,8 @@ pub(super) fn disable_option(config: &mut RoomConfig, option: &OptionOverride) {
         OptionOverride::ProductionMultiSubMultiSeat => {
             config.optimizer.multi_seat = None;
         }
-        OptionOverride::VoiceOfGod { .. } => {
-            config.optimizer.vog = None;
+        OptionOverride::InterChannelTimbreMatching { .. } => {
+            config.optimizer.inter_channel_timbre_matching = None;
         }
         OptionOverride::SpatialRobustness => {
             config.optimizer.multi_measurement = Some(MultiMeasurementConfig {
@@ -247,10 +247,10 @@ pub(super) fn all_test_cases() -> Vec<TestCase> {
             options: vec![OptionOverride::PhaseAlignment],
         },
         TestCase::OptionEffect {
-            name: "OE voice_of_god",
+            name: "OE inter_channel_timbre_matching",
             fem_subdir: "medium_surround_5_1",
             optim_subdir: "medium_surround_5_1",
-            options: vec![OptionOverride::VoiceOfGod {
+            options: vec![OptionOverride::InterChannelTimbreMatching {
                 reference_channel: "C".to_string(),
             }],
         },

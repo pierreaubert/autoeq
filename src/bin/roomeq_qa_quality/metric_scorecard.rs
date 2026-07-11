@@ -133,60 +133,101 @@ pub(super) fn compare_scorecards(
     ));
 
     // 3. EPA preference: must not crater
-    if let (Some(c_pref), Some(b_pref)) = (candidate.epa_preference, baseline.epa_preference) {
-        let epa_ok = b_pref <= 0.0 || c_pref >= b_pref * SCORECARD_EPA_PREF_MIN_RATIO;
-        checks.push((
+    match (candidate.epa_preference, baseline.epa_preference) {
+        (Some(c_pref), Some(b_pref)) => {
+            let epa_ok = b_pref <= 0.0 || c_pref >= b_pref * SCORECARD_EPA_PREF_MIN_RATIO;
+            checks.push((
+                "epa_preference",
+                epa_ok,
+                format!(
+                    "{:.2} vs baseline {:.2} (min {:.0}%)",
+                    c_pref,
+                    b_pref,
+                    SCORECARD_EPA_PREF_MIN_RATIO * 100.0
+                ),
+            ));
+        }
+        (None, Some(_)) => checks.push((
             "epa_preference",
-            epa_ok,
-            format!(
-                "{:.2} vs baseline {:.2} (min {:.0}%)",
-                c_pref,
-                b_pref,
-                SCORECARD_EPA_PREF_MIN_RATIO * 100.0
-            ),
-        ));
+            false,
+            "candidate omitted EPA preference metadata".to_string(),
+        )),
+        _ => {}
     }
 
     // 4. Sharpness: absolute bounds, but skip if baseline already violates
     //    (candidate matching or improving on a pre-existing violation is not a regression)
-    if let (Some(c_sharp), Some(b_sharp)) = (candidate.epa_sharpness, baseline.epa_sharpness) {
-        let in_range = (SCORECARD_SHARPNESS_MIN
-            ..=SCORECARD_SHARPNESS_MAX + SCORECARD_SHARPNESS_EPSILON)
-            .contains(&c_sharp);
-        let baseline_already_violated =
-            !(SCORECARD_SHARPNESS_MIN..=SCORECARD_SHARPNESS_MAX).contains(&b_sharp);
-        let no_worse = c_sharp <= b_sharp + 0.05; // small tolerance for optimizer noise
-        let sharp_ok = in_range || (baseline_already_violated && no_worse);
-        checks.push((
+    match (candidate.epa_sharpness, baseline.epa_sharpness) {
+        (Some(c_sharp), Some(b_sharp)) => {
+            let in_range = (SCORECARD_SHARPNESS_MIN
+                ..=SCORECARD_SHARPNESS_MAX + SCORECARD_SHARPNESS_EPSILON)
+                .contains(&c_sharp);
+            let baseline_already_violated =
+                !(SCORECARD_SHARPNESS_MIN..=SCORECARD_SHARPNESS_MAX).contains(&b_sharp);
+            let no_worse = c_sharp <= b_sharp + 0.05; // small tolerance for optimizer noise
+            let sharp_ok = in_range || (baseline_already_violated && no_worse);
+            checks.push((
+                "sharpness",
+                sharp_ok,
+                format!(
+                    "{:.2} acum (range {:.1}-{:.1}, epsilon {:.2})",
+                    c_sharp,
+                    SCORECARD_SHARPNESS_MIN,
+                    SCORECARD_SHARPNESS_MAX,
+                    SCORECARD_SHARPNESS_EPSILON
+                ),
+            ));
+        }
+        (Some(c_sharp), None) => checks.push((
             "sharpness",
-            sharp_ok,
+            (SCORECARD_SHARPNESS_MIN..=SCORECARD_SHARPNESS_MAX + SCORECARD_SHARPNESS_EPSILON)
+                .contains(&c_sharp),
             format!(
-                "{:.2} acum (range {:.1}-{:.1}, epsilon {:.2})",
-                c_sharp,
-                SCORECARD_SHARPNESS_MIN,
-                SCORECARD_SHARPNESS_MAX,
-                SCORECARD_SHARPNESS_EPSILON
+                "{c_sharp:.2} acum without baseline (range {:.1}-{:.1})",
+                SCORECARD_SHARPNESS_MIN, SCORECARD_SHARPNESS_MAX
             ),
-        ));
+        )),
+        (None, Some(_)) => checks.push((
+            "sharpness",
+            false,
+            "candidate omitted EPA sharpness metadata".to_string(),
+        )),
+        (None, None) => {}
     }
 
     // 5. Roughness: absolute ceiling plus relative regression tolerance.
     //    The EPA model itself penalizes roughness above ~0.5 asper; this gate
     //    catches large regressions (e.g., 50% worse than baseline) while still
     //    allowing +taps mutations that intentionally trade smoothness for FR fit.
-    if let (Some(c_rough), Some(b_rough)) = (candidate.epa_roughness, baseline.epa_roughness) {
-        let below_max = c_rough <= SCORECARD_ROUGHNESS_MAX;
-        let baseline_already_violated = b_rough > SCORECARD_ROUGHNESS_MAX;
-        let no_worse = c_rough <= b_rough * SCORECARD_ROUGHNESS_TOLERANCE;
-        let rough_ok = (baseline_already_violated || below_max) && no_worse;
-        checks.push((
+    match (candidate.epa_roughness, baseline.epa_roughness) {
+        (Some(c_rough), Some(b_rough)) => {
+            let below_max = c_rough <= SCORECARD_ROUGHNESS_MAX;
+            let baseline_already_violated = b_rough > SCORECARD_ROUGHNESS_MAX;
+            let no_worse = c_rough <= b_rough * SCORECARD_ROUGHNESS_TOLERANCE;
+            let rough_ok = (baseline_already_violated || below_max) && no_worse;
+            checks.push((
+                "roughness",
+                rough_ok,
+                format!(
+                    "{:.2} (max {:.1}, baseline {:.2}, tol {:.2}x)",
+                    c_rough, SCORECARD_ROUGHNESS_MAX, b_rough, SCORECARD_ROUGHNESS_TOLERANCE
+                ),
+            ));
+        }
+        (Some(c_rough), None) => checks.push((
             "roughness",
-            rough_ok,
+            c_rough <= SCORECARD_ROUGHNESS_MAX,
             format!(
-                "{:.2} (max {:.1}, baseline {:.2}, tol {:.2}x)",
-                c_rough, SCORECARD_ROUGHNESS_MAX, b_rough, SCORECARD_ROUGHNESS_TOLERANCE
+                "{c_rough:.2} without baseline (max {:.1})",
+                SCORECARD_ROUGHNESS_MAX
             ),
-        ));
+        )),
+        (None, Some(_)) => checks.push((
+            "roughness",
+            false,
+            "candidate omitted EPA roughness metadata".to_string(),
+        )),
+        (None, None) => {}
     }
 
     // 6. Group delay: relative tolerance with minimum floor.

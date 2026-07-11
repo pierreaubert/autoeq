@@ -341,4 +341,29 @@ mod tests {
         assert!(summed.phase.is_some());
         assert!((summed.phase.as_ref().unwrap()[0] - 45.0).abs() < 1e-6);
     }
+
+    #[test]
+    fn sum_array_response_exact_cancellation_has_finite_floor_and_phase() {
+        let curve_a = Curve {
+            freq: Array1::from(vec![100.0]),
+            spl: Array1::from(vec![0.0]),
+            phase: Some(Array1::from(vec![0.0])),
+            ..Default::default()
+        };
+        let curve_b = Curve {
+            freq: Array1::from(vec![100.0]),
+            spl: Array1::from(vec![0.0]),
+            phase: Some(Array1::from(vec![180.0])),
+            ..Default::default()
+        };
+
+        let summed = sum_array_response(&[
+            MeasurementSource::InMemory(curve_a),
+            MeasurementSource::InMemory(curve_b),
+        ])
+        .unwrap();
+
+        assert_eq!(summed.spl[0], -240.0);
+        assert!(summed.phase.as_ref().unwrap()[0].is_finite());
+    }
 }

@@ -93,12 +93,18 @@ impl MicPhaseCalibration {
                 self.coherence[n - 1],
             ));
         }
-        // Binary search for the bracket.
-        let idx = self
-            .freq
-            .as_slice()
-            .expect("contiguous")
-            .partition_point(|&f| f < freq_hz);
+        // Binary search for the bracket without requiring contiguous storage.
+        let mut lo = 0;
+        let mut hi = n;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            if self.freq[mid] < freq_hz {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        let idx = lo;
         let x0 = self.freq[idx - 1];
         let x1 = self.freq[idx];
         let dx = x1 - x0;
@@ -414,6 +420,30 @@ frequency_hz,mag_db,phase_deg,coherence
             (c - 0.75).abs() < 1e-9,
             "coherence @ 150 Hz should be 0.75, got {c}"
         );
+    }
+
+    #[test]
+    fn sample_at_interpolates_non_contiguous_calibration_arrays() {
+        let strided = |values: Vec<f64>| {
+            values
+                .into_iter()
+                .flat_map(|value| [value, -1.0])
+                .collect::<Array1<f64>>()
+                .slice_move(ndarray::s![..;2])
+        };
+        let cal = MicPhaseCalibration {
+            freq: strided(vec![100.0, 200.0]),
+            mag_db: strided(vec![0.0, 4.0]),
+            phase_deg: strided(vec![0.0, 20.0]),
+            coherence: strided(vec![1.0, 0.5]),
+        };
+        assert!(cal.freq.as_slice().is_none());
+
+        let (magnitude, phase, coherence) = cal.sample_at(150.0).unwrap();
+
+        assert!((magnitude - 2.0).abs() < 1e-9);
+        assert!((phase - 10.0).abs() < 1e-9);
+        assert!((coherence - 0.75).abs() < 1e-9);
     }
 
     #[test]

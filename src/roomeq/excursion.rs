@@ -67,10 +67,14 @@ pub fn detect_f3_with_reference_band(
         });
     }
 
-    let _smoothing = smoothing_octaves.unwrap_or(1.0 / 3.0);
+    let smoothing = smoothing_octaves.unwrap_or(1.0 / 3.0);
+    if !smoothing.is_finite() || smoothing <= 0.0 {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!("F3 smoothing width must be finite and positive, got {smoothing}"),
+        });
+    }
 
-    // Apply simple smoothing via moving average in log-frequency space
-    let smoothed = smooth_curve_simple(curve, 5);
+    let smoothed = smooth_curve_fractional_octave(curve, smoothing);
 
     // Find reference level in the configured band
     let mut ref_sum = 0.0;
@@ -113,9 +117,14 @@ pub fn detect_f3_with_reference_band(
                 let spl_high = smoothed.spl[i + 1];
 
                 // Linear interpolation in log-frequency space
-                let t = (target_level - spl_low) / (spl_high - spl_low);
-                let log_f = f_low.log10() + t * (f_high.log10() - f_low.log10());
-                f3_hz = 10.0_f64.powf(log_f);
+                let spl_delta = spl_high - spl_low;
+                if spl_delta.abs() <= f64::EPSILON {
+                    f3_hz = f_low;
+                } else {
+                    let t = ((target_level - spl_low) / spl_delta).clamp(0.0, 1.0);
+                    let log_f = f_low.log10() + t * (f_high.log10() - f_low.log10());
+                    f3_hz = 10.0_f64.powf(log_f);
+                }
             } else {
                 f3_hz = smoothed.freq[i];
             }
@@ -151,20 +160,28 @@ pub fn detect_f3_with_config(
     }
 }
 
-/// Simple smoothing via moving average
-fn smooth_curve_simple(curve: &Curve, window_size: usize) -> Curve {
-    let half_window = window_size / 2;
+/// Smooth in a constant-width fractional-octave window.
+fn smooth_curve_fractional_octave(curve: &Curve, smoothing_octaves: f64) -> Curve {
+    let half_band_ratio = 2.0_f64.powf(smoothing_octaves * 0.5);
     let mut smoothed_spl = Array1::zeros(curve.spl.len());
 
     for i in 0..curve.spl.len() {
-        let start = i.saturating_sub(half_window);
-        let end = (i + half_window + 1).min(curve.spl.len());
-
+        let center = curve.freq[i];
+        let lower = center / half_band_ratio;
+        let upper = center * half_band_ratio;
         let mut sum = 0.0;
-        for j in start..end {
-            sum += curve.spl[j];
+        let mut count = 0;
+        for j in 0..curve.spl.len() {
+            if curve.freq[j] >= lower && curve.freq[j] <= upper {
+                sum += curve.spl[j];
+                count += 1;
+            }
         }
-        smoothed_spl[i] = sum / (end - start) as f64;
+        smoothed_spl[i] = if count == 0 {
+            curve.spl[i]
+        } else {
+            sum / count as f64
+        };
     }
 
     Curve {
@@ -459,5 +476,33 @@ mod tests {
     fn test_linkwitz_riley_filters() {
         let filters = generate_highpass_filters(80.0, 4, &HighpassType::LinkwitzRiley, 48000.0);
         assert_eq!(filters.len(), 2, "LR4 should have 2 sections");
+    }
+
+    #[test]
+    fn audit_f3_detection_uses_requested_smoothing_width() {
+        let curve = create_test_curve_with_rolloff();
+        let narrow = detect_f3(&curve, Some(1.0 / 48.0)).expect("narrow smoothing");
+        let wide = detect_f3(&curve, Some(1.0)).expect("wide smoothing");
+
+        assert!(
+            (narrow.f3_hz - wide.f3_hz).abs() > 0.1,
+            "smoothing widths produced the same F3: {}",
+            narrow.f3_hz
+        );
+    }
+
+    #[test]
+    fn audit_f3_flat_interpolation_segment_stays_finite() {
+        let curve = Curve {
+            freq: Array1::from_vec(vec![20.0, 30.0, 40.0, 50.0, 100.0, 150.0, 200.0]),
+            spl: Array1::from_vec(vec![-10.0, -10.0, -10.0, -10.0, -10.0, 0.0, 0.0]),
+            phase: None,
+            ..Default::default()
+        };
+        let result =
+            detect_f3_with_reference_band(&curve, Some(0.01), 100.0, 200.0).expect("F3 detection");
+
+        assert!(result.f3_hz.is_finite(), "F3 must be finite");
+        assert!(result.f3_hz > 0.0);
     }
 }

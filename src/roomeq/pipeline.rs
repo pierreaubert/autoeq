@@ -67,8 +67,10 @@ pub enum PipelineStepId {
     TimeAlignment,
     /// Match broad spectral balance across channels.
     SpectralAlignment,
-    /// Apply Voice of God timbre matching.
-    VoiceOfGodAlignment,
+    /// Apply inter-channel timbre matching.
+    InterChannelTimbreMatching,
+    /// Align overhead channels to role-appropriate bed references.
+    HeightChannelAlignment,
     /// Optimize sub/main phase alignment.
     PhaseAlignment,
     /// Run group-delay optimization.
@@ -100,7 +102,8 @@ impl PipelineStepId {
         PipelineStepId::PhaseCorrection,
         PipelineStepId::TimeAlignment,
         PipelineStepId::SpectralAlignment,
-        PipelineStepId::VoiceOfGodAlignment,
+        PipelineStepId::InterChannelTimbreMatching,
+        PipelineStepId::HeightChannelAlignment,
         PipelineStepId::PhaseAlignment,
         PipelineStepId::GroupDelayOptimization,
         PipelineStepId::ImpulseResponseComputation,
@@ -124,7 +127,8 @@ impl PipelineStepId {
             PipelineStepId::PhaseCorrection => "Phase Corr.",
             PipelineStepId::TimeAlignment => "Time Align",
             PipelineStepId::SpectralAlignment => "Spectral Align",
-            PipelineStepId::VoiceOfGodAlignment => "VoG Align",
+            PipelineStepId::InterChannelTimbreMatching => "Timbre Match",
+            PipelineStepId::HeightChannelAlignment => "Height Align",
             PipelineStepId::PhaseAlignment => "Phase Align",
             PipelineStepId::GroupDelayOptimization => "GD-Opt",
             PipelineStepId::ImpulseResponseComputation => "IR",

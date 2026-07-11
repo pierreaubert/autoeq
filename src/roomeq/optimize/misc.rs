@@ -45,11 +45,31 @@ pub(in super::super) fn warn_if_optimizer_bounds_exceed_data(
     curve: &Curve,
     opt: &super::super::types::OptimizerConfig,
 ) {
-    if curve.freq.is_empty() {
+    let Some((below, above, data_min, data_max)) = optimizer_bounds_exceed_data(curve, opt) else {
         return;
+    };
+    if below {
+        warn!(
+            "Channel '{}': optimizer.min_freq={:.1} Hz is below measurement minimum {:.1} Hz. \
+             Filters in [{:.1} .. {:.1}] Hz will have no data to correct and will be ignored.",
+            channel_name, opt.min_freq, data_min, opt.min_freq, data_min,
+        );
     }
-    let data_min = curve.freq[0];
-    let data_max = curve.freq[curve.freq.len() - 1];
+    if above {
+        warn!(
+            "Channel '{}': optimizer.max_freq={:.1} Hz is above measurement maximum {:.1} Hz. \
+             Filters in [{:.1} .. {:.1}] Hz will have no data to correct and will be ignored.",
+            channel_name, opt.max_freq, data_max, data_max, opt.max_freq,
+        );
+    }
+}
+
+fn optimizer_bounds_exceed_data(
+    curve: &Curve,
+    opt: &super::super::types::OptimizerConfig,
+) -> Option<(bool, bool, f64, f64)> {
+    let data_min = curve.freq.first().copied()?;
+    let data_max = curve.freq.last().copied()?;
     // 10^0.05 ≈ 1.122 on the frequency axis — about 1/6 octave. Wide
     // enough to ignore floating-point mismatches at the edges (19.99 vs
     // 20 Hz) yet still flag genuinely out-of-range optimizer settings
@@ -57,20 +77,12 @@ pub(in super::super) fn warn_if_optimizer_bounds_exceed_data(
     let log_margin = 0.05;
     let min_tol = data_min * 10_f64.powf(-log_margin);
     let max_tol = data_max * 10_f64.powf(log_margin);
-    if opt.min_freq < min_tol {
-        warn!(
-            "Channel '{}': optimizer.min_freq={:.1} Hz is below measurement minimum {:.1} Hz. \
-             Filters in [{:.1} .. {:.1}] Hz will have no data to correct and will be ignored.",
-            channel_name, opt.min_freq, data_min, opt.min_freq, data_min,
-        );
-    }
-    if opt.max_freq > max_tol {
-        warn!(
-            "Channel '{}': optimizer.max_freq={:.1} Hz is above measurement maximum {:.1} Hz. \
-             Filters in [{:.1} .. {:.1}] Hz will have no data to correct and will be ignored.",
-            channel_name, opt.max_freq, data_max, data_max, opt.max_freq,
-        );
-    }
+    Some((
+        opt.min_freq < min_tol,
+        opt.max_freq > max_tol,
+        data_min,
+        data_max,
+    ))
 }
 
 /// Linear interpolation of the frequency at which a segment crosses the
@@ -969,7 +981,43 @@ mod tests {
             ..Default::default()
         };
         let opt = OptimizerConfig::default();
+        assert!(optimizer_bounds_exceed_data(&curve, &opt).is_none());
         warn_if_optimizer_bounds_exceed_data("left", &curve, &opt);
+    }
+
+    #[test]
+    fn optimizer_bounds_exceed_data_uses_log_frequency_tolerance() {
+        let curve = crate::Curve {
+            freq: Array1::from_vec(vec![100.0, 1_000.0, 10_000.0]),
+            spl: Array1::zeros(3),
+            phase: None,
+            ..Default::default()
+        };
+
+        let mut opt = OptimizerConfig {
+            min_freq: 50.0,
+            max_freq: 5_000.0,
+            ..Default::default()
+        };
+        let (below, above, data_min, data_max) =
+            optimizer_bounds_exceed_data(&curve, &opt).expect("non-empty curve");
+        assert!(below);
+        assert!(!above);
+        assert_eq!((data_min, data_max), (100.0, 10_000.0));
+
+        opt.min_freq = 200.0;
+        opt.max_freq = 20_000.0;
+        let (below, above, _, _) =
+            optimizer_bounds_exceed_data(&curve, &opt).expect("non-empty curve");
+        assert!(!below);
+        assert!(above);
+
+        opt.min_freq = 99.0;
+        opt.max_freq = 10_000.0;
+        let (below, above, _, _) =
+            optimizer_bounds_exceed_data(&curve, &opt).expect("non-empty curve");
+        assert!(!below, "99 Hz is within the 0.05-decade tolerance");
+        assert!(!above);
     }
 
     #[test]

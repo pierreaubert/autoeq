@@ -235,6 +235,11 @@ pub(super) fn speaker_measurement_count(speaker: &SpeakerConfig) -> Option<usize
             .iter()
             .filter_map(measurement_source_count)
             .max(),
+        SpeakerConfig::Topology(topology) => topology
+            .drivers
+            .iter()
+            .filter_map(|driver| measurement_source_count(&driver.measurement))
+            .max(),
         SpeakerConfig::MultiSub(group) => group
             .subwoofers
             .iter()

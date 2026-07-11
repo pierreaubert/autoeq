@@ -5,21 +5,121 @@
 - Added a distance- and directivity-weighted RIR prototype for RoomEQ
   multi-measurement workflows. Multiple microphone positions can now be
   collapsed into a single prototype curve before optimization, controlled by
-  the new `RirPrototypeConfig` block inside `optimizer.multi_measurement`.
-  Supported distance weights are `uniform`, `inverse_square`, and `gaussian`;
-  supported directivity models are `omnidirectional` and `spherical_head`.
-  The prototype averaging is performed in the magnitude (SPL) domain; phase
-  and other metadata are carried over from the first measurement. Using
-  `rir_prototype` together with the `SpatialRobustness` or `MinimaxUncertainty`
-  strategies logs a warning because the prototype collapses multiple
-  measurements into one curve before those strategies run.
+  `optimizer.multi_measurement.rir_prototype`.
+
+## Breaking changes
+
+- Retired the one-schema-cycle Voice-of-God compatibility surface. Configs must
+  use `optimizer.inter_channel_timbre_matching`; the `optimizer.vog` JSON key
+  is now rejected. Rust callers must use `InterChannelTimbreMatchingConfig`,
+  `TimbreMatchingChannelStatus`, `InterChannelTimbreMatchingResult`,
+  `compute_inter_channel_timbre_matching`, and `create_timbre_matching_plugins`.
+  The deprecated VoG type/function aliases and pipeline step ID were removed.
+
+# 0.4.47
+
+## Audit follow-up: numeric robustness and test quality
+
+- Added explicit multi-driver speaker topology with stable driver IDs, declared
+  roles and linearization bands, and parallel acoustic groups. Legacy
+  `SpeakerGroup.measurements` JSON remains accepted through an ordered adapter
+  with a deprecation advisory. Separately measured parallel drivers receive
+  relative gain, delay, and polarity alignment when phase is trustworthy;
+  missing phase keeps temporal controls at identity.
+- Split multi-sub combined responses into a magnitude-only spatial aggregate
+  for global EQ/reporting and a phase-bearing primary-seat response for
+  downstream alignment. The historical single-curve API remains available as
+  a compatibility adapter.
+- Added a reusable `roomeq::acoustic_qa` oracle library with analytic complex
+  ground truth for delay, polarity, all-pass/excess phase, Linkwitz-Riley
+  crossover summation, room modes, parallel woofers, comb nulls, and known
+  RT60/Schroeder transitions. The accompanying scorecard evaluates magnitude,
+  group delay, correction energy, headroom, latency, pre-ringing, null safety,
+  export equivalence, held-out distributions, and normalized timbre spread.
+- Added deterministic PR and ignored nightly acoustic scenario matrices across
+  single/multi-way speakers, parallel woofers, multi-sub/multi-seat systems,
+  height layouts, grid density/mismatch, phase/coherence availability, noise,
+  seeds, optimizer budgets, room dimensions, RT60, crossover regions, and
+  explicit training/held-out seat positions. Every scenario carries identity,
+  analytic-correction, current-main, and candidate comparison baselines.
+- Fixed the group-delay weighted-median fallback so unusable weights cannot
+  reintroduce NaN/infinite targets or select the wrong finite median.
+- Fixed bass-management differential evolution so non-finite objective values
+  are treated as invalid minimization candidates instead of becoming an
+  incumbent that blocks every finite trial.
+- Fixed Equalizer APO export so integer-Hz center frequencies are rounded
+  instead of being biased downward by floating-point truncation.
+- Removed contiguous-memory assumptions from minimum-phase reconstruction,
+  mixed-phase FIR generation, and microphone calibration interpolation so
+  valid strided `Array1` inputs no longer panic.
+- Added finite-positive sample-rate validation at the public RoomEQ, driver,
+  and multisub optimization boundaries so zero, negative, NaN, and infinite
+  rates fail descriptively.
+- Added a shared measurement-curve contract plus checked response and PEQ
+  entry points so empty/single-bin curves, non-finite data, unsorted grids,
+  mismatched arrays, and invalid sample rates fail before DSP evaluation.
+- Added do-no-harm acceptance gates to public driver and multisub optimization
+  so non-finite or worsening candidates restore the initial alignment.
+- Added strict DBA exact-cancellation coverage requiring the documented
+  -240 dB magnitude floor and a finite phase result.
+- Strengthened system-routing integration tests to require the exact logical
+  channel set and isolated them from unrelated filter optimization, reducing
+  the focused suite from roughly 153 seconds in the audit to 0.02 seconds.
+- Split oversized RoomEQ optimization, configuration, and export test modules
+  into focused include files without changing their assertions or scope.
+- Strengthened integration tests to parse exported filters, assert score
+  improvement and filter bounds, compare seeded DE behavior, and verify exact
+  broadband shelf behavior instead of relying on file or substring smoke tests.
+- Made external PCM/export validator contracts optional when their environment
+  variables are unset, keeping minimal-checkout test runs self-contained.
+- Kept the smallest FEM convergence scenario in the default suite and made the
+  remaining strict 2,000-iteration convergence/multimode matrix explicit
+  long-running tests with a documented `--ignored` command.
+- Added property-based regression coverage across every PEQ model for parameter
+  layout and biquad round-trips, finite checked responses, and generated
+  optimizer-bound/initial-candidate invariants.
+- Added standards-anchored psychoacoustic checks for the 1-sone and 1-acum
+  references, phon-to-loudness scaling, and critical-band roughness; calibrated
+  the 24-band loudness model to its defining 1 kHz reference. RoomEQ QA now
+  rejects candidates that omit EPA metrics, and special-filter optimizer bounds
+  remain inside the measurement frequency and configured Q ranges. The
+  perceptual QA recipe now runs the current EPA and multiseat guardrail tests
+  through nextest and fails when a stale filter selects no tests.
 
 ## Fixes
 
+- Preserved the complex summed phase of phase-complete multi-sub results so
+  downstream sub/main phase and group-delay alignment can run. Multi-sub
+  inputs with any missing phase now use an explicit gain-only fallback with
+  zero delay, polarity, and all-pass controls; all-pass gain bounds also honor
+  asymmetric `min_db`/`max_db` settings.
+- Rejected Schroeder two-band optimization with fewer than two filters instead
+  of underflowing or silently allocating an empty band, and accepted identical
+  positive adaptive-GD bootstrap improvements as significant evidence.
+- Renamed Voice-of-God broadband matching to
+  `optimizer.inter_channel_timbre_matching`, added a normalized timbre-spread
+  acceptance gate, with `optimizer.vog`/`VoiceOfGodConfig` retained for one
+  schema cycle as compatibility aliases with migration advisories. Mismatched
+  grids are evaluated only over measured overlap, and invalid references or
+  rejected corrections are exposed through structured stage outcomes.
+- Added separate role-aware `optimizer.height_channel_alignment` for overhead
+  channels, with top-front/middle/rear bed-channel references, timbre and level
+  objectives, bounded positive arrival delay, an optional coherent-phase safety
+  gate, reference overrides, and structured applied/skipped/degraded/failed
+  metadata.
 - Hardened external DSP exports so routed home-cinema bass-management graphs
-  fail with an actionable error instead of being flattened into an incorrect
-  configuration; users are directed to SotF JSON or Apply as Graph when route
-  and global-plugin semantics must be preserved.
+  are never flattened into an incorrect configuration. Equalizer APO now
+  renders the representable static `Channel`/`Copy` subset, including LR24/LR48
+  branches, route gain, polarity, delay, and destination processing; fan-out,
+  hidden-bus, or arbitrary-global-plugin graphs fail with guidance to use
+  CamillaDSP or Apply as Graph.
+- Fixed PipeWire filter-chain export to configure delay nodes in seconds and
+  emit valid graph input/output port references, then added an isolated Docker
+  QA recipe that boots real PipeWire and rejects generated configurations the
+  daemon cannot load.
+- Added fail-on-empty external-export QA selectors, expanded the CamillaDSP
+  recipe to its complete nextest contract suite, and added an opt-in Windows
+  Equalizer APO validator command contract.
 - Packaged convolution WAV sidecars only for formats that retain file paths
   (CamillaDSP, Equalizer APO, and Roon), while preserving the selected sample
   rate in the generated export.
@@ -37,6 +137,25 @@
   avoiding symmetric post-windowing.
 - Handled DC explicitly during log-frequency interpolation and replaced the
   per-target linear bracket scan with binary search.
+- Restored the CLI `min_db` contract as a positive minimum active-filter gain:
+  defaults and presets now use 0.5 dB, while negative CLI values remain
+  rejected. Corrected EPA optimization to reconstruct measured SPL as
+  `target - deviation`, and made metaheuristic backends honor the configured
+  random seed and return errors for parameter/bounds dimension mismatches.
+- Made free PEQ models decode and optimize every encodable biquad type,
+  including Orfanidis shelves and matched peaks. Notch and other zero-magnitude
+  responses are limited to -40 dB throughout optimization, response
+  application, and plotting instead of producing `-inf`; mismatched complex
+  responses preserve unmatched curve bins rather than panicking.
+- Made filter plots respect each `PeqModel` parameter layout and filter type,
+  and fixed the secondary combined-response color. F3 detection now uses the
+  requested fractional-octave smoothing width and safely handles flat
+  interpolation segments.
+- Hardened RoomEQ configuration validation by rejecting non-finite optimizer
+  bounds, invalid or unsorted gain envelopes, missing system speaker
+  references, and unsupported crossover types. Home-cinema role inference no
+  longer classifies incidental substrings such as `subtle` or `shelfed` as
+  subwoofer/LFE channels.
 
 # 0.4.46
 

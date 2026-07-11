@@ -36,15 +36,13 @@ mod tests {
             ..Default::default()
         };
 
-        let result =
+        let metrics =
             compute_pre_optimization_metrics(&args, &objective_data, false, &deviation, &None)
-                .await;
-
-        assert!(result.is_ok());
-        let metrics = result.unwrap();
+                .await
+                .expect("headphone pre-optimization metrics should compute");
 
         // Headphone loss should be computed
-        assert!(metrics.headphone_loss.is_some());
+        assert!(metrics.headphone_loss.unwrap().is_finite());
         // CEA metrics should be None
         assert!(metrics.cea2034_metrics.is_none());
     }
@@ -61,17 +59,15 @@ mod tests {
             ..Default::default()
         };
 
-        let result = compute_pre_optimization_metrics(
+        let metrics = compute_pre_optimization_metrics(
             &args,
             &objective_data,
             false, // no CEA data
             &deviation,
             &None,
         )
-        .await;
-
-        assert!(result.is_ok());
-        let metrics = result.unwrap();
+        .await
+        .expect("speaker-flat pre-optimization metrics should compute");
 
         // Both should be None without CEA data
         assert!(metrics.headphone_loss.is_none());

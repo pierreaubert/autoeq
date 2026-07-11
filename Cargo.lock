@@ -218,6 +218,7 @@ dependencies = [
  "oxiblas-ndarray",
  "plotly",
  "plotly_static",
+ "proptest",
  "rand 0.9.4",
  "rand_chacha 0.9.0",
  "rayon",
@@ -2030,8 +2031,8 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "math-dsp"
-version = "0.5.21"
-source = "git+https://github.com/pierreaubert/math-audio#a845b92c11e0c458944c45303653475ea05f1cba"
+version = "0.5.22"
+source = "git+https://github.com/pierreaubert/math-audio#6cbb2fc619af0d2277c5bb1a98be3e474839eaed"
 dependencies = [
  "clap",
  "hound",
@@ -2050,8 +2051,8 @@ dependencies = [
 
 [[package]]
 name = "math-iir-fir"
-version = "0.5.15"
-source = "git+https://github.com/pierreaubert/math-audio#a845b92c11e0c458944c45303653475ea05f1cba"
+version = "0.5.16"
+source = "git+https://github.com/pierreaubert/math-audio#6cbb2fc619af0d2277c5bb1a98be3e474839eaed"
 dependencies = [
  "base64 0.22.1",
  "byteorder",
@@ -2067,7 +2068,7 @@ dependencies = [
 [[package]]
 name = "math-optimisation"
 version = "0.5.10"
-source = "git+https://github.com/pierreaubert/math-audio#a845b92c11e0c458944c45303653475ea05f1cba"
+source = "git+https://github.com/pierreaubert/math-audio#6cbb2fc619af0d2277c5bb1a98be3e474839eaed"
 dependencies = [
  "clap",
  "directories",
@@ -2083,7 +2084,7 @@ dependencies = [
 [[package]]
 name = "math-rir"
 version = "0.5.6"
-source = "git+https://github.com/pierreaubert/math-audio#a845b92c11e0c458944c45303653475ea05f1cba"
+source = "git+https://github.com/pierreaubert/math-audio#6cbb2fc619af0d2277c5bb1a98be3e474839eaed"
 dependencies = [
  "math-iir-fir",
  "rayon",
@@ -2092,7 +2093,7 @@ dependencies = [
 [[package]]
 name = "math-test-functions"
 version = "0.5.2"
-source = "git+https://github.com/pierreaubert/math-audio#a845b92c11e0c458944c45303653475ea05f1cba"
+source = "git+https://github.com/pierreaubert/math-audio#6cbb2fc619af0d2277c5bb1a98be3e474839eaed"
 dependencies = [
  "clap",
  "directories",
@@ -2635,6 +2636,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "proptest"
+version = "1.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b45fcc2344c680f5025fe57779faef368840d0bd1f42f216291f0dc4ace4744"
+dependencies = [
+ "bitflags 2.13.0",
+ "num-traits",
+ "rand 0.9.4",
+ "rand_chacha 0.9.0",
+ "rand_xorshift",
+ "regex-syntax",
+ "unarray",
+]
+
+[[package]]
 name = "quinn"
 version = "0.11.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2805,6 +2821,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caa0f4137e1c0a72f4c651489402276c8e8e1cf081f3b0ba156d2cbeef09e86a"
 dependencies = [
  "rand_core 0.10.1",
+]
+
+[[package]]
+name = "rand_xorshift"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
+dependencies = [
+ "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -3999,6 +4024,12 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+
+[[package]]
+name = "unarray"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
 
 [[package]]
 name = "unicode-ident"

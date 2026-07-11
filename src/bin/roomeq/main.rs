@@ -359,6 +359,13 @@ fn collect_measurement_paths(
             }
             paths
         }
+        SpeakerConfig::Topology(topology) => {
+            let mut paths = Vec::new();
+            for driver in &topology.drivers {
+                paths.extend(extract_paths_from_source(&driver.measurement));
+            }
+            paths
+        }
         SpeakerConfig::MultiSub(ms) => {
             let mut paths = Vec::new();
             for source in &ms.subwoofers {

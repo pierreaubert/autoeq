@@ -271,6 +271,9 @@ pub fn decode_filter_type(type_value: f64) -> BiquadFilterType {
     // Map [6, 7) -> Bandpass
     // Map [7, 8) -> Notch
     // Map [8, 9) -> AllPass
+    // Map [9, 10) -> Orfanidis low shelf
+    // Map [10, 11) -> Orfanidis high shelf
+    // Map [11, 12) -> matched peak
 
     let idx = type_value.floor() as i32;
     match idx {
@@ -283,6 +286,9 @@ pub fn decode_filter_type(type_value: f64) -> BiquadFilterType {
         6 => BiquadFilterType::Bandpass,
         7 => BiquadFilterType::Notch,
         8 => BiquadFilterType::AllPass,
+        9 => BiquadFilterType::LowshelfOrf,
+        10 => BiquadFilterType::HighshelfOrf,
+        11 => BiquadFilterType::PeakMatched,
         _ => BiquadFilterType::Peak, // Default
     }
 }
@@ -307,7 +313,7 @@ pub fn encode_filter_type(filter_type: BiquadFilterType) -> f64 {
 
 /// Get bounds for filter type parameter
 pub fn filter_type_bounds() -> (f64, f64) {
-    (0.0, 8.999) // Almost 9, but not quite to avoid edge cases
+    (0.0, 11.999)
 }
 
 /// Convert log10 frequency parameter to Hz
@@ -407,7 +413,32 @@ mod tests {
     fn filter_type_bounds_range() {
         let (min, max) = filter_type_bounds();
         assert_eq!(min, 0.0);
-        assert_eq!(max, 8.999);
+        assert_eq!(max, 11.999);
+    }
+
+    #[test]
+    fn audit_every_encoded_filter_type_is_decodable_and_in_bounds() {
+        let filter_types = [
+            BiquadFilterType::Peak,
+            BiquadFilterType::Lowpass,
+            BiquadFilterType::Highpass,
+            BiquadFilterType::Lowshelf,
+            BiquadFilterType::Highshelf,
+            BiquadFilterType::HighpassVariableQ,
+            BiquadFilterType::Bandpass,
+            BiquadFilterType::Notch,
+            BiquadFilterType::AllPass,
+            BiquadFilterType::LowshelfOrf,
+            BiquadFilterType::HighshelfOrf,
+            BiquadFilterType::PeakMatched,
+        ];
+        let (lower, upper) = filter_type_bounds();
+
+        for filter_type in filter_types {
+            let encoded = encode_filter_type(filter_type);
+            assert!(encoded >= lower && encoded <= upper);
+            assert_eq!(decode_filter_type(encoded), filter_type);
+        }
     }
 
     #[test]

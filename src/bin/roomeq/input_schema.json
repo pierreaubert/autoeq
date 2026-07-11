@@ -1494,6 +1494,24 @@
         }
       ]
     },
+    "DriverCrossoverBand": {
+      "description": "Frequency region in which per-driver linearization is allowed.",
+      "type": "object",
+      "properties": {
+        "max_hz": {
+          "type": "number",
+          "format": "double"
+        },
+        "min_hz": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "min_hz",
+        "max_hz"
+      ]
+    },
     "EarlyLateCorrectionConfig": {
       "description": "Direct/early/late impulse-response reporting windows for FIR and\nmixed-phase modes.",
       "type": "object",
@@ -1848,6 +1866,50 @@
         }
       }
     },
+    "HeightChannelAlignmentConfig": {
+      "description": "Role-aware alignment policy for overhead/height channels.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "match_arrival_time": {
+          "type": "boolean",
+          "default": true
+        },
+        "match_level": {
+          "type": "boolean",
+          "default": true
+        },
+        "match_phase": {
+          "description": "Require candidate DSP not to worsen phase consistency when trustworthy\nphase and coherence are available. This is an optional safety gate, not\na standalone correction objective.",
+          "type": "boolean",
+          "default": false
+        },
+        "match_timbre": {
+          "type": "boolean",
+          "default": true
+        },
+        "max_delay_ms": {
+          "type": "number",
+          "format": "double",
+          "default": 20.0
+        },
+        "min_timbre_improvement_db": {
+          "type": "number",
+          "format": "double",
+          "default": 0.05
+        },
+        "reference_channels": {
+          "description": "Optional reference overrides keyed by height channel name or role group\n(`top_front`, `top_middle`, or `top_rear`).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "HighFreqFilterConfig": {
       "description": "High frequency filter configuration for Schroeder split",
       "type": "object",
@@ -1970,6 +2032,30 @@
         }
       },
       "additionalProperties": false
+    },
+    "InterChannelTimbreMatchingConfig": {
+      "description": "Broadband timbre matching between corrected channels.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable inter-channel timbre matching.",
+          "type": "boolean",
+          "default": false
+        },
+        "min_improvement_db": {
+          "description": "Minimum reduction in normalized timbre spread required before applying DSP.",
+          "type": "number",
+          "format": "double",
+          "default": 0.05
+        },
+        "reference_channel": {
+          "description": "Reference channel name (e.g. \"Center\" or \"Left\").",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reference_channel"
+      ]
     },
     "LowFreqFilterConfig": {
       "description": "Low frequency filter configuration for Schroeder split",
@@ -2582,11 +2668,33 @@
             }
           ]
         },
+        "height_channel_alignment": {
+          "description": "Role-aware overhead/height-channel alignment.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HeightChannelAlignmentConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "high_frequency_correction": {
           "description": "Safeguards for high-frequency correction above the conservative range.",
           "anyOf": [
             {
               "$ref": "#/$defs/HighFrequencyCorrectionConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inter_channel_timbre_matching": {
+          "description": "Inter-channel timbre matching configuration.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterChannelTimbreMatchingConfig"
             },
             {
               "type": "null"
@@ -2899,19 +3007,28 @@
               "type": "null"
             }
           ]
-        },
-        "vog": {
-          "description": "Voice of God optimization configuration (v2)",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/VoiceOfGodConfig"
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
-      }
+      },
+      "additionalProperties": false
+    },
+    "ParallelDriverGroup": {
+      "description": "Drivers that radiate in parallel within one acoustic crossover band.",
+      "type": "object",
+      "properties": {
+        "driver_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "driver_ids"
+      ]
     },
     "PerceptualPolicyConfig": {
       "description": "Perceptual policy selector layered above the detailed optimizer settings.",
@@ -3830,7 +3947,7 @@
       }
     },
     "SpeakerConfig": {
-      "description": "Speaker configuration (can be single measurement or group)\n\nVariant order matters for serde untagged deserialization: serde tries each variant\nin order. `SupportingSource` is first because it requires the unique `primary` and\n`support` fields. Group/MultiSub/Dba all require a `name` field that `MeasurementSource`\ndoesn't have, so they are tried before `Single`. `Single` is last as a catch-all.",
+      "description": "Speaker configuration (can be single measurement or group)\n\nVariant order matters for serde untagged deserialization: serde tries each variant\nin order. `SupportingSource` is first because it requires the unique `primary` and\n`support` fields. Topology is before legacy Group because its unique `drivers`\nfield selects the explicit representation. Named group variants are tried before\n`Single`, which remains the catch-all.",
       "anyOf": [
         {
           "description": "Supporting-source room compensation (primary + delayed support loudspeaker).",
@@ -3838,6 +3955,10 @@
         },
         {
           "description": "Group of measurements (multi-driver case)",
+          "$ref": "#/$defs/SpeakerTopology"
+        },
+        {
+          "description": "Legacy group of measurements (multi-driver case)",
           "$ref": "#/$defs/SpeakerGroup"
         },
         {
@@ -3856,6 +3977,50 @@
           "description": "Single channel (simple case)",
           "$ref": "#/$defs/MeasurementSource"
         }
+      ]
+    },
+    "SpeakerDriver": {
+      "description": "One separately measured driver in an explicit speaker topology.",
+      "type": "object",
+      "properties": {
+        "crossover_band": {
+          "description": "Optional explicit linearization band. Crossover-derived defaults are used when absent.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DriverCrossoverBand"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "description": "Stable identifier used by output DSP chains and parallel-group membership.",
+          "type": "string"
+        },
+        "measurement": {
+          "$ref": "#/$defs/MeasurementSource"
+        },
+        "role": {
+          "$ref": "#/$defs/SpeakerDriverRole"
+        }
+      },
+      "required": [
+        "id",
+        "role",
+        "measurement"
+      ]
+    },
+    "SpeakerDriverRole": {
+      "description": "Declared acoustic role of a measured driver.",
+      "type": "string",
+      "enum": [
+        "subwoofer",
+        "woofer",
+        "midrange",
+        "tweeter",
+        "full_range",
+        "other"
       ]
     },
     "SpeakerGroup": {
@@ -3891,6 +4056,44 @@
       "required": [
         "name",
         "measurements"
+      ]
+    },
+    "SpeakerTopology": {
+      "description": "Explicit multi-driver speaker topology.",
+      "type": "object",
+      "properties": {
+        "crossover": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "drivers": {
+          "description": "Drivers in low-to-high acoustic-band order. Members of a parallel group\nmay appear next to each other in any order within their shared band.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SpeakerDriver"
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "parallel_groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ParallelDriverGroup"
+          }
+        },
+        "speaker_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "drivers"
       ]
     },
     "SplCalibration": {
@@ -4468,24 +4671,6 @@
           "default": -23.0
         }
       }
-    },
-    "VoiceOfGodConfig": {
-      "description": "Configuration for Voice of God (Timbre Matching)",
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "description": "Enable Voice of God optimization",
-          "type": "boolean",
-          "default": false
-        },
-        "reference_channel": {
-          "description": "Reference channel name (e.g. \"Center\" or \"Left\")",
-          "type": "string"
-        }
-      },
-      "required": [
-        "reference_channel"
-      ]
     }
   }
 }

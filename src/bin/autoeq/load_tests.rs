@@ -23,10 +23,9 @@ mod tests {
             "5",
         ]);
 
-        let result = load_and_prepare(&args).await;
-
-        assert!(result.is_ok());
-        let (freq, input, target, deviation, spin) = result.unwrap();
+        let (freq, input, target, deviation, spin) = load_and_prepare(&args)
+            .await
+            .expect("CSV measurement should load and prepare");
 
         // Verify frequency grid
         assert!(freq.len() >= 100);
@@ -37,6 +36,19 @@ mod tests {
         assert_eq!(input.freq.len(), freq.len());
         assert_eq!(target.freq.len(), freq.len());
         assert_eq!(deviation.freq.len(), freq.len());
+        assert_eq!(input.freq, freq);
+        assert_eq!(target.freq, freq);
+        assert_eq!(deviation.freq, freq);
+        assert!(freq.iter().all(|value| value.is_finite()));
+        assert!(freq.windows(2).into_iter().all(|pair| pair[0] < pair[1]));
+        for ((input_spl, target_spl), deviation_spl) in input
+            .spl
+            .iter()
+            .zip(target.spl.iter())
+            .zip(deviation.spl.iter())
+        {
+            assert!((deviation_spl - (target_spl - input_spl)).abs() < 1e-9);
+        }
 
         // Verify spin data is None for simple CSV
         assert!(spin.is_none());
@@ -61,12 +73,18 @@ mod tests {
             "8",
         ]);
 
-        let result = load_and_prepare(&args).await;
-
-        assert!(result.is_ok());
-        let (_, input, _, _, _) = result.unwrap();
+        let (freq, input, target, deviation, spin) = load_and_prepare(&args)
+            .await
+            .expect("headphone measurement should load and prepare");
 
         // Headphone mode should use 120 points
         assert_eq!(input.freq.len(), 120);
+        assert_eq!(input.freq, freq);
+        assert_eq!(target.freq, freq);
+        assert_eq!(deviation.freq, freq);
+        assert!(input.spl.iter().all(|value| value.is_finite()));
+        assert!(target.spl.iter().all(|value| value.is_finite()));
+        assert!(deviation.spl.iter().all(|value| value.is_finite()));
+        assert!(spin.is_none());
     }
 }

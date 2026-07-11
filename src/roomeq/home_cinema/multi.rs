@@ -199,8 +199,22 @@ pub fn multi_seat_correction_report(
                     status = "seat_count_mismatch".to_string();
                 }
                 Err(err) => {
-                    status = "measurement_load_failed".to_string();
-                    channel_advisories.push(err.to_string());
+                    if let crate::roomeq::types::MeasurementSource::InMemoryMultiple(curves) =
+                        source.unwrap()
+                    {
+                        if !curves_share_frequency_grid(curves) {
+                            status = "frequency_grid_mismatch_skipped".to_string();
+                            channel_advisories
+                                .push("frequency_grid_mismatch_all_channel_skipped".to_string());
+                        } else {
+                            status = "spatial_robustness_invalid_skipped".to_string();
+                            channel_advisories
+                                .push(format!("spatial_robustness_invalid_skipped: {err}"));
+                        }
+                    } else {
+                        status = "measurement_load_failed".to_string();
+                        channel_advisories.push(err.to_string());
+                    }
                 }
             }
         } else {

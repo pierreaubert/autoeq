@@ -12,7 +12,8 @@ use super::pipeline::{
 };
 use super::types::{
     ChannelDspChain, MeasurementSource, OptimizationMetadata, OptimizerConfig, PerceptualMetrics,
-    ProcessingMode, RoomConfig, SpeakerConfig, SystemConfig, SystemModel, TargetCurveConfig,
+    ProcessingMode, RoomConfig, SpeakerConfig, StageOutcome, StageStatus, SystemConfig,
+    SystemModel, TargetCurveConfig,
 };
 use crate::Curve;
 use crate::error::{AutoeqError, Result};
@@ -92,6 +93,11 @@ pub fn optimize_room(
     callback: Option<RoomOptimizationCallback>,
     output_dir: Option<&Path>,
 ) -> Result<RoomOptimizationResult> {
+    if !sample_rate.is_finite() || sample_rate <= 0.0 {
+        return Err(crate::AutoeqError::InvalidConfiguration {
+            message: format!("sample rate must be finite and positive, got {sample_rate}"),
+        });
+    }
     RoomPipeline::new(RoomPipelineRequest {
         config,
         sample_rate,
@@ -197,12 +203,13 @@ fn select_topology_route(
         return Ok(TopologyRoute::Generic);
     };
 
-    // If any channel uses SpeakerConfig::Group, fall through to the generic path
-    // which handles Groups via process_speaker_group.
-    let has_group = sys
-        .speakers
-        .values()
-        .any(|key| matches!(config.speakers.get(key), Some(SpeakerConfig::Group(_))));
+    // Multi-driver groups use the generic topology-aware path.
+    let has_group = sys.speakers.values().any(|key| {
+        matches!(
+            config.speakers.get(key),
+            Some(SpeakerConfig::Group(_) | SpeakerConfig::Topology(_))
+        )
+    });
 
     if has_group {
         return Ok(TopologyRoute::Generic);
@@ -1001,6 +1008,7 @@ fn assemble_generic_result(
         channel_means,
         mut channel_arrivals,
     } = generic;
+    let mut stage_outcomes = Vec::new();
 
     // Auto IR sync: if no WAV-based arrivals were collected, estimate from phase data.
     // Runs unconditionally (does not require allow_delay = true).
@@ -1295,17 +1303,18 @@ fn assemble_generic_result(
     }
 
     // ========================================================================
-    // Voice of God (VoG) — Timbre-match satellites to a reference channel
+    // Inter-channel timbre matching
     // ========================================================================
-    if let Some(vog_config) = &config.optimizer.vog
-        && vog_config.enabled
+    let timbre_config = config.optimizer.inter_channel_timbre_matching.as_ref();
+    if let Some(timbre_config) = timbre_config
+        && timbre_config.enabled
     {
         send_progress(
             observer_shared,
-            PipelineStepId::VoiceOfGodAlignment,
+            PipelineStepId::InterChannelTimbreMatching,
             PipelineStepStatus::Started,
             &RoomOptimizationProgress {
-                current_speaker: "Voice of God".to_string(),
+                current_speaker: "Inter-channel timbre matching".to_string(),
                 speaker_index: 0,
                 total_speakers,
                 iteration: 0,
@@ -1313,8 +1322,8 @@ fn assemble_generic_result(
                 loss: 0.0,
                 overall_progress: 0.93,
                 message: Some(format!(
-                    "Voice of God alignment (ref: '{}')...",
-                    vog_config.reference_channel
+                    "Inter-channel timbre matching (ref: '{}')...",
+                    timbre_config.reference_channel
                 )),
                 epa_preference: None,
                 step_id: None,
@@ -1322,8 +1331,8 @@ fn assemble_generic_result(
             },
         )?;
         info!(
-            "Running Voice of God alignment (reference: '{}')...",
-            vog_config.reference_channel
+            "Running inter-channel timbre matching (reference: '{}')...",
+            timbre_config.reference_channel
         );
 
         // Build corrected curves from the current channel results
@@ -1332,16 +1341,27 @@ fn assemble_generic_result(
             .map(|(name, result)| (name.clone(), result.final_curve.clone()))
             .collect();
 
-        match super::voice_of_god::compute_voice_of_god(
+        let stage_outcome = match super::inter_channel_timbre_matching::compute_inter_channel_timbre_matching_with_threshold(
             &corrected_curves,
-            &vog_config.reference_channel,
+            &timbre_config.reference_channel,
             sample_rate,
             config.optimizer.min_freq,
             config.optimizer.max_freq,
+            timbre_config.min_improvement_db,
         ) {
-            Ok(vog_results) => {
-                for (channel_name, vog_result) in &vog_results {
-                    let plugins = super::voice_of_god::create_vog_plugins(vog_result, sample_rate);
+            Ok(timbre_results) => {
+                let applied_count = timbre_results
+                    .values()
+                    .filter(|result| {
+                        result.status == super::inter_channel_timbre_matching::TimbreMatchingChannelStatus::Applied
+                    })
+                    .count();
+                let failed_count = timbre_results
+                    .values()
+                    .filter(|result| result.status == super::inter_channel_timbre_matching::TimbreMatchingChannelStatus::Failed)
+                    .count();
+                for (channel_name, timbre_result) in &timbre_results {
+                    let plugins = super::inter_channel_timbre_matching::create_timbre_matching_plugins(timbre_result, sample_rate);
                     if !plugins.is_empty()
                         && let Some(chain) = channel_chains.get_mut(channel_name)
                     {
@@ -1349,7 +1369,7 @@ fn assemble_generic_result(
                             chain.plugins.push(plugin);
                         }
                     }
-                    if let Some(alignment) = &vog_result.alignment {
+                    if let Some(alignment) = &timbre_result.alignment {
                         let shelf_filters =
                             super::spectral_align::create_alignment_filters(alignment, sample_rate);
                         sync_reported_biquad_adjustment(
@@ -1372,26 +1392,235 @@ fn assemble_generic_result(
                     }
                 }
                 curves = collect_current_final_curves(&channel_results);
+                let status = if failed_count > 0 && applied_count > 0 {
+                    StageStatus::Degraded
+                } else if failed_count > 0 {
+                    StageStatus::Failed
+                } else if applied_count > 0 {
+                    StageStatus::Applied
+                } else {
+                    StageStatus::Skipped
+                };
+                let mut advisories = timbre_results
+                    .values()
+                    .flat_map(|result| result.advisories.iter().cloned())
+                    .filter(|advisory| advisory != "reference_channel")
+                    .collect::<Vec<_>>();
+                advisories.sort();
+                advisories.dedup();
+                StageOutcome {
+                    stage: "inter_channel_timbre_matching".to_string(),
+                    status,
+                    advisories,
+                }
             }
             Err(e) => {
-                warn!("Voice of God optimization failed: {}", e);
+                warn!("Inter-channel timbre matching failed: {}", e);
+                StageOutcome {
+                    stage: "inter_channel_timbre_matching".to_string(),
+                    status: StageStatus::Failed,
+                    advisories: vec![format!("invalid_reference: {e}")],
+                }
             }
-        }
+        };
+        let event = match stage_outcome.status {
+            StageStatus::Applied | StageStatus::Degraded => PipelineEvent::completed(
+                PipelineStepId::InterChannelTimbreMatching,
+                format!("Inter-channel timbre matching: {:?}", stage_outcome.status),
+            ),
+            StageStatus::Skipped | StageStatus::Failed => PipelineEvent::skipped(
+                PipelineStepId::InterChannelTimbreMatching,
+                format!(
+                    "Inter-channel timbre matching: {:?} ({})",
+                    stage_outcome.status,
+                    stage_outcome.advisories.join(", ")
+                ),
+            ),
+        };
+        emit_pipeline_event(observer_shared, event)?;
+        stage_outcomes.push(stage_outcome);
     }
-    if config.optimizer.vog.as_ref().is_some_and(|v| v.enabled) {
+    if !timbre_config.is_some_and(|config| config.enabled) {
         emit_pipeline_event(
             observer_shared,
-            PipelineEvent::completed(
-                PipelineStepId::VoiceOfGodAlignment,
-                "Voice of God alignment complete",
+            PipelineEvent::skipped(
+                PipelineStepId::InterChannelTimbreMatching,
+                "Inter-channel timbre matching not enabled",
             ),
         )?;
+    }
+
+    // ========================================================================
+    // Role-aware height-channel alignment
+    // ========================================================================
+    if let Some(height_config) = config
+        .optimizer
+        .height_channel_alignment
+        .as_ref()
+        .filter(|config| config.enabled)
+    {
+        send_progress(
+            observer_shared,
+            PipelineStepId::HeightChannelAlignment,
+            PipelineStepStatus::Started,
+            &RoomOptimizationProgress {
+                current_speaker: "Height-channel alignment".to_string(),
+                speaker_index: 0,
+                total_speakers,
+                iteration: 0,
+                max_iterations: 0,
+                loss: 0.0,
+                overall_progress: 0.935,
+                message: Some("Aligning overhead channels to role-aware references...".to_string()),
+                epa_preference: None,
+                step_id: None,
+                step_status: None,
+            },
+        )?;
+        let corrected_curves = collect_current_final_curves(&channel_results);
+        let stage_outcome = match super::height_channel_alignment::compute_height_channel_alignment(
+            &corrected_curves,
+            &channel_arrivals,
+            height_config,
+            sample_rate,
+            config.optimizer.min_freq,
+            config.optimizer.max_freq,
+        ) {
+            Ok(mut height_results) => {
+                let mut applied_count = 0;
+                let failed_count = height_results
+                    .values()
+                    .filter(|result| {
+                        result.status
+                            == super::height_channel_alignment::HeightAlignmentStatus::Failed
+                    })
+                    .count();
+                for (channel_name, height_result) in &mut height_results {
+                    let mut applied = false;
+                    if let Some(alignment) = &height_result.alignment {
+                        let (eq_plugin, gain_plugin) =
+                            super::spectral_align::create_alignment_plugins(alignment, sample_rate);
+                        if let Some(chain) = channel_chains.get_mut(channel_name) {
+                            if let Some(eq) = eq_plugin {
+                                chain.plugins.push(eq);
+                            }
+                            if let Some(gain) = gain_plugin {
+                                chain.plugins.push(gain);
+                            }
+                        }
+                        let shelf_filters =
+                            super::spectral_align::create_alignment_filters(alignment, sample_rate);
+                        sync_reported_biquad_adjustment(
+                            channel_name,
+                            &mut channel_results,
+                            &mut channel_chains,
+                            &shelf_filters,
+                            sample_rate,
+                        );
+                        if alignment.flat_gain_db.abs() >= super::spectral_align::MIN_CORRECTION_DB
+                        {
+                            sync_reported_gain_adjustment(
+                                channel_name,
+                                &mut channel_results,
+                                &mut channel_chains,
+                                alignment.flat_gain_db,
+                                false,
+                            );
+                        }
+                        applied = true;
+                    }
+                    let delay_applied = height_result.delay_ms > 0.01
+                        && channel_chains.get_mut(channel_name).is_some_and(|chain| {
+                            if chain
+                                .plugins
+                                .iter()
+                                .any(|plugin| plugin.plugin_type == "delay")
+                            {
+                                height_result
+                                    .advisories
+                                    .push("height_arrival_already_aligned".to_string());
+                                false
+                            } else {
+                                chain
+                                    .plugins
+                                    .insert(0, output::create_delay_plugin(height_result.delay_ms));
+                                true
+                            }
+                        });
+                    if delay_applied {
+                        sync_reported_phase_adjustment(
+                            channel_name,
+                            &mut channel_results,
+                            &mut channel_chains,
+                            height_result.delay_ms,
+                            false,
+                        );
+                        applied = true;
+                    }
+                    if applied {
+                        applied_count += 1;
+                    }
+                }
+                curves = collect_current_final_curves(&channel_results);
+                let mut advisories = height_results
+                    .values()
+                    .flat_map(|result| result.advisories.iter().cloned())
+                    .collect::<Vec<_>>();
+                if height_results.is_empty() {
+                    advisories.push("no_height_channels".to_string());
+                }
+                advisories.sort();
+                advisories.dedup();
+                let degraded = advisories.iter().any(|advisory| {
+                    advisory.ends_with("_missing")
+                        || advisory.ends_with("_untrustworthy")
+                        || advisory == "height_objective_acceptance_failed"
+                        || advisory == "height_arrives_after_reference"
+                        || advisory == "height_delay_limit_exceeded"
+                });
+                let status = if applied_count > 0 && (failed_count > 0 || degraded) {
+                    StageStatus::Degraded
+                } else if failed_count > 0 {
+                    StageStatus::Failed
+                } else if applied_count > 0 {
+                    StageStatus::Applied
+                } else {
+                    StageStatus::Skipped
+                };
+                StageOutcome {
+                    stage: "height_channel_alignment".to_string(),
+                    status,
+                    advisories,
+                }
+            }
+            Err(error) => StageOutcome {
+                stage: "height_channel_alignment".to_string(),
+                status: StageStatus::Failed,
+                advisories: vec![format!("height_alignment_failed: {error}")],
+            },
+        };
+        let event = match stage_outcome.status {
+            StageStatus::Applied | StageStatus::Degraded => PipelineEvent::completed(
+                PipelineStepId::HeightChannelAlignment,
+                format!("Height-channel alignment: {:?}", stage_outcome.status),
+            ),
+            StageStatus::Skipped | StageStatus::Failed => PipelineEvent::skipped(
+                PipelineStepId::HeightChannelAlignment,
+                format!(
+                    "Height-channel alignment: {:?} ({})",
+                    stage_outcome.status,
+                    stage_outcome.advisories.join(", ")
+                ),
+            ),
+        };
+        emit_pipeline_event(observer_shared, event)?;
+        stage_outcomes.push(stage_outcome);
     } else {
         emit_pipeline_event(
             observer_shared,
             PipelineEvent::skipped(
-                PipelineStepId::VoiceOfGodAlignment,
-                "Voice of God alignment not enabled",
+                PipelineStepId::HeightChannelAlignment,
+                "Height-channel alignment not enabled",
             ),
         )?;
     }
@@ -1750,6 +1979,7 @@ fn assemble_generic_result(
         bootstrap_uncertainty: None,
         validation_bundle: None,
         supporting_source: None,
+        stage_outcomes,
     };
 
     let mut result = RoomOptimizationResult {

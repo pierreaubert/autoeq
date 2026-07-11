@@ -266,8 +266,8 @@ mod tests {
     fn run_post_eq_without_callback_runs() {
         let opt = tiny_optimizer();
         let curve = flat_curve();
-        let (filters, _) = run_post_eq(&curve, &opt, None, 48_000.0, None).unwrap();
-        assert!(filters.is_empty() || !filters.is_empty());
+        let (filters, loss) = run_post_eq(&curve, &opt, None, 48_000.0, None).unwrap();
+        assert_valid_post_eq_result(&filters, loss);
     }
 
     #[test]
@@ -279,9 +279,9 @@ mod tests {
             callback: Box::new(|_, _, _| crate::de::CallbackAction::Continue),
             stopped: Arc::clone(&stopped),
         };
-        let (filters, _) = run_post_eq(&curve, &opt, None, 48_000.0, Some(progress)).unwrap();
+        let (filters, loss) = run_post_eq(&curve, &opt, None, 48_000.0, Some(progress)).unwrap();
         assert!(!stopped.load(std::sync::atomic::Ordering::SeqCst));
-        assert!(filters.is_empty() || !filters.is_empty());
+        assert_valid_post_eq_result(&filters, loss);
     }
 
     #[test]
@@ -289,8 +289,17 @@ mod tests {
         let opt = tiny_optimizer();
         let curve = flat_curve();
         let target = TargetCurveConfig::Predefined("flat".to_string());
-        let (filters, _) = run_post_eq(&curve, &opt, Some(&target), 48_000.0, None).unwrap();
-        assert!(filters.is_empty() || !filters.is_empty());
+        let (filters, loss) = run_post_eq(&curve, &opt, Some(&target), 48_000.0, None).unwrap();
+        assert_valid_post_eq_result(&filters, loss);
+    }
+
+    fn assert_valid_post_eq_result(filters: &[Biquad], loss: f64) {
+        assert!(loss.is_finite(), "post-EQ loss must be finite");
+        for filter in filters {
+            assert!(filter.freq.is_finite() && filter.freq > 0.0);
+            assert!(filter.q.is_finite() && filter.q > 0.0);
+            assert!(filter.db_gain.is_finite());
+        }
     }
 
     #[test]
@@ -311,8 +320,17 @@ mod tests {
             config.optimizer.max_iter,
         );
         assert!(result.is_ok(), "generic path failed: {:?}", result.err());
-        let (chain, _, _, _, _, _) = result.unwrap();
+        let (chain, channel_result, pre_score, post_score, _, _) = result.unwrap();
         assert_eq!(chain.channel, "Left");
+        assert!(pre_score.is_finite() && post_score.is_finite());
+        assert_eq!(channel_result.name, "Left");
+        assert_eq!(
+            channel_result.initial_curve.freq.len(),
+            channel_result.final_curve.freq.len()
+        );
+        assert!(channel_result.biquads.iter().all(|filter| {
+            filter.freq.is_finite() && filter.q.is_finite() && filter.db_gain.is_finite()
+        }));
     }
 
     #[test]

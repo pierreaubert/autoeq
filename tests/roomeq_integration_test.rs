@@ -81,6 +81,27 @@ fn test_roomeq_stereo_config() {
             .unwrap_or(false)
     });
     assert!(has_eq, "Missing EQ plugin in DSP chain");
+
+    let metadata = json["metadata"].as_object().expect("metadata object");
+    let pre = metadata["pre_score"].as_f64().expect("finite pre_score");
+    let post = metadata["post_score"].as_f64().expect("finite post_score");
+    assert!(pre.is_finite() && post.is_finite());
+    assert!(post <= pre, "stereo RoomEQ score worsened: {pre} -> {post}");
+
+    let initial = left_channel["initial_curve"]["spl"]
+        .as_array()
+        .expect("initial SPL array");
+    let final_curve = left_channel["final_curve"]["spl"]
+        .as_array()
+        .expect("final SPL array");
+    assert_eq!(initial.len(), final_curve.len());
+    assert!(!initial.is_empty());
+    assert!(
+        initial
+            .iter()
+            .chain(final_curve)
+            .all(|value| { value.as_f64().is_some_and(f64::is_finite) })
+    );
 }
 
 #[test]
@@ -196,6 +217,12 @@ fn test_roomeq_invalid_config() {
         !output.status.success(),
         "roomeq should fail with invalid config"
     );
+    assert!(!output_path.exists());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .to_ascii_lowercase()
+            .contains("speakers")
+    );
 }
 
 #[test]
@@ -238,6 +265,12 @@ fn test_roomeq_missing_measurement() {
     assert!(
         !output.status.success(),
         "roomeq should fail with missing measurement file"
+    );
+    assert!(!output_path.exists());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("nonexistent_file.csv"),
+        "missing path should be reported: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 

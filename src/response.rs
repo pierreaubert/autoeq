@@ -1,10 +1,35 @@
 //! Frequency response calculation for filters
 
 use crate::Curve;
+use crate::error::{AutoeqError, Result};
 use crate::iir::Biquad;
 use ndarray::Array1;
 use num_complex::Complex64;
 use std::f64::consts::PI;
+
+/// Lowest response magnitude exposed to optimization and reporting.
+pub const MIN_FILTER_RESPONSE_DB: f64 = -40.0;
+
+fn validate_response_grid(freqs: &Array1<f64>, sample_rate: f64, context: &str) -> Result<()> {
+    if !sample_rate.is_finite() || sample_rate <= 0.0 {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "{context} sample rate must be finite and positive, got {sample_rate}"
+            ),
+        });
+    }
+    Curve::validate_frequency_grid(freqs, context)
+}
+
+/// Checked PEQ response entry point for untrusted public inputs.
+pub fn try_compute_peq_complex_response(
+    filters: &[Biquad],
+    freqs: &Array1<f64>,
+    sample_rate: f64,
+) -> Result<Vec<Complex64>> {
+    validate_response_grid(freqs, sample_rate, "PEQ response")?;
+    Ok(compute_peq_complex_response(filters, freqs, sample_rate))
+}
 
 /// Compute complex frequency response of a list of Biquad filters
 pub fn compute_peq_complex_response(
@@ -62,15 +87,39 @@ pub fn compute_fir_complex_response(
         .collect()
 }
 
+/// Checked FIR response entry point for untrusted public inputs.
+pub fn try_compute_fir_complex_response(
+    coeffs: &[f64],
+    freqs: &Array1<f64>,
+    sample_rate: f64,
+) -> Result<Vec<Complex64>> {
+    validate_response_grid(freqs, sample_rate, "FIR response")?;
+    if coeffs.is_empty() || coeffs.iter().any(|value| !value.is_finite()) {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: "FIR response coefficients must be non-empty and finite".to_string(),
+        });
+    }
+    Ok(compute_fir_complex_response(coeffs, freqs, sample_rate))
+}
+
 /// Apply complex filter response (magnitude and phase) to a curve
 pub fn apply_complex_response(curve: &Curve, response: &[Complex64]) -> Curve {
-    let mut new_spl = Array1::zeros(curve.freq.len());
-    let mut new_phase = Array1::zeros(curve.freq.len());
-    let old_phase = curve.phase.as_ref();
+    if response.len() != curve.freq.len() {
+        log::warn!(
+            "Complex response length {} does not match curve length {}; unmatched bins are preserved",
+            response.len(),
+            curve.freq.len()
+        );
+    }
 
-    for i in 0..curve.freq.len() {
-        let h = response[i];
-        let h_mag_db = 20.0 * h.norm().log10();
+    let mut new_spl = curve.spl.clone();
+    let old_phase = curve.phase.as_ref();
+    let mut new_phase = old_phase
+        .cloned()
+        .unwrap_or_else(|| Array1::zeros(curve.freq.len()));
+
+    for (i, &h) in response.iter().take(curve.freq.len()).enumerate() {
+        let h_mag_db = (20.0 * h.norm().log10()).max(MIN_FILTER_RESPONSE_DB);
         let h_phase_deg = h.arg().to_degrees();
 
         new_spl[i] = curve.spl[i] + h_mag_db;
@@ -84,6 +133,29 @@ pub fn apply_complex_response(curve: &Curve, response: &[Complex64]) -> Curve {
         phase: Some(new_phase),
         ..Default::default()
     }
+}
+
+/// Checked complex-response application for public or deserialized data.
+pub fn try_apply_complex_response(curve: &Curve, response: &[Complex64]) -> Result<Curve> {
+    curve.validate("complex-response curve")?;
+    if response.len() != curve.freq.len() {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: format!(
+                "complex response length {} does not match curve length {}",
+                response.len(),
+                curve.freq.len()
+            ),
+        });
+    }
+    if response
+        .iter()
+        .any(|value| !value.re.is_finite() || !value.im.is_finite())
+    {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: "complex response must contain only finite values".to_string(),
+        });
+    }
+    Ok(apply_complex_response(curve, response))
 }
 
 #[cfg(test)]
@@ -224,5 +296,104 @@ mod tests {
             "got {}",
             out.spl[0]
         );
+    }
+
+    #[test]
+    fn audit_zero_complex_response_is_limited_to_minus_40_db() {
+        let curve = Curve {
+            freq: Array1::from(vec![1000.0]),
+            spl: Array1::from(vec![0.0]),
+            phase: None,
+            ..Default::default()
+        };
+        let out = apply_complex_response(&curve, &[Complex64::new(0.0, 0.0)]);
+
+        assert!(out.spl[0].is_finite());
+        assert_eq!(out.spl[0], -40.0);
+    }
+
+    #[test]
+    fn audit_mismatched_complex_response_preserves_unmatched_bins() {
+        let curve = Curve {
+            freq: Array1::from(vec![100.0, 1000.0]),
+            spl: Array1::from(vec![1.0, 2.0]),
+            phase: None,
+            ..Default::default()
+        };
+        let outcome = std::panic::catch_unwind(|| {
+            apply_complex_response(&curve, &[Complex64::new(1.0, 0.0)])
+        });
+
+        assert!(outcome.is_ok(), "mismatched response must not panic");
+        let out = outcome.unwrap();
+        assert_eq!(out.spl.to_vec(), vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn checked_response_apis_reject_invalid_grids_and_sample_rates() {
+        let valid = Array1::from_vec(vec![100.0, 1_000.0]);
+        for sample_rate in [0.0, -48_000.0, f64::NAN, f64::INFINITY] {
+            assert!(matches!(
+                try_compute_peq_complex_response(&[], &valid, sample_rate),
+                Err(AutoeqError::InvalidConfiguration { .. })
+            ));
+            assert!(matches!(
+                try_compute_fir_complex_response(&[1.0], &valid, sample_rate),
+                Err(AutoeqError::InvalidConfiguration { .. })
+            ));
+        }
+
+        for invalid in [
+            Array1::from_vec(vec![]),
+            Array1::from_vec(vec![100.0]),
+            Array1::from_vec(vec![100.0, f64::NAN]),
+            Array1::from_vec(vec![100.0, f64::INFINITY]),
+        ] {
+            assert!(matches!(
+                try_compute_peq_complex_response(&[], &invalid, 48_000.0),
+                Err(AutoeqError::InvalidMeasurement { .. })
+            ));
+            assert!(matches!(
+                try_compute_fir_complex_response(&[1.0], &invalid, 48_000.0),
+                Err(AutoeqError::InvalidMeasurement { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn checked_fir_response_rejects_empty_or_non_finite_coefficients() {
+        let frequencies = Array1::from_vec(vec![100.0, 1_000.0]);
+        for coefficients in [vec![], vec![1.0, f64::NAN], vec![f64::INFINITY]] {
+            assert!(matches!(
+                try_compute_fir_complex_response(&coefficients, &frequencies, 48_000.0),
+                Err(AutoeqError::InvalidConfiguration { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn checked_complex_response_rejects_invalid_curve_or_length() {
+        let valid = Curve {
+            freq: Array1::from_vec(vec![100.0, 1_000.0]),
+            spl: Array1::from_vec(vec![80.0, 81.0]),
+            ..Default::default()
+        };
+        let identity = [Complex64::new(1.0, 0.0), Complex64::new(1.0, 0.0)];
+        assert!(try_apply_complex_response(&valid, &identity).is_ok());
+        assert!(matches!(
+            try_apply_complex_response(&valid, &identity[..1]),
+            Err(AutoeqError::InvalidMeasurement { .. })
+        ));
+
+        let mut invalid_spl = valid.clone();
+        invalid_spl.spl[0] = f64::NAN;
+        assert!(matches!(
+            try_apply_complex_response(&invalid_spl, &identity),
+            Err(AutoeqError::InvalidMeasurement { .. })
+        ));
+        assert!(matches!(
+            try_apply_complex_response(&valid, &[Complex64::new(f64::INFINITY, 0.0), identity[1]],),
+            Err(AutoeqError::InvalidMeasurement { .. })
+        ));
     }
 }

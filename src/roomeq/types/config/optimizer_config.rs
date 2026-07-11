@@ -52,12 +52,21 @@ use super::types::MixedPhaseSerdeConfig;
 use super::types::PerceptualPolicyPreset;
 use super::types::ProcessingMode;
 use super::types::SmoothnessPenaltyConfigSerde;
-use super::types::VoiceOfGodConfig;
+use super::types::{HeightChannelAlignmentConfig, InterChannelTimbreMatchingConfig};
 use super::validation_bundle_config::ValidationBundleConfig;
 use crate::loss::AsymmetricLossConfig;
 use crate::read::PsychoacousticSmoothingConfig;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
+
+fn reject_removed_vog_alias<'de, D>(_: D) -> Result<Option<()>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Err(de::Error::custom(
+        "optimizer.vog was removed; use optimizer.inter_channel_timbre_matching",
+    ))
+}
 
 /// Optimizer configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -224,9 +233,22 @@ pub struct OptimizerConfig {
     /// Multi-seat optimization configuration
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multi_seat: Option<MultiSeatConfig>,
-    /// Voice of God optimization configuration (v2)
+    /// Inter-channel timbre matching configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vog: Option<VoiceOfGodConfig>,
+    pub inter_channel_timbre_matching: Option<InterChannelTimbreMatchingConfig>,
+    /// Role-aware overhead/height-channel alignment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height_channel_alignment: Option<HeightChannelAlignmentConfig>,
+    /// Deserialization tombstone for the removed `optimizer.vog` alias.
+    #[doc(hidden)]
+    #[serde(
+        default,
+        rename = "vog",
+        skip_serializing,
+        deserialize_with = "reject_removed_vog_alias"
+    )]
+    #[schemars(skip)]
+    pub removed_vog_alias: Option<()>,
     /// Multi-measurement optimization configuration
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multi_measurement: Option<MultiMeasurementConfig>,
@@ -321,7 +343,9 @@ impl Default for OptimizerConfig {
             phase_alignment: None,
             group_delay: None,
             multi_seat: None,
-            vog: None,
+            inter_channel_timbre_matching: None,
+            height_channel_alignment: None,
+            removed_vog_alias: None,
             multi_measurement: None,
             decomposed_correction: Some(DecomposedCorrectionSerdeConfig {
                 enabled: true,
@@ -521,5 +545,37 @@ impl OptimizerConfig {
         }
 
         self.max_db
+    }
+}
+
+#[cfg(test)]
+mod legacy_alias_tests {
+    use super::OptimizerConfig;
+
+    #[test]
+    fn removed_vog_alias_is_rejected() {
+        let error = serde_json::from_value::<OptimizerConfig>(serde_json::json!({
+            "vog": {
+                "enabled": true,
+                "reference_channel": "left",
+                "min_improvement_db": 0.05
+            }
+        }))
+        .unwrap_err();
+
+        assert!(error.to_string().contains("optimizer.vog was removed"));
+    }
+
+    #[test]
+    fn unrelated_legacy_fields_remain_tolerated() {
+        let config = serde_json::from_value::<OptimizerConfig>(serde_json::json!({
+            "mode": "iir"
+        }))
+        .unwrap();
+
+        assert_eq!(
+            config.processing_mode,
+            OptimizerConfig::default().processing_mode
+        );
     }
 }

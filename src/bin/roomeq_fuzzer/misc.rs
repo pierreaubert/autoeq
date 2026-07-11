@@ -2,7 +2,7 @@ use autoeq::roomeq::{
     FirConfig, MixedModeConfig, MixedPhaseSerdeConfig, MultiMeasurementConfig,
     MultiMeasurementStrategy, OptimizerConfig, ProcessingMode, SpatialRobustnessSerdeConfig,
 };
-use rand::Rng;
+use rand::RngExt;
 use rand::prelude::IndexedRandom;
 use rand_chacha::ChaCha8Rng;
 use std::sync::atomic::AtomicUsize;

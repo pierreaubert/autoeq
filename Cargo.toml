@@ -36,16 +36,16 @@ env_logger = "0.11"
 log = "0.4.28"
 num_cpus = "1.17"
 num-complex = "0.4"
-nalgebra = { version = "0.33", default-features = false, features = ["std"] }
+nalgebra = { version = "0.35", default-features = false, features = ["std"] }
 metaheuristics-nature = "10.1"
 rustfft = "6.4"
 hound = "3.5"
 # `plotly` is gated behind the `plotly` feature (off by default). Library code
 # under `src/plot/` and the `roomeq-fuzzer` binary require it; the main
 # `autoeq` binary degrades gracefully and skips chart generation when off.
-plotly = { version = "0.13", optional = true }
-rand = "0.9.2"
-rand_chacha = "0.9"
+plotly = { version = "0.14.1", optional = true }
+rand = "0.10.2"
+rand_chacha = "0.10.0"
 reqwest = { version = "0.13", features = ["json"] }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"

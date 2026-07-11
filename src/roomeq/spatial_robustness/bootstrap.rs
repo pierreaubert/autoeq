@@ -6,7 +6,7 @@ use super::types::BootstrapBand;
 use crate::Curve;
 use crate::error::{AutoeqError, Result};
 use ndarray::Array1;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
 /// Generate B bootstrap-resampled RMS-averaged curves and return per-frequency

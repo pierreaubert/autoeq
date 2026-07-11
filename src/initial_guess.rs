@@ -5,7 +5,7 @@
 
 use ndarray::Array1;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 /// Smart initialization configuration
 #[derive(Debug, Clone)]
@@ -131,7 +131,7 @@ pub fn create_smart_initial_guesses(
     peq_model: crate::PeqModel,
 ) -> Vec<Vec<f64>> {
     // Create RNG based on config seed
-    let mut main_rng: Box<dyn rand::RngCore> = if let Some(seed) = config.seed {
+    let mut main_rng: Box<dyn rand::Rng> = if let Some(seed) = config.seed {
         Box::new(StdRng::seed_from_u64(seed))
     } else {
         Box::new(rand::rng())

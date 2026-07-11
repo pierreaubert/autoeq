@@ -14,7 +14,7 @@ use autoeq::roomeq::{
     SupportingSourceConfig, SupportingSourceDecorrelation, SupportingSourceGroup, SystemConfig,
     SystemModel, TargetCurveConfig,
 };
-use rand::Rng;
+use rand::RngExt;
 use rand::prelude::IndexedRandom;
 use rand_chacha::ChaCha8Rng;
 use std::collections::HashMap;

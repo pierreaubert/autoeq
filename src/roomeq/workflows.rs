@@ -11,7 +11,7 @@ use crate::error::{AutoeqError, Result};
 use crate::read::load_source;
 use log::info;
 use math_audio_dsp::analysis::compute_average_response;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use std::collections::{BTreeMap, HashMap};
 

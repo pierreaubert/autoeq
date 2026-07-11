@@ -1,5 +1,5 @@
 use autoeq::roomeq::{MultiMeasurementStrategy, ProcessingMode};
-use rand::Rng;
+use rand::RngExt;
 use rand::prelude::IndexedRandom;
 use rand_chacha::ChaCha8Rng;
 

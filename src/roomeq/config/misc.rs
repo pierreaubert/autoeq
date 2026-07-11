@@ -13,6 +13,7 @@ pub(super) fn collect_sources(speaker: &SpeakerConfig) -> Vec<&MeasurementSource
         SpeakerConfig::SupportingSource(s) => vec![&s.primary, &s.support],
         SpeakerConfig::Single(s) => vec![s],
         SpeakerConfig::Group(g) => g.measurements.iter().collect(),
+        SpeakerConfig::Topology(t) => t.drivers.iter().map(|driver| &driver.measurement).collect(),
         SpeakerConfig::MultiSub(m) => m.subwoofers.iter().collect(),
         SpeakerConfig::Cardioid(c) => vec![&c.front, &c.rear],
         SpeakerConfig::Dba(d) => d.front.iter().chain(d.rear.iter()).collect(),

@@ -22,6 +22,9 @@ use super::policy::{
 use super::room_config::RoomConfig;
 use super::speaker_config::SpeakerConfig;
 use super::speaker_group::SpeakerGroup;
+use super::speaker_topology::{
+    DriverCrossoverBand, ParallelDriverGroup, SpeakerDriver, SpeakerDriverRole, SpeakerTopology,
+};
 use super::spl_calibration::SplCalibration;
 use super::types::{
     CrossoverConfig, CtcHeadPositionConfig, CtcHrtfSpeakerConfig, CtcMeasurementFileConfig,

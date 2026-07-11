@@ -2,6 +2,16 @@
 
 ## Audit follow-up: numeric robustness and test quality
 
+- Added explicit multi-driver speaker topology with stable driver IDs, declared
+  roles and linearization bands, and parallel acoustic groups. Legacy
+  `SpeakerGroup.measurements` JSON remains accepted through an ordered adapter
+  with a deprecation advisory. Separately measured parallel drivers receive
+  relative gain, delay, and polarity alignment when phase is trustworthy;
+  missing phase keeps temporal controls at identity.
+- Split multi-sub combined responses into a magnitude-only spatial aggregate
+  for global EQ/reporting and a phase-bearing primary-seat response for
+  downstream alignment. The historical single-curve API remains available as
+  a compatibility adapter.
 - Added a reusable `roomeq::acoustic_qa` oracle library with analytic complex
   ground truth for delay, polarity, all-pass/excess phase, Linkwitz-Riley
   crossover summation, room modes, parallel woofers, comb nulls, and known

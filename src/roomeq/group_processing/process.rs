@@ -9,7 +9,8 @@ use super::super::optimize::detect_passband_and_mean;
 use super::super::output;
 use super::super::speaker_eq::determine_optimization_bands;
 use super::super::types::{
-    MixedModeConfig, MultiSeatConfig, MultiSubGroup, OptimizerConfig, RoomConfig, SpeakerGroup,
+    LEGACY_SPEAKER_GROUP_ADVISORY, MixedModeConfig, MultiSeatConfig, MultiSubGroup,
+    OptimizerConfig, RoomConfig, SpeakerGroup, SpeakerTopology,
 };
 use super::misc::apply_per_sub_filters;
 use super::misc::average_power_curve;
@@ -29,6 +30,108 @@ use log::{debug, info, warn};
 use math_audio_dsp::analysis::compute_average_response;
 use std::path::Path;
 
+struct AggregatedTopologyBands {
+    curves: Vec<Curve>,
+    driver_band_indices: Vec<usize>,
+    relative_gains: Vec<f64>,
+    relative_delays: Vec<f64>,
+    relative_inversions: Vec<bool>,
+}
+
+fn aggregate_topology_bands(
+    topology: &SpeakerTopology,
+    drivers: &[Curve],
+    phase_trustworthy: &[bool],
+    sample_rate: f64,
+    optimizer: &OptimizerConfig,
+) -> Result<AggregatedTopologyBands> {
+    let bands = topology
+        .acoustic_bands()
+        .map_err(|message| AutoeqError::InvalidConfiguration { message })?;
+    let mut driver_band_indices = vec![0; drivers.len()];
+    let mut acoustic_drivers = Vec::with_capacity(bands.len());
+    let mut relative_gains = vec![0.0; drivers.len()];
+    let mut relative_delays = vec![0.0; drivers.len()];
+    let mut relative_inversions = vec![false; drivers.len()];
+
+    for (band_index, members) in bands.iter().enumerate() {
+        for &driver_index in members {
+            driver_band_indices[driver_index] = band_index;
+        }
+        if members.len() == 1 {
+            acoustic_drivers.push(drivers[members[0]].clone());
+            continue;
+        }
+
+        let preserve_phase = members
+            .iter()
+            .all(|&driver_index| phase_trustworthy[driver_index]);
+        if preserve_phase {
+            let member_curves = members
+                .iter()
+                .map(|&driver_index| drivers[driver_index].clone())
+                .collect::<Vec<_>>();
+            let (gains, delays, _, combined, inversions) = crossover::optimize_crossover_ordered(
+                member_curves,
+                crate::loss::CrossoverType::None,
+                sample_rate,
+                optimizer,
+                Some(vec![0.0; members.len() - 1]),
+                None,
+            )
+            .map_err(|error| AutoeqError::OptimizationFailed {
+                message: format!("parallel-driver alignment failed: {error}"),
+            })?;
+            for (member_index, &driver_index) in members.iter().enumerate() {
+                relative_gains[driver_index] = gains[member_index];
+                relative_delays[driver_index] = delays[member_index];
+                relative_inversions[driver_index] = inversions[member_index];
+            }
+            acoustic_drivers.push(combined);
+            continue;
+        }
+
+        warn!(
+            "  Parallel driver band contains missing phase; relative delay and polarity controls are disabled"
+        );
+        let measurements = members
+            .iter()
+            .map(|&driver_index| {
+                let curve = &drivers[driver_index];
+                crate::loss::DriverMeasurement {
+                    freq: curve.freq.clone(),
+                    spl: curve.spl.clone(),
+                    phase: curve.phase.clone(),
+                }
+            })
+            .collect::<Vec<_>>();
+        let data = crate::loss::DriversLossData::new_ordered(
+            measurements,
+            crate::loss::CrossoverType::None,
+        );
+        let response = crate::loss::compute_drivers_combined_response_complex(
+            &data,
+            &vec![0.0; members.len()],
+            &[],
+            Some(&vec![0.0; members.len()]),
+            sample_rate,
+        );
+        acoustic_drivers.push(Curve {
+            freq: data.freq_grid,
+            spl: response.mapv(|value| 20.0 * value.norm().max(1e-12).log10()),
+            phase: preserve_phase.then(|| response.mapv(|value| value.arg().to_degrees())),
+            ..Default::default()
+        });
+    }
+    Ok(AggregatedTopologyBands {
+        curves: acoustic_drivers,
+        driver_band_indices,
+        relative_gains,
+        relative_delays,
+        relative_inversions,
+    })
+}
+
 pub(in super::super) fn process_speaker_group(
     channel_name: &str,
     group: &SpeakerGroup,
@@ -36,55 +139,154 @@ pub(in super::super) fn process_speaker_group(
     sample_rate: f64,
     _output_dir: &Path,
 ) -> Result<MixedModeResult> {
+    warn!("  {LEGACY_SPEAKER_GROUP_ADVISORY}");
+    process_speaker_topology_impl(
+        channel_name,
+        &group.to_legacy_topology(),
+        room_config,
+        sample_rate,
+        _output_dir,
+        true,
+    )
+}
+
+pub(in super::super) fn process_speaker_topology(
+    channel_name: &str,
+    topology: &SpeakerTopology,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    output_dir: &Path,
+) -> Result<MixedModeResult> {
+    process_speaker_topology_impl(
+        channel_name,
+        topology,
+        room_config,
+        sample_rate,
+        output_dir,
+        false,
+    )
+}
+
+fn process_speaker_topology_impl(
+    channel_name: &str,
+    group: &SpeakerTopology,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    _output_dir: &Path,
+    legacy_ordering: bool,
+) -> Result<MixedModeResult> {
+    group
+        .validate()
+        .map_err(|message| AutoeqError::InvalidConfiguration { message })?;
     // 1. Load all measurements in the group
-    let mut driver_curves = Vec::new();
-    for (i, source) in group.measurements.iter().enumerate() {
-        let curve = load::load_source(source).map_err(|e| AutoeqError::InvalidMeasurement {
-            message: format!(
-                "Failed to load driver {} measurement for channel {}: {}",
-                i, channel_name, e
-            ),
+    let mut drivers = Vec::new();
+    for (i, driver) in group.drivers.iter().enumerate() {
+        let curve = load::load_source(&driver.measurement).map_err(|e| {
+            AutoeqError::InvalidMeasurement {
+                message: format!(
+                    "Failed to load driver '{}' ({}) measurement for channel {}: {}",
+                    driver.id, i, channel_name, e
+                ),
+            }
         })?;
-        driver_curves.push(curve);
+        drivers.push((driver.clone(), curve));
     }
 
-    debug!("  Loaded {} driver measurements", driver_curves.len());
+    debug!("  Loaded {} driver measurements", drivers.len());
 
-    // 2. Sort drivers by mean frequency (Low to High)
-    driver_curves.sort_by(|a, b| {
-        let get_mean = |c: &Curve| {
-            let (passband, _) = detect_passband_and_mean(c);
-            let (min_f, max_f) = passband.unwrap_or_else(|| {
-                let min_f = c.freq.iter().copied().fold(f64::INFINITY, f64::min);
-                let max_f = c.freq.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-                (min_f, max_f)
-            });
-            (min_f * max_f).sqrt()
-        };
-        get_mean(a)
-            .partial_cmp(&get_mean(b))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    // 3. Get crossover config
-    let crossover_config = if let Some(crossover_ref) = &group.crossover {
-        room_config
-            .crossovers
-            .as_ref()
-            .and_then(|xovers| xovers.get(crossover_ref))
-            .ok_or_else(|| AutoeqError::InvalidConfiguration {
-                message: format!("Crossover configuration '{}' not found", crossover_ref),
-            })?
-    } else {
-        return Err(AutoeqError::InvalidConfiguration {
-            message: "Speaker group requires crossover configuration".to_string(),
+    // Legacy inputs retain the old inferred ordering. Explicit topology order is authoritative.
+    if legacy_ordering {
+        drivers.sort_by(|(_, a), (_, b)| {
+            let get_mean = |c: &Curve| {
+                let (passband, _) = detect_passband_and_mean(c);
+                let (min_f, max_f) = passband.unwrap_or_else(|| {
+                    let min_f = c.freq.iter().copied().fold(f64::INFINITY, f64::min);
+                    let max_f = c.freq.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                    (min_f, max_f)
+                });
+                (min_f * max_f).sqrt()
+            };
+            get_mean(a)
+                .partial_cmp(&get_mean(b))
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
+    }
+    let driver_ids = drivers
+        .iter()
+        .map(|(driver, _)| driver.id.clone())
+        .collect::<Vec<_>>();
+    let driver_bands = drivers
+        .iter()
+        .map(|(driver, _)| driver.crossover_band)
+        .collect::<Vec<_>>();
+    let driver_curves = drivers
+        .into_iter()
+        .map(|(_, curve)| curve)
+        .collect::<Vec<_>>();
+    let driver_phase_trustworthy = driver_curves
+        .iter()
+        .map(|curve| curve.phase.is_some())
+        .collect::<Vec<_>>();
+
+    let acoustic_band_count = group
+        .acoustic_bands()
+        .map_err(|message| AutoeqError::InvalidConfiguration { message })?
+        .len();
+
+    // 3. Get crossover config. A topology containing one acoustic band (for
+    // example a parallel woofer array) does not need a crossover.
+    let crossover_config = if let Some(crossover_ref) = &group.crossover {
+        Some(
+            room_config
+                .crossovers
+                .as_ref()
+                .and_then(|xovers| xovers.get(crossover_ref))
+                .ok_or_else(|| AutoeqError::InvalidConfiguration {
+                    message: format!("Crossover configuration '{}' not found", crossover_ref),
+                })?,
+        )
+    } else if acoustic_band_count > 1 || legacy_ordering {
+        return Err(AutoeqError::InvalidConfiguration {
+            message:
+                "Speaker topology with multiple acoustic bands requires crossover configuration"
+                    .to_string(),
+        });
+    } else {
+        None
     };
 
     // 4. Per-Driver Linearization (Pre-Correction)
     info!("  Linearizing {} drivers...", driver_curves.len());
-    let optimization_bands =
-        determine_optimization_bands(driver_curves.len(), room_config, crossover_config);
+    let mut optimization_bands = crossover_config
+        .map(|crossover| determine_optimization_bands(driver_curves.len(), room_config, crossover))
+        .unwrap_or_else(|| {
+            vec![
+                (
+                    room_config.optimizer.min_freq,
+                    room_config.optimizer.max_freq,
+                );
+                driver_curves.len()
+            ]
+        });
+    for (band, explicit) in optimization_bands.iter_mut().zip(driver_bands) {
+        if let Some(explicit) = explicit {
+            *band = (
+                explicit.min_hz.max(room_config.optimizer.min_freq),
+                explicit.max_hz.min(room_config.optimizer.max_freq),
+            );
+            if band.0 >= band.1 {
+                return Err(AutoeqError::InvalidConfiguration {
+                    message: format!(
+                        "explicit driver band [{:.1}, {:.1}] Hz does not overlap optimizer range [{:.1}, {:.1}] Hz",
+                        explicit.min_hz,
+                        explicit.max_hz,
+                        room_config.optimizer.min_freq,
+                        room_config.optimizer.max_freq
+                    ),
+                });
+            }
+        }
+    }
     let mut linearized_drivers = Vec::with_capacity(driver_curves.len());
     let mut per_driver_filters = Vec::with_capacity(driver_curves.len());
 
@@ -119,32 +321,44 @@ pub(in super::super) fn process_speaker_group(
         per_driver_filters.push(filters);
     }
 
+    let topology_bands = aggregate_topology_bands(
+        group,
+        &linearized_drivers,
+        &driver_phase_trustworthy,
+        sample_rate,
+        &room_config.optimizer,
+    )?;
+    let acoustic_drivers = topology_bands.curves;
+    let driver_band_indices = topology_bands.driver_band_indices;
+
     // 5. Setup Crossover Optimization
     let crossover_type: crate::loss::CrossoverType = crossover_config
-        .crossover_type
-        .parse()
-        .map_err(|e: String| AutoeqError::InvalidConfiguration { message: e })?;
+        .map(|crossover| crossover.crossover_type.parse())
+        .transpose()
+        .map_err(|e: String| AutoeqError::InvalidConfiguration { message: e })?
+        .unwrap_or(crate::loss::CrossoverType::None);
 
-    let fixed_freqs: Option<Vec<f64>> = if let Some(ref freqs) = crossover_config.frequencies {
-        Some(freqs.clone())
-    } else {
-        crossover_config.frequency.map(|freq| vec![freq])
-    };
+    let fixed_freqs: Option<Vec<f64>> = crossover_config.and_then(|crossover| {
+        crossover
+            .frequencies
+            .clone()
+            .or_else(|| crossover.frequency.map(|freq| vec![freq]))
+    });
 
     // 6. Compute pre-score (using linearized drivers)
-    let n_drivers = linearized_drivers.len();
+    let n_drivers = acoustic_drivers.len();
     let initial_gains = vec![0.0; n_drivers];
     let mut initial_xover_freqs = Vec::new();
     // Simple geometric mean estimate for initial guess
     for _ in 0..(n_drivers - 1) {
-        let (min, max) = match crossover_config.frequency_range {
+        let (min, max) = match crossover_config.and_then(|crossover| crossover.frequency_range) {
             Some((a, b)) => (a, b),
             None => (80.0, 3000.0),
         };
         initial_xover_freqs.push((min * max).sqrt());
     }
 
-    let driver_measurements: Vec<crate::loss::DriverMeasurement> = linearized_drivers
+    let driver_measurements: Vec<crate::loss::DriverMeasurement> = acoustic_drivers
         .iter()
         .map(|curve| crate::loss::DriverMeasurement {
             freq: curve.freq.clone(),
@@ -155,35 +369,75 @@ pub(in super::super) fn process_speaker_group(
 
     let initial_delays = vec![0.0; n_drivers];
 
-    let drivers_data = crate::loss::DriversLossData::new(driver_measurements, crossover_type);
-    let pre_score = crate::loss::drivers_flat_loss(
-        &drivers_data,
-        &initial_gains,
-        &initial_xover_freqs,
-        Some(&initial_delays),
-        sample_rate,
-        room_config.optimizer.min_freq,
-        room_config.optimizer.max_freq,
-    );
+    let pre_score = if n_drivers == 1 {
+        flat_loss_score(
+            &acoustic_drivers[0],
+            room_config.optimizer.min_freq,
+            room_config.optimizer.max_freq,
+        )
+    } else {
+        let drivers_data =
+            crate::loss::DriversLossData::new_ordered(driver_measurements, crossover_type);
+        crate::loss::drivers_flat_loss(
+            &drivers_data,
+            &initial_gains,
+            &initial_xover_freqs,
+            Some(&initial_delays),
+            sample_rate,
+            room_config.optimizer.min_freq,
+            room_config.optimizer.max_freq,
+        )
+    };
 
     // 7. Optimize Crossover (using linearized drivers)
-    let (gains, delays, crossover_freqs, combined_curve, inversions) =
-        crossover::optimize_crossover(
-            linearized_drivers.clone(), // Use linearized curves!
+    let (gains, delays, crossover_freqs, combined_curve, inversions) = if n_drivers == 1 {
+        (
+            vec![0.0],
+            vec![0.0],
+            Vec::new(),
+            acoustic_drivers[0].clone(),
+            vec![false],
+        )
+    } else {
+        crossover::optimize_crossover_ordered(
+            acoustic_drivers,
             crossover_type,
             sample_rate,
             &room_config.optimizer,
             fixed_freqs,
-            crossover_config.frequency_range,
+            crossover_config.and_then(|crossover| crossover.frequency_range),
         )
         .map_err(|e| AutoeqError::OptimizationFailed {
             message: format!("Crossover optimization failed: {}", e),
-        })?;
+        })?
+    };
 
     info!(
         "  Optimized crossover: freqs={:?}, gains={:?}, delays={:?}, inversions={:?}",
         crossover_freqs, gains, delays, inversions
     );
+
+    let driver_gains = driver_band_indices
+        .iter()
+        .enumerate()
+        .map(|(driver_index, &band_index)| {
+            topology_bands.relative_gains[driver_index] + gains[band_index]
+        })
+        .collect::<Vec<_>>();
+    let driver_delays = driver_band_indices
+        .iter()
+        .enumerate()
+        .map(|(driver_index, &band_index)| {
+            topology_bands.relative_delays[driver_index] + delays[band_index]
+        })
+        .collect::<Vec<_>>();
+    let driver_inversions = driver_band_indices
+        .iter()
+        .enumerate()
+        .map(|(driver_index, &band_index)| {
+            topology_bands.relative_inversions[driver_index] ^ inversions[band_index]
+        })
+        .collect::<Vec<_>>();
 
     // 8. Global EQ (Optional Touch-up)
     // Run global EQ on the combined response to fix any remaining issues
@@ -236,18 +490,18 @@ pub(in super::super) fn process_speaker_group(
         .map(output::extend_curve_to_full_range)
         .collect();
 
-    let mut chain = output::build_multidriver_dsp_chain_with_curves(
+    let mut chain = output::build_topology_dsp_chain_with_curves(
         channel_name,
-        &gains,
-        &delays,
-        Some(&inversions),
+        &driver_ids,
+        &driver_band_indices,
+        &driver_gains,
+        &driver_delays,
+        &driver_inversions,
         &crossover_freqs,
         crossover_type.to_plugin_string(),
         &global_eq_filters,
-        Some(&per_driver_filters), // Pass the per-driver EQ filters here!
-        None,
-        None,
-        Some(&driver_curves_for_display),
+        &per_driver_filters,
+        &driver_curves_for_display,
     );
 
     // Detect passband
@@ -329,7 +583,7 @@ pub(in super::super) fn process_multisub_group(
         }
     }
 
-    let (result, combined_curve, allpass_filters) = if group.allpass_optimization {
+    let (result, combined_response, allpass_filters) = if group.allpass_optimization {
         // All-pass enhanced optimization
         info!("  Using all-pass enhanced multi-sub optimization");
         let ap_result = multisub::optimize_multisub_with_allpass(
@@ -350,18 +604,23 @@ pub(in super::super) fn process_multisub_group(
 
         (
             ap_result.base,
-            ap_result.combined_curve,
+            ap_result.combined_response,
             Some(ap_result.allpass_filters),
         )
     } else {
         // Standard gain + delay optimization
-        let (result, curve) =
-            multisub::optimize_multisub(&group.subwoofers, &room_config.optimizer, sample_rate)
-                .map_err(|e| AutoeqError::OptimizationFailed {
-                    message: format!("Multi-sub optimization failed: {}", e),
-                })?;
-        (result, curve, None)
+        let detailed = multisub::optimize_multisub_detailed(
+            &group.subwoofers,
+            &room_config.optimizer,
+            sample_rate,
+        )
+        .map_err(|e| AutoeqError::OptimizationFailed {
+            message: format!("Multi-sub optimization failed: {}", e),
+        })?;
+        (detailed.base, detailed.combined_response, None)
     };
+    let combined_curve = combined_response.spatial_magnitude;
+    let primary_curve = combined_response.primary_seat_complex;
 
     info!(
         "  Multi-sub optimization: gains={:?}, delays={:?} ms",
@@ -422,6 +681,11 @@ pub(in super::super) fn process_multisub_group(
     let iir_resp =
         response::compute_peq_complex_response(&eq_filters, &combined_curve.freq, sample_rate);
     let final_curve = response::apply_complex_response(&combined_curve, &iir_resp);
+    let final_primary_curve = primary_curve.as_ref().map(|primary| {
+        let response =
+            response::compute_peq_complex_response(&eq_filters, &primary.freq, sample_rate);
+        response::apply_complex_response(primary, &response)
+    });
 
     // Detect passband for normalization (used for display curves)
     let (norm_range, _passband_mean) = detect_passband_and_mean(&combined_curve);
@@ -456,8 +720,8 @@ pub(in super::super) fn process_multisub_group(
         chain,
         result.pre_objective,
         post_score,
-        combined_curve.clone(),
-        final_curve,
+        primary_curve.unwrap_or_else(|| combined_curve.clone()),
+        final_primary_curve.unwrap_or(final_curve),
         eq_filters,
         mean_spl,
         None, // No single WAV for multi-sub groups
@@ -474,6 +738,13 @@ fn process_multisub_group_multiseat(
     seat_measurements: Vec<Vec<Curve>>,
 ) -> Result<MixedModeResult> {
     let seat_count = seat_measurements.first().map(Vec::len).unwrap_or_default();
+    let phase_trustworthy = seat_measurements
+        .iter()
+        .flatten()
+        .all(|curve| curve.phase.is_some());
+    let primary_seat = multi_seat_config
+        .primary_seat
+        .min(seat_count.saturating_sub(1));
     let peq_config = multiseat_peq_config(multi_seat_config, seat_count);
     let min_freq = room_config.optimizer.min_freq;
     let max_freq = room_config.optimizer.max_freq;
@@ -487,6 +758,7 @@ fn process_multisub_group_multiseat(
         sample_rate,
     )?;
     let raw_combined_curve = average_power_curve(&raw_seat_curves)?;
+    let raw_primary_curve = phase_trustworthy.then(|| raw_seat_curves[primary_seat].clone());
     let pre_score = flat_loss_score(&raw_combined_curve, min_freq, max_freq);
 
     let per_sub_filters = if multi_seat_config.per_sub_peq {
@@ -556,6 +828,7 @@ fn process_multisub_group_multiseat(
         sample_rate,
     )?;
     let combined_curve = average_power_curve(&combined_seat_curves)?;
+    let primary_curve = phase_trustworthy.then(|| combined_seat_curves[primary_seat].clone());
 
     let mut eq_filters = if multi_seat_config.global_eq {
         let (filters, loss) = eq::optimize_channel_eq_multi_with_auto_optimizer(
@@ -585,6 +858,11 @@ fn process_multisub_group_multiseat(
     let iir_resp =
         response::compute_peq_complex_response(&eq_filters, &combined_curve.freq, sample_rate);
     let mut final_curve = response::apply_complex_response(&combined_curve, &iir_resp);
+    let mut final_primary_curve = primary_curve.as_ref().map(|primary| {
+        let response =
+            response::compute_peq_complex_response(&eq_filters, &primary.freq, sample_rate);
+        response::apply_complex_response(primary, &response)
+    });
     let mut post_score = flat_loss_score(&final_curve, min_freq, max_freq);
     if multi_seat_config.global_eq && eq_score_regressed(global_eq_pre_score, post_score) {
         warn!(
@@ -593,6 +871,7 @@ fn process_multisub_group_multiseat(
         );
         eq_filters.clear();
         final_curve = combined_curve.clone();
+        final_primary_curve = primary_curve.clone();
         post_score = global_eq_pre_score;
     }
     let freqs_f32: Vec<f32> = combined_curve.freq.iter().map(|&f| f as f32).collect();
@@ -652,8 +931,8 @@ fn process_multisub_group_multiseat(
         chain,
         pre_score,
         post_score,
-        raw_combined_curve,
-        final_curve,
+        raw_primary_curve.unwrap_or(raw_combined_curve),
+        final_primary_curve.unwrap_or(final_curve),
         eq_filters,
         mean_spl,
         None,

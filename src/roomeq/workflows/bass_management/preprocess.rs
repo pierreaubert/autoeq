@@ -38,10 +38,13 @@ pub(in super::super) fn preprocess_sub(
         },
         SpeakerConfig::Cardioid(c) => preprocess_cardioid(c),
         SpeakerConfig::Dba(d) => preprocess_dba(d, optimizer, sample_rate),
-        SpeakerConfig::Group(_) => Err(AutoeqError::InvalidConfiguration {
-            message: "Group speaker config should not reach stereo sub workflow; use generic path"
-                .to_string(),
-        }),
+        SpeakerConfig::Group(_) | SpeakerConfig::Topology(_) => {
+            Err(AutoeqError::InvalidConfiguration {
+                message:
+                    "Group speaker config should not reach stereo sub workflow; use generic path"
+                        .to_string(),
+            })
+        }
         SpeakerConfig::SupportingSource(_) => Err(AutoeqError::InvalidConfiguration {
             message: "Supporting source config cannot be used as an LFE/subwoofer channel"
                 .to_string(),

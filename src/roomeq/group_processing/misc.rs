@@ -134,7 +134,6 @@ pub(super) fn average_power_curve(curves: &[Curve]) -> Result<Curve> {
             message: "Cannot average an empty multi-seat curve set".to_string(),
         });
     };
-    let all_have_phase = curves.iter().all(|c| c.phase.is_some());
     for (idx, curve) in curves.iter().enumerate() {
         if curve.freq.len() != first.freq.len()
             || curve
@@ -152,53 +151,19 @@ pub(super) fn average_power_curve(curves: &[Curve]) -> Result<Curve> {
         }
     }
 
-    if all_have_phase {
-        // Complex vector average: preserves phase when all inputs have it
-        use num_complex::Complex64;
-        let n = curves.len() as f64;
-        let mut sum_re = Array1::<f64>::zeros(first.freq.len());
-        let mut sum_im = Array1::<f64>::zeros(first.freq.len());
-        for curve in curves {
-            let phase = curve.phase.as_ref().unwrap();
-            for i in 0..first.freq.len() {
-                let pressure = 10.0_f64.powf(curve.spl[i] / 20.0);
-                let rad = phase[i].to_radians();
-                sum_re[i] += pressure * rad.cos();
-                sum_im[i] += pressure * rad.sin();
-            }
-        }
-        let mut spl = Array1::<f64>::zeros(first.freq.len());
-        let mut phase_out = Array1::<f64>::zeros(first.freq.len());
-        for i in 0..first.freq.len() {
-            let z = Complex64::new(sum_re[i] / n, sum_im[i] / n);
-            let mag = z.norm();
-            spl[i] = 20.0 * mag.max(1e-12).log10();
-            phase_out[i] = if mag > 1e-12 {
-                z.arg().to_degrees()
-            } else {
-                0.0
-            };
-        }
-        Ok(Curve {
-            freq: first.freq.clone(),
-            spl,
-            phase: Some(phase_out),
-            ..Default::default()
-        })
-    } else {
-        // Power (energy) average when phase is unavailable or mixed
-        let mut power_sum = Array1::<f64>::zeros(first.freq.len());
-        for curve in curves {
-            power_sum = power_sum + curve.spl.mapv(|spl| 10.0_f64.powf(spl / 10.0));
-        }
-        let avg_power = power_sum / curves.len() as f64;
-        Ok(Curve {
-            freq: first.freq.clone(),
-            spl: avg_power.mapv(|power| 10.0 * power.max(1e-12).log10()),
-            phase: None,
-            ..Default::default()
-        })
+    // Spatial aggregation is an energy average. Phase from different seats is
+    // not a coherent transfer function and must never feed temporal alignment.
+    let mut power_sum = Array1::<f64>::zeros(first.freq.len());
+    for curve in curves {
+        power_sum = power_sum + curve.spl.mapv(|spl| 10.0_f64.powf(spl / 10.0));
     }
+    let avg_power = power_sum / curves.len() as f64;
+    Ok(Curve {
+        freq: first.freq.clone(),
+        spl: avg_power.mapv(|power| 10.0 * power.max(1e-12).log10()),
+        phase: None,
+        ..Default::default()
+    })
 }
 
 pub(super) fn flat_loss_score(curve: &Curve, min_freq: f64, max_freq: f64) -> f64 {

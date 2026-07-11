@@ -271,6 +271,92 @@ fn speaker_group_roundtrip_and_resolve_paths() {
 }
 
 #[test]
+fn explicit_speaker_topology_roundtrip_validates_parallel_groups() {
+    let topology = SpeakerTopology {
+        name: "L-speaker".into(),
+        speaker_name: Some("Model P".into()),
+        drivers: vec![
+            SpeakerDriver {
+                id: "woofer_left".into(),
+                role: SpeakerDriverRole::Woofer,
+                measurement: sample_single_source("woofer-left.csv", None),
+                crossover_band: Some(DriverCrossoverBand {
+                    min_hz: 30.0,
+                    max_hz: 1_200.0,
+                }),
+            },
+            SpeakerDriver {
+                id: "woofer_right".into(),
+                role: SpeakerDriverRole::Woofer,
+                measurement: sample_single_source("woofer-right.csv", None),
+                crossover_band: Some(DriverCrossoverBand {
+                    min_hz: 30.0,
+                    max_hz: 1_200.0,
+                }),
+            },
+            SpeakerDriver {
+                id: "tweeter".into(),
+                role: SpeakerDriverRole::Tweeter,
+                measurement: sample_single_source("tweeter.csv", None),
+                crossover_band: Some(DriverCrossoverBand {
+                    min_hz: 700.0,
+                    max_hz: 20_000.0,
+                }),
+            },
+        ],
+        parallel_groups: vec![ParallelDriverGroup {
+            id: "woofers".into(),
+            driver_ids: vec!["woofer_left".into(), "woofer_right".into()],
+        }],
+        crossover: Some("lr24".into()),
+    };
+    topology.validate().unwrap();
+    assert_eq!(
+        topology.acoustic_bands().unwrap(),
+        vec![vec![0, 1], vec![2]]
+    );
+
+    let json = serde_json::to_string(&SpeakerConfig::Topology(topology)).unwrap();
+    let mut back: SpeakerConfig = serde_json::from_str(&json).unwrap();
+    let SpeakerConfig::Topology(ref parsed) = back else {
+        panic!("explicit drivers input must select the topology variant");
+    };
+    assert_eq!(parsed.drivers[0].id, "woofer_left");
+    assert_eq!(parsed.parallel_groups[0].id, "woofers");
+    back.resolve_paths(PathBuf::from("/base").as_path());
+    let SpeakerConfig::Topology(parsed) = back else {
+        unreachable!();
+    };
+    match &parsed.drivers[1].measurement {
+        MeasurementSource::Single(source) => match &source.measurement {
+            MeasurementRef::Path(path) => {
+                assert_eq!(path, &PathBuf::from("/base/woofer-right.csv"));
+            }
+            other => panic!("expected path, got {other:?}"),
+        },
+        other => panic!("expected single source, got {other:?}"),
+    }
+}
+
+#[test]
+fn legacy_speaker_group_adapter_assigns_stable_driver_entries() {
+    let group = SpeakerGroup {
+        name: "legacy".into(),
+        speaker_name: None,
+        measurements: vec![
+            sample_single_source("woofer.csv", None),
+            sample_single_source("tweeter.csv", None),
+        ],
+        crossover: Some("lr24".into()),
+    };
+    let topology = group.to_legacy_topology();
+    assert_eq!(topology.drivers[0].id, "legacy_driver_1");
+    assert_eq!(topology.drivers[0].role, SpeakerDriverRole::Woofer);
+    assert_eq!(topology.drivers[1].role, SpeakerDriverRole::Tweeter);
+    assert!(topology.parallel_groups.is_empty());
+}
+
+#[test]
 fn speaker_config_single_roundtrip_and_resolve_paths() {
     let cfg = SpeakerConfig::Single(sample_single_source("L.csv", Some("Model A")));
     let json = serde_json::to_string(&cfg).unwrap();

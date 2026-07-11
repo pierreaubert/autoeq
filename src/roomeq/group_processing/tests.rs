@@ -206,7 +206,7 @@ fn multisub_uses_production_multiseat_path_when_subs_have_seat_measurements() {
         cea2034_cache: None,
     };
 
-    let (chain, pre_score, post_score, _initial, _final, filters, _mean, _arrival, _fir) =
+    let (chain, pre_score, post_score, initial, final_curve, filters, _mean, _arrival, _fir) =
         process_multisub_group("LFE", &group, &room_config, 48000.0, Path::new("."))
             .expect("multi-seat multi-sub processing should succeed");
 
@@ -221,12 +221,21 @@ fn multisub_uses_production_multiseat_path_when_subs_have_seat_measurements() {
         "global_eq=false should not emit shared EQ"
     );
     assert!(chain.plugins.is_empty());
+    assert!(initial.phase.is_some());
+    assert!(final_curve.phase.is_some());
+    assert!(
+        chain
+            .initial_curve
+            .as_ref()
+            .is_some_and(|curve| curve.phase.is_none()),
+        "reported spatial aggregate must remain magnitude-only"
+    );
     let drivers = chain.drivers.expect("multi-sub output should have drivers");
     assert_eq!(drivers.len(), 2);
 }
 
 #[test]
-fn average_power_curve_preserves_phase_when_all_inputs_have_phase() {
+fn average_power_curve_is_magnitude_only_even_when_all_inputs_have_phase() {
     let c1 = Curve {
         freq: array![100.0, 200.0, 400.0],
         spl: array![80.0, 80.0, 80.0],
@@ -240,27 +249,8 @@ fn average_power_curve_preserves_phase_when_all_inputs_have_phase() {
         ..Default::default()
     };
     let avg = average_power_curve(&[c1, c2]).unwrap();
-    assert!(
-        avg.phase.is_some(),
-        "average_power_curve should preserve phase when all inputs have phase"
-    );
-    let phase = avg.phase.unwrap();
-    // Same-phase curves should average to the same phase
-    assert!(
-        (phase[0]).abs() < 1.0,
-        "same 0° phase should average to ~0°, got {}",
-        phase[0]
-    );
-    assert!(
-        (phase[1] - 45.0).abs() < 1.0,
-        "same 45° phase should average to ~45°, got {}",
-        phase[1]
-    );
-    assert!(
-        (phase[2] - 90.0).abs() < 1.0,
-        "same 90° phase should average to ~90°, got {}",
-        phase[2]
-    );
+    assert!(avg.phase.is_none());
+    assert!(avg.spl.iter().all(|spl| (*spl - 80.0).abs() < 1e-9));
 }
 
 #[test]
@@ -285,7 +275,7 @@ fn average_power_curve_returns_none_phase_when_any_input_lacks_phase() {
 }
 
 #[test]
-fn average_power_curve_vector_averages_opposing_phases() {
+fn average_power_curve_does_not_cancel_energy_across_seats() {
     let c1 = Curve {
         freq: array![100.0],
         spl: array![80.0],
@@ -299,21 +289,8 @@ fn average_power_curve_vector_averages_opposing_phases() {
         ..Default::default()
     };
     let avg = average_power_curve(&[c1, c2]).unwrap();
-    let phase = avg.phase.expect("phase should be present");
-    // 0° and 180° perfectly cancel; atan2(0,0) returns 0.0
-    assert!(
-        phase[0].abs() < 1.0,
-        "opposing phases should have mean angle ~0° (or undefined), got {}",
-        phase[0]
-    );
-    // Magnitude should reflect cancellation: pressure average of 1 and -1 is 0
-    let expected_power = 10.0 * ((10.0_f64.powf(8.0) + 10.0_f64.powf(8.0)) / 2.0).log10();
-    // With complex averaging, magnitude will be much lower due to cancellation
-    // The key thing is phase is preserved, not the exact SPL value
-    assert!(
-        avg.spl[0] < expected_power,
-        "cancelled phases should reduce SPL magnitude"
-    );
+    assert!(avg.phase.is_none());
+    assert!((avg.spl[0] - 80.0).abs() < 1e-9);
 }
 
 #[test]
@@ -398,6 +375,7 @@ mod coverage_tests {
     use super::super::process::process_mixed_mode_crossover;
     use super::super::process::process_multisub_group;
     use super::super::process::process_speaker_group;
+    use super::super::process::process_speaker_topology;
     use crate::Curve;
     use crate::MeasurementSource;
     use crate::roomeq::types::DBAConfig;
@@ -407,6 +385,9 @@ mod coverage_tests {
     use crate::roomeq::types::OptimizerConfig;
     use crate::roomeq::types::RoomConfig;
     use crate::roomeq::types::SpeakerGroup;
+    use crate::roomeq::types::{
+        DriverCrossoverBand, ParallelDriverGroup, SpeakerDriver, SpeakerDriverRole, SpeakerTopology,
+    };
     use ndarray::array;
     use std::collections::HashMap;
     use std::path::Path;
@@ -627,6 +608,186 @@ mod coverage_tests {
         )]));
         let result = process_speaker_group("L", &group, &config, 48000.0, Path::new("."));
         assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn explicit_parallel_woofers_share_one_acoustic_crossover_band() {
+        let mut woofer = flat_curve();
+        woofer.phase = Some(array![0.0, 0.0, 0.0, 0.0, 0.0]);
+        let mut tweeter = flat_curve();
+        tweeter.phase = Some(array![0.0, 0.0, 0.0, 0.0, 0.0]);
+        let topology = SpeakerTopology {
+            name: "parallel-two-way".to_string(),
+            speaker_name: None,
+            drivers: vec![
+                SpeakerDriver {
+                    id: "woofer_a".to_string(),
+                    role: SpeakerDriverRole::Woofer,
+                    measurement: MeasurementSource::InMemory(woofer.clone()),
+                    crossover_band: Some(DriverCrossoverBand {
+                        min_hz: 100.0,
+                        max_hz: 1_600.0,
+                    }),
+                },
+                SpeakerDriver {
+                    id: "woofer_b".to_string(),
+                    role: SpeakerDriverRole::Woofer,
+                    measurement: MeasurementSource::InMemory(woofer),
+                    crossover_band: Some(DriverCrossoverBand {
+                        min_hz: 100.0,
+                        max_hz: 1_600.0,
+                    }),
+                },
+                SpeakerDriver {
+                    id: "tweeter".to_string(),
+                    role: SpeakerDriverRole::Tweeter,
+                    measurement: MeasurementSource::InMemory(tweeter),
+                    crossover_band: Some(DriverCrossoverBand {
+                        min_hz: 400.0,
+                        max_hz: 1_600.0,
+                    }),
+                },
+            ],
+            parallel_groups: vec![ParallelDriverGroup {
+                id: "woofer_pair".to_string(),
+                driver_ids: vec!["woofer_a".to_string(), "woofer_b".to_string()],
+            }],
+            crossover: Some("xover".to_string()),
+        };
+        let mut config = room_config_with_optimizer(OptimizerConfig {
+            min_freq: 100.0,
+            max_freq: 1_600.0,
+            num_filters: 1,
+            max_iter: 3,
+            population: 4,
+            seed: Some(3),
+            refine: false,
+            ..Default::default()
+        });
+        config.crossovers = Some(HashMap::from([(
+            "xover".to_string(),
+            crate::roomeq::types::CrossoverConfig {
+                crossover_type: "LR24".to_string(),
+                frequency: Some(800.0),
+                frequencies: None,
+                frequency_range: None,
+            },
+        )]));
+
+        let (chain, ..) =
+            process_speaker_topology("L", &topology, &config, 48_000.0, Path::new(".")).unwrap();
+        let drivers = chain.drivers.unwrap();
+        assert_eq!(
+            drivers
+                .iter()
+                .map(|driver| driver.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["woofer_a", "woofer_b", "tweeter"]
+        );
+        assert!(
+            drivers[0]
+                .plugins
+                .iter()
+                .any(|plugin| plugin.plugin_type == "crossover")
+        );
+        assert!(
+            drivers[1]
+                .plugins
+                .iter()
+                .any(|plugin| plugin.plugin_type == "crossover")
+        );
+        assert!(
+            drivers[2]
+                .plugins
+                .iter()
+                .any(|plugin| plugin.plugin_type == "crossover")
+        );
+    }
+
+    #[test]
+    fn parallel_only_topology_does_not_require_a_crossover() {
+        let topology = SpeakerTopology {
+            name: "woofer-array".to_string(),
+            speaker_name: None,
+            drivers: ["woofer_a", "woofer_b"]
+                .into_iter()
+                .map(|id| SpeakerDriver {
+                    id: id.to_string(),
+                    role: SpeakerDriverRole::Woofer,
+                    measurement: MeasurementSource::InMemory(phased_curve()),
+                    crossover_band: Some(DriverCrossoverBand {
+                        min_hz: 100.0,
+                        max_hz: 1_600.0,
+                    }),
+                })
+                .collect(),
+            parallel_groups: vec![ParallelDriverGroup {
+                id: "woofer_pair".to_string(),
+                driver_ids: vec!["woofer_a".to_string(), "woofer_b".to_string()],
+            }],
+            crossover: None,
+        };
+        let config = room_config_with_optimizer(OptimizerConfig {
+            min_freq: 100.0,
+            max_freq: 1_600.0,
+            num_filters: 1,
+            max_iter: 3,
+            population: 4,
+            seed: Some(4),
+            refine: false,
+            ..Default::default()
+        });
+        let (chain, ..) =
+            process_speaker_topology("L", &topology, &config, 48_000.0, Path::new(".")).unwrap();
+        assert!(chain.drivers.unwrap().iter().all(|driver| {
+            driver
+                .plugins
+                .iter()
+                .all(|plugin| plugin.plugin_type != "crossover")
+        }));
+    }
+
+    #[test]
+    fn parallel_missing_phase_disables_relative_temporal_controls() {
+        let topology = SpeakerTopology {
+            name: "woofer-array-no-phase".to_string(),
+            speaker_name: None,
+            drivers: ["woofer_a", "woofer_b"]
+                .into_iter()
+                .map(|id| SpeakerDriver {
+                    id: id.to_string(),
+                    role: SpeakerDriverRole::Woofer,
+                    measurement: MeasurementSource::InMemory(flat_curve()),
+                    crossover_band: Some(DriverCrossoverBand {
+                        min_hz: 100.0,
+                        max_hz: 1_600.0,
+                    }),
+                })
+                .collect(),
+            parallel_groups: vec![ParallelDriverGroup {
+                id: "woofer_pair".to_string(),
+                driver_ids: vec!["woofer_a".to_string(), "woofer_b".to_string()],
+            }],
+            crossover: None,
+        };
+        let config = room_config_with_optimizer(OptimizerConfig {
+            min_freq: 100.0,
+            max_freq: 1_600.0,
+            num_filters: 1,
+            max_iter: 3,
+            population: 4,
+            seed: Some(5),
+            refine: false,
+            ..Default::default()
+        });
+        let (chain, ..) =
+            process_speaker_topology("L", &topology, &config, 48_000.0, Path::new(".")).unwrap();
+        assert!(chain.drivers.unwrap().iter().all(|driver| {
+            driver
+                .plugins
+                .iter()
+                .all(|plugin| plugin.plugin_type != "delay" && plugin.plugin_type != "gain")
+        }));
     }
 
     #[test]

@@ -203,12 +203,13 @@ fn select_topology_route(
         return Ok(TopologyRoute::Generic);
     };
 
-    // If any channel uses SpeakerConfig::Group, fall through to the generic path
-    // which handles Groups via process_speaker_group.
-    let has_group = sys
-        .speakers
-        .values()
-        .any(|key| matches!(config.speakers.get(key), Some(SpeakerConfig::Group(_))));
+    // Multi-driver groups use the generic topology-aware path.
+    let has_group = sys.speakers.values().any(|key| {
+        matches!(
+            config.speakers.get(key),
+            Some(SpeakerConfig::Group(_) | SpeakerConfig::Topology(_))
+        )
+    });
 
     if has_group {
         return Ok(TopologyRoute::Generic);

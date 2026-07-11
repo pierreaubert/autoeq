@@ -81,7 +81,26 @@ fn validate_speakers(speakers: &HashMap<String, SpeakerConfig>, result: &mut Val
         }
 
         match config {
+            SpeakerConfig::Topology(topology) => {
+                if let Err(message) = topology.validate() {
+                    result.add_error(format!("Speaker topology '{}': {message}", name));
+                }
+                let band_count = topology
+                    .acoustic_bands()
+                    .map(|bands| bands.len())
+                    .unwrap_or_default();
+                if topology.crossover.is_none() && band_count > 1 {
+                    result.add_error(format!(
+                        "Speaker topology '{}' has multiple acoustic bands but no crossover specified",
+                        name
+                    ));
+                }
+            }
             SpeakerConfig::Group(group) => {
+                result.add_warning(format!(
+                    "Speaker group '{}' uses deprecated measurements input; migrate to explicit drivers topology",
+                    name
+                ));
                 if group.measurements.is_empty() {
                     result.add_error(format!("Speaker group '{}' has no measurements", name));
                 }
@@ -219,11 +238,24 @@ fn validate_crossovers(
     }
 
     for (name, config) in speakers {
-        let SpeakerConfig::Group(group) = config else {
-            continue;
-        };
-        let Some(ref crossover_ref) = group.crossover else {
-            continue;
+        let (crossover_ref, num_drivers) = match config {
+            SpeakerConfig::Group(group) => {
+                let Some(crossover_ref) = group.crossover.as_ref() else {
+                    continue;
+                };
+                (crossover_ref, group.measurements.len())
+            }
+            SpeakerConfig::Topology(topology) => {
+                let Some(crossover_ref) = topology.crossover.as_ref() else {
+                    continue;
+                };
+                let band_count = topology
+                    .acoustic_bands()
+                    .map(|bands| bands.len())
+                    .unwrap_or_default();
+                (crossover_ref, band_count)
+            }
+            _ => continue,
         };
 
         let Some(crossovers) = crossovers else {
@@ -244,7 +276,6 @@ fn validate_crossovers(
 
         // Validate crossover config
         let crossover = &crossovers[crossover_ref];
-        let num_drivers = group.measurements.len();
         let expected_freqs = num_drivers.saturating_sub(1);
 
         // Check frequency specification

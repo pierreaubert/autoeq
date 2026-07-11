@@ -3,7 +3,7 @@ use super::allpass::allpass_frequency_bounds;
 use super::allpass::compute_combined_with_allpass_complex;
 use super::multisub_allpass_converged;
 use super::multisub_allpass_loss;
-use super::types::MultiSubAllPassResult;
+use super::types::{MultiSubAllPassResult, MultiSubCombinedResponse, MultiSubOptimizationResult};
 use crate::Curve;
 use crate::loss::{CrossoverType, DriverMeasurement, DriversLossData};
 use crate::optim::scalar::{ScalarOptimConfig, optimize_bounded_scalar};
@@ -101,11 +101,11 @@ fn optimize_multisub_gains_only(
 /// # Note on Phase Data
 /// Delay optimization is enabled only when every measurement has phase data.
 /// Otherwise the conservative gain-only path is used.
-pub fn optimize_multisub(
+pub fn optimize_multisub_detailed(
     measurements: &[MeasurementSource],
     config: &OptimizerConfig,
     sample_rate: f64,
-) -> Result<(DriverOptimizationResult, Curve), Box<dyn Error>> {
+) -> Result<MultiSubOptimizationResult, Box<dyn Error>> {
     // Load all measurements and check for phase data
     let mut driver_measurements = Vec::new();
     let mut missing_phase_count = 0;
@@ -161,13 +161,40 @@ pub fn optimize_multisub(
         sample_rate,
     );
 
-    let combined_curve = curve_from_complex_sum(
-        drivers_data.freq_grid.clone(),
-        combined_response,
-        missing_phase_count == 0,
-    );
+    let primary_seat_complex = (missing_phase_count == 0).then(|| {
+        curve_from_complex_sum(
+            drivers_data.freq_grid.clone(),
+            combined_response.clone(),
+            true,
+        )
+    });
+    let spatial_magnitude =
+        curve_from_complex_sum(drivers_data.freq_grid.clone(), combined_response, false);
 
-    Ok((result, combined_curve))
+    Ok(MultiSubOptimizationResult {
+        base: result,
+        combined_response: MultiSubCombinedResponse {
+            spatial_magnitude,
+            primary_seat_complex,
+        },
+        phase_controls_enabled: missing_phase_count == 0,
+        advisories: if missing_phase_count > 0 {
+            vec!["missing_phase_gain_only".to_string()]
+        } else {
+            Vec::new()
+        },
+    })
+}
+
+/// Compatibility adapter returning the historical `(controls, combined curve)` tuple.
+pub fn optimize_multisub(
+    measurements: &[MeasurementSource],
+    config: &OptimizerConfig,
+    sample_rate: f64,
+) -> Result<(DriverOptimizationResult, Curve), Box<dyn Error>> {
+    let result = optimize_multisub_detailed(measurements, config, sample_rate)?;
+    let combined = result.combined_response.legacy_combined_curve();
+    Ok((result.base, combined))
 }
 
 /// Optimize multi-subwoofer configuration with per-sub all-pass filters.
@@ -220,10 +247,16 @@ pub fn optimize_multisub_with_allpass(
             Some(&base.delays),
             sample_rate,
         );
+        let spatial_magnitude =
+            curve_from_complex_sum(drivers_data.freq_grid.clone(), combined, false);
         return Ok(MultiSubAllPassResult {
             base,
             allpass_filters: Vec::new(),
-            combined_curve: curve_from_complex_sum(drivers_data.freq_grid.clone(), combined, false),
+            combined_curve: spatial_magnitude.clone(),
+            combined_response: MultiSubCombinedResponse {
+                spatial_magnitude,
+                primary_seat_complex: None,
+            },
             phase_controls_enabled: false,
             advisories: vec!["missing_phase_gain_only".to_string()],
         });
@@ -349,8 +382,13 @@ pub fn optimize_multisub_with_allpass(
         sample_rate,
     );
 
-    let combined_curve =
-        curve_from_complex_sum(drivers_data.freq_grid.clone(), combined_complex, true);
+    let primary_seat_complex = curve_from_complex_sum(
+        drivers_data.freq_grid.clone(),
+        combined_complex.clone(),
+        true,
+    );
+    let spatial_magnitude =
+        curve_from_complex_sum(drivers_data.freq_grid.clone(), combined_complex, false);
 
     Ok(MultiSubAllPassResult {
         base: DriverOptimizationResult {
@@ -362,7 +400,11 @@ pub fn optimize_multisub_with_allpass(
             converged,
         },
         allpass_filters,
-        combined_curve,
+        combined_curve: primary_seat_complex.clone(),
+        combined_response: MultiSubCombinedResponse {
+            spatial_magnitude,
+            primary_seat_complex: Some(primary_seat_complex),
+        },
         phase_controls_enabled: true,
         advisories: Vec::new(),
     })
@@ -370,7 +412,7 @@ pub fn optimize_multisub_with_allpass(
 
 #[cfg(test)]
 mod tests {
-    use super::{optimize_multisub, optimize_multisub_with_allpass};
+    use super::{optimize_multisub, optimize_multisub_detailed, optimize_multisub_with_allpass};
     use crate::{Curve, MeasurementSource, OptimizerConfig};
     use ndarray::Array1;
 
@@ -446,6 +488,29 @@ mod tests {
     }
 
     #[test]
+    fn optimize_multisub_detailed_separates_spatial_and_primary_responses() {
+        let phase = Some(Array1::from_elem(16, 35.0_f64));
+        let sources = vec![
+            MeasurementSource::InMemory(flat_sub_curve(phase.clone())),
+            MeasurementSource::InMemory(flat_sub_curve(phase)),
+        ];
+        let result =
+            optimize_multisub_detailed(&sources, &tiny_optimizer_config(), 48_000.0).unwrap();
+
+        assert!(result.phase_controls_enabled);
+        assert!(result.advisories.is_empty());
+        assert!(result.combined_response.spatial_magnitude.phase.is_none());
+        assert!(
+            result
+                .combined_response
+                .primary_seat_complex
+                .as_ref()
+                .and_then(|curve| curve.phase.as_ref())
+                .is_some()
+        );
+    }
+
+    #[test]
     fn optimize_multisub_missing_phase_returns_ok() {
         let c1 = flat_sub_curve(None);
         let c2 = flat_sub_curve(None);
@@ -516,6 +581,8 @@ mod tests {
         );
         assert!(res.phase_controls_enabled);
         assert!(res.combined_curve.phase.is_some());
+        assert!(res.combined_response.spatial_magnitude.phase.is_none());
+        assert!(res.combined_response.primary_seat_complex.is_some());
         assert!(res.advisories.is_empty());
     }
 
@@ -532,6 +599,8 @@ mod tests {
         assert!(result.allpass_filters.is_empty());
         assert!(!result.phase_controls_enabled);
         assert!(result.combined_curve.phase.is_none());
+        assert!(result.combined_response.spatial_magnitude.phase.is_none());
+        assert!(result.combined_response.primary_seat_complex.is_none());
         assert_eq!(result.advisories, vec!["missing_phase_gain_only"]);
     }
 

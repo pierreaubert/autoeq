@@ -57,11 +57,19 @@ use super::validation_bundle_config::ValidationBundleConfig;
 use crate::loss::AsymmetricLossConfig;
 use crate::read::PsychoacousticSmoothingConfig;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
+
+fn reject_removed_vog_alias<'de, D>(_: D) -> Result<Option<()>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Err(de::Error::custom(
+        "optimizer.vog was removed; use optimizer.inter_channel_timbre_matching",
+    ))
+}
 
 /// Optimizer configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 pub struct OptimizerConfig {
     /// Processing mode — selects the filter class used for correction.
     #[serde(default)]
@@ -231,6 +239,16 @@ pub struct OptimizerConfig {
     /// Role-aware overhead/height-channel alignment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height_channel_alignment: Option<HeightChannelAlignmentConfig>,
+    /// Deserialization tombstone for the removed `optimizer.vog` alias.
+    #[doc(hidden)]
+    #[serde(
+        default,
+        rename = "vog",
+        skip_serializing,
+        deserialize_with = "reject_removed_vog_alias"
+    )]
+    #[schemars(skip)]
+    pub removed_vog_alias: Option<()>,
     /// Multi-measurement optimization configuration
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multi_measurement: Option<MultiMeasurementConfig>,
@@ -327,6 +345,7 @@ impl Default for OptimizerConfig {
             multi_seat: None,
             inter_channel_timbre_matching: None,
             height_channel_alignment: None,
+            removed_vog_alias: None,
             multi_measurement: None,
             decomposed_correction: Some(DecomposedCorrectionSerdeConfig {
                 enabled: true,
@@ -544,6 +563,19 @@ mod legacy_alias_tests {
         }))
         .unwrap_err();
 
-        assert!(error.to_string().contains("unknown field `vog`"));
+        assert!(error.to_string().contains("optimizer.vog was removed"));
+    }
+
+    #[test]
+    fn unrelated_legacy_fields_remain_tolerated() {
+        let config = serde_json::from_value::<OptimizerConfig>(serde_json::json!({
+            "mode": "iir"
+        }))
+        .unwrap();
+
+        assert_eq!(
+            config.processing_mode,
+            OptimizerConfig::default().processing_mode
+        );
     }
 }

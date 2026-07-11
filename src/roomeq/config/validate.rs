@@ -60,6 +60,70 @@ pub fn validate_room_config(config: &RoomConfig) -> ValidationResult {
 fn validate_optimizer_config(opt: &OptimizerConfig, result: &mut ValidationResult) {
     let mut ctx = ValidationContext::new(opt, result);
     run_optimizer_validation_rules(&mut ctx);
+    validate_channel_alignment_config(opt, result);
+}
+
+fn validate_channel_alignment_config(opt: &OptimizerConfig, result: &mut ValidationResult) {
+    if opt.inter_channel_timbre_matching.is_some() && opt.vog.is_some() {
+        result.add_warning(
+            "optimizer.vog is ignored when optimizer.inter_channel_timbre_matching is present"
+                .to_string(),
+        );
+    }
+
+    for (path, config) in [
+        (
+            "optimizer.inter_channel_timbre_matching",
+            opt.inter_channel_timbre_matching.as_ref(),
+        ),
+        ("optimizer.vog", opt.vog.as_ref()),
+    ] {
+        let Some(config) = config else {
+            continue;
+        };
+        if config.enabled && config.reference_channel.trim().is_empty() {
+            result.add_error(format!(
+                "{path}.reference_channel must not be empty when enabled"
+            ));
+        }
+        if !config.min_improvement_db.is_finite() || config.min_improvement_db < 0.0 {
+            result.add_error(format!(
+                "{path}.min_improvement_db must be finite and non-negative"
+            ));
+        }
+    }
+
+    if let Some(config) = &opt.height_channel_alignment {
+        if !config.min_timbre_improvement_db.is_finite() || config.min_timbre_improvement_db < 0.0 {
+            result.add_error(
+                "optimizer.height_channel_alignment.min_timbre_improvement_db must be finite and non-negative"
+                    .to_string(),
+            );
+        }
+        if !config.max_delay_ms.is_finite() || config.max_delay_ms <= 0.0 {
+            result.add_error(
+                "optimizer.height_channel_alignment.max_delay_ms must be finite and positive"
+                    .to_string(),
+            );
+        }
+        if config.enabled
+            && !(config.match_timbre || config.match_level || config.match_arrival_time)
+        {
+            result.add_error(
+                "optimizer.height_channel_alignment requires at least one actionable timbre, level, or arrival-time objective"
+                    .to_string(),
+            );
+        }
+        for (role, reference) in &config.reference_channels {
+            if role.trim().is_empty() || reference.trim().is_empty() {
+                result.add_error(
+                    "optimizer.height_channel_alignment.reference_channels keys and values must not be empty"
+                        .to_string(),
+                );
+                break;
+            }
+        }
+    }
 }
 
 /// Validate speaker configurations
@@ -670,6 +734,91 @@ mod validate_optimizer_tests {
             result.is_valid,
             "default config should be valid: {:?}",
             result.errors
+        );
+    }
+
+    #[test]
+    fn validate_enabled_timbre_matching_requires_reference_and_finite_threshold() {
+        let mut config = default_config();
+        config.inter_channel_timbre_matching =
+            Some(crate::roomeq::types::InterChannelTimbreMatchingConfig {
+                enabled: true,
+                reference_channel: " ".to_string(),
+                min_improvement_db: f64::NAN,
+            });
+        let mut result = ValidationResult::valid();
+
+        validate_optimizer_config(&config, &mut result);
+
+        assert!(!result.is_valid);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.contains("reference_channel"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.contains("min_improvement_db"))
+        );
+    }
+
+    #[test]
+    fn validate_new_timbre_config_precedence_warns_about_legacy_alias() {
+        let mut config = default_config();
+        config.inter_channel_timbre_matching =
+            Some(crate::roomeq::types::InterChannelTimbreMatchingConfig::default());
+        config.vog = Some(crate::roomeq::types::InterChannelTimbreMatchingConfig::default());
+        let mut result = ValidationResult::valid();
+
+        validate_optimizer_config(&config, &mut result);
+
+        assert!(result.is_valid);
+        assert!(
+            result.warnings.iter().any(|warning| {
+                warning.contains("optimizer.vog") && warning.contains("ignored")
+            })
+        );
+    }
+
+    #[test]
+    fn validate_height_alignment_requires_valid_bounds_and_an_objective() {
+        let mut config = default_config();
+        config.height_channel_alignment =
+            Some(crate::roomeq::types::HeightChannelAlignmentConfig {
+                enabled: true,
+                match_timbre: false,
+                match_level: false,
+                match_arrival_time: false,
+                match_phase: false,
+                min_timbre_improvement_db: -1.0,
+                max_delay_ms: f64::INFINITY,
+                ..Default::default()
+            });
+        let mut result = ValidationResult::valid();
+
+        validate_optimizer_config(&config, &mut result);
+
+        assert!(!result.is_valid);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.contains("min_timbre_improvement_db"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.contains("max_delay_ms"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.contains("at least one actionable"))
         );
     }
 

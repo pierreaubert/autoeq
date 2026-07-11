@@ -18,7 +18,7 @@ pub(super) enum OptionOverride {
     MultiMeasurementMinimax,
     MultiMeasurementVariancePenalized,
     ProductionMultiSubMultiSeat,
-    VoiceOfGod {
+    InterChannelTimbreMatching {
         reference_channel: String,
     },
     SpatialRobustness,
@@ -53,8 +53,8 @@ impl std::fmt::Display for OptionOverride {
             OptionOverride::ProductionMultiSubMultiSeat => {
                 write!(f, "production_multi_sub_multi_seat")
             }
-            OptionOverride::VoiceOfGod { reference_channel } => {
-                write!(f, "voice_of_god(ref={})", reference_channel)
+            OptionOverride::InterChannelTimbreMatching { reference_channel } => {
+                write!(f, "inter_channel_timbre_matching(ref={reference_channel})")
             }
             OptionOverride::SpatialRobustness => write!(f, "spatial_robustness"),
             OptionOverride::PreRinging => write!(f, "pre_ringing"),

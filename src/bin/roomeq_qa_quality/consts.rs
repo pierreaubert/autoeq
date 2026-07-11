@@ -50,8 +50,8 @@ pub(super) const TARGET_CURVE_SLOPE_TOLERANCE: f64 = 0.05;
 /// Score tolerance for option vs baseline (option within 1.2x of baseline)
 pub(super) const OPTION_SCORE_TOLERANCE: f64 = 1.20;
 
-/// Voice-of-God alignment can trade raw flatness for spatial/timing consistency.
-pub(super) const VOG_SCORE_TOLERANCE: f64 = 1.50;
+/// Timbre matching can trade some raw flatness for lower inter-channel spread.
+pub(super) const TIMBRE_MATCHING_SCORE_TOLERANCE: f64 = 1.50;
 
 /// Psychoacoustic may trade raw score for perceptual quality
 pub(super) const PSYCHOACOUSTIC_SCORE_TOLERANCE: f64 = 2.0;

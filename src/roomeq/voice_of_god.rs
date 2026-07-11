@@ -1,7 +1,7 @@
-//! Voice of God (VoG) — timbre-match satellite channels to a reference channel.
+//! Inter-channel timbre matching.
 //!
 //! After per-channel EQ optimization, different speakers may have residual tonal
-//! differences (e.g., one satellite has brighter timbre than another). VoG applies
+//! differences (e.g., one satellite has brighter timbre than another). This stage applies
 //! broadband spectral alignment (lowshelf + highshelf + gain) to push each satellite
 //! channel toward the reference channel's tonal balance.
 //!
@@ -13,13 +13,14 @@ use log::info;
 use std::collections::HashMap;
 
 use super::spectral_align::{
-    SpectralAlignmentResult, compute_target_alignment, create_alignment_plugins,
+    SpectralAlignmentResult, compute_target_alignment, create_alignment_filters,
+    create_alignment_plugins,
 };
 use super::types::PluginConfigWrapper;
 
 /// Structured outcome for one channel in the timbre-matching stage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VoGChannelStatus {
+pub enum TimbreMatchingChannelStatus {
     /// Reference channel; no correction is applied.
     Reference,
     /// A correction was computed.
@@ -30,9 +31,9 @@ pub enum VoGChannelStatus {
     Failed,
 }
 
-/// Result of VoG analysis for a single channel.
+/// Result of inter-channel timbre analysis for a single channel.
 #[derive(Debug, Clone)]
-pub struct VoGResult {
+pub struct InterChannelTimbreMatchingResult {
     /// Channel name
     pub channel_name: String,
     /// Spectral alignment corrections (None for the reference channel)
@@ -40,12 +41,16 @@ pub struct VoGResult {
     /// Whether this channel is the reference
     pub is_reference: bool,
     /// Structured per-channel stage outcome.
-    pub status: VoGChannelStatus,
+    pub status: TimbreMatchingChannelStatus,
     /// Machine-readable advisories for degraded or skipped paths.
     pub advisories: Vec<String>,
+    /// Normalized pairwise timbre spread before candidate DSP.
+    pub timbre_spread_before_db: Option<f64>,
+    /// Normalized pairwise timbre spread after candidate DSP.
+    pub timbre_spread_after_db: Option<f64>,
 }
 
-/// Compute Voice of God corrections for all channels.
+/// Compute inter-channel timbre corrections for all channels.
 ///
 /// For each non-reference channel, fits lowshelf + highshelf + flat gain to match
 /// the reference channel's spectral shape. The reference channel itself receives
@@ -53,17 +58,39 @@ pub struct VoGResult {
 ///
 /// # Errors
 /// Returns an error if `reference_channel` is not found in `corrected_curves`.
-pub fn compute_voice_of_god(
+pub fn compute_inter_channel_timbre_matching_with_threshold(
     corrected_curves: &HashMap<String, Curve>,
     reference_channel: &str,
     sample_rate: f64,
     min_freq: f64,
     max_freq: f64,
-) -> Result<HashMap<String, VoGResult>> {
+    min_improvement_db: f64,
+) -> Result<HashMap<String, InterChannelTimbreMatchingResult>> {
+    if !sample_rate.is_finite() || sample_rate <= 0.0 {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "inter-channel timbre matching requires a positive sample rate, got {sample_rate}"
+            ),
+        });
+    }
+    if !min_freq.is_finite() || !max_freq.is_finite() || min_freq <= 0.0 || max_freq <= min_freq {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "inter-channel timbre matching requires 0 < min_freq < max_freq, got {min_freq}..{max_freq}"
+            ),
+        });
+    }
+    if !min_improvement_db.is_finite() || min_improvement_db < 0.0 {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "inter-channel timbre matching min_improvement_db must be finite and non-negative, got {min_improvement_db}"
+            ),
+        });
+    }
     let reference_curve = corrected_curves.get(reference_channel).ok_or_else(|| {
         AutoeqError::InvalidConfiguration {
             message: format!(
-                "VoG reference channel '{}' not found. Available: {:?}",
+                "Timbre-matching reference channel '{}' not found. Available: {:?}",
                 reference_channel,
                 corrected_curves.keys().collect::<Vec<_>>()
             ),
@@ -77,12 +104,14 @@ pub fn compute_voice_of_god(
         if name == reference_channel {
             results.insert(
                 name.clone(),
-                VoGResult {
+                InterChannelTimbreMatchingResult {
                     channel_name: name.clone(),
                     alignment: None,
                     is_reference: true,
-                    status: VoGChannelStatus::Reference,
+                    status: TimbreMatchingChannelStatus::Reference,
                     advisories: vec!["reference_channel".to_string()],
+                    timbre_spread_before_db: None,
+                    timbre_spread_after_db: None,
                 },
             );
             continue;
@@ -91,12 +120,14 @@ pub fn compute_voice_of_god(
         if let Err(error) = validate_curve(curve, "channel", name) {
             results.insert(
                 name.clone(),
-                VoGResult {
+                InterChannelTimbreMatchingResult {
                     channel_name: name.clone(),
                     alignment: None,
                     is_reference: false,
-                    status: VoGChannelStatus::Failed,
+                    status: TimbreMatchingChannelStatus::Failed,
                     advisories: vec![error.to_string()],
+                    timbre_spread_before_db: None,
+                    timbre_spread_after_db: None,
                 },
             );
             continue;
@@ -106,29 +137,53 @@ pub fn compute_voice_of_god(
             !super::frequency_grid::same_frequency_grid(&curve.freq, &reference_curve.freq);
         // The target-alignment helper interpolates the reference onto this
         // channel's grid and restricts the fit to their measured overlap.
-        let alignment =
+        let candidate_alignment =
             compute_target_alignment(curve, reference_curve, min_freq, max_freq, sample_rate);
-        let status = if alignment.is_some() {
-            VoGChannelStatus::Applied
-        } else {
-            VoGChannelStatus::Skipped
-        };
         let mut advisories = Vec::new();
         if grids_differ {
             advisories.push("frequency_grid_interpolated".to_string());
         }
-        if alignment.is_none() {
+        let timbre_spread_before_db =
+            pairwise_normalized_timbre_spread_db(curve, reference_curve, min_freq, max_freq);
+        let (alignment, timbre_spread_after_db) = if let Some(candidate) = candidate_alignment {
+            let corrected = apply_alignment_to_curve(curve, &candidate, sample_rate);
+            let after = pairwise_normalized_timbre_spread_db(
+                &corrected,
+                reference_curve,
+                min_freq,
+                max_freq,
+            );
+            let improvement = timbre_spread_before_db
+                .zip(after)
+                .map(|(before, after)| before - after);
+            if improvement.is_some_and(|value| value >= min_improvement_db) {
+                (Some(candidate), after)
+            } else {
+                advisories.push("insufficient_timbre_spread_improvement".to_string());
+                (None, after)
+            }
+        } else {
+            (None, timbre_spread_before_db)
+        };
+        let status = if alignment.is_some() {
+            TimbreMatchingChannelStatus::Applied
+        } else {
+            TimbreMatchingChannelStatus::Skipped
+        };
+        if alignment.is_none() && advisories.is_empty() {
             advisories.push("no_material_correction".to_string());
         }
 
         results.insert(
             name.clone(),
-            VoGResult {
+            InterChannelTimbreMatchingResult {
                 channel_name: name.clone(),
                 alignment,
                 is_reference: false,
                 status,
                 advisories,
+                timbre_spread_before_db,
+                timbre_spread_after_db,
             },
         );
     }
@@ -139,7 +194,7 @@ pub fn compute_voice_of_god(
         .for_each(|r| {
             let a = r.alignment.as_ref().unwrap();
             info!(
-                "  VoG '{}': LS={:+.2} dB, HS={:+.2} dB, gain={:+.2} dB (residual {:.2} dB RMS)",
+                "  Timbre match '{}': LS={:+.2} dB, HS={:+.2} dB, gain={:+.2} dB (residual {:.2} dB RMS)",
                 r.channel_name,
                 a.lowshelf_gain_db,
                 a.highshelf_gain_db,
@@ -151,23 +206,45 @@ pub fn compute_voice_of_god(
     Ok(results)
 }
 
+pub fn compute_inter_channel_timbre_matching(
+    corrected_curves: &HashMap<String, Curve>,
+    reference_channel: &str,
+    sample_rate: f64,
+    min_freq: f64,
+    max_freq: f64,
+) -> Result<HashMap<String, InterChannelTimbreMatchingResult>> {
+    compute_inter_channel_timbre_matching_with_threshold(
+        corrected_curves,
+        reference_channel,
+        sample_rate,
+        min_freq,
+        max_freq,
+        0.05,
+    )
+}
+
 fn validate_curve(curve: &Curve, role: &str, name: &str) -> Result<()> {
     if !super::frequency_grid::is_valid_frequency_grid(&curve.freq)
         || curve.spl.len() != curve.freq.len()
         || curve.spl.iter().any(|value| !value.is_finite())
     {
         return Err(AutoeqError::InvalidMeasurement {
-            message: format!("VoG {role} channel '{name}' has invalid frequency/SPL data"),
+            message: format!(
+                "Timbre-matching {role} channel '{name}' has invalid frequency/SPL data"
+            ),
         });
     }
     Ok(())
 }
 
-/// Create DSP plugins for a VoG correction result.
+/// Create DSP plugins for an inter-channel timbre-matching result.
 ///
 /// Returns a list of plugins (EQ with shelves, gain) to apply to the channel.
 /// Returns an empty list for the reference channel or channels with negligible corrections.
-pub fn create_vog_plugins(result: &VoGResult, sample_rate: f64) -> Vec<PluginConfigWrapper> {
+pub fn create_timbre_matching_plugins(
+    result: &InterChannelTimbreMatchingResult,
+    sample_rate: f64,
+) -> Vec<PluginConfigWrapper> {
     let mut plugins = Vec::new();
 
     if let Some(alignment) = &result.alignment {
@@ -183,7 +260,90 @@ pub fn create_vog_plugins(result: &VoGResult, sample_rate: f64) -> Vec<PluginCon
     plugins
 }
 
+pub(crate) fn apply_alignment_to_curve(
+    curve: &Curve,
+    alignment: &SpectralAlignmentResult,
+    sample_rate: f64,
+) -> Curve {
+    let filters = create_alignment_filters(alignment, sample_rate);
+    let response =
+        crate::response::compute_peq_complex_response(&filters, &curve.freq, sample_rate);
+    let mut corrected = crate::response::apply_complex_response(curve, &response);
+    corrected.spl += alignment.flat_gain_db;
+    corrected
+}
+
+/// Mean absolute, level-normalized timbre difference over measured overlap.
+pub fn pairwise_normalized_timbre_spread_db(
+    channel: &Curve,
+    reference: &Curve,
+    min_freq: f64,
+    max_freq: f64,
+) -> Option<f64> {
+    validate_curve(channel, "channel", "metric").ok()?;
+    validate_curve(reference, "reference", "metric").ok()?;
+    let overlap_min = min_freq.max(channel.freq[0]).max(reference.freq[0]);
+    let overlap_max = max_freq
+        .min(channel.freq[channel.freq.len() - 1])
+        .min(reference.freq[reference.freq.len() - 1]);
+    if overlap_max <= overlap_min {
+        return None;
+    }
+    let reference = if super::frequency_grid::same_frequency_grid(&channel.freq, &reference.freq) {
+        reference.clone()
+    } else {
+        crate::read::interpolate_log_space(&channel.freq, reference)
+    };
+    let values = channel
+        .freq
+        .iter()
+        .enumerate()
+        .filter(|(_, frequency)| **frequency >= overlap_min && **frequency <= overlap_max)
+        .filter(|(index, _)| channel.spl[*index].is_finite() && reference.spl[*index].is_finite())
+        .map(|(index, _)| (channel.spl[index], reference.spl[index]))
+        .collect::<Vec<_>>();
+    if values.len() < 2 {
+        return None;
+    }
+    let channel = values.iter().map(|(value, _)| *value).collect::<Vec<_>>();
+    let reference = values.iter().map(|(_, value)| *value).collect::<Vec<_>>();
+    super::acoustic_qa::normalized_timbre_spread_db(&[channel, reference])
+}
+
+#[deprecated(since = "0.4.47", note = "use TimbreMatchingChannelStatus")]
+pub type VoGChannelStatus = TimbreMatchingChannelStatus;
+
+#[deprecated(since = "0.4.47", note = "use InterChannelTimbreMatchingResult")]
+pub type VoGResult = InterChannelTimbreMatchingResult;
+
+#[deprecated(since = "0.4.47", note = "use compute_inter_channel_timbre_matching")]
+pub fn compute_voice_of_god(
+    corrected_curves: &HashMap<String, Curve>,
+    reference_channel: &str,
+    sample_rate: f64,
+    min_freq: f64,
+    max_freq: f64,
+) -> Result<HashMap<String, InterChannelTimbreMatchingResult>> {
+    compute_inter_channel_timbre_matching_with_threshold(
+        corrected_curves,
+        reference_channel,
+        sample_rate,
+        min_freq,
+        max_freq,
+        0.05,
+    )
+}
+
+#[deprecated(since = "0.4.47", note = "use create_timbre_matching_plugins")]
+pub fn create_vog_plugins(
+    result: &InterChannelTimbreMatchingResult,
+    sample_rate: f64,
+) -> Vec<PluginConfigWrapper> {
+    create_timbre_matching_plugins(result, sample_rate)
+}
+
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use ndarray::Array1;
@@ -262,6 +422,10 @@ mod tests {
             l_result.lowshelf_gain_db < -0.3,
             "L should need LS cut, got {:.2}",
             l_result.lowshelf_gain_db
+        );
+        assert!(
+            results["L"].timbre_spread_after_db.unwrap()
+                < results["L"].timbre_spread_before_db.unwrap()
         );
     }
 
@@ -370,5 +534,59 @@ mod tests {
             "R should need LS cut for excess bass, got {:.2}",
             r_align.lowshelf_gain_db
         );
+    }
+
+    #[test]
+    fn timbre_matching_rejects_candidate_without_required_metric_improvement() {
+        let curves = HashMap::from([
+            ("C".to_string(), make_curve(|_| 0.0)),
+            (
+                "L".to_string(),
+                make_curve(|frequency| if frequency < 200.0 { 1.0 } else { 0.0 }),
+            ),
+        ]);
+        let results = compute_inter_channel_timbre_matching_with_threshold(
+            &curves, "C", SR, 20.0, 20_000.0, 100.0,
+        )
+        .unwrap();
+        assert_eq!(results["L"].status, TimbreMatchingChannelStatus::Skipped);
+        assert!(results["L"].alignment.is_none());
+        assert!(
+            results["L"]
+                .advisories
+                .contains(&"insufficient_timbre_spread_improvement".to_string())
+        );
+    }
+
+    #[test]
+    fn normalized_timbre_spread_uses_only_measured_overlap() {
+        let channel = make_curve_on_grid(vec![20.0, 50.0, 100.0, 200.0], |frequency| {
+            if frequency < 50.0 { 100.0 } else { 0.0 }
+        });
+        let reference = make_curve_on_grid(vec![50.0, 100.0, 200.0, 500.0], |_| 0.0);
+
+        assert_eq!(
+            pairwise_normalized_timbre_spread_db(&channel, &reference, 20.0, 500.0),
+            Some(0.0)
+        );
+    }
+
+    #[test]
+    fn timbre_matching_rejects_non_finite_improvement_threshold() {
+        let curves = HashMap::from([
+            ("C".to_string(), make_curve(|_| 0.0)),
+            ("L".to_string(), make_curve(|_| 1.0)),
+        ]);
+
+        let error = compute_inter_channel_timbre_matching_with_threshold(
+            &curves,
+            "C",
+            SR,
+            20.0,
+            20_000.0,
+            f64::NAN,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("min_improvement_db"));
     }
 }

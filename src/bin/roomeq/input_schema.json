@@ -1427,6 +1427,24 @@
         }
       }
     },
+    "DriverCrossoverBand": {
+      "description": "Frequency region in which per-driver linearization is allowed.",
+      "type": "object",
+      "properties": {
+        "max_hz": {
+          "type": "number",
+          "format": "double"
+        },
+        "min_hz": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "min_hz",
+        "max_hz"
+      ]
+    },
     "EarlyLateCorrectionConfig": {
       "description": "Direct/early/late impulse-response reporting windows for FIR and\nmixed-phase modes.",
       "type": "object",
@@ -1781,6 +1799,50 @@
         }
       }
     },
+    "HeightChannelAlignmentConfig": {
+      "description": "Role-aware alignment policy for overhead/height channels.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "match_arrival_time": {
+          "type": "boolean",
+          "default": true
+        },
+        "match_level": {
+          "type": "boolean",
+          "default": true
+        },
+        "match_phase": {
+          "description": "Require candidate DSP not to worsen phase consistency when trustworthy\nphase and coherence are available. This is an optional safety gate, not\na standalone correction objective.",
+          "type": "boolean",
+          "default": false
+        },
+        "match_timbre": {
+          "type": "boolean",
+          "default": true
+        },
+        "max_delay_ms": {
+          "type": "number",
+          "format": "double",
+          "default": 20.0
+        },
+        "min_timbre_improvement_db": {
+          "type": "number",
+          "format": "double",
+          "default": 0.05
+        },
+        "reference_channels": {
+          "description": "Optional reference overrides keyed by height channel name or role group\n(`top_front`, `top_middle`, or `top_rear`).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "HighFreqFilterConfig": {
       "description": "High frequency filter configuration for Schroeder split",
       "type": "object",
@@ -1903,6 +1965,30 @@
         }
       },
       "additionalProperties": false
+    },
+    "InterChannelTimbreMatchingConfig": {
+      "description": "Broadband timbre matching between corrected channels.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable inter-channel timbre matching.",
+          "type": "boolean",
+          "default": false
+        },
+        "min_improvement_db": {
+          "description": "Minimum reduction in normalized timbre spread required before applying DSP.",
+          "type": "number",
+          "format": "double",
+          "default": 0.05
+        },
+        "reference_channel": {
+          "description": "Reference channel name (e.g. \"Center\" or \"Left\").",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reference_channel"
+      ]
     },
     "LowFreqFilterConfig": {
       "description": "Low frequency filter configuration for Schroeder split",
@@ -2504,11 +2590,33 @@
             }
           ]
         },
+        "height_channel_alignment": {
+          "description": "Role-aware overhead/height-channel alignment.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HeightChannelAlignmentConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "high_frequency_correction": {
           "description": "Safeguards for high-frequency correction above the conservative range.",
           "anyOf": [
             {
               "$ref": "#/$defs/HighFrequencyCorrectionConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inter_channel_timbre_matching": {
+          "description": "Inter-channel timbre matching configuration.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterChannelTimbreMatchingConfig"
             },
             {
               "type": "null"
@@ -2823,10 +2931,10 @@
           ]
         },
         "vog": {
-          "description": "Voice of God optimization configuration (v2)",
+          "description": "Deprecated one-cycle JSON alias for `inter_channel_timbre_matching`.",
           "anyOf": [
             {
-              "$ref": "#/$defs/VoiceOfGodConfig"
+              "$ref": "#/$defs/InterChannelTimbreMatchingConfig"
             },
             {
               "type": "null"
@@ -2834,6 +2942,25 @@
           ]
         }
       }
+    },
+    "ParallelDriverGroup": {
+      "description": "Drivers that radiate in parallel within one acoustic crossover band.",
+      "type": "object",
+      "properties": {
+        "driver_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "driver_ids"
+      ]
     },
     "PerceptualPolicyConfig": {
       "description": "Perceptual policy selector layered above the detailed optimizer settings.",
@@ -3692,45 +3819,8 @@
         }
       }
     },
-    "DriverCrossoverBand": {
-      "description": "Frequency region in which per-driver linearization is allowed.",
-      "type": "object",
-      "properties": {
-        "max_hz": {
-          "type": "number",
-          "format": "double"
-        },
-        "min_hz": {
-          "type": "number",
-          "format": "double"
-        }
-      },
-      "required": [
-        "min_hz",
-        "max_hz"
-      ]
-    },
-    "ParallelDriverGroup": {
-      "description": "Drivers that radiate in parallel within one acoustic crossover band.",
-      "type": "object",
-      "properties": {
-        "driver_ids": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "driver_ids"
-      ]
-    },
     "SpeakerConfig": {
-      "description": "Speaker configuration (can be single measurement or group)\n\nVariant order matters for serde untagged deserialization: explicit topology is selected by its unique `drivers` field, legacy groups by `measurements`, and `Single` remains the catch-all.",
+      "description": "Speaker configuration (can be single measurement or group)\n\nVariant order matters for serde untagged deserialization: serde tries each variant\nin order. `SupportingSource` is first because it requires the unique `primary` and\n`support` fields. Topology is before legacy Group because its unique `drivers`\nfield selects the explicit representation. Named group variants are tried before\n`Single`, which remains the catch-all.",
       "anyOf": [
         {
           "description": "Supporting-source room compensation (primary + delayed support loudspeaker).",
@@ -3852,7 +3942,7 @@
           ]
         },
         "drivers": {
-          "description": "Drivers in low-to-high acoustic-band order. Members of a parallel group may appear next to each other in any order within their shared band.",
+          "description": "Drivers in low-to-high acoustic-band order. Members of a parallel group\nmay appear next to each other in any order within their shared band.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/SpeakerDriver"
@@ -4454,24 +4544,6 @@
           "default": -23.0
         }
       }
-    },
-    "VoiceOfGodConfig": {
-      "description": "Configuration for Voice of God (Timbre Matching)",
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "description": "Enable Voice of God optimization",
-          "type": "boolean",
-          "default": false
-        },
-        "reference_channel": {
-          "description": "Reference channel name (e.g. \"Center\" or \"Left\")",
-          "type": "string"
-        }
-      },
-      "required": [
-        "reference_channel"
-      ]
     }
   }
 }

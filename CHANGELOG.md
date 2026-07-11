@@ -78,10 +78,17 @@
 - Rejected Schroeder two-band optimization with fewer than two filters instead
   of underflowing or silently allocating an empty band, and accepted identical
   positive adaptive-GD bootstrap improvements as significant evidence.
-- Made Voice-of-God timbre matching interpolate compatible mismatched frequency
-  grids over their measured overlap, validate reference/channel data, and
-  report applied, skipped, degraded, or failed outcomes in serialized
-  `metadata.stage_outcomes`.
+- Renamed Voice-of-God broadband matching to
+  `optimizer.inter_channel_timbre_matching`, added a normalized timbre-spread
+  acceptance gate, and retained `optimizer.vog`/`VoiceOfGodConfig` as
+  one-schema-cycle compatibility aliases with migration advisories. Mismatched
+  grids are evaluated only over measured overlap, and invalid references or
+  rejected corrections are exposed through structured stage outcomes.
+- Added separate role-aware `optimizer.height_channel_alignment` for overhead
+  channels, with top-front/middle/rear bed-channel references, timbre and level
+  objectives, bounded positive arrival delay, an optional coherent-phase safety
+  gate, reference overrides, and structured applied/skipped/degraded/failed
+  metadata.
 - Hardened external DSP exports so routed home-cinema bass-management graphs
   fail with an actionable error instead of being flattened into an incorrect
   configuration; users are directed to SotF JSON or Apply as Graph when route

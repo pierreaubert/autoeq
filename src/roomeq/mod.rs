@@ -117,9 +117,23 @@ pub use spectral_align::{
     create_alignment_plugins, log_spectral_alignment,
 };
 
-// Voice of God (timbre matching between channels)
-mod voice_of_god;
-pub use voice_of_god::{VoGChannelStatus, VoGResult, compute_voice_of_god, create_vog_plugins};
+// Inter-channel timbre matching (legacy file path retained for one schema cycle).
+#[path = "voice_of_god.rs"]
+mod inter_channel_timbre_matching;
+pub use inter_channel_timbre_matching::{
+    InterChannelTimbreMatchingResult, TimbreMatchingChannelStatus,
+    compute_inter_channel_timbre_matching, compute_inter_channel_timbre_matching_with_threshold,
+    create_timbre_matching_plugins, pairwise_normalized_timbre_spread_db,
+};
+#[allow(deprecated)]
+pub use inter_channel_timbre_matching::{
+    VoGChannelStatus, VoGResult, compute_voice_of_god, create_vog_plugins,
+};
+
+mod height_channel_alignment;
+pub use height_channel_alignment::{
+    HeightAlignmentStatus, HeightChannelAlignmentResult, compute_height_channel_alignment,
+};
 
 // Spatial robustness (multi-position analysis)
 pub mod spatial_robustness;

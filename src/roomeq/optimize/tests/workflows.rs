@@ -174,16 +174,18 @@ fn optimize_room_with_phase_alignment_enabled_succeeds() {
 }
 
 #[test]
-fn optimize_room_with_vog_enabled_succeeds() {
+fn optimize_room_with_inter_channel_timbre_matching_enabled_succeeds() {
     let mut config = stereo_2_0_config();
-    config.optimizer.vog = Some(crate::roomeq::types::VoiceOfGodConfig {
-        enabled: true,
-        reference_channel: "Left".to_string(),
-    });
+    config.optimizer.inter_channel_timbre_matching =
+        Some(crate::roomeq::types::InterChannelTimbreMatchingConfig {
+            enabled: true,
+            reference_channel: "Left".to_string(),
+            min_improvement_db: 0.0,
+        });
     let result = optimize_room(&config, 48000.0, None, None);
     assert!(
         result.is_ok(),
-        "optimize_room with VoG should succeed: {:?}",
+        "optimize_room with inter-channel timbre matching should succeed: {:?}",
         result.err()
     );
 }

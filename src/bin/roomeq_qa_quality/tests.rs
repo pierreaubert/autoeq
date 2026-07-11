@@ -1,7 +1,8 @@
 use super::consts::qa_seed;
 use super::metric_scorecard::MetricScorecard;
 use super::metric_scorecard::compare_scorecards;
-use super::validate::validate_target_tilt;
+use super::option_override::OptionOverride;
+use super::validate::{validate_option_effect, validate_target_tilt};
 use autoeq::Curve;
 use autoeq::roomeq::RoomConfig;
 use std::collections::HashMap;
@@ -110,6 +111,40 @@ fn empty_room_config() -> RoomConfig {
     }
 }
 
+fn result_with_inter_channel_slope(channel_slope_db_per_octave: f64) -> RoomOptimizationResult {
+    let mut result = result_with_channel_slopes(0.0, 0.0, 0.0);
+    let reference_curve = curve_with_slope(0.0);
+    let channel_curve = curve_with_slope(channel_slope_db_per_octave);
+    result.channel_results = HashMap::from([
+        (
+            "C".to_string(),
+            ChannelOptimizationResult {
+                name: "C".to_string(),
+                pre_score: 0.0,
+                post_score: 0.0,
+                initial_curve: reference_curve.clone(),
+                final_curve: reference_curve,
+                biquads: Vec::new(),
+                fir_coeffs: None,
+            },
+        ),
+        (
+            "L".to_string(),
+            ChannelOptimizationResult {
+                name: "L".to_string(),
+                pre_score: 0.0,
+                post_score: 0.0,
+                initial_curve: channel_curve.clone(),
+                final_curve: channel_curve,
+                biquads: Vec::new(),
+                fir_coeffs: None,
+            },
+        ),
+    ]);
+    result.combined_post_score = 1.0;
+    result
+}
+
 #[test]
 fn target_tilt_validator_accepts_response_that_does_not_regress_from_target() {
     let baseline = result_with_channel_slopes(0.0, 0.0, 0.0);
@@ -139,6 +174,48 @@ fn target_tilt_validator_rejects_wrong_target_curve_slope() {
     let config = empty_room_config();
 
     let (pass, _) = validate_target_tilt(-0.8, &baseline, &config, &option, 1, false, false);
+
+    assert!(!pass);
+}
+
+#[test]
+fn timbre_matching_validator_requires_reduced_normalized_spread() {
+    let baseline = result_with_inter_channel_slope(3.0);
+    let option = result_with_inter_channel_slope(1.0);
+    let config = empty_room_config();
+    let override_option = OptionOverride::InterChannelTimbreMatching {
+        reference_channel: "C".to_string(),
+    };
+
+    let (pass, detail) = validate_option_effect(
+        &override_option,
+        &config,
+        &baseline,
+        &config,
+        &option,
+        std::slice::from_ref(&override_option),
+    );
+
+    assert!(pass, "{detail}");
+}
+
+#[test]
+fn timbre_matching_validator_rejects_increased_normalized_spread() {
+    let baseline = result_with_inter_channel_slope(1.0);
+    let option = result_with_inter_channel_slope(3.0);
+    let config = empty_room_config();
+    let override_option = OptionOverride::InterChannelTimbreMatching {
+        reference_channel: "C".to_string(),
+    };
+
+    let (pass, _) = validate_option_effect(
+        &override_option,
+        &config,
+        &baseline,
+        &config,
+        &option,
+        std::slice::from_ref(&override_option),
+    );
 
     assert!(!pass);
 }

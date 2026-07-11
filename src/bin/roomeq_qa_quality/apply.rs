@@ -6,9 +6,10 @@ use super::mutation::Mutation;
 use super::option_override::OptionOverride;
 use autoeq::roomeq::{
     CrossoverConfig, DecomposedCorrectionSerdeConfig, ExcursionProtectionConfig,
-    MixedPhaseSerdeConfig, MultiMeasurementConfig, MultiMeasurementStrategy, MultiSeatConfig,
-    MultiSeatStrategy, PhaseAlignmentConfig, PreRingingSerdeConfig, ProcessingMode, RoomConfig,
-    SchroederSplitConfig, SpatialRobustnessSerdeConfig, VoiceOfGodConfig,
+    InterChannelTimbreMatchingConfig, MixedPhaseSerdeConfig, MultiMeasurementConfig,
+    MultiMeasurementStrategy, MultiSeatConfig, MultiSeatStrategy, PhaseAlignmentConfig,
+    PreRingingSerdeConfig, ProcessingMode, RoomConfig, SchroederSplitConfig,
+    SpatialRobustnessSerdeConfig,
 };
 use std::collections::HashMap;
 
@@ -131,11 +132,13 @@ pub(super) fn apply_option_override(config: &mut RoomConfig, option: &OptionOver
                 ..Default::default()
             });
         }
-        OptionOverride::VoiceOfGod { reference_channel } => {
-            config.optimizer.vog = Some(VoiceOfGodConfig {
-                enabled: true,
-                reference_channel: reference_channel.clone(),
-            });
+        OptionOverride::InterChannelTimbreMatching { reference_channel } => {
+            config.optimizer.inter_channel_timbre_matching =
+                Some(InterChannelTimbreMatchingConfig {
+                    enabled: true,
+                    reference_channel: reference_channel.clone(),
+                    ..Default::default()
+                });
         }
         OptionOverride::SpatialRobustness => {
             config.optimizer.multi_measurement = Some(MultiMeasurementConfig {

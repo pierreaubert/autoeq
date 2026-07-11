@@ -87,7 +87,8 @@ fn optimize_room_single_speaker_low_latency_succeeds() {
 }
 
 #[test]
-fn optimize_room_invalid_vog_reference_records_failed_stage() {
+#[allow(deprecated)]
+fn optimize_room_legacy_vog_alias_records_migration_and_failed_stage() {
     let mut config = minimal_room_config(ProcessingMode::LowLatency);
     config.speakers.insert(
         "right".to_string(),
@@ -96,6 +97,7 @@ fn optimize_room_invalid_vog_reference_records_failed_stage() {
     config.optimizer.vog = Some(crate::roomeq::types::VoiceOfGodConfig {
         enabled: true,
         reference_channel: "missing".to_string(),
+        min_improvement_db: 0.0,
     });
 
     let result = optimize_room(&config, 48_000.0, None, None).unwrap();
@@ -103,14 +105,112 @@ fn optimize_room_invalid_vog_reference_records_failed_stage() {
         .metadata
         .stage_outcomes
         .iter()
-        .find(|outcome| outcome.stage == "voice_of_god_alignment")
-        .expect("VoG stage outcome");
+        .find(|outcome| outcome.stage == "inter_channel_timbre_matching")
+        .expect("inter-channel timbre-matching stage outcome");
     assert_eq!(outcome.status, crate::roomeq::types::StageStatus::Failed);
     assert!(
         outcome
             .advisories
             .iter()
             .any(|advisory| advisory.contains("invalid_reference"))
+    );
+    assert!(
+        outcome
+            .advisories
+            .contains(&"deprecated_optimizer_vog_alias".to_string())
+    );
+}
+
+#[test]
+fn optimize_room_new_timbre_config_precedes_legacy_alias() {
+    let mut config = minimal_room_config(ProcessingMode::LowLatency);
+    config.optimizer.inter_channel_timbre_matching =
+        Some(crate::roomeq::types::InterChannelTimbreMatchingConfig::default());
+    config.optimizer.vog = Some(crate::roomeq::types::InterChannelTimbreMatchingConfig {
+        enabled: true,
+        reference_channel: "left".to_string(),
+        min_improvement_db: 0.0,
+    });
+
+    let result = optimize_room(&config, 48_000.0, None, None).unwrap();
+    let outcome = result
+        .metadata
+        .stage_outcomes
+        .iter()
+        .find(|outcome| outcome.stage == "inter_channel_timbre_matching")
+        .expect("ignored legacy alias should be reported");
+    assert_eq!(outcome.status, crate::roomeq::types::StageStatus::Skipped);
+    assert!(
+        outcome
+            .advisories
+            .contains(&"optimizer_vog_ignored_because_new_config_present".to_string())
+    );
+}
+
+#[test]
+fn optimize_room_height_alignment_records_structured_stage() {
+    let mut config = minimal_room_config(ProcessingMode::LowLatency);
+    config.speakers.insert(
+        "TFL".to_string(),
+        SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
+    );
+    config.optimizer.height_channel_alignment =
+        Some(crate::roomeq::types::HeightChannelAlignmentConfig {
+            enabled: true,
+            min_timbre_improvement_db: 0.0,
+            ..Default::default()
+        });
+
+    let result = optimize_room(&config, 48_000.0, None, None).unwrap();
+    let outcome = result
+        .metadata
+        .stage_outcomes
+        .iter()
+        .find(|outcome| outcome.stage == "height_channel_alignment")
+        .expect("height-alignment stage outcome");
+    assert_ne!(outcome.status, crate::roomeq::types::StageStatus::Failed);
+}
+
+#[test]
+fn height_arrival_delay_updates_exported_chain_and_reported_phase() {
+    let mut config = minimal_room_config(ProcessingMode::LowLatency);
+    let mut phased = flat_curve();
+    phased.phase = Some(Array1::zeros(phased.freq.len()));
+    config.speakers.insert(
+        "left".to_string(),
+        SpeakerConfig::Single(MeasurementSource::InMemory(phased.clone())),
+    );
+    config.speakers.insert(
+        "TFL".to_string(),
+        SpeakerConfig::Single(MeasurementSource::InMemory(phased)),
+    );
+    config.optimizer.height_channel_alignment =
+        Some(crate::roomeq::types::HeightChannelAlignmentConfig {
+            enabled: true,
+            match_timbre: false,
+            match_level: false,
+            match_arrival_time: true,
+            ..Default::default()
+        });
+    let arrivals = HashMap::from([("left".to_string(), 5.0), ("TFL".to_string(), 3.0)]);
+
+    let result =
+        optimize_room_with_probe_arrivals(&config, 48_000.0, None, None, &arrivals).unwrap();
+
+    assert!(result.channels["TFL"].plugins.iter().any(|plugin| {
+        plugin.plugin_type == "delay"
+            && plugin
+                .parameters
+                .get("delay_ms")
+                .and_then(serde_json::Value::as_f64)
+                .is_some_and(|delay| (delay - 2.0).abs() < 1e-9)
+    }));
+    assert!(
+        result.channel_results["TFL"]
+            .final_curve
+            .phase
+            .as_ref()
+            .is_some_and(|phase| phase.iter().any(|value| value.abs() > 1e-6))
     );
 }
 

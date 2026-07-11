@@ -52,7 +52,7 @@ use super::types::MixedPhaseSerdeConfig;
 use super::types::PerceptualPolicyPreset;
 use super::types::ProcessingMode;
 use super::types::SmoothnessPenaltyConfigSerde;
-use super::types::VoiceOfGodConfig;
+use super::types::{HeightChannelAlignmentConfig, InterChannelTimbreMatchingConfig};
 use super::validation_bundle_config::ValidationBundleConfig;
 use crate::loss::AsymmetricLossConfig;
 use crate::read::PsychoacousticSmoothingConfig;
@@ -224,9 +224,15 @@ pub struct OptimizerConfig {
     /// Multi-seat optimization configuration
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multi_seat: Option<MultiSeatConfig>,
-    /// Voice of God optimization configuration (v2)
+    /// Inter-channel timbre matching configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vog: Option<VoiceOfGodConfig>,
+    pub inter_channel_timbre_matching: Option<InterChannelTimbreMatchingConfig>,
+    /// Role-aware overhead/height-channel alignment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height_channel_alignment: Option<HeightChannelAlignmentConfig>,
+    /// Deprecated one-cycle JSON alias for `inter_channel_timbre_matching`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vog: Option<InterChannelTimbreMatchingConfig>,
     /// Multi-measurement optimization configuration
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multi_measurement: Option<MultiMeasurementConfig>,
@@ -321,6 +327,8 @@ impl Default for OptimizerConfig {
             phase_alignment: None,
             group_delay: None,
             multi_seat: None,
+            inter_channel_timbre_matching: None,
+            height_channel_alignment: None,
             vog: None,
             multi_measurement: None,
             decomposed_correction: Some(DecomposedCorrectionSerdeConfig {

@@ -132,6 +132,13 @@ pub use impulse_analysis::{
     DecomposedCorrectionConfig, DecomposedCorrectionResult, analyze_decomposed_correction,
 };
 
+// Distance- and directivity-weighted RIR prototype builder
+pub mod rir_prototype;
+pub use rir_prototype::{
+    DirectivityModel, DistanceWeightMode, RirPrototypeConfig, WeightedPrototype,
+    build_weighted_prototype,
+};
+
 // CEA2034 speaker pre-correction (3-pass pipeline)
 pub mod cea2034_correction;
 

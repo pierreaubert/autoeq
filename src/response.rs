@@ -1,7 +1,7 @@
 //! Frequency response calculation for filters
 
 use crate::Curve;
-use crate::iir::{Biquad, BiquadFilterType};
+use crate::iir::Biquad;
 use ndarray::Array1;
 use num_complex::Complex64;
 use std::f64::consts::PI;
@@ -12,6 +12,11 @@ pub fn compute_peq_complex_response(
     freqs: &Array1<f64>,
     sample_rate: f64,
 ) -> Vec<Complex64> {
+    // `Biquad` owns the canonical coefficient generation for every filter
+    // type. Cache those normalized coefficients once instead of maintaining a
+    // second set of formulas here (and recomputing them for every frequency).
+    let coefficients: Vec<_> = filters.iter().map(Biquad::constants).collect();
+
     freqs
         .iter()
         .map(|&f| {
@@ -21,81 +26,9 @@ pub fn compute_peq_complex_response(
 
             let mut total_h = Complex64::new(1.0, 0.0);
 
-            for b in filters {
-                let f0 = b.freq;
-                let fs = b.srate;
-                let q = b.q;
-                let db = b.db_gain;
-
-                let w0 = 2.0 * PI * f0 / fs;
-                let cos_w0 = w0.cos();
-                let sin_w0 = w0.sin();
-                let alpha = sin_w0 / (2.0 * q);
-                let big_a = 10.0_f64.powf(db / 40.0);
-
-                let (b0, b1, b2, a0, a1, a2) = match b.filter_type {
-                    BiquadFilterType::Peak => {
-                        let b0 = 1.0 + alpha * big_a;
-                        let b1 = -2.0 * cos_w0;
-                        let b2 = 1.0 - alpha * big_a;
-                        let a0 = 1.0 + alpha / big_a;
-                        let a1 = -2.0 * cos_w0;
-                        let a2 = 1.0 - alpha / big_a;
-                        (b0, b1, b2, a0, a1, a2)
-                    }
-                    BiquadFilterType::Lowshelf => {
-                        let sqrt_a = big_a.sqrt();
-                        let b0 =
-                            big_a * ((big_a + 1.0) - (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha);
-                        let b1 = 2.0 * big_a * ((big_a - 1.0) - (big_a + 1.0) * cos_w0);
-                        let b2 =
-                            big_a * ((big_a + 1.0) - (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha);
-                        let a0 = (big_a + 1.0) + (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha;
-                        let a1 = -2.0 * ((big_a - 1.0) + (big_a + 1.0) * cos_w0);
-                        let a2 = (big_a + 1.0) - (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha;
-                        (b0, b1, b2, a0, a1, a2)
-                    }
-                    BiquadFilterType::Highshelf => {
-                        let sqrt_a = big_a.sqrt();
-                        let b0 =
-                            big_a * ((big_a + 1.0) + (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha);
-                        let b1 = -2.0 * big_a * ((big_a - 1.0) + (big_a + 1.0) * cos_w0);
-                        let b2 =
-                            big_a * ((big_a + 1.0) + (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha);
-                        let a0 = (big_a + 1.0) - (big_a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha;
-                        let a1 = 2.0 * ((big_a - 1.0) - (big_a + 1.0) * cos_w0);
-                        let a2 = (big_a + 1.0) - (big_a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha;
-                        (b0, b1, b2, a0, a1, a2)
-                    }
-                    BiquadFilterType::Lowpass => {
-                        let b0 = (1.0 - cos_w0) / 2.0;
-                        let b1 = 1.0 - cos_w0;
-                        let b2 = (1.0 - cos_w0) / 2.0;
-                        let a0 = 1.0 + alpha;
-                        let a1 = -2.0 * cos_w0;
-                        let a2 = 1.0 - alpha;
-                        (b0, b1, b2, a0, a1, a2)
-                    }
-                    BiquadFilterType::Highpass => {
-                        let b0 = (1.0 + cos_w0) / 2.0;
-                        let b1 = -(1.0 + cos_w0);
-                        let b2 = (1.0 + cos_w0) / 2.0;
-                        let a0 = 1.0 + alpha;
-                        let a1 = -2.0 * cos_w0;
-                        let a2 = 1.0 - alpha;
-                        (b0, b1, b2, a0, a1, a2)
-                    }
-                    // TODO: Add other filter types as needed (HighPass, LowPass, BandPass etc.)
-                    // For now, identity
-                    _ => (1.0, 0.0, 0.0, 1.0, 0.0, 0.0),
-                };
-
-                let num = Complex64::new(b0, 0.0)
-                    + Complex64::new(b1, 0.0) * z_inv
-                    + Complex64::new(b2, 0.0) * z_inv_2;
-                let den = Complex64::new(a0, 0.0)
-                    + Complex64::new(a1, 0.0) * z_inv
-                    + Complex64::new(a2, 0.0) * z_inv_2;
+            for &(a1, a2, b0, b1, b2) in &coefficients {
+                let num = b0 + b1 * z_inv + b2 * z_inv_2;
+                let den = 1.0 + a1 * z_inv + a2 * z_inv_2;
 
                 if den.norm_sqr() > 1e-12 {
                     total_h *= num / den;
@@ -156,6 +89,7 @@ pub fn apply_complex_response(curve: &Curve, response: &[Complex64]) -> Curve {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::iir::BiquadFilterType;
     use ndarray::Array1;
     use num_complex::Complex64;
     use std::f64::consts::PI;
@@ -212,6 +146,49 @@ mod tests {
         for h in &resp {
             assert!((h.norm() - 1.0).abs() < 1e-12);
             assert!(h.arg().abs() < 1e-12);
+        }
+    }
+
+    fn response_from_stored_coefficients(
+        biquad: &Biquad,
+        frequency: f64,
+        sample_rate: f64,
+    ) -> Complex64 {
+        let (a1, a2, b0, b1, b2) = biquad.constants();
+        let z_inv = Complex64::from_polar(1.0, -2.0 * PI * frequency / sample_rate);
+        let z_inv_2 = z_inv * z_inv;
+        (b0 + b1 * z_inv + b2 * z_inv_2) / (1.0 + a1 * z_inv + a2 * z_inv_2)
+    }
+
+    #[test]
+    fn test_peq_response_uses_coefficients_for_every_biquad_type() {
+        let sample_rate = 48_000.0;
+        let frequencies = Array1::from(vec![500.0, 1_000.0, 2_000.0]);
+        let filter_types = [
+            BiquadFilterType::Bandpass,
+            BiquadFilterType::Notch,
+            BiquadFilterType::AllPass,
+            BiquadFilterType::LowshelfOrf,
+            BiquadFilterType::HighshelfOrf,
+            BiquadFilterType::PeakMatched,
+            BiquadFilterType::HighpassVariableQ,
+        ];
+
+        for filter_type in filter_types {
+            let biquad = Biquad::new(filter_type, 1_000.0, sample_rate, 1.1, 6.0);
+            let actual = compute_peq_complex_response(
+                std::slice::from_ref(&biquad),
+                &frequencies,
+                sample_rate,
+            );
+
+            for (&frequency, actual) in frequencies.iter().zip(actual) {
+                let expected = response_from_stored_coefficients(&biquad, frequency, sample_rate);
+                assert!(
+                    (actual - expected).norm() < 1e-12,
+                    "{filter_type:?} response mismatch at {frequency} Hz: actual={actual:?}, expected={expected:?}"
+                );
+            }
         }
     }
 

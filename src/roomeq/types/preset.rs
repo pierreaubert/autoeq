@@ -194,6 +194,7 @@ impl SimplePresetConfig {
                 variance_lambda: 0.5,
                 spatial_robustness: None,
                 bootstrap_uncertainty: None,
+                rir_prototype: None,
             })
         } else {
             None

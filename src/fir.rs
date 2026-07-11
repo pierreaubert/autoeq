@@ -39,6 +39,14 @@ pub fn generate_fir_from_response(
         n_taps,
         sample_rate,
         phase: phase_type,
+        // A causal minimum-phase impulse begins at tap zero. Symmetric windows
+        // also begin at zero, which erases that leading energy and destroys
+        // the minimum-phase result. Truncation is sufficient here.
+        window: if phase_type == FirPhase::Minimum {
+            WindowType::Rectangular
+        } else {
+            FirDesignConfig::default().window
+        },
         ..Default::default()
     };
 
@@ -277,6 +285,20 @@ mod tests {
             first_half_energy,
             second_half_energy
         );
+    }
+
+    #[test]
+    fn test_minimum_phase_flat_target_keeps_impulse_at_start() {
+        let target_curve = create_flat_curve(20.0, 20_000.0, 100, 0.0);
+        let coeffs = generate_fir_from_response(&target_curve, 48_000.0, 256, FirPhase::Minimum);
+
+        assert!(
+            (coeffs[0] - 1.0).abs() < 1e-6,
+            "minimum-phase flat response should start with a unit impulse, got {}",
+            coeffs[0]
+        );
+        let tail_energy: f64 = coeffs[1..].iter().map(|value| value * value).sum();
+        assert!(tail_energy < 1e-12, "unexpected tail energy: {tail_energy}");
     }
 
     #[test]

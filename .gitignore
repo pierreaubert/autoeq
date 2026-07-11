@@ -27,6 +27,8 @@ _site
 
 # python
 __pycache__
+.venv
+venv
 
 # MCP
 /.chunkhound

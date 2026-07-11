@@ -117,6 +117,7 @@ pub(super) fn make_test_output() -> DspChainOutput {
             bootstrap_uncertainty: None,
             validation_bundle: None,
             supporting_source: None,
+            stage_outcomes: Vec::new(),
         }),
     }
 }
@@ -361,6 +362,7 @@ pub(super) fn make_routed_bass_output() -> DspChainOutput {
             bootstrap_uncertainty: None,
             validation_bundle: None,
             supporting_source: None,
+            stage_outcomes: Vec::new(),
         }),
     }
 }

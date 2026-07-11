@@ -91,6 +91,7 @@ fn result_with_channel_slopes(
             bootstrap_uncertainty: None,
             validation_bundle: None,
             supporting_source: None,
+            stage_outcomes: Vec::new(),
         },
     }
 }

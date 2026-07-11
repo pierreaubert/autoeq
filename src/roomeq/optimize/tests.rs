@@ -7,8 +7,9 @@ use crate::roomeq::pipeline::{
 use crate::roomeq::test_fixtures::{empty_metadata, single_channel_room_result};
 use crate::roomeq::types::{
     BassManagementConfig, ChannelDspChain, CrossoverConfig, MultiMeasurementConfig,
-    MultiMeasurementStrategy, OptimizerConfig, ProcessingMode, RoomConfig, SpeakerConfig,
-    SpeakerGroup, SubwooferStrategy, SubwooferSystemConfig, SystemConfig, SystemModel,
+    MultiMeasurementStrategy, MultiSubGroup, OptimizerConfig, ProcessingMode, RoomConfig,
+    SpeakerConfig, SpeakerGroup, SubwooferStrategy, SubwooferSystemConfig, SystemConfig,
+    SystemModel,
 };
 use ndarray::Array1;
 use std::collections::HashMap;
@@ -83,6 +84,81 @@ fn optimize_room_single_speaker_low_latency_succeeds() {
         "single speaker low-latency optimization should succeed: {:?}",
         result.err()
     );
+}
+
+#[test]
+fn optimize_room_invalid_vog_reference_records_failed_stage() {
+    let mut config = minimal_room_config(ProcessingMode::LowLatency);
+    config.speakers.insert(
+        "right".to_string(),
+        SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
+    );
+    config.optimizer.vog = Some(crate::roomeq::types::VoiceOfGodConfig {
+        enabled: true,
+        reference_channel: "missing".to_string(),
+    });
+
+    let result = optimize_room(&config, 48_000.0, None, None).unwrap();
+    let outcome = result
+        .metadata
+        .stage_outcomes
+        .iter()
+        .find(|outcome| outcome.stage == "voice_of_god_alignment")
+        .expect("VoG stage outcome");
+    assert_eq!(outcome.status, crate::roomeq::types::StageStatus::Failed);
+    assert!(
+        outcome
+            .advisories
+            .iter()
+            .any(|advisory| advisory.contains("invalid_reference"))
+    );
+}
+
+#[test]
+fn phase_complete_multisub_reaches_downstream_phase_alignment() {
+    let mut config = minimal_room_config(ProcessingMode::LowLatency);
+    let mut phased = flat_curve();
+    phased.phase = Some(Array1::zeros(phased.freq.len()));
+    config.speakers.insert(
+        "left".to_string(),
+        SpeakerConfig::Single(MeasurementSource::InMemory(phased.clone())),
+    );
+    config.speakers.insert(
+        "sub".to_string(),
+        SpeakerConfig::MultiSub(MultiSubGroup {
+            name: "subs".to_string(),
+            speaker_name: None,
+            subwoofers: vec![
+                MeasurementSource::InMemory(phased.clone()),
+                MeasurementSource::InMemory(phased),
+            ],
+            allpass_optimization: false,
+        }),
+    );
+    config.optimizer.phase_alignment = Some(Default::default());
+    config.optimizer.allow_delay = Some(true);
+
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&events);
+    let observer = Box::new(move |event: &PipelineEvent| {
+        observed.lock().unwrap().push((event.step_id, event.status));
+        PipelineControl::Continue
+    });
+    let result = RoomPipeline::new(RoomPipelineRequest {
+        config: &config,
+        sample_rate: 48_000.0,
+        output_dir: None,
+        probe_arrival_overrides: None,
+    })
+    .run(Some(observer));
+
+    assert!(
+        result.is_ok(),
+        "phase-complete multi-sub run failed: {result:?}"
+    );
+    assert!(events.lock().unwrap().iter().any(|(step, status)| {
+        *step == PipelineStepId::PhaseAlignment && *status == PipelineStepStatus::Started
+    }));
 }
 
 #[test]

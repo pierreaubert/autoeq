@@ -15,6 +15,11 @@ use super::types::normalize_per_channel_controls;
 use crate::optim::scalar::{ScalarOptimConfig, optimize_bounded_scalar};
 use crate::roomeq::types::{MixedModeConfig, ProcessingMode};
 
+fn bootstrap_improvement_is_significant(mean_improvement: f64, sigma: f64) -> bool {
+    mean_improvement > 0.0
+        && (sigma <= 1e-15 || (mean_improvement / sigma) > BOOTSTRAP_SIGMA_THRESHOLD)
+}
+
 /// Run the group-delay optimiser on a set of channel measurements.
 ///
 /// Returns `Err` if fewer than 2 channels are provided or measurements are
@@ -176,8 +181,9 @@ pub fn optimize_group_delay_adaptive(
             / (n - 1.0);
         let sigma = variance.sqrt();
 
-        // Accept if mean_improvement / σ > 3 (and σ > 0 to avoid division by zero)
-        let significant = sigma > 1e-15 && (mean_improvement / sigma) > BOOTSTRAP_SIGMA_THRESHOLD;
+        // Identical positive improvements are maximally consistent evidence,
+        // not insignificant merely because their sample variance is zero.
+        let significant = bootstrap_improvement_is_significant(mean_improvement, sigma);
 
         if significant && trial_result.sum_gd_post_rms_ms < best_result.sum_gd_post_rms_ms {
             best_result = trial_result;
@@ -238,5 +244,17 @@ pub fn optimize_group_delay_for_mode(
         ProcessingMode::PhaseLinear => Err("PhaseLinear mode does not use IIR AP filters. \
              Use the FIR path (GD-3b) with GdAlignmentTarget instead."
             .into()),
+    }
+}
+
+#[cfg(test)]
+mod significance_tests {
+    use super::bootstrap_improvement_is_significant;
+
+    #[test]
+    fn identical_positive_bootstrap_improvements_are_significant() {
+        assert!(bootstrap_improvement_is_significant(0.25, 0.0));
+        assert!(!bootstrap_improvement_is_significant(0.0, 0.0));
+        assert!(!bootstrap_improvement_is_significant(-0.25, 0.0));
     }
 }

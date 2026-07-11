@@ -116,7 +116,7 @@ pub use spectral_align::{
 
 // Voice of God (timbre matching between channels)
 mod voice_of_god;
-pub use voice_of_god::{VoGResult, compute_voice_of_god, create_vog_plugins};
+pub use voice_of_god::{VoGChannelStatus, VoGResult, compute_voice_of_god, create_vog_plugins};
 
 // Spatial robustness (multi-position analysis)
 pub mod spatial_robustness;

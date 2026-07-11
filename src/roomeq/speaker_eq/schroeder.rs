@@ -95,6 +95,15 @@ pub(in crate::roomeq) fn optimize_with_schroeder_split(
     schroeder_config: &SchroederSplitConfig,
     sample_rate: f64,
 ) -> Result<(Vec<Biquad>, Vec<Biquad>)> {
+    if optimizer.num_filters < 2 {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "Schroeder split requires at least 2 filters (one per band), got {}",
+                optimizer.num_filters
+            ),
+        });
+    }
+
     let schroeder_freq = if let Some(ref dims) = schroeder_config.room_dimensions {
         dims.schroeder_frequency()
     } else {
@@ -340,5 +349,27 @@ mod tests {
             loss,
             expected
         );
+    }
+
+    #[test]
+    fn schroeder_split_rejects_fewer_than_two_filters_without_panicking() {
+        let curve = curve_with_bass_peak_and_treble_tilt();
+        let split = SchroederSplitConfig {
+            enabled: true,
+            schroeder_freq: 200.0,
+            ..Default::default()
+        };
+
+        for num_filters in [0, 1] {
+            let optimizer = OptimizerConfig {
+                num_filters,
+                min_freq: 20.0,
+                max_freq: 2_000.0,
+                ..Default::default()
+            };
+            let error = optimize_with_schroeder_split(&curve, &optimizer, &split, 48_000.0)
+                .expect_err("undersized split must be rejected");
+            assert!(error.to_string().contains("at least 2 filters"));
+        }
     }
 }

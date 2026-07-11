@@ -29,6 +29,18 @@ pub(super) fn compute_combined_with_allpass(
     allpass_filters: &[(f64, f64)],
     sample_rate: f64,
 ) -> Array1<f64> {
+    compute_combined_with_allpass_complex(data, gains, delays, allpass_filters, sample_rate)
+        .mapv(|z| 20.0 * z.norm().max(1e-12).log10())
+}
+
+/// Compute the complex multi-sub response with per-sub all-pass filters.
+pub(super) fn compute_combined_with_allpass_complex(
+    data: &DriversLossData,
+    gains: &[f64],
+    delays: &[f64],
+    allpass_filters: &[(f64, f64)],
+    sample_rate: f64,
+) -> Array1<Complex64> {
     let n_drivers = data.drivers.len();
 
     // Prepare driver curves on common grid (same approach as loss.rs)
@@ -84,8 +96,7 @@ pub(super) fn compute_combined_with_allpass(
         }
     }
 
-    // Convert to dB SPL
-    combined_complex.mapv(|z| 20.0 * z.norm().max(1e-12).log10())
+    combined_complex
 }
 
 /// Compute complex frequency response of an all-pass biquad at frequency f.

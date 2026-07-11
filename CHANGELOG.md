@@ -48,6 +48,18 @@
 
 ## Fixes
 
+- Preserved the complex summed phase of phase-complete multi-sub results so
+  downstream sub/main phase and group-delay alignment can run. Multi-sub
+  inputs with any missing phase now use an explicit gain-only fallback with
+  zero delay, polarity, and all-pass controls; all-pass gain bounds also honor
+  asymmetric `min_db`/`max_db` settings.
+- Rejected Schroeder two-band optimization with fewer than two filters instead
+  of underflowing or silently allocating an empty band, and accepted identical
+  positive adaptive-GD bootstrap improvements as significant evidence.
+- Made Voice-of-God timbre matching interpolate compatible mismatched frequency
+  grids over their measured overlap, validate reference/channel data, and
+  report applied, skipped, degraded, or failed outcomes in serialized
+  `metadata.stage_outcomes`.
 - Hardened external DSP exports so routed home-cinema bass-management graphs
   fail with an actionable error instead of being flattened into an incorrect
   configuration; users are directed to SotF JSON or Apply as Graph when route

@@ -12,7 +12,8 @@ use super::pipeline::{
 };
 use super::types::{
     ChannelDspChain, MeasurementSource, OptimizationMetadata, OptimizerConfig, PerceptualMetrics,
-    ProcessingMode, RoomConfig, SpeakerConfig, SystemConfig, SystemModel, TargetCurveConfig,
+    ProcessingMode, RoomConfig, SpeakerConfig, StageOutcome, StageStatus, SystemConfig,
+    SystemModel, TargetCurveConfig,
 };
 use crate::Curve;
 use crate::error::{AutoeqError, Result};
@@ -1006,6 +1007,7 @@ fn assemble_generic_result(
         channel_means,
         mut channel_arrivals,
     } = generic;
+    let mut stage_outcomes = Vec::new();
 
     // Auto IR sync: if no WAV-based arrivals were collected, estimate from phase data.
     // Runs unconditionally (does not require allow_delay = true).
@@ -1337,7 +1339,7 @@ fn assemble_generic_result(
             .map(|(name, result)| (name.clone(), result.final_curve.clone()))
             .collect();
 
-        match super::voice_of_god::compute_voice_of_god(
+        let stage_outcome = match super::voice_of_god::compute_voice_of_god(
             &corrected_curves,
             &vog_config.reference_channel,
             sample_rate,
@@ -1345,6 +1347,16 @@ fn assemble_generic_result(
             config.optimizer.max_freq,
         ) {
             Ok(vog_results) => {
+                let applied_count = vog_results
+                    .values()
+                    .filter(|result| {
+                        result.status == super::voice_of_god::VoGChannelStatus::Applied
+                    })
+                    .count();
+                let failed_count = vog_results
+                    .values()
+                    .filter(|result| result.status == super::voice_of_god::VoGChannelStatus::Failed)
+                    .count();
                 for (channel_name, vog_result) in &vog_results {
                     let plugins = super::voice_of_god::create_vog_plugins(vog_result, sample_rate);
                     if !plugins.is_empty()
@@ -1377,21 +1389,55 @@ fn assemble_generic_result(
                     }
                 }
                 curves = collect_current_final_curves(&channel_results);
+                let status = if failed_count > 0 && applied_count > 0 {
+                    StageStatus::Degraded
+                } else if failed_count > 0 {
+                    StageStatus::Failed
+                } else if applied_count > 0 {
+                    StageStatus::Applied
+                } else {
+                    StageStatus::Skipped
+                };
+                let mut advisories = vog_results
+                    .values()
+                    .flat_map(|result| result.advisories.iter().cloned())
+                    .filter(|advisory| advisory != "reference_channel")
+                    .collect::<Vec<_>>();
+                advisories.sort();
+                advisories.dedup();
+                StageOutcome {
+                    stage: "voice_of_god_alignment".to_string(),
+                    status,
+                    advisories,
+                }
             }
             Err(e) => {
                 warn!("Voice of God optimization failed: {}", e);
+                StageOutcome {
+                    stage: "voice_of_god_alignment".to_string(),
+                    status: StageStatus::Failed,
+                    advisories: vec![format!("invalid_reference: {e}")],
+                }
             }
-        }
-    }
-    if config.optimizer.vog.as_ref().is_some_and(|v| v.enabled) {
-        emit_pipeline_event(
-            observer_shared,
-            PipelineEvent::completed(
+        };
+        let event = match stage_outcome.status {
+            StageStatus::Applied | StageStatus::Degraded => PipelineEvent::completed(
                 PipelineStepId::VoiceOfGodAlignment,
-                "Voice of God alignment complete",
+                format!("Voice of God alignment: {:?}", stage_outcome.status),
             ),
-        )?;
-    } else {
+            StageStatus::Skipped | StageStatus::Failed => PipelineEvent::skipped(
+                PipelineStepId::VoiceOfGodAlignment,
+                format!(
+                    "Voice of God alignment: {:?} ({})",
+                    stage_outcome.status,
+                    stage_outcome.advisories.join(", ")
+                ),
+            ),
+        };
+        emit_pipeline_event(observer_shared, event)?;
+        stage_outcomes.push(stage_outcome);
+    }
+    if !config.optimizer.vog.as_ref().is_some_and(|v| v.enabled) {
         emit_pipeline_event(
             observer_shared,
             PipelineEvent::skipped(
@@ -1755,6 +1801,7 @@ fn assemble_generic_result(
         bootstrap_uncertainty: None,
         validation_bundle: None,
         supporting_source: None,
+        stage_outcomes,
     };
 
     let mut result = RoomOptimizationResult {

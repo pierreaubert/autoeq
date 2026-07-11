@@ -1544,6 +1544,7 @@ fn process_single_speaker_with_refine_succeeds() {
 fn process_single_speaker_with_schroeder_split_succeeds() {
     let source = MeasurementSource::InMemory(flat_curve());
     let mut config = single_speaker_config(ProcessingMode::LowLatency);
+    config.optimizer.num_filters = 2;
     config.optimizer.schroeder_split = Some(super::super::types::SchroederSplitConfig {
         enabled: true,
         schroeder_freq: 300.0,

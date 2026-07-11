@@ -34,6 +34,7 @@ pub fn empty_metadata() -> OptimizationMetadata {
         bootstrap_uncertainty: None,
         validation_bundle: None,
         supporting_source: None,
+        stage_outcomes: Vec::new(),
     }
 }
 

@@ -401,6 +401,7 @@ fn test_create_dsp_chain_output() {
         bootstrap_uncertainty: None,
         validation_bundle: None,
         supporting_source: None,
+        stage_outcomes: Vec::new(),
     };
 
     let output = create_dsp_chain_output(channels, Some(metadata));
@@ -470,6 +471,7 @@ fn test_create_dsp_chain_output_adds_ctc_global_xtc_plugin() {
         bootstrap_uncertainty: None,
         validation_bundle: None,
         supporting_source: None,
+        stage_outcomes: Vec::new(),
     };
 
     let output = create_dsp_chain_output(channels, Some(metadata));

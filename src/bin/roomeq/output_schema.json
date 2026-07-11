@@ -2290,6 +2290,13 @@
           "type": "number",
           "format": "double"
         },
+        "stage_outcomes": {
+          "description": "Structured outcomes for optional/degradable processing stages.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StageOutcome"
+          }
+        },
         "supporting_source": {
           "description": "Supporting-source room-compensation reports, keyed by logical channel.",
           "type": [
@@ -2680,6 +2687,56 @@
           "default": 0.0
         }
       }
+    },
+    "StageOutcome": {
+      "description": "Structured stage status and machine-readable advisories.",
+      "type": "object",
+      "properties": {
+        "advisories": {
+          "description": "Machine-readable reasons, warnings, or migration notices.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stage": {
+          "description": "Stable snake_case stage identifier.",
+          "type": "string"
+        },
+        "status": {
+          "description": "Final stage status.",
+          "$ref": "#/$defs/StageStatus"
+        }
+      },
+      "required": [
+        "stage",
+        "status"
+      ]
+    },
+    "StageStatus": {
+      "description": "Final outcome of an optional RoomEQ processing stage.",
+      "oneOf": [
+        {
+          "description": "The stage applied a material change.",
+          "type": "string",
+          "const": "applied"
+        },
+        {
+          "description": "The stage was not applicable or no material change was needed.",
+          "type": "string",
+          "const": "skipped"
+        },
+        {
+          "description": "The stage ran with reduced capabilities.",
+          "type": "string",
+          "const": "degraded"
+        },
+        {
+          "description": "Invalid data or an internal error prevented the stage from running.",
+          "type": "string",
+          "const": "failed"
+        }
+      ]
     },
     "StatisticalSummary": {
       "description": "Simple statistical summary for reporting.",

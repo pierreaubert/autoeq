@@ -17,6 +17,19 @@ use super::spectral_align::{
 };
 use super::types::PluginConfigWrapper;
 
+/// Structured outcome for one channel in the timbre-matching stage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VoGChannelStatus {
+    /// Reference channel; no correction is applied.
+    Reference,
+    /// A correction was computed.
+    Applied,
+    /// The channel needed no material correction.
+    Skipped,
+    /// Invalid channel data prevented a correction.
+    Failed,
+}
+
 /// Result of VoG analysis for a single channel.
 #[derive(Debug, Clone)]
 pub struct VoGResult {
@@ -26,6 +39,10 @@ pub struct VoGResult {
     pub alignment: Option<SpectralAlignmentResult>,
     /// Whether this channel is the reference
     pub is_reference: bool,
+    /// Structured per-channel stage outcome.
+    pub status: VoGChannelStatus,
+    /// Machine-readable advisories for degraded or skipped paths.
+    pub advisories: Vec<String>,
 }
 
 /// Compute Voice of God corrections for all channels.
@@ -52,6 +69,7 @@ pub fn compute_voice_of_god(
             ),
         }
     })?;
+    validate_curve(reference_curve, "reference", reference_channel)?;
 
     let mut results = HashMap::new();
 
@@ -63,14 +81,45 @@ pub fn compute_voice_of_god(
                     channel_name: name.clone(),
                     alignment: None,
                     is_reference: true,
+                    status: VoGChannelStatus::Reference,
+                    advisories: vec!["reference_channel".to_string()],
                 },
             );
             continue;
         }
 
-        // Align this channel's curve to the reference channel's curve
+        if let Err(error) = validate_curve(curve, "channel", name) {
+            results.insert(
+                name.clone(),
+                VoGResult {
+                    channel_name: name.clone(),
+                    alignment: None,
+                    is_reference: false,
+                    status: VoGChannelStatus::Failed,
+                    advisories: vec![error.to_string()],
+                },
+            );
+            continue;
+        }
+
+        let grids_differ =
+            !super::frequency_grid::same_frequency_grid(&curve.freq, &reference_curve.freq);
+        // The target-alignment helper interpolates the reference onto this
+        // channel's grid and restricts the fit to their measured overlap.
         let alignment =
             compute_target_alignment(curve, reference_curve, min_freq, max_freq, sample_rate);
+        let status = if alignment.is_some() {
+            VoGChannelStatus::Applied
+        } else {
+            VoGChannelStatus::Skipped
+        };
+        let mut advisories = Vec::new();
+        if grids_differ {
+            advisories.push("frequency_grid_interpolated".to_string());
+        }
+        if alignment.is_none() {
+            advisories.push("no_material_correction".to_string());
+        }
 
         results.insert(
             name.clone(),
@@ -78,6 +127,8 @@ pub fn compute_voice_of_god(
                 channel_name: name.clone(),
                 alignment,
                 is_reference: false,
+                status,
+                advisories,
             },
         );
     }
@@ -98,6 +149,18 @@ pub fn compute_voice_of_god(
         });
 
     Ok(results)
+}
+
+fn validate_curve(curve: &Curve, role: &str, name: &str) -> Result<()> {
+    if !super::frequency_grid::is_valid_frequency_grid(&curve.freq)
+        || curve.spl.len() != curve.freq.len()
+        || curve.spl.iter().any(|value| !value.is_finite())
+    {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: format!("VoG {role} channel '{name}' has invalid frequency/SPL data"),
+        });
+    }
+    Ok(())
 }
 
 /// Create DSP plugins for a VoG correction result.
@@ -141,6 +204,16 @@ mod tests {
         }
     }
 
+    fn make_curve_on_grid(freq: Vec<f64>, spl_fn: impl Fn(f64) -> f64) -> Curve {
+        let spl = freq.iter().map(|&f| spl_fn(f)).collect::<Vec<_>>();
+        Curve {
+            freq: Array1::from(freq),
+            spl: Array1::from(spl),
+            phase: None,
+            ..Default::default()
+        }
+    }
+
     const SR: f64 = 48000.0;
 
     #[test]
@@ -155,6 +228,7 @@ mod tests {
 
         assert_eq!(results.len(), 3);
         assert!(results["C"].is_reference);
+        assert_eq!(results["C"].status, VoGChannelStatus::Reference);
         // L and R should have no alignment (identical to reference)
         assert!(
             results["L"].alignment.is_none(),
@@ -201,6 +275,46 @@ mod tests {
             result.is_err(),
             "Should error when reference channel not found"
         );
+    }
+
+    #[test]
+    fn test_vog_mismatched_grids_are_interpolated() {
+        let mut curves = HashMap::new();
+        curves.insert(
+            "C".to_string(),
+            make_curve_on_grid(vec![20.0, 50.0, 100.0, 500.0, 2_000.0, 10_000.0], |_| 0.0),
+        );
+        curves.insert(
+            "L".to_string(),
+            make_curve_on_grid(
+                vec![25.0, 40.0, 80.0, 200.0, 1_000.0, 5_000.0, 12_000.0],
+                |f| if f < 200.0 { 3.0 } else { 0.0 },
+            ),
+        );
+
+        let results = compute_voice_of_god(&curves, "C", SR, 20.0, 20_000.0).unwrap();
+        assert_ne!(results["L"].status, VoGChannelStatus::Failed);
+        assert!(
+            results["L"]
+                .advisories
+                .contains(&"frequency_grid_interpolated".to_string())
+        );
+    }
+
+    #[test]
+    fn test_vog_invalid_reference_is_structured_error() {
+        let mut curves = HashMap::new();
+        curves.insert(
+            "C".to_string(),
+            Curve {
+                freq: Array1::from(vec![100.0, 200.0]),
+                spl: Array1::from(vec![0.0]),
+                ..Default::default()
+            },
+        );
+
+        let error = compute_voice_of_god(&curves, "C", SR, 20.0, 20_000.0).unwrap_err();
+        assert!(error.to_string().contains("invalid frequency/SPL data"));
     }
 
     #[test]

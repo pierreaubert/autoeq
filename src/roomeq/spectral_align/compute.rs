@@ -266,12 +266,37 @@ pub fn compute_target_alignment(
     max_freq: f64,
     sample_rate: f64,
 ) -> Option<SpectralAlignmentResult> {
+    if !super::super::frequency_grid::is_valid_frequency_grid(&curve.freq)
+        || !super::super::frequency_grid::is_valid_frequency_grid(&target.freq)
+        || curve.spl.len() != curve.freq.len()
+        || target.spl.len() != target.freq.len()
+        || curve.spl.iter().any(|value| !value.is_finite())
+        || target.spl.iter().any(|value| !value.is_finite())
+    {
+        return None;
+    }
+
+    let aligned_target =
+        if super::super::frequency_grid::same_frequency_grid(&curve.freq, &target.freq) {
+            target.clone()
+        } else {
+            crate::read::interpolate_log_space(&curve.freq, target)
+        };
+
+    let overlap_min = min_freq.max(curve.freq[0]).max(target.freq[0]);
+    let overlap_max = max_freq
+        .min(curve.freq[curve.freq.len() - 1])
+        .min(target.freq[target.freq.len() - 1]);
+    if overlap_max <= overlap_min {
+        return None;
+    }
+
     // Build mask: only consider frequencies within [min_freq, max_freq]
-    // where both curve and target have data (assuming same freq grid)
+    // where both curve and target have measured data.
     let freq = &curve.freq;
     let mask: Vec<bool> = freq
         .iter()
-        .map(|&f| f >= min_freq && f <= max_freq)
+        .map(|&f| f >= overlap_min && f <= overlap_max)
         .collect();
     let n_active: usize = mask.iter().filter(|m| **m).count();
 
@@ -300,7 +325,7 @@ pub fn compute_target_alignment(
     );
 
     let target_spl: Array1<f64> = Array1::from(
-        target
+        aligned_target
             .spl
             .iter()
             .zip(mask.iter())

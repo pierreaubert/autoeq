@@ -90,9 +90,18 @@
   gate, reference overrides, and structured applied/skipped/degraded/failed
   metadata.
 - Hardened external DSP exports so routed home-cinema bass-management graphs
-  fail with an actionable error instead of being flattened into an incorrect
-  configuration; users are directed to SotF JSON or Apply as Graph when route
-  and global-plugin semantics must be preserved.
+  are never flattened into an incorrect configuration. Equalizer APO now
+  renders the representable static `Channel`/`Copy` subset, including LR24/LR48
+  branches, route gain, polarity, delay, and destination processing; fan-out,
+  hidden-bus, or arbitrary-global-plugin graphs fail with guidance to use
+  CamillaDSP or Apply as Graph.
+- Fixed PipeWire filter-chain export to configure delay nodes in seconds and
+  emit valid graph input/output port references, then added an isolated Docker
+  QA recipe that boots real PipeWire and rejects generated configurations the
+  daemon cannot load.
+- Added fail-on-empty external-export QA selectors, expanded the CamillaDSP
+  recipe to its complete nextest contract suite, and added an opt-in Windows
+  Equalizer APO validator command contract.
 - Packaged convolution WAV sidecars only for formats that retain file paths
   (CamillaDSP, Equalizer APO, and Roon), while preserving the selected sample
   rate in the generated export.

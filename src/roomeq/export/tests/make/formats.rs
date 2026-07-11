@@ -82,6 +82,32 @@ fn equalizer_apo_routed_export_explains_unsupported_fan_out() {
 }
 
 #[test]
+fn equalizer_apo_routed_export_rejects_intermediate_destination_bus() {
+    let mut output = make_routed_bass_output();
+    let graph = output
+        .metadata
+        .as_mut()
+        .unwrap()
+        .bass_management
+        .as_mut()
+        .unwrap()
+        .routing_graph
+        .as_mut()
+        .unwrap();
+    graph.routes.retain(|route| {
+        (route.destination == "LFE" && matches!(route.source_channel.as_str(), "L" | "R"))
+            || (route.source_channel == "LFE" && route.destination == "LFE")
+    });
+    graph.input_channels = vec!["L".to_string(), "R".to_string(), "LFE".to_string()];
+    graph.output_channels = vec!["LFE".to_string()];
+
+    let error = export_equalizer_apo(&output).unwrap_err();
+
+    assert!(error.to_string().contains("routed destination 'LFE'"));
+    assert!(error.to_string().contains("intermediate bus"));
+}
+
+#[test]
 fn test_export_easyeffects() {
     let output = make_test_output();
     let result = export_easyeffects(&output).unwrap();

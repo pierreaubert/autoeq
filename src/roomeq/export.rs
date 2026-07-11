@@ -704,6 +704,20 @@ fn ensure_equalizer_apo_routing_supported(
             "Equalizer APO export cannot preserve fan-out from '{source}': route-specific filters need an intermediate bus. Use CamillaDSP or Apply as Graph."
         );
     }
+    let source_channels = graph
+        .routes
+        .iter()
+        .map(|route| route.source_channel.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    if let Some(route) = graph.routes.iter().find(|route| {
+        route.destination != route.source_channel
+            && source_channels.contains(route.destination.as_str())
+    }) {
+        anyhow::bail!(
+            "Equalizer APO export cannot preserve routed destination '{}' because it is also used as a source and would require an intermediate bus. Use CamillaDSP or Apply as Graph.",
+            route.destination
+        );
+    }
     Ok(())
 }
 

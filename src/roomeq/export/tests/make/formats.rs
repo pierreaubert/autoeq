@@ -43,6 +43,45 @@ fn tool_contract_equalizer_apo_text_has_channel_scoped_filters() {
 }
 
 #[test]
+fn equalizer_apo_routed_export_uses_channel_and_copy_for_supported_static_mix() {
+    let mut output = make_routed_bass_output();
+    let graph = output
+        .metadata
+        .as_mut()
+        .unwrap()
+        .bass_management
+        .as_mut()
+        .unwrap()
+        .routing_graph
+        .as_mut()
+        .unwrap();
+    // A low-pass mix with one route per source has no fan-out and can be
+    // represented by APO's in-place Channel/Copy model.
+    graph.routes.retain(|route| {
+        route.destination == "LFE" && matches!(route.source_channel.as_str(), "L" | "R")
+    });
+    graph.input_channels = vec!["L".to_string(), "R".to_string()];
+    graph.output_channels = vec!["LFE".to_string()];
+
+    let result = export_equalizer_apo(&output).unwrap();
+    assert!(result.contains("# Static RoomEQ routing graph (Channel/Copy)"));
+    assert!(result.contains("Channel: L"));
+    assert!(result.contains("Channel: R"));
+    assert!(result.contains("Filter  1: ON LP Fc 80 Hz Q 0.7071"));
+    assert!(result.contains("Copy:\n  LFE = 0.501187234*L + -0.501187234*R"));
+    assert!(result.contains("Channel: LFE"));
+    run_optional_export_validator("ROOMEQ_EQUALIZER_APO_VALIDATE_CMD", "txt", &result);
+}
+
+#[test]
+fn equalizer_apo_routed_export_explains_unsupported_fan_out() {
+    let output = make_routed_bass_output();
+    let err = export_equalizer_apo(&output).unwrap_err();
+    assert!(err.to_string().contains("cannot preserve fan-out"));
+    assert!(err.to_string().contains("Use CamillaDSP or Apply as Graph"));
+}
+
+#[test]
 fn test_export_easyeffects() {
     let output = make_test_output();
     let result = export_easyeffects(&output).unwrap();
@@ -144,8 +183,12 @@ fn tool_contract_pipewire_filter_chain_has_nodes_links_and_positions() {
     assert!(result.contains("outputs = ["));
     assert!(result.contains("audio.position = [ \"FL\", \"FR\" ]"));
     assert!(result.contains("label = delay"));
+    assert!(result.contains("config = { \"max-delay\" = 0.001500 }"));
+    assert!(result.contains("control = { \"Delay (s)\" = 0.001500 }"));
     assert!(result.contains("label = bq_peaking"));
     assert!(result.contains("label = bq_highshelf"));
+    assert!(result.contains("\"ch0_left_gain:In\""));
+    assert!(result.contains("\"ch0_left_eq_2:Out\""));
 
     run_optional_export_validator("ROOMEQ_PIPEWIRE_VALIDATE_CMD", "conf", &result);
 }

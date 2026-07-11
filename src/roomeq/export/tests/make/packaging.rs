@@ -4,7 +4,6 @@ fn external_exports_reject_routed_bass_management() {
     assert!(external_export_supported(&output, ExportFormat::CamillaDsp).is_ok());
 
     for format in [
-        ExportFormat::EqualizerApo,
         ExportFormat::EasyEffects,
         ExportFormat::Wavelet,
         ExportFormat::PipeWire,
@@ -17,6 +16,13 @@ fn external_exports_reject_routed_bass_management() {
             "unexpected error for {format:?}: {err}"
         );
     }
+
+    // APO decides graph representability during rendering: some static
+    // Channel/Copy routings work, while this fixture's source fan-out must
+    // fail instead of silently changing the DSP.
+    assert!(external_export_supported(&output, ExportFormat::EqualizerApo).is_ok());
+    let err = export_equalizer_apo(&output).unwrap_err();
+    assert!(err.to_string().contains("cannot preserve fan-out"));
 }
 
 #[test]

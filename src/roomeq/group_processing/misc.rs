@@ -97,6 +97,7 @@ pub(super) fn multiseat_peq_config(
             mask_smoothing_octaves: 1.0 / 6.0,
         }),
         bootstrap_uncertainty: None,
+        rir_prototype: None,
     }
 }
 

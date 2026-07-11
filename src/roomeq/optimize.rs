@@ -1303,21 +1303,9 @@ fn assemble_generic_result(
     }
 
     // ========================================================================
-    // Inter-channel timbre matching (optimizer.vog is a one-cycle alias)
+    // Inter-channel timbre matching
     // ========================================================================
-    let legacy_vog_ignored =
-        config.optimizer.inter_channel_timbre_matching.is_some() && config.optimizer.vog.is_some();
-    let (timbre_config, legacy_vog_alias) = config
-        .optimizer
-        .inter_channel_timbre_matching
-        .as_ref()
-        .map(|config| (Some(config), false))
-        .unwrap_or_else(|| {
-            (
-                config.optimizer.vog.as_ref(),
-                config.optimizer.vog.is_some(),
-            )
-        });
+    let timbre_config = config.optimizer.inter_channel_timbre_matching.as_ref();
     if let Some(timbre_config) = timbre_config
         && timbre_config.enabled
     {
@@ -1361,19 +1349,19 @@ fn assemble_generic_result(
             config.optimizer.max_freq,
             timbre_config.min_improvement_db,
         ) {
-            Ok(vog_results) => {
-                let applied_count = vog_results
+            Ok(timbre_results) => {
+                let applied_count = timbre_results
                     .values()
                     .filter(|result| {
                         result.status == super::inter_channel_timbre_matching::TimbreMatchingChannelStatus::Applied
                     })
                     .count();
-                let failed_count = vog_results
+                let failed_count = timbre_results
                     .values()
                     .filter(|result| result.status == super::inter_channel_timbre_matching::TimbreMatchingChannelStatus::Failed)
                     .count();
-                for (channel_name, vog_result) in &vog_results {
-                    let plugins = super::inter_channel_timbre_matching::create_timbre_matching_plugins(vog_result, sample_rate);
+                for (channel_name, timbre_result) in &timbre_results {
+                    let plugins = super::inter_channel_timbre_matching::create_timbre_matching_plugins(timbre_result, sample_rate);
                     if !plugins.is_empty()
                         && let Some(chain) = channel_chains.get_mut(channel_name)
                     {
@@ -1381,7 +1369,7 @@ fn assemble_generic_result(
                             chain.plugins.push(plugin);
                         }
                     }
-                    if let Some(alignment) = &vog_result.alignment {
+                    if let Some(alignment) = &timbre_result.alignment {
                         let shelf_filters =
                             super::spectral_align::create_alignment_filters(alignment, sample_rate);
                         sync_reported_biquad_adjustment(
@@ -1413,18 +1401,11 @@ fn assemble_generic_result(
                 } else {
                     StageStatus::Skipped
                 };
-                let mut advisories = vog_results
+                let mut advisories = timbre_results
                     .values()
                     .flat_map(|result| result.advisories.iter().cloned())
                     .filter(|advisory| advisory != "reference_channel")
                     .collect::<Vec<_>>();
-                if legacy_vog_alias {
-                    advisories.push("deprecated_optimizer_vog_alias".to_string());
-                }
-                if legacy_vog_ignored {
-                    advisories
-                        .push("optimizer_vog_ignored_because_new_config_present".to_string());
-                }
                 advisories.sort();
                 advisories.dedup();
                 StageOutcome {
@@ -1438,18 +1419,7 @@ fn assemble_generic_result(
                 StageOutcome {
                     stage: "inter_channel_timbre_matching".to_string(),
                     status: StageStatus::Failed,
-                    advisories: {
-                        let mut advisories = vec![format!("invalid_reference: {e}")];
-                        if legacy_vog_alias {
-                            advisories.push("deprecated_optimizer_vog_alias".to_string());
-                        }
-                        if legacy_vog_ignored {
-                            advisories.push(
-                                "optimizer_vog_ignored_because_new_config_present".to_string(),
-                            );
-                        }
-                        advisories
-                    },
+                    advisories: vec![format!("invalid_reference: {e}")],
                 }
             }
         };
@@ -1478,13 +1448,6 @@ fn assemble_generic_result(
                 "Inter-channel timbre matching not enabled",
             ),
         )?;
-        if legacy_vog_ignored {
-            stage_outcomes.push(StageOutcome {
-                stage: "inter_channel_timbre_matching".to_string(),
-                status: StageStatus::Skipped,
-                advisories: vec!["optimizer_vog_ignored_because_new_config_present".to_string()],
-            });
-        }
     }
 
     // ========================================================================

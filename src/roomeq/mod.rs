@@ -117,17 +117,11 @@ pub use spectral_align::{
     create_alignment_plugins, log_spectral_alignment,
 };
 
-// Inter-channel timbre matching (legacy file path retained for one schema cycle).
-#[path = "voice_of_god.rs"]
 mod inter_channel_timbre_matching;
 pub use inter_channel_timbre_matching::{
     InterChannelTimbreMatchingResult, TimbreMatchingChannelStatus,
     compute_inter_channel_timbre_matching, compute_inter_channel_timbre_matching_with_threshold,
     create_timbre_matching_plugins, pairwise_normalized_timbre_spread_db,
-};
-#[allow(deprecated)]
-pub use inter_channel_timbre_matching::{
-    VoGChannelStatus, VoGResult, compute_voice_of_god, create_vog_plugins,
 };
 
 mod height_channel_alignment;
@@ -147,6 +141,13 @@ pub use mixed_phase::{MixedPhaseConfig, MixedPhaseResult, decompose_phase};
 pub mod impulse_analysis;
 pub use impulse_analysis::{
     DecomposedCorrectionConfig, DecomposedCorrectionResult, analyze_decomposed_correction,
+};
+
+// Distance- and directivity-weighted RIR prototype builder
+pub mod rir_prototype;
+pub use rir_prototype::{
+    DirectivityModel, DistanceWeightMode, RirPrototypeConfig, WeightedPrototype,
+    build_weighted_prototype,
 };
 
 // CEA2034 speaker pre-correction (3-pass pipeline)

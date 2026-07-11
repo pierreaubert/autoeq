@@ -1,5 +1,7 @@
 //! Tests for multi-measurement optimization strategies.
 
+mod common;
+
 use autoeq::PeqModel;
 use autoeq::optim::{
     MultiObjectiveData, ObjectiveData, ObjectiveDataBuilder, compute_base_fitness,
@@ -238,6 +240,7 @@ fn config_serialization_roundtrip() {
         variance_lambda: 2.5,
         spatial_robustness: None,
         bootstrap_uncertainty: None,
+        rir_prototype: None,
     };
 
     let json = serde_json::to_string(&config).unwrap();
@@ -273,4 +276,82 @@ fn load_source_individual_single() {
 
     assert_eq!(curves.len(), 1);
     assert_eq!(curves[0].freq.len(), 3);
+}
+
+#[test]
+fn rir_prototype_config_dry_run_succeeds() {
+    use common::binary_runner::run_roomeq;
+    use std::fs;
+    use std::path::PathBuf;
+
+    let temp_dir = tempfile::TempDir::new().expect("Failed to create temp dir");
+    let config_path = temp_dir.path().join("rir_prototype_config.json");
+    let output_path = temp_dir.path().join("output.json");
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let left = manifest_dir.join("tests/data/roomeq/test_speaker_left.csv");
+    let right = manifest_dir.join("tests/data/roomeq/test_speaker_right.csv");
+    let tweeter = manifest_dir.join("tests/data/roomeq/test_tweeter.csv");
+
+    let config = serde_json::json!({
+        "version": "2.1.0",
+        "speakers": {
+            "left": {
+                "measurements": [
+                    left.to_str().unwrap(),
+                    right.to_str().unwrap(),
+                    tweeter.to_str().unwrap()
+                ]
+            }
+        },
+        "optimizer": {
+            "num_filters": 3,
+            "max_iter": 5,
+            "population": 8,
+            "multi_measurement": {
+                "strategy": "weighted_sum",
+                "rir_prototype": {
+                    "reference_position": [0.0, 0.0, 0.0],
+                    "source_position": [0.0, 2.5, 0.0],
+                    "microphone_positions": [
+                        [0.0, 0.0, 0.0],
+                        [0.15, 0.0, 0.0],
+                        [-0.15, 0.0, 0.0]
+                    ],
+                    "distance_mode": "inverse_square",
+                    "directivity": "omnidirectional",
+                    "frequency_dependent_directivity": false
+                }
+            }
+        }
+    });
+
+    fs::write(&config_path, serde_json::to_string_pretty(&config).unwrap())
+        .expect("Failed to write config");
+
+    let output = run_roomeq(&[
+        "--config",
+        config_path.to_str().unwrap(),
+        "--output",
+        output_path.to_str().unwrap(),
+        "--dry-run",
+    ]);
+
+    if !output.status.success() {
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        panic!("roomeq --dry-run failed with status: {}", output.status);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Configuration: VALID"),
+        "dry-run should report a valid config; got:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("All checks passed"),
+        "dry-run should complete successfully; got:\n{}",
+        stdout
+    );
 }

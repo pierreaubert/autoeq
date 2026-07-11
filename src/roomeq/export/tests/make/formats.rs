@@ -95,8 +95,8 @@ fn equalizer_apo_routed_export_rejects_intermediate_destination_bus() {
         .as_mut()
         .unwrap();
     graph.routes.retain(|route| {
-        (route.destination == "LFE" && matches!(route.source_channel.as_str(), "L" | "R"))
-            || (route.source_channel == "LFE" && route.destination == "LFE")
+        route.destination == "LFE"
+            && matches!(route.source_channel.as_str(), "L" | "R" | "LFE")
     });
     graph.input_channels = vec!["L".to_string(), "R".to_string(), "LFE".to_string()];
     graph.output_channels = vec!["LFE".to_string()];

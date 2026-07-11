@@ -116,7 +116,6 @@ impl OptimizerConfigBuilder {
         height_channel_alignment,
         Option<super::HeightChannelAlignmentConfig>
     );
-    setter!(vog, Option<super::InterChannelTimbreMatchingConfig>);
     setter!(multi_measurement, Option<super::MultiMeasurementConfig>);
     setter!(
         decomposed_correction,

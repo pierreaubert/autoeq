@@ -106,6 +106,7 @@ pub(super) fn multi_measurement_config(
         variance_lambda: 1.0,
         spatial_robustness,
         bootstrap_uncertainty: None,
+        rir_prototype: None,
     }
 }
 

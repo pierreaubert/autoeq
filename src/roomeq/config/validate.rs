@@ -64,23 +64,8 @@ fn validate_optimizer_config(opt: &OptimizerConfig, result: &mut ValidationResul
 }
 
 fn validate_channel_alignment_config(opt: &OptimizerConfig, result: &mut ValidationResult) {
-    if opt.inter_channel_timbre_matching.is_some() && opt.vog.is_some() {
-        result.add_warning(
-            "optimizer.vog is ignored when optimizer.inter_channel_timbre_matching is present"
-                .to_string(),
-        );
-    }
-
-    for (path, config) in [
-        (
-            "optimizer.inter_channel_timbre_matching",
-            opt.inter_channel_timbre_matching.as_ref(),
-        ),
-        ("optimizer.vog", opt.vog.as_ref()),
-    ] {
-        let Some(config) = config else {
-            continue;
-        };
+    if let Some(config) = &opt.inter_channel_timbre_matching {
+        let path = "optimizer.inter_channel_timbre_matching";
         if config.enabled && config.reference_channel.trim().is_empty() {
             result.add_error(format!(
                 "{path}.reference_channel must not be empty when enabled"
@@ -762,24 +747,6 @@ mod validate_optimizer_tests {
                 .errors
                 .iter()
                 .any(|error| error.contains("min_improvement_db"))
-        );
-    }
-
-    #[test]
-    fn validate_new_timbre_config_precedence_warns_about_legacy_alias() {
-        let mut config = default_config();
-        config.inter_channel_timbre_matching =
-            Some(crate::roomeq::types::InterChannelTimbreMatchingConfig::default());
-        config.vog = Some(crate::roomeq::types::InterChannelTimbreMatchingConfig::default());
-        let mut result = ValidationResult::valid();
-
-        validate_optimizer_config(&config, &mut result);
-
-        assert!(result.is_valid);
-        assert!(
-            result.warnings.iter().any(|warning| {
-                warning.contains("optimizer.vog") && warning.contains("ignored")
-            })
         );
     }
 

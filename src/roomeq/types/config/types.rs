@@ -772,13 +772,6 @@ impl Default for InterChannelTimbreMatchingConfig {
     }
 }
 
-/// Deprecated Rust compatibility name for [`InterChannelTimbreMatchingConfig`].
-#[deprecated(
-    since = "0.4.47",
-    note = "use InterChannelTimbreMatchingConfig; optimizer.vog remains a one-cycle JSON alias"
-)]
-pub type VoiceOfGodConfig = InterChannelTimbreMatchingConfig;
-
 /// Role-aware alignment policy for overhead/height channels.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct HeightChannelAlignmentConfig {

@@ -78,7 +78,6 @@ pub(super) fn disable_option(config: &mut RoomConfig, option: &OptionOverride) {
             config.optimizer.multi_seat = None;
         }
         OptionOverride::InterChannelTimbreMatching { .. } => {
-            config.optimizer.vog = None;
             config.optimizer.inter_channel_timbre_matching = None;
         }
         OptionOverride::SpatialRobustness => {

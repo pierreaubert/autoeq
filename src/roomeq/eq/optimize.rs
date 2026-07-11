@@ -13,6 +13,7 @@ use crate::Curve;
 use crate::PeqModel;
 use crate::loss::LossType;
 use crate::optim::{MultiObjectiveData, OptimizerBackend, RealOptimizerBackend};
+use crate::roomeq::rir_prototype::build_weighted_prototype;
 use crate::workflow::setup_objective_data;
 use clap::ValueEnum;
 use math_audio_iir_fir::Biquad;
@@ -251,6 +252,42 @@ fn optimize_channel_eq_multi_inner(
     backend: &dyn OptimizerBackend,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
     assert!(!curves.is_empty(), "curves must not be empty");
+
+    // Optionally collapse multiple measurements into a distance- and
+    // directivity-weighted prototype before applying the chosen strategy.
+    let mut prototype_holder: Vec<Curve> = Vec::with_capacity(1);
+    let curves: &[Curve] = if let Some(rir_cfg) = &multi_config.rir_prototype {
+        if multi_config.weights.is_some() {
+            log::warn!(
+                "multi_measurement.weights is ignored when rir_prototype is enabled; \
+                 the prototype builder has already collapsed the measurements into a single curve"
+            );
+        }
+        log::info!(
+            "Building RIR prototype from {} measurements (distance_mode={:?}, directivity={:?})",
+            curves.len(),
+            rir_cfg.distance_mode,
+            rir_cfg.directivity,
+        );
+        let prototype = build_weighted_prototype(curves, rir_cfg)
+            .map_err(|e| format!("Failed to build RIR prototype: {}", e))?;
+        if matches!(
+            multi_config.strategy,
+            MultiMeasurementStrategy::SpatialRobustness
+                | MultiMeasurementStrategy::MinimaxUncertainty
+        ) {
+            log::warn!(
+                "rir_prototype collapses {} measurements into one curve; \
+                 {:?} strategy will operate on the prototype only",
+                curves.len(),
+                multi_config.strategy
+            );
+        }
+        prototype_holder.push(prototype.curve);
+        &prototype_holder
+    } else {
+        curves
+    };
 
     // =========================================================================
     // SpatialRobustness strategy: early return with single-curve optimization
@@ -1691,5 +1728,94 @@ mod multi_eq_tests {
             "spatial robustness with bootstrap should succeed: {:?}",
             result.err()
         );
+    }
+
+    use crate::roomeq::rir_prototype::{DirectivityModel, DistanceWeightMode, RirPrototypeConfig};
+
+    #[test]
+    fn optimize_channel_eq_multi_rir_prototype_runs() {
+        let reference = make_simple_room_curve();
+        let mut far = reference.clone();
+        far.spl = far.spl.mapv(|s| s + 2.0);
+        let mut off_axis = reference.clone();
+        off_axis.spl = off_axis.spl.mapv(|s| s - 2.0);
+
+        let multi_config = MultiMeasurementConfig {
+            strategy: MultiMeasurementStrategy::Average,
+            weights: None,
+            variance_lambda: 1.0,
+            spatial_robustness: None,
+            bootstrap_uncertainty: None,
+            rir_prototype: Some(RirPrototypeConfig {
+                reference_position: [0.0, 0.0, 0.0],
+                source_position: [0.0, 2.5, 0.0],
+                microphone_positions: vec![[0.0, 0.0, 0.0], [0.5, 0.1, 0.0], [-0.5, 0.1, 0.0]],
+                distance_mode: DistanceWeightMode::InverseSquare,
+                directivity: DirectivityModel::Omnidirectional,
+                frequency_dependent_directivity: false,
+            }),
+        };
+
+        let config = OptimizerConfig {
+            loss_type: "flat".to_string(),
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 3,
+            max_iter: 500,
+            population: 8,
+            seed: Some(42),
+            ..OptimizerConfig::default()
+        };
+
+        let result = optimize_channel_eq_multi(
+            &[reference, far, off_axis],
+            &config,
+            &multi_config,
+            None,
+            48000.0,
+        );
+
+        assert!(result.is_ok(), "optimization failed: {:?}", result.err());
+        let (filters, loss) = result.unwrap();
+        assert!(!filters.is_empty());
+        assert!(loss.is_finite(), "loss should be finite, got {}", loss);
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_rir_prototype_none_uses_plain_average_path() {
+        let c1 = make_simple_room_curve();
+        let mut c2 = c1.clone();
+        c2.spl = c2.spl.mapv(|s| s + 1.5);
+
+        let multi_config = MultiMeasurementConfig {
+            strategy: MultiMeasurementStrategy::Average,
+            weights: None,
+            variance_lambda: 1.0,
+            spatial_robustness: None,
+            bootstrap_uncertainty: None,
+            rir_prototype: None,
+        };
+
+        let config = OptimizerConfig {
+            loss_type: "flat".to_string(),
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 2,
+            max_iter: 500,
+            population: 8,
+            seed: Some(42),
+            ..OptimizerConfig::default()
+        };
+
+        let result = optimize_channel_eq_multi(&[c1, c2], &config, &multi_config, None, 48000.0);
+
+        assert!(
+            result.is_ok(),
+            "plain average path failed: {:?}",
+            result.err()
+        );
+        let (filters, loss) = result.unwrap();
+        assert!(!filters.is_empty());
+        assert!(loss.is_finite());
     }
 }

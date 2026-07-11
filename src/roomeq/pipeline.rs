@@ -71,9 +71,6 @@ pub enum PipelineStepId {
     InterChannelTimbreMatching,
     /// Align overhead channels to role-appropriate bed references.
     HeightChannelAlignment,
-    /// Deprecated compatibility step ID for Voice of God timbre matching.
-    #[deprecated(since = "0.4.47", note = "use InterChannelTimbreMatching")]
-    VoiceOfGodAlignment,
     /// Optimize sub/main phase alignment.
     PhaseAlignment,
     /// Run group-delay optimization.
@@ -132,8 +129,6 @@ impl PipelineStepId {
             PipelineStepId::SpectralAlignment => "Spectral Align",
             PipelineStepId::InterChannelTimbreMatching => "Timbre Match",
             PipelineStepId::HeightChannelAlignment => "Height Align",
-            #[allow(deprecated)]
-            PipelineStepId::VoiceOfGodAlignment => "VoG Align (legacy)",
             PipelineStepId::PhaseAlignment => "Phase Align",
             PipelineStepId::GroupDelayOptimization => "GD-Opt",
             PipelineStepId::ImpulseResponseComputation => "IR",

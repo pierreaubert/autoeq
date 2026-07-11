@@ -87,67 +87,6 @@ fn optimize_room_single_speaker_low_latency_succeeds() {
 }
 
 #[test]
-#[allow(deprecated)]
-fn optimize_room_legacy_vog_alias_records_migration_and_failed_stage() {
-    let mut config = minimal_room_config(ProcessingMode::LowLatency);
-    config.speakers.insert(
-        "right".to_string(),
-        SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
-    );
-    config.optimizer.vog = Some(crate::roomeq::types::VoiceOfGodConfig {
-        enabled: true,
-        reference_channel: "missing".to_string(),
-        min_improvement_db: 0.0,
-    });
-
-    let result = optimize_room(&config, 48_000.0, None, None).unwrap();
-    let outcome = result
-        .metadata
-        .stage_outcomes
-        .iter()
-        .find(|outcome| outcome.stage == "inter_channel_timbre_matching")
-        .expect("inter-channel timbre-matching stage outcome");
-    assert_eq!(outcome.status, crate::roomeq::types::StageStatus::Failed);
-    assert!(
-        outcome
-            .advisories
-            .iter()
-            .any(|advisory| advisory.contains("invalid_reference"))
-    );
-    assert!(
-        outcome
-            .advisories
-            .contains(&"deprecated_optimizer_vog_alias".to_string())
-    );
-}
-
-#[test]
-fn optimize_room_new_timbre_config_precedes_legacy_alias() {
-    let mut config = minimal_room_config(ProcessingMode::LowLatency);
-    config.optimizer.inter_channel_timbre_matching =
-        Some(crate::roomeq::types::InterChannelTimbreMatchingConfig::default());
-    config.optimizer.vog = Some(crate::roomeq::types::InterChannelTimbreMatchingConfig {
-        enabled: true,
-        reference_channel: "left".to_string(),
-        min_improvement_db: 0.0,
-    });
-
-    let result = optimize_room(&config, 48_000.0, None, None).unwrap();
-    let outcome = result
-        .metadata
-        .stage_outcomes
-        .iter()
-        .find(|outcome| outcome.stage == "inter_channel_timbre_matching")
-        .expect("ignored legacy alias should be reported");
-    assert_eq!(outcome.status, crate::roomeq::types::StageStatus::Skipped);
-    assert!(
-        outcome
-            .advisories
-            .contains(&"optimizer_vog_ignored_because_new_config_present".to_string())
-    );
-}
-
-#[test]
 fn optimize_room_height_alignment_records_structured_stage() {
     let mut config = minimal_room_config(ProcessingMode::LowLatency);
     config.speakers.insert(

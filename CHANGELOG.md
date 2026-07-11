@@ -1,4 +1,22 @@
-# 0.4.47 -- unreleased
+# 0.4.48 -- unreleased
+
+## New features
+
+- Added a distance- and directivity-weighted RIR prototype for RoomEQ
+  multi-measurement workflows. Multiple microphone positions can now be
+  collapsed into a single prototype curve before optimization, controlled by
+  `optimizer.multi_measurement.rir_prototype`.
+
+## Breaking changes
+
+- Retired the one-schema-cycle Voice-of-God compatibility surface. Configs must
+  use `optimizer.inter_channel_timbre_matching`; the `optimizer.vog` JSON key
+  is now rejected. Rust callers must use `InterChannelTimbreMatchingConfig`,
+  `TimbreMatchingChannelStatus`, `InterChannelTimbreMatchingResult`,
+  `compute_inter_channel_timbre_matching`, and `create_timbre_matching_plugins`.
+  The deprecated VoG type/function aliases and pipeline step ID were removed.
+
+# 0.4.47
 
 ## Audit follow-up: numeric robustness and test quality
 
@@ -80,8 +98,8 @@
   positive adaptive-GD bootstrap improvements as significant evidence.
 - Renamed Voice-of-God broadband matching to
   `optimizer.inter_channel_timbre_matching`, added a normalized timbre-spread
-  acceptance gate, and retained `optimizer.vog`/`VoiceOfGodConfig` as
-  one-schema-cycle compatibility aliases with migration advisories. Mismatched
+  acceptance gate, with `optimizer.vog`/`VoiceOfGodConfig` retained for one
+  schema cycle as compatibility aliases with migration advisories. Mismatched
   grids are evaluated only over measured overlap, and invalid references or
   rejected corrections are exposed through structured stage outcomes.
 - Added separate role-aware `optimizer.height_channel_alignment` for overhead

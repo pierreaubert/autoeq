@@ -61,6 +61,7 @@ use serde::{Deserialize, Serialize};
 
 /// Optimizer configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct OptimizerConfig {
     /// Processing mode — selects the filter class used for correction.
     #[serde(default)]
@@ -230,9 +231,6 @@ pub struct OptimizerConfig {
     /// Role-aware overhead/height-channel alignment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height_channel_alignment: Option<HeightChannelAlignmentConfig>,
-    /// Deprecated one-cycle JSON alias for `inter_channel_timbre_matching`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vog: Option<InterChannelTimbreMatchingConfig>,
     /// Multi-measurement optimization configuration
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multi_measurement: Option<MultiMeasurementConfig>,
@@ -329,7 +327,6 @@ impl Default for OptimizerConfig {
             multi_seat: None,
             inter_channel_timbre_matching: None,
             height_channel_alignment: None,
-            vog: None,
             multi_measurement: None,
             decomposed_correction: Some(DecomposedCorrectionSerdeConfig {
                 enabled: true,
@@ -529,5 +526,24 @@ impl OptimizerConfig {
         }
 
         self.max_db
+    }
+}
+
+#[cfg(test)]
+mod legacy_alias_tests {
+    use super::OptimizerConfig;
+
+    #[test]
+    fn removed_vog_alias_is_rejected() {
+        let error = serde_json::from_value::<OptimizerConfig>(serde_json::json!({
+            "vog": {
+                "enabled": true,
+                "reference_channel": "left",
+                "min_improvement_db": 0.05
+            }
+        }))
+        .unwrap_err();
+
+        assert!(error.to_string().contains("unknown field `vog`"));
     }
 }

@@ -310,40 +310,7 @@ pub fn pairwise_normalized_timbre_spread_db(
     super::acoustic_qa::normalized_timbre_spread_db(&[channel, reference])
 }
 
-#[deprecated(since = "0.4.47", note = "use TimbreMatchingChannelStatus")]
-pub type VoGChannelStatus = TimbreMatchingChannelStatus;
-
-#[deprecated(since = "0.4.47", note = "use InterChannelTimbreMatchingResult")]
-pub type VoGResult = InterChannelTimbreMatchingResult;
-
-#[deprecated(since = "0.4.47", note = "use compute_inter_channel_timbre_matching")]
-pub fn compute_voice_of_god(
-    corrected_curves: &HashMap<String, Curve>,
-    reference_channel: &str,
-    sample_rate: f64,
-    min_freq: f64,
-    max_freq: f64,
-) -> Result<HashMap<String, InterChannelTimbreMatchingResult>> {
-    compute_inter_channel_timbre_matching_with_threshold(
-        corrected_curves,
-        reference_channel,
-        sample_rate,
-        min_freq,
-        max_freq,
-        0.05,
-    )
-}
-
-#[deprecated(since = "0.4.47", note = "use create_timbre_matching_plugins")]
-pub fn create_vog_plugins(
-    result: &InterChannelTimbreMatchingResult,
-    sample_rate: f64,
-) -> Vec<PluginConfigWrapper> {
-    create_timbre_matching_plugins(result, sample_rate)
-}
-
 #[cfg(test)]
-#[allow(deprecated)]
 mod tests {
     use super::*;
     use ndarray::Array1;
@@ -377,18 +344,19 @@ mod tests {
     const SR: f64 = 48000.0;
 
     #[test]
-    fn test_vog_identical_channels() {
+    fn identical_channels_need_no_timbre_correction() {
         // All flat channels → corrections should be None (negligible)
         let mut curves = HashMap::new();
         curves.insert("L".to_string(), make_curve(|_| 0.0));
         curves.insert("R".to_string(), make_curve(|_| 0.0));
         curves.insert("C".to_string(), make_curve(|_| 0.0));
 
-        let results = compute_voice_of_god(&curves, "C", SR, 20.0, 20000.0).unwrap();
+        let results =
+            compute_inter_channel_timbre_matching(&curves, "C", SR, 20.0, 20000.0).unwrap();
 
         assert_eq!(results.len(), 3);
         assert!(results["C"].is_reference);
-        assert_eq!(results["C"].status, VoGChannelStatus::Reference);
+        assert_eq!(results["C"].status, TimbreMatchingChannelStatus::Reference);
         // L and R should have no alignment (identical to reference)
         assert!(
             results["L"].alignment.is_none(),
@@ -401,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn test_vog_bass_mismatch() {
+    fn bass_mismatch_is_reduced() {
         // Reference (C) is flat, satellite (L) has +3dB bass → expect negative lowshelf correction
         let mut curves = HashMap::new();
         curves.insert("C".to_string(), make_curve(|_| 0.0));
@@ -410,7 +378,8 @@ mod tests {
             make_curve(|f| if f < 200.0 { 3.0 } else { 0.0 }),
         );
 
-        let results = compute_voice_of_god(&curves, "C", SR, 20.0, 20000.0).unwrap();
+        let results =
+            compute_inter_channel_timbre_matching(&curves, "C", SR, 20.0, 20000.0).unwrap();
 
         assert!(results["C"].is_reference);
         let l_result = results["L"]
@@ -430,11 +399,12 @@ mod tests {
     }
 
     #[test]
-    fn test_vog_reference_not_found() {
+    fn missing_reference_is_rejected() {
         let mut curves = HashMap::new();
         curves.insert("L".to_string(), make_curve(|_| 0.0));
 
-        let result = compute_voice_of_god(&curves, "NONEXISTENT", SR, 20.0, 20000.0);
+        let result =
+            compute_inter_channel_timbre_matching(&curves, "NONEXISTENT", SR, 20.0, 20000.0);
         assert!(
             result.is_err(),
             "Should error when reference channel not found"
@@ -442,7 +412,7 @@ mod tests {
     }
 
     #[test]
-    fn test_vog_mismatched_grids_are_interpolated() {
+    fn mismatched_grids_are_interpolated() {
         let mut curves = HashMap::new();
         curves.insert(
             "C".to_string(),
@@ -456,8 +426,9 @@ mod tests {
             ),
         );
 
-        let results = compute_voice_of_god(&curves, "C", SR, 20.0, 20_000.0).unwrap();
-        assert_ne!(results["L"].status, VoGChannelStatus::Failed);
+        let results =
+            compute_inter_channel_timbre_matching(&curves, "C", SR, 20.0, 20_000.0).unwrap();
+        assert_ne!(results["L"].status, TimbreMatchingChannelStatus::Failed);
         assert!(
             results["L"]
                 .advisories
@@ -466,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn test_vog_invalid_reference_is_structured_error() {
+    fn invalid_reference_is_structured_error() {
         let mut curves = HashMap::new();
         curves.insert(
             "C".to_string(),
@@ -477,17 +448,19 @@ mod tests {
             },
         );
 
-        let error = compute_voice_of_god(&curves, "C", SR, 20.0, 20_000.0).unwrap_err();
+        let error =
+            compute_inter_channel_timbre_matching(&curves, "C", SR, 20.0, 20_000.0).unwrap_err();
         assert!(error.to_string().contains("invalid frequency/SPL data"));
     }
 
     #[test]
-    fn test_vog_single_channel() {
+    fn single_reference_channel_needs_no_correction() {
         // Only the reference exists → no corrections needed
         let mut curves = HashMap::new();
         curves.insert("C".to_string(), make_curve(|_| 0.0));
 
-        let results = compute_voice_of_god(&curves, "C", SR, 20.0, 20000.0).unwrap();
+        let results =
+            compute_inter_channel_timbre_matching(&curves, "C", SR, 20.0, 20000.0).unwrap();
 
         assert_eq!(results.len(), 1);
         assert!(results["C"].is_reference);
@@ -495,7 +468,7 @@ mod tests {
     }
 
     #[test]
-    fn test_vog_three_channels() {
+    fn three_channels_are_matched_to_reference() {
         // L (reference, flat), C (+2dB treble), R (+3dB bass)
         // Verify corrections push C and R toward L
         let mut curves = HashMap::new();
@@ -509,7 +482,8 @@ mod tests {
             make_curve(|f| if f < 200.0 { 3.0 } else { 0.0 }),
         );
 
-        let results = compute_voice_of_god(&curves, "L", SR, 20.0, 20000.0).unwrap();
+        let results =
+            compute_inter_channel_timbre_matching(&curves, "L", SR, 20.0, 20000.0).unwrap();
 
         assert!(results["L"].is_reference);
 

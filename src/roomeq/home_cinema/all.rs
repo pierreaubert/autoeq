@@ -40,6 +40,7 @@ pub fn derive_all_channel_multiseat_config(
         variance_lambda: 1.0,
         spatial_robustness: Some(default_all_channel_spatial_robustness()),
         bootstrap_uncertainty: None,
+        rir_prototype: None,
     })
 }
 

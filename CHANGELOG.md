@@ -2,6 +2,18 @@
 
 ## Audit follow-up: numeric robustness and test quality
 
+- Added a reusable `roomeq::acoustic_qa` oracle library with analytic complex
+  ground truth for delay, polarity, all-pass/excess phase, Linkwitz-Riley
+  crossover summation, room modes, parallel woofers, comb nulls, and known
+  RT60/Schroeder transitions. The accompanying scorecard evaluates magnitude,
+  group delay, correction energy, headroom, latency, pre-ringing, null safety,
+  export equivalence, held-out distributions, and normalized timbre spread.
+- Added deterministic PR and ignored nightly acoustic scenario matrices across
+  single/multi-way speakers, parallel woofers, multi-sub/multi-seat systems,
+  height layouts, grid density/mismatch, phase/coherence availability, noise,
+  seeds, optimizer budgets, room dimensions, RT60, crossover regions, and
+  explicit training/held-out seat positions. Every scenario carries identity,
+  analytic-correction, current-main, and candidate comparison baselines.
 - Fixed the group-delay weighted-median fallback so unusable weights cannot
   reintroduce NaN/infinite targets or select the wrong finite median.
 - Fixed bass-management differential evolution so non-finite objective values

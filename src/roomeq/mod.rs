@@ -39,6 +39,9 @@ pub use types::RecordingConfiguration;
 mod config_loader;
 pub use config_loader::{SHALLOW_MERGE_KEYS, load_config, merge_json_objects};
 
+// Analytic acoustic ground truth and multi-dimensional QA metrics.
+pub mod acoustic_qa;
+
 // Configuration validation
 mod config;
 pub use config::{ValidationResult, validate_room_config};

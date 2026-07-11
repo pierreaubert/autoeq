@@ -22,12 +22,29 @@ AutoEQ and RoomEQ are Rust CLIs for computing corrections.
 
 ### RoomEQ
 
-- [RoomEQ input format](src/bin/roomeq/INPUT_FORMAT.md) — configuration
-  examples for timbre matching, height alignment, and RIR prototypes
+- [RoomEQ 101](docs/ROOMEQ_101.md) — architecture, signal flow, topology
+  workflows, and the acoustic rationale behind each correction stage
+- [RoomEQ manual](docs/ROOMEQ_MANUAL.md) — installation, configuration,
+  algorithms, correction modes, API usage, and complete examples
+- [RoomEQ input configuration guide](docs/ROOMEQ_INPUT_FORMAT.md) — detailed
+  field-by-field reference and complete system examples
+- [RoomEQ output DSP-chain guide](docs/ROOMEQ_OUTPUT_FORMAT.md) — filters,
+  per-driver chains, routing, curves, metadata, and export examples
+- [Focused configuration examples](src/bin/roomeq/INPUT_FORMAT.md) — timbre
+  matching, height alignment, and RIR prototypes
 - [RoomEQ input schema](src/bin/roomeq/input_schema.json) — complete
   machine-readable configuration contract
 - [RoomEQ output schema](src/bin/roomeq/output_schema.json) — generated filters,
   routing, reports, and metadata contract
+- [RIR prototype design](docs/superpowers/specs/2026-07-10-roomeq-rir-prototype-design.md)
+  — distance/directivity weighting model and validation rules
+
+### Research and references
+
+- [References](docs/REFERENCES.md) — standards, papers, algorithms, and
+  measurement resources used by AutoEQ and RoomEQ
+- [ASR 2026 research notes](docs/asr-202604.md) — annotated research survey
+  and implementation ideas
 
 ## RoomEQ Highlights
 
@@ -46,10 +63,6 @@ RoomEQ keeps the full DSP chain and its evidence together: corrected responses,
 filter stages, routing graphs, perceptual scores, timing diagnostics, advisories,
 and export artifacts are represented in the output rather than hidden behind a
 single aggregate score.
-
-### General
-
-- [References](docs/REFERENCES.md) — papers, algorithms, and measurement resources
 
 ## Capabilities
 

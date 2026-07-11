@@ -102,7 +102,7 @@ pub async fn fetch_measurement_plot_data_with_backend(
         } else {
             log::debug!(
                 "⚠️  Cache file exists but could not be parsed as Plotly JSON: {:?}",
-                &cache_file
+                cache_file
             );
         }
     }
@@ -125,12 +125,12 @@ pub async fn fetch_measurement_plot_data_with_backend(
 
     // 2) Save normalized Plotly JSON to cache for future use
     if let Err(e) = cache.create_dir_all(&cache_dir).await {
-        log::debug!("⚠️  Failed to create cache dir {:?}: {}", &cache_dir, e);
+        log::debug!("⚠️  Failed to create cache dir {:?}: {}", cache_dir, e);
     } else {
         match serde_json::to_string(&plot_data) {
             Ok(serialized) => {
                 if let Err(e) = cache.write(&cache_file, &serialized).await {
-                    log::debug!("⚠️  Failed to write cache file {:?}: {}", &cache_file, e);
+                    log::debug!("⚠️  Failed to write cache file {:?}: {}", cache_file, e);
                 }
             }
             Err(e) => log::debug!("⚠️  Failed to serialize plot data for cache: {}", e),

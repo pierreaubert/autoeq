@@ -10,4 +10,5 @@ mod plugin;
 mod tests;
 mod types;
 
+pub use dsp_response_cache::apply_channel_dsp_chain_to_curve;
 pub use types::*;

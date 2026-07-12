@@ -202,6 +202,7 @@ The QA suite runs optimization scenarios with regression thresholds:
 ```bash
 just qa-autoeq
 just qa-roomeq
+just qa-roomeq-acoustic-pr
 ```
 
 This executes predefined scenarios testing:
@@ -209,6 +210,7 @@ This executes predefined scenarios testing:
 - Speaker optimization (flat and score loss)
 - Headphone optimization (multiple algorithms)
 - Various PEQ models and algorithm combinations
+- Repository-backed real-room and held-out FEM acoustic quality
 
 Each scenario has a `--qa <threshold>` flag that fails if the final loss exceeds the threshold.
 

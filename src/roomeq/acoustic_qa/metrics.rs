@@ -67,7 +67,7 @@ fn magnitude_db(value: Complex64) -> f64 {
     20.0 * value.norm().max(MAGNITUDE_FLOOR).log10()
 }
 
-fn percentile(mut values: Vec<f64>, quantile: f64) -> f64 {
+pub(super) fn percentile(mut values: Vec<f64>, quantile: f64) -> f64 {
     if values.is_empty() {
         return 0.0;
     }
@@ -76,7 +76,7 @@ fn percentile(mut values: Vec<f64>, quantile: f64) -> f64 {
     values[index.min(values.len() - 1)]
 }
 
-fn log_frequency_weights(frequencies_hz: &[f64]) -> Vec<f64> {
+pub(super) fn log_frequency_weights(frequencies_hz: &[f64]) -> Vec<f64> {
     let count = frequencies_hz.len();
     if count < 2 {
         return vec![1.0; count];

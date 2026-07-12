@@ -43,6 +43,10 @@ pub struct CorrectionAcceptanceReport {
     pub violations: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reverted_stages: Vec<String>,
+    /// Optional multi-position quality evidence. Runtime callers without
+    /// held-out measurements keep this absent for wire compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acoustic_quality: Option<super::AcousticQualityScorecard>,
 }
 
 pub fn evaluate_correction_acceptance(
@@ -149,6 +153,7 @@ pub fn evaluate_correction_acceptance(
         metrics,
         violations,
         reverted_stages: Vec::new(),
+        acoustic_quality: None,
     })
 }
 

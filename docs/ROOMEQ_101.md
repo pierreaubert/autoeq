@@ -792,6 +792,25 @@ and multi-seat variance. Degraded measurements reduce correction depth; poor
 measurements are capped at 35%, and unusable or mismatched measurement grids are
 rejected explicitly.
 
+The acoustic-quality scorecard extends this contract across training and
+held-out positions. It reports target-weighted median RMS, p95 and worst
+residuals, normalized seat spread, separate below/above-Schroeder results,
+correction energy, peak boost/cut, and induced group-delay RMS. Different
+measurement grids are evaluated only over their explicit shared frequency
+overlap; sparse grids and missing phase degrade individual metrics rather than
+silently changing the evaluation range.
+
+`data_tests/roomeq/acoustic_corpus/manifest.json` is the versioned corpus entry
+point. It includes repository-owned real stereo measurements and FEM rooms with
+training/held-out seats. `just qa-roomeq-acoustic-pr` runs the bounded PR tier;
+`just qa-roomeq-acoustic-nightly` includes the full corpus. Corpus gates begin
+in `report_only` mode so stable paired baselines can be collected before the
+0.1 dB held-out improvement and 0.25 dB p95-regression limits become blocking.
+The compact `baseline.json` snapshot records current-main metrics for each
+scenario; every corpus run emits paired weighted-RMS, p95, improvement,
+headroom, and group-delay deltas. `--enforce` proves the future blocking path
+without changing the manifest's calibration mode.
+
 `export_dsp_chain` (`roomeq/export.rs`) serialises the result into
 external formats. Some targets (e.g. EasyEffects, Wavelet GraphicEQ)
 do not support routing matrices or convolution; the exporter rejects

@@ -6,6 +6,7 @@ use super::plugin::plugin_response;
 use super::types::MatrixSpectrum;
 use crate::error::{AutoeqError, Result};
 use crate::roomeq::types::{ChannelDspChain, PluginConfigWrapper, SystemConfig};
+use crate::{Curve, response::try_apply_complex_response};
 use math_audio_dsp::{fir_complex_response, lr4_crossover_response};
 use num_complex::Complex64;
 use std::collections::HashMap;
@@ -55,6 +56,27 @@ pub(super) fn apply_room_eq_dsp_to_spectrum(
         }
     }
     Ok(())
+}
+
+/// Apply the canonical serialized channel chain to an arbitrary measurement.
+///
+/// Held-out acoustic QA uses the same plugin evaluator as CTC so gain,
+/// crossovers, delay, EQ, convolution, and mixed-band processing are not
+/// approximated by a PEQ-only response. Graph-level routing remains outside
+/// this serial channel API.
+pub fn apply_channel_dsp_chain_to_curve(
+    chain: &ChannelDspChain,
+    curve: &Curve,
+    sample_rate: f64,
+) -> Result<Curve> {
+    curve.validate("channel DSP evaluation curve")?;
+    let mut cache = DspResponseCache::new(checked_sample_rate(sample_rate)?);
+    let response = curve
+        .freq
+        .iter()
+        .map(|frequency| channel_chain_response(chain, *frequency, sample_rate, &mut cache))
+        .collect::<Result<Vec<_>>>()?;
+    try_apply_complex_response(curve, &response)
 }
 
 pub(super) struct DspResponseCache {

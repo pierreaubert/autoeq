@@ -111,6 +111,43 @@ pub(super) fn apply_final_correction_safety_gate(result: &mut RoomOptimizationRe
                 .push("audibility_regression_reverted".to_string());
             report.reverted_stages = reverted;
         }
+        let mut names: Vec<_> = result.channel_results.keys().cloned().collect();
+        names.sort();
+        let training_pre: Vec<_> = names
+            .iter()
+            .map(|name| result.channel_results[name].initial_curve.clone())
+            .collect();
+        let training_post: Vec<_> = names
+            .iter()
+            .map(|name| result.channel_results[name].final_curve.clone())
+            .collect();
+        let min_freq_hz = training_pre
+            .iter()
+            .chain(&training_post)
+            .map(|curve| curve.freq[0])
+            .fold(0.0, f64::max);
+        let max_freq_hz = training_pre
+            .iter()
+            .chain(&training_post)
+            .filter_map(|curve| curve.freq.last().copied())
+            .fold(f64::INFINITY, f64::min);
+        if max_freq_hz > min_freq_hz {
+            report.acoustic_quality = crate::roomeq::acoustic_qa::evaluate_acoustic_quality(
+                &training_pre,
+                &training_post,
+                &[],
+                &[],
+                None,
+                crate::roomeq::acoustic_qa::QualityEvaluationConfig {
+                    min_freq_hz,
+                    max_freq_hz,
+                    schroeder_hz: None,
+                    normalize_level: true,
+                },
+                crate::roomeq::acoustic_qa::TemporalQualityEvidence::default(),
+            )
+            .ok();
+        }
         result.metadata.correction_acceptance = Some(report);
     }
 }
@@ -375,6 +412,14 @@ mod tests {
                 .decision,
             CorrectionDecision::IdentityFallback
         );
+        let quality = result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .and_then(|report| report.acoustic_quality.as_ref())
+            .expect("final safety gate should attach the shared quality scorecard");
+        assert!(quality.finite);
+        assert_eq!(quality.training.curve_count, 1);
     }
 
     // In debug builds `sanity_check_result` panics on invariant violations via

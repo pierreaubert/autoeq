@@ -127,6 +127,34 @@ fn joint_room_eq_path_models_convolution_ir_phase() {
 }
 
 #[test]
+fn canonical_channel_chain_applies_to_held_out_curve() {
+    use super::apply_channel_dsp_chain_to_curve;
+    use crate::Curve;
+    use ndarray::Array1;
+
+    let chain = test_channel_chain(
+        vec![PluginConfigWrapper {
+            plugin_type: "gain".to_string(),
+            parameters: serde_json::json!({"gain_db": -6.0}),
+        }],
+        None,
+    );
+    let curve = Curve {
+        freq: Array1::from(vec![20.0, 100.0, 1_000.0]),
+        spl: Array1::from(vec![0.0; 3]),
+        ..Default::default()
+    };
+    let corrected = apply_channel_dsp_chain_to_curve(&chain, &curve, 48_000.0).unwrap();
+    assert_eq!(corrected.freq, curve.freq);
+    assert!(
+        corrected
+            .spl
+            .iter()
+            .all(|value| (*value + 6.0).abs() < 1e-9)
+    );
+}
+
+#[test]
 fn measured_wav_requires_two_channels() {
     let dir = tempdir().unwrap();
     let wav = dir.path().join("mono.wav");

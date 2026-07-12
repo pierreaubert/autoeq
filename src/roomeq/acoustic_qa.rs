@@ -12,14 +12,18 @@
 //! - Nightly: `cargo test -p autoeq acoustic_qa_nightly_ --lib -- --ignored`
 
 mod acceptance;
+mod corpus;
 mod fixtures;
 mod metrics;
+mod quality;
 mod scenario;
 mod types;
 
 pub use acceptance::*;
+pub use corpus::*;
 pub use fixtures::*;
 pub use metrics::*;
+pub use quality::*;
 pub use scenario::*;
 pub use types::*;
 

@@ -727,12 +727,24 @@ qa-audibility-pr:
 	cargo test -p autoeq correction_acceptance --lib
 	cargo test -p autoeq final_safety_gate --lib
 	cargo run --bin roomeq-qa-synthetic --no-default-features --release -- --pr
+	cargo run --bin roomeq-qa-acoustic --release -- --tier pr
+
+# Repository-backed real/FEM corpus. Scenarios remain report-only while the
+# paired quality baselines are calibrated; pass --enforce to exercise gates.
+[group('qa-roomeq')]
+qa-roomeq-acoustic-pr:
+	cargo run --bin roomeq-qa-acoustic --release -- --tier pr
+
+[group('qa-roomeq')]
+qa-roomeq-acoustic-nightly:
+	cargo run --bin roomeq-qa-acoustic --release -- --tier nightly
 
 # Exhaustive layout x sub-topology x processing-mode audibility matrix.
 [group('qa-roomeq')]
 qa-audibility-nightly:
 	just qa-roomeq-convergence
 	cargo run --bin roomeq-qa-synthetic --no-default-features --release -- --full-matrix
+	just qa-roomeq-acoustic-nightly
 	just qa-roomeq-coverage-gate
 
 # Backend semantic/PCM validation. External backends are mandatory here so a

@@ -5,6 +5,16 @@
 - Built matrix for testing
 - Added testing for each export software (need more work for Roon and
 add it to a docker, more work to test properly EQAPO on Windows)
+- Added a repository-backed RoomEQ acoustic corpus with fixed-seed PR and
+  nightly tiers, real measured stereo rooms, FEM held-out listening positions,
+  and machine-readable quality reports.
+- Added a shared training/held-out acoustic scorecard covering target residuals,
+  normalized seat spread, below/above-Schroeder quality, correction depth, and
+  induced group delay. Final correction metadata can carry the same scorecard
+  without breaking existing serialized output.
+- Added committed current-main acoustic baselines and paired regression deltas;
+  report-only calibration and explicit `--enforce` runs share the same 0.1 dB
+  weighted-RMS/improvement and 0.25 dB p95 policies.
 
 # 0.4.49
 

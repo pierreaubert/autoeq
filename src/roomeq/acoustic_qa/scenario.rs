@@ -4,13 +4,30 @@ use super::fixtures::{
 };
 use super::types::{AcousticOracle, ParallelSourceParameters};
 use num_complex::Complex64;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum QaTier {
     Pr,
     Nightly,
     Weekly,
     Release,
+}
+
+impl QaTier {
+    pub fn includes(self, candidate: Self) -> bool {
+        fn rank(tier: QaTier) -> u8 {
+            match tier {
+                QaTier::Pr => 0,
+                QaTier::Nightly => 1,
+                QaTier::Weekly => 2,
+                QaTier::Release => 3,
+            }
+        }
+        rank(candidate) <= rank(self)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,0 +1,82 @@
+{
+  "version": "1.0.0",
+  "scenarios": [
+    {
+      "id": "fem_medium_multiseat_20",
+      "tier": "pr",
+      "provenance": "fem",
+      "topology": "stereo_2_0_multiseat",
+      "channels": ["L", "R"],
+      "sample_rate": 48000.0,
+      "config": "../generate/fem/medium_multi_seat/config.json",
+      "override_config": "qa_optimizer.json",
+      "evaluation_band_hz": [20.0, 500.0],
+      "schroeder_hz": 200.0,
+      "held_out": [
+        { "channel": "L", "path": "../generate/fem/medium_multi_seat/left_lp1.csv" },
+        { "channel": "L", "path": "../generate/fem/medium_multi_seat/left_lp2.csv" },
+        { "channel": "R", "path": "../generate/fem/medium_multi_seat/right_lp1.csv" },
+        { "channel": "R", "path": "../generate/fem/medium_multi_seat/right_lp2.csv" }
+      ],
+      "gate_mode": "report_only"
+    },
+    {
+      "id": "measured_stereo_8361a",
+      "tier": "pr",
+      "provenance": "real_measurement",
+      "topology": "stereo_2_0",
+      "channels": ["L", "R"],
+      "sample_rate": 48000.0,
+      "config": "../measured/2.0_8361a/recordings.json",
+      "override_config": "qa_optimizer.json",
+      "evaluation_band_hz": [20.0, 500.0],
+      "schroeder_hz": 200.0,
+      "gate_mode": "report_only"
+    },
+    {
+      "id": "fem_large_multiseat_21",
+      "tier": "nightly",
+      "provenance": "fem",
+      "topology": "stereo_2_1_multiseat",
+      "channels": ["L", "R"],
+      "sample_rate": 48000.0,
+      "config": "../generate/fem/large_multi_seat_2_1/config.json",
+      "override_config": "qa_optimizer.json",
+      "evaluation_band_hz": [100.0, 500.0],
+      "schroeder_hz": 200.0,
+      "held_out": [
+        { "channel": "L", "path": "../generate/fem/large_multi_seat_2_1/left_lp1.csv" },
+        { "channel": "L", "path": "../generate/fem/large_multi_seat_2_1/left_lp2.csv" },
+        { "channel": "R", "path": "../generate/fem/large_multi_seat_2_1/right_lp1.csv" },
+        { "channel": "R", "path": "../generate/fem/large_multi_seat_2_1/right_lp2.csv" }
+      ],
+      "gate_mode": "report_only"
+    },
+    {
+      "id": "measured_stereo_d3v",
+      "tier": "nightly",
+      "provenance": "real_measurement",
+      "topology": "stereo_2_0",
+      "channels": ["L", "R"],
+      "sample_rate": 48000.0,
+      "config": "../measured/2.0_d3v/recordings.json",
+      "override_config": "qa_optimizer.json",
+      "evaluation_band_hz": [20.0, 500.0],
+      "schroeder_hz": 200.0,
+      "gate_mode": "report_only"
+    },
+    {
+      "id": "measured_stereo_t7v",
+      "tier": "nightly",
+      "provenance": "real_measurement",
+      "topology": "stereo_2_0",
+      "channels": ["L", "R"],
+      "sample_rate": 48000.0,
+      "config": "../measured/2.0_t7v/recordings.json",
+      "override_config": "qa_optimizer.json",
+      "evaluation_band_hz": [20.0, 500.0],
+      "schroeder_hz": 200.0,
+      "gate_mode": "report_only"
+    }
+  ]
+}

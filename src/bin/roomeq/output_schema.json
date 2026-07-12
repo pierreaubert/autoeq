@@ -39,6 +39,77 @@
     "channels"
   ],
   "$defs": {
+    "AcousticQualityScorecard": {
+      "type": "object",
+      "properties": {
+        "correction_rms_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "evaluated_band_hz": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 2,
+          "minItems": 2
+        },
+        "finite": {
+          "type": "boolean"
+        },
+        "held_out": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualityPartitionMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "induced_group_delay_rms_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "max_boost_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "max_cut_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "measurement_overlap_hz": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 2,
+          "minItems": 2
+        },
+        "temporal": {
+          "$ref": "#/$defs/TemporalQualityEvidence"
+        },
+        "training": {
+          "$ref": "#/$defs/QualityPartitionMetrics"
+        }
+      },
+      "required": [
+        "training",
+        "correction_rms_db",
+        "max_boost_db",
+        "max_cut_db",
+        "temporal",
+        "evaluated_band_hz",
+        "measurement_overlap_hz",
+        "finite"
+      ]
+    },
     "AudibilityDeadbandConfig": {
       "description": "Audibility/JND deadband applied to spectral objective residuals after\nperceptual or octave smoothing.",
       "type": "object",
@@ -1037,6 +1108,17 @@
       "properties": {
         "accepted": {
           "type": "boolean"
+        },
+        "acoustic_quality": {
+          "description": "Optional multi-position quality evidence. Runtime callers without\nheld-out measurements keep this absent for wire compatibility.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AcousticQualityScorecard"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "decision": {
           "$ref": "#/$defs/CorrectionDecision"
@@ -2666,6 +2748,73 @@
         "parameters"
       ]
     },
+    "QualityPartitionMetrics": {
+      "type": "object",
+      "properties": {
+        "bass_post_weighted_rms_db": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "curve_count": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "improvement_median_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "max_normalized_seat_spread_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "mean_normalized_seat_spread_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "post_p95_abs_residual_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "post_weighted_rms_median_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "post_worst_abs_residual_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "pre_p95_abs_residual_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "pre_weighted_rms_median_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "upper_post_weighted_rms_db": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "required": [
+        "curve_count",
+        "pre_weighted_rms_median_db",
+        "post_weighted_rms_median_db",
+        "improvement_median_db",
+        "pre_p95_abs_residual_db",
+        "post_p95_abs_residual_db",
+        "post_worst_abs_residual_db",
+        "mean_normalized_seat_spread_db",
+        "max_normalized_seat_spread_db"
+      ]
+    },
     "RoleTargetConfig": {
       "description": "Optional role-aware target adjustments for home-cinema layouts.\n\nThese are deliberately explicit and default to zero change: enabling the\nblock makes the target semantics role-aware without silently changing\nexisting RoomEQ output. The adjustments layer on top of\n[`TargetResponseConfig::preference`].",
       "type": "object",
@@ -3086,6 +3235,32 @@
         "post_ringing_audible_db",
         "penalty"
       ]
+    },
+    "TemporalQualityEvidence": {
+      "type": "object",
+      "properties": {
+        "available_headroom_db": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "latency_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "pre_ringing_energy_db": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      }
     },
     "TimingDiagnosticsReport": {
       "type": "object",

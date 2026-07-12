@@ -149,6 +149,10 @@ name = "roomeq-qa-synthetic"
 path = "src/bin/roomeq_qa_synthetic.rs"
 
 [[bin]]
+name = "roomeq-qa-acoustic"
+path = "src/bin/roomeq_qa_acoustic.rs"
+
+[[bin]]
 name = "convert-recording"
 path = "src/bin/convert_recording.rs"
 

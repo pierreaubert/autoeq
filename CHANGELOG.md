@@ -21,6 +21,10 @@ add it to a docker, more work to test properly EQAPO on Windows)
   resource tracking, subsystem coverage floors, and focused mutation QA. The
   candidate is promoted for the 2.2 MSO corpus path after its matched headroom
   win; other topologies retain the existing objective.
+- Added a deterministic PR-sized acoustic mutation shard and strengthened its
+  contracts against arithmetic and validation mutations. REW MDAT conversion
+  now recovers embedded channel labels, accepts valid sub-zero band-edge SPL,
+  and exports no free-form note bodies, with focused Python regression tests.
 
 # 0.4.49
 

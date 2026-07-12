@@ -202,7 +202,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "autoeq"
-version = "0.4.49"
+version = "0.4.50"
 dependencies = [
  "anyhow",
  "assert_fs",
@@ -255,7 +255,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-core"
-version = "0.4.49"
+version = "0.4.50"
 dependencies = [
  "clap",
  "log",
@@ -270,7 +270,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-measurements"
-version = "0.4.49"
+version = "0.4.50"
 dependencies = [
  "async-trait",
  "autoeq-core",
@@ -290,7 +290,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-optim"
-version = "0.4.49"
+version = "0.4.50"
 dependencies = [
  "autoeq-core",
  "autoeq-measurements",
@@ -311,7 +311,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-workflow"
-version = "0.4.49"
+version = "0.4.50"
 dependencies = [
  "autoeq-core",
  "autoeq-measurements",
@@ -3163,7 +3163,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-engine"
-version = "0.4.49"
+version = "0.4.50"
 dependencies = [
  "autoeq-core",
  "autoeq-measurements",
@@ -3173,7 +3173,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-export"
-version = "0.4.49"
+version = "0.4.50"
 dependencies = [
  "autoeq-core",
  "roomeq-model",
@@ -3182,7 +3182,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-model"
-version = "0.4.49"
+version = "0.4.50"
 dependencies = [
  "autoeq-core",
  "autoeq-measurements",

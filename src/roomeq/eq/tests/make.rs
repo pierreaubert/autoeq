@@ -127,6 +127,10 @@ pub(super) fn make_fdw_e2e_ir(sample_rate: u32) -> Vec<f32> {
 /// Bug: optimize_channel_eq_inner called optimize_filters directly,
 /// bypassing perform_optimization which contains the refine path.
 #[test]
+#[cfg_attr(
+    coverage,
+    ignore = "optimizer convergence is prohibitively slow under LLVM coverage instrumentation"
+)]
 fn optimize_channel_eq_runs_refine_when_enabled() {
     let curve = make_synthetic_room_curve();
     let config_no_refine = OptimizerConfig {
@@ -167,6 +171,10 @@ fn optimize_channel_eq_runs_refine_when_enabled() {
 
 /// Verify that LSHADE strategy is accepted and produces valid results.
 #[test]
+#[cfg_attr(
+    coverage,
+    ignore = "optimizer convergence is prohibitively slow under LLVM coverage instrumentation"
+)]
 fn optimize_channel_eq_with_lshade_strategy() {
     let curve = make_synthetic_room_curve();
     let config = OptimizerConfig {

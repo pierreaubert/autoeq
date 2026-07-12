@@ -496,3 +496,70 @@ pub fn normalized_timbre_spread_db(channels_db: &[Vec<f64>]) -> Option<f64> {
         / bins as f64;
     Some(mean_spread)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::roomeq::acoustic_qa::identity_oracle;
+    use ndarray::Array1;
+
+    fn permissive_thresholds() -> AcceptanceThresholds {
+        AcceptanceThresholds {
+            max_weighted_rms_db: 100.0,
+            max_p95_residual_db: 100.0,
+            max_worst_residual_db: 100.0,
+            max_correction_energy_db2: 10_000.0,
+            max_group_delay_residual_rms_ms: 100.0,
+        }
+    }
+
+    #[test]
+    fn weighted_rms_uses_normalized_log_frequency_weights() {
+        let oracle = identity_oracle(Array1::from(vec![100.0, 200.0, 400.0, 800.0]));
+        let residual_db = [0.0, 1.0, 2.0, 3.0];
+        let candidate = residual_db
+            .iter()
+            .map(|value| Complex64::new(10.0_f64.powf(*value / 20.0), 0.0))
+            .collect::<Vec<_>>();
+        let report = evaluate_oracle(
+            &oracle,
+            CandidateTransfer {
+                transfer: &candidate,
+                impulse: None,
+            },
+            &permissive_thresholds(),
+        )
+        .expect("oracle report");
+        let expected = (19.0_f64 / 6.0).sqrt();
+        assert!((report.metrics.target_weighted_rms_db - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn fixture_group_delay_limit_is_enforced_independently() {
+        let frequencies = Array1::from(vec![100.0, 200.0, 300.0, 400.0]);
+        let mut oracle = identity_oracle(frequencies.clone());
+        oracle.prohibited_behaviors =
+            vec![ProhibitedBehavior::GroupDelayResidual { max_rms_ms: 0.5 }];
+        let candidate = frequencies
+            .iter()
+            .map(|frequency| {
+                Complex64::from_polar(1.0, -2.0 * std::f64::consts::PI * frequency * 0.001)
+            })
+            .collect::<Vec<_>>();
+        let report = evaluate_oracle(
+            &oracle,
+            CandidateTransfer {
+                transfer: &candidate,
+                impulse: None,
+            },
+            &permissive_thresholds(),
+        )
+        .expect("oracle report");
+        assert!(
+            report
+                .violations
+                .iter()
+                .any(|violation| { violation.metric == "fixture_group_delay_residual_rms_ms" })
+        );
+    }
+}

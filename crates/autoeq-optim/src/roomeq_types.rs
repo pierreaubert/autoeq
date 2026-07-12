@@ -1,7 +1,7 @@
 //! Neutral policy types consumed by the optimizer without depending on RoomEQ.
 
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct AudibilityDeadbandConfig {

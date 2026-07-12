@@ -36,7 +36,15 @@ impl fmt::Display for PeqModel {
 
 impl PeqModel {
     pub fn all() -> Vec<Self> {
-        vec![Self::Pk, Self::HpPk, Self::LsPk, Self::HpPkLp, Self::LsPkHs, Self::FreePkFree, Self::Free]
+        vec![
+            Self::Pk,
+            Self::HpPk,
+            Self::LsPk,
+            Self::HpPkLp,
+            Self::LsPkHs,
+            Self::FreePkFree,
+            Self::Free,
+        ]
     }
 
     pub fn description(&self) -> &'static str {
@@ -45,7 +53,9 @@ impl PeqModel {
             Self::HpPk => "First filter is highpass, rest are peak filters",
             Self::HpPkLp => "First filter is highpass, last is lowpass, rest are peak filters",
             Self::LsPk => "First filter is low shelve, rest are peak filters",
-            Self::LsPkHs => "First filter is low shelve, last is high shelve, rest are peak filters",
+            Self::LsPkHs => {
+                "First filter is low shelve, last is high shelve, rest are peak filters"
+            }
             Self::FreePkFree => "First and last filters can be any type, middle filters are peak",
             Self::Free => "All filters can be any type (peak, highpass, lowpass, shelf)",
         }

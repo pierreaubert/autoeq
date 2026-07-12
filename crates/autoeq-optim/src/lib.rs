@@ -29,23 +29,23 @@ pub mod roomeq {
     }
 }
 
+pub mod cli;
 pub mod constraints;
 pub mod initial_guess;
 pub mod loss;
-pub mod cli;
 pub mod optim;
+pub mod penalty_mode;
 pub mod problem;
 pub mod roomeq_types;
-pub mod penalty_mode;
 pub mod smoothness_penalty_config;
 
 pub use loss::{CrossoverType, HeadphoneLossData, LossType, SpeakerLossData};
-pub use problem::{ObjectiveEvaluator, OptimizationProblem, OptimizationResult};
-pub use penalty_mode::PenaltyMode;
-pub use smoothness_penalty_config::SmoothnessPenaltyConfig;
 pub use math_audio_optimisation as de;
 pub use optim::params::OptimParams;
 pub use optim::{MultiObjectiveData, ObjectiveData, ObjectiveDataBuilder};
+pub use penalty_mode::PenaltyMode;
+pub use problem::{ObjectiveEvaluator, OptimizationProblem, OptimizationResult};
+pub use smoothness_penalty_config::SmoothnessPenaltyConfig;
 
 /// Adapter implemented by higher-level RoomEQ configuration crates.
 pub trait RoomOptimizerConfig {

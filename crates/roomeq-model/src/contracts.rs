@@ -23,7 +23,10 @@ pub struct DspGraph {
 
 impl DspGraph {
     pub fn new(version: impl Into<String>) -> Self {
-        Self { version: version.into(), channels: BTreeMap::new() }
+        Self {
+            version: version.into(),
+            channels: BTreeMap::new(),
+        }
     }
 
     pub fn add_channel(&mut self, name: impl Into<String>, plugins: Vec<Plugin>) {

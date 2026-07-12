@@ -130,13 +130,13 @@ pub(super) fn validate_option_effect(
                 .stage_outcomes
                 .iter()
                 .any(|outcome| outcome.stage == "inter_channel_timbre_matching");
-            let spread_ok = baseline_spread.zip(option_spread).is_some_and(
-                |(baseline, option)| {
+            let spread_ok = baseline_spread
+                .zip(option_spread)
+                .is_some_and(|(baseline, option)| {
                     option + 1e-6 < baseline
                         || (stage_executed
                             && option <= baseline + TIMBRE_MATCHING_PARALLEL_DRIFT_DB)
-                },
-            );
+                });
             let score_ok = option_result.combined_post_score
                 <= TIMBRE_MATCHING_SCORE_TOLERANCE * baseline_result.combined_post_score;
 

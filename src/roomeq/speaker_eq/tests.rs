@@ -997,7 +997,10 @@ fn apply_broadband_precorrection_does_not_double_apply_target_tilt() {
         48_000.0,
     );
 
-    assert_eq!(with_tilt.curve_for_optim.spl, without_tilt.curve_for_optim.spl);
+    assert_eq!(
+        with_tilt.curve_for_optim.spl,
+        without_tilt.curve_for_optim.spl
+    );
     assert_eq!(with_tilt.mean_shift, without_tilt.mean_shift);
 }
 

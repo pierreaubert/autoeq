@@ -989,5 +989,69 @@ mod tests {
             compare_quality_to_baseline(&scorecard, &baseline, QualityRegressionPolicy::default())
                 .expect("comparison");
         assert!(comparison.violations.len() >= 3);
+        assert!((comparison.improvement_delta_db + 0.2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn quality_config_rejects_each_non_finite_band_endpoint_independently() {
+        let mut invalid_min = config();
+        invalid_min.min_freq_hz = f64::NAN;
+        assert!(invalid_min.validate().is_err());
+
+        let mut invalid_max = config();
+        invalid_max.max_freq_hz = f64::INFINITY;
+        assert!(invalid_max.validate().is_err());
+    }
+
+    #[test]
+    fn modal_roughness_excludes_non_finite_residuals() {
+        assert_eq!(
+            modal_roughness(&[20.0, 40.0, 80.0], &[0.0, f64::NAN, 0.0], 20.0, 80.0),
+            None
+        );
+    }
+
+    #[test]
+    fn normalized_seat_spread_uses_the_full_shared_band() {
+        let first = curve(&[20.0, 40.0, 80.0], &[0.0, 0.0, 0.0]);
+        let second = curve(&[20.0, 40.0, 80.0], &[0.0, 2.0, 0.0]);
+        let (mean, maximum) =
+            normalized_seat_spread(&[first, second], None, config()).expect("shared band");
+
+        assert!(mean > 0.0);
+        assert!(maximum > mean);
+    }
+
+    #[test]
+    fn sample_log_interpolates_at_the_geometric_midpoint() {
+        let curve = curve(&[100.0, 1_000.0], &[0.0, 0.0]);
+        let values = Array1::from(vec![0.0, 10.0]);
+        let midpoint = (100.0_f64 * 1_000.0).sqrt();
+        assert!((sample_log(&curve, midpoint, &values) - 5.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn induced_group_delay_unwraps_positive_phase_wraps() {
+        let mut pre = curve(&[100.0, 200.0, 300.0], &[0.0, 0.0, 0.0]);
+        let mut post = pre.clone();
+        pre.phase = Some(Array1::zeros(3));
+        post.phase = Some(Array1::from(vec![-170.0, 170.0, 150.0]));
+        let observed = induced_group_delay_rms_ms(&pre, &post, config())
+            .expect("group delay calculation")
+            .expect("phase evidence");
+        assert!((observed - 5.0 / 9.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn induced_group_delay_unwraps_negative_phase_wraps() {
+        let mut pre = curve(&[100.0, 200.0, 300.0], &[0.0, 0.0, 0.0]);
+        let mut post = pre.clone();
+        pre.phase = Some(Array1::zeros(3));
+        post.phase = Some(Array1::from(vec![170.0, -170.0, -150.0]));
+        let observed = induced_group_delay_rms_ms(&pre, &post, config())
+            .expect("group delay calculation")
+            .expect("phase evidence");
+
+        assert!((observed - 5.0 / 9.0).abs() < 1e-12);
     }
 }

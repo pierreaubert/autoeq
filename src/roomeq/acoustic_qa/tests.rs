@@ -29,6 +29,24 @@ fn acoustic_qa_pr_analytic_oracles_are_valid_and_self_consistent() {
 }
 
 #[test]
+fn acoustic_qa_pr_invalid_oracle_contracts_are_rejected() {
+    let mut oracle = identity_oracle(log_frequency_grid(17, 20.0, 20_000.0));
+    oracle.expected_transfer = ndarray::Array1::from(vec![Complex64::new(1.0, 0.0)]);
+    assert!(oracle.validate().is_err());
+}
+
+#[test]
+fn acoustic_qa_pr_non_finite_oracle_components_are_rejected() {
+    let mut oracle = identity_oracle(log_frequency_grid(17, 20.0, 20_000.0));
+    oracle.components = vec![ndarray::Array1::from_elem(
+        oracle.frequencies_hz.len(),
+        Complex64::new(f64::NAN, 0.0),
+    )];
+
+    assert!(oracle.validate().is_err());
+}
+
+#[test]
 fn acoustic_qa_pr_delay_and_allpass_match_temporal_oracles() {
     // Keep adjacent phase increments below π so ordinary unwrap has an
     // unambiguous delay solution on this log grid.

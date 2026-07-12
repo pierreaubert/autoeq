@@ -387,3 +387,56 @@ pub fn analytic_oracle_suite() -> Vec<AcousticOracle> {
         room_transition_oracle(full(), 30.0, 0.4, 1.0),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parallel_woofer_delay_is_expressed_in_milliseconds() {
+        let oracle = parallel_woofers_oracle(
+            Array1::from(vec![100.0, 200.0]),
+            vec![ParallelSourceParameters {
+                gain_db: 0.0,
+                delay_ms: 2.5,
+                inverted: false,
+            }],
+        );
+        let expected = Complex64::from_polar(1.0, -std::f64::consts::FRAC_PI_2);
+        assert!((oracle.components[0][0] - expected).norm() < 1e-12);
+    }
+
+    #[test]
+    fn room_transition_modal_component_uses_fractional_schroeder_frequency() {
+        let frequencies = Array1::from(vec![100.0, 200.0]);
+        let oracle = room_transition_oracle(frequencies, 100.0, 1.0, 1.0);
+        let expected = room_mode_transfer(200.0, 110.0, 8.0, 6.0);
+        assert!((oracle.components[0][1] - expected).norm() < 1e-12);
+    }
+
+    #[test]
+    fn polarity_oracle_preserves_the_requested_sign() {
+        let frequencies = Array1::from(vec![100.0, 200.0]);
+        let normal = polarity_oracle(frequencies.clone(), false);
+        let inverted = polarity_oracle(frequencies, true);
+
+        assert_eq!(normal.expected_transfer[0], Complex64::new(1.0, 0.0));
+        assert_eq!(inverted.expected_transfer[0], Complex64::new(-1.0, 0.0));
+    }
+
+    #[test]
+    fn room_transition_is_evenly_blended_at_the_schroeder_frequency() {
+        let schroeder_hz = schroeder_frequency_hz(100.0, 1.0);
+        let oracle = room_transition_oracle(
+            Array1::from(vec![schroeder_hz, schroeder_hz * 2.0, schroeder_hz * 4.0]),
+            100.0,
+            1.0,
+            1.0,
+        );
+        let expected = (oracle.components[0][0] + oracle.components[1][0]) * 0.5;
+        let expected_diffuse_at_two_octaves = Complex64::new(10.0_f64.powf(-1.6 / 20.0), 0.0);
+
+        assert!((oracle.expected_transfer[0] - expected).norm() < 1e-12);
+        assert!((oracle.components[1][2] - expected_diffuse_at_two_octaves).norm() < 1e-12);
+    }
+}

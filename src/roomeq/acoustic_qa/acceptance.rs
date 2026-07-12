@@ -283,4 +283,27 @@ mod tests {
             .is_err()
         );
     }
+
+    #[test]
+    fn correction_metrics_are_computed_relative_to_the_target() {
+        let target = curve(&[10.0, 10.0, 10.0, 10.0]);
+        let pre = curve(&[11.0, 8.0, 13.0, 6.0]);
+        let post = curve(&[10.5, 9.0, 11.0, 8.0]);
+        let report = evaluate_correction_acceptance(
+            &pre,
+            &post,
+            &target,
+            None,
+            CorrectionAcceptancePolicy::RuntimeSafety,
+        )
+        .expect("acceptance report");
+
+        let expected_pre_rms = 7.5_f64.sqrt();
+        let expected_post_rms = 1.25;
+        assert!((report.metrics.pre_target_weighted_rms_db - expected_pre_rms).abs() < 1e-12);
+        assert!((report.metrics.post_target_weighted_rms_db - expected_post_rms).abs() < 1e-12);
+        assert!(
+            (report.metrics.improvement_db - (expected_pre_rms - expected_post_rms)).abs() < 1e-12
+        );
+    }
 }

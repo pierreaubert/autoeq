@@ -5,7 +5,10 @@
 use roomeq_model::{DspGraph, Plugin};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExportFormat { Json, EqualizerApo }
+pub enum ExportFormat {
+    Json,
+    EqualizerApo,
+}
 
 pub fn export(graph: &DspGraph, format: ExportFormat) -> Result<String, String> {
     match format {
@@ -28,18 +31,31 @@ fn export_equalizer_apo(graph: &DspGraph) -> Result<String, String> {
 fn write_plugin(out: &mut String, plugin: &Plugin) -> Result<(), String> {
     match plugin.kind.as_str() {
         "gain" => {
-            let gain = plugin.parameters.get("gain_db").and_then(|v| v.as_f64()).ok_or("gain plugin requires gain_db")?;
+            let gain = plugin
+                .parameters
+                .get("gain_db")
+                .and_then(|v| v.as_f64())
+                .ok_or("gain plugin requires gain_db")?;
             out.push_str(&format!("Preamp: {gain:+.2} dB\n"));
         }
         "eq" => {
             let p = &plugin.parameters;
-            let freq = p.get("freq").and_then(|v| v.as_f64()).ok_or("eq plugin requires freq")?;
+            let freq = p
+                .get("freq")
+                .and_then(|v| v.as_f64())
+                .ok_or("eq plugin requires freq")?;
             let gain = p.get("gain_db").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let q = p.get("q").and_then(|v| v.as_f64()).unwrap_or(1.0);
-            out.push_str(&format!("Filter: ON PK Fc {freq:.2} Hz Gain {gain:+.2} dB Q {q:.4}\n"));
+            out.push_str(&format!(
+                "Filter: ON PK Fc {freq:.2} Hz Gain {gain:+.2} dB Q {q:.4}\n"
+            ));
         }
         "delay" => {
-            let delay = plugin.parameters.get("delay_ms").and_then(|v| v.as_f64()).ok_or("delay plugin requires delay_ms")?;
+            let delay = plugin
+                .parameters
+                .get("delay_ms")
+                .and_then(|v| v.as_f64())
+                .ok_or("delay plugin requires delay_ms")?;
             out.push_str(&format!("Delay: {delay:.3} ms\n"));
         }
         other => return Err(format!("unsupported plugin kind '{other}'")),
@@ -53,8 +69,22 @@ mod tests {
     #[test]
     fn exports_json_and_apo() {
         let mut graph = DspGraph::new("1");
-        graph.add_channel("L", vec![Plugin { kind: "gain".into(), parameters: serde_json::json!({"gain_db": -3.0}) }]);
-        assert!(export(&graph, ExportFormat::Json).unwrap().contains("channels"));
-        assert!(export(&graph, ExportFormat::EqualizerApo).unwrap().contains("Preamp"));
+        graph.add_channel(
+            "L",
+            vec![Plugin {
+                kind: "gain".into(),
+                parameters: serde_json::json!({"gain_db": -3.0}),
+            }],
+        );
+        assert!(
+            export(&graph, ExportFormat::Json)
+                .unwrap()
+                .contains("channels")
+        );
+        assert!(
+            export(&graph, ExportFormat::EqualizerApo)
+                .unwrap()
+                .contains("Preamp")
+        );
     }
 }

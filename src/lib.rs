@@ -79,7 +79,7 @@ pub mod roomeq;
 /// Extracted RoomEQ contracts and execution/export boundaries.
 pub use roomeq_engine;
 pub use roomeq_export;
-pub use roomeq_model as roomeq_model;
+pub use roomeq_model;
 
 // Backward-compatible re-exports for moved modules
 pub use optim::callback as optim_callback;

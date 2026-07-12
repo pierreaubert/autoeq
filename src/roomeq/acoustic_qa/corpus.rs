@@ -262,6 +262,25 @@ fn resolve(base: &Path, path: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
+    fn valid_scenario() -> AcousticCorpusScenario {
+        AcousticCorpusScenario {
+            id: "validation-contract".to_string(),
+            tier: QaTier::Pr,
+            provenance: CorpusProvenance::Synthetic,
+            topology: "stereo_2_0".to_string(),
+            channels: Vec::new(),
+            sample_rate: 48_000.0,
+            config: Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
+            override_config: None,
+            candidate_override_config: None,
+            evaluation_band_hz: [20.0, 20_000.0],
+            schroeder_hz: None,
+            held_out: Vec::new(),
+            robustness: None,
+            gate_mode: QualityGateMode::ReportOnly,
+        }
+    }
+
     #[test]
     fn qa_tiers_include_lower_cost_scenarios() {
         assert!(QaTier::Nightly.includes(QaTier::Pr));
@@ -324,5 +343,14 @@ mod tests {
                 .iter()
                 .all(|scenario| baseline.get(&scenario.id).is_some())
         );
+    }
+
+    #[test]
+    fn missing_candidate_override_is_rejected() {
+        let mut scenario = valid_scenario();
+        scenario.candidate_override_config =
+            Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("definitely-missing-candidate.json"));
+
+        assert!(scenario.validate().is_err());
     }
 }

@@ -427,3 +427,32 @@ pub fn perturb_transfer(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn environment_uses_seeded_physical_units() {
+        let generated = environment(8, 2, 1);
+        for (observed, expected) in generated.room_dimensions_m.iter().zip([5.55, 4.1, 2.47]) {
+            assert!((observed - expected).abs() < 1e-12);
+        }
+        assert!((generated.rt60_seconds - 0.35).abs() < 1e-12);
+        assert_eq!(generated.crossover_hz, 800.0);
+        assert_eq!(generated.training_positions_m.len(), 2);
+        assert_eq!(generated.held_out_positions_m.len(), 1);
+    }
+
+    #[test]
+    fn matrix_coherence_tracks_complete_phase_availability() {
+        for scenario in scenario_matrix(QaTier::Nightly) {
+            assert_eq!(
+                scenario.coherence_available,
+                scenario.phase == PhaseAvailability::Complete,
+                "coherence mismatch for {}",
+                scenario.name
+            );
+        }
+    }
+}

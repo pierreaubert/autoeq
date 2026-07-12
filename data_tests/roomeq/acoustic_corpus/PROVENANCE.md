@@ -30,5 +30,9 @@ Before committing a real measurement:
 5. Add at least one held-out position where the capture contains multiple seats.
 6. Run the PR corpus twice and confirm byte-identical JSON output.
 
-The unused ../measured/5_1_kef/*.mdat capture is not in the acoustic corpus:
-its channel extraction and rights/privacy review have not yet been completed.
+The unused ../measured/5_1_kef/*.mdat capture is not in the acoustic corpus.
+The privacy-safe converter can recover its seven channel labels and numeric
+SPL/phase curves without exporting embedded note bodies, but contributor rights
+remain unverified and the file contains only one listening position. It cannot
+serve as held-out or multi-seat evidence until a maintainer completes the
+rights review and obtains additional positions.

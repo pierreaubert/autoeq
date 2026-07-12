@@ -6,6 +6,8 @@ on:
       - "src/roomeq/**"
       - "src/bin/roomeq_qa_acoustic.rs"
       - "data_tests/roomeq/**"
+      - "scripts/mdat2csv.py"
+      - "scripts/test_mdat2csv.py"
       - "Justfile"
   schedule:
     - cron: "17 2 * * *"
@@ -23,6 +25,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: extractions/setup-just@v4
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@cargo-mutants
+      - name: REW MDAT converter contracts
+        run: just qa-roomeq-mdat
       - name: PR acoustic gates and reports
         if: github.event_name == 'pull_request'
         run: just qa-roomeq-acoustic-report
@@ -30,7 +36,17 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           mkdir -p target/qa
-          cargo run --release --bin roomeq-qa-acoustic -- +            --tier nightly +            --output target/qa/roomeq-acoustic.json +            --markdown-output target/qa/roomeq-acoustic.md +            --history target/qa/roomeq-acoustic-history.ndjson +            --max-runtime-ms 900000 +            --max-peak-rss-kib 4194304
+          cargo run --release --bin roomeq-qa-acoustic -- \
+            --tier nightly \
+            --output target/qa/roomeq-acoustic.json \
+            --markdown-output target/qa/roomeq-acoustic.md \
+            --history target/qa/roomeq-acoustic-history.ndjson \
+            --max-runtime-ms 900000 \
+            --max-peak-rss-kib 4194304
+      - name: RoomEQ subsystem coverage floors
+        run: just qa-roomeq-subsystem-coverage
+      - name: Deterministic RoomEQ mutation smoke
+        run: just qa-roomeq-mutation-smoke
       - name: Upload acoustic trend artifacts
         if: always()
         uses: actions/upload-artifact@v4

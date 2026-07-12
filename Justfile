@@ -751,13 +751,31 @@ qa-roomeq-acoustic-recalibrate:
 # Per-subsystem coverage floors, stricter around the acoustic acceptance layer.
 [group('qa-roomeq')]
 qa-roomeq-subsystem-coverage:
-	cargo llvm-cov --release --package autoeq --lib --json --output-path target/qa/roomeq-coverage.json
+	cargo llvm-cov clean --workspace
+	cargo llvm-cov test --release --package autoeq --lib --no-report roomeq::acoustic_qa
+	cargo llvm-cov test --release --package autoeq --lib --no-report acoustic_qa_nightly_matrix_is_deterministic_and_finite -- --ignored
+	cargo llvm-cov test --release --package autoeq --lib --no-report roomeq::eq
+	cargo llvm-cov test --release --package autoeq --lib --no-report roomeq::optimize
+	cargo llvm-cov test --release --package autoeq --lib --no-report roomeq::workflows
+	mkdir -p target/qa
+	cargo llvm-cov report --release --package autoeq --json --summary-only --skip-functions --output-path target/qa/roomeq-coverage.json
 	python3 scripts/check_roomeq_subsystem_coverage.py target/qa/roomeq-coverage.json
 
-# Focused mutation testing for quality metrics, acceptance, and corpus contracts.
+# Fast, deterministic mutation shard for pull requests and local smoke checks.
+[group('qa-roomeq')]
+qa-roomeq-mutation-smoke:
+	mkdir -p target/qa
+	cargo mutants --package autoeq --file 'src/roomeq/acoustic_qa/**/*.rs' --baseline skip --timeout 60 --shard 1/50 --sharding round-robin -j 4 -o target/qa/roomeq-mutants-smoke -- roomeq::acoustic_qa
+
+# Exhaustive mutation testing for quality metrics, acceptance, and corpus contracts.
 [group('qa-roomeq')]
 qa-roomeq-mutation:
 	cargo mutants --package autoeq --file 'src/roomeq/acoustic_qa/**/*.rs'
+
+# Unit contracts for privacy-safe REW MDAT conversion.
+[group('qa-roomeq')]
+qa-roomeq-mdat:
+	python3 scripts/test_mdat2csv.py
 
 # Exhaustive layout x sub-topology x processing-mode audibility matrix.
 [group('qa-roomeq')]

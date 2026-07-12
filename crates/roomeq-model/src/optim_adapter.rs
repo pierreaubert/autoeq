@@ -63,7 +63,10 @@ impl RoomOptimizerConfig for OptimizerConfig {
             bo_initial_samples: self.bo_initial_samples.unwrap_or(0),
             bo_batch_size: self.bo_batch_size.unwrap_or(0),
             bo_posterior_std_threshold: self.bo_posterior_std_threshold.unwrap_or(0.0),
-            bo_acquisition: self.bo_acquisition.clone().unwrap_or_else(|| "qei".to_string()),
+            bo_acquisition: self
+                .bo_acquisition
+                .clone()
+                .unwrap_or_else(|| "qei".to_string()),
             bo_ehvi: self.bo_ehvi.unwrap_or(false),
             strategy: self.strategy.clone(),
             tolerance: self.tolerance,

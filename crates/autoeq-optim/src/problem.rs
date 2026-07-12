@@ -71,9 +71,8 @@ mod tests {
 
     #[test]
     fn validates_neutral_problem_shape() {
-        let problem = OptimizationProblem::new(vec![0.0, 1.0], vec![1.0, 2.0], |x: &[f64]| {
-            x.iter().sum()
-        });
+        let problem =
+            OptimizationProblem::new(vec![0.0, 1.0], vec![1.0, 2.0], |x: &[f64]| x.iter().sum());
         assert!(problem.validate().is_ok());
         assert_eq!(problem.objective.evaluate(&[2.0, 3.0]), 5.0);
     }

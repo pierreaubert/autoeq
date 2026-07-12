@@ -294,7 +294,6 @@ def find_html_descriptions(data):
         content = m.group(1).decode('utf-8', errors='replace')
         parts = content.split('<BR>')
         desc = {
-            'raw': content,
             'date': parts[0] if len(parts) > 0 else '',
             'time': parts[1] if len(parts) > 1 else '',
             'freq_range': parts[2] if len(parts) > 2 else '',
@@ -304,33 +303,51 @@ def find_html_descriptions(data):
     return descriptions
 
 
-def find_measurement_names(data, ir_positions):
-    """Try to find measurement names from shortDesc or notes fields."""
+def _measurement_label(metadata):
+    """Return only the public label from a potentially private REW note."""
+    for line in metadata.splitlines():
+        label = ' '.join(line.split())
+        if label and len(label) <= 100:
+            return label
+    return None
+
+
+def find_measurement_names(data, ir_arrays, measurement_ends):
+    """
+    Recover short measurement labels without retaining embedded REW notes.
+
+    REW commonly serializes the channel label as the first line of a longer
+    notes string. The remaining lines can contain room dimensions, equipment,
+    and timing details, so this function deliberately returns only that label.
+    """
     names = []
-    # Look for strings after each IR data block
-    for ir_idx, ir_pos in enumerate(ir_positions):
-        ir_end = ir_pos + 10 + 131072 * 4
-        # Search for TC_STRING patterns in the gap after IR
-        search_area = data[ir_end:ir_end + 5000]
-        found_name = None
+    element_sizes = {'[F': 4, '[D': 8, '[I': 4}
+    for index, (_, arr_len, arr_data, elem_type) in enumerate(ir_arrays):
+        ir_end = arr_data + arr_len * element_sizes[elem_type]
+        measurement_end = measurement_ends[index]
+        search_area = data[ir_end:measurement_end]
+        candidates = []
         pos = 0
         while pos < len(search_area) - 3:
             if search_area[pos] == 0x74:  # TC_STRING
                 slen = struct.unpack('>H', search_area[pos + 1:pos + 3])[0]
-                if 3 <= slen <= 500 and pos + 3 + slen <= len(search_area):
+                if 1 <= slen <= 4096 and pos + 3 + slen <= len(search_area):
                     try:
                         s = search_area[pos + 3:pos + 3 + slen].decode('utf-8')
                         # Skip Java class/type strings
                         if not any(x in s for x in ['java', 'javax', 'roomeq', 'swing', 'awt',
                                                       'HERMITE', 'TUKEY', 'HANN', 'PERCENT',
                                                       'Ljava', '64-bit', '32-bit']):
-                            if not s.startswith(('[', 'L[')):
-                                if found_name is None or len(s) > len(found_name):
-                                    found_name = s
+                            label = _measurement_label(s)
+                            if label and not label.startswith(('[', 'L[')):
+                                candidates.append((len(s), label))
                     except UnicodeDecodeError:
                         pass
+            # Advance one byte even after a plausible token. Serialized array
+            # payloads can contain false TC_STRING bytes; jumping by their
+            # apparent length could skip the real metadata token.
             pos += 1
-        names.append(found_name)
+        names.append(max(candidates, default=(0, None))[1])
     return names
 
 
@@ -358,10 +375,14 @@ def identify_spl_array(arrays, data, data_length):
         if elem_type != '[F' or arr_len != data_length:
             continue
         vals = read_float_array(data, arr_data, arr_len)
+        if not all(math.isfinite(value) for value in vals):
+            continue
         vmin, vmax = min(vals), max(vals)
         vmean = sum(vals) / len(vals)
-        # SPL arrays: mean typically 40-110 dB, all values positive, significant variation
-        if 30 < vmean < 120 and vmin > -10:
+        # Valid REW SPL curves can fall below 0 dB at the measurement-band
+        # edges, especially for subwoofers and limited-band surrounds. Phase
+        # arrays remain excluded by their near-zero mean and ±180 degree range.
+        if 20 < vmean < 140 and vmin > -200 and vmax < 200:
             variance = sum((v - vmean) ** 2 for v in vals) / len(vals)
             std = variance ** 0.5
             if std > 1.5:
@@ -420,18 +441,20 @@ def parse_mdat(filepath):
     ir_candidates = {}
     for o, l, d, t in arrays:
         if t == '[F' and l >= 512 and l & (l - 1) == 0:  # power of 2, >= 512
-            ir_candidates.setdefault(l, []).append(o)
+            ir_candidates.setdefault(l, []).append((o, l, d, t))
     # The IR length that matches measurement count is the one we want
     ir_length = None
-    ir_offsets = []
-    for length, offsets in sorted(ir_candidates.items(), reverse=True):
-        if len(offsets) == num_measurements:
+    ir_arrays = []
+    for length, candidates in sorted(ir_candidates.items(), reverse=True):
+        if len(candidates) == num_measurements:
             ir_length = length
-            ir_offsets = sorted(offsets)
+            ir_arrays = sorted(candidates, key=lambda candidate: candidate[0])
             break
 
     # Get HTML descriptions for naming
     html_descs = find_html_descriptions(data)
+    measurement_ends = prim_starts[1:] + [len(data)]
+    embedded_names = find_measurement_names(data, ir_arrays, measurement_ends)
 
     prim_size = sum(TYPE_SIZES[tc] for tc, _ in prim_fields)
     measurements = []
@@ -448,9 +471,9 @@ def parse_mdat(filepath):
         prim_end = meas_start + prim_size
 
         # If we have IR landmarks, prefer post-IR arrays (where phase/SPL live)
-        if ir_offsets and meas_idx < len(ir_offsets):
-            ir_offset = ir_offsets[meas_idx]
-            ir_data_end = ir_offset + 10 + ir_length * 4  # 10 = array header
+        if ir_arrays and meas_idx < len(ir_arrays):
+            _, _, ir_data_start, _ = ir_arrays[meas_idx]
+            ir_data_end = ir_data_start + ir_length * 4
             # Post-IR: between IR end and next measurement's primitive start
             post_ir = [(o, l, d, t) for o, l, d, t in arrays
                        if o > ir_data_end and o < meas_end]
@@ -474,14 +497,13 @@ def parse_mdat(filepath):
         spl = cal_spl if cal_spl is not None else raw_spl
 
         # Build measurement name
-        if meas_idx < len(html_descs):
+        if meas_idx < len(embedded_names) and embedded_names[meas_idx]:
+            name = embedded_names[meas_idx]
+        elif meas_idx < len(html_descs):
             desc = html_descs[meas_idx]
             name = f"measurement_{meas_idx + 1}_{desc['date']}_{desc['time']}"
         else:
             name = f"measurement_{meas_idx + 1}"
-        # Clean name for filename
-        name = re.sub(r'[^\w\-.]', '_', name)
-        name = re.sub(r'_+', '_', name).strip('_')
 
         measurements.append({
             'name': name,
@@ -504,10 +526,16 @@ def sanitize_filename(name, max_len=100):
     return name
 
 
+def sanitize_identifier(name, max_len=100):
+    """Create a stable underscore-separated filename or JSON object key."""
+    identifier = sanitize_filename(name, max_len=max_len).replace(' ', '_')
+    return re.sub(r'_+', '_', identifier).strip('_')
+
+
 def export_csv(measurement, output_dir):
     """Export a single measurement to CSV."""
     os.makedirs(output_dir, exist_ok=True)
-    name = sanitize_filename(measurement['name'])
+    name = sanitize_identifier(measurement['name'])
     filepath = os.path.join(output_dir, f"{name}.csv")
 
     freqs = measurement['freq']
@@ -538,7 +566,7 @@ def export_recordings_json(measurements, csv_paths, output_dir):
             continue
         # Use relative path from recordings.json location
         rel_path = os.path.relpath(csv_path, output_dir)
-        key = sanitize_filename(m['name'])
+        key = sanitize_identifier(m['name'])
         speakers[key] = {
             "path": rel_path,
             "name": m['name'],

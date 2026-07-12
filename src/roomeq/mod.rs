@@ -43,6 +43,7 @@ pub use config_loader::{SHALLOW_MERGE_KEYS, load_config, merge_json_objects};
 pub mod acoustic_qa;
 
 // Configuration validation
+#[allow(hidden_glob_reexports)]
 mod config;
 pub use config::{ValidationResult, validate_room_config};
 

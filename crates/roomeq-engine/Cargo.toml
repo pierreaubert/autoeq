@@ -1,0 +1,12 @@
+[package]
+name = "roomeq-engine"
+version = "0.4.47"
+edition = "2024"
+description = "RoomEQ analysis, optimization, and pipeline execution"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+autoeq-core = { path = "../autoeq-core" }
+autoeq-measurements = { path = "../autoeq-measurements" }
+autoeq-optim = { path = "../autoeq-optim" }
+roomeq-model = { path = "../roomeq-model" }

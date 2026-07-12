@@ -30,6 +30,21 @@ pub(super) fn run_post_eq(
     sample_rate: f64,
     progress: Option<WorkflowProgressCallback>,
 ) -> Result<(Vec<Biquad>, f64)> {
+    let data_min_freq = curve.freq.first().copied().unwrap_or(f64::INFINITY);
+    let data_max_freq = curve.freq.last().copied().unwrap_or(f64::NEG_INFINITY);
+    let effective_min_freq = opt_config.min_freq.max(data_min_freq);
+    let effective_max_freq = opt_config.max_freq.min(data_max_freq);
+    if !effective_min_freq.is_finite()
+        || !effective_max_freq.is_finite()
+        || effective_min_freq >= effective_max_freq
+    {
+        warn!(
+            "Skipping Post-EQ: empty frequency band after intersecting configured [{:.1}, {:.1}] Hz with measurement [{:.1}, {:.1}] Hz",
+            opt_config.min_freq, opt_config.max_freq, data_min_freq, data_max_freq
+        );
+        return Ok((Vec::new(), 0.0));
+    }
+
     let result = if let Some(WorkflowProgressCallback { callback, stopped }) = progress {
         let res =
             eq::optimize_channel_eq_with_callback(curve, opt_config, target, sample_rate, callback);
@@ -291,6 +306,17 @@ mod tests {
         let target = TargetCurveConfig::Predefined("flat".to_string());
         let (filters, loss) = run_post_eq(&curve, &opt, Some(&target), 48_000.0, None).unwrap();
         assert_valid_post_eq_result(&filters, loss);
+    }
+
+    #[test]
+    fn run_post_eq_skips_an_inverted_frequency_band() {
+        let mut opt = tiny_optimizer();
+        opt.min_freq = 400.0;
+        opt.max_freq = 80.0;
+        let curve = flat_curve();
+        let (filters, loss) = run_post_eq(&curve, &opt, None, 48_000.0, None).unwrap();
+        assert!(filters.is_empty());
+        assert_eq!(loss, 0.0);
     }
 
     fn assert_valid_post_eq_result(filters: &[Biquad], loss: f64) {

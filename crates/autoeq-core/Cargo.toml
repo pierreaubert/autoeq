@@ -1,0 +1,17 @@
+[package]
+name = "autoeq-core"
+version = "0.4.47"
+edition = "2024"
+description = "Core curves, filter models, response math, and PEQ parameter layouts for AutoEQ"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+log = "0.4.28"
+math-iir-fir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
+ndarray = { version = "0.17", default-features = false, features = ["serde"] }
+num-complex = "0.4"
+rustfft = "6.4"
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = "1.0"
+thiserror = "2.0.17"

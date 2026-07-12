@@ -4,84 +4,11 @@
 //! argument struct (`cli::Args`), allowing roomeq to use the same
 //! optimization functions without constructing fake `Args` values.
 
-use clap::ValueEnum;
-use std::fmt;
-
 use crate::cli::Args;
 use crate::loss::LossType;
 use crate::optim::SmoothnessPenaltyConfig;
 
-/// PEQ model types that define the structure and constraints of the equalizer
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum PeqModel {
-    /// All filters are peak filters
-    #[value(name = "pk")]
-    Pk,
-    /// First filter is highpass, rest are peak filters
-    #[value(name = "hp-pk")]
-    HpPk,
-    /// First filter is highpass, last is lowpass, rest are peak filters
-    #[value(name = "hp-pk-lp")]
-    HpPkLp,
-    /// First filter is low shelve, rest are peak filters
-    #[value(name = "ls-pk")]
-    LsPk,
-    /// First filter is low shelve, last is high shelve, rest are peak filters
-    #[value(name = "ls-pk-hs")]
-    LsPkHs,
-    /// First and last filters are free (any type), rest are peak filters
-    #[value(name = "free-pk-free")]
-    FreePkFree,
-    /// All filters are free to be any type
-    #[value(name = "free")]
-    Free,
-}
-
-impl fmt::Display for PeqModel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PeqModel::Pk => write!(f, "pk"),
-            PeqModel::HpPk => write!(f, "hp-pk"),
-            PeqModel::LsPk => write!(f, "ls-pk"),
-            PeqModel::HpPkLp => write!(f, "hp-pk-lp"),
-            PeqModel::LsPkHs => write!(f, "ls-pk-hs"),
-            PeqModel::FreePkFree => write!(f, "free-pk-free"),
-            PeqModel::Free => write!(f, "free"),
-        }
-    }
-}
-
-impl PeqModel {
-    /// Get all available PEQ models
-    pub fn all() -> Vec<Self> {
-        vec![
-            PeqModel::Pk,
-            PeqModel::HpPk,
-            PeqModel::LsPk,
-            PeqModel::HpPkLp,
-            PeqModel::LsPkHs,
-            PeqModel::FreePkFree,
-            PeqModel::Free,
-        ]
-    }
-
-    /// Get a description of the model
-    pub fn description(&self) -> &'static str {
-        match self {
-            PeqModel::Pk => "All filters are peak/bell filters",
-            PeqModel::HpPk => "First filter is highpass, rest are peak filters",
-            PeqModel::LsPk => "First filter is low shelve, rest are peak filters",
-            PeqModel::HpPkLp => "First filter is highpass, last is lowpass, rest are peak filters",
-            PeqModel::LsPkHs => {
-                "First filter is low shelve, last is high shelve, rest are peak filters"
-            }
-            PeqModel::FreePkFree => {
-                "First and last filters can be any type, middle filters are peak"
-            }
-            PeqModel::Free => "All filters can be any type (peak, highpass, lowpass, shelf)",
-        }
-    }
-}
+pub use autoeq_core::PeqModel;
 
 /// Optimization-relevant parameters extracted from either `cli::Args`
 /// (for the autoeq binary) or `roomeq::OptimizerConfig` (for room EQ).
@@ -142,6 +69,7 @@ pub struct OptimParams {
     pub quiet: bool,
 }
 
+#[cfg(feature = "roomeq-adapter")]
 pub fn resolve_smoothness_schroeder_hz(config: &crate::roomeq::OptimizerConfig) -> Option<f64> {
     config
         .schroeder_split
@@ -156,6 +84,7 @@ pub fn resolve_smoothness_schroeder_hz(config: &crate::roomeq::OptimizerConfig) 
         })
 }
 
+#[cfg(feature = "roomeq-adapter")]
 pub fn resolve_smoothness_penalty_config(
     config: &crate::roomeq::OptimizerConfig,
 ) -> Option<SmoothnessPenaltyConfig> {
@@ -221,6 +150,7 @@ impl From<&Args> for OptimParams {
     }
 }
 
+#[cfg(feature = "roomeq-adapter")]
 impl From<&crate::roomeq::OptimizerConfig> for OptimParams {
     fn from(config: &crate::roomeq::OptimizerConfig) -> Self {
         // Parse peq_model string to enum, defaulting to Pk
@@ -290,24 +220,7 @@ impl From<&crate::roomeq::OptimizerConfig> for OptimParams {
     }
 }
 
-impl std::str::FromStr for PeqModel {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "pk" => Ok(PeqModel::Pk),
-            "hp-pk" => Ok(PeqModel::HpPk),
-            "hp-pk-lp" => Ok(PeqModel::HpPkLp),
-            "ls-pk" => Ok(PeqModel::LsPk),
-            "ls-pk-hs" => Ok(PeqModel::LsPkHs),
-            "free-pk-free" => Ok(PeqModel::FreePkFree),
-            "free" => Ok(PeqModel::Free),
-            _ => Err(format!("Unknown PEQ model: {}", s)),
-        }
-    }
-}
-
-#[cfg(test)]
+#[cfg(all(test, feature = "roomeq-adapter"))]
 mod tests {
     use super::*;
     use crate::roomeq::{

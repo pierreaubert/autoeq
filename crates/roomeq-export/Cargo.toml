@@ -1,0 +1,11 @@
+[package]
+name = "roomeq-export"
+version = "0.4.47"
+edition = "2024"
+description = "RoomEQ external DSP exporters and artifact packaging"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+autoeq-core = { path = "../autoeq-core" }
+roomeq-model = { path = "../roomeq-model" }
+serde_json = "1.0"

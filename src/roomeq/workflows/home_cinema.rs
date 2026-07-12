@@ -376,7 +376,16 @@ fn optimize_home_cinema_with_sub(
     for (channel_index, role) in main_roles.iter().enumerate() {
         let source = resolve_single_source(role, config, sys)?;
         let mut per_config = config.clone();
-        per_config.optimizer.min_freq = min_xo;
+        if min_xo < per_config.optimizer.max_freq {
+            per_config.optimizer.min_freq = per_config.optimizer.min_freq.max(min_xo);
+        } else {
+            log::warn!(
+                "  Main Pre-EQ crossover lower bound {:.1} Hz does not overlap configured optimization band [{:.1}, {:.1}] Hz; retaining the configured band",
+                min_xo,
+                per_config.optimizer.min_freq,
+                per_config.optimizer.max_freq
+            );
+        }
         info!(
             "  Pre-EQ via generic path for '{}' (min_freq={:.1} Hz)",
             role, min_xo
@@ -405,7 +414,16 @@ fn optimize_home_cinema_with_sub(
     {
         let sub_source = crate::MeasurementSource::InMemory(sub_preprocess.combined_curve.clone());
         let mut sub_config = config.clone();
-        sub_config.optimizer.max_freq = max_xo;
+        if max_xo > sub_config.optimizer.min_freq {
+            sub_config.optimizer.max_freq = sub_config.optimizer.max_freq.min(max_xo);
+        } else {
+            log::warn!(
+                "  Sub Pre-EQ crossover upper bound {:.1} Hz does not overlap configured optimization band [{:.1}, {:.1}] Hz; retaining the configured band",
+                max_xo,
+                sub_config.optimizer.min_freq,
+                sub_config.optimizer.max_freq
+            );
+        }
         info!(
             "  Pre-EQ via generic path for '{}' (max_freq={:.1} Hz)",
             sub_role, max_xo
@@ -934,7 +952,18 @@ fn optimize_home_cinema_with_sub(
             .get(group_id)
             .and_then(|g| g.selected_crossover_hz)
             .unwrap_or(final_xo_freq);
-        opt_config.min_freq = role_xover_freq + 20.0;
+        let requested_min_freq = role_xover_freq + 20.0;
+        opt_config.min_freq = opt_config.min_freq.max(requested_min_freq);
+        if opt_config.min_freq >= opt_config.max_freq {
+            log::warn!(
+                "  Skipping {role} Post-EQ: crossover guard band starts at {:.1} Hz, outside configured optimization band [{:.1}, {:.1}] Hz",
+                requested_min_freq,
+                config.optimizer.min_freq,
+                config.optimizer.max_freq
+            );
+            post_eq_filters.insert(role.clone(), Vec::new());
+            continue;
+        }
 
         let post_curve = &main_post_curves[role];
         let post_eq_callback = workflow_progress_callback(

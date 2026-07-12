@@ -503,7 +503,7 @@ fn optimize_channel_eq_multi_inner(
 
     let multi_data = MultiObjectiveData {
         objectives,
-        strategy: multi_config.strategy.clone(),
+        strategy: multi_config.strategy,
         weights,
         variance_lambda: multi_config.variance_lambda,
         uncertainty_cvar_alpha,

@@ -359,30 +359,7 @@ pub enum MultiSeatStrategy {
     ContinuousArea,
 }
 
-/// Strategy for handling multiple measurements per speaker
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum MultiMeasurementStrategy {
-    /// RMS-average curves, optimize on average (existing behavior)
-    #[default]
-    Average,
-    /// loss = Σ w_i * loss_i — weighted sum of per-measurement losses
-    WeightedSum,
-    /// loss = max(loss_i) — optimize worst case across all measurements
-    Minimax,
-    /// loss = mean(loss_i) + λ * var(loss_i) — balance quality + consistency
-    VariancePenalized,
-    /// Spatial robustness: RMS-average + correction depth mask based on spatial variance.
-    /// Only corrects features consistent across positions.
-    SpatialRobustness,
-    /// Measurement-uncertainty-aware robust optimization. Generates B
-    /// case-bootstrap resamples of the input curves at setup time, then
-    /// scalarises losses across the resampled targets per the configured
-    /// `BootstrapUncertaintyConfig::scalarisation` (worst-case or CVaR).
-    /// Drives the optimizer toward a solution that is robust to which
-    /// resample of the measurement set is "true".
-    MinimaxUncertainty,
-}
+pub use autoeq_optim::roomeq::MultiMeasurementStrategy;
 
 /// Correction mode for CEA2034 speaker pre-correction
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default, PartialEq)]

@@ -4,12 +4,16 @@
 //! New code should import directly from submodules.
 
 // Configuration types
-mod config;
-pub use config::*;
+pub mod config {
+    pub use roomeq_model::config::*;
+}
+pub use roomeq_model::config::*;
 
 // Simple wizard preset types
-mod preset;
-pub use preset::*;
+pub mod preset {
+    pub use roomeq_model::preset::*;
+}
+pub use roomeq_model::preset::*;
 
 // Output types
 mod output;

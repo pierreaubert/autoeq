@@ -87,7 +87,7 @@ pub(super) fn multiseat_peq_config(
     }
 
     MultiMeasurementConfig {
-        strategy: policy.all_channel_strategy.clone(),
+        strategy: policy.all_channel_strategy,
         weights: Some(weights),
         variance_lambda: 1.0,
         spatial_robustness: Some(super::super::types::SpatialRobustnessSerdeConfig {

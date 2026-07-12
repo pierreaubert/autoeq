@@ -1,4 +1,4 @@
-use super::curve::Curve;
+use crate::Curve;
 use super::misc::octave_intervals;
 use super::misc::pressure2spl;
 use super::misc::spl2pressure;

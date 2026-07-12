@@ -5,6 +5,4 @@
 
 #![allow(dead_code)]
 
-mod misc;
-
-pub use misc::*;
+pub use autoeq_core::phase_utils::*;

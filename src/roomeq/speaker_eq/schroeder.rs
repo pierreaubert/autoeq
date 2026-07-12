@@ -113,6 +113,42 @@ pub(in crate::roomeq) fn optimize_with_schroeder_split(
     let low_config = &schroeder_config.low_freq_config;
     let high_config = &schroeder_config.high_freq_config;
 
+    let has_non_flat_target = optimizer
+        .target_response
+        .as_ref()
+        .is_some_and(|tr| tr.shape != TargetShape::Flat);
+
+    // A split outside the configured optimization band has only one real
+    // side. Do not manufacture an inverted second band (for example
+    // [400, 80] Hz); optimize the available side with the full filter budget.
+    if schroeder_freq >= optimizer.max_freq {
+        let (min_db, max_db) = low_freq_gain_bounds(optimizer, low_config, has_non_flat_target);
+        let low_optimizer = OptimizerConfig {
+            min_q: low_config.min_q,
+            max_q: low_config.max_q,
+            min_db,
+            max_db,
+            ..optimizer.clone()
+        };
+        let (filters, _) = eq::optimize_channel_eq(curve, &low_optimizer, None, sample_rate)
+            .map_err(|e| AutoeqError::OptimizationFailed {
+                message: format!("Low-frequency EQ optimization failed: {e}"),
+            })?;
+        return Ok((filters, Vec::new()));
+    }
+    if schroeder_freq <= optimizer.min_freq {
+        let high_optimizer = OptimizerConfig {
+            min_q: optimizer.min_q.max(0.3),
+            max_q: high_config.max_q,
+            ..optimizer.clone()
+        };
+        let (filters, _) = eq::optimize_channel_eq(curve, &high_optimizer, None, sample_rate)
+            .map_err(|e| AutoeqError::OptimizationFailed {
+                message: format!("High-frequency EQ optimization failed: {e}"),
+            })?;
+        return Ok((Vec::new(), filters));
+    }
+
     // Determine filter allocation (roughly proportional to frequency range)
     let total_filters = optimizer.num_filters;
     let log_range_total = (optimizer.max_freq / optimizer.min_freq).log2();
@@ -135,11 +171,6 @@ pub(in crate::roomeq) fn optimize_with_schroeder_split(
     // When target_tilt is active, the optimizer works on a tilt-adjusted curve
     // where following the tilt may require both boosts and cuts. Allow limited
     // boost (half the configured max) to give the optimizer enough freedom.
-    let has_non_flat_target = optimizer
-        .target_response
-        .as_ref()
-        .is_some_and(|tr| tr.shape != TargetShape::Flat);
-
     let (low_min_db, low_max_db) = low_freq_gain_bounds(optimizer, low_config, has_non_flat_target);
     let low_optimizer = OptimizerConfig {
         num_filters: low_filters,
@@ -371,5 +402,30 @@ mod tests {
                 .expect_err("undersized split must be rejected");
             assert!(error.to_string().contains("at least 2 filters"));
         }
+    }
+
+    #[test]
+    fn schroeder_split_above_band_uses_only_low_frequency_pass() {
+        let curve = curve_with_bass_peak_and_treble_tilt();
+        let optimizer = OptimizerConfig {
+            num_filters: 2,
+            max_iter: 20,
+            population: 6,
+            refine: false,
+            min_freq: 20.0,
+            max_freq: 80.0,
+            psychoacoustic: false,
+            ..Default::default()
+        };
+        let split = SchroederSplitConfig {
+            enabled: true,
+            schroeder_freq: 400.0,
+            ..Default::default()
+        };
+
+        let (low, high) =
+            optimize_with_schroeder_split(&curve, &optimizer, &split, 48_000.0).unwrap();
+        assert!(!low.is_empty());
+        assert!(high.is_empty());
     }
 }

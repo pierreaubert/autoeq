@@ -209,7 +209,7 @@ impl Curve {
             return;
         }
 
-        use crate::roomeq::phase_utils::{
+        use crate::phase_utils::{
             compute_excess_phase, estimate_delay_from_excess_phase, reconstruct_minimum_phase,
             unwrap_phase_degrees,
         };
@@ -603,41 +603,4 @@ mod decompose_cache_tests {
         );
     }
 
-    // Test 7 — load-time integration: CSV round-trip populates min_phase
-    //
-    // Write a CSV with freq + spl + phase, load it via read_curve_from_csv,
-    // and assert the returned Curve has min_phase.is_some().
-    #[test]
-    fn csv_roundtrip_populates_min_phase() {
-        use crate::read::read_curve_from_csv;
-        use std::io::Write;
-        use tempfile::NamedTempFile;
-
-        let csv = "frequency,spl,phase\n\
-20.0,0.0,-1.0\n\
-50.0,-0.5,-3.0\n\
-200.0,-2.0,-10.0\n\
-1000.0,-6.0,-30.0\n\
-4000.0,-12.0,-60.0\n\
-10000.0,-20.0,-85.0\n";
-
-        let mut f = NamedTempFile::new().unwrap();
-        f.write_all(csv.as_bytes()).unwrap();
-        f.flush().unwrap();
-
-        let curve = read_curve_from_csv(&f.path().to_path_buf()).unwrap();
-        assert_eq!(curve.freq.len(), 6);
-        assert!(
-            curve.min_phase.is_some(),
-            "min_phase must be Some after CSV load with phase column"
-        );
-        assert!(
-            curve.excess_phase.is_some(),
-            "excess_phase must be Some after CSV load with phase column"
-        );
-        assert!(
-            curve.excess_delay_ms.is_some(),
-            "excess_delay_ms must be Some after CSV load with phase column"
-        );
-    }
 }

@@ -169,7 +169,8 @@ pub(super) fn build_optim_params(
     loss_type: LossType,
     peq_model: PeqModel,
 ) -> crate::OptimParams {
-    let mut params = crate::OptimParams::from(config);
+    use autoeq_optim::RoomOptimizerConfig;
+    let mut params = config.to_optim_params();
     params.min_freq = effective_min_freq;
     params.max_freq = effective_max_freq;
     params.sample_rate = sample_rate;

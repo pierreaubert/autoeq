@@ -1,4 +1,15 @@
-# 0.4.48 -- unreleased
+# 0.4.49
+
+## Refactoring:
+
+- splitted the code into a few crates to make it more manageable
+- no other change
+
+## Bug fixes introduced by the refactor
+
+- Fixed invalid [400, 80] Hz construction at all three levels: Pre-EQ retains the configured band when crossover narrowing has no overlap, Post-EQ skips optional refinement when its guarded band is empty and Schroeder splitting outside the optimization band runs only the existing side with the full filter budget.
+
+# 0.4.48
 
 ## New features
 

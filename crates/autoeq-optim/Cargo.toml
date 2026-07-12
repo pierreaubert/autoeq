@@ -1,0 +1,26 @@
+[package]
+name = "autoeq-optim"
+version = "0.4.47"
+edition = "2024"
+description = "AutoEQ objectives, constraints, and optimizer backends"
+license = "GPL-3.0-or-later"
+
+[features]
+roomeq-adapter = []
+
+[dependencies]
+autoeq-core = { path = "../autoeq-core" }
+autoeq-measurements = { path = "../autoeq-measurements" }
+clap = { version = "4.5", features = ["derive"] }
+log = "0.4.28"
+math-iir-fir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
+math-dsp = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
+math-optimisation = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
+ndarray = { version = "0.17", default-features = false, features = ["rayon", "serde"] }
+num-complex = "0.4"
+num_cpus = "1.17"
+rand = "=0.9.2"
+rand_chacha = "0.9"
+schemars = "1.2"
+serde = { version = "1.0", features = ["derive", "rc"] }
+metaheuristics-nature = "10.1"

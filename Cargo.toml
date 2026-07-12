@@ -1,6 +1,6 @@
 [package]
 name = "autoeq"
-version = "0.4.48"
+version = "0.4.49"
 description = "Automatic equalization for speakers, headphones and rooms!"
 edition = "2024"
 keywords = ["audio", "dsp", "eq"]
@@ -8,6 +8,19 @@ categories = ["multimedia::audio"]
 repository = "https://github.com/pierreaubert/autoeq"
 authors = ["Pierre F. Aubert pierre@spinorama.org"]
 license = "GPL-3.0-or-later"
+
+[workspace]
+resolver = "3"
+members = [
+    ".",
+    "crates/autoeq-core",
+    "crates/autoeq-measurements",
+    "crates/autoeq-optim",
+    "crates/autoeq-workflow",
+    "crates/roomeq-model",
+    "crates/roomeq-engine",
+    "crates/roomeq-export",
+]
 # Keep the published crate under crates.io's size cap. The excluded paths are
 # QA recordings, generated test fixtures, helper shell scripts, and editor
 # backups — none are needed to compile the library or the user-facing
@@ -24,6 +37,13 @@ exclude = [
 ]
 
 [dependencies]
+autoeq-core = { path = "crates/autoeq-core" }
+autoeq-measurements = { path = "crates/autoeq-measurements" }
+autoeq-optim = { path = "crates/autoeq-optim" }
+autoeq-workflow = { path = "crates/autoeq-workflow" }
+roomeq-model = { path = "crates/roomeq-model" }
+roomeq-engine = { path = "crates/roomeq-engine" }
+roomeq-export = { path = "crates/roomeq-export" }
 anyhow = "1.0"
 async-trait = "0.1"
 base64 = "0.22"

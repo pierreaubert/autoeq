@@ -8,7 +8,7 @@ use super::types::OptimizationOutput;
 use super::types::ProgressUpdate;
 use crate::iir::Biquad;
 use crate::read;
-use crate::x2peq;
+use crate::x2peq::x2peq;
 use ndarray::Array1;
 use std::error::Error;
 

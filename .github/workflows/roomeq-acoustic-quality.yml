@@ -1,0 +1,39 @@
+name: RoomEQ acoustic quality
+
+on:
+  pull_request:
+    paths:
+      - "src/roomeq/**"
+      - "src/bin/roomeq_qa_acoustic.rs"
+      - "data_tests/roomeq/**"
+      - "Justfile"
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acoustic-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@v4
+      - name: PR acoustic gates and reports
+        if: github.event_name == 'pull_request'
+        run: just qa-roomeq-acoustic-report
+      - name: Nightly acoustic gates and reports
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p target/qa
+          cargo run --release --bin roomeq-qa-acoustic -- +            --tier nightly +            --output target/qa/roomeq-acoustic.json +            --markdown-output target/qa/roomeq-acoustic.md +            --history target/qa/roomeq-acoustic-history.ndjson +            --max-runtime-ms 900000 +            --max-peak-rss-kib 4194304
+      - name: Upload acoustic trend artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roomeq-acoustic-quality
+          path: target/qa/

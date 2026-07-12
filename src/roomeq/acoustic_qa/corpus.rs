@@ -38,6 +38,13 @@ pub struct HeldOutMeasurement {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CorpusRobustnessConfig {
+    pub seeds: Vec<u64>,
+    pub noise_peak_db: f64,
+    pub coherence_floor: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AcousticCorpusScenario {
     pub id: String,
     pub tier: QaTier,
@@ -50,11 +57,17 @@ pub struct AcousticCorpusScenario {
     pub config: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub override_config: Option<PathBuf>,
+    /// Optional matched algorithm/objective candidate. The corpus evaluator
+    /// runs this against the same measurements, seed, band, and held-out data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate_override_config: Option<PathBuf>,
     pub evaluation_band_hz: [f64; 2],
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schroeder_hz: Option<f64>,
     #[serde(default)]
     pub held_out: Vec<HeldOutMeasurement>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub robustness: Option<CorpusRobustnessConfig>,
     #[serde(default)]
     pub gate_mode: QualityGateMode,
 }
@@ -99,6 +112,15 @@ impl AcousticCorpusScenario {
                 path.display()
             ));
         }
+        if let Some(path) = &self.candidate_override_config
+            && !path.is_file()
+        {
+            return Err(format!(
+                "scenario '{}' candidate override does not exist: {}",
+                self.id,
+                path.display()
+            ));
+        }
         for measurement in &self.held_out {
             if measurement.channel.trim().is_empty() || !measurement.path.is_file() {
                 return Err(format!(
@@ -115,6 +137,18 @@ impl AcousticCorpusScenario {
                 ));
             }
         }
+        if let Some(robustness) = &self.robustness
+            && (robustness.seeds.is_empty()
+                || !robustness.noise_peak_db.is_finite()
+                || robustness.noise_peak_db < 0.0
+                || !robustness.coherence_floor.is_finite()
+                || !(0.0..=1.0).contains(&robustness.coherence_floor))
+        {
+            return Err(format!(
+                "scenario '{}' has an invalid robustness configuration",
+                self.id
+            ));
+        }
         Ok(())
     }
 
@@ -122,6 +156,10 @@ impl AcousticCorpusScenario {
         self.config = resolve(base, &self.config);
         self.override_config = self
             .override_config
+            .as_ref()
+            .map(|path| resolve(base, path));
+        self.candidate_override_config = self
+            .candidate_override_config
             .as_ref()
             .map(|path| resolve(base, path));
         for measurement in &mut self.held_out {
@@ -244,10 +282,42 @@ mod tests {
         assert!(pr.iter().any(|scenario| !scenario.held_out.is_empty()));
         assert!(
             pr.iter()
-                .all(|scenario| scenario.gate_mode == QualityGateMode::ReportOnly)
+                .all(|scenario| scenario.gate_mode == QualityGateMode::Enforce)
+        );
+        assert!(pr.iter().any(|scenario| scenario.topology == "stereo_2_1"));
+        assert!(
+            manifest
+                .scenarios_for(QaTier::Nightly)
+                .any(|scenario| scenario.topology == "stereo_2_2_mso")
+        );
+        let promoted_mso = manifest
+            .scenarios
+            .iter()
+            .find(|scenario| scenario.id == "fem_small_stereo_22_mso")
+            .expect("promoted MSO scenario");
+        assert!(
+            promoted_mso
+                .override_config
+                .as_ref()
+                .is_some_and(|path| path.ends_with("qa_optimizer_headroom_smooth.json"))
+        );
+        assert!(promoted_mso.candidate_override_config.is_none());
+        assert!(
+            manifest
+                .scenarios
+                .iter()
+                .find(|scenario| scenario.id == "measured_stereo_t7v")
+                .and_then(|scenario| scenario.candidate_override_config.as_ref())
+                .is_some_and(|path| path.ends_with("qa_optimizer_alternate_de.json"))
+        );
+        assert!(
+            manifest
+                .scenarios_for(QaTier::Nightly)
+                .any(|scenario| scenario.topology == "home_cinema_5_1")
         );
         let baseline_path = path.with_file_name("baseline.json");
         let baseline = AcousticCorpusBaseline::load(&baseline_path).expect("repository baseline");
+        assert_eq!(manifest.version, baseline.version);
         assert!(
             manifest
                 .scenarios

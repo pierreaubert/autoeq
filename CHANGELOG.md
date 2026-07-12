@@ -7,14 +7,20 @@
 add it to a docker, more work to test properly EQAPO on Windows)
 - Added a repository-backed RoomEQ acoustic corpus with fixed-seed PR and
   nightly tiers, real measured stereo rooms, FEM held-out listening positions,
-  and machine-readable quality reports.
+  stereo-with-sub, MSO, and 5.1 workflows, plus JSON/Markdown quality reports.
 - Added a shared training/held-out acoustic scorecard covering target residuals,
   normalized seat spread, below/above-Schroeder quality, correction depth, and
   induced group delay. Final correction metadata can carry the same scorecard
   without breaking existing serialized output.
 - Added committed current-main acoustic baselines and paired regression deltas;
-  report-only calibration and explicit `--enforce` runs share the same 0.1 dB
-  weighted-RMS/improvement and 0.25 dB p95 policies.
+  calibrated manifest gates now enforce the same 0.1 dB weighted-RMS/improvement
+  and 0.25 dB p95 policies, with a deterministic recalibration recipe.
+- Added uncertainty-scaled optimizer gain bounds, a matched smoothness/headroom
+  candidate runner, modal-curvature scoring, multi-seed noise/coherence tests,
+  per-stage PEQ/MSO/all-pass/FIR rollback, temporal/headroom evidence, trend and
+  resource tracking, subsystem coverage floors, and focused mutation QA. The
+  candidate is promoted for the 2.2 MSO corpus path after its matched headroom
+  win; other topologies retain the existing objective.
 
 # 0.4.49
 

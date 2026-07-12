@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "2.0.0",
   "scenarios": [
     {
       "id": "fem_medium_multiseat_20",
@@ -10,6 +10,7 @@
       "sample_rate": 48000.0,
       "config": "../generate/fem/medium_multi_seat/config.json",
       "override_config": "qa_optimizer.json",
+      "candidate_override_config": "qa_optimizer_headroom_smooth.json",
       "evaluation_band_hz": [20.0, 500.0],
       "schroeder_hz": 200.0,
       "held_out": [
@@ -18,7 +19,12 @@
         { "channel": "R", "path": "../generate/fem/medium_multi_seat/right_lp1.csv" },
         { "channel": "R", "path": "../generate/fem/medium_multi_seat/right_lp2.csv" }
       ],
-      "gate_mode": "report_only"
+      "robustness": {
+        "seeds": [1, 7, 42, 424242],
+        "noise_peak_db": 0.2,
+        "coherence_floor": 0.8
+      },
+      "gate_mode": "enforce"
     },
     {
       "id": "measured_stereo_8361a",
@@ -29,9 +35,29 @@
       "sample_rate": 48000.0,
       "config": "../measured/2.0_8361a/recordings.json",
       "override_config": "qa_optimizer.json",
+      "candidate_override_config": "qa_optimizer_headroom_smooth.json",
       "evaluation_band_hz": [20.0, 500.0],
       "schroeder_hz": 200.0,
-      "gate_mode": "report_only"
+      "robustness": {
+        "seeds": [1, 7, 42, 424242],
+        "noise_peak_db": 0.2,
+        "coherence_floor": 0.8
+      },
+      "gate_mode": "enforce"
+    },
+    {
+      "id": "fem_medium_stereo_21",
+      "tier": "pr",
+      "provenance": "fem",
+      "topology": "stereo_2_1",
+      "channels": ["L", "R"],
+      "sample_rate": 48000.0,
+      "config": "../generate/fem/medium_stereo_2_1/config.json",
+      "override_config": "qa_optimizer.json",
+      "candidate_override_config": "qa_optimizer_headroom_smooth.json",
+      "evaluation_band_hz": [100.0, 500.0],
+      "schroeder_hz": 200.0,
+      "gate_mode": "enforce"
     },
     {
       "id": "fem_large_multiseat_21",
@@ -42,6 +68,7 @@
       "sample_rate": 48000.0,
       "config": "../generate/fem/large_multi_seat_2_1/config.json",
       "override_config": "qa_optimizer.json",
+      "candidate_override_config": "qa_optimizer_headroom_smooth.json",
       "evaluation_band_hz": [100.0, 500.0],
       "schroeder_hz": 200.0,
       "held_out": [
@@ -50,7 +77,7 @@
         { "channel": "R", "path": "../generate/fem/large_multi_seat_2_1/right_lp1.csv" },
         { "channel": "R", "path": "../generate/fem/large_multi_seat_2_1/right_lp2.csv" }
       ],
-      "gate_mode": "report_only"
+      "gate_mode": "enforce"
     },
     {
       "id": "measured_stereo_d3v",
@@ -61,9 +88,10 @@
       "sample_rate": 48000.0,
       "config": "../measured/2.0_d3v/recordings.json",
       "override_config": "qa_optimizer.json",
+      "candidate_override_config": "qa_optimizer_headroom_smooth.json",
       "evaluation_band_hz": [20.0, 500.0],
       "schroeder_hz": 200.0,
-      "gate_mode": "report_only"
+      "gate_mode": "enforce"
     },
     {
       "id": "measured_stereo_t7v",
@@ -74,9 +102,37 @@
       "sample_rate": 48000.0,
       "config": "../measured/2.0_t7v/recordings.json",
       "override_config": "qa_optimizer.json",
+      "candidate_override_config": "qa_optimizer_alternate_de.json",
       "evaluation_band_hz": [20.0, 500.0],
       "schroeder_hz": 200.0,
-      "gate_mode": "report_only"
+      "gate_mode": "enforce"
+    },
+    {
+      "id": "fem_small_stereo_22_mso",
+      "tier": "nightly",
+      "provenance": "fem",
+      "topology": "stereo_2_2_mso",
+      "channels": ["L", "R"],
+      "sample_rate": 48000.0,
+      "config": "../generate/fem/small_stereo_2_2_mso/config.json",
+      "override_config": "qa_optimizer_headroom_smooth.json",
+      "evaluation_band_hz": [100.0, 500.0],
+      "schroeder_hz": 200.0,
+      "gate_mode": "enforce"
+    },
+    {
+      "id": "fem_medium_home_cinema_51",
+      "tier": "nightly",
+      "provenance": "fem",
+      "topology": "home_cinema_5_1",
+      "channels": ["L", "R", "C", "SL", "SR"],
+      "sample_rate": 48000.0,
+      "config": "../generate/fem/medium_surround_5_1/config.json",
+      "override_config": "qa_optimizer.json",
+      "candidate_override_config": "qa_optimizer_headroom_smooth.json",
+      "evaluation_band_hz": [100.0, 500.0],
+      "schroeder_hz": 200.0,
+      "gate_mode": "enforce"
     }
   ]
 }

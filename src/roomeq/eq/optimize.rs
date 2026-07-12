@@ -143,6 +143,11 @@ fn optimize_channel_eq_inner(
     callback: Option<crate::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+    let measurement_quality = autoeq_measurements::assess_measurement_quality(curve);
+    let uncertainty_scaled_config =
+        uncertainty_scaled_optimizer_config(config, &measurement_quality);
+    let config = &uncertainty_scaled_config;
+
     // Use adaptive filter selection when enabled and no callback
     if config.min_filter_improvement > 0.0 && config.num_filters > 1 && callback.is_none() {
         return optimize_channel_eq_adaptive(curve, config, target_config, sample_rate, backend);
@@ -252,6 +257,11 @@ fn optimize_channel_eq_multi_inner(
     backend: &dyn OptimizerBackend,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
     assert!(!curves.is_empty(), "curves must not be empty");
+
+    let measurement_quality = autoeq_measurements::assess_multiple_measurement_quality(curves);
+    let uncertainty_scaled_config =
+        uncertainty_scaled_optimizer_config(config, &measurement_quality);
+    let config = &uncertainty_scaled_config;
 
     // Optionally collapse multiple measurements into a distance- and
     // directivity-weighted prototype before applying the chosen strategy.
@@ -626,6 +636,28 @@ fn optimize_channel_eq_multi_inner(
     Ok((filters, final_loss))
 }
 
+fn uncertainty_scaled_optimizer_config(
+    config: &OptimizerConfig,
+    quality: &autoeq_measurements::MeasurementQualityReport,
+) -> OptimizerConfig {
+    let mut scaled = config.clone();
+    let scale = quality.correction_depth_scale.clamp(0.0, 1.0);
+    scaled.min_db = config.min_db * scale;
+    scaled.max_db = config.max_db * scale;
+    if scale < 1.0 {
+        log::info!(
+            "Measurement confidence {:?} limits correction depth to {:.0}%: [{:.1}, {:.1}] dB -> [{:.1}, {:.1}] dB",
+            quality.quality,
+            scale * 100.0,
+            config.min_db,
+            config.max_db,
+            scaled.min_db,
+            scaled.max_db,
+        );
+    }
+    scaled
+}
+
 /// Spatial robustness optimization.
 ///
 /// Instead of running multi-objective optimization across all curves, this:
@@ -947,6 +979,21 @@ mod processing_mode_tests {
             phase: Some(Array1::from_vec(phase)),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn measurement_uncertainty_scales_optimizer_gain_bounds() {
+        let config = OptimizerConfig {
+            min_db: -12.0,
+            max_db: 8.0,
+            ..OptimizerConfig::default()
+        };
+        let quality = autoeq_measurements::assess_measurement_quality(&make_simple_room_curve());
+        assert_eq!(quality.correction_depth_scale, 0.75);
+
+        let scaled = uncertainty_scaled_optimizer_config(&config, &quality);
+        assert_eq!(scaled.min_db, -9.0);
+        assert_eq!(scaled.max_db, 6.0);
     }
 
     /// Test LowLatency mode (IIR only) - default processing mode

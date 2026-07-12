@@ -2751,7 +2751,28 @@
     "QualityPartitionMetrics": {
       "type": "object",
       "properties": {
+        "bass_modal_roughness_improvement_db_per_octave2": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
         "bass_post_weighted_rms_db": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "bass_post_modal_roughness_db_per_octave2": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "bass_pre_modal_roughness_db_per_octave2": {
           "type": [
             "number",
             "null"

@@ -729,8 +729,7 @@ qa-audibility-pr:
 	cargo run --bin roomeq-qa-synthetic --no-default-features --release -- --pr
 	cargo run --bin roomeq-qa-acoustic --release -- --tier pr
 
-# Repository-backed real/FEM corpus. Scenarios remain report-only while the
-# paired quality baselines are calibrated; pass --enforce to exercise gates.
+# Repository-backed real/FEM corpus with calibrated blocking quality gates.
 [group('qa-roomeq')]
 qa-roomeq-acoustic-pr:
 	cargo run --bin roomeq-qa-acoustic --release -- --tier pr
@@ -738,6 +737,27 @@ qa-roomeq-acoustic-pr:
 [group('qa-roomeq')]
 qa-roomeq-acoustic-nightly:
 	cargo run --bin roomeq-qa-acoustic --release -- --tier nightly
+
+# Human + machine report, trend history, and explicit PR resource budgets.
+[group('qa-roomeq')]
+qa-roomeq-acoustic-report:
+	cargo run --bin roomeq-qa-acoustic --release -- --tier pr --output target/qa/roomeq-acoustic.json --markdown-output target/qa/roomeq-acoustic.md --history target/qa/roomeq-acoustic-history.ndjson --max-runtime-ms 900000 --max-peak-rss-kib 4194304
+
+# Deterministically replace paired snapshots after an intentional quality change.
+[group('qa-roomeq')]
+qa-roomeq-acoustic-recalibrate:
+	cargo run --bin roomeq-qa-acoustic --release -- --tier nightly --recalibrate-baseline
+
+# Per-subsystem coverage floors, stricter around the acoustic acceptance layer.
+[group('qa-roomeq')]
+qa-roomeq-subsystem-coverage:
+	cargo llvm-cov --release --package autoeq --lib --json --output-path target/qa/roomeq-coverage.json
+	python3 scripts/check_roomeq_subsystem_coverage.py target/qa/roomeq-coverage.json
+
+# Focused mutation testing for quality metrics, acceptance, and corpus contracts.
+[group('qa-roomeq')]
+qa-roomeq-mutation:
+	cargo mutants --package autoeq --file 'src/roomeq/acoustic_qa/**/*.rs'
 
 # Exhaustive layout x sub-topology x processing-mode audibility matrix.
 [group('qa-roomeq')]

@@ -426,7 +426,7 @@ pub fn build_multisub_dsp_chain_advanced(
         if let Some(filters) = per_sub_eq_filters.and_then(|filters| filters.get(i))
             && !filters.is_empty()
         {
-            sub_plugins.push(create_eq_plugin(filters));
+            sub_plugins.push(create_labeled_eq_plugin(filters, "mso_per_sub_peq"));
         }
 
         // Add gain/polarity plugin if non-zero or inverted.
@@ -461,7 +461,7 @@ pub fn build_multisub_dsp_chain_advanced(
                     )
                 })
                 .collect();
-            sub_plugins.push(create_eq_plugin(&biquads));
+            sub_plugins.push(create_labeled_eq_plugin(&biquads, "group_delay_allpass"));
         }
 
         let driver_curve = driver_initial_curves
@@ -479,7 +479,7 @@ pub fn build_multisub_dsp_chain_advanced(
     // Build combined EQ
     let mut combined_plugins = Vec::new();
     if !eq_filters.is_empty() {
-        combined_plugins.push(create_eq_plugin(eq_filters));
+        combined_plugins.push(create_labeled_eq_plugin(eq_filters, "mso_combined_peq"));
     }
 
     ChannelDspChain {

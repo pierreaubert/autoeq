@@ -2026,7 +2026,7 @@ fn assemble_generic_result(
         )?;
     }
 
-    room_optimization_result::apply_final_correction_safety_gate(&mut result);
+    room_optimization_result::apply_final_correction_safety_gate(&mut result, sample_rate);
 
     emit_pipeline_event(
         observer_shared,

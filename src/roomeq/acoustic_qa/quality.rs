@@ -43,6 +43,53 @@ pub struct TemporalQualityEvidence {
     pub available_headroom_db: Option<f64>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct TemporalChannelEvidence {
+    pub pre_ringing_audible_db: Option<f64>,
+    pub main_time_ms: Option<f64>,
+    pub fir_taps: Option<usize>,
+}
+
+pub fn derive_temporal_quality_evidence(
+    channels: &[TemporalChannelEvidence],
+    pre: &[Curve],
+    post: &[Curve],
+    sample_rate: f64,
+) -> TemporalQualityEvidence {
+    let has_fir = channels.iter().any(|channel| {
+        channel.pre_ringing_audible_db.is_some()
+            || channel.main_time_ms.is_some()
+            || channel.fir_taps.is_some()
+    });
+    let pre_ringing_energy_db = channels
+        .iter()
+        .filter_map(|channel| channel.pre_ringing_audible_db)
+        .reduce(f64::max)
+        .unwrap_or(if has_fir { -120.0 } else { -300.0 });
+    let latency_ms = channels
+        .iter()
+        .map(|channel| {
+            let explicit = channel.main_time_ms.unwrap_or(0.0);
+            let linear_phase = channel
+                .fir_taps
+                .map(|taps| taps.saturating_sub(1) as f64 * 500.0 / sample_rate)
+                .unwrap_or(0.0);
+            explicit.max(linear_phase)
+        })
+        .fold(0.0_f64, f64::max);
+    let max_boost_db = pre
+        .iter()
+        .zip(post)
+        .flat_map(|(pre, post)| post.spl.iter().zip(&pre.spl))
+        .map(|(post, pre)| post - pre)
+        .fold(0.0_f64, f64::max);
+    TemporalQualityEvidence {
+        pre_ringing_energy_db: Some(pre_ringing_energy_db),
+        latency_ms: Some(latency_ms),
+        available_headroom_db: Some(-max_boost_db.max(0.0)),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct QualityPartitionMetrics {
     pub curve_count: usize,
@@ -58,6 +105,16 @@ pub struct QualityPartitionMetrics {
     pub bass_post_weighted_rms_db: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upper_post_weighted_rms_db: Option<f64>,
+    /// Median RMS curvature of the residual below Schroeder frequency.
+    ///
+    /// This is measured in dB/octave² and distinguishes a response with
+    /// narrow modal ripple from one with the same band RMS but a smooth tilt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bass_pre_modal_roughness_db_per_octave2: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bass_post_modal_roughness_db_per_octave2: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bass_modal_roughness_improvement_db_per_octave2: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -119,6 +176,8 @@ pub struct QualityBaselineMetrics {
     pub max_boost_db: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub induced_group_delay_rms_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bass_modal_roughness_db_per_octave2: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -127,6 +186,8 @@ pub struct QualityRegressionPolicy {
     pub max_p95_regression_db: f64,
     pub max_improvement_loss_db: f64,
     pub max_group_delay_regression_ms: f64,
+    pub max_modal_roughness_regression_db_per_octave2: f64,
+    pub max_modal_roughness_regression_fraction: f64,
 }
 
 impl Default for QualityRegressionPolicy {
@@ -136,6 +197,8 @@ impl Default for QualityRegressionPolicy {
             max_p95_regression_db: 0.25,
             max_improvement_loss_db: 0.1,
             max_group_delay_regression_ms: 0.1,
+            max_modal_roughness_regression_db_per_octave2: 0.5,
+            max_modal_roughness_regression_fraction: 0.05,
         }
     }
 }
@@ -149,6 +212,8 @@ pub struct QualityBaselineComparison {
     pub max_boost_delta_db: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_delay_delta_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bass_modal_roughness_delta_db_per_octave2: Option<f64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub violations: Vec<String>,
 }
@@ -283,6 +348,10 @@ pub fn compare_quality_to_baseline(
         .induced_group_delay_rms_ms
         .zip(baseline.induced_group_delay_rms_ms)
         .map(|(current, baseline)| current - baseline);
+    let bass_modal_roughness_delta_db_per_octave2 = current
+        .bass_post_modal_roughness_db_per_octave2
+        .zip(baseline.bass_modal_roughness_db_per_octave2)
+        .map(|(current, baseline)| current - baseline);
     let mut violations = Vec::new();
     if weighted_rms_delta_db > policy.max_weighted_rms_regression_db {
         violations.push("baseline_weighted_rms_regressed".to_string());
@@ -296,6 +365,17 @@ pub fn compare_quality_to_baseline(
     if group_delay_delta_ms.is_some_and(|delta| delta > policy.max_group_delay_regression_ms) {
         violations.push("baseline_group_delay_regressed".to_string());
     }
+    if bass_modal_roughness_delta_db_per_octave2.is_some_and(|delta| {
+        delta > policy.max_modal_roughness_regression_db_per_octave2
+            && delta
+                > baseline
+                    .bass_modal_roughness_db_per_octave2
+                    .unwrap_or(0.0)
+                    .abs()
+                    * policy.max_modal_roughness_regression_fraction
+    }) {
+        violations.push("baseline_bass_modal_roughness_regressed".to_string());
+    }
     Ok(QualityBaselineComparison {
         partition: baseline.partition,
         weighted_rms_delta_db,
@@ -303,6 +383,7 @@ pub fn compare_quality_to_baseline(
         improvement_delta_db,
         max_boost_delta_db,
         group_delay_delta_ms,
+        bass_modal_roughness_delta_db_per_octave2,
         violations,
     })
 }
@@ -346,6 +427,8 @@ fn evaluate_partition(
     let mut post_abs = Vec::new();
     let mut bass_post = Vec::new();
     let mut upper_post = Vec::new();
+    let mut bass_pre_modal_roughness = Vec::new();
+    let mut bass_post_modal_roughness = Vec::new();
     for (pre, post) in pre.iter().zip(post) {
         let samples = aligned_samples(pre, post, target, config)?;
         let mut pre_residual: Vec<f64> = samples.iter().map(|s| s.pre - s.target).collect();
@@ -366,11 +449,28 @@ fn evaluate_partition(
             if let Some(value) = band_rms(&frequencies, &post_residual, split, config.max_freq_hz) {
                 upper_post.push(value);
             }
+            if let Some(value) =
+                modal_roughness(&frequencies, &pre_residual, config.min_freq_hz, split)
+            {
+                bass_pre_modal_roughness.push(value);
+            }
+            if let Some(value) =
+                modal_roughness(&frequencies, &post_residual, config.min_freq_hz, split)
+            {
+                bass_post_modal_roughness.push(value);
+            }
         }
     }
     let (mean_spread, max_spread) = normalized_seat_spread(post, target, config)?;
     let pre_median = median(pre_rms_values);
     let post_median = median(post_rms_values);
+    let bass_pre_modal_roughness_db_per_octave2 =
+        (!bass_pre_modal_roughness.is_empty()).then(|| median(bass_pre_modal_roughness));
+    let bass_post_modal_roughness_db_per_octave2 =
+        (!bass_post_modal_roughness.is_empty()).then(|| median(bass_post_modal_roughness));
+    let bass_modal_roughness_improvement_db_per_octave2 = bass_pre_modal_roughness_db_per_octave2
+        .zip(bass_post_modal_roughness_db_per_octave2)
+        .map(|(pre, post)| pre - post);
     Ok(QualityPartitionMetrics {
         curve_count: pre.len(),
         pre_weighted_rms_median_db: pre_median,
@@ -383,7 +483,52 @@ fn evaluate_partition(
         max_normalized_seat_spread_db: max_spread,
         bass_post_weighted_rms_db: (!bass_post.is_empty()).then(|| median(bass_post)),
         upper_post_weighted_rms_db: (!upper_post.is_empty()).then(|| median(upper_post)),
+        bass_pre_modal_roughness_db_per_octave2,
+        bass_post_modal_roughness_db_per_octave2,
+        bass_modal_roughness_improvement_db_per_octave2,
     })
+}
+
+fn modal_roughness(
+    frequencies: &[f64],
+    residual: &[f64],
+    min_freq_hz: f64,
+    max_freq_hz: f64,
+) -> Option<f64> {
+    let samples: Vec<(f64, f64)> = frequencies
+        .iter()
+        .copied()
+        .zip(residual.iter().copied())
+        .filter(|(frequency, value)| {
+            frequency.is_finite()
+                && value.is_finite()
+                && *frequency >= min_freq_hz
+                && *frequency <= max_freq_hz
+                && *frequency > 0.0
+        })
+        .map(|(frequency, value)| (frequency.log2(), value))
+        .collect();
+    if samples.len() < 3 {
+        return None;
+    }
+
+    let curvatures: Vec<f64> = samples
+        .windows(3)
+        .filter_map(|window| {
+            let [(x0, y0), (x1, y1), (x2, y2)] = window else {
+                return None;
+            };
+            let left_dx = x1 - x0;
+            let right_dx = x2 - x1;
+            if left_dx <= 0.0 || right_dx <= 0.0 {
+                return None;
+            }
+            let left_slope = (y1 - y0) / left_dx;
+            let right_slope = (y2 - y1) / right_dx;
+            Some(2.0 * (right_slope - left_slope) / (left_dx + right_dx))
+        })
+        .collect();
+    (!curvatures.is_empty()).then(|| rms(&curvatures))
 }
 
 fn aligned_samples(
@@ -642,6 +787,50 @@ mod tests {
     }
 
     #[test]
+    fn modal_roughness_distinguishes_ripple_from_log_frequency_tilt() {
+        let frequencies = [20.0, 28.284, 40.0, 56.569, 80.0, 113.137, 160.0, 200.0];
+        let tilt: Vec<f64> = frequencies
+            .iter()
+            .map(|frequency| 2.0 * (*frequency / 20.0_f64).log2())
+            .collect();
+        let ripple = [0.0, 4.0, -4.0, 4.0, -4.0, 4.0, -4.0, 0.0];
+
+        let smooth = modal_roughness(&frequencies, &tilt, 20.0, 200.0).expect("smooth metric");
+        let rough = modal_roughness(&frequencies, &ripple, 20.0, 200.0).expect("rough metric");
+        assert!(
+            smooth < 1e-6,
+            "linear log-frequency tilt should have zero curvature"
+        );
+        assert!(rough > 10.0, "modal ripple should have material curvature");
+    }
+
+    #[test]
+    fn temporal_evidence_uses_worst_pre_ringing_and_fir_latency() {
+        let pre = curve(&[20.0, 100.0, 1_000.0], &[0.0, 0.0, 0.0]);
+        let post = curve(&[20.0, 100.0, 1_000.0], &[1.0, 2.0, 3.0]);
+        let evidence = derive_temporal_quality_evidence(
+            &[
+                TemporalChannelEvidence {
+                    pre_ringing_audible_db: Some(-42.0),
+                    main_time_ms: Some(2.0),
+                    fir_taps: Some(481),
+                },
+                TemporalChannelEvidence {
+                    pre_ringing_audible_db: Some(-30.0),
+                    main_time_ms: Some(1.0),
+                    fir_taps: None,
+                },
+            ],
+            &[pre],
+            &[post],
+            48_000.0,
+        );
+        assert_eq!(evidence.pre_ringing_energy_db, Some(-30.0));
+        assert_eq!(evidence.latency_ms, Some(5.0));
+        assert_eq!(evidence.available_headroom_db, Some(-3.0));
+    }
+
+    #[test]
     fn scorecard_handles_mismatched_sparse_grids_over_overlap() {
         let pre = curve(&[20.0, 100.0, 1000.0, 20_000.0], &[3.0, -2.0, 1.0, 0.0]);
         let post = curve(&[30.0, 300.0, 3000.0, 10_000.0], &[1.0, -0.5, 0.2, 0.0]);
@@ -658,6 +847,100 @@ mod tests {
         .expect("overlap is explicitly aligned");
         assert_eq!(scorecard.measurement_overlap_hz, [30.0, 10_000.0]);
         assert!(scorecard.finite);
+    }
+
+    #[test]
+    fn scorecard_is_invariant_to_global_gain_and_seat_order() {
+        let left = curve(&[20.0, 50.0, 100.0, 200.0], &[4.0, -2.0, 3.0, -1.0]);
+        let right = curve(&[20.0, 50.0, 100.0, 200.0], &[-3.0, 2.0, -1.0, 4.0]);
+        let left_post = curve(&[20.0, 50.0, 100.0, 200.0], &[2.0, -1.0, 1.5, -0.5]);
+        let right_post = curve(&[20.0, 50.0, 100.0, 200.0], &[-1.5, 1.0, -0.5, 2.0]);
+        let baseline = evaluate_acoustic_quality(
+            &[left.clone(), right.clone()],
+            &[left_post.clone(), right_post.clone()],
+            &[],
+            &[],
+            None,
+            config(),
+            TemporalQualityEvidence::default(),
+        )
+        .expect("baseline");
+        let add_gain = |mut input: Curve| {
+            input.spl += 12.0;
+            input
+        };
+        let transformed = evaluate_acoustic_quality(
+            &[add_gain(right), add_gain(left)],
+            &[add_gain(right_post), add_gain(left_post)],
+            &[],
+            &[],
+            None,
+            config(),
+            TemporalQualityEvidence::default(),
+        )
+        .expect("transformed");
+        assert_eq!(baseline.training, transformed.training);
+    }
+
+    #[test]
+    fn duplicated_measurements_do_not_change_partition_metrics() {
+        let pre = curve(&[20.0, 50.0, 100.0, 200.0], &[4.0, -2.0, 3.0, -1.0]);
+        let post = curve(&[20.0, 50.0, 100.0, 200.0], &[2.0, -1.0, 1.5, -0.5]);
+        let single = evaluate_partition(
+            std::slice::from_ref(&pre),
+            std::slice::from_ref(&post),
+            None,
+            config(),
+        )
+        .expect("single");
+        let duplicated =
+            evaluate_partition(&[pre.clone(), pre], &[post.clone(), post], None, config())
+                .expect("duplicated");
+        assert_eq!(
+            single.post_weighted_rms_median_db,
+            duplicated.post_weighted_rms_median_db
+        );
+        assert_eq!(
+            single.post_p95_abs_residual_db,
+            duplicated.post_p95_abs_residual_db
+        );
+        assert_eq!(
+            single.bass_post_modal_roughness_db_per_octave2,
+            duplicated.bass_post_modal_roughness_db_per_octave2
+        );
+    }
+
+    #[test]
+    fn missing_phase_and_controlled_noise_are_handled_deterministically() {
+        let mut pre = curve(
+            &[20.0, 35.0, 50.0, 80.0, 120.0, 200.0],
+            &[5.0, -3.0, 4.0, -2.0, 2.0, -1.0],
+        );
+        let mut post = curve(
+            &[20.0, 35.0, 50.0, 80.0, 120.0, 200.0],
+            &[2.0, -1.5, 2.0, -1.0, 1.0, -0.5],
+        );
+        pre.phase = Some(Array1::zeros(pre.freq.len()));
+        post.phase = Some(Array1::zeros(post.freq.len()));
+        let with_phase = evaluate_partition(
+            std::slice::from_ref(&pre),
+            std::slice::from_ref(&post),
+            None,
+            config(),
+        )
+        .expect("phase");
+        pre.phase = None;
+        post.phase = None;
+        for (index, value) in post.spl.iter_mut().enumerate() {
+            *value += (index as f64 * 1.618_033_988_75).sin() * 0.1;
+        }
+        let noisy = evaluate_partition(&[pre], &[post], None, config()).expect("noisy");
+        assert!(noisy.post_weighted_rms_median_db.is_finite());
+        assert!(noisy.improvement_median_db > 0.5);
+        assert!(
+            (noisy.post_weighted_rms_median_db - with_phase.post_weighted_rms_median_db).abs()
+                < 0.15
+        );
     }
 
     #[test]
@@ -700,6 +983,7 @@ mod tests {
             improvement_median_db: current.improvement_median_db + 0.2,
             max_boost_db: scorecard.max_boost_db,
             induced_group_delay_rms_ms: scorecard.induced_group_delay_rms_ms,
+            bass_modal_roughness_db_per_octave2: current.bass_post_modal_roughness_db_per_octave2,
         };
         let comparison =
             compare_quality_to_baseline(&scorecard, &baseline, QualityRegressionPolicy::default())

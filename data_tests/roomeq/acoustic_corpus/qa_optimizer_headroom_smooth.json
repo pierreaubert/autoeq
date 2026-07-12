@@ -1,0 +1,27 @@
+{
+  "optimizer": {
+    "algorithm": "autoeq:cmaes",
+    "mode": "iir",
+    "processing_mode": "low_latency",
+    "loss_type": "flat",
+    "num_filters": 4,
+    "min_q": 0.5,
+    "max_q": 6.0,
+    "min_db": -9.0,
+    "max_db": 4.0,
+    "min_freq": 20.0,
+    "max_freq": 500.0,
+    "max_iter": 500,
+    "population": 16,
+    "seed": 424242,
+    "refine": false,
+    "psychoacoustic": true,
+    "asymmetric_loss": true,
+    "smoothness_penalty": {
+      "tv2_weight": 0.001,
+      "schroeder_hz": 200.0,
+      "modal_weight_scale": 0.1,
+      "exponent": 1.0
+    }
+  }
+}

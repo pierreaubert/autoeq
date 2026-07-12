@@ -203,6 +203,8 @@ The QA suite runs optimization scenarios with regression thresholds:
 just qa-autoeq
 just qa-roomeq
 just qa-roomeq-acoustic-pr
+just qa-roomeq-acoustic-report
+just qa-roomeq-subsystem-coverage
 ```
 
 This executes predefined scenarios testing:
@@ -211,6 +213,8 @@ This executes predefined scenarios testing:
 - Headphone optimization (multiple algorithms)
 - Various PEQ models and algorithm combinations
 - Repository-backed real-room and held-out FEM acoustic quality
+- Stereo-with-sub, MSO/multi-sub, and 5.1 home-cinema topology coverage
+- Multi-seed noise/coherence robustness, Markdown reports, and CI trends
 
 Each scenario has a `--qa <threshold>` flag that fails if the final loss exceeds the threshold.
 

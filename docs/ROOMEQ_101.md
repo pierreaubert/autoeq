@@ -784,8 +784,9 @@ flowchart TB
 Final metadata also includes `correction_acceptance` when the audibility safety
 gate can evaluate aligned pre/post/target curves. The gate records whether the
 chain was accepted, a corrective stage was reverted, or identity correction was
-used. A revert removes correction EQ/convolution while retaining crossover,
-routing, delay, and polarity infrastructure required by the playback topology.
+used. Mixed chains are re-synthesized at the run's sample rate and independently
+test PEQ, MSO, group-delay/all-pass, and FIR removal. A revert retains crossover,
+routing, delay, gain, and polarity infrastructure required by the topology.
 
 Measurement confidence is classified from coherence, signal-to-noise margin,
 and multi-seat variance. Degraded measurements reduce correction depth; poor
@@ -795,21 +796,38 @@ rejected explicitly.
 The acoustic-quality scorecard extends this contract across training and
 held-out positions. It reports target-weighted median RMS, p95 and worst
 residuals, normalized seat spread, separate below/above-Schroeder results,
-correction energy, peak boost/cut, and induced group-delay RMS. Different
+correction energy, peak boost/cut, induced group-delay RMS, below-Schroeder
+modal curvature, pre-ringing, latency, and available headroom. Different
 measurement grids are evaluated only over their explicit shared frequency
 overlap; sparse grids and missing phase degrade individual metrics rather than
 silently changing the evaluation range.
 
+Callers with measurements excluded from optimization can attach them through
+RoomPipeline::with_validation_measurements. The runtime correction metadata
+then carries the same held-out scorecard used by corpus QA.
+
 `data_tests/roomeq/acoustic_corpus/manifest.json` is the versioned corpus entry
 point. It includes repository-owned real stereo measurements and FEM rooms with
-training/held-out seats. `just qa-roomeq-acoustic-pr` runs the bounded PR tier;
-`just qa-roomeq-acoustic-nightly` includes the full corpus. Corpus gates begin
-in `report_only` mode so stable paired baselines can be collected before the
-0.1 dB held-out improvement and 0.25 dB p95-regression limits become blocking.
+training/held-out seats, stereo-with-sub, MSO/multi-sub, and 5.1 home-cinema
+paths. Provenance and intake rules live beside the manifest in PROVENANCE.md.
+The PR recipe runs the bounded tier; the nightly recipe includes the full
+corpus. Calibrated manifest gates enforce the 0.1 dB held-out improvement and
+0.25 dB p95-regression limits.
 The compact `baseline.json` snapshot records current-main metrics for each
 scenario; every corpus run emits paired weighted-RMS, p95, improvement,
-headroom, and group-delay deltas. `--enforce` proves the future blocking path
-without changing the manifest's calibration mode.
+headroom, group-delay, and modal-roughness deltas. The report recipe writes JSON
+and Markdown, appends runtime/memory trend history, and enforces the PR resource
+budget. The recalibration recipe intentionally replaces snapshots after a
+reviewed quality change. Four fixed noise/coherence seeds exercise robustness
+deterministically.
+
+The matched candidate runner compares the same measurements, seeds, bands, and
+held-out positions before recommending a change. The headroom-smooth objective
+is promoted only for the 2.2 MSO scenario, where it reduced peak boost by more
+than 1 dB while keeping weighted-RMS and p95 tradeoffs inside the promotion
+policy; other topologies retain the current-main objective.
+The nightly measured-T7V case also runs an equal-budget DE backend against the
+current CMA-ES path so backend changes have a matched, non-promotional control.
 
 `export_dsp_chain` (`roomeq/export.rs`) serialises the result into
 external formats. Some targets (e.g. EasyEffects, Wavelet GraphicEQ)

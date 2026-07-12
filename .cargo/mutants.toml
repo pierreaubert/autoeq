@@ -1,0 +1,9 @@
+test_tool = "nextest"
+timeout_multiplier = 4.0
+minimum_test_timeout = 20.0
+exclude_globs = [
+  "src/bin/**",
+  "data_tests/**",
+  "venv/**",
+]
+

@@ -2,10 +2,13 @@ use super::super::output;
 use super::super::types::{ChannelDspChain, DspChainOutput, OptimizationMetadata, RoomConfig};
 use super::types::ChannelOptimizationResult;
 use crate::error::{AutoeqError, Result};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
-pub(super) fn apply_final_correction_safety_gate(result: &mut RoomOptimizationResult) {
+pub(super) fn apply_final_correction_safety_gate(
+    result: &mut RoomOptimizationResult,
+    sample_rate: f64,
+) {
     use crate::roomeq::acoustic_qa::{
         CorrectionAcceptancePolicy, CorrectionDecision, evaluate_correction_acceptance,
     };
@@ -75,16 +78,53 @@ pub(super) fn apply_final_correction_safety_gate(result: &mut RoomOptimizationRe
                     advisories: vec!["audibility_regression_reverted".to_string()],
                 });
         } else if regressed {
-            result
-                .metadata
-                .stage_outcomes
-                .push(crate::roomeq::types::StageOutcome {
-                    stage: format!("final_correction_safety_{name}"),
-                    status: crate::roomeq::types::StageStatus::Degraded,
-                    advisories: vec![
-                        "audibility_regression_requires_stage_local_revert".to_string(),
-                    ],
-                });
+            let stage_revert = result.channels.get(name).and_then(|chain| {
+                revert_regressed_correction_stages(
+                    chain,
+                    &channel.initial_curve,
+                    &target,
+                    sample_rate,
+                )
+            });
+            if let Some((chain, curve, stages, report)) = stage_revert {
+                channel.final_curve = curve;
+                channel.post_score = report.metrics.post_target_weighted_rms_db;
+                if stages.contains(&CorrectionStage::Peq) {
+                    channel.biquads.clear();
+                }
+                if stages.contains(&CorrectionStage::Fir) {
+                    channel.fir_coeffs = None;
+                }
+                result.channels.insert(name.clone(), chain);
+                let stage_names: Vec<_> = stages
+                    .iter()
+                    .map(|stage| format!("{name}:{}", stage.as_str()))
+                    .collect();
+                reverted.extend(stage_names.iter().cloned());
+                accepted_report = Some(report);
+                result
+                    .metadata
+                    .stage_outcomes
+                    .push(crate::roomeq::types::StageOutcome {
+                        stage: format!("final_correction_safety_{name}"),
+                        status: crate::roomeq::types::StageStatus::Degraded,
+                        advisories: stage_names
+                            .iter()
+                            .map(|stage| format!("audibility_regression_reverted_{stage}"))
+                            .collect(),
+                    });
+            } else {
+                result
+                    .metadata
+                    .stage_outcomes
+                    .push(crate::roomeq::types::StageOutcome {
+                        stage: format!("final_correction_safety_{name}"),
+                        status: crate::roomeq::types::StageStatus::Degraded,
+                        advisories: vec![
+                            "audibility_regression_has_no_revertible_correction_stage".to_string(),
+                        ],
+                    });
+            }
         }
     }
 
@@ -101,7 +141,9 @@ pub(super) fn apply_final_correction_safety_gate(result: &mut RoomOptimizationRe
     if let Some(mut report) = accepted_report {
         if !reverted.is_empty() {
             report.accepted = false;
-            report.decision = if reverted.len() == result.channel_results.len() {
+            report.decision = if reverted.len() == result.channel_results.len()
+                && reverted.iter().all(|stage| !stage.contains(':'))
+            {
                 CorrectionDecision::IdentityFallback
             } else {
                 CorrectionDecision::RevertedStage
@@ -132,6 +174,13 @@ pub(super) fn apply_final_correction_safety_gate(result: &mut RoomOptimizationRe
             .filter_map(|curve| curve.freq.last().copied())
             .fold(f64::INFINITY, f64::min);
         if max_freq_hz > min_freq_hz {
+            let temporal = runtime_temporal_quality_evidence(
+                result,
+                &names,
+                &training_pre,
+                &training_post,
+                sample_rate,
+            );
             report.acoustic_quality = crate::roomeq::acoustic_qa::evaluate_acoustic_quality(
                 &training_pre,
                 &training_post,
@@ -144,11 +193,162 @@ pub(super) fn apply_final_correction_safety_gate(result: &mut RoomOptimizationRe
                     schroeder_hz: None,
                     normalize_level: true,
                 },
-                crate::roomeq::acoustic_qa::TemporalQualityEvidence::default(),
+                temporal,
             )
             .ok();
         }
         result.metadata.correction_acceptance = Some(report);
+    }
+}
+
+fn runtime_temporal_quality_evidence(
+    result: &RoomOptimizationResult,
+    names: &[String],
+    pre: &[crate::Curve],
+    post: &[crate::Curve],
+    sample_rate: f64,
+) -> crate::roomeq::acoustic_qa::TemporalQualityEvidence {
+    let channels: Vec<_> = names
+        .iter()
+        .map(|name| {
+            let masking = result.channels[name].fir_temporal_masking.as_ref();
+            crate::roomeq::acoustic_qa::TemporalChannelEvidence {
+                pre_ringing_audible_db: masking.map(|metrics| metrics.pre_ringing_audible_db),
+                main_time_ms: masking.map(|metrics| metrics.main_time_ms),
+                fir_taps: result.channel_results[name]
+                    .fir_coeffs
+                    .as_ref()
+                    .map(Vec::len),
+            }
+        })
+        .collect();
+    crate::roomeq::acoustic_qa::derive_temporal_quality_evidence(&channels, pre, post, sample_rate)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum CorrectionStage {
+    Peq,
+    Mso,
+    GroupDelay,
+    Fir,
+}
+
+impl CorrectionStage {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Peq => "peq",
+            Self::Mso => "mso",
+            Self::GroupDelay => "group_delay_allpass",
+            Self::Fir => "fir",
+        }
+    }
+}
+
+fn revert_regressed_correction_stages(
+    chain: &ChannelDspChain,
+    initial: &crate::Curve,
+    target: &crate::Curve,
+    sample_rate: f64,
+) -> Option<(
+    ChannelDspChain,
+    crate::Curve,
+    BTreeSet<CorrectionStage>,
+    crate::roomeq::acoustic_qa::CorrectionAcceptanceReport,
+)> {
+    use crate::roomeq::acoustic_qa::{CorrectionAcceptancePolicy, evaluate_correction_acceptance};
+
+    let stages = correction_stages(chain);
+    let mut active_chain = chain.clone();
+    let mut active_curve =
+        crate::roomeq::ctc::apply_channel_dsp_chain_to_curve(&active_chain, initial, sample_rate)
+            .ok()?;
+    let mut active_report = evaluate_correction_acceptance(
+        initial,
+        &active_curve,
+        target,
+        None,
+        CorrectionAcceptancePolicy::RuntimeSafety,
+    )
+    .ok()?;
+    let mut reverted = BTreeSet::new();
+
+    for stage in stages {
+        let mut candidate_chain = active_chain.clone();
+        remove_correction_stage(&mut candidate_chain, stage);
+        let candidate_curve = crate::roomeq::ctc::apply_channel_dsp_chain_to_curve(
+            &candidate_chain,
+            initial,
+            sample_rate,
+        )
+        .ok()?;
+        let candidate_report = evaluate_correction_acceptance(
+            initial,
+            &candidate_curve,
+            target,
+            None,
+            CorrectionAcceptancePolicy::RuntimeSafety,
+        )
+        .ok()?;
+        if candidate_report.metrics.post_target_weighted_rms_db
+            + (active_report.metrics.pre_target_weighted_rms_db.abs() * 1e-6).max(1e-9)
+            < active_report.metrics.post_target_weighted_rms_db
+        {
+            active_chain = candidate_chain;
+            active_curve = candidate_curve;
+            active_report = candidate_report;
+            reverted.insert(stage);
+        }
+    }
+
+    (!reverted.is_empty()).then_some((active_chain, active_curve, reverted, active_report))
+}
+
+fn correction_stages(chain: &ChannelDspChain) -> BTreeSet<CorrectionStage> {
+    chain
+        .plugins
+        .iter()
+        .chain(
+            chain
+                .drivers
+                .iter()
+                .flatten()
+                .flat_map(|driver| driver.plugins.iter()),
+        )
+        .filter_map(correction_stage)
+        .collect()
+}
+
+fn correction_stage(plugin: &crate::roomeq::types::PluginConfigWrapper) -> Option<CorrectionStage> {
+    if plugin.plugin_type == "convolution" {
+        return Some(CorrectionStage::Fir);
+    }
+    if plugin.plugin_type != "eq" {
+        return None;
+    }
+    let label = plugin
+        .parameters
+        .get("label")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if label.contains("allpass") || label.contains("group_delay") {
+        Some(CorrectionStage::GroupDelay)
+    } else if label.contains("mso") || label.contains("multisub") {
+        Some(CorrectionStage::Mso)
+    } else {
+        Some(CorrectionStage::Peq)
+    }
+}
+
+fn remove_correction_stage(chain: &mut ChannelDspChain, stage: CorrectionStage) {
+    chain
+        .plugins
+        .retain(|plugin| correction_stage(plugin) != Some(stage));
+    if let Some(drivers) = &mut chain.drivers {
+        for driver in drivers {
+            driver
+                .plugins
+                .retain(|plugin| correction_stage(plugin) != Some(stage));
+        }
     }
 }
 
@@ -400,7 +600,7 @@ mod tests {
             plugin_type: "eq".to_string(),
             parameters: serde_json::json!({"filters": []}),
         }];
-        apply_final_correction_safety_gate(&mut result);
+        apply_final_correction_safety_gate(&mut result, 48_000.0);
         assert_eq!(result.channel_results["left"].post_score, 1.0);
         assert!(result.channels["left"].plugins.is_empty());
         assert_eq!(
@@ -420,6 +620,41 @@ mod tests {
             .expect("final safety gate should attach the shared quality scorecard");
         assert!(quality.finite);
         assert_eq!(quality.training.curve_count, 1);
+        assert_eq!(quality.temporal.pre_ringing_energy_db, Some(-300.0));
+        assert_eq!(quality.temporal.latency_ms, Some(0.0));
+        assert!(quality.temporal.available_headroom_db.is_some());
+    }
+
+    #[test]
+    fn final_safety_gate_reverts_peq_stage_without_removing_gain() {
+        let mut result = single_channel_room_result("left");
+        let channel = result.channel_results.get_mut("left").unwrap();
+        channel.pre_score = 0.0;
+        channel.post_score = 6.0;
+        let filter = math_audio_iir_fir::Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Peak,
+            1_000.0,
+            48_000.0,
+            0.7,
+            12.0,
+        );
+        let chain = result.channels.get_mut("left").unwrap();
+        chain.plugins = vec![
+            crate::roomeq::create_gain_plugin(-3.0),
+            crate::roomeq::create_labeled_eq_plugin(&[filter], "room_eq_correction"),
+        ];
+
+        apply_final_correction_safety_gate(&mut result, 48_000.0);
+
+        assert_eq!(result.channels["left"].plugins.len(), 1);
+        assert_eq!(result.channels["left"].plugins[0].plugin_type, "gain");
+        let report = result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .expect("acceptance report");
+        assert_eq!(report.decision, CorrectionDecision::RevertedStage);
+        assert_eq!(report.reverted_stages, ["left:peq"]);
     }
 
     // In debug builds `sanity_check_result` panics on invariant violations via

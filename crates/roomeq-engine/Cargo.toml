@@ -1,6 +1,6 @@
 [package]
 name = "roomeq-engine"
-version = "0.4.47"
+version.workspace = true
 edition = "2024"
 description = "RoomEQ analysis, optimization, and pipeline execution"
 license = "GPL-3.0-or-later"

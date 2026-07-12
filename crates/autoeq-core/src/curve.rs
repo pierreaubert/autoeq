@@ -16,7 +16,7 @@ use crate::error::{AutoeqError, Result};
 /// sets every optional field to `None`:
 ///
 /// ```
-/// # use autoeq::Curve;
+/// # use autoeq_core::Curve;
 /// # use ndarray::Array1;
 /// let freq = Array1::from_vec(vec![20.0, 200.0, 2000.0]);
 /// let spl = Array1::from_vec(vec![0.0, 0.0, 0.0]);
@@ -602,5 +602,4 @@ mod decompose_cache_tests {
             "excess_delay_ms must be identical on second call"
         );
     }
-
 }

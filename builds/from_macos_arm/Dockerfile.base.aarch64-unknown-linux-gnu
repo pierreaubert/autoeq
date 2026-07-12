@@ -2,6 +2,7 @@
 FROM --platform=linux/arm64 ubuntu:24.04 AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
+ARG RUST_TOOLCHAIN=1.95.0
 
 # Install base build dependencies - combined into single layer
 RUN apt-get update && \
@@ -30,12 +31,16 @@ RUN apt-get update && \
     gnome-browser-connector \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Install Rust 1.95 (pinned version for compatibility)
+# Install the pinned Rust toolchain used by every later build/test invocation.
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-    sh -s -- -y --default-toolchain 1.95.0 --profile minimal && \
+    sh -s -- -y --default-toolchain ${RUST_TOOLCHAIN} --profile minimal && \
     rm -rf /root/.cargo/registry /root/.cargo/git
 
 ENV PATH="/root/.cargo/bin:${PATH}"
+# Override the repository's moving `stable` channel inside this image. Without
+# this, copying/mounting rust-toolchain.toml can make rustup download a newer
+# toolchain and target during the final build or test step.
+ENV RUSTUP_TOOLCHAIN=${RUST_TOOLCHAIN}
 
 # Add the target
 RUN rustup target add aarch64-unknown-linux-gnu

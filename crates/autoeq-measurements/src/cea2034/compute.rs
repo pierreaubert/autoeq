@@ -1,9 +1,9 @@
-use crate::Curve;
 use super::misc::octave_intervals;
 use super::misc::pressure2spl;
 use super::misc::spl2pressure;
 use super::score::score_peq_approx;
 use super::types::ScoreMetrics;
+use crate::Curve;
 use ndarray::Array1;
 use std::collections::HashMap;
 use std::error::Error;

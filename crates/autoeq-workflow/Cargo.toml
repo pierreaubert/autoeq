@@ -1,6 +1,6 @@
 [package]
 name = "autoeq-workflow"
-version = "0.4.47"
+version.workspace = true
 edition = "2024"
 description = "Speaker and headphone AutoEQ workflows"
 license = "GPL-3.0-or-later"

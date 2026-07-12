@@ -1,6 +1,6 @@
 [package]
 name = "autoeq-measurements"
-version = "0.4.47"
+version.workspace = true
 edition = "2024"
 description = "AutoEQ measurement loading and preprocessing"
 license = "GPL-3.0-or-later"

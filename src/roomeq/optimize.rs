@@ -1979,6 +1979,7 @@ fn assemble_generic_result(
         bootstrap_uncertainty: None,
         validation_bundle: None,
         supporting_source: None,
+        correction_acceptance: None,
         stage_outcomes,
     };
 
@@ -2024,6 +2025,8 @@ fn assemble_generic_result(
             ),
         )?;
     }
+
+    room_optimization_result::apply_final_correction_safety_gate(&mut result);
 
     emit_pipeline_event(
         observer_shared,

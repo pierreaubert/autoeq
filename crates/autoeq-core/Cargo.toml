@@ -1,6 +1,6 @@
 [package]
 name = "autoeq-core"
-version = "0.4.47"
+version.workspace = true
 edition = "2024"
 description = "Core curves, filter models, response math, and PEQ parameter layouts for AutoEQ"
 license = "GPL-3.0-or-later"

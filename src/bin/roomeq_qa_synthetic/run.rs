@@ -169,7 +169,8 @@ pub(super) fn run_multisub_test(
     let post = result.combined_post_score;
     let epa = avg_epa_preference(&result);
 
-    if post > pre * 1.20 {
+    let required_improvement = 0.25_f64.max(pre.abs() * 0.10);
+    if post > pre - required_improvement {
         return TestResult {
             name: test_name,
             passed: false,
@@ -177,10 +178,8 @@ pub(super) fn run_multisub_test(
             post_score: post,
             epa_preference: epa,
             reason: format!(
-                "Severe regression: pre={:.3}, post={:.3} ({:.1}% worse)",
-                pre,
-                post,
-                (post / pre - 1.0) * 100.0,
+                "Meaningful audibility margin not reached: pre={:.3}, post={:.3}, required improvement={:.3}",
+                pre, post, required_improvement,
             ),
         };
     }
@@ -521,15 +520,18 @@ pub(super) fn run_multichannel_test(
     sub_topo: Option<&SubTopology>,
     difficulty: &DifficultyLevel,
     base_curve: &Curve,
+    processing_mode: ProcessingMode,
     sample_rate: f64,
 ) -> TestResult {
     let sub_str = sub_topo.map(|s| s.name).unwrap_or("no_lfe");
     let test_name = format!(
-        "multichannel/{}/{}/{}",
-        layout.name, sub_str, difficulty.name
+        "multichannel/{}/{}/{}/{:?}",
+        layout.name, sub_str, difficulty.name, processing_mode
     );
 
-    let config = build_multichannel_config(layout, sub_topo, difficulty, base_curve, sample_rate);
+    let mut config =
+        build_multichannel_config(layout, sub_topo, difficulty, base_curve, sample_rate);
+    config.optimizer.processing_mode = processing_mode;
 
     let result = match run_optimization(&config) {
         Ok(r) => r,

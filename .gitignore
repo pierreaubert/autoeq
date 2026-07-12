@@ -42,6 +42,8 @@ check_output_*.txt
 .tokensave
 .superpowers
 /docs/superpowers
+.codex
+.claude
 .evo
 
 # Logs

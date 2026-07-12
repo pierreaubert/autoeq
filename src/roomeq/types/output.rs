@@ -449,6 +449,9 @@ pub struct OptimizationMetadata {
     /// Supporting-source room-compensation reports, keyed by logical channel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supporting_source: Option<HashMap<String, SupportingSourceReport>>,
+    /// Audibility-first acceptance decision for the final correction chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correction_acceptance: Option<crate::roomeq::acoustic_qa::CorrectionAcceptanceReport>,
     /// Structured outcomes for optional/degradable processing stages.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stage_outcomes: Vec<StageOutcome>,

@@ -299,6 +299,7 @@ fn optimize_home_cinema_no_sub(
             bootstrap_uncertainty: None,
             validation_bundle: None,
             supporting_source: None,
+            correction_acceptance: None,
             stage_outcomes: Vec::new(),
         },
     })
@@ -1388,6 +1389,7 @@ fn optimize_home_cinema_with_sub(
             bootstrap_uncertainty: None,
             validation_bundle: None,
             supporting_source: None,
+            correction_acceptance: None,
             stage_outcomes: Vec::new(),
         },
     })

@@ -286,6 +286,7 @@ mod tests {
             bootstrap_uncertainty: None,
             validation_bundle: None,
             supporting_source: None,
+            correction_acceptance: None,
             stage_outcomes: Vec::new(),
         };
 
@@ -346,6 +347,7 @@ mod tests {
             bootstrap_uncertainty: None,
             validation_bundle: None,
             supporting_source: None,
+            correction_acceptance: None,
             stage_outcomes: Vec::new(),
         };
 

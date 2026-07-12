@@ -290,6 +290,8 @@ export-test-systems-help:
 	@echo "  cargo test -p autoeq export::tests"
 	@echo "  just qa-export-camilladsp  # requires the real CamillaDSP binary"
 	@echo "  just qa-export-pipewire    # runs PipeWire validation in Docker"
+	@echo "  just qa-export-portable    # semantic APO/EasyEffects/Wavelet/Roon checks"
+	@echo "  just qa-export-all         # portable + CamillaDSP + PipeWire matrix"
 	@echo "  just qa-export-equalizer-apo  # requires a Windows VM validator command"
 	@echo
 	@echo "Install helper:"
@@ -381,17 +383,35 @@ qa-export-camilladsp:
 		cargo nextest run -p autoeq --lib --no-tests fail -E 'test(/camilladsp/)'
 
 [group('qa')]
+qa-export-portable:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	# Roon and Wavelet have no supported headless importer. These tests parse each
+	# generated artifact independently and reconstruct its frequency response;
+	# optional application validators remain available through ROOMEQ_*_VALIDATE_CMD.
+	cargo nextest run -p autoeq --lib --no-tests fail \
+		-E 'test(/equalizer_apo|easyeffects|wavelet|roon/)'
+
+[group('qa')]
+qa-export-all: qa-export-portable qa-export-camilladsp qa-export-pipewire
+	#!/usr/bin/env bash
+	set -euo pipefail
+	case "$(uname -s)" in
+		MINGW*|MSYS*|CYGWIN*) just qa-export-equalizer-apo ;;
+		*) echo "Equalizer APO engine QA requires Windows; portable APO semantics passed." ;;
+	esac
+
+[group('qa')]
 qa-export-equalizer-apo:
 	#!/usr/bin/env bash
 	set -euo pipefail
-	validator="${ROOMEQ_EQUALIZER_APO_VALIDATE_CMD:-}"
-	if [[ -z "$validator" ]]; then
-		echo "A Windows Equalizer APO validator is required." >&2
-		echo "Set ROOMEQ_EQUALIZER_APO_VALIDATE_CMD to a command that accepts {config}." >&2
-		echo "The command should copy the generated file into a Windows VM and validate it with the installed Equalizer APO tooling." >&2
+	benchmark="${ROOMEQ_EQUALIZER_APO_BENCHMARK:-C:\\Program Files\\EqualizerAPO\\Benchmark.exe}"
+	if [[ ! -f "$benchmark" ]]; then
+		echo "Equalizer APO Benchmark.exe not found: $benchmark" >&2
+		echo "Install Equalizer APO on Windows or set ROOMEQ_EQUALIZER_APO_BENCHMARK." >&2
 		exit 1
 	fi
-	ROOMEQ_EQUALIZER_APO_VALIDATE_CMD="$validator" \
+	ROOMEQ_EQUALIZER_APO_PCM_CMD="powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-equalizer-apo-benchmark.ps1 -Benchmark '$benchmark' -Config '{config}' -InputFile '{input}' -OutputFile '{output}'" \
 		cargo nextest run -p autoeq --lib --no-tests fail -E 'test(/equalizer_apo/)'
 
 [group('qa')]
@@ -695,3 +715,27 @@ qa-roomeq-ci:
 	cargo test -p autoeq home_cinema_bass_management --lib -- --nocapture
 	cargo test -p autoeq validate_bass_management --lib -- --nocapture
 	just qa-roomeq-perceptual
+
+# Audibility-first PR gate: deterministic, offline, and bounded. The synthetic
+# easy matrix exercises representative layouts while the nightly recipe owns
+# the exhaustive combinatorics.
+[group('qa-roomeq')]
+qa-audibility-pr:
+	cargo test -p autoeq-core --doc
+	cargo test -p autoeq-measurements quality
+	cargo test -p autoeq acoustic_qa_pr_ --lib
+	cargo test -p autoeq correction_acceptance --lib
+	cargo test -p autoeq final_safety_gate --lib
+	cargo run --bin roomeq-qa-synthetic --no-default-features --release -- --pr
+
+# Exhaustive layout x sub-topology x processing-mode audibility matrix.
+[group('qa-roomeq')]
+qa-audibility-nightly:
+	just qa-roomeq-convergence
+	cargo run --bin roomeq-qa-synthetic --no-default-features --release -- --full-matrix
+	just qa-roomeq-coverage-gate
+
+# Backend semantic/PCM validation. External backends are mandatory here so a
+# release cannot silently skip correctness checks.
+[group('qa')]
+qa-export-equivalence: qa-export-all

@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use autoeq::roomeq::{
     ChannelDspChain, ChannelOptimizationResult, OptimizationMetadata, RoomOptimizationResult,
+    StageOutcome, StageStatus,
 };
 
 fn curve_with_slope(slope_db_per_octave: f64) -> Curve {
@@ -92,6 +93,7 @@ fn result_with_channel_slopes(
             bootstrap_uncertainty: None,
             validation_bundle: None,
             supporting_source: None,
+            correction_acceptance: None,
             stage_outcomes: Vec::new(),
         },
     }
@@ -218,6 +220,32 @@ fn timbre_matching_validator_rejects_increased_normalized_spread() {
     );
 
     assert!(!pass);
+}
+
+#[test]
+fn timbre_matching_validator_allows_small_parallel_drift_for_applied_stage() {
+    let baseline = result_with_inter_channel_slope(1.0);
+    let mut option = result_with_inter_channel_slope(1.02);
+    option.metadata.stage_outcomes.push(StageOutcome {
+        stage: "inter_channel_timbre_matching".to_string(),
+        status: StageStatus::Applied,
+        advisories: Vec::new(),
+    });
+    let config = empty_room_config();
+    let override_option = OptionOverride::InterChannelTimbreMatching {
+        reference_channel: "C".to_string(),
+    };
+
+    let (pass, detail) = validate_option_effect(
+        &override_option,
+        &config,
+        &baseline,
+        &config,
+        &option,
+        std::slice::from_ref(&override_option),
+    );
+
+    assert!(pass, "{detail}");
 }
 
 #[test]

@@ -970,6 +970,38 @@ fn apply_broadband_precorrection_enabled_flat_curve() {
 }
 
 #[test]
+fn apply_broadband_precorrection_does_not_double_apply_target_tilt() {
+    let curve = curve_with_room_mode();
+    let mut config = single_speaker_config(ProcessingMode::LowLatency);
+    config.optimizer.target_response = Some(TargetResponseConfig {
+        broadband_precorrection: true,
+        ..Default::default()
+    });
+    let target_tilt = Curve {
+        freq: curve.freq.clone(),
+        spl: curve.freq.mapv(|f| -0.8 * (f / 1_000.0).log2()),
+        phase: None,
+        ..Default::default()
+    };
+
+    let without_tilt = super::apply::apply_broadband_precorrection(
+        &config, &curve, None, 80.0, 20.0, 20_000.0, 48_000.0,
+    );
+    let with_tilt = super::apply::apply_broadband_precorrection(
+        &config,
+        &curve,
+        Some(&target_tilt),
+        80.0,
+        20.0,
+        20_000.0,
+        48_000.0,
+    );
+
+    assert_eq!(with_tilt.curve_for_optim.spl, without_tilt.curve_for_optim.spl);
+    assert_eq!(with_tilt.mean_shift, without_tilt.mean_shift);
+}
+
+#[test]
 fn apply_broadband_precorrection_respects_worsening_limit() {
     // A steep rolloff stresses the shelf fit. Depending on the fitted
     // response it may be rejected, but an accepted correction must satisfy

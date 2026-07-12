@@ -184,7 +184,7 @@ fn test_camilladsp_no_duplicate_yaml_keys() {
 }
 
 #[test]
-fn test_easyeffects_uses_min_gain() {
+fn test_easyeffects_rejects_different_channel_gains() {
     // Bug: was using largest absolute gain which could pick positive gain
     let mut channels = HashMap::new();
     channels.insert(
@@ -231,16 +231,8 @@ fn test_easyeffects_uses_min_gain() {
         channels,
         metadata: None,
     };
-    let result = export_easyeffects(&output).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
-    let input_gain = parsed["output"]["equalizer#0"]["input-gain"]
-        .as_f64()
-        .unwrap();
-    // Should use -5.0 (most negative) to prevent clipping, not +3.0
-    assert!(
-        (input_gain - (-5.0)).abs() < 0.01,
-        "Expected -5.0 gain, got {input_gain}"
-    );
+    let error = export_easyeffects(&output).unwrap_err().to_string();
+    assert!(error.contains("cannot preserve different per-channel DSP chains"));
 }
 
 #[test]
@@ -371,8 +363,11 @@ fn test_export_with_drivers() {
             .contains("cannot represent active-crossover driver branches")
     );
 
-    // APO should include driver gain and delay
-    let apo = export_equalizer_apo(&output).unwrap();
-    assert!(apo.contains("Preamp: -3.0 dB"));
-    assert!(apo.contains("Delay: 2.000 ms"));
+    // APO must reject the same parallel topology instead of serializing it.
+    let error = export_equalizer_apo(&output).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("cannot represent active-crossover driver branches")
+    );
 }

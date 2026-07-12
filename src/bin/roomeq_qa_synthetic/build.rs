@@ -237,6 +237,37 @@ pub(super) fn build_multichannel_config(
                     mapping: HashMap::new(),
                 })
             }
+            "mso_4sub" => {
+                let ms = generate_multisub_scenario(
+                    "lfe",
+                    4,
+                    &bass_modes,
+                    &[],
+                    &[0.0, 2.0, 4.0, 6.0],
+                    difficulty.noise_rms * 0.3,
+                    SEED.wrapping_add(9000),
+                    sample_rate,
+                );
+                speakers.insert(
+                    "lfe".to_string(),
+                    autoeq::roomeq::SpeakerConfig::MultiSub(MultiSubGroup {
+                        name: "subs".to_string(),
+                        speaker_name: None,
+                        subwoofers: ms
+                            .sub_curves
+                            .into_iter()
+                            .map(MeasurementSource::InMemory)
+                            .collect(),
+                        allpass_optimization: false,
+                    }),
+                );
+                sys_speakers.insert("LFE".to_string(), "lfe".to_string());
+                Some(SubwooferSystemConfig {
+                    config: SubwooferStrategy::Mso,
+                    crossover: None,
+                    mapping: HashMap::new(),
+                })
+            }
             "cardioid" => {
                 let card = generate_cardioid_scenario(
                     "lfe",

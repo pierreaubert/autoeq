@@ -8,6 +8,9 @@ use super::super::export_format::external_export_supported;
 use super::super::export_pipewire;
 use super::super::export_roon;
 use super::super::export_wavelet;
+use super::super::extract::extract_eq_filters;
+use super::super::extract_gain_db;
+use super::super::misc::parse_biquad_filter_type;
 use super::super::package::package_convolution_sidecars;
 use crate::roomeq::{
     BassManagementMatrix, BassManagementReport, BassManagementRoute, BassManagementRoutingGraph,
@@ -117,9 +120,24 @@ pub(super) fn make_test_output() -> DspChainOutput {
             bootstrap_uncertainty: None,
             validation_bundle: None,
             supporting_source: None,
+            correction_acceptance: None,
             stage_outcomes: Vec::new(),
         }),
     }
+}
+
+pub(super) fn make_systemwide_test_output() -> DspChainOutput {
+    let mut output = make_test_output();
+    let plugins: Vec<_> = output.channels["left"]
+        .plugins
+        .iter()
+        .filter(|plugin| plugin.plugin_type != "delay")
+        .cloned()
+        .collect();
+    for chain in output.channels.values_mut() {
+        chain.plugins.clone_from(&plugins);
+    }
+    output
 }
 
 fn make_single_filter_output(filter_type: &str, gain_db: f64) -> DspChainOutput {
@@ -362,6 +380,7 @@ pub(super) fn make_routed_bass_output() -> DspChainOutput {
             bootstrap_uncertainty: None,
             validation_bundle: None,
             supporting_source: None,
+            correction_acceptance: None,
             stage_outcomes: Vec::new(),
         }),
     }

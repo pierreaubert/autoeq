@@ -155,6 +155,13 @@ pub(super) const LAYOUT_7_1: ChannelLayout = ChannelLayout {
     heights: &[],
 };
 
+pub(super) const LAYOUT_9_1: ChannelLayout = ChannelLayout {
+    name: "9.1",
+    mains: &["L", "R", "C", "SL", "SR", "SBL", "SBR", "WL", "WR"],
+    has_lfe: true,
+    heights: &[],
+};
+
 pub(super) const LAYOUT_5_1_2: ChannelLayout = ChannelLayout {
     name: "5.1.2",
     mains: &["L", "R", "C", "SL", "SR"],
@@ -162,9 +169,30 @@ pub(super) const LAYOUT_5_1_2: ChannelLayout = ChannelLayout {
     heights: &["HL", "HR"],
 };
 
+pub(super) const LAYOUT_5_1_4: ChannelLayout = ChannelLayout {
+    name: "5.1.4",
+    mains: &["L", "R", "C", "SL", "SR"],
+    has_lfe: true,
+    heights: &["TFL", "TFR", "TRL", "TRR"],
+};
+
+pub(super) const LAYOUT_7_1_2: ChannelLayout = ChannelLayout {
+    name: "7.1.2",
+    mains: &["L", "R", "C", "SL", "SR", "SBL", "SBR"],
+    has_lfe: true,
+    heights: &["HL", "HR"],
+};
+
 pub(super) const LAYOUT_7_1_4: ChannelLayout = ChannelLayout {
     name: "7.1.4",
     mains: &["L", "R", "C", "SL", "SR", "SBL", "SBR"],
+    has_lfe: true,
+    heights: &["TFL", "TFR", "TRL", "TRR"],
+};
+
+pub(super) const LAYOUT_9_1_4: ChannelLayout = ChannelLayout {
+    name: "9.1.4",
+    mains: &["L", "R", "C", "SL", "SR", "SBL", "SBR", "WL", "WR"],
     has_lfe: true,
     heights: &["TFL", "TFR", "TRL", "TRR"],
 };
@@ -182,8 +210,12 @@ pub(super) const ALL_LAYOUTS: &[ChannelLayout] = &[
     LAYOUT_5_0,
     LAYOUT_5_1,
     LAYOUT_7_1,
+    LAYOUT_9_1,
     LAYOUT_5_1_2,
+    LAYOUT_5_1_4,
+    LAYOUT_7_1_2,
     LAYOUT_7_1_4,
+    LAYOUT_9_1_4,
     LAYOUT_9_1_6,
 ];
 
@@ -195,12 +227,20 @@ pub(super) const SUB_MSO_AP: SubTopology = SubTopology {
     name: "mso_2sub_allpass",
 };
 
+pub(super) const SUB_MSO_4: SubTopology = SubTopology { name: "mso_4sub" };
+
 pub(super) const SUB_CARDIOID: SubTopology = SubTopology { name: "cardioid" };
 
 pub(super) const SUB_DBA: SubTopology = SubTopology { name: "dba" };
 
-pub(super) const ALL_SUB_TOPOS: &[SubTopology] =
-    &[SUB_SINGLE, SUB_MSO, SUB_MSO_AP, SUB_CARDIOID, SUB_DBA];
+pub(super) const ALL_SUB_TOPOS: &[SubTopology] = &[
+    SUB_SINGLE,
+    SUB_MSO,
+    SUB_MSO_AP,
+    SUB_MSO_4,
+    SUB_CARDIOID,
+    SUB_DBA,
+];
 
 pub(super) const OPTIONS: &[OptionDef] = &[
     OptionDef {

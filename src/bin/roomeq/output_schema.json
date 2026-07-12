@@ -1023,6 +1023,105 @@
         "final_offset_from_reference_ms"
       ]
     },
+    "CorrectionAcceptancePolicy": {
+      "type": "string",
+      "enum": [
+        "runtime_safety",
+        "correctable_fixture",
+        "already_good_fixture",
+        "poor_measurement_fixture"
+      ]
+    },
+    "CorrectionAcceptanceReport": {
+      "type": "object",
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "decision": {
+          "$ref": "#/$defs/CorrectionDecision"
+        },
+        "metrics": {
+          "$ref": "#/$defs/CorrectionMetricSummary"
+        },
+        "policy": {
+          "$ref": "#/$defs/CorrectionAcceptancePolicy"
+        },
+        "reverted_stages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "policy",
+        "decision",
+        "accepted",
+        "metrics"
+      ]
+    },
+    "CorrectionDecision": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "reverted_stage",
+        "identity_fallback"
+      ]
+    },
+    "CorrectionMetricSummary": {
+      "type": "object",
+      "properties": {
+        "correction_rms_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "improvement_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "improvement_ratio": {
+          "type": "number",
+          "format": "double"
+        },
+        "max_abs_correction_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "post_p95_abs_residual_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "post_target_weighted_rms_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "post_worst_abs_residual_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "pre_target_weighted_rms_db": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "pre_target_weighted_rms_db",
+        "post_target_weighted_rms_db",
+        "improvement_db",
+        "improvement_ratio",
+        "post_p95_abs_residual_db",
+        "post_worst_abs_residual_db",
+        "correction_rms_db",
+        "max_abs_correction_db"
+      ]
+    },
     "CtcBinauralDiagnostics": {
       "type": "object",
       "properties": {
@@ -2152,6 +2251,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/BootstrapUncertaintyReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "correction_acceptance": {
+          "description": "Audibility-first acceptance decision for the final correction chain.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CorrectionAcceptanceReport"
             },
             {
               "type": "null"

@@ -5,6 +5,116 @@ use crate::error::{AutoeqError, Result};
 use std::collections::HashMap;
 use std::path::Path;
 
+pub(super) fn apply_final_correction_safety_gate(result: &mut RoomOptimizationResult) {
+    use crate::roomeq::acoustic_qa::{
+        CorrectionAcceptancePolicy, CorrectionDecision, evaluate_correction_acceptance,
+    };
+
+    let mut accepted_report = None;
+    let mut reverted = Vec::new();
+    for (name, channel) in &mut result.channel_results {
+        let epsilon = (channel.pre_score.abs() * 1e-4).max(1e-6);
+        let regressed = !channel.post_score.is_finite()
+            || (channel.pre_score.is_finite() && channel.post_score > channel.pre_score + epsilon);
+
+        let target = result
+            .channels
+            .get(name)
+            .and_then(|chain| chain.target_curve.clone())
+            .map(crate::Curve::from)
+            .unwrap_or_else(|| {
+                let mean = channel.initial_curve.spl.mean().unwrap_or(0.0);
+                let mut target = channel.initial_curve.clone();
+                target.spl.fill(mean);
+                target.phase = None;
+                target
+            });
+        let report = evaluate_correction_acceptance(
+            &channel.initial_curve,
+            &channel.final_curve,
+            &target,
+            None,
+            CorrectionAcceptancePolicy::RuntimeSafety,
+        )
+        .ok();
+        if report.as_ref().is_some_and(|report| {
+            accepted_report.as_ref().is_none_or(
+                |current: &crate::roomeq::acoustic_qa::CorrectionAcceptanceReport| {
+                    report.metrics.improvement_db < current.metrics.improvement_db
+                },
+            )
+        }) {
+            accepted_report = report;
+        }
+
+        let can_identity_fallback = result.channels.get(name).is_some_and(|chain| {
+            chain
+                .plugins
+                .iter()
+                .all(|plugin| matches!(plugin.plugin_type.as_str(), "eq" | "convolution"))
+        });
+        if regressed && can_identity_fallback {
+            channel.final_curve = channel.initial_curve.clone();
+            channel.post_score = channel.pre_score;
+            channel.biquads.clear();
+            channel.fir_coeffs = None;
+            if let Some(chain) = result.channels.get_mut(name) {
+                chain
+                    .plugins
+                    .retain(|plugin| !matches!(plugin.plugin_type.as_str(), "eq" | "convolution"));
+                chain.final_curve = Some((&channel.final_curve).into());
+                chain.eq_response = None;
+            }
+            reverted.push(name.clone());
+            result
+                .metadata
+                .stage_outcomes
+                .push(crate::roomeq::types::StageOutcome {
+                    stage: format!("final_correction_safety_{name}"),
+                    status: crate::roomeq::types::StageStatus::Degraded,
+                    advisories: vec!["audibility_regression_reverted".to_string()],
+                });
+        } else if regressed {
+            result
+                .metadata
+                .stage_outcomes
+                .push(crate::roomeq::types::StageOutcome {
+                    stage: format!("final_correction_safety_{name}"),
+                    status: crate::roomeq::types::StageStatus::Degraded,
+                    advisories: vec![
+                        "audibility_regression_requires_stage_local_revert".to_string(),
+                    ],
+                });
+        }
+    }
+
+    if !reverted.is_empty() {
+        let count = result.channel_results.len().max(1) as f64;
+        result.combined_post_score = result
+            .channel_results
+            .values()
+            .map(|channel| channel.post_score)
+            .sum::<f64>()
+            / count;
+        result.metadata.post_score = result.combined_post_score;
+    }
+    if let Some(mut report) = accepted_report {
+        if !reverted.is_empty() {
+            report.accepted = false;
+            report.decision = if reverted.len() == result.channel_results.len() {
+                CorrectionDecision::IdentityFallback
+            } else {
+                CorrectionDecision::RevertedStage
+            };
+            report
+                .violations
+                .push("audibility_regression_reverted".to_string());
+            report.reverted_stages = reverted;
+        }
+        result.metadata.correction_acceptance = Some(report);
+    }
+}
+
 /// Result of room optimization
 #[derive(Debug, Clone)]
 pub struct RoomOptimizationResult {
@@ -126,6 +236,7 @@ pub(super) fn sanity_check_result(result: &RoomOptimizationResult) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::roomeq::acoustic_qa::CorrectionDecision;
     use crate::roomeq::test_fixtures::{empty_metadata, single_channel_room_result};
     use crate::roomeq::types::{CtcConfig, RoomConfig, SystemConfig, SystemModel};
     use std::collections::HashMap;
@@ -238,6 +349,32 @@ mod tests {
             metadata: empty_metadata(),
         };
         assert!(sanity_check_result(&result).is_err());
+    }
+
+    #[test]
+    fn final_safety_gate_reverts_only_corrective_plugins() {
+        let mut result = single_channel_room_result("left");
+        let channel = result.channel_results.get_mut("left").unwrap();
+        channel.pre_score = 1.0;
+        channel.post_score = 2.0;
+        channel.final_curve.spl += 6.0;
+        let chain = result.channels.get_mut("left").unwrap();
+        chain.plugins = vec![crate::roomeq::types::PluginConfigWrapper {
+            plugin_type: "eq".to_string(),
+            parameters: serde_json::json!({"filters": []}),
+        }];
+        apply_final_correction_safety_gate(&mut result);
+        assert_eq!(result.channel_results["left"].post_score, 1.0);
+        assert!(result.channels["left"].plugins.is_empty());
+        assert_eq!(
+            result
+                .metadata
+                .correction_acceptance
+                .as_ref()
+                .unwrap()
+                .decision,
+            CorrectionDecision::IdentityFallback
+        );
     }
 
     // In debug builds `sanity_check_result` panics on invariant violations via

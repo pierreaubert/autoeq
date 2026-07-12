@@ -1,13 +1,71 @@
+# 0.4.50
+
+## QA improvements
+
+- Built matrix for testing
+- Added testing for each export software (need more work for Roon and
+add it to a docker, more work to test properly EQAPO on Windows)
+
 # 0.4.49
 
-## Refactoring:
+## Refactoring
 
-- splitted the code into a few crates to make it more manageable
-- no other change
+- Split the monolithic crate into eight focused crates with explicit dependency
+  boundaries: `autoeq-core`, `autoeq-measurements`, `autoeq-optim`,
+  `autoeq-workflow`, `roomeq-model`, `roomeq-engine`, `roomeq-export`, and the
+  backward-compatible `autoeq` facade.
+- Moved response/PEQ primitives, measurement ingestion, optimizer backends,
+  high-level AutoEQ workflows, RoomEQ contracts, orchestration, and export
+  rendering behind independently testable crate APIs while preserving the
+  existing public surface through facade re-exports.
 
-## Bug fixes introduced by the refactor
+## Fixes
 
-- Fixed invalid [400, 80] Hz construction at all three levels: Pre-EQ retains the configured band when crossover narrowing has no overlap, Post-EQ skips optional refinement when its guarded band is empty and Schroeder splitting outside the optimization band runs only the existing side with the full filter budget.
+- Prevented inverted RoomEQ optimization bands such as `[400, 80]` Hz.
+  Pre-EQ retains the configured band when crossover narrowing has no overlap,
+  optional Post-EQ skips empty guarded bands, and Schroeder splits outside the
+  configured range optimize only the side that actually exists.
+- Fixed broadband target matching applying target tilt twice. Broadband shelves
+  now correct toward a flat response at the measurement mean, leaving tilt and
+  preference shaping exclusively to the following optimizer.
+- Made convergence QA robust to small parallel-optimizer drift for guarded
+  inter-channel timbre-matching stages while continuing to reject missing-stage
+  and material spread regressions.
+- Removed refactor-introduced Clippy failures and kept the default lint target
+  independent of non-hermetic optional Plotly template paths.
+- Hardened Linux PipeWire export so every successful export accounts for every
+  plugin in source order. Gain and polarity now use PipeWire's native mixer
+  instead of a zero-frequency shelf; delay, all supported biquads, LR24/LR48
+  crossover cascades, and convolution are validated against a real PipeWire
+  daemon. Unsupported matrix, XTC, mixed-band, and active-driver graphs now
+  fail explicitly instead of producing a partial configuration.
+- Added an audibility-first correction acceptance contract shared by production
+  and QA. Final corrective EQ/FIR stages that regress their audited score are
+  reverted while routing and crossover infrastructure is preserved, and the
+  decision is recorded in optimization metadata.
+- Added measurement-confidence classification from coherence, noise floor, and
+  multi-seat variance, including explicit correction-depth limits for degraded
+  and poor measurements.
+- Expanded deterministic synthetic QA to all twelve declared layouts, single/
+  two-/four-sub MSO, all-pass MSO, cardioid and DBA topologies, plus optional
+  WarpedIir and KautzModal full-matrix coverage.
+- Unified the eight workspace crate versions at 0.4.49, fixed the extracted
+  `autoeq-core` doctest, and made `RoomEngine` validate structural configuration
+  invariants before invoking an optimizer.
+- Applied the same fail-closed conformance rule to every external exporter.
+  Equalizer APO rejects parallel driver graphs, EasyEffects and Wavelet reject
+  unlike per-channel or time-domain chains, and Roon rejects all-pass
+  substitution, multiple convolution IRs, and PEQ counts above 20. PipeWire
+  convolution exports now package their WAV sidecars as well.
+- Added semantic export QA for Equalizer APO, EasyEffects, Wavelet, and Roon.
+  Tests independently parse each generated artifact, reconstruct its response,
+  and compare it with RoomEQ's canonical biquad chain. APO now preserves Q and
+  high-precision gain, frequency, delay, and filter parameters. Use
+  `just qa-export-portable` or `just qa-export-all` to run the expanded matrix.
+- Added a full Equalizer APO engine contract using its official
+  `Benchmark.exe`. On Windows, `just qa-export-equalizer-apo` now feeds a
+  deterministic WAV through Equalizer APO's real `FilterEngine` and checks the
+  measured output gain against RoomEQ's expected response.
 
 # 0.4.48
 

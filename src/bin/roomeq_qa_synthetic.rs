@@ -67,6 +67,8 @@ fn main() -> Result<()> {
     let help = args.iter().any(|a| a == "--help" || a == "-h");
     let list_only = args.iter().any(|a| a == "--list");
     let multiseat_guards_only = args.iter().any(|a| a == "--multiseat-guards-only");
+    let full_matrix = args.iter().any(|a| a == "--full-matrix");
+    let pr_matrix = args.iter().any(|a| a == "--pr");
     let difficulty_filter = args
         .windows(2)
         .find(|w| w[0] == "--difficulty")
@@ -76,12 +78,18 @@ fn main() -> Result<()> {
         println!("RoomEQ Synthetic QA");
         println!();
         println!("Usage:");
-        println!("  roomeq-qa-synthetic [--list] [--difficulty NAME] [--multiseat-guards-only]");
+        println!(
+            "  roomeq-qa-synthetic [--list] [--pr] [--difficulty NAME] [--full-matrix] [--multiseat-guards-only]"
+        );
         println!();
         println!("Options:");
         println!("  --list                   Print the synthetic QA matrix and exit");
         println!("  --difficulty NAME        Run only one difficulty: easy, medium, hard");
         println!("  --multiseat-guards-only  Run only multi-seat API guard tests");
+        println!(
+            "  --full-matrix            Include WarpedIir/KautzModal and every multichannel processing mode"
+        );
+        println!("  --pr                     Run the bounded pull-request audibility matrix");
         println!("  --help, -h               Print this help");
         return Ok(());
     }
@@ -90,7 +98,9 @@ fn main() -> Result<()> {
         return report_multiseat_api_guard_tests();
     }
 
-    let difficulties: Vec<&DifficultyLevel> = if let Some(ref filter) = difficulty_filter {
+    let difficulties: Vec<&DifficultyLevel> = if pr_matrix {
+        vec![&consts::EASY]
+    } else if let Some(ref filter) = difficulty_filter {
         ALL_DIFFICULTIES
             .iter()
             .filter(|d| d.name == filter.as_str())
@@ -99,7 +109,9 @@ fn main() -> Result<()> {
         ALL_DIFFICULTIES.iter().collect()
     };
 
-    let ms_difficulties: Vec<&MultiSubDifficulty> = if let Some(ref filter) = difficulty_filter {
+    let ms_difficulties: Vec<&MultiSubDifficulty> = if pr_matrix {
+        vec![&consts::MS_EASY]
+    } else if let Some(ref filter) = difficulty_filter {
         ALL_MS_DIFFICULTIES
             .iter()
             .filter(|d| d.name == filter.as_str())
@@ -108,12 +120,33 @@ fn main() -> Result<()> {
         ALL_MS_DIFFICULTIES.iter().collect()
     };
 
-    let modes = [
+    let default_modes = [
         ProcessingMode::LowLatency,
         ProcessingMode::PhaseLinear,
         ProcessingMode::Hybrid,
         ProcessingMode::MixedPhase,
     ];
+    let full_modes = [
+        ProcessingMode::LowLatency,
+        ProcessingMode::PhaseLinear,
+        ProcessingMode::Hybrid,
+        ProcessingMode::MixedPhase,
+        ProcessingMode::WarpedIir,
+        ProcessingMode::KautzModal,
+    ];
+    let pr_modes = [ProcessingMode::LowLatency, ProcessingMode::Hybrid];
+    let modes: &[ProcessingMode] = if pr_matrix {
+        &pr_modes
+    } else if full_matrix {
+        &full_modes
+    } else {
+        &default_modes
+    };
+    let multichannel_modes: &[ProcessingMode] = if full_matrix {
+        &full_modes
+    } else {
+        &full_modes[..1]
+    };
 
     let flat_target = generate_flat_curve(20.0, 20000.0, 200);
     let harman_target = generate_harman_tilt_curve(20.0, 20000.0, 200);
@@ -122,24 +155,42 @@ fn main() -> Result<()> {
     // Speaker rolloff: 0 dB above 80 Hz, -12 dB/oct below (realistic 2nd-order highpass)
     let speaker_rolloff = generate_speaker_rolloff_curve(20.0, 20000.0, 200, 80.0, -12.0);
 
-    let option_combos = generate_option_combos();
-    let ms_option_combos = generate_ms_option_combos();
+    let mut option_combos = generate_option_combos();
+    let mut ms_option_combos = generate_ms_option_combos();
+    if pr_matrix {
+        option_combos.truncate(OPTIONS.len() + 1);
+        ms_option_combos.truncate(1);
+    }
+    let layouts: Vec<_> = ALL_LAYOUTS
+        .iter()
+        .filter(|layout| !pr_matrix || matches!(layout.name, "2.0" | "2.1" | "5.1" | "7.1.4"))
+        .collect();
 
     // Count total tests
     let single_total = difficulties.len() * modes.len() * targets.len() * option_combos.len();
     let ms_total = ms_difficulties.len() * MS_TOPOLOGIES.len() * ms_option_combos.len();
     let multiseat_guard_total = 4;
-    let mc_total: usize = ALL_LAYOUTS
+    let mc_total: usize = layouts
         .iter()
         .map(|layout| {
-            let n_topos = sub_topos_for_layout(layout).len();
+            let n_topos = sub_topos_for_layout(layout)
+                .iter()
+                .filter(|topology| {
+                    !pr_matrix
+                        || matches!(
+                            topology.name,
+                            "single_sub" | "mso_2sub" | "cardioid" | "dba"
+                        )
+                })
+                .count();
             if n_topos == 0 {
                 difficulties.len() // no LFE → 1 test per difficulty
             } else {
                 n_topos * difficulties.len()
             }
         })
-        .sum();
+        .sum::<usize>()
+        * multichannel_modes.len();
     let total = single_total + ms_total + multiseat_guard_total + mc_total;
 
     if list_only {
@@ -154,7 +205,14 @@ fn main() -> Result<()> {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
-        println!("    Modes: IIR, FIR, Mixed, MixedPhase");
+        println!(
+            "    Modes: {}",
+            modes
+                .iter()
+                .map(|mode| format!("{mode:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
         println!("    Targets: flat, harman");
         println!(
             "    Option combos: {} (baseline + {} singles + {} pairs + 1 all)",
@@ -197,7 +255,7 @@ fn main() -> Result<()> {
         println!("  Multi-channel:");
         println!(
             "    Layouts: {}",
-            ALL_LAYOUTS
+            layouts
                 .iter()
                 .map(|l| l.name)
                 .collect::<Vec<_>>()
@@ -216,6 +274,14 @@ fn main() -> Result<()> {
             difficulties
                 .iter()
                 .map(|d| d.name)
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        println!(
+            "    Modes: {}",
+            multichannel_modes
+                .iter()
+                .map(|mode| format!("{mode:?}"))
                 .collect::<Vec<_>>()
                 .join(", ")
         );
@@ -263,7 +329,7 @@ fn main() -> Result<()> {
                 SAMPLE_RATE,
             );
 
-            for mode in &modes {
+            for mode in modes {
                 for combo in &option_combos {
                     let result = run_single_test(
                         &scenario.degraded_curve,
@@ -362,36 +428,28 @@ fn main() -> Result<()> {
     // ====================================================================
     let base_fullrange = generate_speaker_rolloff_curve(20.0, 20000.0, 200, 80.0, -6.0);
 
-    for layout in ALL_LAYOUTS {
-        let topos = sub_topos_for_layout(layout);
+    for layout in layouts {
+        let topos: Vec<_> = sub_topos_for_layout(layout)
+            .iter()
+            .filter(|topology| {
+                !pr_matrix
+                    || matches!(
+                        topology.name,
+                        "single_sub" | "mso_2sub" | "cardioid" | "dba"
+                    )
+            })
+            .collect();
 
         if topos.is_empty() {
             // No LFE — test mains only
             for difficulty in &difficulties {
-                let result =
-                    run_multichannel_test(layout, None, difficulty, &base_fullrange, SAMPLE_RATE);
-                if result.passed {
-                    passed += 1;
-                } else {
-                    failed += 1;
-                    println!(
-                        "  FAIL: {} -- {} (epa={})",
-                        result.name,
-                        result.reason,
-                        fmt_epa(result.epa_preference)
-                    );
-                }
-                all_results.push(result);
-            }
-        } else {
-            // With LFE — test each sub topology
-            for sub_topo in topos {
-                for difficulty in &difficulties {
+                for mode in multichannel_modes {
                     let result = run_multichannel_test(
                         layout,
-                        Some(sub_topo),
+                        None,
                         difficulty,
                         &base_fullrange,
+                        mode.clone(),
                         SAMPLE_RATE,
                     );
                     if result.passed {
@@ -406,6 +464,34 @@ fn main() -> Result<()> {
                         );
                     }
                     all_results.push(result);
+                }
+            }
+        } else {
+            // With LFE — test each sub topology
+            for sub_topo in topos {
+                for difficulty in &difficulties {
+                    for mode in multichannel_modes {
+                        let result = run_multichannel_test(
+                            layout,
+                            Some(sub_topo),
+                            difficulty,
+                            &base_fullrange,
+                            mode.clone(),
+                            SAMPLE_RATE,
+                        );
+                        if result.passed {
+                            passed += 1;
+                        } else {
+                            failed += 1;
+                            println!(
+                                "  FAIL: {} -- {} (epa={})",
+                                result.name,
+                                result.reason,
+                                fmt_epa(result.epa_preference)
+                            );
+                        }
+                        all_results.push(result);
+                    }
                 }
             }
         }

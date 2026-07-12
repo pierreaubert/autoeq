@@ -1,5 +1,7 @@
 use super::super::types::DspChainOutput;
-use super::conformance::validate_camilladsp_input;
+use super::conformance::{
+    validate_camilladsp_input, validate_pipewire_input, validate_serial_external_input,
+};
 use std::path::{Path, PathBuf};
 
 /// Supported export formats for DSP chain output
@@ -88,11 +90,17 @@ pub(super) fn ensure_external_export_supported(
     // capability checks at render time because some static Channel/Copy
     // routings are representable while arbitrary graphs are not.
     if matches!(format, ExportFormat::EqualizerApo) {
+        if !has_routed_bass_management && !has_global_plugins {
+            return validate_serial_external_input(output, format);
+        }
         return Ok(());
     }
 
     if !has_routed_bass_management && !has_global_plugins {
-        return Ok(());
+        if matches!(format, ExportFormat::PipeWire) {
+            return validate_pipewire_input(output, None);
+        }
+        return validate_serial_external_input(output, format);
     }
 
     unsupported_graph_error(format)

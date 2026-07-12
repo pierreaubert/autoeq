@@ -9,7 +9,9 @@ pub mod error {
 }
 
 pub mod cea2034;
+pub mod quality;
 pub mod read;
 
 pub use cea2034::*;
+pub use quality::*;
 pub use read::*;

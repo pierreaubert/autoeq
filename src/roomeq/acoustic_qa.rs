@@ -11,11 +11,13 @@
 //! - PR: `cargo test -p autoeq acoustic_qa_pr_ --lib`
 //! - Nightly: `cargo test -p autoeq acoustic_qa_nightly_ --lib -- --ignored`
 
+mod acceptance;
 mod fixtures;
 mod metrics;
 mod scenario;
 mod types;
 
+pub use acceptance::*;
 pub use fixtures::*;
 pub use metrics::*;
 pub use scenario::*;

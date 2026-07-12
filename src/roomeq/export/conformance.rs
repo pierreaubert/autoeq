@@ -142,6 +142,7 @@ struct ExportCapabilities {
 
 const CAMILLADSP_PLUGIN_TYPES: &[&str] = &["gain", "delay", "eq", "crossover", "convolution"];
 const CAMILLADSP_ROUTED_STAGES: &[&str] = &["pre_route", "route_owned", "post_route"];
+const PIPEWIRE_PLUGIN_TYPES: &[&str] = &["gain", "delay", "eq", "crossover", "convolution"];
 
 fn camilladsp_capabilities() -> ExportCapabilities {
     ExportCapabilities {
@@ -177,6 +178,277 @@ pub(super) fn validate_camilladsp_input(
     validate_export_input(output, &capabilities, sample_rate, graph.as_ref())?;
     if let Some(graph) = graph.as_ref().filter(|graph| !graph.routes.is_empty()) {
         validate_camilladsp_routing_graph(output, graph, sample_rate)?;
+    }
+    Ok(())
+}
+
+pub(super) fn validate_pipewire_input(
+    output: &DspChainOutput,
+    sample_rate: Option<f64>,
+) -> anyhow::Result<()> {
+    if let Some(plugin) = output.global_plugins.first() {
+        anyhow::bail!(
+            "PipeWire export does not yet support global plugin #0 ('{}'); use the \
+             CamillaDSP export for routed or matrix DSP graphs",
+            plugin.plugin_type
+        );
+    }
+
+    let capabilities = ExportCapabilities {
+        format: ExportFormat::PipeWire,
+        supported_plugin_types: PIPEWIRE_PLUGIN_TYPES,
+        supports_driver_branches: false,
+        routed_stages: &[],
+        normalize_identifier: normalize_export_identifier,
+        validate_plugin: validate_pipewire_plugin,
+    };
+    validate_export_input(output, &capabilities, sample_rate, None)
+}
+
+pub(super) fn validate_serial_external_input(
+    output: &DspChainOutput,
+    format: ExportFormat,
+) -> anyhow::Result<()> {
+    if output.channels.is_empty() {
+        anyhow::bail!("{format:?} export requires at least one channel");
+    }
+    if let Some(plugin) = output.global_plugins.first() {
+        anyhow::bail!(
+            "{format:?} export does not support global plugin #0 ('{}')",
+            plugin.plugin_type
+        );
+    }
+
+    let allowed: &[&str] = match format {
+        ExportFormat::EqualizerApo | ExportFormat::RoonDsp => {
+            &["gain", "delay", "eq", "convolution"]
+        }
+        ExportFormat::EasyEffects | ExportFormat::Wavelet => &["gain", "eq"],
+        _ => anyhow::bail!("internal error: no serial validator for {format:?}"),
+    };
+
+    let mut channels: Vec<_> = output.channels.iter().collect();
+    channels.sort_by(|a, b| a.0.cmp(b.0));
+    for (channel_name, chain) in &channels {
+        if chain.channel != **channel_name {
+            anyhow::bail!(
+                "{format:?} export channel map key '{}' does not match chain channel '{}'",
+                channel_name,
+                chain.channel
+            );
+        }
+        if chain
+            .drivers
+            .as_ref()
+            .is_some_and(|drivers| !drivers.is_empty())
+        {
+            anyhow::bail!(
+                "{format:?} export cannot represent active-crossover driver branches for channel '{channel_name}'"
+            );
+        }
+        let mut convolution_count = 0usize;
+        let mut eq_filter_count = 0usize;
+        for (plugin_index, plugin) in chain.plugins.iter().enumerate() {
+            let context = format!(
+                "channel '{channel_name}' plugin #{plugin_index} ('{}')",
+                plugin.plugin_type
+            );
+            if !allowed.contains(&plugin.plugin_type.as_str()) {
+                anyhow::bail!("{format:?} export does not support {context}");
+            }
+            let parameters = plugin.parameters.as_object().ok_or_else(|| {
+                anyhow::anyhow!("{format:?} export requires object parameters on {context}")
+            })?;
+            match plugin.plugin_type.as_str() {
+                "gain" => {
+                    required_f64(parameters, "gain_db", &context)?;
+                    optional_bool(parameters, "invert", &context)?;
+                    if parameters.get("invert").and_then(|value| value.as_bool()) == Some(true) {
+                        anyhow::bail!(
+                            "{format:?} export cannot represent polarity inversion on {context}"
+                        );
+                    }
+                }
+                "delay" => {
+                    let delay = required_f64(parameters, "delay_ms", &context)?;
+                    if delay < 0.0 {
+                        anyhow::bail!("{format:?} export requires non-negative delay on {context}");
+                    }
+                }
+                "eq" => {
+                    let filters = parameters
+                        .get("filters")
+                        .and_then(|value| value.as_array())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "{format:?} export requires an array field 'filters' on {context}"
+                            )
+                        })?;
+                    eq_filter_count += filters.len();
+                    for (index, filter) in filters.iter().enumerate() {
+                        let filter_context = format!("{context}, filter #{index}");
+                        let filter = filter.as_object().ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "{format:?} export requires an object for {filter_context}"
+                            )
+                        })?;
+                        let filter_type = required_str(filter, "filter_type", &filter_context)?;
+                        if !matches!(
+                            filter_type,
+                            "peak"
+                                | "lowshelf"
+                                | "highshelf"
+                                | "lowpass"
+                                | "highpass"
+                                | "highpassvariableq"
+                                | "notch"
+                                | "bandpass"
+                                | "allpass"
+                        ) {
+                            anyhow::bail!(
+                                "{format:?} export does not support filter type '{filter_type}' on {filter_context}"
+                            );
+                        }
+                        if matches!(format, ExportFormat::RoonDsp) && filter_type == "allpass" {
+                            anyhow::bail!(
+                                "RoonDsp export cannot represent all-pass filter on {filter_context}"
+                            );
+                        }
+                        let frequency = required_f64(filter, "freq", &filter_context)?;
+                        let q = required_f64(filter, "q", &filter_context)?;
+                        if frequency <= 0.0 || q <= 0.0 {
+                            anyhow::bail!(
+                                "{format:?} export requires positive frequency and Q on {filter_context}"
+                            );
+                        }
+                        required_f64(filter, "db_gain", &filter_context)?;
+                    }
+                }
+                "convolution" => {
+                    convolution_count += 1;
+                    required_str(parameters, "ir_file", &context)?;
+                }
+                _ => unreachable!(),
+            }
+        }
+        if matches!(format, ExportFormat::RoonDsp) && eq_filter_count > 20 {
+            anyhow::bail!(
+                "RoonDsp export supports at most 20 PEQ filters per channel; '{channel_name}' has {eq_filter_count}"
+            );
+        }
+        if matches!(format, ExportFormat::RoonDsp) && convolution_count > 1 {
+            anyhow::bail!(
+                "RoonDsp export supports one convolution impulse per channel; '{channel_name}' has {convolution_count}"
+            );
+        }
+    }
+
+    if matches!(format, ExportFormat::EasyEffects | ExportFormat::Wavelet) && channels.len() > 1 {
+        let canonical = serde_json::to_value(&channels[0].1.plugins)?;
+        if channels.iter().skip(1).any(|(_, chain)| {
+            serde_json::to_value(&chain.plugins).ok().as_ref() != Some(&canonical)
+        }) {
+            anyhow::bail!(
+                "{format:?} export is system-wide and cannot preserve different per-channel DSP chains"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_pipewire_plugin(
+    plugin: &PluginConfigWrapper,
+    sample_rate: Option<f64>,
+    context: &str,
+) -> anyhow::Result<()> {
+    let parameters = plugin.parameters.as_object().ok_or_else(|| {
+        anyhow::anyhow!("PipeWire export requires an object for parameters on {context}")
+    })?;
+
+    match plugin.plugin_type.as_str() {
+        "gain" => {
+            let gain_db = required_f64(parameters, "gain_db", context)?;
+            if !(-150.0..=150.0).contains(&gain_db) {
+                anyhow::bail!("PipeWire export requires gain_db between -150 and 150 on {context}");
+            }
+            optional_bool(parameters, "invert", context)?;
+        }
+        "delay" => {
+            let delay_ms = required_f64(parameters, "delay_ms", context)?;
+            if delay_ms < 0.0 {
+                anyhow::bail!("PipeWire export requires non-negative delay_ms on {context}");
+            }
+        }
+        "crossover" => {
+            let crossover_type = required_str(parameters, "type", context)?;
+            if !matches!(
+                crossover_type.to_ascii_lowercase().as_str(),
+                "lr24"
+                    | "linkwitzriley4"
+                    | "linkwitz-riley-4"
+                    | "lr48"
+                    | "linkwitzriley8"
+                    | "linkwitz-riley-8"
+            ) {
+                anyhow::bail!(
+                    "PipeWire export supports LR24 and LR48 crossover plugins, not \
+                     '{crossover_type}' on {context}"
+                );
+            }
+            let output = required_str(parameters, "output", context)?;
+            if !matches!(output, "low" | "high") {
+                anyhow::bail!(
+                    "PipeWire export requires crossover output 'low' or 'high' on {context}"
+                );
+            }
+            validate_frequency(
+                required_f64(parameters, "frequency", context)?,
+                sample_rate,
+                context,
+            )?;
+        }
+        "eq" => {
+            let filters = parameters
+                .get("filters")
+                .and_then(|value| value.as_array())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "PipeWire export requires an array field 'filters' on {context}"
+                    )
+                })?;
+            for (filter_index, filter) in filters.iter().enumerate() {
+                let filter_context = format!("{context}, filter #{filter_index}");
+                let filter = filter.as_object().ok_or_else(|| {
+                    anyhow::anyhow!("PipeWire export requires an object for {filter_context}")
+                })?;
+                let filter_type = required_str(filter, "filter_type", &filter_context)?;
+                super::pipewire::pipewire_filter_label(filter_type)?;
+                if filter.contains_key("topology") {
+                    anyhow::bail!(
+                        "PipeWire export does not support explicit EQ topology on {filter_context}"
+                    );
+                }
+                validate_frequency(
+                    required_f64(filter, "freq", &filter_context)?,
+                    sample_rate,
+                    &filter_context,
+                )?;
+                let q = required_f64(filter, "q", &filter_context)?;
+                if q <= 0.0 {
+                    anyhow::bail!("PipeWire export requires q > 0 on {filter_context}");
+                }
+                required_f64(filter, "db_gain", &filter_context)?;
+            }
+        }
+        "convolution" => {
+            let ir_file = required_str(parameters, "ir_file", context)?;
+            if ir_file.trim().is_empty() {
+                anyhow::bail!("PipeWire export requires a non-empty ir_file on {context}");
+            }
+        }
+        unsupported => {
+            anyhow::bail!("PipeWire export does not support plugin type '{unsupported}'")
+        }
     }
     Ok(())
 }

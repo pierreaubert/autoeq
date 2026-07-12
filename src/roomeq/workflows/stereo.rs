@@ -133,6 +133,7 @@ impl WorkflowExecutor for Stereo20Executor {
             bootstrap_uncertainty: None,
             validation_bundle: None,
             supporting_source: None,
+            correction_acceptance: None,
             stage_outcomes: Vec::new(),
         };
 

@@ -31,7 +31,16 @@ for _ in $(seq 1 50); do
     # The daemon needs PIPEWIRE_CONFIG_DIR for our temporary drop-in, but the
     # client needs its stock client.conf rather than that daemon-only directory.
     if env -u PIPEWIRE_CONFIG_DIR pw-cli info 0 >/dev/null 2>&1; then
-        exit 0
+        graph="$(env -u PIPEWIRE_CONFIG_DIR pw-dump 2>/dev/null || true)"
+        if grep -q 'roomeq_filter_input' <<<"$graph" && \
+           grep -q 'roomeq_filter_output' <<<"$graph"; then
+            if grep -Eqi 'unknown port|filter-chain.*(error|failed)|libpipewire-module-filter-chain.*(error|failed)' "$log_file"; then
+                echo "PipeWire logged an error while creating the RoomEQ filter graph." >&2
+                cat "$log_file" >&2
+                exit 1
+            fi
+            exit 0
+        fi
     fi
     if ! kill -0 "$pipewire_pid" 2>/dev/null; then
         cat "$log_file" >&2

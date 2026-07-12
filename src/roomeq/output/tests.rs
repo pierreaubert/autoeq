@@ -401,6 +401,7 @@ fn test_create_dsp_chain_output() {
         bootstrap_uncertainty: None,
         validation_bundle: None,
         supporting_source: None,
+        correction_acceptance: None,
         stage_outcomes: Vec::new(),
     };
 
@@ -471,6 +472,7 @@ fn test_create_dsp_chain_output_adds_ctc_global_xtc_plugin() {
         bootstrap_uncertainty: None,
         validation_bundle: None,
         supporting_source: None,
+        correction_acceptance: None,
         stage_outcomes: Vec::new(),
     };
 

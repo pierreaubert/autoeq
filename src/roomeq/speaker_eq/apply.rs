@@ -137,7 +137,7 @@ pub(super) fn apply_cea2034_speaker_correction(
 pub(super) fn apply_broadband_precorrection(
     room_config: &RoomConfig,
     curve: &Curve,
-    target_tilt_curve: Option<&Curve>,
+    _target_tilt_curve: Option<&Curve>,
     mean_spl: f64,
     min_freq: f64,
     max_freq: f64,
@@ -174,23 +174,15 @@ pub(super) fn apply_broadband_precorrection(
     };
     let bb_min_freq = detected_f3.unwrap_or(min_freq);
 
-    // Construct target at the measurement's mean level, INCLUDING the
-    // target shape (tilt + preference). This ensures broadband and
-    // optimizer pull toward the same goal — no double-tilt.
-    let target = if let Some(tilt_curve) = target_tilt_curve {
-        Curve {
-            freq: curve.freq.clone(),
-            spl: &tilt_curve.spl + mean_spl,
-            phase: None,
-            ..Default::default()
-        }
-    } else {
-        Curve {
-            freq: curve.freq.clone(),
-            spl: Array1::from_elem(curve.freq.len(), mean_spl),
-            phase: None,
-            ..Default::default()
-        }
+    // Broadband pre-correction removes only coarse measurement shape. Target
+    // tilt and preference shaping are handled by the following optimizer; if
+    // included here they are applied twice and the fine EQ has to fight the
+    // shelf approximation.
+    let target = Curve {
+        freq: curve.freq.clone(),
+        spl: Array1::from_elem(curve.freq.len(), mean_spl),
+        phase: None,
+        ..Default::default()
     };
 
     let Some(mut result) =

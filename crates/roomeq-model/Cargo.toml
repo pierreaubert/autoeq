@@ -1,6 +1,6 @@
 [package]
 name = "roomeq-model"
-version = "0.4.47"
+version.workspace = true
 edition = "2024"
 description = "RoomEQ configuration, pipeline, and DSP-chain contracts"
 license = "GPL-3.0-or-later"

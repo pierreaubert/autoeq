@@ -29,7 +29,7 @@ pub struct RoomEngine;
 
 impl RoomEngine {
     pub fn validate(request: &EngineRequest<'_>) -> Result<(), String> {
-        let _ = request.config;
+        request.config.validate_structure()?;
         request.problem.validate()
     }
 
@@ -40,7 +40,10 @@ impl RoomEngine {
     ) -> Result<EngineResult, String> {
         Self::validate(&request)?;
         let optimization = optimizer.optimize(&request.problem)?;
-        Ok(EngineResult { optimization, graph: DspGraph::new("1") })
+        Ok(EngineResult {
+            optimization,
+            graph: DspGraph::new("1"),
+        })
     }
 }
 
@@ -61,15 +64,40 @@ mod tests {
 
     #[test]
     fn validates_before_calling_optimizer() {
-        let config = RoomConfig::default();
+        let mut config = RoomConfig::default();
+        config.speakers.insert(
+            "L".into(),
+            roomeq_model::SpeakerConfig::Single(roomeq_model::MeasurementSource::Single(
+                roomeq_model::MeasurementSingle {
+                    measurement: roomeq_model::MeasurementRef::Path("left.csv".into()),
+                    speaker_name: None,
+                },
+            )),
+        );
         let request = EngineRequest {
             config: &config,
             problem: OptimizationProblem::new(vec![0.0], vec![1.0], |_: &[f64]| 0.0),
         };
         let optimizer = |_p: &OptimizationProblem| {
-            Ok(OptimizationResult { parameters: vec![0.5], objective: 0.0, status: "ok".into() })
+            Ok(OptimizationResult {
+                parameters: vec![0.5],
+                objective: 0.0,
+                status: "ok".into(),
+            })
         };
         let result = RoomEngine.run(request, &optimizer).unwrap();
         assert_eq!(result.optimization.parameters, vec![0.5]);
+    }
+
+    #[test]
+    fn rejects_invalid_room_config_before_optimizer() {
+        let config = RoomConfig::default();
+        let request = EngineRequest {
+            config: &config,
+            problem: OptimizationProblem::new(vec![0.0], vec![1.0], |_: &[f64]| 0.0),
+        };
+        let optimizer = |_p: &OptimizationProblem| panic!("optimizer must not be called");
+        let error = RoomEngine.run(request, &optimizer).unwrap_err();
+        assert!(error.contains("at least one speaker"));
     }
 }

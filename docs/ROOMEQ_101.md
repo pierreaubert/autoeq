@@ -781,10 +781,49 @@ flowchart TB
   `BassManagementReport` (routing graph, group crossovers, headroom
   simulation, advisories).
 
+Final metadata also includes `correction_acceptance` when the audibility safety
+gate can evaluate aligned pre/post/target curves. The gate records whether the
+chain was accepted, a corrective stage was reverted, or identity correction was
+used. A revert removes correction EQ/convolution while retaining crossover,
+routing, delay, and polarity infrastructure required by the playback topology.
+
+Measurement confidence is classified from coherence, signal-to-noise margin,
+and multi-seat variance. Degraded measurements reduce correction depth; poor
+measurements are capped at 35%, and unusable or mismatched measurement grids are
+rejected explicitly.
+
 `export_dsp_chain` (`roomeq/export.rs`) serialises the result into
 external formats. Some targets (e.g. EasyEffects, Wavelet GraphicEQ)
 do not support routing matrices or convolution; the exporter rejects
 those configurations explicitly rather than silently dropping plugins.
+
+Every external exporter is fail-closed: a successful render has accounted for
+every plugin, global operation, and driver branch. CamillaDSP preserves the
+widest contract, including supported bass-management routing. Equalizer APO
+supports serial gain/delay/EQ/convolution and a checked static `Channel`/`Copy`
+routing subset. Roon rejects all-pass filters, multiple per-channel convolution
+IRs, and more than its 20-filter limit instead of substituting or truncating.
+EasyEffects and Wavelet accept only gain/EQ chains that are identical on every
+channel, because their exported presets are system-wide rather than independent
+per-channel graphs.
+
+Equalizer APO also has a native Windows engine test. The
+`qa-export-equalizer-apo` recipe runs the official `Benchmark.exe`, which loads
+Equalizer APO's real `FilterEngine`, processes a deterministic WAV through the
+generated configuration, and compares the measured result with RoomEQ's
+expected response. Set `ROOMEQ_EQUALIZER_APO_BENCHMARK` when Equalizer APO is
+installed outside its standard location; the test needs permission to
+temporarily update Equalizer APO's `ConfigPath` registry value and restores it
+afterward.
+
+The PipeWire exporter preserves the per-channel plugin order and has native
+coverage for signed gain/polarity, delay, all RoomEQ biquad variants, LR24 and
+LR48 crossover cascades, and WAV convolution. Its Linux QA loads configurations
+covering those nodes into a real PipeWire daemon and verifies that both filter
+endpoints were instantiated. Graph-level matrix routing, XTC, active-driver
+fan-out, and mixed-mode `band_split`/`band_merge` are not serial operations;
+PipeWire export rejects them explicitly and directs users to the CamillaDSP or
+native SotF graph export until equivalent PipeWire graph rendering is added.
 
 ---
 

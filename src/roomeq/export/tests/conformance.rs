@@ -286,6 +286,88 @@ fn rms(samples: &[i32]) -> f64 {
 }
 
 #[test]
+fn tool_contract_equalizer_apo_benchmark_processes_real_pcm() {
+    let command = match std::env::var("ROOMEQ_EQUALIZER_APO_PCM_CMD") {
+        Ok(command) if !command.trim().is_empty() => command,
+        _ => {
+            eprintln!("skipping Equalizer APO PCM contract; set ROOMEQ_EQUALIZER_APO_PCM_CMD");
+            return;
+        }
+    };
+    let output = output_with_plugins(vec![
+        PluginConfigWrapper {
+            plugin_type: "gain".to_string(),
+            parameters: json!({"gain_db": -3.0}),
+        },
+        PluginConfigWrapper {
+            plugin_type: "eq".to_string(),
+            parameters: json!({"filters": [{
+                "filter_type": "peak", "freq": 1000.0, "q": 1.0, "db_gain": 6.0
+            }]}),
+        },
+    ]);
+    let config = render_dsp_chain(&output, ExportFormat::EqualizerApo, 48_000.0).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.txt");
+    let input_path = dir.path().join("input.wav");
+    let output_path = dir.path().join("output.wav");
+    std::fs::write(&config_path, config).unwrap();
+
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: 48_000,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut writer = hound::WavWriter::create(&input_path, spec).unwrap();
+    let amplitude = 0.05_f32;
+    for index in 0..16_384 {
+        let phase = std::f32::consts::TAU * 1000.0 * index as f32 / 48_000.0;
+        writer.write_sample(amplitude * phase.sin()).unwrap();
+        writer.write_sample(0.0_f32).unwrap();
+    }
+    writer.finalize().unwrap();
+
+    let config_string = config_path.to_string_lossy();
+    let input_string = input_path.to_string_lossy();
+    let output_string = output_path.to_string_lossy();
+    let expanded = command
+        .replace("{config}", &config_string)
+        .replace("{input}", &input_string)
+        .replace("{output}", &output_string);
+    #[cfg(windows)]
+    let result = Command::new("cmd")
+        .args(["/C", &expanded])
+        .output()
+        .unwrap();
+    #[cfg(not(windows))]
+    let result = Command::new("sh").args(["-c", &expanded]).output().unwrap();
+    assert!(
+        result.status.success(),
+        "Equalizer APO PCM command failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+
+    let mut reader = hound::WavReader::open(output_path).unwrap();
+    let samples: Vec<i16> = reader.samples::<i16>().map(Result::unwrap).collect();
+    let left: Vec<f64> = samples
+        .chunks_exact(2)
+        .skip(4096)
+        .map(|frame| frame[0] as f64 / i16::MAX as f64)
+        .collect();
+    let measured_rms =
+        (left.iter().map(|sample| sample * sample).sum::<f64>() / left.len() as f64).sqrt();
+    let input_rms = amplitude as f64 / std::f64::consts::SQRT_2;
+    let expected_gain = 10.0_f64.powf(3.0 / 20.0);
+    let measured_gain = measured_rms / input_rms;
+    assert!(
+        (measured_gain - expected_gain).abs() < 0.003,
+        "real Equalizer APO gain {measured_gain}, expected {expected_gain}"
+    );
+}
+
+#[test]
 fn tool_contract_camilladsp_pcm_processes_convolution_sidecar() {
     let output = output_with_plugins(vec![PluginConfigWrapper {
         plugin_type: "convolution".to_string(),
@@ -341,6 +423,96 @@ fn camilladsp_rejects_unsupported_plugins_instead_of_dropping_them() {
 
     let error = camilladsp_error(&output);
     assert!(error.contains("does not support channel 'left' plugin #0 ('xtc')"));
+}
+
+#[test]
+fn every_external_export_rejects_unknown_plugins_instead_of_dropping_them() {
+    let output = output_with_plugins(vec![PluginConfigWrapper {
+        plugin_type: "xtc".to_string(),
+        parameters: json!({}),
+    }]);
+    for format in [
+        ExportFormat::CamillaDsp,
+        ExportFormat::EqualizerApo,
+        ExportFormat::EasyEffects,
+        ExportFormat::Wavelet,
+        ExportFormat::PipeWire,
+        ExportFormat::RoonDsp,
+    ] {
+        let error = render_dsp_chain(&output, format, 48_000.0)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("does not support channel 'left' plugin #0 ('xtc')"),
+            "unexpected {format:?} error: {error}"
+        );
+    }
+}
+
+#[test]
+fn systemwide_exports_reject_time_domain_processing_and_channel_collapse() {
+    let convolution = output_with_plugins(vec![PluginConfigWrapper {
+        plugin_type: "convolution".to_string(),
+        parameters: json!({"ir_file": "room.wav"}),
+    }]);
+    for format in [ExportFormat::EasyEffects, ExportFormat::Wavelet] {
+        let error = render_dsp_chain(&convolution, format, 48_000.0)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("does not support channel 'left' plugin #0 ('convolution')"));
+    }
+
+    let mut different_channels = output_with_plugins(vec![PluginConfigWrapper {
+        plugin_type: "gain".to_string(),
+        parameters: json!({"gain_db": -1.0}),
+    }]);
+    different_channels.channels.insert(
+        "right".to_string(),
+        channel(
+            "right",
+            vec![PluginConfigWrapper {
+                plugin_type: "gain".to_string(),
+                parameters: json!({"gain_db": -2.0}),
+            }],
+        ),
+    );
+    for format in [ExportFormat::EasyEffects, ExportFormat::Wavelet] {
+        let error = render_dsp_chain(&different_channels, format, 48_000.0)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("cannot preserve different per-channel DSP chains"));
+    }
+}
+
+#[test]
+fn roon_rejects_lossy_filter_substitution_and_truncation() {
+    let allpass = output_with_plugins(vec![PluginConfigWrapper {
+        plugin_type: "eq".to_string(),
+        parameters: json!({"filters": [{
+            "filter_type": "allpass", "freq": 1000.0, "q": 1.0, "db_gain": 0.0
+        }]}),
+    }]);
+    let error = render_dsp_chain(&allpass, ExportFormat::RoonDsp, 48_000.0)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("cannot represent all-pass filter"));
+
+    let filters: Vec<_> = (0..21)
+        .map(|index| {
+            json!({
+                "filter_type": "peak", "freq": 100.0 + index as f64 * 10.0,
+                "q": 1.0, "db_gain": -1.0
+            })
+        })
+        .collect();
+    let too_many = output_with_plugins(vec![PluginConfigWrapper {
+        plugin_type: "eq".to_string(),
+        parameters: json!({"filters": filters}),
+    }]);
+    let error = render_dsp_chain(&too_many, ExportFormat::RoonDsp, 48_000.0)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("at most 20 PEQ filters"));
 }
 
 #[test]

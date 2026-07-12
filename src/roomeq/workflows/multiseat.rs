@@ -57,6 +57,7 @@ impl WorkflowExecutor for MultiseatExecutor {
                     bootstrap_uncertainty: None,
                     validation_bundle: None,
                     supporting_source: None,
+                    correction_acceptance: None,
                     stage_outcomes: Vec::new(),
                 },
             });

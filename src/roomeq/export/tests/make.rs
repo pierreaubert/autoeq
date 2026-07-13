@@ -12,6 +12,7 @@ use super::super::extract::extract_eq_filters;
 use super::super::extract_gain_db;
 use super::super::misc::parse_biquad_filter_type;
 use super::super::package::package_convolution_sidecars;
+use super::super::roon_convolver::package_roon_convolution_archive;
 use crate::roomeq::{
     BassManagementMatrix, BassManagementReport, BassManagementRoute, BassManagementRoutingGraph,
 };

@@ -326,7 +326,26 @@ pub(super) fn validate_serial_external_input(
                 }
                 "convolution" => {
                     convolution_count += 1;
-                    required_str(parameters, "ir_file", &context)?;
+                    let ir_file = required_str(parameters, "ir_file", &context)?;
+                    if matches!(format, ExportFormat::RoonDsp) {
+                        let path = std::path::Path::new(ir_file);
+                        if path.is_absolute()
+                            || path.components().any(|component| {
+                                !matches!(component, std::path::Component::Normal(_))
+                            })
+                        {
+                            anyhow::bail!(
+                                "RoonDsp export requires a safe relative impulse path on {context}"
+                            );
+                        }
+                        for key in parameters.keys() {
+                            if key != "ir_file" {
+                                anyhow::bail!(
+                                    "RoonDsp export does not support convolution parameter '{key}' on {context}"
+                                );
+                            }
+                        }
+                    }
                 }
                 _ => unreachable!(),
             }

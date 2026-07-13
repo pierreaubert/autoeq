@@ -840,6 +840,11 @@ widest contract, including supported bass-management routing. Equalizer APO
 supports serial gain/delay/EQ/convolution and a checked static `Channel`/`Copy`
 routing subset. Roon rejects all-pass filters, multiple per-channel convolution
 IRs, and more than its 20-filter limit instead of substituting or truncating.
+Its JSON is a versioned manual MUSE setup manifest, not an importable preset.
+When convolution is present, the exporter also creates a deterministic Roon
+Convolver ZIP with relative mono WAVs, explicit channel routing, and a canonical
+WAVE speaker mask; see `docs/roon_export_validation.md` for portable and
+licensed macOS validation.
 EasyEffects and Wavelet accept only gain/EQ chains that are identical on every
 channel, because their exported presets are system-wide rather than independent
 per-channel graphs.

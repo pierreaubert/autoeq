@@ -234,6 +234,9 @@ fn test_export_roon() {
 
     let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
     let channels = &parsed["channels"];
+    assert_eq!(parsed["manifest_version"], serde_json::json!(1));
+    assert_eq!(parsed["artifact_type"], "roon_manual_iir_setup");
+    assert_eq!(parsed["importable_preset"], false);
 
     // Left channel
     let left = &channels["left"];
@@ -245,6 +248,10 @@ fn test_export_roon() {
     assert_eq!(left_bands[0]["type"].as_str().unwrap(), "Peak/Dip");
     assert_eq!(left_bands[0]["frequency"].as_f64().unwrap(), 100.0);
     assert_eq!(left_bands[2]["type"].as_str().unwrap(), "High Shelf");
+    let operations = left["procedural_eq"]["operations"].as_array().unwrap();
+    assert_eq!(operations[0]["type"], "Volume");
+    assert_eq!(operations[1]["type"], "Delay");
+    assert_eq!(operations[2]["type"], "Parametric EQ");
 
     // Right channel
     let right = &channels["right"];
@@ -281,6 +288,25 @@ fn tool_contract_roon_json_keeps_per_channel_manual_setup_data() {
     }
 
     run_optional_export_validator("ROOMEQ_ROON_VALIDATE_CMD", "json", &result);
+}
+
+#[test]
+fn roon_manifest_schema_and_json_round_trip_are_versioned() {
+    let schema: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../docs/roon_manual_iir_manifest.schema.json"
+    ))
+    .unwrap();
+    assert_eq!(schema["properties"]["manifest_version"]["const"], json!(1));
+    assert_eq!(
+        schema["properties"]["artifact_type"]["const"],
+        json!("roon_manual_iir_setup")
+    );
+
+    let original: serde_json::Value =
+        serde_json::from_str(&export_roon(&make_test_output()).unwrap()).unwrap();
+    let round_tripped: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&original).unwrap()).unwrap();
+    assert_eq!(round_tripped, original);
 }
 
 #[test]

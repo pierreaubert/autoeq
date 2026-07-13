@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/pierreaubert/autoeq/schemas/roon-manual-iir-manifest-v1.json",
+  "title": "RoomEQ Roon manual IIR setup manifest",
+  "type": "object",
+  "required": ["manifest_version", "artifact_type", "importable_preset", "channels"],
+  "properties": {
+    "manifest_version": {"const": 1},
+    "artifact_type": {"const": "roon_manual_iir_setup"},
+    "importable_preset": {"const": false},
+    "_comment": {"type": "string"},
+    "convolution_archive": {
+      "type": "object",
+      "required": ["file", "format", "sample_rate_hz", "channel_count", "wave_channel_mask_hex", "config"],
+      "properties": {
+        "file": {"const": "room_eq_convolution.zip"},
+        "format": {"const": "roon_convolver_zip"},
+        "sample_rate_hz": {"type": "integer", "minimum": 1},
+        "channel_count": {"type": "integer", "minimum": 1},
+        "wave_channel_mask_hex": {"type": "string", "pattern": "^[0-9A-F]+$"},
+        "config": {"type": "string", "pattern": "^[^/\\\\]+\\.cfg$"}
+      },
+      "additionalProperties": false
+    },
+    "channels": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/channel"}
+    }
+  },
+  "$defs": {
+    "band": {
+      "type": "object",
+      "required": ["type", "frequency", "gain", "q", "enabled"],
+      "properties": {
+        "type": {"enum": ["Peak/Dip", "Low Shelf", "High Shelf", "Low Pass", "High Pass", "Band Pass", "Band Stop"]},
+        "frequency": {"type": "number", "exclusiveMinimum": 0},
+        "gain": {"type": "number"},
+        "q": {"type": "number", "exclusiveMinimum": 0},
+        "enabled": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "channel": {
+      "type": "object",
+      "required": ["procedural_eq"],
+      "properties": {
+        "headroom_gain_db": {"type": "number"},
+        "delay_ms": {"type": "number", "minimum": 0},
+        "parametric_eq": {
+          "type": "object",
+          "required": ["bands", "is_enabled"],
+          "properties": {
+            "bands": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/band"}},
+            "is_enabled": {"const": true}
+          },
+          "additionalProperties": false
+        },
+        "convolution": {
+          "type": "object",
+          "required": ["ir_files", "is_enabled"],
+          "properties": {
+            "ir_files": {"type": "array", "maxItems": 1, "items": {"type": "string"}},
+            "is_enabled": {"const": true}
+          },
+          "additionalProperties": false
+        },
+        "procedural_eq": {
+          "type": "object",
+          "required": ["operations"],
+          "properties": {"operations": {"type": "array"}},
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

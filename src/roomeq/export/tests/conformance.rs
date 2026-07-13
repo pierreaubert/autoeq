@@ -513,6 +513,26 @@ fn roon_rejects_lossy_filter_substitution_and_truncation() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("at most 20 PEQ filters"));
+
+    for (parameters, expected) in [
+        (
+            json!({"ir_file": "/tmp/room.wav"}),
+            "safe relative impulse path",
+        ),
+        (
+            json!({"ir_file": "room.wav", "mix": 0.5}),
+            "does not support convolution parameter 'mix'",
+        ),
+    ] {
+        let convolution = output_with_plugins(vec![PluginConfigWrapper {
+            plugin_type: "convolution".to_string(),
+            parameters,
+        }]);
+        let error = render_dsp_chain(&convolution, ExportFormat::RoonDsp, 48_000.0)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(expected), "unexpected error: {error}");
+    }
 }
 
 #[test]

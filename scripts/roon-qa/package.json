@@ -1,0 +1,10 @@
+{
+  "name": "sotf-roon-export-qa",
+  "version": "1.0.0",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "dependencies": {
+    "node-roon-api": "github:RoonLabs/node-roon-api",
+    "node-roon-api-transport": "github:RoonLabs/node-roon-api-transport"
+  }
+}

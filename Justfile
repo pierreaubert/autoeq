@@ -293,6 +293,8 @@ export-test-systems-help:
 	@echo "  just qa-export-portable    # semantic APO/EasyEffects/Wavelet/Roon checks"
 	@echo "  just qa-export-all         # portable + CamillaDSP + PipeWire matrix"
 	@echo "  just qa-export-equalizer-apo  # requires a Windows VM validator command"
+	@echo "  just qa-export-roon-setup  # one-time private macOS Roon/BlackHole setup"
+	@echo "  just qa-export-roon-app    # licensed interactive macOS Roon smoke test"
 	@echo
 	@echo "Install helper:"
 	@echo "  just install-export-test-systems"
@@ -391,6 +393,18 @@ qa-export-portable:
 	# optional application validators remain available through ROOMEQ_*_VALIDATE_CMD.
 	cargo nextest run -p autoeq --lib --no-tests fail \
 		-E 'test(/equalizer_apo|easyeffects|wavelet|roon/)'
+
+[group('qa')]
+qa-export-roon-setup:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	scripts/roon-qa/setup.sh
+
+[group('qa')]
+qa-export-roon-app:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	scripts/roon-qa/run-app-qa.sh
 
 [group('qa')]
 qa-export-all: qa-export-portable qa-export-camilladsp qa-export-pipewire

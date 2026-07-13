@@ -251,6 +251,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "urlencoding",
+ "zip 0.6.6",
 ]
 
 [[package]]

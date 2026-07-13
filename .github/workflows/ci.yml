@@ -7,7 +7,7 @@ on:
     branches: [main, master]
 
 permissions:
-  content: read
+  contents: read
   
 env:
   CARGO_TERM_COLOR: always

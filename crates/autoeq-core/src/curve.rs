@@ -291,9 +291,21 @@ mod validation_tests {
 
     #[test]
     fn curve_validation_rejects_non_finite_spl_and_mismatched_arrays() {
-        let mut non_finite = valid_curve();
-        non_finite.spl[1] = f64::NEG_INFINITY;
-        assert!(non_finite.validate("test curve").is_err());
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut non_finite = valid_curve();
+            non_finite.spl[1] = value;
+            assert!(
+                non_finite.validate("test curve").is_err(),
+                "accepted non-finite SPL {value}"
+            );
+
+            let mut non_finite_phase = valid_curve();
+            non_finite_phase.phase = Some(Array1::from_vec(vec![0.0, value, 0.0]));
+            assert!(
+                non_finite_phase.validate("test curve").is_err(),
+                "accepted non-finite phase {value}"
+            );
+        }
 
         let mut spl_mismatch = valid_curve();
         spl_mismatch.spl = Array1::zeros(2);

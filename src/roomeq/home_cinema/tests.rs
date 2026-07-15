@@ -330,6 +330,7 @@ mod apply_tests {
             final_curve: flat_curve(),
             biquads: Vec::new(),
             fir_coeffs: None,
+            optimizer_evidence: Vec::new(),
         }
     }
 
@@ -702,6 +703,7 @@ mod coverage_tests {
             final_curve: flat_curve(),
             biquads: Vec::new(),
             fir_coeffs: None,
+            optimizer_evidence: Vec::new(),
         };
         let acceptance =
             all_channel_multiseat_acceptance(&config, "LFE", &source, &flat_curve(), &flat_curve());

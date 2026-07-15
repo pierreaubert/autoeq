@@ -122,6 +122,7 @@ pub(super) fn make_test_output() -> DspChainOutput {
             validation_bundle: None,
             supporting_source: None,
             correction_acceptance: None,
+            optimizer_evidence: None,
             stage_outcomes: Vec::new(),
         }),
     }
@@ -382,6 +383,7 @@ pub(super) fn make_routed_bass_output() -> DspChainOutput {
             validation_bundle: None,
             supporting_source: None,
             correction_acceptance: None,
+            optimizer_evidence: None,
             stage_outcomes: Vec::new(),
         }),
     }

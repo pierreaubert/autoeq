@@ -129,7 +129,8 @@ fn cardioid_flat_response_does_not_regress() {
         "Cardioid processing should succeed: {:?}",
         result
     );
-    let (_chain, _pre, post, _initial, _final, _filters, _mean, _arrival, _fir) = result.unwrap();
+    let (_chain, _pre, post, _initial, _final, _filters, _mean, _arrival, _fir, _evidence) =
+        result.unwrap();
     assert!(
         post.is_finite(),
         "post_score must be finite after regression guard"
@@ -206,9 +207,19 @@ fn multisub_uses_production_multiseat_path_when_subs_have_seat_measurements() {
         cea2034_cache: None,
     };
 
-    let (chain, pre_score, post_score, initial, final_curve, filters, _mean, _arrival, _fir) =
-        process_multisub_group("LFE", &group, &room_config, 48000.0, Path::new("."))
-            .expect("multi-seat multi-sub processing should succeed");
+    let (
+        chain,
+        pre_score,
+        post_score,
+        initial,
+        final_curve,
+        filters,
+        _mean,
+        _arrival,
+        _fir,
+        _evidence,
+    ) = process_multisub_group("LFE", &group, &room_config, 48000.0, Path::new("."))
+        .expect("multi-seat multi-sub processing should succeed");
 
     assert!(pre_score.is_finite());
     assert!(post_score.is_finite());
@@ -337,7 +348,7 @@ fn production_multiseat_path_emits_per_sub_and_global_eq_when_enabled() {
         cea2034_cache: None,
     };
 
-    let (chain, pre_score, post_score, _initial, _final, filters, _mean, _arrival, _fir) =
+    let (chain, pre_score, post_score, _initial, _final, filters, _mean, _arrival, _fir, _evidence) =
         process_multisub_group("LFE", &group, &room_config, 48000.0, Path::new("."))
             .expect("multi-seat multi-sub processing should succeed");
 

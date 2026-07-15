@@ -1,4 +1,8 @@
-//! RoomEQ export formats, conformance checks, and artifact packaging.
+//! Experimental exporters for the canonical `roomeq-model` DSP graph.
+//!
+//! Production RoomEQ formats remain in the root `autoeq` crate while they are
+//! migrated. These exporters validate the graph and never emit an empty
+//! placeholder artifact.
 
 #![forbid(unsafe_code)]
 
@@ -11,6 +15,7 @@ pub enum ExportFormat {
 }
 
 pub fn export(graph: &DspGraph, format: ExportFormat) -> Result<String, String> {
+    graph.validate()?;
     match format {
         ExportFormat::Json => serde_json::to_string_pretty(graph).map_err(|e| e.to_string()),
         ExportFormat::EqualizerApo => export_equalizer_apo(graph),
@@ -66,6 +71,19 @@ fn write_plugin(out: &mut String, plugin: &Plugin) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_empty_graph_for_every_format() {
+        let graph = DspGraph::new("1");
+        for format in [ExportFormat::Json, ExportFormat::EqualizerApo] {
+            let error = export(&graph, format).expect_err("empty graph must not export");
+            assert!(
+                error.contains("at least one channel"),
+                "unexpected error: {error}"
+            );
+        }
+    }
+
     #[test]
     fn exports_json_and_apo() {
         let mut graph = DspGraph::new("1");

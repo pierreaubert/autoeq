@@ -6,6 +6,64 @@ use ndarray::Array1;
 use std::error::Error;
 use std::path::PathBuf;
 
+fn measurement_identity(measurement: &MeasurementRef) -> String {
+    measurement
+        .path()
+        .map(|path| path.display().to_string())
+        .or_else(|| measurement.name().map(String::from))
+        .unwrap_or_else(|| "inline".to_string())
+}
+
+fn load_measurements_strict(measurements: &[MeasurementRef]) -> Result<Vec<Curve>, Box<dyn Error>> {
+    let mut curves = Vec::with_capacity(measurements.len());
+    let mut failures = Vec::new();
+    for measurement in measurements {
+        match load_measurement(measurement) {
+            Ok(curve) => curves.push(curve),
+            Err(error) => failures.push(format!("{}: {error}", measurement_identity(measurement))),
+        }
+    }
+    if failures.is_empty() {
+        Ok(curves)
+    } else {
+        Err(format!(
+            "Failed to load {} of {} measurements: {}",
+            failures.len(),
+            measurements.len(),
+            failures.join("; ")
+        )
+        .into())
+    }
+}
+
+fn grids_match(left: &Array1<f64>, right: &Array1<f64>) -> bool {
+    left.len() == right.len() && left.iter().zip(right).all(|(a, b)| (a - b).abs() <= 1e-9)
+}
+
+fn validate_and_align_curves(
+    curves: &[Curve],
+    context: &str,
+) -> Result<Vec<Curve>, Box<dyn Error>> {
+    let Some(first) = curves.first() else {
+        return Err(format!("{context} is empty").into());
+    };
+    for (index, curve) in curves.iter().enumerate() {
+        curve.validate(&format!("{context} {index}"))?;
+    }
+
+    let reference_grid = first.freq.clone();
+    Ok(curves
+        .iter()
+        .map(|curve| {
+            if grids_match(&reference_grid, &curve.freq) {
+                curve.clone()
+            } else {
+                interpolate_log_space(&reference_grid, curve)
+            }
+        })
+        .collect())
+}
+
 /// Load a single measurement from a file or inline data
 pub fn load_measurement(measurement: &MeasurementRef) -> Result<Curve, Box<dyn Error>> {
     let curve = match measurement {
@@ -83,45 +141,14 @@ pub fn load_source_individual(source: &MeasurementSource) -> Result<Vec<Curve>, 
             Ok(vec![curve.clone()])
         }
         MeasurementSource::InMemoryMultiple(curves) => {
-            if curves.is_empty() {
-                return Err("In-memory measurement list is empty".into());
-            }
-            for (index, curve) in curves.iter().enumerate() {
-                curve.validate(&format!("in-memory measurement {index}"))?;
-            }
-            Ok(curves.clone())
+            validate_and_align_curves(curves, "in-memory measurement")
         }
         MeasurementSource::Multiple(m) => {
             if m.measurements.is_empty() {
                 return Err("Measurement list is empty".into());
             }
-
-            let mut curves = Vec::new();
-            for r in &m.measurements {
-                match load_measurement(r) {
-                    Ok(c) => curves.push(c),
-                    Err(e) => {
-                        let name = r
-                            .path()
-                            .map(|p| p.display().to_string())
-                            .or_else(|| r.name().map(String::from))
-                            .unwrap_or_else(|| "inline".to_string());
-                        log::debug!("Warning: failed to load measurement {}: {}", name, e)
-                    }
-                }
-            }
-
-            if curves.is_empty() {
-                return Err("No valid measurements loaded".into());
-            }
-
-            // Interpolate all curves to the first curve's frequency grid
-            let ref_freqs = curves[0].freq.clone();
-            let mut result = vec![curves[0].clone()];
-            for curve in &curves[1..] {
-                result.push(interpolate_log_space(&ref_freqs, curve));
-            }
-            Ok(result)
+            let curves = load_measurements_strict(&m.measurements)?;
+            validate_and_align_curves(&curves, "measurement")
         }
     }
 }
@@ -155,13 +182,12 @@ fn average_curves_power_domain(curves: &[Curve]) -> Curve {
 
     let avg_power = power_sum / (curves.len() as f64);
     let avg_spl = avg_power.mapv(|p| 10.0 * p.log10());
-    let phase = ref_curve.phase.clone();
     let coherence = coherence_sum.map(|sum| sum / curves.len() as f64);
 
     Curve {
         freq: freqs,
         spl: avg_spl,
-        phase,
+        phase: None,
         coherence,
         ..Default::default()
     }
@@ -169,45 +195,11 @@ fn average_curves_power_domain(curves: &[Curve]) -> Curve {
 
 /// Load measurement(s) from a source and average if necessary
 pub fn load_source(source: &MeasurementSource) -> Result<Curve, Box<dyn Error>> {
-    match source {
-        MeasurementSource::Single(s) => load_measurement(&s.measurement),
-        MeasurementSource::InMemory(curve) => Ok(curve.clone()),
-        MeasurementSource::InMemoryMultiple(curves) => {
-            if curves.is_empty() {
-                return Err("InMemoryMultiple has no curves".into());
-            }
-            if curves.len() == 1 {
-                return Ok(curves[0].clone());
-            }
-            Ok(average_curves_power_domain(curves))
-        }
-        MeasurementSource::Multiple(m) => {
-            if m.measurements.is_empty() {
-                return Err("Measurement list is empty".into());
-            }
-
-            // Load all curves
-            let mut curves = Vec::new();
-            for r in &m.measurements {
-                match load_measurement(r) {
-                    Ok(c) => curves.push(c),
-                    Err(e) => {
-                        let name = r
-                            .path()
-                            .map(|p| p.display().to_string())
-                            .or_else(|| r.name().map(String::from))
-                            .unwrap_or_else(|| "inline".to_string());
-                        log::debug!("Warning: failed to load measurement {}: {}", name, e)
-                    }
-                }
-            }
-
-            if curves.is_empty() {
-                return Err("No valid measurements loaded".into());
-            }
-
-            Ok(average_curves_power_domain(&curves))
-        }
+    let curves = load_source_individual(source)?;
+    if curves.len() == 1 {
+        Ok(curves[0].clone())
+    } else {
+        Ok(average_curves_power_domain(&curves))
     }
 }
 
@@ -304,6 +296,7 @@ mod tests {
             ..Default::default()
         });
         assert!(load_source_individual(&source).is_err());
+        assert!(load_source(&source).is_err());
     }
 
     #[test]
@@ -367,6 +360,23 @@ mod tests {
     }
 
     #[test]
+    fn load_source_power_average_invalidates_position_specific_phase() {
+        let mut first = sample_curve(0.0);
+        first.phase = Some(Array1::from_vec(vec![10.0, 20.0, 30.0]));
+        first.min_phase = Some(Array1::from_vec(vec![1.0, 2.0, 3.0]));
+        first.excess_phase = Some(Array1::from_vec(vec![9.0, 18.0, 27.0]));
+        first.excess_delay_ms = Some(1.0);
+        let source = MeasurementSource::InMemoryMultiple(vec![first, sample_curve(3.0)]);
+
+        let average = load_source(&source).unwrap();
+
+        assert!(average.phase.is_none());
+        assert!(average.min_phase.is_none());
+        assert!(average.excess_phase.is_none());
+        assert!(average.excess_delay_ms.is_none());
+    }
+
+    #[test]
     fn load_source_individual_multiple_interpolates_to_first_grid() {
         let c1 = sample_curve(0.0);
         let mut c2 = sample_curve(3.0);
@@ -399,6 +409,36 @@ mod tests {
     }
 
     #[test]
+    fn load_source_individual_in_memory_multiple_interpolates_to_first_grid() {
+        let first = sample_curve(0.0);
+        let second = Curve {
+            freq: Array1::from_vec(vec![120.0, 1100.0, 9000.0]),
+            spl: Array1::from_vec(vec![83.0, 78.0, 73.0]),
+            ..Default::default()
+        };
+        let source = MeasurementSource::InMemoryMultiple(vec![first.clone(), second]);
+
+        let curves = load_source_individual(&source).unwrap();
+
+        assert_eq!(curves.len(), 2);
+        assert_eq!(curves[0].freq, first.freq);
+        assert_eq!(curves[1].freq, first.freq);
+    }
+
+    #[test]
+    fn load_source_rejects_invalid_curve_inside_in_memory_multiple() {
+        let invalid = Curve {
+            freq: Array1::from_vec(vec![100.0, 1000.0]),
+            spl: Array1::from_vec(vec![80.0]),
+            ..Default::default()
+        };
+        let source = MeasurementSource::InMemoryMultiple(vec![sample_curve(0.0), invalid]);
+
+        assert!(load_source_individual(&source).is_err());
+        assert!(load_source(&source).is_err());
+    }
+
+    #[test]
     fn load_source_individual_empty_multiple_errors() {
         let source = MeasurementSource::Multiple(MeasurementMultiple {
             measurements: vec![],
@@ -408,7 +448,7 @@ mod tests {
     }
 
     #[test]
-    fn load_source_multiple_skips_failed_measurements() {
+    fn load_source_multiple_rejects_partial_measurement_failure() {
         let source = MeasurementSource::Multiple(MeasurementMultiple {
             measurements: vec![
                 MeasurementRef::Inline(sample_inline()),
@@ -416,7 +456,16 @@ mod tests {
             ],
             speaker_name: None,
         });
-        let curve = load_source(&source).unwrap();
-        assert_eq!(curve.freq.len(), 3);
+        for error in [
+            load_source(&source).unwrap_err(),
+            load_source_individual(&source).unwrap_err(),
+        ] {
+            let message = error.to_string();
+            assert!(message.contains("1 of 2"), "unexpected error: {message}");
+            assert!(
+                message.contains("missing.csv"),
+                "unexpected error: {message}"
+            );
+        }
     }
 }

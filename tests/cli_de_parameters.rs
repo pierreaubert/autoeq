@@ -27,7 +27,7 @@ fn create_test_objective_data() -> autoeq::optim::ObjectiveData {
     .min_spacing_oct(0.2)
     .spacing_weight(20.0)
     .max_db(3.0)
-    .min_db(0.5)
+    .min_db(-12.0)
     .freq_range(60.0, 16_000.0)
     .smoothing(false, 3)
     .build()

@@ -12,4 +12,5 @@ pub(in super::super) type MixedModeResult = (
     f64,
     Option<f64>,
     Option<Vec<f64>>,
+    Vec<crate::optim::OptimizerRunEvidence>,
 );

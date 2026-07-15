@@ -651,6 +651,12 @@ JSON Schemas for validation:
 - [`input_schema.json`](../src/bin/roomeq/input_schema.json): Input configuration schema
 - [`output_schema.json`](../src/bin/roomeq/output_schema.json): Output DSP chain schema
 
+Configuration validation is also exposed as a versioned five-stage runtime
+report: `schema_version`, `structural`, `resolved_resource`, `acoustic`, and
+`export_target`. A structural-only report is intentionally not
+`production_ready`; the CLI loader returns the staged report and the production
+optimizer reruns the required resource/acoustic gates after path resolution.
+
 ## Testing
 
 Run the integration tests:

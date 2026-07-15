@@ -1,4 +1,5 @@
 use crate::Curve;
+use autoeq_core::phase_utils::unwrap_phase_degrees;
 use ndarray::Array1;
 
 /// Helper to interpolate a single value array in log frequency space
@@ -63,6 +64,64 @@ fn interpolate_log_space_vals(
     vals_out
 }
 
+/// Mean of a piecewise-linear response over a logarithmic-frequency interval.
+///
+/// The integral is evaluated in `ln(f)`, so adding samples on an existing
+/// line segment does not change the result. `None` is returned when the
+/// arrays do not describe a usable positive-frequency interval.
+pub(crate) fn mean_over_log_frequency(
+    freqs: &Array1<f64>,
+    values: &Array1<f64>,
+    f_min: f64,
+    f_max: f64,
+) -> Option<f64> {
+    if freqs.len() != values.len() || freqs.len() < 2 || f_min > f_max {
+        return None;
+    }
+
+    let lower = f_min.max(freqs[0]);
+    let upper = f_max.min(freqs[freqs.len() - 1]);
+    if !lower.is_finite() || !upper.is_finite() || lower <= 0.0 || upper <= lower {
+        return None;
+    }
+
+    let log_lower = lower.ln();
+    let log_upper = upper.ln();
+    let mut integral = 0.0;
+    let mut width = 0.0;
+
+    for i in 0..freqs.len() - 1 {
+        let f0 = freqs[i];
+        let f1 = freqs[i + 1];
+        let y0 = values[i];
+        let y1 = values[i + 1];
+        if !f0.is_finite()
+            || !f1.is_finite()
+            || !y0.is_finite()
+            || !y1.is_finite()
+            || f0 <= 0.0
+            || f1 <= f0
+        {
+            continue;
+        }
+
+        let x0 = f0.ln();
+        let x1 = f1.ln();
+        let a = x0.max(log_lower);
+        let b = x1.min(log_upper);
+        if b <= a {
+            continue;
+        }
+
+        let segment_width = x1 - x0;
+        let value_at = |x: f64| y0 + (y1 - y0) * ((x - x0) / segment_width);
+        integral += 0.5 * (value_at(a) + value_at(b)) * (b - a);
+        width += b - a;
+    }
+
+    (width > 0.0).then_some(integral / width)
+}
+
 /// Interpolate frequency response to a standard grid using linear interpolation in log space
 ///
 /// # Arguments
@@ -105,10 +164,10 @@ pub fn interpolate_log_space(freq_out: &Array1<f64>, curve: &Curve) -> Curve {
 
     let spl_out = interpolate_log_space_vals(&log_freq_out, &log_freq_in, &curve.spl);
 
-    let phase_out = curve
-        .phase
-        .as_ref()
-        .map(|p| interpolate_log_space_vals(&log_freq_out, &log_freq_in, p));
+    let phase_out = curve.phase.as_ref().map(|p| {
+        let unwrapped = unwrap_phase_degrees(p);
+        interpolate_log_space_vals(&log_freq_out, &log_freq_in, &unwrapped)
+    });
     let coherence_out = curve
         .coherence
         .as_ref()
@@ -153,7 +212,8 @@ pub fn interpolate(freqs: &Array1<f64>, curve: &Curve) -> Curve {
         "interpolate() requires sorted frequencies"
     );
     let mut result_spl = Array1::zeros(freqs.len());
-    let mut result_phase = curve.phase.as_ref().map(|_| Array1::zeros(freqs.len()));
+    let unwrapped_phase = curve.phase.as_ref().map(unwrap_phase_degrees);
+    let mut result_phase = unwrapped_phase.as_ref().map(|_| Array1::zeros(freqs.len()));
 
     for (i, &target_freq) in freqs.iter().enumerate() {
         // Find the two nearest points in the source data
@@ -164,13 +224,13 @@ pub fn interpolate(freqs: &Array1<f64>, curve: &Curve) -> Curve {
         if target_freq <= curve.freq[0] {
             // Target frequency is below the range, use the first point
             result_spl[i] = curve.spl[0];
-            if let (Some(res_p), Some(src_p)) = (result_phase.as_mut(), &curve.phase) {
+            if let (Some(res_p), Some(src_p)) = (result_phase.as_mut(), &unwrapped_phase) {
                 res_p[i] = src_p[0];
             }
         } else if target_freq >= curve.freq[curve.freq.len() - 1] {
             // Target frequency is above the range, use the last point
             result_spl[i] = curve.spl[curve.freq.len() - 1];
-            if let (Some(res_p), Some(src_p)) = (result_phase.as_mut(), &curve.phase) {
+            if let (Some(res_p), Some(src_p)) = (result_phase.as_mut(), &unwrapped_phase) {
                 res_p[i] = src_p[curve.freq.len() - 1];
             }
         } else {
@@ -192,7 +252,7 @@ pub fn interpolate(freqs: &Array1<f64>, curve: &Curve) -> Curve {
             let spl_right = curve.spl[right_idx];
             result_spl[i] = spl_left + t * (spl_right - spl_left);
 
-            if let (Some(res_p), Some(src_p)) = (result_phase.as_mut(), &curve.phase) {
+            if let (Some(res_p), Some(src_p)) = (result_phase.as_mut(), &unwrapped_phase) {
                 let p_left = src_p[left_idx];
                 let p_right = src_p[right_idx];
                 res_p[i] = p_left + t * (p_right - p_left);
@@ -249,6 +309,24 @@ mod tests {
         assert_eq!(result.len(), 1);
         // log10(10)=1 is midpoint between log10(1)=0 and log10(100)=2
         assert!((result[0] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn log_frequency_mean_is_invariant_to_samples_on_linear_segments() {
+        let sparse_freq = Array1::from_vec(vec![100.0, 200.0, 400.0]);
+        let sparse_values = Array1::from_vec(vec![0.0, 10.0, 0.0]);
+        let dense_freq = Array1::from_vec(vec![100.0, 150.0, 200.0, 300.0, 400.0]);
+        let dense_values = Array1::from_iter(dense_freq.iter().map(|&freq| {
+            if freq <= 200.0 {
+                10.0 * (freq / 100.0_f64).ln() / 2.0_f64.ln()
+            } else {
+                10.0 * (1.0 - (freq / 200.0_f64).ln() / 2.0_f64.ln())
+            }
+        }));
+
+        let sparse = mean_over_log_frequency(&sparse_freq, &sparse_values, 100.0, 400.0).unwrap();
+        let dense = mean_over_log_frequency(&dense_freq, &dense_values, 100.0, 400.0).unwrap();
+        assert!((sparse - dense).abs() < 1e-12);
     }
 
     #[test]
@@ -323,6 +401,21 @@ mod tests {
     }
 
     #[test]
+    fn interpolate_log_space_unwraps_phase_across_branch_cut() {
+        let curve = Curve {
+            freq: Array1::from_vec(vec![100.0, 10_000.0]),
+            spl: Array1::from_vec(vec![0.0, 0.0]),
+            phase: Some(Array1::from_vec(vec![170.0, -170.0])),
+            ..Default::default()
+        };
+
+        let result = interpolate_log_space(&Array1::from_vec(vec![1_000.0]), &curve);
+        let phase = result.phase.expect("phase should be preserved");
+
+        assert!((phase[0] - 180.0).abs() < 1e-9, "phase was {}", phase[0]);
+    }
+
+    #[test]
     fn create_log_frequency_grid_bounds_and_length() {
         let grid = create_log_frequency_grid(50, 20.0, 20000.0);
         assert_eq!(grid.len(), 50);
@@ -350,6 +443,21 @@ mod tests {
         assert!((result.spl[0] - 0.0).abs() < 1e-12);
         assert!((result.spl[1] - 10.0).abs() < 1e-12);
         assert!((result.spl[2] - 5.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn interpolate_linear_unwraps_phase_across_branch_cut() {
+        let curve = Curve {
+            freq: Array1::from_vec(vec![100.0, 300.0]),
+            spl: Array1::from_vec(vec![0.0, 0.0]),
+            phase: Some(Array1::from_vec(vec![170.0, -170.0])),
+            ..Default::default()
+        };
+
+        let result = interpolate(&Array1::from_vec(vec![200.0]), &curve);
+        let phase = result.phase.expect("phase should be preserved");
+
+        assert!((phase[0] - 180.0).abs() < 1e-9, "phase was {}", phase[0]);
     }
 
     #[test]

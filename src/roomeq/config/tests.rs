@@ -2,7 +2,7 @@
 use super::super::types::{
     Cea2034CorrectionMode, OptimizerConfig, ProcessingMode, RoomConfig, SpeakerConfig,
 };
-use super::validate::validate_room_config;
+use super::validate::{RoomValidationContext, validate_room_config, validate_room_config_staged};
 use super::validation_result::ValidationResult;
 use crate::{MeasurementRef, MeasurementSource};
 use std::collections::HashMap;
@@ -18,6 +18,28 @@ fn test_validation_result_default_is_valid() {
     assert!(result.is_valid);
     assert!(result.errors.is_empty());
     assert!(result.warnings.is_empty());
+    assert!(result.staged_report.is_none());
+}
+
+#[test]
+fn compatibility_validator_identifies_structural_only_strength() {
+    let mut config = RoomConfig::default();
+    config.speakers.insert(
+        "left".to_string(),
+        SpeakerConfig::Single(MeasurementSource::InMemory(crate::Curve {
+            freq: ndarray::arr1(&[20.0, 20_000.0]),
+            spl: ndarray::arr1(&[0.0, 0.0]),
+            phase: None,
+            ..Default::default()
+        })),
+    );
+
+    let result = validate_room_config(&config);
+    let staged = result
+        .staged_report
+        .expect("public compatibility result must state which stages ran");
+    assert!(staged.stage_ran(ValidationStage::Structural));
+    assert!(!staged.production_ready());
 }
 
 #[test]
@@ -34,6 +56,31 @@ fn test_validation_result_add_warning_keeps_valid() {
     result.add_warning("Test warning".to_string());
     assert!(result.is_valid);
     assert_eq!(result.warnings.len(), 1);
+}
+
+#[test]
+fn production_validation_reports_every_named_stage() {
+    let mut config = RoomConfig::default();
+    config.speakers.insert(
+        "left".to_string(),
+        SpeakerConfig::Single(MeasurementSource::InMemory(crate::Curve {
+            freq: ndarray::arr1(&[20.0, 100.0, 1_000.0, 20_000.0]),
+            spl: ndarray::arr1(&[0.0, 1.0, -1.0, 0.0]),
+            phase: None,
+            ..Default::default()
+        })),
+    );
+
+    let report = validate_room_config_staged(&config, RoomValidationContext::production());
+
+    for stage in ValidationStage::ALL {
+        assert_ne!(report.stage(stage).status, ValidationStageStatus::NotRun);
+    }
+    assert_eq!(
+        report.stage(ValidationStage::ExportTarget).status,
+        ValidationStageStatus::NotApplicable
+    );
+    assert!(report.production_ready(), "{report:#?}");
 }
 
 #[test]

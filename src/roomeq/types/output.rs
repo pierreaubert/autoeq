@@ -4,7 +4,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 // Re-export Curve for reference in output docs
 pub use crate::Curve;
@@ -373,6 +373,16 @@ pub struct StageOutcome {
     pub advisories: Vec<String>,
 }
 
+/// Versioned optimizer-confidence evidence used by final production
+/// acceptance. Superseded attempts remain visible in `runs_by_channel`, while
+/// `confidence` is derived only from runs marked `selected_for_output`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct RoomOptimizerEvidence {
+    pub policy_version: String,
+    pub confidence: crate::optim::OptimizerConfidence,
+    pub runs_by_channel: BTreeMap<String, Vec<crate::optim::OptimizerRunEvidence>>,
+}
+
 /// Optimization metadata
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct OptimizationMetadata {
@@ -452,6 +462,10 @@ pub struct OptimizationMetadata {
     /// Audibility-first acceptance decision for the final correction chain.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correction_acceptance: Option<crate::roomeq::acoustic_qa::CorrectionAcceptanceReport>,
+    /// Backend termination, convergence, budget, seed, constraint, and
+    /// confidence evidence for the optimizer runs that produced each channel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub optimizer_evidence: Option<RoomOptimizerEvidence>,
     /// Structured outcomes for optional/degradable processing stages.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stage_outcomes: Vec<StageOutcome>,

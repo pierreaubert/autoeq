@@ -1,4 +1,140 @@
 #[test]
+fn room_config_version_policy_accepts_supported_generations_and_rejects_unknown_versions() {
+    for version in ["1.0.0", "1.2.7", "2.0.0", "2.1.0"] {
+        assert!(
+            validate_config_version(version).is_ok(),
+            "known compatible version {version} should be accepted"
+        );
+    }
+    for version in ["", "2", "2.1", "0.9.0", "1.3.0", "2.2.0", "3.0.0"] {
+        assert!(
+            validate_config_version(version).is_err(),
+            "unknown version {version:?} should be rejected"
+        );
+    }
+}
+
+#[test]
+fn room_config_default_uses_current_config_version() {
+    assert_eq!(RoomConfig::default().version, default_config_version());
+}
+
+#[test]
+fn structural_validation_report_cannot_claim_production_readiness() {
+    let mut config = RoomConfig::default();
+    config.speakers.insert(
+        "L".to_string(),
+        SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Path("left.csv".into()),
+            speaker_name: None,
+        })),
+    );
+
+    let report = config.validation_report();
+
+    assert!(report.stage_ran(ValidationStage::SchemaVersion));
+    assert!(report.stage_ran(ValidationStage::Structural));
+    assert!(!report.stage_ran(ValidationStage::ResolvedResource));
+    assert!(!report.production_ready());
+    assert!(config.validate_structure().is_ok());
+}
+
+#[test]
+fn structural_validation_rejects_missing_system_speaker_reference() {
+    let mut config = RoomConfig::default();
+    config.speakers.insert(
+        "left_measurement".to_string(),
+        SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Path("left.csv".into()),
+            speaker_name: None,
+        })),
+    );
+    config.system = Some(SystemConfig {
+        model: SystemModel::Stereo,
+        speakers: HashMap::from([("L".to_string(), "typo".to_string())]),
+        ..Default::default()
+    });
+
+    let report = config.validation_report();
+
+    assert!(
+        report
+            .stage(ValidationStage::Structural)
+            .errors
+            .iter()
+            .any(|error| error.contains("role 'L'") && error.contains("'typo'")),
+        "canonical structural validation must reject dangling system speaker mappings: {report:?}"
+    );
+    assert!(config.validate_structure().is_err());
+}
+
+#[test]
+fn structural_validation_rejects_unsupported_crossover_type() {
+    let mut config = RoomConfig::default();
+    config.speakers.insert(
+        "L".to_string(),
+        SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Path("left.csv".into()),
+            speaker_name: None,
+        })),
+    );
+    config.crossovers = Some(HashMap::from([(
+        "main".to_string(),
+        CrossoverConfig {
+            crossover_type: "not-a-crossover".to_string(),
+            frequency: Some(80.0),
+            frequencies: None,
+            frequency_range: None,
+        },
+    )]));
+
+    let report = config.validation_report();
+
+    assert!(
+        report
+            .stage(ValidationStage::Structural)
+            .errors
+            .iter()
+            .any(|error| error.contains("Crossover 'main'") && error.contains("unsupported type")),
+        "canonical structural validation must reject unsupported crossover types: {report:?}"
+    );
+    assert!(config.validate_structure().is_err());
+}
+
+#[test]
+fn structural_validation_rejects_invalid_gain_envelopes() {
+    let mut config = RoomConfig::default();
+    config.speakers.insert(
+        "L".to_string(),
+        SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Path("left.csv".into()),
+            speaker_name: None,
+        })),
+    );
+    config.optimizer.max_boost_envelope =
+        Some(vec![(20.0, 6.0), (200.0, 3.0), (200.0, 2.0)]);
+    config.optimizer.min_cut_envelope =
+        Some(vec![(20.0, -6.0), (200.0, f64::NEG_INFINITY)]);
+
+    let report = config.validation_report();
+    let errors = &report.stage(ValidationStage::Structural).errors;
+
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("max_boost_envelope")
+                && error.contains("strictly increasing")),
+        "duplicate frequencies were accepted: {errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("min_cut_envelope") && error.contains("finite")),
+        "non-finite envelope gain was accepted: {errors:?}"
+    );
+}
+
+#[test]
 fn spl_calibration_roundtrip_and_helpers() {
     let cal = SplCalibration {
         reported_db_spl: 85.0,

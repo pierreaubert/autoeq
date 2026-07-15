@@ -53,6 +53,7 @@ mod target_response_config;
 mod tests;
 mod types;
 mod user_preference;
+mod validation;
 mod validation_bundle_config;
 
 pub use area_quadrature_kind::*;
@@ -103,4 +104,5 @@ pub use supporting_source_group::*;
 pub use target_response_config::*;
 pub use types::*;
 pub use user_preference::*;
+pub use validation::*;
 pub use validation_bundle_config::*;

@@ -224,6 +224,7 @@ pub fn process_supporting_source_channel(
         final_curve: primary.clone(),
         biquads: Vec::new(),
         fir_coeffs: None,
+        optimizer_evidence: Vec::new(),
     };
     let support_result = ChannelOptimizationResult {
         name: support_name.clone(),
@@ -233,6 +234,7 @@ pub fn process_supporting_source_channel(
         final_curve: support_final_curve,
         biquads: Vec::new(),
         fir_coeffs: Some(filter.taps.clone()),
+        optimizer_evidence: Vec::new(),
     };
 
     let band_hz = group.supporting_source.freq_range_hz;

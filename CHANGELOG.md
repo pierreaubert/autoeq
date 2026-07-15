@@ -1,5 +1,73 @@
 # 0.4.50
 
+## Breaking changes
+
+- `roomeq_model::OptimizerConfig::to_optim_params` now requires the actual
+  sample rate instead of silently constructing 48 kHz optimizer parameters.
+- `roomeq_engine::RoomEngine::run` now requires a graph-builder callback and
+  returns an error when the resulting DSP graph is empty or structurally
+  invalid. Callers can no longer receive a successful placeholder graph; a
+  successful `EngineResult` now also carries the named-stage validation report.
+- `roomeq::load_config` now returns `(RoomConfig, config_dir,
+  ConfigValidationReport)` so callers cannot confuse deserialization or
+  structural acceptance with production readiness.
+
+## Fixes
+
+- Recognized measurement CSV headers on the first meaningful record, including
+  files with leading comments or blank lines, so reordered phase, coherence,
+  and noise-floor columns are no longer interpreted positionally.
+- Unwrapped phase before linear and log-frequency interpolation, preventing
+  responses crossing the `+180°/-180°` branch cut from being interpolated
+  through an incorrect `0°` phase.
+- Interpolated responses before normalization and replaced point-count means
+  with trapezoidal integration over log frequency. Normalization and one-over-N
+  or psychoacoustic smoothing are now invariant to equivalent source-grid
+  densities.
+- Preserved measured phase, coherence, and noise-floor data during smoothing
+  while invalidating derived phase caches. Power-domain and RIR-prototype
+  magnitude averaging now discard borrowed position-specific phase,
+  confidence, and cache metadata.
+- Made multi-position measurement loading fail closed when any requested seat
+  cannot be loaded, including the failed count and source identity in the
+  error. Aggregate and individual in-memory inputs now share validation and
+  grid alignment, and unusable grids return errors instead of silently
+  collapsing optimization to identity correction.
+- Enforced RoomEQ configuration schema versions during loading and both
+  validation paths. Defaults now use schema `2.1.0`; supported `1.0.x-1.2.x`
+  and `2.0.x-2.1.x` configurations remain accepted, while malformed and future
+  versions fail explicitly.
+- Replaced parallel validation strengths with a versioned, named-stage report
+  covering schema/version, structural, resolved-resource, acoustic, and
+  export-target validation. Structural-only reports cannot claim production
+  readiness; production loading and optimization run the stronger stages, and
+  the extracted engine reports the stages it actually ran.
+- Expanded final runtime acceptance into versioned output-class policies that
+  enforce p95/worst residual, worst-position regression, boost/headroom,
+  latency, pre-ringing, induced group delay, and canonical DSP realization
+  completeness/error. Violating correction stages are reverted while required
+  routing, gains, and crossovers remain intact.
+- Added structured optimizer evidence for global, local, adaptive, split-band,
+  multi-measurement, CEA2034, DBA, group, and bass-management EQ paths. Reports
+  carry termination cause, objective/evaluation budget, parsed evaluation
+  count, seed, bound violation, restart history, selected-attempt state, and
+  confidence. `Ok("not converged …")` is best effort rather than convergence;
+  selected unusable evidence fails final production acceptance.
+- Completed the original audit items 12–18 at their shared boundaries. The
+  canonical model now rejects dangling `system.speakers` mappings, unsupported
+  crossover types, and invalid gain envelopes; root validation delegates to
+  those contracts. Reflection cancellation clamps its subtraction ceiling to
+  `[0, 1]` and rejects invalid sample rates, while DBA nulls use a deterministic
+  finite magnitude floor and `0°` phase.
+- Restored `--min-db` as the signed lower filter-gain bound, including `-12 dB`
+  defaults and presets. The prior `+0.5 dB` interpretation conflicted with the
+  optimizer, RoomEQ configuration, and the original audit contract.
+- Centralized minimum engine/export invariants in `DspGraph::validate` and made
+  `roomeq-export` reject empty or invalid graphs.
+- Isolated measurement-cache tests with a shared lock and scoped environment
+  restoration, and corrected the psychoacoustic-smoothing doctest to import
+  the public `autoeq_measurements` crate path.
+
 ## QA improvements
 
 - Built matrix for testing
@@ -28,6 +96,11 @@ add it to a docker, more work to test properly EQAPO on Windows)
 - Added testing and documentation to test Roon (at least on MacOS). Roon API 
   does not allow proper automated testing but manual testing is doable see
   documentations in `docs`.
+- Strengthened the original audit integration/negative-path matrix with parsed
+  APO parameter bounds, independently recomputed RoomEQ before/after flatness,
+  required low-shelf correction of a synthetic bass boost, non-finite curve and
+  sample-rate rejection, duplicate-envelope rejection, and invalid-crossover
+  coverage.
 
 # 0.4.49
 

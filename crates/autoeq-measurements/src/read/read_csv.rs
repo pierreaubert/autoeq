@@ -175,7 +175,7 @@ pub fn load_driver_measurement(
     let mut noise_floor_col: Option<usize> = None;
     let mut header_parsed = false;
 
-    for (line_num, line) in reader.lines().enumerate() {
+    for line in reader.lines() {
         let line = line?;
         let line = line.trim();
 
@@ -191,8 +191,9 @@ pub fn load_driver_measurement(
             line.split_whitespace().collect()
         };
 
-        // Try to parse header on first line
-        if line_num == 0 && !header_parsed {
+        // Try to parse a header on the first meaningful record. Comments and
+        // blank lines before it are deliberately ignored above.
+        if !header_parsed {
             let is_header = parts.iter().any(|p| {
                 let lower = p.to_lowercase();
                 lower.contains("freq")
@@ -477,6 +478,28 @@ freq,spl,phase,coherence,noise_floor_db
         assert!((coh[0] - 0.95).abs() < 1e-9);
         let nf = result.4.unwrap();
         assert!((nf[1] + 50.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn header_after_comments_and_blank_lines_uses_named_columns() {
+        let csv = "\
+# measurement exported by the acquisition tool
+
+// columns may be reordered
+phase_deg,noise_floor_db,frequency_hz,coherence,spl_db
+10,-45,20,0.95,0.0
+20,-50,200,0.98,1.0
+30,-55,2000,0.99,2.0
+";
+        let f = write_tmp(csv);
+        let (freq, spl, phase, coherence, noise_floor_db) =
+            load_driver_measurement(&f.path().to_path_buf()).unwrap();
+
+        assert_eq!(freq.to_vec(), vec![20.0, 200.0, 2000.0]);
+        assert_eq!(spl.to_vec(), vec![0.0, 1.0, 2.0]);
+        assert_eq!(phase.unwrap().to_vec(), vec![10.0, 20.0, 30.0]);
+        assert_eq!(coherence.unwrap().to_vec(), vec![0.95, 0.98, 0.99]);
+        assert_eq!(noise_floor_db.unwrap().to_vec(), vec![-45.0, -50.0, -55.0]);
     }
 
     #[test]

@@ -1,18 +1,18 @@
-pub(super) fn parse_strictly_positive_f64(s: &str) -> Result<f64, String> {
-    let v: f64 = s.parse().map_err(|_| format!("invalid float: {s}"))?;
-    if v > 0.0 {
-        Ok(v)
-    } else {
-        Err("value must be strictly positive (> 0)".to_string())
-    }
-}
-
 pub(super) fn parse_nonnegative_f64(s: &str) -> Result<f64, String> {
     let v: f64 = s.parse().map_err(|_| format!("invalid float: {s}"))?;
     if v >= 0.0 {
         Ok(v)
     } else {
         Err("value must be non-negative (>= 0)".to_string())
+    }
+}
+
+pub(super) fn parse_finite_f64(s: &str) -> Result<f64, String> {
+    let value: f64 = s.parse().map_err(|_| format!("invalid float: {s}"))?;
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err("value must be finite".to_string())
     }
 }
 
@@ -46,18 +46,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_strictly_positive_f64_accepts_positive_only() {
-        assert_eq!(parse_strictly_positive_f64("0.001").unwrap(), 0.001);
-        assert_eq!(parse_strictly_positive_f64("1").unwrap(), 1.0);
-        assert_eq!(parse_strictly_positive_f64("3.5").unwrap(), 3.5);
-    }
-
-    #[test]
-    fn parse_strictly_positive_f64_rejects_non_positive_and_invalid() {
-        assert!(parse_strictly_positive_f64("0").is_err());
-        assert!(parse_strictly_positive_f64("-1").is_err());
-        assert!(parse_strictly_positive_f64("abc").is_err());
-        assert!(parse_strictly_positive_f64("").is_err());
+    fn parse_finite_f64_accepts_signed_values_and_rejects_non_finite_values() {
+        assert_eq!(parse_finite_f64("-12").unwrap(), -12.0);
+        assert_eq!(parse_finite_f64("0").unwrap(), 0.0);
+        assert_eq!(parse_finite_f64("3.5").unwrap(), 3.5);
+        for invalid in ["NaN", "inf", "-inf", "not-a-number", ""] {
+            assert!(parse_finite_f64(invalid).is_err(), "accepted {invalid:?}");
+        }
     }
 
     #[test]

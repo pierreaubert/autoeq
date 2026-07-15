@@ -109,7 +109,7 @@
       ]
     },
     "version": {
-      "description": "Configuration version (semantic versioning, e.g. \"1.0.0\")",
+      "description": "Configuration schema version. Supported lines are 1.0.x–1.2.x and 2.0.x–2.1.x; the current version is 2.1.0.",
       "type": "string",
       "default": "2.1.0"
     }

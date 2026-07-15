@@ -496,6 +496,7 @@ mod multi_seat_branch_tests {
             final_curve,
             biquads: Vec::new(),
             fir_coeffs: None,
+            optimizer_evidence: Vec::new(),
         }
     }
 

@@ -273,7 +273,7 @@ fn evaluate_variant(
     override_config: Option<&Path>,
     variant: &str,
 ) -> Result<VariantEvaluation> {
-    let (room_config, _) = load_config(&scenario.config, override_config)
+    let (room_config, _, _validation) = load_config(&scenario.config, override_config)
         .with_context(|| format!("failed to load {variant} scenario '{}'", scenario.id))?;
     let loaded_held_out: Vec<_> = scenario
         .held_out

@@ -25,7 +25,7 @@ use std::path::PathBuf;
 use autoeq::roomeq::{
     DspChainOutput, ExportFormat, PipelineControl, PipelineEvent, PipelineObserver, RoomConfig,
     RoomPipeline, RoomPipelineRequest, export_dsp_chain_with_convolution_sidecars, load_config,
-    save_dsp_chain, validate_room_config,
+    save_dsp_chain,
 };
 
 /// Room EQ - Optimize multi-channel speaker systems
@@ -199,7 +199,8 @@ fn run(
     // Load room configuration
     info!("Loading room configuration from {:?}", config_path);
 
-    let (room_config, _config_dir) = load_config(&config_path, override_config_path.as_deref())?;
+    let (room_config, _config_dir, _validation) =
+        load_config(&config_path, override_config_path.as_deref())?;
 
     info!("Found {} speakers", room_config.speakers.len());
 
@@ -256,29 +257,31 @@ fn run(
 fn run_dry_run(config_path: PathBuf, override_config_path: Option<PathBuf>) -> Result<()> {
     info!("Loading room configuration from {:?}", config_path);
 
-    let (room_config, _config_dir) = load_config(&config_path, override_config_path.as_deref())?;
+    let (room_config, _config_dir, validation) =
+        load_config(&config_path, override_config_path.as_deref())?;
 
     println!("\n=== Configuration Validation ===\n");
 
     // Run validation
-    let validation = validate_room_config(&room_config);
-
-    if validation.is_valid {
+    if validation.production_ready() {
         println!("Configuration: VALID");
     } else {
         println!("Configuration: INVALID");
     }
 
-    if !validation.warnings.is_empty() {
+    let warnings = validation.warnings().collect::<Vec<_>>();
+    if !warnings.is_empty() {
         println!("\nWarnings:");
-        for warning in &validation.warnings {
+        for warning in warnings {
             println!("  - {}", warning);
         }
     }
 
-    if !validation.errors.is_empty() {
+    let errors = validation.errors().collect::<Vec<_>>();
+    let error_count = errors.len();
+    if !errors.is_empty() {
         println!("\nErrors:");
-        for error in &validation.errors {
+        for error in &errors {
             println!("  - {}", error);
         }
     }
@@ -305,10 +308,10 @@ fn run_dry_run(config_path: PathBuf, override_config_path: Option<PathBuf>) -> R
 
     println!("\n=== Result ===\n");
 
-    if !validation.errors.is_empty() || !file_errors.is_empty() {
+    if error_count > 0 || !file_errors.is_empty() {
         println!("VALIDATION FAILED");
-        if !validation.errors.is_empty() {
-            println!("  {} configuration error(s)", validation.errors.len());
+        if error_count > 0 {
+            println!("  {} configuration error(s)", error_count);
         }
         if !file_errors.is_empty() {
             println!("  {} file(s) missing", file_errors.len());

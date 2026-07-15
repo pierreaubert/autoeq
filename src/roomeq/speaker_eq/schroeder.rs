@@ -9,6 +9,12 @@ use log::{debug, info};
 use math_audio_dsp::analysis::compute_average_response;
 use math_audio_iir_fir::Biquad;
 
+pub(in crate::roomeq) struct SchroederOptimizationResult {
+    pub low_filters: Vec<Biquad>,
+    pub high_filters: Vec<Biquad>,
+    pub optimizer_evidence: Vec<crate::optim::OptimizerRunEvidence>,
+}
+
 /// Optimize EQ with optional Schroeder frequency split.
 ///
 /// If the optimizer config has an enabled Schroeder split, performs two-pass
@@ -95,6 +101,16 @@ pub(in crate::roomeq) fn optimize_with_schroeder_split(
     schroeder_config: &SchroederSplitConfig,
     sample_rate: f64,
 ) -> Result<(Vec<Biquad>, Vec<Biquad>)> {
+    optimize_with_schroeder_split_detailed(curve, optimizer, schroeder_config, sample_rate)
+        .map(|result| (result.low_filters, result.high_filters))
+}
+
+pub(in crate::roomeq) fn optimize_with_schroeder_split_detailed(
+    curve: &Curve,
+    optimizer: &OptimizerConfig,
+    schroeder_config: &SchroederSplitConfig,
+    sample_rate: f64,
+) -> Result<SchroederOptimizationResult> {
     if optimizer.num_filters < 2 {
         return Err(AutoeqError::InvalidConfiguration {
             message: format!(
@@ -130,11 +146,15 @@ pub(in crate::roomeq) fn optimize_with_schroeder_split(
             max_db,
             ..optimizer.clone()
         };
-        let (filters, _) = eq::optimize_channel_eq(curve, &low_optimizer, None, sample_rate)
+        let result = eq::optimize_channel_eq_detailed(curve, &low_optimizer, None, sample_rate)
             .map_err(|e| AutoeqError::OptimizationFailed {
                 message: format!("Low-frequency EQ optimization failed: {e}"),
             })?;
-        return Ok((filters, Vec::new()));
+        return Ok(SchroederOptimizationResult {
+            low_filters: result.filters,
+            high_filters: Vec::new(),
+            optimizer_evidence: result.optimizer_evidence,
+        });
     }
     if schroeder_freq <= optimizer.min_freq {
         let high_optimizer = OptimizerConfig {
@@ -142,11 +162,15 @@ pub(in crate::roomeq) fn optimize_with_schroeder_split(
             max_q: high_config.max_q,
             ..optimizer.clone()
         };
-        let (filters, _) = eq::optimize_channel_eq(curve, &high_optimizer, None, sample_rate)
+        let result = eq::optimize_channel_eq_detailed(curve, &high_optimizer, None, sample_rate)
             .map_err(|e| AutoeqError::OptimizationFailed {
                 message: format!("High-frequency EQ optimization failed: {e}"),
             })?;
-        return Ok((Vec::new(), filters));
+        return Ok(SchroederOptimizationResult {
+            low_filters: Vec::new(),
+            high_filters: result.filters,
+            optimizer_evidence: result.optimizer_evidence,
+        });
     }
 
     // Determine filter allocation (roughly proportional to frequency range)
@@ -183,7 +207,7 @@ pub(in crate::roomeq) fn optimize_with_schroeder_split(
         ..optimizer.clone()
     };
 
-    let (low_eq_filters, _) = eq::optimize_channel_eq(
+    let low_result = eq::optimize_channel_eq_detailed(
         curve,
         &low_optimizer,
         None, // No additional target for split optimization
@@ -192,6 +216,7 @@ pub(in crate::roomeq) fn optimize_with_schroeder_split(
     .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!("Low-frequency EQ optimization failed: {}", e),
     })?;
+    let low_eq_filters = low_result.filters;
 
     // High frequency optimization (above Schroeder)
     let high_optimizer = OptimizerConfig {
@@ -208,7 +233,7 @@ pub(in crate::roomeq) fn optimize_with_schroeder_split(
         response::compute_peq_complex_response(&low_eq_filters, &curve.freq, sample_rate);
     let curve_with_low_correction = response::apply_complex_response(curve, &low_resp);
 
-    let (high_eq_filters, _) = eq::optimize_channel_eq(
+    let high_result = eq::optimize_channel_eq_detailed(
         &curve_with_low_correction,
         &high_optimizer,
         None,
@@ -217,6 +242,7 @@ pub(in crate::roomeq) fn optimize_with_schroeder_split(
     .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!("High-frequency EQ optimization failed: {}", e),
     })?;
+    let high_eq_filters = high_result.filters;
 
     // Post-optimization Q clamping: NLopt COBYLA can violate bounds slightly (or
     // significantly with low maxeval). Enforce the configured Q constraints on the
@@ -225,7 +251,13 @@ pub(in crate::roomeq) fn optimize_with_schroeder_split(
     let high_eq_filters =
         clamp_filter_q(high_eq_filters, optimizer.min_q.max(0.3), high_config.max_q);
 
-    Ok((low_eq_filters, high_eq_filters))
+    let mut optimizer_evidence = low_result.optimizer_evidence;
+    optimizer_evidence.extend(high_result.optimizer_evidence);
+    Ok(SchroederOptimizationResult {
+        low_filters: low_eq_filters,
+        high_filters: high_eq_filters,
+        optimizer_evidence,
+    })
 }
 
 fn low_freq_gain_bounds(

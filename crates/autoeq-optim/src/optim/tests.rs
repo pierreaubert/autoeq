@@ -1,6 +1,89 @@
 use super::registry;
 
 #[cfg(test)]
+mod outcome_evidence_tests {
+    use super::super::{OptimizerConfidence, OptimizerRunEvidence, OptimizerTermination};
+
+    #[test]
+    fn ok_status_marked_not_converged_is_best_effort_not_success() {
+        let evidence = OptimizerRunEvidence::from_backend_result(
+            "autoeq:bo",
+            Ok((
+                "AutoEQ BO: maximum evaluations reached (not converged, nfev=42)".to_string(),
+                1.25,
+            )),
+            &[0.5],
+            &[0.0],
+            &[1.0],
+            100,
+            Some(7),
+        );
+
+        assert!(!evidence.converged);
+        assert!(evidence.best_effort);
+        assert_eq!(evidence.termination, OptimizerTermination::EvaluationLimit);
+        assert_eq!(evidence.evaluation_count, Some(42));
+        assert_eq!(evidence.evaluation_limit, 100);
+        assert_eq!(evidence.seed, Some(7));
+        assert_eq!(evidence.confidence, OptimizerConfidence::Low);
+    }
+
+    #[test]
+    fn finite_error_result_preserves_best_vector_but_reports_backend_failure() {
+        let evidence = OptimizerRunEvidence::from_backend_result(
+            "autoeq:de",
+            Err(("line search failed".to_string(), 2.0)),
+            &[0.5],
+            &[0.0],
+            &[1.0],
+            50,
+            None,
+        );
+
+        assert!(!evidence.converged);
+        assert!(evidence.best_effort);
+        assert_eq!(evidence.termination, OptimizerTermination::BackendFailure);
+        assert_eq!(evidence.confidence, OptimizerConfidence::Low);
+    }
+
+    #[test]
+    fn bound_constraint_violation_makes_outcome_unusable() {
+        let evidence = OptimizerRunEvidence::from_backend_result(
+            "autoeq:cobyla",
+            Ok(("converged".to_string(), 1.0)),
+            &[1.5],
+            &[0.0],
+            &[1.0],
+            50,
+            Some(11),
+        );
+
+        assert_eq!(evidence.max_constraint_violation, 0.5);
+        assert_eq!(evidence.confidence, OptimizerConfidence::Unusable);
+        assert!(!evidence.converged);
+    }
+
+    #[test]
+    fn clean_success_is_high_confidence_and_records_empty_restart_history() {
+        let evidence = OptimizerRunEvidence::from_backend_result(
+            "autoeq:de",
+            Ok(("relative tolerance reached".to_string(), 0.5)),
+            &[0.5],
+            &[0.0],
+            &[1.0],
+            200,
+            Some(3),
+        );
+
+        assert!(evidence.converged);
+        assert!(!evidence.best_effort);
+        assert_eq!(evidence.termination, OptimizerTermination::Converged);
+        assert_eq!(evidence.confidence, OptimizerConfidence::High);
+        assert!(evidence.restart_history.is_empty());
+    }
+}
+
+#[cfg(test)]
 mod dispatch_tests {
 
     /// Bug C reproducer: `optimize_filters_with_callback` previously

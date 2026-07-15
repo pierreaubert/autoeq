@@ -1129,11 +1129,31 @@
         "policy": {
           "$ref": "#/$defs/CorrectionAcceptancePolicy"
         },
+        "realization_quality": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RealizationQualityEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "reverted_stages": {
           "type": "array",
           "items": {
             "type": "string"
           }
+        },
+        "runtime_policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeAcceptancePolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "violations": {
           "type": "array",
@@ -2450,6 +2470,17 @@
             }
           ]
         },
+        "optimizer_evidence": {
+          "description": "Backend termination, convergence, budget, seed, constraint, and\nconfidence evidence for the optimizer runs that produced each channel.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RoomOptimizerEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "perceptual_metrics": {
           "description": "Perceptual scorecard computed from final exported curves/DSP.",
           "anyOf": [
@@ -2532,6 +2563,134 @@
         "algorithm",
         "iterations",
         "timestamp"
+      ]
+    },
+    "OptimizerConfidence": {
+      "type": "string",
+      "enum": [
+        "high",
+        "low",
+        "unusable"
+      ]
+    },
+    "OptimizerRestartEvidence": {
+      "type": "object",
+      "properties": {
+        "attempt": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "objective": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "seed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "termination": {
+          "$ref": "#/$defs/OptimizerTermination"
+        }
+      },
+      "required": [
+        "attempt",
+        "termination"
+      ]
+    },
+    "OptimizerRunEvidence": {
+      "description": "Structured evidence for one optimizer invocation.\n\nBackends retain their historical tuple API, but callers should use this\ntype for production acceptance. In particular, an `Ok` tuple containing\n\"not converged\" is classified as best-effort rather than success.",
+      "type": "object",
+      "properties": {
+        "algorithm": {
+          "type": "string"
+        },
+        "best_effort": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "$ref": "#/$defs/OptimizerConfidence"
+        },
+        "converged": {
+          "type": "boolean"
+        },
+        "evaluation_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "evaluation_limit": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "max_constraint_violation": {
+          "type": "number",
+          "format": "double"
+        },
+        "objective": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "restart_history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OptimizerRestartEvidence"
+          }
+        },
+        "seed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "selected_for_output": {
+          "description": "Whether this invocation supplied the parameters used in the emitted\nresult. Attempts superseded by a better pass/refinement remain in the\nreport but are not production-acceptance inputs.",
+          "type": "boolean",
+          "default": true
+        },
+        "status": {
+          "type": "string"
+        },
+        "termination": {
+          "$ref": "#/$defs/OptimizerTermination"
+        }
+      },
+      "required": [
+        "algorithm",
+        "termination",
+        "converged",
+        "best_effort",
+        "status",
+        "evaluation_limit",
+        "max_constraint_violation",
+        "confidence"
+      ]
+    },
+    "OptimizerTermination": {
+      "type": "string",
+      "enum": [
+        "converged",
+        "evaluation_limit",
+        "non_converged",
+        "user_stopped",
+        "backend_failure",
+        "invalid_result"
       ]
     },
     "PerceptualMetrics": {
@@ -2758,13 +2917,6 @@
           ],
           "format": "double"
         },
-        "bass_post_weighted_rms_db": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "format": "double"
-        },
         "bass_post_modal_roughness_db_per_octave2": {
           "type": [
             "number",
@@ -2772,7 +2924,15 @@
           ],
           "format": "double"
         },
+        "bass_post_weighted_rms_db": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
         "bass_pre_modal_roughness_db_per_octave2": {
+          "description": "Median RMS curvature of the residual below Schroeder frequency.\n\nThis is measured in dB/octave² and distinguishes a response with\nnarrow modal ripple from one with the same band RMS but a smooth tilt.",
           "type": [
             "number",
             "null"
@@ -2822,6 +2982,12 @@
             "null"
           ],
           "format": "double"
+        },
+        "worst_position_improvement_db": {
+          "description": "Smallest per-position improvement. Negative values are regressions.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
         }
       },
       "required": [
@@ -2834,6 +3000,32 @@
         "post_worst_abs_residual_db",
         "mean_normalized_seat_spread_db",
         "max_normalized_seat_spread_db"
+      ]
+    },
+    "RealizationQualityEvidence": {
+      "type": "object",
+      "properties": {
+        "evaluated_channels": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "failed_channels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "max_abs_error_db": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "required": [
+        "evaluated_channels"
       ]
     },
     "RoleTargetConfig": {
@@ -2967,6 +3159,101 @@
           "default": 0.0
         }
       }
+    },
+    "RoomOptimizerEvidence": {
+      "description": "Versioned optimizer-confidence evidence used by final production\nacceptance. Superseded attempts remain visible in `runs_by_channel`, while\n`confidence` is derived only from runs marked `selected_for_output`.",
+      "type": "object",
+      "properties": {
+        "confidence": {
+          "$ref": "#/$defs/OptimizerConfidence"
+        },
+        "policy_version": {
+          "type": "string"
+        },
+        "runs_by_channel": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/OptimizerRunEvidence"
+            }
+          }
+        }
+      },
+      "required": [
+        "policy_version",
+        "confidence",
+        "runs_by_channel"
+      ]
+    },
+    "RuntimeAcceptancePolicy": {
+      "description": "Versioned limits applied to production RoomEQ output.\n\nThe output class changes only temporal limits. Spectral, spatial, boost,\nheadroom, and realization limits are invariant across filter classes.",
+      "type": "object",
+      "properties": {
+        "max_boost_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "max_induced_group_delay_rms_ms": {
+          "type": "number",
+          "format": "double"
+        },
+        "max_latency_ms": {
+          "type": "number",
+          "format": "double"
+        },
+        "max_post_p95_abs_residual_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "max_post_worst_abs_residual_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "max_pre_ringing_energy_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "max_realization_error_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "max_worst_position_regression_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "min_available_headroom_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "output_class": {
+          "$ref": "#/$defs/RuntimeOutputClass"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "output_class",
+        "max_post_p95_abs_residual_db",
+        "max_post_worst_abs_residual_db",
+        "max_worst_position_regression_db",
+        "max_boost_db",
+        "min_available_headroom_db",
+        "max_latency_ms",
+        "max_pre_ringing_energy_db",
+        "max_induced_group_delay_rms_ms",
+        "max_realization_error_db"
+      ]
+    },
+    "RuntimeOutputClass": {
+      "type": "string",
+      "enum": [
+        "low_latency_iir",
+        "fir",
+        "hybrid"
+      ]
     },
     "StageOutcome": {
       "description": "Structured stage status and machine-readable advisories.",

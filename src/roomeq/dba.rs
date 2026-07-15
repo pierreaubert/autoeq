@@ -17,8 +17,24 @@ use clap::Parser;
 use ndarray::Array1;
 use std::error::Error;
 
+const MIN_COMPLEX_MAGNITUDE: f64 = 1e-12;
+
+fn complex_to_spl_phase(z: num_complex::Complex64) -> (f64, f64) {
+    let magnitude = z.norm();
+    if !magnitude.is_finite() || magnitude <= MIN_COMPLEX_MAGNITUDE {
+        return (20.0 * MIN_COMPLEX_MAGNITUDE.log10(), 0.0);
+    }
+    (20.0 * magnitude.log10(), z.arg().to_degrees())
+}
+
 use super::types::{DBAConfig, OptimizerConfig};
 use crate::read as load;
+
+pub struct DbaOptimizationResult {
+    pub driver: DriverOptimizationResult,
+    pub combined_curve: Curve,
+    pub optimizer_evidence: crate::optim::OptimizerRunEvidence,
+}
 
 /// Optimize Double Bass Array configuration
 ///
@@ -40,6 +56,15 @@ pub fn optimize_dba(
     config: &OptimizerConfig,
     sample_rate: f64,
 ) -> Result<(DriverOptimizationResult, Curve), Box<dyn Error>> {
+    let result = optimize_dba_detailed(dba_config, config, sample_rate)?;
+    Ok((result.driver, result.combined_curve))
+}
+
+pub fn optimize_dba_detailed(
+    dba_config: &DBAConfig,
+    config: &OptimizerConfig,
+    sample_rate: f64,
+) -> Result<DbaOptimizationResult, Box<dyn Error>> {
     // 1. Load and Sum Front Array
     let front_curve = sum_array_response(&dba_config.front)?;
 
@@ -123,7 +148,22 @@ pub fn optimize_dba(
         &optim_params,
     );
 
-    let converged = opt_result.is_ok();
+    let optimizer_evidence = crate::optim::OptimizerRunEvidence::from_backend_result(
+        &optim_params.algo,
+        opt_result,
+        &x,
+        &lower_bounds,
+        &upper_bounds,
+        optim_params.maxeval,
+        optim_params.seed,
+    );
+    if optimizer_evidence.confidence == crate::optim::OptimizerConfidence::Unusable {
+        return Err(format!(
+            "DBA optimizer produced unusable result: {}",
+            optimizer_evidence.status
+        )
+        .into());
+    }
 
     // Recompute scores
     // Note: compute_base_fitness uses args.loss_type which we set to MultiSubFlat
@@ -144,17 +184,18 @@ pub fn optimize_dba(
         sample_rate,
     )?;
 
-    Ok((
-        DriverOptimizationResult {
+    Ok(DbaOptimizationResult {
+        driver: DriverOptimizationResult {
             gains,
             delays,
             crossover_freqs,
             pre_objective: 0.0, // Lazy
             post_objective: 0.0,
-            converged,
+            converged: optimizer_evidence.converged,
         },
         combined_curve,
-    ))
+        optimizer_evidence,
+    })
 }
 
 /// Sum multiple measurements into a single curve (complex summation)
@@ -210,14 +251,19 @@ pub fn sum_array_response(
         }
     }
 
-    // Convert to SPL/Phase
-    let spl = sum_complex.mapv(|z| 20.0 * z.norm().max(1e-12).log10());
-    let phase = sum_complex.mapv(|z| z.arg() * 180.0 / PI);
+    // Phase is undefined at a null. Pin zero/near-zero complex sums to the
+    // finite magnitude floor and a deterministic 0° phase instead of exposing
+    // floating-point residue as an arbitrary angle.
+    let (spl, phase): (Vec<_>, Vec<_>) = sum_complex
+        .iter()
+        .copied()
+        .map(complex_to_spl_phase)
+        .unzip();
 
     Ok(Curve {
         freq: ref_freq,
-        spl,
-        phase: Some(phase),
+        spl: Array1::from(spl),
+        phase: Some(Array1::from(phase)),
         ..Default::default()
     })
 }
@@ -268,10 +314,16 @@ fn compute_dba_combined_curve(
             Complex64::from_polar(front_mag, front_phi) + Complex64::from_polar(rear_mag, rear_phi);
     }
 
+    let (spl, phase): (Vec<_>, Vec<_>) = sum_complex
+        .iter()
+        .copied()
+        .map(complex_to_spl_phase)
+        .unzip();
+
     Ok(Curve {
         freq: freq_grid.clone(),
-        spl: sum_complex.mapv(|z| 20.0 * z.norm().max(1e-12).log10()),
-        phase: Some(sum_complex.mapv(|z| z.arg().to_degrees())),
+        spl: Array1::from(spl),
+        phase: Some(Array1::from(phase)),
         ..Default::default()
     })
 }
@@ -320,15 +372,15 @@ mod tests {
     #[test]
     fn sum_array_response_preserves_complex_phase() {
         let curve_a = Curve {
-            freq: Array1::from(vec![100.0]),
-            spl: Array1::from(vec![80.0]),
-            phase: Some(Array1::from(vec![0.0])),
+            freq: Array1::from(vec![100.0, 200.0]),
+            spl: Array1::from(vec![80.0, 80.0]),
+            phase: Some(Array1::from(vec![0.0, 0.0])),
             ..Default::default()
         };
         let curve_b = Curve {
-            freq: Array1::from(vec![100.0]),
-            spl: Array1::from(vec![80.0]),
-            phase: Some(Array1::from(vec![90.0])),
+            freq: Array1::from(vec![100.0, 200.0]),
+            spl: Array1::from(vec![80.0, 80.0]),
+            phase: Some(Array1::from(vec![90.0, 90.0])),
             ..Default::default()
         };
 
@@ -345,15 +397,15 @@ mod tests {
     #[test]
     fn sum_array_response_exact_cancellation_has_finite_floor_and_phase() {
         let curve_a = Curve {
-            freq: Array1::from(vec![100.0]),
-            spl: Array1::from(vec![0.0]),
-            phase: Some(Array1::from(vec![0.0])),
+            freq: Array1::from(vec![100.0, 200.0]),
+            spl: Array1::from(vec![0.0, 0.0]),
+            phase: Some(Array1::from(vec![0.0, 0.0])),
             ..Default::default()
         };
         let curve_b = Curve {
-            freq: Array1::from(vec![100.0]),
-            spl: Array1::from(vec![0.0]),
-            phase: Some(Array1::from(vec![180.0])),
+            freq: Array1::from(vec![100.0, 200.0]),
+            spl: Array1::from(vec![0.0, 0.0]),
+            phase: Some(Array1::from(vec![180.0, 180.0])),
             ..Default::default()
         };
 
@@ -364,6 +416,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(summed.spl[0], -240.0);
-        assert!(summed.phase.as_ref().unwrap()[0].is_finite());
+        assert_eq!(summed.phase.as_ref().unwrap()[0], 0.0);
     }
 }

@@ -15,21 +15,9 @@ pub const NORMALIZE_LOW_FREQ: f64 = 1000.0;
 /// from `NORMALIZE_LOW_FREQ` to `NORMALIZE_HIGH_FREQ`.
 pub const NORMALIZE_HIGH_FREQ: f64 = 2000.0;
 
-/// Normalize frequency response by subtracting mean in 100Hz-12kHz range
+/// Normalize a response by subtracting its log-frequency-weighted mean.
 fn normalize_response(input: &Curve, f_min: f64, f_max: f64) -> Array1<f64> {
-    let mut sum = 0.0;
-    let mut count = 0;
-
-    // Calculate mean in the specified frequency range
-    for i in 0..input.freq.len() {
-        if input.freq[i] >= f_min && input.freq[i] <= f_max {
-            sum += input.spl[i];
-            count += 1;
-        }
-    }
-
-    if count > 0 {
-        let mean = sum / count as f64;
+    if let Some(mean) = mean_over_log_frequency(&input.freq, &input.spl, f_min, f_max) {
         input.spl.clone() - mean // Subtract mean from all values
     } else {
         input.spl.clone() // Return unchanged if no points in range
@@ -38,8 +26,8 @@ fn normalize_response(input: &Curve, f_min: f64, f_max: f64) -> Array1<f64> {
 
 /// Normalize and interpolate a frequency response curve.
 ///
-/// Normalizes the SPL by subtracting the mean in the 1000-2000 Hz range,
-/// then interpolates the result to the standard frequency grid.
+/// Interpolates to the standard frequency grid, then normalizes the SPL by
+/// subtracting the log-frequency-weighted mean in the 1000-2000 Hz range.
 ///
 /// # Arguments
 ///
@@ -53,18 +41,9 @@ pub fn normalize_and_interpolate_response(
     standard_freq: &ndarray::Array1<f64>,
     curve: &Curve,
 ) -> Curve {
-    // Normalize after interpolation
-    let spl_norm = normalize_response(curve, NORMALIZE_LOW_FREQ, NORMALIZE_HIGH_FREQ);
-
-    interpolate_log_space(
-        standard_freq,
-        &Curve {
-            freq: curve.freq.clone(),
-            spl: spl_norm,
-            phase: curve.phase.clone(),
-            ..Default::default()
-        },
-    )
+    let mut interpolated = interpolate_log_space(standard_freq, curve);
+    interpolated.spl = normalize_response(&interpolated, NORMALIZE_LOW_FREQ, NORMALIZE_HIGH_FREQ);
+    interpolated
 }
 
 /// Interpolate a frequency response curve WITHOUT normalizing.
@@ -95,17 +74,9 @@ pub fn normalize_and_interpolate_response_with_range(
     norm_freq_min: f64,
     norm_freq_max: f64,
 ) -> Curve {
-    let spl_norm = normalize_response(curve, norm_freq_min, norm_freq_max);
-
-    interpolate_log_space(
-        standard_freq,
-        &Curve {
-            freq: curve.freq.clone(),
-            spl: spl_norm,
-            phase: curve.phase.clone(),
-            ..Default::default()
-        },
-    )
+    let mut interpolated = interpolate_log_space(standard_freq, curve);
+    interpolated.spl = normalize_response(&interpolated, norm_freq_min, norm_freq_max);
+    interpolated
 }
 
 #[cfg(test)]
@@ -115,20 +86,21 @@ mod tests {
     use ndarray::Array1;
 
     #[test]
-    fn normalize_response_subtracts_mean_in_range() {
+    fn normalize_response_subtracts_log_frequency_mean_in_range() {
         let curve = Curve {
             freq: Array1::from_vec(vec![500.0, 1000.0, 1500.0, 2000.0, 2500.0]),
             spl: Array1::from_vec(vec![0.0, 2.0, 4.0, 6.0, 8.0]),
             phase: None,
             ..Default::default()
         };
+        let mean = mean_over_log_frequency(&curve.freq, &curve.spl, 1000.0, 2000.0).unwrap();
         let result = normalize_response(&curve, 1000.0, 2000.0);
-        // Mean of [2.0, 4.0, 6.0] = 4.0
-        assert!((result[0] - (-4.0)).abs() < 1e-12);
-        assert!((result[1] - (-2.0)).abs() < 1e-12);
-        assert!((result[2] - 0.0).abs() < 1e-12);
-        assert!((result[3] - 2.0).abs() < 1e-12);
-        assert!((result[4] - 4.0).abs() < 1e-12);
+        for ((&actual, &original), index) in result.iter().zip(curve.spl.iter()).zip(0..) {
+            assert!(
+                (actual - (original - mean)).abs() < 1e-12,
+                "unexpected normalized value at {index}"
+            );
+        }
     }
 
     #[test]
@@ -192,6 +164,40 @@ mod tests {
         assert_eq!(result.freq.len(), standard_freq.len());
         for &v in result.spl.iter() {
             assert!(v.is_finite());
+        }
+    }
+
+    #[test]
+    fn normalize_and_interpolate_is_invariant_to_source_grid_density() {
+        fn response_at(freq: f64) -> f64 {
+            if freq <= 1000.0 {
+                0.0
+            } else if freq >= 2000.0 {
+                6.0
+            } else {
+                6.0 * (freq / 1000.0).ln() / 2.0_f64.ln()
+            }
+        }
+
+        let sparse_freq = vec![500.0, 1000.0, 2000.0, 4000.0];
+        let dense_freq = vec![
+            500.0, 1000.0, 1050.0, 1100.0, 1200.0, 1400.0, 1600.0, 1800.0, 2000.0, 4000.0,
+        ];
+        let curve = |freq: Vec<f64>| Curve {
+            spl: Array1::from_iter(freq.iter().copied().map(response_at)),
+            freq: Array1::from_vec(freq),
+            ..Default::default()
+        };
+        let standard_freq = Array1::logspace(10.0, 500.0_f64.log10(), 4000.0_f64.log10(), 31);
+
+        let sparse = normalize_and_interpolate_response(&standard_freq, &curve(sparse_freq));
+        let dense = normalize_and_interpolate_response(&standard_freq, &curve(dense_freq));
+
+        for (index, (&a, &b)) in sparse.spl.iter().zip(dense.spl.iter()).enumerate() {
+            assert!(
+                (a - b).abs() < 1e-9,
+                "normalized responses differ at {index}: {a} versus {b}"
+            );
         }
     }
 }

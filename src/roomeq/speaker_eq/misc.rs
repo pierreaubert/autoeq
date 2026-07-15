@@ -63,7 +63,7 @@ pub(in super::super) fn optimize_eq_maybe_multi(
     channel_name: &str,
     callback: Option<crate::optim::OptimProgressCallback>,
     target_tilt_curve: Option<&Curve>,
-) -> Result<(Vec<Biquad>, f64)> {
+) -> Result<eq::EqOptimizationResult> {
     use super::super::types::MultiMeasurementStrategy;
 
     let use_multi = matches!(
@@ -113,7 +113,7 @@ pub(in super::super) fn optimize_eq_maybe_multi(
         );
 
         if let Some(cb) = callback {
-            eq::optimize_channel_eq_multi_with_callback(
+            eq::optimize_channel_eq_multi_with_callback_detailed(
                 &curves,
                 optimizer_config,
                 multi_config,
@@ -122,7 +122,7 @@ pub(in super::super) fn optimize_eq_maybe_multi(
                 cb,
             )
         } else {
-            eq::optimize_channel_eq_multi(
+            eq::optimize_channel_eq_multi_detailed(
                 &curves,
                 optimizer_config,
                 multi_config,
@@ -138,7 +138,7 @@ pub(in super::super) fn optimize_eq_maybe_multi(
         })
     } else {
         if let Some(cb) = callback {
-            eq::optimize_channel_eq_with_callback(
+            eq::optimize_channel_eq_with_callback_detailed(
                 optimization_curve,
                 optimizer_config,
                 target_config,
@@ -146,7 +146,7 @@ pub(in super::super) fn optimize_eq_maybe_multi(
                 cb,
             )
         } else {
-            eq::optimize_channel_eq(
+            eq::optimize_channel_eq_detailed(
                 optimization_curve,
                 optimizer_config,
                 target_config,

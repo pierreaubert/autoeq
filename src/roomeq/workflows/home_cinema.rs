@@ -300,6 +300,7 @@ fn optimize_home_cinema_no_sub(
             validation_bundle: None,
             supporting_source: None,
             correction_acceptance: None,
+            optimizer_evidence: None,
             stage_outcomes: Vec::new(),
         },
     })
@@ -371,6 +372,10 @@ fn optimize_home_cinema_with_sub(
     let mut pre_eq_plugins: HashMap<String, Vec<super::super::types::PluginConfigWrapper>> =
         HashMap::new();
     let mut linearized_curves: HashMap<String, Curve> = HashMap::new();
+    let mut optimizer_evidence_by_channel: HashMap<
+        String,
+        Vec<crate::optim::OptimizerRunEvidence>,
+    > = HashMap::new();
     let mut multi_seat_rejections: HashMap<String, Vec<String>> = HashMap::new();
 
     let max_iterations = config.optimizer.max_iter;
@@ -408,6 +413,7 @@ fn optimize_home_cinema_with_sub(
             multi_seat_rejections.insert(role.clone(), advisories);
         }
         pre_eq_plugins.insert(role.clone(), mark_plugins_stage(chain.plugins, "pre_route"));
+        optimizer_evidence_by_channel.insert(role.clone(), ch_result.optimizer_evidence);
         linearized_curves.insert(role.clone(), ch_result.final_curve);
     }
 
@@ -446,6 +452,7 @@ fn optimize_home_cinema_with_sub(
             sub_role.clone(),
             mark_plugins_stage(chain.plugins, "pre_route"),
         );
+        optimizer_evidence_by_channel.insert(sub_role.clone(), ch_result.optimizer_evidence);
         linearized_curves.insert(sub_role.clone(), ch_result.final_curve);
     }
     workflow_stage_event(
@@ -974,13 +981,14 @@ fn optimize_home_cinema_with_sub(
             total_post_eq_passes,
             opt_config.max_iter,
         );
-        let (filters, _) = run_post_eq(
+        let mut post_eq_result = run_post_eq(
             post_curve,
             &opt_config,
             config.target_curve.as_ref(),
             sample_rate,
             post_eq_callback,
         )?;
+        let filters = post_eq_result.filters;
 
         let pre = compute_flat_loss(post_curve, opt_config.min_freq, main_post_max_freq);
         let eq_resp =
@@ -988,8 +996,19 @@ fn optimize_home_cinema_with_sub(
         let post_curve_after = response::apply_complex_response(post_curve, &eq_resp);
         let post = compute_flat_loss(&post_curve_after, opt_config.min_freq, main_post_max_freq);
         if post < pre {
+            optimizer_evidence_by_channel
+                .entry(role.clone())
+                .or_default()
+                .append(&mut post_eq_result.optimizer_evidence);
             post_eq_filters.insert(role.clone(), filters);
         } else {
+            for evidence in &mut post_eq_result.optimizer_evidence {
+                evidence.selected_for_output = false;
+            }
+            optimizer_evidence_by_channel
+                .entry(role.clone())
+                .or_default()
+                .append(&mut post_eq_result.optimizer_evidence);
             log::warn!(
                 "  {} Post-EQ discarded: score regressed from {:.4} to {:.4}",
                 role,
@@ -1021,21 +1040,33 @@ fn optimize_home_cinema_with_sub(
             total_post_eq_passes,
             opt_config.max_iter,
         );
-        let (filters, _) = run_post_eq(
+        let mut post_eq_result = run_post_eq(
             &sub_post,
             &opt_config,
             config.target_curve.as_ref(),
             sample_rate,
             sub_callback,
         )?;
+        let filters = post_eq_result.filters;
 
         let pre = compute_flat_loss(&sub_post, sub_min_score, bass_route_upper_hz);
         let eq_resp = response::compute_peq_complex_response(&filters, &sub_post.freq, sample_rate);
         let sub_after_eq = response::apply_complex_response(&sub_post, &eq_resp);
         let post = compute_flat_loss(&sub_after_eq, sub_min_score, bass_route_upper_hz);
         if post < pre {
+            optimizer_evidence_by_channel
+                .entry(sub_role.clone())
+                .or_default()
+                .append(&mut post_eq_result.optimizer_evidence);
             post_eq_filters.insert(sub_role.clone(), filters);
         } else {
+            for evidence in &mut post_eq_result.optimizer_evidence {
+                evidence.selected_for_output = false;
+            }
+            optimizer_evidence_by_channel
+                .entry(sub_role.clone())
+                .or_default()
+                .append(&mut post_eq_result.optimizer_evidence);
             log::warn!(
                 "  Sub Post-EQ discarded: score regressed from {:.4} to {:.4}",
                 pre,
@@ -1307,6 +1338,9 @@ fn optimize_home_cinema_with_sub(
                 final_curve: final_curve_obj,
                 biquads: post_eq_filters.get(role).cloned().unwrap_or_default(),
                 fir_coeffs: None,
+                optimizer_evidence: optimizer_evidence_by_channel
+                    .remove(role)
+                    .unwrap_or_default(),
             },
         );
     }
@@ -1326,6 +1360,9 @@ fn optimize_home_cinema_with_sub(
                 final_curve: final_sub_curve.clone(),
                 biquads: post_eq_filters.get(&sub_role).cloned().unwrap_or_default(),
                 fir_coeffs: None,
+                optimizer_evidence: optimizer_evidence_by_channel
+                    .remove(&sub_role)
+                    .unwrap_or_default(),
             },
         );
     }
@@ -1390,6 +1427,7 @@ fn optimize_home_cinema_with_sub(
             validation_bundle: None,
             supporting_source: None,
             correction_acceptance: None,
+            optimizer_evidence: None,
             stage_outcomes: Vec::new(),
         },
     })

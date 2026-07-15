@@ -289,6 +289,7 @@ fn two_channel_generic_collection() -> GenericChannelCollection {
             final_curve: curve.clone(),
             biquads: Vec::new(),
             fir_coeffs: None,
+            optimizer_evidence: Vec::new(),
         },
     );
     channel_results.insert(
@@ -301,6 +302,7 @@ fn two_channel_generic_collection() -> GenericChannelCollection {
             final_curve: curve.clone(),
             biquads: Vec::new(),
             fir_coeffs: None,
+            optimizer_evidence: Vec::new(),
         },
     );
     let mut curves = HashMap::new();

@@ -72,10 +72,9 @@ pub struct WeightedPrototype {
 /// `crate::read::load_source_individual` first, which interpolates all curves to the
 /// first curve's grid.
 ///
-/// The returned `WeightedPrototype.curve` is a clone of the first input curve
-/// with only `freq` and `spl` overwritten. All other metadata — including
-/// `coherence`, `noise_floor_db`, `phase`, and the cached phase-decomposition
-/// fields — are preserved.
+/// The returned curve is a magnitude-only prototype. Phase, coherence, noise
+/// floor, and phase-decomposition caches are position-specific and therefore
+/// invalid after magnitudes from multiple positions have been combined.
 pub fn build_weighted_prototype(
     curves: &[Curve],
     config: &RirPrototypeConfig,
@@ -158,11 +157,11 @@ pub fn build_weighted_prototype(
 
     let avg_spl = power_sum.mapv(|p| 10.0 * p.max(1e-12).log10());
 
-    // Preserve all metadata (coherence, noise_floor_db, phase, delay cache, etc.)
-    // from the first input curve; only the frequency grid and SPL are recomputed.
-    let mut prototype = curves[0].clone();
-    prototype.freq = freqs;
-    prototype.spl = avg_spl;
+    let prototype = Curve {
+        freq: freqs,
+        spl: avg_spl,
+        ..Default::default()
+    };
 
     Ok(WeightedPrototype {
         curve: prototype,
@@ -238,6 +237,34 @@ mod tests {
         let expected =
             10.0 * ((10.0_f64.powf(80.0 / 10.0) + 10.0_f64.powf(86.0 / 10.0)) / 2.0).log10();
         assert!((prototype.curve.spl[0] - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn magnitude_prototype_invalidates_position_specific_metadata() {
+        let config = RirPrototypeConfig {
+            reference_position: [0.0, 0.0, 0.0],
+            source_position: [0.0, 2.0, 0.0],
+            microphone_positions: vec![[0.0, 0.0, 0.0], [0.3, 0.0, 0.0]],
+            distance_mode: DistanceWeightMode::Uniform,
+            directivity: DirectivityModel::Omnidirectional,
+            frequency_dependent_directivity: false,
+        };
+        let mut first = flat_curve(80.0);
+        first.phase = Some(Array1::from_vec(vec![10.0, 20.0, 30.0]));
+        first.coherence = Some(Array1::from_vec(vec![0.8, 0.9, 0.95]));
+        first.noise_floor_db = Some(Array1::from_vec(vec![-50.0, -55.0, -60.0]));
+        first.min_phase = Some(Array1::from_vec(vec![1.0, 2.0, 3.0]));
+        first.excess_phase = Some(Array1::from_vec(vec![9.0, 18.0, 27.0]));
+        first.excess_delay_ms = Some(1.5);
+
+        let prototype = build_weighted_prototype(&[first, flat_curve(86.0)], &config).unwrap();
+
+        assert!(prototype.curve.phase.is_none());
+        assert!(prototype.curve.coherence.is_none());
+        assert!(prototype.curve.noise_floor_db.is_none());
+        assert!(prototype.curve.min_phase.is_none());
+        assert!(prototype.curve.excess_phase.is_none());
+        assert!(prototype.curve.excess_delay_ms.is_none());
     }
 
     #[test]

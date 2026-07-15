@@ -65,7 +65,7 @@ pub(super) fn run_stereo_workflow_tests(
     let mut baseline_scorecard: Option<MetricScorecard> = None;
 
     for mutation in IIR_MUTATIONS {
-        let (mut config, _) = load_config(base_config_path, override_config_path)?;
+        let (mut config, _, _validation) = load_config(base_config_path, override_config_path)?;
         apply_qa_overrides(&mut config, &format!("{name}:iir:{mutation}"));
         apply_mutation(&mut config, *mutation);
 
@@ -478,7 +478,8 @@ pub(super) fn run_option_effect_test(
     };
 
     // Load and run baseline (all options disabled)
-    let (mut baseline_config, _) = load_config(&base_config_path, override_path.as_deref())?;
+    let (mut baseline_config, _, _validation) =
+        load_config(&base_config_path, override_path.as_deref())?;
     apply_qa_overrides(&mut baseline_config, &format!("{name}:option-baseline"));
     for option in options {
         disable_option(&mut baseline_config, option);
@@ -510,7 +511,8 @@ pub(super) fn run_option_effect_test(
     .unwrap();
 
     // Load and run with all options enabled
-    let (mut option_config, _) = load_config(&base_config_path, override_path.as_deref())?;
+    let (mut option_config, _, _validation) =
+        load_config(&base_config_path, override_path.as_deref())?;
     apply_qa_overrides(&mut option_config, &format!("{name}:option-enabled"));
     for option in options {
         apply_option_override(&mut option_config, option);

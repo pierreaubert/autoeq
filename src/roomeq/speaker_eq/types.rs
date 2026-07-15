@@ -16,6 +16,7 @@ pub(in super::super) type MixedModeResult = (
     f64,
     Option<f64>,
     Option<Vec<f64>>,
+    Vec<crate::optim::OptimizerRunEvidence>,
 );
 
 /// Decomposed DSP-chain parts for a single channel.
@@ -166,6 +167,7 @@ pub(in crate::roomeq) struct PreprocessedFeatures {
     pub excursion_filters: Vec<Biquad>,
     pub cea2034_filters: Vec<Biquad>,
     pub cea2034_plugins: Vec<PluginConfigWrapper>,
+    pub optimizer_evidence: Vec<crate::optim::OptimizerRunEvidence>,
     pub broadband_plugins: Vec<PluginConfigWrapper>,
     pub broadband_biquads: Vec<Biquad>,
     pub broadband_mean_shift: f64,

@@ -1980,6 +1980,7 @@ fn assemble_generic_result(
         validation_bundle: None,
         supporting_source: None,
         correction_acceptance: None,
+        optimizer_evidence: None,
         stage_outcomes,
     };
 
@@ -2088,6 +2089,7 @@ pub fn optimize_speaker(
         _mean_spl,
         _arrival_time_ms,
         fir_coeffs,
+        optimizer_evidence,
     ) = process_speaker_internal(
         channel_name,
         speaker_config,
@@ -2107,5 +2109,6 @@ pub fn optimize_speaker(
         final_curve,
         biquads,
         fir_coeffs,
+        optimizer_evidence,
     })
 }

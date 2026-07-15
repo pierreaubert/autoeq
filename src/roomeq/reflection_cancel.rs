@@ -66,6 +66,12 @@ pub fn compute_reflection_cancellation(
         log::info!("Reflection cancellation skipped: feature is disabled");
         return None;
     }
+    if !sample_rate.is_finite() || sample_rate <= 0.0 {
+        log::warn!(
+            "Reflection cancellation skipped: sample rate must be finite and positive, got {sample_rate}"
+        );
+        return None;
+    }
 
     // Step 1: Find the direct sound segment.
     let Some(direct) = ssir_result.direct_sound() else {
@@ -105,9 +111,16 @@ pub fn compute_reflection_cancellation(
     }
     let raw_gain = (first_reflection.peak_energy / direct.peak_energy).sqrt();
 
-    // Step 5: Clamp gain so attenuation doesn't exceed max_attenuation_db.
-    // max_attenuation_db limits how much we subtract. Convert dB limit to linear ceiling.
-    let max_gain = 1.0 - 10f64.powf(-config.max_attenuation_db / 20.0);
+    // Step 5: Clamp gain so cancellation cannot exceed max_attenuation_db.
+    // For `y = x - g*x`, the uncancelled amplitude is `1 - g`. Requiring
+    // that residual to stay at or above `10^(-A/20)` gives
+    // `g <= 1 - 10^(-A/20)`. Invalid/non-finite limits fail closed, and the
+    // physical subtraction gain is always constrained to [0, 1].
+    let max_gain = if config.max_attenuation_db.is_finite() {
+        (1.0 - 10f64.powf(-config.max_attenuation_db / 20.0)).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     let gain = raw_gain.min(max_gain);
 
     // Step 6: Design Butterworth LP cascade at max_freq_hz.
@@ -217,6 +230,54 @@ mod tests {
         // Should be clamped.
         let max_gain = 1.0 - 10f64.powf(-6.0 / 20.0);
         assert!((result.attenuation_linear - max_gain).abs() < 0.001);
+    }
+
+    #[test]
+    fn negative_attenuation_limit_clamps_cancellation_gain_to_zero() {
+        let ssir = make_ssir(vec![
+            direct_segment(0, 1.0),
+            reflection_segment(100, 480, 960, 0.25),
+        ]);
+        let config = ReflectionCancellationConfig {
+            max_attenuation_db: -6.0,
+            ..Default::default()
+        };
+
+        let result = compute_reflection_cancellation(&ssir, 48000.0, &config).unwrap();
+
+        assert_eq!(result.attenuation_linear, 0.0);
+    }
+
+    #[test]
+    fn non_finite_attenuation_limit_fails_closed() {
+        let ssir = make_ssir(vec![
+            direct_segment(0, 1.0),
+            reflection_segment(100, 480, 960, 0.25),
+        ]);
+        let config = ReflectionCancellationConfig {
+            max_attenuation_db: f64::NAN,
+            ..Default::default()
+        };
+
+        let result = compute_reflection_cancellation(&ssir, 48000.0, &config).unwrap();
+
+        assert_eq!(result.attenuation_linear, 0.0);
+    }
+
+    #[test]
+    fn invalid_sample_rate_rejects_reflection_cancellation() {
+        let ssir = make_ssir(vec![
+            direct_segment(0, 1.0),
+            reflection_segment(100, 480, 960, 0.25),
+        ]);
+        let config = ReflectionCancellationConfig::default();
+
+        for sample_rate in [0.0, -48_000.0, f64::NAN, f64::INFINITY] {
+            assert!(
+                compute_reflection_cancellation(&ssir, sample_rate, &config).is_none(),
+                "accepted invalid sample rate {sample_rate}"
+            );
+        }
     }
 
     #[test]

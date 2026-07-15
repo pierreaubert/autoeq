@@ -5,7 +5,7 @@
 
 use super::apply::{assemble_channel_report, assemble_dsp_chain, build_mixed_mode_result};
 use super::misc::optimize_eq_maybe_multi;
-use super::schroeder::optimize_with_schroeder_split;
+use super::schroeder::optimize_with_schroeder_split_detailed;
 use super::types::{
     ChannelOptimizationInput, MixedModeResult, OptimizerOutput, PreparedMeasurement,
     PreprocessedFeatures, TargetContext,
@@ -17,6 +17,15 @@ use crate::roomeq::types::{MeasurementSource, OptimizerConfig, ProcessingMode};
 use crate::roomeq::{artifacts, eq, fir, group_processing};
 use log::{info, warn};
 use math_audio_iir_fir::Biquad;
+
+fn with_preprocessing_evidence(
+    preprocessed: &PreprocessedFeatures,
+    mut optimizer_evidence: Vec<crate::optim::OptimizerRunEvidence>,
+) -> Vec<crate::optim::OptimizerRunEvidence> {
+    let mut combined = preprocessed.optimizer_evidence.clone();
+    combined.append(&mut optimizer_evidence);
+    combined
+}
 
 /// Strategy trait for processing a single speaker according to a processing mode.
 pub trait ChannelProcessingStrategy {
@@ -116,7 +125,12 @@ impl ChannelProcessingStrategy for PhaseLinearStrategy {
             cb(2, report.post_score, None);
         }
 
-        Ok(build_mixed_mode_result(dsp_chain, report, optim_output))
+        Ok(build_mixed_mode_result(
+            dsp_chain,
+            report,
+            optim_output,
+            preprocessed.optimizer_evidence.clone(),
+        ))
     }
 }
 
@@ -162,8 +176,8 @@ impl ChannelProcessingStrategy for HybridStrategy {
             preprocessed.curve_for_optim.clone()
         };
 
-        let (eq_filters, _opt_loss) = if let Some(cb) = input.callback.take() {
-            eq::optimize_channel_eq_with_callback(
+        let eq_result = if let Some(cb) = input.callback.take() {
+            eq::optimize_channel_eq_with_callback_detailed(
                 &hybrid_optim_curve,
                 &opt_config,
                 target.effective_target(input.room_config),
@@ -171,7 +185,7 @@ impl ChannelProcessingStrategy for HybridStrategy {
                 cb,
             )
         } else {
-            eq::optimize_channel_eq(
+            eq::optimize_channel_eq_detailed(
                 &hybrid_optim_curve,
                 &opt_config,
                 target.effective_target(input.room_config),
@@ -184,6 +198,11 @@ impl ChannelProcessingStrategy for HybridStrategy {
                 input.channel_name, e
             ),
         })?;
+        let eq::EqOptimizationResult {
+            filters: eq_filters,
+            optimizer_evidence,
+            ..
+        } = eq_result;
 
         info!("  IIR stage: {} filters", eq_filters.len());
 
@@ -233,7 +252,12 @@ impl ChannelProcessingStrategy for HybridStrategy {
             &optim_output,
         )?;
 
-        Ok(build_mixed_mode_result(dsp_chain, report, optim_output))
+        Ok(build_mixed_mode_result(
+            dsp_chain,
+            report,
+            optim_output,
+            with_preprocessing_evidence(preprocessed, optimizer_evidence),
+        ))
     }
 }
 
@@ -260,7 +284,11 @@ impl ChannelProcessingStrategy for MixedPhaseStrategy {
             preprocessed.curve_for_optim.clone()
         };
 
-        let (eq_filters, _opt_loss) = optimize_eq_maybe_multi(
+        let eq::EqOptimizationResult {
+            filters: eq_filters,
+            optimizer_evidence,
+            ..
+        } = optimize_eq_maybe_multi(
             input.source,
             &optimization_curve,
             clamped_optimizer,
@@ -403,7 +431,12 @@ impl ChannelProcessingStrategy for MixedPhaseStrategy {
             report.pre_score, report.post_score
         );
 
-        Ok(build_mixed_mode_result(dsp_chain, report, optim_output))
+        Ok(build_mixed_mode_result(
+            dsp_chain,
+            report,
+            optim_output,
+            with_preprocessing_evidence(preprocessed, optimizer_evidence),
+        ))
     }
 }
 
@@ -435,7 +468,9 @@ impl ChannelProcessingStrategy for LowLatencyStrategy {
             preprocessed.curve_for_optim.clone()
         };
 
-        let eq_filters = if let Some(schroeder_config) = &clamped_optimizer.schroeder_split {
+        let (eq_filters, optimizer_evidence) = if let Some(schroeder_config) =
+            &clamped_optimizer.schroeder_split
+        {
             if schroeder_config.enabled {
                 let schroeder_freq = if let Some(ref dims) = schroeder_config.room_dimensions {
                     let calculated = dims.schroeder_frequency();
@@ -454,15 +489,15 @@ impl ChannelProcessingStrategy for LowLatencyStrategy {
                     schroeder_config.high_freq_config.max_q
                 );
 
-                let (low_filters, high_filters) = optimize_with_schroeder_split(
+                let result = optimize_with_schroeder_split_detailed(
                     &optimization_curve,
                     clamped_optimizer,
                     schroeder_config,
                     input.sample_rate,
                 )?;
 
-                let mut combined_filters = low_filters;
-                combined_filters.extend(high_filters);
+                let mut combined_filters = result.low_filters;
+                combined_filters.extend(result.high_filters);
                 info!(
                     "  Schroeder split: {} low-freq filters + {} high-freq filters",
                     combined_filters
@@ -474,9 +509,9 @@ impl ChannelProcessingStrategy for LowLatencyStrategy {
                         .filter(|f| f.freq >= schroeder_freq)
                         .count()
                 );
-                combined_filters
+                (combined_filters, result.optimizer_evidence)
             } else {
-                let (filters, _opt_loss) = optimize_eq_maybe_multi(
+                let result = optimize_eq_maybe_multi(
                     input.source,
                     &optimization_curve,
                     clamped_optimizer,
@@ -486,10 +521,10 @@ impl ChannelProcessingStrategy for LowLatencyStrategy {
                     input.callback.take(),
                     target.target_tilt_curve.as_ref(),
                 )?;
-                filters
+                (result.filters, result.optimizer_evidence)
             }
         } else {
-            let (filters, _opt_loss) = optimize_eq_maybe_multi(
+            let result = optimize_eq_maybe_multi(
                 input.source,
                 &optimization_curve,
                 clamped_optimizer,
@@ -499,7 +534,7 @@ impl ChannelProcessingStrategy for LowLatencyStrategy {
                 input.callback.take(),
                 target.target_tilt_curve.as_ref(),
             )?;
-            filters
+            (result.filters, result.optimizer_evidence)
         };
 
         info!("  Optimized {} EQ filters", eq_filters.len());
@@ -539,7 +574,12 @@ impl ChannelProcessingStrategy for LowLatencyStrategy {
             &optim_output,
         )?;
 
-        Ok(build_mixed_mode_result(dsp_chain, report, optim_output))
+        Ok(build_mixed_mode_result(
+            dsp_chain,
+            report,
+            optim_output,
+            with_preprocessing_evidence(preprocessed, optimizer_evidence),
+        ))
     }
 }
 
@@ -661,6 +701,11 @@ impl ChannelProcessingStrategy for KautzModalStrategy {
             &optim_output,
         )?;
 
-        Ok(build_mixed_mode_result(dsp_chain, report, optim_output))
+        Ok(build_mixed_mode_result(
+            dsp_chain,
+            report,
+            optim_output,
+            preprocessed.optimizer_evidence.clone(),
+        ))
     }
 }

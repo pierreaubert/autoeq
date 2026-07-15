@@ -41,7 +41,7 @@ curl "http://api.spinorama.org/v1/speakers/JBL%20M2/versions/eac/measurements"
 | `--peq-model` | pk | Filter structure model |
 | `--min-freq` / `--max-freq` | 60 / 16000 | Frequency range for filters |
 | `--min-q` / `--max-q` | 1 / 3 | Q factor limits |
-| `--min-db` / `--max-db` | 1 / 3 | Gain limits (dB) |
+| `--min-db` / `--max-db` | -12 / 3 | Signed cut/boost gain limits (dB) |
 | `--maxeval` | 2000 | Maximum optimizer evaluations |
 | `--refine` | false | Run local refinement after global optimization |
 

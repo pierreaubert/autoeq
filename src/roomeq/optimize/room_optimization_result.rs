@@ -13,8 +13,17 @@ pub(super) fn apply_final_correction_safety_gate(
         CorrectionAcceptancePolicy, CorrectionDecision, evaluate_correction_acceptance,
     };
 
+    let optimizer_confidence = refresh_optimizer_evidence(result);
+    let optimizer_rejected =
+        optimizer_confidence == Some(crate::optim::OptimizerConfidence::Unusable);
+    let mut reverted = if optimizer_rejected {
+        let reverted = revert_all_correction_stages(result, sample_rate);
+        refresh_combined_scores(result);
+        reverted
+    } else {
+        Vec::new()
+    };
     let mut accepted_report = None;
-    let mut reverted = Vec::new();
     for (name, channel) in &mut result.channel_results {
         let epsilon = (channel.pre_score.abs() * 1e-4).max(1e-6);
         let regressed = !channel.post_score.is_finite()
@@ -148,57 +157,361 @@ pub(super) fn apply_final_correction_safety_gate(
             } else {
                 CorrectionDecision::RevertedStage
             };
-            report
-                .violations
-                .push("audibility_regression_reverted".to_string());
+            report.violations.push(if optimizer_rejected {
+                "optimizer_confidence_unusable".to_string()
+            } else {
+                "audibility_regression_reverted".to_string()
+            });
             report.reverted_stages = reverted;
         }
-        let mut names: Vec<_> = result.channel_results.keys().cloned().collect();
-        names.sort();
-        let training_pre: Vec<_> = names
-            .iter()
-            .map(|name| result.channel_results[name].initial_curve.clone())
-            .collect();
-        let training_post: Vec<_> = names
-            .iter()
-            .map(|name| result.channel_results[name].final_curve.clone())
-            .collect();
-        let min_freq_hz = training_pre
-            .iter()
-            .chain(&training_post)
-            .map(|curve| curve.freq[0])
-            .fold(0.0, f64::max);
-        let max_freq_hz = training_pre
-            .iter()
-            .chain(&training_post)
-            .filter_map(|curve| curve.freq.last().copied())
-            .fold(f64::INFINITY, f64::min);
-        if max_freq_hz > min_freq_hz {
-            let temporal = runtime_temporal_quality_evidence(
-                result,
-                &names,
-                &training_pre,
-                &training_post,
-                sample_rate,
+        if let Some((quality, realization, policy)) =
+            runtime_acceptance_evidence(result, sample_rate)
+        {
+            let _ = crate::roomeq::acoustic_qa::enforce_runtime_acceptance_evidence(
+                &mut report,
+                quality,
+                realization,
+                policy,
             );
-            report.acoustic_quality = crate::roomeq::acoustic_qa::evaluate_acoustic_quality(
-                &training_pre,
-                &training_post,
-                &[],
-                &[],
-                None,
-                crate::roomeq::acoustic_qa::QualityEvaluationConfig {
-                    min_freq_hz,
-                    max_freq_hz,
-                    schroeder_hz: None,
-                    normalize_level: true,
-                },
-                temporal,
-            )
-            .ok();
+            if report.violations.iter().any(|violation| {
+                is_runtime_quality_violation(violation)
+                    && violation != "audibility_regression_reverted"
+            }) {
+                let runtime_reverted = revert_all_correction_stages(result, sample_rate);
+                if !runtime_reverted.is_empty() {
+                    report.accepted = false;
+                    report.decision = CorrectionDecision::RevertedStage;
+                    report
+                        .reverted_stages
+                        .extend(runtime_reverted.iter().cloned());
+                    report.reverted_stages.sort();
+                    report.reverted_stages.dedup();
+                    report
+                        .violations
+                        .push("runtime_policy_violation_reverted".to_string());
+                    report.violations.sort();
+                    report.violations.dedup();
+                    result
+                        .metadata
+                        .stage_outcomes
+                        .push(crate::roomeq::types::StageOutcome {
+                            stage: "final_runtime_acceptance".to_string(),
+                            status: crate::roomeq::types::StageStatus::Degraded,
+                            advisories: runtime_reverted
+                                .iter()
+                                .map(|stage| format!("runtime_policy_reverted_{stage}"))
+                                .collect(),
+                        });
+                    refresh_combined_scores(result);
+                    if let Some((quality, realization, _)) =
+                        runtime_acceptance_evidence(result, sample_rate)
+                    {
+                        report.acoustic_quality = Some(quality);
+                        report.realization_quality = Some(realization);
+                    }
+                }
+            }
         }
         result.metadata.correction_acceptance = Some(report);
     }
+}
+
+const OPTIMIZER_ACCEPTANCE_POLICY_VERSION: &str = "1.0.0";
+
+fn refresh_optimizer_evidence(
+    result: &mut RoomOptimizationResult,
+) -> Option<crate::optim::OptimizerConfidence> {
+    use crate::optim::OptimizerConfidence;
+    use crate::roomeq::types::{RoomOptimizerEvidence, StageOutcome, StageStatus};
+
+    let runs_by_channel: std::collections::BTreeMap<_, _> = result
+        .channel_results
+        .iter()
+        .filter(|(_, channel)| !channel.optimizer_evidence.is_empty())
+        .map(|(name, channel)| (name.clone(), channel.optimizer_evidence.clone()))
+        .collect();
+    result
+        .metadata
+        .stage_outcomes
+        .retain(|outcome| outcome.stage != "optimizer_confidence");
+    if runs_by_channel.is_empty() {
+        result.metadata.optimizer_evidence = None;
+        return None;
+    }
+
+    let selected: Vec<_> = runs_by_channel
+        .iter()
+        .flat_map(|(channel, runs)| {
+            runs.iter()
+                .filter(|run| run.selected_for_output)
+                .map(move |run| (channel, run))
+        })
+        .collect();
+    let confidence = if selected.is_empty()
+        || selected
+            .iter()
+            .any(|(_, run)| run.confidence == OptimizerConfidence::Unusable)
+    {
+        OptimizerConfidence::Unusable
+    } else if selected
+        .iter()
+        .any(|(_, run)| run.confidence == OptimizerConfidence::Low)
+    {
+        OptimizerConfidence::Low
+    } else {
+        OptimizerConfidence::High
+    };
+
+    let mut advisories = Vec::new();
+    if selected.is_empty() {
+        advisories.push("optimizer_no_selected_run".to_string());
+    }
+    for (channel, run) in selected {
+        match run.confidence {
+            OptimizerConfidence::High => {}
+            OptimizerConfidence::Low => {
+                advisories.push(format!("optimizer_best_effort_selected:{channel}"));
+            }
+            OptimizerConfidence::Unusable => {
+                advisories.push(format!("optimizer_unusable_selected:{channel}"));
+            }
+        }
+    }
+    if !advisories.is_empty() {
+        result.metadata.stage_outcomes.push(StageOutcome {
+            stage: "optimizer_confidence".to_string(),
+            status: StageStatus::Degraded,
+            advisories,
+        });
+    }
+    result.metadata.optimizer_evidence = Some(RoomOptimizerEvidence {
+        policy_version: OPTIMIZER_ACCEPTANCE_POLICY_VERSION.to_string(),
+        confidence,
+        runs_by_channel,
+    });
+    Some(confidence)
+}
+
+fn runtime_acceptance_evidence(
+    result: &RoomOptimizationResult,
+    sample_rate: f64,
+) -> Option<(
+    crate::roomeq::acoustic_qa::AcousticQualityScorecard,
+    crate::roomeq::acoustic_qa::RealizationQualityEvidence,
+    crate::roomeq::acoustic_qa::RuntimeAcceptancePolicy,
+)> {
+    let mut names: Vec<_> = result.channel_results.keys().cloned().collect();
+    names.sort();
+    let training_pre: Vec<_> = names
+        .iter()
+        .map(|name| result.channel_results[name].initial_curve.clone())
+        .collect();
+    let training_post: Vec<_> = names
+        .iter()
+        .map(|name| result.channel_results[name].final_curve.clone())
+        .collect();
+    let min_freq_hz = training_pre
+        .iter()
+        .chain(&training_post)
+        .map(|curve| curve.freq[0])
+        .fold(0.0, f64::max);
+    let max_freq_hz = training_pre
+        .iter()
+        .chain(&training_post)
+        .filter_map(|curve| curve.freq.last().copied())
+        .fold(f64::INFINITY, f64::min);
+    if max_freq_hz <= min_freq_hz {
+        return None;
+    }
+    let temporal = runtime_temporal_quality_evidence(
+        result,
+        &names,
+        &training_pre,
+        &training_post,
+        sample_rate,
+    );
+    let quality = crate::roomeq::acoustic_qa::evaluate_acoustic_quality(
+        &training_pre,
+        &training_post,
+        &[],
+        &[],
+        None,
+        crate::roomeq::acoustic_qa::QualityEvaluationConfig {
+            min_freq_hz,
+            max_freq_hz,
+            schroeder_hz: None,
+            normalize_level: true,
+        },
+        temporal,
+    )
+    .ok()?;
+    let realization = runtime_realization_quality(result, &names, sample_rate);
+    let has_fir = result
+        .channel_results
+        .values()
+        .any(|channel| channel.fir_coeffs.is_some())
+        || result.channels.values().any(|chain| {
+            chain
+                .plugins
+                .iter()
+                .any(|plugin| plugin.plugin_type == "convolution")
+        });
+    let has_iir = result.channels.values().any(|chain| {
+        chain.plugins.iter().any(|plugin| {
+            correction_stage(plugin).is_some_and(|stage| stage != CorrectionStage::Fir)
+        })
+    });
+    let output_class = match (has_fir, has_iir) {
+        (true, true) => crate::roomeq::acoustic_qa::RuntimeOutputClass::Hybrid,
+        (true, false) => crate::roomeq::acoustic_qa::RuntimeOutputClass::Fir,
+        (false, _) => crate::roomeq::acoustic_qa::RuntimeOutputClass::LowLatencyIir,
+    };
+    let policy =
+        crate::roomeq::acoustic_qa::RuntimeAcceptancePolicy::for_output_class(output_class);
+    Some((quality, realization, policy))
+}
+
+fn runtime_realization_quality(
+    result: &RoomOptimizationResult,
+    names: &[String],
+    sample_rate: f64,
+) -> crate::roomeq::acoustic_qa::RealizationQualityEvidence {
+    let mut evaluated_channels = 0;
+    let mut max_abs_error_db = 0.0_f64;
+    let mut failed_channels = Vec::new();
+    for name in names {
+        let channel = &result.channel_results[name];
+        let Some(chain) = result.channels.get(name) else {
+            failed_channels.push(name.clone());
+            continue;
+        };
+        let Ok(realized) = crate::roomeq::ctc::apply_channel_dsp_chain_to_curve(
+            chain,
+            &channel.initial_curve,
+            sample_rate,
+        ) else {
+            failed_channels.push(name.clone());
+            continue;
+        };
+        if realized.freq.len() != channel.final_curve.freq.len()
+            || realized.spl.len() != channel.final_curve.spl.len()
+            || realized
+                .freq
+                .iter()
+                .zip(&channel.final_curve.freq)
+                .any(|(left, right)| (left - right).abs() > 1e-9)
+        {
+            failed_channels.push(name.clone());
+            continue;
+        }
+        let channel_error = realized
+            .spl
+            .iter()
+            .zip(&channel.final_curve.spl)
+            .map(|(left, right)| (left - right).abs())
+            .fold(0.0_f64, f64::max);
+        if !channel_error.is_finite() {
+            failed_channels.push(name.clone());
+            continue;
+        }
+        evaluated_channels += 1;
+        max_abs_error_db = max_abs_error_db.max(channel_error);
+    }
+    crate::roomeq::acoustic_qa::RealizationQualityEvidence {
+        evaluated_channels,
+        max_abs_error_db: (evaluated_channels > 0).then_some(max_abs_error_db),
+        failed_channels,
+    }
+}
+
+fn is_runtime_quality_violation(violation: &str) -> bool {
+    matches!(
+        violation,
+        "acoustic_quality_non_finite"
+            | "post_p95_residual_limit_exceeded"
+            | "post_worst_residual_limit_exceeded"
+            | "worst_position_regressed"
+            | "max_boost_limit_exceeded"
+            | "headroom_limit_exceeded"
+            | "latency_limit_exceeded"
+            | "pre_ringing_limit_exceeded"
+            | "induced_group_delay_limit_exceeded"
+            | "realization_error_limit_exceeded"
+            | "realization_incomplete"
+    )
+}
+
+fn revert_all_correction_stages(
+    result: &mut RoomOptimizationResult,
+    sample_rate: f64,
+) -> Vec<String> {
+    let names: Vec<_> = result.channel_results.keys().cloned().collect();
+    let mut reverted = Vec::new();
+    for name in names {
+        let Some(existing_chain) = result.channels.get(&name) else {
+            continue;
+        };
+        let stages = correction_stages(existing_chain);
+        if stages.is_empty() {
+            continue;
+        }
+        let mut chain = existing_chain.clone();
+        for stage in &stages {
+            remove_correction_stage(&mut chain, *stage);
+        }
+        let initial = result.channel_results[&name].initial_curve.clone();
+        let Ok(final_curve) =
+            crate::roomeq::ctc::apply_channel_dsp_chain_to_curve(&chain, &initial, sample_rate)
+        else {
+            continue;
+        };
+        let target = chain
+            .target_curve
+            .clone()
+            .map(crate::Curve::from)
+            .unwrap_or_else(|| {
+                let mean = initial.spl.mean().unwrap_or(0.0);
+                let mut target = initial.clone();
+                target.spl.fill(mean);
+                target.phase = None;
+                target
+            });
+        let post_score = crate::roomeq::acoustic_qa::evaluate_correction_acceptance(
+            &initial,
+            &final_curve,
+            &target,
+            None,
+            crate::roomeq::acoustic_qa::CorrectionAcceptancePolicy::RuntimeSafety,
+        )
+        .map(|report| report.metrics.post_target_weighted_rms_db)
+        .unwrap_or(result.channel_results[&name].pre_score);
+        if let Some(channel) = result.channel_results.get_mut(&name) {
+            channel.final_curve = final_curve.clone();
+            channel.post_score = post_score;
+            channel.biquads.clear();
+            channel.fir_coeffs = None;
+        }
+        chain.final_curve = Some((&final_curve).into());
+        chain.eq_response = None;
+        result.channels.insert(name.clone(), chain);
+        reverted.extend(
+            stages
+                .into_iter()
+                .map(|stage| format!("{name}:{}", stage.as_str())),
+        );
+    }
+    reverted
+}
+
+fn refresh_combined_scores(result: &mut RoomOptimizationResult) {
+    let count = result.channel_results.len().max(1) as f64;
+    result.combined_post_score = result
+        .channel_results
+        .values()
+        .map(|channel| channel.post_score)
+        .sum::<f64>()
+        / count;
+    result.metadata.post_score = result.combined_post_score;
 }
 
 fn runtime_temporal_quality_evidence(
@@ -473,6 +786,7 @@ pub(super) fn sanity_check_result(result: &RoomOptimizationResult) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::optim::{OptimizerConfidence, OptimizerRunEvidence};
     use crate::roomeq::acoustic_qa::CorrectionDecision;
     use crate::roomeq::test_fixtures::{empty_metadata, single_channel_room_result};
     use crate::roomeq::types::{CtcConfig, RoomConfig, SystemConfig, SystemModel};
@@ -484,6 +798,82 @@ mod tests {
         let output = result.to_dsp_chain_output();
         assert!(output.channels.contains_key("left"));
         assert!(output.metadata.is_some());
+    }
+
+    #[test]
+    fn final_safety_gate_reports_selected_best_effort_optimizer_evidence() {
+        let mut result = single_channel_room_result("left");
+        let evidence = OptimizerRunEvidence::from_backend_result(
+            "autoeq:de",
+            Ok((
+                "not converged: maximum evaluation budget reached (nfev=40)".to_string(),
+                0.5,
+            )),
+            &[0.0],
+            &[-1.0],
+            &[1.0],
+            40,
+            Some(7),
+        );
+        result
+            .channel_results
+            .get_mut("left")
+            .unwrap()
+            .optimizer_evidence = vec![evidence];
+
+        apply_final_correction_safety_gate(&mut result, 48_000.0);
+
+        let report = result
+            .metadata
+            .optimizer_evidence
+            .as_ref()
+            .expect("optimizer evidence must be serialized in production metadata");
+        assert_eq!(report.confidence, OptimizerConfidence::Low);
+        assert_eq!(report.runs_by_channel["left"][0].evaluation_count, Some(40));
+        assert!(result.metadata.stage_outcomes.iter().any(|outcome| {
+            outcome.stage == "optimizer_confidence"
+                && outcome
+                    .advisories
+                    .contains(&"optimizer_best_effort_selected:left".to_string())
+        }));
+    }
+
+    #[test]
+    fn final_safety_gate_rejects_selected_unusable_optimizer_evidence() {
+        let mut result = single_channel_room_result("left");
+        let evidence = OptimizerRunEvidence::from_backend_result(
+            "autoeq:de",
+            Ok(("converged with invalid vector".to_string(), 0.5)),
+            &[2.0],
+            &[-1.0],
+            &[1.0],
+            40,
+            Some(7),
+        );
+        result
+            .channel_results
+            .get_mut("left")
+            .unwrap()
+            .optimizer_evidence = vec![evidence];
+
+        apply_final_correction_safety_gate(&mut result, 48_000.0);
+
+        let report = result.metadata.correction_acceptance.as_ref().unwrap();
+        assert!(!report.accepted);
+        assert!(
+            report
+                .violations
+                .contains(&"optimizer_confidence_unusable".to_string())
+        );
+        assert_eq!(
+            result
+                .metadata
+                .optimizer_evidence
+                .as_ref()
+                .unwrap()
+                .confidence,
+            OptimizerConfidence::Unusable
+        );
     }
 
     #[test]
@@ -653,6 +1043,45 @@ mod tests {
             .correction_acceptance
             .as_ref()
             .expect("acceptance report");
+        assert_eq!(report.decision, CorrectionDecision::RevertedStage);
+        assert_eq!(report.reverted_stages, ["left:peq"]);
+    }
+
+    #[test]
+    fn final_safety_gate_enforces_canonical_realization_error() {
+        let mut result = single_channel_room_result("left");
+        let channel = result.channel_results.get_mut("left").unwrap();
+        channel.pre_score = 4.0;
+        channel.post_score = 1.0;
+        channel.final_curve = channel.initial_curve.clone();
+        let filter = math_audio_iir_fir::Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Peak,
+            1_000.0,
+            48_000.0,
+            0.7,
+            12.0,
+        );
+        result.channels.get_mut("left").unwrap().plugins =
+            vec![crate::roomeq::create_labeled_eq_plugin(
+                &[filter],
+                "room_eq_correction",
+            )];
+
+        apply_final_correction_safety_gate(&mut result, 48_000.0);
+
+        assert!(result.channels["left"].plugins.is_empty());
+        let report = result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .expect("acceptance report");
+        assert!(!report.accepted);
+        assert!(
+            report
+                .violations
+                .iter()
+                .any(|value| value == "realization_error_limit_exceeded")
+        );
         assert_eq!(report.decision, CorrectionDecision::RevertedStage);
         assert_eq!(report.reverted_stages, ["left:peq"]);
     }

@@ -439,7 +439,7 @@ pub(in super::super) fn prepare_single_channel_eq(
 
 /// Run a single optimization pass with the given number of filters.
 ///
-/// Returns (filters, loss, parameter_vector).
+/// Returns (filters, loss, parameter_vector, optimizer evidence).
 #[allow(clippy::type_complexity)]
 pub(in super::super) fn run_optimization_pass(
     prep: &PreparedSingleChannelEq,
@@ -448,7 +448,15 @@ pub(in super::super) fn run_optimization_pass(
     config: &OptimizerConfig,
     callback: Option<crate::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
-) -> Result<(Vec<Biquad>, f64, Vec<f64>), Box<dyn Error>> {
+) -> Result<
+    (
+        Vec<Biquad>,
+        f64,
+        Vec<f64>,
+        Vec<crate::optim::OptimizerRunEvidence>,
+    ),
+    Box<dyn Error>,
+> {
     let mut optim_params = prep.args_template.clone();
     optim_params.num_filters = num_filters;
     optim_params.maxeval = max_iter;
@@ -507,18 +515,38 @@ pub(in super::super) fn run_optimization_pass(
         )
     };
 
-    let (converged_msg, global_loss) = match opt_result {
-        Ok((msg, loss)) => (msg, loss),
-        Err((msg, loss)) => {
-            log::warn!("  Global optimization did not fully converge: {}", msg);
-            (msg, loss)
+    let global_evidence = crate::optim::OptimizerRunEvidence::from_backend_result(
+        &optim_params.algo,
+        opt_result,
+        &x,
+        &lower_bounds,
+        &upper_bounds,
+        optim_params.maxeval,
+        optim_params.seed,
+    );
+    if !global_evidence.converged {
+        if global_evidence.best_effort {
+            log::warn!(
+                "  Global optimization did not fully converge: {}",
+                global_evidence.status
+            );
+        } else {
+            return Err(format!(
+                "global optimizer produced unusable result: {}",
+                global_evidence.status
+            )
+            .into());
         }
-    };
+    }
+    let global_loss = global_evidence
+        .objective
+        .ok_or("global optimizer did not return a finite objective")?;
     log::info!(
         "  Global optimizer result: {} (loss={:.6})",
-        converged_msg,
+        global_evidence.status,
         global_loss
     );
+    let mut optimizer_evidence = vec![global_evidence];
 
     // Local refinement (COBYLA)
     let final_loss = if config.refine {
@@ -536,14 +564,28 @@ pub(in super::super) fn run_optimization_pass(
             &optim_params,
             Some(&optim_params.local_algo),
         );
-        let local_loss = match local_result {
-            Ok((_msg, loss)) => loss,
-            Err((msg, loss)) => {
-                log::warn!("  Local refinement did not converge: {}", msg);
-                loss
-            }
-        };
-        if local_loss < global_loss {
+        let mut local_evidence = crate::optim::OptimizerRunEvidence::from_backend_result(
+            &optim_params.local_algo,
+            local_result,
+            &x,
+            &lower_bounds,
+            &upper_bounds,
+            optim_params.maxeval,
+            optim_params.seed,
+        );
+        if !local_evidence.converged {
+            log::warn!(
+                "  Local refinement did not fully converge: {}",
+                local_evidence.status
+            );
+        }
+        let local_loss = local_evidence.objective.unwrap_or(f64::INFINITY);
+        let use_local = local_evidence.confidence != crate::optim::OptimizerConfidence::Unusable
+            && local_loss < global_loss;
+        local_evidence.selected_for_output = use_local;
+        optimizer_evidence[0].selected_for_output = !use_local;
+        optimizer_evidence.push(local_evidence);
+        if use_local {
             log::info!(
                 "  Local refinement: {:.6} -> {:.6} (improved {:.6})",
                 global_loss,
@@ -581,5 +623,5 @@ pub(in super::super) fn run_optimization_pass(
         .filter(|b| b.db_gain.abs() >= 0.05)
         .collect();
 
-    Ok((filters, final_loss, x))
+    Ok((filters, final_loss, x, optimizer_evidence))
 }

@@ -27,6 +27,7 @@ pub(super) type SpeakerProcessResult = std::result::Result<
         f64,
         Option<f64>,
         Option<Vec<f64>>,
+        Vec<crate::optim::OptimizerRunEvidence>,
     ),
     AutoeqError,
 >;
@@ -53,6 +54,7 @@ pub(super) type MixedModeResult = (
     f64,
     Option<f64>,
     Option<Vec<f64>>,
+    Vec<crate::optim::OptimizerRunEvidence>,
 );
 
 /// Action to take after progress callback
@@ -89,6 +91,9 @@ pub struct ChannelOptimizationResult {
     pub biquads: Vec<Biquad>,
     /// FIR coefficients (for FIR/mixed mode)
     pub fir_coeffs: Option<Vec<f64>>,
+    /// Structured evidence from every backend invocation used or considered
+    /// while producing this channel.
+    pub optimizer_evidence: Vec<crate::optim::OptimizerRunEvidence>,
 }
 
 /// Result for single speaker optimization
@@ -108,6 +113,8 @@ pub struct SpeakerOptimizationResult {
     pub biquads: Vec<Biquad>,
     /// FIR coefficients (if applicable)
     pub fir_coeffs: Option<Vec<f64>>,
+    /// Structured backend termination and confidence evidence.
+    pub optimizer_evidence: Vec<crate::optim::OptimizerRunEvidence>,
 }
 
 pub(super) type SharedPipelineObserver = Arc<Mutex<Option<Box<dyn PipelineObserver>>>>;
@@ -164,6 +171,7 @@ pub(super) fn collect_generic_channel_results(
             mean_spl,
             arrival_time_ms,
             fir_coeffs,
+            optimizer_evidence,
         ) = res?;
 
         channel_chains.insert(channel_name.clone(), chain);
@@ -229,6 +237,7 @@ pub(super) fn collect_generic_channel_results(
                 final_curve,
                 biquads,
                 fir_coeffs,
+                optimizer_evidence,
             },
         );
 

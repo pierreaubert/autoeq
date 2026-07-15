@@ -21,6 +21,101 @@ pub enum CorrectionDecision {
     IdentityFallback,
 }
 
+pub const RUNTIME_ACCEPTANCE_POLICY_VERSION: &str = "1.0.0";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeOutputClass {
+    LowLatencyIir,
+    Fir,
+    Hybrid,
+}
+
+/// Versioned limits applied to production RoomEQ output.
+///
+/// The output class changes only temporal limits. Spectral, spatial, boost,
+/// headroom, and realization limits are invariant across filter classes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeAcceptancePolicy {
+    pub version: String,
+    pub output_class: RuntimeOutputClass,
+    pub max_post_p95_abs_residual_db: f64,
+    pub max_post_worst_abs_residual_db: f64,
+    pub max_worst_position_regression_db: f64,
+    pub max_boost_db: f64,
+    pub min_available_headroom_db: f64,
+    pub max_latency_ms: f64,
+    pub max_pre_ringing_energy_db: f64,
+    pub max_induced_group_delay_rms_ms: f64,
+    pub max_realization_error_db: f64,
+}
+
+impl RuntimeAcceptancePolicy {
+    pub fn for_output_class(output_class: RuntimeOutputClass) -> Self {
+        let (max_latency_ms, max_induced_group_delay_rms_ms) = match output_class {
+            RuntimeOutputClass::LowLatencyIir => (10.0, 5.0),
+            RuntimeOutputClass::Fir => (250.0, 25.0),
+            RuntimeOutputClass::Hybrid => (100.0, 10.0),
+        };
+        Self {
+            version: RUNTIME_ACCEPTANCE_POLICY_VERSION.to_string(),
+            output_class,
+            max_post_p95_abs_residual_db: 6.0,
+            max_post_worst_abs_residual_db: 12.0,
+            max_worst_position_regression_db: 0.25,
+            max_boost_db: 12.0,
+            min_available_headroom_db: -12.0,
+            max_latency_ms,
+            max_pre_ringing_energy_db: -20.0,
+            max_induced_group_delay_rms_ms,
+            max_realization_error_db: 0.25,
+        }
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.version != RUNTIME_ACCEPTANCE_POLICY_VERSION {
+            return Err(format!(
+                "unsupported runtime acceptance policy version '{}'; expected '{}'",
+                self.version, RUNTIME_ACCEPTANCE_POLICY_VERSION
+            ));
+        }
+        let finite = [
+            self.max_post_p95_abs_residual_db,
+            self.max_post_worst_abs_residual_db,
+            self.max_worst_position_regression_db,
+            self.max_boost_db,
+            self.min_available_headroom_db,
+            self.max_latency_ms,
+            self.max_pre_ringing_energy_db,
+            self.max_induced_group_delay_rms_ms,
+            self.max_realization_error_db,
+        ]
+        .into_iter()
+        .all(f64::is_finite);
+        if !finite
+            || self.max_post_p95_abs_residual_db < 0.0
+            || self.max_post_worst_abs_residual_db < 0.0
+            || self.max_worst_position_regression_db < 0.0
+            || self.max_boost_db < 0.0
+            || self.max_latency_ms < 0.0
+            || self.max_induced_group_delay_rms_ms < 0.0
+            || self.max_realization_error_db < 0.0
+        {
+            return Err("runtime acceptance policy contains invalid limits".to_string());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RealizationQualityEvidence {
+    pub evaluated_channels: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_abs_error_db: Option<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed_channels: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CorrectionMetricSummary {
     pub pre_target_weighted_rms_db: f64,
@@ -36,6 +131,8 @@ pub struct CorrectionMetricSummary {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CorrectionAcceptanceReport {
     pub policy: CorrectionAcceptancePolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_policy: Option<RuntimeAcceptancePolicy>,
     pub decision: CorrectionDecision,
     pub accepted: bool,
     pub metrics: CorrectionMetricSummary,
@@ -47,6 +144,8 @@ pub struct CorrectionAcceptanceReport {
     /// held-out measurements keep this absent for wire compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acoustic_quality: Option<super::AcousticQualityScorecard>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub realization_quality: Option<RealizationQualityEvidence>,
 }
 
 pub fn evaluate_correction_acceptance(
@@ -144,6 +243,7 @@ pub fn evaluate_correction_acceptance(
 
     Ok(CorrectionAcceptanceReport {
         policy,
+        runtime_policy: None,
         decision: if violations.is_empty() {
             CorrectionDecision::Accepted
         } else {
@@ -154,7 +254,106 @@ pub fn evaluate_correction_acceptance(
         violations,
         reverted_stages: Vec::new(),
         acoustic_quality: None,
+        realization_quality: None,
     })
+}
+
+/// Apply the production acceptance policy to evidence derived from the final
+/// canonical DSP graph. This is deliberately separate from the curve-only
+/// fixture policies so runtime decisions cannot silently omit evidence that
+/// was computed later in the pipeline.
+pub fn enforce_runtime_acceptance_evidence(
+    report: &mut CorrectionAcceptanceReport,
+    acoustic_quality: super::AcousticQualityScorecard,
+    realization_quality: RealizationQualityEvidence,
+    policy: RuntimeAcceptancePolicy,
+) -> Result<(), String> {
+    policy.validate()?;
+    if report.policy != CorrectionAcceptancePolicy::RuntimeSafety {
+        return Err("runtime evidence requires the runtime_safety policy".to_string());
+    }
+
+    let mut violations = Vec::new();
+    let partitions =
+        std::iter::once(&acoustic_quality.training).chain(acoustic_quality.held_out.as_ref());
+    let mut max_p95 = 0.0_f64;
+    let mut max_worst = 0.0_f64;
+    let mut worst_position_improvement = f64::INFINITY;
+    for partition in partitions {
+        max_p95 = max_p95.max(partition.post_p95_abs_residual_db);
+        max_worst = max_worst.max(partition.post_worst_abs_residual_db);
+        worst_position_improvement =
+            worst_position_improvement.min(partition.worst_position_improvement_db);
+    }
+    if !acoustic_quality.finite {
+        violations.push("acoustic_quality_non_finite".to_string());
+    }
+    if max_p95 > policy.max_post_p95_abs_residual_db {
+        violations.push("post_p95_residual_limit_exceeded".to_string());
+    }
+    if max_worst > policy.max_post_worst_abs_residual_db {
+        violations.push("post_worst_residual_limit_exceeded".to_string());
+    }
+    if worst_position_improvement < -policy.max_worst_position_regression_db {
+        violations.push("worst_position_regressed".to_string());
+    }
+    if acoustic_quality.max_boost_db > policy.max_boost_db {
+        violations.push("max_boost_limit_exceeded".to_string());
+    }
+    if acoustic_quality
+        .temporal
+        .available_headroom_db
+        .is_some_and(|value| value < policy.min_available_headroom_db)
+    {
+        violations.push("headroom_limit_exceeded".to_string());
+    }
+    if acoustic_quality
+        .temporal
+        .latency_ms
+        .is_some_and(|value| value > policy.max_latency_ms)
+    {
+        violations.push("latency_limit_exceeded".to_string());
+    }
+    if acoustic_quality
+        .temporal
+        .pre_ringing_energy_db
+        .is_some_and(|value| value > policy.max_pre_ringing_energy_db)
+    {
+        violations.push("pre_ringing_limit_exceeded".to_string());
+    }
+    if acoustic_quality
+        .induced_group_delay_rms_ms
+        .is_some_and(|value| value > policy.max_induced_group_delay_rms_ms)
+    {
+        violations.push("induced_group_delay_limit_exceeded".to_string());
+    }
+    if realization_quality
+        .max_abs_error_db
+        .is_some_and(|value| value > policy.max_realization_error_db)
+    {
+        violations.push("realization_error_limit_exceeded".to_string());
+    }
+    if realization_quality.evaluated_channels == 0
+        || realization_quality.max_abs_error_db.is_none()
+        || !realization_quality.failed_channels.is_empty()
+    {
+        violations.push("realization_incomplete".to_string());
+    }
+
+    let runtime_violated = !violations.is_empty();
+    report.runtime_policy = Some(policy);
+    report.acoustic_quality = Some(acoustic_quality);
+    report.realization_quality = Some(realization_quality);
+    report.violations.extend(violations);
+    report.violations.sort();
+    report.violations.dedup();
+    if runtime_violated {
+        report.accepted = false;
+        if report.decision == CorrectionDecision::Accepted {
+            report.decision = CorrectionDecision::IdentityFallback;
+        }
+    }
+    Ok(())
 }
 
 fn validate_shared_grid(pre: &Curve, post: &Curve, target: &Curve) -> Result<(), String> {
@@ -305,5 +504,165 @@ mod tests {
         assert!(
             (report.metrics.improvement_db - (expected_pre_rms - expected_post_rms)).abs() < 1e-12
         );
+    }
+
+    fn runtime_scorecard() -> super::super::AcousticQualityScorecard {
+        let partition = super::super::QualityPartitionMetrics {
+            curve_count: 2,
+            pre_weighted_rms_median_db: 4.0,
+            post_weighted_rms_median_db: 2.0,
+            improvement_median_db: 2.0,
+            worst_position_improvement_db: 1.0,
+            pre_p95_abs_residual_db: 6.0,
+            post_p95_abs_residual_db: 3.0,
+            post_worst_abs_residual_db: 5.0,
+            mean_normalized_seat_spread_db: 1.0,
+            max_normalized_seat_spread_db: 2.0,
+            bass_post_weighted_rms_db: None,
+            upper_post_weighted_rms_db: None,
+            bass_pre_modal_roughness_db_per_octave2: None,
+            bass_post_modal_roughness_db_per_octave2: None,
+            bass_modal_roughness_improvement_db_per_octave2: None,
+        };
+        super::super::AcousticQualityScorecard {
+            training: partition,
+            held_out: None,
+            correction_rms_db: 2.0,
+            max_boost_db: 4.0,
+            max_cut_db: -6.0,
+            induced_group_delay_rms_ms: Some(1.0),
+            temporal: super::super::TemporalQualityEvidence {
+                pre_ringing_energy_db: Some(-40.0),
+                latency_ms: Some(5.0),
+                available_headroom_db: Some(-4.0),
+            },
+            evaluated_band_hz: [20.0, 20_000.0],
+            measurement_overlap_hz: [20.0, 20_000.0],
+            finite: true,
+        }
+    }
+
+    #[test]
+    fn runtime_policy_accepts_complete_safe_evidence_and_records_version() {
+        let target = curve(&[0.0; 4]);
+        let pre = curve(&[4.0, -4.0, 3.0, -3.0]);
+        let post = curve(&[1.0, -1.0, 0.5, -0.5]);
+        let mut report = evaluate_correction_acceptance(
+            &pre,
+            &post,
+            &target,
+            None,
+            CorrectionAcceptancePolicy::RuntimeSafety,
+        )
+        .unwrap();
+        let policy = RuntimeAcceptancePolicy::for_output_class(RuntimeOutputClass::Hybrid);
+        let realization = RealizationQualityEvidence {
+            evaluated_channels: 2,
+            max_abs_error_db: Some(0.01),
+            failed_channels: Vec::new(),
+        };
+
+        enforce_runtime_acceptance_evidence(
+            &mut report,
+            runtime_scorecard(),
+            realization,
+            policy.clone(),
+        )
+        .unwrap();
+
+        assert!(report.accepted);
+        assert_eq!(report.runtime_policy, Some(policy));
+        assert!(report.realization_quality.is_some());
+    }
+
+    #[test]
+    fn runtime_policy_rejects_each_unsafe_quality_dimension() {
+        let target = curve(&[0.0; 4]);
+        let pre = curve(&[4.0, -4.0, 3.0, -3.0]);
+        let post = curve(&[1.0, -1.0, 0.5, -0.5]);
+        let mut report = evaluate_correction_acceptance(
+            &pre,
+            &post,
+            &target,
+            None,
+            CorrectionAcceptancePolicy::RuntimeSafety,
+        )
+        .unwrap();
+        let mut scorecard = runtime_scorecard();
+        scorecard.training.post_p95_abs_residual_db = 20.0;
+        scorecard.training.post_worst_abs_residual_db = 30.0;
+        scorecard.training.worst_position_improvement_db = -2.0;
+        scorecard.max_boost_db = 20.0;
+        scorecard.induced_group_delay_rms_ms = Some(50.0);
+        scorecard.temporal = super::super::TemporalQualityEvidence {
+            pre_ringing_energy_db: Some(-5.0),
+            latency_ms: Some(500.0),
+            available_headroom_db: Some(-20.0),
+        };
+        let realization = RealizationQualityEvidence {
+            evaluated_channels: 1,
+            max_abs_error_db: Some(2.0),
+            failed_channels: vec!["right".to_string()],
+        };
+
+        enforce_runtime_acceptance_evidence(
+            &mut report,
+            scorecard,
+            realization,
+            RuntimeAcceptancePolicy::for_output_class(RuntimeOutputClass::Hybrid),
+        )
+        .unwrap();
+
+        assert!(!report.accepted);
+        for expected in [
+            "post_p95_residual_limit_exceeded",
+            "post_worst_residual_limit_exceeded",
+            "worst_position_regressed",
+            "max_boost_limit_exceeded",
+            "headroom_limit_exceeded",
+            "latency_limit_exceeded",
+            "pre_ringing_limit_exceeded",
+            "induced_group_delay_limit_exceeded",
+            "realization_error_limit_exceeded",
+            "realization_incomplete",
+        ] {
+            assert!(
+                report.violations.iter().any(|value| value == expected),
+                "missing violation {expected}: {:?}",
+                report.violations
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_policy_rejects_unknown_policy_versions() {
+        let target = curve(&[0.0; 4]);
+        let pre = curve(&[4.0, -4.0, 3.0, -3.0]);
+        let post = curve(&[1.0, -1.0, 0.5, -0.5]);
+        let mut report = evaluate_correction_acceptance(
+            &pre,
+            &post,
+            &target,
+            None,
+            CorrectionAcceptancePolicy::RuntimeSafety,
+        )
+        .unwrap();
+        let mut policy =
+            RuntimeAcceptancePolicy::for_output_class(RuntimeOutputClass::LowLatencyIir);
+        policy.version = "2.0.0".to_string();
+
+        let error = enforce_runtime_acceptance_evidence(
+            &mut report,
+            runtime_scorecard(),
+            RealizationQualityEvidence {
+                evaluated_channels: 2,
+                max_abs_error_db: Some(0.0),
+                failed_channels: Vec::new(),
+            },
+            policy,
+        )
+        .expect_err("unknown policy versions must fail closed");
+
+        assert!(error.contains("unsupported runtime acceptance policy version"));
     }
 }

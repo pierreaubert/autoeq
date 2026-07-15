@@ -35,6 +35,7 @@ pub fn empty_metadata() -> OptimizationMetadata {
         validation_bundle: None,
         supporting_source: None,
         correction_acceptance: None,
+        optimizer_evidence: None,
         stage_outcomes: Vec::new(),
     }
 }
@@ -80,6 +81,7 @@ pub fn single_channel_room_result(channel_name: &str) -> RoomOptimizationResult 
             final_curve: curve,
             biquads: Vec::new(),
             fir_coeffs: None,
+            optimizer_evidence: Vec::new(),
         },
     );
     RoomOptimizationResult {

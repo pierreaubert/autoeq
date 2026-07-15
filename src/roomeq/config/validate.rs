@@ -10,9 +10,95 @@ use super::optimizer_rules::run_optimizer_validation_rules;
 use super::validation_result::{ValidationContext, ValidationResult};
 use crate::MeasurementSource;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
-/// Validate a complete room configuration
+#[derive(Debug, Clone, Default)]
+pub struct RoomValidationContext {
+    production: bool,
+    export_target: Option<PathBuf>,
+}
+
+impl RoomValidationContext {
+    pub fn structural() -> Self {
+        Self::default()
+    }
+
+    pub fn production() -> Self {
+        Self {
+            production: true,
+            export_target: None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn for_export(target: impl Into<PathBuf>) -> Self {
+        Self {
+            production: true,
+            export_target: Some(target.into()),
+        }
+    }
+}
+
+/// Compatibility adapter for callers that only need configuration semantics.
+/// Use [`validate_room_config_staged`] whenever production readiness matters.
 pub fn validate_room_config(config: &RoomConfig) -> ValidationResult {
+    let report = validate_room_config_staged(config, RoomValidationContext::structural());
+    let errors = report.errors().cloned().collect::<Vec<_>>();
+    let warnings = report.warnings().cloned().collect::<Vec<_>>();
+    ValidationResult {
+        is_valid: errors.is_empty(),
+        errors,
+        warnings,
+        staged_report: Some(report),
+    }
+}
+
+/// Canonical named-stage validation pipeline.
+pub fn validate_room_config_staged(
+    config: &RoomConfig,
+    context: RoomValidationContext,
+) -> super::super::types::ConfigValidationReport {
+    use super::super::types::ValidationStage;
+
+    let mut report = config.validation_report();
+    let structural = validate_room_config_rules(config);
+    let mut structural_errors = report.stage(ValidationStage::Structural).errors.clone();
+    structural_errors.extend(structural.errors);
+    structural_errors.sort();
+    structural_errors.dedup();
+    report.record(
+        ValidationStage::Structural,
+        structural_errors,
+        structural.warnings,
+    );
+
+    if !context.production {
+        return report;
+    }
+
+    report.record(
+        ValidationStage::ResolvedResource,
+        validate_resolved_resources(config),
+        Vec::new(),
+    );
+    report.record(
+        ValidationStage::Acoustic,
+        validate_acoustic_inputs(config),
+        Vec::new(),
+    );
+    if let Some(target) = context.export_target.as_deref() {
+        report.record(
+            ValidationStage::ExportTarget,
+            validate_export_target(target),
+            Vec::new(),
+        );
+    } else {
+        report.mark_not_applicable(ValidationStage::ExportTarget);
+    }
+    report
+}
+
+fn validate_room_config_rules(config: &RoomConfig) -> ValidationResult {
     let mut result = ValidationResult::valid();
 
     // Validate optimizer config
@@ -44,7 +130,6 @@ pub fn validate_room_config(config: &RoomConfig) -> ValidationResult {
 
     // Validate speaker configurations
     validate_speakers(&config.speakers, &mut result);
-    validate_system_speaker_references(config, &mut result);
 
     // Validate crossover references
     validate_crossovers(&config.speakers, config.crossovers.as_ref(), &mut result);
@@ -54,6 +139,102 @@ pub fn validate_room_config(config: &RoomConfig) -> ValidationResult {
     validate_cross_option_interactions(config, &mut result);
 
     result
+}
+
+fn validate_resolved_resources(config: &RoomConfig) -> Vec<String> {
+    let mut errors = Vec::new();
+    for (speaker_name, speaker) in &config.speakers {
+        for source in collect_sources(speaker) {
+            for path in measurement_paths(source) {
+                if path.is_relative() {
+                    errors.push(format!(
+                        "speaker '{speaker_name}' measurement path was not resolved: {}",
+                        path.display()
+                    ));
+                } else if !path.is_file() {
+                    errors.push(format!(
+                        "speaker '{speaker_name}' measurement resource does not exist: {}",
+                        path.display()
+                    ));
+                }
+            }
+        }
+    }
+    if let Some(super::super::types::TargetCurveConfig::Path(path)) = &config.target_curve {
+        if path.is_relative() {
+            errors.push(format!(
+                "target curve path was not resolved: {}",
+                path.display()
+            ));
+        } else if !path.is_file() {
+            errors.push(format!(
+                "target curve resource does not exist: {}",
+                path.display()
+            ));
+        }
+    }
+    errors
+}
+
+fn measurement_paths(source: &MeasurementSource) -> Vec<&Path> {
+    match source {
+        MeasurementSource::Single(single) => single
+            .measurement
+            .path()
+            .map(PathBuf::as_path)
+            .into_iter()
+            .collect(),
+        MeasurementSource::Multiple(multiple) => multiple
+            .measurements
+            .iter()
+            .filter_map(crate::MeasurementRef::path)
+            .map(PathBuf::as_path)
+            .collect(),
+        MeasurementSource::InMemory(_) | MeasurementSource::InMemoryMultiple(_) => Vec::new(),
+    }
+}
+
+fn validate_acoustic_inputs(config: &RoomConfig) -> Vec<String> {
+    let mut errors = Vec::new();
+    for (speaker_name, speaker) in &config.speakers {
+        for (source_index, source) in collect_sources(speaker).into_iter().enumerate() {
+            match crate::read::load_source_individual(source) {
+                Ok(curves) if curves.is_empty() => errors.push(format!(
+                    "speaker '{speaker_name}' source {source_index} produced no measurement curves"
+                )),
+                Ok(_) => {}
+                Err(error) => errors.push(format!(
+                    "speaker '{speaker_name}' source {source_index} failed acoustic validation: {error}"
+                )),
+            }
+        }
+    }
+    errors
+}
+
+fn validate_export_target(target: &Path) -> Vec<String> {
+    let mut errors = Vec::new();
+    if target.as_os_str().is_empty() {
+        errors.push("export target must not be empty".to_string());
+        return errors;
+    }
+    if target.is_dir() {
+        errors.push(format!(
+            "export target must be a file, not a directory: {}",
+            target.display()
+        ));
+    }
+    let parent = target
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    if !parent.is_dir() {
+        errors.push(format!(
+            "export target parent directory does not exist: {}",
+            parent.display()
+        ));
+    }
+    errors
 }
 
 /// Validate optimizer configuration parameters
@@ -252,40 +433,11 @@ fn validate_speakers(speakers: &HashMap<String, SpeakerConfig>, result: &mut Val
     }
 }
 
-/// Validate crossover references
-fn validate_system_speaker_references(config: &RoomConfig, result: &mut ValidationResult) {
-    let Some(system) = &config.system else {
-        return;
-    };
-    for (role, measurement_key) in &system.speakers {
-        if !config.speakers.contains_key(measurement_key) {
-            result.add_error(format!(
-                "system.speakers role '{role}' references missing speaker measurement '{measurement_key}'"
-            ));
-        }
-    }
-}
-
 fn validate_crossovers(
     speakers: &HashMap<String, SpeakerConfig>,
     crossovers: Option<&HashMap<String, super::super::types::CrossoverConfig>>,
     result: &mut ValidationResult,
 ) {
-    if let Some(crossovers) = crossovers {
-        for (name, crossover) in crossovers {
-            if crossover
-                .crossover_type
-                .parse::<crate::loss::CrossoverType>()
-                .is_err()
-            {
-                result.add_error(format!(
-                    "Crossover '{name}' has unsupported type '{}'",
-                    crossover.crossover_type
-                ));
-            }
-        }
-    }
-
     for (name, config) in speakers {
         let (crossover_ref, num_drivers) = match config {
             SpeakerConfig::Group(group) => {
@@ -1126,6 +1278,26 @@ mod room_config_validation_tests {
             measurement: MeasurementRef::Path(PathBuf::from(path)),
             speaker_name: speaker_name.map(String::from),
         })
+    }
+
+    #[test]
+    fn unsupported_config_version_is_a_validation_error() {
+        let mut config = default_room();
+        config.version = "3.0.0".to_string();
+        config.speakers.insert(
+            "L".to_string(),
+            SpeakerConfig::Single(single_source("l.csv", None)),
+        );
+
+        let result = validate_room_config(&config);
+
+        assert!(!result.is_valid);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.contains("unsupported RoomEQ config version"))
+        );
     }
 
     #[test]

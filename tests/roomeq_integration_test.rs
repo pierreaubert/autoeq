@@ -7,6 +7,32 @@ mod common;
 
 use common::binary_runner::{BinaryRunner, ProcessBinaryRunner, run_roomeq};
 
+fn centered_rms_in_band(curve: &serde_json::Value, min_hz: f64, max_hz: f64) -> f64 {
+    let frequencies = curve["freq"].as_array().expect("curve frequency array");
+    let spl = curve["spl"].as_array().expect("curve SPL array");
+    assert_eq!(frequencies.len(), spl.len());
+    let values: Vec<f64> = frequencies
+        .iter()
+        .zip(spl)
+        .filter_map(|(frequency, spl)| {
+            let frequency = frequency.as_f64()?;
+            (min_hz..=max_hz)
+                .contains(&frequency)
+                .then(|| spl.as_f64())
+                .flatten()
+        })
+        .collect();
+    assert!(values.len() >= 3, "insufficient score bins: {values:?}");
+    assert!(values.iter().all(|value| value.is_finite()));
+    let mean = values.iter().sum::<f64>() / values.len() as f64;
+    (values
+        .iter()
+        .map(|value| (value - mean).powi(2))
+        .sum::<f64>()
+        / values.len() as f64)
+        .sqrt()
+}
+
 #[test]
 fn test_roomeq_stereo_config() {
     let temp_dir = tempfile::TempDir::new().expect("Failed to create temp dir");
@@ -88,20 +114,17 @@ fn test_roomeq_stereo_config() {
     assert!(pre.is_finite() && post.is_finite());
     assert!(post <= pre, "stereo RoomEQ score worsened: {pre} -> {post}");
 
-    let initial = left_channel["initial_curve"]["spl"]
-        .as_array()
-        .expect("initial SPL array");
-    let final_curve = left_channel["final_curve"]["spl"]
-        .as_array()
-        .expect("final SPL array");
-    assert_eq!(initial.len(), final_curve.len());
-    assert!(!initial.is_empty());
-    assert!(
-        initial
-            .iter()
-            .chain(final_curve)
-            .all(|value| { value.as_f64().is_some_and(f64::is_finite) })
-    );
+    for channel_name in ["left", "right"] {
+        let channel = &channels[channel_name];
+        let initial = &channel["initial_curve"];
+        let final_curve = &channel["final_curve"];
+        let independently_scored_pre = centered_rms_in_band(initial, 20.0, 20_000.0);
+        let independently_scored_post = centered_rms_in_band(final_curve, 20.0, 20_000.0);
+        assert!(
+            independently_scored_post + 0.01 < independently_scored_pre,
+            "{channel_name} correction did not materially improve independently computed flatness: {independently_scored_pre} -> {independently_scored_post}"
+        );
+    }
 }
 
 #[test]

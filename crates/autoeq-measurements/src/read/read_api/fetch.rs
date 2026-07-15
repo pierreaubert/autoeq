@@ -300,6 +300,20 @@ mod tests {
 
     static CACHE_LOCK: Mutex<()> = Mutex::const_new(());
 
+    struct CacheEnvGuard {
+        _tmp: TempDir,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl Drop for CacheEnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => unsafe { env::set_var("SOTF_CACHE_DIR", value) },
+                None => unsafe { env::remove_var("SOTF_CACHE_DIR") },
+            }
+        }
+    }
+
     fn plotly_object() -> Value {
         json!({
             "data": [
@@ -313,10 +327,36 @@ mod tests {
         })
     }
 
-    async fn setup_cache() -> TempDir {
+    async fn setup_cache() -> CacheEnvGuard {
+        let previous = env::var_os("SOTF_CACHE_DIR");
         let tmp = TempDir::new().unwrap();
         unsafe { env::set_var("SOTF_CACHE_DIR", tmp.path().as_os_str()) };
-        tmp
+        CacheEnvGuard {
+            _tmp: tmp,
+            previous,
+        }
+    }
+
+    #[tokio::test]
+    async fn setup_cache_restores_previous_environment_value() {
+        let _guard = CACHE_LOCK.lock().await;
+        let original = env::var_os("SOTF_CACHE_DIR");
+        unsafe { env::set_var("SOTF_CACHE_DIR", "autoeq-cache-test-sentinel") };
+
+        {
+            let _cache = setup_cache().await;
+        }
+        let restored = env::var_os("SOTF_CACHE_DIR")
+            == Some(std::ffi::OsString::from("autoeq-cache-test-sentinel"));
+
+        match original {
+            Some(value) => unsafe { env::set_var("SOTF_CACHE_DIR", value) },
+            None => unsafe { env::remove_var("SOTF_CACHE_DIR") },
+        }
+        assert!(
+            restored,
+            "setup_cache leaked its temporary environment value"
+        );
     }
 
     #[tokio::test]
@@ -436,6 +476,7 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_measurement_plot_data_with_backend_uses_cache_and_backend() {
+        let _guard = CACHE_LOCK.lock().await;
         let cache = InMemoryMeasurementCache::new();
         let speaker = "mock-speaker";
         let measurement = "CEA2034";

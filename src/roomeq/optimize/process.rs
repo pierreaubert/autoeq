@@ -135,6 +135,7 @@ pub(super) fn process_generic_channels(
                 mean_spl,
                 arrival_time_ms,
                 fir_coeffs,
+                optimizer_evidence,
             )) => {
                 send_progress(
                     observer_shared,
@@ -169,6 +170,7 @@ pub(super) fn process_generic_channels(
                     mean_spl,
                     arrival_time_ms,
                     fir_coeffs,
+                    optimizer_evidence,
                 )));
             }
             Err(e) => {

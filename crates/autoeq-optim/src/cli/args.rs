@@ -1,6 +1,6 @@
+use super::parse::parse_finite_f64;
 use super::parse::parse_nonnegative_f64;
 use super::parse::parse_recombination_probability;
-use super::parse::parse_strictly_positive_f64;
 use super::peq_model::PeqModel;
 use crate::LossType;
 use clap::Parser;
@@ -33,8 +33,8 @@ pub struct Args {
     #[arg(long, default_value_t = 3.0, value_parser = parse_nonnegative_f64)]
     pub max_db: f64,
 
-    /// Minimum absolute dB gain allowed for each filter.
-    #[arg(long, default_value_t = 0.5, value_parser = parse_strictly_positive_f64)]
+    /// Minimum signed dB gain allowed for each filter (the cut bound).
+    #[arg(long, default_value_t = -12.0, value_parser = parse_finite_f64)]
     pub min_db: f64,
 
     /// Maximum Q factor allowed for each filter.
@@ -270,7 +270,7 @@ impl Args {
             population: 300,
             maxeval: 50000,
             strategy: "lshade".to_string(),
-            min_db: 0.5,
+            min_db: -12.0,
             max_db: 12.0,
             min_q: 0.5,
             max_q: 10.0,
@@ -373,7 +373,7 @@ impl Args {
                 self.refine = false;
                 self.min_q = 0.5;
                 self.max_q = 6.0;
-                self.min_db = 0.5;
+                self.min_db = -12.0;
                 self.max_db = 6.0;
             }
             "balanced" => {
@@ -383,7 +383,7 @@ impl Args {
                 self.refine = true;
                 self.min_q = 0.5;
                 self.max_q = 6.0;
-                self.min_db = 0.5;
+                self.min_db = -12.0;
                 self.max_db = 6.0;
             }
             "max-quality" => {
@@ -394,7 +394,7 @@ impl Args {
                 self.refine = true;
                 self.min_q = 0.5;
                 self.max_q = 6.0;
-                self.min_db = 0.5;
+                self.min_db = -12.0;
                 self.max_db = 6.0;
             }
             "score" => {
@@ -405,7 +405,7 @@ impl Args {
                 self.refine = true;
                 self.min_q = 0.5;
                 self.max_q = 6.0;
-                self.min_db = 0.5;
+                self.min_db = -12.0;
                 self.max_db = 6.0;
             }
             other => {
@@ -452,7 +452,7 @@ mod tests {
         assert_eq!(args.population, 300);
         assert_eq!(args.maxeval, 50000);
         assert_eq!(args.strategy, "lshade");
-        assert_eq!(args.min_db, 0.5);
+        assert_eq!(args.min_db, -12.0);
         assert_eq!(args.max_db, 12.0);
         assert_eq!(args.min_q, 0.5);
         assert_eq!(args.max_q, 10.0);
@@ -494,7 +494,7 @@ mod tests {
         assert!(!args.refine);
         assert_eq!(args.min_q, 0.5);
         assert_eq!(args.max_q, 6.0);
-        assert_eq!(args.min_db, 0.5);
+        assert_eq!(args.min_db, -12.0);
         assert_eq!(args.max_db, 6.0);
     }
 
@@ -547,16 +547,17 @@ mod tests {
     }
 
     #[test]
-    fn audit_cli_min_db_is_positive_audibility_threshold() {
-        assert_eq!(Args::speaker_defaults().min_db, 0.5);
+    fn audit_cli_min_db_is_signed_lower_gain_bound() {
+        assert_eq!(Args::speaker_defaults().min_db, -12.0);
 
         for preset in ["quick", "balanced", "max-quality", "score"] {
             let mut args = parsed_base();
             args.preset = Some(preset.to_string());
             args.apply_preset();
-            assert_eq!(args.min_db, 0.5, "preset {preset}");
+            assert_eq!(args.min_db, -12.0, "preset {preset}");
         }
 
-        assert!(Args::try_parse_from(["autoeq", "--min-db", "-12"]).is_err());
+        let parsed = Args::try_parse_from(["autoeq", "--min-db=-12"]).unwrap();
+        assert_eq!(parsed.min_db, -12.0);
     }
 }

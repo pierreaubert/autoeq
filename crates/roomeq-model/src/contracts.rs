@@ -32,4 +32,29 @@ impl DspGraph {
     pub fn add_channel(&mut self, name: impl Into<String>, plugins: Vec<Plugin>) {
         self.channels.insert(name.into(), ChannelChain { plugins });
     }
+
+    /// Validate the minimum contract shared by engines and exporters.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.version.trim().is_empty() {
+            return Err("DSP graph version must not be empty".to_string());
+        }
+        if self.channels.is_empty() {
+            return Err("DSP graph requires at least one channel".to_string());
+        }
+        for (name, chain) in &self.channels {
+            if name.trim().is_empty() {
+                return Err("DSP graph channel names must not be empty".to_string());
+            }
+            if chain
+                .plugins
+                .iter()
+                .any(|plugin| plugin.kind.trim().is_empty())
+            {
+                return Err(format!(
+                    "DSP graph channel '{name}' contains a plugin with an empty kind"
+                ));
+            }
+        }
+        Ok(())
+    }
 }

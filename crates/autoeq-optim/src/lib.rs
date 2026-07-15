@@ -49,7 +49,10 @@ pub use smoothness_penalty_config::SmoothnessPenaltyConfig;
 
 /// Adapter implemented by higher-level RoomEQ configuration crates.
 pub trait RoomOptimizerConfig {
-    fn to_optim_params(&self) -> OptimParams;
+    /// Convert configuration into optimizer parameters for an explicit sample
+    /// rate. Sample rate is required because it controls Nyquist and filter
+    /// realization and therefore must never be supplied by an adapter default.
+    fn to_optim_params(&self, sample_rate: f64) -> OptimParams;
 }
 
 #[macro_export]

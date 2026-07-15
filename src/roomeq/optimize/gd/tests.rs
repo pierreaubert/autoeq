@@ -55,6 +55,7 @@ fn channel_result(name: &str, delay_ms: f64) -> ChannelOptimizationResult {
         final_curve: curve,
         biquads: Vec::new(),
         fir_coeffs: None,
+        optimizer_evidence: Vec::new(),
     }
 }
 

@@ -263,6 +263,7 @@ mod tests {
             final_curve: curve,
             biquads: Vec::new(),
             fir_coeffs: None,
+            optimizer_evidence: Vec::new(),
         };
         RoomOptimizationResult {
             channels: HashMap::new(),
@@ -378,6 +379,7 @@ mod tests {
                         final_curve: small_curve(),
                         biquads: Vec::new(),
                         fir_coeffs: None,
+                        optimizer_evidence: Vec::new(),
                     },
                 ),
                 (
@@ -390,6 +392,7 @@ mod tests {
                         final_curve: small_curve(),
                         biquads: Vec::new(),
                         fir_coeffs: None,
+                        optimizer_evidence: Vec::new(),
                     },
                 ),
             ]),

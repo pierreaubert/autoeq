@@ -1,9 +1,43 @@
 use super::types::BassHeadroomModelKind;
 use super::types::MultiMeasurementStrategy;
 
-/// Configuration version (semantic versioning)
+/// Current configuration version.
+pub const CURRENT_CONFIG_VERSION: &str = "2.1.0";
+
+/// Configuration version (semantic versioning).
 pub fn default_config_version() -> String {
-    "2.1.0".to_string()
+    CURRENT_CONFIG_VERSION.to_string()
+}
+
+/// Validate the RoomEQ configuration schema version.
+///
+/// The loader retains explicit compatibility with the historical 1.0–1.2
+/// schemas and the current 2.0–2.1 schemas. Patch releases within those
+/// schema lines are compatible; unknown minor/major versions fail closed so
+/// new fields are not silently interpreted with old defaults.
+pub fn validate_config_version(version: &str) -> Result<(), String> {
+    let parts: Vec<&str> = version.split('.').collect();
+    if parts.len() != 3 {
+        return Err(format!(
+            "invalid RoomEQ config version '{version}': expected MAJOR.MINOR.PATCH"
+        ));
+    }
+    let parse = |part: &str| {
+        part.parse::<u64>().map_err(|_| {
+            format!("invalid RoomEQ config version '{version}': expected numeric components")
+        })
+    };
+    let major = parse(parts[0])?;
+    let minor = parse(parts[1])?;
+    let _patch = parse(parts[2])?;
+
+    if matches!((major, minor), (1, 0..=2) | (2, 0..=1)) {
+        Ok(())
+    } else {
+        Err(format!(
+            "unsupported RoomEQ config version '{version}'; supported schema lines are 1.0.x–1.2.x and 2.0.x–2.1.x (current {CURRENT_CONFIG_VERSION})"
+        ))
+    }
 }
 
 pub(super) fn default_bass_management_enabled() -> bool {

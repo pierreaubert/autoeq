@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 use crate::roomeq::RoomConfig;
+use crate::roomeq::config::{RoomValidationContext, validate_room_config_staged};
 
 /// Keys that are shallow-merged (override individual fields within the object).
 /// All other top-level keys are replaced entirely by the override value.
@@ -41,7 +42,11 @@ pub fn merge_json_objects(base: &mut serde_json::Value, overrides: &serde_json::
 pub fn load_config(
     base_config_path: &Path,
     override_config_path: Option<&Path>,
-) -> Result<(RoomConfig, PathBuf)> {
+) -> Result<(
+    RoomConfig,
+    PathBuf,
+    crate::roomeq::types::ConfigValidationReport,
+)> {
     let config_json = std::fs::read_to_string(base_config_path)
         .with_context(|| format!("Failed to read config: {:?}", base_config_path))?;
 
@@ -64,9 +69,13 @@ pub fn load_config(
     let mut room_config: RoomConfig = serde_json::from_value(config_value)
         .with_context(|| "Failed to deserialize merged config into RoomConfig")?;
 
+    room_config.validate_version().map_err(anyhow::Error::msg)?;
+
     room_config.resolve_paths(&config_dir);
 
-    Ok((room_config, config_dir))
+    let validation = validate_room_config_staged(&room_config, RoomValidationContext::production());
+
+    Ok((room_config, config_dir, validation))
 }
 
 #[cfg(test)]
@@ -117,9 +126,10 @@ mod tests {
             r#"{"version":"1.0.0","speakers":{},"optimizer":{"min_freq":20.0,"max_freq":20000.0}}"#,
         );
         let override_path = write_temp_config("override", r#"{"optimizer":{"max_freq":16000.0}}"#);
-        let (config, dir) = load_config(&base, Some(&override_path)).unwrap();
+        let (config, dir, validation) = load_config(&base, Some(&override_path)).unwrap();
         assert_eq!(config.optimizer.max_freq, 16000.0);
         assert_eq!(dir, base.parent().unwrap());
+        assert!(validation.stage_ran(crate::roomeq::types::ValidationStage::SchemaVersion));
     }
 
     #[test]
@@ -132,5 +142,20 @@ mod tests {
     fn load_config_returns_error_for_invalid_json() {
         let path = write_temp_config("invalid", "not json");
         assert!(load_config(&path, None).is_err());
+    }
+
+    #[test]
+    fn load_config_rejects_unsupported_version() {
+        let path = write_temp_config(
+            "future_version",
+            r#"{"version":"3.0.0","speakers":{},"optimizer":{}}"#,
+        );
+        let error = load_config(&path, None).expect_err("future config must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported RoomEQ config version"),
+            "unexpected error: {error:#}"
+        );
     }
 }

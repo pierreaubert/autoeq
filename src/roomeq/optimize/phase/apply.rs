@@ -172,6 +172,7 @@ mod tests {
             final_curve: curve.clone(),
             biquads: Vec::new(),
             fir_coeffs: None,
+            optimizer_evidence: Vec::new(),
         };
         let chain = ChannelDspChain {
             channel: name.to_string(),

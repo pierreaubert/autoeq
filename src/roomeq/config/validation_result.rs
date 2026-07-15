@@ -7,6 +7,9 @@ pub struct ValidationResult {
     pub errors: Vec<String>,
     /// Non-critical warnings that may affect results
     pub warnings: Vec<String>,
+    /// Named-stage evidence for public compatibility adapters. Internal rule
+    /// accumulators leave this absent until assembled by the canonical pipeline.
+    pub staged_report: Option<crate::roomeq::types::ConfigValidationReport>,
 }
 
 impl ValidationResult {
@@ -16,6 +19,7 @@ impl ValidationResult {
             is_valid: true,
             errors: Vec::new(),
             warnings: Vec::new(),
+            staged_report: None,
         }
     }
 
@@ -36,6 +40,9 @@ impl ValidationResult {
         self.errors.extend(other.errors);
         self.warnings.extend(other.warnings);
         self.is_valid = self.is_valid && other.is_valid;
+        if other.staged_report.is_some() {
+            self.staged_report = other.staged_report;
+        }
     }
 
     /// Print validation results to stderr

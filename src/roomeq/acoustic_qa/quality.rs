@@ -96,6 +96,9 @@ pub struct QualityPartitionMetrics {
     pub pre_weighted_rms_median_db: f64,
     pub post_weighted_rms_median_db: f64,
     pub improvement_median_db: f64,
+    /// Smallest per-position improvement. Negative values are regressions.
+    #[serde(default)]
+    pub worst_position_improvement_db: f64,
     pub pre_p95_abs_residual_db: f64,
     pub post_p95_abs_residual_db: f64,
     pub post_worst_abs_residual_db: f64,
@@ -462,6 +465,11 @@ fn evaluate_partition(
         }
     }
     let (mean_spread, max_spread) = normalized_seat_spread(post, target, config)?;
+    let worst_position_improvement_db = pre_rms_values
+        .iter()
+        .zip(&post_rms_values)
+        .map(|(pre, post)| pre - post)
+        .fold(f64::INFINITY, f64::min);
     let pre_median = median(pre_rms_values);
     let post_median = median(post_rms_values);
     let bass_pre_modal_roughness_db_per_octave2 =
@@ -476,6 +484,7 @@ fn evaluate_partition(
         pre_weighted_rms_median_db: pre_median,
         post_weighted_rms_median_db: post_median,
         improvement_median_db: pre_median - post_median,
+        worst_position_improvement_db,
         pre_p95_abs_residual_db: percentile(pre_abs, 0.95),
         post_p95_abs_residual_db: percentile(post_abs.clone(), 0.95),
         post_worst_abs_residual_db: post_abs.into_iter().fold(0.0, f64::max),

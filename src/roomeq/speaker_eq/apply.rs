@@ -54,6 +54,7 @@ pub(super) fn apply_excursion_filters_to_curve(
     adjusted
 }
 
+#[allow(dead_code)]
 pub(super) fn apply_cea2034_speaker_correction(
     channel_name: &str,
     source: &MeasurementSource,
@@ -62,11 +63,47 @@ pub(super) fn apply_cea2034_speaker_correction(
     arrival_time_ms: Option<f64>,
     sample_rate: f64,
 ) -> (Curve, Vec<Biquad>, Vec<PluginConfigWrapper>) {
+    let result = apply_cea2034_speaker_correction_detailed(
+        channel_name,
+        source,
+        room_config,
+        curve,
+        arrival_time_ms,
+        sample_rate,
+    );
+    (result.curve, result.filters, result.plugins)
+}
+
+struct AppliedCea2034Correction {
+    curve: Curve,
+    filters: Vec<Biquad>,
+    plugins: Vec<PluginConfigWrapper>,
+    optimizer_evidence: Vec<crate::optim::OptimizerRunEvidence>,
+}
+
+fn apply_cea2034_speaker_correction_detailed(
+    channel_name: &str,
+    source: &MeasurementSource,
+    room_config: &RoomConfig,
+    curve: Curve,
+    arrival_time_ms: Option<f64>,
+    sample_rate: f64,
+) -> AppliedCea2034Correction {
     let Some(cea_config) = &room_config.optimizer.cea2034_correction else {
-        return (curve, vec![], vec![]);
+        return AppliedCea2034Correction {
+            curve,
+            filters: Vec::new(),
+            plugins: Vec::new(),
+            optimizer_evidence: Vec::new(),
+        };
     };
     if !cea_config.enabled {
-        return (curve, vec![], vec![]);
+        return AppliedCea2034Correction {
+            curve,
+            filters: Vec::new(),
+            plugins: Vec::new(),
+            optimizer_evidence: Vec::new(),
+        };
     }
 
     // Resolve speaker name: config override > MeasurementSource
@@ -80,7 +117,12 @@ pub(super) fn apply_cea2034_speaker_correction(
             "  No speaker_name configured for '{}'. Skipping CEA2034 correction.",
             channel_name
         );
-        return (curve, vec![], vec![]);
+        return AppliedCea2034Correction {
+            curve,
+            filters: Vec::new(),
+            plugins: Vec::new(),
+            optimizer_evidence: Vec::new(),
+        };
     };
 
     let cea_data = room_config
@@ -93,7 +135,12 @@ pub(super) fn apply_cea2034_speaker_correction(
             "  No CEA2034 data in cache for speaker '{}'. Skipping Pass 1.",
             name
         );
-        return (curve, vec![], vec![]);
+        return AppliedCea2034Correction {
+            curve,
+            filters: Vec::new(),
+            plugins: Vec::new(),
+            optimizer_evidence: Vec::new(),
+        };
     };
 
     let schroeder_freq = cea_config.min_freq.unwrap_or_else(|| {
@@ -106,7 +153,7 @@ pub(super) fn apply_cea2034_speaker_correction(
             .unwrap_or(300.0)
     });
 
-    match super::super::cea2034_correction::compute_speaker_correction(
+    match super::super::cea2034_correction::compute_speaker_correction_detailed(
         data,
         cea_config,
         &curve,
@@ -114,22 +161,33 @@ pub(super) fn apply_cea2034_speaker_correction(
         arrival_time_ms,
         sample_rate,
     ) {
-        Ok((filters, corrected_curve)) => {
+        Ok(result) => {
             info!(
                 "  Pass 1 CEA2034 correction: {} filters above {:.0} Hz for '{}'",
-                filters.len(),
+                result.filters.len(),
                 schroeder_freq,
                 name
             );
-            let plugin = output::create_labeled_eq_plugin(&filters, "cea2034_speaker_correction");
-            (corrected_curve, filters, vec![plugin])
+            let plugin =
+                output::create_labeled_eq_plugin(&result.filters, "cea2034_speaker_correction");
+            AppliedCea2034Correction {
+                curve: result.corrected_curve,
+                filters: result.filters,
+                plugins: vec![plugin],
+                optimizer_evidence: result.optimizer_evidence,
+            }
         }
         Err(e) => {
             warn!(
                 "  CEA2034 correction failed for '{}': {}. Skipping Pass 1.",
                 name, e
             );
-            (curve, vec![], vec![])
+            AppliedCea2034Correction {
+                curve,
+                filters: Vec::new(),
+                plugins: Vec::new(),
+                optimizer_evidence: Vec::new(),
+            }
         }
     }
 }
@@ -371,7 +429,7 @@ pub(super) fn preprocess_features(
         &excursion_filters,
         input.sample_rate,
     );
-    let (curve, cea2034_filters, cea2034_plugins) = apply_cea2034_speaker_correction(
+    let cea2034 = apply_cea2034_speaker_correction_detailed(
         input.channel_name,
         input.source,
         input.room_config,
@@ -379,6 +437,7 @@ pub(super) fn preprocess_features(
         prepared.arrival_time_ms,
         input.sample_rate,
     );
+    let curve = cea2034.curve;
 
     let (norm_range, _passband_mean) = detect_passband_and_mean(&curve);
 
@@ -434,8 +493,9 @@ pub(super) fn preprocess_features(
         curve,
         curve_for_optim,
         excursion_filters,
-        cea2034_filters,
-        cea2034_plugins,
+        cea2034_filters: cea2034.filters,
+        cea2034_plugins: cea2034.plugins,
+        optimizer_evidence: cea2034.optimizer_evidence,
         broadband_plugins,
         broadband_biquads,
         broadband_mean_shift,
@@ -839,6 +899,7 @@ pub(super) fn build_mixed_mode_result(
     dsp_chain: ChannelDspChain,
     report: ChannelReport,
     optim_output: OptimizerOutput,
+    optimizer_evidence: Vec<crate::optim::OptimizerRunEvidence>,
 ) -> MixedModeResult {
     let public_chain = super::super::types::ChannelDspChain {
         channel: report.channel_name,
@@ -871,6 +932,7 @@ pub(super) fn build_mixed_mode_result(
         report.mean_spl,
         report.arrival_time_ms,
         fir_coeffs,
+        optimizer_evidence,
     )
 }
 #[allow(clippy::too_many_arguments)]

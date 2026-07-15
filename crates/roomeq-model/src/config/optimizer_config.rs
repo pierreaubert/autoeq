@@ -546,6 +546,41 @@ impl OptimizerConfig {
 
         self.max_db
     }
+
+    /// Return structural errors for the frequency-dependent gain envelopes.
+    ///
+    /// Interpolation requires finite positive frequencies in strict ascending
+    /// order; validating this in the model keeps every engine caller from
+    /// reaching a zero/invalid log-frequency denominator.
+    pub fn gain_envelope_errors(&self) -> Vec<String> {
+        [
+            ("max_boost_envelope", self.max_boost_envelope.as_deref()),
+            ("min_cut_envelope", self.min_cut_envelope.as_deref()),
+        ]
+        .into_iter()
+        .filter_map(|(name, envelope)| gain_envelope_error(name, envelope))
+        .collect()
+    }
+}
+
+fn gain_envelope_error(name: &str, envelope: Option<&[(f64, f64)]>) -> Option<String> {
+    let envelope = envelope?;
+    for &(frequency, gain) in envelope {
+        if !frequency.is_finite() || frequency <= 0.0 {
+            return Some(format!(
+                "{name} frequencies must be finite and positive, got {frequency}"
+            ));
+        }
+        if !gain.is_finite() {
+            return Some(format!("{name} gains must be finite, got {gain}"));
+        }
+    }
+    if envelope.windows(2).any(|points| points[0].0 >= points[1].0) {
+        return Some(format!(
+            "{name} frequencies must be strictly increasing without duplicates"
+        ));
+    }
+    None
 }
 
 #[cfg(test)]

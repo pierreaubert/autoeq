@@ -160,6 +160,10 @@ impl WorkflowExecutor for Stereo21Executor {
         let mut pre_eq_plugins: HashMap<String, Vec<super::super::types::PluginConfigWrapper>> =
             HashMap::new();
         let mut linearized_curves: HashMap<String, Curve> = HashMap::new();
+        let mut optimizer_evidence_by_channel: HashMap<
+            String,
+            Vec<crate::optim::OptimizerRunEvidence>,
+        > = HashMap::new();
 
         let total_channels = 3;
         let max_iterations = config.optimizer.max_iter;
@@ -195,6 +199,7 @@ impl WorkflowExecutor for Stereo21Executor {
                     max_iterations,
                 )?;
             pre_eq_plugins.insert(role.to_string(), chain.plugins);
+            optimizer_evidence_by_channel.insert(role.to_string(), ch_result.optimizer_evidence);
             linearized_curves.insert(role.to_string(), ch_result.final_curve);
         }
 
@@ -231,6 +236,7 @@ impl WorkflowExecutor for Stereo21Executor {
                     max_iterations,
                 )?;
             pre_eq_plugins.insert(sub_role.clone(), chain.plugins);
+            optimizer_evidence_by_channel.insert(sub_role.clone(), ch_result.optimizer_evidence);
             linearized_curves.insert(sub_role.clone(), ch_result.final_curve);
         }
         workflow_stage_event(
@@ -549,13 +555,14 @@ impl WorkflowExecutor for Stereo21Executor {
                 3,
                 opt_config.max_iter,
             );
-            let (filters, _) = run_post_eq(
+            let mut post_eq_result = run_post_eq(
                 post_curve,
                 &opt_config,
                 config.target_curve.as_ref(),
                 sample_rate,
                 post_eq_callback,
             )?;
+            let filters = post_eq_result.filters;
 
             let pre = compute_flat_loss(post_curve, opt_config.min_freq, main_post_max_freq);
             let eq_resp =
@@ -564,8 +571,19 @@ impl WorkflowExecutor for Stereo21Executor {
             let post =
                 compute_flat_loss(&post_curve_after, opt_config.min_freq, main_post_max_freq);
             if post < pre {
+                optimizer_evidence_by_channel
+                    .entry(role.to_string())
+                    .or_default()
+                    .append(&mut post_eq_result.optimizer_evidence);
                 post_eq_filters.insert(role.to_string(), filters);
             } else {
+                for evidence in &mut post_eq_result.optimizer_evidence {
+                    evidence.selected_for_output = false;
+                }
+                optimizer_evidence_by_channel
+                    .entry(role.to_string())
+                    .or_default()
+                    .append(&mut post_eq_result.optimizer_evidence);
                 log::warn!(
                     "  {} Post-EQ discarded: score regressed from {:.4} to {:.4}",
                     role,
@@ -595,13 +613,14 @@ impl WorkflowExecutor for Stereo21Executor {
                 3,
                 opt_config.max_iter,
             );
-            let (filters, _) = run_post_eq(
+            let mut post_eq_result = run_post_eq(
                 &sub_post,
                 &opt_config,
                 config.target_curve.as_ref(),
                 sample_rate,
                 sub_callback,
             )?;
+            let filters = post_eq_result.filters;
 
             let pre = compute_flat_loss(&sub_post, sub_min_score, final_xo_freq);
             let eq_resp =
@@ -609,8 +628,19 @@ impl WorkflowExecutor for Stereo21Executor {
             let sub_after_eq = response::apply_complex_response(&sub_post, &eq_resp);
             let post = compute_flat_loss(&sub_after_eq, sub_min_score, final_xo_freq);
             if post < pre {
+                optimizer_evidence_by_channel
+                    .entry(sub_role.clone())
+                    .or_default()
+                    .append(&mut post_eq_result.optimizer_evidence);
                 post_eq_filters.insert(sub_role.clone(), filters);
             } else {
+                for evidence in &mut post_eq_result.optimizer_evidence {
+                    evidence.selected_for_output = false;
+                }
+                optimizer_evidence_by_channel
+                    .entry(sub_role.clone())
+                    .or_default()
+                    .append(&mut post_eq_result.optimizer_evidence);
                 log::warn!(
                     "  Sub Post-EQ discarded: score regressed from {:.4} to {:.4}",
                     pre,
@@ -801,6 +831,9 @@ impl WorkflowExecutor for Stereo21Executor {
                     final_curve: final_curve_obj,
                     biquads: post_eq_filters.get(role).cloned().unwrap_or_default(),
                     fir_coeffs: None,
+                    optimizer_evidence: optimizer_evidence_by_channel
+                        .remove(role)
+                        .unwrap_or_default(),
                 },
             );
         }
@@ -820,6 +853,9 @@ impl WorkflowExecutor for Stereo21Executor {
                     final_curve: final_sub_curve.clone(),
                     biquads: post_eq_filters.get(&sub_role).cloned().unwrap_or_default(),
                     fir_coeffs: None,
+                    optimizer_evidence: optimizer_evidence_by_channel
+                        .remove(&sub_role)
+                        .unwrap_or_default(),
                 },
             );
         }
@@ -879,7 +915,8 @@ impl WorkflowExecutor for Stereo21Executor {
                 bootstrap_uncertainty: None,
                 validation_bundle: None,
                 supporting_source: None,
-                correction_acceptance: None,
+            correction_acceptance: None,
+            optimizer_evidence: None,
                 stage_outcomes: Vec::new(),
             },
         })

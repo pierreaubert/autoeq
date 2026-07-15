@@ -51,7 +51,7 @@ fn main() -> Result<()> {
     for (name, config_path) in &recordings {
         println!("=== Recording: {} ===", name);
 
-        let (base_config, _config_dir) = load_config(config_path, None)
+        let (base_config, _config_dir, _validation) = load_config(config_path, None)
             .with_context(|| format!("Failed to load {}", config_path.display()))?;
 
         let mut recording_ok = true;

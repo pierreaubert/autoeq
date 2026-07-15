@@ -145,6 +145,7 @@ impl WorkflowExecutor for GenericExecutor {
                 validation_bundle: None,
                 supporting_source: None,
                 correction_acceptance: None,
+                optimizer_evidence: None,
                 stage_outcomes: Vec::new(),
             },
         })

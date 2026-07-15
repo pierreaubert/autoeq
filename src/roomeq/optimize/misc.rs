@@ -1,4 +1,4 @@
-use super::super::config::validate_room_config;
+use super::super::config::{RoomValidationContext, validate_room_config_staged};
 use super::super::pipeline::PipelineStepId;
 use super::super::slope;
 use super::super::types::{MeasurementSource, RoomConfig, SpeakerConfig, TargetShape};
@@ -246,13 +246,18 @@ pub(super) fn prepare_room_config(config: &RoomConfig) -> RoomConfig {
 }
 
 pub(super) fn validate_room_config_or_fail(config: &RoomConfig) -> Result<()> {
-    let validation = validate_room_config(config);
-    validation.print_results();
-    if !validation.is_valid {
+    let validation = validate_room_config_staged(config, RoomValidationContext::production());
+    for warning in validation.warnings() {
+        eprintln!("Warning: {warning}");
+    }
+    for error in validation.errors() {
+        eprintln!("Error: {error}");
+    }
+    if !validation.production_ready() {
         return Err(AutoeqError::OptimizationFailed {
             message: format!(
                 "Configuration validation failed with {} errors",
-                validation.errors.len()
+                validation.errors().count()
             ),
         });
     }

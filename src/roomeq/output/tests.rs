@@ -402,6 +402,7 @@ fn test_create_dsp_chain_output() {
         validation_bundle: None,
         supporting_source: None,
         correction_acceptance: None,
+        optimizer_evidence: None,
         stage_outcomes: Vec::new(),
     };
 
@@ -473,6 +474,7 @@ fn test_create_dsp_chain_output_adds_ctc_global_xtc_plugin() {
         validation_bundle: None,
         supporting_source: None,
         correction_acceptance: None,
+        optimizer_evidence: None,
         stage_outcomes: Vec::new(),
     };
 

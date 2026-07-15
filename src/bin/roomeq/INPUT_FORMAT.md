@@ -64,6 +64,14 @@ At least one of `match_timbre`, `match_level`, or `match_arrival_time` must be
 enabled. `max_delay_ms` must be finite and positive. Reference overrides may be
 keyed by a height channel name or by `top_front`, `top_middle`, or `top_rear`.
 
+## Configuration schema version
+
+The top-level `version` is validated before paths are resolved or optimization
+starts. RoomEQ accepts the historical `1.0.x` through `1.2.x` schema lines and
+the `2.0.x` through `2.1.x` lines. The current default is `2.1.0`. Malformed
+versions and unknown minor or major versions fail closed instead of being
+interpreted with current defaults.
+
 ## Multi-measurement RIR prototype
 
 When a speaker has several measurements captured at different positions, you

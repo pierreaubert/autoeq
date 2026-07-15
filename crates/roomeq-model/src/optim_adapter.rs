@@ -2,7 +2,7 @@ use crate::config::OptimizerConfig;
 use autoeq_optim::{LossType, OptimParams, PeqModel, RoomOptimizerConfig, SmoothnessPenaltyConfig};
 
 impl RoomOptimizerConfig for OptimizerConfig {
-    fn to_optim_params(&self) -> OptimParams {
+    fn to_optim_params(&self, sample_rate: f64) -> OptimParams {
         let peq_model = self.peq_model.parse::<PeqModel>().unwrap_or(PeqModel::Pk);
         let loss = match self.loss_type.as_str() {
             "flat" if self.asymmetric_loss => LossType::SpeakerFlatAsymmetric,
@@ -41,7 +41,7 @@ impl RoomOptimizerConfig for OptimizerConfig {
         OptimParams {
             num_filters: self.num_filters,
             peq_model,
-            sample_rate: 48000.0,
+            sample_rate,
             min_freq: self.min_freq,
             max_freq: self.max_freq,
             min_q: self.min_q,
@@ -78,6 +78,20 @@ impl RoomOptimizerConfig for OptimizerConfig {
             parallel_threads: num_cpus::get(),
             seed: self.seed,
             quiet: false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optimizer_adapter_uses_required_sample_rate() {
+        let config = OptimizerConfig::default();
+        for sample_rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0] {
+            let params = config.to_optim_params(sample_rate);
+            assert_eq!(params.sample_rate, sample_rate);
         }
     }
 }

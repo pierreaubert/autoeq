@@ -9,6 +9,12 @@ use crate::read::Cea2034Data;
 use log::{debug, info};
 use math_audio_iir_fir::Biquad;
 
+pub struct SpeakerCorrectionResult {
+    pub filters: Vec<Biquad>,
+    pub corrected_curve: Curve,
+    pub optimizer_evidence: Vec<crate::optim::OptimizerRunEvidence>,
+}
+
 /// Compute speaker correction filters from CEA2034 data.
 ///
 /// Returns the correction filters and the room measurement curve with the
@@ -29,6 +35,25 @@ pub fn compute_speaker_correction(
     arrival_time_ms: Option<f64>,
     sample_rate: f64,
 ) -> Result<(Vec<Biquad>, Curve)> {
+    compute_speaker_correction_detailed(
+        cea2034_data,
+        config,
+        room_curve,
+        schroeder_freq,
+        arrival_time_ms,
+        sample_rate,
+    )
+    .map(|result| (result.filters, result.corrected_curve))
+}
+
+pub fn compute_speaker_correction_detailed(
+    cea2034_data: &Cea2034Data,
+    config: &Cea2034CorrectionConfig,
+    room_curve: &Curve,
+    schroeder_freq: f64,
+    arrival_time_ms: Option<f64>,
+    sample_rate: f64,
+) -> Result<SpeakerCorrectionResult> {
     let mode = resolve_correction_mode(config, arrival_time_ms);
 
     match mode {
@@ -60,7 +85,7 @@ fn compute_flat_lw_correction(
     room_curve: &Curve,
     schroeder_freq: f64,
     sample_rate: f64,
-) -> Result<(Vec<Biquad>, Curve)> {
+) -> Result<SpeakerCorrectionResult> {
     if room_curve.freq.is_empty() {
         return Err(AutoeqError::InvalidMeasurement {
             message: "Room curve has no frequency data for CEA2034 correction".to_string(),
@@ -97,7 +122,7 @@ fn compute_flat_lw_correction(
     };
 
     // Optimize the Listening Window curve toward flat
-    let (filters, loss) = eq::optimize_channel_eq(
+    let result = eq::optimize_channel_eq_detailed(
         &lw_interpolated,
         &optimizer_config,
         None, // Flat target (default)
@@ -106,6 +131,8 @@ fn compute_flat_lw_correction(
     .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!("CEA2034 flat LW correction failed: {}", e),
     })?;
+    let filters = result.filters;
+    let loss = result.loss;
 
     info!(
         "  CEA2034 flat LW correction: {} filters, final loss={:.4}",
@@ -119,7 +146,11 @@ fn compute_flat_lw_correction(
     // Apply correction to the room measurement curve
     let corrected_room = simulate_correction(&filters, room_curve, sample_rate);
 
-    Ok((filters, corrected_room))
+    Ok(SpeakerCorrectionResult {
+        filters,
+        corrected_curve: corrected_room,
+        optimizer_evidence: result.optimizer_evidence,
+    })
 }
 
 /// Speaker-score correction is intentionally unsupported in roomeq.
@@ -134,7 +165,7 @@ fn compute_score_correction(
     _room_curve: &Curve,
     _schroeder_freq: f64,
     _sample_rate: f64,
-) -> Result<(Vec<Biquad>, Curve)> {
+) -> Result<SpeakerCorrectionResult> {
     Err(AutoeqError::InvalidConfiguration {
         message: "CEA2034 score correction is not supported in roomeq; the Harman/Olive \
                   preference score is defined for anechoic spinorama data, while roomeq \

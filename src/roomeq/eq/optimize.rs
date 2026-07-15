@@ -20,6 +20,19 @@ use math_audio_iir_fir::Biquad;
 use ndarray::Array1;
 use std::error::Error;
 
+#[derive(Debug, Clone)]
+pub struct EqOptimizationResult {
+    pub filters: Vec<Biquad>,
+    pub loss: f64,
+    pub optimizer_evidence: Vec<crate::optim::OptimizerRunEvidence>,
+}
+
+impl EqOptimizationResult {
+    fn into_legacy(self) -> (Vec<Biquad>, f64) {
+        (self.filters, self.loss)
+    }
+}
+
 /// Optimize EQ filters for a single channel using autoeq's workflow
 ///
 /// # Arguments
@@ -36,6 +49,18 @@ pub fn optimize_channel_eq(
     target_config: Option<&TargetCurveConfig>,
     sample_rate: f64,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+    optimize_channel_eq_detailed(curve, config, target_config, sample_rate)
+        .map(EqOptimizationResult::into_legacy)
+}
+
+/// Detailed variant of [`optimize_channel_eq`] retaining termination,
+/// evaluation-budget, seed, constraint, restart, and confidence evidence.
+pub fn optimize_channel_eq_detailed(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    target_config: Option<&TargetCurveConfig>,
+    sample_rate: f64,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
     optimize_channel_eq_inner(
         curve,
         config,
@@ -47,6 +72,7 @@ pub fn optimize_channel_eq(
 }
 
 /// Optimize EQ filters for a single channel with per-iteration progress callback
+#[allow(dead_code)]
 pub fn optimize_channel_eq_with_callback(
     curve: &Curve,
     config: &OptimizerConfig,
@@ -54,6 +80,18 @@ pub fn optimize_channel_eq_with_callback(
     sample_rate: f64,
     callback: crate::optim::OptimProgressCallback,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+    optimize_channel_eq_with_callback_detailed(curve, config, target_config, sample_rate, callback)
+        .map(EqOptimizationResult::into_legacy)
+}
+
+/// Callback variant retaining structured optimizer evidence.
+pub fn optimize_channel_eq_with_callback_detailed(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    target_config: Option<&TargetCurveConfig>,
+    sample_rate: f64,
+    callback: crate::optim::OptimProgressCallback,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
     optimize_channel_eq_inner(
         curve,
         config,
@@ -71,13 +109,14 @@ fn optimize_channel_eq_adaptive(
     target_config: Option<&TargetCurveConfig>,
     sample_rate: f64,
     backend: &dyn OptimizerBackend,
-) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
     let prep = prepare_single_channel_eq(curve, config, target_config, sample_rate)?;
     let max_filters = config.num_filters;
     let base_budget_per_step = adaptive_budget_for_step(config.max_iter, max_filters, 1);
 
     let mut best_filters: Vec<Biquad> = vec![];
     let mut best_loss = f64::INFINITY;
+    let mut optimizer_evidence = Vec::new();
 
     log::info!(
         "  Adaptive filter selection: up to {} filters, threshold={:.6}, base budget/step={}",
@@ -88,7 +127,7 @@ fn optimize_channel_eq_adaptive(
 
     for k in 1..=max_filters {
         let budget_per_step = adaptive_budget_for_step(config.max_iter, max_filters, k);
-        let (filters, loss, _x) =
+        let (filters, loss, _x, mut pass_evidence) =
             run_optimization_pass(&prep, k, budget_per_step, config, None, backend)?;
 
         let improvement = best_loss - loss;
@@ -101,6 +140,10 @@ fn optimize_channel_eq_adaptive(
         );
 
         if k > 1 && improvement < config.min_filter_improvement {
+            for evidence in &mut pass_evidence {
+                evidence.selected_for_output = false;
+            }
+            optimizer_evidence.extend(pass_evidence);
             log::info!(
                 "  Stopping at {} filters: improvement {:.6} < threshold {:.6}",
                 k - 1,
@@ -110,6 +153,10 @@ fn optimize_channel_eq_adaptive(
             break;
         }
 
+        for evidence in &mut optimizer_evidence {
+            evidence.selected_for_output = false;
+        }
+        optimizer_evidence.extend(pass_evidence);
         best_filters = filters;
         best_loss = loss;
     }
@@ -132,7 +179,11 @@ fn optimize_channel_eq_adaptive(
         best_loss
     );
 
-    Ok((best_filters, best_loss))
+    Ok(EqOptimizationResult {
+        filters: best_filters,
+        loss: best_loss,
+        optimizer_evidence,
+    })
 }
 
 fn optimize_channel_eq_inner(
@@ -142,7 +193,7 @@ fn optimize_channel_eq_inner(
     sample_rate: f64,
     callback: Option<crate::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
-) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
     let measurement_quality = autoeq_measurements::assess_measurement_quality(curve);
     let uncertainty_scaled_config =
         uncertainty_scaled_optimizer_config(config, &measurement_quality);
@@ -155,7 +206,7 @@ fn optimize_channel_eq_inner(
 
     // Single-pass optimization (legacy path or callback path)
     let prep = prepare_single_channel_eq(curve, config, target_config, sample_rate)?;
-    let (filters, loss, _x) = run_optimization_pass(
+    let (filters, loss, _x, optimizer_evidence) = run_optimization_pass(
         &prep,
         config.num_filters,
         config.max_iter,
@@ -170,7 +221,11 @@ fn optimize_channel_eq_inner(
         loss
     );
 
-    Ok((filters, loss))
+    Ok(EqOptimizationResult {
+        filters,
+        loss,
+        optimizer_evidence,
+    })
 }
 
 /// Optimize EQ filters across multiple measurement curves simultaneously.
@@ -187,6 +242,7 @@ fn optimize_channel_eq_inner(
 ///
 /// # Returns
 /// * Tuple of (optimized Biquad filters, final loss value)
+#[allow(dead_code)]
 pub fn optimize_channel_eq_multi(
     curves: &[Curve],
     config: &OptimizerConfig,
@@ -194,6 +250,18 @@ pub fn optimize_channel_eq_multi(
     target_config: Option<&TargetCurveConfig>,
     sample_rate: f64,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+    optimize_channel_eq_multi_detailed(curves, config, multi_config, target_config, sample_rate)
+        .map(EqOptimizationResult::into_legacy)
+}
+
+/// Detailed multi-measurement variant retaining optimizer evidence.
+pub fn optimize_channel_eq_multi_detailed(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    target_config: Option<&TargetCurveConfig>,
+    sample_rate: f64,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
     optimize_channel_eq_multi_inner(
         curves,
         config,
@@ -205,6 +273,7 @@ pub fn optimize_channel_eq_multi(
     )
 }
 
+#[allow(dead_code)]
 pub(in super::super) fn optimize_channel_eq_multi_with_auto_optimizer(
     curves: &[Curve],
     config: &OptimizerConfig,
@@ -213,6 +282,25 @@ pub(in super::super) fn optimize_channel_eq_multi_with_auto_optimizer(
     sample_rate: f64,
     auto_context: MultiEqAutoOptimizerContext,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+    optimize_channel_eq_multi_with_auto_optimizer_detailed(
+        curves,
+        config,
+        multi_config,
+        target_config,
+        sample_rate,
+        auto_context,
+    )
+    .map(EqOptimizationResult::into_legacy)
+}
+
+pub(in super::super) fn optimize_channel_eq_multi_with_auto_optimizer_detailed(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    target_config: Option<&TargetCurveConfig>,
+    sample_rate: f64,
+    auto_context: MultiEqAutoOptimizerContext,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
     let resolved_config =
         resolve_multi_measurement_auto_optimizer_config(curves, config, auto_context);
     optimize_channel_eq_multi_inner(
@@ -227,6 +315,7 @@ pub(in super::super) fn optimize_channel_eq_multi_with_auto_optimizer(
 }
 
 /// Optimize EQ across multiple measurement curves with per-iteration progress callback
+#[allow(dead_code)]
 pub fn optimize_channel_eq_multi_with_callback(
     curves: &[Curve],
     config: &OptimizerConfig,
@@ -235,6 +324,26 @@ pub fn optimize_channel_eq_multi_with_callback(
     sample_rate: f64,
     callback: crate::optim::OptimProgressCallback,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+    optimize_channel_eq_multi_with_callback_detailed(
+        curves,
+        config,
+        multi_config,
+        target_config,
+        sample_rate,
+        callback,
+    )
+    .map(EqOptimizationResult::into_legacy)
+}
+
+/// Callback variant retaining structured optimizer evidence.
+pub fn optimize_channel_eq_multi_with_callback_detailed(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    target_config: Option<&TargetCurveConfig>,
+    sample_rate: f64,
+    callback: crate::optim::OptimProgressCallback,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
     optimize_channel_eq_multi_inner(
         curves,
         config,
@@ -255,10 +364,19 @@ fn optimize_channel_eq_multi_inner(
     sample_rate: f64,
     callback: Option<crate::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
-) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
-    assert!(!curves.is_empty(), "curves must not be empty");
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    if curves.is_empty() {
+        return Err("no_measurements".into());
+    }
 
     let measurement_quality = autoeq_measurements::assess_multiple_measurement_quality(curves);
+    if measurement_quality.quality == autoeq_measurements::MeasurementQuality::Unusable {
+        return Err(format!(
+            "unusable multi-measurement input: {}",
+            measurement_quality.advisories.join(", ")
+        )
+        .into());
+    }
     let uncertainty_scaled_config =
         uncertainty_scaled_optimizer_config(config, &measurement_quality);
     let config = &uncertainty_scaled_config;
@@ -557,16 +675,33 @@ fn optimize_channel_eq_multi_inner(
         backend.optimize_filters(&mut x, &lower_bounds, &upper_bounds, primary, &optim_params)
     };
 
-    let (_converged_msg, global_loss) = match opt_result {
-        Ok((msg, loss)) => (msg, loss),
-        Err((msg, loss)) => {
+    let global_evidence = crate::optim::OptimizerRunEvidence::from_backend_result(
+        &optim_params.algo,
+        opt_result,
+        &x,
+        &lower_bounds,
+        &upper_bounds,
+        optim_params.maxeval,
+        optim_params.seed,
+    );
+    if !global_evidence.converged {
+        if global_evidence.best_effort {
             log::warn!(
                 "  Multi-measurement global optimization did not fully converge: {}",
-                msg
+                global_evidence.status
             );
-            (msg, loss)
+        } else {
+            return Err(format!(
+                "multi-measurement global optimizer produced unusable result: {}",
+                global_evidence.status
+            )
+            .into());
         }
-    };
+    }
+    let global_loss = global_evidence
+        .objective
+        .ok_or("multi-measurement optimizer did not return a finite objective")?;
+    let mut optimizer_evidence = vec![global_evidence];
 
     // Local refinement (COBYLA) to polish the global solution.
     //
@@ -591,14 +726,28 @@ fn optimize_channel_eq_multi_inner(
             &optim_params,
             Some(&optim_params.local_algo),
         );
-        let local_loss = match local_result {
-            Ok((_msg, loss)) => loss,
-            Err((msg, loss)) => {
-                log::warn!("  Local refinement did not converge: {}", msg);
-                loss
-            }
-        };
-        if local_loss.is_finite() && local_loss < global_loss {
+        let mut local_evidence = crate::optim::OptimizerRunEvidence::from_backend_result(
+            &optim_params.local_algo,
+            local_result,
+            &x,
+            &lower_bounds,
+            &upper_bounds,
+            optim_params.maxeval,
+            optim_params.seed,
+        );
+        if !local_evidence.converged {
+            log::warn!(
+                "  Multi-measurement local refinement did not fully converge: {}",
+                local_evidence.status
+            );
+        }
+        let local_loss = local_evidence.objective.unwrap_or(f64::INFINITY);
+        let use_local = local_evidence.confidence != crate::optim::OptimizerConfidence::Unusable
+            && local_loss < global_loss;
+        local_evidence.selected_for_output = use_local;
+        optimizer_evidence[0].selected_for_output = !use_local;
+        optimizer_evidence.push(local_evidence);
+        if use_local {
             log::info!(
                 "  Local refinement: {:.6} -> {:.6} (improved {:.6})",
                 global_loss,
@@ -633,7 +782,11 @@ fn optimize_channel_eq_multi_inner(
         final_loss
     );
 
-    Ok((filters, final_loss))
+    Ok(EqOptimizationResult {
+        filters,
+        loss: final_loss,
+        optimizer_evidence,
+    })
 }
 
 fn uncertainty_scaled_optimizer_config(
@@ -677,7 +830,7 @@ fn optimize_spatial_robustness(
     sample_rate: f64,
     callback: Option<crate::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
-) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
     // Build spatial robustness config from serde config or defaults
     let sr_config = match &multi_config.spatial_robustness {
         Some(sc) => SpatialRobustnessConfig {
@@ -904,16 +1057,32 @@ fn optimize_spatial_robustness(
         )
     };
 
-    let (_converged_msg, final_loss) = match opt_result {
-        Ok((msg, loss)) => (msg, loss),
-        Err((msg, loss)) => {
-            eprintln!(
-                "  Warning: spatial robustness optimization did not fully converge: {}",
-                msg
+    let evidence = crate::optim::OptimizerRunEvidence::from_backend_result(
+        &optim_params.algo,
+        opt_result,
+        &x,
+        &lower_bounds,
+        &upper_bounds,
+        optim_params.maxeval,
+        optim_params.seed,
+    );
+    if !evidence.converged {
+        if evidence.best_effort {
+            log::warn!(
+                "  Spatial robustness optimization did not fully converge: {}",
+                evidence.status
             );
-            (msg, loss)
+        } else {
+            return Err(format!(
+                "spatial robustness optimizer produced unusable result: {}",
+                evidence.status
+            )
+            .into());
         }
-    };
+    }
+    let final_loss = evidence
+        .objective
+        .ok_or("spatial robustness optimizer did not return a finite objective")?;
 
     let peq = crate::x2peq::x2peq(&x, sample_rate, optim_params.peq_model);
     let filters: Vec<Biquad> = peq
@@ -928,7 +1097,11 @@ fn optimize_spatial_robustness(
         final_loss
     );
 
-    Ok((filters, final_loss))
+    Ok(EqOptimizationResult {
+        filters,
+        loss: final_loss,
+        optimizer_evidence: vec![evidence],
+    })
 }
 
 #[cfg(test)]
@@ -1304,6 +1477,7 @@ mod harman_regression_tests {
 #[cfg(test)]
 mod multi_eq_tests {
     use super::*;
+    use crate::optim::{MockOptimizerBackend, OptimizerConfidence, OptimizerTermination};
     use ndarray::Array1;
 
     fn make_simple_room_curve() -> Curve {
@@ -1323,6 +1497,70 @@ mod multi_eq_tests {
             phase: None,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn multi_eq_detailed_reports_ok_non_convergence_as_low_confidence() {
+        let curve = make_simple_room_curve();
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            num_filters: 1,
+            max_iter: 25,
+            refine: false,
+            ..OptimizerConfig::default()
+        };
+        let backend = MockOptimizerBackend::ok(
+            "not converged: maximum evaluation budget reached (nfev=25)",
+            1.5,
+        );
+
+        let result = optimize_channel_eq_multi_inner(
+            &[curve],
+            &config,
+            &MultiMeasurementConfig::default(),
+            None,
+            48_000.0,
+            None,
+            &backend,
+        )
+        .expect("a finite in-bounds best-effort result remains reportable");
+
+        assert_eq!(result.optimizer_evidence.len(), 1);
+        let evidence = &result.optimizer_evidence[0];
+        assert_eq!(evidence.termination, OptimizerTermination::EvaluationLimit);
+        assert_eq!(evidence.confidence, OptimizerConfidence::Low);
+        assert!(!evidence.converged);
+        assert!(evidence.best_effort);
+        assert_eq!(evidence.evaluation_count, Some(25));
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_rejects_mismatched_measurement_grids() {
+        let first = make_simple_room_curve();
+        let mut second = first.clone();
+        second.freq[10] *= 1.001;
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            num_filters: 1,
+            max_iter: 1,
+            population: 4,
+            seed: Some(42),
+            ..OptimizerConfig::default()
+        };
+
+        let error = optimize_channel_eq_multi(
+            &[first, second],
+            &config,
+            &MultiMeasurementConfig::default(),
+            None,
+            48_000.0,
+        )
+        .expect_err("mismatched grids must be rejected before optimization");
+
+        assert!(
+            error.to_string().contains("mismatched_measurement_grids"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
@@ -1523,11 +1761,13 @@ mod multi_eq_tests {
     }
 
     #[test]
-    #[should_panic(expected = "curves must not be empty")]
-    fn optimize_channel_eq_multi_empty_curves_panics() {
+    fn optimize_channel_eq_multi_empty_curves_returns_error() {
         let config = OptimizerConfig::default();
         let multi_config = MultiMeasurementConfig::default();
-        let _ = optimize_channel_eq_multi(&[], &config, &multi_config, None, 48000.0);
+        let err = optimize_channel_eq_multi(&[], &config, &multi_config, None, 48000.0)
+            .expect_err("empty measurement sets must fail closed");
+
+        assert_eq!(err.to_string(), "no_measurements");
     }
 
     #[test]

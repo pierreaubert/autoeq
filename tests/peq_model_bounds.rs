@@ -18,7 +18,7 @@ fn create_test_args(model: PeqModel, num_filters: usize) -> Args {
     args.max_freq = 20000.0;
     args.min_q = 0.5;
     args.max_q = 10.0;
-    args.min_db = 0.5;
+    args.min_db = -12.0;
     args.max_db = 6.0;
     args
 }

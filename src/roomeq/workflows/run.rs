@@ -9,6 +9,7 @@ use super::workflow::workflow_progress_stopped;
 use crate::Curve;
 use crate::error::{AutoeqError, Result};
 use log::warn;
+#[cfg(test)]
 use math_audio_iir_fir::Biquad;
 use std::path::Path;
 use std::sync::Arc;
@@ -29,7 +30,7 @@ pub(super) fn run_post_eq(
     target: Option<&TargetCurveConfig>,
     sample_rate: f64,
     progress: Option<WorkflowProgressCallback>,
-) -> Result<(Vec<Biquad>, f64)> {
+) -> Result<eq::EqOptimizationResult> {
     let data_min_freq = curve.freq.first().copied().unwrap_or(f64::INFINITY);
     let data_max_freq = curve.freq.last().copied().unwrap_or(f64::NEG_INFINITY);
     let effective_min_freq = opt_config.min_freq.max(data_min_freq);
@@ -42,16 +43,25 @@ pub(super) fn run_post_eq(
             "Skipping Post-EQ: empty frequency band after intersecting configured [{:.1}, {:.1}] Hz with measurement [{:.1}, {:.1}] Hz",
             opt_config.min_freq, opt_config.max_freq, data_min_freq, data_max_freq
         );
-        return Ok((Vec::new(), 0.0));
+        return Ok(eq::EqOptimizationResult {
+            filters: Vec::new(),
+            loss: 0.0,
+            optimizer_evidence: Vec::new(),
+        });
     }
 
     let result = if let Some(WorkflowProgressCallback { callback, stopped }) = progress {
-        let res =
-            eq::optimize_channel_eq_with_callback(curve, opt_config, target, sample_rate, callback);
+        let res = eq::optimize_channel_eq_with_callback_detailed(
+            curve,
+            opt_config,
+            target,
+            sample_rate,
+            callback,
+        );
         workflow_progress_stopped(&Some(stopped), "Post-EQ")?;
         res
     } else {
-        eq::optimize_channel_eq(curve, opt_config, target, sample_rate)
+        eq::optimize_channel_eq_detailed(curve, opt_config, target, sample_rate)
     };
     result.map_err(|e| AutoeqError::OptimizationFailed {
         message: e.to_string(),
@@ -186,6 +196,7 @@ pub(super) fn run_channel_via_generic_path(
         _mean_spl,
         _arrival_ms,
         fir_coeffs,
+        optimizer_evidence,
     ) = processed;
 
     // Prepend the alignment gain plugin without touching the inner chain's
@@ -218,6 +229,7 @@ pub(super) fn run_channel_via_generic_path(
         final_curve,
         biquads,
         fir_coeffs: fir_coeffs.clone(),
+        optimizer_evidence,
     };
 
     Ok((
@@ -281,8 +293,8 @@ mod tests {
     fn run_post_eq_without_callback_runs() {
         let opt = tiny_optimizer();
         let curve = flat_curve();
-        let (filters, loss) = run_post_eq(&curve, &opt, None, 48_000.0, None).unwrap();
-        assert_valid_post_eq_result(&filters, loss);
+        let result = run_post_eq(&curve, &opt, None, 48_000.0, None).unwrap();
+        assert_valid_post_eq_result(&result.filters, result.loss);
     }
 
     #[test]
@@ -294,9 +306,9 @@ mod tests {
             callback: Box::new(|_, _, _| crate::de::CallbackAction::Continue),
             stopped: Arc::clone(&stopped),
         };
-        let (filters, loss) = run_post_eq(&curve, &opt, None, 48_000.0, Some(progress)).unwrap();
+        let result = run_post_eq(&curve, &opt, None, 48_000.0, Some(progress)).unwrap();
         assert!(!stopped.load(std::sync::atomic::Ordering::SeqCst));
-        assert_valid_post_eq_result(&filters, loss);
+        assert_valid_post_eq_result(&result.filters, result.loss);
     }
 
     #[test]
@@ -304,8 +316,8 @@ mod tests {
         let opt = tiny_optimizer();
         let curve = flat_curve();
         let target = TargetCurveConfig::Predefined("flat".to_string());
-        let (filters, loss) = run_post_eq(&curve, &opt, Some(&target), 48_000.0, None).unwrap();
-        assert_valid_post_eq_result(&filters, loss);
+        let result = run_post_eq(&curve, &opt, Some(&target), 48_000.0, None).unwrap();
+        assert_valid_post_eq_result(&result.filters, result.loss);
     }
 
     #[test]
@@ -314,9 +326,9 @@ mod tests {
         opt.min_freq = 400.0;
         opt.max_freq = 80.0;
         let curve = flat_curve();
-        let (filters, loss) = run_post_eq(&curve, &opt, None, 48_000.0, None).unwrap();
-        assert!(filters.is_empty());
-        assert_eq!(loss, 0.0);
+        let result = run_post_eq(&curve, &opt, None, 48_000.0, None).unwrap();
+        assert!(result.filters.is_empty());
+        assert_eq!(result.loss, 0.0);
     }
 
     fn assert_valid_post_eq_result(filters: &[Biquad], loss: f64) {

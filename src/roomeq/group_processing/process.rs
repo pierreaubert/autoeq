@@ -289,6 +289,7 @@ fn process_speaker_topology_impl(
     }
     let mut linearized_drivers = Vec::with_capacity(driver_curves.len());
     let mut per_driver_filters = Vec::with_capacity(driver_curves.len());
+    let mut optimizer_evidence = Vec::new();
 
     for (i, curve) in driver_curves.iter().enumerate() {
         let (min_f, max_f) = optimization_bands[i];
@@ -303,7 +304,7 @@ fn process_speaker_topology_impl(
         driver_opt_config.max_freq = max_f;
 
         // Optimize EQ for this driver
-        let (filters, _) = eq::optimize_channel_eq(
+        let result = eq::optimize_channel_eq_detailed(
             curve,
             &driver_opt_config,
             room_config.target_curve.as_ref(), // Use global target (usually flat)
@@ -312,6 +313,8 @@ fn process_speaker_topology_impl(
         .map_err(|e| AutoeqError::OptimizationFailed {
             message: format!("Linearization failed for driver {}: {}", i, e),
         })?;
+        let filters = result.filters;
+        optimizer_evidence.extend(result.optimizer_evidence);
 
         // Apply filters to get linearized curve
         let resp = response::compute_peq_complex_response(&filters, &curve.freq, sample_rate);
@@ -446,7 +449,7 @@ fn process_speaker_topology_impl(
     let max_freq = room_config.optimizer.max_freq;
     let pre_global_eq_score = flat_loss_score(&combined_curve, min_freq, max_freq);
 
-    let (global_eq_filters, post_score) = eq::optimize_channel_eq(
+    let global_result = eq::optimize_channel_eq_detailed(
         &combined_curve,
         &room_config.optimizer,
         room_config.target_curve.as_ref(),
@@ -458,9 +461,16 @@ fn process_speaker_topology_impl(
             channel_name, e
         ),
     })?;
+    let global_eq_filters = global_result.filters;
+    let post_score = global_result.loss;
+    let global_evidence_start = optimizer_evidence.len();
+    optimizer_evidence.extend(global_result.optimizer_evidence);
 
     let (global_eq_filters, post_score, final_curve) =
         if eq_score_regressed(pre_global_eq_score, post_score) {
+            for evidence in &mut optimizer_evidence[global_evidence_start..] {
+                evidence.selected_for_output = false;
+            }
             warn!(
                 "  Global EQ rejected for speaker group {}: flat loss {:.6} -> {:.6}",
                 channel_name, pre_global_eq_score, post_score
@@ -546,6 +556,7 @@ fn process_speaker_topology_impl(
         mean_spl,
         None, // No single WAV for speaker groups
         None, // IIR-only for speaker groups
+        optimizer_evidence,
     ))
 }
 
@@ -632,7 +643,7 @@ pub(in super::super) fn process_multisub_group(
         &room_config.optimizer,
         eq::MultiEqAutoOptimizerContext::sub_channel(),
     );
-    let (eq_filters, post_score) = eq::optimize_channel_eq(
+    let eq_result = eq::optimize_channel_eq_detailed(
         &combined_curve,
         &multisub_eq_optimizer,
         room_config.target_curve.as_ref(),
@@ -641,6 +652,9 @@ pub(in super::super) fn process_multisub_group(
     .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!("EQ optimization failed for multi-sub sum: {}", e),
     })?;
+    let eq_filters = eq_result.filters;
+    let post_score = eq_result.loss;
+    let optimizer_evidence = eq_result.optimizer_evidence;
 
     info!(
         "  Global EQ: {} filters, score={:.6}",
@@ -726,6 +740,7 @@ pub(in super::super) fn process_multisub_group(
         mean_spl,
         None, // No single WAV for multi-sub groups
         None, // IIR-only for multi-sub groups
+        optimizer_evidence,
     ))
 }
 
@@ -748,6 +763,7 @@ fn process_multisub_group_multiseat(
     let peq_config = multiseat_peq_config(multi_seat_config, seat_count);
     let min_freq = room_config.optimizer.min_freq;
     let max_freq = room_config.optimizer.max_freq;
+    let mut optimizer_evidence = Vec::new();
 
     let raw_measurements = MultiSeatMeasurements::new(seat_measurements.clone())?;
     let raw_identity = identity_multiseat_result(&raw_measurements, multi_seat_config);
@@ -768,7 +784,7 @@ fn process_multisub_group_multiseat(
                 "  Multi-seat per-sub PEQ: optimizing sub {} across {} seats ({:?})",
                 sub_idx, seat_count, peq_config.strategy
             );
-            let (sub_filters, sub_loss) = eq::optimize_channel_eq_multi_with_auto_optimizer(
+            let result = eq::optimize_channel_eq_multi_with_auto_optimizer_detailed(
                 sub_curves,
                 &room_config.optimizer,
                 &peq_config,
@@ -779,6 +795,9 @@ fn process_multisub_group_multiseat(
             .map_err(|e| AutoeqError::OptimizationFailed {
                 message: format!("Per-sub multi-seat PEQ failed for sub {}: {}", sub_idx, e),
             })?;
+            let sub_filters = result.filters;
+            let sub_loss = result.loss;
+            optimizer_evidence.extend(result.optimizer_evidence);
             info!(
                 "  Sub {} per-seat PEQ: {} filters, loss={:.6}",
                 sub_idx,
@@ -830,8 +849,9 @@ fn process_multisub_group_multiseat(
     let combined_curve = average_power_curve(&combined_seat_curves)?;
     let primary_curve = phase_trustworthy.then(|| combined_seat_curves[primary_seat].clone());
 
+    let mut global_evidence_start = None;
     let mut eq_filters = if multi_seat_config.global_eq {
-        let (filters, loss) = eq::optimize_channel_eq_multi_with_auto_optimizer(
+        let result = eq::optimize_channel_eq_multi_with_auto_optimizer_detailed(
             &combined_seat_curves,
             &room_config.optimizer,
             &peq_config,
@@ -842,6 +862,10 @@ fn process_multisub_group_multiseat(
         .map_err(|e| AutoeqError::OptimizationFailed {
             message: format!("Global multi-seat EQ failed for multi-sub sum: {}", e),
         })?;
+        let filters = result.filters;
+        let loss = result.loss;
+        global_evidence_start = Some(optimizer_evidence.len());
+        optimizer_evidence.extend(result.optimizer_evidence);
         info!(
             "  Global multi-seat EQ: {} filters, score={:.6}",
             filters.len(),
@@ -865,6 +889,11 @@ fn process_multisub_group_multiseat(
     });
     let mut post_score = flat_loss_score(&final_curve, min_freq, max_freq);
     if multi_seat_config.global_eq && eq_score_regressed(global_eq_pre_score, post_score) {
+        if let Some(start) = global_evidence_start {
+            for evidence in &mut optimizer_evidence[start..] {
+                evidence.selected_for_output = false;
+            }
+        }
         warn!(
             "  Global multi-seat EQ rejected for multi-sub sum: flat loss {:.6} -> {:.6}",
             global_eq_pre_score, post_score
@@ -937,6 +966,7 @@ fn process_multisub_group_multiseat(
         mean_spl,
         None,
         None,
+        optimizer_evidence,
     ))
 }
 
@@ -950,19 +980,20 @@ pub(in super::super) fn process_dba(
     sample_rate: f64,
     _output_dir: &Path,
 ) -> Result<MixedModeResult> {
-    let (result, combined_curve) =
-        dba::optimize_dba(dba_config, &room_config.optimizer, sample_rate).map_err(|e| {
-            AutoeqError::OptimizationFailed {
-                message: format!("DBA optimization failed: {}", e),
-            }
+    let dba_result = dba::optimize_dba_detailed(dba_config, &room_config.optimizer, sample_rate)
+        .map_err(|e| AutoeqError::OptimizationFailed {
+            message: format!("DBA optimization failed: {}", e),
         })?;
+    let result = dba_result.driver;
+    let combined_curve = dba_result.combined_curve;
+    let mut optimizer_evidence = vec![dba_result.optimizer_evidence];
 
     info!(
         "  DBA Optimization: Front Gain={:.2}dB, Rear Gain={:.2}dB, Rear Delay={:.2}ms",
         result.gains[0], result.gains[1], result.delays[1]
     );
 
-    let (eq_filters, post_score) = eq::optimize_channel_eq(
+    let eq_result = eq::optimize_channel_eq_detailed(
         &combined_curve,
         &room_config.optimizer,
         room_config.target_curve.as_ref(),
@@ -971,6 +1002,9 @@ pub(in super::super) fn process_dba(
     .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!("EQ optimization failed for DBA sum: {}", e),
     })?;
+    let eq_filters = eq_result.filters;
+    let post_score = eq_result.loss;
+    optimizer_evidence.extend(eq_result.optimizer_evidence);
 
     info!(
         "  Global EQ: {} filters, score={:.6}",
@@ -1045,6 +1079,7 @@ pub(in super::super) fn process_dba(
         mean_spl,
         None, // No single WAV for DBA
         None, // IIR-only for DBA
+        optimizer_evidence,
     ))
 }
 
@@ -1108,8 +1143,8 @@ pub(in super::super) fn process_mixed_mode_crossover(
         ..room_config.optimizer.clone()
     };
 
-    let (eq_filters, _) = if let Some(cb) = callback {
-        eq::optimize_channel_eq_with_callback(
+    let eq_result = if let Some(cb) = callback {
+        eq::optimize_channel_eq_with_callback_detailed(
             iir_curve,
             &iir_config,
             room_config.target_curve.as_ref(),
@@ -1117,7 +1152,7 @@ pub(in super::super) fn process_mixed_mode_crossover(
             cb,
         )
     } else {
-        eq::optimize_channel_eq(
+        eq::optimize_channel_eq_detailed(
             iir_curve,
             &iir_config,
             room_config.target_curve.as_ref(),
@@ -1131,6 +1166,8 @@ pub(in super::super) fn process_mixed_mode_crossover(
             e
         ),
     })?;
+    let eq_filters = eq_result.filters;
+    let optimizer_evidence = eq_result.optimizer_evidence;
 
     info!(
         "  IIR stage: {} filters for {} band",
@@ -1266,6 +1303,7 @@ pub(in super::super) fn process_mixed_mode_crossover(
         mean,
         arrival_time_ms,
         Some(fir_coeffs),
+        optimizer_evidence,
     ))
 }
 
@@ -1371,7 +1409,7 @@ pub(in super::super) fn process_cardioid(
     let max_freq = room_config.optimizer.max_freq;
     let pre_score = flat_loss_score(&combined_curve, min_freq, max_freq);
 
-    let (eq_filters, post_score) = eq::optimize_channel_eq(
+    let eq_result = eq::optimize_channel_eq_detailed(
         &combined_curve,
         &room_config.optimizer,
         room_config.target_curve.as_ref(),
@@ -1380,8 +1418,14 @@ pub(in super::super) fn process_cardioid(
     .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!("EQ optimization failed for Cardioid sum: {}", e),
     })?;
+    let eq_filters = eq_result.filters;
+    let post_score = eq_result.loss;
+    let mut optimizer_evidence = eq_result.optimizer_evidence;
 
     let (eq_filters, post_score, final_curve) = if eq_score_regressed(pre_score, post_score) {
+        for evidence in &mut optimizer_evidence {
+            evidence.selected_for_output = false;
+        }
         warn!(
             "  Global EQ rejected for Cardioid sum {}: flat loss {:.6} -> {:.6}",
             channel_name, pre_score, post_score
@@ -1452,5 +1496,6 @@ pub(in super::super) fn process_cardioid(
         mean_spl,
         None,
         None, // IIR-only for cardioid
+        optimizer_evidence,
     ))
 }

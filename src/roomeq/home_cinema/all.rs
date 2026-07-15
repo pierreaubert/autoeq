@@ -122,6 +122,7 @@ pub fn all_channel_multiseat_acceptance(
                 final_curve: final_curve.clone(),
                 biquads: Vec::new(),
                 fir_coeffs: None,
+                optimizer_evidence: Vec::new(),
             },
             band_hz,
             policy.primary_seat,

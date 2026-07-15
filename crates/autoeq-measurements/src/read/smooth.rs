@@ -3,6 +3,8 @@ use ndarray::Array1;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::interpolate::mean_over_log_frequency;
+
 /// Psychoacoustic variable smoothing configuration
 ///
 /// Different frequency ranges benefit from different smoothing levels:
@@ -47,8 +49,9 @@ impl Default for PsychoacousticSmoothingConfig {
 ///
 /// # Example
 /// ```
-/// use autoeq::read::{smooth_psychoacoustic, PsychoacousticSmoothingConfig};
-/// use autoeq::cea2034::Curve;
+/// use autoeq_measurements::{
+///     Curve, PsychoacousticSmoothingConfig, smooth_psychoacoustic,
+/// };
 /// use ndarray::Array1;
 ///
 /// // Create a dummy curve
@@ -75,23 +78,15 @@ pub fn smooth_psychoacoustic(curve: &Curve, config: &PsychoacousticSmoothingConf
         let lo = f / half_win;
         let hi = f * half_win;
 
-        // Average values within window
-        let mut sum = 0.0;
-        let mut cnt = 0usize;
-        for j in 0..freqs.len() {
-            let fj = freqs[j];
-            if fj >= lo && fj <= hi {
-                sum += values[j];
-                cnt += 1;
-            }
-        }
-        out[i] = if cnt > 0 { sum / cnt as f64 } else { values[i] };
+        out[i] = mean_over_log_frequency(freqs, values, lo, hi).unwrap_or(values[i]);
     }
 
     Curve {
         freq: curve.freq.clone(),
         spl: out,
-        phase: None,
+        phase: curve.phase.clone(),
+        coherence: curve.coherence.clone(),
+        noise_floor_db: curve.noise_floor_db.clone(),
         ..Default::default()
     }
 }
@@ -141,21 +136,14 @@ pub fn smooth_one_over_n_octave(curve: &Curve, n: usize) -> Curve {
         let f = freqs[i].max(1e-12);
         let lo = f / half_win;
         let hi = f * half_win;
-        let mut sum = 0.0;
-        let mut cnt = 0usize;
-        for j in 0..freqs.len() {
-            let fj = freqs[j];
-            if fj >= lo && fj <= hi {
-                sum += values[j];
-                cnt += 1;
-            }
-        }
-        out[i] = if cnt > 0 { sum / cnt as f64 } else { values[i] };
+        out[i] = mean_over_log_frequency(freqs, values, lo, hi).unwrap_or(values[i]);
     }
     Curve {
         freq: curve.freq.clone(),
         spl: out,
-        phase: None,
+        phase: curve.phase.clone(),
+        coherence: curve.coherence.clone(),
+        noise_floor_db: curve.noise_floor_db.clone(),
         ..Default::default()
     }
 }
@@ -316,6 +304,92 @@ mod tests {
         // Flat input should remain flat (within floating point precision)
         for &v in out.spl.iter() {
             assert!((v - 80.0).abs() < 0.01, "Expected 80.0, got {}", v);
+        }
+    }
+
+    #[test]
+    fn octave_smoothing_is_invariant_to_source_grid_density() {
+        fn response_at(freq: f64) -> f64 {
+            if freq <= 200.0 {
+                10.0 * (freq / 100.0).ln() / 2.0_f64.ln()
+            } else {
+                10.0 * (1.0 - (freq / 200.0).ln() / 2.0_f64.ln())
+            }
+        }
+
+        let curve = |freq: Vec<f64>| Curve {
+            spl: Array1::from_iter(freq.iter().copied().map(response_at)),
+            freq: Array1::from_vec(freq),
+            ..Default::default()
+        };
+        let sparse = curve(vec![100.0, 200.0, 400.0]);
+        let dense = curve(vec![
+            100.0, 125.0, 150.0, 175.0, 200.0, 225.0, 250.0, 300.0, 350.0, 400.0,
+        ]);
+
+        let sparse_smoothed = smooth_one_over_n_octave(&sparse, 1);
+        let dense_smoothed = smooth_one_over_n_octave(&dense, 1);
+        assert!(
+            (sparse_smoothed.spl[1] - dense_smoothed.spl[4]).abs() < 1e-9,
+            "sparse={} dense={}",
+            sparse_smoothed.spl[1],
+            dense_smoothed.spl[4]
+        );
+
+        let config = PsychoacousticSmoothingConfig {
+            low_freq_n: 1,
+            high_freq_n: 1,
+            low_freq: 1.0,
+            high_freq: 10.0,
+        };
+        let sparse_smoothed = smooth_psychoacoustic(&sparse, &config);
+        let dense_smoothed = smooth_psychoacoustic(&dense, &config);
+        assert!(
+            (sparse_smoothed.spl[1] - dense_smoothed.spl[4]).abs() < 1e-9,
+            "sparse={} dense={}",
+            sparse_smoothed.spl[1],
+            dense_smoothed.spl[4]
+        );
+    }
+
+    #[test]
+    fn magnitude_smoothing_preserves_measured_metadata_and_invalidates_derived_phase() {
+        let curve = Curve {
+            freq: Array1::from_vec(vec![100.0, 200.0, 400.0]),
+            spl: Array1::from_vec(vec![0.0, 10.0, 0.0]),
+            phase: Some(Array1::from_vec(vec![10.0, 20.0, 30.0])),
+            coherence: Some(Array1::from_vec(vec![0.8, 0.9, 0.95])),
+            noise_floor_db: Some(Array1::from_vec(vec![-50.0, -55.0, -60.0])),
+            min_phase: Some(Array1::from_vec(vec![1.0, 2.0, 3.0])),
+            excess_phase: Some(Array1::from_vec(vec![9.0, 18.0, 27.0])),
+            excess_delay_ms: Some(1.5),
+        };
+        let config = PsychoacousticSmoothingConfig {
+            low_freq_n: 1,
+            high_freq_n: 1,
+            low_freq: 1.0,
+            high_freq: 10.0,
+        };
+
+        for smoothed in [
+            smooth_one_over_n_octave(&curve, 1),
+            smooth_psychoacoustic(&curve, &config),
+        ] {
+            assert_eq!(
+                smoothed.phase.as_ref().unwrap(),
+                curve.phase.as_ref().unwrap()
+            );
+            assert_eq!(
+                smoothed.coherence.as_ref().unwrap(),
+                curve.coherence.as_ref().unwrap()
+            );
+            assert_eq!(
+                smoothed.noise_floor_db.as_ref().unwrap(),
+                curve.noise_floor_db.as_ref().unwrap()
+            );
+            assert!(smoothed.min_phase.is_none());
+            assert!(smoothed.excess_phase.is_none());
+            assert!(smoothed.excess_delay_ms.is_none());
         }
     }
 

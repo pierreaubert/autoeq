@@ -464,6 +464,15 @@ Information about the optimization process.
 | `perceptual_metrics.fir_post_ringing_audible_db` | number or null | Worst FIR post-ringing audible energy across channels, dB relative to each FIR main impulse peak. |
 | `perceptual_metrics.fir_temporal_masking_penalty` | number or null | Worst scalar FIR temporal masking penalty across channels. |
 | `supporting_source` | object or null | Per-channel supporting-source room-compensation reports. Present when at least one `SupportingSourceGroup` was processed. |
+| `correction_acceptance` | object or null | Versioned final runtime decision. Includes enforced spectral/spatial/boost/headroom/temporal/realization limits, violations, and correction stages reverted before output. |
+| `optimizer_evidence` | object or null | Versioned room-level optimizer confidence plus every per-channel backend run. Each run records termination, convergence/best-effort status, objective, evaluation count/limit, seed, bound violation, restart history, and whether it supplied the emitted parameters. Selected `unusable` evidence cannot pass production acceptance. |
+| `stage_outcomes` | array | Machine-readable applied/skipped/degraded/failed outcomes for optional processing and safety stages. |
+
+`optimizer_evidence.confidence` is derived only from runs with
+`selected_for_output: true`. Superseded adaptive passes and rejected local
+refinements remain visible for diagnosis without lowering the confidence of the
+parameters that were actually emitted.
+
 ### EPA Per-Channel Metrics
 
 Keyed by channel name. Each entry has `pre` (computed from `initial_curve`)

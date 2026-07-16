@@ -439,6 +439,7 @@ mod tests {
         args.max_freq = 2000.0;
         args.min_q = 0.3;
         args.max_q = 8.0;
+        args.min_db = -9.0;
         args.max_db = 12.0;
         args.peq_model = PeqModel::HpPk;
 
@@ -455,11 +456,10 @@ mod tests {
         assert!((ub[2] - 0.0).abs() < 1e-12);
 
         // Second filter should follow the general pattern
-        let gain_lower = -3.0 * args.max_db;
         let q_lower = args.min_q.max(0.1);
         assert!((lb[3] - args.min_freq.log10()).abs() < 1e-12);
         assert!((lb[4] - q_lower).abs() < 1e-12);
-        assert!((lb[5] - gain_lower).abs() < 1e-12);
+        assert!((lb[5] - args.min_db).abs() < 1e-12);
         assert!((ub[3] - args.max_freq.log10()).abs() < 1e-12);
         assert!((ub[4] - args.max_q).abs() < 1e-12);
         assert!((ub[5] - args.max_db).abs() < 1e-12);

@@ -19,7 +19,7 @@ math-optimisation = { git = "https://github.com/pierreaubert/math-audio", versio
 ndarray = { version = "0.17", default-features = false, features = ["rayon", "serde"] }
 num-complex = "0.4"
 num_cpus = "1.17"
-rand = "=0.9.2"
+rand = "=0.10.2"
 rand_chacha = "0.9"
 schemars = "1.2"
 serde = { version = "1.0", features = ["derive", "rc"] }

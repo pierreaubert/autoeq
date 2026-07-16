@@ -295,6 +295,124 @@ def _gd_summary_cells_html(metadata: dict) -> str:
     )
 
 
+def _mixed_phase_summary_html(metadata: dict, channels: dict | list) -> str:
+    """Render per-channel mixed-phase and FIR temporal evidence."""
+    mixed_phase = metadata.get("mixed_phase_per_channel") or {}
+    if isinstance(channels, dict):
+        channel_map = channels
+    elif isinstance(channels, list):
+        channel_map = {
+            str(channel.get("channel")): channel
+            for channel in channels
+            if isinstance(channel, dict) and channel.get("channel")
+        }
+    else:
+        channel_map = {}
+
+    temporal_by_channel = {
+        name: (channel or {}).get("fir_temporal_masking")
+        for name, channel in channel_map.items()
+        if isinstance(channel, dict) and (channel or {}).get("fir_temporal_masking")
+    }
+    perceptual = metadata.get("perceptual_metrics") or {}
+    has_global_fir_metrics = any(
+        isinstance(perceptual.get(field), (int, float))
+        for field in (
+            "fir_pre_ringing_audible_db",
+            "fir_post_ringing_audible_db",
+            "fir_temporal_masking_penalty",
+        )
+    )
+    if not mixed_phase and not temporal_by_channel and not has_global_fir_metrics:
+        return ""
+
+    def phase_range(report: dict) -> str:
+        minimum = report.get("residual_excess_phase_min_deg")
+        maximum = report.get("residual_excess_phase_max_deg")
+        if isinstance(minimum, (int, float)) and isinstance(maximum, (int, float)):
+            return f"{minimum:+.2f}° to {maximum:+.2f}°"
+        return "-"
+
+    def phase_rms(report: dict) -> str:
+        value = report.get("residual_excess_phase_rms_deg")
+        return f"{value:.2f}°" if isinstance(value, (int, float)) else "-"
+
+    def ringing_pair(masking: dict, peak_field: str, audible_field: str) -> str:
+        peak = masking.get(peak_field)
+        audible = masking.get(audible_field)
+        if isinstance(peak, (int, float)) and isinstance(audible, (int, float)):
+            return f"{peak:+.2f} / {audible:+.2f} dB"
+        if isinstance(peak, (int, float)):
+            return f"{peak:+.2f} / - dB"
+        if isinstance(audible, (int, float)):
+            return f"- / {audible:+.2f} dB"
+        return "-"
+
+    rows: list[str] = []
+    channel_names = sorted(
+        set(mixed_phase) | set(temporal_by_channel), key=get_channel_sort_key
+    )
+    for channel_name in channel_names:
+        phase = mixed_phase.get(channel_name) or {}
+        masking = temporal_by_channel.get(channel_name) or {}
+        taps = phase.get("fir_taps")
+        taps_str = str(taps) if isinstance(taps, int) else "-"
+        penalty = masking.get("penalty")
+        penalty_str = f"{penalty:.3f}" if isinstance(penalty, (int, float)) else "-"
+        rows.append(
+            "<tr>"
+            f"<td>{escape(str(channel_name))}</td>"
+            f"<td>{_fmt_ms(phase.get('estimated_delay_ms'))}</td>"
+            f"<td>{taps_str}</td>"
+            f"<td>{phase_range(phase)}</td>"
+            f"<td>{phase_rms(phase)}</td>"
+            f"<td>{_fmt_ms(masking.get('main_time_ms'))}</td>"
+            f"<td>{ringing_pair(masking, 'pre_ringing_peak_db', 'pre_ringing_audible_db')}</td>"
+            f"<td>{ringing_pair(masking, 'post_ringing_peak_db', 'post_ringing_audible_db')}</td>"
+            f"<td>{penalty_str}</td>"
+            "</tr>\n"
+        )
+
+    pre = perceptual.get("fir_pre_ringing_audible_db")
+    post = perceptual.get("fir_post_ringing_audible_db")
+    penalty = perceptual.get("fir_temporal_masking_penalty")
+    summary_parts: list[str] = []
+    if isinstance(pre, (int, float)) or isinstance(post, (int, float)):
+        summary_parts.append(
+            "Worst audible pre/post ringing: "
+            f"{pre:+.2f} dB" if isinstance(pre, (int, float)) else "Worst audible pre/post ringing: -"
+        )
+        summary_parts[-1] += (
+            f" / {post:+.2f} dB" if isinstance(post, (int, float)) else " / -"
+        )
+    if isinstance(penalty, (int, float)):
+        summary_parts.append(f"worst temporal masking penalty: {penalty:.3f}")
+    summary_html = (
+        f'<p class="epa-footer">{escape("; ".join(summary_parts))}.</p>\n'
+        if summary_parts
+        else ""
+    )
+
+    table_html = ""
+    if rows:
+        table_html = (
+            '<table class="bm-table">\n'
+            "<thead><tr><th>Channel</th><th>Estimated delay</th><th>FIR taps</th>"
+            "<th>Residual phase range</th><th>Residual RMS</th><th>Main impulse</th>"
+            "<th>Pre peak / audible</th><th>Post peak / audible</th><th>Penalty</th>"
+            "</tr></thead>\n<tbody>\n"
+            + "".join(rows)
+            + "</tbody>\n</table>\n"
+        )
+    return (
+        '<div class="filters-section mixed-phase-section">\n'
+        "<h3>Mixed-Phase and FIR Timing</h3>\n"
+        + table_html
+        + summary_html
+        + "</div>\n"
+    )
+
+
 def _bass_management_summary_html(report: dict) -> str:
     if not report:
         return ""
@@ -733,6 +851,10 @@ def create_html_report(
         </div>
 """
         )
+
+    mixed_phase_html = _mixed_phase_summary_html(metadata, channels_dict)
+    if mixed_phase_html:
+        html_parts.append(mixed_phase_html)
 
     # Combined plot
     combined_fig = create_combined_figure(data, output_json_path)

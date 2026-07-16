@@ -61,7 +61,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut rng = if let Some(seed) = args.seed {
         ChaCha8Rng::seed_from_u64(seed)
     } else {
-        ChaCha8Rng::from_os_rng()
+        ChaCha8Rng::from_rng(&mut rand::rng())
     };
 
     for i in 0..args.num_tests {

@@ -56,7 +56,7 @@ struct Args {
     #[arg(long, alias = "optim-config")]
     override_config: Option<PathBuf>,
 
-    /// Export DSP chain to external format (camilladsp, apo, easyeffects, wavelet, pipewire)
+    /// Export DSP chain (camilladsp, apo, easyeffects, wavelet, pipewire, roon, rew, coefficients)
     #[arg(long, value_enum)]
     export_format: Option<ExportFormat>,
 

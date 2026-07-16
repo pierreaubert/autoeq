@@ -35,6 +35,27 @@ pub async fn optimize_speaker<F>(
 where
     F: FnMut(&ProgressUpdate) -> crate::de::CallbackAction + Send + 'static,
 {
+    optimize_speaker_with_grid(
+        input,
+        params,
+        &crate::workflow::VisualizationGridConfig::default(),
+        progress_config,
+        progress_callback,
+    )
+    .await
+}
+
+/// Run speaker optimization with an explicit normalization/report grid.
+pub async fn optimize_speaker_with_grid<F>(
+    input: &crate::workflow::InputConfig,
+    params: &crate::OptimParams,
+    visualization_grid: &crate::workflow::VisualizationGridConfig,
+    progress_config: Option<ProgressCallbackConfig>,
+    progress_callback: Option<F>,
+) -> Result<SpeakerOptResult, Box<dyn Error>>
+where
+    F: FnMut(&ProgressUpdate) -> crate::de::CallbackAction + Send + 'static,
+{
     // 1. Load measurement with spin data
     let speaker = input.speaker.as_deref().unwrap_or("");
     let version = input.version.as_deref().unwrap_or("");
@@ -43,7 +64,7 @@ where
         read::load_spinorama_with_spin(speaker, version, measurement, &input.curve_name).await?;
 
     // 2. Normalize to standard frequency grid
-    let standard_freq = read::create_log_frequency_grid(200, 20.0, 20000.0);
+    let standard_freq = visualization_grid.create_frequency_grid(params)?;
     let input_normalized = read::normalize_and_interpolate_response(&standard_freq, &input_curve);
 
     // 3. Build target curve
@@ -146,11 +167,33 @@ pub fn optimize_headphone<F>(
 where
     F: FnMut(&ProgressUpdate) -> crate::de::CallbackAction + Send + 'static,
 {
+    optimize_headphone_with_grid(
+        curve_path,
+        target_curve,
+        params,
+        &crate::workflow::VisualizationGridConfig::default(),
+        progress_config,
+        progress_callback,
+    )
+}
+
+/// Run headphone optimization with an explicit normalization/report grid.
+pub fn optimize_headphone_with_grid<F>(
+    curve_path: &PathBuf,
+    target_curve: &Curve,
+    params: &crate::OptimParams,
+    visualization_grid: &crate::workflow::VisualizationGridConfig,
+    progress_config: Option<ProgressCallbackConfig>,
+    progress_callback: Option<F>,
+) -> Result<HeadphoneOptResult, Box<dyn Error>>
+where
+    F: FnMut(&ProgressUpdate) -> crate::de::CallbackAction + Send + 'static,
+{
     // 1. Load measurement
     let input_curve = read::read_curve_from_csv(curve_path)?;
 
     // 2. Normalize to standard frequency grid
-    let standard_freq = read::create_log_frequency_grid(200, 20.0, 20000.0);
+    let standard_freq = visualization_grid.create_frequency_grid(params)?;
     let input_normalized = read::normalize_and_interpolate_response(&standard_freq, &input_curve);
     let target_normalized = read::normalize_and_interpolate_response(&standard_freq, target_curve);
 

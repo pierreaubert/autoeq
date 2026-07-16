@@ -57,7 +57,7 @@ AutoEQ and RoomEQ are Rust CLIs for computing corrections.
 | Perceptual quality | EPA loudness/sharpness/roughness scoring, audibility deadbands, role-aware targets, inter-channel timbre matching, and height-channel alignment |
 | Home cinema | Role-aware bass management, crossover optimization, physical sub routing, headroom simulation, and topology-aware reporting |
 | Safety | Measurement-grid validation, bounded filters, null and headroom protection, do-no-harm acceptance gates, and structured applied/skipped/degraded/failed outcomes |
-| Export | SotF DSP graphs, CamillaDSP, Equalizer APO, PipeWire, Roon, Wavelet, EasyEffects, convolution WAV sidecars, and explicit rejection when a target format cannot preserve the routing graph |
+| Export | SotF DSP graphs, CamillaDSP, Equalizer APO, PipeWire, Roon, REW Generic EQ, normalized biquad coefficients, Wavelet, EasyEffects, convolution WAV sidecars, and explicit rejection when a target format cannot preserve the routing graph |
 
 RoomEQ keeps the full DSP chain and its evidence together: corrected responses,
 filter stages, routing graphs, perceptual scores, timing diagnostics, advisories,
@@ -123,6 +123,11 @@ cargo run --release --bin roomeq -- \
   --output path/to/result.json
 ```
 
+Use `--export-format rew` for a single-channel Room EQ Wizard Generic EQ text
+file or `--export-format coefficients` for canonical normalized biquad
+coefficients. Both exports fail closed if the source DSP graph contains stages
+or routing that the target artifact cannot represent.
+
 Start with the [input-format examples](src/bin/roomeq/INPUT_FORMAT.md), then use
 the [input schema](src/bin/roomeq/input_schema.json) and
 [output schema](src/bin/roomeq/output_schema.json) as the complete contracts.
@@ -160,6 +165,14 @@ just prod             # Build all release binaries
 just prod-autoeq      # Build autoeq only
 just prod-roomeq      # Build roomeq only
 just dev              # Build debug binaries
+```
+
+The optional `plotly_static` feature writes deterministic PNG charts in-process
+through SVG rasterization. It has no browser, WebDriver, display-server, or
+runtime network dependency:
+
+```bash
+cargo build -p autoeq --features plotly_static
 ```
 
 ### Testing

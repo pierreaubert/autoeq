@@ -552,10 +552,16 @@ fn optimize_headphone_with_csv_runs() {
     args.min_freq = 100.0;
     args.max_freq = 10000.0;
 
-    let result = super::optimize_headphone(
+    let grid = super::VisualizationGridConfig {
+        points: 37,
+        min_freq: None,
+        max_freq: None,
+    };
+    let result = super::optimize_headphone_with_grid(
         &curve_path,
         &target_curve,
         &crate::OptimParams::from(&args),
+        &grid,
         None,
         None::<fn(&_) -> _>,
     );
@@ -565,6 +571,9 @@ fn optimize_headphone_with_csv_runs() {
         result.err()
     );
     let opt = result.unwrap();
+    assert_eq!(opt.curves.frequencies.len(), 37);
+    assert!((opt.curves.frequencies[0] - args.min_freq).abs() < 1e-10);
+    assert!((opt.curves.frequencies[36] - args.max_freq).abs() < 1e-8);
     assert!(!opt.biquads.is_empty());
     assert!(opt.initial_loss.is_finite() && opt.final_loss.is_finite());
     assert!(

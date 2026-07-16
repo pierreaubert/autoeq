@@ -438,6 +438,8 @@ fn every_external_export_rejects_unknown_plugins_instead_of_dropping_them() {
         ExportFormat::Wavelet,
         ExportFormat::PipeWire,
         ExportFormat::RoonDsp,
+        ExportFormat::Rew,
+        ExportFormat::BiquadCoefficients,
     ] {
         let error = render_dsp_chain(&output, format, 48_000.0)
             .unwrap_err()

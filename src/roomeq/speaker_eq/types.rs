@@ -97,6 +97,7 @@ pub(in crate::roomeq) enum OptimizerOutput {
         eq_filters: Vec<Biquad>,
         fir_coeffs: Option<Vec<f64>>,
         fir_filename: Option<String>,
+        report: Option<crate::roomeq::mixed_phase::MixedPhaseCorrectionReport>,
     },
     /// Low-latency IIR correction.
     LowLatency {

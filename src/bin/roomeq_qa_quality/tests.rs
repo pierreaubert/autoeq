@@ -58,6 +58,7 @@ fn result_with_channel_slopes(
         final_curve,
         biquads: Vec::new(),
         fir_coeffs: None,
+        optimizer_evidence: Vec::new(),
     };
     RoomOptimizationResult {
         channels: HashMap::from([(
@@ -82,6 +83,7 @@ fn result_with_channel_slopes(
             epa_per_channel: None,
             epa_multichannel: None,
             group_delay: None,
+            mixed_phase_per_channel: None,
             perceptual_metrics: None,
             home_cinema_layout: None,
             multi_seat_coverage: None,
@@ -94,6 +96,7 @@ fn result_with_channel_slopes(
             validation_bundle: None,
             supporting_source: None,
             correction_acceptance: None,
+            optimizer_evidence: None,
             stage_outcomes: Vec::new(),
         },
     }
@@ -128,6 +131,7 @@ fn result_with_inter_channel_slope(channel_slope_db_per_octave: f64) -> RoomOpti
                 final_curve: reference_curve,
                 biquads: Vec::new(),
                 fir_coeffs: None,
+                optimizer_evidence: Vec::new(),
             },
         ),
         (
@@ -140,6 +144,7 @@ fn result_with_inter_channel_slope(channel_slope_db_per_octave: f64) -> RoomOpti
                 final_curve: channel_curve,
                 biquads: Vec::new(),
                 fir_coeffs: None,
+                optimizer_evidence: Vec::new(),
             },
         ),
     ]);

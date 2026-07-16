@@ -37,7 +37,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.4.50"
+version = "0.4.51"
 
 [dependencies]
 autoeq-core = { path = "crates/autoeq-core" }
@@ -90,15 +90,16 @@ sofa-reader = "0.1"
 ndarray = { version = "0.17", default-features = false, features = ["rayon", "serde"] }
 oxiblas-ndarray = "0.2.1"
 
-# Optional features
-plotly_static = { version = "0.1", features = ["chromedriver", "webdriver_download"], optional = true }
+# Optional, WebDriver-free static rendering. Charts are emitted as deterministic
+# SVG and `resvg` rasterizes them in-process to PNG.
+resvg = { version = "0.46", optional = true }
 rayon = "1.11"
 
 [features]
 default = []
 plotly = ["dep:plotly"]
-# Static PNG export needs both the plotly crate and the chrome-driver wrapper.
-plotly_static = ["plotly", "dep:plotly_static"]
+# Static PNG export has no browser, WebDriver, display-server, or network dependency.
+plotly_static = ["plotly", "dep:resvg"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 
@@ -177,11 +178,6 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
-
-# Plotly's `webdriver-downloader` dependency needs a small fix to build reliably
-# on recent Rust toolchains. math-audio applies the same patch.
-[patch.crates-io]
-webdriver-downloader = { version = "0.16.4", git = "https://github.com/pierreaubert/webdriver-downloader" }
 
 [profile.release]
 # `release` is the everyday optimised profile — used by CI, `just prod-*`,

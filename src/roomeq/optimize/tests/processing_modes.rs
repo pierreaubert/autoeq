@@ -105,7 +105,14 @@ fn optimize_room_impl_workflow_hybrid_succeeds() {
 
 #[test]
 fn optimize_room_impl_workflow_mixed_phase_succeeds() {
-    let config = stereo_config_for_mode(ProcessingMode::MixedPhase);
+    let mut config = stereo_config_for_mode(ProcessingMode::MixedPhase);
+    for speaker in config.speakers.values_mut() {
+        if let SpeakerConfig::Single(MeasurementSource::InMemory(curve)) = speaker {
+            curve.phase = Some(Array1::from_iter(
+                curve.freq.iter().map(|frequency| -0.02 * frequency),
+            ));
+        }
+    }
     let result = optimize_room_impl(
         &config,
         48000.0,
@@ -121,11 +128,34 @@ fn optimize_room_impl_workflow_mixed_phase_succeeds() {
     );
     let result = result.unwrap();
     assert!(!result.channels.is_empty());
+    let reports = result
+        .metadata
+        .mixed_phase_per_channel
+        .as_ref()
+        .expect("mixed-phase correction should emit decomposition reports");
+    assert_eq!(reports.len(), 2);
+    for report in reports.values() {
+        assert!(report.estimated_delay_ms.is_finite());
+        assert!(report.fir_taps > 0);
+        assert!(report.residual_excess_phase_min_deg.is_finite());
+        assert!(report.residual_excess_phase_max_deg.is_finite());
+        assert!(report.residual_excess_phase_rms_deg.is_finite());
+        assert!(
+            report.residual_excess_phase_min_deg <= report.residual_excess_phase_max_deg
+        );
+    }
 }
 
 #[test]
 fn optimize_room_impl_workflow_phase_correction_succeeds() {
     let mut config = stereo_config_for_mode(ProcessingMode::LowLatency);
+    for speaker in config.speakers.values_mut() {
+        if let SpeakerConfig::Single(MeasurementSource::InMemory(curve)) = speaker {
+            curve.phase = Some(Array1::from_iter(
+                curve.freq.iter().map(|frequency| -0.02 * frequency),
+            ));
+        }
+    }
     config.optimizer.phase_correction = Some(crate::roomeq::types::MixedPhaseSerdeConfig {
         max_fir_length_ms: 5.0,
         pre_ringing_threshold_db: -30.0,
@@ -143,7 +173,16 @@ fn optimize_room_impl_workflow_phase_correction_succeeds() {
     assert!(
         result.is_ok(),
         "workflow with phase correction should succeed: {:?}",
-        result.err()
+        result.as_ref().err()
+    );
+    let result = result.unwrap();
+    assert_eq!(
+        result
+            .metadata
+            .mixed_phase_per_channel
+            .as_ref()
+            .map(HashMap::len),
+        Some(2)
     );
 }
 

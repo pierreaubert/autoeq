@@ -22,6 +22,8 @@ mod plot_filters;
 mod plot_results;
 mod plot_spin;
 mod ref_lines;
+#[cfg(feature = "plotly_static")]
+mod static_export;
 mod trend_lines;
 
 pub use config::PlotConfig;

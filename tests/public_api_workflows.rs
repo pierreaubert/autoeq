@@ -17,7 +17,8 @@ use autoeq::read::{
     read_curve_from_csv, smooth_psychoacoustic,
 };
 use autoeq::workflow::{
-    compute_visualization_curves, optimize_drivers_crossover, optimize_headphone, optimize_multisub,
+    VisualizationGridConfig, compute_visualization_curves, optimize_drivers_crossover,
+    optimize_headphone, optimize_multisub,
 };
 use autoeq::x2peq::{peq2x, x2peq};
 use ndarray::Array1;
@@ -52,6 +53,54 @@ fn write_csv(path: &PathBuf, curve: &Curve) {
         content.push_str(&format!("{},{}\n", f, s));
     }
     std::fs::write(path, content).unwrap();
+}
+
+#[test]
+fn visualization_grid_defaults_to_optimizer_bounds_and_accepts_overrides() {
+    let mut args = Args::headphone_defaults();
+    args.min_freq = 35.0;
+    args.max_freq = 16_000.0;
+    let params = autoeq::OptimParams::from(&args);
+
+    let default_grid = VisualizationGridConfig::default()
+        .create_frequency_grid(&params)
+        .expect("default visualization grid should be valid");
+    assert_eq!(default_grid.len(), 200);
+    assert!((default_grid[0] - 35.0).abs() < 1e-10);
+    assert!((default_grid[default_grid.len() - 1] - 16_000.0).abs() < 1e-8);
+
+    let custom_grid = VisualizationGridConfig {
+        points: 37,
+        min_freq: Some(50.0),
+        max_freq: Some(12_000.0),
+    }
+    .create_frequency_grid(&params)
+    .expect("explicit visualization grid should be valid");
+    assert_eq!(custom_grid.len(), 37);
+    assert!((custom_grid[0] - 50.0).abs() < 1e-10);
+    assert!((custom_grid[custom_grid.len() - 1] - 12_000.0).abs() < 1e-8);
+}
+
+#[test]
+fn visualization_grid_rejects_invalid_point_counts_and_bounds() {
+    let params = autoeq::OptimParams::from(&Args::headphone_defaults());
+    for config in [
+        VisualizationGridConfig {
+            points: 1,
+            ..VisualizationGridConfig::default()
+        },
+        VisualizationGridConfig {
+            min_freq: Some(1_000.0),
+            max_freq: Some(100.0),
+            ..VisualizationGridConfig::default()
+        },
+        VisualizationGridConfig {
+            min_freq: Some(f64::NAN),
+            ..VisualizationGridConfig::default()
+        },
+    ] {
+        assert!(config.create_frequency_grid(&params).is_err());
+    }
 }
 
 #[test]
@@ -96,12 +145,14 @@ fn test_optimize_headphone_happy_path() {
         args.num_filters,
         "biquad count should match requested filter count"
     );
-    // `optimize_headphone` always normalizes to a hard-coded 200-point grid.
+    // The default grid keeps 200 points but follows the optimizer bounds.
     assert_eq!(
         result.curves.frequencies.len(),
         200,
         "visualization curves should cover the standard 200-point grid"
     );
+    assert!((result.curves.frequencies[0] - args.min_freq).abs() < 1e-10);
+    assert!((result.curves.frequencies[199] - args.max_freq).abs() < 1e-8);
     assert!(
         result.curves.corrected_curve.iter().all(|v| v.is_finite()),
         "corrected curve must be finite"
@@ -490,4 +541,12 @@ fn test_plot_results_writes_html() {
         html.contains("IIR Filter Optimization Results"),
         "HTML report should contain the expected title"
     );
+
+    #[cfg(feature = "plotly_static")]
+    {
+        let png_path = tmp.path().join("report-filters.png");
+        let png = std::fs::read(&png_path)
+            .unwrap_or_else(|error| panic!("static PNG missing at {png_path:?}: {error}"));
+        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+    }
 }

@@ -393,7 +393,13 @@ impl ChannelProcessingStrategy for MixedPhaseStrategy {
                         info!("  Saved excess phase FIR to {}", wav_path.display());
                     }
 
-                    Some((coeffs, filename))
+                    let report =
+                        super::super::mixed_phase::MixedPhaseCorrectionReport::from_residual(
+                            delay_ms,
+                            coeffs.len(),
+                            &residual,
+                        );
+                    Some((coeffs, filename, report))
                 }
                 Err(e) => {
                     warn!(
@@ -413,8 +419,9 @@ impl ChannelProcessingStrategy for MixedPhaseStrategy {
 
         let optim_output = OptimizerOutput::MixedPhase {
             eq_filters,
-            fir_coeffs: fir_coeffs.as_ref().map(|(coeffs, _)| coeffs.clone()),
-            fir_filename: fir_coeffs.as_ref().map(|(_, filename)| filename.clone()),
+            fir_coeffs: fir_coeffs.as_ref().map(|(coeffs, _, _)| coeffs.clone()),
+            fir_filename: fir_coeffs.as_ref().map(|(_, filename, _)| filename.clone()),
+            report: fir_coeffs.as_ref().map(|(_, _, report)| report.clone()),
         };
         let dsp_chain = assemble_dsp_chain(input, preprocessed, &optim_output)?;
         let report = assemble_channel_report(

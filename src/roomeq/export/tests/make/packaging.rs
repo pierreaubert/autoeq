@@ -8,6 +8,8 @@ fn external_exports_reject_routed_bass_management() {
         ExportFormat::Wavelet,
         ExportFormat::PipeWire,
         ExportFormat::RoonDsp,
+        ExportFormat::Rew,
+        ExportFormat::BiquadCoefficients,
     ] {
         let err = external_export_supported(&output, format).unwrap_err();
         assert!(

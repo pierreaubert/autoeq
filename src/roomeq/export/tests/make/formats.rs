@@ -23,6 +23,123 @@ fn test_export_equalizer_apo() {
 }
 
 #[test]
+fn rew_export_is_single_channel_generic_eq_text_and_fails_closed() {
+    let mut output = make_test_output();
+    output.channels.remove("right");
+    output.channels.get_mut("left").unwrap().plugins.retain(|plugin| {
+        plugin.plugin_type != "delay"
+    });
+
+    let text = export_rew(&output).expect("serial PEQ chain should export to REW");
+    assert!(text.starts_with("Filter Settings file\n\nEqualiser: Generic\n"));
+    assert!(text.contains("Channel: L"));
+    assert!(text.contains("Preamp: -2.500000000 dB"));
+    assert!(
+        text.contains("Filter  1: ON PK Fc 100.000000000 Hz Gain -5.000000000 dB Q 2.000000000")
+    );
+    assert!(
+        text.contains("Filter  3: ON HS Fc 8000.000000000 Hz Gain -2.000000000 dB Q 0.700000000")
+    );
+
+    let mut multichannel = output.clone();
+    let mut right = multichannel.channels["left"].clone();
+    right.channel = "right".to_string();
+    multichannel.channels.insert("right".to_string(), right);
+    let error = export_rew(&multichannel).unwrap_err().to_string();
+    assert!(error.contains("exactly one channel"), "unexpected error: {error}");
+
+    let mut convolution = output;
+    convolution.channels.get_mut("left").unwrap().plugins.push(PluginConfigWrapper {
+        plugin_type: "convolution".to_string(),
+        parameters: json!({"ir_file": "left.wav"}),
+    });
+    let error = export_rew(&convolution).unwrap_err().to_string();
+    assert!(error.contains("does not support"), "unexpected error: {error}");
+}
+
+#[test]
+fn normalized_biquad_export_round_trips_canonical_transfer_functions() {
+    let output = make_test_output();
+    let rendered = export_normalized_biquad_coefficients(&output, 48_000.0)
+        .expect("serial channel chains should export normalized coefficients");
+    let document: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+
+    assert_eq!(document["format"], "roomeq_normalized_biquad_coefficients");
+    assert_eq!(document["version"], 1);
+    assert_eq!(document["sample_rate_hz"], 48_000.0);
+    let channels = document["channels"].as_array().unwrap();
+    assert_eq!(channels.len(), 2);
+    assert_eq!(channels[0]["channel"], "L");
+    assert_eq!(channels[0]["preamp_gain_db"], -2.5);
+    assert_eq!(channels[0]["delay_ms"], 1.5);
+
+    let source_filters = extract_eq_filters(&output.channels["left"].plugins);
+    let sections = channels[0]["sections"].as_array().unwrap();
+    assert_eq!(sections.len(), source_filters.len());
+    for (index, (source, section)) in source_filters.iter().zip(sections).enumerate() {
+        assert_eq!(section["section_index"], index);
+        assert_eq!(section["order"], 2);
+        assert_eq!(section["filter_type"], source.filter_type);
+        assert_eq!(section["a0"], 1.0);
+
+        let coefficients = ["b0", "b1", "b2", "a1", "a2"]
+            .map(|name| section[name].as_f64().unwrap());
+        let canonical = math_audio_iir_fir::Biquad::new(
+            parse_biquad_filter_type(&source.filter_type).unwrap(),
+            source.freq,
+            48_000.0,
+            source.q,
+            source.gain_db,
+        );
+        for frequency in [20.0, 80.0, 1_000.0, 10_000.0, 20_000.0] {
+            let omega = 2.0 * std::f64::consts::PI * frequency / 48_000.0;
+            let z1 = num_complex::Complex64::from_polar(1.0, -omega);
+            let z2 = z1 * z1;
+            let numerator = coefficients[0] + coefficients[1] * z1 + coefficients[2] * z2;
+            let denominator = 1.0 + coefficients[3] * z1 + coefficients[4] * z2;
+            let exported_db = 20.0 * (numerator / denominator).norm().log10();
+            assert!(
+                (exported_db - canonical.log_result(frequency)).abs() < 1e-10,
+                "section {index} mismatch at {frequency} Hz"
+            );
+        }
+    }
+}
+
+#[test]
+fn normalized_biquad_export_supports_every_canonical_filter_type() {
+    for filter_type in [
+        "lowpass",
+        "highpass",
+        "highpassvariableq",
+        "bandpass",
+        "peak",
+        "notch",
+        "lowshelf",
+        "highshelf",
+        "allpass",
+        "lowshelforf",
+        "highshelforf",
+        "peakmatched",
+    ] {
+        let output = make_single_filter_output(filter_type, -3.0);
+        let rendered = export_normalized_biquad_coefficients(&output, 48_000.0)
+            .unwrap_or_else(|error| panic!("{filter_type} coefficient export failed: {error}"));
+        let document: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+        assert_eq!(document["channels"][0]["sections"][0]["filter_type"], filter_type);
+    }
+
+    for coefficient_only_type in ["lowshelforf", "highshelforf", "peakmatched"] {
+        let output = make_single_filter_output(coefficient_only_type, -3.0);
+        let error = export_rew(&output).unwrap_err().to_string();
+        assert!(
+            error.contains("does not support filter type"),
+            "REW unexpectedly accepted {coefficient_only_type}: {error}"
+        );
+    }
+}
+
+#[test]
 fn tool_contract_equalizer_apo_text_has_channel_scoped_filters() {
     let output = make_test_output();
     let result = export_equalizer_apo(&output).unwrap();

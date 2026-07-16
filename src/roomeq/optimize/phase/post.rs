@@ -41,7 +41,11 @@ pub(in super::super) fn post_generate_fir(
                     info!("  Saved FIR filter to {}", wav_path.display());
                 }
             }
-            Some(GeneratedFir { coeffs, filename })
+            Some(GeneratedFir {
+                coeffs,
+                filename,
+                mixed_phase_report: None,
+            })
         }
         Err(e) => {
             warn!("FIR generation failed for {}: {}", name, e);
@@ -89,6 +93,12 @@ pub(in super::super) fn post_generate_mixed_phase_fir(
                 &mp_config,
                 sample_rate,
             );
+            let mixed_phase_report =
+                crate::roomeq::mixed_phase::MixedPhaseCorrectionReport::from_residual(
+                    delay_ms,
+                    coeffs.len(),
+                    &residual,
+                );
 
             let mut filename = crate::roomeq::artifacts::convolution_artifact_filename(
                 name,
@@ -112,7 +122,11 @@ pub(in super::super) fn post_generate_mixed_phase_fir(
                 }
             }
 
-            Some(GeneratedFir { coeffs, filename })
+            Some(GeneratedFir {
+                coeffs,
+                filename,
+                mixed_phase_report: Some(mixed_phase_report),
+            })
         }
         Err(e) => {
             warn!(

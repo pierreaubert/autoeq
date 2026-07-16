@@ -27,8 +27,19 @@ cargo run --bin roomeq -- --config <config.json> --output <output.json> [OPTIONS
 - `--config <CONFIG>`: Path to room configuration JSON file (required)
 - `--output <OUTPUT>`: Path to output DSP chain JSON file (required)
 - `--sample-rate <RATE>`: Sample rate for filter design (default: 48000 Hz)
+- `--export-format <FORMAT>`: Also export `camilladsp`, `apo`, `easyeffects`,
+  `wavelet`, `pipewire`, `roon`, `rew`, or `coefficients`
+- `--export-path <PATH>`: Override the derived external-export path
+- `--convert <DSP_CHAIN_JSON>`: Convert an existing RoomEQ DSP chain without
+  running optimization
 - `--verbose`: Enable verbose output
 - `--help`: Print help information
+
+`rew` emits a single-channel REW Generic EQ filter-settings file.
+`coefficients` emits normalized `a0=1, a1, a2, b0, b1, b2` sections using the
+same canonical biquad implementation as runtime DSP. Both formats reject
+convolution, crossovers, routing, or unknown stages instead of silently
+dropping them.
 
 ## Configuration File Format
 

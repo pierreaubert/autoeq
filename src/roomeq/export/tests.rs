@@ -77,6 +77,13 @@ fn test_export_format_extensions() {
     assert_eq!(ExportFormat::Wavelet.default_extension(), "txt");
     assert_eq!(ExportFormat::PipeWire.default_extension(), "conf");
     assert_eq!(ExportFormat::RoonDsp.default_extension(), "json");
+    assert_eq!(ExportFormat::Rew.default_extension(), "txt");
+    assert_eq!(ExportFormat::BiquadCoefficients.default_extension(), "json");
+    assert_eq!(ExportFormat::Rew.default_file_name(), "room_eq_rew.txt");
+    assert_eq!(
+        ExportFormat::BiquadCoefficients.default_file_name(),
+        "room_eq_biquads.json"
+    );
     assert_eq!(
         ExportFormat::CamillaDsp.default_file_name(),
         "room_eq_cdsp.yaml"

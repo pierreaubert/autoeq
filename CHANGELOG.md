@@ -1,3 +1,43 @@
+# 0.4.51
+
+## Features
+
+- Added an explicit `VisualizationGridConfig` to the high-level speaker and
+  headphone workflows. Defaults remain 200 logarithmic points but now follow
+  the optimizer frequency bounds; callers can override point count and bounds
+  with Nyquist-aware validation.
+- Completed mixed-phase output reporting with per-channel propagation delay,
+  FIR tap count, and residual excess-phase range/RMS derived from the exact
+  decomposition used for FIR generation, including standalone phase
+  correction and fallback FIR-generation paths. Python reports now present
+  this evidence alongside main-impulse timing, pre/post-ringing peaks, audible
+  ringing energy, and temporal-masking penalties.
+- Added fail-closed REW Generic EQ text export with `--export-format rew`.
+  Exports require exactly one serial channel and reject delay, convolution,
+  routing, crossovers, unsupported filters, and non-biquad topologies instead
+  of silently dropping processing.
+- Added canonical normalized biquad coefficient JSON export with
+  `--export-format coefficients` (alias `biquad-coefficients`). The artifact
+  records sample rate, channel/source identity, preamp, delay, section order,
+  filter metadata, all 12 RoomEQ biquad types, and the explicit `a0 = 1`
+  transfer-function convention.
+- Replaced WebDriver-based PNG export with deterministic in-process SVG
+  rasterization behind `plotly_static`; no browser, display server, or runtime
+  network access is required. Static trace parsing preserves x/y pairing across
+  missing values and safely clamps malformed zero-sized Plotly grids.
+
+## Fixes
+
+- Synchronized the Python RoomEQ plotter with all Rust biquad types and
+  coefficient conventions, including Orfanidis shelves and matched peaks;
+  unknown filter types now fail instead of being plotted as peak filters, and
+  standard shelf responses follow Rust's Q-independent convention.
+- Preserved mixed-phase decomposition reports through primary, fallback, and
+  standalone phase-correction paths while removing internal transport metadata
+  from returned DSP plugin parameters.
+- Updated random RoomEQ fuzzer seeding for the Rand 0.10 API so plot-enabled
+  targets compile.
+
 # 0.4.50
 
 ## Breaking changes

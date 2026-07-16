@@ -425,6 +425,10 @@ pub struct OptimizationMetadata {
     /// Present when GD-Opt was attempted (success or skip with advisory).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_delay: Option<crate::roomeq::gd_opt::GroupDelayOptSummary>,
+    /// Per-channel mixed-phase decomposition and excess-phase FIR summaries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mixed_phase_per_channel:
+        Option<HashMap<String, crate::roomeq::mixed_phase::MixedPhaseCorrectionReport>>,
     /// Perceptual scorecard computed from final exported curves/DSP.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub perceptual_metrics: Option<PerceptualMetrics>,

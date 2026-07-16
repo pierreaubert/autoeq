@@ -104,6 +104,9 @@ pub(super) fn parse_biquad_filter_type(ft: &str) -> anyhow::Result<BiquadFilterT
         "notch" => BiquadFilterType::Notch,
         "bandpass" => BiquadFilterType::Bandpass,
         "allpass" => BiquadFilterType::AllPass,
+        "lowshelforf" => BiquadFilterType::LowshelfOrf,
+        "highshelforf" => BiquadFilterType::HighshelfOrf,
+        "peakmatched" => BiquadFilterType::PeakMatched,
         other => anyhow::bail!("Unsupported biquad filter type '{other}'"),
     };
 

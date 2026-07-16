@@ -187,10 +187,8 @@ pub(super) fn collect_generic_channel_results(
         // (e.g., speaker groups that only support IIR internally)
         let mut post_generated_fir = None;
         let fir_coeffs = if fir_coeffs.is_none()
-            && !matches!(
-                config.optimizer.processing_mode,
-                ProcessingMode::LowLatency | ProcessingMode::MixedPhase
-            ) {
+            && !matches!(config.optimizer.processing_mode, ProcessingMode::LowLatency)
+        {
             send_progress(
                 observer_shared,
                 PipelineStepId::FirGeneration,
@@ -212,15 +210,26 @@ pub(super) fn collect_generic_channel_results(
                     step_status: None,
                 },
             )?;
-            let generated = post_generate_fir(
-                &channel_name,
-                &initial_curve,
-                &final_curve,
-                &config.optimizer,
-                config.target_curve.as_ref(),
-                sample_rate,
-                output_dir,
-            );
+            let generated =
+                if matches!(config.optimizer.processing_mode, ProcessingMode::MixedPhase) {
+                    post_generate_mixed_phase_fir(
+                        &channel_name,
+                        &initial_curve,
+                        &config.optimizer,
+                        sample_rate,
+                        output_dir,
+                    )
+                } else {
+                    post_generate_fir(
+                        &channel_name,
+                        &initial_curve,
+                        &final_curve,
+                        &config.optimizer,
+                        config.target_curve.as_ref(),
+                        sample_rate,
+                        output_dir,
+                    )
+                };
             post_generated_fir = generated.clone();
             generated.map(|generated| generated.coeffs)
         } else {
@@ -243,11 +252,16 @@ pub(super) fn collect_generic_channel_results(
 
         if let Some(generated) = post_generated_fir {
             if let Some(chain) = channel_chains.get_mut(&channel_name) {
-                chain
-                    .plugins
-                    .push(super::super::output::create_convolution_plugin(
-                        &generated.filename,
-                    ));
+                chain.plugins.push(
+                    if let Some(report) = generated.mixed_phase_report.as_ref() {
+                        super::super::output::create_mixed_phase_convolution_plugin(
+                            &generated.filename,
+                            report,
+                        )
+                    } else {
+                        super::super::output::create_convolution_plugin(&generated.filename)
+                    },
+                );
             }
             sync_reported_fir_adjustment(
                 &channel_name,

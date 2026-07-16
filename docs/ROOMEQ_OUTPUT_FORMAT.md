@@ -144,6 +144,44 @@ windows weight near-transient ringing down before reporting audible energy.
 
 ---
 
+## Mixed-Phase Correction Report
+
+When mixed-phase correction generates an excess-phase FIR,
+`metadata.mixed_phase_per_channel` records the phase decomposition that fed the
+filter design. It is separate from `channels.*.fir_temporal_masking`: the former
+describes phase and filter length, while the latter measures the realized FIR's
+time-domain ringing.
+
+```json
+{
+  "metadata": {
+    "mixed_phase_per_channel": {
+      "L": {
+        "estimated_delay_ms": 4.25,
+        "fir_taps": 1024,
+        "residual_excess_phase_min_deg": -45.0,
+        "residual_excess_phase_max_deg": 18.5,
+        "residual_excess_phase_rms_deg": 23.75
+      }
+    }
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `estimated_delay_ms` | number | Linear propagation delay removed from excess phase before FIR design. |
+| `fir_taps` | integer | Number of coefficients in the generated excess-phase FIR. |
+| `residual_excess_phase_min_deg` | number | Minimum residual excess phase after delay removal. |
+| `residual_excess_phase_max_deg` | number | Maximum residual excess phase after delay removal. |
+| `residual_excess_phase_rms_deg` | number | RMS residual excess phase after delay removal. |
+
+The Python report generator (`scripts/display-roomeq.py`) displays this report
+alongside per-channel main-impulse timing, pre/post-ringing peaks, audible
+ringing energy, and temporal-masking penalty.
+
+---
+
 ## Plugin Types
 
 ### Gain Plugin
@@ -460,6 +498,7 @@ Information about the optimization process.
 | `inter_channel_deviation` | object or null | Inter-channel SPL consistency metric (present when >1 channel) |
 | `epa_per_channel` | object or null | Per-channel EPA psychoacoustic metrics computed on the pre-EQ and post-EQ frequency responses. Emitted for every channel that has both `initial_curve` and `final_curve` populated, regardless of `loss_type`. See [EPA Per-Channel Metrics](#epa-per-channel-metrics). |
 | `epa_multichannel` | object or null | Whole-system EPA metrics after BS.1770-style channel-energy aggregation. Main/front channels use unit energy weight, surround channels use +1.5 dB, and LFE/subwoofer channels are excluded. |
+| `mixed_phase_per_channel` | object or null | Per-channel mixed-phase decomposition report from the exact excess-phase data used to generate each FIR. See [Mixed-Phase Correction Report](#mixed-phase-correction-report). |
 | `perceptual_metrics.fir_pre_ringing_audible_db` | number or null | Worst FIR pre-ringing audible energy across channels, dB relative to each FIR main impulse peak. |
 | `perceptual_metrics.fir_post_ringing_audible_db` | number or null | Worst FIR post-ringing audible energy across channels, dB relative to each FIR main impulse peak. |
 | `perceptual_metrics.fir_temporal_masking_penalty` | number or null | Worst scalar FIR temporal masking penalty across channels. |
@@ -555,6 +594,80 @@ support FIR and its effect on direct-to-reverberant ratio (DRR).
 | `target_constraints_active` | boolean | Whether target floor/ceiling constraints were active |
 | `precedence_limit_hits` | integer | Number of frequency bins where the precedence ceiling was hit |
 | `advisories` | array of strings | Optional spatial-robustness or measurement advisories (e.g. `primary:high_spatial_variance`, `support:single_position_measurement`) |
+
+---
+
+## External Exports
+
+`roomeq --export-format <FORMAT>` can render the DSP chain for an external
+consumer. Exporters validate the complete source graph and return an error when
+the target cannot preserve required plugins or routing.
+
+| CLI value | Artifact | Important constraints |
+|-----------|----------|-----------------------|
+| `camilladsp` | CamillaDSP YAML | Supports the routed bass-management graph and convolution sidecars. |
+| `apo` | Equalizer APO / Peace text | Supports representable APO channel routing and serial filters. |
+| `easyeffects` | EasyEffects JSON | Serial single-channel-compatible gain/EQ only. |
+| `wavelet` | Wavelet GraphicEQ text | Serial single-channel-compatible magnitude EQ only. |
+| `pipewire` | PipeWire filter-chain configuration | Serial chains and supported convolution sidecars. |
+| `roon` | Roon DSP Engine JSON | Serial Roon-supported IIR/FIR stages, with Roon limits enforced. |
+| `rew` | REW Generic EQ filter-settings text | Exactly one channel; gain plus supported biquads; no delay, FIR, crossover, or routing. |
+| `coefficients` | Normalized biquad JSON | Any number of serial channels; gain, delay, and all 12 canonical RoomEQ biquad types; no FIR, crossover, or routing. Alias: `biquad-coefficients`. |
+
+### REW Generic EQ
+
+The REW export contains an explicit preamp followed by ordered filter rows:
+
+```text
+Filter Settings file
+
+Equaliser: Generic
+Channel: L
+Preamp: -3.000000000 dB
+Filter  1: ON PK Fc 82.000000000 Hz Gain -4.500000000 dB Q 3.200000000
+```
+
+### Normalized Biquad Coefficients
+
+The coefficient export uses runtime-canonical `Biquad::constants()` values and
+states its denominator sign convention explicitly:
+
+```json
+{
+  "format": "roomeq_normalized_biquad_coefficients",
+  "version": 1,
+  "sample_rate_hz": 48000.0,
+  "coefficient_convention": "H(z) = (b0 + b1*z^-1 + b2*z^-2) / (1 + a1*z^-1 + a2*z^-2)",
+  "channels": [
+    {
+      "channel": "L",
+      "source_channel": "left",
+      "preamp_gain_db": -3.0,
+      "delay_ms": 0.0,
+      "sections": [
+        {
+          "section_index": 0,
+          "order": 2,
+          "filter_type": "peak",
+          "frequency_hz": 82.0,
+          "q": 3.2,
+          "gain_db": -4.5,
+          "a0": 1.0,
+          "a1": -1.96,
+          "a2": 0.97,
+          "b0": 0.99,
+          "b1": -1.96,
+          "b2": 0.98
+        }
+      ]
+    }
+  ]
+}
+```
+
+The numeric values above are abbreviated for readability; produced files keep
+full serialized precision. Apply `preamp_gain_db` and `delay_ms` separately,
+then process sections in ascending `section_index` order.
 
 ---
 

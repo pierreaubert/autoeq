@@ -463,7 +463,7 @@ fn optimize_room_impl(
     let route = select_topology_route(&config, &observer_shared)?;
     let config = &config;
 
-    let result = match route {
+    let mut result = match route {
         TopologyRoute::Stereo2_0 | TopologyRoute::Stereo2_1 | TopologyRoute::HomeCinema => {
             let sys = config
                 .system
@@ -513,6 +513,10 @@ fn optimize_room_impl(
             )?
         }
     };
+
+    if let Some(reports) = crate::roomeq::output::take_mixed_phase_reports(&mut result.channels) {
+        result.metadata.mixed_phase_per_channel = Some(reports);
+    }
 
     emit_pipeline_event(
         &observer_shared,
@@ -712,9 +716,16 @@ fn assemble_workflow_result(
             };
 
             if let Some(chain) = result.channels.get_mut(&name) {
-                chain.plugins.push(super::output::create_convolution_plugin(
-                    &generated.filename,
-                ));
+                chain.plugins.push(
+                    if let Some(report) = generated.mixed_phase_report.as_ref() {
+                        super::output::create_mixed_phase_convolution_plugin(
+                            &generated.filename,
+                            report,
+                        )
+                    } else {
+                        super::output::create_convolution_plugin(&generated.filename)
+                    },
+                );
             }
             sync_reported_fir_adjustment(
                 &name,
@@ -1956,6 +1967,8 @@ fn assemble_generic_result(
     let epa_per_channel = crate::roomeq::output::compute_epa_per_channel(&channel_chains, &epa_cfg);
     let epa_multichannel =
         crate::roomeq::output::compute_epa_multichannel(&channel_chains, &epa_cfg);
+    let mixed_phase_per_channel =
+        crate::roomeq::output::take_mixed_phase_reports(&mut channel_chains);
 
     let metadata = OptimizationMetadata {
         pre_score: avg_pre_score,
@@ -1968,6 +1981,7 @@ fn assemble_generic_result(
         epa_per_channel,
         epa_multichannel,
         group_delay: group_delay_summary,
+        mixed_phase_per_channel,
         perceptual_metrics: None,
         home_cinema_layout: None,
         multi_seat_coverage: None,

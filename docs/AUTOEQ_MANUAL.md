@@ -91,3 +91,33 @@ cargo run --bin autoeq --release -- \
   --algo mh:rga -n 5 --maxeval 20000 \
   --min-freq 20 --max-freq 10000 --peq-model hp-pk-lp
 ```
+
+## Library Visualization Grid
+
+The high-level Rust workflows keep their source-compatible 200-point default,
+but the default bounds now follow `OptimParams.min_freq` and
+`OptimParams.max_freq`. Library callers can override the logarithmic report and
+normalization grid explicitly:
+
+```rust
+use autoeq::workflow::{VisualizationGridConfig, optimize_headphone_with_grid};
+
+let grid = VisualizationGridConfig {
+    points: 400,
+    min_freq: Some(20.0),
+    max_freq: Some(20_000.0),
+};
+
+let result = optimize_headphone_with_grid(
+    &curve_path,
+    &target,
+    &params,
+    &grid,
+    None,
+    None::<fn(&autoeq::optim::ProgressUpdate) -> autoeq::de::CallbackAction>,
+)?;
+```
+
+The grid requires at least two points, finite positive ordered bounds, and an
+upper bound below Nyquist. `optimize_speaker_with_grid` provides the equivalent
+speaker workflow API.

@@ -1,6 +1,7 @@
 """DSP computation functions for biquad filters and smoothing."""
 
 import math
+import sys
 
 
 def smooth_octave(freq: list[float], spl: list[float], octave_fraction: float) -> list[float]:
@@ -55,107 +56,219 @@ def smooth_octave(freq: list[float], spl: list[float], octave_fraction: float) -
     return smoothed
 
 
+_FILTER_TYPE_ALIASES = {
+    "lowpass": "lowpass",
+    "lp": "lowpass",
+    "highpass": "highpass",
+    "hp": "highpass",
+    "highpassvariableq": "highpassvariableq",
+    "hpq": "highpassvariableq",
+    "bandpass": "bandpass",
+    "bp": "bandpass",
+    "peak": "peak",
+    "peaking": "peak",
+    "peakdip": "peak",
+    "parametric": "peak",
+    "pk": "peak",
+    "notch": "notch",
+    "bandstop": "notch",
+    "no": "notch",
+    "lowshelf": "lowshelf",
+    "ls": "lowshelf",
+    "highshelf": "highshelf",
+    "hs": "highshelf",
+    "allpass": "allpass",
+    "ap": "allpass",
+    "lowshelforf": "lowshelforf",
+    "lso": "lowshelforf",
+    "highshelforf": "highshelforf",
+    "hso": "highshelforf",
+    "peakmatched": "peakmatched",
+    "pkm": "peakmatched",
+}
+
+
+def _canonical_filter_type(filter_type: object) -> str:
+    key = "".join(character for character in str(filter_type).lower() if character.isalnum())
+    try:
+        return _FILTER_TYPE_ALIASES[key]
+    except KeyError as error:
+        raise ValueError(f"unsupported biquad filter type {filter_type!r}") from error
+
+
+def biquad_coefficients(
+    filter_type: object,
+    freq: float,
+    sample_rate: float = 48_000.0,
+    q: float = 1.0,
+    db_gain: float = 0.0,
+) -> tuple[float, float, float, float, float]:
+    """Return Rust-canonical normalized ``(a1, a2, b0, b1, b2)`` coefficients.
+
+    This mirrors ``math_audio_iir_fir::Biquad::constants`` for every
+    ``BiquadFilterType`` used by RoomEQ. Keeping coefficient generation in one
+    helper also prevents the plotted aggregate and per-filter curves from
+    drifting apart.
+    """
+    kind = _canonical_filter_type(filter_type)
+    sample_rate = float(sample_rate)
+    if not math.isfinite(sample_rate) or sample_rate <= 0.0:
+        sample_rate = 48_000.0
+    nyquist = sample_rate / 2.0
+    margin = nyquist * math.sqrt(sys.float_info.epsilon)
+    freq = float(freq)
+    if not math.isfinite(freq) or freq <= 0.0:
+        freq = margin
+    elif freq >= nyquist:
+        freq = nyquist - margin
+
+    q = float(q)
+    if not math.isfinite(q):
+        raise ValueError(f"biquad Q must be finite, got {q!r}")
+    if q == 0.0:
+        if kind == "notch":
+            q = 30.0
+        elif kind in {"bandpass", "highpass", "lowpass"}:
+            q = 1.0 / math.sqrt(2.0)
+        elif kind in {"lowshelf", "highshelf", "lowshelforf", "highshelforf"}:
+            q = 1.0668676536332304
+    if q <= 0.0:
+        q = 1.0e-2
+
+    db_gain = float(db_gain)
+    if not math.isfinite(db_gain):
+        db_gain = 0.0
+    amplitude = 10.0 ** (db_gain / 40.0)
+    omega = 2.0 * math.pi * freq / sample_rate
+    sine = math.sin(omega)
+    cosine = math.cos(omega)
+    alpha = sine / (2.0 * q)
+    beta = math.sqrt(2.0 * amplitude)
+
+    if kind == "lowpass":
+        b0, b1, b2 = (1.0 - cosine) / 2.0, 1.0 - cosine, (1.0 - cosine) / 2.0
+        a0, a1, a2 = 1.0 + alpha, -2.0 * cosine, 1.0 - alpha
+    elif kind in {"highpass", "highpassvariableq"}:
+        b0, b1, b2 = (1.0 + cosine) / 2.0, -(1.0 + cosine), (1.0 + cosine) / 2.0
+        a0, a1, a2 = 1.0 + alpha, -2.0 * cosine, 1.0 - alpha
+    elif kind == "bandpass":
+        b0, b1, b2 = alpha, 0.0, -alpha
+        a0, a1, a2 = 1.0 + alpha, -2.0 * cosine, 1.0 - alpha
+    elif kind == "notch":
+        b0, b1, b2 = 1.0, -2.0 * cosine, 1.0
+        a0, a1, a2 = 1.0 + alpha, -2.0 * cosine, 1.0 - alpha
+    elif kind == "peak":
+        b0, b1, b2 = 1.0 + alpha * amplitude, -2.0 * cosine, 1.0 - alpha * amplitude
+        a0, a1, a2 = 1.0 + alpha / amplitude, -2.0 * cosine, 1.0 - alpha / amplitude
+    elif kind == "lowshelf":
+        b0 = amplitude * ((amplitude + 1.0) - (amplitude - 1.0) * cosine + beta * sine)
+        b1 = 2.0 * amplitude * ((amplitude - 1.0) - (amplitude + 1.0) * cosine)
+        b2 = amplitude * ((amplitude + 1.0) - (amplitude - 1.0) * cosine - beta * sine)
+        a0 = (amplitude + 1.0) + (amplitude - 1.0) * cosine + beta * sine
+        a1 = -2.0 * ((amplitude - 1.0) + (amplitude + 1.0) * cosine)
+        a2 = (amplitude + 1.0) + (amplitude - 1.0) * cosine - beta * sine
+    elif kind == "highshelf":
+        b0 = amplitude * ((amplitude + 1.0) + (amplitude - 1.0) * cosine + beta * sine)
+        b1 = -2.0 * amplitude * ((amplitude - 1.0) + (amplitude + 1.0) * cosine)
+        b2 = amplitude * ((amplitude + 1.0) + (amplitude - 1.0) * cosine - beta * sine)
+        a0 = (amplitude + 1.0) - (amplitude - 1.0) * cosine + beta * sine
+        a1 = 2.0 * ((amplitude - 1.0) - (amplitude + 1.0) * cosine)
+        a2 = (amplitude + 1.0) - (amplitude - 1.0) * cosine - beta * sine
+    elif kind == "allpass":
+        b0, b1, b2 = 1.0 - alpha, -2.0 * cosine, 1.0 + alpha
+        a0, a1, a2 = 1.0 + alpha, -2.0 * cosine, 1.0 - alpha
+    elif kind in {"lowshelforf", "highshelforf"}:
+        linear_gain = 10.0 ** (db_gain / 20.0)
+        if kind == "lowshelforf":
+            a0 = (amplitude + 1.0) + (amplitude - 1.0) * cosine + beta * sine
+            a1 = -2.0 * ((amplitude - 1.0) + (amplitude + 1.0) * cosine)
+            a2 = (amplitude + 1.0) + (amplitude - 1.0) * cosine - beta * sine
+            sum_b = linear_gain * (a0 + a1 + a2)
+            diff_b = a0 - a1 + a2
+        else:
+            a0 = (amplitude + 1.0) - (amplitude - 1.0) * cosine + beta * sine
+            a1 = 2.0 * ((amplitude - 1.0) - (amplitude + 1.0) * cosine)
+            a2 = (amplitude + 1.0) - (amplitude - 1.0) * cosine - beta * sine
+            sum_b = a0 + a1 + a2
+            diff_b = linear_gain * (a0 - a1 + a2)
+
+        b1 = (sum_b - diff_b) / 2.0
+        p = (sum_b + diff_b) / 2.0
+        cosine_2w = math.cos(2.0 * omega)
+        sine_2w = math.sin(2.0 * omega)
+        denominator_real = a0 + a1 * cosine + a2 * cosine_2w
+        denominator_imag = -a1 * sine - a2 * sine_2w
+        target = linear_gain * (denominator_real**2 + denominator_imag**2)
+        known = (
+            p**2 / 2.0
+            + b1**2
+            + 2.0 * b1 * p * cosine
+            + p**2 / 2.0 * cosine_2w
+        )
+        d_coefficient = 0.5 - 0.5 * cosine_2w
+        d_squared = (target - known) / d_coefficient if abs(d_coefficient) > 1.0e-15 else 0.0
+        d_value = math.sqrt(d_squared) if d_squared >= 0.0 else 0.0
+        d_signed = d_value if linear_gain >= 1.0 else -d_value
+        b0, b2 = (p + d_signed) / 2.0, (p - d_signed) / 2.0
+    else:  # peakmatched
+        linear_gain = 10.0 ** (db_gain / 20.0)
+        radius = math.exp(-(omega / q) / 2.0)
+        a0, a1, a2 = 1.0, -2.0 * radius * cosine, radius**2
+        sum_b = 1.0 + a1 + a2
+        diff_b = 1.0 - a1 + a2
+        b1 = (sum_b - diff_b) / 2.0
+        p = (sum_b + diff_b) / 2.0
+        cosine_2w = math.cos(2.0 * omega)
+        sine_2w = math.sin(2.0 * omega)
+        denominator_real = 1.0 + a1 * cosine + a2 * cosine_2w
+        denominator_imag = -a1 * sine - a2 * sine_2w
+        target = linear_gain**2 * (denominator_real**2 + denominator_imag**2)
+        known = (
+            p**2 / 2.0
+            + b1**2
+            + 2.0 * b1 * p * cosine
+            + p**2 / 2.0 * cosine_2w
+        )
+        d_coefficient = 0.5 - 0.5 * cosine_2w
+        d_squared = (target - known) / d_coefficient if abs(d_coefficient) > 1.0e-15 else 0.0
+        d_value = math.sqrt(d_squared) if d_squared >= 0.0 else 0.0
+        d_signed = d_value if linear_gain >= 1.0 else -d_value
+        b0, b2 = (p + d_signed) / 2.0, (p - d_signed) / 2.0
+
+    if abs(a0) < 1.0e-15:
+        return (0.0, 0.0, 1.0, 0.0, 0.0)
+    return (a1 / a0, a2 / a0, b0 / a0, b1 / a0, b2 / a0)
+
+
 def compute_eq_response(
-    filters: list[dict], freq_points: list[float], sample_rate: float = 48000.0
+    filters: list[dict], freq_points: list[float], sample_rate: float = 48_000.0
 ) -> list[float]:
-    """Compute the combined EQ frequency response from biquad filters."""
+    """Compute the combined EQ response using Rust-canonical biquad math."""
     if not filters or not freq_points:
         return []
 
-    # Compute combined magnitude response
     combined_db = [0.0] * len(freq_points)
-
     for filt in filters:
-        filter_type = filt.get("filter_type", "peak").lower()
-        fc = filt.get("freq", 1000.0)
-        q = filt.get("q", 1.0)
-        gain_db = filt.get("db_gain", 0.0)
-
-        # Compute biquad coefficients based on filter type
-        for i, f in enumerate(freq_points):
-            if f <= 0:
+        coefficients = biquad_coefficients(
+            filt.get("filter_type", "peak"),
+            filt.get("freq", filt.get("frequency", 1_000.0)),
+            sample_rate,
+            filt.get("q", 1.0),
+            filt.get("db_gain", filt.get("gain", 0.0)),
+        )
+        a1, a2, b0, b1, b2 = coefficients
+        for index, frequency in enumerate(freq_points):
+            if frequency <= 0.0:
                 continue
-
-            # Normalized frequency
-            w0 = 2 * math.pi * fc / sample_rate
-            w = 2 * math.pi * f / sample_rate
-
-            # For peak/parametric EQ filter
-            if filter_type in ("peak", "peaking", "pk"):
-                A = 10 ** (gain_db / 40.0)
-                alpha = math.sin(w0) / (2 * q)
-
-                b0 = 1 + alpha * A
-                b1 = -2 * math.cos(w0)
-                b2 = 1 - alpha * A
-                a0 = 1 + alpha / A
-                a1 = -2 * math.cos(w0)
-                a2 = 1 - alpha / A
-
-            elif filter_type in ("lowshelf", "ls"):
-                A = 10 ** (gain_db / 40.0)
-                alpha = math.sin(w0) / (2 * q)
-                cos_w0 = math.cos(w0)
-                sqrt_A = math.sqrt(A)
-
-                b0 = A * ((A + 1) - (A - 1) * cos_w0 + 2 * sqrt_A * alpha)
-                b1 = 2 * A * ((A - 1) - (A + 1) * cos_w0)
-                b2 = A * ((A + 1) - (A - 1) * cos_w0 - 2 * sqrt_A * alpha)
-                a0 = (A + 1) + (A - 1) * cos_w0 + 2 * sqrt_A * alpha
-                a1 = -2 * ((A - 1) + (A + 1) * cos_w0)
-                a2 = (A + 1) + (A - 1) * cos_w0 - 2 * sqrt_A * alpha
-
-            elif filter_type in ("highshelf", "hs"):
-                A = 10 ** (gain_db / 40.0)
-                alpha = math.sin(w0) / (2 * q)
-                cos_w0 = math.cos(w0)
-                sqrt_A = math.sqrt(A)
-
-                b0 = A * ((A + 1) + (A - 1) * cos_w0 + 2 * sqrt_A * alpha)
-                b1 = -2 * A * ((A - 1) + (A + 1) * cos_w0)
-                b2 = A * ((A + 1) + (A - 1) * cos_w0 - 2 * sqrt_A * alpha)
-                a0 = (A + 1) - (A - 1) * cos_w0 + 2 * sqrt_A * alpha
-                a1 = 2 * ((A - 1) - (A + 1) * cos_w0)
-                a2 = (A + 1) - (A - 1) * cos_w0 - 2 * sqrt_A * alpha
-
-            else:
-                # Default to peak filter for unknown types
-                A = 10 ** (gain_db / 40.0)
-                alpha = math.sin(w0) / (2 * q)
-
-                b0 = 1 + alpha * A
-                b1 = -2 * math.cos(w0)
-                b2 = 1 - alpha * A
-                a0 = 1 + alpha / A
-                a1 = -2 * math.cos(w0)
-                a2 = 1 - alpha / A
-
-            # Normalize coefficients
-            b0 /= a0
-            b1 /= a0
-            b2 /= a0
-            a1 /= a0
-            a2 /= a0
-
-            # Compute frequency response using z-transform
-            # H(e^jw) = (b0 + b1*e^-jw + b2*e^-2jw) / (1 + a1*e^-jw + a2*e^-2jw)
-            cos_w = math.cos(w)
-            cos_2w = math.cos(2 * w)
-            sin_w = math.sin(w)
-            sin_2w = math.sin(2 * w)
-
-            num_real = b0 + b1 * cos_w + b2 * cos_2w
-            num_imag = -b1 * sin_w - b2 * sin_2w
-            den_real = 1 + a1 * cos_w + a2 * cos_2w
-            den_imag = -a1 * sin_w - a2 * sin_2w
-
-            num_mag = math.sqrt(num_real**2 + num_imag**2)
-            den_mag = math.sqrt(den_real**2 + den_imag**2)
-
-            if den_mag > 1e-10:
-                mag = num_mag / den_mag
-                if mag > 1e-10:
-                    combined_db[i] += 20 * math.log10(mag)
+            omega = 2.0 * math.pi * frequency / sample_rate
+            cosine, sine = math.cos(omega), math.sin(omega)
+            cosine_2w, sine_2w = math.cos(2.0 * omega), math.sin(2.0 * omega)
+            numerator = complex(b0 + b1 * cosine + b2 * cosine_2w, -b1 * sine - b2 * sine_2w)
+            denominator = complex(1.0 + a1 * cosine + a2 * cosine_2w, -a1 * sine - a2 * sine_2w)
+            denominator_magnitude = abs(denominator)
+            if denominator_magnitude > 1.0e-10:
+                magnitude = max(abs(numerator) / denominator_magnitude, 1.0e-10)
+                combined_db[index] += 20.0 * math.log10(magnitude)
 
     return combined_db
 

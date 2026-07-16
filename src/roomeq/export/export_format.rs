@@ -25,6 +25,12 @@ pub enum ExportFormat {
     /// Roon DSP Engine preset (JSON)
     #[value(name = "roon")]
     RoonDsp,
+    /// Room EQ Wizard Generic EQ filter settings text
+    #[value(name = "rew")]
+    Rew,
+    /// Raw normalized biquad coefficients with channel/order metadata
+    #[value(name = "coefficients", alias = "biquad-coefficients")]
+    BiquadCoefficients,
 }
 
 impl ExportFormat {
@@ -36,6 +42,8 @@ impl ExportFormat {
             ExportFormat::Wavelet => "txt",
             ExportFormat::PipeWire => "conf",
             ExportFormat::RoonDsp => "json",
+            ExportFormat::Rew => "txt",
+            ExportFormat::BiquadCoefficients => "json",
         }
     }
 
@@ -47,6 +55,8 @@ impl ExportFormat {
             ExportFormat::Wavelet => "room_eq.txt",
             ExportFormat::PipeWire => "room_eq.conf",
             ExportFormat::RoonDsp => "room_eq.json",
+            ExportFormat::Rew => "room_eq_rew.txt",
+            ExportFormat::BiquadCoefficients => "room_eq_biquads.json",
         }
     }
 

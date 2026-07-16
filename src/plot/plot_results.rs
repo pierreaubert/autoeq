@@ -6,8 +6,6 @@ use std::path::Path;
 
 use build_html::*;
 use plotly::Plot;
-#[cfg(feature = "plotly_static")]
-use plotly_static::{ImageFormat, StaticExporterBuilder};
 
 use crate::plot::plot_filters::plot_filters;
 use crate::plot::plot_spin::{plot_spin, plot_spin_details, plot_spin_tonal};
@@ -166,65 +164,15 @@ pub async fn plot_results(
         plots.push((plot_spin, "spinorama", 1280, 450));
     }
 
-    // PNG export functionality - only available with plotly_static feature
+    // WebDriver-free PNG export via deterministic SVG + resvg.
     #[cfg(feature = "plotly_static")]
     {
-        // Try to create an async static exporter. If unavailable, skip PNG export and continue.
-        let exporter_build = StaticExporterBuilder::default()
-            .webdriver_port(5112)
-            .build_async();
-
-        match exporter_build {
-            Ok(mut exporter) => {
-                for (plot, name, width, height) in plots {
-                    let img_path = output_path.with_file_name(format!("{}-{}.png", stem, name));
-
-                    // Ensure parent directory exists for PNG files
-                    if let Some(parent) = img_path.parent()
-                        && let Err(e) = std::fs::create_dir_all(parent)
-                    {
-                        eprintln!(
-                            "Warning: Failed to create PNG output directory {:?}: {}",
-                            parent, e
-                        );
-                        continue;
-                    }
-
-                    let plot_json = match serde_json::to_value(&plot) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            eprintln!("Warning: Failed to serialize plot to JSON: {}", e);
-                            continue;
-                        }
-                    };
-
-                    if let Err(e) = exporter
-                        .write_fig(
-                            img_path.as_path(),
-                            &plot_json,
-                            ImageFormat::PNG,
-                            width,
-                            height,
-                            1.0,
-                        )
-                        .await
-                    {
-                        eprintln!(
-                            "⚠️ Warning: Failed to export plot '{}' to PNG ({}). Continuing without PNG.",
-                            name, e
-                        );
-                    }
-                }
-                // Close exporter (ignore close errors)
-                let _ = exporter.close().await;
+        for (plot, name, width, height) in plots {
+            let img_path = output_path.with_file_name(format!("{}-{}.png", stem, name));
+            if let Some(parent) = img_path.parent() {
+                std::fs::create_dir_all(parent)?;
             }
-            Err(e) => {
-                eprintln!(
-                    "⚠️ Warning: PNG export skipped (WebDriver not available): {}. HTML report was generated at {}",
-                    e,
-                    html_output_path.display()
-                );
-            }
+            crate::plot::static_export::write_plot_png(&plot, &img_path, width, height)?;
         }
     }
 

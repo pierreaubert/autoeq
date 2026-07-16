@@ -5,7 +5,9 @@ use super::super::export_easyeffects;
 use super::super::export_equalizer_apo;
 use super::super::export_format::ExportFormat;
 use super::super::export_format::external_export_supported;
+use super::super::export_normalized_biquad_coefficients;
 use super::super::export_pipewire;
+use super::super::export_rew;
 use super::super::export_roon;
 use super::super::export_wavelet;
 use super::super::extract::extract_eq_filters;
@@ -110,6 +112,7 @@ pub(super) fn make_test_output() -> DspChainOutput {
             epa_per_channel: None,
             epa_multichannel: None,
             group_delay: None,
+            mixed_phase_per_channel: None,
             perceptual_metrics: None,
             home_cinema_layout: None,
             multi_seat_coverage: None,
@@ -345,6 +348,7 @@ pub(super) fn make_routed_bass_output() -> DspChainOutput {
             epa_per_channel: None,
             epa_multichannel: None,
             group_delay: None,
+            mixed_phase_per_channel: None,
             perceptual_metrics: None,
             home_cinema_layout: None,
             multi_seat_coverage: None,

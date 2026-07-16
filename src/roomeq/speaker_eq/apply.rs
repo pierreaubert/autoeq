@@ -555,6 +555,7 @@ pub(super) fn assemble_dsp_chain(
         OptimizerOutput::MixedPhase {
             eq_filters,
             fir_filename,
+            report,
             ..
         } => {
             pre_eq_plugins.extend(preprocessed.broadband_plugins.iter().cloned());
@@ -565,7 +566,11 @@ pub(super) fn assemble_dsp_chain(
                 ));
             }
             if let Some(filename) = fir_filename {
-                post_eq_plugins.push(output::create_convolution_plugin(filename));
+                post_eq_plugins.push(if let Some(report) = report {
+                    output::create_mixed_phase_convolution_plugin(filename, report)
+                } else {
+                    output::create_convolution_plugin(filename)
+                });
             }
             filters.extend(eq_filters.iter().cloned());
         }

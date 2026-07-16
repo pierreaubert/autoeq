@@ -223,6 +223,8 @@ pub(super) fn validate_serial_external_input(
         ExportFormat::EqualizerApo | ExportFormat::RoonDsp => {
             &["gain", "delay", "eq", "convolution"]
         }
+        ExportFormat::Rew => &["gain", "eq"],
+        ExportFormat::BiquadCoefficients => &["gain", "delay", "eq"],
         ExportFormat::EasyEffects | ExportFormat::Wavelet => &["gain", "eq"],
         _ => anyhow::bail!("internal error: no serial validator for {format:?}"),
     };
@@ -293,7 +295,7 @@ pub(super) fn validate_serial_external_input(
                             )
                         })?;
                         let filter_type = required_str(filter, "filter_type", &filter_context)?;
-                        if !matches!(
+                        let common_filter_type = matches!(
                             filter_type,
                             "peak"
                                 | "lowshelf"
@@ -304,7 +306,14 @@ pub(super) fn validate_serial_external_input(
                                 | "notch"
                                 | "bandpass"
                                 | "allpass"
-                        ) {
+                        );
+                        let coefficient_only_filter_type =
+                            matches!(format, ExportFormat::BiquadCoefficients)
+                                && matches!(
+                                    filter_type,
+                                    "lowshelforf" | "highshelforf" | "peakmatched"
+                                );
+                        if !common_filter_type && !coefficient_only_filter_type {
                             anyhow::bail!(
                                 "{format:?} export does not support filter type '{filter_type}' on {filter_context}"
                             );
@@ -312,6 +321,21 @@ pub(super) fn validate_serial_external_input(
                         if matches!(format, ExportFormat::RoonDsp) && filter_type == "allpass" {
                             anyhow::bail!(
                                 "RoonDsp export cannot represent all-pass filter on {filter_context}"
+                            );
+                        }
+                        if matches!(format, ExportFormat::Rew) && filter_type == "bandpass" {
+                            anyhow::bail!(
+                                "Rew export cannot represent band-pass filter on {filter_context}"
+                            );
+                        }
+                        if matches!(format, ExportFormat::Rew | ExportFormat::BiquadCoefficients)
+                            && filter
+                                .get("topology")
+                                .and_then(|value| value.as_str())
+                                .is_some_and(|topology| topology != "biquad")
+                        {
+                            anyhow::bail!(
+                                "{format:?} export cannot represent non-biquad topology on {filter_context}"
                             );
                         }
                         let frequency = required_f64(filter, "freq", &filter_context)?;
@@ -371,6 +395,9 @@ pub(super) fn validate_serial_external_input(
                 "{format:?} export is system-wide and cannot preserve different per-channel DSP chains"
             );
         }
+    }
+    if matches!(format, ExportFormat::Rew) && channels.len() != 1 {
+        anyhow::bail!("Rew export requires exactly one channel per filter-settings file");
     }
     Ok(())
 }

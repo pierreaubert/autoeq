@@ -23,6 +23,7 @@ pub fn empty_metadata() -> OptimizationMetadata {
         epa_per_channel: None,
         epa_multichannel: None,
         group_delay: None,
+        mixed_phase_per_channel: None,
         perceptual_metrics: None,
         home_cinema_layout: None,
         multi_seat_coverage: None,

@@ -6,6 +6,9 @@
 //! - EasyEffects (JSON preset)
 //! - Wavelet (GraphicEQ text)
 //! - PipeWire filter-chain (SPA-JSON .conf)
+//! - Roon DSP Engine (JSON)
+//! - Room EQ Wizard Generic EQ (text)
+//! - Canonical normalized biquad coefficients (JSON)
 
 use super::home_cinema::{BassManagementMatrix, BassManagementRoute, BassManagementRoutingGraph};
 use super::types::{ChannelDspChain, DspChainOutput, PluginConfigWrapper};
@@ -83,6 +86,10 @@ fn render_dsp_chain(
         ExportFormat::Wavelet => export_wavelet(output, sample_rate),
         ExportFormat::PipeWire => export_pipewire(output, sample_rate),
         ExportFormat::RoonDsp => export_roon(output),
+        ExportFormat::Rew => export_rew(output),
+        ExportFormat::BiquadCoefficients => {
+            export_normalized_biquad_coefficients(output, sample_rate)
+        }
     }
 }
 
@@ -125,6 +132,108 @@ fn export_format_preserves_convolution_paths(format: ExportFormat) -> bool {
         format,
         ExportFormat::CamillaDsp | ExportFormat::EqualizerApo | ExportFormat::PipeWire
     )
+}
+
+/// Export a single serial channel as a REW Generic EQ filter-settings file.
+fn export_rew(output: &DspChainOutput) -> anyhow::Result<String> {
+    validate_serial_external_input(output, ExportFormat::Rew)?;
+    let channels = sorted_channels(output);
+    let (channel_name, chain) = channels
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("Rew export requires exactly one channel"))?;
+    let filters = extract_eq_filters(&chain.plugins);
+    let mut out = String::new();
+    writeln!(out, "Filter Settings file")?;
+    writeln!(out)?;
+    writeln!(out, "Equaliser: Generic")?;
+    writeln!(out, "Channel: {}", channel_short_name(channel_name))?;
+    writeln!(out, "Preamp: {:.9} dB", extract_gain_db(&chain.plugins))?;
+
+    for (index, filter) in filters.iter().enumerate() {
+        let filter_type = match filter.filter_type.as_str() {
+            "peak" => "PK",
+            "lowshelf" => "LS",
+            "highshelf" => "HS",
+            "lowpass" => "LP",
+            "highpass" | "highpassvariableq" => "HP",
+            "notch" => "NO",
+            "allpass" => "AP",
+            other => anyhow::bail!("Rew export does not support filter type '{other}'"),
+        };
+        writeln!(
+            out,
+            "Filter {:>2}: ON {filter_type} Fc {:.9} Hz Gain {:+.9} dB Q {:.9}",
+            index + 1,
+            filter.freq,
+            filter.gain_db,
+            filter.q,
+        )?;
+    }
+    Ok(out)
+}
+
+/// Export exact normalized coefficients using RoomEQ's canonical biquad
+/// implementation and denominator sign convention.
+fn export_normalized_biquad_coefficients(
+    output: &DspChainOutput,
+    sample_rate: f64,
+) -> anyhow::Result<String> {
+    validate_serial_external_input(output, ExportFormat::BiquadCoefficients)?;
+    if !sample_rate.is_finite() || sample_rate <= 0.0 {
+        anyhow::bail!("BiquadCoefficients export requires a finite positive sample rate");
+    }
+    let nyquist = sample_rate / 2.0;
+    let mut channels_json = Vec::new();
+    for (channel_name, chain) in sorted_channels(output) {
+        let filters = extract_eq_filters(&chain.plugins);
+        let mut sections = Vec::with_capacity(filters.len());
+        for (section_index, filter) in filters.iter().enumerate() {
+            if filter.freq >= nyquist {
+                anyhow::bail!(
+                    "BiquadCoefficients export requires filter frequency {} Hz to be below Nyquist ({nyquist} Hz)",
+                    filter.freq
+                );
+            }
+            let filter_type = parse_biquad_filter_type(&filter.filter_type)?;
+            let biquad = Biquad::new(
+                filter_type,
+                filter.freq,
+                sample_rate,
+                filter.q,
+                filter.gain_db,
+            );
+            let (a1, a2, b0, b1, b2) = biquad.constants();
+            sections.push(serde_json::json!({
+                "section_index": section_index,
+                "order": 2,
+                "filter_type": filter.filter_type,
+                "frequency_hz": filter.freq,
+                "q": filter.q,
+                "gain_db": filter.gain_db,
+                "a0": 1.0,
+                "a1": a1,
+                "a2": a2,
+                "b0": b0,
+                "b1": b1,
+                "b2": b2,
+            }));
+        }
+        channels_json.push(serde_json::json!({
+            "channel": channel_short_name(channel_name),
+            "source_channel": channel_name,
+            "preamp_gain_db": extract_gain_db(&chain.plugins),
+            "delay_ms": extract_delay_ms(&chain.plugins).unwrap_or(0.0),
+            "sections": sections,
+        }));
+    }
+
+    Ok(serde_json::to_string_pretty(&serde_json::json!({
+        "format": "roomeq_normalized_biquad_coefficients",
+        "version": 1,
+        "sample_rate_hz": sample_rate,
+        "coefficient_convention": "H(z) = (b0 + b1*z^-1 + b2*z^-2) / (1 + a1*z^-1 + a2*z^-2)",
+        "channels": channels_json,
+    }))?)
 }
 
 fn export_camilladsp(output: &DspChainOutput, sample_rate: f64) -> anyhow::Result<String> {

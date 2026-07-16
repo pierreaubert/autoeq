@@ -122,6 +122,7 @@ impl WorkflowExecutor for Stereo20Executor {
             epa_per_channel,
             epa_multichannel,
             group_delay: None,
+            mixed_phase_per_channel: None,
             perceptual_metrics: None,
             home_cinema_layout: None,
             multi_seat_coverage: None,

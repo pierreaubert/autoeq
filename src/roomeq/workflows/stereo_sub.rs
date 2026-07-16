@@ -897,6 +897,7 @@ impl WorkflowExecutor for Stereo21Executor {
                 epa_per_channel,
                 epa_multichannel,
                 group_delay: None,
+                mixed_phase_per_channel: None,
                 perceptual_metrics: None,
                 home_cinema_layout: Some(super::super::home_cinema::analyze_layout(config)),
                 multi_seat_coverage: Some(super::super::home_cinema::multi_seat_coverage(config)),

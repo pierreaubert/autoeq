@@ -31,25 +31,31 @@ pub(in super::super) fn apply_phase_correction(
         phase_smoothing_octaves: config.phase_smoothing_octaves,
     };
 
-    let phase_fir = match crate::roomeq::mixed_phase::decompose_phase(&ch.initial_curve, &mp_config)
-    {
-        Ok((_min, _excess, delay_ms, residual)) => {
-            info!(
-                "  Phase correction '{}': delay={:.2} ms, generating phase-only FIR",
-                name, delay_ms
-            );
-            crate::roomeq::mixed_phase::generate_excess_phase_fir(
-                &ch.initial_curve.freq,
-                &residual,
-                &mp_config,
-                sample_rate,
-            )
-        }
-        Err(e) => {
-            warn!("  Phase correction failed for '{}': {}", name, e);
-            return;
-        }
-    };
+    let (phase_fir, mixed_phase_report) =
+        match crate::roomeq::mixed_phase::decompose_phase(&ch.initial_curve, &mp_config) {
+            Ok((_min, _excess, delay_ms, residual)) => {
+                info!(
+                    "  Phase correction '{}': delay={:.2} ms, generating phase-only FIR",
+                    name, delay_ms
+                );
+                let phase_fir = crate::roomeq::mixed_phase::generate_excess_phase_fir(
+                    &ch.initial_curve.freq,
+                    &residual,
+                    &mp_config,
+                    sample_rate,
+                );
+                let report = crate::roomeq::mixed_phase::MixedPhaseCorrectionReport::from_residual(
+                    delay_ms,
+                    phase_fir.len(),
+                    &residual,
+                );
+                (phase_fir, report)
+            }
+            Err(e) => {
+                warn!("  Phase correction failed for '{}': {}", name, e);
+                return;
+            }
+        };
 
     // Save phase FIR WAV and add convolution plugin
     let mut filename = crate::roomeq::artifacts::convolution_artifact_filename(
@@ -72,9 +78,12 @@ pub(in super::super) fn apply_phase_correction(
             info!("  Saved phase correction FIR to {}", wav_path.display());
         }
     }
-    chain
-        .plugins
-        .push(crate::roomeq::output::create_convolution_plugin(&filename));
+    chain.plugins.push(
+        crate::roomeq::output::create_mixed_phase_convolution_plugin(
+            &filename,
+            &mixed_phase_report,
+        ),
+    );
 
     let phase_response = crate::response::compute_fir_complex_response(
         &phase_fir,
@@ -262,6 +271,11 @@ mod tests {
             chain.plugins.iter().any(|p| p.plugin_type == "convolution"),
             "phase correction should add a convolution plugin"
         );
+        let expected_taps = ch.fir_coeffs.as_ref().unwrap().len();
+        let mut chains = HashMap::from([("left".to_string(), chain)]);
+        let reports = crate::roomeq::output::take_mixed_phase_reports(&mut chains)
+            .expect("phase correction should retain its decomposition report");
+        assert_eq!(reports["left"].fir_taps, expected_taps);
     }
 
     #[test]

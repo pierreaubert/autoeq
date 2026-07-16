@@ -181,9 +181,47 @@ pub struct AcousticCorpusBaselineEntry {
     pub metrics: QualityBaselineMetrics,
 }
 
+/// Execution platform for which an optimizer-derived acoustic baseline was
+/// calibrated. Fixed seeds make runs repeatable on one platform, but floating
+/// point and parallel evaluation order can still lead iterative optimizers to
+/// a different solution on another OS or architecture.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct AcousticBaselinePlatform {
+    pub os: String,
+    pub arch: String,
+}
+
+impl AcousticBaselinePlatform {
+    pub fn current() -> Self {
+        Self {
+            os: std::env::consts::OS.to_string(),
+            arch: std::env::consts::ARCH.to_string(),
+        }
+    }
+
+    pub fn label(&self) -> String {
+        format!("{}-{}", self.os, self.arch)
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.os.trim().is_empty() || self.arch.trim().is_empty() {
+            return Err(
+                "acoustic corpus baseline platform needs non-empty os and arch".to_string(),
+            );
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AcousticCorpusBaseline {
     pub version: String,
+    pub platform: AcousticBaselinePlatform,
+    /// Informational compiler provenance. Platform compatibility deliberately
+    /// remains keyed to OS and architecture; compiler changes are still
+    /// visible in artifacts and remain subject to the numeric quality gates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated_with_rustc: Option<String>,
     pub scenarios: Vec<AcousticCorpusBaselineEntry>,
 }
 
@@ -193,6 +231,16 @@ impl AcousticCorpusBaseline {
             .map_err(|error| format!("failed to read corpus baseline: {error}"))?;
         let baseline: Self = serde_json::from_str(&json)
             .map_err(|error| format!("failed to parse corpus baseline: {error}"))?;
+        baseline.platform.validate()?;
+        if baseline
+            .generated_with_rustc
+            .as_ref()
+            .is_some_and(|version| version.trim().is_empty())
+        {
+            return Err(
+                "acoustic corpus baseline generated_with_rustc must not be empty".to_string(),
+            );
+        }
         let mut ids = std::collections::HashSet::new();
         if let Some(duplicate) = baseline
             .scenarios
@@ -207,6 +255,18 @@ impl AcousticCorpusBaseline {
         Ok(baseline)
     }
 
+    pub fn validate_for_platform(&self, expected: &AcousticBaselinePlatform) -> Result<(), String> {
+        expected.validate()?;
+        if self.platform != *expected {
+            return Err(format!(
+                "acoustic corpus baseline is calibrated for {}, but this run is {}; select or recalibrate the matching platform baseline",
+                self.platform.label(),
+                expected.label()
+            ));
+        }
+        Ok(())
+    }
+
     pub fn get(&self, id: &str) -> Option<&QualityBaselineMetrics> {
         self.scenarios
             .iter()
@@ -217,7 +277,13 @@ impl AcousticCorpusBaseline {
 
 impl AcousticCorpusManifest {
     pub fn load(path: &Path) -> Result<Self, String> {
-        let json = std::fs::read_to_string(path)
+        let path = path.canonicalize().map_err(|error| {
+            format!(
+                "failed to resolve corpus manifest '{}': {error}",
+                path.display()
+            )
+        })?;
+        let json = std::fs::read_to_string(&path)
             .map_err(|error| format!("failed to read corpus manifest: {error}"))?;
         let mut manifest: Self = serde_json::from_str(&json)
             .map_err(|error| format!("failed to parse corpus manifest: {error}"))?;
@@ -262,6 +328,72 @@ fn resolve(base: &Path, path: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
+    #[test]
+    fn acoustic_baseline_rejects_a_different_execution_platform() {
+        let expected = AcousticBaselinePlatform {
+            os: "linux".to_string(),
+            arch: "x86_64".to_string(),
+        };
+        let baseline = AcousticCorpusBaseline {
+            version: "2.0.0".to_string(),
+            platform: AcousticBaselinePlatform {
+                os: "macos".to_string(),
+                arch: "aarch64".to_string(),
+            },
+            generated_with_rustc: Some("rustc test".to_string()),
+            scenarios: Vec::new(),
+        };
+
+        let error = baseline
+            .validate_for_platform(&expected)
+            .expect_err("a platform-specific baseline must not cross platforms");
+        assert!(error.contains("macos-aarch64"));
+        assert!(error.contains("linux-x86_64"));
+    }
+
+    #[test]
+    fn acoustic_baseline_accepts_its_declared_execution_platform() {
+        let platform = AcousticBaselinePlatform {
+            os: "linux".to_string(),
+            arch: "x86_64".to_string(),
+        };
+        let baseline = AcousticCorpusBaseline {
+            version: "2.0.0".to_string(),
+            platform: platform.clone(),
+            generated_with_rustc: None,
+            scenarios: Vec::new(),
+        };
+
+        baseline
+            .validate_for_platform(&platform)
+            .expect("matching platform must be accepted");
+    }
+
+    #[test]
+    fn repository_baselines_declare_their_execution_platform() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("data_tests/roomeq/acoustic_corpus");
+        for (file, os, arch) in [
+            ("baseline.json", "macos", "aarch64"),
+            ("baseline.linux-x86_64.json", "linux", "x86_64"),
+        ] {
+            let expected = AcousticBaselinePlatform {
+                os: os.to_string(),
+                arch: arch.to_string(),
+            };
+            let baseline = AcousticCorpusBaseline::load(&root.join(file))
+                .unwrap_or_else(|error| panic!("failed to load {file}: {error}"));
+
+            baseline
+                .validate_for_platform(&expected)
+                .unwrap_or_else(|error| panic!("invalid platform in {file}: {error}"));
+            assert_eq!(baseline.scenarios.len(), 8, "unexpected corpus in {file}");
+            assert!(
+                baseline.generated_with_rustc.is_some(),
+                "missing compiler provenance in {file}"
+            );
+        }
+    }
+
     fn valid_scenario() -> AcousticCorpusScenario {
         AcousticCorpusScenario {
             id: "validation-contract".to_string(),
@@ -293,6 +425,13 @@ mod tests {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("data_tests/roomeq/acoustic_corpus/manifest.json");
         let manifest = AcousticCorpusManifest::load(&path).expect("repository corpus manifest");
+        assert!(
+            manifest
+                .scenarios
+                .iter()
+                .all(|scenario| scenario.config.is_absolute()),
+            "corpus paths must be fully resolved before RoomEQ validation"
+        );
         let pr: Vec<_> = manifest.scenarios_for(QaTier::Pr).collect();
         assert!(
             pr.iter()
@@ -342,6 +481,31 @@ mod tests {
                 .scenarios
                 .iter()
                 .all(|scenario| baseline.get(&scenario.id).is_some())
+        );
+    }
+
+    #[test]
+    fn repository_manifest_resolves_paths_from_a_relative_manifest_path() {
+        let path = Path::new("data_tests/roomeq/acoustic_corpus/manifest.json");
+        let manifest = AcousticCorpusManifest::load(path).expect("relative repository manifest");
+
+        assert!(
+            manifest.scenarios.iter().all(|scenario| {
+                scenario.config.is_absolute()
+                    && scenario
+                        .override_config
+                        .as_ref()
+                        .is_none_or(|path| path.is_absolute())
+                    && scenario
+                        .candidate_override_config
+                        .as_ref()
+                        .is_none_or(|path| path.is_absolute())
+                    && scenario
+                        .held_out
+                        .iter()
+                        .all(|measurement| measurement.path.is_absolute())
+            }),
+            "all corpus paths must be absolute even when the manifest argument is relative"
         );
     }
 

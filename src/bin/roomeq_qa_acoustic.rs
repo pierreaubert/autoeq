@@ -2,12 +2,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use autoeq::roomeq::acoustic_qa::{
-    AcousticCorpusBaseline, AcousticCorpusBaselineEntry, AcousticCorpusManifest,
-    AcousticCorpusScenario, AcousticQualityScorecard, QaTier, QualityBaselineComparison,
-    QualityBaselineMetrics, QualityBaselinePartition, QualityEvaluationConfig, QualityGateMode,
-    QualityGatePolicy, QualityGateReport, QualityRegressionPolicy, TemporalChannelEvidence,
-    TemporalQualityEvidence, compare_quality_to_baseline, derive_temporal_quality_evidence,
-    evaluate_acoustic_quality, evaluate_quality_gate,
+    AcousticBaselinePlatform, AcousticCorpusBaseline, AcousticCorpusBaselineEntry,
+    AcousticCorpusManifest, AcousticCorpusScenario, AcousticQualityScorecard, QaTier,
+    QualityBaselineComparison, QualityBaselineMetrics, QualityBaselinePartition,
+    QualityEvaluationConfig, QualityGateMode, QualityGatePolicy, QualityGateReport,
+    QualityRegressionPolicy, TemporalChannelEvidence, TemporalQualityEvidence,
+    compare_quality_to_baseline, derive_temporal_quality_evidence, evaluate_acoustic_quality,
+    evaluate_quality_gate,
 };
 use autoeq::roomeq::{
     RoomOptimizationResult, RoomPipeline, RoomPipelineRequest,
@@ -48,11 +49,10 @@ struct Args {
         default_value = "data_tests/roomeq/acoustic_corpus/manifest.json"
     )]
     manifest: PathBuf,
-    #[arg(
-        long,
-        default_value = "data_tests/roomeq/acoustic_corpus/baseline.json"
-    )]
-    baseline: PathBuf,
+    /// Platform-scoped acoustic baseline. Defaults to the repository baseline
+    /// for the current OS and architecture.
+    #[arg(long)]
+    baseline: Option<PathBuf>,
     #[arg(long, value_enum, default_value = "pr")]
     tier: TierArg,
     /// Override report-only scenarios and enforce their quality thresholds.
@@ -136,6 +136,10 @@ struct VariantEvaluation {
 struct CorpusReport {
     version: String,
     tier: String,
+    platform: AcousticBaselinePlatform,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rustc_version: Option<String>,
+    baseline: String,
     scenario_count: usize,
     passed: bool,
     scenarios: Vec<ScenarioReport>,
@@ -145,8 +149,16 @@ fn main() -> Result<()> {
     let run_started = std::time::Instant::now();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let args = Args::parse();
+    let platform = AcousticBaselinePlatform::current();
+    let baseline_path = args
+        .baseline
+        .clone()
+        .unwrap_or_else(|| default_baseline_path_for(&platform.os, &platform.arch));
     let manifest = AcousticCorpusManifest::load(&args.manifest).map_err(|error| anyhow!(error))?;
-    let baseline = AcousticCorpusBaseline::load(&args.baseline).map_err(|error| anyhow!(error))?;
+    let baseline = AcousticCorpusBaseline::load(&baseline_path).map_err(|error| anyhow!(error))?;
+    baseline
+        .validate_for_platform(&platform)
+        .map_err(|error| anyhow!(error))?;
     if baseline.version != manifest.version {
         return Err(anyhow!(
             "acoustic corpus baseline version '{}' does not match manifest version '{}'",
@@ -223,6 +235,9 @@ fn main() -> Result<()> {
     let report = CorpusReport {
         version: manifest.version,
         tier: format!("{:?}", args.tier).to_lowercase(),
+        platform,
+        rustc_version: rustc_version(),
+        baseline: baseline_path.display().to_string(),
         scenario_count: scenarios.len(),
         passed: scenarios.iter().all(|scenario| scenario.gate.passed),
         scenarios,
@@ -242,7 +257,7 @@ fn main() -> Result<()> {
         append_history(path, &report, elapsed_ms, peak_rss_kib)?;
     }
     if args.recalibrate_baseline {
-        write_recalibrated_baseline(&args.baseline, &report)?;
+        write_recalibrated_baseline(&baseline_path, &report)?;
     }
     if args
         .max_runtime_ms
@@ -266,6 +281,27 @@ fn main() -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn default_baseline_path_for(os: &str, arch: &str) -> PathBuf {
+    let file_name = if os == "macos" && arch == "aarch64" {
+        "baseline.json".to_string()
+    } else {
+        format!("baseline.{os}-{arch}.json")
+    };
+    Path::new("data_tests/roomeq/acoustic_corpus").join(file_name)
+}
+
+fn rustc_version() -> Option<String> {
+    let output = std::process::Command::new("rustc")
+        .arg("--version")
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|version| !version.is_empty())
 }
 
 fn evaluate_variant(
@@ -644,8 +680,11 @@ fn print_terminal_summary(report: &CorpusReport) {
 
 fn render_markdown(report: &CorpusReport) -> String {
     let mut markdown = format!(
-        "# RoomEQ acoustic quality\n\nTier: {}  \nResult: **{}**\n\n",
+        "# RoomEQ acoustic quality\n\nTier: {}  \nPlatform: {}  \nCompiler: {}  \nBaseline: `{}`  \nResult: **{}**\n\n",
         report.tier,
+        report.platform.label(),
+        report.rustc_version.as_deref().unwrap_or("unknown"),
+        report.baseline,
         if report.passed { "PASS" } else { "FAIL" }
     );
     markdown.push_str(
@@ -722,6 +761,9 @@ fn append_history(
     let record = serde_json::json!({
         "version": report.version,
         "tier": report.tier,
+        "platform": report.platform,
+        "rustc_version": report.rustc_version,
+        "baseline": report.baseline,
         "generated_at": chrono::Utc::now().to_rfc3339(),
         "passed": report.passed,
         "elapsed_ms": elapsed_ms,
@@ -748,6 +790,8 @@ fn peak_rss_kib() -> Option<u64> {
 fn write_recalibrated_baseline(path: &Path, report: &CorpusReport) -> Result<()> {
     let baseline = AcousticCorpusBaseline {
         version: report.version.clone(),
+        platform: report.platform.clone(),
+        generated_with_rustc: report.rustc_version.clone(),
         scenarios: report
             .scenarios
             .iter()
@@ -795,6 +839,22 @@ mod tests {
     use super::*;
     use autoeq::roomeq::{build_channel_dsp_chain, create_gain_plugin};
     use ndarray::Array1;
+
+    #[test]
+    fn default_baseline_path_is_scoped_to_the_execution_platform() {
+        assert_eq!(
+            default_baseline_path_for("linux", "x86_64"),
+            PathBuf::from("data_tests/roomeq/acoustic_corpus/baseline.linux-x86_64.json")
+        );
+        assert_eq!(
+            default_baseline_path_for("macos", "aarch64"),
+            PathBuf::from("data_tests/roomeq/acoustic_corpus/baseline.json")
+        );
+        assert_eq!(
+            default_baseline_path_for("freebsd", "x86_64"),
+            PathBuf::from("data_tests/roomeq/acoustic_corpus/baseline.freebsd-x86_64.json")
+        );
+    }
 
     #[test]
     fn held_out_application_preserves_grid_and_is_finite() {

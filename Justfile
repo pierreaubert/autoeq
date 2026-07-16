@@ -754,8 +754,14 @@ qa-roomeq-acoustic-nightly:
 
 # Human + machine report, trend history, and explicit PR resource budgets.
 [group('qa-roomeq')]
-qa-roomeq-acoustic-report:
-	cargo run --bin roomeq-qa-acoustic --release -- --tier pr --output target/qa/roomeq-acoustic.json --markdown-output target/qa/roomeq-acoustic.md --history target/qa/roomeq-acoustic-history.ndjson --max-runtime-ms 900000 --max-peak-rss-kib 4194304
+qa-roomeq-acoustic-report baseline="":
+	#!/usr/bin/env bash
+	set -euo pipefail
+	baseline_args=()
+	if [ -n "{{baseline}}" ]; then
+	  baseline_args+=(--baseline "{{baseline}}")
+	fi
+	cargo run --bin roomeq-qa-acoustic --release -- --tier pr "${baseline_args[@]}" --output target/qa/roomeq-acoustic.json --markdown-output target/qa/roomeq-acoustic.md --history target/qa/roomeq-acoustic-history.ndjson --max-runtime-ms 900000 --max-peak-rss-kib 4194304
 
 # Deterministically replace paired snapshots after an intentional quality change.
 [group('qa-roomeq')]

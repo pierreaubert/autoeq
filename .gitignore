@@ -24,6 +24,7 @@ fuzzer_output
 .jekyll-metadata
 _site
 [a-z]*.md
+!artifacts.md
 
 # python
 __pycache__

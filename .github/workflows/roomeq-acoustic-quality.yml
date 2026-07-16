@@ -31,13 +31,14 @@ jobs:
         run: just qa-roomeq-mdat
       - name: PR acoustic gates and reports
         if: github.event_name == 'pull_request'
-        run: just qa-roomeq-acoustic-report
+        run: just qa-roomeq-acoustic-report data_tests/roomeq/acoustic_corpus/baseline.linux-x86_64.json
       - name: Nightly acoustic gates and reports
         if: github.event_name != 'pull_request'
         run: |
           mkdir -p target/qa
           cargo run --release --bin roomeq-qa-acoustic -- \
             --tier nightly \
+            --baseline data_tests/roomeq/acoustic_corpus/baseline.linux-x86_64.json \
             --output target/qa/roomeq-acoustic.json \
             --markdown-output target/qa/roomeq-acoustic.md \
             --history target/qa/roomeq-acoustic-history.ndjson \

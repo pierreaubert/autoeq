@@ -1,4 +1,4 @@
-/// Result of arrival time analysis
+/// Result of arrival time analysis produced by RoomEQ measurement analysis.
 #[derive(Debug, Clone)]
 pub struct ArrivalTimeResult {
     /// Arrival time in samples from the start of the recording

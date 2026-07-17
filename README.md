@@ -29,6 +29,8 @@ moves into focused crates. The current library layers are:
   execution boundary, and external-DSP rendering
 - `roomeq-quality` — acoustic-quality metrics, acceptance policies, and QA
   fixtures
+- `roomeq-analysis` — measurement analysis, beginning with phase/probe time
+  alignment and channel-delay calculation
 
 Each crate has its own README and changelog under `crates/`. Existing
 `autoeq::*` public paths remain available while the RoomEQ pipeline, analysis,

@@ -23,6 +23,7 @@ members = [
     "crates/roomeq-engine",
     "crates/roomeq-export",
     "crates/roomeq-quality",
+    "crates/roomeq-analysis",
 ]
 # Keep the published crate under crates.io's size cap. The excluded paths are
 # QA recordings, generated test fixtures, helper shell scripts, and editor
@@ -53,6 +54,7 @@ roomeq-model = { path = "crates/roomeq-model" }
 roomeq-engine = { path = "crates/roomeq-engine" }
 roomeq-export = { path = "crates/roomeq-export" }
 roomeq-quality = { path = "crates/roomeq-quality" }
+roomeq-analysis = { path = "crates/roomeq-analysis" }
 anyhow = "1.0"
 async-trait = "0.1"
 base64 = "0.22"
@@ -117,6 +119,7 @@ roomeq-model = { workspace = true }
 roomeq-engine = { workspace = true }
 roomeq-export = { workspace = true }
 roomeq-quality = { workspace = true }
+roomeq-analysis = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }

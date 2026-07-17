@@ -177,7 +177,7 @@ pub use bass_phase_confidence::{
 mod ir_waveform;
 pub(crate) mod phase_utils;
 pub mod synthetic;
-mod time_align;
+pub(crate) use roomeq_analysis::time_align;
 // GD-Opt v2 Phase GD-1f — microphone phase calibration loader. See
 // `docs/gd_opt_v2_plan.md` §2.6 and §2.8.
 pub mod mic_phase_calibration;

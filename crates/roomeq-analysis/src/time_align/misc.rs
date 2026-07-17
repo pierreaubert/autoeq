@@ -40,7 +40,7 @@ pub(super) fn load_wav_first_channel(wav_path: &Path) -> Result<(Vec<f32>, u32),
 /// which avoids running subwoofer-only channels through an empty 200-2000 Hz
 /// phase regression.
 pub fn phase_arrival_regression_band(
-    curve: &crate::Curve,
+    curve: &autoeq_core::Curve,
     preferred_min: f64,
     preferred_max: f64,
 ) -> Option<(f64, f64)> {

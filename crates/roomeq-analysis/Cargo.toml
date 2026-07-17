@@ -1,0 +1,16 @@
+[package]
+name = "roomeq-analysis"
+version.workspace = true
+edition = "2024"
+description = "Measurement-analysis primitives for RoomEQ"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+autoeq-core = { workspace = true }
+hound = { workspace = true }
+log = { workspace = true }
+math-dsp = { workspace = true }
+ndarray = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

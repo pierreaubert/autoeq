@@ -9,6 +9,8 @@
   serialization into `autoeq-fir`; the root facade retains their public paths.
 - Extracted RoomEQ acoustic-quality metrics, acceptance policies, and fixtures
   into `roomeq-quality`; the root RoomEQ module retains its public path.
+- Extracted RoomEQ phase/probe time-alignment analysis into `roomeq-analysis`;
+  existing root RoomEQ entry points remain available.
 - Added crate-local README and CHANGELOG files for every extracted library.
 
 # 0.4.51

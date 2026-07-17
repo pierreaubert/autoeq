@@ -9,7 +9,7 @@ use super::error::PhaseArrivalError;
 /// is absent, no points fall in the band, or the estimate is implausible.
 #[allow(dead_code)]
 pub fn estimate_arrival_from_phase(
-    curve: &crate::Curve,
+    curve: &autoeq_core::Curve,
     min_freq: f64,
     max_freq: f64,
 ) -> Option<f64> {
@@ -18,7 +18,7 @@ pub fn estimate_arrival_from_phase(
 
 /// Estimate speaker propagation delay from phase data and report why rejected.
 pub fn estimate_arrival_from_phase_detailed(
-    curve: &crate::Curve,
+    curve: &autoeq_core::Curve,
     min_freq: f64,
     max_freq: f64,
 ) -> Result<f64, PhaseArrivalError> {
@@ -30,7 +30,7 @@ pub fn estimate_arrival_from_phase_detailed(
         .ok_or(PhaseArrivalError::MissingPhase)?;
 
     // Unwrap phase to remove discontinuities
-    let unwrapped = super::super::phase_utils::unwrap_phase_degrees(phase);
+    let unwrapped = autoeq_core::phase_utils::unwrap_phase_degrees(phase);
 
     // Filter to the [min_freq, max_freq] band
     let points: Vec<(f64, f64)> = curve

@@ -1,3 +1,4 @@
+// WAV and probe based arrival-time discovery.
 use super::detect::detect_delay_with_probe;
 use super::misc::load_wav_first_channel;
 use super::types::ArrivalTimeResult;

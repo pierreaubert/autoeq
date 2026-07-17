@@ -1,3 +1,4 @@
+// Probe-signal delay detection.
 use super::types::ProbeDelayResult;
 use math_audio_dsp::analysis::cross_correlate_envelope;
 

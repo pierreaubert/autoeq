@@ -1,3 +1,4 @@
+// Time-alignment regression coverage.
 use super::detect::detect_delay_with_probe;
 use super::detect::detect_delays_multi_channel;
 use super::error::PhaseArrivalError;
@@ -51,7 +52,7 @@ fn negative_relative_delay_is_accepted() {
     let freqs: Vec<f64> = (20..=2000).step_by(10).map(|f| f as f64).collect();
     let phase_deg: Vec<f64> = freqs.iter().map(|&f| -360.0 * f * tau_s).collect();
 
-    let curve = crate::Curve {
+    let curve = autoeq_core::Curve {
         freq: Array1::from_vec(freqs),
         spl: Array1::zeros(phase_deg.len()),
         phase: Some(Array1::from_vec(phase_deg)),
@@ -78,7 +79,7 @@ fn test_estimate_arrival_from_phase() {
     let freqs: Vec<f64> = (20..=2000).step_by(10).map(|f| f as f64).collect();
     let phase_deg: Vec<f64> = freqs.iter().map(|&f| -360.0 * f * tau_s).collect();
 
-    let curve = crate::Curve {
+    let curve = autoeq_core::Curve {
         freq: Array1::from_vec(freqs),
         spl: Array1::zeros(phase_deg.len()),
         phase: Some(Array1::from_vec(phase_deg)),
@@ -103,7 +104,7 @@ fn test_estimate_arrival_from_phase() {
 fn test_estimate_arrival_from_phase_no_phase() {
     use ndarray::Array1;
 
-    let curve = crate::Curve {
+    let curve = autoeq_core::Curve {
         freq: Array1::linspace(20.0, 2000.0, 100),
         spl: Array1::zeros(100),
         phase: None,
@@ -151,7 +152,7 @@ fn test_estimate_arrival_from_phase_detailed_reports_implausible_delay() {
     let freqs: Vec<f64> = (100..=3000).map(|f| f as f64).collect();
     let phase_deg: Vec<f64> = freqs.iter().map(|&f| -360.0 * f * tau_s).collect();
 
-    let curve = crate::Curve {
+    let curve = autoeq_core::Curve {
         freq: Array1::from_vec(freqs),
         spl: Array1::zeros(phase_deg.len()),
         phase: Some(Array1::from_vec(phase_deg)),
@@ -175,7 +176,7 @@ fn test_phase_arrival_regression_band_falls_back_to_active_sub_band() {
         .iter()
         .map(|&f| if f <= 120.0 { 0.0 } else { -80.0 })
         .collect();
-    let curve = crate::Curve {
+    let curve = autoeq_core::Curve {
         freq: Array1::from_vec(freqs),
         spl: Array1::from_vec(spl),
         phase: Some(Array1::zeros(199)),
@@ -231,7 +232,7 @@ fn test_estimate_arrival_linear_phase() {
     let freqs: Vec<f64> = (100..=5000).step_by(20).map(|f| f as f64).collect();
     let phase_deg: Vec<f64> = freqs.iter().map(|&f| -360.0 * f * tau_s).collect();
 
-    let curve = crate::Curve {
+    let curve = autoeq_core::Curve {
         freq: Array1::from_vec(freqs),
         spl: Array1::zeros(phase_deg.len()),
         phase: Some(Array1::from_vec(phase_deg)),
@@ -262,7 +263,7 @@ fn test_estimate_arrival_zero_delay_accepted() {
     let freqs: Vec<f64> = (100..=5000).step_by(20).map(|f| f as f64).collect();
     let phase_deg: Vec<f64> = freqs.iter().map(|_| 0.0).collect();
 
-    let curve = crate::Curve {
+    let curve = autoeq_core::Curve {
         freq: Array1::from_vec(freqs),
         spl: Array1::zeros(phase_deg.len()),
         phase: Some(Array1::from_vec(phase_deg)),

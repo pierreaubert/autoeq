@@ -1,4 +1,6 @@
 /// Why a phase-derived arrival estimate could not be used.
+///
+/// This error belongs to the measurement-analysis boundary.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PhaseArrivalError {
     MissingPhase,

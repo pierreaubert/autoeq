@@ -221,6 +221,7 @@ dependencies = [
  "rayon",
  "reqwest",
  "resvg",
+ "roomeq-analysis",
  "roomeq-engine",
  "roomeq-export",
  "roomeq-model",
@@ -2640,6 +2641,18 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "roomeq-analysis"
+version = "0.4.51"
+dependencies = [
+ "autoeq-core",
+ "hound",
+ "log",
+ "math-dsp",
+ "ndarray",
+ "tempfile",
 ]
 
 [[package]]

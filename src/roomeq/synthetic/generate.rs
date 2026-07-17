@@ -5,19 +5,19 @@ use super::types::DbaSyntheticScenario;
 use super::types::MultiSubSyntheticScenario;
 use super::types::SyntheticScenario;
 use crate::Curve;
+use crate::error::{AutoeqError, Result};
 use math_audio_iir_fir::Biquad;
 use ndarray::Array1;
 
 /// Generate a flat curve at 0 dB SPL with log-spaced frequency points.
 ///
-/// # Panics
-/// Panics if `n_points < 2` (need at least two points for a frequency range).
+/// Invalid grid parameters return an empty curve; use
+/// [`try_generate_flat_curve`] when the caller can propagate errors.
 pub fn generate_flat_curve(min_freq: f64, max_freq: f64, n_points: usize) -> Curve {
-    assert!(
-        n_points >= 2,
-        "generate_flat_curve requires n_points >= 2, got {}",
-        n_points
-    );
+    if let Err(error) = validate_synthetic_grid(min_freq, max_freq, n_points, "flat curve") {
+        log::warn!("Synthetic flat-curve generation skipped: {error}");
+        return Curve::default();
+    }
     let log_min = min_freq.log10();
     let log_max = max_freq.log10();
     let freq: Vec<f64> = (0..n_points)
@@ -34,14 +34,13 @@ pub fn generate_flat_curve(min_freq: f64, max_freq: f64, n_points: usize) -> Cur
 
 /// Generate a Harman-style tilt curve (-0.8 dB/octave from 200 Hz reference).
 ///
-/// # Panics
-/// Panics if `n_points < 2` (need at least two points for a frequency range).
+/// Invalid grid parameters return an empty curve; use
+/// [`try_generate_harman_tilt_curve`] when the caller can propagate errors.
 pub fn generate_harman_tilt_curve(min_freq: f64, max_freq: f64, n_points: usize) -> Curve {
-    assert!(
-        n_points >= 2,
-        "generate_harman_tilt_curve requires n_points >= 2, got {}",
-        n_points
-    );
+    if let Err(error) = validate_synthetic_grid(min_freq, max_freq, n_points, "Harman tilt curve") {
+        log::warn!("Synthetic Harman-tilt generation skipped: {error}");
+        return Curve::default();
+    }
     let tilt_db_per_octave = -0.8;
     let reference_freq = 200.0;
 
@@ -76,7 +75,17 @@ pub fn generate_speaker_rolloff_curve(
     crossover_freq: f64,
     slope_db_per_oct: f64,
 ) -> Curve {
-    assert!(n_points >= 2);
+    if let Err(error) = validate_rolloff_parameters(
+        min_freq,
+        max_freq,
+        n_points,
+        crossover_freq,
+        slope_db_per_oct,
+        "speaker rolloff curve",
+    ) {
+        log::warn!("Synthetic speaker-rolloff generation skipped: {error}");
+        return Curve::default();
+    }
     let log_min = min_freq.log10();
     let log_max = max_freq.log10();
     let freq: Vec<f64> = (0..n_points)
@@ -115,7 +124,17 @@ pub fn generate_subwoofer_rolloff_curve(
     crossover_freq: f64,
     slope_db_per_oct: f64,
 ) -> Curve {
-    assert!(n_points >= 2);
+    if let Err(error) = validate_rolloff_parameters(
+        min_freq,
+        max_freq,
+        n_points,
+        crossover_freq,
+        slope_db_per_oct,
+        "subwoofer rolloff curve",
+    ) {
+        log::warn!("Synthetic subwoofer-rolloff generation skipped: {error}");
+        return Curve::default();
+    }
     let log_min = min_freq.log10();
     let log_max = max_freq.log10();
     let freq: Vec<f64> = (0..n_points)
@@ -140,6 +159,117 @@ pub fn generate_subwoofer_rolloff_curve(
         phase: None,
         ..Default::default()
     }
+}
+
+/// Checked variant of [`generate_flat_curve`].
+pub fn try_generate_flat_curve(min_freq: f64, max_freq: f64, n_points: usize) -> Result<Curve> {
+    validate_synthetic_grid(min_freq, max_freq, n_points, "flat curve")?;
+    Ok(generate_flat_curve(min_freq, max_freq, n_points))
+}
+
+/// Checked variant of [`generate_harman_tilt_curve`].
+pub fn try_generate_harman_tilt_curve(
+    min_freq: f64,
+    max_freq: f64,
+    n_points: usize,
+) -> Result<Curve> {
+    validate_synthetic_grid(min_freq, max_freq, n_points, "Harman tilt curve")?;
+    Ok(generate_harman_tilt_curve(min_freq, max_freq, n_points))
+}
+
+/// Checked variant of [`generate_speaker_rolloff_curve`].
+pub fn try_generate_speaker_rolloff_curve(
+    min_freq: f64,
+    max_freq: f64,
+    n_points: usize,
+    crossover_freq: f64,
+    slope_db_per_oct: f64,
+) -> Result<Curve> {
+    validate_rolloff_parameters(
+        min_freq,
+        max_freq,
+        n_points,
+        crossover_freq,
+        slope_db_per_oct,
+        "speaker rolloff curve",
+    )?;
+    Ok(generate_speaker_rolloff_curve(
+        min_freq,
+        max_freq,
+        n_points,
+        crossover_freq,
+        slope_db_per_oct,
+    ))
+}
+
+/// Checked variant of [`generate_subwoofer_rolloff_curve`].
+pub fn try_generate_subwoofer_rolloff_curve(
+    min_freq: f64,
+    max_freq: f64,
+    n_points: usize,
+    crossover_freq: f64,
+    slope_db_per_oct: f64,
+) -> Result<Curve> {
+    validate_rolloff_parameters(
+        min_freq,
+        max_freq,
+        n_points,
+        crossover_freq,
+        slope_db_per_oct,
+        "subwoofer rolloff curve",
+    )?;
+    Ok(generate_subwoofer_rolloff_curve(
+        min_freq,
+        max_freq,
+        n_points,
+        crossover_freq,
+        slope_db_per_oct,
+    ))
+}
+
+fn validate_synthetic_grid(
+    min_freq: f64,
+    max_freq: f64,
+    n_points: usize,
+    context: &str,
+) -> Result<()> {
+    if n_points < 2 {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!("{context} requires at least two points, got {n_points}"),
+        });
+    }
+    if !min_freq.is_finite() || !max_freq.is_finite() || min_freq <= 0.0 || max_freq <= min_freq {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "{context} requires finite positive ordered frequency bounds, got {min_freq}..{max_freq}"
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn validate_rolloff_parameters(
+    min_freq: f64,
+    max_freq: f64,
+    n_points: usize,
+    crossover_freq: f64,
+    slope_db_per_oct: f64,
+    context: &str,
+) -> Result<()> {
+    validate_synthetic_grid(min_freq, max_freq, n_points, context)?;
+    if !crossover_freq.is_finite() || crossover_freq <= 0.0 {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "{context} requires a finite positive crossover frequency, got {crossover_freq}"
+            ),
+        });
+    }
+    if !slope_db_per_oct.is_finite() {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!("{context} requires a finite rolloff slope"),
+        });
+    }
+    Ok(())
 }
 
 /// Add Gaussian noise (in dB domain) with configurable RMS and deterministic seed.

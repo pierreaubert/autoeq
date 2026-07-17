@@ -19,12 +19,12 @@ const DISPLAY_MAX_FREQ: f64 = math_audio_iir_fir::AUDIBLE_MAX_FREQ;
 /// log-frequency SPL slope at each boundary. The original measurement data
 /// points are preserved.
 pub fn extend_curve_to_full_range(curve: &crate::Curve) -> crate::Curve {
-    if curve.freq.is_empty() {
+    if curve.freq.is_empty() || curve.spl.len() != curve.freq.len() {
         return curve.clone();
     }
 
     let meas_min = curve.freq[0];
-    let meas_max = *curve.freq.last().unwrap();
+    let meas_max = curve.freq[curve.freq.len() - 1];
 
     // If curve already approximately covers 20 Hz – 20 kHz, return as-is
     if meas_min <= DISPLAY_MIN_FREQ * 1.05 && meas_max >= DISPLAY_MAX_FREQ * 0.95 {
@@ -32,7 +32,7 @@ pub fn extend_curve_to_full_range(curve: &crate::Curve) -> crate::Curve {
     }
 
     let first_spl = curve.spl[0];
-    let last_spl = *curve.spl.last().unwrap();
+    let last_spl = curve.spl[curve.spl.len() - 1];
     let low_slope_ref = if curve.freq.len() >= 2 && curve.spl.len() >= 2 {
         Some((curve.freq[0], curve.spl[0], curve.freq[1], curve.spl[1]))
     } else {

@@ -17,7 +17,21 @@ pub fn rms_average(curves: &[Curve]) -> Curve {
 }
 
 pub fn rms_average_weighted(curves: &[Curve], weights: Option<&[f64]>) -> Curve {
-    validate_spatial_curves(curves).expect("spatial robustness curves must be valid");
+    try_rms_average_weighted(curves, weights).unwrap_or_else(|error| {
+        log::warn!("RMS spatial aggregation skipped: {error}");
+        Curve::default()
+    })
+}
+
+pub fn try_rms_average(curves: &[Curve]) -> crate::error::Result<Curve> {
+    try_rms_average_weighted(curves, None)
+}
+
+pub fn try_rms_average_weighted(
+    curves: &[Curve],
+    weights: Option<&[f64]>,
+) -> crate::error::Result<Curve> {
+    validate_spatial_curves(curves)?;
     let len = curves[0].freq.len();
     let weights = normalized_weights(curves.len(), weights);
 
@@ -31,10 +45,10 @@ pub fn rms_average_weighted(curves: &[Curve], weights: Option<&[f64]>) -> Curve 
         avg_spl[bin] = 10.0 * sum_power.max(1e-12).log10();
     }
 
-    Curve {
+    Ok(Curve {
         freq: curves[0].freq.clone(),
         spl: avg_spl,
         phase: None,
         ..Default::default()
-    }
+    })
 }

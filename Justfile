@@ -670,13 +670,9 @@ qa-roomeq-all-channel-multiseat:
 
 [group('qa-roomeq')]
 qa-roomeq-bass-management:
-	cargo test -p autoeq home_cinema_bass_management --lib -- --nocapture
-	cargo test -p autoeq bass_headroom_uses_supplied_sample_rate_for_crossover_response --lib -- --nocapture
-	cargo test -p autoeq home_cinema_bass_management_sub_curve_is_predicted_from_routes --lib -- --nocapture
-	cargo test -p autoeq home_cinema_bass_bus_curve_is_predicted_across_multiple_sub_outputs --lib -- --nocapture
-	cargo test -p autoeq representative_bass_route_signature_uses_emitted_route_shape --lib -- --nocapture
-	cargo test -p autoeq home_cinema_bass_management_workflow_applies_configured_group_crossovers_when_optimization_disabled --lib -- --nocapture
-	cargo test -p autoeq validate_bass_management --lib -- --nocapture
+	cargo test -p autoeq bass_management_ --lib -- --nocapture
+	cargo test -p autoeq estimated_bass_bus_peak_gain --lib -- --nocapture
+	cargo test -p autoeq representative_bass_route_signature_ --lib -- --nocapture
 
 [group('qa-roomeq')]
 qa-roomeq-dsp-consistency:
@@ -686,14 +682,14 @@ qa-roomeq-dsp-consistency:
 [group('qa-roomeq')]
 qa-roomeq-phase-critical:
 	cargo test -p autoeq gd_opt --lib -- --nocapture
-	cargo test -p autoeq phase_linear_gd_target --lib -- --nocapture
+	cargo test -p autoeq try_run_phase_linear_fir_gd --lib -- --nocapture
 	cargo test -p autoeq frequency_grid --lib -- --nocapture
 	cargo run --bin roomeq-qa-synthetic --no-default-features --release -- --multiseat-guards-only
 
 [group('qa-roomeq')]
 qa-roomeq-perceptual:
 	# nextest's explicit no-test failure prevents stale filters from producing a false-green QA run.
-	cargo nextest run -p autoeq --lib --no-tests fail -E 'test(/loss::epa::/)'
+	cargo nextest run -p autoeq-optim --lib --no-tests fail -E 'test(/loss::epa::/)'
 	cargo nextest run -p autoeq --lib --no-tests fail -E 'test(/generate_validation_bundle_report_creates_json|correction_report_(rejected_guardrails|failed_constraints_and_null_advisory)/)'
 	cargo nextest run -p autoeq --lib --no-tests fail -E 'test(/home_cinema_(no_sub|with_sub)_multiseat_rejection_reports|run_channel_via_generic_path_multiseat_rejected_recovers|all_channel_multiseat_acceptance_rejects_subs/)'
 	cargo nextest run -p autoeq --bin roomeq-qa-quality --no-tests fail -E 'test(/scorecard_/)'
@@ -701,7 +697,7 @@ qa-roomeq-perceptual:
 [group('qa-roomeq')]
 qa-roomeq-gd:
 	cargo test -p autoeq gd_opt -- --nocapture
-	cargo test -p autoeq phase_linear_gd_target --lib -- --nocapture
+	cargo test -p autoeq try_run_phase_linear_fir_gd --lib -- --nocapture
 
 [group('qa-roomeq')]
 qa-roomeq-features:
@@ -722,11 +718,11 @@ qa-roomeq-ci:
 	cargo test -p autoeq reported_ --lib -- --nocapture
 	cargo test -p autoeq timing_diagnostics --lib -- --nocapture
 	cargo test -p autoeq gd_opt --lib -- --nocapture
-	cargo test -p autoeq phase_linear_gd_target --lib -- --nocapture
+	cargo test -p autoeq try_run_phase_linear_fir_gd --lib -- --nocapture
 	cargo test -p autoeq frequency_grid --lib -- --nocapture
 	cargo run --bin roomeq-qa-synthetic --no-default-features --release -- --multiseat-guards-only
 	cargo test -p autoeq home_cinema --lib -- --nocapture
-	cargo test -p autoeq home_cinema_bass_management --lib -- --nocapture
+	cargo test -p autoeq bass_management_ --lib -- --nocapture
 	cargo test -p autoeq validate_bass_management --lib -- --nocapture
 	just qa-roomeq-perceptual
 

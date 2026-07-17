@@ -2,6 +2,7 @@ use super::super::types::ChannelOptimizationResult;
 use super::super::*;
 use super::misc::apply_gd_opt_result;
 use super::misc::build_gd_sweep_realisations;
+use super::misc::coherence_average_gd_realisations;
 use super::misc::existing_fir_convolution_filename;
 
 /// Attempt to run GD-Opt v2 on the channel results.
@@ -149,6 +150,16 @@ pub(in super::super) fn try_run_gd_opt(
     } else if gd_user_config.adaptive_allpass && ap_per_channel > 0 {
         adaptive_realisations =
             build_gd_sweep_realisations(config, channel_results, &gd_channel_names);
+        if let Some(realisations) = adaptive_realisations.as_ref() {
+            if let Some(averaged_channels) = coherence_average_gd_realisations(realisations) {
+                // Multi-position magnitude aggregation intentionally drops
+                // phase. Adaptive GD fitting instead uses a coherence-weighted
+                // circular phase average of the independent raw sweeps.
+                gd_channels = averaged_channels;
+            } else {
+                adaptive_realisations = None;
+            }
+        }
         if adaptive_realisations.is_none() {
             // Keep the existing safety gate when production has only an
             // averaged measurement. Independent sweeps are required before

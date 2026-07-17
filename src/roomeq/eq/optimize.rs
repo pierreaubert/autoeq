@@ -8,6 +8,7 @@ use super::misc::build_optim_params;
 use super::multi_eq_auto_optimizer_context::MultiEqAutoOptimizerContext;
 use super::multi_eq_auto_optimizer_context::resolve_multi_measurement_auto_optimizer_config;
 use super::prepared_single_channel_eq::prepare_single_channel_eq;
+use super::prepared_single_channel_eq::prepare_single_channel_eq_with_spin;
 use super::prepared_single_channel_eq::run_optimization_pass;
 use crate::Curve;
 use crate::PeqModel;
@@ -18,6 +19,7 @@ use crate::workflow::setup_objective_data;
 use clap::ValueEnum;
 use math_audio_iir_fir::Biquad;
 use ndarray::Array1;
+use std::collections::HashMap;
 use std::error::Error;
 
 #[derive(Debug, Clone)]
@@ -67,6 +69,27 @@ pub fn optimize_channel_eq_detailed(
         target_config,
         sample_rate,
         None,
+        None,
+        &RealOptimizerBackend::new(),
+    )
+}
+
+/// Optimize one channel with the CEA-2034 spinorama curves required by the
+/// speaker-score objective.
+pub fn optimize_channel_eq_with_spin_detailed(
+    curve: &Curve,
+    spin_data: &HashMap<String, Curve>,
+    config: &OptimizerConfig,
+    target_config: Option<&TargetCurveConfig>,
+    sample_rate: f64,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    optimize_channel_eq_inner(
+        curve,
+        config,
+        target_config,
+        sample_rate,
+        Some(spin_data),
+        None,
         &RealOptimizerBackend::new(),
     )
 }
@@ -97,6 +120,7 @@ pub fn optimize_channel_eq_with_callback_detailed(
         config,
         target_config,
         sample_rate,
+        None,
         Some(callback),
         &RealOptimizerBackend::new(),
     )
@@ -108,9 +132,20 @@ fn optimize_channel_eq_adaptive(
     config: &OptimizerConfig,
     target_config: Option<&TargetCurveConfig>,
     sample_rate: f64,
+    spin_data: Option<&HashMap<String, Curve>>,
     backend: &dyn OptimizerBackend,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    let prep = prepare_single_channel_eq(curve, config, target_config, sample_rate)?;
+    let prep = if let Some(spin_data) = spin_data {
+        prepare_single_channel_eq_with_spin(
+            curve,
+            config,
+            target_config,
+            sample_rate,
+            Some(spin_data),
+        )?
+    } else {
+        prepare_single_channel_eq(curve, config, target_config, sample_rate)?
+    };
     let max_filters = config.num_filters;
     let base_budget_per_step = adaptive_budget_for_step(config.max_iter, max_filters, 1);
 
@@ -191,6 +226,7 @@ fn optimize_channel_eq_inner(
     config: &OptimizerConfig,
     target_config: Option<&TargetCurveConfig>,
     sample_rate: f64,
+    spin_data: Option<&HashMap<String, Curve>>,
     callback: Option<crate::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
@@ -201,11 +237,28 @@ fn optimize_channel_eq_inner(
 
     // Use adaptive filter selection when enabled and no callback
     if config.min_filter_improvement > 0.0 && config.num_filters > 1 && callback.is_none() {
-        return optimize_channel_eq_adaptive(curve, config, target_config, sample_rate, backend);
+        return optimize_channel_eq_adaptive(
+            curve,
+            config,
+            target_config,
+            sample_rate,
+            spin_data,
+            backend,
+        );
     }
 
     // Single-pass optimization (legacy path or callback path)
-    let prep = prepare_single_channel_eq(curve, config, target_config, sample_rate)?;
+    let prep = if let Some(spin_data) = spin_data {
+        prepare_single_channel_eq_with_spin(
+            curve,
+            config,
+            target_config,
+            sample_rate,
+            Some(spin_data),
+        )?
+    } else {
+        prepare_single_channel_eq(curve, config, target_config, sample_rate)?
+    };
     let (filters, loss, _x, optimizer_evidence) = run_optimization_pass(
         &prep,
         config.num_filters,
@@ -599,8 +652,7 @@ fn optimize_channel_eq_multi_inner(
             &target_curve,
             &deviation_curve,
             &None,
-        )
-        .expect("setup_objective_data should not fail without spin data");
+        )?;
 
         // Propagate EPA configuration from OptimizerConfig into the
         // ObjectiveData so `compute_base_fitness` uses the user-provided
@@ -638,7 +690,9 @@ fn optimize_channel_eq_multi_inner(
     };
 
     // Wrap multi-objective data into the primary ObjectiveData
-    let mut primary = primary_objective.unwrap();
+    let Some(mut primary) = primary_objective else {
+        return Err("multi-measurement optimization requires at least one objective".into());
+    };
     primary.multi_objective = Some(multi_data);
 
     let optim_params = build_optim_params(
@@ -1026,8 +1080,7 @@ fn optimize_spatial_robustness(
         &target_curve,
         &deviation_curve,
         &None,
-    )
-    .expect("setup_objective_data should not fail without spin data");
+    )?;
 
     // Propagate EPA config so compute_base_fitness uses user-provided
     // weights when loss_type == LossType::Epa.

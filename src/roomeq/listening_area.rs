@@ -136,6 +136,18 @@ impl<const D: usize> ListeningArea<D> {
                         ),
                     });
                 }
+                if curve
+                    .phase
+                    .as_ref()
+                    .is_some_and(|phase| phase.len() != curve.freq.len())
+                {
+                    return Err(AutoeqError::InvalidMeasurement {
+                        message: format!(
+                            "ListeningArea: sub {} pos {} freq/phase length mismatch",
+                            sub_idx, pos_idx
+                        ),
+                    });
+                }
                 if !super::frequency_grid::same_frequency_grid(reference_freq, &curve.freq) {
                     return Err(AutoeqError::InvalidMeasurement {
                         message: format!(
@@ -372,6 +384,26 @@ mod tests {
         )
         .unwrap_err();
         assert!(format!("{err}").contains("phase"));
+    }
+
+    #[test]
+    fn rejects_curves_with_mismatched_phase_length() {
+        let positions = vec![[0.0]];
+        let short_phase = Curve {
+            freq: Array1::from_vec(vec![100.0, 1_000.0]),
+            spl: Array1::from_vec(vec![80.0, 81.0]),
+            phase: Some(Array1::from_vec(vec![0.0])),
+            ..Default::default()
+        };
+
+        let err = ListeningArea::<1>::new(
+            positions,
+            vec![vec![short_phase]],
+            ListeningAreaInterpolatorConfig::default(),
+        )
+        .expect_err("mismatched phase length must be rejected at construction");
+
+        assert!(format!("{err}").contains("freq/phase length mismatch"));
     }
 
     #[test]

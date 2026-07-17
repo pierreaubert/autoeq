@@ -587,6 +587,20 @@ fn test_extend_curve_to_full_range_empty() {
 }
 
 #[test]
+fn extend_curve_to_full_range_preserves_malformed_curve_without_panicking() {
+    let curve = crate::Curve {
+        freq: Array1::from(vec![100.0]),
+        spl: Array1::from(vec![]),
+        phase: None,
+        ..Default::default()
+    };
+
+    let extended = extend_curve_to_full_range(&curve);
+    assert_eq!(extended.freq, curve.freq);
+    assert_eq!(extended.spl, curve.spl);
+}
+
+#[test]
 fn test_multisub_allpass_chain_has_eq_plugin_per_sub() {
     let chain = build_multisub_dsp_chain_with_allpass(
         "LFE",

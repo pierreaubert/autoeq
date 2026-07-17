@@ -444,6 +444,15 @@ pub fn simulate_bass_bus_headroom(
     headroom_margin_db: f64,
     sample_rate: f64,
 ) -> Option<BassBusHeadroomSimulationReport> {
+    if !sample_rate.is_finite()
+        || sample_rate <= 0.0
+        || !headroom_margin_db.is_finite()
+        || !model.lr_correlation.is_finite()
+        || !model.lcr_correlation.is_finite()
+        || !model.surround_height_correlation.is_finite()
+    {
+        return None;
+    }
     let graph = graph?;
     let mut per_output = Vec::new();
     let mut worst_rms = f64::NEG_INFINITY;
@@ -484,6 +493,12 @@ pub fn simulate_bass_bus_headroom(
                 .iter()
                 .map(|route| bass_route_complex_gain(route, freq, sample_rate))
                 .collect();
+            if route_gains
+                .iter()
+                .any(|gain| !gain.re.is_finite() || !gain.im.is_finite())
+            {
+                return None;
+            }
             let coherent = route_gains.iter().map(|g| g.norm()).sum::<f64>();
             let mut rms_power = 0.0;
             for (i, route_i) in routes.iter().enumerate() {

@@ -6,7 +6,13 @@ use super::generate::generate_flat_curve;
 use super::generate::generate_harman_tilt_curve;
 use super::generate::generate_multisub_scenario;
 use super::generate::generate_scenario;
+use super::generate::generate_speaker_rolloff_curve;
 use super::generate::generate_sub_curve_with_phase;
+use super::generate::generate_subwoofer_rolloff_curve;
+use super::generate::try_generate_flat_curve;
+use super::generate::try_generate_harman_tilt_curve;
+use super::generate::try_generate_speaker_rolloff_curve;
+use super::generate::try_generate_subwoofer_rolloff_curve;
 use super::misc::apply_known_eq;
 use math_audio_iir_fir::Biquad;
 
@@ -144,15 +150,35 @@ fn test_generate_scenario() {
 }
 
 #[test]
-#[should_panic(expected = "n_points >= 2")]
-fn test_generate_flat_curve_panics_on_single_point() {
-    generate_flat_curve(20.0, 20000.0, 1);
+fn public_curve_generators_do_not_panic_on_invalid_grids() {
+    let outcomes = [
+        std::panic::catch_unwind(|| generate_flat_curve(20.0, 20000.0, 1)),
+        std::panic::catch_unwind(|| generate_harman_tilt_curve(20.0, 20000.0, 0)),
+        std::panic::catch_unwind(|| generate_speaker_rolloff_curve(20.0, 20000.0, 1, 80.0, -12.0)),
+        std::panic::catch_unwind(|| generate_subwoofer_rolloff_curve(20.0, 200.0, 1, 80.0, -12.0)),
+    ];
+
+    for outcome in outcomes {
+        let curve = outcome.expect("invalid synthetic input must not panic");
+        assert!(curve.freq.is_empty());
+        assert!(curve.spl.is_empty());
+    }
 }
 
 #[test]
-#[should_panic(expected = "n_points >= 2")]
-fn test_generate_harman_tilt_curve_panics_on_zero_points() {
-    generate_harman_tilt_curve(20.0, 20000.0, 0);
+fn checked_curve_generators_reject_invalid_parameters() {
+    assert!(try_generate_flat_curve(20.0, 20000.0, 1).is_err());
+    assert!(try_generate_harman_tilt_curve(20.0, 20000.0, 0).is_err());
+    assert!(try_generate_speaker_rolloff_curve(20.0, 20000.0, 1, 80.0, -12.0).is_err());
+    assert!(try_generate_subwoofer_rolloff_curve(20.0, 200.0, 1, 80.0, -12.0).is_err());
+
+    for invalid in [f64::NAN, f64::INFINITY, 0.0, -20.0] {
+        assert!(try_generate_flat_curve(invalid, 20000.0, 100).is_err());
+        assert!(try_generate_flat_curve(20.0, invalid, 100).is_err());
+    }
+    assert!(try_generate_flat_curve(20000.0, 20.0, 100).is_err());
+    assert!(try_generate_speaker_rolloff_curve(20.0, 20000.0, 100, f64::NAN, -12.0).is_err());
+    assert!(try_generate_subwoofer_rolloff_curve(20.0, 200.0, 100, 80.0, f64::NAN).is_err());
 }
 
 #[test]

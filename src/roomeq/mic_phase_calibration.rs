@@ -241,10 +241,11 @@ pub fn load_mic_phase_calibration(path: &Path) -> Result<MicPhaseCalibration, Bo
             continue;
         }
 
-        let freq_idx = freq_col.unwrap();
-        let mag_idx = mag_col.unwrap();
-        let phase_idx = phase_col.unwrap();
-        let coh_idx = coh_col.unwrap();
+        let (Some(freq_idx), Some(mag_idx), Some(phase_idx), Some(coh_idx)) =
+            (freq_col, mag_col, phase_col, coh_col)
+        else {
+            return Err("mic phase calibration header was not parsed".into());
+        };
         let max_idx = freq_idx.max(mag_idx).max(phase_idx).max(coh_idx);
         if parts.len() <= max_idx {
             continue; // short row; skip

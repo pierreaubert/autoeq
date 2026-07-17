@@ -134,3 +134,53 @@ pub(super) fn run_parallel(
 
     results
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::processing_method::ProcessingMethod;
+    use crate::solver::Solver;
+
+    fn test_case(scenario: &str, method: ProcessingMethod) -> TestCase {
+        TestCase {
+            scenario: scenario.to_string(),
+            description: scenario.to_string(),
+            solver: Solver::Fem,
+            method,
+        }
+    }
+
+    #[test]
+    fn grouped_topology_modes_accept_final_realization() {
+        for method in [
+            ProcessingMethod::Iir,
+            ProcessingMethod::Fir,
+            ProcessingMethod::Mixed,
+            ProcessingMethod::MixedPhase,
+        ] {
+            let result = run_test_case(
+                &test_case("small_stereo_2_2_group", method),
+                super::super::consts::QA_MAXEVAL,
+            );
+            assert!(
+                result.passed,
+                "{} failed: {}",
+                method.name(),
+                result.error.as_deref().unwrap_or("unknown failure")
+            );
+        }
+    }
+
+    #[test]
+    fn mso_realization_counts_as_coverage_when_flatness_is_unchanged() {
+        let result = run_test_case(
+            &test_case("small_stereo_2_2_mso", ProcessingMethod::Iir),
+            super::super::consts::QA_MAXEVAL,
+        );
+        assert!(
+            result.passed,
+            "MSO coverage failed: {}",
+            result.error.as_deref().unwrap_or("unknown failure")
+        );
+    }
+}

@@ -66,7 +66,8 @@ hound = "3.5"
 # `plotly` is gated behind the `plotly` feature (off by default). Library code
 # under `src/plot/` and the `roomeq-fuzzer` binary require it; the main
 # `autoeq` binary degrades gracefully and skips chart generation when off.
-plotly = { version = "0.14.1", optional = true }
+# currently we have compilation errors in 0.14.1
+plotly = { version = "0.13.3", optional = true }
 rand = "0.10.2"
 rand_chacha = "0.10.0"
 reqwest = { version = "0.13", features = ["json"] }

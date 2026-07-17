@@ -13,10 +13,24 @@ pub fn spatial_std_dev(curves: &[Curve]) -> Array1<f64> {
 }
 
 pub fn spatial_std_dev_weighted(curves: &[Curve], weights: Option<&[f64]>) -> Array1<f64> {
-    validate_spatial_curves(curves).expect("spatial robustness curves must be valid");
+    try_spatial_std_dev_weighted(curves, weights).unwrap_or_else(|error| {
+        log::warn!("Spatial-deviation aggregation skipped: {error}");
+        Array1::zeros(0)
+    })
+}
+
+pub fn try_spatial_std_dev(curves: &[Curve]) -> crate::error::Result<Array1<f64>> {
+    try_spatial_std_dev_weighted(curves, None)
+}
+
+pub fn try_spatial_std_dev_weighted(
+    curves: &[Curve],
+    weights: Option<&[f64]>,
+) -> crate::error::Result<Array1<f64>> {
+    validate_spatial_curves(curves)?;
     if curves.len() == 1 {
         // Single curve: zero variance everywhere
-        return Array1::zeros(curves[0].freq.len());
+        return Ok(Array1::zeros(curves[0].freq.len()));
     }
     let len = curves[0].freq.len();
     let weights = normalized_weights(curves.len(), weights);
@@ -38,5 +52,5 @@ pub fn spatial_std_dev_weighted(curves: &[Curve], weights: Option<&[f64]>) -> Ar
         std_dev[bin] = (variance / unbiased_denominator.max(denominator_floor)).sqrt();
     }
 
-    std_dev
+    Ok(std_dev)
 }

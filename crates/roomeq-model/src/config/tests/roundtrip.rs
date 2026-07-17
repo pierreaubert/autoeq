@@ -12,6 +12,35 @@ fn sample_single_source(path: &str, speaker_name: Option<&str>) -> MeasurementSo
 }
 
 #[test]
+fn room_config_resolve_paths_makes_relative_base_absolute() {
+    let mut config = RoomConfig::default();
+    config.speakers.insert(
+        "L".to_string(),
+        SpeakerConfig::Single(sample_single_source("left.csv", None)),
+    );
+    let relative_base = PathBuf::from("data_tests/roomeq/generate/fem/small_stereo_2_0");
+
+    config.resolve_paths(&relative_base);
+
+    let SpeakerConfig::Single(MeasurementSource::Single(source)) =
+        config.speakers.get("L").expect("resolved speaker")
+    else {
+        panic!("expected single measurement source");
+    };
+    let MeasurementRef::Path(path) = &source.measurement else {
+        panic!("expected resolved path");
+    };
+    assert!(path.is_absolute(), "resolved path is still relative: {path:?}");
+    assert_eq!(
+        path,
+        &std::env::current_dir()
+            .expect("current directory")
+            .join(relative_base)
+            .join("left.csv")
+    );
+}
+
+#[test]
 fn cardioid_config_roundtrip_and_resolve_paths() {
     let mut cfg = CardioidConfig {
         name: "sub-cardioid".into(),

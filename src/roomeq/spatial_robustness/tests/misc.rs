@@ -4,8 +4,10 @@ use super::super::bootstrap::bootstrap_band;
 use super::super::bootstrap::bootstrap_resampled_curves;
 use super::super::bootstrap_config::BootstrapConfig;
 use super::super::rms::rms_average;
+use super::super::rms::try_rms_average;
 use super::super::spatial::spatial_std_dev;
 use super::super::spatial::spatial_std_dev_weighted;
+use super::super::spatial::try_spatial_std_dev;
 use super::super::spatial_robustness_config::SpatialRobustnessConfig;
 use crate::Curve;
 use ndarray::Array1;
@@ -90,19 +92,21 @@ fn test_spatial_std_dev_skewed_weights_do_not_zero_variance() {
 }
 
 #[test]
-#[should_panic(expected = "invalid frequency grid")]
 fn test_spatial_std_dev_rejects_mismatched_spl_lengths() {
     let c1 = make_curve(vec![100.0, 1000.0], vec![80.0, 85.0]);
     let c2 = make_curve(vec![100.0, 1000.0], vec![80.0]);
-    let _ = spatial_std_dev(&[c1, c2]);
+    assert!(spatial_std_dev(&[c1.clone(), c2.clone()]).is_empty());
+    assert!(try_spatial_std_dev(&[c1, c2]).is_err());
 }
 
 #[test]
-#[should_panic(expected = "invalid frequency grid")]
 fn test_rms_average_rejects_mismatched_spl_lengths() {
     let c1 = make_curve(vec![100.0, 1000.0], vec![80.0, 85.0]);
     let c2 = make_curve(vec![100.0, 1000.0], vec![80.0]);
-    let _ = rms_average(&[c1, c2]);
+    let result = rms_average(&[c1.clone(), c2.clone()]);
+    assert!(result.freq.is_empty());
+    assert!(result.spl.is_empty());
+    assert!(try_rms_average(&[c1, c2]).is_err());
 }
 
 #[test]

@@ -76,9 +76,9 @@ pub(super) fn representative_bass_rt60(band_centers: &[f32], rt60s: &[f32]) -> O
 }
 
 pub(super) fn representative_multi_measurement_curve(curves: &[Curve]) -> Curve {
-    let first = curves
-        .first()
-        .expect("representative curve requires at least one curve");
+    let Some(first) = curves.first() else {
+        return Curve::default();
+    };
     let same_grid = curves.iter().all(|curve| {
         curve.freq.len() == first.freq.len()
             && curve.spl.len() == first.spl.len()

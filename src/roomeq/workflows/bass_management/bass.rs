@@ -56,7 +56,8 @@ pub(in super::super) fn bass_route_upper_frequency_hz(
                 .routes
                 .iter()
                 .filter_map(|route| route.low_pass_hz)
-                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .filter(|frequency| frequency.is_finite() && *frequency > 0.0)
+                .max_by(f64::total_cmp)
         })
         .unwrap_or(fallback_hz)
 }

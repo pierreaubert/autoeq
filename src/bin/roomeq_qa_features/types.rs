@@ -91,4 +91,7 @@ pub(super) struct StepResult {
     /// Average EPA preference across channels (higher = better).
     /// `None` if EPA metrics were not available.
     pub(super) epa_preference: Option<f64>,
+    /// True when the runtime safety gate explicitly removed one or more
+    /// correction stages from the final DSP realization.
+    pub(super) correction_reverted: bool,
 }

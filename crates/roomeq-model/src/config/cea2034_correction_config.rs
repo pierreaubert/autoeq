@@ -20,7 +20,7 @@ pub struct Cea2034CorrectionConfig {
     /// Measurement version on spinorama.org (default: "asr")
     #[serde(default = "default_cea2034_version")]
     pub version: String,
-    /// Correction mode: flat, score (unsupported in roomeq), auto (distance-aware flat)
+    /// Correction mode: flat, score, or auto (flat near-field, score far-field)
     #[serde(default)]
     pub correction_mode: Cea2034CorrectionMode,
     /// Manual listening distance override in meters

@@ -34,17 +34,6 @@ impl ValidationResult {
         self.warnings.push(warning);
     }
 
-    /// Merge another validation result into this one
-    #[allow(dead_code)]
-    pub fn merge(&mut self, other: ValidationResult) {
-        self.errors.extend(other.errors);
-        self.warnings.extend(other.warnings);
-        self.is_valid = self.is_valid && other.is_valid;
-        if other.staged_report.is_some() {
-            self.staged_report = other.staged_report;
-        }
-    }
-
     /// Print validation results to stderr
     pub fn print_results(&self) {
         for warning in &self.warnings {

@@ -145,8 +145,15 @@ impl RoomConfig {
 
     /// Resolve relative paths in this room configuration against a base directory
     pub fn resolve_paths(&mut self, base_dir: &std::path::Path) {
+        let base_dir = if base_dir.is_absolute() {
+            base_dir.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map(|current_dir| current_dir.join(base_dir))
+                .unwrap_or_else(|_| base_dir.to_path_buf())
+        };
         for speaker in self.speakers.values_mut() {
-            speaker.resolve_paths(base_dir);
+            speaker.resolve_paths(&base_dir);
         }
         if let Some(TargetCurveConfig::Path(ref mut path)) = self.target_curve
             && path.is_relative()
@@ -154,7 +161,7 @@ impl RoomConfig {
             *path = base_dir.join(&*path);
         }
         if let Some(ctc) = &mut self.ctc {
-            ctc.resolve_paths(base_dir);
+            ctc.resolve_paths(&base_dir);
         }
     }
 }

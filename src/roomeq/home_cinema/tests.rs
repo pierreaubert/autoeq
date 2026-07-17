@@ -588,6 +588,14 @@ mod coverage_tests {
         assert!(is_linear_phase_crossover_type("linear_phase"));
         assert!(!is_linear_phase_crossover_type("LR24"));
         assert_eq!(linear_to_db(1.0), 0.0);
+        assert!(
+            linear_to_db(-1.0).is_nan(),
+            "negative linear magnitudes must not be silently clamped"
+        );
+        assert!(
+            linear_to_db(f64::NAN).is_nan(),
+            "non-finite linear magnitudes must remain visibly invalid"
+        );
         assert_eq!(home_cinema_role_sort_index(HomeCinemaRole::FrontLeft), 0);
         assert_eq!(home_cinema_role_sort_index(HomeCinemaRole::Unknown), 99);
         assert_eq!(normalize_channel_name("  Front-Left  "), "frontleft");
@@ -880,6 +888,20 @@ mod coverage_tests {
         assert!(peak.is_some());
         assert!((peak.unwrap() - 0.0).abs() < 1e-6);
         assert!(estimated_bass_bus_peak_gain_db(None, 0.0).is_none());
+
+        let mut invalid_graph = graph.clone();
+        invalid_graph.routes[0].route_kind = "redirected_bass_lowpass_to_sub".to_string();
+        invalid_graph.routes[0].matrix_gain = f64::NAN;
+        assert!(
+            super::super::bass::simulate_bass_bus_headroom(
+                Some(&invalid_graph),
+                &crate::roomeq::types::BassHeadroomModelConfig::default(),
+                6.0,
+                48_000.0,
+            )
+            .is_none(),
+            "invalid route gains must fail the headroom simulation closed"
+        );
     }
 
     #[test]

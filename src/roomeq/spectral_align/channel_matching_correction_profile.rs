@@ -149,7 +149,7 @@ pub(in super::super) fn correct_inter_channel_deviation_with_profile(
         }
 
         // Sort by absolute deviation (largest first), take up to max_filters
-        peaks.sort_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap());
+        peaks.sort_by(|a, b| b.1.abs().total_cmp(&a.1.abs()));
         peaks.truncate(max_filters);
 
         // Enforce minimum 1/3 octave spacing between selected peaks

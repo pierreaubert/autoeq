@@ -207,16 +207,16 @@ pub(super) fn camilladsp_crossover_filter_type(
         }
         other => anyhow::bail!("Unsupported crossover type '{other}' for CamillaDSP export"),
     };
-    Ok((
-        match (family, suffix) {
-            ("LinkwitzRiley", "Lowpass") => "LinkwitzRileyLowpass",
-            ("LinkwitzRiley", "Highpass") => "LinkwitzRileyHighpass",
-            ("Butterworth", "Lowpass") => "ButterworthLowpass",
-            ("Butterworth", "Highpass") => "ButterworthHighpass",
-            _ => unreachable!(),
-        },
-        order,
-    ))
+    let filter_type = match (family, suffix) {
+        ("LinkwitzRiley", "Lowpass") => "LinkwitzRileyLowpass",
+        ("LinkwitzRiley", "Highpass") => "LinkwitzRileyHighpass",
+        ("Butterworth", "Lowpass") => "ButterworthLowpass",
+        ("Butterworth", "Highpass") => "ButterworthHighpass",
+        _ => anyhow::bail!(
+            "Unsupported CamillaDSP crossover family/output combination: {family}/{suffix}"
+        ),
+    };
+    Ok((filter_type, order))
 }
 
 fn required_f64(plugin: &PluginConfigWrapper, name: &str) -> anyhow::Result<f64> {

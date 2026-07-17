@@ -105,6 +105,19 @@ pub(super) fn resolve_correction_mode(
             };
 
             if let Some(dist) = distance_m {
+                if !dist.is_finite() || !config.nearfield_threshold_m.is_finite() {
+                    info!(
+                        " Auto mode: invalid distance metadata, defaulting to Flat LW correction"
+                    );
+                    return Cea2034CorrectionMode::Flat;
+                }
+                if dist >= config.nearfield_threshold_m {
+                    info!(
+                        " Auto mode: distance={:.2}m >= threshold={:.1}m -> CEA2034 score correction",
+                        dist, config.nearfield_threshold_m
+                    );
+                    return Cea2034CorrectionMode::Score;
+                }
                 if dist < config.nearfield_threshold_m {
                     info!(
                         "  Auto mode: distance={:.2}m < threshold={:.1}m -> Flat LW correction",

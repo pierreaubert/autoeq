@@ -107,3 +107,40 @@ pub(in super::super) fn build_timing_diagnostics(
         advisories,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timing_diagnostics_returns_none_without_arrivals() {
+        assert!(
+            build_timing_diagnostics(&RoomConfig::default(), &HashMap::new(), &HashMap::new())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn timing_diagnostics_reports_reference_spread_and_offsets() {
+        let arrivals = HashMap::from([("R".to_string(), 12.0), ("L".to_string(), 10.0)]);
+
+        let report = build_timing_diagnostics(&RoomConfig::default(), &arrivals, &HashMap::new())
+            .expect("timing report");
+
+        assert_eq!(report.reference_channel.as_deref(), Some("R"));
+        assert_eq!(report.reference_arrival_ms, Some(12.0));
+        assert!((report.arrival_spread_before_ms - 2.0).abs() < 1e-12);
+        assert!((report.arrival_spread_after_ms - 2.0).abs() < 1e-12);
+        assert_eq!(report.channels.len(), 2);
+        assert_eq!(report.channels[0].name, "L");
+        assert!((report.channels[0].final_offset_from_reference_ms + 2.0).abs() < 1e-12);
+        assert_eq!(report.channels[1].name, "R");
+        assert!(report.channels[1].final_offset_from_reference_ms.abs() < 1e-12);
+        assert!(
+            report
+                .advisories
+                .iter()
+                .any(|advisory| advisory == "post_dsp_arrivals_not_aligned")
+        );
+    }
+}

@@ -8,6 +8,7 @@ use crate::read;
 use crate::read::Cea2034Data;
 use log::{debug, info};
 use math_audio_iir_fir::Biquad;
+use std::collections::HashMap;
 
 pub struct SpeakerCorrectionResult {
     pub filters: Vec<Biquad>,
@@ -153,23 +154,95 @@ fn compute_flat_lw_correction(
     })
 }
 
-/// Speaker-score correction is intentionally unsupported in roomeq.
+/// Optimize a shared speaker pre-correction against the anechoic spinorama
+/// preference-score objective before applying the filters to the room curve.
 ///
 /// The CEA2034 score is defined for anechoic spinorama data. Roomeq uses
 /// spinorama curves only to build an anechoic speaker pre-correction before
 /// room optimization, so silently approximating score mode as flat LW
 /// correction would misrepresent the requested objective.
 fn compute_score_correction(
-    _cea2034_data: &Cea2034Data,
-    _config: &Cea2034CorrectionConfig,
-    _room_curve: &Curve,
-    _schroeder_freq: f64,
-    _sample_rate: f64,
+    cea2034_data: &Cea2034Data,
+    config: &Cea2034CorrectionConfig,
+    room_curve: &Curve,
+    schroeder_freq: f64,
+    sample_rate: f64,
 ) -> Result<SpeakerCorrectionResult> {
-    Err(AutoeqError::InvalidConfiguration {
-        message: "CEA2034 score correction is not supported in roomeq; the Harman/Olive \
-                  preference score is defined for anechoic spinorama data, while roomeq \
-                  uses CEA2034 only for flat Listening Window speaker pre-correction"
-            .to_string(),
+    room_curve.validate("CEA2034 score room curve")?;
+    for (name, curve) in [
+        ("On Axis", &cea2034_data.on_axis),
+        ("Listening Window", &cea2034_data.listening_window),
+        ("Sound Power", &cea2034_data.sound_power),
+        (
+            "Estimated In-Room Response",
+            &cea2034_data.estimated_in_room,
+        ),
+    ] {
+        curve.validate(&format!("CEA2034 {name}"))?;
+    }
+
+    let grid = &room_curve.freq;
+    let spin_data: HashMap<String, Curve> = [
+        ("On Axis", &cea2034_data.on_axis),
+        ("Listening Window", &cea2034_data.listening_window),
+        ("Sound Power", &cea2034_data.sound_power),
+        (
+            "Estimated In-Room Response",
+            &cea2034_data.estimated_in_room,
+        ),
+    ]
+    .into_iter()
+    .map(|(name, curve)| (name.to_string(), read::interpolate_log_space(grid, curve)))
+    .collect();
+    let listening_window =
+        spin_data
+            .get("Listening Window")
+            .ok_or_else(|| AutoeqError::MissingCea2034Curve {
+                curve_name: "Listening Window".to_string(),
+            })?;
+
+    let optimizer_config = OptimizerConfig {
+        num_filters: config.num_filters,
+        min_freq: schroeder_freq,
+        max_freq: 20_000.0,
+        min_q: 0.5,
+        max_q: config.max_q,
+        min_db: config.min_db,
+        max_db: config.max_db,
+        loss_type: "score".to_string(),
+        asymmetric_loss: false,
+        psychoacoustic: false,
+        refine: true,
+        ..OptimizerConfig::default()
+    };
+
+    let result = eq::optimize_channel_eq_with_spin_detailed(
+        listening_window,
+        &spin_data,
+        &optimizer_config,
+        None,
+        sample_rate,
+    )
+    .map_err(|error| AutoeqError::OptimizationFailed {
+        message: format!("CEA2034 score correction failed: {error}"),
+    })?;
+
+    info!(
+        " CEA2034 score correction: {} filters, final loss={:.4}",
+        result.filters.len(),
+        result.loss
+    );
+    for filter in &result.filters {
+        debug!(
+            "  {:.0} Hz, Q={:.2}, {:+.1} dB",
+            filter.freq, filter.q, filter.db_gain
+        );
+    }
+
+    let corrected_room = simulate_correction(&result.filters, room_curve, sample_rate);
+    Ok(SpeakerCorrectionResult {
+        filters: result.filters,
+        corrected_curve: corrected_room,
+        optimizer_evidence: result.optimizer_evidence,
     })
 }

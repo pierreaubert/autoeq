@@ -36,6 +36,9 @@ pub(super) fn is_linear_phase_crossover_type(crossover_type: &str) -> bool {
 }
 
 pub(super) fn linear_to_db(value: f64) -> f64 {
+    if !value.is_finite() || value < 0.0 {
+        return f64::NAN;
+    }
     20.0 * value.max(1e-12).log10()
 }
 

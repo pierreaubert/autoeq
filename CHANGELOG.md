@@ -28,6 +28,15 @@
 
 ## Fixes
 
+- Completed the 2026-07-10/15 defect re-audit: CEA-2034 `Auto` now performs
+  score optimization for far-field speakers when a complete spinorama set is
+  available; malformed RIR prototypes, display curves, spatial aggregates,
+  bass routes, and optimizer objectives now fail closed instead of panicking
+  or propagating non-finite values.
+- Added checked synthetic-curve generators and made their compatibility APIs
+  return an empty curve rather than panic on invalid grids; corrected PEQ
+  integrality allocation, BOM-prefixed CSV-header handling, and remaining
+  NaN-sensitive ordering/error-propagation paths.
 - Synchronized the Python RoomEQ plotter with all Rust biquad types and
   coefficient conventions, including Orfanidis shelves and matched peaks;
   unknown filter types now fail instead of being plotted as peak filters, and
@@ -37,6 +46,16 @@
   from returned DSP plugin parameters.
 - Updated random RoomEQ fuzzer seeding for the Rand 0.10 API so plot-enabled
   targets compile.
+
+- Resolved relative RoomEQ configuration directories against the process working
+  directory before resolving measurement and calibration resources, so staged
+  resource validation no longer rejects valid relative configurations.
+- Made phase-sensitive Cardioid and DBA fuzzer fixtures use single measurements,
+  preserving phase instead of occasionally losing it through magnitude-only
+  multi-position aggregation.
+- Repaired RoomEQ CI selectors for timing diagnostics, phase-linear FIR group
+  delay, bass management, and EPA tests; perceptual nextest gates now fail on
+  empty selections instead of reporting a false green.
 
 # 0.4.50
 

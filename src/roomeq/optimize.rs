@@ -468,7 +468,9 @@ fn optimize_room_impl(
             let sys = config
                 .system
                 .as_ref()
-                .expect("specific route requires system");
+                .ok_or_else(|| AutoeqError::InvalidConfiguration {
+                    message: format!("topology route {route:?} requires system configuration"),
+                })?;
             let workflow_result = execute_topology_workflow(
                 config,
                 sys,
@@ -536,6 +538,116 @@ fn optimize_room_impl(
         .with_overall_progress(1.0),
     )?;
     Ok(result)
+}
+
+fn apply_inter_channel_timbre_matching_stage(
+    config: &RoomConfig,
+    sample_rate: f64,
+    channel_results: &mut HashMap<String, ChannelOptimizationResult>,
+    channel_chains: &mut HashMap<String, ChannelDspChain>,
+) -> Option<StageOutcome> {
+    let timbre_config = config
+        .optimizer
+        .inter_channel_timbre_matching
+        .as_ref()
+        .filter(|config| config.enabled)?;
+    let corrected_curves: HashMap<String, Curve> = channel_results
+        .iter()
+        .map(|(name, result)| (name.clone(), result.final_curve.clone()))
+        .collect();
+
+    Some(
+        match super::inter_channel_timbre_matching::compute_inter_channel_timbre_matching_with_threshold(
+            &corrected_curves,
+            &timbre_config.reference_channel,
+            sample_rate,
+            config.optimizer.min_freq,
+            config.optimizer.max_freq,
+            timbre_config.min_improvement_db,
+        ) {
+            Ok(timbre_results) => {
+                let applied_count = timbre_results
+                    .values()
+                    .filter(|result| {
+                        result.status
+                            == super::inter_channel_timbre_matching::TimbreMatchingChannelStatus::Applied
+                    })
+                    .count();
+                let failed_count = timbre_results
+                    .values()
+                    .filter(|result| {
+                        result.status
+                            == super::inter_channel_timbre_matching::TimbreMatchingChannelStatus::Failed
+                    })
+                    .count();
+
+                for (channel_name, timbre_result) in &timbre_results {
+                    let plugins =
+                        super::inter_channel_timbre_matching::create_timbre_matching_plugins(
+                            timbre_result,
+                            sample_rate,
+                        );
+                    if !plugins.is_empty()
+                        && let Some(chain) = channel_chains.get_mut(channel_name)
+                    {
+                        chain.plugins.extend(plugins);
+                    }
+                    if let Some(alignment) = &timbre_result.alignment {
+                        let shelf_filters =
+                            super::spectral_align::create_alignment_filters(alignment, sample_rate);
+                        sync_reported_biquad_adjustment(
+                            channel_name,
+                            channel_results,
+                            channel_chains,
+                            &shelf_filters,
+                            sample_rate,
+                        );
+                        if alignment.flat_gain_db.abs()
+                            >= super::spectral_align::MIN_CORRECTION_DB
+                        {
+                            sync_reported_gain_adjustment(
+                                channel_name,
+                                channel_results,
+                                channel_chains,
+                                alignment.flat_gain_db,
+                                false,
+                            );
+                        }
+                    }
+                }
+
+                let status = if failed_count > 0 && applied_count > 0 {
+                    StageStatus::Degraded
+                } else if failed_count > 0 {
+                    StageStatus::Failed
+                } else if applied_count > 0 {
+                    StageStatus::Applied
+                } else {
+                    StageStatus::Skipped
+                };
+                let mut advisories = timbre_results
+                    .values()
+                    .flat_map(|result| result.advisories.iter().cloned())
+                    .filter(|advisory| advisory != "reference_channel")
+                    .collect::<Vec<_>>();
+                advisories.sort();
+                advisories.dedup();
+                StageOutcome {
+                    stage: "inter_channel_timbre_matching".to_string(),
+                    status,
+                    advisories,
+                }
+            }
+            Err(error) => {
+                warn!("Inter-channel timbre matching failed: {error}");
+                StageOutcome {
+                    stage: "inter_channel_timbre_matching".to_string(),
+                    status: StageStatus::Failed,
+                    advisories: vec![format!("invalid_reference: {error}")],
+                }
+            }
+        },
+    )
 }
 
 fn assemble_workflow_result(
@@ -800,6 +912,58 @@ fn assemble_workflow_result(
                 "Phase correction not enabled",
             )
             .with_overall_progress(0.96),
+        )?;
+    }
+
+    if config
+        .optimizer
+        .inter_channel_timbre_matching
+        .as_ref()
+        .is_some_and(|config| config.enabled)
+    {
+        emit_pipeline_event(
+            observer_shared,
+            PipelineEvent::started(
+                PipelineStepId::InterChannelTimbreMatching,
+                "Running inter-channel timbre matching",
+            )
+            .with_overall_progress(0.962),
+        )?;
+        if let Some(stage_outcome) = apply_inter_channel_timbre_matching_stage(
+            config,
+            sample_rate,
+            &mut result.channel_results,
+            &mut result.channels,
+        ) {
+            workflow_refresh_needed |= matches!(
+                stage_outcome.status,
+                StageStatus::Applied | StageStatus::Degraded
+            );
+            let event = match stage_outcome.status {
+                StageStatus::Applied | StageStatus::Degraded => PipelineEvent::completed(
+                    PipelineStepId::InterChannelTimbreMatching,
+                    format!("Inter-channel timbre matching: {:?}", stage_outcome.status),
+                ),
+                StageStatus::Skipped | StageStatus::Failed => PipelineEvent::skipped(
+                    PipelineStepId::InterChannelTimbreMatching,
+                    format!(
+                        "Inter-channel timbre matching: {:?} ({})",
+                        stage_outcome.status,
+                        stage_outcome.advisories.join(", ")
+                    ),
+                ),
+            };
+            emit_pipeline_event(observer_shared, event.with_overall_progress(0.962))?;
+            result.metadata.stage_outcomes.push(stage_outcome);
+        }
+    } else {
+        emit_pipeline_event(
+            observer_shared,
+            PipelineEvent::skipped(
+                PipelineStepId::InterChannelTimbreMatching,
+                "Inter-channel timbre matching not enabled",
+            )
+            .with_overall_progress(0.962),
         )?;
     }
 

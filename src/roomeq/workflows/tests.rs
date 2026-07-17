@@ -431,7 +431,7 @@ fn bass_management_sub_output_results_dba_roles() {
 fn bass_route_upper_frequency_hz_with_graph() {
     use crate::roomeq::home_cinema::{BassManagementRoute, BassManagementRoutingGraph};
 
-    let graph = BassManagementRoutingGraph {
+    let mut graph = BassManagementRoutingGraph {
         physical_sub_output: "LFE".to_string(),
         input_channels: vec!["L".to_string()],
         output_channels: vec!["L".to_string(), "LFE".to_string()],
@@ -476,6 +476,10 @@ fn bass_route_upper_frequency_hz_with_graph() {
         matrix: None,
         advisories: vec![],
     };
+
+    let mut invalid_route = graph.routes[0].clone();
+    invalid_route.low_pass_hz = Some(f64::NAN);
+    graph.routes.push(invalid_route);
 
     let hz = super::bass_management::bass_route_upper_frequency_hz(Some(&graph), 80.0);
     assert!((hz - 120.0).abs() < 1e-9);

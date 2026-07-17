@@ -261,9 +261,9 @@ pub(super) fn generate_stratified_config(
         }
         ScenarioKind::Dba => {
             let (source_f, paths_f) =
-                generate_random_source(rng, output_dir, test_idx, "LFE", "front", 0, 1, None)?;
+                generate_random_source(rng, output_dir, test_idx, "LFE", "front", 0, 1, Some(1))?;
             let (source_r, paths_r) =
-                generate_random_source(rng, output_dir, test_idx, "LFE", "rear", 0, 1, None)?;
+                generate_random_source(rng, output_dir, test_idx, "LFE", "rear", 0, 1, Some(1))?;
             measurement_files.extend(paths_f);
             measurement_files.extend(paths_r);
 
@@ -279,9 +279,9 @@ pub(super) fn generate_stratified_config(
         }
         ScenarioKind::Cardioid => {
             let (front, paths_f) =
-                generate_random_source(rng, output_dir, test_idx, "LFE", "front", 0, 2, None)?;
+                generate_random_source(rng, output_dir, test_idx, "LFE", "front", 0, 2, Some(1))?;
             let (rear, paths_r) =
-                generate_random_source(rng, output_dir, test_idx, "LFE", "rear", 1, 2, None)?;
+                generate_random_source(rng, output_dir, test_idx, "LFE", "rear", 1, 2, Some(1))?;
             measurement_files.extend(paths_f);
             measurement_files.extend(paths_r);
 
@@ -537,13 +537,29 @@ pub(super) fn generate_random_mixed_config(
                 let mut front_sources = Vec::new();
                 let mut rear_sources = Vec::new();
 
-                let (source_f, paths_f) =
-                    generate_random_source(rng, output_dir, test_idx, "LFE", "front", 0, 1, None)?;
+                let (source_f, paths_f) = generate_random_source(
+                    rng,
+                    output_dir,
+                    test_idx,
+                    "LFE",
+                    "front",
+                    0,
+                    1,
+                    Some(1),
+                )?;
                 measurement_files.extend(paths_f);
                 front_sources.push(source_f);
 
-                let (source_r, paths_r) =
-                    generate_random_source(rng, output_dir, test_idx, "LFE", "rear", 0, 1, None)?;
+                let (source_r, paths_r) = generate_random_source(
+                    rng,
+                    output_dir,
+                    test_idx,
+                    "LFE",
+                    "rear",
+                    0,
+                    1,
+                    Some(1),
+                )?;
                 measurement_files.extend(paths_r);
                 rear_sources.push(source_r);
 
@@ -934,5 +950,69 @@ mod tests {
 
         // Cleanup
         let _ = std::fs::remove_file(&paths[0]);
+    }
+
+    #[test]
+    fn cardioid_stratified_configs_always_use_single_phase_measurements() {
+        let temp_dir = tempfile::tempdir().expect("temporary fuzzer directory");
+
+        for seed in 0..64_u64 {
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            let (config, _paths, _groups) = generate_stratified_config(
+                temp_dir.path(),
+                10_000 + seed as usize,
+                &mut rng,
+                ScenarioKind::Cardioid,
+            )
+            .expect("cardioid fixture generation");
+
+            let SpeakerConfig::Cardioid(cardioid) =
+                config.speakers.get("LFE").expect("cardioid LFE speaker")
+            else {
+                panic!("expected cardioid speaker");
+            };
+
+            assert!(
+                matches!(cardioid.front, autoeq::MeasurementSource::Single(_)),
+                "front source must preserve measured phase for seed {seed}"
+            );
+            assert!(
+                matches!(cardioid.rear, autoeq::MeasurementSource::Single(_)),
+                "rear source must preserve measured phase for seed {seed}"
+            );
+        }
+    }
+
+    #[test]
+    fn random_mixed_dba_configs_always_use_single_phase_measurements() {
+        let temp_dir = tempfile::tempdir().expect("temporary fuzzer directory");
+        let mut saw_dba = false;
+
+        for seed in 0..256_u64 {
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            let (config, _paths, _groups) =
+                generate_random_mixed_config(temp_dir.path(), 20_000 + seed as usize, &mut rng, 1)
+                    .expect("random mixed fixture generation");
+
+            let Some(SpeakerConfig::Dba(dba)) = config.speakers.get("LFE") else {
+                continue;
+            };
+            saw_dba = true;
+
+            assert!(
+                dba.front
+                    .iter()
+                    .all(|source| matches!(source, autoeq::MeasurementSource::Single(_))),
+                "DBA front sources must preserve measured phase for seed {seed}"
+            );
+            assert!(
+                dba.rear
+                    .iter()
+                    .all(|source| matches!(source, autoeq::MeasurementSource::Single(_))),
+                "DBA rear sources must preserve measured phase for seed {seed}"
+            );
+        }
+
+        assert!(saw_dba, "seed sweep must exercise at least one DBA fixture");
     }
 }

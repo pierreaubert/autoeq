@@ -49,15 +49,15 @@ pub(crate) fn reserve_convolution_artifact_path(
     }
 
     let stem = filename.trim_end_matches(".wav");
-    for suffix in 2.. {
+    let mut suffix = 2_u64;
+    loop {
         let candidate = format!("{stem}_{suffix:03}.wav");
         let path = output_dir.join(&candidate);
         if !path.exists() {
             return (candidate, path);
         }
+        suffix = suffix.saturating_add(1);
     }
-
-    unreachable!("unbounded numeric suffix search must return a filename")
 }
 
 fn sanitize_filename_part(input: &str) -> String {

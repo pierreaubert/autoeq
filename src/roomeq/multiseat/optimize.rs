@@ -161,60 +161,68 @@ pub fn optimize_multiseat(
     );
 
     // Optimize based on strategy
-    let (optimal_gains, optimal_delays, optimal_polarities, optimal_allpass_filters) =
-        match config.strategy {
-            MultiSeatStrategy::MinimizeVariance => optimize_minimize_variance(
-                &interpolated,
-                &freqs,
-                measurements.num_subs,
-                config,
-                sample_rate,
-                eval_min,
-                eval_max,
-                &objective_context,
-            ),
-            MultiSeatStrategy::Average => optimize_average_response(
-                &interpolated,
-                &freqs,
-                measurements.num_subs,
-                config,
-                sample_rate,
-                eval_min,
-                eval_max,
-                &objective_context,
-            ),
-            MultiSeatStrategy::PrimaryWithConstraints => optimize_primary_with_constraints(
-                &interpolated,
-                &freqs,
-                measurements.num_subs,
-                config,
-                sample_rate,
-                config.primary_seat,
-                config.max_deviation_db,
-                eval_min,
-                eval_max,
-                &objective_context,
-            ),
-            MultiSeatStrategy::ModalBasis => optimize_modal_basis(
-                &interpolated,
-                &freqs,
-                measurements.num_subs,
-                config,
-                sample_rate,
-                eval_min,
-                eval_max,
+    let (optimal_gains, optimal_delays, optimal_polarities, optimal_allpass_filters) = match config
+        .strategy
+    {
+        MultiSeatStrategy::MinimizeVariance => optimize_minimize_variance(
+            &interpolated,
+            &freqs,
+            measurements.num_subs,
+            config,
+            sample_rate,
+            eval_min,
+            eval_max,
+            &objective_context,
+        ),
+        MultiSeatStrategy::Average => optimize_average_response(
+            &interpolated,
+            &freqs,
+            measurements.num_subs,
+            config,
+            sample_rate,
+            eval_min,
+            eval_max,
+            &objective_context,
+        ),
+        MultiSeatStrategy::PrimaryWithConstraints => optimize_primary_with_constraints(
+            &interpolated,
+            &freqs,
+            measurements.num_subs,
+            config,
+            sample_rate,
+            config.primary_seat,
+            config.max_deviation_db,
+            eval_min,
+            eval_max,
+            &objective_context,
+        ),
+        MultiSeatStrategy::ModalBasis => {
+            let modal_basis =
                 modal_basis
                     .as_ref()
-                    .expect("modal basis is built before modal-basis optimization"),
+                    .ok_or_else(|| AutoeqError::InvalidConfiguration {
+                        message: "modal-basis strategy requires a constructed modal basis"
+                            .to_string(),
+                    })?;
+            optimize_modal_basis(
+                &interpolated,
+                &freqs,
+                measurements.num_subs,
+                config,
+                sample_rate,
+                eval_min,
+                eval_max,
+                modal_basis,
                 &objective_context,
-            ),
-            MultiSeatStrategy::ContinuousArea => {
-                // Already rejected at the top of this function; the early
-                // return above is the authoritative error path. This arm
-                // exists only to satisfy exhaustiveness.
-                unreachable!("ContinuousArea handled by optimize_multiseat_continuous_area")
-            }
-        };
+            )
+        }
+        MultiSeatStrategy::ContinuousArea => {
+            return Err(AutoeqError::InvalidConfiguration {
+                message: "ContinuousArea must be run through optimize_multiseat_continuous_area"
+                    .to_string(),
+            });
+        }
+    };
 
     let final_complex_responses = compute_combined_complex_responses(
         &interpolated,
@@ -353,7 +361,12 @@ pub(super) fn optimize_continuous_mso(
         .map(|params| {
             let (gains, delays, polarities, allpass_filters) =
                 decode_mso_params(params, num_subs, options);
-            eval(&gains, &delays, &polarities, &allpass_filters)
+            let score = eval(&gains, &delays, &polarities, &allpass_filters);
+            if score.is_finite() {
+                score
+            } else {
+                f64::INFINITY
+            }
         })
         .collect();
 
@@ -394,6 +407,11 @@ pub(super) fn optimize_continuous_mso(
             let (gains, delays, polarities, allpass_filters) =
                 decode_mso_params(&trial, num_subs, options);
             let trial_score = eval(&gains, &delays, &polarities, &allpass_filters);
+            let trial_score = if trial_score.is_finite() {
+                trial_score
+            } else {
+                f64::INFINITY
+            };
             if trial_score < scores[target_idx] {
                 population[target_idx] = trial;
                 scores[target_idx] = trial_score;
@@ -404,7 +422,7 @@ pub(super) fn optimize_continuous_mso(
     let (best_idx, best_loss) = scores
         .iter()
         .enumerate()
-        .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .min_by(|(_, a), (_, b)| a.total_cmp(b))
         .map(|(idx, score)| (idx, *score))
         .unwrap_or((0, f64::INFINITY));
 
@@ -678,10 +696,14 @@ fn optimize_continuous_area_dispatch<const D: usize>(
         AreaScalarisation, Prior, Quadrature, build_quadrature_points,
     };
 
-    let area_cfg = config
-        .continuous_area
-        .as_ref()
-        .expect("validated by caller");
+    let area_cfg =
+        config
+            .continuous_area
+            .as_ref()
+            .ok_or_else(|| AutoeqError::InvalidConfiguration {
+                message: "continuous-area strategy requires continuous_area configuration"
+                    .to_string(),
+            })?;
 
     // Convert positions to fixed-size arrays.
     let positions: Vec<[f64; D]> = area_cfg
@@ -877,10 +899,18 @@ fn optimize_continuous_area_dispatch<const D: usize>(
                                 eval_min,
                                 eval_max,
                             );
-                            (single_seat_flatness(&combined), w)
+                            let loss = single_seat_flatness(&combined);
+                            (
+                                if loss.is_finite() {
+                                    loss
+                                } else {
+                                    f64::INFINITY
+                                },
+                                if w.is_finite() && w > 0.0 { w } else { 0.0 },
+                            )
                         })
                         .collect();
-                    wl.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                    wl.sort_by(|a, b| b.0.total_cmp(&a.0));
                     let mut acc_loss = 0.0;
                     let mut acc_mass = 0.0;
                     for (l, w) in &wl {

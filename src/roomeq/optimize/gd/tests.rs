@@ -1,7 +1,7 @@
 use super::misc::{
-    apply_gd_opt_result, build_gd_sweep_realisations, corrected_realisation_to_gd_input,
-    existing_fir_convolution_filename, gd_phase_response_for_curve, interpolate_optional_array_log,
-    source_for_output_channel,
+    apply_gd_opt_result, build_gd_sweep_realisations, coherence_average_gd_realisations,
+    corrected_realisation_to_gd_input, existing_fir_convolution_filename,
+    gd_phase_response_for_curve, interpolate_optional_array_log, source_for_output_channel,
 };
 use super::{try_run_gd_opt, try_run_phase_linear_fir_gd};
 use crate::roomeq::gd_opt::{ChannelGdResult, GroupDelayOptResult};
@@ -222,6 +222,40 @@ fn corrected_realisation_to_gd_input_combines_curves() {
     assert_eq!(input.spl.len(), 16);
     assert_eq!(input.phase.len(), 16);
     assert_eq!(input.coherence.len(), 16);
+}
+
+#[test]
+fn corrected_realisation_to_gd_input_accepts_phase_less_representative() {
+    let raw = measurement_curve_with_delay(16, 1.0, 10.0);
+    let mut initial = flat_curve(16);
+    initial.phase = None;
+    let mut final_curve = flat_curve(16);
+    final_curve.phase = Some(Array1::from_elem(16, 5.0));
+
+    let input = corrected_realisation_to_gd_input(&raw, &initial, &final_curve)
+        .expect("the final phase is the DSP phase when the representative has no phase");
+    let expected = (raw.phase.as_ref().unwrap()[0] + 5.0).to_radians();
+    assert!((input.phase[0] - expected).abs() < 1e-12);
+}
+
+#[test]
+fn coherence_average_gd_realisations_uses_circular_phase_mean() {
+    let make_input = |phase_deg: f64| crate::roomeq::gd_opt::ChannelMeasurementInput {
+        freq: Array1::from_vec(vec![100.0]),
+        spl: Array1::from_vec(vec![80.0]),
+        phase: Array1::from_vec(vec![phase_deg.to_radians()]),
+        coherence: Array1::from_vec(vec![1.0]),
+    };
+    let realisations = vec![vec![make_input(179.0)], vec![make_input(-179.0)]];
+
+    let averaged = coherence_average_gd_realisations(&realisations).unwrap();
+    assert_eq!(averaged.len(), 1);
+    assert!((averaged[0].spl[0] - 80.0).abs() < 1e-12);
+    assert!(
+        (averaged[0].phase[0].abs() - std::f64::consts::PI).abs() < 1e-12,
+        "wrapped phases should average around ±180°, got {} rad",
+        averaged[0].phase[0]
+    );
 }
 
 #[test]
@@ -798,6 +832,44 @@ fn try_run_gd_opt_adaptive_allpass_with_bootstrap_realisations() {
     let summary =
         try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).unwrap();
     assert!(summary.advisory.contains("success") || summary.advisory.contains("minimal"));
+}
+
+#[test]
+fn try_run_gd_opt_adaptive_allpass_with_system_role_bootstrap_realisations() {
+    let sweeps = vec![flat_curve(32), flat_curve(32)];
+    let source = MeasurementSource::InMemoryMultiple(sweeps);
+    let mut speakers = HashMap::new();
+    speakers.insert("left".to_string(), SpeakerConfig::Single(source.clone()));
+    speakers.insert("right".to_string(), SpeakerConfig::Single(source));
+    let mut config = room_config_with_in_memory_speakers(speakers);
+    config.system = Some(crate::roomeq::types::SystemConfig {
+        model: crate::roomeq::types::SystemModel::Stereo,
+        speakers: HashMap::from([
+            ("L".to_string(), "left".to_string()),
+            ("R".to_string(), "right".to_string()),
+        ]),
+        ..Default::default()
+    });
+    let mut gd = gd_config_with_small_budget();
+    gd.adaptive_allpass = true;
+    gd.ap_per_channel = 1;
+    config.optimizer = optimizer_with_gd(gd);
+
+    let mut channel_results = HashMap::new();
+    channel_results.insert("L".to_string(), channel_result("L", 2.0));
+    channel_results.insert("R".to_string(), channel_result("R", 0.0));
+    let mut channel_chains = HashMap::new();
+    channel_chains.insert("L".to_string(), dsp_chain("L"));
+    channel_chains.insert("R".to_string(), dsp_chain("R"));
+
+    let summary =
+        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).unwrap();
+    assert!(
+        !summary
+            .advisory
+            .contains("allpass_disabled_no_bootstrap_realisations"),
+        "{summary:?}"
+    );
 }
 
 #[test]

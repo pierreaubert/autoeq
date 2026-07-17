@@ -40,6 +40,9 @@ pub enum RirPrototypeError {
         got: usize,
         expected: usize,
     },
+    /// A measurement curve contains invalid frequency, SPL, or optional data.
+    #[error("curve {index} is invalid: {message}")]
+    InvalidCurve { index: usize, message: String },
     /// A curve's frequency grid differs from the first curve's grid at a specific bin.
     #[error(
         "curve {index} frequency value at bin {bin} differs from reference: {got} vs {expected}"
@@ -106,6 +109,12 @@ pub fn build_weighted_prototype(
                 expected: expected_len,
             });
         }
+        curve
+            .validate(&format!("RIR prototype curve {i}"))
+            .map_err(|error| RirPrototypeError::InvalidCurve {
+                index: i,
+                message: error.to_string(),
+            })?;
         for (bin, (&got, &expected)) in curve.freq.iter().zip(reference_freq.iter()).enumerate() {
             // Reject a grid value only if it fails BOTH the absolute and the
             // relative tolerance checks; either check passing means the bin is
@@ -124,13 +133,13 @@ pub fn build_weighted_prototype(
     }
 
     if let DistanceWeightMode::Gaussian { sigma_m } = config.distance_mode
-        && sigma_m <= 0.0
+        && (!sigma_m.is_finite() || sigma_m <= 0.0)
     {
         return Err(RirPrototypeError::InvalidGaussianSigma(sigma_m));
     }
 
     if let DirectivityModel::SphericalHead { radius_m } = config.directivity
-        && radius_m <= 0.0
+        && (!radius_m.is_finite() || radius_m <= 0.0)
     {
         return Err(RirPrototypeError::InvalidSphericalHeadRadius(radius_m));
     }
@@ -285,6 +294,23 @@ mod tests {
     }
 
     #[test]
+    fn prototype_rejects_non_finite_measurement_values() {
+        let config = RirPrototypeConfig {
+            reference_position: [0.0, 0.0, 0.0],
+            source_position: [0.0, 2.0, 0.0],
+            microphone_positions: vec![[0.0, 0.0, 0.0], [0.3, 0.0, 0.0]],
+            distance_mode: DistanceWeightMode::Uniform,
+            directivity: DirectivityModel::Omnidirectional,
+            frequency_dependent_directivity: false,
+        };
+        let c1 = flat_curve(80.0);
+        let mut c2 = flat_curve(86.0);
+        c2.spl[1] = f64::NAN;
+
+        assert!(build_weighted_prototype(&[c1, c2], &config).is_err());
+    }
+
+    #[test]
     fn prototype_rejects_mismatched_grid_values() {
         let config = RirPrototypeConfig {
             reference_position: [0.0, 0.0, 0.0],
@@ -326,32 +352,36 @@ mod tests {
 
     #[test]
     fn prototype_rejects_invalid_gaussian_sigma() {
-        let config = RirPrototypeConfig {
-            reference_position: [0.0, 0.0, 0.0],
-            source_position: [0.0, 2.0, 0.0],
-            microphone_positions: vec![[0.0, 0.0, 0.0], [0.3, 0.0, 0.0]],
-            distance_mode: DistanceWeightMode::Gaussian { sigma_m: 0.0 },
-            directivity: DirectivityModel::Omnidirectional,
-            frequency_dependent_directivity: false,
-        };
-        let c1 = flat_curve(80.0);
-        let c2 = flat_curve(86.0);
-        assert!(build_weighted_prototype(&[c1, c2], &config).is_err());
+        for sigma_m in [0.0, f64::NAN, f64::INFINITY] {
+            let config = RirPrototypeConfig {
+                reference_position: [0.0, 0.0, 0.0],
+                source_position: [0.0, 2.0, 0.0],
+                microphone_positions: vec![[0.0, 0.0, 0.0], [0.3, 0.0, 0.0]],
+                distance_mode: DistanceWeightMode::Gaussian { sigma_m },
+                directivity: DirectivityModel::Omnidirectional,
+                frequency_dependent_directivity: false,
+            };
+            let c1 = flat_curve(80.0);
+            let c2 = flat_curve(86.0);
+            assert!(build_weighted_prototype(&[c1, c2], &config).is_err());
+        }
     }
 
     #[test]
     fn prototype_rejects_invalid_spherical_head_radius() {
-        let config = RirPrototypeConfig {
-            reference_position: [0.0, 0.0, 0.0],
-            source_position: [0.0, 2.0, 0.0],
-            microphone_positions: vec![[0.0, 0.0, 0.0], [0.3, 0.0, 0.0]],
-            distance_mode: DistanceWeightMode::Uniform,
-            directivity: DirectivityModel::SphericalHead { radius_m: -0.1 },
-            frequency_dependent_directivity: false,
-        };
-        let c1 = flat_curve(80.0);
-        let c2 = flat_curve(86.0);
-        assert!(build_weighted_prototype(&[c1, c2], &config).is_err());
+        for radius_m in [-0.1, f64::NAN, f64::INFINITY] {
+            let config = RirPrototypeConfig {
+                reference_position: [0.0, 0.0, 0.0],
+                source_position: [0.0, 2.0, 0.0],
+                microphone_positions: vec![[0.0, 0.0, 0.0], [0.3, 0.0, 0.0]],
+                distance_mode: DistanceWeightMode::Uniform,
+                directivity: DirectivityModel::SphericalHead { radius_m },
+                frequency_dependent_directivity: false,
+            };
+            let c1 = flat_curve(80.0);
+            let c2 = flat_curve(86.0);
+            assert!(build_weighted_prototype(&[c1, c2], &config).is_err());
+        }
     }
 
     #[test]

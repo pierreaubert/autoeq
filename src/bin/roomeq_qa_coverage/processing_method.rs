@@ -10,7 +10,9 @@ use super::solver::Solver;
 use super::test_case::TestCase;
 use autoeq::loss::calculate_standard_deviation_in_range;
 use autoeq::loss::phase_aware::{compute_group_delay, unwrap_phase_degrees};
-use autoeq::roomeq::{ProcessingMode, RoomConfig, RoomOptimizationResult};
+use autoeq::roomeq::{
+    ChannelDspChain, ProcessingMode, RoomConfig, RoomOptimizationResult, SubwooferStrategy,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum ProcessingMethod {
@@ -115,6 +117,77 @@ pub(super) fn build_test_matrix(
     test_cases
 }
 
+fn channel_has_plugin_type(chain: Option<&ChannelDspChain>, plugin_type: &str) -> bool {
+    chain.is_some_and(|chain| {
+        chain
+            .plugins
+            .iter()
+            .chain(
+                chain
+                    .drivers
+                    .iter()
+                    .flatten()
+                    .flat_map(|driver| driver.plugins.iter()),
+            )
+            .any(|plugin| plugin.plugin_type == plugin_type)
+    })
+}
+
+fn correction_stage_was_reverted(
+    result: &RoomOptimizationResult,
+    channel: &str,
+    stage: &str,
+) -> bool {
+    let expected = format!("{}:{}", channel, stage);
+    result
+        .metadata
+        .correction_acceptance
+        .as_ref()
+        .is_some_and(|report| {
+            report
+                .reverted_stages
+                .iter()
+                .any(|value| value == &expected)
+        })
+}
+
+fn has_meaningful_mso_realization(result: &RoomOptimizationResult, config: &RoomConfig) -> bool {
+    let is_mso = config
+        .system
+        .as_ref()
+        .and_then(|system| system.subwoofers.as_ref())
+        .is_some_and(|subwoofers| subwoofers.config == SubwooferStrategy::Mso);
+    if !is_mso {
+        return false;
+    }
+
+    result.channels.iter().any(|(name, chain)| {
+        if !is_subwoofer_channel(config, name) {
+            return false;
+        }
+        let Some(drivers) = chain.drivers.as_ref().filter(|drivers| drivers.len() >= 2) else {
+            return false;
+        };
+
+        drivers
+            .iter()
+            .flat_map(|driver| &driver.plugins)
+            .any(|plugin| {
+                matches!(plugin.plugin_type.as_str(), "gain" | "delay")
+                    || (plugin.plugin_type == "eq"
+                        && plugin
+                            .parameters
+                            .get("label")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|label| {
+                                label.contains("mso")
+                                    || label.contains("multisub")
+                                    || label.contains("group_delay")
+                            }))
+            })
+    })
+}
+
 /// Validate the optimization result beyond just "post < pre".
 /// Returns a list of failure reasons (empty = all checks passed).
 pub(super) fn validate_result(
@@ -130,13 +203,22 @@ pub(super) fn validate_result(
     // bed, then keep separate per-channel checks below for regressions.
     let (pre, post) = qa_primary_score_pair(result, config);
 
-    // Check 1: post must be better than pre
-    if post >= pre {
+    // Check 1: post must not regress. Exact flatness identity is useful only
+    // for MSO when the canonical per-sub chain contains a material alignment
+    // realization (gain, delay, polarity, or MSO/all-pass EQ).
+    if post > pre {
         failures.push(format!(
             "no improvement: post {:.4} >= pre {:.4}",
             post, pre
         ));
         return failures; // remaining checks meaningless if no improvement at all
+    }
+    if post == pre && !has_meaningful_mso_realization(result, config) {
+        failures.push(format!(
+            "no improvement: post {:.4} >= pre {:.4}",
+            post, pre
+        ));
+        return failures;
     }
 
     // Check 2: minimum improvement threshold
@@ -199,12 +281,16 @@ pub(super) fn validate_result(
     // so missing filters is expected, not an error.
     for (name, ch_result) in &result.channel_results {
         let improved = ch_result.post_score < ch_result.pre_score;
-        let has_biquads = !ch_result.biquads.is_empty();
-        let has_fir = ch_result.fir_coeffs.as_ref().is_some_and(|c| !c.is_empty());
+        let chain = result.channels.get(name);
+        let has_biquads = !ch_result.biquads.is_empty() || channel_has_plugin_type(chain, "eq");
+        let has_fir = ch_result.fir_coeffs.as_ref().is_some_and(|c| !c.is_empty())
+            || channel_has_plugin_type(chain, "convolution");
+        let peq_reverted = correction_stage_was_reverted(result, name, "peq");
+        let fir_reverted = correction_stage_was_reverted(result, name, "fir");
 
         match method {
             ProcessingMethod::Iir => {
-                if improved && !has_biquads {
+                if improved && !has_biquads && !peq_reverted {
                     failures.push(format!(
                         "channel '{}': IIR mode but no biquad filters",
                         name
@@ -212,7 +298,7 @@ pub(super) fn validate_result(
                 }
             }
             ProcessingMethod::Fir => {
-                if improved && !has_fir {
+                if improved && !has_fir && !fir_reverted {
                     failures.push(format!(
                         "channel '{}': FIR mode but no FIR coefficients",
                         name
@@ -220,7 +306,7 @@ pub(super) fn validate_result(
                 }
             }
             ProcessingMethod::Mixed => {
-                if improved && !has_biquads && !has_fir {
+                if improved && !has_biquads && !has_fir && !peq_reverted && !fir_reverted {
                     failures.push(format!(
                         "channel '{}': Mixed mode but no filters at all",
                         name
@@ -230,7 +316,7 @@ pub(super) fn validate_result(
             ProcessingMethod::MixedPhase => {
                 // MixedPhase should always have IIR biquads; FIR is optional
                 // (only generated when phase data is available)
-                if improved && !has_biquads {
+                if improved && !has_biquads && !peq_reverted {
                     failures.push(format!(
                         "channel '{}': MixedPhase mode but no biquad filters",
                         name

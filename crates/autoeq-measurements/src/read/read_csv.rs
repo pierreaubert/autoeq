@@ -195,7 +195,7 @@ pub fn load_driver_measurement(
         // blank lines before it are deliberately ignored above.
         if !header_parsed {
             let is_header = parts.iter().any(|p| {
-                let lower = p.to_lowercase();
+                let lower = p.trim_start_matches('\u{feff}').to_lowercase();
                 lower.contains("freq")
                     || lower.contains("hz")
                     || lower.contains("spl")
@@ -208,7 +208,7 @@ pub fn load_driver_measurement(
             if is_header {
                 // Parse header to find column indices
                 for (idx, col_name) in parts.iter().enumerate() {
-                    let lower = col_name.to_lowercase();
+                    let lower = col_name.trim_start_matches('\u{feff}').to_lowercase();
                     // Order matters — check the most specific names first.
                     // `noise_floor_db` contains `db`, so it must be checked
                     // before `spl_col`'s `db` fallback, otherwise `spl`
@@ -396,6 +396,20 @@ coherence,frequency,noise_floor_db,phase,spl
         assert!((coh[0] - 0.9).abs() < 1e-9);
         let nf = curve.noise_floor_db.expect("noise_floor_db populated");
         assert!((nf[0] + 45.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn utf8_bom_does_not_hide_first_reordered_header_column() {
+        let csv = "\u{feff}coherence,phase_deg,spl,frequency_hz,noise_floor_db\n\
+                   0.90,10.0,80.0,100.0,-45.0\n\
+                   0.95,20.0,81.0,200.0,-50.0\n";
+        let f = write_tmp(csv);
+
+        let (_, _, _, coherence, _) = load_driver_measurement(&f.path().to_path_buf()).unwrap();
+        assert_eq!(
+            coherence.expect("BOM-prefixed coherence header must be recognized"),
+            Array1::from_vec(vec![0.90, 0.95])
+        );
     }
 
     #[test]

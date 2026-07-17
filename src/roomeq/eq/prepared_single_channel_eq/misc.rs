@@ -14,6 +14,7 @@ use clap::ValueEnum;
 use log::debug;
 use math_audio_iir_fir::Biquad;
 use ndarray::Array1;
+use std::collections::HashMap;
 use std::error::Error;
 
 /// Prepare shared data for single-channel EQ optimization.
@@ -26,6 +27,16 @@ pub(in super::super) fn prepare_single_channel_eq(
     config: &OptimizerConfig,
     target_config: Option<&TargetCurveConfig>,
     sample_rate: f64,
+) -> Result<PreparedSingleChannelEq, Box<dyn Error>> {
+    prepare_single_channel_eq_with_spin(curve, config, target_config, sample_rate, None)
+}
+
+pub(in super::super) fn prepare_single_channel_eq_with_spin(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    target_config: Option<&TargetCurveConfig>,
+    sample_rate: f64,
+    spin_data: Option<&HashMap<String, Curve>>,
 ) -> Result<PreparedSingleChannelEq, Box<dyn Error>> {
     // Clamp optimizer frequency range to measurement data range.
     let data_min_freq = curve.freq[0];
@@ -385,12 +396,13 @@ pub(in super::super) fn prepare_single_channel_eq(
     // Setup objective data. This can now fail at construction time if the
     // chosen loss type requires data that was not provided (e.g. speaker-score
     // loss without spinorama curves).
+    let spin_data = spin_data.cloned();
     let (mut objective_data, _use_cea) = setup_objective_data(
         &args_template,
         &normalized_curve,
         &target_curve,
         &deviation_curve,
-        &None,
+        &spin_data,
     )?;
 
     // Propagate frequency-dependent boost/cut envelopes for per-filter gain clamping

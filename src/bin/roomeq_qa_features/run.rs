@@ -67,6 +67,11 @@ pub(super) fn run_pass(
         })?;
 
         let epa_preference = avg_epa_preference(&opt_result);
+        let correction_reverted = opt_result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .is_some_and(|report| !report.reverted_stages.is_empty());
 
         results.push(StepResult {
             name: step.name,
@@ -76,6 +81,7 @@ pub(super) fn run_pass(
             changes_loss: step.changes_loss,
             allows_perceptual_tradeoff: step.allows_perceptual_tradeoff,
             epa_preference,
+            correction_reverted,
         });
     }
 

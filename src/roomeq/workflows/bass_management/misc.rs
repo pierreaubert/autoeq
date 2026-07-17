@@ -244,7 +244,8 @@ pub(in super::super) fn representative_bass_route_signature(
                         .low_pass_hz
                         .map(|freq| (route.crossover_type.clone(), freq))
                 })
-                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .filter(|(_, frequency)| frequency.is_finite() && *frequency > 0.0)
+                .max_by(|a, b| a.1.total_cmp(&b.1))
         })
         .unwrap_or_else(|| (fallback_type.to_string(), fallback_hz))
 }
@@ -252,6 +253,28 @@ pub(in super::super) fn representative_bass_route_signature(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::roomeq::home_cinema::{BassManagementRoute, BassManagementRoutingGraph};
+
+    fn bass_route(crossover_type: &str, low_pass_hz: f64) -> BassManagementRoute {
+        BassManagementRoute {
+            group_id: None,
+            source_channel: "L".to_string(),
+            source_index: 0,
+            destination: "LFE".to_string(),
+            destination_index: 0,
+            pre_chain_channel: None,
+            post_chain_channel: None,
+            route_kind: "redirected_bass_lowpass_to_sub".to_string(),
+            crossover_type: crossover_type.to_string(),
+            high_pass_hz: None,
+            low_pass_hz: Some(low_pass_hz),
+            gain_db: 0.0,
+            gain_linear: 1.0,
+            matrix_gain: 1.0,
+            delay_ms: 0.0,
+            polarity_inverted: false,
+        }
+    }
 
     #[test]
     fn differential_evolution_discards_non_finite_objective_scores() {
@@ -269,5 +292,25 @@ mod tests {
         assert!(score.is_finite(), "optimizer returned score {score}");
         assert!((-1.0..=1.0).contains(&candidate[0]));
         assert_eq!(score, objective(&candidate));
+    }
+
+    #[test]
+    fn representative_bass_route_signature_ignores_non_finite_frequencies() {
+        let graph = BassManagementRoutingGraph {
+            physical_sub_output: "LFE".to_string(),
+            input_channels: vec!["L".to_string()],
+            output_channels: vec!["LFE".to_string()],
+            routes: vec![
+                bass_route("linkwitz-riley24", 120.0),
+                bass_route("invalid", f64::NAN),
+            ],
+            matrix: None,
+            advisories: vec![],
+        };
+
+        assert_eq!(
+            representative_bass_route_signature(Some(&graph), "fallback", 80.0),
+            ("linkwitz-riley24".to_string(), 120.0)
+        );
     }
 }

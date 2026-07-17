@@ -314,7 +314,7 @@ pub fn create_smart_initial_guesses(
 /// # Returns
 /// Vector of boolean values: true for integer parameters, false for continuous
 pub fn generate_integrality_constraints(num_filters: usize, use_freq_indexing: bool) -> Vec<bool> {
-    let mut constraints = Vec::with_capacity(num_filters * 4);
+    let mut constraints = Vec::with_capacity(num_filters * 3);
 
     for _i in 0..num_filters {
         // constraints.push(true);  // Filter type - integer, not yet implemented
@@ -337,6 +337,11 @@ mod tests {
         // 2 filters × 3 params each = 6 total params
         // Pattern: [true, false, false] repeated (freq indexed, Q continuous, gain continuous)
         assert_eq!(constraints.len(), 6);
+        assert_eq!(
+            constraints.capacity(),
+            constraints.len(),
+            "integrality constraints should reserve exactly the emitted three parameters per filter"
+        );
         assert!(constraints[0]); // Frequency (indexed)
         assert!(!constraints[1]); // Q factor (continuous)
         assert!(!constraints[2]); // Gain (continuous)

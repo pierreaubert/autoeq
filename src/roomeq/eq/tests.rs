@@ -61,6 +61,13 @@ fn representative_multi_measurement_curve_interpolates_mismatched_grids() {
 }
 
 #[test]
+fn representative_multi_measurement_curve_handles_empty_input() {
+    let representative = representative_multi_measurement_curve(&[]);
+    assert!(representative.freq.is_empty());
+    assert!(representative.spl.is_empty());
+}
+
+#[test]
 fn fdw_e2e_downweights_hf_reflection_but_keeps_bass_mode() {
     let sample_rate = 48_000;
     let curve = make_fdw_e2e_curve();

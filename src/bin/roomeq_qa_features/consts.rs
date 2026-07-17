@@ -35,6 +35,7 @@ pub(super) fn make_baseline(config: &RoomConfig, with_tilt: bool) -> RoomConfig 
     c.optimizer.target_response = None;
     c.optimizer.excursion_protection = None;
     c.optimizer.schroeder_split = None;
+    c.optimizer.decomposed_correction = None;
 
     // QA optimizer overrides
     c.optimizer.algorithm = "autoeq:cmaes".to_string();
@@ -56,3 +57,22 @@ pub(super) fn make_baseline(config: &RoomConfig, with_tilt: bool) -> RoomConfig 
 }
 
 pub(super) static TEMP_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use autoeq::roomeq::DecomposedCorrectionSerdeConfig;
+
+    #[test]
+    fn baseline_disables_decomposed_correction() {
+        let mut config = RoomConfig::default();
+        config.optimizer.decomposed_correction = Some(DecomposedCorrectionSerdeConfig::default());
+
+        let baseline = make_baseline(&config, false);
+
+        assert!(
+            baseline.optimizer.decomposed_correction.is_none(),
+            "baseline must not inherit decomposed correction from the recording"
+        );
+    }
+}

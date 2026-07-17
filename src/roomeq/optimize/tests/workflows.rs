@@ -182,11 +182,15 @@ fn optimize_room_with_inter_channel_timbre_matching_enabled_succeeds() {
             reference_channel: "Left".to_string(),
             min_improvement_db: 0.0,
         });
-    let result = optimize_room(&config, 48000.0, None, None);
+    let result = optimize_room(&config, 48000.0, None, None)
+        .expect("optimize_room with inter-channel timbre matching should succeed");
     assert!(
-        result.is_ok(),
-        "optimize_room with inter-channel timbre matching should succeed: {:?}",
-        result.err()
+        result
+            .metadata
+            .stage_outcomes
+            .iter()
+            .any(|outcome| outcome.stage == "inter_channel_timbre_matching"),
+        "topology workflows must execute and report the timbre-matching stage"
     );
 }
 

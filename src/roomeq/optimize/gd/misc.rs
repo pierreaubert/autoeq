@@ -59,7 +59,6 @@ pub(super) fn corrected_realisation_to_gd_input(
     let initial_on_grid = crate::read::interpolate_log_space(&final_curve.freq, initial_curve);
 
     let raw_phase = raw_on_grid.phase.as_ref()?;
-    let initial_phase = initial_on_grid.phase.as_ref()?;
     let final_phase = final_curve.phase.as_ref()?;
     let raw_coherence = raw_curve.coherence.as_ref()?;
 
@@ -67,7 +66,13 @@ pub(super) fn corrected_realisation_to_gd_input(
         interpolate_optional_array_log(&final_curve.freq, &raw_curve.freq, raw_coherence);
 
     let spl = &raw_on_grid.spl + &(&final_curve.spl - &initial_on_grid.spl);
-    let phase_delta = final_phase - initial_phase;
+    // Multi-position magnitude aggregation may omit representative phase.
+    // In that case `apply_complex_response` makes `final_phase` the applied DSP
+    // phase, so it can be composed with each raw sweep directly.
+    let phase_delta = match initial_on_grid.phase.as_ref() {
+        Some(initial_phase) => final_phase - initial_phase,
+        None => final_phase.clone(),
+    };
     let phase = (raw_phase + &phase_delta).mapv(|deg| deg.to_radians());
 
     Some(crate::roomeq::gd_opt::ChannelMeasurementInput {
@@ -86,17 +91,48 @@ pub(super) fn build_gd_sweep_realisations(
     let mut per_channel: Vec<Vec<crate::roomeq::gd_opt::ChannelMeasurementInput>> = Vec::new();
 
     for name in channel_names {
-        let source = source_for_output_channel(config, name)?;
-        let raw_curves = crate::read::load_source_individual(source).ok()?;
+        let Some(source) = source_for_output_channel(config, name) else {
+            log::debug!("GD-Opt adaptive bootstrap: no measurement source for '{name}'");
+            return None;
+        };
+        let raw_curves = match crate::read::load_source_individual(source) {
+            Ok(curves) => curves,
+            Err(error) => {
+                log::debug!(
+                    "GD-Opt adaptive bootstrap: failed to load sweeps for '{name}': {error}"
+                );
+                return None;
+            }
+        };
         if raw_curves.len() < 2 {
+            log::debug!(
+                "GD-Opt adaptive bootstrap: '{}' has {} sweep(s), need at least 2",
+                name,
+                raw_curves.len()
+            );
             return None;
         }
 
-        let ch = channel_results.get(name.as_str())?;
+        let Some(ch) = channel_results.get(name.as_str()) else {
+            log::debug!("GD-Opt adaptive bootstrap: no channel result for '{name}'");
+            return None;
+        };
         let mut realisations = Vec::with_capacity(raw_curves.len());
         for raw_curve in &raw_curves {
-            let input =
-                corrected_realisation_to_gd_input(raw_curve, &ch.initial_curve, &ch.final_curve)?;
+            let Some(input) =
+                corrected_realisation_to_gd_input(raw_curve, &ch.initial_curve, &ch.final_curve)
+            else {
+                log::debug!(
+                    "GD-Opt adaptive bootstrap: unusable sweep for '{}': raw_phase={} \
+                     initial_phase={} final_phase={} coherence={}",
+                    name,
+                    raw_curve.phase.is_some(),
+                    ch.initial_curve.phase.is_some(),
+                    ch.final_curve.phase.is_some(),
+                    raw_curve.coherence.is_some()
+                );
+                return None;
+            };
             realisations.push(input);
         }
         per_channel.push(realisations);
@@ -122,6 +158,82 @@ pub(super) fn build_gd_sweep_realisations(
     }
 
     Some(by_sweep)
+}
+
+pub(super) fn coherence_average_gd_realisations(
+    realisations: &[Vec<crate::roomeq::gd_opt::ChannelMeasurementInput>],
+) -> Option<Vec<crate::roomeq::gd_opt::ChannelMeasurementInput>> {
+    let channel_count = realisations.first()?.len();
+    if channel_count == 0
+        || realisations
+            .iter()
+            .any(|sweep| sweep.len() != channel_count)
+    {
+        return None;
+    }
+
+    let mut averaged = Vec::with_capacity(channel_count);
+    for channel_index in 0..channel_count {
+        let reference = &realisations[0][channel_index];
+        let bin_count = reference.freq.len();
+        if bin_count == 0
+            || realisations.iter().any(|sweep| {
+                let channel = &sweep[channel_index];
+                channel.spl.len() != bin_count
+                    || channel.phase.len() != bin_count
+                    || channel.coherence.len() != bin_count
+                    || !crate::roomeq::frequency_grid::same_frequency_grid(
+                        &reference.freq,
+                        &channel.freq,
+                    )
+            })
+        {
+            return None;
+        }
+
+        let mut spl = ndarray::Array1::zeros(bin_count);
+        let mut phase = ndarray::Array1::zeros(bin_count);
+        let mut coherence = ndarray::Array1::zeros(bin_count);
+        for bin in 0..bin_count {
+            let coherence_sum: f64 = realisations
+                .iter()
+                .map(|sweep| sweep[channel_index].coherence[bin].clamp(0.0, 1.0))
+                .sum();
+            let use_equal_weights = coherence_sum <= f64::EPSILON;
+            let mut weight_sum = 0.0;
+            let mut power_sum = 0.0;
+            let mut phase_sin_sum = 0.0;
+            let mut phase_cos_sum = 0.0;
+            let mut raw_coherence_sum = 0.0;
+
+            for sweep in realisations {
+                let channel = &sweep[channel_index];
+                let raw_coherence = channel.coherence[bin].clamp(0.0, 1.0);
+                let weight = if use_equal_weights {
+                    1.0
+                } else {
+                    raw_coherence
+                };
+                weight_sum += weight;
+                power_sum += weight * 10.0_f64.powf(channel.spl[bin] / 10.0);
+                phase_sin_sum += weight * channel.phase[bin].sin();
+                phase_cos_sum += weight * channel.phase[bin].cos();
+                raw_coherence_sum += raw_coherence;
+            }
+
+            spl[bin] = 10.0 * (power_sum / weight_sum).max(1e-30).log10();
+            phase[bin] = phase_sin_sum.atan2(phase_cos_sum);
+            coherence[bin] = raw_coherence_sum / realisations.len() as f64;
+        }
+
+        averaged.push(crate::roomeq::gd_opt::ChannelMeasurementInput {
+            freq: reference.freq.clone(),
+            spl,
+            phase,
+            coherence,
+        });
+    }
+    Some(averaged)
 }
 
 pub(in super::super) fn apply_gd_opt_result(

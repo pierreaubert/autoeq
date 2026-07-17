@@ -4,7 +4,6 @@ use super::misc::generate_preference_filters;
 use super::misc::resolve_correction_mode;
 use super::misc::simulate_correction;
 use crate::Curve;
-use crate::error::AutoeqError;
 use crate::read::Cea2034Data;
 use math_audio_iir_fir::BiquadFilterType;
 use std::collections::HashMap;
@@ -115,7 +114,7 @@ fn test_resolve_correction_mode_auto_farfield() {
         ..Default::default()
     };
     let mode = resolve_correction_mode(&config, None);
-    assert_eq!(mode, Cea2034CorrectionMode::Flat);
+    assert_eq!(mode, Cea2034CorrectionMode::Score);
 }
 
 #[test]
@@ -128,11 +127,9 @@ fn test_resolve_correction_mode_auto_from_arrival_time() {
         system_latency_ms: Some(2.0),
         ..Default::default()
     };
-    // 8.83ms arrival -> (8.83 - 2.0) * 0.001 * 343 = 2.34m.
-    // Roomeq still uses flat anechoic pre-correction because Harman score
-    // optimization is not meaningful for in-room measurements.
+    // 8.83ms arrival -> (8.83 - 2.0) * 0.001 * 343 = 2.34m -> Score.
     let mode = resolve_correction_mode(&config, Some(8.83));
-    assert_eq!(mode, Cea2034CorrectionMode::Flat);
+    assert_eq!(mode, Cea2034CorrectionMode::Score);
 
     // 5.0ms arrival -> (5.0 - 2.0) * 0.001 * 343 = 1.029m -> Flat (< threshold)
     let mode = resolve_correction_mode(&config, Some(5.0));
@@ -151,22 +148,22 @@ fn test_resolve_correction_mode_auto_no_distance() {
 }
 
 #[test]
-fn test_score_correction_mode_returns_error() {
+fn test_score_correction_mode_uses_spinorama_objective() {
     let room_curve = make_flat_curve(32);
     let cea_data = make_cea2034_data(32);
     let config = Cea2034CorrectionConfig {
         enabled: true,
         correction_mode: Cea2034CorrectionMode::Score,
+        num_filters: 1,
         ..Default::default()
     };
 
     let result = compute_speaker_correction(&cea_data, &config, &room_curve, 300.0, None, 48000.0);
 
-    assert!(matches!(
-        result,
-        Err(AutoeqError::InvalidConfiguration { ref message })
-            if message.contains("CEA2034 score correction is not supported in roomeq")
-    ));
+    let (filters, corrected) = result.expect("score correction should use the supplied spinorama");
+    assert!(filters.len() <= config.num_filters);
+    assert_eq!(corrected.freq, room_curve.freq);
+    assert!(corrected.spl.iter().all(|value| value.is_finite()));
 }
 
 #[test]

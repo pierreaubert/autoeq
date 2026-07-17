@@ -24,15 +24,14 @@ pub(super) fn unique_sidecar_filename(
         .map(|ext| format!(".{ext}"))
         .unwrap_or_default();
 
-    for suffix in 2.. {
+    for suffix in 2_u64..=u64::MAX {
         let candidate = format!("{stem}_{suffix:03}{ext}");
         let candidate_path = dest_dir.join(&candidate);
         if !candidate_path.exists() || same_existing_file(&candidate_path, source_path)? {
             return Ok(candidate);
         }
     }
-
-    unreachable!("unbounded numeric suffix search must return a filename")
+    anyhow::bail!("could not reserve a unique sidecar filename for '{preferred}'")
 }
 
 pub(super) fn same_existing_file(path: &Path, source_path: &Path) -> anyhow::Result<bool> {

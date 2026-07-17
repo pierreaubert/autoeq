@@ -79,14 +79,21 @@ pub(super) fn validate_pass(
         }
     }
 
-    // End-of-pass: baseline step must improve over raw measurement
+    // End-of-pass: baseline step must improve over raw measurement. An exact
+    // identity is valid only when the runtime safety gate explicitly reverted
+    // the proposed correction; an ordinary optimizer no-op remains a failure.
     if let Some(baseline) = results.first()
         && baseline.post_score >= baseline.pre_score
     {
-        errors.push(format!(
-            "  {} step '{}': post_score {:.4} >= pre_score {:.4} — EQ did not improve over raw",
-            pass_name, baseline.name, baseline.post_score, baseline.pre_score
-        ));
+        let identity_epsilon = (baseline.pre_score.abs() * 1e-10).max(1e-12);
+        let explicitly_reverted_identity = baseline.correction_reverted
+            && (baseline.post_score - baseline.pre_score).abs() <= identity_epsilon;
+        if !explicitly_reverted_identity {
+            errors.push(format!(
+                "  {} step '{}': post_score {:.4} >= pre_score {:.4} — EQ did not improve over raw",
+                pass_name, baseline.name, baseline.post_score, baseline.pre_score
+            ));
+        }
     }
 
     errors
@@ -126,5 +133,47 @@ pub(super) fn print_pass_results(results: &[StepResult]) {
                 i, step.name, step.post_score, step.worst_slope, pct, epa_str, epa_vs_baseline
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn baseline(pre_score: f64, post_score: f64, correction_reverted: bool) -> StepResult {
+        StepResult {
+            name: "Baseline",
+            pre_score,
+            post_score,
+            worst_slope: 0.0,
+            changes_loss: false,
+            allows_perceptual_tradeoff: false,
+            epa_preference: None,
+            correction_reverted,
+        }
+    }
+
+    #[test]
+    fn explicitly_reverted_identity_baseline_is_not_an_optimization_failure() {
+        let errors = validate_pass("Pass A", &[baseline(10.0, 10.0, true)], true);
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    }
+
+    #[test]
+    fn ordinary_identity_baseline_still_fails() {
+        let errors = validate_pass("Pass A", &[baseline(10.0, 10.0, false)], true);
+        assert!(
+            errors.iter().any(|error| error.contains("did not improve")),
+            "expected no-improvement error, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn explicitly_reverted_regression_still_fails() {
+        let errors = validate_pass("Pass A", &[baseline(10.0, 10.1, true)], true);
+        assert!(
+            errors.iter().any(|error| error.contains("did not improve")),
+            "expected no-improvement error, got: {errors:?}"
+        );
     }
 }

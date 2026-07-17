@@ -44,8 +44,8 @@ pub use error::{AutoeqError, Result};
 pub mod cli;
 /// Constraint functions for optimization
 pub mod constraints;
-/// FIR filter design and optimization
-pub mod fir;
+/// FIR filter design and optimization.
+pub use autoeq_fir as fir;
 /// Smart initial guess generation
 pub mod initial_guess;
 /// Loss functions for optimization
@@ -70,8 +70,7 @@ pub mod x2peq;
 mod property_tests;
 
 /// Artifact storage abstraction for reports, exports, and sidecars.
-pub mod artifact_store;
-pub use artifact_store::{ArtifactStore, FsArtifactStore, MemoryArtifactStore};
+pub use autoeq_artifacts::{ArtifactStore, FsArtifactStore, MemoryArtifactStore};
 
 /// Room EQ multi-channel optimization
 pub mod roomeq;

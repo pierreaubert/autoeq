@@ -1,5 +1,7 @@
 //! Analytic acoustic ground truth and acceptance metrics for RoomEQ QA.
 //!
+//! This is the standalone RoomEQ acoustic-quality boundary.
+//!
 //! The fixtures in this module carry their generating parameters, expected
 //! complex transfer function, valid correction region, and prohibited
 //! behaviours. Candidate DSP is evaluated from its complex transfer function,

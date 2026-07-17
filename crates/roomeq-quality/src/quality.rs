@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::metrics::{log_frequency_weights, percentile};
-use crate::Curve;
+use autoeq_core::Curve;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct QualityEvaluationConfig {

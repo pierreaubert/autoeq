@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+// Repository-backed acoustic corpus support.
 use super::{QaTier, QualityBaselineMetrics};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -328,6 +329,10 @@ fn resolve(base: &Path, path: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
+    fn workspace_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    }
+
     #[test]
     fn acoustic_baseline_rejects_a_different_execution_platform() {
         let expected = AcousticBaselinePlatform {
@@ -371,7 +376,7 @@ mod tests {
 
     #[test]
     fn repository_baselines_declare_their_execution_platform() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("data_tests/roomeq/acoustic_corpus");
+        let root = workspace_root().join("data_tests/roomeq/acoustic_corpus");
         for (file, os, arch) in [
             ("baseline.json", "macos", "aarch64"),
             ("baseline.linux-x86_64.json", "linux", "x86_64"),
@@ -422,8 +427,7 @@ mod tests {
 
     #[test]
     fn repository_manifest_has_real_and_held_out_pr_evidence() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("data_tests/roomeq/acoustic_corpus/manifest.json");
+        let path = workspace_root().join("data_tests/roomeq/acoustic_corpus/manifest.json");
         let manifest = AcousticCorpusManifest::load(&path).expect("repository corpus manifest");
         assert!(
             manifest
@@ -486,7 +490,7 @@ mod tests {
 
     #[test]
     fn repository_manifest_resolves_paths_from_a_relative_manifest_path() {
-        let path = Path::new("data_tests/roomeq/acoustic_corpus/manifest.json");
+        let path = Path::new("../../data_tests/roomeq/acoustic_corpus/manifest.json");
         let manifest = AcousticCorpusManifest::load(path).expect("relative repository manifest");
 
         assert!(

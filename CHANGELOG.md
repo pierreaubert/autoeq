@@ -1,3 +1,16 @@
+# Unreleased
+
+## Refactoring
+
+- Centralized all workspace dependency specifications, including development
+  dependencies, so member manifests inherit their versions and feature sets.
+- Upgraded the direct AutoEQ optimizer random dependencies to Rand 0.10.
+- Extracted artifact storage into `autoeq-artifacts` and FIR design/WAV
+  serialization into `autoeq-fir`; the root facade retains their public paths.
+- Extracted RoomEQ acoustic-quality metrics, acceptance policies, and fixtures
+  into `roomeq-quality`; the root RoomEQ module retains its public path.
+- Added crate-local README and CHANGELOG files for every extracted library.
+
 # 0.4.51
 
 ## Features

@@ -6,7 +6,7 @@
 //! This module wraps the core FIR design functions from `math_audio_iir_fir` and adds
 //! convenience wrappers that work with the `Curve` type.
 
-use crate::Curve;
+use autoeq_core::Curve;
 use std::path::Path;
 
 // Re-export core types from math-iir-fir
@@ -167,7 +167,7 @@ pub fn generate_kirkeby_correction_with_smoothing(
         target.spl.to_vec()
     } else {
         // Interpolate target to measurement frequency grid
-        let interpolated = crate::read::interpolate(&measurement.freq, target);
+        let interpolated = autoeq_measurements::read::interpolate(&measurement.freq, target);
         interpolated.spl.to_vec()
     };
 

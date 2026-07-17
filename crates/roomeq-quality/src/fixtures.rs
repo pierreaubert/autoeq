@@ -1,3 +1,4 @@
+// Deterministic acoustic fixture builders.
 use super::types::{
     AcousticOracle, OracleParameters, ParallelSourceParameters, ProhibitedBehavior,
 };

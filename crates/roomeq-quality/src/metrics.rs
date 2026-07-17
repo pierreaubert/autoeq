@@ -1,3 +1,4 @@
+// Transfer-function metric evaluation.
 use super::types::{AcousticOracle, CandidateTransfer, ImpulseEvidence, ProhibitedBehavior};
 use num_complex::Complex64;
 use std::f64::consts::PI;
@@ -500,7 +501,7 @@ pub fn normalized_timbre_spread_db(channels_db: &[Vec<f64>]) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::roomeq::acoustic_qa::identity_oracle;
+    use crate::identity_oracle;
     use ndarray::Array1;
 
     fn permissive_thresholds() -> AcceptanceThresholds {

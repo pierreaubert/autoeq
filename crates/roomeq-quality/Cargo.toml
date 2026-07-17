@@ -1,18 +1,16 @@
 [package]
-name = "roomeq-model"
+name = "roomeq-quality"
 version.workspace = true
 edition = "2024"
-description = "RoomEQ configuration, pipeline, and DSP-chain contracts"
+description = "Acoustic quality metrics, acceptance policies, and QA fixtures for RoomEQ"
 license = "GPL-3.0-or-later"
 
 [dependencies]
 autoeq-core = { workspace = true }
 autoeq-measurements = { workspace = true }
-autoeq-optim = { workspace = true }
-clap = { workspace = true }
-log = { workspace = true }
+math-iir-fir = { workspace = true }
 ndarray = { workspace = true }
-num_cpus = { workspace = true }
+num-complex = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

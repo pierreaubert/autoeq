@@ -1,3 +1,4 @@
+// End-to-end acoustic-quality regression tests.
 use super::*;
 use math_audio_iir_fir::{Biquad, BiquadFilterType};
 use num_complex::Complex64;
@@ -130,7 +131,7 @@ fn acoustic_qa_pr_generated_biquad_is_checked_by_complex_transfer() {
         sample_rate,
     );
     let generated =
-        crate::response::compute_peq_complex_response(&filters, &frequencies, sample_rate);
+        autoeq_core::response::compute_peq_complex_response(&filters, &frequencies, sample_rate);
     compare_complex_transfers(
         frequencies.as_slice().unwrap(),
         oracle.expected_transfer.as_slice().unwrap(),

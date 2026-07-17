@@ -1,3 +1,4 @@
+// Scenario-level quality evaluation.
 use super::fixtures::{
     delay_oracle, linkwitz_riley4_oracle, log_frequency_grid, parallel_woofers_oracle,
     room_mode_oracle, room_transition_oracle,

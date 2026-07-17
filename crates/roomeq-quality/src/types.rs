@@ -95,7 +95,7 @@ pub struct AcousticOracle {
 impl AcousticOracle {
     /// Validate the fixture boundary before it is used as ground truth.
     pub fn validate(&self) -> Result<(), String> {
-        if !crate::roomeq::frequency_grid::is_valid_frequency_grid(&self.frequencies_hz) {
+        if !is_valid_frequency_grid(&self.frequencies_hz) {
             return Err(format!(
                 "oracle '{}' has an invalid frequency grid",
                 self.name
@@ -133,6 +133,12 @@ impl AcousticOracle {
         }
         Ok(())
     }
+}
+
+fn is_valid_frequency_grid(freq: &Array1<f64>) -> bool {
+    freq.len() >= 2
+        && freq.iter().all(|value| value.is_finite() && *value > 0.0)
+        && freq.windows(2).into_iter().all(|pair| pair[1] > pair[0])
 }
 
 /// Optional time-domain evidence evaluated alongside a complex transfer.

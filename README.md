@@ -14,6 +14,26 @@ AutoEQ and RoomEQ are Rust CLIs for computing corrections.
 
 **Note:** A graphical desktop application is available in a separate repository: [SotF](https://github.com/pierreaubert/sotf)
 
+## Workspace crates
+
+`autoeq` remains the compatibility facade and CLI package while implementation
+moves into focused crates. The current library layers are:
+
+- `autoeq-core` — curves, PEQ models, response math, and parameter layouts
+- `autoeq-measurements` — loading and preprocessing measurement data
+- `autoeq-optim` — objectives, constraints, and optimizer backends
+- `autoeq-workflow` — speaker and headphone application workflows
+- `autoeq-artifacts` — report/export artifact storage
+- `autoeq-fir` — FIR design and WAV serialization
+- `roomeq-model`, `roomeq-engine`, and `roomeq-export` — RoomEQ contracts,
+  execution boundary, and external-DSP rendering
+- `roomeq-quality` — acoustic-quality metrics, acceptance policies, and QA
+  fixtures
+
+Each crate has its own README and changelog under `crates/`. Existing
+`autoeq::*` public paths remain available while the RoomEQ pipeline, analysis,
+quality, plotting, and CLI layers are extracted incrementally.
+
 ## Documentation
 
 ### AutoEQ

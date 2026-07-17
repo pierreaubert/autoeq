@@ -40,7 +40,7 @@ mod config_loader;
 pub use config_loader::{SHALLOW_MERGE_KEYS, load_config, merge_json_objects};
 
 // Analytic acoustic ground truth and multi-dimensional QA metrics.
-pub mod acoustic_qa;
+pub use roomeq_quality as acoustic_qa;
 
 // Configuration validation
 #[allow(hidden_glob_reexports)]

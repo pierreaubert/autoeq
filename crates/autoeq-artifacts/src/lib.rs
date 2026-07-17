@@ -1,10 +1,6 @@
-//! Artifact storage abstraction.
-//!
-//! The [`ArtifactStore`] trait decouples domain code from direct `std::fs`
-//! calls, making it possible to run tests against an in-memory store instead
-//! of the filesystem.
+//! Artifact storage contracts for AutoEQ reports, exports, and sidecars.
 
-use crate::error::AutoeqError;
+use autoeq_core::AutoeqError;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

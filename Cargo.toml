@@ -14,12 +14,15 @@ resolver = "3"
 members = [
     ".",
     "crates/autoeq-core",
+    "crates/autoeq-artifacts",
+    "crates/autoeq-fir",
     "crates/autoeq-measurements",
     "crates/autoeq-optim",
     "crates/autoeq-workflow",
     "crates/roomeq-model",
     "crates/roomeq-engine",
     "crates/roomeq-export",
+    "crates/roomeq-quality",
 ]
 # Keep the published crate under crates.io's size cap. The excluded paths are
 # QA recordings, generated test fixtures, helper shell scripts, and editor
@@ -39,14 +42,17 @@ exclude = [
 [workspace.package]
 version = "0.4.51"
 
-[dependencies]
+[workspace.dependencies]
 autoeq-core = { path = "crates/autoeq-core" }
+autoeq-artifacts = { path = "crates/autoeq-artifacts" }
+autoeq-fir = { path = "crates/autoeq-fir" }
 autoeq-measurements = { path = "crates/autoeq-measurements" }
 autoeq-optim = { path = "crates/autoeq-optim" }
 autoeq-workflow = { path = "crates/autoeq-workflow" }
 roomeq-model = { path = "crates/roomeq-model" }
 roomeq-engine = { path = "crates/roomeq-engine" }
 roomeq-export = { path = "crates/roomeq-export" }
+roomeq-quality = { path = "crates/roomeq-quality" }
 anyhow = "1.0"
 async-trait = "0.1"
 base64 = "0.22"
@@ -67,7 +73,7 @@ hound = "3.5"
 # under `src/plot/` and the `roomeq-fuzzer` binary require it; the main
 # `autoeq` binary degrades gracefully and skips chart generation when off.
 # currently we have compilation errors in 0.14.1
-plotly = { version = "0.13.3", optional = true }
+plotly = "0.13.3"
 rand = "0.10.2"
 rand_chacha = "0.10.0"
 reqwest = { version = "0.13", features = ["json"] }
@@ -79,6 +85,10 @@ thiserror = "2.0.17"
 tokio = { version = "1", features = ["rt-multi-thread", "fs", "macros", "io-util", "process", "signal"] }
 urlencoding = "2.1"
 zip = { version = "0.6.6", default-features = false }
+tempfile = "3.23"
+assert_fs = "1.0"
+proptest = { version = "1.8", default-features = false, features = ["std"] }
+serial_test = "3"
 
 # Math-Audio crates from GitHub
 math-iir-fir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
@@ -93,8 +103,57 @@ oxiblas-ndarray = "0.2.1"
 
 # Optional, WebDriver-free static rendering. Charts are emitted as deterministic
 # SVG and `resvg` rasterizes them in-process to PNG.
-resvg = { version = "0.46", optional = true }
+resvg = "0.46"
 rayon = "1.11"
+
+[dependencies]
+autoeq-core = { workspace = true }
+autoeq-artifacts = { workspace = true }
+autoeq-fir = { workspace = true }
+autoeq-measurements = { workspace = true }
+autoeq-optim = { workspace = true }
+autoeq-workflow = { workspace = true }
+roomeq-model = { workspace = true }
+roomeq-engine = { workspace = true }
+roomeq-export = { workspace = true }
+roomeq-quality = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+build_html = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+csv = { workspace = true }
+directories = { workspace = true }
+env_logger = { workspace = true }
+log = { workspace = true }
+num_cpus = { workspace = true }
+num-complex = { workspace = true }
+nalgebra = { workspace = true }
+metaheuristics-nature = { workspace = true }
+rustfft = { workspace = true }
+hound = { workspace = true }
+plotly = { workspace = true, optional = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+strsim = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+urlencoding = { workspace = true }
+zip = { workspace = true }
+math-iir-fir = { workspace = true }
+math-dsp = { workspace = true }
+math-optimisation = { workspace = true }
+math-rir = { workspace = true }
+sofa-reader = { workspace = true }
+ndarray = { workspace = true }
+oxiblas-ndarray = { workspace = true }
+resvg = { workspace = true, optional = true }
+rayon = { workspace = true }
 
 [features]
 default = []
@@ -171,11 +230,11 @@ required-features = ["plotly"]
 name = "headphone_loss_validation"
 
 [dev-dependencies]
-tempfile = "3.23"
-assert_fs = "1.0"
-proptest = { version = "1.8", default-features = false, features = ["std"] }
-serial_test = "3"
-tokio = { version = "1", features = ["rt-multi-thread"] }
+tempfile = { workspace = true }
+assert_fs = { workspace = true }
+proptest = { workspace = true }
+serial_test = { workspace = true }
+tokio = { workspace = true }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }

@@ -5,7 +5,7 @@
 
 use ndarray::Array1;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 /// Smart initialization configuration
 #[derive(Debug, Clone)]

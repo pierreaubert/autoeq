@@ -1,0 +1,54 @@
+use super::misc::normalized_weights;
+use super::misc::validate_spatial_curves;
+use crate::Curve;
+use ndarray::Array1;
+
+/// Compute RMS power spectrum average across multiple measurement positions.
+///
+/// Unlike arithmetic averaging of dB values (which underweights loud positions)
+/// or complex averaging (which causes phase cancellation), RMS averaging preserves
+/// the energy content:
+///
+///   avg_spl[f] = 10 * log10(mean(10^(spl_i[f] / 10)))
+///
+/// All curves must share the same frequency axis.
+pub fn rms_average(curves: &[Curve]) -> Curve {
+    rms_average_weighted(curves, None)
+}
+
+pub fn rms_average_weighted(curves: &[Curve], weights: Option<&[f64]>) -> Curve {
+    try_rms_average_weighted(curves, weights).unwrap_or_else(|error| {
+        log::warn!("RMS spatial aggregation skipped: {error}");
+        Curve::default()
+    })
+}
+
+pub fn try_rms_average(curves: &[Curve]) -> crate::error::Result<Curve> {
+    try_rms_average_weighted(curves, None)
+}
+
+pub fn try_rms_average_weighted(
+    curves: &[Curve],
+    weights: Option<&[f64]>,
+) -> crate::error::Result<Curve> {
+    validate_spatial_curves(curves)?;
+    let len = curves[0].freq.len();
+    let weights = normalized_weights(curves.len(), weights);
+
+    let mut avg_spl = Array1::zeros(len);
+    for bin in 0..len {
+        let sum_power: f64 = curves
+            .iter()
+            .zip(weights.iter())
+            .map(|(c, weight)| weight * 10.0_f64.powf(c.spl[bin] / 10.0))
+            .sum();
+        avg_spl[bin] = 10.0 * sum_power.max(1e-12).log10();
+    }
+
+    Ok(Curve {
+        freq: curves[0].freq.clone(),
+        spl: avg_spl,
+        phase: None,
+        ..Default::default()
+    })
+}

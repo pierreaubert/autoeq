@@ -3,6 +3,24 @@
 //! This module provides functions to analyze WAV files and determine arrival times
 //! for time-aligning multiple speakers in a room EQ setup.
 
+pub use autoeq_core::{AutoeqError, Curve, Result};
+pub mod error {
+    pub use autoeq_core::error::*;
+}
+
+pub mod crossover_utils;
+pub mod frequency_grid;
+pub mod impulse_analysis;
+pub mod ir_waveform;
+mod ir_waveform_types;
+pub mod listening_area;
+pub mod reflection_cancel;
+pub mod rir_prototype;
+pub mod slope;
+pub mod spatial_robustness;
+pub mod temporal_targets;
+pub use ir_waveform_types::IrWaveform;
+
 pub mod time_align {
     //! Time alignment utilities for speaker measurements.
 

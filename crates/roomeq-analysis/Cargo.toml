@@ -10,7 +10,17 @@ autoeq-core = { workspace = true }
 hound = { workspace = true }
 log = { workspace = true }
 math-dsp = { workspace = true }
+math-iir-fir = { workspace = true }
+math-rir = { workspace = true }
 ndarray = { workspace = true }
+num-complex = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+rustfft = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+roomeq-model = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

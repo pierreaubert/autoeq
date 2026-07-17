@@ -7,8 +7,43 @@
 
 #![forbid(unsafe_code)]
 
+pub use autoeq_core::{AutoeqError, Curve};
+pub mod error {
+    pub use autoeq_core::error::*;
+}
+
 use autoeq_optim::{OptimizationProblem, OptimizationResult};
 use roomeq_model::{ConfigValidationReport, DspGraph, RoomConfig, ValidationStage};
+
+/// Measurement-confidence gate for bass-band phase correction.
+pub mod bass_phase_confidence;
+/// Multi-driver crossover optimization with polarity search.
+pub mod crossover;
+/// Double-bass-array optimization with phase-critical array summation.
+pub mod dba;
+/// Speaker-excursion protection analysis and high-pass realization.
+pub mod excursion;
+/// RoomEQ FIR correction design.
+pub mod fir;
+/// Group-delay optimization and IIR all-pass alignment.
+pub mod gd_opt;
+/// Role-aware height-channel spectral, phase, and arrival-time alignment.
+pub mod height_channel_alignment;
+/// Inter-channel tonal matching using broadband spectral correction.
+pub mod inter_channel_timbre_matching;
+/// Mixed IIR/FIR phase decomposition and excess-phase correction.
+pub mod mixed_phase;
+/// Multi-seat and continuous-listening-area subwoofer optimization.
+pub mod multiseat;
+/// Multi-subwoofer optimization and all-pass alignment.
+pub mod multisub;
+pub mod phase_alignment;
+/// Progress reporting for long-running RoomEQ operations.
+pub mod progress;
+/// Broadband spectral and inter-channel response alignment.
+pub mod spectral_align;
+/// Supporting-source room compensation filter design.
+pub mod supporting_source;
 
 /// A narrow execution boundary. The engine owns orchestration; concrete
 /// optimizers and exporters remain replaceable and independently testable.

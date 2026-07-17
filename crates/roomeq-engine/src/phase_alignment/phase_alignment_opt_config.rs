@@ -1,0 +1,22 @@
+use super::types::WeightingType;
+
+/// Configuration for phase alignment optimization
+#[derive(Debug, Clone)]
+pub struct PhaseAlignmentOptConfig {
+    /// Type of frequency weighting
+    pub weighting: WeightingType,
+    /// Tolerance for golden section search (ms)
+    pub tolerance_ms: f64,
+    /// Maximum iterations for optimization
+    pub max_iterations: usize,
+}
+
+impl Default for PhaseAlignmentOptConfig {
+    fn default() -> Self {
+        Self {
+            weighting: WeightingType::None,
+            tolerance_ms: 0.01,
+            max_iterations: 50,
+        }
+    }
+}

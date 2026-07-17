@@ -1,0 +1,27 @@
+//! Spectral channel alignment via shelf filters + gain.
+//!
+//! After independent per-channel room EQ optimization, L and R corrected curves
+//! can differ in both overall level and spectral tilt. This module replaces the
+//! flat-gain-only alignment with a 3-parameter spectral model:
+//!   **low-shelf + high-shelf + flat gain**
+//! fitted via weighted linear least squares.
+//!
+//! The shelf response in dB is nonlinear in `db_gain` (the transition band shape
+//! changes with gain). The fitting uses Gauss-Newton iteration to handle this:
+//! a linear solve provides the initial estimate, then 3 iterations refine it
+//! using the actual shelf response and a finite-difference Jacobian.
+
+mod channel_matching_correction_profile;
+mod compute;
+mod consts;
+mod create;
+mod misc;
+#[cfg(test)]
+mod tests;
+mod types;
+
+pub use channel_matching_correction_profile::*;
+pub use compute::*;
+pub use consts::*;
+pub use create::*;
+pub use types::*;

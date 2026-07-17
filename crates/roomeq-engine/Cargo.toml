@@ -7,6 +7,21 @@ license = "GPL-3.0-or-later"
 
 [dependencies]
 autoeq-core = { workspace = true }
+autoeq-fir = { workspace = true }
 autoeq-measurements = { workspace = true }
 autoeq-optim = { workspace = true }
+autoeq-workflow = { workspace = true }
+log = { workspace = true }
+math-iir-fir = { workspace = true }
+math-optimisation = { workspace = true }
+nalgebra = { workspace = true }
+ndarray = { workspace = true }
+num-complex = { workspace = true }
+oxiblas-ndarray = { workspace = true }
+roomeq-analysis = { workspace = true }
 roomeq-model = { workspace = true }
+roomeq-quality = { workspace = true }
+rustfft = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

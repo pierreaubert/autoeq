@@ -86,6 +86,15 @@ impl RoomOptimizerConfig for OptimizerConfig {
 mod tests {
     use super::*;
 
+    fn smoothness_config(schroeder_hz: Option<f64>) -> crate::SmoothnessPenaltyConfigSerde {
+        crate::SmoothnessPenaltyConfigSerde {
+            tv2_weight: 0.05,
+            schroeder_hz,
+            modal_weight_scale: 0.1,
+            exponent: 1.0,
+        }
+    }
+
     #[test]
     fn optimizer_adapter_uses_required_sample_rate() {
         let config = OptimizerConfig::default();
@@ -93,5 +102,60 @@ mod tests {
             let params = config.to_optim_params(sample_rate);
             assert_eq!(params.sample_rate, sample_rate);
         }
+    }
+
+    #[test]
+    fn optimizer_adapter_resolves_schroeder_frequency_and_bo_options() {
+        let config = OptimizerConfig {
+            smoothness_penalty: Some(smoothness_config(None)),
+            schroeder_split: Some(crate::SchroederSplitConfig {
+                enabled: true,
+                schroeder_freq: 280.0,
+                room_dimensions: Some(crate::RoomDimensions {
+                    length: 4.0,
+                    width: 3.0,
+                    height: 2.5,
+                }),
+                ..Default::default()
+            }),
+            bo_initial_samples: Some(24),
+            bo_batch_size: Some(4),
+            bo_posterior_std_threshold: Some(0.02),
+            bo_acquisition: Some("ei".to_string()),
+            bo_ehvi: Some(true),
+            ..Default::default()
+        };
+
+        let params = config.to_optim_params(48_000.0);
+        let expected = config
+            .schroeder_split
+            .as_ref()
+            .unwrap()
+            .room_dimensions
+            .as_ref()
+            .unwrap()
+            .schroeder_frequency();
+        assert_eq!(
+            params.smoothness_penalty.unwrap().schroeder_hz,
+            Some(expected)
+        );
+        assert_eq!(params.bo_initial_samples, 24);
+        assert_eq!(params.bo_batch_size, 4);
+        assert_eq!(params.bo_posterior_std_threshold, 0.02);
+        assert_eq!(params.bo_acquisition, "ei");
+        assert!(params.bo_ehvi);
+
+        let explicit = OptimizerConfig {
+            smoothness_penalty: Some(smoothness_config(Some(123.0))),
+            ..config
+        };
+        assert_eq!(
+            explicit
+                .to_optim_params(48_000.0)
+                .smoothness_penalty
+                .unwrap()
+                .schroeder_hz,
+            Some(123.0)
+        );
     }
 }

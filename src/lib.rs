@@ -56,7 +56,7 @@ pub mod optim;
 pub mod param_utils;
 /// Plotting and visualization functions (requires the `plotly` feature).
 #[cfg(feature = "plotly")]
-pub mod plot;
+pub use autoeq_plot as plot;
 /// Data reading and parsing functions
 pub mod read;
 /// Frequency response utilities

@@ -1,12 +1,3 @@
-//! FIR filter optimization for room correction
-//!
-//! This module provides high-level FIR correction generation for room EQ,
-//! using the core FIR design functions from `math_audio_iir_fir`.
+//! Compatibility re-export for engine-owned FIR correction design.
 
-mod apply;
-mod generate;
-#[cfg(test)]
-mod tests;
-
-pub(crate) use apply::*;
-pub use generate::*;
+pub use roomeq_engine::fir::*;

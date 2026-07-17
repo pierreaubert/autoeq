@@ -1,0 +1,12 @@
+[package]
+name = "roomeq-synthetic"
+version.workspace = true
+edition = "2024"
+description = "Deterministic synthetic measurement scenarios for RoomEQ QA"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+autoeq-core = { workspace = true }
+log = { workspace = true }
+math-iir-fir = { workspace = true }
+ndarray = { workspace = true }

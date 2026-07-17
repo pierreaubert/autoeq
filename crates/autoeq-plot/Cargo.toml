@@ -1,0 +1,23 @@
+[package]
+name = "autoeq-plot"
+version.workspace = true
+edition = "2024"
+description = "Plotly visualizations and report generation for AutoEQ"
+license = "GPL-3.0-or-later"
+
+[features]
+default = []
+plotly = []
+plotly_static = ["plotly", "dep:resvg"]
+
+[dependencies]
+anyhow = { workspace = true }
+autoeq-core = { workspace = true }
+autoeq-measurements = { workspace = true }
+autoeq-optim = { workspace = true }
+build_html = { workspace = true }
+math-iir-fir = { workspace = true }
+ndarray = { workspace = true }
+plotly = { workspace = true }
+resvg = { workspace = true, optional = true }
+serde_json = { workspace = true }

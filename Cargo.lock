@@ -194,6 +194,7 @@ dependencies = [
  "autoeq-fir",
  "autoeq-measurements",
  "autoeq-optim",
+ "autoeq-plot",
  "autoeq-workflow",
  "base64",
  "build_html",
@@ -226,6 +227,7 @@ dependencies = [
  "roomeq-export",
  "roomeq-model",
  "roomeq-quality",
+ "roomeq-synthetic",
  "rustfft",
  "schemars 1.2.1",
  "serde",
@@ -316,6 +318,22 @@ dependencies = [
  "rand_chacha 0.10.0",
  "schemars 1.2.1",
  "serde",
+]
+
+[[package]]
+name = "autoeq-plot"
+version = "0.4.51"
+dependencies = [
+ "anyhow",
+ "autoeq-core",
+ "autoeq-measurements",
+ "autoeq-optim",
+ "build_html",
+ "math-iir-fir",
+ "ndarray",
+ "plotly",
+ "resvg",
+ "serde_json",
 ]
 
 [[package]]
@@ -2651,8 +2669,18 @@ dependencies = [
  "hound",
  "log",
  "math-dsp",
+ "math-iir-fir",
+ "math-rir",
  "ndarray",
+ "num-complex",
+ "rand 0.10.2",
+ "rand_chacha 0.10.0",
+ "roomeq-model",
+ "rustfft",
+ "schemars 1.2.1",
+ "serde",
  "tempfile",
+ "thiserror",
 ]
 
 [[package]]
@@ -2660,9 +2688,24 @@ name = "roomeq-engine"
 version = "0.4.51"
 dependencies = [
  "autoeq-core",
+ "autoeq-fir",
  "autoeq-measurements",
  "autoeq-optim",
+ "autoeq-workflow",
+ "log",
+ "math-iir-fir",
+ "math-optimisation",
+ "nalgebra",
+ "ndarray",
+ "num-complex",
+ "oxiblas-ndarray",
+ "roomeq-analysis",
  "roomeq-model",
+ "roomeq-quality",
+ "rustfft",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2678,6 +2721,7 @@ dependencies = [
 name = "roomeq-model"
 version = "0.4.51"
 dependencies = [
+ "anyhow",
  "autoeq-core",
  "autoeq-measurements",
  "autoeq-optim",
@@ -2702,6 +2746,16 @@ dependencies = [
  "schemars 1.2.1",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "roomeq-synthetic"
+version = "0.4.51"
+dependencies = [
+ "autoeq-core",
+ "log",
+ "math-iir-fir",
+ "ndarray",
 ]
 
 [[package]]

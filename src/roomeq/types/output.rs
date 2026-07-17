@@ -69,14 +69,7 @@ impl From<CurveData> for Curve {
 // Impulse Response Waveform
 // ============================================================================
 
-/// Impulse response waveform (time-domain)
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct IrWaveform {
-    /// Time axis in milliseconds
-    pub time_ms: Vec<f64>,
-    /// Amplitude (normalized so pre-IR peak = 1.0)
-    pub amplitude: Vec<f64>,
-}
+pub use roomeq_analysis::IrWaveform;
 
 // ============================================================================
 // DSP Chain Types

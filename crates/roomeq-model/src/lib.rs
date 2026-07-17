@@ -29,11 +29,18 @@ pub mod roomeq {
     }
 }
 
+pub mod auto_tune;
 pub mod config;
+pub mod config_loader;
 pub mod contracts;
+pub mod home_cinema;
+pub mod home_cinema_resolution;
 pub mod preset;
 pub mod rir_prototype_config;
+pub mod target_tilt;
+pub mod validation_rules;
 pub use contracts::{ChannelChain, DspGraph, Plugin};
 mod optim_adapter;
 pub use config::*;
+pub use home_cinema::*;
 pub use preset::*;

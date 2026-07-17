@@ -173,7 +173,7 @@ pub(in super::super) fn compute_and_correct_icd(
                 );
 
             for correction in &corrections {
-                if correction.plugin.is_some() {
+                if !correction.filters.is_empty() {
                     apply_channel_matching_correction(result, correction, sample_rate);
                     applied_any = true;
                 }

@@ -453,7 +453,7 @@ pub(in super::super) fn apply_channel_matching_correction(
     correction: &crate::roomeq::spectral_align::ChannelMatchingResult,
     sample_rate: f64,
 ) {
-    if let Some(plugin) = &correction.plugin {
+    if !correction.filters.is_empty() {
         info!(
             "  Channel '{}': {} matching filters",
             correction.channel_name,
@@ -467,7 +467,12 @@ pub(in super::super) fn apply_channel_matching_correction(
         }
 
         if let Some(chain) = result.channels.get_mut(&correction.channel_name) {
-            chain.plugins.push(plugin.clone());
+            chain
+                .plugins
+                .push(crate::roomeq::output::create_labeled_eq_plugin(
+                    &correction.filters,
+                    "channel_matching",
+                ));
         }
 
         if let Some(ch_result) = result.channel_results.get_mut(&correction.channel_name) {
@@ -972,10 +977,6 @@ mod tests {
         let correction = ChannelMatchingResult {
             channel_name: "left".to_string(),
             filters: vec![filter],
-            plugin: Some(PluginConfigWrapper {
-                plugin_type: "eq".to_string(),
-                parameters: json!({"filters": []}),
-            }),
         };
         let before = result.channel_results["left"].final_curve.spl[10];
         apply_channel_matching_correction(&mut result, &correction, 48_000.0);

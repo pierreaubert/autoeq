@@ -1,22 +1,4 @@
-use super::role::role_for_channel;
-pub use super::types::*;
+//! Compatibility adapters for model-owned channel matching contracts.
 
-pub fn matching_group_key(channel_name: &str) -> Option<&'static str> {
-    matching_group_key_for_role(role_for_channel(channel_name))
-}
-
-pub(super) fn matching_group_key_for_role(role: HomeCinemaRole) -> Option<&'static str> {
-    match role.group() {
-        HomeCinemaRoleGroup::FrontLr => Some("front_lr"),
-        HomeCinemaRoleGroup::SideSurrounds => Some("side_surrounds"),
-        HomeCinemaRoleGroup::RearSurrounds => Some("rear_surrounds"),
-        HomeCinemaRoleGroup::Wides => Some("wides"),
-        HomeCinemaRoleGroup::TopFront => Some("top_front"),
-        HomeCinemaRoleGroup::TopMiddle => Some("top_middle"),
-        HomeCinemaRoleGroup::TopRear => Some("top_rear"),
-        HomeCinemaRoleGroup::Unknown => Some("generic"),
-        HomeCinemaRoleGroup::Center | HomeCinemaRoleGroup::Lfe | HomeCinemaRoleGroup::Subwoofer => {
-            None
-        }
-    }
-}
+#[allow(unused_imports)]
+pub use roomeq_model::home_cinema::{matching_group_key, matching_group_key_for_role};

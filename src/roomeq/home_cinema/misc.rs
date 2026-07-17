@@ -145,74 +145,6 @@ pub(super) fn optional_max(values: impl Iterator<Item = f64>) -> Option<f64> {
     values.reduce(f64::max)
 }
 
-impl HomeCinemaRole {
-    pub fn group(self) -> HomeCinemaRoleGroup {
-        match self {
-            HomeCinemaRole::FrontLeft | HomeCinemaRole::FrontRight => HomeCinemaRoleGroup::FrontLr,
-            HomeCinemaRole::Center => HomeCinemaRoleGroup::Center,
-            HomeCinemaRole::Lfe => HomeCinemaRoleGroup::Lfe,
-            HomeCinemaRole::Subwoofer => HomeCinemaRoleGroup::Subwoofer,
-            HomeCinemaRole::SideSurroundLeft | HomeCinemaRole::SideSurroundRight => {
-                HomeCinemaRoleGroup::SideSurrounds
-            }
-            HomeCinemaRole::RearSurroundLeft | HomeCinemaRole::RearSurroundRight => {
-                HomeCinemaRoleGroup::RearSurrounds
-            }
-            HomeCinemaRole::WideLeft | HomeCinemaRole::WideRight => HomeCinemaRoleGroup::Wides,
-            HomeCinemaRole::TopFrontLeft | HomeCinemaRole::TopFrontRight => {
-                HomeCinemaRoleGroup::TopFront
-            }
-            HomeCinemaRole::TopMiddleLeft | HomeCinemaRole::TopMiddleRight => {
-                HomeCinemaRoleGroup::TopMiddle
-            }
-            HomeCinemaRole::TopRearLeft | HomeCinemaRole::TopRearRight => {
-                HomeCinemaRoleGroup::TopRear
-            }
-            HomeCinemaRole::Unknown => HomeCinemaRoleGroup::Unknown,
-        }
-    }
-
-    pub fn is_height(self) -> bool {
-        matches!(
-            self,
-            HomeCinemaRole::TopFrontLeft
-                | HomeCinemaRole::TopFrontRight
-                | HomeCinemaRole::TopMiddleLeft
-                | HomeCinemaRole::TopMiddleRight
-                | HomeCinemaRole::TopRearLeft
-                | HomeCinemaRole::TopRearRight
-        )
-    }
-
-    pub fn is_sub_or_lfe(self) -> bool {
-        matches!(self, HomeCinemaRole::Subwoofer | HomeCinemaRole::Lfe)
-    }
-
-    pub fn is_bed_channel(self) -> bool {
-        !self.is_height() && !self.is_sub_or_lfe() && self != HomeCinemaRole::Unknown
-    }
-
-    pub fn is_bass_managed_candidate(self) -> bool {
-        self.is_bed_channel() || self.is_height()
-    }
-
-    pub fn default_target_band_hz(self) -> (f64, f64) {
-        match self {
-            HomeCinemaRole::Lfe | HomeCinemaRole::Subwoofer => (20.0, 160.0),
-            HomeCinemaRole::Center => (80.0, 16_000.0),
-            HomeCinemaRole::SideSurroundLeft
-            | HomeCinemaRole::SideSurroundRight
-            | HomeCinemaRole::RearSurroundLeft
-            | HomeCinemaRole::RearSurroundRight
-            | HomeCinemaRole::WideLeft
-            | HomeCinemaRole::WideRight => (80.0, 12_000.0),
-            role if role.is_height() => (120.0, 10_000.0),
-            HomeCinemaRole::Unknown => (20.0, 20_000.0),
-            _ => (40.0, 18_000.0),
-        }
-    }
-}
-
 pub(super) fn detect_layout_name(
     bed_channels: usize,
     lfe_channels: usize,
@@ -270,6 +202,7 @@ pub(super) fn measurement_source_count(source: &MeasurementSource) -> Option<usi
     }
 }
 
+#[cfg(test)]
 pub(super) fn normalize_channel_name(channel_name: &str) -> String {
     channel_name
         .trim()

@@ -31,9 +31,11 @@ pub use all::*;
 pub use apply::*;
 pub use bass::*;
 pub use estimated::*;
+#[allow(unused_imports)]
 pub use matching::*;
 pub use misc::*;
 pub use multi::*;
 pub use resolve::*;
+#[allow(unused_imports)]
 pub use role::*;
 pub use target::*;

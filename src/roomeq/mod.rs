@@ -36,19 +36,17 @@ pub use types::*;
 pub use types::RecordingConfiguration;
 
 // Configuration loading (shared between roomeq and roomeq_qa binaries)
-mod config_loader;
-pub use config_loader::{SHALLOW_MERGE_KEYS, load_config, merge_json_objects};
+pub use roomeq_model::config_loader::{SHALLOW_MERGE_KEYS, load_config, merge_json_objects};
 
 // Analytic acoustic ground truth and multi-dimensional QA metrics.
 pub use roomeq_quality as acoustic_qa;
 
 // Configuration validation
-#[allow(hidden_glob_reexports)]
-mod config;
 pub use config::{ValidationResult, validate_room_config};
+pub use roomeq_model::validation_rules as config;
 
 // Main optimization entry points
-mod artifacts;
+pub(crate) use autoeq_artifacts::roomeq as artifacts;
 mod pipeline;
 pub use pipeline::{
     PipelineControl, PipelineEvent, PipelineObserver, PipelineStepId, PipelineStepStatus,
@@ -63,8 +61,8 @@ pub use optimize::{
 };
 
 // Extracted optimization submodules
-mod auto_tune;
-mod crossover_utils;
+pub(crate) use roomeq_analysis::crossover_utils;
+pub(crate) use roomeq_model::auto_tune;
 mod group_processing; // Multi-speaker groups, multisub, DBA, cardioid, mixed-mode
 mod speaker_eq; // Single-speaker EQ optimization // Crossover and group consistency utilities
 
@@ -72,13 +70,13 @@ mod speaker_eq; // Single-speaker EQ optimization // Crossover and group consist
 pub mod test_fixtures;
 
 // Individual optimization modules
-mod crossover;
-mod dba;
+pub use roomeq_engine::crossover;
+pub use roomeq_engine::dba;
 mod eq;
 mod fir;
-mod frequency_grid;
+pub(crate) use roomeq_analysis::frequency_grid;
 pub mod home_cinema;
-pub mod multisub;
+pub use roomeq_engine::multisub;
 pub mod workflows; // Make public to access from optimize.rs or tests
 
 // Export to external formats (CamillaDSP, APO, EasyEffects, Wavelet, PipeWire)
@@ -102,11 +100,10 @@ pub use output::{
 };
 
 // Progress reporting
-mod progress;
-pub use progress::{MultiStageProgress, ProgressReporter};
+pub use roomeq_engine::progress::{MultiStageProgress, ProgressReporter};
 
 // Supporting-source room compensation (Brooks-Park)
-mod supporting_source;
+pub use roomeq_engine::supporting_source;
 pub use supporting_source::{
     SupportingSourceFilter, compute_supporting_source_filter, generate_velvet_noise,
 };
@@ -125,31 +122,33 @@ pub use inter_channel_timbre_matching::{
     create_timbre_matching_plugins, pairwise_normalized_timbre_spread_db,
 };
 
-mod height_channel_alignment;
+pub mod height_channel_alignment {
+    pub use roomeq_engine::height_channel_alignment::*;
+}
 pub use height_channel_alignment::{
     HeightAlignmentStatus, HeightChannelAlignmentResult, compute_height_channel_alignment,
 };
 
 // Spatial robustness (multi-position analysis)
-pub mod spatial_robustness;
+pub use roomeq_analysis::spatial_robustness;
 pub use spatial_robustness::{SpatialRobustnessResult, analyze_spatial_robustness};
 
 // Mixed-phase correction (IIR + short FIR)
-pub mod mixed_phase;
 pub use mixed_phase::{MixedPhaseConfig, MixedPhaseResult, decompose_phase};
+pub use roomeq_engine::mixed_phase;
 
 // Decomposed correction (modes vs reflections vs steady-state)
-pub mod impulse_analysis;
 pub use impulse_analysis::{
     DecomposedCorrectionConfig, DecomposedCorrectionResult, analyze_decomposed_correction,
 };
+pub use roomeq_analysis::impulse_analysis;
 
 // Distance- and directivity-weighted RIR prototype builder
-pub mod rir_prototype;
 pub use rir_prototype::{
     DirectivityModel, DistanceWeightMode, RirPrototypeConfig, WeightedPrototype,
     build_weighted_prototype,
 };
+pub use roomeq_analysis::rir_prototype;
 
 // CEA2034 speaker pre-correction (3-pass pipeline)
 pub mod cea2034_correction;
@@ -158,30 +157,30 @@ pub mod cea2034_correction;
 pub mod ctc;
 
 // First-reflection cancellation (Johnston IIR filter)
-pub mod reflection_cancel;
 pub use reflection_cancel::{
     ReflectionCancellationConfig, ReflectionCancellationResult, compute_reflection_cancellation,
 };
+pub use roomeq_analysis::reflection_cancel;
 
 // Group delay optimisation v2 (LowLatency IIR path)
-pub mod gd_opt;
+pub use roomeq_engine::gd_opt;
 
 // Bass-phase confidence gate for GD-Opt v2 (§3.5)
-pub mod bass_phase_confidence;
 pub use bass_phase_confidence::{
     BassPhaseConfidence, DEFAULT_COHERENCE_THRESHOLD, MIN_BASS_OCTAVE_DURATION_S, MIN_NUM_SWEEPS,
     MIN_SNR_DB, bass_phase_confidence as compute_bass_phase_confidence,
 };
+pub use roomeq_engine::bass_phase_confidence;
 
 // Utility modules
-mod ir_waveform;
+pub(crate) use roomeq_analysis::ir_waveform;
 pub(crate) mod phase_utils;
-pub mod synthetic;
 pub(crate) use roomeq_analysis::time_align;
+pub use roomeq_synthetic as synthetic;
 // GD-Opt v2 Phase GD-1f — microphone phase calibration loader. See
 // `docs/gd_opt_v2_plan.md` §2.6 and §2.8.
-pub mod mic_phase_calibration;
-pub use mic_phase_calibration::{MicPhaseCalibration, load_mic_phase_calibration};
+pub use autoeq_measurements::mic_phase_calibration;
+pub use autoeq_measurements::{MicPhaseCalibration, load_mic_phase_calibration};
 
 pub use time_align::{
     ArrivalTimeResult, ProbeDelayResult, calculate_alignment_delays, detect_delay_with_probe,
@@ -189,17 +188,17 @@ pub use time_align::{
 };
 
 // Perceptual temporal decay thresholds for modal ringing
-pub mod temporal_targets;
+pub use roomeq_analysis::temporal_targets;
 
 // Broadband slope estimation from measurement curves
-pub mod slope;
+pub use roomeq_analysis::slope;
 
 // Advanced room correction features (Scenario A & B)
-pub mod excursion;
-pub mod listening_area;
-pub mod multiseat;
-pub mod phase_alignment;
-pub mod target_tilt;
+pub use roomeq_analysis::listening_area;
+pub use roomeq_engine::excursion;
+pub use roomeq_engine::multiseat;
+pub use roomeq_engine::phase_alignment;
+pub use roomeq_model::target_tilt;
 
 pub use listening_area::{ListeningArea, ListeningAreaInterpolatorConfig};
 

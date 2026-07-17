@@ -9,6 +9,7 @@ license = "GPL-3.0-or-later"
 autoeq-core = { workspace = true }
 autoeq-measurements = { workspace = true }
 autoeq-optim = { workspace = true }
+anyhow = { workspace = true }
 clap = { workspace = true }
 log = { workspace = true }
 ndarray = { workspace = true }

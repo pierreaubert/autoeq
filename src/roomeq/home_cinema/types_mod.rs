@@ -1,16 +1,5 @@
-#[derive(Debug, Clone)]
-pub(super) struct ResolvedGroupCrossover {
-    pub(super) crossover_type: String,
-    pub(super) frequency_hz: Option<f64>,
-    pub(super) configured_hz: Option<f64>,
-    pub(super) frequency_range: Option<(f64, f64)>,
-    pub(super) missing_config_key: Option<String>,
-}
+//! Compatibility adapters for model-owned home-cinema resolution contracts.
 
-#[derive(Debug, Clone, Copy)]
-pub(super) struct ResolvedGroupRouteSettings {
-    pub(super) main_delay_ms: f64,
-    pub(super) bass_route_delay_ms: f64,
-    pub(super) polarity_inverted: bool,
-    pub(super) trim_db: f64,
-}
+pub(super) use roomeq_model::home_cinema_resolution::{
+    ResolvedGroupCrossover, ResolvedGroupRouteSettings,
+};

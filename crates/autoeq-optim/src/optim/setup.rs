@@ -16,8 +16,6 @@ mod drivers;
 mod misc;
 mod perform;
 mod progress_callback_config;
-#[cfg(all(test, feature = "roomeq-adapter"))]
-mod tests;
 mod types;
 
 pub use drivers::*;

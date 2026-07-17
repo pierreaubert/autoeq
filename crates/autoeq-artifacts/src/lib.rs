@@ -5,6 +5,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+/// Deterministic RoomEQ convolution-sidecar naming and reservation helpers.
+pub mod roomeq;
+
 /// Abstraction over artifact persistence (directories, JSON exports, FIR WAVs,
 /// reports, sidecars, etc.).
 pub trait ArtifactStore: Send + Sync {

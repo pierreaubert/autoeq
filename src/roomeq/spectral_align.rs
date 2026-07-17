@@ -1,27 +1,45 @@
-//! Spectral channel alignment via shelf filters + gain.
+//! Compatibility adapter for the extracted spectral-alignment engine.
 //!
-//! After independent per-channel room EQ optimization, L and R corrected curves
-//! can differ in both overall level and spectral tilt. This module replaces the
-//! flat-gain-only alignment with a 3-parameter spectral model:
-//!   **low-shelf + high-shelf + flat gain**
-//! fitted via weighted linear least squares.
-//!
-//! The shelf response in dB is nonlinear in `db_gain` (the transition band shape
-//! changes with gain). The fitting uses Gauss-Newton iteration to handle this:
-//! a linear solve provides the initial estimate, then 3 iterations refine it
-//! using the actual shelf response and a finite-difference Jacobian.
+//! Filter fitting and response analysis live in `roomeq-engine`. This module
+//! alone converts the engine's filter primitives into the root crate's legacy
+//! output-plugin representation.
 
-mod channel_matching_correction_profile;
-mod compute;
-mod consts;
-mod create;
-mod misc;
+pub use roomeq_engine::spectral_align::{
+    ChannelMatchingCorrectionProfile, ChannelMatchingResult, HIGHSHELF_FREQ, LOWSHELF_FREQ,
+    MIN_CORRECTION_DB, SpectralAlignmentResult, compute_inter_channel_deviation,
+    compute_spectral_alignment, compute_target_alignment,
+    correct_inter_channel_deviation_with_profile, create_alignment_filters, log_spectral_alignment,
+};
+
+use super::types::PluginConfigWrapper;
+
+/// Convert spectral-alignment filters to the legacy RoomEQ output plugins.
+pub fn create_alignment_plugins(
+    result: &SpectralAlignmentResult,
+    sample_rate: f64,
+) -> (Option<PluginConfigWrapper>, Option<PluginConfigWrapper>) {
+    let shelf_filters = create_alignment_filters(result, sample_rate);
+    let eq_plugin = (!shelf_filters.is_empty())
+        .then(|| super::output::create_labeled_eq_plugin(&shelf_filters, "broadband"));
+    let gain_plugin = (result.flat_gain_db.abs() >= MIN_CORRECTION_DB)
+        .then(|| super::output::create_gain_plugin(result.flat_gain_db));
+    (eq_plugin, gain_plugin)
+}
+
 #[cfg(test)]
-mod tests;
-mod types;
+mod tests {
+    use super::*;
 
-pub(in crate::roomeq) use channel_matching_correction_profile::*;
-pub use compute::*;
-pub use consts::*;
-pub use create::*;
-pub use types::*;
+    #[test]
+    fn adapter_preserves_broadband_output_contract() {
+        let result = SpectralAlignmentResult {
+            lowshelf_gain_db: -2.0,
+            highshelf_gain_db: 1.5,
+            flat_gain_db: -1.0,
+            residual_rms_db: 0.5,
+        };
+        let (eq, gain) = create_alignment_plugins(&result, 48_000.0);
+        assert_eq!(eq.expect("shelf plugin").plugin_type, "eq");
+        assert_eq!(gain.expect("gain plugin").plugin_type, "gain");
+    }
+}

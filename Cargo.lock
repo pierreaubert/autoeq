@@ -2692,6 +2692,7 @@ dependencies = [
  "autoeq-fir",
  "autoeq-optim",
  "log",
+ "math-dsp",
  "math-iir-fir",
  "math-optimisation",
  "math-rir",

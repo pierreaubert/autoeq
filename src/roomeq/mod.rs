@@ -62,7 +62,6 @@ pub use optimize::{
 
 // Extracted optimization submodules
 pub(crate) use roomeq_analysis::crossover_utils;
-mod group_processing; // Multi-speaker groups, multisub, DBA, cardioid, mixed-mode
 
 #[cfg(test)]
 pub mod test_fixtures;

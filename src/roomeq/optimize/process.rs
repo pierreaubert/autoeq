@@ -1,6 +1,3 @@
-use super::super::group_processing::{
-    process_cardioid, process_dba, process_multisub_group, process_speaker_group,
-};
 use super::super::pipeline::{PipelineStepId, PipelineStepStatus};
 use super::super::types::{RoomConfig, SpeakerConfig};
 use super::misc::generic_channel_progress_iterations;
@@ -11,6 +8,10 @@ use super::types::SharedPipelineObserver;
 use super::types::SpeakerProcessResult;
 use crate::error::Result;
 use log::info;
+use roomeq_workflow::{
+    process_cardioid, process_dba, process_multisub_group, process_speaker_group,
+    process_speaker_topology,
+};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -240,13 +241,7 @@ pub(super) fn process_speaker_internal(
             process_speaker_group(channel_name, group, room_config, sample_rate, output_dir)
         }
         SpeakerConfig::Topology(topology) => {
-            super::super::group_processing::process_speaker_topology(
-                channel_name,
-                topology,
-                room_config,
-                sample_rate,
-                output_dir,
-            )
+            process_speaker_topology(channel_name, topology, room_config, sample_rate, output_dir)
         }
         SpeakerConfig::MultiSub(group) => {
             process_multisub_group(channel_name, group, room_config, sample_rate, output_dir)

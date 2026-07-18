@@ -1,29 +1,68 @@
-use super::super::crossover;
-use super::super::dba;
-use super::super::multiseat::{self, MultiSeatMeasurements};
-use super::super::multisub;
-use super::super::optimize::detect_passband_and_mean;
-use super::super::output;
-use super::super::types::{
-    LEGACY_SPEAKER_GROUP_ADVISORY, MultiSeatConfig, MultiSubGroup, OptimizerConfig, RoomConfig,
-    SpeakerGroup, SpeakerTopology,
+use crate::crossover;
+use crate::dba::{self, DbaPreparedInput};
+use crate::eq::{self, EqResources};
+use crate::group::{
+    apply_per_sub_filters, average_power_curve, eq_score_regressed, flat_loss_score,
+    identity_multiseat_result, multiseat_peq_config,
 };
-use super::misc::apply_per_sub_filters;
-use super::misc::average_power_curve;
-use super::misc::eq_score_regressed;
-use super::misc::flat_loss_score;
-use super::misc::identity_multiseat_result;
-use super::misc::load_multisub_seat_measurements;
-use super::misc::multiseat_peq_config;
-use super::types::MixedModeResult;
-use crate::Curve;
-use crate::error::{AutoeqError, Result};
-use crate::read as load;
-use crate::response;
+use crate::multiseat::{self, MultiSeatMeasurements};
+use crate::multisub;
+use crate::output;
+use autoeq_core::{Curve, response};
+use autoeq_optim::loss::{CrossoverType, DriverMeasurement, DriversLossData, drivers_flat_loss};
 use log::{debug, info, warn};
 use math_audio_dsp::analysis::compute_average_response;
-use roomeq_workflow::eq;
-use std::path::Path;
+use math_audio_iir_fir::Biquad;
+use roomeq_analysis::response_metrics::detect_passband_and_mean;
+use roomeq_model::{
+    CardioidConfig, ChannelDspChain, CurveData, LEGACY_SPEAKER_GROUP_ADVISORY, MultiSeatConfig,
+    MultiSubGroup, OptimizerConfig, RoomConfig, SpeakerGroup, SpeakerTopology,
+};
+
+use crate::error::{AutoeqError, Result};
+
+/// Compatibility result consumed by the remaining root composition layer.
+pub type GroupProcessingResult = (
+    ChannelDspChain,
+    f64,
+    f64,
+    Curve,
+    Curve,
+    Vec<Biquad>,
+    f64,
+    Option<f64>,
+    Option<Vec<f64>>,
+    Vec<autoeq_optim::optim::OptimizerRunEvidence>,
+);
+
+/// In-memory measurements for an explicit or legacy speaker topology.
+pub struct PreparedSpeakerTopology {
+    pub drivers: Vec<Curve>,
+}
+
+/// In-memory measurements for a multi-sub group and its optional seat matrix.
+pub struct PreparedMultiSubGroup {
+    pub subwoofers: Vec<Curve>,
+    pub seat_measurements: Option<Vec<Vec<Curve>>>,
+}
+
+/// In-memory front/rear measurements for gradient-cardioid processing.
+pub struct PreparedCardioidInput {
+    pub front: Curve,
+    pub rear: Curve,
+}
+
+#[derive(Clone, Copy)]
+struct MultiSubExecutionContext<'a> {
+    channel_name: &'a str,
+    group: &'a MultiSubGroup,
+    room_config: &'a RoomConfig,
+    multi_seat_config: &'a MultiSeatConfig,
+    sample_rate: f64,
+    prepared: &'a PreparedMultiSubGroup,
+    eq_resources: &'a EqResources,
+    flat_eq_resources: &'a EqResources,
+}
 
 struct AggregatedTopologyBands {
     curves: Vec<Curve>,
@@ -68,7 +107,7 @@ fn aggregate_topology_bands(
                 .collect::<Vec<_>>();
             let (gains, delays, _, combined, inversions) = crossover::optimize_crossover_ordered(
                 member_curves,
-                crate::loss::CrossoverType::None,
+                CrossoverType::None,
                 sample_rate,
                 optimizer,
                 Some(vec![0.0; members.len() - 1]),
@@ -93,18 +132,15 @@ fn aggregate_topology_bands(
             .iter()
             .map(|&driver_index| {
                 let curve = &drivers[driver_index];
-                crate::loss::DriverMeasurement {
+                DriverMeasurement {
                     freq: curve.freq.clone(),
                     spl: curve.spl.clone(),
                     phase: curve.phase.clone(),
                 }
             })
             .collect::<Vec<_>>();
-        let data = crate::loss::DriversLossData::new_ordered(
-            measurements,
-            crate::loss::CrossoverType::None,
-        );
-        let response = crate::loss::compute_drivers_combined_response_complex(
+        let data = DriversLossData::new_ordered(measurements, CrossoverType::None);
+        let response = autoeq_optim::loss::compute_drivers_combined_response_complex(
             &data,
             &vec![0.0; members.len()],
             &[],
@@ -127,37 +163,41 @@ fn aggregate_topology_bands(
     })
 }
 
-pub(in super::super) fn process_speaker_group(
+pub fn process_speaker_group(
     channel_name: &str,
     group: &SpeakerGroup,
     room_config: &RoomConfig,
     sample_rate: f64,
-    _output_dir: &Path,
-) -> Result<MixedModeResult> {
+    prepared: &PreparedSpeakerTopology,
+    eq_resources: &EqResources,
+) -> Result<GroupProcessingResult> {
     warn!("  {LEGACY_SPEAKER_GROUP_ADVISORY}");
     process_speaker_topology_impl(
         channel_name,
         &group.to_legacy_topology(),
         room_config,
         sample_rate,
-        _output_dir,
+        prepared,
+        eq_resources,
         true,
     )
 }
 
-pub(in super::super) fn process_speaker_topology(
+pub fn process_speaker_topology(
     channel_name: &str,
     topology: &SpeakerTopology,
     room_config: &RoomConfig,
     sample_rate: f64,
-    output_dir: &Path,
-) -> Result<MixedModeResult> {
+    prepared: &PreparedSpeakerTopology,
+    eq_resources: &EqResources,
+) -> Result<GroupProcessingResult> {
     process_speaker_topology_impl(
         channel_name,
         topology,
         room_config,
         sample_rate,
-        output_dir,
+        prepared,
+        eq_resources,
         false,
     )
 }
@@ -167,25 +207,29 @@ fn process_speaker_topology_impl(
     group: &SpeakerTopology,
     room_config: &RoomConfig,
     sample_rate: f64,
-    _output_dir: &Path,
+    prepared: &PreparedSpeakerTopology,
+    eq_resources: &EqResources,
     legacy_ordering: bool,
-) -> Result<MixedModeResult> {
+) -> Result<GroupProcessingResult> {
     group
         .validate()
         .map_err(|message| AutoeqError::InvalidConfiguration { message })?;
-    // 1. Load all measurements in the group
-    let mut drivers = Vec::new();
-    for (i, driver) in group.drivers.iter().enumerate() {
-        let curve = load::load_source(&driver.measurement).map_err(|e| {
-            AutoeqError::InvalidMeasurement {
-                message: format!(
-                    "Failed to load driver '{}' ({}) measurement for channel {}: {}",
-                    driver.id, i, channel_name, e
-                ),
-            }
-        })?;
-        drivers.push((driver.clone(), curve));
+    if prepared.drivers.len() != group.drivers.len() {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: format!(
+                "prepared driver count {} does not match topology driver count {} for channel {}",
+                prepared.drivers.len(),
+                group.drivers.len(),
+                channel_name
+            ),
+        });
     }
+    let mut drivers = group
+        .drivers
+        .iter()
+        .cloned()
+        .zip(prepared.drivers.iter().cloned())
+        .collect::<Vec<_>>();
 
     debug!("  Loaded {} driver measurements", drivers.len());
 
@@ -254,11 +298,7 @@ fn process_speaker_topology_impl(
     info!("  Linearizing {} drivers...", driver_curves.len());
     let mut optimization_bands = crossover_config
         .map(|crossover| {
-            roomeq_engine::crossover::determine_optimization_bands(
-                driver_curves.len(),
-                room_config,
-                crossover,
-            )
+            crossover::determine_optimization_bands(driver_curves.len(), room_config, crossover)
         })
         .unwrap_or_else(|| {
             vec![
@@ -308,7 +348,7 @@ fn process_speaker_topology_impl(
         let result = eq::optimize_channel_eq_detailed(
             curve,
             &driver_opt_config,
-            room_config.target_curve.as_ref(), // Use global target (usually flat)
+            Some(eq_resources),
             sample_rate,
         )
         .map_err(|e| AutoeqError::OptimizationFailed {
@@ -336,11 +376,11 @@ fn process_speaker_topology_impl(
     let driver_band_indices = topology_bands.driver_band_indices;
 
     // 5. Setup Crossover Optimization
-    let crossover_type: crate::loss::CrossoverType = crossover_config
+    let crossover_type: CrossoverType = crossover_config
         .map(|crossover| crossover.crossover_type.parse())
         .transpose()
         .map_err(|e: String| AutoeqError::InvalidConfiguration { message: e })?
-        .unwrap_or(crate::loss::CrossoverType::None);
+        .unwrap_or(CrossoverType::None);
 
     let fixed_freqs: Option<Vec<f64>> = crossover_config.and_then(|crossover| {
         crossover
@@ -362,9 +402,9 @@ fn process_speaker_topology_impl(
         initial_xover_freqs.push((min * max).sqrt());
     }
 
-    let driver_measurements: Vec<crate::loss::DriverMeasurement> = acoustic_drivers
+    let driver_measurements: Vec<DriverMeasurement> = acoustic_drivers
         .iter()
-        .map(|curve| crate::loss::DriverMeasurement {
+        .map(|curve| DriverMeasurement {
             freq: curve.freq.clone(),
             spl: curve.spl.clone(),
             phase: curve.phase.clone(),
@@ -380,9 +420,8 @@ fn process_speaker_topology_impl(
             room_config.optimizer.max_freq,
         )
     } else {
-        let drivers_data =
-            crate::loss::DriversLossData::new_ordered(driver_measurements, crossover_type);
-        crate::loss::drivers_flat_loss(
+        let drivers_data = DriversLossData::new_ordered(driver_measurements, crossover_type);
+        drivers_flat_loss(
             &drivers_data,
             &initial_gains,
             &initial_xover_freqs,
@@ -453,7 +492,7 @@ fn process_speaker_topology_impl(
     let global_result = eq::optimize_channel_eq_detailed(
         &combined_curve,
         &room_config.optimizer,
-        room_config.target_curve.as_ref(),
+        Some(eq_resources),
         sample_rate,
     )
     .map_err(|e| AutoeqError::OptimizationFailed {
@@ -527,9 +566,9 @@ fn process_speaker_topology_impl(
     );
     let display_final = response::apply_complex_response(&display_initial, &display_resp);
 
-    let mut initial_data: super::super::types::CurveData = (&display_initial).into();
+    let mut initial_data: CurveData = (&display_initial).into();
     initial_data.norm_range = norm_range;
-    let mut final_data: super::super::types::CurveData = (&display_final).into();
+    let mut final_data: CurveData = (&display_final).into();
     final_data.norm_range = norm_range;
 
     chain.initial_curve = Some(initial_data.clone());
@@ -564,29 +603,44 @@ fn process_speaker_topology_impl(
 /// Process multi-subwoofer group
 ///
 /// Returns: (DSP chain, pre_score, post_score, initial_curve, final_curve, biquads, mean_spl, arrival_time_ms)
-pub(in super::super) fn process_multisub_group(
+pub fn process_multisub_group(
     channel_name: &str,
     group: &MultiSubGroup,
     room_config: &RoomConfig,
     sample_rate: f64,
-    _output_dir: &Path,
-) -> Result<MixedModeResult> {
+    prepared: &PreparedMultiSubGroup,
+    eq_resources: &EqResources,
+    flat_eq_resources: &EqResources,
+) -> Result<GroupProcessingResult> {
+    if prepared.subwoofers.len() != group.subwoofers.len() {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: format!(
+                "prepared subwoofer count {} does not match group source count {} for channel {}",
+                prepared.subwoofers.len(),
+                group.subwoofers.len(),
+                channel_name
+            ),
+        });
+    }
     if let Some(multi_seat_config) = room_config
         .optimizer
         .multi_seat
         .as_ref()
         .filter(|config| config.enabled)
     {
-        match load_multisub_seat_measurements(group)? {
+        match prepared.seat_measurements.clone() {
             Some(seat_measurements) => {
-                return process_multisub_group_multiseat(
+                let context = MultiSubExecutionContext {
                     channel_name,
                     group,
                     room_config,
                     multi_seat_config,
                     sample_rate,
-                    seat_measurements,
-                );
+                    prepared,
+                    eq_resources,
+                    flat_eq_resources,
+                };
+                return process_multisub_group_multiseat(&context, seat_measurements);
             }
             None => warn!(
                 "  Multi-seat optimization is enabled for multi-sub group '{}' but subwoofer sources do not contain at least two seat measurements each; using single-seat multi-sub path",
@@ -599,7 +653,7 @@ pub(in super::super) fn process_multisub_group(
         // All-pass enhanced optimization
         info!("  Using all-pass enhanced multi-sub optimization");
         let ap_result = multisub::optimize_multisub_with_allpass(
-            &group.subwoofers,
+            &prepared.subwoofers,
             &room_config.optimizer,
             sample_rate,
         )
@@ -622,7 +676,7 @@ pub(in super::super) fn process_multisub_group(
     } else {
         // Standard gain + delay optimization
         let detailed = multisub::optimize_multisub_detailed(
-            &group.subwoofers,
+            &prepared.subwoofers,
             &room_config.optimizer,
             sample_rate,
         )
@@ -647,7 +701,7 @@ pub(in super::super) fn process_multisub_group(
     let eq_result = eq::optimize_channel_eq_detailed(
         &combined_curve,
         &multisub_eq_optimizer,
-        room_config.target_curve.as_ref(),
+        Some(eq_resources),
         sample_rate,
     )
     .map_err(|e| AutoeqError::OptimizationFailed {
@@ -663,26 +717,17 @@ pub(in super::super) fn process_multisub_group(
         post_score
     );
 
-    // Load individual sub curves for per-driver display
-    let driver_curves_for_display: Vec<Curve> = group
+    let driver_curves_for_display: Vec<Curve> = prepared
         .subwoofers
         .iter()
-        .filter_map(|source| {
-            load::load_source(source)
-                .ok()
-                .map(|c| output::extend_curve_to_full_range(&c))
-        })
+        .map(output::extend_curve_to_full_range)
         .collect();
-    let driver_display_ref = if driver_curves_for_display.len() == group.subwoofers.len() {
-        Some(driver_curves_for_display.as_slice())
-    } else {
-        None
-    };
+    let driver_display_ref = Some(driver_curves_for_display.as_slice());
 
     let mut chain = output::build_multisub_dsp_chain_with_allpass(
         channel_name,
         &group.name,
-        group.subwoofers.len(),
+        prepared.subwoofers.len(),
         &result.gains,
         &result.delays,
         &eq_filters,
@@ -722,9 +767,9 @@ pub(in super::super) fn process_multisub_group(
         response::compute_peq_complex_response(&eq_filters, &display_initial.freq, sample_rate);
     let display_final = response::apply_complex_response(&display_initial, &display_resp);
 
-    let mut initial_data: super::super::types::CurveData = (&display_initial).into();
+    let mut initial_data: CurveData = (&display_initial).into();
     initial_data.norm_range = norm_range;
-    let mut final_data: super::super::types::CurveData = (&display_final).into();
+    let mut final_data: CurveData = (&display_final).into();
     final_data.norm_range = norm_range;
 
     chain.initial_curve = Some(initial_data.clone());
@@ -746,13 +791,20 @@ pub(in super::super) fn process_multisub_group(
 }
 
 fn process_multisub_group_multiseat(
-    channel_name: &str,
-    group: &MultiSubGroup,
-    room_config: &RoomConfig,
-    multi_seat_config: &MultiSeatConfig,
-    sample_rate: f64,
+    context: &MultiSubExecutionContext<'_>,
     seat_measurements: Vec<Vec<Curve>>,
-) -> Result<MixedModeResult> {
+) -> Result<GroupProcessingResult> {
+    let MultiSubExecutionContext {
+        channel_name,
+        group,
+        room_config,
+        multi_seat_config,
+        sample_rate,
+        prepared,
+        eq_resources,
+        flat_eq_resources,
+    } = *context;
+    let subwoofer_curves = &prepared.subwoofers;
     let seat_count = seat_measurements.first().map(Vec::len).unwrap_or_default();
     let phase_trustworthy = seat_measurements
         .iter()
@@ -789,7 +841,7 @@ fn process_multisub_group_multiseat(
                 sub_curves,
                 &room_config.optimizer,
                 &peq_config,
-                None,
+                Some(flat_eq_resources),
                 sample_rate,
                 eq::MultiEqAutoOptimizerContext::sub_channel(),
             )
@@ -856,7 +908,7 @@ fn process_multisub_group_multiseat(
             &combined_seat_curves,
             &room_config.optimizer,
             &peq_config,
-            room_config.target_curve.as_ref(),
+            Some(eq_resources),
             sample_rate,
             eq::MultiEqAutoOptimizerContext::sub_channel(),
         )
@@ -912,25 +964,16 @@ fn process_multisub_group_multiseat(
         Some((min_freq as f32, max_freq as f32)),
     ) as f64;
 
-    let driver_curves_for_display: Vec<Curve> = group
-        .subwoofers
+    let driver_curves_for_display: Vec<Curve> = subwoofer_curves
         .iter()
-        .filter_map(|source| {
-            load::load_source(source)
-                .ok()
-                .map(|c| output::extend_curve_to_full_range(&c))
-        })
+        .map(output::extend_curve_to_full_range)
         .collect();
-    let driver_display_ref = if driver_curves_for_display.len() == group.subwoofers.len() {
-        Some(driver_curves_for_display.as_slice())
-    } else {
-        None
-    };
+    let driver_display_ref = Some(driver_curves_for_display.as_slice());
 
     let mut chain = output::build_multisub_dsp_chain_advanced(
         channel_name,
         &group.name,
-        group.subwoofers.len(),
+        subwoofer_curves.len(),
         &mso_result.gains,
         &mso_result.delays,
         &eq_filters,
@@ -948,9 +991,9 @@ fn process_multisub_group_multiseat(
         response::compute_peq_complex_response(&eq_filters, &display_initial.freq, sample_rate);
     let display_final = response::apply_complex_response(&display_initial, &display_resp);
 
-    let mut initial_data: super::super::types::CurveData = (&display_initial).into();
+    let mut initial_data: CurveData = (&display_initial).into();
     initial_data.norm_range = norm_range;
-    let mut final_data: super::super::types::CurveData = (&display_final).into();
+    let mut final_data: CurveData = (&display_final).into();
     final_data.norm_range = norm_range;
 
     chain.initial_curve = Some(initial_data.clone());
@@ -974,14 +1017,14 @@ fn process_multisub_group_multiseat(
 /// Process DBA configuration
 ///
 /// Returns: (DSP chain, pre_score, post_score, initial_curve, final_curve, biquads, mean_spl, arrival_time_ms)
-pub(in super::super) fn process_dba(
+pub fn process_dba(
     channel_name: &str,
-    dba_config: &super::super::types::DBAConfig,
     room_config: &RoomConfig,
     sample_rate: f64,
-    _output_dir: &Path,
-) -> Result<MixedModeResult> {
-    let dba_result = dba::optimize_dba_detailed(dba_config, &room_config.optimizer, sample_rate)
+    prepared: &DbaPreparedInput,
+    eq_resources: &EqResources,
+) -> Result<GroupProcessingResult> {
+    let dba_result = dba::optimize_dba_detailed(prepared, &room_config.optimizer, sample_rate)
         .map_err(|e| AutoeqError::OptimizationFailed {
             message: format!("DBA optimization failed: {}", e),
         })?;
@@ -997,7 +1040,7 @@ pub(in super::super) fn process_dba(
     let eq_result = eq::optimize_channel_eq_detailed(
         &combined_curve,
         &room_config.optimizer,
-        room_config.target_curve.as_ref(),
+        Some(eq_resources),
         sample_rate,
     )
     .map_err(|e| AutoeqError::OptimizationFailed {
@@ -1016,8 +1059,8 @@ pub(in super::super) fn process_dba(
     // Load front/rear array curves for per-driver display
     // DBA has 2 "drivers": front aggregate and rear aggregate
     let driver_display_ref = match (
-        dba::sum_array_response(&dba_config.front),
-        dba::sum_array_response(&dba_config.rear),
+        dba::sum_array_response(&prepared.front),
+        dba::sum_array_response(&prepared.rear),
     ) {
         (Ok(front), Ok(rear)) => Some(vec![
             output::extend_curve_to_full_range(&front),
@@ -1061,9 +1104,9 @@ pub(in super::super) fn process_dba(
         response::compute_peq_complex_response(&eq_filters, &display_initial.freq, sample_rate);
     let display_final = response::apply_complex_response(&display_initial, &display_resp);
 
-    let mut initial_data: super::super::types::CurveData = (&display_initial).into();
+    let mut initial_data: CurveData = (&display_initial).into();
     initial_data.norm_range = norm_range;
-    let mut final_data: super::super::types::CurveData = (&display_final).into();
+    let mut final_data: CurveData = (&display_final).into();
     final_data.norm_range = norm_range;
 
     chain.initial_curve = Some(initial_data.clone());
@@ -1087,34 +1130,30 @@ pub(in super::super) fn process_dba(
 /// Process Gradient Cardioid configuration
 ///
 /// Returns: (DSP chain, pre_score, post_score, initial_curve, final_curve, biquads, mean_spl, arrival_time_ms)
-pub(in super::super) fn process_cardioid(
+pub fn process_cardioid(
     channel_name: &str,
-    config: &super::super::types::CardioidConfig,
+    config: &CardioidConfig,
     room_config: &RoomConfig,
     sample_rate: f64,
-    _output_dir: &Path,
-) -> Result<MixedModeResult> {
-    // 1. Load measurements
-    let front_curve =
-        load::load_source(&config.front).map_err(|e| AutoeqError::InvalidMeasurement {
-            message: format!("Failed to load Front measurement: {}", e),
-        })?;
-    let rear_curve =
-        load::load_source(&config.rear).map_err(|e| AutoeqError::InvalidMeasurement {
-            message: format!("Failed to load Rear measurement: {}", e),
-        })?;
+    prepared: &PreparedCardioidInput,
+    eq_resources: &EqResources,
+) -> Result<GroupProcessingResult> {
+    let front_curve = prepared.front.clone();
+    let rear_curve = prepared.rear.clone();
     if front_curve.phase.is_none() || rear_curve.phase.is_none() {
         return Err(AutoeqError::InvalidMeasurement {
             message: "Cardioid processing requires measured phase for front and rear drivers"
                 .to_string(),
         });
     }
-    let rear_curve =
-        if super::super::frequency_grid::same_frequency_grid(&front_curve.freq, &rear_curve.freq) {
-            rear_curve
-        } else {
-            crate::read::interpolate_log_space(&front_curve.freq, &rear_curve)
-        };
+    let rear_curve = if roomeq_analysis::frequency_grid::same_frequency_grid(
+        &front_curve.freq,
+        &rear_curve.freq,
+    ) {
+        rear_curve
+    } else {
+        autoeq_core::interpolate_log_space(&front_curve.freq, &rear_curve)
+    };
 
     // 2. Calculate Delay
     let delay_ms = config.separation_meters / 343.0 * 1000.0;
@@ -1189,7 +1228,7 @@ pub(in super::super) fn process_cardioid(
     let eq_result = eq::optimize_channel_eq_detailed(
         &combined_curve,
         &room_config.optimizer,
-        room_config.target_curve.as_ref(),
+        Some(eq_resources),
         sample_rate,
     )
     .map_err(|e| AutoeqError::OptimizationFailed {
@@ -1245,9 +1284,9 @@ pub(in super::super) fn process_cardioid(
         response::compute_peq_complex_response(&eq_filters, &display_initial.freq, sample_rate);
     let display_final = response::apply_complex_response(&display_initial, &display_resp);
 
-    let mut initial_data: super::super::types::CurveData = (&display_initial).into();
+    let mut initial_data: CurveData = (&display_initial).into();
     initial_data.norm_range = norm_range;
-    let mut final_data: super::super::types::CurveData = (&display_final).into();
+    let mut final_data: CurveData = (&display_final).into();
     final_data.norm_range = norm_range;
 
     chain.initial_curve = Some(initial_data.clone());

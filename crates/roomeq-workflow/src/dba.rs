@@ -17,7 +17,7 @@ fn load_sources(sources: &[MeasurementSource]) -> Result<Vec<Curve>, Box<dyn Err
         .collect::<Result<Vec<_>, _>>()
 }
 
-fn prepare_dba(config: &DBAConfig) -> Result<DbaPreparedInput, Box<dyn Error>> {
+pub(crate) fn prepare_dba(config: &DBAConfig) -> Result<DbaPreparedInput, Box<dyn Error>> {
     Ok(DbaPreparedInput {
         front: load_sources(&config.front)?,
         rear: load_sources(&config.rear)?,

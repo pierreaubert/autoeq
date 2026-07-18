@@ -1,16 +1,12 @@
-use super::super::types::{MultiSeatConfig, MultiSubGroup, OptimizerConfig, RoomConfig};
-use super::misc::GLOBAL_EQ_REGRESSION_TOLERANCE;
-use super::misc::average_power_curve;
-use super::misc::eq_score_regressed;
-use super::misc::flat_loss_score;
-use super::process::process_cardioid;
-use super::process::process_multisub_group;
-use crate::Curve;
+use super::{process_cardioid, process_multisub_group};
+use roomeq_engine::Curve;
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::MeasurementSource;
 use ndarray::array;
+use roomeq_model::{
+    MeasurementSource, MultiSeatConfig, MultiSubGroup, OptimizerConfig, RoomConfig,
+};
 
 fn flat_curve_without_phase() -> Curve {
     Curve {
@@ -23,7 +19,7 @@ fn flat_curve_without_phase() -> Curve {
 
 #[test]
 fn cardioid_rejects_missing_phase() {
-    let cardioid = super::super::types::CardioidConfig {
+    let cardioid = roomeq_model::CardioidConfig {
         name: "card".to_string(),
         speaker_name: None,
         front: MeasurementSource::InMemory(flat_curve_without_phase()),
@@ -31,7 +27,7 @@ fn cardioid_rejects_missing_phase() {
         separation_meters: 0.5,
     };
     let room_config = RoomConfig {
-        version: super::super::types::default_config_version(),
+        version: roomeq_model::default_config_version(),
         system: None,
         speakers: HashMap::new(),
         crossovers: None,
@@ -51,36 +47,6 @@ fn cardioid_rejects_missing_phase() {
 }
 
 #[test]
-fn flat_loss_score_zero_for_flat_curve() {
-    let curve = Curve {
-        freq: array![100.0, 200.0, 400.0, 800.0, 1600.0],
-        spl: array![80.0, 80.0, 80.0, 80.0, 80.0],
-        phase: None,
-        ..Default::default()
-    };
-    let score = flat_loss_score(&curve, 100.0, 1600.0);
-    assert!(
-        score.abs() < 1e-6,
-        "perfectly flat curve should have zero loss, got {score}"
-    );
-}
-
-#[test]
-fn flat_loss_score_positive_for_uneven_curve() {
-    let curve = Curve {
-        freq: array![100.0, 200.0, 400.0, 800.0, 1600.0],
-        spl: array![80.0, 85.0, 80.0, 75.0, 80.0],
-        phase: None,
-        ..Default::default()
-    };
-    let score = flat_loss_score(&curve, 100.0, 1600.0);
-    assert!(
-        score > 0.1,
-        "uneven curve should have positive loss, got {score}"
-    );
-}
-
-#[test]
 fn cardioid_flat_response_does_not_regress() {
     // Front and rear are identical flat curves with measured phase.
     // The cardioid sum will be flat-ish; global EQ should not regress it.
@@ -96,7 +62,7 @@ fn cardioid_flat_response_does_not_regress() {
         phase: Some(array![0.0, 0.0, 0.0, 0.0]),
         ..Default::default()
     };
-    let cardioid = super::super::types::CardioidConfig {
+    let cardioid = roomeq_model::CardioidConfig {
         name: "card".to_string(),
         speaker_name: None,
         front: MeasurementSource::InMemory(front),
@@ -104,7 +70,7 @@ fn cardioid_flat_response_does_not_regress() {
         separation_meters: 0.5,
     };
     let room_config = RoomConfig {
-        version: super::super::types::default_config_version(),
+        version: roomeq_model::default_config_version(),
         system: None,
         speakers: HashMap::new(),
         crossovers: None,
@@ -135,17 +101,6 @@ fn cardioid_flat_response_does_not_regress() {
         post.is_finite(),
         "post_score must be finite after regression guard"
     );
-}
-
-#[test]
-fn global_eq_regression_guard_rejects_worse_or_nonfinite_scores() {
-    assert!(eq_score_regressed(1.0, 1.01));
-    assert!(eq_score_regressed(1.0, f64::NAN));
-    assert!(!eq_score_regressed(1.0, 1.0));
-    assert!(!eq_score_regressed(
-        1.0,
-        1.0 + GLOBAL_EQ_REGRESSION_TOLERANCE
-    ));
 }
 
 fn phased_sub_curve(spl_offset: f64, phase_offset: f64) -> Curve {
@@ -181,7 +136,7 @@ fn multisub_uses_production_multiseat_path_when_subs_have_seat_measurements() {
         allpass_optimization: false,
     };
     let room_config = RoomConfig {
-        version: super::super::types::default_config_version(),
+        version: roomeq_model::default_config_version(),
         system: None,
         speakers: HashMap::new(),
         crossovers: None,
@@ -246,65 +201,6 @@ fn multisub_uses_production_multiseat_path_when_subs_have_seat_measurements() {
 }
 
 #[test]
-fn average_power_curve_is_magnitude_only_even_when_all_inputs_have_phase() {
-    let c1 = Curve {
-        freq: array![100.0, 200.0, 400.0],
-        spl: array![80.0, 80.0, 80.0],
-        phase: Some(array![0.0, 45.0, 90.0]),
-        ..Default::default()
-    };
-    let c2 = Curve {
-        freq: array![100.0, 200.0, 400.0],
-        spl: array![80.0, 80.0, 80.0],
-        phase: Some(array![0.0, 45.0, 90.0]),
-        ..Default::default()
-    };
-    let avg = average_power_curve(&[c1, c2]).unwrap();
-    assert!(avg.phase.is_none());
-    assert!(avg.spl.iter().all(|spl| (*spl - 80.0).abs() < 1e-9));
-}
-
-#[test]
-fn average_power_curve_returns_none_phase_when_any_input_lacks_phase() {
-    let c1 = Curve {
-        freq: array![100.0, 200.0],
-        spl: array![80.0, 80.0],
-        phase: Some(array![0.0, 0.0]),
-        ..Default::default()
-    };
-    let c2 = Curve {
-        freq: array![100.0, 200.0],
-        spl: array![80.0, 80.0],
-        phase: None,
-        ..Default::default()
-    };
-    let avg = average_power_curve(&[c1, c2]).unwrap();
-    assert!(
-        avg.phase.is_none(),
-        "average_power_curve should return None phase when any input lacks phase"
-    );
-}
-
-#[test]
-fn average_power_curve_does_not_cancel_energy_across_seats() {
-    let c1 = Curve {
-        freq: array![100.0],
-        spl: array![80.0],
-        phase: Some(array![0.0]),
-        ..Default::default()
-    };
-    let c2 = Curve {
-        freq: array![100.0],
-        spl: array![80.0],
-        phase: Some(array![180.0]),
-        ..Default::default()
-    };
-    let avg = average_power_curve(&[c1, c2]).unwrap();
-    assert!(avg.phase.is_none());
-    assert!((avg.spl[0] - 80.0).abs() < 1e-9);
-}
-
-#[test]
 fn production_multiseat_path_emits_per_sub_and_global_eq_when_enabled() {
     let group = MultiSubGroup {
         name: "subs".to_string(),
@@ -322,7 +218,7 @@ fn production_multiseat_path_emits_per_sub_and_global_eq_when_enabled() {
         allpass_optimization: false,
     };
     let room_config = RoomConfig {
-        version: super::super::types::default_config_version(),
+        version: roomeq_model::default_config_version(),
         system: None,
         speakers: HashMap::new(),
         crossovers: None,
@@ -375,27 +271,20 @@ fn production_multiseat_path_emits_per_sub_and_global_eq_when_enabled() {
 }
 
 mod coverage_tests {
-    use super::super::check::check_group_consistency;
-    use super::super::check::check_octave_consistency;
-    use super::super::misc::apply_per_sub_filters;
-    use super::super::misc::load_multisub_seat_measurements;
-    use super::super::misc::multiseat_peq_config;
-    use super::super::process::process_dba;
-    use super::super::process::process_multisub_group;
-    use super::super::process::process_speaker_group;
-    use super::super::process::process_speaker_topology;
-    use crate::Curve;
-    use crate::MeasurementSource;
-    use crate::roomeq::types::DBAConfig;
-    use crate::roomeq::types::MultiSeatConfig;
-    use crate::roomeq::types::MultiSubGroup;
-    use crate::roomeq::types::OptimizerConfig;
-    use crate::roomeq::types::RoomConfig;
-    use crate::roomeq::types::SpeakerGroup;
-    use crate::roomeq::types::{
-        DriverCrossoverBand, ParallelDriverGroup, SpeakerDriver, SpeakerDriverRole, SpeakerTopology,
+    use super::super::{
+        process_dba, process_multisub_group, process_speaker_group, process_speaker_topology,
     };
     use ndarray::array;
+    use roomeq_engine::Curve;
+    use roomeq_model::DBAConfig;
+    use roomeq_model::MeasurementSource;
+    use roomeq_model::MultiSubGroup;
+    use roomeq_model::OptimizerConfig;
+    use roomeq_model::RoomConfig;
+    use roomeq_model::SpeakerGroup;
+    use roomeq_model::{
+        DriverCrossoverBand, ParallelDriverGroup, SpeakerDriver, SpeakerDriverRole, SpeakerTopology,
+    };
     use std::collections::HashMap;
     use std::path::Path;
 
@@ -423,7 +312,7 @@ mod coverage_tests {
 
     fn room_config_with_optimizer(optimizer: OptimizerConfig) -> RoomConfig {
         RoomConfig {
-            version: crate::roomeq::types::default_config_version(),
+            version: roomeq_model::default_config_version(),
             system: None,
             speakers: HashMap::new(),
             crossovers: None,
@@ -433,111 +322,6 @@ mod coverage_tests {
             ctc: None,
             cea2034_cache: None,
         }
-    }
-
-    #[test]
-    fn check_group_consistency_exercises_all_branches() {
-        let mut means = HashMap::new();
-        let curves = HashMap::from([
-            ("L".to_string(), flat_curve()),
-            ("R".to_string(), flat_curve()),
-        ]);
-        // Fewer than 2 channels: early return
-        check_group_consistency("pair", &[], &means, &curves);
-        check_group_consistency("pair", &["L".to_string()], &means, &curves);
-        // Missing mean entries are skipped
-        check_group_consistency("pair", &["L".to_string(), "R".to_string()], &means, &curves);
-        // Range difference below and above threshold
-        means.insert("L".to_string(), 80.0);
-        means.insert("R".to_string(), 83.0);
-        check_group_consistency("pair", &["L".to_string(), "R".to_string()], &means, &curves);
-        means.insert("R".to_string(), 90.0);
-        check_group_consistency("pair", &["L".to_string(), "R".to_string()], &means, &curves);
-    }
-
-    #[test]
-    fn check_octave_consistency_exercises_overlap_and_diff_branches() {
-        let c1 = flat_curve();
-        let mut c2 = flat_curve();
-        c2.spl += 10.0;
-        // Curves overlap and differ by more than 6 dB in some octaves
-        check_octave_consistency("pair", "L", "R", &c1, &c2);
-        // Non-overlapping high octave
-        let c_high = Curve {
-            freq: array![20000.0, 40000.0],
-            spl: array![80.0, 80.0],
-            phase: None,
-            ..Default::default()
-        };
-        check_octave_consistency("pair", "L", "R", &c1, &c_high);
-    }
-
-    #[test]
-    fn load_multisub_seat_measurements_rejects_inconsistent_seats() {
-        let group = MultiSubGroup {
-            name: "subs".to_string(),
-            speaker_name: None,
-            subwoofers: vec![
-                MeasurementSource::InMemoryMultiple(vec![flat_curve(), flat_curve()]),
-                MeasurementSource::InMemoryMultiple(vec![flat_curve()]),
-            ],
-            allpass_optimization: false,
-        };
-        let err = load_multisub_seat_measurements(&group).unwrap_err();
-        assert!(err.to_string().contains("inconsistent seat counts"));
-    }
-
-    #[test]
-    fn load_multisub_seat_measurements_returns_none_for_single_seat() {
-        let group = MultiSubGroup {
-            name: "subs".to_string(),
-            speaker_name: None,
-            subwoofers: vec![
-                MeasurementSource::InMemoryMultiple(vec![flat_curve()]),
-                MeasurementSource::InMemoryMultiple(vec![flat_curve()]),
-            ],
-            allpass_optimization: false,
-        };
-        assert!(load_multisub_seat_measurements(&group).unwrap().is_none());
-    }
-
-    #[test]
-    fn multiseat_peq_config_normalizes_weights_and_handles_primary() {
-        let policy = MultiSeatConfig {
-            enabled: true,
-            strategy: crate::roomeq::types::MultiSeatStrategy::PrimaryWithConstraints,
-            primary_seat: 0,
-            max_deviation_db: 3.0,
-            seat_weights: Some(vec![1.0, 1.0]),
-            primary_seat_weight: 2.0,
-            ..Default::default()
-        };
-        let config = multiseat_peq_config(&policy, 2);
-        assert_eq!(config.weights.as_ref().unwrap().len(), 2);
-        assert!(config.weights.as_ref().unwrap()[0] > config.weights.as_ref().unwrap()[1]);
-    }
-
-    #[test]
-    fn multiseat_peq_config_falls_back_on_invalid_weights() {
-        let policy = MultiSeatConfig {
-            enabled: true,
-            strategy: crate::roomeq::types::MultiSeatStrategy::MinimizeVariance,
-            seat_weights: Some(vec![1.0, f64::NAN, -1.0]),
-            ..Default::default()
-        };
-        let config = multiseat_peq_config(&policy, 3);
-        let weights = config.weights.unwrap();
-        assert!(weights.iter().all(|w| w.is_finite() && *w >= 0.0));
-    }
-
-    #[test]
-    fn apply_per_sub_filters_preserves_empty_filters() {
-        let seat = flat_curve();
-        let measurements = vec![vec![seat.clone()], vec![seat.clone()]];
-        let filters: Vec<Vec<math_audio_iir_fir::Biquad>> = vec![vec![], vec![]];
-        let result = apply_per_sub_filters(&measurements, &filters, 48000.0);
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0][0].spl, seat.spl);
     }
 
     #[test]
@@ -595,7 +379,7 @@ mod coverage_tests {
         });
         config.crossovers = Some(HashMap::from([(
             "xover".to_string(),
-            crate::roomeq::types::CrossoverConfig {
+            roomeq_model::CrossoverConfig {
                 crossover_type: "LR24".to_string(),
                 frequency: Some(800.0),
                 frequencies: None,
@@ -662,7 +446,7 @@ mod coverage_tests {
         });
         config.crossovers = Some(HashMap::from([(
             "xover".to_string(),
-            crate::roomeq::types::CrossoverConfig {
+            roomeq_model::CrossoverConfig {
                 crossover_type: "LR24".to_string(),
                 frequency: Some(800.0),
                 frequencies: None,

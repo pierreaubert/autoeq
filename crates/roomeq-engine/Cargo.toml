@@ -10,6 +10,7 @@ autoeq-core = { workspace = true }
 autoeq-fir = { workspace = true }
 autoeq-optim = { workspace = true }
 log = { workspace = true }
+math-dsp = { workspace = true }
 math-iir-fir = { workspace = true }
 math-rir = { workspace = true }
 math-optimisation = { workspace = true }

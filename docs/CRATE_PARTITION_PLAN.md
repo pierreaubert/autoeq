@@ -507,6 +507,23 @@ Exit criteria:
 - Group tests run under the owning crate.
 - No engine dependency is added outside the allowed graph.
 
+Completion state:
+
+- WP5 is complete. `roomeq-workflow` now loads topology, multi-sub seat,
+  DBA-array, cardioid, and target resources before making one prepared call
+  into `roomeq-engine`. The engine owns topology aggregation, per-driver EQ,
+  crossover/polarity/delay/gain orchestration, multi-seat and multi-sub
+  execution, DBA/cardioid execution, DSP graph construction, and report
+  curves. The root `group_processing` tree and its passband facade were
+  deleted, and the remaining group integration tests moved to the workflow
+  owner. This also pulls the prepared multi-sub, DBA, and cardioid execution
+  boundary forward from WP6; WP6 retains their higher-level workflow and
+  routing composition. Eighteen focused owner tests cover the engine helpers
+  and complete workflow boundary. Internal edges remain 43, with zero cycles,
+  exceptions, or duplicate implementations; the ratchets are now 51,228 root
+  Rust lines, 35,591 root RoomEQ lines, 15,337 root binary lines, and 585 root
+  unit tests.
+
 ### WP6 — Move stereo, subwoofer, DBA, and cardioid workflows
 
 Scope:

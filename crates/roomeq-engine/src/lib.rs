@@ -43,6 +43,10 @@ pub mod excursion;
 pub mod fir;
 /// Group-delay optimization and IIR all-pass alignment.
 pub mod gd_opt;
+/// Pure group and topology execution helpers.
+pub mod group;
+/// Prepared group/topology execution and DSP graph construction.
+pub mod group_processing;
 /// Role-aware height-channel spectral, phase, and arrival-time alignment.
 pub mod height_channel_alignment;
 /// Inter-channel tonal matching using broadband spectral correction.

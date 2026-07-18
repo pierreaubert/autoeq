@@ -36,7 +36,6 @@ mod gd;
 mod phase;
 mod reports;
 
-mod detect;
 mod misc;
 mod process;
 mod room_optimization_callback_observer;
@@ -49,7 +48,6 @@ mod validation_scorecard;
 
 pub(in crate::roomeq) mod supporting_source;
 
-pub(in crate::roomeq) use detect::*;
 pub use room_optimization_progress::*;
 pub use room_optimization_result::*;
 pub use types::*;

@@ -3,7 +3,6 @@ use super::super::types::{OptimizerConfig, RoomConfig};
 use crate::Curve;
 use crate::error::{AutoeqError, Result};
 use log::{debug, info, warn};
-use math_audio_dsp::analysis::compute_average_response;
 use math_audio_iir_fir::Biquad;
 use roomeq_engine::PreparedChannelMeasurements;
 use roomeq_engine::eq::{self as engine_eq, EqResources};
@@ -144,14 +143,6 @@ pub(super) fn create_kautz_filter_config(sections: &[(f64, f64, f64)]) -> serde_
     })
 }
 
-pub(super) fn cea2034_correction_active(room_config: &RoomConfig) -> bool {
-    room_config
-        .optimizer
-        .cea2034_correction
-        .as_ref()
-        .is_some_and(|c| c.enabled)
-}
-
 pub(super) fn generate_excursion_filters(
     room_config: &RoomConfig,
     curve: &Curve,
@@ -248,19 +239,11 @@ pub(super) fn maybe_clamp_min_freq_for_target_tilt(
 }
 
 pub(super) fn mean_response_in_range(curve: &Curve, min_freq: f64, max_freq: f64) -> f64 {
-    let freqs_f32: Vec<f32> = curve.freq.iter().map(|&f| f as f32).collect();
-    let spl_f32: Vec<f32> = curve.spl.iter().map(|&s| s as f32).collect();
-    compute_average_response(
-        &freqs_f32,
-        &spl_f32,
-        Some((min_freq as f32, max_freq as f32)),
-    ) as f64
+    roomeq_analysis::response_metrics::mean_response_in_range(curve, min_freq, max_freq)
 }
 
 pub(super) fn flatness_score_in_range(curve: &Curve, min_freq: f64, max_freq: f64) -> f64 {
-    let mean = mean_response_in_range(curve, min_freq, max_freq);
-    let normalized_spl = &curve.spl - mean;
-    crate::loss::flat_loss(&curve.freq, &normalized_spl, min_freq, max_freq)
+    roomeq_engine::channel_target::flatness_score_in_range(curve, min_freq, max_freq)
 }
 
 pub(super) fn target_mean_spl(
@@ -268,21 +251,7 @@ pub(super) fn target_mean_spl(
     channel_mean_spl: f64,
     shared_mean_spl: Option<f64>,
 ) -> f64 {
-    if let Some(shared) = shared_mean_spl {
-        debug!(
-            "  Using shared target level {:.1} dB (channel mean was {:.1} dB, delta {:.1} dB)",
-            shared,
-            channel_mean_spl,
-            shared - channel_mean_spl
-        );
-        shared
-    } else {
-        debug!(
-            "  Using channel '{}' target level {:.1} dB",
-            channel_name, channel_mean_spl
-        );
-        channel_mean_spl
-    }
+    roomeq_engine::channel_target::target_mean_spl(channel_name, channel_mean_spl, shared_mean_spl)
 }
 
 pub(super) fn is_subwoofer_measurement_channel(

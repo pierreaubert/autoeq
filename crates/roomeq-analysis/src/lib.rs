@@ -14,6 +14,7 @@ pub mod impulse_analysis;
 pub mod ir_waveform;
 pub mod listening_area;
 pub mod reflection_cancel;
+pub mod response_metrics;
 pub mod rir_prototype;
 pub mod slope;
 pub mod spatial_robustness;

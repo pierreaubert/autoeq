@@ -1,11 +1,12 @@
 use super::super::types::{
     ChannelDspChain as PublicChannelDspChain, CurveData, PluginConfigWrapper, RoomConfig,
-    TargetCurveConfig,
 };
 use crate::Curve;
 use math_audio_iir_fir::Biquad;
 use roomeq_engine::PreparedChannelInput;
 use std::path::Path;
+
+pub(in crate::roomeq) use roomeq_engine::channel_target::TargetContext;
 
 pub(in super::super) type MixedModeResult = (
     PublicChannelDspChain,
@@ -136,30 +137,6 @@ pub(in crate::roomeq) struct PreparedMeasurement {
     pub curve: Curve,
     pub curve_raw: Curve,
     pub arrival_time_ms: Option<f64>,
-}
-
-pub(in crate::roomeq) struct TargetContext {
-    pub target_tilt_curve: Option<Curve>,
-    pub min_freq: f64,
-    pub max_freq: f64,
-    pub pre_score: f64,
-    pub mean_spl: f64,
-    pub cea2034_active: bool,
-}
-
-impl TargetContext {
-    /// The configured target curve config, if any, excluding cases where a target
-    /// response tilt is already baked into the measurement.
-    pub fn effective_target<'a>(
-        &self,
-        room_config: &'a RoomConfig,
-    ) -> Option<&'a TargetCurveConfig> {
-        if self.target_tilt_curve.is_some() {
-            None
-        } else {
-            room_config.target_curve.as_ref()
-        }
-    }
 }
 
 pub(in crate::roomeq) struct PreprocessedFeatures {

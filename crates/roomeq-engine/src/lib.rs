@@ -13,6 +13,8 @@ pub mod bass_phase_confidence;
 pub mod channel_input;
 /// Prepared, path-free measurement inputs for channel processing.
 pub mod channel_measurements;
+/// Target preparation for one channel.
+pub mod channel_target;
 pub mod config_adapter;
 /// Multi-driver crossover optimization and polarity search.
 pub mod crossover;

@@ -4,9 +4,7 @@ use super::super::output;
 use super::super::spectral_align;
 use super::super::types::{MeasurementSource, PluginConfigWrapper, RoomConfig};
 use super::build::build_clamped_optimizer;
-use super::build::build_target_tilt_curve;
 use super::misc::broadband_correction_rejected;
-use super::misc::cea2034_correction_active;
 use super::misc::create_kautz_filter_config;
 use super::misc::flatness_score_in_range;
 use super::misc::generate_excursion_filters;
@@ -366,44 +364,6 @@ pub(super) fn prepare_measurement(
         curve,
         curve_raw,
         arrival_time_ms,
-    })
-}
-
-pub(super) fn build_target_context(
-    input: &ChannelOptimizationInput<'_>,
-    prepared: &PreparedMeasurement,
-) -> Result<TargetContext> {
-    let cea2034_active = cea2034_correction_active(input.room_config);
-    let target_tilt_curve = build_target_tilt_curve(
-        input.channel_name,
-        input.room_config,
-        &prepared.curve,
-        cea2034_active,
-    );
-
-    if target_tilt_curve.is_some() && input.room_config.target_curve.is_some() {
-        warn!(
-            "  Both target_curve and target_response are configured for '{}'. \
-             target_response is baked into the measurement; target_curve will be \
-             ignored to avoid double-application.",
-            input.channel_name
-        );
-    }
-
-    let min_freq = input.room_config.optimizer.min_freq;
-    let max_freq = input.room_config.optimizer.max_freq;
-
-    let pre_score = flatness_score_in_range(&prepared.curve, min_freq, max_freq);
-    let channel_mean_spl = mean_response_in_range(&prepared.curve, min_freq, max_freq);
-    let mean_spl = input.shared_mean_spl.unwrap_or(channel_mean_spl);
-
-    Ok(TargetContext {
-        target_tilt_curve,
-        min_freq,
-        max_freq,
-        pre_score,
-        mean_spl,
-        cea2034_active,
     })
 }
 
@@ -966,7 +926,12 @@ pub(in super::super) fn process_single_speaker(
     };
 
     let prepared = prepare_measurement(&input)?;
-    let mut target = build_target_context(&input, &prepared)?;
+    let mut target = roomeq_engine::channel_target::build_target_context(
+        input.channel_name,
+        input.room_config,
+        &prepared.curve,
+        input.shared_mean_spl,
+    );
     let preprocessed = preprocess_features(&input, &prepared, &mut target)?;
 
     let clamped_optimizer = build_clamped_optimizer(

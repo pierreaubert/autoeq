@@ -414,17 +414,6 @@ fn determine_optimization_bands_with_frequencies() {
 // ===================================================================
 
 #[test]
-fn cea2034_correction_active_reflects_config() {
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    assert!(!super::cea2034_correction_active(&config));
-    config.optimizer.cea2034_correction = Some(Cea2034CorrectionConfig {
-        enabled: true,
-        ..Default::default()
-    });
-    assert!(super::cea2034_correction_active(&config));
-}
-
-#[test]
 fn generate_excursion_filters_disabled_returns_empty() {
     let config = single_speaker_config(ProcessingMode::LowLatency);
     let filters = super::generate_excursion_filters(&config, &flat_curve(), 48000.0);
@@ -900,57 +889,6 @@ fn prepare_measurement_in_memory() {
 }
 
 #[test]
-fn build_target_context_flat_returns_none_tilt() {
-    let curve = flat_curve();
-    let source = MeasurementSource::InMemory(curve.clone());
-    let measurements = roomeq_workflow::prepare_channel_measurements(&source).unwrap();
-    let prepared_input = roomeq_engine::PreparedChannelInput::from_measurements(measurements);
-    let config = single_speaker_config(ProcessingMode::LowLatency);
-    let input = super::types::ChannelOptimizationInput {
-        channel_name: "left",
-        prepared: &prepared_input,
-        room_config: &config,
-        sample_rate: 48000.0,
-        output_dir: std::path::Path::new("/tmp"),
-        callback: None,
-        shared_mean_spl: None,
-    };
-    let prepared = super::apply::prepare_measurement(&input).unwrap();
-    let ctx = super::apply::build_target_context(&input, &prepared).unwrap();
-    assert!(ctx.target_tilt_curve.is_none());
-    assert_eq!(ctx.min_freq, 20.0);
-    assert_eq!(ctx.max_freq, 500.0);
-}
-
-#[test]
-fn build_target_context_harman_creates_tilt_and_warns_on_target_curve() {
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.optimizer.target_response = Some(TargetResponseConfig {
-        shape: super::super::types::TargetShape::Harman,
-        ..Default::default()
-    });
-    config.target_curve = Some(super::super::types::TargetCurveConfig::Predefined(
-        "flat".to_string(),
-    ));
-    let curve = flat_curve();
-    let source = MeasurementSource::InMemory(curve.clone());
-    let measurements = roomeq_workflow::prepare_channel_measurements(&source).unwrap();
-    let prepared_input = roomeq_engine::PreparedChannelInput::from_measurements(measurements);
-    let input = super::types::ChannelOptimizationInput {
-        channel_name: "left",
-        prepared: &prepared_input,
-        room_config: &config,
-        sample_rate: 48000.0,
-        output_dir: std::path::Path::new("/tmp"),
-        callback: None,
-        shared_mean_spl: None,
-    };
-    let prepared = super::apply::prepare_measurement(&input).unwrap();
-    let ctx = super::apply::build_target_context(&input, &prepared).unwrap();
-    assert!(ctx.target_tilt_curve.is_some());
-}
-
-#[test]
 fn preprocess_features_basic_path() {
     let mut config = single_speaker_config(ProcessingMode::LowLatency);
     config.optimizer.target_response = Some(TargetResponseConfig {
@@ -971,7 +909,12 @@ fn preprocess_features_basic_path() {
         shared_mean_spl: None,
     };
     let prepared = super::apply::prepare_measurement(&input).unwrap();
-    let mut ctx = super::apply::build_target_context(&input, &prepared).unwrap();
+    let mut ctx = roomeq_engine::channel_target::build_target_context(
+        input.channel_name,
+        input.room_config,
+        &prepared.curve,
+        input.shared_mean_spl,
+    );
     let features = super::apply::preprocess_features(&input, &prepared, &mut ctx).unwrap();
     assert_eq!(features.curve.freq.len(), curve.freq.len());
     assert!(
@@ -979,98 +922,6 @@ fn preprocess_features_basic_path() {
             || !features.broadband_plugins.is_empty()
             || features.broadband_mean_shift.abs() < 1.0
     );
-}
-
-// ===================================================================
-// build.rs tests
-// ===================================================================
-
-#[test]
-fn build_target_tilt_curve_flat_no_preference_returns_none() {
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.optimizer.target_response = Some(TargetResponseConfig::default());
-    let curve = flat_curve();
-    let tilt = super::build::build_target_tilt_curve("left", &config, &curve, false);
-    assert!(tilt.is_none());
-}
-
-#[test]
-fn build_target_tilt_curve_harman_and_custom() {
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.optimizer.target_response = Some(TargetResponseConfig {
-        shape: super::super::types::TargetShape::Harman,
-        ..Default::default()
-    });
-    let curve = flat_curve();
-    let tilt = super::build::build_target_tilt_curve("left", &config, &curve, false);
-    assert!(tilt.is_some());
-
-    config.optimizer.target_response = Some(TargetResponseConfig {
-        shape: super::super::types::TargetShape::Custom,
-        slope_db_per_octave: -1.5,
-        ..Default::default()
-    });
-    let tilt = super::build::build_target_tilt_curve("left", &config, &curve, false);
-    assert!(tilt.is_some());
-}
-
-#[test]
-fn build_target_tilt_curve_from_measurement_sub_defaults_flat() {
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.optimizer.target_response = Some(TargetResponseConfig {
-        shape: super::super::types::TargetShape::FromMeasurement,
-        ..Default::default()
-    });
-    let curve = flat_curve();
-    let tilt = super::build::build_target_tilt_curve("LFE", &config, &curve, false);
-    assert!(tilt.is_some());
-}
-
-#[test]
-fn build_target_tilt_curve_from_measurement_override_slope() {
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.optimizer.target_response = Some(TargetResponseConfig {
-        shape: super::super::types::TargetShape::FromMeasurement,
-        ..Default::default()
-    });
-    config.optimizer.from_measurement_slope_override = Some(-1.2);
-    let curve = flat_curve();
-    let tilt = super::build::build_target_tilt_curve("left", &config, &curve, false);
-    assert!(tilt.is_some());
-}
-
-#[test]
-fn build_target_tilt_curve_preference_shelves_create_tilt() {
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.optimizer.target_response = Some(TargetResponseConfig {
-        preference: super::super::types::UserPreference {
-            bass_shelf_db: 2.0,
-            ..Default::default()
-        },
-        ..Default::default()
-    });
-    let curve = flat_curve();
-    let tilt = super::build::build_target_tilt_curve("left", &config, &curve, false);
-    assert!(tilt.is_some());
-}
-
-#[test]
-fn build_target_tilt_curve_cea2034_active_strips_preferences() {
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.optimizer.target_response = Some(TargetResponseConfig {
-        shape: super::super::types::TargetShape::Harman,
-        preference: super::super::types::UserPreference {
-            bass_shelf_db: 2.0,
-            ..Default::default()
-        },
-        ..Default::default()
-    });
-    let curve = flat_curve();
-    let tilt_normal =
-        super::build::build_target_tilt_curve("left", &config, &curve, false).unwrap();
-    let tilt_cea = super::build::build_target_tilt_curve("left", &config, &curve, true).unwrap();
-    // CEA path strips preference shelves, so the curves should differ
-    assert!(tilt_normal.spl != tilt_cea.spl);
 }
 
 #[test]

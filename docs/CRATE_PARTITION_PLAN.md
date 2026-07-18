@@ -413,16 +413,25 @@ Local progress:
   exceptions, or duplicate implementations; the ratchets are now 59,004 root
   Rust lines, 43,367 root RoomEQ lines, 15,337 root binary lines, and 690 root
   unit tests.
+- Target construction now follows the same ownership graph. Home-cinema role
+  shaping lives with target-domain policy in roomeq-model, range-mean response
+  analysis lives in roomeq-analysis, and roomeq-engine owns the complete
+  `TargetContext` plus measured-slope and CEA preference-extraction decisions.
+  The root builder and nine root-only helper tests were deleted and replaced by
+  six focused owner-crate tests. Internal edges remain 43, with zero cycles,
+  exceptions, or duplicate implementations; the ratchets are now 58,590 root
+  Rust lines, 42,953 root RoomEQ lines, 15,337 root binary lines, and 681 root
+  unit tests.
 - WP4 remains in progress: ChannelProcessingStrategy ownership and the generic
   single-channel topology/workflow adapters are still rooted and must move
   before the package exit criteria are satisfied.
 
 Remaining dependency order:
 
-1. Move target-context construction, deterministic preprocessing, and the
-   `LowLatency`, `WarpedIir`, and `KautzModal` strategies behind one engine entry
-   point. Move their assembly/report tests with them; do not leave a second
-   implementation in the root facade.
+1. Move deterministic preprocessing and the `LowLatency`, `WarpedIir`, and
+   `KautzModal` strategies behind one engine entry point. Move their
+   assembly/report tests with them; do not leave a second implementation in the
+   root facade.
 2. Make convolution sidecars a two-phase boundary: `roomeq-workflow` reserves
    logical filenames, `roomeq-engine` returns FIR coefficients and references
    those names, and `roomeq-workflow` writes the WAV artifacts. Then move the

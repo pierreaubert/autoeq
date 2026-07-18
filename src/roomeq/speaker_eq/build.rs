@@ -2,8 +2,7 @@ use super::super::auto_tune::{self, AutoOptimizerContext};
 use super::super::excursion;
 use super::super::slope;
 use super::super::target_tilt;
-use super::super::types::{MeasurementSource, OptimizerConfig, RoomConfig, TargetShape};
-use super::misc::existing_ssir_wav_path;
+use super::super::types::{OptimizerConfig, RoomConfig, TargetShape};
 use super::misc::is_subwoofer_measurement_channel;
 use crate::Curve;
 use log::{debug, info};
@@ -110,7 +109,6 @@ pub(super) fn build_target_tilt_curve(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_clamped_optimizer(
     channel_name: &str,
-    source: &MeasurementSource,
     room_config: &RoomConfig,
     curve_raw: &Curve,
     curve_for_optim: &Curve,
@@ -124,7 +122,9 @@ pub(super) fn build_clamped_optimizer(
     if min_freq != room_config.optimizer.min_freq {
         opt.min_freq = min_freq;
     }
-    opt.ssir_wav_path = existing_ssir_wav_path(source);
+    // The workflow has already decoded any SSIR resource into the prepared
+    // channel input. Do not pass a filesystem path into engine execution.
+    opt.ssir_wav_path = None;
 
     // For sub channels, clamp the optimizer's UPPER frequency bound to the
     // actual usable bandwidth.

@@ -11,9 +11,9 @@ pub mod output;
 pub mod pipeline;
 mod wav;
 
-pub use arrival::{prepare_channel_arrival_time, prepare_channel_measurements_with_arrival};
+pub use arrival::{prepare_channel_arrival_time, prepare_channel_input};
 pub use channel_measurements::prepare_channel_measurements;
 pub use config_loader::{SHALLOW_MERGE_KEYS, load_config, merge_json_objects};
-pub use eq_resources::prepare_eq_resources;
+pub use eq_resources::{prepare_eq_resources, prepare_eq_target};
 pub use output::save_dsp_chain;
 pub use pipeline::{RoomPipeline, RoomPipelineRequest, WorkflowContext};

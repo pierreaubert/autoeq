@@ -5,7 +5,8 @@ use std::path::Path;
 use autoeq_measurements::MeasurementSource;
 use log::debug;
 use math_audio_dsp::signals::{gen_dirac, gen_mls};
-use roomeq_engine::PreparedChannelMeasurements;
+use roomeq_engine::eq::{EqResources, PreparedImpulseResponse};
+use roomeq_engine::{PreparedCea2034, PreparedChannelInput};
 use roomeq_model::RoomConfig;
 
 use crate::channel_measurements::prepare_channel_measurements;
@@ -56,13 +57,34 @@ fn matched_reference_from_recording_config(
     }
 }
 
-/// Resolve a channel's acoustic arrival time before engine execution.
-pub fn prepare_channel_arrival_time(
+fn decode_source_wav(
     channel_name: &str,
     source: &MeasurementSource,
+) -> Option<crate::wav::DecodedMonoWav> {
+    let wav_path = source.wav_path()?;
+    let path = Path::new(wav_path);
+    if !path.exists() {
+        debug!("  WAV file not found for '{}': {:?}", channel_name, path);
+        return None;
+    }
+    match decode_first_channel(path) {
+        Ok(decoded) => Some(decoded),
+        Err(error) => {
+            debug!(
+                "  Could not decode arrival WAV for '{}': {}",
+                channel_name, error
+            );
+            None
+        }
+    }
+}
+
+fn arrival_time_from_decoded(
+    channel_name: &str,
     room_config: &RoomConfig,
     sample_rate: f64,
     probe_arrival_ms: Option<f64>,
+    decoded: Option<&crate::wav::DecodedMonoWav>,
 ) -> Option<f64> {
     if let Some(probe_ms) = probe_arrival_ms {
         debug!(
@@ -71,23 +93,7 @@ pub fn prepare_channel_arrival_time(
         );
         return Some(probe_ms);
     }
-
-    let wav_path = source.wav_path()?;
-    let path = Path::new(wav_path);
-    if !path.exists() {
-        debug!("  WAV file not found for '{}': {:?}", channel_name, path);
-        return None;
-    }
-    let decoded = match decode_first_channel(path) {
-        Ok(decoded) => decoded,
-        Err(error) => {
-            debug!(
-                "  Could not decode arrival WAV for '{}': {}",
-                channel_name, error
-            );
-            return None;
-        }
-    };
+    let decoded = decoded?;
 
     if let Some((reference_name, reference_signal, reference_sample_rate)) =
         matched_reference_from_recording_config(room_config, sample_rate)
@@ -144,30 +150,91 @@ pub fn prepare_channel_arrival_time(
     }
 }
 
-/// Load channel curves and attach workflow-resolved arrival metadata.
-pub fn prepare_channel_measurements_with_arrival(
+/// Resolve a channel's acoustic arrival time before engine execution.
+pub fn prepare_channel_arrival_time(
     channel_name: &str,
     source: &MeasurementSource,
     room_config: &RoomConfig,
     sample_rate: f64,
     probe_arrival_ms: Option<f64>,
-) -> Result<PreparedChannelMeasurements, Box<dyn std::error::Error>> {
-    let measurements = prepare_channel_measurements(source)?;
-    let arrival_time_ms = prepare_channel_arrival_time(
+) -> Option<f64> {
+    if probe_arrival_ms.is_some() {
+        return arrival_time_from_decoded(
+            channel_name,
+            room_config,
+            sample_rate,
+            probe_arrival_ms,
+            None,
+        );
+    }
+    let decoded = decode_source_wav(channel_name, source);
+    arrival_time_from_decoded(
         channel_name,
-        source,
+        room_config,
+        sample_rate,
+        None,
+        decoded.as_ref(),
+    )
+}
+
+/// Resolve all source-backed resources into one engine-owned channel input.
+pub fn prepare_channel_input(
+    channel_name: &str,
+    source: &MeasurementSource,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    probe_arrival_ms: Option<f64>,
+) -> Result<PreparedChannelInput, Box<dyn std::error::Error>> {
+    let measurements = prepare_channel_measurements(source)?;
+    let decoded = decode_source_wav(channel_name, source);
+    let arrival_time_ms = arrival_time_from_decoded(
+        channel_name,
         room_config,
         sample_rate,
         probe_arrival_ms,
+        decoded.as_ref(),
     );
-    Ok(measurements.with_arrival_time(arrival_time_ms))
+    let impulse_response = decoded.map(|decoded| PreparedImpulseResponse {
+        samples: decoded.samples,
+        sample_rate: f64::from(decoded.sample_rate),
+    });
+
+    let speaker_name = room_config
+        .optimizer
+        .cea2034_correction
+        .as_ref()
+        .and_then(|config| config.speaker_name.clone())
+        .or_else(|| source.speaker_name().map(String::from));
+    let cea2034_data = room_config
+        .optimizer
+        .cea2034_correction
+        .as_ref()
+        .filter(|config| config.enabled)
+        .and(speaker_name.as_deref())
+        .and_then(|name| room_config.cea2034_cache.as_ref()?.get(name))
+        .cloned()
+        .map(Box::new);
+
+    Ok(PreparedChannelInput::new(
+        measurements,
+        arrival_time_ms,
+        PreparedCea2034::new(speaker_name, cea2034_data),
+        EqResources {
+            target: None,
+            impulse_response,
+        },
+    ))
 }
 
 #[cfg(test)]
 mod tests {
-    use autoeq_measurements::{Curve, InlineMeasurement, MeasurementRef, MeasurementSingle};
+    use std::collections::HashMap;
+
+    use autoeq_measurements::{
+        Curve, InlineMeasurement, MeasurementRef, MeasurementSingle, SpinoramaBundle,
+    };
     use ndarray::Array1;
-    use roomeq_model::RecordingConfiguration;
+    use roomeq_model::{Cea2034CorrectionConfig, RecordingConfiguration};
 
     use super::*;
 
@@ -259,7 +326,7 @@ mod tests {
             ..RoomConfig::default()
         };
 
-        let prepared = prepare_channel_measurements_with_arrival(
+        let prepared = prepare_channel_input(
             "left",
             &source_with_wav(wav.path()),
             &config,
@@ -269,6 +336,7 @@ mod tests {
         .unwrap();
 
         assert!((prepared.arrival_time_ms().unwrap() - 25.0).abs() < 0.2);
+        assert!(prepared.eq_resources().impulse_response.is_some());
     }
 
     #[test]
@@ -299,5 +367,59 @@ mod tests {
             ..RoomConfig::default()
         };
         assert!(matched_reference_from_recording_config(&config, 48_000.0).is_none());
+    }
+
+    #[test]
+    fn resolves_cea2034_override_and_skips_disabled_data() {
+        let response = curve();
+        let bundle = SpinoramaBundle {
+            on_axis: response.clone(),
+            listening_window: response.clone(),
+            early_reflections: response.clone(),
+            sound_power: response.clone(),
+            estimated_in_room: response.clone(),
+            er_di: response.clone(),
+            sp_di: response,
+            curves: HashMap::new(),
+        };
+        let mut config = RoomConfig {
+            optimizer: roomeq_model::OptimizerConfig {
+                cea2034_correction: Some(Cea2034CorrectionConfig {
+                    enabled: true,
+                    speaker_name: Some("Prepared speaker".to_string()),
+                    ..Cea2034CorrectionConfig::default()
+                }),
+                ..roomeq_model::OptimizerConfig::default()
+            },
+            cea2034_cache: Some(HashMap::from([("Prepared speaker".to_string(), bundle)])),
+            ..RoomConfig::default()
+        };
+        let source_response = curve();
+        let source = MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Inline(InlineMeasurement {
+                frequencies: source_response.freq.to_vec(),
+                magnitude_db: source_response.spl.to_vec(),
+                phase_deg: None,
+                name: None,
+                wav_path: None,
+                csv_path: None,
+            }),
+            speaker_name: Some("Source speaker".to_string()),
+        });
+
+        let input = prepare_channel_input("left", &source, &config, 48_000.0, None).unwrap();
+
+        assert_eq!(input.cea2034().speaker_name(), Some("Prepared speaker"));
+        assert!(input.cea2034().data().is_some());
+
+        config
+            .optimizer
+            .cea2034_correction
+            .as_mut()
+            .unwrap()
+            .enabled = false;
+        let input = prepare_channel_input("left", &source, &config, 48_000.0, None).unwrap();
+        assert_eq!(input.cea2034().speaker_name(), Some("Prepared speaker"));
+        assert!(input.cea2034().data().is_none());
     }
 }

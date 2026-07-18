@@ -10,6 +10,20 @@ pub fn prepare_eq_resources(
     optimizer: &OptimizerConfig,
     target: Option<&TargetCurveConfig>,
 ) -> Result<EqResources, Box<dyn std::error::Error>> {
+    let target = prepare_eq_target(target)?;
+    let impulse_response = optimizer.ssir_wav_path.as_deref().and_then(decode_mono_wav);
+
+    Ok(EqResources {
+        target,
+        impulse_response,
+    })
+}
+
+/// Resolve only the configured target resource, leaving impulse preparation to
+/// the channel-input adapter.
+pub fn prepare_eq_target(
+    target: Option<&TargetCurveConfig>,
+) -> Result<Option<PreparedEqTarget>, Box<dyn std::error::Error>> {
     let target = match target {
         Some(TargetCurveConfig::Path(path)) => Some(PreparedEqTarget::Curve(Box::new(
             autoeq_measurements::read::read_curve_from_csv(path)?,
@@ -19,12 +33,7 @@ pub fn prepare_eq_resources(
         }
         None => None,
     };
-    let impulse_response = optimizer.ssir_wav_path.as_deref().and_then(decode_mono_wav);
-
-    Ok(EqResources {
-        target,
-        impulse_response,
-    })
+    Ok(target)
 }
 
 fn decode_mono_wav(path: &std::path::Path) -> Option<PreparedImpulseResponse> {

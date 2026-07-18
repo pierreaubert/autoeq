@@ -9,6 +9,8 @@ pub mod error {
 
 /// Measurement-confidence gate for bass-band phase correction.
 pub mod bass_phase_confidence;
+/// Complete path-free input prepared for channel processing.
+pub mod channel_input;
 /// Prepared, path-free measurement inputs for channel processing.
 pub mod channel_measurements;
 pub mod config_adapter;
@@ -53,6 +55,7 @@ pub mod time_align {
     };
 }
 
+pub use channel_input::{PreparedCea2034, PreparedChannelInput};
 pub use channel_measurements::PreparedChannelMeasurements;
 pub use pipeline::{
     EngineRequest, PipelineControl, PipelineEvent, PipelineObserver, PipelineStepId,

@@ -30,6 +30,7 @@ use log::{debug, info, warn};
 use math_audio_dsp::analysis::compute_average_response;
 use math_audio_iir_fir::Biquad;
 use ndarray::Array1;
+use roomeq_engine::PreparedCea2034;
 use std::path::Path;
 
 pub(super) fn apply_excursion_filters_to_curve(
@@ -54,7 +55,7 @@ pub(super) fn apply_excursion_filters_to_curve(
 #[allow(dead_code)]
 pub(super) fn apply_cea2034_speaker_correction(
     channel_name: &str,
-    source: &MeasurementSource,
+    prepared_cea2034: &PreparedCea2034,
     room_config: &RoomConfig,
     curve: Curve,
     arrival_time_ms: Option<f64>,
@@ -62,7 +63,7 @@ pub(super) fn apply_cea2034_speaker_correction(
 ) -> (Curve, Vec<Biquad>, Vec<PluginConfigWrapper>) {
     let result = apply_cea2034_speaker_correction_detailed(
         channel_name,
-        source,
+        prepared_cea2034,
         room_config,
         curve,
         arrival_time_ms,
@@ -80,7 +81,7 @@ struct AppliedCea2034Correction {
 
 fn apply_cea2034_speaker_correction_detailed(
     channel_name: &str,
-    source: &MeasurementSource,
+    prepared_cea2034: &PreparedCea2034,
     room_config: &RoomConfig,
     curve: Curve,
     arrival_time_ms: Option<f64>,
@@ -103,13 +104,7 @@ fn apply_cea2034_speaker_correction_detailed(
         };
     }
 
-    // Resolve speaker name: config override > MeasurementSource
-    let speaker_name = cea_config
-        .speaker_name
-        .as_deref()
-        .or_else(|| source.speaker_name());
-
-    let Some(name) = speaker_name else {
+    let Some(name) = prepared_cea2034.speaker_name() else {
         debug!(
             "  No speaker_name configured for '{}'. Skipping CEA2034 correction.",
             channel_name
@@ -122,12 +117,7 @@ fn apply_cea2034_speaker_correction_detailed(
         };
     };
 
-    let cea_data = room_config
-        .cea2034_cache
-        .as_ref()
-        .and_then(|cache| cache.get(name));
-
-    let Some(data) = cea_data else {
+    let Some(data) = prepared_cea2034.data() else {
         warn!(
             "  No CEA2034 data in cache for speaker '{}'. Skipping Pass 1.",
             name
@@ -358,7 +348,7 @@ pub(super) fn apply_broadband_precorrection(
 pub(super) fn prepare_measurement(
     input: &ChannelOptimizationInput<'_>,
 ) -> Result<PreparedMeasurement> {
-    let curve = input.measurements.representative().clone();
+    let curve = input.prepared.measurements().representative().clone();
     debug!(
         "  Loaded measurement: {:.1} Hz - {:.1} Hz",
         curve.freq[0],
@@ -369,7 +359,7 @@ pub(super) fn prepare_measurement(
         &curve,
         &input.room_config.optimizer,
     );
-    let arrival_time_ms = input.measurements.arrival_time_ms();
+    let arrival_time_ms = input.prepared.arrival_time_ms();
     let curve_raw = curve.clone();
 
     Ok(PreparedMeasurement {
@@ -432,7 +422,7 @@ pub(super) fn preprocess_features(
     );
     let cea2034 = apply_cea2034_speaker_correction_detailed(
         input.channel_name,
-        input.source,
+        input.prepared.cea2034(),
         input.room_config,
         curve,
         prepared.arrival_time_ms,
@@ -952,7 +942,7 @@ pub(in super::super) fn process_single_speaker(
     probe_arrival_ms: Option<f64>,
     shared_mean_spl: Option<f64>,
 ) -> Result<MixedModeResult> {
-    let channel_measurements = roomeq_workflow::prepare_channel_measurements_with_arrival(
+    let prepared_input = roomeq_workflow::prepare_channel_input(
         channel_name,
         source,
         room_config,
@@ -967,8 +957,7 @@ pub(in super::super) fn process_single_speaker(
     })?;
     let mut input = ChannelOptimizationInput {
         channel_name,
-        source,
-        measurements: &channel_measurements,
+        prepared: &prepared_input,
         room_config,
         sample_rate,
         output_dir,
@@ -982,7 +971,6 @@ pub(in super::super) fn process_single_speaker(
 
     let clamped_optimizer = build_clamped_optimizer(
         channel_name,
-        source,
         room_config,
         &prepared.curve_raw,
         &preprocessed.curve_for_optim,
@@ -992,11 +980,21 @@ pub(in super::super) fn process_single_speaker(
         preprocessed.broadband_enabled,
     );
 
+    let mut eq_resources = prepared_input.eq_resources().clone();
+    eq_resources.target = roomeq_workflow::prepare_eq_target(target.effective_target(room_config))
+        .map_err(|e| AutoeqError::OptimizationFailed {
+            message: format!(
+                "Failed to prepare EQ resources for channel {}: {}",
+                channel_name, e
+            ),
+        })?;
+
     super::strategies::strategy_for_mode(room_config.optimizer.processing_mode.clone()).process(
         &mut input,
         &prepared,
         &target,
         &preprocessed,
         &clamped_optimizer,
+        &eq_resources,
     )
 }

@@ -13,10 +13,10 @@ use crate::Curve;
 use crate::error::{AutoeqError, Result};
 use crate::response;
 use crate::roomeq::types::{OptimizerConfig, ProcessingMode};
-use crate::roomeq::{artifacts, eq, fir, group_processing};
+use crate::roomeq::{artifacts, fir, group_processing};
 use log::{info, warn};
 use math_audio_iir_fir::Biquad;
-use roomeq_engine::eq::optimize_with_schroeder_split_detailed;
+use roomeq_engine::eq::{self as engine_eq, EqResources, optimize_with_schroeder_split_detailed};
 
 fn with_preprocessing_evidence(
     preprocessed: &PreprocessedFeatures,
@@ -37,6 +37,7 @@ pub trait ChannelProcessingStrategy {
         target: &TargetContext,
         preprocessed: &PreprocessedFeatures,
         clamped_optimizer: &OptimizerConfig,
+        eq_resources: &EqResources,
     ) -> Result<MixedModeResult>;
 }
 
@@ -63,6 +64,7 @@ impl ChannelProcessingStrategy for PhaseLinearStrategy {
         target: &TargetContext,
         preprocessed: &PreprocessedFeatures,
         clamped_optimizer: &OptimizerConfig,
+        _eq_resources: &EqResources,
     ) -> Result<MixedModeResult> {
         info!("  Generating FIR filter...");
 
@@ -145,6 +147,7 @@ impl ChannelProcessingStrategy for HybridStrategy {
         target: &TargetContext,
         preprocessed: &PreprocessedFeatures,
         clamped_optimizer: &OptimizerConfig,
+        eq_resources: &EqResources,
     ) -> Result<MixedModeResult> {
         if let Some(mixed_config) = &input.room_config.optimizer.mixed_config {
             return group_processing::process_mixed_mode_crossover(
@@ -177,18 +180,18 @@ impl ChannelProcessingStrategy for HybridStrategy {
         };
 
         let eq_result = if let Some(cb) = input.callback.take() {
-            eq::optimize_channel_eq_with_callback_detailed(
+            engine_eq::optimize_channel_eq_with_callback_detailed(
                 &hybrid_optim_curve,
                 &opt_config,
-                target.effective_target(input.room_config),
+                Some(eq_resources),
                 input.sample_rate,
                 cb,
             )
         } else {
-            eq::optimize_channel_eq_detailed(
+            engine_eq::optimize_channel_eq_detailed(
                 &hybrid_optim_curve,
                 &opt_config,
-                target.effective_target(input.room_config),
+                Some(eq_resources),
                 input.sample_rate,
             )
         }
@@ -198,7 +201,7 @@ impl ChannelProcessingStrategy for HybridStrategy {
                 input.channel_name, e
             ),
         })?;
-        let eq::EqOptimizationResult {
+        let engine_eq::EqOptimizationResult {
             filters: eq_filters,
             optimizer_evidence,
             ..
@@ -272,6 +275,7 @@ impl ChannelProcessingStrategy for MixedPhaseStrategy {
         target: &TargetContext,
         preprocessed: &PreprocessedFeatures,
         clamped_optimizer: &OptimizerConfig,
+        eq_resources: &EqResources,
     ) -> Result<MixedModeResult> {
         let optimization_curve = if let Some(ref tilt_curve) = target.target_tilt_curve {
             Curve {
@@ -284,15 +288,15 @@ impl ChannelProcessingStrategy for MixedPhaseStrategy {
             preprocessed.curve_for_optim.clone()
         };
 
-        let eq::EqOptimizationResult {
+        let engine_eq::EqOptimizationResult {
             filters: eq_filters,
             optimizer_evidence,
             ..
         } = optimize_eq_maybe_multi(
-            input.measurements,
+            input.prepared.measurements(),
             &optimization_curve,
             clamped_optimizer,
-            target.effective_target(input.room_config),
+            eq_resources,
             input.sample_rate,
             input.channel_name,
             input.callback.take(),
@@ -311,8 +315,8 @@ impl ChannelProcessingStrategy for MixedPhaseStrategy {
             None => super::super::mixed_phase::MixedPhaseConfig::default(),
         };
 
-        let spatial_depth = if input.measurements.is_multi_measurement_source() {
-            let curves = input.measurements.individual();
+        let spatial_depth = if input.prepared.measurements().is_multi_measurement_source() {
+            let curves = input.prepared.measurements().individual();
             if curves.len() > 1 {
                 let sr_config = input
                     .room_config
@@ -457,6 +461,7 @@ impl ChannelProcessingStrategy for LowLatencyStrategy {
         target: &TargetContext,
         preprocessed: &PreprocessedFeatures,
         clamped_optimizer: &OptimizerConfig,
+        eq_resources: &EqResources,
     ) -> Result<MixedModeResult> {
         let warped_iir = self.warped;
         let warped_lambda = warped_iir.then(|| math_audio_iir_fir::bark_lambda(input.sample_rate));
@@ -516,10 +521,10 @@ impl ChannelProcessingStrategy for LowLatencyStrategy {
                 (combined_filters, result.optimizer_evidence)
             } else {
                 let result = optimize_eq_maybe_multi(
-                    input.measurements,
+                    input.prepared.measurements(),
                     &optimization_curve,
                     clamped_optimizer,
-                    target.effective_target(input.room_config),
+                    eq_resources,
                     input.sample_rate,
                     input.channel_name,
                     input.callback.take(),
@@ -529,10 +534,10 @@ impl ChannelProcessingStrategy for LowLatencyStrategy {
             }
         } else {
             let result = optimize_eq_maybe_multi(
-                input.measurements,
+                input.prepared.measurements(),
                 &optimization_curve,
                 clamped_optimizer,
-                target.effective_target(input.room_config),
+                eq_resources,
                 input.sample_rate,
                 input.channel_name,
                 input.callback.take(),
@@ -598,6 +603,7 @@ impl ChannelProcessingStrategy for KautzModalStrategy {
         target: &TargetContext,
         preprocessed: &PreprocessedFeatures,
         _clamped_optimizer: &OptimizerConfig,
+        _eq_resources: &EqResources,
     ) -> Result<MixedModeResult> {
         info!("  KautzModal mode: starting optimization...");
 

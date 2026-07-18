@@ -1,24 +1,24 @@
-use super::super::eq;
 use super::super::excursion;
-use super::super::types::{MeasurementSource, OptimizerConfig, RoomConfig};
+use super::super::types::{OptimizerConfig, RoomConfig};
 use crate::Curve;
 use crate::error::{AutoeqError, Result};
 use log::{debug, info, warn};
 use math_audio_dsp::analysis::compute_average_response;
 use math_audio_iir_fir::Biquad;
 use roomeq_engine::PreparedChannelMeasurements;
+use roomeq_engine::eq::{self as engine_eq, EqResources};
 
 #[allow(clippy::too_many_arguments)]
 pub(in super::super) fn optimize_eq_maybe_multi(
     measurements: &PreparedChannelMeasurements,
     optimization_curve: &Curve,
     optimizer_config: &OptimizerConfig,
-    target_config: Option<&super::super::types::TargetCurveConfig>,
+    eq_resources: &EqResources,
     sample_rate: f64,
     channel_name: &str,
     callback: Option<crate::optim::OptimProgressCallback>,
     target_tilt_curve: Option<&Curve>,
-) -> Result<eq::EqOptimizationResult> {
+) -> Result<engine_eq::EqOptimizationResult> {
     use super::super::types::MultiMeasurementStrategy;
 
     let use_multi = measurements.is_multi_measurement_source()
@@ -62,20 +62,20 @@ pub(in super::super) fn optimize_eq_maybe_multi(
         );
 
         if let Some(cb) = callback {
-            eq::optimize_channel_eq_multi_with_callback_detailed(
+            engine_eq::optimize_channel_eq_multi_with_callback_detailed(
                 curves,
                 optimizer_config,
                 multi_config,
-                target_config,
+                Some(eq_resources),
                 sample_rate,
                 cb,
             )
         } else {
-            eq::optimize_channel_eq_multi_detailed(
+            engine_eq::optimize_channel_eq_multi_detailed(
                 curves,
                 optimizer_config,
                 multi_config,
-                target_config,
+                Some(eq_resources),
                 sample_rate,
             )
         }
@@ -87,18 +87,18 @@ pub(in super::super) fn optimize_eq_maybe_multi(
         })
     } else {
         if let Some(cb) = callback {
-            eq::optimize_channel_eq_with_callback_detailed(
+            engine_eq::optimize_channel_eq_with_callback_detailed(
                 optimization_curve,
                 optimizer_config,
-                target_config,
+                Some(eq_resources),
                 sample_rate,
                 cb,
             )
         } else {
-            eq::optimize_channel_eq_detailed(
+            engine_eq::optimize_channel_eq_detailed(
                 optimization_curve,
                 optimizer_config,
-                target_config,
+                Some(eq_resources),
                 sample_rate,
             )
         }
@@ -283,13 +283,6 @@ pub(super) fn target_mean_spl(
         );
         channel_mean_spl
     }
-}
-
-pub(super) fn existing_ssir_wav_path(source: &MeasurementSource) -> Option<std::path::PathBuf> {
-    source.wav_path().and_then(|wav_path| {
-        let path = std::path::PathBuf::from(wav_path);
-        if path.exists() { Some(path) } else { None }
-    })
 }
 
 pub(super) fn is_subwoofer_measurement_channel(

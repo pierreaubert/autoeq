@@ -69,23 +69,6 @@ pub fn optimize_channel_eq_with_callback_detailed(
     )
 }
 
-pub fn optimize_channel_eq_multi_detailed(
-    curves: &[Curve],
-    config: &OptimizerConfig,
-    multi_config: &MultiMeasurementConfig,
-    target: Option<&TargetCurveConfig>,
-    sample_rate: f64,
-) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    let resources = prepare_resources(config, target)?;
-    engine_eq::optimize_channel_eq_multi_detailed(
-        curves,
-        config,
-        multi_config,
-        Some(&resources),
-        sample_rate,
-    )
-}
-
 pub fn optimize_channel_eq_multi_with_auto_optimizer_detailed(
     curves: &[Curve],
     config: &OptimizerConfig,
@@ -102,24 +85,5 @@ pub fn optimize_channel_eq_multi_with_auto_optimizer_detailed(
         Some(&resources),
         sample_rate,
         auto_context,
-    )
-}
-
-pub fn optimize_channel_eq_multi_with_callback_detailed(
-    curves: &[Curve],
-    config: &OptimizerConfig,
-    multi_config: &MultiMeasurementConfig,
-    target: Option<&TargetCurveConfig>,
-    sample_rate: f64,
-    callback: autoeq_optim::optim::OptimProgressCallback,
-) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    let resources = prepare_resources(config, target)?;
-    engine_eq::optimize_channel_eq_multi_with_callback_detailed(
-        curves,
-        config,
-        multi_config,
-        Some(&resources),
-        sample_rate,
-        callback,
     )
 }

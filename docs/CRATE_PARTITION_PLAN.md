@@ -396,27 +396,39 @@ Local progress:
   edges remain 43, with zero cycles, exceptions, or duplicate implementations;
   the ratchets are now 59,110 root Rust lines, 43,473 root RoomEQ lines, 15,337
   root binary lines, and 691 root unit tests.
+- The workflow preparation boundary now covers all source-backed inputs for one
+  channel. `PreparedChannelInput` combines prepared measurements, arrival
+  metadata, resolved CEA-2034 selection/data, and base EQ resources without
+  paths or a direct roomeq-engine dependency on autoeq-measurements. The
+  workflow decodes a source WAV once, uses the borrowed samples for arrival
+  detection, then moves them into the engine-owned impulse resource; it also
+  applies the configured CEA speaker override before the source speaker name
+  and clones cached data only when correction is enabled. The effective target
+  is likewise resolved by workflow before the strategy calls the engine.
+- Root `ChannelOptimizationInput` no longer contains `MeasurementSource` or a
+  separate measurements reference. Its strategies consume the complete
+  prepared input and call crate-owned EQ APIs with `EqResources` directly. The
+  obsolete root SSIR path helper and two now-unused multi-measurement EQ
+  adapters were deleted. Internal edges remain 43, with zero cycles,
+  exceptions, or duplicate implementations; the ratchets are now 59,004 root
+  Rust lines, 43,367 root RoomEQ lines, 15,337 root binary lines, and 690 root
+  unit tests.
 - WP4 remains in progress: ChannelProcessingStrategy ownership and the generic
   single-channel topology/workflow adapters are still rooted and must move
   before the package exit criteria are satisfied.
 
 Remaining dependency order:
 
-1. Extend the workflow-owned preparation boundary, which now resolves
-   `MeasurementSource` into representative/individual curves and arrival data,
-   to include CEA2034 curves and `EqResources` in one in-memory channel request.
-   The engine request must not contain `Path` or depend directly on
-   `autoeq-measurements`.
-2. Move target-context construction, deterministic preprocessing, and the
+1. Move target-context construction, deterministic preprocessing, and the
    `LowLatency`, `WarpedIir`, and `KautzModal` strategies behind one engine entry
    point. Move their assembly/report tests with them; do not leave a second
    implementation in the root facade.
-3. Make convolution sidecars a two-phase boundary: `roomeq-workflow` reserves
+2. Make convolution sidecars a two-phase boundary: `roomeq-workflow` reserves
    logical filenames, `roomeq-engine` returns FIR coefficients and references
    those names, and `roomeq-workflow` writes the WAV artifacts. Then move the
    `PhaseLinear`, `Hybrid`, and `MixedPhase` strategies without adding a direct
    `roomeq-engine` dependency on `autoeq-artifacts` or `roomeq-workflow`.
-4. Route the group-specific `Hybrid` mixed-crossover branch to WP5 ownership,
+3. Route the group-specific `Hybrid` mixed-crossover branch to WP5 ownership,
    move the remaining generic result assembly, and delete the root `speaker_eq`
    module and temporary EQ adapters.
 

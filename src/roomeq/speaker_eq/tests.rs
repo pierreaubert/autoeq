@@ -51,40 +51,6 @@ fn single_speaker_config(processing_mode: ProcessingMode) -> RoomConfig {
     }
 }
 
-fn write_mono_wav(samples: &[f32], sample_rate: u32) -> tempfile::NamedTempFile {
-    let temp_file = tempfile::Builder::new().suffix(".wav").tempfile().unwrap();
-    let spec = hound::WavSpec {
-        channels: 1,
-        sample_rate,
-        bits_per_sample: 32,
-        sample_format: hound::SampleFormat::Float,
-    };
-    let mut writer = hound::WavWriter::create(temp_file.path(), spec).unwrap();
-    for &sample in samples {
-        writer.write_sample(sample).unwrap();
-    }
-    writer.finalize().unwrap();
-    temp_file
-}
-
-fn wav_source_with_curve(
-    wav_path: &std::path::Path,
-    curve: Curve,
-    speaker_name: Option<&str>,
-) -> MeasurementSource {
-    MeasurementSource::Single(MeasurementSingle {
-        measurement: MeasurementRef::Inline(InlineMeasurement {
-            frequencies: curve.freq.to_vec(),
-            magnitude_db: curve.spl.to_vec(),
-            phase_deg: curve.phase.as_ref().map(|p| p.to_vec()),
-            name: None,
-            wav_path: Some(wav_path.to_string_lossy().to_string()),
-            csv_path: None,
-        }),
-        speaker_name: speaker_name.map(|s| s.to_string()),
-    })
-}
-
 #[test]
 fn broadband_rejection_tight_threshold() {
     // A 10 % worse result is accepted.
@@ -562,20 +528,6 @@ fn target_mean_spl_prefers_shared() {
 }
 
 #[test]
-fn existing_ssir_wav_path_respects_existence() {
-    let wav = write_mono_wav(&[0.0_f32; 8], 48000);
-    let curve = flat_curve();
-    let source = wav_source_with_curve(wav.path(), curve, None);
-    assert_eq!(
-        super::existing_ssir_wav_path(&source),
-        Some(wav.path().to_path_buf())
-    );
-
-    let source = MeasurementSource::InMemory(flat_curve());
-    assert!(super::existing_ssir_wav_path(&source).is_none());
-}
-
-#[test]
 fn is_subwoofer_measurement_channel_detects_roles_and_mapping() {
     let config = single_speaker_config(ProcessingMode::LowLatency);
     assert!(!super::is_subwoofer_measurement_channel("left", &config));
@@ -625,11 +577,12 @@ fn optimize_eq_maybe_multi_single_curve_succeeds() {
     let source = MeasurementSource::InMemory(flat_curve());
     let measurements = roomeq_workflow::prepare_channel_measurements(&source).unwrap();
     let config = single_speaker_config(ProcessingMode::LowLatency);
+    let eq_resources = roomeq_engine::eq::EqResources::default();
     let result = super::optimize_eq_maybe_multi(
         &measurements,
         &flat_curve(),
         &config.optimizer,
-        None,
+        &eq_resources,
         48000.0,
         "left",
         None,
@@ -648,11 +601,12 @@ fn optimize_eq_maybe_multi_multi_measurement_weighted() {
         strategy: super::super::types::MultiMeasurementStrategy::WeightedSum,
         ..Default::default()
     });
+    let eq_resources = roomeq_engine::eq::EqResources::default();
     let result = super::optimize_eq_maybe_multi(
         &measurements,
         &flat_curve(),
         &config.optimizer,
-        None,
+        &eq_resources,
         48000.0,
         "left",
         None,
@@ -697,13 +651,13 @@ fn apply_excursion_filters_non_empty_changes_curve() {
 #[test]
 fn apply_cea2034_speaker_correction_disabled_paths() {
     let curve = flat_curve();
-    let source = MeasurementSource::InMemory(curve.clone());
+    let prepared_cea2034 = roomeq_engine::PreparedCea2034::default();
     let mut config = single_speaker_config(ProcessingMode::LowLatency);
 
     // No config
     let (out, filters, plugins) = super::apply::apply_cea2034_speaker_correction(
         "left",
-        &source,
+        &prepared_cea2034,
         &config,
         curve.clone(),
         None,
@@ -720,7 +674,7 @@ fn apply_cea2034_speaker_correction_disabled_paths() {
     });
     let (_out, filters, plugins) = super::apply::apply_cea2034_speaker_correction(
         "left",
-        &source,
+        &prepared_cea2034,
         &config,
         curve.clone(),
         None,
@@ -733,7 +687,6 @@ fn apply_cea2034_speaker_correction_disabled_paths() {
 #[test]
 fn apply_cea2034_speaker_correction_no_speaker_name_or_cache() {
     let curve = flat_curve();
-    let source = MeasurementSource::InMemory(curve.clone());
     let mut config = single_speaker_config(ProcessingMode::LowLatency);
     config.optimizer.cea2034_correction = Some(Cea2034CorrectionConfig {
         enabled: true,
@@ -741,9 +694,10 @@ fn apply_cea2034_speaker_correction_no_speaker_name_or_cache() {
     });
 
     // No speaker_name anywhere
+    let prepared_cea2034 = roomeq_engine::PreparedCea2034::default();
     let (_out, filters, plugins) = super::apply::apply_cea2034_speaker_correction(
         "left",
-        &source,
+        &prepared_cea2034,
         &config,
         curve.clone(),
         None,
@@ -753,20 +707,11 @@ fn apply_cea2034_speaker_correction_no_speaker_name_or_cache() {
     assert!(plugins.is_empty());
 
     // speaker_name configured but cache missing
-    let source = MeasurementSource::Single(MeasurementSingle {
-        measurement: MeasurementRef::Inline(InlineMeasurement {
-            frequencies: curve.freq.to_vec(),
-            magnitude_db: curve.spl.to_vec(),
-            phase_deg: None,
-            name: None,
-            wav_path: None,
-            csv_path: None,
-        }),
-        speaker_name: Some("Some Speaker".to_string()),
-    });
+    let prepared_cea2034 =
+        roomeq_engine::PreparedCea2034::new(Some("Some Speaker".to_string()), None);
     let (_out, _filters, plugins) = super::apply::apply_cea2034_speaker_correction(
         "left",
-        &source,
+        &prepared_cea2034,
         &config,
         curve.clone(),
         None,
@@ -789,32 +734,22 @@ fn make_cea2034_data(curve: &Curve) -> crate::read::Cea2034Data {
 }
 
 #[test]
-fn apply_cea2034_speaker_correction_with_cache_succeeds() {
+fn apply_cea2034_speaker_correction_with_prepared_data_succeeds() {
     let curve = flat_curve();
-    let source = MeasurementSource::Single(MeasurementSingle {
-        measurement: MeasurementRef::Inline(InlineMeasurement {
-            frequencies: curve.freq.to_vec(),
-            magnitude_db: curve.spl.to_vec(),
-            phase_deg: None,
-            name: None,
-            wav_path: None,
-            csv_path: None,
-        }),
-        speaker_name: Some("Speaker".to_string()),
-    });
     let mut config = single_speaker_config(ProcessingMode::LowLatency);
     config.optimizer.cea2034_correction = Some(Cea2034CorrectionConfig {
         enabled: true,
         num_filters: 2,
         ..Default::default()
     });
-    let mut cache = std::collections::HashMap::new();
-    cache.insert("Speaker".to_string(), make_cea2034_data(&curve));
-    config.cea2034_cache = Some(cache);
+    let prepared_cea2034 = roomeq_engine::PreparedCea2034::new(
+        Some("Speaker".to_string()),
+        Some(Box::new(make_cea2034_data(&curve))),
+    );
 
     let (_out, _filters, plugins) = super::apply::apply_cea2034_speaker_correction(
         "left",
-        &source,
+        &prepared_cea2034,
         &config,
         curve.clone(),
         None,
@@ -942,14 +877,17 @@ fn apply_broadband_precorrection_respects_worsening_limit() {
 fn prepare_measurement_in_memory() {
     let curve = flat_curve();
     let source = MeasurementSource::InMemory(curve.clone());
-    let measurements = roomeq_workflow::prepare_channel_measurements(&source)
-        .unwrap()
-        .with_arrival_time(Some(1.5));
+    let measurements = roomeq_workflow::prepare_channel_measurements(&source).unwrap();
+    let prepared_input = roomeq_engine::PreparedChannelInput::new(
+        measurements,
+        Some(1.5),
+        roomeq_engine::PreparedCea2034::default(),
+        roomeq_engine::eq::EqResources::default(),
+    );
     let config = single_speaker_config(ProcessingMode::LowLatency);
     let input = super::types::ChannelOptimizationInput {
         channel_name: "left",
-        source: &source,
-        measurements: &measurements,
+        prepared: &prepared_input,
         room_config: &config,
         sample_rate: 48000.0,
         output_dir: std::path::Path::new("/tmp"),
@@ -966,11 +904,11 @@ fn build_target_context_flat_returns_none_tilt() {
     let curve = flat_curve();
     let source = MeasurementSource::InMemory(curve.clone());
     let measurements = roomeq_workflow::prepare_channel_measurements(&source).unwrap();
+    let prepared_input = roomeq_engine::PreparedChannelInput::from_measurements(measurements);
     let config = single_speaker_config(ProcessingMode::LowLatency);
     let input = super::types::ChannelOptimizationInput {
         channel_name: "left",
-        source: &source,
-        measurements: &measurements,
+        prepared: &prepared_input,
         room_config: &config,
         sample_rate: 48000.0,
         output_dir: std::path::Path::new("/tmp"),
@@ -997,10 +935,10 @@ fn build_target_context_harman_creates_tilt_and_warns_on_target_curve() {
     let curve = flat_curve();
     let source = MeasurementSource::InMemory(curve.clone());
     let measurements = roomeq_workflow::prepare_channel_measurements(&source).unwrap();
+    let prepared_input = roomeq_engine::PreparedChannelInput::from_measurements(measurements);
     let input = super::types::ChannelOptimizationInput {
         channel_name: "left",
-        source: &source,
-        measurements: &measurements,
+        prepared: &prepared_input,
         room_config: &config,
         sample_rate: 48000.0,
         output_dir: std::path::Path::new("/tmp"),
@@ -1022,10 +960,10 @@ fn preprocess_features_basic_path() {
     let curve = flat_curve();
     let source = MeasurementSource::InMemory(curve.clone());
     let measurements = roomeq_workflow::prepare_channel_measurements(&source).unwrap();
+    let prepared_input = roomeq_engine::PreparedChannelInput::from_measurements(measurements);
     let input = super::types::ChannelOptimizationInput {
         channel_name: "left",
-        source: &source,
-        measurements: &measurements,
+        prepared: &prepared_input,
         room_config: &config,
         sample_rate: 48000.0,
         output_dir: std::path::Path::new("/tmp"),
@@ -1138,10 +1076,9 @@ fn build_target_tilt_curve_cea2034_active_strips_preferences() {
 #[test]
 fn build_clamped_optimizer_non_sub_passes_through() {
     let curve = flat_curve();
-    let source = MeasurementSource::InMemory(curve.clone());
     let config = single_speaker_config(ProcessingMode::LowLatency);
     let opt = super::build::build_clamped_optimizer(
-        "left", &source, &config, &curve, &curve, 20.0, 500.0, None, false,
+        "left", &config, &curve, &curve, 20.0, 500.0, None, false,
     );
     assert_eq!(opt.min_freq, 20.0);
     assert_eq!(opt.max_freq, 500.0);
@@ -1166,11 +1103,10 @@ fn build_clamped_optimizer_sub_channel_clamps_max_freq() {
         phase: None,
         ..Default::default()
     };
-    let source = MeasurementSource::InMemory(curve.clone());
     let mut config = single_speaker_config(ProcessingMode::LowLatency);
     config.optimizer.max_freq = 500.0;
     let opt = super::build::build_clamped_optimizer(
-        "LFE", &source, &config, &curve, &curve, 20.0, 500.0, None, false,
+        "LFE", &config, &curve, &curve, 20.0, 500.0, None, false,
     );
     // Sub clamping should reduce max_freq to something below or equal to configured max
     assert!(opt.max_freq <= 500.0);
@@ -1180,7 +1116,6 @@ fn build_clamped_optimizer_sub_channel_clamps_max_freq() {
 #[test]
 fn build_clamped_optimizer_sub_config_overrides() {
     let curve = flat_curve();
-    let source = MeasurementSource::InMemory(curve.clone());
     let mut config = single_speaker_config(ProcessingMode::LowLatency);
     config.optimizer.sub_config = Some(SubOptimizerConfig {
         num_filters: 7,
@@ -1190,7 +1125,7 @@ fn build_clamped_optimizer_sub_config_overrides() {
         max_q: 15.0,
     });
     let opt = super::build::build_clamped_optimizer(
-        "LFE", &source, &config, &curve, &curve, 20.0, 500.0, None, false,
+        "LFE", &config, &curve, &curve, 20.0, 500.0, None, false,
     );
     assert_eq!(opt.num_filters, 7);
     assert_eq!(opt.max_db, 12.0);
@@ -1198,15 +1133,14 @@ fn build_clamped_optimizer_sub_config_overrides() {
 }
 
 #[test]
-fn build_clamped_optimizer_ssir_wav_path_set() {
-    let wav = write_mono_wav(&[0.0_f32; 8], 48000);
+fn build_clamped_optimizer_clears_ssir_wav_path() {
     let curve = flat_curve();
-    let source = wav_source_with_curve(wav.path(), curve.clone(), None);
-    let config = single_speaker_config(ProcessingMode::LowLatency);
+    let mut config = single_speaker_config(ProcessingMode::LowLatency);
+    config.optimizer.ssir_wav_path = Some(std::path::PathBuf::from("ignored-ssir.wav"));
     let opt = super::build::build_clamped_optimizer(
-        "left", &source, &config, &curve, &curve, 20.0, 500.0, None, false,
+        "left", &config, &curve, &curve, 20.0, 500.0, None, false,
     );
-    assert_eq!(opt.ssir_wav_path, Some(wav.path().to_path_buf()));
+    assert!(opt.ssir_wav_path.is_none());
 }
 
 // ===================================================================

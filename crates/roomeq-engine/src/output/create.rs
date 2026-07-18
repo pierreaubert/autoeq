@@ -1,9 +1,7 @@
-use super::super::types::{
-    ChannelDspChain, DspChainOutput, OptimizationMetadata, PluginConfigWrapper,
-};
 use super::biquad::biquad_to_json;
 use super::biquad::biquad_to_warped_json;
 use math_audio_iir_fir::Biquad;
+use roomeq_model::{ChannelDspChain, DspChainOutput, OptimizationMetadata, PluginConfigWrapper};
 use serde_json::json;
 use std::collections::HashMap;
 
@@ -36,7 +34,7 @@ pub fn create_eq_plugin(filters: &[Biquad]) -> PluginConfigWrapper {
 }
 
 /// Create an EQ plugin configuration from already-serialized filter configs.
-pub(in super::super) fn create_eq_plugin_from_filter_configs(
+pub fn create_eq_plugin_from_filter_configs(
     filter_configs: Vec<serde_json::Value>,
 ) -> PluginConfigWrapper {
     PluginConfigWrapper {
@@ -48,7 +46,7 @@ pub(in super::super) fn create_eq_plugin_from_filter_configs(
 }
 
 /// Create a labeled EQ plugin configuration from already-serialized filter configs.
-pub(in super::super) fn create_labeled_eq_plugin_from_filter_configs(
+pub fn create_labeled_eq_plugin_from_filter_configs(
     filter_configs: Vec<serde_json::Value>,
     label: &str,
 ) -> PluginConfigWrapper {
@@ -68,7 +66,7 @@ pub(in super::super) fn create_labeled_eq_plugin_from_filter_configs(
 /// EQ filters card can distinguish the main DE-optimized Pre-EQ pass
 /// from later cleanup passes (Post-EQ) or feature passes (CEA2034,
 /// broadband, user preference).
-pub(in super::super) fn create_warped_eq_plugin(
+pub fn create_warped_eq_plugin(
     standard_filters: &[Biquad],
     warped_filters: &[Biquad],
     lambda: Option<f64>,
@@ -180,9 +178,9 @@ const MIXED_PHASE_REPORT_TRANSPORT_KEY: &str = "_roomeq_mixed_phase_report";
 ///
 /// The marker is removed by [`take_mixed_phase_reports`] before the public DSP
 /// chain is returned, so external convolution-plugin contracts remain stable.
-pub(in crate::roomeq) fn create_mixed_phase_convolution_plugin(
+pub fn create_mixed_phase_convolution_plugin(
     wav_path: &str,
-    report: &crate::roomeq::mixed_phase::MixedPhaseCorrectionReport,
+    report: &crate::mixed_phase::MixedPhaseCorrectionReport,
 ) -> PluginConfigWrapper {
     let mut plugin = create_convolution_plugin(wav_path);
     if let Some(parameters) = plugin.parameters.as_object_mut() {
@@ -196,9 +194,9 @@ pub(in crate::roomeq) fn create_mixed_phase_convolution_plugin(
 
 /// Collect exact mixed-phase reports and remove their internal transport
 /// markers from convolution plugin parameters.
-pub(in crate::roomeq) fn take_mixed_phase_reports(
+pub fn take_mixed_phase_reports(
     channels: &mut HashMap<String, ChannelDspChain>,
-) -> Option<HashMap<String, crate::roomeq::mixed_phase::MixedPhaseCorrectionReport>> {
+) -> Option<HashMap<String, crate::mixed_phase::MixedPhaseCorrectionReport>> {
     let mut reports = HashMap::new();
     for (channel_name, chain) in channels {
         for plugin in &mut chain.plugins {
@@ -237,7 +235,7 @@ pub fn create_dsp_chain_output(
                     matrix.output_channel_map.clone(),
                     matrix.matrix.clone(),
                     "home_cinema_bass_management",
-                    super::super::home_cinema::bass_management_matrix_metadata(graph),
+                    bass_management_matrix_metadata(graph),
                 )
             })
         })
@@ -273,11 +271,23 @@ pub fn create_dsp_chain_output(
     }
 
     DspChainOutput {
-        version: super::super::types::default_config_version(),
+        version: roomeq_model::default_config_version(),
         global_plugins,
         channels,
         metadata,
     }
+}
+
+/// Serialize the stable metadata attached to a bass-management routing matrix.
+pub fn bass_management_matrix_metadata(
+    graph: &roomeq_model::BassManagementRoutingGraph,
+) -> serde_json::Value {
+    json!({
+        "purpose": "home_cinema_bass_management",
+        "physical_sub_output": graph.physical_sub_output,
+        "routes": graph.routes,
+        "advisories": graph.advisories,
+    })
 }
 
 /// Add a delay plugin to an existing chain

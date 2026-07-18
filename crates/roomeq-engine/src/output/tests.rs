@@ -1,4 +1,3 @@
-use super::super::types::{ChannelDspChain, MixedModeConfig, OptimizationMetadata};
 use super::build::build_cardioid_dsp_chain_with_curves;
 use super::build::build_channel_dsp_chain;
 use super::build::build_channel_dsp_chain_with_curves;
@@ -28,6 +27,7 @@ use super::misc::extend_curve_to_full_range;
 use super::misc::get_driver_name;
 use math_audio_iir_fir::Biquad;
 use ndarray::Array1;
+use roomeq_model::{ChannelDspChain, MixedModeConfig, OptimizationMetadata};
 use std::collections::HashMap;
 
 use math_audio_iir_fir::BiquadFilterType;
@@ -443,7 +443,7 @@ fn test_create_dsp_chain_output_adds_ctc_global_xtc_plugin() {
         multi_seat_correction: None,
         bass_management: None,
         timing_diagnostics: None,
-        ctc: Some(crate::roomeq::ctc::CtcReport {
+        ctc: Some(roomeq_model::CtcReport {
             enabled: true,
             source: "measured".to_string(),
             artifact: "/tmp/recommended_xtc_matrix.json".to_string(),
@@ -462,7 +462,7 @@ fn test_create_dsp_chain_output_adds_ctc_global_xtc_plugin() {
             driver_headroom_limited: true,
             room_eq_correction_applied: true,
             room_eq_correction_channels: vec!["left".to_string(), "right".to_string()],
-            delivered_response: Some(crate::roomeq::ctc::CtcDeliveredResponseMetrics {
+            delivered_response: Some(roomeq_model::CtcDeliveredResponseMetrics {
                 mean_target_error: 0.05,
                 worst_target_error: 0.08,
                 mean_crosstalk_db: -24.0,
@@ -744,7 +744,7 @@ fn test_get_driver_name_fallback() {
 
 #[test]
 fn test_compute_eq_response() {
-    use super::super::types::CurveData;
+    use roomeq_model::CurveData;
     let initial = CurveData {
         freq: vec![100.0, 200.0],
         spl: vec![80.0, 80.0],

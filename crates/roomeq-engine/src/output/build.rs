@@ -1,4 +1,3 @@
-use super::super::types::{ChannelDspChain, DriverDspChain, MixedModeConfig, PluginConfigWrapper};
 use super::create::create_band_merge_plugin;
 use super::create::create_band_split_plugin;
 use super::create::create_convolution_plugin;
@@ -10,6 +9,7 @@ use super::create::create_gain_plugin_with_invert;
 use super::create::create_labeled_eq_plugin;
 use super::misc::get_driver_name;
 use math_audio_iir_fir::Biquad;
+use roomeq_model::{ChannelDspChain, DriverDspChain, MixedModeConfig, PluginConfigWrapper};
 use serde_json::json;
 
 /// Build a DSP chain for a single channel

@@ -30,6 +30,8 @@ pub mod mixed_phase;
 pub mod multiseat;
 /// Multi-subwoofer optimization and all-pass alignment.
 pub mod multisub;
+/// Deterministic DSP-chain and response assembly.
+pub mod output;
 pub mod phase_alignment;
 /// Prepared pipeline requests, observable events, and the production execution port.
 pub mod pipeline;

@@ -1,6 +1,4 @@
-use super::super::types::DspChainOutput;
 use ndarray::Array1;
-use std::error::Error;
 
 pub(super) fn same_frequency_grid(a: &[f64], b: &[f64]) -> bool {
     a.len() == b.len()
@@ -140,14 +138,4 @@ pub(super) fn get_driver_name(index: usize, n_drivers: usize) -> String {
         _ => return format!("driver_{}", index),
     }
     .to_string()
-}
-
-/// Save DSP chain to JSON file
-pub fn save_dsp_chain(
-    output: &DspChainOutput,
-    path: &std::path::Path,
-) -> Result<(), Box<dyn Error>> {
-    let json = serde_json::to_string_pretty(output)?;
-    std::fs::write(path, json)?;
-    Ok(())
 }

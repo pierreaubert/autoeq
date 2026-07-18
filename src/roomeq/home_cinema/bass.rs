@@ -307,12 +307,7 @@ pub fn bass_management_routing_graph(
 }
 
 pub fn bass_management_matrix_metadata(graph: &BassManagementRoutingGraph) -> serde_json::Value {
-    serde_json::json!({
-        "purpose": "home_cinema_bass_management",
-        "physical_sub_output": graph.physical_sub_output,
-        "routes": graph.routes,
-        "advisories": graph.advisories,
-    })
+    roomeq_engine::output::bass_management_matrix_metadata(graph)
 }
 
 pub fn bass_management_groups(

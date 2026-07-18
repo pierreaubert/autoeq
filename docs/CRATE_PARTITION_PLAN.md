@@ -1,6 +1,6 @@
 # Crate Partition Migration Plan
 
-Status: canonical; WP0-WP3 complete locally, WP4 next
+Status: canonical; WP0-WP3 complete locally, WP4 in progress
 
 Date: 2026-07-18
 
@@ -353,6 +353,14 @@ Scope:
 - Filter synthesis and channel result assembly.
 - Acceptance/safety outcome propagation.
 - Focused tests currently under `eq`, `speaker_eq`, `optimize`, and `output`.
+
+Local progress:
+
+- Deterministic DSP-chain, plugin, curve-response, and EPA assembly moved from
+  root output modules to roomeq-engine. JSON persistence moved to
+  roomeq-workflow, and root retains only compatibility re-exports.
+- This prerequisite removed 2,533 root RoomEQ lines and moved 42 focused tests
+  without adding an internal dependency edge.
 
 Exit criteria:
 

@@ -12,6 +12,7 @@ autoeq-measurements = { workspace = true }
 hound = { workspace = true }
 log = { workspace = true }
 math-dsp = { workspace = true }
+math-iir-fir = { workspace = true }
 ndarray = { workspace = true }
 roomeq-engine = { workspace = true }
 roomeq-model = { workspace = true }

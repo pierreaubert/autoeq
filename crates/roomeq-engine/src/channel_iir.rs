@@ -9,9 +9,10 @@ use autoeq_core::{AutoeqError, Curve, Result};
 use autoeq_optim::optim::{OptimProgressCallback, OptimizerRunEvidence};
 use log::info;
 use math_audio_iir_fir::{Biquad, BiquadFilterType, KautzFilter};
-use roomeq_model::{ChannelDspChain, OptimizerConfig, RoomConfig};
+use roomeq_model::{OptimizerConfig, RoomConfig};
 
 use crate::channel_preprocessing::PreprocessedFeatures;
+pub use crate::channel_result::ChannelProcessingResult as IirChannelResult;
 use crate::channel_target::TargetContext;
 use crate::eq::EqResources;
 use crate::{PreparedChannelInput, cea2034};
@@ -36,19 +37,6 @@ pub struct IirChannelRequest<'a> {
     pub optimizer: &'a OptimizerConfig,
     pub eq_resources: &'a EqResources,
     pub callback: Option<OptimProgressCallback>,
-}
-
-/// Assembled channel output returned to the root workflow facade.
-pub struct IirChannelResult {
-    pub channel: ChannelDspChain,
-    pub pre_score: f64,
-    pub post_score: f64,
-    pub raw_pre_eq_curve: Curve,
-    pub raw_post_eq_curve: Curve,
-    pub filters: Vec<Biquad>,
-    pub mean_spl: f64,
-    pub arrival_time_ms: Option<f64>,
-    pub optimizer_evidence: Vec<OptimizerRunEvidence>,
 }
 
 pub(super) enum IirOptimizerOutput {
@@ -84,8 +72,10 @@ impl IirOptimizerOutput {
 /// I/O. All source-backed resources must already be present in the prepared
 /// channel input.
 pub fn process_iir_channel(mut request: IirChannelRequest<'_>) -> Result<IirChannelResult> {
-    let optimization_curve =
-        optimization_curve(&request.preprocessed.curve_for_optim, request.target);
+    let optimization_curve = crate::channel_result::subtract_target_tilt(
+        &request.preprocessed.curve_for_optim,
+        request.target,
+    );
 
     match request.mode {
         IirChannelMode::LowLatency | IirChannelMode::WarpedIir => {
@@ -129,19 +119,6 @@ pub fn process_iir_channel(mut request: IirChannelRequest<'_>) -> Result<IirChan
                 request.preprocessed.optimizer_evidence.clone(),
             )
         }
-    }
-}
-
-fn optimization_curve(curve: &Curve, target: &TargetContext) -> Curve {
-    if let Some(tilt_curve) = &target.target_tilt_curve {
-        Curve {
-            freq: curve.freq.clone(),
-            spl: &curve.spl - &tilt_curve.spl,
-            phase: curve.phase.clone(),
-            ..Curve::default()
-        }
-    } else {
-        curve.clone()
     }
 }
 

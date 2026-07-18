@@ -1,7 +1,6 @@
 //! Target resolution for engine-owned FIR correction design.
 
 use autoeq_measurements::Curve;
-use ndarray::Array1;
 use roomeq_model::{OptimizerConfig, TargetCurveConfig};
 use std::error::Error;
 
@@ -10,41 +9,15 @@ fn resolve_fir_target_curve(
     config: &OptimizerConfig,
     target_config: Option<&TargetCurveConfig>,
 ) -> Result<Curve, Box<dyn Error>> {
-    match target_config {
-        Some(TargetCurveConfig::Path(path)) => {
-            let target = autoeq_measurements::read::read_curve_from_csv(path)?;
-            Ok(
-                autoeq_measurements::read::normalize_and_interpolate_response(
-                    &measurement.freq,
-                    &target,
-                ),
-            )
-        }
-        Some(TargetCurveConfig::Predefined(name)) => Ok(
-            autoeq_measurements::build_target_curve_by_name(name, &measurement.freq, measurement),
-        ),
-        None => {
-            let values =
-                measurement
-                    .freq
-                    .iter()
-                    .zip(&measurement.spl)
-                    .filter_map(|(&frequency, &spl)| {
-                        (frequency >= config.min_freq && frequency <= config.max_freq)
-                            .then_some(spl)
-                    });
-            let (sum, count) = values.fold((0.0, 0_usize), |(sum, count), value| {
-                (sum + value, count + 1)
-            });
-            let mean_level = if count > 0 { sum / count as f64 } else { 0.0 };
-            Ok(Curve {
-                freq: measurement.freq.clone(),
-                spl: Array1::from_elem(measurement.freq.len(), mean_level),
-                phase: None,
-                ..Default::default()
-            })
-        }
-    }
+    let resources = roomeq_engine::eq::EqResources {
+        target: crate::prepare_eq_target(target_config)?,
+        impulse_response: None,
+    };
+    Ok(roomeq_engine::fir::prepared_fir_target_curve(
+        measurement,
+        config,
+        &resources,
+    ))
 }
 
 pub fn generate_fir_correction(
@@ -83,6 +56,8 @@ pub use roomeq_engine::fir::{
 
 #[cfg(test)]
 mod tests {
+    use ndarray::Array1;
+
     use super::*;
 
     #[test]

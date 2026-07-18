@@ -90,6 +90,8 @@ pub(super) fn assemble_iir_result(
         filters: report_filters,
         mean_spl: request.target.mean_spl,
         arrival_time_ms: request.prepared.arrival_time_ms(),
+        fir_coeffs: None,
+        convolution_sidecar: None,
         optimizer_evidence,
     })
 }

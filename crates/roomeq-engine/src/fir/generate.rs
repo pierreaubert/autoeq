@@ -1,8 +1,56 @@
 use super::apply::apply_fractional_sample_shift;
 use crate::Curve;
+use crate::eq::{EqResources, PreparedEqTarget};
 pub use autoeq_fir::FirPhase;
+use ndarray::Array1;
 use roomeq_model::OptimizerConfig;
 use std::error::Error;
+
+/// Resolve a workflow-prepared FIR target on the measurement grid.
+pub fn prepared_fir_target_curve(
+    measurement: &Curve,
+    config: &OptimizerConfig,
+    resources: &EqResources,
+) -> Curve {
+    match resources.target.as_ref() {
+        Some(PreparedEqTarget::Curve(target)) => {
+            autoeq_core::normalize_and_interpolate_response(&measurement.freq, target)
+        }
+        Some(PreparedEqTarget::Predefined(name)) => {
+            autoeq_core::build_target_curve_by_name(name, &measurement.freq, measurement)
+        }
+        None => {
+            let (sum, count) = measurement
+                .freq
+                .iter()
+                .zip(measurement.spl.iter())
+                .filter_map(|(&frequency, &level)| {
+                    (frequency >= config.min_freq && frequency <= config.max_freq).then_some(level)
+                })
+                .fold((0.0, 0_usize), |(sum, count), level| {
+                    (sum + level, count + 1)
+                });
+            let mean_level = if count == 0 { 0.0 } else { sum / count as f64 };
+            Curve {
+                freq: measurement.freq.clone(),
+                spl: Array1::from_elem(measurement.freq.len(), mean_level),
+                phase: None,
+                ..Curve::default()
+            }
+        }
+    }
+}
+
+/// Generate FIR coefficients using only workflow-prepared in-memory resources.
+pub fn generate_fir_correction_with_resources(
+    measurement: &Curve,
+    config: &OptimizerConfig,
+    resources: &EqResources,
+    sample_rate: f64,
+) -> Result<Vec<f64>, Box<dyn Error>> {
+    let target = prepared_fir_target_curve(measurement, config, resources);
+    generate_fir_correction_prepared(measurement, config, &target, sample_rate)
+}
 
 /// Generate an FIR correction filter for a single channel
 ///

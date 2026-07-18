@@ -2766,6 +2766,7 @@ dependencies = [
  "hound",
  "log",
  "math-dsp",
+ "math-iir-fir",
  "ndarray",
  "roomeq-engine",
  "roomeq-model",

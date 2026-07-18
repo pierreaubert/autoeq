@@ -411,49 +411,6 @@ fn determine_optimization_bands_no_crossover_info() {
     assert_eq!(bands[1].1, 20000.0);
 }
 
-#[test]
-fn optimize_eq_maybe_multi_single_curve_succeeds() {
-    let source = MeasurementSource::InMemory(flat_curve());
-    let measurements = roomeq_workflow::prepare_channel_measurements(&source).unwrap();
-    let config = single_speaker_config(ProcessingMode::LowLatency);
-    let eq_resources = roomeq_engine::eq::EqResources::default();
-    let result = super::optimize_eq_maybe_multi(
-        &measurements,
-        &flat_curve(),
-        &config.optimizer,
-        &eq_resources,
-        48000.0,
-        "left",
-        None,
-        None,
-    );
-    assert!(result.is_ok(), "{:?}", result.err());
-}
-
-#[test]
-fn optimize_eq_maybe_multi_multi_measurement_weighted() {
-    let curves = vec![flat_curve(), flat_curve()];
-    let source = MeasurementSource::InMemoryMultiple(curves);
-    let measurements = roomeq_workflow::prepare_channel_measurements(&source).unwrap();
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.optimizer.multi_measurement = Some(super::super::types::MultiMeasurementConfig {
-        strategy: super::super::types::MultiMeasurementStrategy::WeightedSum,
-        ..Default::default()
-    });
-    let eq_resources = roomeq_engine::eq::EqResources::default();
-    let result = super::optimize_eq_maybe_multi(
-        &measurements,
-        &flat_curve(),
-        &config.optimizer,
-        &eq_resources,
-        48000.0,
-        "left",
-        None,
-        None,
-    );
-    assert!(result.is_ok(), "{:?}", result.err());
-}
-
 // ===================================================================
 // apply.rs helper tests
 // ===================================================================

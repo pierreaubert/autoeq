@@ -1,20 +1,20 @@
 //! Processing-mode adapters for single-speaker room EQ.
 //!
-//! Generic modes delegate to roomeq-engine. The group-specific hybrid
-//! crossover remains rooted until WP5 owns that topology.
+//! All processing modes delegate to roomeq-engine; this module only adapts the
+//! remaining root workflow contract and persists workflow-owned sidecars.
 
 use super::types::{
     ChannelOptimizationInput, MixedModeResult, PreparedMeasurement, PreprocessedFeatures,
     TargetContext,
 };
 use crate::error::{AutoeqError, Result};
-use crate::roomeq::group_processing;
 use crate::roomeq::types::{OptimizerConfig, ProcessingMode};
 use log::{info, warn};
 use roomeq_engine::channel_fir::{FirChannelMode, FirChannelRequest, process_fir_channel};
 use roomeq_engine::channel_iir::{IirChannelMode, IirChannelRequest, process_iir_channel};
 use roomeq_engine::channel_result::ChannelProcessingResult;
 use roomeq_engine::eq::EqResources;
+use roomeq_engine::mixed_crossover::{MixedCrossoverRequest, process_mixed_crossover};
 
 /// Strategy trait retained by the root compatibility facade.
 pub trait ChannelProcessingStrategy {
@@ -67,66 +67,79 @@ impl ChannelProcessingStrategy for EngineFirStrategy {
         clamped_optimizer: &OptimizerConfig,
         eq_resources: &EqResources,
     ) -> Result<MixedModeResult> {
-        if self.mode == FirChannelMode::Hybrid
-            && let Some(mixed_config) = &input.room_config.optimizer.mixed_config
-        {
-            return group_processing::process_mixed_mode_crossover(
-                input.channel_name,
-                &preprocessed.curve_for_optim,
-                input.room_config,
-                mixed_config,
-                input.sample_rate,
-                input.output_dir,
-                target.min_freq,
-                target.max_freq,
-                target.mean_spl,
-                target.pre_score,
-                prepared.arrival_time_ms,
-                input.callback.take(),
-            );
-        }
-
         if self.mode == FirChannelMode::PhaseLinear
             && let Some(callback) = input.callback.as_mut()
         {
             callback(1, target.pre_score, None);
         }
-        let mode = match self.mode {
-            FirChannelMode::PhaseLinear => ProcessingMode::PhaseLinear,
-            FirChannelMode::Hybrid => ProcessingMode::Hybrid,
-            FirChannelMode::MixedPhase => ProcessingMode::MixedPhase,
+        let (reservation, result) = if self.mode == FirChannelMode::Hybrid
+            && let Some(mixed_config) = &input.room_config.optimizer.mixed_config
+        {
+            let reservation = roomeq_workflow::reserve_mixed_crossover_sidecar(
+                input.output_dir,
+                input.channel_name,
+                input.sample_rate,
+            )
+            .map_err(|error| AutoeqError::OptimizationFailed {
+                message: format!(
+                    "Failed to reserve convolution artifact for channel {}: {error}",
+                    input.channel_name
+                ),
+            })?;
+            let result = process_mixed_crossover(MixedCrossoverRequest {
+                channel_name: input.channel_name,
+                curve: &preprocessed.curve_for_optim,
+                mixed_config,
+                optimizer: &input.room_config.optimizer,
+                eq_resources,
+                sample_rate: input.sample_rate,
+                min_freq: target.min_freq,
+                max_freq: target.max_freq,
+                mean_spl: target.mean_spl,
+                pre_score: target.pre_score,
+                arrival_time_ms: prepared.arrival_time_ms,
+                sidecar_reference: reservation.reference().clone(),
+                callback: input.callback.take(),
+            })?;
+            (reservation, result)
+        } else {
+            let mode = match self.mode {
+                FirChannelMode::PhaseLinear => ProcessingMode::PhaseLinear,
+                FirChannelMode::Hybrid => ProcessingMode::Hybrid,
+                FirChannelMode::MixedPhase => ProcessingMode::MixedPhase,
+            };
+            let reservation = roomeq_workflow::reserve_channel_convolution_sidecar(
+                input.output_dir,
+                input.channel_name,
+                mode,
+                input.sample_rate,
+            )
+            .map_err(|error| AutoeqError::OptimizationFailed {
+                message: format!(
+                    "Failed to reserve convolution artifact for channel {}: {error}",
+                    input.channel_name
+                ),
+            })?
+            .expect("FIR-capable modes always reserve a convolution sidecar");
+            let result = process_fir_channel(FirChannelRequest {
+                mode: self.mode,
+                channel_name: input.channel_name,
+                prepared: input.prepared,
+                room_config: input.room_config,
+                sample_rate: input.sample_rate,
+                target,
+                preprocessed,
+                optimizer: clamped_optimizer,
+                eq_resources,
+                sidecar_reference: reservation.reference().clone(),
+                callback: if self.mode == FirChannelMode::PhaseLinear {
+                    None
+                } else {
+                    input.callback.take()
+                },
+            })?;
+            (reservation, result)
         };
-        let reservation = roomeq_workflow::reserve_channel_convolution_sidecar(
-            input.output_dir,
-            input.channel_name,
-            mode,
-            input.sample_rate,
-        )
-        .map_err(|error| AutoeqError::OptimizationFailed {
-            message: format!(
-                "Failed to reserve convolution artifact for channel {}: {error}",
-                input.channel_name
-            ),
-        })?
-        .expect("FIR-capable modes always reserve a convolution sidecar");
-
-        let result = process_fir_channel(FirChannelRequest {
-            mode: self.mode,
-            channel_name: input.channel_name,
-            prepared: input.prepared,
-            room_config: input.room_config,
-            sample_rate: input.sample_rate,
-            target,
-            preprocessed,
-            optimizer: clamped_optimizer,
-            eq_resources,
-            sidecar_reference: reservation.reference().clone(),
-            callback: if self.mode == FirChannelMode::PhaseLinear {
-                None
-            } else {
-                input.callback.take()
-            },
-        })?;
 
         if let Some(generated) = result.convolution_sidecar.as_ref() {
             let coefficients = result

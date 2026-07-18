@@ -37,12 +37,40 @@ pub fn reserve_channel_convolution_sidecar(
             return Ok(None);
         }
     };
+    Ok(Some(reserve_sidecar_kind(
+        output_dir,
+        channel_name,
+        kind,
+        sample_rate,
+    )?))
+}
+
+/// Reserve the Band-FIR sidecar used by the frequency-split Hybrid topology.
+pub fn reserve_mixed_crossover_sidecar(
+    output_dir: &Path,
+    channel_name: &str,
+    sample_rate: f64,
+) -> Result<ReservedConvolutionSidecar, Box<dyn std::error::Error>> {
+    reserve_sidecar_kind(
+        output_dir,
+        channel_name,
+        ConvolutionArtifactKind::BandFir,
+        sample_rate,
+    )
+}
+
+fn reserve_sidecar_kind(
+    output_dir: &Path,
+    channel_name: &str,
+    kind: ConvolutionArtifactKind,
+    sample_rate: f64,
+) -> Result<ReservedConvolutionSidecar, Box<dyn std::error::Error>> {
     let (filename, path) =
         reserve_convolution_artifact_path(output_dir, channel_name, kind, sample_rate);
-    Ok(Some(ReservedConvolutionSidecar {
+    Ok(ReservedConvolutionSidecar {
         reference: ConvolutionSidecarReference::new(filename)?,
         path,
-    }))
+    })
 }
 
 /// Persist coefficients returned by the engine to the matching reservation.
@@ -128,5 +156,17 @@ mod tests {
                     .is_none()
             );
         }
+    }
+
+    #[test]
+    fn mixed_crossover_reserves_band_fir_sidecar() {
+        let directory = tempfile::tempdir().unwrap();
+        let reserved = reserve_mixed_crossover_sidecar(directory.path(), "left", 48_000.0).unwrap();
+
+        assert_eq!(reserved.reference().filename(), "left_band_fir_48000hz.wav");
+        assert_eq!(
+            reserved.path(),
+            directory.path().join("left_band_fir_48000hz.wav")
+        );
     }
 }

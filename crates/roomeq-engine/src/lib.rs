@@ -43,6 +43,8 @@ pub mod gd_opt;
 pub mod height_channel_alignment;
 /// Inter-channel tonal matching using broadband spectral correction.
 pub mod inter_channel_timbre_matching;
+/// Path-free frequency-split FIR/IIR channel processing.
+pub mod mixed_crossover;
 /// Mixed IIR/FIR phase decomposition and excess-phase correction.
 pub mod mixed_phase;
 /// Multi-seat continuous-listening-area subwoofer optimization.

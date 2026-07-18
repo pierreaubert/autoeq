@@ -20,4 +20,5 @@ pub use output::save_dsp_chain;
 pub use pipeline::{RoomPipeline, RoomPipelineRequest, WorkflowContext};
 pub use sidecar::{
     ReservedConvolutionSidecar, persist_convolution_sidecar, reserve_channel_convolution_sidecar,
+    reserve_mixed_crossover_sidecar,
 };

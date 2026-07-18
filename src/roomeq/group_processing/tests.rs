@@ -378,19 +378,15 @@ mod coverage_tests {
     use super::super::check::check_group_consistency;
     use super::super::check::check_octave_consistency;
     use super::super::misc::apply_per_sub_filters;
-    use super::super::misc::compute_lr24_crossover_responses;
     use super::super::misc::load_multisub_seat_measurements;
     use super::super::misc::multiseat_peq_config;
-    use super::super::misc::split_curve_at_frequency;
     use super::super::process::process_dba;
-    use super::super::process::process_mixed_mode_crossover;
     use super::super::process::process_multisub_group;
     use super::super::process::process_speaker_group;
     use super::super::process::process_speaker_topology;
     use crate::Curve;
     use crate::MeasurementSource;
     use crate::roomeq::types::DBAConfig;
-    use crate::roomeq::types::MixedModeConfig;
     use crate::roomeq::types::MultiSeatConfig;
     use crate::roomeq::types::MultiSubGroup;
     use crate::roomeq::types::OptimizerConfig;
@@ -542,17 +538,6 @@ mod coverage_tests {
         let result = apply_per_sub_filters(&measurements, &filters, 48000.0);
         assert_eq!(result.len(), 2);
         assert_eq!(result[0][0].spl, seat.spl);
-    }
-
-    #[test]
-    fn split_curve_at_frequency_and_lr24_responses_work() {
-        let curve = flat_curve();
-        let (low, high) = split_curve_at_frequency(&curve, 400.0);
-        assert!(!low.freq.is_empty());
-        assert!(!high.freq.is_empty());
-        let (lp, hp) = compute_lr24_crossover_responses(&curve.freq, 400.0, 48000.0);
-        assert_eq!(lp.len(), curve.freq.len());
-        assert_eq!(hp.len(), curve.freq.len());
     }
 
     #[test]
@@ -836,43 +821,6 @@ mod coverage_tests {
         };
         let config = room_config_with_optimizer(sub_optimizer());
         let result = process_dba("LFE", &dba, &config, 48000.0, Path::new("."));
-        assert!(result.is_ok(), "{result:?}");
-    }
-
-    #[test]
-    fn process_mixed_mode_crossover_succeeds_with_low_fir() {
-        let curve = flat_curve();
-        let mixed = MixedModeConfig {
-            crossover_freq: 500.0,
-            fir_band: "low".to_string(),
-            ..Default::default()
-        };
-        let config = room_config_with_optimizer(OptimizerConfig {
-            min_freq: 100.0,
-            max_freq: 1600.0,
-            num_filters: 1,
-            max_iter: 3,
-            population: 4,
-            seed: Some(2),
-            refine: false,
-            fir: Some(crate::roomeq::types::FirConfig::default()),
-            ..Default::default()
-        });
-        let output_dir = std::env::temp_dir();
-        let result = process_mixed_mode_crossover(
-            "L",
-            &curve,
-            &config,
-            &mixed,
-            48000.0,
-            &output_dir,
-            100.0,
-            1600.0,
-            80.0,
-            1.0,
-            None,
-            None,
-        );
         assert!(result.is_ok(), "{result:?}");
     }
 }

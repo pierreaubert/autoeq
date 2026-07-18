@@ -459,15 +459,23 @@ Local progress:
   cycles, exceptions, or duplicate implementations; the ratchets are now
   55,631 root Rust lines, 39,994 root RoomEQ lines, 15,337 root binary lines,
   and 643 root unit tests.
+- The group-specific Hybrid mixed-crossover branch now uses the same two-phase
+  boundary: roomeq-engine owns the frequency split, band-limited IIR/FIR
+  optimization, crossover response simulation, DSP graph, and report result;
+  roomeq-workflow reserves and persists the Band-FIR sidecar. The former root
+  implementation and its redundant helper coverage were deleted. One focused
+  engine test and one workflow test cover the new boundary. Internal edges
+  remain 43, with zero cycles, exceptions, or duplicate implementations; the
+  ratchets are now 55,358 root Rust lines, 39,721 root RoomEQ lines, 15,337 root
+  binary lines, and 641 root unit tests.
 - WP4 remains in progress: ChannelProcessingStrategy ownership and the generic
   single-channel topology/workflow adapters are still rooted and must move
   before the package exit criteria are satisfied.
 
 Remaining dependency order:
 
-1. Route the group-specific `Hybrid` mixed-crossover branch to WP5 ownership,
-   move the remaining channel preparation, optimizer clamping, and compatibility
-   tuple dispatch into owner crates, and delete the root `speaker_eq` module and
+1. Move the remaining channel preparation, optimizer clamping, and compatibility
+   tuple dispatch into owner crates, then delete the root `speaker_eq` module and
    temporary EQ adapters.
 
 No intermediate WP4 change may add filesystem paths to an engine channel

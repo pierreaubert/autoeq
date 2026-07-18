@@ -10,12 +10,6 @@ use ndarray::Array1;
 
 pub(super) const GLOBAL_EQ_REGRESSION_TOLERANCE: f64 = 1e-6;
 
-// Re-export shared crossover helpers from the sibling `crossover_utils` module
-// so group_processing does not duplicate them.
-pub(super) use super::super::crossover_utils::{
-    compute_lr24_crossover_responses, split_curve_at_frequency,
-};
-
 pub(super) fn load_multisub_seat_measurements(
     group: &MultiSubGroup,
 ) -> Result<Option<Vec<Vec<Curve>>>> {

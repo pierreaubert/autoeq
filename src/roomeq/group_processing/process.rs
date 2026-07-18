@@ -1,26 +1,22 @@
-use super::super::artifacts::{self, ConvolutionArtifactKind};
 use super::super::crossover;
 use super::super::dba;
 use super::super::eq;
-use super::super::fir;
 use super::super::multiseat::{self, MultiSeatMeasurements};
 use super::super::multisub;
 use super::super::optimize::detect_passband_and_mean;
 use super::super::output;
 use super::super::speaker_eq::determine_optimization_bands;
 use super::super::types::{
-    LEGACY_SPEAKER_GROUP_ADVISORY, MixedModeConfig, MultiSeatConfig, MultiSubGroup,
-    OptimizerConfig, RoomConfig, SpeakerGroup, SpeakerTopology,
+    LEGACY_SPEAKER_GROUP_ADVISORY, MultiSeatConfig, MultiSubGroup, OptimizerConfig, RoomConfig,
+    SpeakerGroup, SpeakerTopology,
 };
 use super::misc::apply_per_sub_filters;
 use super::misc::average_power_curve;
-use super::misc::compute_lr24_crossover_responses;
 use super::misc::eq_score_regressed;
 use super::misc::flat_loss_score;
 use super::misc::identity_multiseat_result;
 use super::misc::load_multisub_seat_measurements;
 use super::misc::multiseat_peq_config;
-use super::misc::split_curve_at_frequency;
 use super::types::MixedModeResult;
 use crate::Curve;
 use crate::error::{AutoeqError, Result};
@@ -1079,230 +1075,6 @@ pub(in super::super) fn process_dba(
         mean_spl,
         None, // No single WAV for DBA
         None, // IIR-only for DBA
-        optimizer_evidence,
-    ))
-}
-
-/// Process mixed mode with frequency-based crossover
-///
-/// This mode applies FIR correction to one frequency band (default: low frequencies)
-/// and IIR correction to the other band (default: high frequencies), separated by
-/// a configurable crossover frequency.
-///
-/// Returns: (DSP chain, pre_score, post_score, initial_curve, final_curve, biquads, mean_spl, arrival_time_ms)
-#[allow(clippy::too_many_arguments)]
-pub(in super::super) fn process_mixed_mode_crossover(
-    channel_name: &str,
-    curve: &Curve,
-    room_config: &RoomConfig,
-    mixed_config: &MixedModeConfig,
-    sample_rate: f64,
-    output_dir: &Path,
-    min_freq: f64,
-    max_freq: f64,
-    mean: f64,
-    pre_score: f64,
-    arrival_time_ms: Option<f64>,
-    callback: Option<crate::optim::OptimProgressCallback>,
-) -> Result<MixedModeResult> {
-    let crossover_freq = mixed_config.crossover_freq;
-    let fir_uses_low = mixed_config.fir_band.to_lowercase() == "low";
-
-    info!(
-        "  Mixed mode crossover at {} Hz (FIR on {} band, IIR on {} band)",
-        crossover_freq,
-        if fir_uses_low { "low" } else { "high" },
-        if fir_uses_low { "high" } else { "low" }
-    );
-
-    // Split the curve at crossover frequency
-    let (low_curve, high_curve) = split_curve_at_frequency(curve, crossover_freq);
-
-    // Determine which curve gets FIR and which gets IIR
-    let (fir_curve, iir_curve) = if fir_uses_low {
-        (&low_curve, &high_curve)
-    } else {
-        (&high_curve, &low_curve)
-    };
-
-    // Create band-specific optimizer configs with appropriate frequency ranges
-    let fir_min_freq = fir_curve.freq.first().copied().unwrap_or(min_freq);
-    let fir_max_freq = fir_curve.freq.last().copied().unwrap_or(crossover_freq);
-    let iir_min_freq = iir_curve.freq.first().copied().unwrap_or(crossover_freq);
-    let iir_max_freq = iir_curve.freq.last().copied().unwrap_or(max_freq);
-
-    info!(
-        "  FIR band: {:.1}-{:.1} Hz, IIR band: {:.1}-{:.1} Hz",
-        fir_min_freq, fir_max_freq, iir_min_freq, iir_max_freq
-    );
-
-    // Optimize IIR on designated band
-    let iir_config = OptimizerConfig {
-        min_freq: iir_min_freq,
-        max_freq: iir_max_freq,
-        ..room_config.optimizer.clone()
-    };
-
-    let eq_result = if let Some(cb) = callback {
-        eq::optimize_channel_eq_with_callback_detailed(
-            iir_curve,
-            &iir_config,
-            room_config.target_curve.as_ref(),
-            sample_rate,
-            cb,
-        )
-    } else {
-        eq::optimize_channel_eq_detailed(
-            iir_curve,
-            &iir_config,
-            room_config.target_curve.as_ref(),
-            sample_rate,
-        )
-    }
-    .map_err(|e| AutoeqError::OptimizationFailed {
-        message: format!(
-            "IIR optimization failed for {} band: {}",
-            if fir_uses_low { "high" } else { "low" },
-            e
-        ),
-    })?;
-    let eq_filters = eq_result.filters;
-    let optimizer_evidence = eq_result.optimizer_evidence;
-
-    info!(
-        "  IIR stage: {} filters for {} band",
-        eq_filters.len(),
-        if fir_uses_low { "high" } else { "low" }
-    );
-
-    // Optimize FIR on designated band
-    let fir_config = OptimizerConfig {
-        min_freq: fir_min_freq,
-        max_freq: fir_max_freq,
-        ..room_config.optimizer.clone()
-    };
-
-    let fir_coeffs = fir::generate_fir_correction(
-        fir_curve,
-        &fir_config,
-        room_config.target_curve.as_ref(),
-        sample_rate,
-    )
-    .map_err(|e| AutoeqError::OptimizationFailed {
-        message: format!(
-            "FIR generation failed for {} band: {}",
-            if fir_uses_low { "low" } else { "high" },
-            e
-        ),
-    })?;
-
-    // Save FIR to WAV
-    let (fir_filename, wav_path) = artifacts::reserve_convolution_artifact_path(
-        output_dir,
-        channel_name,
-        ConvolutionArtifactKind::BandFir,
-        sample_rate,
-    );
-    crate::fir::save_fir_to_wav(&fir_coeffs, sample_rate as u32, &wav_path).map_err(|e| {
-        AutoeqError::OptimizationFailed {
-            message: format!("Failed to save FIR WAV: {}", e),
-        }
-    })?;
-
-    info!("  Saved FIR filter to {}", wav_path.display());
-
-    // Build DSP chain with band split/merge
-    let mut chain = output::build_mixed_mode_crossover_chain(
-        channel_name,
-        mixed_config,
-        &eq_filters,
-        &fir_filename,
-        fir_uses_low,
-        None,
-    );
-
-    // Compute combined response for scoring
-    // For proper scoring, we need to simulate what the full chain does:
-    // - Split into bands at crossover
-    // - Apply FIR to one band, IIR to the other
-    // - Sum bands back together
-    let iir_resp = response::compute_peq_complex_response(&eq_filters, &curve.freq, sample_rate);
-    let fir_resp = response::compute_fir_complex_response(&fir_coeffs, &curve.freq, sample_rate);
-
-    // Compute crossover filter responses (LR24 = 4th order Butterworth)
-    let (lp_resp, hp_resp) =
-        compute_lr24_crossover_responses(&curve.freq, crossover_freq, sample_rate);
-
-    // Combine responses: low_band * fir_or_iir + high_band * iir_or_fir
-    let combined_resp: Vec<num_complex::Complex<f64>> = curve
-        .freq
-        .iter()
-        .enumerate()
-        .map(|(i, _)| {
-            if fir_uses_low {
-                lp_resp[i] * fir_resp[i] + hp_resp[i] * iir_resp[i]
-            } else {
-                lp_resp[i] * iir_resp[i] + hp_resp[i] * fir_resp[i]
-            }
-        })
-        .collect();
-
-    let final_curve = response::apply_complex_response(curve, &combined_resp);
-
-    // Detect passband for normalization
-    let (norm_range, mean_final) = detect_passband_and_mean(&final_curve);
-
-    // Compute post-score
-    let normalized_final_spl = &final_curve.spl - mean_final;
-    let post_score =
-        crate::loss::flat_loss(&final_curve.freq, &normalized_final_spl, min_freq, max_freq);
-
-    info!(
-        "  Pre-score: {:.6}, Post-score: {:.6}",
-        pre_score, post_score
-    );
-
-    // Extend curves to 20 Hz – 20 kHz for display output
-    let display_initial = output::extend_curve_to_full_range(curve);
-    let display_iir_resp =
-        response::compute_peq_complex_response(&eq_filters, &display_initial.freq, sample_rate);
-    let display_fir_resp =
-        response::compute_fir_complex_response(&fir_coeffs, &display_initial.freq, sample_rate);
-    let (display_lp, display_hp) =
-        compute_lr24_crossover_responses(&display_initial.freq, crossover_freq, sample_rate);
-    let display_combined: Vec<num_complex::Complex<f64>> = display_initial
-        .freq
-        .iter()
-        .enumerate()
-        .map(|(i, _)| {
-            if fir_uses_low {
-                display_lp[i] * display_fir_resp[i] + display_hp[i] * display_iir_resp[i]
-            } else {
-                display_lp[i] * display_iir_resp[i] + display_hp[i] * display_fir_resp[i]
-            }
-        })
-        .collect();
-    let display_final = response::apply_complex_response(&display_initial, &display_combined);
-
-    let mut initial_data: super::super::types::CurveData = (&display_initial).into();
-    initial_data.norm_range = norm_range;
-    let mut final_data: super::super::types::CurveData = (&display_final).into();
-    final_data.norm_range = norm_range;
-
-    chain.initial_curve = Some(initial_data.clone());
-    chain.final_curve = Some(final_data.clone());
-    chain.eq_response = Some(output::compute_eq_response(&initial_data, &final_data));
-
-    Ok((
-        chain,
-        pre_score,
-        post_score,
-        curve.clone(),
-        final_curve,
-        eq_filters,
-        mean,
-        arrival_time_ms,
-        Some(fir_coeffs),
         optimizer_evidence,
     ))
 }

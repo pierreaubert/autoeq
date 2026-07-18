@@ -104,29 +104,6 @@ pub(in super::super) fn optimize_eq_maybe_multi(
         })
     }
 }
-pub(super) fn create_kautz_filter_config(sections: &[(f64, f64, f64)]) -> serde_json::Value {
-    let kautz_sections: Vec<serde_json::Value> = sections
-        .iter()
-        .map(|(pole_freq, q, gain)| {
-            serde_json::json!({
-                "pole_freq": pole_freq,
-                "q": q,
-                "gain": gain,
-            })
-        })
-        .collect();
-    let (freq, q, _) = sections.first().copied().unwrap_or((100.0, 1.0, 0.0));
-
-    serde_json::json!({
-        "topology": "kautz_filter",
-        "filter_type": "peak",
-        "freq": freq,
-        "q": q,
-        "db_gain": 0.0,
-        "kautz_sections": kautz_sections,
-    })
-}
-
 pub(super) fn is_subwoofer_measurement_channel(
     channel_name: &str,
     room_config: &RoomConfig,

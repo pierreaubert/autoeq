@@ -11,6 +11,8 @@ pub mod error {
 pub mod bass_phase_confidence;
 /// Pure CEA-2034 speaker and preference correction.
 pub mod cea2034;
+/// Path-free low-latency, warped-IIR, and Kautz-modal channel processing.
+pub mod channel_iir;
 /// Complete path-free input prepared for channel processing.
 pub mod channel_input;
 /// Prepared, path-free measurement inputs for channel processing.

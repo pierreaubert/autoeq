@@ -5,7 +5,6 @@ use super::super::types::{
 use super::apply::process_single_speaker;
 use super::misc::determine_optimization_bands;
 use crate::Curve;
-use crate::error::AutoeqError;
 use crate::{InlineMeasurement, MeasurementRef, MeasurementSingle};
 use ndarray::Array1;
 
@@ -61,50 +60,6 @@ fn single_speaker_config(processing_mode: ProcessingMode) -> RoomConfig {
         ctc: None,
         cea2034_cache: None,
     }
-}
-
-#[test]
-fn kautz_filter_config_serializes_modal_sections() {
-    let config = super::create_kautz_filter_config(&[(42.0, 8.0, -4.5), (71.0, 5.5, 2.0)]);
-
-    assert_eq!(
-        config.get("topology").unwrap().as_str().unwrap(),
-        "kautz_filter"
-    );
-    assert_eq!(config.get("freq").unwrap().as_f64().unwrap(), 42.0);
-    assert_eq!(
-        config
-            .get("kautz_sections")
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .len(),
-        2
-    );
-}
-
-#[test]
-fn kautz_modal_without_detected_modes_returns_error() {
-    let source = MeasurementSource::InMemory(flat_curve());
-    let config = single_speaker_config(ProcessingMode::KautzModal);
-    let output_dir = std::env::temp_dir();
-
-    let result = process_single_speaker(
-        "left",
-        &source,
-        &config,
-        48000.0,
-        &output_dir,
-        None,
-        None,
-        None,
-    );
-
-    assert!(matches!(
-        result,
-        Err(AutoeqError::OptimizationFailed { ref message })
-            if message.contains("KautzModal found no room modes")
-    ));
 }
 
 #[test]
@@ -604,24 +559,6 @@ fn build_clamped_optimizer_clears_ssir_wav_path() {
 // ===================================================================
 
 #[test]
-fn process_single_speaker_warped_iir_succeeds() {
-    let source = MeasurementSource::InMemory(flat_curve());
-    let config = single_speaker_config(ProcessingMode::WarpedIir);
-    let output_dir = std::env::temp_dir();
-    let result = process_single_speaker(
-        "left",
-        &source,
-        &config,
-        48000.0,
-        &output_dir,
-        None,
-        None,
-        None,
-    );
-    assert!(result.is_ok(), "{:?}", result.err());
-}
-
-#[test]
 fn process_single_speaker_mixed_phase_with_phase_data_succeeds() {
     let mut curve = flat_curve();
     curve.phase = Some(Array1::zeros(curve.freq.len()));
@@ -634,42 +571,6 @@ fn process_single_speaker_mixed_phase_with_phase_data_succeeds() {
         min_spatial_depth: 0.5,
         phase_smoothing_octaves: 1.0 / 6.0,
     });
-    let output_dir = std::env::temp_dir();
-    let result = process_single_speaker(
-        "left",
-        &source,
-        &config,
-        48000.0,
-        &output_dir,
-        None,
-        None,
-        None,
-    );
-    assert!(result.is_ok(), "{:?}", result.err());
-}
-
-fn curve_with_room_mode() -> Curve {
-    // Add a prominent modal peak around 100 Hz
-    let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(500.0), 96);
-    let spl: Vec<f64> = freq
-        .iter()
-        .map(|&f| {
-            let peak = 8.0 * (-((f - 100.0) / 8.0).powi(2)).exp();
-            80.0 + peak
-        })
-        .collect();
-    Curve {
-        freq,
-        spl: Array1::from(spl),
-        phase: None,
-        ..Default::default()
-    }
-}
-
-#[test]
-fn process_single_speaker_kautz_modal_with_modes_succeeds() {
-    let source = MeasurementSource::InMemory(curve_with_room_mode());
-    let config = single_speaker_config(ProcessingMode::KautzModal);
     let output_dir = std::env::temp_dir();
     let result = process_single_speaker(
         "left",

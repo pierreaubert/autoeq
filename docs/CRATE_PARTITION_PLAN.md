@@ -433,21 +433,30 @@ Local progress:
   deleted. Internal edges remain 43, with zero cycles, exceptions, or duplicate
   implementations; the ratchets are now 56,973 root Rust lines, 41,336 root
   RoomEQ lines, 15,337 root binary lines, and 649 root unit tests.
+- Artifact-free single-channel IIR processing is now engine-owned behind one
+  path-free `process_iir_channel` entry point. Low-latency, warped-IIR, and
+  Kautz-modal optimization now consume prepared measurements, target and
+  preprocessing contexts, and in-memory EQ resources; roomeq-engine also owns
+  their plugin ordering, response simulation, report curves, scores, and
+  optimizer evidence. Six focused owner-crate tests cover the shared optimizer
+  dispatch, warped serialization, Kautz success/error behavior, pass ordering,
+  and report assembly. The root factory retains only a thin compatibility
+  adapter, while the three root implementations and four root-only tests were
+  deleted. Internal edges remain 43, with zero cycles, exceptions, or duplicate
+  implementations; the ratchets are now 56,425 root Rust lines, 40,788 root
+  RoomEQ lines, 15,337 root binary lines, and 645 root unit tests.
 - WP4 remains in progress: ChannelProcessingStrategy ownership and the generic
   single-channel topology/workflow adapters are still rooted and must move
   before the package exit criteria are satisfied.
 
 Remaining dependency order:
 
-1. Move the `LowLatency`, `WarpedIir`, and `KautzModal` strategies behind one
-   engine entry point. Move their assembly/report tests with them; do not leave
-   a second implementation in the root facade.
-2. Make convolution sidecars a two-phase boundary: `roomeq-workflow` reserves
+1. Make convolution sidecars a two-phase boundary: `roomeq-workflow` reserves
    logical filenames, `roomeq-engine` returns FIR coefficients and references
    those names, and `roomeq-workflow` writes the WAV artifacts. Then move the
    `PhaseLinear`, `Hybrid`, and `MixedPhase` strategies without adding a direct
    `roomeq-engine` dependency on `autoeq-artifacts` or `roomeq-workflow`.
-3. Route the group-specific `Hybrid` mixed-crossover branch to WP5 ownership,
+2. Route the group-specific `Hybrid` mixed-crossover branch to WP5 ownership,
    move the remaining generic result assembly, and delete the root `speaker_eq`
    module and temporary EQ adapters.
 

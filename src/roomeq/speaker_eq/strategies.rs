@@ -1,7 +1,7 @@
 //! Processing-mode strategies for single-speaker room EQ.
 //!
-//! Each [`ProcessingMode`] is implemented as a separate strategy so the main
-//! `process_single_speaker` dispatch is a simple lookup instead of a large match.
+//! Artifact-producing modes remain local strategies until their sidecar
+//! boundary moves. Artifact-free IIR modes delegate through one engine adapter.
 
 use super::apply::{assemble_channel_report, assemble_dsp_chain, build_mixed_mode_result};
 use super::misc::optimize_eq_maybe_multi;
@@ -15,8 +15,10 @@ use crate::response;
 use crate::roomeq::types::{OptimizerConfig, ProcessingMode};
 use crate::roomeq::{artifacts, fir, group_processing};
 use log::{info, warn};
-use math_audio_iir_fir::Biquad;
-use roomeq_engine::eq::{self as engine_eq, EqResources, optimize_with_schroeder_split_detailed};
+use roomeq_engine::channel_iir::{
+    IirChannelMode, IirChannelRequest, IirChannelResult, process_iir_channel,
+};
+use roomeq_engine::eq::{self as engine_eq, EqResources};
 
 fn with_preprocessing_evidence(
     preprocessed: &PreprocessedFeatures,
@@ -47,9 +49,15 @@ pub fn strategy_for_mode(mode: ProcessingMode) -> Box<dyn ChannelProcessingStrat
         ProcessingMode::PhaseLinear => Box::new(PhaseLinearStrategy),
         ProcessingMode::Hybrid => Box::new(HybridStrategy),
         ProcessingMode::MixedPhase => Box::new(MixedPhaseStrategy),
-        ProcessingMode::LowLatency => Box::new(LowLatencyStrategy { warped: false }),
-        ProcessingMode::WarpedIir => Box::new(LowLatencyStrategy { warped: true }),
-        ProcessingMode::KautzModal => Box::new(KautzModalStrategy),
+        ProcessingMode::LowLatency => Box::new(EngineIirStrategy {
+            mode: IirChannelMode::LowLatency,
+        }),
+        ProcessingMode::WarpedIir => Box::new(EngineIirStrategy {
+            mode: IirChannelMode::WarpedIir,
+        }),
+        ProcessingMode::KautzModal => Box::new(EngineIirStrategy {
+            mode: IirChannelMode::KautzModal,
+        }),
     }
 }
 
@@ -114,14 +122,7 @@ impl ChannelProcessingStrategy for PhaseLinearStrategy {
             wav_filename: filename,
         };
         let dsp_chain = assemble_dsp_chain(input, preprocessed, &optim_output)?;
-        let report = assemble_channel_report(
-            input,
-            prepared,
-            target,
-            preprocessed,
-            &dsp_chain,
-            &optim_output,
-        )?;
+        let report = assemble_channel_report(input, prepared, target, preprocessed, &optim_output)?;
 
         if let Some(ref mut cb) = input.callback {
             cb(2, report.post_score, None);
@@ -246,14 +247,7 @@ impl ChannelProcessingStrategy for HybridStrategy {
             wav_filename: filename,
         };
         let dsp_chain = assemble_dsp_chain(input, preprocessed, &optim_output)?;
-        let report = assemble_channel_report(
-            input,
-            prepared,
-            target,
-            preprocessed,
-            &dsp_chain,
-            &optim_output,
-        )?;
+        let report = assemble_channel_report(input, prepared, target, preprocessed, &optim_output)?;
 
         Ok(build_mixed_mode_result(
             dsp_chain,
@@ -425,14 +419,7 @@ impl ChannelProcessingStrategy for MixedPhaseStrategy {
             report: fir_coeffs.as_ref().map(|(_, _, report)| report.clone()),
         };
         let dsp_chain = assemble_dsp_chain(input, preprocessed, &optim_output)?;
-        let report = assemble_channel_report(
-            input,
-            prepared,
-            target,
-            preprocessed,
-            &dsp_chain,
-            &optim_output,
-        )?;
+        let report = assemble_channel_report(input, prepared, target, preprocessed, &optim_output)?;
 
         info!(
             "  Mixed-phase result: pre={:.6}, post={:.6}",
@@ -448,274 +435,55 @@ impl ChannelProcessingStrategy for MixedPhaseStrategy {
     }
 }
 
-/// Low-latency / warped-IIR mode: IIR-only correction.
-pub struct LowLatencyStrategy {
-    warped: bool,
+/// Thin compatibility adapter for the engine-owned artifact-free modes.
+pub struct EngineIirStrategy {
+    mode: IirChannelMode,
 }
 
-impl ChannelProcessingStrategy for LowLatencyStrategy {
+impl ChannelProcessingStrategy for EngineIirStrategy {
     fn process(
         &self,
         input: &mut ChannelOptimizationInput,
-        prepared: &PreparedMeasurement,
+        _prepared: &PreparedMeasurement,
         target: &TargetContext,
         preprocessed: &PreprocessedFeatures,
         clamped_optimizer: &OptimizerConfig,
         eq_resources: &EqResources,
     ) -> Result<MixedModeResult> {
-        let warped_iir = self.warped;
-        let warped_lambda = warped_iir.then(|| math_audio_iir_fir::bark_lambda(input.sample_rate));
-
-        let optimization_curve = if let Some(ref tilt_curve) = target.target_tilt_curve {
-            Curve {
-                freq: preprocessed.curve_for_optim.freq.clone(),
-                spl: &preprocessed.curve_for_optim.spl - &tilt_curve.spl,
-                phase: preprocessed.curve_for_optim.phase.clone(),
-                ..Default::default()
-            }
-        } else {
-            preprocessed.curve_for_optim.clone()
-        };
-
-        let (eq_filters, optimizer_evidence) = if let Some(schroeder_config) =
-            &clamped_optimizer.schroeder_split
-        {
-            if schroeder_config.enabled {
-                let schroeder_freq = if let Some(ref dims) = schroeder_config.room_dimensions {
-                    let calculated = dims.schroeder_frequency();
-                    info!(
-                        "  Schroeder split: calculated frequency {:.1} Hz from room dimensions",
-                        calculated
-                    );
-                    calculated
-                } else {
-                    schroeder_config.schroeder_freq
-                };
-                info!(
-                    "  Schroeder split: optimizing below {:.1} Hz with max_q={:.1}, above with max_q={:.1}",
-                    schroeder_freq,
-                    schroeder_config.low_freq_config.max_q,
-                    schroeder_config.high_freq_config.max_q
-                );
-
-                let result = optimize_with_schroeder_split_detailed(
-                    &optimization_curve,
-                    clamped_optimizer,
-                    schroeder_config,
-                    input.sample_rate,
-                )?;
-
-                let mut combined_filters = result.low_filters;
-                combined_filters.extend(result.high_filters);
-                info!(
-                    "  Schroeder split: {} low-freq filters + {} high-freq filters",
-                    combined_filters
-                        .iter()
-                        .filter(|f| f.freq < schroeder_freq)
-                        .count(),
-                    combined_filters
-                        .iter()
-                        .filter(|f| f.freq >= schroeder_freq)
-                        .count()
-                );
-                (combined_filters, result.optimizer_evidence)
-            } else {
-                let result = optimize_eq_maybe_multi(
-                    input.prepared.measurements(),
-                    &optimization_curve,
-                    clamped_optimizer,
-                    eq_resources,
-                    input.sample_rate,
-                    input.channel_name,
-                    input.callback.take(),
-                    target.target_tilt_curve.as_ref(),
-                )?;
-                (result.filters, result.optimizer_evidence)
-            }
-        } else {
-            let result = optimize_eq_maybe_multi(
-                input.prepared.measurements(),
-                &optimization_curve,
-                clamped_optimizer,
-                eq_resources,
-                input.sample_rate,
-                input.channel_name,
-                input.callback.take(),
-                target.target_tilt_curve.as_ref(),
-            )?;
-            (result.filters, result.optimizer_evidence)
-        };
-
-        info!("  Optimized {} EQ filters", eq_filters.len());
-
-        let preference_filters = if target.cea2034_active {
-            if let Some(ref target_resp) = input.room_config.optimizer.target_response {
-                super::super::cea2034_correction::generate_preference_filters(
-                    &target_resp.preference,
-                    input.sample_rate,
-                )
-            } else {
-                vec![]
-            }
-        } else {
-            vec![]
-        };
-
-        let optim_output = if warped_iir {
-            OptimizerOutput::WarpedIir {
-                eq_filters,
-                preference_filters,
-                warped_lambda: warped_lambda.unwrap_or(0.0),
-            }
-        } else {
-            OptimizerOutput::LowLatency {
-                eq_filters,
-                preference_filters,
-            }
-        };
-        let dsp_chain = assemble_dsp_chain(input, preprocessed, &optim_output)?;
-        let report = assemble_channel_report(
-            input,
-            prepared,
+        let IirChannelResult {
+            channel,
+            pre_score,
+            post_score,
+            raw_pre_eq_curve,
+            raw_post_eq_curve,
+            filters,
+            mean_spl,
+            arrival_time_ms,
+            optimizer_evidence,
+        } = process_iir_channel(IirChannelRequest {
+            mode: self.mode,
+            channel_name: input.channel_name,
+            prepared: input.prepared,
+            room_config: input.room_config,
+            sample_rate: input.sample_rate,
             target,
             preprocessed,
-            &dsp_chain,
-            &optim_output,
-        )?;
+            optimizer: clamped_optimizer,
+            eq_resources,
+            callback: input.callback.take(),
+        })?;
 
-        Ok(build_mixed_mode_result(
-            dsp_chain,
-            report,
-            optim_output,
-            with_preprocessing_evidence(preprocessed, optimizer_evidence),
-        ))
-    }
-}
-
-/// Kautz-modal mode: pole-tuned filters targeted at detected room modes.
-pub struct KautzModalStrategy;
-
-impl ChannelProcessingStrategy for KautzModalStrategy {
-    fn process(
-        &self,
-        input: &mut ChannelOptimizationInput,
-        prepared: &PreparedMeasurement,
-        target: &TargetContext,
-        preprocessed: &PreprocessedFeatures,
-        _clamped_optimizer: &OptimizerConfig,
-        _eq_resources: &EqResources,
-    ) -> Result<MixedModeResult> {
-        info!("  KautzModal mode: starting optimization...");
-
-        let optimization_curve = if let Some(ref tilt_curve) = target.target_tilt_curve {
-            Curve {
-                freq: preprocessed.curve_for_optim.freq.clone(),
-                spl: &preprocessed.curve_for_optim.spl - &tilt_curve.spl,
-                phase: preprocessed.curve_for_optim.phase.clone(),
-                ..Default::default()
-            }
-        } else {
-            preprocessed.curve_for_optim.clone()
-        };
-
-        let decomposed_config =
-            super::super::impulse_analysis::DecomposedCorrectionConfig::default();
-        let room_modes = super::super::impulse_analysis::detect_room_modes(
-            &optimization_curve.freq,
-            &optimization_curve.spl,
-            &decomposed_config,
-        );
-
-        if room_modes.is_empty() {
-            return Err(AutoeqError::OptimizationFailed {
-                message: format!(
-                    "KautzModal found no room modes for channel '{}'; use low_latency or \
-                     provide a measurement with clear modal peaks",
-                    input.channel_name
-                ),
-            });
-        }
-
-        info!(
-            "  Detected {} room modes, building Kautz filter",
-            room_modes.len()
-        );
-
-        let mode_tuples: Vec<(f64, f64)> = room_modes.iter().map(|m| (m.frequency, m.q)).collect();
-
-        let mut kautz =
-            math_audio_iir_fir::KautzFilter::from_room_modes(&mode_tuples, input.sample_rate);
-
-        let freqs_f64: Vec<f64> = optimization_curve.freq.iter().copied().collect();
-        let measured_f64: Vec<f64> = optimization_curve.spl.iter().copied().collect();
-        let target_f64: Vec<f64> = vec![0.0; freqs_f64.len()];
-
-        kautz.optimize_gains(&freqs_f64, &measured_f64, &target_f64);
-
-        let kautz_sections: Vec<(f64, f64, f64)> = room_modes
-            .iter()
-            .zip(kautz.sections.iter())
-            .filter(|(_, s)| s.gain.abs() > 0.1)
-            .map(|(mode, section)| (mode.frequency, mode.q.max(0.5), section.gain))
-            .collect();
-
-        let eq_filters: Vec<Biquad> = kautz_sections
-            .iter()
-            .map(|(freq, q, gain)| {
-                use math_audio_iir_fir::BiquadFilterType;
-                Biquad::new(BiquadFilterType::Peak, *freq, input.sample_rate, *q, *gain)
-            })
-            .collect();
-
-        if kautz_sections.is_empty() {
-            return Err(AutoeqError::OptimizationFailed {
-                message: format!(
-                    "KautzModal optimized zero usable filters for channel '{}'; use low_latency \
-                     or adjust the measurement/optimizer range",
-                    input.channel_name
-                ),
-            });
-        }
-
-        info!(
-            "  KautzModal: {} Kautz sections from {} modes",
-            kautz_sections.len(),
-            room_modes.len()
-        );
-
-        let preference_filters = if target.cea2034_active {
-            if let Some(ref target_resp) = input.room_config.optimizer.target_response {
-                super::super::cea2034_correction::generate_preference_filters(
-                    &target_resp.preference,
-                    input.sample_rate,
-                )
-            } else {
-                vec![]
-            }
-        } else {
-            vec![]
-        };
-
-        let optim_output = OptimizerOutput::KautzModal {
-            eq_filters,
-            kautz_sections,
-            preference_filters,
-        };
-        let dsp_chain = assemble_dsp_chain(input, preprocessed, &optim_output)?;
-        let report = assemble_channel_report(
-            input,
-            prepared,
-            target,
-            preprocessed,
-            &dsp_chain,
-            &optim_output,
-        )?;
-
-        Ok(build_mixed_mode_result(
-            dsp_chain,
-            report,
-            optim_output,
-            preprocessed.optimizer_evidence.clone(),
+        Ok((
+            channel,
+            pre_score,
+            post_score,
+            raw_pre_eq_curve,
+            raw_post_eq_curve,
+            filters,
+            mean_spl,
+            arrival_time_ms,
+            None,
+            optimizer_evidence,
         ))
     }
 }

@@ -44,11 +44,7 @@ pub(in crate::roomeq) struct ChannelDspChain {
     pub delays: Vec<PluginConfigWrapper>,
     /// Gain plugins for this channel (empty for simple single-speaker paths).
     pub gains: Vec<PluginConfigWrapper>,
-    /// Filters used for response simulation and scoring. For IIR-based modes
-    /// this is the full filter set including excursion HPF, CEA2034 correction,
-    /// broadband shelves, EQ and preference filters. For FIR/phase modes it is
-    /// the IIR portion (if any) and the FIR is carried separately in the
-    /// optimizer output.
+    /// IIR filters used alongside the FIR/phase optimizer output.
     pub filters: Vec<Biquad>,
 }
 
@@ -101,25 +97,6 @@ pub(in crate::roomeq) enum OptimizerOutput {
         fir_coeffs: Option<Vec<f64>>,
         fir_filename: Option<String>,
         report: Option<crate::roomeq::mixed_phase::MixedPhaseCorrectionReport>,
-    },
-    /// Low-latency IIR correction.
-    LowLatency {
-        eq_filters: Vec<Biquad>,
-        preference_filters: Vec<Biquad>,
-    },
-    /// Warped-biquad IIR correction.
-    WarpedIir {
-        eq_filters: Vec<Biquad>,
-        preference_filters: Vec<Biquad>,
-        warped_lambda: f64,
-    },
-    /// Kautz-modal decomposition.
-    KautzModal {
-        /// Approximate peak biquads used for scoring/display.
-        eq_filters: Vec<Biquad>,
-        /// Kautz sections exported to the runtime topology.
-        kautz_sections: Vec<(f64, f64, f64)>,
-        preference_filters: Vec<Biquad>,
     },
 }
 

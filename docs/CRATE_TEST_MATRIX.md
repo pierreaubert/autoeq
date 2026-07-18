@@ -20,6 +20,7 @@ architecture checker rejects a workspace package without a focused command.
 | `roomeq-engine` | `cargo test -p roomeq-engine --lib` | Extracted deterministic processing |
 | `roomeq-export` | `cargo test -p roomeq-export --lib` | External-format contracts and rendering |
 | `roomeq-synthetic` | `cargo test -p roomeq-synthetic --lib` | Deterministic scenarios and measurements |
+| `roomeq-workflow` | `cargo test -p roomeq-workflow --lib` | Resource loading and engine invocation |
 
 Run all WP0 fitness and compatibility checks with:
 

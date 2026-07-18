@@ -100,8 +100,8 @@ impl OptimizerConfigExt for OptimizerConfig {
 
 pub fn to_measurement_smoothing(
     value: PsychoacousticSmoothingConfig,
-) -> autoeq_measurements::read::PsychoacousticSmoothingConfig {
-    autoeq_measurements::read::PsychoacousticSmoothingConfig {
+) -> autoeq_core::PsychoacousticSmoothingConfig {
+    autoeq_core::PsychoacousticSmoothingConfig {
         low_freq_n: value.low_freq_n,
         high_freq_n: value.high_freq_n,
         low_freq: value.low_freq,

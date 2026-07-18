@@ -153,7 +153,7 @@ fn optimize_crossover_impl(
     let num_combinations = 1 << (n_drivers - 1);
 
     struct OptimizationResult {
-        result: autoeq_workflow::DriverOptimizationResult,
+        result: autoeq_optim::DriverOptimizationResult,
         inversions: Vec<bool>,
         data: DriversLossData,
     }
@@ -198,7 +198,7 @@ fn optimize_crossover_impl(
         let drivers_data = DriversLossData::new_ordered(modified_drivers, crossover_type);
 
         // Run optimization
-        let result = autoeq_workflow::optimize_drivers_crossover(
+        let result = autoeq_optim::optimize_drivers_crossover(
             drivers_data.clone(),
             xover_min_freq,
             xover_max_freq,

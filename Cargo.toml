@@ -26,6 +26,7 @@ members = [
     "crates/roomeq-quality",
     "crates/roomeq-analysis",
     "crates/roomeq-synthetic",
+    "crates/roomeq-workflow",
 ]
 # Keep the published crate under crates.io's size cap. The excluded paths are
 # QA recordings, generated test fixtures, helper shell scripts, and editor
@@ -59,6 +60,7 @@ roomeq-export = { path = "crates/roomeq-export" }
 roomeq-quality = { path = "crates/roomeq-quality" }
 roomeq-analysis = { path = "crates/roomeq-analysis" }
 roomeq-synthetic = { path = "crates/roomeq-synthetic" }
+roomeq-workflow = { path = "crates/roomeq-workflow" }
 anyhow = "1.0"
 async-trait = "0.1"
 base64 = "0.22"
@@ -126,6 +128,7 @@ roomeq-export = { workspace = true }
 roomeq-quality = { workspace = true }
 roomeq-analysis = { workspace = true }
 roomeq-synthetic = { workspace = true }
+roomeq-workflow = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }

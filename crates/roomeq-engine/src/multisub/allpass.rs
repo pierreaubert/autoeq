@@ -48,7 +48,7 @@ pub(super) fn compute_combined_with_allpass_complex(
         .drivers
         .iter()
         .map(|d| {
-            autoeq_measurements::read::normalize_and_interpolate_response_with_range(
+            autoeq_core::normalize_and_interpolate_response_with_range(
                 &data.freq_grid,
                 &Curve {
                     freq: d.freq.clone(),

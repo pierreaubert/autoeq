@@ -164,19 +164,4 @@ pub struct HeadphoneOptResult {
     pub final_loss: f64,
 }
 
-/// Result of driver crossover optimization
-#[derive(Debug, Clone)]
-pub struct DriverOptimizationResult {
-    /// Optimal per-driver gains in dB
-    pub gains: Vec<f64>,
-    /// Optimal per-driver delays in ms
-    pub delays: Vec<f64>,
-    /// Optimal crossover frequencies in Hz (n_drivers - 1 values)
-    pub crossover_freqs: Vec<f64>,
-    /// Loss value before optimization
-    pub pre_objective: f64,
-    /// Loss value after optimization
-    pub post_objective: f64,
-    /// Whether optimization converged successfully
-    pub converged: bool,
-}
+pub use autoeq_optim::DriverOptimizationResult;

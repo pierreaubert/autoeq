@@ -60,11 +60,13 @@ pub(in super::super) fn preprocess_multisub_mso(
 ) -> Result<SubPreprocessResult> {
     info!("  MSO optimization for {} subwoofers", ms.subwoofers.len());
 
-    let (result, combined) =
+    let optimized =
         crate::roomeq::multisub::optimize_multisub(&ms.subwoofers, optimizer, sample_rate)
             .map_err(|e| AutoeqError::OptimizationFailed {
                 message: format!("MSO optimization failed: {}", e),
             })?;
+    let combined = optimized.combined_response.legacy_combined_curve();
+    let result = optimized.base;
 
     info!(
         "  MSO result: gains={:?}, delays={:?}",
@@ -259,11 +261,13 @@ pub(in super::super) fn preprocess_dba(
 ) -> Result<SubPreprocessResult> {
     info!("  DBA optimization");
 
-    let (result, combined) = dba::optimize_dba(d, optimizer, sample_rate).map_err(|e| {
+    let optimized = dba::optimize_dba(d, optimizer, sample_rate).map_err(|e| {
         AutoeqError::OptimizationFailed {
             message: format!("DBA optimization failed: {}", e),
         }
     })?;
+    let result = optimized.driver;
+    let combined = optimized.combined_curve;
 
     info!(
         "  DBA result: gains={:?}, delays={:?}",

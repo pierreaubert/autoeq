@@ -4,15 +4,14 @@ use super::multisub_allpass_converged;
 use super::multisub_allpass_loss;
 use super::types::{MultiSubAllPassResult, MultiSubCombinedResponse, MultiSubOptimizationResult};
 use crate::Curve;
-use autoeq_measurements::read as load;
 use autoeq_optim::CrossoverType;
+use autoeq_optim::DriverOptimizationResult;
 use autoeq_optim::loss::{DriverMeasurement, DriversLossData};
 use autoeq_optim::optim::scalar::{ScalarOptimConfig, optimize_bounded_scalar};
-use autoeq_workflow::DriverOptimizationResult;
 use log::{info, warn};
 use ndarray::Array1;
 use num_complex::Complex64;
-use roomeq_model::{MeasurementSource, OptimizerConfig};
+use roomeq_model::OptimizerConfig;
 use std::error::Error;
 
 fn curve_from_complex_sum(
@@ -92,7 +91,7 @@ fn optimize_multisub_gains_only(
 /// Optimize multi-subwoofer configuration
 ///
 /// # Arguments
-/// * `measurements` - List of subwoofer measurements (sources)
+/// * `measurements` - Prepared subwoofer measurement curves
 /// * `config` - Optimizer configuration
 /// * `sample_rate` - Sample rate
 ///
@@ -103,23 +102,21 @@ fn optimize_multisub_gains_only(
 /// Delay optimization is enabled only when every measurement has phase data.
 /// Otherwise the conservative gain-only path is used.
 pub fn optimize_multisub_detailed(
-    measurements: &[MeasurementSource],
+    measurements: &[Curve],
     config: &OptimizerConfig,
     sample_rate: f64,
 ) -> Result<MultiSubOptimizationResult, Box<dyn Error>> {
-    // Load all measurements and check for phase data
     let mut driver_measurements = Vec::new();
     let mut missing_phase_count = 0;
 
-    for source in measurements {
-        let curve = load::load_source(source)?;
+    for curve in measurements {
         if curve.phase.is_none() {
             missing_phase_count += 1;
         }
         driver_measurements.push(DriverMeasurement {
-            freq: curve.freq,
-            spl: curve.spl,
-            phase: curve.phase, // Critical: use phase for accurate summation
+            freq: curve.freq.clone(),
+            spl: curve.spl.clone(),
+            phase: curve.phase.clone(), // Critical: use phase for accurate summation
         });
     }
 
@@ -137,7 +134,7 @@ pub fn optimize_multisub_detailed(
     let drivers_data = DriversLossData::new(driver_measurements, CrossoverType::None);
 
     let result = if missing_phase_count == 0 {
-        autoeq_workflow::optimize_multisub(
+        autoeq_optim::optimize_multisub(
             drivers_data.clone(),
             config.min_freq,
             config.max_freq,
@@ -189,7 +186,7 @@ pub fn optimize_multisub_detailed(
 
 /// Compatibility adapter returning the historical `(controls, combined curve)` tuple.
 pub fn optimize_multisub(
-    measurements: &[MeasurementSource],
+    measurements: &[Curve],
     config: &OptimizerConfig,
     sample_rate: f64,
 ) -> Result<(DriverOptimizationResult, Curve), Box<dyn Error>> {
@@ -208,23 +205,21 @@ pub fn optimize_multisub(
 ///
 /// Inspired by Brännmark, Rosencratz & Andersson.
 pub fn optimize_multisub_with_allpass(
-    measurements: &[MeasurementSource],
+    measurements: &[Curve],
     config: &OptimizerConfig,
     sample_rate: f64,
 ) -> Result<MultiSubAllPassResult, Box<dyn Error>> {
-    // Load measurements
     let mut driver_measurements = Vec::new();
     let mut missing_phase_count = 0;
 
-    for source in measurements {
-        let curve = load::load_source(source)?;
+    for curve in measurements {
         if curve.phase.is_none() {
             missing_phase_count += 1;
         }
         driver_measurements.push(DriverMeasurement {
-            freq: curve.freq,
-            spl: curve.spl,
-            phase: curve.phase,
+            freq: curve.freq.clone(),
+            spl: curve.spl.clone(),
+            phase: curve.phase.clone(),
         });
     }
 
@@ -416,7 +411,7 @@ mod tests {
     use super::{optimize_multisub, optimize_multisub_detailed, optimize_multisub_with_allpass};
     use crate::Curve;
     use ndarray::Array1;
-    use roomeq_model::{MeasurementSource, OptimizerConfig};
+    use roomeq_model::OptimizerConfig;
 
     fn log_freq_grid(n: usize, lo: f64, hi: f64) -> Array1<f64> {
         Array1::from_vec(
@@ -457,10 +452,7 @@ mod tests {
         let phase = Some(Array1::from_elem(16, 0.0_f64));
         let c1 = flat_sub_curve(phase.clone());
         let c2 = flat_sub_curve(phase);
-        let sources = vec![
-            MeasurementSource::InMemory(c1),
-            MeasurementSource::InMemory(c2),
-        ];
+        let sources = vec![c1, c2];
         let config = tiny_optimizer_config();
 
         let result = optimize_multisub(&sources, &config, 48000.0);
@@ -492,10 +484,7 @@ mod tests {
     #[test]
     fn optimize_multisub_detailed_separates_spatial_and_primary_responses() {
         let phase = Some(Array1::from_elem(16, 35.0_f64));
-        let sources = vec![
-            MeasurementSource::InMemory(flat_sub_curve(phase.clone())),
-            MeasurementSource::InMemory(flat_sub_curve(phase)),
-        ];
+        let sources = vec![flat_sub_curve(phase.clone()), flat_sub_curve(phase)];
         let result =
             optimize_multisub_detailed(&sources, &tiny_optimizer_config(), 48_000.0).unwrap();
 
@@ -516,10 +505,7 @@ mod tests {
     fn optimize_multisub_missing_phase_returns_ok() {
         let c1 = flat_sub_curve(None);
         let c2 = flat_sub_curve(None);
-        let sources = vec![
-            MeasurementSource::InMemory(c1),
-            MeasurementSource::InMemory(c2),
-        ];
+        let sources = vec![c1, c2];
         let config = tiny_optimizer_config();
 
         let result = optimize_multisub(&sources, &config, 48000.0);
@@ -550,10 +536,7 @@ mod tests {
         let phase = Some(Array1::from_elem(16, 0.0_f64));
         let c1 = flat_sub_curve(phase.clone());
         let c2 = flat_sub_curve(phase);
-        let sources = vec![
-            MeasurementSource::InMemory(c1),
-            MeasurementSource::InMemory(c2),
-        ];
+        let sources = vec![c1, c2];
         let config = tiny_optimizer_config();
 
         let result = optimize_multisub_with_allpass(&sources, &config, 48000.0);
@@ -590,10 +573,7 @@ mod tests {
 
     #[test]
     fn optimize_multisub_with_allpass_missing_phase_is_gain_only() {
-        let sources = vec![
-            MeasurementSource::InMemory(flat_sub_curve(None)),
-            MeasurementSource::InMemory(flat_sub_curve(None)),
-        ];
+        let sources = vec![flat_sub_curve(None), flat_sub_curve(None)];
         let result =
             optimize_multisub_with_allpass(&sources, &tiny_optimizer_config(), 48000.0).unwrap();
 
@@ -609,10 +589,7 @@ mod tests {
     #[test]
     fn optimize_multisub_with_allpass_honors_asymmetric_gain_bounds() {
         let phase = Some(Array1::from_elem(16, 0.0_f64));
-        let sources = vec![
-            MeasurementSource::InMemory(flat_sub_curve(phase.clone())),
-            MeasurementSource::InMemory(flat_sub_curve(phase)),
-        ];
+        let sources = vec![flat_sub_curve(phase.clone()), flat_sub_curve(phase)];
         let mut config = tiny_optimizer_config();
         config.min_db = 1.0;
         config.max_db = 2.0;
@@ -636,10 +613,7 @@ mod tests {
         let phase = Some(Array1::from_elem(16, 0.0_f64));
         let c1 = flat_sub_curve(phase.clone());
         let c2 = flat_sub_curve(phase);
-        let sources = vec![
-            MeasurementSource::InMemory(c1),
-            MeasurementSource::InMemory(c2),
-        ];
+        let sources = vec![c1, c2];
         let mut config = tiny_optimizer_config();
         config.min_freq = 200.0;
         config.max_freq = 200.0;

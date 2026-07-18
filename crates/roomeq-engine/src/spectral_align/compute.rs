@@ -280,7 +280,7 @@ pub fn compute_target_alignment(
         if roomeq_analysis::frequency_grid::same_frequency_grid(&curve.freq, &target.freq) {
             target.clone()
         } else {
-            autoeq_measurements::read::interpolate_log_space(&curve.freq, target)
+            autoeq_core::interpolate_log_space(&curve.freq, target)
         };
 
     let overlap_min = min_freq.max(curve.freq[0]).max(target.freq[0]);

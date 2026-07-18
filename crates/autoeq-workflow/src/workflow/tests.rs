@@ -457,31 +457,6 @@ fn build_target_curve_loads_from_csv_path() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn create_driver_optimization_args_has_expected_values() {
-    let args = super::misc::create_driver_optimization_args(
-        50.0,
-        5000.0,
-        48000.0,
-        "autoeq:de",
-        20,
-        6,
-        -6.0,
-        6.0,
-        Some(1),
-    );
-    assert_eq!(args.min_freq, 50.0);
-    assert_eq!(args.max_freq, 5000.0);
-    assert_eq!(args.sample_rate, 48000.0);
-    assert_eq!(args.algo, "autoeq:de");
-    assert_eq!(args.maxeval, 20);
-    assert_eq!(args.population, 6);
-    assert_eq!(args.min_db, -6.0);
-    assert_eq!(args.max_db, 6.0);
-    assert_eq!(args.seed, Some(1));
-    assert_eq!(args.loss, crate::LossType::DriversFlat);
-}
-
-#[test]
 fn interpolate_cea2034_data_preserves_keys() {
     use crate::Cea2034Data;
 

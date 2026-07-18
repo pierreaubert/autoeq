@@ -1,8 +1,8 @@
 //! Role-aware alignment for overhead/height channels.
 
+use autoeq_core::interpolate_log_space;
 use autoeq_core::phase_utils::unwrap_phase_degrees;
 use autoeq_core::{AutoeqError, Curve, Result};
-use autoeq_measurements::read::interpolate_log_space;
 use roomeq_analysis::frequency_grid::{is_valid_frequency_grid, same_frequency_grid};
 use roomeq_model::home_cinema::role_for_channel;
 use roomeq_model::{HeightChannelAlignmentConfig, HomeCinemaRole, HomeCinemaRoleGroup};

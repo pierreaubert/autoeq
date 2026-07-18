@@ -8,9 +8,7 @@ license = "GPL-3.0-or-later"
 [dependencies]
 autoeq-core = { workspace = true }
 autoeq-fir = { workspace = true }
-autoeq-measurements = { workspace = true }
 autoeq-optim = { workspace = true }
-autoeq-workflow = { workspace = true }
 log = { workspace = true }
 math-iir-fir = { workspace = true }
 math-optimisation = { workspace = true }

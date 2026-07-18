@@ -1,10 +1,10 @@
 # Crate Partition Migration Plan
 
-Status: canonical; WP0 in progress on a local branch
+Status: canonical; WP0-WP2 complete locally, WP3 next
 
 Date: 2026-07-18
 
-Tracking issue: deferred until Gitea is available; attach the local WP0 branch
+Tracking issue: deferred until Gitea is available; local migration branches only
 
 Supersedes: the crate-split roadmap in `ARCHITECTURE.md`
 

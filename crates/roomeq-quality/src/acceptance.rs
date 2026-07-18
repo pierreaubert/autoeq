@@ -1,5 +1,4 @@
-use autoeq_core::Curve;
-use autoeq_measurements::{MeasurementQuality, MeasurementQualityReport};
+use autoeq_core::{Curve, MeasurementQuality, MeasurementQualityReport};
 pub use roomeq_model::{
     CorrectionAcceptancePolicy, CorrectionAcceptanceReport, CorrectionDecision,
     CorrectionMetricSummary, RUNTIME_ACCEPTANCE_POLICY_VERSION, RealizationQualityEvidence,

@@ -167,7 +167,7 @@ pub fn generate_kirkeby_correction_with_smoothing(
         target.spl.to_vec()
     } else {
         // Interpolate target to measurement frequency grid
-        let interpolated = autoeq_measurements::read::interpolate(&measurement.freq, target);
+        let interpolated = autoeq_core::interpolate(&measurement.freq, target);
         interpolated.spl.to_vec()
     };
 

@@ -228,6 +228,7 @@ dependencies = [
  "roomeq-model",
  "roomeq-quality",
  "roomeq-synthetic",
+ "roomeq-workflow",
  "rustfft",
  "schemars 1.2.1",
  "serde",
@@ -271,7 +272,6 @@ name = "autoeq-fir"
 version = "0.4.51"
 dependencies = [
  "autoeq-core",
- "autoeq-measurements",
  "hound",
  "math-iir-fir",
  "ndarray",
@@ -2690,9 +2690,7 @@ version = "0.4.51"
 dependencies = [
  "autoeq-core",
  "autoeq-fir",
- "autoeq-measurements",
  "autoeq-optim",
- "autoeq-workflow",
  "log",
  "math-iir-fir",
  "math-optimisation",
@@ -2739,7 +2737,6 @@ name = "roomeq-quality"
 version = "0.4.51"
 dependencies = [
  "autoeq-core",
- "autoeq-measurements",
  "math-iir-fir",
  "ndarray",
  "num-complex",
@@ -2757,6 +2754,16 @@ dependencies = [
  "log",
  "math-iir-fir",
  "ndarray",
+]
+
+[[package]]
+name = "roomeq-workflow"
+version = "0.4.51"
+dependencies = [
+ "autoeq-measurements",
+ "ndarray",
+ "roomeq-engine",
+ "roomeq-model",
 ]
 
 [[package]]

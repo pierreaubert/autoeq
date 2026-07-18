@@ -270,7 +270,7 @@ pub fn pairwise_normalized_timbre_spread_db(
         if roomeq_analysis::frequency_grid::same_frequency_grid(&channel.freq, &reference.freq) {
             reference.clone()
         } else {
-            autoeq_measurements::read::interpolate_log_space(&channel.freq, reference)
+            autoeq_core::interpolate_log_space(&channel.freq, reference)
         };
     let values = channel
         .freq

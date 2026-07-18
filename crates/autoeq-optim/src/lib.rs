@@ -31,6 +31,7 @@ pub mod roomeq {
 
 pub mod cli;
 pub mod constraints;
+pub mod driver_optimization;
 pub mod initial_guess;
 pub mod loss;
 pub mod optim;
@@ -39,6 +40,10 @@ pub mod problem;
 pub mod roomeq_types;
 pub mod smoothness_penalty_config;
 
+pub use driver_optimization::{
+    DriverOptimizationResult, create_driver_optimization_params, optimize_drivers_crossover,
+    optimize_multisub,
+};
 pub use loss::{CrossoverType, HeadphoneLossData, LossType, SpeakerLossData};
 pub use math_audio_optimisation as de;
 pub use optim::params::OptimParams;

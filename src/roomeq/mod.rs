@@ -69,14 +69,12 @@ mod speaker_eq; // Single-speaker EQ optimization // Crossover and group consist
 #[cfg(test)]
 pub mod test_fixtures;
 
-// Individual optimization modules
 pub use roomeq_engine::crossover;
-pub use roomeq_engine::dba;
+pub use roomeq_workflow::{dba, multisub};
 mod eq;
-mod fir;
 pub(crate) use roomeq_analysis::frequency_grid;
+use roomeq_workflow::fir;
 pub mod home_cinema;
-pub use roomeq_engine::multisub;
 pub mod workflows; // Make public to access from optimize.rs or tests
 
 // Export to external formats (CamillaDSP, APO, EasyEffects, Wavelet, PipeWire)

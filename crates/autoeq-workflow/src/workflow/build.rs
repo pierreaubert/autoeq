@@ -54,62 +54,9 @@ pub fn build_target_curve_by_name(
     freqs: &Array1<f64>,
     input_curve: &Curve,
 ) -> Result<Curve, AutoeqError> {
-    match curve_name {
-        "Listening Window" => {
-            let log_f_min = 1000.0_f64.log10();
-            let log_f_max = 20000.0_f64.log10();
-            let denom = log_f_max - log_f_min;
-            let spl = Array1::from_shape_fn(freqs.len(), |i| {
-                let f_hz = freqs[i].max(1e-12);
-                let fl = f_hz.log10();
-                if fl < log_f_min {
-                    0.0
-                } else if fl >= log_f_max {
-                    -0.5
-                } else {
-                    let t = (fl - log_f_min) / denom;
-                    -0.5 * t
-                }
-            });
-            Ok(Curve {
-                freq: freqs.clone(),
-                spl,
-                phase: None,
-                ..Default::default()
-            })
-        }
-        "Sound Power" | "Early Reflections" | "Estimated In-Room Response" => {
-            let slope = crate::loss::curve_slope_per_octave_in_range(input_curve, 100.0, 10000.0)
-                .unwrap_or(-1.2)
-                - 0.2;
-            let lo = 100.0_f64;
-            let hi = 20000.0_f64;
-            let hi_val = slope * (hi / lo).log2();
-            let spl = Array1::from_shape_fn(freqs.len(), |i| {
-                let f = freqs[i].max(1e-12);
-                if f < lo {
-                    0.0
-                } else if f >= hi {
-                    hi_val
-                } else {
-                    slope * (f / lo).log2()
-                }
-            });
-            Ok(Curve {
-                freq: freqs.clone(),
-                spl,
-                phase: None,
-                ..Default::default()
-            })
-        }
-        _ => {
-            let spl = Array1::zeros(freqs.len());
-            Ok(Curve {
-                freq: freqs.clone(),
-                spl,
-                phase: None,
-                ..Default::default()
-            })
-        }
-    }
+    Ok(autoeq_core::build_target_curve_by_name(
+        curve_name,
+        freqs,
+        input_curve,
+    ))
 }

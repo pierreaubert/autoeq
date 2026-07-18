@@ -55,37 +55,19 @@
     "roomeq-synthetic": [
       "autoeq-core",
       "roomeq-model"
+    ],
+    "roomeq-workflow": [
+      "autoeq-artifacts",
+      "autoeq-measurements",
+      "roomeq-engine",
+      "roomeq-export",
+      "roomeq-model"
     ]
   },
-  "temporary_exceptions": [
-    {
-      "from": "autoeq-fir",
-      "to": "autoeq-measurements",
-      "remove_by": "WP2",
-      "reason": "FIR still accepts measurement-owned curve inputs instead of core contracts."
-    },
-    {
-      "from": "roomeq-engine",
-      "to": "autoeq-measurements",
-      "remove_by": "WP2",
-      "reason": "Engine still prepares measurement data that must be supplied by workflow."
-    },
-    {
-      "from": "roomeq-engine",
-      "to": "autoeq-workflow",
-      "remove_by": "WP2",
-      "reason": "Extracted engine still calls AutoEQ application workflow services."
-    },
-    {
-      "from": "roomeq-quality",
-      "to": "autoeq-measurements",
-      "remove_by": "WP2",
-      "reason": "Quality metrics still consume measurement-layer types directly."
-    }
-  ],
+  "temporary_exceptions": [],
   "metric_budgets": {
-    "root_rust_loc": 66967,
-    "root_roomeq_rust_loc": 51330,
+    "root_rust_loc": 66966,
+    "root_roomeq_rust_loc": 51329,
     "root_binary_rust_loc": 15337,
     "root_unit_tests": 818
   },
@@ -111,6 +93,7 @@
     "roomeq-export": "cargo test -p roomeq-export --lib",
     "roomeq-model": "cargo test -p roomeq-model --lib",
     "roomeq-quality": "cargo test -p roomeq-quality --lib",
-    "roomeq-synthetic": "cargo test -p roomeq-synthetic --lib"
+    "roomeq-synthetic": "cargo test -p roomeq-synthetic --lib",
+    "roomeq-workflow": "cargo test -p roomeq-workflow --lib"
   }
 }

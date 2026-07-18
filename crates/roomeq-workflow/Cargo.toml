@@ -1,0 +1,12 @@
+[package]
+name = "roomeq-workflow"
+version.workspace = true
+edition = "2024"
+description = "RoomEQ resource loading and application workflow composition"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+autoeq-measurements = { workspace = true }
+ndarray = { workspace = true }
+roomeq-engine = { workspace = true }
+roomeq-model = { workspace = true }

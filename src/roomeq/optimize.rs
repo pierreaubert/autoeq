@@ -45,6 +45,7 @@ mod room_optimization_result;
 #[cfg(test)]
 mod tests;
 mod types;
+mod validation_scorecard;
 
 pub(in crate::roomeq) mod supporting_source;
 
@@ -130,18 +131,26 @@ pub fn optimize_room_with_probe_arrivals(
 }
 
 pub(super) fn optimize_room_pipeline_impl(
-    request: RoomPipelineRequest<'_>,
+    request: roomeq_engine::EngineRequest<'_>,
+    context: &roomeq_workflow::WorkflowContext<'_>,
     observer: Option<Box<dyn PipelineObserver>>,
 ) -> Result<RoomOptimizationResult> {
-    let store = crate::FsArtifactStore::new();
-    optimize_room_impl(
+    let mut result = optimize_room_impl(
         request.config,
         request.sample_rate,
-        request.output_dir,
+        context.output_dir,
         request.probe_arrival_overrides,
         observer,
-        &store,
-    )
+        context.artifact_store,
+    )?;
+    if !context.validation_measurements.is_empty() {
+        validation_scorecard::attach_validation_scorecard(
+            &mut result,
+            context.validation_measurements,
+            request.sample_rate,
+        )?;
+    }
+    Ok(result)
 }
 
 fn prepare_room_optimization(

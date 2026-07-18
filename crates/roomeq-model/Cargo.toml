@@ -7,7 +7,6 @@ license = "GPL-3.0-or-later"
 
 [dependencies]
 autoeq-core = { workspace = true }
-anyhow = { workspace = true }
 clap = { workspace = true }
 log = { workspace = true }
 ndarray = { workspace = true }

@@ -24,9 +24,9 @@ use std::path::PathBuf;
 // Use the library types
 use autoeq::roomeq::{
     DspChainOutput, ExportFormat, PipelineControl, PipelineEvent, PipelineObserver, RoomConfig,
-    RoomPipeline, RoomPipelineRequest, export_dsp_chain_with_convolution_sidecars, load_config,
-    save_dsp_chain,
+    RoomPipeline, RoomPipelineRequest, export_dsp_chain_with_convolution_sidecars, save_dsp_chain,
 };
+use roomeq_workflow::load_config;
 
 /// Room EQ - Optimize multi-channel speaker systems
 #[derive(Parser, Debug)]

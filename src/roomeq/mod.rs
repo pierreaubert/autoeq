@@ -36,7 +36,7 @@ pub use types::*;
 pub use types::RecordingConfiguration;
 
 // Configuration loading (shared between roomeq and roomeq_qa binaries)
-pub use roomeq_model::config_loader::{SHALLOW_MERGE_KEYS, load_config, merge_json_objects};
+pub use roomeq_workflow::{SHALLOW_MERGE_KEYS, load_config, merge_json_objects};
 
 // Analytic acoustic ground truth and multi-dimensional QA metrics.
 pub use roomeq_quality as acoustic_qa;

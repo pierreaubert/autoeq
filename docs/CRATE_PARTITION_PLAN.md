@@ -1,6 +1,6 @@
 # Crate Partition Migration Plan
 
-Status: canonical; WP0-WP2 complete locally, WP3 next
+Status: canonical; WP0-WP3 complete locally, WP4 next
 
 Date: 2026-07-18
 
@@ -291,22 +291,58 @@ Exit criteria:
 
 Scope:
 
-- Create the application crate.
-- Move configuration loading, path resolution, measurement acquisition,
-  provenance validation, cache/resume, and artifact-store composition into it.
-- Move the observable pipeline request/response boundary to the appropriate
-  model/engine owners.
-- Make the production RoomEQ command invoke `roomeq-workflow`, which invokes
-  `roomeq-engine`.
-- Delete the unused placeholder-only execution path or make it the actual
-  production path.
+- Move configuration-file loading, override merging, path resolution, and
+  artifact-store composition into the application crate.
+- Move prepared in-memory engine requests and observable pipeline events to
+  `roomeq-engine`; keep filesystem paths and held-out measurement composition
+  in `roomeq-workflow`.
+- Replace the unused optimizer/graph-builder demo in `RoomEngine` with an
+  engine-owned execution port that is exercised by the production pipeline.
+- Make the published RoomEQ command reach `roomeq-workflow`, which invokes
+  `roomeq-engine`, before entering the still-root-owned implementation kernel.
+- Reduce the root `roomeq/pipeline` module to compatibility delegation. Keep
+  exactly one temporary root kernel for behavior not moved by WP4-WP8; do not
+  copy that behavior into a crate or present the kernel as extracted code.
+
+The temporary call path after this package is deliberately explicit:
+
+```text
+root CLI/facade -> roomeq-workflow -> roomeq-engine execution port
+                                      -> root implementation kernel
+```
+
+WP4-WP8 replace that kernel one vertical slice at a time. Measurement
+acquisition, provenance, cache/resume, and topology-specific resource loading
+move with the engine slice that consumes them instead of in a horizontal WP3
+sweep. This avoids both a catch-all workflow crate and adapters with no
+production behavior behind them.
 
 Exit criteria:
 
-- `RoomEngine` (or its replacement) has a production caller outside tests.
-- A minimal generic RoomEQ run succeeds without importing root implementation
-  modules.
-- Root keeps only a compatibility delegation for the migrated entry point.
+- The production call graph contains
+  `roomeq-workflow -> roomeq-engine`; the placeholder-only engine path is gone.
+- A root-free workflow test proves the prepared request, observer, artifact
+  store, and engine execution port together.
+- Configuration loading is no longer owned by `roomeq-model`.
+- Root `roomeq/pipeline` contains compatibility delegation only; the temporary
+  implementation kernel is named, unique, and scheduled for deletion by
+  WP4-WP8.
+- Root LOC decreases, no duplicate implementation exists, and dependency
+  cycles and temporary policy exceptions remain zero.
+
+WP3 local outcome:
+
+- roomeq-model no longer owns configuration-file I/O; roomeq-workflow loads,
+  merges, resolves, and validates configurations.
+- roomeq-workflow owns the application request, validation inputs, and
+  artifact-store selection; roomeq-engine owns the prepared request and
+  observable event vocabulary.
+- The obsolete optimizer/graph-builder demo was replaced by the production
+  execution port. The root facade delegates through workflow and engine to the
+  unique temporary implementation kernel.
+- Root Rust LOC is 66,677, root RoomEQ LOC is 51,040, root unit tests are 814,
+  direct internal edges are 43, and cycles, exceptions, and duplicate
+  implementations are all zero.
 
 ### WP4 — Move the generic single-channel vertical slice
 

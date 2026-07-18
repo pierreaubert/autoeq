@@ -65,13 +65,19 @@ fn optimize_room_with_probe_arrivals_stereo_config() {
 #[test]
 fn optimize_room_pipeline_impl_direct_call() {
     let config = minimal_room_config(ProcessingMode::LowLatency);
-    let request = RoomPipelineRequest {
+    let request = roomeq_engine::EngineRequest {
         config: &config,
         sample_rate: 48000.0,
-        output_dir: None,
         probe_arrival_overrides: None,
     };
-    let result = optimize_room_pipeline_impl(request, None);
+    let store = crate::MemoryArtifactStore::new();
+    let validation_measurements = HashMap::new();
+    let context = roomeq_workflow::WorkflowContext {
+        output_dir: None,
+        artifact_store: &store,
+        validation_measurements: &validation_measurements,
+    };
+    let result = optimize_room_pipeline_impl(request, &context, None);
     assert!(
         result.is_ok(),
         "pipeline impl direct call should succeed: {:?}",

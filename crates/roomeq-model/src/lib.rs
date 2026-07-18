@@ -21,7 +21,6 @@ pub mod roomeq {
 
 pub mod auto_tune;
 pub mod config;
-pub mod config_loader;
 pub mod contracts;
 pub mod home_cinema;
 pub mod home_cinema_resolution;

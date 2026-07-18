@@ -2721,7 +2721,6 @@ dependencies = [
 name = "roomeq-model"
 version = "0.4.51"
 dependencies = [
- "anyhow",
  "autoeq-core",
  "clap",
  "log",
@@ -2760,10 +2759,14 @@ dependencies = [
 name = "roomeq-workflow"
 version = "0.4.51"
 dependencies = [
+ "anyhow",
+ "autoeq-artifacts",
  "autoeq-measurements",
  "ndarray",
  "roomeq-engine",
  "roomeq-model",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

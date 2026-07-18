@@ -1,5 +1,6 @@
 //! RoomEQ application workflows and resource adapters.
 
+pub mod arrival;
 pub mod channel_measurements;
 pub mod config_loader;
 pub mod dba;
@@ -8,7 +9,9 @@ pub mod fir;
 pub mod multisub;
 pub mod output;
 pub mod pipeline;
+mod wav;
 
+pub use arrival::{prepare_channel_arrival_time, prepare_channel_measurements_with_arrival};
 pub use channel_measurements::prepare_channel_measurements;
 pub use config_loader::{SHALLOW_MERGE_KEYS, load_config, merge_json_objects};
 pub use eq_resources::prepare_eq_resources;

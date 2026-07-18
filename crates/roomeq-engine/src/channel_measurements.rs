@@ -13,6 +13,7 @@ pub struct PreparedChannelMeasurements {
     representative: Curve,
     individual: Vec<Curve>,
     multi_measurement_source: bool,
+    arrival_time_ms: Option<f64>,
 }
 
 impl PreparedChannelMeasurements {
@@ -26,7 +27,14 @@ impl PreparedChannelMeasurements {
             representative,
             individual,
             multi_measurement_source,
+            arrival_time_ms: None,
         }
+    }
+
+    /// Attach arrival metadata resolved by the workflow.
+    pub fn with_arrival_time(mut self, arrival_time_ms: Option<f64>) -> Self {
+        self.arrival_time_ms = arrival_time_ms;
+        self
     }
 
     /// Power-domain representative response for the channel.
@@ -46,6 +54,11 @@ impl PreparedChannelMeasurements {
     /// optimizer dispatch semantics.
     pub fn is_multi_measurement_source(&self) -> bool {
         self.multi_measurement_source
+    }
+
+    /// Detected acoustic arrival time, if the workflow could resolve one.
+    pub fn arrival_time_ms(&self) -> Option<f64> {
+        self.arrival_time_ms
     }
 }
 
@@ -71,5 +84,9 @@ mod tests {
         assert_eq!(prepared.representative().spl[0], 81.0);
         assert_eq!(prepared.individual().len(), 2);
         assert!(prepared.is_multi_measurement_source());
+        assert!(prepared.arrival_time_ms().is_none());
+
+        let prepared = prepared.with_arrival_time(Some(12.5));
+        assert_eq!(prepared.arrival_time_ms(), Some(12.5));
     }
 }

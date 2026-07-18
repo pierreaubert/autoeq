@@ -1,9 +1,9 @@
 //! Resolve filesystem-backed EQ resources before engine execution.
 
-use std::path::Path;
-
 use roomeq_engine::eq::{EqResources, PreparedEqTarget, PreparedImpulseResponse};
 use roomeq_model::{OptimizerConfig, TargetCurveConfig};
+
+use crate::wav::decode_first_channel;
 
 /// Resolve target curves and optional SSIR impulse responses for the EQ engine.
 pub fn prepare_eq_resources(
@@ -27,41 +27,11 @@ pub fn prepare_eq_resources(
     })
 }
 
-fn decode_mono_wav(path: &Path) -> Option<PreparedImpulseResponse> {
-    let reader = hound::WavReader::open(path).ok()?;
-    let spec = reader.spec();
-    let channels = usize::from(spec.channels);
-    if channels == 0 || spec.sample_rate == 0 || spec.bits_per_sample == 0 {
-        return None;
-    }
-    let samples: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Float => reader
-            .into_samples::<f32>()
-            .collect::<Result<_, _>>()
-            .ok()?,
-        hound::SampleFormat::Int => {
-            let full_scale = 1_i64.checked_shl(u32::from(spec.bits_per_sample - 1))?;
-            let scale = 1.0 / full_scale as f32;
-            reader
-                .into_samples::<i32>()
-                .map(|sample| sample.map(|sample| sample as f32 * scale))
-                .collect::<Result<_, _>>()
-                .ok()?
-        }
-    };
-    if samples.is_empty() {
-        return None;
-    }
-
-    let frames = samples.len() / channels;
-    let samples = if channels == 1 {
-        samples
-    } else {
-        (0..frames).map(|frame| samples[frame * channels]).collect()
-    };
+fn decode_mono_wav(path: &std::path::Path) -> Option<PreparedImpulseResponse> {
+    let decoded = decode_first_channel(path).ok()?;
     Some(PreparedImpulseResponse {
-        samples,
-        sample_rate: f64::from(spec.sample_rate),
+        samples: decoded.samples,
+        sample_rate: f64::from(decoded.sample_rate),
     })
 }
 

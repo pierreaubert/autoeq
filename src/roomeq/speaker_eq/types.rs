@@ -130,7 +130,6 @@ pub(in crate::roomeq) struct ChannelOptimizationInput<'a> {
     pub sample_rate: f64,
     pub output_dir: &'a Path,
     pub callback: Option<crate::optim::OptimProgressCallback>,
-    pub probe_arrival_ms: Option<f64>,
     pub shared_mean_spl: Option<f64>,
 }
 

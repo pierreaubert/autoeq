@@ -2764,6 +2764,8 @@ dependencies = [
  "autoeq-artifacts",
  "autoeq-measurements",
  "hound",
+ "log",
+ "math-dsp",
  "ndarray",
  "roomeq-engine",
  "roomeq-model",

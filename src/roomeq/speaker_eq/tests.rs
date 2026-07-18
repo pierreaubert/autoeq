@@ -1,7 +1,7 @@
 use super::super::types::{
     Cea2034CorrectionConfig, CrossoverConfig, ExcursionProtectionConfig, MeasurementSource,
-    OptimizerConfig, ProcessingMode, RecordingConfiguration, RoomConfig, SpeakerConfig,
-    SubOptimizerConfig, SubwooferSystemConfig, SystemConfig, TargetResponseConfig,
+    OptimizerConfig, ProcessingMode, RoomConfig, SpeakerConfig, SubOptimizerConfig,
+    SubwooferSystemConfig, SystemConfig, TargetResponseConfig,
 };
 use super::apply::process_single_speaker;
 use super::misc::determine_optimization_bands;
@@ -446,117 +446,6 @@ fn determine_optimization_bands_with_frequencies() {
 // ===================================================================
 // misc.rs unit tests
 // ===================================================================
-
-#[test]
-fn normalize_recording_signal_type_handles_whitespace_and_case() {
-    assert_eq!(super::normalize_recording_signal_type("  MLS  "), "mls");
-    assert_eq!(
-        super::normalize_recording_signal_type("Maximum-Length-Sequence"),
-        "maximumlengthsequence"
-    );
-    assert_eq!(super::normalize_recording_signal_type("DIRAC"), "dirac");
-    assert_eq!(
-        super::normalize_recording_signal_type("Pink Noise"),
-        "pinknoise"
-    );
-}
-
-#[test]
-fn matched_reference_mls_and_dirac() {
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.recording_config = Some(RecordingConfiguration {
-        signal_type: Some("MLS".to_string()),
-        signal_level_db: Some(-6.0),
-        recording_sample_rate: Some(48000),
-        ..Default::default()
-    });
-    let (name, signal, sr) =
-        super::matched_reference_from_recording_config(&config, 96000.0).unwrap();
-    assert_eq!(name, "MLS");
-    assert_eq!(sr, 48000);
-    assert!(!signal.is_empty());
-
-    config.recording_config = Some(RecordingConfiguration {
-        signal_type: Some("Dirac".to_string()),
-        signal_level_db: Some(0.0),
-        recording_sample_rate: None,
-        signal_duration_secs: Some(0.5),
-        ..Default::default()
-    });
-    let (name, signal, sr) = super::matched_reference_from_recording_config(&config, 0.0).unwrap();
-    assert_eq!(name, "Dirac");
-    assert_eq!(sr, 48_000);
-    assert!(!signal.is_empty());
-}
-
-#[test]
-fn matched_reference_unknown_returns_none() {
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.recording_config = Some(RecordingConfiguration {
-        signal_type: Some("Pink Noise".to_string()),
-        ..Default::default()
-    });
-    assert!(super::matched_reference_from_recording_config(&config, 48000.0).is_none());
-}
-
-#[test]
-fn detect_channel_arrival_time_probe_wins() {
-    let source = MeasurementSource::InMemory(flat_curve());
-    let config = single_speaker_config(ProcessingMode::LowLatency);
-    let arrival = super::detect_channel_arrival_time("left", &source, &config, 48000.0, Some(2.5));
-    assert_eq!(arrival, Some(2.5));
-}
-
-#[test]
-fn detect_channel_arrival_time_mls_reference() {
-    let sr = 48000_u32;
-    let reference = math_audio_dsp::signals::gen_mls(10, 0.5);
-    let delay = 123_usize;
-    let mut recorded = vec![0.0_f32; reference.len() + delay + 256];
-    for (i, &sample) in reference.iter().enumerate() {
-        recorded[i + delay] += sample * 0.8;
-    }
-    let wav = write_mono_wav(&recorded, sr);
-    let curve = flat_curve();
-    let source = wav_source_with_curve(wav.path(), curve, None);
-
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.recording_config = Some(RecordingConfiguration {
-        signal_type: Some("MLS".to_string()),
-        recording_sample_rate: Some(sr),
-        ..Default::default()
-    });
-
-    let arrival = super::detect_channel_arrival_time("left", &source, &config, sr as f64, None);
-    assert!(
-        arrival.is_some() && arrival.unwrap() > 0.0 && arrival.unwrap() < 10.0,
-        "expected positive arrival < 10 ms, got {:?}",
-        arrival
-    );
-}
-
-#[test]
-fn detect_channel_arrival_time_falls_back_to_onset() {
-    let sr = 48000_u32;
-    let mut recorded = vec![0.0_f32; 4096];
-    recorded[120] = 0.1;
-    let wav = write_mono_wav(&recorded, sr);
-    let curve = flat_curve();
-    let source = wav_source_with_curve(wav.path(), curve, None);
-
-    let config = single_speaker_config(ProcessingMode::LowLatency);
-    let arrival = super::detect_channel_arrival_time("left", &source, &config, sr as f64, None);
-    assert!(arrival.is_some());
-}
-
-#[test]
-fn detect_channel_arrival_time_missing_wav_returns_none() {
-    let curve = flat_curve();
-    let source = wav_source_with_curve(std::path::Path::new("/nonexistent/path.wav"), curve, None);
-    let config = single_speaker_config(ProcessingMode::LowLatency);
-    let arrival = super::detect_channel_arrival_time("left", &source, &config, 48000.0, None);
-    assert!(arrival.is_none());
-}
 
 #[test]
 fn cea2034_correction_active_reflects_config() {
@@ -1053,7 +942,9 @@ fn apply_broadband_precorrection_respects_worsening_limit() {
 fn prepare_measurement_in_memory() {
     let curve = flat_curve();
     let source = MeasurementSource::InMemory(curve.clone());
-    let measurements = roomeq_workflow::prepare_channel_measurements(&source).unwrap();
+    let measurements = roomeq_workflow::prepare_channel_measurements(&source)
+        .unwrap()
+        .with_arrival_time(Some(1.5));
     let config = single_speaker_config(ProcessingMode::LowLatency);
     let input = super::types::ChannelOptimizationInput {
         channel_name: "left",
@@ -1063,7 +954,6 @@ fn prepare_measurement_in_memory() {
         sample_rate: 48000.0,
         output_dir: std::path::Path::new("/tmp"),
         callback: None,
-        probe_arrival_ms: Some(1.5),
         shared_mean_spl: None,
     };
     let prepared = super::apply::prepare_measurement(&input).unwrap();
@@ -1085,7 +975,6 @@ fn build_target_context_flat_returns_none_tilt() {
         sample_rate: 48000.0,
         output_dir: std::path::Path::new("/tmp"),
         callback: None,
-        probe_arrival_ms: None,
         shared_mean_spl: None,
     };
     let prepared = super::apply::prepare_measurement(&input).unwrap();
@@ -1116,7 +1005,6 @@ fn build_target_context_harman_creates_tilt_and_warns_on_target_curve() {
         sample_rate: 48000.0,
         output_dir: std::path::Path::new("/tmp"),
         callback: None,
-        probe_arrival_ms: None,
         shared_mean_spl: None,
     };
     let prepared = super::apply::prepare_measurement(&input).unwrap();
@@ -1142,7 +1030,6 @@ fn preprocess_features_basic_path() {
         sample_rate: 48000.0,
         output_dir: std::path::Path::new("/tmp"),
         callback: None,
-        probe_arrival_ms: None,
         shared_mean_spl: None,
     };
     let prepared = super::apply::prepare_measurement(&input).unwrap();

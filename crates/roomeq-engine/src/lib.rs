@@ -46,6 +46,12 @@ pub mod report_adapter;
 pub mod spectral_align;
 /// Supporting-source room compensation filter design.
 pub mod supporting_source;
+/// Path-free time-alignment analysis used by workflow preparation.
+pub mod time_align {
+    pub use roomeq_analysis::time_align::{
+        ArrivalTimeResult, ProbeDelayResult, detect_delay_with_probe, find_arrival_time_samples,
+    };
+}
 
 pub use channel_measurements::PreparedChannelMeasurements;
 pub use pipeline::{

@@ -617,30 +617,6 @@ pub(super) fn shared_target_level(channel_means: &[f64]) -> f64 {
     }
 }
 
-/// Extract wav_path from a MeasurementSource if available
-pub(in super::super) fn extract_wav_path(source: &MeasurementSource) -> Option<String> {
-    match source {
-        MeasurementSource::Single(s) => {
-            if let crate::MeasurementRef::Inline(inline) = &s.measurement {
-                inline.wav_path.clone()
-            } else {
-                None
-            }
-        }
-        MeasurementSource::Multiple(m) => {
-            // Use the first measurement's wav_path if available
-            m.measurements.first().and_then(|r| {
-                if let crate::MeasurementRef::Inline(inline) = r {
-                    inline.wav_path.clone()
-                } else {
-                    None
-                }
-            })
-        }
-        MeasurementSource::InMemory(_) | MeasurementSource::InMemoryMultiple(_) => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -648,7 +624,7 @@ mod tests {
     use crate::roomeq::types::{
         OptimizerConfig, SubwooferStrategy, SubwooferSystemConfig, SystemConfig,
     };
-    use crate::{InlineMeasurement, MeasurementMultiple, MeasurementRef, MeasurementSingle};
+    use crate::{InlineMeasurement, MeasurementRef, MeasurementSingle};
     use ndarray::Array1;
 
     fn small_curve() -> crate::Curve {
@@ -952,53 +928,6 @@ mod tests {
     #[test]
     fn shared_target_level_empty_returns_zero() {
         assert_eq!(shared_target_level(&[]), 0.0);
-    }
-
-    #[test]
-    fn extract_wav_path_single_inline() {
-        let source = MeasurementSource::Single(MeasurementSingle {
-            measurement: MeasurementRef::Inline(InlineMeasurement {
-                frequencies: vec![100.0],
-                magnitude_db: vec![80.0],
-                phase_deg: None,
-                name: None,
-                wav_path: Some("ir.wav".to_string()),
-                csv_path: None,
-            }),
-            speaker_name: None,
-        });
-        assert_eq!(extract_wav_path(&source), Some("ir.wav".to_string()));
-    }
-
-    #[test]
-    fn extract_wav_path_multiple_uses_first() {
-        let source = MeasurementSource::Multiple(MeasurementMultiple {
-            measurements: vec![
-                MeasurementRef::Inline(InlineMeasurement {
-                    frequencies: vec![100.0],
-                    magnitude_db: vec![80.0],
-                    phase_deg: None,
-                    name: None,
-                    wav_path: Some("first.wav".to_string()),
-                    csv_path: None,
-                }),
-                MeasurementRef::Inline(InlineMeasurement {
-                    frequencies: vec![100.0],
-                    magnitude_db: vec![80.0],
-                    phase_deg: None,
-                    name: None,
-                    wav_path: Some("second.wav".to_string()),
-                    csv_path: None,
-                }),
-            ],
-            speaker_name: None,
-        });
-        assert_eq!(extract_wav_path(&source), Some("first.wav".to_string()));
-    }
-
-    #[test]
-    fn extract_wav_path_in_memory_returns_none() {
-        assert!(extract_wav_path(&single_source()).is_none());
     }
 
     #[test]

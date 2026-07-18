@@ -8,7 +8,6 @@ use super::build::build_target_tilt_curve;
 use super::misc::broadband_correction_rejected;
 use super::misc::cea2034_correction_active;
 use super::misc::create_kautz_filter_config;
-use super::misc::detect_channel_arrival_time;
 use super::misc::flatness_score_in_range;
 use super::misc::generate_excursion_filters;
 use super::misc::maybe_clamp_min_freq_for_target_tilt;
@@ -370,13 +369,7 @@ pub(super) fn prepare_measurement(
         &curve,
         &input.room_config.optimizer,
     );
-    let arrival_time_ms = detect_channel_arrival_time(
-        input.channel_name,
-        input.source,
-        input.room_config,
-        input.sample_rate,
-        input.probe_arrival_ms,
-    );
+    let arrival_time_ms = input.measurements.arrival_time_ms();
     let curve_raw = curve.clone();
 
     Ok(PreparedMeasurement {
@@ -959,15 +952,19 @@ pub(in super::super) fn process_single_speaker(
     probe_arrival_ms: Option<f64>,
     shared_mean_spl: Option<f64>,
 ) -> Result<MixedModeResult> {
-    let channel_measurements =
-        roomeq_workflow::prepare_channel_measurements(source).map_err(|e| {
-            AutoeqError::InvalidMeasurement {
-                message: format!(
-                    "Failed to load measurement for channel {}: {}",
-                    channel_name, e
-                ),
-            }
-        })?;
+    let channel_measurements = roomeq_workflow::prepare_channel_measurements_with_arrival(
+        channel_name,
+        source,
+        room_config,
+        sample_rate,
+        probe_arrival_ms,
+    )
+    .map_err(|e| AutoeqError::InvalidMeasurement {
+        message: format!(
+            "Failed to load measurement for channel {}: {}",
+            channel_name, e
+        ),
+    })?;
     let mut input = ChannelOptimizationInput {
         channel_name,
         source,
@@ -976,7 +973,6 @@ pub(in super::super) fn process_single_speaker(
         sample_rate,
         output_dir,
         callback,
-        probe_arrival_ms,
         shared_mean_spl,
     };
 

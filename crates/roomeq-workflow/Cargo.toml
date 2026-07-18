@@ -10,6 +10,8 @@ anyhow = { workspace = true }
 autoeq-artifacts = { workspace = true }
 autoeq-measurements = { workspace = true }
 hound = { workspace = true }
+log = { workspace = true }
+math-dsp = { workspace = true }
 ndarray = { workspace = true }
 roomeq-engine = { workspace = true }
 roomeq-model = { workspace = true }

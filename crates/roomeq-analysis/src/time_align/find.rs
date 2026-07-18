@@ -21,11 +21,26 @@ pub fn find_arrival_time(
     wav_path: &Path,
     threshold_db: Option<f64>,
 ) -> Result<ArrivalTimeResult, String> {
-    let threshold_db = threshold_db.unwrap_or(-40.0);
     let (samples, sample_rate) = load_wav_first_channel(wav_path)?;
+    find_arrival_time_samples(&samples, sample_rate, threshold_db)
+}
+
+/// Find the signal onset in already-decoded mono samples.
+///
+/// Keeping this analysis path-free lets workflow crates own WAV decoding while
+/// engine callers reuse the canonical threshold behavior.
+pub fn find_arrival_time_samples(
+    samples: &[f32],
+    sample_rate: u32,
+    threshold_db: Option<f64>,
+) -> Result<ArrivalTimeResult, String> {
+    let threshold_db = threshold_db.unwrap_or(-40.0);
 
     if samples.is_empty() {
         return Err("WAV file contains no samples".to_string());
+    }
+    if sample_rate == 0 {
+        return Err("Recording sample rate must be positive".to_string());
     }
 
     // Find the peak (maximum absolute value) for reference

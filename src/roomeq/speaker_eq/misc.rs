@@ -1,57 +1,12 @@
 use super::super::eq;
 use super::super::excursion;
-use super::super::optimize::extract_wav_path;
 use super::super::types::{MeasurementSource, OptimizerConfig, RoomConfig};
 use crate::Curve;
 use crate::error::{AutoeqError, Result};
 use log::{debug, info, warn};
 use math_audio_dsp::analysis::compute_average_response;
-use math_audio_dsp::signals::{gen_dirac, gen_mls};
 use math_audio_iir_fir::Biquad;
 use roomeq_engine::PreparedChannelMeasurements;
-
-pub(super) const DEFAULT_MLS_ORDER: u8 = 16;
-
-pub(super) fn normalize_recording_signal_type(signal_type: &str) -> String {
-    signal_type
-        .trim()
-        .chars()
-        .filter(|c| !c.is_whitespace() && *c != '-' && *c != '_')
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
-pub(super) fn matched_reference_from_recording_config(
-    room_config: &RoomConfig,
-    fallback_sample_rate: f64,
-) -> Option<(&'static str, Vec<f32>, u32)> {
-    let recording = room_config.recording_config.as_ref()?;
-    let signal_type = recording.signal_type.as_deref()?;
-    let signal_type = normalize_recording_signal_type(signal_type);
-
-    let sample_rate = recording.recording_sample_rate.unwrap_or_else(|| {
-        if fallback_sample_rate.is_finite() && fallback_sample_rate > 0.0 {
-            fallback_sample_rate.round() as u32
-        } else {
-            48_000
-        }
-    });
-    let amp = 10.0_f32.powf(recording.signal_level_db.unwrap_or(0.0) / 20.0);
-
-    match signal_type.as_str() {
-        "mls" | "maximumlengthsequence" | "maximumlengthsequences" => {
-            Some(("MLS", gen_mls(DEFAULT_MLS_ORDER, amp), sample_rate))
-        }
-        "dirac" | "impulse" => {
-            let duration = recording
-                .signal_duration_secs
-                .unwrap_or(1.0)
-                .max(1.0 / sample_rate as f32);
-            Some(("Dirac", gen_dirac(amp, sample_rate, duration), sample_rate))
-        }
-        _ => None,
-    }
-}
 
 #[allow(clippy::too_many_arguments)]
 pub(in super::super) fn optimize_eq_maybe_multi(
@@ -186,76 +141,6 @@ pub(super) fn create_kautz_filter_config(sections: &[(f64, f64, f64)]) -> serde_
         "q": q,
         "db_gain": 0.0,
         "kautz_sections": kautz_sections,
-    })
-}
-
-pub(super) fn detect_channel_arrival_time(
-    channel_name: &str,
-    source: &MeasurementSource,
-    room_config: &RoomConfig,
-    sample_rate: f64,
-    probe_arrival_ms: Option<f64>,
-) -> Option<f64> {
-    if let Some(probe_ms) = probe_arrival_ms {
-        debug!(
-            "  Using probe-based arrival time for '{}': {:.2} ms",
-            channel_name, probe_ms
-        );
-        return Some(probe_ms);
-    }
-
-    extract_wav_path(source).and_then(|wav_path| {
-        let path = std::path::Path::new(&wav_path);
-        if path.exists() {
-            if let Some((reference_name, reference_signal, reference_sample_rate)) =
-                matched_reference_from_recording_config(room_config, sample_rate)
-                && !reference_signal.is_empty()
-            {
-                match super::super::time_align::find_arrival_time_with_reference(
-                    path,
-                    &reference_signal,
-                    reference_sample_rate,
-                ) {
-                    Ok(result) => {
-                        debug!(
-                            "  {} matched arrival for '{}': {:.2} ms (peak at sample {}, SNR {:.1} dB)",
-                            reference_name,
-                            channel_name,
-                            result.arrival_ms,
-                            result.arrival_samples,
-                            result.detection_snr_db
-                        );
-                        return Some(result.arrival_ms);
-                    }
-                    Err(e) => {
-                        debug!(
-                            "  Could not determine {} matched arrival for '{}': {}; falling back to WAV onset",
-                            reference_name, channel_name, e
-                        );
-                    }
-                }
-            }
-
-            match super::super::time_align::find_arrival_time(path, None) {
-                Ok(result) => {
-                    debug!(
-                        "  Arrival time for '{}': {:.2} ms (peak at sample {})",
-                        channel_name, result.arrival_ms, result.arrival_samples
-                    );
-                    Some(result.arrival_ms)
-                }
-                Err(e) => {
-                    debug!(
-                        "  Could not determine arrival time for '{}': {}",
-                        channel_name, e
-                    );
-                    None
-                }
-            }
-        } else {
-            debug!("  WAV file not found for '{}': {:?}", channel_name, path);
-            None
-        }
     })
 }
 
@@ -401,8 +286,8 @@ pub(super) fn target_mean_spl(
 }
 
 pub(super) fn existing_ssir_wav_path(source: &MeasurementSource) -> Option<std::path::PathBuf> {
-    extract_wav_path(source).and_then(|wp| {
-        let path = std::path::PathBuf::from(&wp);
+    source.wav_path().and_then(|wav_path| {
+        let path = std::path::PathBuf::from(wav_path);
         if path.exists() { Some(path) } else { None }
     })
 }

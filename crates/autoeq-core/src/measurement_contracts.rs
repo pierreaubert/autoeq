@@ -222,6 +222,19 @@ impl MeasurementSource {
         }
     }
 
+    /// Associated recording WAV path, when the source carries inline data.
+    ///
+    /// Multi-measurement sources retain the historical convention of using the
+    /// first position's recording for channel-level arrival and SSIR analysis.
+    pub fn wav_path(&self) -> Option<&str> {
+        let measurement = match self {
+            Self::Single(single) => &single.measurement,
+            Self::Multiple(multiple) => multiple.measurements.first()?,
+            Self::InMemory(_) | Self::InMemoryMultiple(_) => return None,
+        };
+        measurement.inline_data()?.wav_path.as_deref()
+    }
+
     pub fn resolve_paths(&mut self, base_dir: &Path) {
         match self {
             Self::Single(single) => single.measurement.resolve_paths(base_dir),
@@ -232,6 +245,42 @@ impl MeasurementSource {
             }
             Self::InMemory(_) | Self::InMemoryMultiple(_) => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn inline(wav_path: Option<&str>) -> MeasurementRef {
+        MeasurementRef::Inline(InlineMeasurement {
+            frequencies: vec![100.0],
+            magnitude_db: vec![80.0],
+            phase_deg: None,
+            name: None,
+            wav_path: wav_path.map(String::from),
+            csv_path: None,
+        })
+    }
+
+    #[test]
+    fn measurement_source_wav_path_uses_single_or_first_position() {
+        let single = MeasurementSource::Single(MeasurementSingle {
+            measurement: inline(Some("single.wav")),
+            speaker_name: None,
+        });
+        assert_eq!(single.wav_path(), Some("single.wav"));
+
+        let multiple = MeasurementSource::Multiple(MeasurementMultiple {
+            measurements: vec![inline(Some("first.wav")), inline(Some("second.wav"))],
+            speaker_name: None,
+        });
+        assert_eq!(multiple.wav_path(), Some("first.wav"));
+        assert!(
+            MeasurementSource::InMemory(Curve::default())
+                .wav_path()
+                .is_none()
+        );
     }
 }
 

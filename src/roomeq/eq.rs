@@ -8,7 +8,6 @@
 use std::collections::HashMap;
 use std::error::Error;
 
-use math_audio_iir_fir::Biquad;
 use roomeq_engine::eq::{self as engine_eq, EqResources};
 use roomeq_model::{MultiMeasurementConfig, OptimizerConfig, TargetCurveConfig};
 
@@ -24,16 +23,6 @@ fn prepare_resources(
     target: Option<&TargetCurveConfig>,
 ) -> Result<EqResources, Box<dyn Error>> {
     roomeq_workflow::prepare_eq_resources(config, target)
-}
-
-pub fn optimize_channel_eq(
-    curve: &Curve,
-    config: &OptimizerConfig,
-    target: Option<&TargetCurveConfig>,
-    sample_rate: f64,
-) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
-    let resources = prepare_resources(config, target)?;
-    engine_eq::optimize_channel_eq(curve, config, Some(&resources), sample_rate)
 }
 
 pub fn optimize_channel_eq_detailed(

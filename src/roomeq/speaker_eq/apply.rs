@@ -16,7 +16,6 @@ use super::misc::maybe_clamp_min_freq_for_target_tilt;
 use super::misc::mean_response_in_range;
 use super::misc::target_mean_spl;
 #[allow(unused_imports)]
-pub(super) use super::schroeder::optimize_with_schroeder_split;
 use super::types::BroadbandPreCorrection;
 use super::types::ChannelDspChain;
 use super::types::ChannelOptimizationInput;

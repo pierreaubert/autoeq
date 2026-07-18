@@ -1,93 +1,16 @@
-use crate::Curve;
-use crate::error::{AutoeqError, Result};
-use crate::response;
-use crate::roomeq::eq;
-use crate::roomeq::types::{
-    LowFreqFilterConfig, OptimizerConfig, SchroederSplitConfig, TargetCurveConfig, TargetShape,
-};
-use log::{debug, info};
-use math_audio_dsp::analysis::compute_average_response;
+use super::optimize_channel_eq_detailed;
+use crate::{AutoeqError, Curve};
+use autoeq_core::{Result, response};
+use log::debug;
 use math_audio_iir_fir::Biquad;
+use roomeq_model::{LowFreqFilterConfig, OptimizerConfig, SchroederSplitConfig, TargetShape};
 
-pub(in crate::roomeq) struct SchroederOptimizationResult {
+/// Optimized low- and high-frequency filters for a Schroeder split.
+#[derive(Debug)]
+pub struct SchroederOptimizationResult {
     pub low_filters: Vec<Biquad>,
     pub high_filters: Vec<Biquad>,
-    pub optimizer_evidence: Vec<crate::optim::OptimizerRunEvidence>,
-}
-
-/// Optimize EQ with optional Schroeder frequency split.
-///
-/// If the optimizer config has an enabled Schroeder split, performs two-pass
-/// optimization with different Q constraints. Otherwise falls back to standard
-/// single-pass optimization.
-///
-/// Historically used by the system-config workflows; after Phase 3 those
-/// workflows route per-channel EQ through `process_single_speaker`, which
-/// applies the Schroeder split itself inside `prepare_single_channel_eq`.
-/// Kept as an internal convenience wrapper for tests and future callers.
-#[allow(dead_code)]
-pub(in crate::roomeq) fn optimize_eq_with_optional_schroeder(
-    curve: &Curve,
-    optimizer: &OptimizerConfig,
-    target_config: Option<&TargetCurveConfig>,
-    sample_rate: f64,
-) -> std::result::Result<(Vec<Biquad>, f64), Box<dyn std::error::Error>> {
-    if let Some(schroeder_config) = &optimizer.schroeder_split
-        && schroeder_config.enabled
-    {
-        let schroeder_freq = if let Some(ref dims) = schroeder_config.room_dimensions {
-            dims.schroeder_frequency()
-        } else {
-            schroeder_config.schroeder_freq
-        };
-        info!(
-            "  Schroeder split: optimizing below {:.1} Hz with max_q={:.1}, above with max_q={:.1}",
-            schroeder_freq,
-            schroeder_config.low_freq_config.max_q,
-            schroeder_config.high_freq_config.max_q
-        );
-
-        let (low_filters, high_filters) =
-            optimize_with_schroeder_split(curve, optimizer, schroeder_config, sample_rate)
-                .map_err(|e| -> Box<dyn std::error::Error> { Box::new(e) })?;
-
-        let mut combined = low_filters;
-        combined.extend(high_filters);
-        let loss = compute_combined_filter_loss(curve, &combined, optimizer, sample_rate);
-        Ok((combined, loss))
-    } else {
-        eq::optimize_channel_eq(curve, optimizer, target_config, sample_rate)
-    }
-}
-
-fn compute_combined_filter_loss(
-    curve: &Curve,
-    filters: &[Biquad],
-    optimizer: &OptimizerConfig,
-    sample_rate: f64,
-) -> f64 {
-    let corrected = if filters.is_empty() {
-        curve.clone()
-    } else {
-        let response = response::compute_peq_complex_response(filters, &curve.freq, sample_rate);
-        response::apply_complex_response(curve, &response)
-    };
-
-    let freqs_f32: Vec<f32> = corrected.freq.iter().map(|&f| f as f32).collect();
-    let spl_f32: Vec<f32> = corrected.spl.iter().map(|&s| s as f32).collect();
-    let mean = compute_average_response(
-        &freqs_f32,
-        &spl_f32,
-        Some((optimizer.min_freq as f32, optimizer.max_freq as f32)),
-    ) as f64;
-    let normalized = &corrected.spl - mean;
-
-    crate::loss::flat_loss(
-        &corrected.freq,
-        &normalized,
-        optimizer.min_freq,
-        optimizer.max_freq,
-    )
+    pub optimizer_evidence: Vec<autoeq_optim::optim::OptimizerRunEvidence>,
 }
 
 /// Optimize EQ with Schroeder frequency split
@@ -95,17 +18,7 @@ fn compute_combined_filter_loss(
 /// Performs two-pass optimization with different Q constraints:
 /// - Below Schroeder: high-Q narrow filters for room modes
 /// - Above Schroeder: low-Q broad filters for tonal adjustment
-pub(in crate::roomeq) fn optimize_with_schroeder_split(
-    curve: &Curve,
-    optimizer: &OptimizerConfig,
-    schroeder_config: &SchroederSplitConfig,
-    sample_rate: f64,
-) -> Result<(Vec<Biquad>, Vec<Biquad>)> {
-    optimize_with_schroeder_split_detailed(curve, optimizer, schroeder_config, sample_rate)
-        .map(|result| (result.low_filters, result.high_filters))
-}
-
-pub(in crate::roomeq) fn optimize_with_schroeder_split_detailed(
+pub fn optimize_with_schroeder_split_detailed(
     curve: &Curve,
     optimizer: &OptimizerConfig,
     schroeder_config: &SchroederSplitConfig,
@@ -146,7 +59,7 @@ pub(in crate::roomeq) fn optimize_with_schroeder_split_detailed(
             max_db,
             ..optimizer.clone()
         };
-        let result = eq::optimize_channel_eq_detailed(curve, &low_optimizer, None, sample_rate)
+        let result = optimize_channel_eq_detailed(curve, &low_optimizer, None, sample_rate)
             .map_err(|e| AutoeqError::OptimizationFailed {
                 message: format!("Low-frequency EQ optimization failed: {e}"),
             })?;
@@ -162,7 +75,7 @@ pub(in crate::roomeq) fn optimize_with_schroeder_split_detailed(
             max_q: high_config.max_q,
             ..optimizer.clone()
         };
-        let result = eq::optimize_channel_eq_detailed(curve, &high_optimizer, None, sample_rate)
+        let result = optimize_channel_eq_detailed(curve, &high_optimizer, None, sample_rate)
             .map_err(|e| AutoeqError::OptimizationFailed {
                 message: format!("High-frequency EQ optimization failed: {e}"),
             })?;
@@ -207,7 +120,7 @@ pub(in crate::roomeq) fn optimize_with_schroeder_split_detailed(
         ..optimizer.clone()
     };
 
-    let low_result = eq::optimize_channel_eq_detailed(
+    let low_result = optimize_channel_eq_detailed(
         curve,
         &low_optimizer,
         None, // No additional target for split optimization
@@ -233,7 +146,7 @@ pub(in crate::roomeq) fn optimize_with_schroeder_split_detailed(
         response::compute_peq_complex_response(&low_eq_filters, &curve.freq, sample_rate);
     let curve_with_low_correction = response::apply_complex_response(curve, &low_resp);
 
-    let high_result = eq::optimize_channel_eq_detailed(
+    let high_result = optimize_channel_eq_detailed(
         &curve_with_low_correction,
         &high_optimizer,
         None,
@@ -285,11 +198,7 @@ fn low_freq_gain_bounds(
 }
 
 /// Clamp Q values of filters to [min_q, max_q], recomputing biquad coefficients.
-pub(in crate::roomeq) fn clamp_filter_q(
-    filters: Vec<Biquad>,
-    min_q: f64,
-    max_q: f64,
-) -> Vec<Biquad> {
+fn clamp_filter_q(filters: Vec<Biquad>, min_q: f64, max_q: f64) -> Vec<Biquad> {
     filters
         .into_iter()
         .map(|f| {
@@ -310,7 +219,6 @@ pub(in crate::roomeq) fn clamp_filter_q(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::roomeq::types::HighFreqFilterConfig;
     use ndarray::Array1;
 
     fn curve_with_bass_peak_and_treble_tilt() -> Curve {
@@ -368,53 +276,6 @@ mod tests {
     }
 
     #[test]
-    fn optional_schroeder_split_returns_actual_combined_loss() {
-        let curve = curve_with_bass_peak_and_treble_tilt();
-        let optimizer = OptimizerConfig {
-            num_filters: 2,
-            min_filter_improvement: 0.0,
-            max_iter: 20,
-            population: 6,
-            refine: false,
-            min_freq: 20.0,
-            max_freq: 2000.0,
-            min_q: 0.5,
-            max_q: 4.0,
-            min_db: -6.0,
-            max_db: 3.0,
-            psychoacoustic: false,
-            schroeder_split: Some(SchroederSplitConfig {
-                enabled: true,
-                schroeder_freq: 200.0,
-                low_freq_config: LowFreqFilterConfig {
-                    min_q: 1.0,
-                    max_q: 6.0,
-                    allow_boost: false,
-                    max_db: Some(6.0),
-                },
-                high_freq_config: HighFreqFilterConfig {
-                    max_q: 2.0,
-                    shelving_only: false,
-                },
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-
-        let (filters, loss) =
-            optimize_eq_with_optional_schroeder(&curve, &optimizer, None, 48000.0).unwrap();
-        let expected = compute_combined_filter_loss(&curve, &filters, &optimizer, 48000.0);
-
-        assert!(expected > 1e-6, "test curve should not produce zero loss");
-        assert!(
-            (loss - expected).abs() < 1e-9,
-            "reported loss {} did not match combined response loss {}",
-            loss,
-            expected
-        );
-    }
-
-    #[test]
     fn schroeder_split_rejects_fewer_than_two_filters_without_panicking() {
         let curve = curve_with_bass_peak_and_treble_tilt();
         let split = SchroederSplitConfig {
@@ -430,8 +291,9 @@ mod tests {
                 max_freq: 2_000.0,
                 ..Default::default()
             };
-            let error = optimize_with_schroeder_split(&curve, &optimizer, &split, 48_000.0)
-                .expect_err("undersized split must be rejected");
+            let error =
+                optimize_with_schroeder_split_detailed(&curve, &optimizer, &split, 48_000.0)
+                    .expect_err("undersized split must be rejected");
             assert!(error.to_string().contains("at least 2 filters"));
         }
     }
@@ -455,9 +317,9 @@ mod tests {
             ..Default::default()
         };
 
-        let (low, high) =
-            optimize_with_schroeder_split(&curve, &optimizer, &split, 48_000.0).unwrap();
-        assert!(!low.is_empty());
-        assert!(high.is_empty());
+        let result =
+            optimize_with_schroeder_split_detailed(&curve, &optimizer, &split, 48_000.0).unwrap();
+        assert!(!result.low_filters.is_empty());
+        assert!(result.high_filters.is_empty());
     }
 }

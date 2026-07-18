@@ -5,7 +5,6 @@
 
 use super::apply::{assemble_channel_report, assemble_dsp_chain, build_mixed_mode_result};
 use super::misc::optimize_eq_maybe_multi;
-use super::schroeder::optimize_with_schroeder_split_detailed;
 use super::types::{
     ChannelOptimizationInput, MixedModeResult, OptimizerOutput, PreparedMeasurement,
     PreprocessedFeatures, TargetContext,
@@ -17,6 +16,7 @@ use crate::roomeq::types::{MeasurementSource, OptimizerConfig, ProcessingMode};
 use crate::roomeq::{artifacts, eq, fir, group_processing};
 use log::{info, warn};
 use math_audio_iir_fir::Biquad;
+use roomeq_engine::eq::optimize_with_schroeder_split_detailed;
 
 fn with_preprocessing_evidence(
     preprocessed: &PreprocessedFeatures,

@@ -372,6 +372,13 @@ Local progress:
 - The EQ slice removed another 4,235 root RoomEQ lines and moved 65 tests to
   roomeq-engine. The current ratchets are 59,909 root Rust lines, 44,272 root
   RoomEQ lines, 15,337 root binary lines, and 707 root unit tests.
+- The production Schroeder split optimizer and four focused tests moved next
+  to roomeq-engine. Unused optional/non-detailed wrappers and their exclusive
+  regression test were deleted instead of being carried across the boundary;
+  the remaining strategy caller uses the engine API directly. This removed a
+  further 482 root RoomEQ lines without changing the crate graph. The current
+  ratchets are 59,427 root Rust lines, 43,790 root RoomEQ lines, 15,337 root
+  binary lines, and 702 root unit tests.
 - WP4 remains in progress: ChannelProcessingStrategy ownership and the generic
   single-channel topology/workflow adapters are still rooted and must move
   before the package exit criteria are satisfied.

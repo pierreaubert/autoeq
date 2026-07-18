@@ -9,5 +9,6 @@ mod tests;
 mod validate;
 pub mod validation_result;
 
+pub use misc::collect_sources;
 pub use validate::*;
 pub use validation_result::*;

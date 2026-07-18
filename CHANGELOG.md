@@ -6,6 +6,10 @@
   gates for dependency direction and cycles, shrinking temporary exceptions,
   root LOC/test ratchets, duplicate implementation ownership, public facade
   and RoomEQ schema baselines, and focused per-crate verification.
+- Made `roomeq-model` an implementation-independent contract crate: neutral
+  optimizer settings and serialized output/report contracts now live there,
+  while measurement loading and optimizer/report adapters remain in their
+  owning runtime crates. Root output paths remain compatible re-exports.
 - Centralized all workspace dependency specifications, including development
   dependencies, so member manifests inherit their versions and feature sets.
 - Upgraded the direct AutoEQ optimizer random dependencies to Rand 0.10.

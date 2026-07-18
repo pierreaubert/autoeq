@@ -8,7 +8,7 @@ pub(super) const PHASE_LINEAR_RECOMMENDED_MAX_FREQ_HZ: f64 = 2000.0;
 
 /// Collect all `MeasurementSource`s referenced by a speaker, so the validator
 /// can inspect counts, paths, and speaker-name metadata uniformly.
-pub(super) fn collect_sources(speaker: &SpeakerConfig) -> Vec<&MeasurementSource> {
+pub fn collect_sources(speaker: &SpeakerConfig) -> Vec<&MeasurementSource> {
     match speaker {
         SpeakerConfig::SupportingSource(s) => vec![&s.primary, &s.support],
         SpeakerConfig::Single(s) => vec![s],

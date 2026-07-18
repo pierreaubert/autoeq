@@ -1,5 +1,4 @@
-use super::measurement_ref::MeasurementRef;
-use super::measurement_source::MeasurementSource;
+use super::{MeasurementRef, MeasurementSource};
 use crate::Curve;
 use crate::read::{interpolate_log_space, read_curve_from_csv};
 use ndarray::Array1;

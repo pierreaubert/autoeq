@@ -595,7 +595,9 @@ fn optimize_channel_eq_multi_inner(
                     curves.len()
                 );
             }
-            let smoothing_config = config.psychoacoustic_smoothing_config();
+            let smoothing_config = roomeq_engine::config_adapter::to_measurement_smoothing(
+                config.psychoacoustic_smoothing_config(),
+            );
             normalized_curve =
                 crate::read::smooth_psychoacoustic(&normalized_curve, &smoothing_config);
         }
@@ -657,8 +659,14 @@ fn optimize_channel_eq_multi_inner(
         // Propagate EPA configuration from OptimizerConfig into the
         // ObjectiveData so `compute_base_fitness` uses the user-provided
         // weights when `loss_type == LossType::Epa`.
-        objective_data.epa_config = config.epa_config.clone();
-        objective_data.asymmetric_loss_config = config.asymmetric_loss_config();
+        objective_data.epa_config = config
+            .epa_config
+            .as_ref()
+            .map(roomeq_engine::config_adapter::to_optimizer_epa);
+        objective_data.asymmetric_loss_config =
+            roomeq_engine::config_adapter::to_optimizer_asymmetric_loss(
+                config.asymmetric_loss_config(),
+            );
         objective_data.smoothness_penalty = optim_params_multi.smoothness_penalty.clone();
 
         if i == 0 {
@@ -683,7 +691,9 @@ fn optimize_channel_eq_multi_inner(
 
     let multi_data = MultiObjectiveData {
         objectives,
-        strategy: multi_config.strategy,
+        strategy: roomeq_engine::config_adapter::to_optimizer_multi_measurement(
+            multi_config.strategy,
+        ),
         weights,
         variance_lambda: multi_config.variance_lambda,
         uncertainty_cvar_alpha,
@@ -999,7 +1009,9 @@ fn optimize_spatial_robustness(
     // Apply psychoacoustic smoothing if enabled
     if config.psychoacoustic {
         log::info!("  Applying psychoacoustic smoothing to spatially averaged curve");
-        let smoothing_config = config.psychoacoustic_smoothing_config();
+        let smoothing_config = roomeq_engine::config_adapter::to_measurement_smoothing(
+            config.psychoacoustic_smoothing_config(),
+        );
         normalized_curve = crate::read::smooth_psychoacoustic(&normalized_curve, &smoothing_config);
     }
 
@@ -1084,8 +1096,14 @@ fn optimize_spatial_robustness(
 
     // Propagate EPA config so compute_base_fitness uses user-provided
     // weights when loss_type == LossType::Epa.
-    objective_data.epa_config = config.epa_config.clone();
-    objective_data.asymmetric_loss_config = config.asymmetric_loss_config();
+    objective_data.epa_config = config
+        .epa_config
+        .as_ref()
+        .map(roomeq_engine::config_adapter::to_optimizer_epa);
+    objective_data.asymmetric_loss_config =
+        roomeq_engine::config_adapter::to_optimizer_asymmetric_loss(
+            config.asymmetric_loss_config(),
+        );
     objective_data.smoothness_penalty = optim_params.smoothness_penalty.clone();
 
     let (lower_bounds, upper_bounds) = crate::workflow::setup_bounds(&optim_params);

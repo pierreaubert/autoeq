@@ -198,18 +198,72 @@ fn validate_acoustic_inputs(config: &RoomConfig) -> Vec<String> {
     let mut errors = Vec::new();
     for (speaker_name, speaker) in &config.speakers {
         for (source_index, source) in collect_sources(speaker).into_iter().enumerate() {
-            match crate::read::load_source_individual(source) {
-                Ok(curves) if curves.is_empty() => errors.push(format!(
+            let curves: Vec<&crate::Curve> = match source {
+                MeasurementSource::InMemory(curve) => vec![curve],
+                MeasurementSource::InMemoryMultiple(curves) => curves.iter().collect(),
+                MeasurementSource::Single(single) => match &single.measurement {
+                    crate::MeasurementRef::Inline(inline) => {
+                        validate_inline_measurement(
+                            inline,
+                            speaker_name,
+                            source_index,
+                            &mut errors,
+                        );
+                        Vec::new()
+                    }
+                    _ => Vec::new(),
+                },
+                MeasurementSource::Multiple(multiple) => {
+                    for measurement in &multiple.measurements {
+                        if let crate::MeasurementRef::Inline(inline) = measurement {
+                            validate_inline_measurement(
+                                inline,
+                                speaker_name,
+                                source_index,
+                                &mut errors,
+                            );
+                        }
+                    }
+                    Vec::new()
+                }
+            };
+            if matches!(source, MeasurementSource::InMemoryMultiple(curves) if curves.is_empty()) {
+                errors.push(format!(
                     "speaker '{speaker_name}' source {source_index} produced no measurement curves"
-                )),
-                Ok(_) => {}
-                Err(error) => errors.push(format!(
-                    "speaker '{speaker_name}' source {source_index} failed acoustic validation: {error}"
-                )),
+                ));
+            }
+            for curve in curves {
+                if curve.freq.is_empty() || curve.freq.len() != curve.spl.len() {
+                    errors.push(format!(
+                        "speaker '{speaker_name}' source {source_index} has invalid in-memory frequency/SPL data"
+                    ));
+                }
             }
         }
     }
     errors
+}
+
+fn validate_inline_measurement(
+    inline: &crate::InlineMeasurement,
+    speaker_name: &str,
+    source_index: usize,
+    errors: &mut Vec<String>,
+) {
+    if inline.frequencies.is_empty() || inline.frequencies.len() != inline.magnitude_db.len() {
+        errors.push(format!(
+            "speaker '{speaker_name}' source {source_index} has invalid inline frequency/SPL data"
+        ));
+    }
+    if inline
+        .phase_deg
+        .as_ref()
+        .is_some_and(|phase| phase.len() != inline.frequencies.len())
+    {
+        errors.push(format!(
+            "speaker '{speaker_name}' source {source_index} has inline phase data with the wrong length"
+        ));
+    }
 }
 
 fn validate_export_target(target: &Path) -> Vec<String> {
@@ -1159,7 +1213,7 @@ mod validate_optimizer_tests {
     fn validate_psychoacoustic_smoothing_zero_n_errors() {
         let mut result = ValidationResult::valid();
         let mut config = default_config();
-        config.psychoacoustic_smoothing = Some(crate::read::PsychoacousticSmoothingConfig {
+        config.psychoacoustic_smoothing = Some(crate::PsychoacousticSmoothingConfig {
             low_freq_n: 0,
             high_freq_n: 1,
             ..Default::default()
@@ -1178,7 +1232,7 @@ mod validate_optimizer_tests {
     fn validate_asymmetric_loss_config_negative_weight_errors() {
         let mut result = ValidationResult::valid();
         let mut config = default_config();
-        config.asymmetric_loss_config = Some(crate::loss::AsymmetricLossConfig {
+        config.asymmetric_loss_config = Some(crate::AsymmetricLossConfig {
             peak_weight: -1.0,
             ..Default::default()
         });

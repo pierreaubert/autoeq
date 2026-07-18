@@ -46,7 +46,7 @@ impl OptimizerConfigBuilder {
     setter!(mixed_phase, Option<super::MixedPhaseSerdeConfig>);
     setter!(phase_correction, Option<super::MixedPhaseSerdeConfig>);
     setter!(loss_type, String);
-    setter!(epa_config, Option<crate::loss::epa::score::EpaConfig>);
+    setter!(epa_config, Option<crate::EpaConfig>);
     setter!(algorithm, String);
     setter!(strategy, String);
     setter!(num_filters, usize);
@@ -72,14 +72,11 @@ impl OptimizerConfigBuilder {
     setter!(psychoacoustic, bool);
     setter!(
         psychoacoustic_smoothing,
-        Option<crate::read::PsychoacousticSmoothingConfig>
+        Option<crate::PsychoacousticSmoothingConfig>
     );
     setter!(smooth_n, usize);
     setter!(asymmetric_loss, bool);
-    setter!(
-        asymmetric_loss_config,
-        Option<crate::loss::AsymmetricLossConfig>
-    );
+    setter!(asymmetric_loss_config, Option<crate::AsymmetricLossConfig>);
     setter!(perceptual_policy, Option<super::PerceptualPolicyConfig>);
     setter!(audibility_deadband, Option<super::AudibilityDeadbandConfig>);
     setter!(

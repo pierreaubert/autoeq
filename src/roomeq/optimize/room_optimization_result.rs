@@ -286,8 +286,18 @@ fn refresh_optimizer_evidence(
     }
     result.metadata.optimizer_evidence = Some(RoomOptimizerEvidence {
         policy_version: OPTIMIZER_ACCEPTANCE_POLICY_VERSION.to_string(),
-        confidence,
-        runs_by_channel,
+        confidence: roomeq_engine::report_adapter::to_optimizer_confidence(confidence),
+        runs_by_channel: runs_by_channel
+            .into_iter()
+            .map(|(channel, runs)| {
+                (
+                    channel,
+                    runs.iter()
+                        .map(roomeq_engine::report_adapter::to_optimizer_run_evidence)
+                        .collect(),
+                )
+            })
+            .collect(),
     });
     Some(confidence)
 }
@@ -786,7 +796,7 @@ pub(super) fn sanity_check_result(result: &RoomOptimizationResult) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::optim::{OptimizerConfidence, OptimizerRunEvidence};
+    use crate::optim::OptimizerRunEvidence;
     use crate::roomeq::acoustic_qa::CorrectionDecision;
     use crate::roomeq::test_fixtures::{empty_metadata, single_channel_room_result};
     use crate::roomeq::types::{CtcConfig, RoomConfig, SystemConfig, SystemModel};
@@ -828,7 +838,7 @@ mod tests {
             .optimizer_evidence
             .as_ref()
             .expect("optimizer evidence must be serialized in production metadata");
-        assert_eq!(report.confidence, OptimizerConfidence::Low);
+        assert_eq!(report.confidence, roomeq_model::OptimizerConfidence::Low);
         assert_eq!(report.runs_by_channel["left"][0].evaluation_count, Some(40));
         assert!(result.metadata.stage_outcomes.iter().any(|outcome| {
             outcome.stage == "optimizer_confidence"
@@ -872,7 +882,7 @@ mod tests {
                 .as_ref()
                 .unwrap()
                 .confidence,
-            OptimizerConfidence::Unusable
+            roomeq_model::OptimizerConfidence::Unusable
         );
     }
 

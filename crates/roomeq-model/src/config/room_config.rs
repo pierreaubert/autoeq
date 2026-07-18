@@ -41,7 +41,7 @@ pub struct RoomConfig {
     /// Pre-fetched CEA2034 data (runtime only, not serialized).
     #[serde(skip)]
     #[schemars(skip)]
-    pub cea2034_cache: Option<HashMap<String, crate::read::Cea2034Data>>,
+    pub cea2034_cache: Option<HashMap<String, crate::SpinoramaBundle>>,
 }
 
 impl Default for RoomConfig {
@@ -119,7 +119,7 @@ impl RoomConfig {
             for (name, crossover) in crossovers {
                 if crossover
                     .crossover_type
-                    .parse::<crate::loss::CrossoverType>()
+                    .parse::<crate::CrossoverType>()
                     .is_err()
                 {
                     errors.push(format!(

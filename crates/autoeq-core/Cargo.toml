@@ -12,6 +12,7 @@ math-iir-fir = { workspace = true }
 ndarray = { workspace = true }
 num-complex = { workspace = true }
 rustfft = { workspace = true }
+schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

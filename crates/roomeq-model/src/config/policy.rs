@@ -14,8 +14,7 @@ use super::types::SmoothnessPenaltyConfigSerde;
 use super::types::SpatialRobustnessSerdeConfig;
 use super::types::TargetShape;
 use super::user_preference::UserPreference;
-use crate::loss::AsymmetricLossConfig;
-use crate::read::PsychoacousticSmoothingConfig;
+use crate::{AsymmetricLossConfig, PsychoacousticSmoothingConfig};
 
 pub(super) fn policy_target_response(preset: PerceptualPolicyPreset) -> TargetResponseConfig {
     match preset {

@@ -17,6 +17,7 @@ math-optimisation = { workspace = true }
 nalgebra = { workspace = true }
 ndarray = { workspace = true }
 num-complex = { workspace = true }
+num_cpus = { workspace = true }
 oxiblas-ndarray = { workspace = true }
 roomeq-analysis = { workspace = true }
 roomeq-model = { workspace = true }

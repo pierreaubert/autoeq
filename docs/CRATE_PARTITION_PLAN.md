@@ -168,8 +168,8 @@ package that removes them. The exception list may only shrink.
 
 | Crate | Owns | Must not own |
 |---|---|---|
-| `autoeq-core` | Curve/value types, PEQ layouts, response math, canonical numerical primitives | I/O, optimizer backends, plotting, RoomEQ policy |
-| `autoeq-measurements` | Measurement sources, parsing, calibration, provenance, normalization, interpolation, smoothing, CEA-2034 acquisition data | Optimization orchestration, CLI commands |
+| `autoeq-core` | Curve/value types, I/O-free measurement descriptors and curve bundles, PEQ layouts, response math, canonical numerical primitives | I/O, optimizer backends, plotting, RoomEQ policy |
+| `autoeq-measurements` | Measurement loading/acquisition, parsing, calibration, provenance, normalization, interpolation, smoothing, CEA-2034 acquisition behavior | Optimization orchestration, CLI commands, duplicate source-descriptor contracts |
 | `autoeq-optim` | Objectives, bounds, constraints, optimizer backends, optimizer evidence | Filesystem/network acquisition, application workflows |
 | `autoeq-fir` | Pure FIR design and byte/WAV encoding primitives | File-path resolution, artifact placement |
 | `autoeq-artifacts` | Artifact-store ports and filesystem/in-memory implementations | Acoustic policy, optimization |

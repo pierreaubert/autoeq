@@ -11,8 +11,9 @@
 //! pressure wave cancellation pattern characteristic of DBA systems.
 
 use crate::Curve;
+use crate::config_adapter::OptimizerConfigExt;
 use autoeq_optim::loss::{DriverMeasurement, DriversLossData};
-use autoeq_optim::{CrossoverType, LossType, RoomOptimizerConfig};
+use autoeq_optim::{CrossoverType, LossType};
 use autoeq_workflow::DriverOptimizationResult;
 use ndarray::Array1;
 use std::error::Error;

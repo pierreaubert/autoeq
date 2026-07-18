@@ -231,7 +231,7 @@ fn normalize_room_config_for_latest_schema(config: &mut RoomConfig) {
     if config.optimizer.loss_type.eq_ignore_ascii_case("epa")
         && config.optimizer.epa_config.is_none()
     {
-        config.optimizer.epa_config = Some(autoeq::loss::epa::score::EpaConfig::default());
+        config.optimizer.epa_config = Some(autoeq::roomeq_model::EpaConfig::default());
     }
 }
 

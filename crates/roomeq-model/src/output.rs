@@ -69,7 +69,7 @@ impl From<CurveData> for Curve {
 // Impulse Response Waveform
 // ============================================================================
 
-pub use roomeq_analysis::IrWaveform;
+pub use crate::IrWaveform;
 
 // ============================================================================
 // DSP Chain Types
@@ -79,7 +79,7 @@ pub use roomeq_analysis::IrWaveform;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DspChainOutput {
     /// Output version
-    #[serde(default = "crate::roomeq::types::default_config_version")]
+    #[serde(default = "crate::config::default_config_version")]
     pub version: String,
     /// Global graph-level plugins, e.g. matrix routing that combines several
     /// programme inputs before per-output correction chains.
@@ -122,7 +122,7 @@ pub struct ChannelDspChain {
     pub post_ir: Option<IrWaveform>,
     /// FIR impulse-response temporal masking metrics (optional, FIR/phase modes)
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fir_temporal_masking: Option<crate::loss::epa::score::TemporalIrMaskingMetrics>,
+    pub fir_temporal_masking: Option<crate::TemporalIrMaskingMetrics>,
     /// Direct/early/late correction-energy metrics (optional, FIR/phase modes
     /// or any channel with phase-derived IRs).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -157,9 +157,9 @@ pub struct PluginConfigWrapper {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct EpaChannelMetrics {
     /// EPA score computed from the initial (pre-EQ) response.
-    pub pre: crate::loss::epa::score::EpaScore,
+    pub pre: crate::EpaScore,
     /// EPA score computed from the final (post-EQ) response.
-    pub post: crate::loss::epa::score::EpaScore,
+    pub post: crate::EpaScore,
 }
 
 /// Aggregate EPA metrics for the whole reproduced channel set.
@@ -170,9 +170,9 @@ pub struct EpaChannelMetrics {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct EpaMultichannelMetrics {
     /// EPA score computed from the aggregate initial (pre-EQ) response.
-    pub pre: crate::loss::epa::score::EpaScore,
+    pub pre: crate::EpaScore,
     /// EPA score computed from the aggregate final (post-EQ) response.
-    pub post: crate::loss::epa::score::EpaScore,
+    pub post: crate::EpaScore,
     /// Human-readable aggregation standard/approximation.
     pub standard: String,
 }
@@ -202,18 +202,18 @@ pub struct DirectEarlyLateCorrectionMetrics {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct PerceptualPolicyReport {
     /// Policy preset requested by the user or UI.
-    pub preset: crate::roomeq::PerceptualPolicyPreset,
+    pub preset: crate::PerceptualPolicyPreset,
     /// Effective loss type after policy resolution.
     pub loss_type: String,
     /// Effective target response after policy resolution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target_response: Option<crate::roomeq::TargetResponseConfig>,
+    pub target_response: Option<crate::TargetResponseConfig>,
     /// Effective audibility deadband.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub audibility_deadband: Option<crate::roomeq::AudibilityDeadbandConfig>,
+    pub audibility_deadband: Option<crate::AudibilityDeadbandConfig>,
     /// Effective high-frequency safeguard.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub high_frequency_correction: Option<crate::roomeq::HighFrequencyCorrectionConfig>,
+    pub high_frequency_correction: Option<crate::HighFrequencyCorrectionConfig>,
 }
 
 /// Bootstrap uncertainty reporting summary.
@@ -224,7 +224,7 @@ pub struct BootstrapUncertaintyReport {
     /// Two-sided alpha used for confidence bands.
     pub alpha: f64,
     /// Scalarisation used for uncertainty-aware optimization.
-    pub scalarisation: crate::roomeq::BootstrapScalarisation,
+    pub scalarisation: crate::BootstrapScalarisation,
     /// CVaR tail fraction when scalarisation is CVaR.
     pub cvar_alpha: f64,
     /// Whether bootstrap confidence width was folded into correction-depth masks.
@@ -372,8 +372,8 @@ pub struct StageOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RoomOptimizerEvidence {
     pub policy_version: String,
-    pub confidence: crate::optim::OptimizerConfidence,
-    pub runs_by_channel: BTreeMap<String, Vec<crate::optim::OptimizerRunEvidence>>,
+    pub confidence: crate::OptimizerConfidence,
+    pub runs_by_channel: BTreeMap<String, Vec<crate::OptimizerRunEvidence>>,
 }
 
 /// Optimization metadata
@@ -404,7 +404,7 @@ pub struct OptimizationMetadata {
     pub timestamp: String,
     /// Inter-channel deviation metric (computed when >1 channel)
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub inter_channel_deviation: Option<crate::roomeq::types::InterChannelDeviation>,
+    pub inter_channel_deviation: Option<crate::InterChannelDeviation>,
     /// Per-channel EPA psychoacoustic metrics (pre-EQ and post-EQ).
     /// Computed from each channel's initial and final frequency responses
     /// using the configured `EpaConfig` (or defaults when unset).
@@ -417,33 +417,32 @@ pub struct OptimizationMetadata {
     /// Group delay optimisation summary (GD-Opt v2, Phase GD-4).
     /// Present when GD-Opt was attempted (success or skip with advisory).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub group_delay: Option<crate::roomeq::gd_opt::GroupDelayOptSummary>,
+    pub group_delay: Option<crate::GroupDelayOptSummary>,
     /// Per-channel mixed-phase decomposition and excess-phase FIR summaries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mixed_phase_per_channel:
-        Option<HashMap<String, crate::roomeq::mixed_phase::MixedPhaseCorrectionReport>>,
+    pub mixed_phase_per_channel: Option<HashMap<String, crate::MixedPhaseCorrectionReport>>,
     /// Perceptual scorecard computed from final exported curves/DSP.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub perceptual_metrics: Option<PerceptualMetrics>,
     /// Home-cinema role/layout interpretation used by role-aware scoring.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub home_cinema_layout: Option<crate::roomeq::home_cinema::HomeCinemaLayoutReport>,
+    pub home_cinema_layout: Option<crate::HomeCinemaLayoutReport>,
     /// Coverage summary for multi-position measurements beyond sub-only MSO.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub multi_seat_coverage: Option<crate::roomeq::home_cinema::MultiSeatCoverageReport>,
+    pub multi_seat_coverage: Option<crate::MultiSeatCoverageReport>,
     /// All-channel multi-seat correction summary for non-sub home-cinema channels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub multi_seat_correction: Option<crate::roomeq::home_cinema::MultiSeatCorrectionReport>,
+    pub multi_seat_correction: Option<crate::MultiSeatCorrectionReport>,
     /// Bass-management policy and applied trim/headroom summary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bass_management: Option<crate::roomeq::home_cinema::BassManagementReport>,
+    pub bass_management: Option<crate::BassManagementReport>,
     /// Timing/localization diagnostics derived from measured arrivals and
     /// final exported delay plugins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timing_diagnostics: Option<crate::roomeq::home_cinema::TimingDiagnosticsReport>,
+    pub timing_diagnostics: Option<crate::TimingDiagnosticsReport>,
     /// Cross-talk cancellation / binaural-aware correction artifact summary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ctc: Option<crate::roomeq::ctc::CtcReport>,
+    pub ctc: Option<crate::CtcReport>,
     /// Resolved perceptual policy metadata.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub perceptual_policy: Option<PerceptualPolicyReport>,
@@ -458,7 +457,7 @@ pub struct OptimizationMetadata {
     pub supporting_source: Option<HashMap<String, SupportingSourceReport>>,
     /// Audibility-first acceptance decision for the final correction chain.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub correction_acceptance: Option<crate::roomeq::acoustic_qa::CorrectionAcceptanceReport>,
+    pub correction_acceptance: Option<crate::CorrectionAcceptanceReport>,
     /// Backend termination, convergence, budget, seed, constraint, and
     /// confidence evidence for the optimizer runs that produced each channel.
     #[serde(default, skip_serializing_if = "Option::is_none")]

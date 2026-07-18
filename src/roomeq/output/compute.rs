@@ -1,8 +1,9 @@
 use super::super::types::{ChannelDspChain, EpaChannelMetrics, EpaMultichannelMetrics};
 use super::misc::same_frequency_grid;
 use crate::loss::epa::score::{
-    EpaConfig, compute_epa_multichannel_normalized, compute_epa_normalized, infer_epa_channel_role,
+    compute_epa_multichannel_normalized, compute_epa_normalized, infer_epa_channel_role,
 };
+use roomeq_model::EpaConfig;
 use std::collections::HashMap;
 
 /// Compute per-channel EPA metrics (pre-EQ and post-EQ) from each
@@ -20,13 +21,22 @@ pub fn compute_epa_per_channel(
     channels: &HashMap<String, ChannelDspChain>,
     config: &EpaConfig,
 ) -> Option<HashMap<String, EpaChannelMetrics>> {
+    let config = roomeq_engine::config_adapter::to_optimizer_epa(config);
     let mut out: HashMap<String, EpaChannelMetrics> = HashMap::new();
     for (name, chain) in channels {
         let (Some(initial), Some(final_)) = (&chain.initial_curve, &chain.final_curve) else {
             continue;
         };
-        let pre = compute_epa_normalized(&initial.freq, &initial.spl, config);
-        let post = compute_epa_normalized(&final_.freq, &final_.spl, config);
+        let pre = roomeq_engine::report_adapter::to_epa_score(compute_epa_normalized(
+            &initial.freq,
+            &initial.spl,
+            &config,
+        ));
+        let post = roomeq_engine::report_adapter::to_epa_score(compute_epa_normalized(
+            &final_.freq,
+            &final_.spl,
+            &config,
+        ));
         out.insert(name.clone(), EpaChannelMetrics { pre, post });
     }
     if out.is_empty() { None } else { Some(out) }
@@ -42,6 +52,7 @@ pub fn compute_epa_multichannel(
     channels: &HashMap<String, ChannelDspChain>,
     config: &EpaConfig,
 ) -> Option<EpaMultichannelMetrics> {
+    let config = roomeq_engine::config_adapter::to_optimizer_epa(config);
     let mut entries: Vec<_> = channels
         .iter()
         .filter_map(|(name, chain)| {
@@ -75,8 +86,16 @@ pub fn compute_epa_multichannel(
         .map(|(name, _, final_)| (final_.spl.as_slice(), infer_epa_channel_role(name)))
         .collect();
 
-    let pre = compute_epa_multichannel_normalized(freqs, &pre_channels, config)?;
-    let post = compute_epa_multichannel_normalized(freqs, &post_channels, config)?;
+    let pre = roomeq_engine::report_adapter::to_epa_score(compute_epa_multichannel_normalized(
+        freqs,
+        &pre_channels,
+        &config,
+    )?);
+    let post = roomeq_engine::report_adapter::to_epa_score(compute_epa_multichannel_normalized(
+        freqs,
+        &post_channels,
+        &config,
+    )?);
 
     Some(EpaMultichannelMetrics {
         pre,

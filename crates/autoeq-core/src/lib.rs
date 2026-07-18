@@ -12,6 +12,7 @@ pub use math_audio_iir_fir as iir;
 
 pub mod curve;
 pub mod error;
+pub mod measurement_contracts;
 pub mod param_utils;
 pub mod peq_model;
 pub mod phase_utils;
@@ -20,5 +21,9 @@ pub mod x2peq;
 
 pub use curve::Curve;
 pub use error::{AutoeqError, Result};
+pub use measurement_contracts::{
+    InlineMeasurement, MeasurementMultiple, MeasurementRef, MeasurementSingle, MeasurementSource,
+    SpinoramaBundle,
+};
 pub use param_utils::{FilterParams, ParamLayout, PeqLayout};
 pub use peq_model::PeqModel;

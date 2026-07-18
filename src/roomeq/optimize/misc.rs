@@ -261,6 +261,30 @@ pub(super) fn validate_room_config_or_fail(config: &RoomConfig) -> Result<()> {
             ),
         });
     }
+    for (speaker_name, speaker) in &config.speakers {
+        for (source_index, source) in roomeq_model::validation_rules::collect_sources(speaker)
+            .into_iter()
+            .enumerate()
+        {
+            match crate::read::load_source_individual(source) {
+                Ok(curves) if curves.is_empty() => {
+                    return Err(AutoeqError::OptimizationFailed {
+                        message: format!(
+                            "speaker '{speaker_name}' source {source_index} produced no measurement curves"
+                        ),
+                    });
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    return Err(AutoeqError::OptimizationFailed {
+                        message: format!(
+                            "speaker '{speaker_name}' source {source_index} failed acoustic validation: {error}"
+                        ),
+                    });
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1029,5 +1053,23 @@ mod tests {
     fn validate_room_config_or_fail_empty_speakers_fails() {
         let config = room_config_with_speakers(HashMap::new());
         assert!(validate_room_config_or_fail(&config).is_err());
+    }
+
+    #[test]
+    fn validate_room_config_or_fail_loads_file_sources_at_runtime_boundary() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("invalid-measurement.csv");
+        std::fs::write(&path, "not,a,measurement\n").unwrap();
+        let source = MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Path(path),
+            speaker_name: None,
+        });
+        let config = room_config_with_speakers(HashMap::from([(
+            "left".to_string(),
+            SpeakerConfig::Single(source),
+        )]));
+
+        let error = validate_room_config_or_fail(&config).unwrap_err();
+        assert!(error.to_string().contains("failed acoustic validation"));
     }
 }

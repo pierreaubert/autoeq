@@ -17,6 +17,7 @@ use roomeq_model::{ConfigValidationReport, DspGraph, RoomConfig, ValidationStage
 
 /// Measurement-confidence gate for bass-band phase correction.
 pub mod bass_phase_confidence;
+pub mod config_adapter;
 /// Multi-driver crossover optimization with polarity search.
 pub mod crossover;
 /// Double-bass-array optimization with phase-critical array summation.
@@ -40,6 +41,7 @@ pub mod multisub;
 pub mod phase_alignment;
 /// Progress reporting for long-running RoomEQ operations.
 pub mod progress;
+pub mod report_adapter;
 /// Broadband spectral and inter-channel response alignment.
 pub mod spectral_align;
 /// Supporting-source room compensation filter design.

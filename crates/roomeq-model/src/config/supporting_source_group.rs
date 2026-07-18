@@ -39,7 +39,7 @@ mod tests {
 
     fn dummy_source(path: &str) -> MeasurementSource {
         MeasurementSource::Single(MeasurementSingle {
-            measurement: crate::read::MeasurementRef::Path(std::path::PathBuf::from(path)),
+            measurement: crate::MeasurementRef::Path(std::path::PathBuf::from(path)),
             speaker_name: None,
         })
     }

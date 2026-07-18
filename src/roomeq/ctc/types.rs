@@ -18,64 +18,13 @@ use math_audio_dsp::{
     solve_minimax_regularized_inverse_bin, solve_regularized_inverse_bin,
 };
 use num_complex::Complex64;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct CtcReport {
-    pub enabled: bool,
-    pub source: String,
-    pub artifact: String,
-    pub speakers: Vec<String>,
-    pub ears: Vec<String>,
-    pub head_positions: usize,
-    pub fir_taps: usize,
-    pub latency_samples: usize,
-    pub latency_ms: f64,
-    pub max_filter_gain_db: f64,
-    pub max_condition_number: f64,
-    pub mean_reconstruction_error: f64,
-    pub worst_position_error: f64,
-    pub mean_crosstalk_residual_db: f64,
-    pub max_electrical_sum_gain_db: f64,
-    pub driver_headroom_limited: bool,
-    pub room_eq_correction_applied: bool,
-    pub room_eq_correction_channels: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub delivered_response: Option<CtcDeliveredResponseMetrics>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub binaural_diagnostics: Option<CtcBinauralDiagnostics>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-pub struct CtcDeliveredResponseMetrics {
-    pub mean_target_error: f64,
-    pub worst_target_error: f64,
-    pub mean_crosstalk_db: f64,
-    pub worst_crosstalk_db: f64,
-    pub mean_channel_balance_db: f64,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-pub struct CtcBinauralDiagnostics {
-    pub ild_error_db: f64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub itd_error_proxy_us: Option<f64>,
-    pub cue_deviation_score: f64,
-    pub externalization_risk: String,
-    pub imaging_risk: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hrtf_candidate_comparison: Option<CtcHrtfCandidateComparison>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-pub struct CtcHrtfCandidateComparison {
-    pub candidate_count: usize,
-    pub selected_source: String,
-    pub advisory: String,
-}
+pub use roomeq_model::{
+    CtcBinauralDiagnostics, CtcDeliveredResponseMetrics, CtcHrtfCandidateComparison, CtcReport,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct CtcArtifact {

@@ -1,38 +1,15 @@
-use super::types::GdOptAdvisory;
-use super::types::GroupDelayOptResult;
+use super::types::{GdOptAdvisory, GroupDelayOptResult};
 
-/// Serialisable summary of GD-Opt results for report plumbing (GD-4).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-pub struct GroupDelayOptSummary {
-    /// Optimisation band (Hz).
-    pub band: (f64, f64),
-    /// Channel names in the same order as the per-channel vectors.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub channel_names: Vec<String>,
-    /// Per-channel delays applied (ms).
-    pub per_channel_delay_ms: Vec<f64>,
-    /// Per-channel polarity inversions.
-    pub per_channel_polarity_inverted: Vec<bool>,
-    /// Number of all-pass filters per channel.
-    pub per_channel_ap_count: Vec<usize>,
-    /// Sum GD RMS before optimisation (ms).
-    pub sum_gd_pre_rms_ms: f64,
-    /// Sum GD RMS after optimisation (ms).
-    pub sum_gd_post_rms_ms: f64,
-    /// Mean coherence in-band.
-    pub mean_coherence: f64,
-    /// Improvement in dB: 20*log10(pre/post).
-    pub improvement_db: f64,
-    /// Advisory outcome.
-    pub advisory: String,
-    /// Whether the reported GD controls were inserted into the exported DSP.
-    #[serde(default)]
-    pub applied: bool,
+pub use roomeq_model::GroupDelayOptSummary;
+
+/// Engine-side constructors for the neutral serialized summary contract.
+pub trait GroupDelayOptSummaryExt {
+    fn from_result_with_names(result: &GroupDelayOptResult, names: Vec<String>) -> Self;
+    fn from_advisory(advisory: &GdOptAdvisory) -> Self;
 }
 
-impl GroupDelayOptSummary {
-    /// Create a summary from a successful optimisation result.
-    pub fn from_result_with_names(result: &GroupDelayOptResult, names: Vec<String>) -> Self {
+impl GroupDelayOptSummaryExt for GroupDelayOptSummary {
+    fn from_result_with_names(result: &GroupDelayOptResult, names: Vec<String>) -> Self {
         Self {
             band: result.band,
             channel_names: names,
@@ -56,14 +33,7 @@ impl GroupDelayOptSummary {
         }
     }
 
-    /// Mark a summary as reflected in the exported DSP chain.
-    pub fn with_applied(mut self, applied: bool) -> Self {
-        self.applied = applied;
-        self
-    }
-
-    /// Create a summary for a skipped/failed case.
-    pub fn from_advisory(advisory: &GdOptAdvisory) -> Self {
+    fn from_advisory(advisory: &GdOptAdvisory) -> Self {
         let reason = match advisory {
             GdOptAdvisory::Success { improvement_db } => {
                 format!("success:{improvement_db:.1}dB")
@@ -84,7 +54,6 @@ impl GroupDelayOptSummary {
                 "allpass_disabled_no_bootstrap_realisations".to_string()
             }
         };
-
         Self {
             band: (0.0, 0.0),
             channel_names: vec![],

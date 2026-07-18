@@ -834,7 +834,7 @@ mod optimizer_rule_tests {
     #[test]
     fn rule_psychoacoustic_smoothing_errors() {
         let mut config = default_config();
-        config.psychoacoustic_smoothing = Some(crate::read::PsychoacousticSmoothingConfig {
+        config.psychoacoustic_smoothing = Some(crate::PsychoacousticSmoothingConfig {
             low_freq_n: 0,
             high_freq_n: 1,
             low_freq: 100.0,
@@ -849,7 +849,7 @@ mod optimizer_rule_tests {
         );
 
         let mut config = default_config();
-        config.psychoacoustic_smoothing = Some(crate::read::PsychoacousticSmoothingConfig {
+        config.psychoacoustic_smoothing = Some(crate::PsychoacousticSmoothingConfig {
             low_freq_n: 1,
             high_freq_n: 1,
             low_freq: 200.0,
@@ -867,7 +867,7 @@ mod optimizer_rule_tests {
     #[test]
     fn rule_asymmetric_loss_errors() {
         let mut config = default_config();
-        config.asymmetric_loss_config = Some(crate::loss::AsymmetricLossConfig {
+        config.asymmetric_loss_config = Some(crate::AsymmetricLossConfig {
             transition_freq: 0.0,
             peak_weight: -1.0,
             dip_weight: 1.0,

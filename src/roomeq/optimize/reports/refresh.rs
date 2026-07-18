@@ -56,6 +56,7 @@ pub(in super::super) fn refresh_final_reports(
     };
 
     let epa_cfg = config.optimizer.epa_config.clone().unwrap_or_default();
+    let runtime_epa_cfg = roomeq_engine::config_adapter::to_optimizer_epa(&epa_cfg);
     result.metadata.epa_per_channel =
         crate::roomeq::output::compute_epa_per_channel(&result.channels, &epa_cfg);
     result.metadata.epa_multichannel =
@@ -97,11 +98,13 @@ pub(in super::super) fn refresh_final_reports(
             && let Some(metrics) = crate::loss::epa::score::temporal_ir_masking_metrics(
                 coeffs,
                 sample_rate,
-                &epa_cfg.temporal_masking,
+                &runtime_epa_cfg.temporal_masking,
             )
             && let Some(chain) = result.channels.get_mut(&channel_name)
         {
-            chain.fir_temporal_masking = Some(metrics);
+            chain.fir_temporal_masking = Some(
+                roomeq_engine::report_adapter::to_temporal_ir_masking(metrics),
+            );
         }
     }
 

@@ -3,6 +3,7 @@ use crate::Curve;
 use crate::PeqModel;
 use crate::loss::LossType;
 use hound;
+use roomeq_engine::config_adapter::OptimizerConfigExt;
 
 /// Find the length (in samples) at which to truncate an impulse
 /// response so the Schroeder backward integration sees clean decay
@@ -169,7 +170,6 @@ pub(super) fn build_optim_params(
     loss_type: LossType,
     peq_model: PeqModel,
 ) -> crate::OptimParams {
-    use autoeq_optim::RoomOptimizerConfig;
     let mut params = config.to_optim_params(sample_rate);
     params.min_freq = effective_min_freq;
     params.max_freq = effective_max_freq;

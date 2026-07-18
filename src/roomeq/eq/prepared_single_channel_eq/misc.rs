@@ -287,7 +287,9 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
     // Apply psychoacoustic smoothing if enabled
     let mut normalized_curve = normalized_curve_unsmoothed;
     if config.psychoacoustic {
-        let smoothing_config = config.psychoacoustic_smoothing_config();
+        let smoothing_config = roomeq_engine::config_adapter::to_measurement_smoothing(
+            config.psychoacoustic_smoothing_config(),
+        );
         log::info!(
             "  Applying psychoacoustic smoothing (1/{} oct < {:.0} Hz, 1/{} oct > {:.0} Hz)",
             smoothing_config.low_freq_n,
@@ -410,8 +412,14 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
     objective_data.min_cut_envelope = config.min_cut_envelope.clone();
     // Propagate EPA config so compute_base_fitness uses user-provided
     // weights when loss_type == LossType::Epa.
-    objective_data.epa_config = config.epa_config.clone();
-    objective_data.asymmetric_loss_config = config.asymmetric_loss_config();
+    objective_data.epa_config = config
+        .epa_config
+        .as_ref()
+        .map(roomeq_engine::config_adapter::to_optimizer_epa);
+    objective_data.asymmetric_loss_config =
+        roomeq_engine::config_adapter::to_optimizer_asymmetric_loss(
+            config.asymmetric_loss_config(),
+        );
     objective_data.temporal_masking_modes = temporal_masking_modes;
     // Hand the SSIR / decomposed-correction mode list over to the DE
     // optimizer's smart initial-guess generator so filters actually

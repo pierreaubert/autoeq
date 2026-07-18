@@ -11,8 +11,6 @@
 
 mod compute;
 mod misc;
-#[cfg(test)]
-mod tests;
 
 pub use compute::*;
 pub use misc::*;

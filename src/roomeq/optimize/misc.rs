@@ -85,18 +85,6 @@ fn optimizer_bounds_exceed_data(
     ))
 }
 
-/// Linear interpolation of the frequency at which a segment crosses the
-/// given magnitude threshold. The result is clamped to the segment so a
-/// non-monotonic pair cannot return a frequency outside `[f0, f1]`.
-pub(super) fn interp_threshold_crossing(f0: f32, f1: f32, m0: f32, m1: f32, threshold: f32) -> f32 {
-    let denom = m1 - m0;
-    if denom.abs() < 1e-9 {
-        return f0;
-    }
-    let t = ((threshold - m0) / denom).clamp(0.0, 1.0);
-    f0 + t * (f1 - f0)
-}
-
 /// Threshold in dB above which to warn about channel level differences
 pub(super) const LEVEL_DIFFERENCE_WARNING_THRESHOLD: f64 = 6.0;
 
@@ -652,31 +640,6 @@ mod tests {
             ctc: None,
             cea2034_cache: None,
         }
-    }
-
-    #[test]
-    fn interp_threshold_crossing_basic() {
-        assert!((interp_threshold_crossing(100.0, 200.0, 0.0, 10.0, 5.0) - 150.0).abs() < 1e-3);
-    }
-
-    #[test]
-    fn interp_threshold_crossing_clamps_to_segment() {
-        assert_eq!(
-            interp_threshold_crossing(100.0, 200.0, 0.0, 10.0, -5.0),
-            100.0
-        );
-        assert_eq!(
-            interp_threshold_crossing(100.0, 200.0, 0.0, 10.0, 15.0),
-            200.0
-        );
-    }
-
-    #[test]
-    fn interp_threshold_crossing_horizontal_returns_f0() {
-        assert_eq!(
-            interp_threshold_crossing(100.0, 200.0, 5.0, 5.0, 5.0),
-            100.0
-        );
     }
 
     #[test]

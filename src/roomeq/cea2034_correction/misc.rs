@@ -1,16 +1,10 @@
-use super::super::types::{
-    Cea2034CorrectionConfig, Cea2034CorrectionMode, RoomConfig, UserPreference,
-};
-use crate::Curve;
+use super::super::types::RoomConfig;
 use crate::read;
 use crate::read::Cea2034Data;
-use crate::response;
 use log::{info, warn};
-use math_audio_iir_fir::{Biquad, BiquadFilterType, DEFAULT_Q_HIGH_LOW_SHELF};
 use std::collections::HashMap;
 
-/// Speed of sound in m/s at ~20C
-pub(super) const SPEED_OF_SOUND: f64 = 343.0;
+pub use roomeq_engine::cea2034::generate_preference_filters;
 
 /// Fetch CEA2034 data for a speaker from spinorama.org (blocking).
 ///
@@ -82,107 +76,4 @@ pub fn pre_fetch_all_cea2034(config: &RoomConfig) -> HashMap<String, Cea2034Data
     }
 
     cache
-}
-
-/// Compute the effective correction mode based on config and listening distance.
-pub(super) fn resolve_correction_mode(
-    config: &Cea2034CorrectionConfig,
-    arrival_time_ms: Option<f64>,
-) -> Cea2034CorrectionMode {
-    match config.correction_mode {
-        Cea2034CorrectionMode::Flat => Cea2034CorrectionMode::Flat,
-        Cea2034CorrectionMode::Score => Cea2034CorrectionMode::Score,
-        Cea2034CorrectionMode::Auto => {
-            // Try to compute distance from arrival time
-            let distance_m = if let Some(manual) = config.listening_distance_m {
-                Some(manual)
-            } else if let Some(arrival_ms) = arrival_time_ms {
-                let latency_ms = config.system_latency_ms.unwrap_or(0.0);
-                let acoustic_ms = (arrival_ms - latency_ms).max(0.0);
-                Some(acoustic_ms * 0.001 * SPEED_OF_SOUND)
-            } else {
-                None
-            };
-
-            if let Some(dist) = distance_m {
-                if !dist.is_finite() || !config.nearfield_threshold_m.is_finite() {
-                    info!(
-                        " Auto mode: invalid distance metadata, defaulting to Flat LW correction"
-                    );
-                    return Cea2034CorrectionMode::Flat;
-                }
-                if dist >= config.nearfield_threshold_m {
-                    info!(
-                        " Auto mode: distance={:.2}m >= threshold={:.1}m -> CEA2034 score correction",
-                        dist, config.nearfield_threshold_m
-                    );
-                    return Cea2034CorrectionMode::Score;
-                }
-                if dist < config.nearfield_threshold_m {
-                    info!(
-                        "  Auto mode: distance={:.2}m < threshold={:.1}m -> Flat LW correction",
-                        dist, config.nearfield_threshold_m
-                    );
-                } else {
-                    info!(
-                        "  Auto mode: distance={:.2}m >= threshold={:.1}m -> Flat LW correction \
-                         (CEA2034 score optimization is not supported in roomeq)",
-                        dist, config.nearfield_threshold_m
-                    );
-                }
-                Cea2034CorrectionMode::Flat
-            } else {
-                // No distance info available, default to Flat (safer)
-                info!("  Auto mode: no distance info available, defaulting to Flat LW correction");
-                Cea2034CorrectionMode::Flat
-            }
-        }
-    }
-}
-
-/// Apply filter correction to a curve, returning the corrected curve.
-pub(super) fn simulate_correction(filters: &[Biquad], curve: &Curve, sample_rate: f64) -> Curve {
-    if filters.is_empty() {
-        return curve.clone();
-    }
-    let resp = response::compute_peq_complex_response(filters, &curve.freq, sample_rate);
-    response::apply_complex_response(curve, &resp)
-}
-
-/// Generate bass and treble shelf filters from user preference settings.
-///
-/// Returns separate Biquad filters for bass and treble shelves.
-/// Returns empty vec if both adjustments are near zero.
-pub fn generate_preference_filters(preference: &UserPreference, sample_rate: f64) -> Vec<Biquad> {
-    let mut filters = Vec::new();
-
-    if preference.bass_shelf_db.abs() > 0.1 {
-        filters.push(Biquad::new(
-            BiquadFilterType::Lowshelf,
-            preference.bass_shelf_freq,
-            sample_rate,
-            DEFAULT_Q_HIGH_LOW_SHELF,
-            preference.bass_shelf_db,
-        ));
-        info!(
-            "  Pass 3 preference: bass shelf {:+.1} dB at {:.0} Hz",
-            preference.bass_shelf_db, preference.bass_shelf_freq
-        );
-    }
-
-    if preference.treble_shelf_db.abs() > 0.1 {
-        filters.push(Biquad::new(
-            BiquadFilterType::Highshelf,
-            preference.treble_shelf_freq,
-            sample_rate,
-            DEFAULT_Q_HIGH_LOW_SHELF,
-            preference.treble_shelf_db,
-        ));
-        info!(
-            "  Pass 3 preference: treble shelf {:+.1} dB at {:.0} Hz",
-            preference.treble_shelf_db, preference.treble_shelf_freq
-        );
-    }
-
-    filters
 }

@@ -5,7 +5,6 @@
 //! engine. This module should disappear when the remaining orchestration moves
 //! to `roomeq-workflow`.
 
-use std::collections::HashMap;
 use std::error::Error;
 
 use roomeq_engine::eq::{self as engine_eq, EqResources};
@@ -33,23 +32,6 @@ pub fn optimize_channel_eq_detailed(
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
     let resources = prepare_resources(config, target)?;
     engine_eq::optimize_channel_eq_detailed(curve, config, Some(&resources), sample_rate)
-}
-
-pub fn optimize_channel_eq_with_spin_detailed(
-    curve: &Curve,
-    spin_data: &HashMap<String, Curve>,
-    config: &OptimizerConfig,
-    target: Option<&TargetCurveConfig>,
-    sample_rate: f64,
-) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    let resources = prepare_resources(config, target)?;
-    engine_eq::optimize_channel_eq_with_spin_detailed(
-        curve,
-        spin_data,
-        config,
-        Some(&resources),
-        sample_rate,
-    )
 }
 
 pub fn optimize_channel_eq_with_callback_detailed(

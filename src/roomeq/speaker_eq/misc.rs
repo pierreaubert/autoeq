@@ -1,9 +1,7 @@
-use super::super::excursion;
 use super::super::types::{OptimizerConfig, RoomConfig};
 use crate::Curve;
 use crate::error::{AutoeqError, Result};
-use log::{debug, info, warn};
-use math_audio_iir_fir::Biquad;
+use log::info;
 use roomeq_engine::PreparedChannelMeasurements;
 use roomeq_engine::eq::{self as engine_eq, EqResources};
 
@@ -106,20 +104,6 @@ pub(in super::super) fn optimize_eq_maybe_multi(
         })
     }
 }
-
-/// Decide whether a broadband pre-correction result should be rejected.
-///
-/// The shelf fit can be confused by room modes or HPF rolloff, producing
-/// a result that is worse than the raw measurement. Rejecting it prevents
-/// the optimizer from compounding the error.
-pub(super) fn broadband_correction_rejected(pre_bb_score: f64, post_bb_score: f64) -> bool {
-    // Tight threshold: anything more than 20 % worse is rejected.
-    // The old 1.5× threshold was too permissive — a 40 % worse result
-    // would still be accepted, causing audible degradation.
-    const MAX_WORSENING_RATIO: f64 = 1.2;
-    post_bb_score > pre_bb_score * MAX_WORSENING_RATIO
-}
-
 pub(super) fn create_kautz_filter_config(sections: &[(f64, f64, f64)]) -> serde_json::Value {
     let kautz_sections: Vec<serde_json::Value> = sections
         .iter()
@@ -141,117 +125,6 @@ pub(super) fn create_kautz_filter_config(sections: &[(f64, f64, f64)]) -> serde_
         "db_gain": 0.0,
         "kautz_sections": kautz_sections,
     })
-}
-
-pub(super) fn generate_excursion_filters(
-    room_config: &RoomConfig,
-    curve: &Curve,
-    sample_rate: f64,
-) -> Vec<Biquad> {
-    let Some(exc_config) = &room_config.optimizer.excursion_protection else {
-        return Vec::new();
-    };
-    if !exc_config.enabled {
-        return Vec::new();
-    }
-
-    info!("  Applying excursion protection...");
-    match excursion::generate_excursion_protection(curve, exc_config, sample_rate) {
-        Ok(result) => {
-            info!(
-                "  Excursion protection: F3={:.1}Hz, HPF={:.1}Hz ({} filters)",
-                result.f3_hz,
-                result.hpf_frequency,
-                result.filters.len()
-            );
-            result.filters
-        }
-        Err(e) => {
-            warn!(
-                "  Excursion protection failed: {}. Continuing without protection.",
-                e
-            );
-            Vec::new()
-        }
-    }
-}
-
-pub(super) fn system_has_subwoofer(room_config: &RoomConfig) -> bool {
-    room_config
-        .system
-        .as_ref()
-        .map(|sys| {
-            sys.subwoofers
-                .as_ref()
-                .is_some_and(|s| !s.mapping.is_empty())
-        })
-        .unwrap_or_else(|| {
-            // Legacy: check if any speaker name looks like a sub
-            room_config
-                .speakers
-                .keys()
-                .any(|k| k.eq_ignore_ascii_case("lfe") || k.to_lowercase().starts_with("sub"))
-        })
-}
-
-pub(super) fn maybe_clamp_min_freq_for_target_tilt(
-    channel_name: &str,
-    room_config: &RoomConfig,
-    curve: &Curve,
-    target_tilt_curve: Option<&Curve>,
-    min_freq: f64,
-    max_freq: f64,
-) -> f64 {
-    if target_tilt_curve.is_some() && system_has_subwoofer(room_config) {
-        match excursion::detect_f3_with_config(
-            curve,
-            None,
-            room_config.optimizer.excursion_protection.as_ref(),
-        ) {
-            Ok(f3_result) => {
-                // Only clamp if F3 is above the configured min_freq but still
-                // well below max_freq. A very high "F3" (e.g., on a tilted curve
-                // with no real rolloff) would invalidate the frequency range.
-                if f3_result.f3_hz > min_freq && f3_result.f3_hz < max_freq * 0.5 {
-                    info!(
-                        "  Tilt active + subwoofer: clamping min_freq from {:.1}Hz to F3={:.1}Hz \
-                         to prevent bass over-boost below rolloff",
-                        min_freq, f3_result.f3_hz
-                    );
-                    return f3_result.f3_hz;
-                }
-            }
-            Err(e) => {
-                debug!(
-                    "  F3 detection failed for tilt clamping: {}. Using configured min_freq.",
-                    e
-                );
-            }
-        }
-    } else if target_tilt_curve.is_some() {
-        debug!(
-            "  Tilt active but no subwoofer: skipping F3 min_freq clamping for '{}' (full-range speakers)",
-            channel_name
-        );
-    }
-
-    min_freq
-}
-
-pub(super) fn mean_response_in_range(curve: &Curve, min_freq: f64, max_freq: f64) -> f64 {
-    roomeq_analysis::response_metrics::mean_response_in_range(curve, min_freq, max_freq)
-}
-
-pub(super) fn flatness_score_in_range(curve: &Curve, min_freq: f64, max_freq: f64) -> f64 {
-    roomeq_engine::channel_target::flatness_score_in_range(curve, min_freq, max_freq)
-}
-
-pub(super) fn target_mean_spl(
-    channel_name: &str,
-    channel_mean_spl: f64,
-    shared_mean_spl: Option<f64>,
-) -> f64 {
-    roomeq_engine::channel_target::target_mean_spl(channel_name, channel_mean_spl, shared_mean_spl)
 }
 
 pub(super) fn is_subwoofer_measurement_channel(

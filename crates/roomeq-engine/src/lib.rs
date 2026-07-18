@@ -9,10 +9,14 @@ pub mod error {
 
 /// Measurement-confidence gate for bass-band phase correction.
 pub mod bass_phase_confidence;
+/// Pure CEA-2034 speaker and preference correction.
+pub mod cea2034;
 /// Complete path-free input prepared for channel processing.
 pub mod channel_input;
 /// Prepared, path-free measurement inputs for channel processing.
 pub mod channel_measurements;
+/// Deterministic preprocessing for a prepared channel.
+pub mod channel_preprocessing;
 /// Target preparation for one channel.
 pub mod channel_target;
 pub mod config_adapter;

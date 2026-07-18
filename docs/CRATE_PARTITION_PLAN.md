@@ -422,16 +422,26 @@ Local progress:
   exceptions, or duplicate implementations; the ratchets are now 58,590 root
   Rust lines, 42,953 root RoomEQ lines, 15,337 root binary lines, and 681 root
   unit tests.
+- Deterministic channel preprocessing is now engine-owned. roomeq-engine
+  consumes `PreparedChannelInput` to apply excursion protection, prepared
+  CEA-2034 speaker correction, passband-aware target bounds, and broadband
+  alignment, returning in-memory curves, filters, plugins, and optimizer
+  evidence. Pure CEA correction and preference-filter behavior moved with its
+  consolidated tests; network/cache fetch remains outside the engine.
+  roomeq-analysis now owns passband detection and threshold interpolation. The
+  obsolete root implementations, helper tests, and spinorama EQ adapter were
+  deleted. Internal edges remain 43, with zero cycles, exceptions, or duplicate
+  implementations; the ratchets are now 56,973 root Rust lines, 41,336 root
+  RoomEQ lines, 15,337 root binary lines, and 649 root unit tests.
 - WP4 remains in progress: ChannelProcessingStrategy ownership and the generic
   single-channel topology/workflow adapters are still rooted and must move
   before the package exit criteria are satisfied.
 
 Remaining dependency order:
 
-1. Move deterministic preprocessing and the `LowLatency`, `WarpedIir`, and
-   `KautzModal` strategies behind one engine entry point. Move their
-   assembly/report tests with them; do not leave a second implementation in the
-   root facade.
+1. Move the `LowLatency`, `WarpedIir`, and `KautzModal` strategies behind one
+   engine entry point. Move their assembly/report tests with them; do not leave
+   a second implementation in the root facade.
 2. Make convolution sidecars a two-phase boundary: `roomeq-workflow` reserves
    logical filenames, `roomeq-engine` returns FIR coefficients and references
    those names, and `roomeq-workflow` writes the WAV artifacts. Then move the

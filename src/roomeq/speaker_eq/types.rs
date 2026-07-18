@@ -6,6 +6,7 @@ use math_audio_iir_fir::Biquad;
 use roomeq_engine::PreparedChannelInput;
 use std::path::Path;
 
+pub(in crate::roomeq) use roomeq_engine::channel_preprocessing::PreprocessedFeatures;
 pub(in crate::roomeq) use roomeq_engine::channel_target::TargetContext;
 
 pub(in super::super) type MixedModeResult = (
@@ -137,25 +138,4 @@ pub(in crate::roomeq) struct PreparedMeasurement {
     pub curve: Curve,
     pub curve_raw: Curve,
     pub arrival_time_ms: Option<f64>,
-}
-
-pub(in crate::roomeq) struct PreprocessedFeatures {
-    pub curve: Curve,
-    pub curve_for_optim: Curve,
-    pub excursion_filters: Vec<Biquad>,
-    pub cea2034_filters: Vec<Biquad>,
-    pub cea2034_plugins: Vec<PluginConfigWrapper>,
-    pub optimizer_evidence: Vec<crate::optim::OptimizerRunEvidence>,
-    pub broadband_plugins: Vec<PluginConfigWrapper>,
-    pub broadband_biquads: Vec<Biquad>,
-    pub broadband_mean_shift: f64,
-    pub broadband_enabled: bool,
-    pub norm_range: Option<(f64, f64)>,
-}
-
-pub(super) struct BroadbandPreCorrection {
-    pub(super) curve_for_optim: Curve,
-    pub(super) plugins: Vec<PluginConfigWrapper>,
-    pub(super) biquads: Vec<Biquad>,
-    pub(super) mean_shift: f64,
 }

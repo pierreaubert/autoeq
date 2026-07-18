@@ -1,4 +1,3 @@
-use super::misc::interp_threshold_crossing;
 use crate::Curve;
 use math_audio_dsp::analysis::compute_average_response;
 
@@ -142,64 +141,5 @@ pub(in super::super) fn detect_sub_passband_3db(curve: &Curve) -> Option<(f64, f
 }
 
 pub(in super::super) fn detect_passband_and_mean(curve: &Curve) -> (Option<(f64, f64)>, f64) {
-    let freqs_f32: Vec<f32> = curve.freq.iter().map(|&f| f as f32).collect();
-    let spl_f32: Vec<f32> = curve.spl.iter().map(|&s| s as f32).collect();
-
-    if spl_f32.len() < 2 {
-        return (None, 0.0);
-    }
-
-    // 1-octave smoothing suppresses narrow room modes while preserving
-    // the broadband shape of the speaker response.
-    let smoothed = crate::read::smooth_one_over_n_octave(curve, 1);
-    let smoothed_spl: Vec<f32> = smoothed.spl.iter().map(|&s| s as f32).collect();
-
-    // Log-frequency weighted average of the smoothed curve: robust to
-    // narrow peaks and to non-uniform sample spacing.
-    let ref_level = compute_average_response(&freqs_f32, &smoothed_spl, None);
-    if !ref_level.is_finite() || ref_level < -100.0 {
-        return (None, 0.0);
-    }
-
-    let threshold = ref_level - 10.0;
-
-    // Outermost indices at or above the threshold. Interior dips (room
-    // nulls) are intentionally ignored -- they do not change the speaker's
-    // reproducible range, only its in-room smoothness.
-    let first_above = smoothed_spl.iter().position(|&v| v >= threshold);
-    let last_above = smoothed_spl.iter().rposition(|&v| v >= threshold);
-
-    let (start_idx, end_idx) = match (first_above, last_above) {
-        (Some(s), Some(e)) if e > s => (s, e),
-        _ => return (None, 0.0),
-    };
-
-    let f_low = if start_idx > 0 {
-        interp_threshold_crossing(
-            freqs_f32[start_idx - 1],
-            freqs_f32[start_idx],
-            smoothed_spl[start_idx - 1],
-            smoothed_spl[start_idx],
-            threshold,
-        )
-    } else {
-        freqs_f32[start_idx]
-    };
-    let f_high = if end_idx + 1 < smoothed_spl.len() {
-        interp_threshold_crossing(
-            freqs_f32[end_idx],
-            freqs_f32[end_idx + 1],
-            smoothed_spl[end_idx],
-            smoothed_spl[end_idx + 1],
-            threshold,
-        )
-    } else {
-        freqs_f32[end_idx]
-    };
-
-    // Compute mean on the original (unsmoothed) curve within the detected passband
-    let norm_range_f32 = Some((f_low, f_high));
-    let mean = compute_average_response(&freqs_f32, &spl_f32, norm_range_f32) as f64;
-
-    (Some((f_low as f64, f_high as f64)), mean)
+    roomeq_analysis::response_metrics::detect_passband_and_mean(curve)
 }

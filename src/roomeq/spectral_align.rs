@@ -5,9 +5,8 @@
 //! output-plugin representation.
 
 pub use roomeq_engine::spectral_align::{
-    ChannelMatchingCorrectionProfile, ChannelMatchingResult, HIGHSHELF_FREQ, LOWSHELF_FREQ,
-    MIN_CORRECTION_DB, SpectralAlignmentResult, compute_inter_channel_deviation,
-    compute_spectral_alignment, compute_target_alignment,
+    ChannelMatchingCorrectionProfile, ChannelMatchingResult, MIN_CORRECTION_DB,
+    SpectralAlignmentResult, compute_inter_channel_deviation, compute_spectral_alignment,
     correct_inter_channel_deviation_with_profile, create_alignment_filters, log_spectral_alignment,
 };
 

@@ -1,7 +1,6 @@
 use super::super::types::{
-    Cea2034CorrectionConfig, CrossoverConfig, ExcursionProtectionConfig, MeasurementSource,
-    OptimizerConfig, ProcessingMode, RoomConfig, SpeakerConfig, SubOptimizerConfig,
-    SubwooferSystemConfig, SystemConfig, TargetResponseConfig,
+    Cea2034CorrectionConfig, CrossoverConfig, MeasurementSource, OptimizerConfig, ProcessingMode,
+    RoomConfig, SubOptimizerConfig, SubwooferSystemConfig, SystemConfig, TargetResponseConfig,
 };
 use super::apply::process_single_speaker;
 use super::misc::determine_optimization_bands;
@@ -18,6 +17,19 @@ fn flat_curve() -> Curve {
         spl: Array1::from_elem(96, 80.0),
         phase: None,
         ..Default::default()
+    }
+}
+
+fn make_cea2034_data(curve: &Curve) -> crate::read::Cea2034Data {
+    crate::read::Cea2034Data {
+        on_axis: curve.clone(),
+        listening_window: curve.clone(),
+        early_reflections: curve.clone(),
+        sound_power: curve.clone(),
+        estimated_in_room: curve.clone(),
+        er_di: curve.clone(),
+        sp_di: curve.clone(),
+        curves: HashMap::new(),
     }
 }
 
@@ -49,20 +61,6 @@ fn single_speaker_config(processing_mode: ProcessingMode) -> RoomConfig {
         ctc: None,
         cea2034_cache: None,
     }
-}
-
-#[test]
-fn broadband_rejection_tight_threshold() {
-    // A 10 % worse result is accepted.
-    assert!(!super::broadband_correction_rejected(1.0, 1.10));
-    // A 25 % worse result is rejected.
-    assert!(super::broadband_correction_rejected(1.0, 1.25));
-    // Slightly past the 20 % boundary is rejected.
-    assert!(super::broadband_correction_rejected(1.0, 1.200_000_1));
-    // Improvement is always accepted.
-    assert!(!super::broadband_correction_rejected(1.0, 0.5));
-    // Zero pre-score with any positive post-score is rejected.
-    assert!(super::broadband_correction_rejected(0.0, 0.1));
 }
 
 #[test]
@@ -414,109 +412,6 @@ fn determine_optimization_bands_with_frequencies() {
 // ===================================================================
 
 #[test]
-fn generate_excursion_filters_disabled_returns_empty() {
-    let config = single_speaker_config(ProcessingMode::LowLatency);
-    let filters = super::generate_excursion_filters(&config, &flat_curve(), 48000.0);
-    assert!(filters.is_empty());
-}
-
-#[test]
-fn generate_excursion_filters_enabled_returns_hpf() {
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.optimizer.excursion_protection = Some(ExcursionProtectionConfig {
-        enabled: true,
-        ..Default::default()
-    });
-    let filters = super::generate_excursion_filters(&config, &flat_curve(), 48000.0);
-    assert!(!filters.is_empty());
-}
-
-#[test]
-fn system_has_subwoofer_legacy_and_system_v2() {
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    assert!(!super::system_has_subwoofer(&config));
-
-    config.speakers.insert(
-        "LFE".to_string(),
-        SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
-    );
-    assert!(super::system_has_subwoofer(&config));
-
-    config.speakers.clear();
-    let mut mapping = HashMap::new();
-    mapping.insert("sub1".to_string(), "left".to_string());
-    config.system = Some(SystemConfig {
-        model: super::super::types::SystemModel::Custom,
-        speakers: [("left".to_string(), "left".to_string())]
-            .into_iter()
-            .collect(),
-        subwoofers: Some(SubwooferSystemConfig {
-            config: super::super::types::SubwooferStrategy::Single,
-            crossover: None,
-            mapping,
-        }),
-        bass_management: None,
-        ..Default::default()
-    });
-    assert!(super::system_has_subwoofer(&config));
-}
-
-#[test]
-fn maybe_clamp_min_freq_for_target_tilt_branches() {
-    let curve = flat_curve();
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.optimizer.target_response = Some(TargetResponseConfig::default());
-    // No subwoofer → no clamp
-    let min =
-        super::maybe_clamp_min_freq_for_target_tilt("left", &config, &curve, None, 20.0, 500.0);
-    assert_eq!(min, 20.0);
-
-    // With subwoofer but no tilt → no clamp
-    config.speakers.insert(
-        "sub1".to_string(),
-        SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
-    );
-    let min =
-        super::maybe_clamp_min_freq_for_target_tilt("left", &config, &curve, None, 20.0, 500.0);
-    assert_eq!(min, 20.0);
-
-    // With tilt and subwoofer but flat curve has no F3 → min_freq unchanged
-    let tilt = flat_curve();
-    let min = super::maybe_clamp_min_freq_for_target_tilt(
-        "left",
-        &config,
-        &curve,
-        Some(&tilt),
-        20.0,
-        500.0,
-    );
-    assert_eq!(min, 20.0);
-}
-
-#[test]
-fn mean_and_flatness_score_in_range() {
-    let curve = flat_curve();
-    let mean = super::mean_response_in_range(&curve, 20.0, 500.0);
-    assert!(
-        (mean - 80.0).abs() < 0.5,
-        "mean should be ~80 dB, got {}",
-        mean
-    );
-    let score = super::flatness_score_in_range(&curve, 20.0, 500.0);
-    assert!(
-        score.abs() < 0.1,
-        "flat curve should have near-zero score, got {}",
-        score
-    );
-}
-
-#[test]
-fn target_mean_spl_prefers_shared() {
-    assert_eq!(super::target_mean_spl("left", 78.0, Some(82.0)), 82.0);
-    assert_eq!(super::target_mean_spl("left", 78.0, None), 78.0);
-}
-
-#[test]
 fn is_subwoofer_measurement_channel_detects_roles_and_mapping() {
     let config = single_speaker_config(ProcessingMode::LowLatency);
     assert!(!super::is_subwoofer_measurement_channel("left", &config));
@@ -609,260 +504,6 @@ fn optimize_eq_maybe_multi_multi_measurement_weighted() {
 // ===================================================================
 
 #[test]
-fn apply_excursion_filters_empty_returns_curve_unchanged() {
-    let curve = flat_curve();
-    let out = super::apply::apply_excursion_filters_to_curve(curve.clone(), &[], 48000.0);
-    assert_eq!(out.freq, curve.freq);
-    assert_eq!(out.spl, curve.spl);
-}
-
-#[test]
-fn apply_excursion_filters_non_empty_changes_curve() {
-    let curve = flat_curve();
-    let hpf = math_audio_iir_fir::Biquad::new(
-        math_audio_iir_fir::BiquadFilterType::Highpass,
-        100.0,
-        48000.0,
-        0.707,
-        0.0,
-    );
-    let out = super::apply::apply_excursion_filters_to_curve(curve.clone(), &[hpf], 48000.0);
-    // Low end should be attenuated
-    let low_idx = out.freq.iter().position(|&f| f > 30.0 && f < 50.0).unwrap();
-    let high_idx = out
-        .freq
-        .iter()
-        .position(|&f| f > 200.0 && f < 300.0)
-        .unwrap();
-    assert!(out.spl[low_idx] < out.spl[high_idx]);
-}
-
-#[test]
-fn apply_cea2034_speaker_correction_disabled_paths() {
-    let curve = flat_curve();
-    let prepared_cea2034 = roomeq_engine::PreparedCea2034::default();
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-
-    // No config
-    let (out, filters, plugins) = super::apply::apply_cea2034_speaker_correction(
-        "left",
-        &prepared_cea2034,
-        &config,
-        curve.clone(),
-        None,
-        48000.0,
-    );
-    assert_eq!(out.spl, curve.spl);
-    assert!(filters.is_empty());
-    assert!(plugins.is_empty());
-
-    // Config disabled
-    config.optimizer.cea2034_correction = Some(Cea2034CorrectionConfig {
-        enabled: false,
-        ..Default::default()
-    });
-    let (_out, filters, plugins) = super::apply::apply_cea2034_speaker_correction(
-        "left",
-        &prepared_cea2034,
-        &config,
-        curve.clone(),
-        None,
-        48000.0,
-    );
-    assert!(filters.is_empty());
-    assert!(plugins.is_empty());
-}
-
-#[test]
-fn apply_cea2034_speaker_correction_no_speaker_name_or_cache() {
-    let curve = flat_curve();
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.optimizer.cea2034_correction = Some(Cea2034CorrectionConfig {
-        enabled: true,
-        ..Default::default()
-    });
-
-    // No speaker_name anywhere
-    let prepared_cea2034 = roomeq_engine::PreparedCea2034::default();
-    let (_out, filters, plugins) = super::apply::apply_cea2034_speaker_correction(
-        "left",
-        &prepared_cea2034,
-        &config,
-        curve.clone(),
-        None,
-        48000.0,
-    );
-    assert!(filters.is_empty());
-    assert!(plugins.is_empty());
-
-    // speaker_name configured but cache missing
-    let prepared_cea2034 =
-        roomeq_engine::PreparedCea2034::new(Some("Some Speaker".to_string()), None);
-    let (_out, _filters, plugins) = super::apply::apply_cea2034_speaker_correction(
-        "left",
-        &prepared_cea2034,
-        &config,
-        curve.clone(),
-        None,
-        48000.0,
-    );
-    assert!(plugins.is_empty());
-}
-
-fn make_cea2034_data(curve: &Curve) -> crate::read::Cea2034Data {
-    crate::read::Cea2034Data {
-        on_axis: curve.clone(),
-        listening_window: curve.clone(),
-        early_reflections: curve.clone(),
-        sound_power: curve.clone(),
-        estimated_in_room: curve.clone(),
-        er_di: curve.clone(),
-        sp_di: curve.clone(),
-        curves: std::collections::HashMap::new(),
-    }
-}
-
-#[test]
-fn apply_cea2034_speaker_correction_with_prepared_data_succeeds() {
-    let curve = flat_curve();
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.optimizer.cea2034_correction = Some(Cea2034CorrectionConfig {
-        enabled: true,
-        num_filters: 2,
-        ..Default::default()
-    });
-    let prepared_cea2034 = roomeq_engine::PreparedCea2034::new(
-        Some("Speaker".to_string()),
-        Some(Box::new(make_cea2034_data(&curve))),
-    );
-
-    let (_out, _filters, plugins) = super::apply::apply_cea2034_speaker_correction(
-        "left",
-        &prepared_cea2034,
-        &config,
-        curve.clone(),
-        None,
-        48000.0,
-    );
-    // Correction may return filters or skip if curve can't be improved
-    assert!(plugins.is_empty() || plugins.len() == 1);
-}
-
-#[test]
-fn apply_broadband_precorrection_disabled_returns_identity() {
-    let curve = flat_curve();
-    let config = single_speaker_config(ProcessingMode::LowLatency);
-    let bb = super::apply::apply_broadband_precorrection(
-        &config, &curve, None, 80.0, 20.0, 500.0, 48000.0,
-    );
-    assert_eq!(bb.curve_for_optim.spl, curve.spl);
-    assert!(bb.plugins.is_empty());
-    assert!(bb.biquads.is_empty());
-    assert_eq!(bb.mean_shift, 0.0);
-}
-
-#[test]
-fn apply_broadband_precorrection_enabled_flat_curve() {
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.optimizer.target_response = Some(TargetResponseConfig {
-        broadband_precorrection: true,
-        ..Default::default()
-    });
-    let curve = flat_curve();
-    let bb = super::apply::apply_broadband_precorrection(
-        &config, &curve, None, 80.0, 20.0, 500.0, 48000.0,
-    );
-    // Flat input at target level should produce tiny or no correction
-    assert!(bb.mean_shift.abs() < 1.0, "mean_shift={}", bb.mean_shift);
-}
-
-#[test]
-fn apply_broadband_precorrection_does_not_double_apply_target_tilt() {
-    let curve = curve_with_room_mode();
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.optimizer.target_response = Some(TargetResponseConfig {
-        broadband_precorrection: true,
-        ..Default::default()
-    });
-    let target_tilt = Curve {
-        freq: curve.freq.clone(),
-        spl: curve.freq.mapv(|f| -0.8 * (f / 1_000.0).log2()),
-        phase: None,
-        ..Default::default()
-    };
-
-    let without_tilt = super::apply::apply_broadband_precorrection(
-        &config, &curve, None, 80.0, 20.0, 20_000.0, 48_000.0,
-    );
-    let with_tilt = super::apply::apply_broadband_precorrection(
-        &config,
-        &curve,
-        Some(&target_tilt),
-        80.0,
-        20.0,
-        20_000.0,
-        48_000.0,
-    );
-
-    assert_eq!(
-        with_tilt.curve_for_optim.spl,
-        without_tilt.curve_for_optim.spl
-    );
-    assert_eq!(with_tilt.mean_shift, without_tilt.mean_shift);
-}
-
-#[test]
-fn apply_broadband_precorrection_respects_worsening_limit() {
-    // A steep rolloff stresses the shelf fit. Depending on the fitted
-    // response it may be rejected, but an accepted correction must satisfy
-    // the same measured-loss gate as the production path.
-    let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(20000.0), 96);
-    let spl: Vec<f64> = freq
-        .iter()
-        .map(|&f| {
-            if f < 150.0 {
-                80.0
-            } else {
-                80.0 - 25.0 * ((f / 150.0).log2().max(0.0))
-            }
-        })
-        .collect();
-    let curve = Curve {
-        freq,
-        spl: Array1::from(spl),
-        phase: None,
-        ..Default::default()
-    };
-
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.optimizer.target_response = Some(TargetResponseConfig {
-        broadband_precorrection: true,
-        ..Default::default()
-    });
-    let bb = super::apply::apply_broadband_precorrection(
-        &config, &curve, None, 80.0, 20.0, 500.0, 48000.0,
-    );
-    let target = Array1::from_elem(curve.freq.len(), 80.0);
-    let pre_score = crate::loss::flat_loss(&curve.freq, &(&curve.spl - &target), 20.0, 500.0);
-    let post_score = crate::loss::flat_loss(
-        &bb.curve_for_optim.freq,
-        &(&bb.curve_for_optim.spl - &target),
-        20.0,
-        500.0,
-    );
-    if bb.curve_for_optim.spl == curve.spl {
-        assert!(bb.plugins.is_empty());
-        assert!(bb.biquads.is_empty());
-        assert_eq!(bb.mean_shift, 0.0);
-    } else {
-        assert!(
-            !super::broadband_correction_rejected(pre_score, post_score),
-            "accepted correction exceeded worsening limit: {pre_score} -> {post_score}"
-        );
-    }
-}
-
-#[test]
 fn prepare_measurement_in_memory() {
     let curve = flat_curve();
     let source = MeasurementSource::InMemory(curve.clone());
@@ -886,42 +527,6 @@ fn prepare_measurement_in_memory() {
     let prepared = super::apply::prepare_measurement(&input).unwrap();
     assert_eq!(prepared.curve.freq.len(), curve.freq.len());
     assert_eq!(prepared.arrival_time_ms, Some(1.5));
-}
-
-#[test]
-fn preprocess_features_basic_path() {
-    let mut config = single_speaker_config(ProcessingMode::LowLatency);
-    config.optimizer.target_response = Some(TargetResponseConfig {
-        broadband_precorrection: true,
-        ..Default::default()
-    });
-    let curve = flat_curve();
-    let source = MeasurementSource::InMemory(curve.clone());
-    let measurements = roomeq_workflow::prepare_channel_measurements(&source).unwrap();
-    let prepared_input = roomeq_engine::PreparedChannelInput::from_measurements(measurements);
-    let input = super::types::ChannelOptimizationInput {
-        channel_name: "left",
-        prepared: &prepared_input,
-        room_config: &config,
-        sample_rate: 48000.0,
-        output_dir: std::path::Path::new("/tmp"),
-        callback: None,
-        shared_mean_spl: None,
-    };
-    let prepared = super::apply::prepare_measurement(&input).unwrap();
-    let mut ctx = roomeq_engine::channel_target::build_target_context(
-        input.channel_name,
-        input.room_config,
-        &prepared.curve,
-        input.shared_mean_spl,
-    );
-    let features = super::apply::preprocess_features(&input, &prepared, &mut ctx).unwrap();
-    assert_eq!(features.curve.freq.len(), curve.freq.len());
-    assert!(
-        !features.broadband_enabled
-            || !features.broadband_plugins.is_empty()
-            || features.broadband_mean_shift.abs() < 1.0
-    );
 }
 
 #[test]

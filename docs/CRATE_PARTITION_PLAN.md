@@ -383,6 +383,29 @@ Local progress:
   single-channel topology/workflow adapters are still rooted and must move
   before the package exit criteria are satisfied.
 
+Remaining dependency order:
+
+1. Add a workflow-owned preparation adapter that resolves `MeasurementSource`
+   inputs, individual-position curves, arrival time, CEA2034 curves, and
+   `EqResources` into an in-memory channel request. The engine request must not
+   contain `Path` or depend directly on `autoeq-measurements`.
+2. Move target-context construction, deterministic preprocessing, and the
+   `LowLatency`, `WarpedIir`, and `KautzModal` strategies behind one engine entry
+   point. Move their assembly/report tests with them; do not leave a second
+   implementation in the root facade.
+3. Make convolution sidecars a two-phase boundary: `roomeq-workflow` reserves
+   logical filenames, `roomeq-engine` returns FIR coefficients and references
+   those names, and `roomeq-workflow` writes the WAV artifacts. Then move the
+   `PhaseLinear`, `Hybrid`, and `MixedPhase` strategies without adding a direct
+   `roomeq-engine` dependency on `autoeq-artifacts` or `roomeq-workflow`.
+4. Route the group-specific `Hybrid` mixed-crossover branch to WP5 ownership,
+   move the remaining generic result assembly, and delete the root `speaker_eq`
+   module and temporary EQ adapters.
+
+No intermediate WP4 change may add filesystem paths to an engine channel
+contract, perform measurement or artifact I/O in `roomeq-engine`, add an internal
+dependency edge outside the target graph, or retain a duplicate root strategy.
+
 Exit criteria:
 
 - The generic single-channel workflow is entirely crate-owned.

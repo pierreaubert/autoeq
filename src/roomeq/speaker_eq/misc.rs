@@ -4,11 +4,11 @@ use super::super::optimize::extract_wav_path;
 use super::super::types::{MeasurementSource, OptimizerConfig, RoomConfig};
 use crate::Curve;
 use crate::error::{AutoeqError, Result};
-use crate::read as load;
 use log::{debug, info, warn};
 use math_audio_dsp::analysis::compute_average_response;
 use math_audio_dsp::signals::{gen_dirac, gen_mls};
 use math_audio_iir_fir::Biquad;
+use roomeq_engine::PreparedChannelMeasurements;
 
 pub(super) const DEFAULT_MLS_ORDER: u8 = 16;
 
@@ -55,7 +55,7 @@ pub(super) fn matched_reference_from_recording_config(
 
 #[allow(clippy::too_many_arguments)]
 pub(in super::super) fn optimize_eq_maybe_multi(
-    source: &MeasurementSource,
+    measurements: &PreparedChannelMeasurements,
     optimization_curve: &Curve,
     optimizer_config: &OptimizerConfig,
     target_config: Option<&super::super::types::TargetCurveConfig>,
@@ -66,29 +66,22 @@ pub(in super::super) fn optimize_eq_maybe_multi(
 ) -> Result<eq::EqOptimizationResult> {
     use super::super::types::MultiMeasurementStrategy;
 
-    let use_multi = matches!(
-        source,
-        MeasurementSource::Multiple(_) | MeasurementSource::InMemoryMultiple(_)
-    ) && optimizer_config
-        .multi_measurement
-        .as_ref()
-        .is_some_and(|mc| mc.strategy != MultiMeasurementStrategy::Average);
+    let use_multi = measurements.is_multi_measurement_source()
+        && optimizer_config
+            .multi_measurement
+            .as_ref()
+            .is_some_and(|mc| mc.strategy != MultiMeasurementStrategy::Average);
 
     if use_multi {
         let multi_config = optimizer_config.multi_measurement.as_ref().unwrap();
-        let raw_curves =
-            load::load_source_individual(source).map_err(|e| AutoeqError::InvalidMeasurement {
-                message: format!(
-                    "Failed to load individual measurements for channel {}: {}",
-                    channel_name, e
-                ),
-            })?;
+        let raw_curves = measurements.individual();
 
         // Apply target tilt to each individual curve (same as single-measurement path).
         // Without this, multi-measurement optimization sees untilted curves while the
         // averaged curve was tilted, causing variance to increase instead of decrease.
-        let curves: Vec<Curve> = if let Some(tilt) = target_tilt_curve {
-            raw_curves
+        let tilted_curves;
+        let curves = if let Some(tilt) = target_tilt_curve {
+            tilted_curves = raw_curves
                 .iter()
                 .map(|c| Curve {
                     freq: c.freq.clone(),
@@ -96,7 +89,8 @@ pub(in super::super) fn optimize_eq_maybe_multi(
                     phase: c.phase.clone(),
                     ..Default::default()
                 })
-                .collect()
+                .collect::<Vec<_>>();
+            tilted_curves.as_slice()
         } else {
             raw_curves
         };
@@ -114,7 +108,7 @@ pub(in super::super) fn optimize_eq_maybe_multi(
 
         if let Some(cb) = callback {
             eq::optimize_channel_eq_multi_with_callback_detailed(
-                &curves,
+                curves,
                 optimizer_config,
                 multi_config,
                 target_config,
@@ -123,7 +117,7 @@ pub(in super::super) fn optimize_eq_maybe_multi(
             )
         } else {
             eq::optimize_channel_eq_multi_detailed(
-                &curves,
+                curves,
                 optimizer_config,
                 multi_config,
                 target_config,
@@ -193,33 +187,6 @@ pub(super) fn create_kautz_filter_config(sections: &[(f64, f64, f64)]) -> serde_
         "db_gain": 0.0,
         "kautz_sections": kautz_sections,
     })
-}
-
-pub(super) fn load_channel_measurement(
-    channel_name: &str,
-    source: &MeasurementSource,
-    room_config: &RoomConfig,
-) -> Result<Curve> {
-    let curve = load::load_source(source).map_err(|e| AutoeqError::InvalidMeasurement {
-        message: format!(
-            "Failed to load measurement for channel {}: {}",
-            channel_name, e
-        ),
-    })?;
-
-    debug!(
-        "  Loaded measurement: {:.1} Hz - {:.1} Hz",
-        curve.freq[0],
-        curve.freq[curve.freq.len() - 1]
-    );
-
-    super::super::optimize::warn_if_optimizer_bounds_exceed_data(
-        channel_name,
-        &curve,
-        &room_config.optimizer,
-    );
-
-    Ok(curve)
 }
 
 pub(super) fn detect_channel_arrival_time(

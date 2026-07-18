@@ -379,16 +379,26 @@ Local progress:
   further 482 root RoomEQ lines without changing the crate graph. The current
   ratchets are 59,427 root Rust lines, 43,790 root RoomEQ lines, 15,337 root
   binary lines, and 702 root unit tests.
+- Channel measurement preparation now has a workflow-owned adapter and an
+  engine-owned, path-free `PreparedChannelMeasurements` contract. The
+  measurements crate loads and aligns individual positions once while deriving
+  the representative response from the same curves; multi-measurement EQ and
+  mixed-phase spatial-depth analysis no longer reopen the source. The obsolete
+  root loader and its focused test were deleted. Internal edges remain 43, with
+  zero cycles, exceptions, or duplicate implementations; the ratchets are now
+  59,414 root Rust lines, 43,777 root RoomEQ lines, 15,337 root binary lines,
+  and 701 root unit tests.
 - WP4 remains in progress: ChannelProcessingStrategy ownership and the generic
   single-channel topology/workflow adapters are still rooted and must move
   before the package exit criteria are satisfied.
 
 Remaining dependency order:
 
-1. Add a workflow-owned preparation adapter that resolves `MeasurementSource`
-   inputs, individual-position curves, arrival time, CEA2034 curves, and
-   `EqResources` into an in-memory channel request. The engine request must not
-   contain `Path` or depend directly on `autoeq-measurements`.
+1. Extend the workflow-owned preparation boundary, which now resolves
+   `MeasurementSource` into representative and individual-position curves, to
+   include arrival data, CEA2034 curves, and `EqResources` in one in-memory
+   channel request. The engine request must not contain `Path` or depend
+   directly on `autoeq-measurements`.
 2. Move target-context construction, deterministic preprocessing, and the
    `LowLatency`, `WarpedIir`, and `KautzModal` strategies behind one engine entry
    point. Move their assembly/report tests with them; do not leave a second

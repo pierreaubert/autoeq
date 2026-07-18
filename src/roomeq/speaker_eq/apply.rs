@@ -11,7 +11,6 @@ use super::misc::create_kautz_filter_config;
 use super::misc::detect_channel_arrival_time;
 use super::misc::flatness_score_in_range;
 use super::misc::generate_excursion_filters;
-use super::misc::load_channel_measurement;
 use super::misc::maybe_clamp_min_freq_for_target_tilt;
 use super::misc::mean_response_in_range;
 use super::misc::target_mean_spl;
@@ -26,7 +25,7 @@ use super::types::PreparedMeasurement;
 use super::types::PreprocessedFeatures;
 use super::types::TargetContext;
 use crate::Curve;
-use crate::error::Result;
+use crate::error::{AutoeqError, Result};
 use crate::response;
 use log::{debug, info, warn};
 use math_audio_dsp::analysis::compute_average_response;
@@ -360,7 +359,17 @@ pub(super) fn apply_broadband_precorrection(
 pub(super) fn prepare_measurement(
     input: &ChannelOptimizationInput<'_>,
 ) -> Result<PreparedMeasurement> {
-    let curve = load_channel_measurement(input.channel_name, input.source, input.room_config)?;
+    let curve = input.measurements.representative().clone();
+    debug!(
+        "  Loaded measurement: {:.1} Hz - {:.1} Hz",
+        curve.freq[0],
+        curve.freq[curve.freq.len() - 1]
+    );
+    super::super::optimize::warn_if_optimizer_bounds_exceed_data(
+        input.channel_name,
+        &curve,
+        &input.room_config.optimizer,
+    );
     let arrival_time_ms = detect_channel_arrival_time(
         input.channel_name,
         input.source,
@@ -950,9 +959,19 @@ pub(in super::super) fn process_single_speaker(
     probe_arrival_ms: Option<f64>,
     shared_mean_spl: Option<f64>,
 ) -> Result<MixedModeResult> {
+    let channel_measurements =
+        roomeq_workflow::prepare_channel_measurements(source).map_err(|e| {
+            AutoeqError::InvalidMeasurement {
+                message: format!(
+                    "Failed to load measurement for channel {}: {}",
+                    channel_name, e
+                ),
+            }
+        })?;
     let mut input = ChannelOptimizationInput {
         channel_name,
         source,
+        measurements: &channel_measurements,
         room_config,
         sample_rate,
         output_dir,

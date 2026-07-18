@@ -4,6 +4,7 @@ use super::super::types::{
 };
 use crate::Curve;
 use math_audio_iir_fir::Biquad;
+use roomeq_engine::PreparedChannelMeasurements;
 use std::path::Path;
 
 pub(in super::super) type MixedModeResult = (
@@ -124,6 +125,7 @@ pub(in crate::roomeq) enum OptimizerOutput {
 pub(in crate::roomeq) struct ChannelOptimizationInput<'a> {
     pub channel_name: &'a str,
     pub source: &'a MeasurementSource,
+    pub measurements: &'a PreparedChannelMeasurements,
     pub room_config: &'a RoomConfig,
     pub sample_rate: f64,
     pub output_dir: &'a Path,

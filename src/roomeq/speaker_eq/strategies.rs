@@ -12,7 +12,7 @@ use super::types::{
 use crate::Curve;
 use crate::error::{AutoeqError, Result};
 use crate::response;
-use crate::roomeq::types::{MeasurementSource, OptimizerConfig, ProcessingMode};
+use crate::roomeq::types::{OptimizerConfig, ProcessingMode};
 use crate::roomeq::{artifacts, eq, fir, group_processing};
 use log::{info, warn};
 use math_audio_iir_fir::Biquad;
@@ -289,7 +289,7 @@ impl ChannelProcessingStrategy for MixedPhaseStrategy {
             optimizer_evidence,
             ..
         } = optimize_eq_maybe_multi(
-            input.source,
+            input.measurements,
             &optimization_curve,
             clamped_optimizer,
             target.effective_target(input.room_config),
@@ -311,51 +311,48 @@ impl ChannelProcessingStrategy for MixedPhaseStrategy {
             None => super::super::mixed_phase::MixedPhaseConfig::default(),
         };
 
-        let spatial_depth = if matches!(
-            input.source,
-            MeasurementSource::Multiple(_) | MeasurementSource::InMemoryMultiple(_)
-        ) {
-            match crate::read::load_source_individual(input.source) {
-                Ok(curves) if curves.len() > 1 => {
-                    let sr_config = input
-                        .room_config
-                        .optimizer
-                        .multi_measurement
-                        .as_ref()
-                        .and_then(|mc| mc.spatial_robustness.as_ref())
-                        .map(
-                            |sc| super::super::spatial_robustness::SpatialRobustnessConfig {
-                                variance_threshold_db: sc.variance_threshold_db,
-                                transition_width_db: sc.transition_width_db,
-                                min_correction_depth: sc.min_correction_depth,
-                                mask_smoothing_octaves: sc.mask_smoothing_octaves,
-                            },
-                        )
-                        .unwrap_or_default();
-                    let weights = input
-                        .room_config
-                        .optimizer
-                        .multi_measurement
-                        .as_ref()
-                        .and_then(|mc| mc.weights.as_deref());
-                    match super::super::spatial_robustness::analyze_spatial_robustness_weighted(
-                        &curves, &sr_config, weights,
-                    ) {
-                        Ok(analysis) => {
-                            info!(
-                                "  Spatial depth for mixed-phase: mean={:.2}",
-                                analysis.correction_depth.iter().sum::<f64>()
-                                    / analysis.correction_depth.len() as f64,
-                            );
-                            Some(analysis.correction_depth)
-                        }
-                        Err(e) => {
-                            warn!("  Spatial robustness analysis skipped: {e}");
-                            None
-                        }
+        let spatial_depth = if input.measurements.is_multi_measurement_source() {
+            let curves = input.measurements.individual();
+            if curves.len() > 1 {
+                let sr_config = input
+                    .room_config
+                    .optimizer
+                    .multi_measurement
+                    .as_ref()
+                    .and_then(|mc| mc.spatial_robustness.as_ref())
+                    .map(
+                        |sc| super::super::spatial_robustness::SpatialRobustnessConfig {
+                            variance_threshold_db: sc.variance_threshold_db,
+                            transition_width_db: sc.transition_width_db,
+                            min_correction_depth: sc.min_correction_depth,
+                            mask_smoothing_octaves: sc.mask_smoothing_octaves,
+                        },
+                    )
+                    .unwrap_or_default();
+                let weights = input
+                    .room_config
+                    .optimizer
+                    .multi_measurement
+                    .as_ref()
+                    .and_then(|mc| mc.weights.as_deref());
+                match super::super::spatial_robustness::analyze_spatial_robustness_weighted(
+                    curves, &sr_config, weights,
+                ) {
+                    Ok(analysis) => {
+                        info!(
+                            "  Spatial depth for mixed-phase: mean={:.2}",
+                            analysis.correction_depth.iter().sum::<f64>()
+                                / analysis.correction_depth.len() as f64,
+                        );
+                        Some(analysis.correction_depth)
+                    }
+                    Err(e) => {
+                        warn!("  Spatial robustness analysis skipped: {e}");
+                        None
                     }
                 }
-                _ => None,
+            } else {
+                None
             }
         } else {
             None
@@ -519,7 +516,7 @@ impl ChannelProcessingStrategy for LowLatencyStrategy {
                 (combined_filters, result.optimizer_evidence)
             } else {
                 let result = optimize_eq_maybe_multi(
-                    input.source,
+                    input.measurements,
                     &optimization_curve,
                     clamped_optimizer,
                     target.effective_target(input.room_config),
@@ -532,7 +529,7 @@ impl ChannelProcessingStrategy for LowLatencyStrategy {
             }
         } else {
             let result = optimize_eq_maybe_multi(
-                input.source,
+                input.measurements,
                 &optimization_curve,
                 clamped_optimizer,
                 target.effective_target(input.room_config),

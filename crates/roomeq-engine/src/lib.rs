@@ -9,6 +9,8 @@ pub mod error {
 
 /// Measurement-confidence gate for bass-band phase correction.
 pub mod bass_phase_confidence;
+/// Prepared, path-free measurement inputs for channel processing.
+pub mod channel_measurements;
 pub mod config_adapter;
 /// Multi-driver crossover optimization and polarity search.
 pub mod crossover;
@@ -45,6 +47,7 @@ pub mod spectral_align;
 /// Supporting-source room compensation filter design.
 pub mod supporting_source;
 
+pub use channel_measurements::PreparedChannelMeasurements;
 pub use pipeline::{
     EngineRequest, PipelineControl, PipelineEvent, PipelineObserver, PipelineStepId,
     PipelineStepStatus, RoomEngine,

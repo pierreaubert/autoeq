@@ -500,14 +500,6 @@ fn matched_reference_unknown_returns_none() {
 }
 
 #[test]
-fn load_channel_measurement_ok_and_warn_bounds() {
-    let source = MeasurementSource::InMemory(flat_curve());
-    let config = single_speaker_config(ProcessingMode::LowLatency);
-    let curve = super::load_channel_measurement("left", &source, &config).unwrap();
-    assert_eq!(curve.freq.len(), 96);
-}
-
-#[test]
 fn detect_channel_arrival_time_probe_wins() {
     let source = MeasurementSource::InMemory(flat_curve());
     let config = single_speaker_config(ProcessingMode::LowLatency);
@@ -742,9 +734,10 @@ fn determine_optimization_bands_no_crossover_info() {
 #[test]
 fn optimize_eq_maybe_multi_single_curve_succeeds() {
     let source = MeasurementSource::InMemory(flat_curve());
+    let measurements = roomeq_workflow::prepare_channel_measurements(&source).unwrap();
     let config = single_speaker_config(ProcessingMode::LowLatency);
     let result = super::optimize_eq_maybe_multi(
-        &source,
+        &measurements,
         &flat_curve(),
         &config.optimizer,
         None,
@@ -760,13 +753,14 @@ fn optimize_eq_maybe_multi_single_curve_succeeds() {
 fn optimize_eq_maybe_multi_multi_measurement_weighted() {
     let curves = vec![flat_curve(), flat_curve()];
     let source = MeasurementSource::InMemoryMultiple(curves);
+    let measurements = roomeq_workflow::prepare_channel_measurements(&source).unwrap();
     let mut config = single_speaker_config(ProcessingMode::LowLatency);
     config.optimizer.multi_measurement = Some(super::super::types::MultiMeasurementConfig {
         strategy: super::super::types::MultiMeasurementStrategy::WeightedSum,
         ..Default::default()
     });
     let result = super::optimize_eq_maybe_multi(
-        &source,
+        &measurements,
         &flat_curve(),
         &config.optimizer,
         None,
@@ -1059,10 +1053,12 @@ fn apply_broadband_precorrection_respects_worsening_limit() {
 fn prepare_measurement_in_memory() {
     let curve = flat_curve();
     let source = MeasurementSource::InMemory(curve.clone());
+    let measurements = roomeq_workflow::prepare_channel_measurements(&source).unwrap();
     let config = single_speaker_config(ProcessingMode::LowLatency);
     let input = super::types::ChannelOptimizationInput {
         channel_name: "left",
         source: &source,
+        measurements: &measurements,
         room_config: &config,
         sample_rate: 48000.0,
         output_dir: std::path::Path::new("/tmp"),
@@ -1079,10 +1075,12 @@ fn prepare_measurement_in_memory() {
 fn build_target_context_flat_returns_none_tilt() {
     let curve = flat_curve();
     let source = MeasurementSource::InMemory(curve.clone());
+    let measurements = roomeq_workflow::prepare_channel_measurements(&source).unwrap();
     let config = single_speaker_config(ProcessingMode::LowLatency);
     let input = super::types::ChannelOptimizationInput {
         channel_name: "left",
         source: &source,
+        measurements: &measurements,
         room_config: &config,
         sample_rate: 48000.0,
         output_dir: std::path::Path::new("/tmp"),
@@ -1109,9 +1107,11 @@ fn build_target_context_harman_creates_tilt_and_warns_on_target_curve() {
     ));
     let curve = flat_curve();
     let source = MeasurementSource::InMemory(curve.clone());
+    let measurements = roomeq_workflow::prepare_channel_measurements(&source).unwrap();
     let input = super::types::ChannelOptimizationInput {
         channel_name: "left",
         source: &source,
+        measurements: &measurements,
         room_config: &config,
         sample_rate: 48000.0,
         output_dir: std::path::Path::new("/tmp"),
@@ -1133,9 +1133,11 @@ fn preprocess_features_basic_path() {
     });
     let curve = flat_curve();
     let source = MeasurementSource::InMemory(curve.clone());
+    let measurements = roomeq_workflow::prepare_channel_measurements(&source).unwrap();
     let input = super::types::ChannelOptimizationInput {
         channel_name: "left",
         source: &source,
+        measurements: &measurements,
         room_config: &config,
         sample_rate: 48000.0,
         output_dir: std::path::Path::new("/tmp"),

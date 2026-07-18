@@ -2,6 +2,10 @@
 
 ## Refactoring
 
+- Defined the canonical crate-partition target graph and added WP0 fitness
+  gates for dependency direction and cycles, shrinking temporary exceptions,
+  root LOC/test ratchets, duplicate implementation ownership, public facade
+  and RoomEQ schema baselines, and focused per-crate verification.
 - Centralized all workspace dependency specifications, including development
   dependencies, so member manifests inherit their versions and feature sets.
 - Upgraded the direct AutoEQ optimizer random dependencies to Rand 0.10.

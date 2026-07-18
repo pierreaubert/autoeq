@@ -61,6 +61,23 @@ test-autoeq threads="2":
 ntest:
 	cargo nextest run --release --no-fail-fast --lib --bins --examples
 
+# WP0 crate-partition gates. Keep the fast checker tests and graph/ownership
+# report independently runnable; the umbrella also regenerates both schemas.
+[group('test')]
+check-crate-partition: test-crate-partition-checker check-crate-partition-fitness check-roomeq-schema-baselines
+
+[group('test')]
+test-crate-partition-checker:
+	python3 -m unittest scripts/test_check_crate_partition.py
+
+[group('test')]
+check-crate-partition-fitness:
+	python3 scripts/check_crate_partition.py
+
+[group('test')]
+check-roomeq-schema-baselines:
+	python3 scripts/check_roomeq_schema_baselines.py
+
 # ----------------------------------------------------------------------
 # LINT / FORMAT
 # ----------------------------------------------------------------------

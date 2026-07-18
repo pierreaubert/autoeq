@@ -19,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -32,8 +34,16 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Check crate-partition architecture
+        run: |
+          python3 -m unittest scripts/test_check_crate_partition.py
+          python3 scripts/check_crate_partition.py --baseline-ref "${{ github.event.pull_request.base.sha }}"
+
       - name: cargo check
         run: cargo check -p autoeq --lib --bins --tests
+
+      - name: Check RoomEQ schema baselines
+        run: python3 scripts/check_roomeq_schema_baselines.py
 
       - name: cargo clippy
         run: cargo clippy -p autoeq --no-deps -- -D warnings

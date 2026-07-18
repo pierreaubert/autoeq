@@ -36,6 +36,12 @@ Each crate has its own README and changelog under `crates/`. Existing
 `autoeq::*` public paths remain available while the RoomEQ pipeline, analysis,
 quality, plotting, and CLI layers are extracted incrementally.
 
+The authoritative extraction sequence, target dependency graph, ownership
+rules, and completion gates are documented in the
+[Crate Partition Migration Plan](docs/CRATE_PARTITION_PLAN.md).
+Focused verification commands for every current workspace package are listed
+in the [Crate Test Matrix](docs/CRATE_TEST_MATRIX.md).
+
 ## Documentation
 
 ### AutoEQ

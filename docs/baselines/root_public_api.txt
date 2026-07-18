@@ -1,0 +1,40 @@
+# Root compatibility-facade declarations accepted at the WP0 baseline.
+# The architecture checker extracts and compares these declarations in order.
+macro qa_println
+pub use math_audio_iir_fir as iir;
+pub use math_audio_optimisation as de;
+pub mod cea2034;
+pub use cea2034::{ Curve, DirectivityCurve, DirectivityData, SpinoramaBundle, SpinoramaBundleBuilder, };
+pub mod error;
+pub use error::{AutoeqError, Result};
+pub mod cli;
+pub mod constraints;
+pub use autoeq_fir as fir;
+pub mod initial_guess;
+pub mod loss;
+pub mod optim;
+pub mod param_utils;
+pub use autoeq_plot as plot;
+pub mod read;
+pub mod response;
+pub mod workflow;
+pub mod x2peq;
+pub use autoeq_artifacts::{ArtifactStore, FsArtifactStore, MemoryArtifactStore};
+pub mod roomeq;
+pub use roomeq_engine;
+pub use roomeq_export;
+pub use roomeq_model;
+pub use optim::callback as optim_callback;
+pub use optim::de as optim_de;
+pub use optim::mh as optim_mh;
+pub use optim::params as optim_params;
+pub use cli::*;
+pub use loss::{CrossoverType, HeadphoneLossData, LossType, SpeakerLossData};
+pub use optim::params::{OptimParams, PeqModel};
+pub use optim::*;
+pub use plot::*;
+pub use read::*;
+pub use workflow::*;
+pub use workflow::{ HeadphoneOptResult, OptimizationOutput, ProgressCallbackConfig, ProgressUpdate, SpeakerOptResult, VisualizationCurves, compute_visualization_curves, optimize_headphone, optimize_speaker, perform_optimization_with_progress, };
+pub use x2peq::x2peq;
+pub use roomeq::{ DspChainOutput, OptimizerConfig, OptimizerConfigBuilder, RecordingConfiguration, RoomConfig, RoomConfigBuilder, RoomOptimizationProgress, RoomOptimizationResult, SpeakerConfig, optimize_room, optimize_speaker as optimize_room_speaker, };

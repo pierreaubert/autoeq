@@ -109,7 +109,7 @@
       ]
     },
     "version": {
-      "description": "Configuration schema version. Supported lines are 1.0.x–1.2.x and 2.0.x–2.1.x; the current version is 2.1.0.",
+      "description": "Configuration schema version. Supported lines are 1.0.x–1.2.x and\n2.0.x–2.1.x; the current version is 2.1.0.",
       "type": "string",
       "default": "2.1.0"
     }
@@ -730,7 +730,7 @@
       "type": "object",
       "properties": {
         "correction_mode": {
-          "description": "Correction mode: flat, score (unsupported in roomeq), auto (distance-aware flat)",
+          "description": "Correction mode: flat, score, or auto (flat near-field, score far-field)",
           "$ref": "#/$defs/Cea2034CorrectionMode",
           "default": "auto"
         },
@@ -2288,38 +2288,14 @@
       }
     },
     "MultiMeasurementStrategy": {
-      "description": "Strategy for handling multiple measurements per speaker",
-      "oneOf": [
-        {
-          "description": "RMS-average curves, optimize on average (existing behavior)",
-          "type": "string",
-          "const": "average"
-        },
-        {
-          "description": "loss = Σ w_i * loss_i — weighted sum of per-measurement losses",
-          "type": "string",
-          "const": "weighted_sum"
-        },
-        {
-          "description": "loss = max(loss_i) — optimize worst case across all measurements",
-          "type": "string",
-          "const": "minimax"
-        },
-        {
-          "description": "loss = mean(loss_i) + λ * var(loss_i) — balance quality + consistency",
-          "type": "string",
-          "const": "variance_penalized"
-        },
-        {
-          "description": "Spatial robustness: RMS-average + correction depth mask based on spatial variance.\nOnly corrects features consistent across positions.",
-          "type": "string",
-          "const": "spatial_robustness"
-        },
-        {
-          "description": "Measurement-uncertainty-aware robust optimization. Generates B\ncase-bootstrap resamples of the input curves at setup time, then\nscalarises losses across the resampled targets per the configured\n`BootstrapUncertaintyConfig::scalarisation` (worst-case or CVaR).\nDrives the optimizer toward a solution that is robust to which\nresample of the measurement set is \"true\".",
-          "type": "string",
-          "const": "minimax_uncertainty"
-        }
+      "type": "string",
+      "enum": [
+        "average",
+        "weighted_sum",
+        "minimax",
+        "variance_penalized",
+        "spatial_robustness",
+        "minimax_uncertainty"
       ]
     },
     "MultiSeatConfig": {
@@ -3008,8 +2984,7 @@
             }
           ]
         }
-      },
-      "additionalProperties": false
+      }
     },
     "ParallelDriverGroup": {
       "description": "Drivers that radiate in parallel within one acoustic crossover band.",

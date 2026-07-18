@@ -74,48 +74,7 @@ pub type RoomOptimizationCallback =
 pub type SpeakerOptimizationCallback =
     Box<dyn FnMut(&RoomOptimizationProgress) -> CallbackAction + Send>;
 
-/// Result for a single channel optimization
-#[derive(Debug, Clone)]
-pub struct ChannelOptimizationResult {
-    /// Channel name
-    pub name: String,
-    /// Pre-optimization score
-    pub pre_score: f64,
-    /// Post-optimization score
-    pub post_score: f64,
-    /// Initial frequency response curve
-    pub initial_curve: Curve,
-    /// Final corrected frequency response curve
-    pub final_curve: Curve,
-    /// Biquad filters (for IIR mode)
-    pub biquads: Vec<Biquad>,
-    /// FIR coefficients (for FIR/mixed mode)
-    pub fir_coeffs: Option<Vec<f64>>,
-    /// Structured evidence from every backend invocation used or considered
-    /// while producing this channel.
-    pub optimizer_evidence: Vec<crate::optim::OptimizerRunEvidence>,
-}
-
-/// Result for single speaker optimization
-#[derive(Debug, Clone)]
-pub struct SpeakerOptimizationResult {
-    /// DSP chain for this speaker
-    pub chain: ChannelDspChain,
-    /// Pre-optimization score
-    pub pre_score: f64,
-    /// Post-optimization score
-    pub post_score: f64,
-    /// Initial curve
-    pub initial_curve: Curve,
-    /// Final curve
-    pub final_curve: Curve,
-    /// Biquad filters
-    pub biquads: Vec<Biquad>,
-    /// FIR coefficients (if applicable)
-    pub fir_coeffs: Option<Vec<f64>>,
-    /// Structured backend termination and confidence evidence.
-    pub optimizer_evidence: Vec<crate::optim::OptimizerRunEvidence>,
-}
+pub use roomeq_engine::room_result::{ChannelOptimizationResult, SpeakerOptimizationResult};
 
 pub(super) type SharedPipelineObserver = Arc<Mutex<Option<Box<dyn PipelineObserver>>>>;
 

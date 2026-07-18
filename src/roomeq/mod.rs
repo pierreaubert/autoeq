@@ -168,7 +168,6 @@ pub use roomeq_engine::bass_phase_confidence;
 
 // Utility modules
 pub(crate) use roomeq_analysis::ir_waveform;
-pub(crate) mod phase_utils;
 pub(crate) use roomeq_analysis::time_align;
 pub use roomeq_synthetic as synthetic;
 // GD-Opt v2 Phase GD-1f — microphone phase calibration loader. See

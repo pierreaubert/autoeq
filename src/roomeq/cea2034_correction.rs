@@ -1,16 +1,7 @@
-//! CEA2034 speaker pre-correction for 3-pass room EQ pipeline.
-//!
-//! When a speaker has known anechoic data (CEA2034 from spinorama.org),
-//! this module generates correction filters for frequencies above the
-//! Schroeder frequency, where the speaker's response dominates over room effects.
-//!
-//! **3-pass pipeline:**
-//! - Pass 1: Speaker correction (this module) — above Schroeder
-//! - Pass 2: Room EQ correction — standard room correction on the residual
-//! - Pass 3: User preference — bass/treble shelves as separate output filters
+//! CEA-2034 compatibility surface over engine processing and workflow acquisition.
 
-mod compute;
-mod misc;
-
-pub use compute::*;
-pub use misc::*;
+pub use roomeq_engine::cea2034::{
+    SpeakerCorrectionResult, compute_speaker_correction, compute_speaker_correction_detailed,
+    generate_preference_filters,
+};
+pub use roomeq_workflow::cea2034::{fetch_cea2034_blocking, pre_fetch_all_cea2034};

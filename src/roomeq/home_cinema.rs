@@ -5,37 +5,5 @@
 //! host crate. RoomEQ needs the same semantic model for target bands, channel
 //! matching, and multi-seat diagnostics.
 
-pub use types::*;
-
-mod types;
-
-mod all;
-mod apply;
-mod bass;
-mod crossover;
-mod estimated;
-mod logical;
-mod matching;
-mod misc;
-mod multi;
-mod resolve;
-mod resolved;
-mod role;
-mod route;
-mod target;
-#[cfg(test)]
-mod tests;
-mod types_mod;
-
-pub use all::*;
-pub use apply::*;
-pub use bass::*;
-pub use estimated::*;
-#[allow(unused_imports)]
-pub use matching::*;
-pub use misc::*;
-pub use multi::*;
-pub use resolve::*;
-#[allow(unused_imports)]
-pub use role::*;
-pub use target::*;
+pub use roomeq_engine::home_cinema::*;
+pub use roomeq_workflow::home_cinema::*;

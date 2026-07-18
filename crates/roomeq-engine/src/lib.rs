@@ -8,7 +8,15 @@ pub use autoeq_optim::optim::{OptimProgressCallback, OptimizerRunEvidence};
 pub mod error {
     pub use autoeq_core::error::*;
 }
+pub mod loss {
+    pub use autoeq_optim::loss::*;
+}
+pub mod response {
+    pub use autoeq_core::response::*;
+}
 
+/// Deterministic bass-management planning, prediction, and joint optimization.
+pub mod bass_management;
 /// Measurement-confidence gate for bass-band phase correction.
 pub mod bass_phase_confidence;
 /// Pure CEA-2034 speaker and preference correction.
@@ -49,6 +57,8 @@ pub mod group;
 pub mod group_processing;
 /// Role-aware height-channel spectral, phase, and arrival-time alignment.
 pub mod height_channel_alignment;
+/// In-memory home-cinema policy, routing, reporting, and seat analysis.
+pub mod home_cinema;
 /// Inter-channel tonal matching using broadband spectral correction.
 pub mod inter_channel_timbre_matching;
 /// Path-free frequency-split FIR/IIR channel processing.
@@ -67,10 +77,15 @@ pub mod pipeline;
 /// Progress reporting for long-running RoomEQ operations.
 pub mod progress;
 pub mod report_adapter;
+/// Shared in-memory results returned by RoomEQ execution workflows.
+pub mod room_result;
 /// Broadband spectral inter-channel response alignment.
 pub mod spectral_align;
+pub use roomeq_analysis::spatial_robustness;
 /// Supporting-source room compensation filter design.
 pub mod supporting_source;
+/// Deterministic topology, crossover, and bass-routing primitives.
+pub mod topology;
 /// Path-free time-alignment analysis used by workflow preparation.
 pub mod time_align {
     pub use roomeq_analysis::time_align::{

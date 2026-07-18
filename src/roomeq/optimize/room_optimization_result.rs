@@ -1,8 +1,6 @@
-use super::super::output;
-use super::super::types::{ChannelDspChain, DspChainOutput, OptimizationMetadata, RoomConfig};
-use super::types::ChannelOptimizationResult;
+use super::super::types::{ChannelDspChain, RoomConfig};
 use crate::error::{AutoeqError, Result};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::path::Path;
 
 pub(super) fn apply_final_correction_safety_gate(
@@ -675,27 +673,7 @@ fn remove_correction_stage(chain: &mut ChannelDspChain, stage: CorrectionStage) 
     }
 }
 
-/// Result of room optimization
-#[derive(Debug, Clone)]
-pub struct RoomOptimizationResult {
-    /// Per-channel DSP chains
-    pub channels: HashMap<String, ChannelDspChain>,
-    /// Per-channel optimization results (initial/final curves, scores)
-    pub channel_results: HashMap<String, ChannelOptimizationResult>,
-    /// Combined pre-optimization score (average)
-    pub combined_pre_score: f64,
-    /// Combined post-optimization score (average)
-    pub combined_post_score: f64,
-    /// Optimization metadata
-    pub metadata: OptimizationMetadata,
-}
-
-impl RoomOptimizationResult {
-    /// Convert to DspChainOutput for serialization
-    pub fn to_dsp_chain_output(&self) -> DspChainOutput {
-        output::create_dsp_chain_output(self.channels.clone(), Some(self.metadata.clone()))
-    }
-}
+pub use roomeq_engine::room_result::RoomOptimizationResult;
 
 pub(super) fn apply_ctc_if_enabled(
     result: &mut RoomOptimizationResult,

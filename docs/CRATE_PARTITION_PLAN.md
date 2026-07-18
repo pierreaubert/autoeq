@@ -539,6 +539,16 @@ Exit criteria:
 - Root topology workflow implementations are deleted.
 - Focused topology tests no longer require `cargo test -p autoeq --lib`.
 
+Completion state:
+
+- WP6 is complete. Stereo 2.0/2.1 execution, subwoofer resource preparation,
+  and topology result construction live in `roomeq-workflow`; deterministic
+  crossover, bass prediction, joint optimization, and result contracts live in
+  `roomeq-engine`.
+- The root workflow tree is now a compatibility re-export only. Its production
+  implementations and topology tests were deleted or moved to their owner
+  crates.
+
 ### WP7 — Move home cinema and bass management
 
 Scope:
@@ -556,6 +566,13 @@ Exit criteria:
 - Engine tests cover processing.
 - Workflow tests cover resources and end-to-end composition.
 
+Completion state:
+
+- WP7 is complete. Home-cinema policy, routing, headroom, crossover selection,
+  and deterministic reports live in `roomeq-engine`; measurement-owning
+  multi-seat and complete home-cinema execution live in `roomeq-workflow`.
+- Root home-cinema and bass-management production subtrees are deleted.
+
 ### WP8 — Move CTC, supporting-source, and CEA-2034 correction workflows
 
 Scope:
@@ -571,6 +588,19 @@ Exit criteria:
 - No production CTC or CEA-2034 correction implementation remains in root.
 - Engine tests do not require filesystem resources unless explicitly testing
   an injected adapter.
+
+Completion state:
+
+- The WP8 root-removal slice is complete. Supporting-source orchestration, CTC
+  artifact/resource handling, and CEA-2034 acquisition/cache handling now live
+  in `roomeq-workflow`; prepared supporting-source and CEA-2034 DSP remain in
+  `roomeq-engine`; CTC contracts remain in `roomeq-model`.
+- The remaining WP8 refinement is to split numerical-only CTC helpers out of
+  the workflow module after introducing path-free prepared matrix contracts.
+- Current ratchets are 35,000 root Rust lines, 19,362 root RoomEQ lines,
+  15,337 root binary lines, and 378 root unit tests. Direct internal edges
+  remain 43; cycles, temporary exceptions, and duplicate implementations
+  remain zero.
 
 ### WP9 — Complete `roomeq-export`
 

@@ -46,8 +46,6 @@ mod tests;
 mod types;
 mod validation_scorecard;
 
-pub(in crate::roomeq) mod supporting_source;
-
 pub use room_optimization_progress::*;
 pub use room_optimization_result::*;
 pub use types::*;

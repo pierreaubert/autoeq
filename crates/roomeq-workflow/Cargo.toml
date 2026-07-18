@@ -9,14 +9,20 @@ license = "GPL-3.0-or-later"
 anyhow = { workspace = true }
 autoeq-artifacts = { workspace = true }
 autoeq-measurements = { workspace = true }
+chrono = { workspace = true }
 hound = { workspace = true }
 log = { workspace = true }
 math-dsp = { workspace = true }
 math-iir-fir = { workspace = true }
 ndarray = { workspace = true }
+num-complex = { workspace = true }
 roomeq-engine = { workspace = true }
 roomeq-model = { workspace = true }
+rustfft = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
+sofa-reader = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

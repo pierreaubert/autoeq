@@ -1,19 +1,24 @@
 //! RoomEQ application workflows and resource adapters.
 
 pub mod arrival;
+pub mod cea2034;
 pub mod channel;
 pub mod channel_measurements;
 pub mod config_loader;
+pub mod ctc;
 pub mod dba;
 pub mod eq;
 pub mod eq_resources;
 pub mod fir;
 pub mod group_measurements;
 pub mod group_processing;
+pub mod home_cinema;
 pub mod multisub;
 pub mod output;
 pub mod pipeline;
 pub mod sidecar;
+pub mod supporting_source;
+pub mod topology;
 mod wav;
 
 pub use arrival::{prepare_channel_arrival_time, prepare_channel_input};

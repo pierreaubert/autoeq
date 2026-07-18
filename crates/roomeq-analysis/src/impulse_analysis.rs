@@ -31,3 +31,6 @@ pub use decomposed_correction_config::*;
 pub use detect::*;
 pub use null_detection_config::*;
 pub use types::*;
+
+/// Compute octave-band RT60 estimates for an in-memory impulse response.
+pub use math_audio_dsp::analysis::compute_rt60_spectrum;

@@ -1,7 +1,7 @@
-use super::super::types::DecomposedCorrectionSerdeConfig;
 use crate::PeqModel;
 use math_audio_iir_fir::Biquad;
 use math_audio_iir_fir::Peq;
+use roomeq_model::DecomposedCorrectionSerdeConfig;
 
 /// Plausibility range for a measurement-driven Schroeder frequency.
 ///
@@ -123,7 +123,7 @@ pub(super) fn decide_schroeder_override(
 /// until no more filters can be removed without exceeding the threshold.
 pub(super) fn backward_eliminate(
     filters: Vec<Biquad>,
-    objective_data: &crate::optim::ObjectiveData,
+    objective_data: &autoeq_optim::optim::ObjectiveData,
     peq_model: PeqModel,
     threshold: f64,
 ) -> (Vec<Biquad>, f64) {
@@ -142,8 +142,8 @@ pub(super) fn backward_eliminate(
 
     // Evaluate current loss from the full filter set
     let peq_vec: Peq = remaining.iter().map(|b| (1.0, b.clone())).collect();
-    let x_full = crate::x2peq::peq2x(&peq_vec, peq_model);
-    let mut current_loss = crate::optim::compute_base_fitness(&x_full, objective_data);
+    let x_full = autoeq_core::x2peq::peq2x(&peq_vec, peq_model);
+    let mut current_loss = autoeq_optim::optim::compute_base_fitness(&x_full, objective_data);
     let mut subset: Peq = Vec::with_capacity(remaining.len().saturating_sub(1));
 
     loop {
@@ -165,8 +165,8 @@ pub(super) fn backward_eliminate(
                     .map(|(_, b)| (1.0, b.clone())),
             );
 
-            let x_subset = crate::x2peq::peq2x(&subset, peq_model);
-            let subset_loss = crate::optim::compute_base_fitness(&x_subset, objective_data);
+            let x_subset = autoeq_core::x2peq::peq2x(&subset, peq_model);
+            let subset_loss = autoeq_optim::optim::compute_base_fitness(&x_subset, objective_data);
             let impact = subset_loss - current_loss;
 
             if impact < min_impact {

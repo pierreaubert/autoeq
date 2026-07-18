@@ -1,19 +1,16 @@
-use super::super::super::impulse_analysis;
-use super::super::super::types::{OptimizerConfig, TargetCurveConfig};
 use super::super::consts::decide_schroeder_override;
 use super::super::misc::build_optim_params;
-use super::super::misc::try_ssir_analysis;
 use super::super::representative::measure_bass_rt60;
+use super::super::resources::{self, EqResources};
 use super::super::types::PreparedSingleChannelEq;
 use crate::Curve;
 use crate::PeqModel;
-use crate::loss::LossType;
-use crate::optim::OptimizerBackend;
-use crate::workflow::setup_objective_data;
-use clap::ValueEnum;
-use log::debug;
+use autoeq_optim::loss::LossType;
+use autoeq_optim::optim::OptimizerBackend;
+use autoeq_optim::optim::setup::setup_objective_data;
 use math_audio_iir_fir::Biquad;
-use ndarray::Array1;
+use roomeq_analysis::impulse_analysis;
+use roomeq_model::OptimizerConfig;
 use std::collections::HashMap;
 use std::error::Error;
 
@@ -25,16 +22,16 @@ use std::error::Error;
 pub(in super::super) fn prepare_single_channel_eq(
     curve: &Curve,
     config: &OptimizerConfig,
-    target_config: Option<&TargetCurveConfig>,
+    resources: Option<&EqResources>,
     sample_rate: f64,
 ) -> Result<PreparedSingleChannelEq, Box<dyn Error>> {
-    prepare_single_channel_eq_with_spin(curve, config, target_config, sample_rate, None)
+    prepare_single_channel_eq_with_spin(curve, config, resources, sample_rate, None)
 }
 
 pub(in super::super) fn prepare_single_channel_eq_with_spin(
     curve: &Curve,
     config: &OptimizerConfig,
-    target_config: Option<&TargetCurveConfig>,
+    resources: Option<&EqResources>,
     sample_rate: f64,
     spin_data: Option<&HashMap<String, Curve>>,
 ) -> Result<PreparedSingleChannelEq, Box<dyn Error>> {
@@ -115,64 +112,61 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
                 ..Default::default()
             };
 
-            let result = if let Some(path) = config.ssir_wav_path.as_deref() {
-                match try_ssir_analysis(path, sample_rate) {
-                    Some((ssir_result, mono_ir, ir_sr)) => {
-                        log::info!(
-                            "  SSIR analysis: {} reflections, mixing time={:.1} ms",
-                            ssir_result.num_reflections(),
-                            ssir_result.mixing_time_ms(),
-                        );
+            let result = match resources::analyze_ssir(resources) {
+                Some((ssir_result, mono_ir, ir_sr)) => {
+                    log::info!(
+                        "  SSIR analysis: {} reflections, mixing time={:.1} ms",
+                        ssir_result.num_reflections(),
+                        ssir_result.mixing_time_ms(),
+                    );
 
-                        // Measurement-driven Schroeder frequency.
-                        //
-                        // The IR is already in memory, so instead of
-                        // using the config-supplied `schroeder_freq`
-                        // guess we measure the bass-band RT60 via
-                        // `compute_rt60_spectrum` and plug it into
-                        // `2000 · √(RT60 / V)` with V from
-                        // `dc_config.room_dimensions`. The override is
-                        // gated by `decide_schroeder_override` which
-                        // requires the result to land in a plausible
-                        // band — anything outside is treated as a
-                        // malformed IR / wrong dimensions and we fall
-                        // back to the config value. See that helper
-                        // for the exact decision logic and its tests.
-                        let rt60_bass = measure_bass_rt60(&mono_ir, ir_sr as f32);
-                        if let Some(measured) = decide_schroeder_override(
-                            rt60_bass,
-                            dc_config,
-                            dc_analysis_config.schroeder_freq,
-                        ) {
-                            dc_analysis_config.schroeder_freq = measured;
-                        }
-
-                        impulse_analysis::build_ssir_correction_weights(
-                            &normalized_curve_unsmoothed.freq,
-                            &normalized_curve_unsmoothed.spl,
-                            &ssir_result,
-                            Some(&mono_ir),
-                            ir_sr,
-                            &dc_analysis_config,
-                        )
+                    // Measurement-driven Schroeder frequency.
+                    //
+                    // The IR is already in memory, so instead of
+                    // using the config-supplied `schroeder_freq`
+                    // guess we measure the bass-band RT60 via
+                    // `compute_rt60_spectrum` and plug it into
+                    // `2000 · √(RT60 / V)` with V from
+                    // `dc_config.room_dimensions`. The override is
+                    // gated by `decide_schroeder_override` which
+                    // requires the result to land in a plausible
+                    // band — anything outside is treated as a
+                    // malformed IR / wrong dimensions and we fall
+                    // back to the config value. See that helper
+                    // for the exact decision logic and its tests.
+                    let rt60_bass = measure_bass_rt60(mono_ir, ir_sr as f32);
+                    if let Some(measured) = decide_schroeder_override(
+                        rt60_bass,
+                        dc_config,
+                        dc_analysis_config.schroeder_freq,
+                    ) {
+                        dc_analysis_config.schroeder_freq = measured;
                     }
-                    None => {
+
+                    impulse_analysis::build_ssir_correction_weights(
+                        &normalized_curve_unsmoothed.freq,
+                        &normalized_curve_unsmoothed.spl,
+                        &ssir_result,
+                        Some(mono_ir),
+                        ir_sr,
+                        &dc_analysis_config,
+                    )
+                }
+                None => {
+                    if resources
+                        .and_then(|value| value.impulse_response.as_ref())
+                        .is_some()
+                    {
                         log::info!(
                             "  SSIR analysis failed, falling back to Schroeder-based decomposition"
                         );
-                        impulse_analysis::analyze_decomposed_correction(
-                            &normalized_curve_unsmoothed.freq,
-                            &normalized_curve_unsmoothed.spl,
-                            &dc_analysis_config,
-                        )
                     }
+                    impulse_analysis::analyze_decomposed_correction(
+                        &normalized_curve_unsmoothed.freq,
+                        &normalized_curve_unsmoothed.spl,
+                        &dc_analysis_config,
+                    )
                 }
-            } else {
-                impulse_analysis::analyze_decomposed_correction(
-                    &normalized_curve_unsmoothed.freq,
-                    &normalized_curve_unsmoothed.spl,
-                    &dc_analysis_config,
-                )
             };
 
             log::info!(
@@ -232,14 +226,14 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
         }
         None => Vec::new(),
     };
-    let temporal_masking_modes: Vec<crate::loss::epa::score::TemporalMaskingMode> =
+    let temporal_masking_modes: Vec<autoeq_optim::loss::epa::score::TemporalMaskingMode> =
         decomposed_result
             .as_ref()
             .map(|r| {
                 r.room_modes
                     .iter()
                     .filter(|m| m.temporal_severity_db > 0.0)
-                    .map(|m| crate::loss::epa::score::TemporalMaskingMode {
+                    .map(|m| autoeq_optim::loss::epa::score::TemporalMaskingMode {
                         frequency: m.frequency,
                         q: m.q,
                         prominence_db: m.prominence_db,
@@ -287,7 +281,7 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
     // Apply psychoacoustic smoothing if enabled
     let mut normalized_curve = normalized_curve_unsmoothed;
     if config.psychoacoustic {
-        let smoothing_config = roomeq_engine::config_adapter::to_measurement_smoothing(
+        let smoothing_config = crate::config_adapter::to_measurement_smoothing(
             config.psychoacoustic_smoothing_config(),
         );
         log::info!(
@@ -297,43 +291,18 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
             smoothing_config.high_freq_n,
             smoothing_config.high_freq
         );
-        normalized_curve = crate::read::smooth_psychoacoustic(&normalized_curve, &smoothing_config);
+        normalized_curve =
+            autoeq_optim::read::smooth_psychoacoustic(&normalized_curve, &smoothing_config);
     }
 
     // Parse PEQ model
-    let peq_model = PeqModel::from_str(&config.peq_model, true)
+    let peq_model = config
+        .peq_model
+        .parse::<PeqModel>()
         .map_err(|e| format!("Invalid PEQ model '{}': {}", config.peq_model, e))?;
 
     // Create target curve
-    let target_curve = match target_config {
-        Some(TargetCurveConfig::Path(path)) => {
-            let target = crate::read::read_curve_from_csv(path)?;
-            crate::read::normalize_and_interpolate_response(&normalized_curve.freq, &target)
-        }
-        Some(TargetCurveConfig::Predefined(name)) => {
-            match crate::workflow::build_target_curve_by_name(
-                name,
-                &normalized_curve.freq,
-                &normalized_curve,
-            ) {
-                Ok(curve) => curve,
-                Err(_) => {
-                    debug!(
-                        "  Target '{}' not a predefined curve, trying as file path...",
-                        name
-                    );
-                    let target = crate::read::read_curve_from_csv(&std::path::PathBuf::from(name))?;
-                    crate::read::normalize_and_interpolate_response(&normalized_curve.freq, &target)
-                }
-            }
-        }
-        None => Curve {
-            freq: normalized_curve.freq.clone(),
-            spl: Array1::zeros(normalized_curve.freq.len()),
-            phase: None,
-            ..Default::default()
-        },
-    };
+    let target_curve = resources::target_curve(&normalized_curve, resources);
 
     // Parse loss type
     let loss_type = match config.loss_type.as_str() {
@@ -415,11 +384,9 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
     objective_data.epa_config = config
         .epa_config
         .as_ref()
-        .map(roomeq_engine::config_adapter::to_optimizer_epa);
+        .map(crate::config_adapter::to_optimizer_epa);
     objective_data.asymmetric_loss_config =
-        roomeq_engine::config_adapter::to_optimizer_asymmetric_loss(
-            config.asymmetric_loss_config(),
-        );
+        crate::config_adapter::to_optimizer_asymmetric_loss(config.asymmetric_loss_config());
     objective_data.temporal_masking_modes = temporal_masking_modes;
     // Hand the SSIR / decomposed-correction mode list over to the DE
     // optimizer's smart initial-guess generator so filters actually
@@ -466,14 +433,14 @@ pub(in super::super) fn run_optimization_pass(
     num_filters: usize,
     max_iter: usize,
     config: &OptimizerConfig,
-    callback: Option<crate::optim::OptimProgressCallback>,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
 ) -> Result<
     (
         Vec<Biquad>,
         f64,
         Vec<f64>,
-        Vec<crate::optim::OptimizerRunEvidence>,
+        Vec<autoeq_optim::optim::OptimizerRunEvidence>,
     ),
     Box<dyn Error>,
 > {
@@ -481,11 +448,11 @@ pub(in super::super) fn run_optimization_pass(
     optim_params.num_filters = num_filters;
     optim_params.maxeval = max_iter;
 
-    let (lower_bounds, mut upper_bounds) = crate::workflow::setup_bounds(&optim_params);
+    let (lower_bounds, mut upper_bounds) = autoeq_optim::optim::setup::setup_bounds(&optim_params);
 
     // Log per-filter frequency bounds for diagnostics
     {
-        let ppf = crate::param_utils::params_per_filter(prep.peq_model);
+        let ppf = autoeq_core::param_utils::params_per_filter(prep.peq_model);
         for i in 0..num_filters {
             let freq_idx = i * ppf;
             let f_low = 10.0_f64.powf(lower_bounds[freq_idx]);
@@ -510,10 +477,15 @@ pub(in super::super) fn run_optimization_pass(
     // to 0 dB (cuts only). Skipped when decomposed-correction is
     // disabled (no trustworthy Schroeder value available).
     if let Some(sf) = prep.schroeder_hz {
-        crate::workflow::restrict_boost_above_schroeder(&mut upper_bounds, &optim_params, sf);
+        autoeq_optim::optim::setup::restrict_boost_above_schroeder(
+            &mut upper_bounds,
+            &optim_params,
+            sf,
+        );
     }
 
-    let mut x = crate::workflow::initial_guess(&optim_params, &lower_bounds, &upper_bounds);
+    let mut x =
+        autoeq_optim::optim::setup::initial_guess(&optim_params, &lower_bounds, &upper_bounds);
 
     // Global optimization
     let opt_result = if let Some(cb) = callback {
@@ -535,7 +507,7 @@ pub(in super::super) fn run_optimization_pass(
         )
     };
 
-    let global_evidence = crate::optim::OptimizerRunEvidence::from_backend_result(
+    let global_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
         &optim_params.algo,
         opt_result,
         &x,
@@ -584,7 +556,7 @@ pub(in super::super) fn run_optimization_pass(
             &optim_params,
             Some(&optim_params.local_algo),
         );
-        let mut local_evidence = crate::optim::OptimizerRunEvidence::from_backend_result(
+        let mut local_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
             &optim_params.local_algo,
             local_result,
             &x,
@@ -600,7 +572,8 @@ pub(in super::super) fn run_optimization_pass(
             );
         }
         let local_loss = local_evidence.objective.unwrap_or(f64::INFINITY);
-        let use_local = local_evidence.confidence != crate::optim::OptimizerConfidence::Unusable
+        let use_local = local_evidence.confidence
+            != autoeq_optim::optim::OptimizerConfidence::Unusable
             && local_loss < global_loss;
         local_evidence.selected_for_output = use_local;
         optimizer_evidence[0].selected_for_output = !use_local;
@@ -625,18 +598,18 @@ pub(in super::super) fn run_optimization_pass(
     // Apply boost and cut envelope clamps to the final result so deployed filters
     // respect the same gain limits used during fitness evaluation.
     let x_after_boost = if let Some(ref env) = prep.objective_data.max_boost_envelope {
-        crate::optim::clamp_gains_to_envelope(&x, env, prep.peq_model)
+        autoeq_optim::optim::clamp_gains_to_envelope(&x, env, prep.peq_model)
     } else {
         x.to_vec()
     };
     let x_final = if let Some(ref env) = prep.objective_data.min_cut_envelope {
-        crate::optim::clamp_cuts_to_envelope(&x_after_boost, env, prep.peq_model)
+        autoeq_optim::optim::clamp_cuts_to_envelope(&x_after_boost, env, prep.peq_model)
     } else {
         x_after_boost
     };
 
     // Convert to Biquad filters, pruning near-zero gain
-    let peq = crate::x2peq::x2peq(&x_final, prep.sample_rate, prep.peq_model);
+    let peq = autoeq_core::x2peq::x2peq(&x_final, prep.sample_rate, prep.peq_model);
     let filters: Vec<Biquad> = peq
         .into_iter()
         .map(|(_weight, biquad)| biquad)

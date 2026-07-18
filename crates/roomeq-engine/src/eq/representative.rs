@@ -33,7 +33,8 @@ pub(super) fn measure_bass_rt60(mono_ir: &[f32], ir_sr: f32) -> Option<f64> {
     // representative weighted estimate rather than the max, so one
     // noisy band does not dominate the Schroeder override.
     let bass_centers = [125.0_f32, 250.0];
-    let bass_rt60s = math_audio_dsp::analysis::compute_rt60_spectrum(trimmed, ir_sr, &bass_centers);
+    let bass_rt60s =
+        roomeq_analysis::impulse_analysis::compute_rt60_spectrum(trimmed, ir_sr, &bass_centers);
     for (center, rt60) in bass_centers.iter().zip(bass_rt60s.iter()) {
         if *rt60 > 0.0 && *rt60 <= MAX_PLAUSIBLE_BASS_RT60_SECONDS {
             log::info!("  Bass RT60 {:.0} Hz: {:.3} s", center, rt60);

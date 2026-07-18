@@ -1,18 +1,18 @@
-use super::super::auto_tune::{self, AutoOptimizerContext};
-use super::super::types::OptimizerConfig;
 use super::representative::representative_multi_measurement_curve;
 use crate::Curve;
 use log::debug;
+use roomeq_model::OptimizerConfig;
+use roomeq_model::auto_tune::{self, AutoOptimizerContext};
 
 #[derive(Debug, Clone, Copy)]
-pub(in super::super) struct MultiEqAutoOptimizerContext {
+pub struct MultiEqAutoOptimizerContext {
     pub is_sub_channel: bool,
     pub target_tilt_active: bool,
     pub broadband_enabled: bool,
 }
 
 impl MultiEqAutoOptimizerContext {
-    pub(in super::super) fn sub_channel() -> Self {
+    pub fn sub_channel() -> Self {
         Self {
             is_sub_channel: true,
             target_tilt_active: false,
@@ -21,7 +21,7 @@ impl MultiEqAutoOptimizerContext {
     }
 }
 
-pub(in super::super) fn resolve_multi_measurement_auto_optimizer_config(
+pub fn resolve_multi_measurement_auto_optimizer_config(
     curves: &[Curve],
     config: &OptimizerConfig,
     context: MultiEqAutoOptimizerContext,
@@ -40,7 +40,7 @@ pub(in super::super) fn resolve_multi_measurement_auto_optimizer_config(
     let data_max_freq = representative_curve.freq[representative_curve.freq.len() - 1];
     let effective_min_freq = config.min_freq.max(data_min_freq);
     let effective_max_freq = config.max_freq.min(data_max_freq);
-    let detected_f3_hz = match super::super::excursion::detect_f3_with_config(
+    let detected_f3_hz = match crate::excursion::detect_f3_with_config(
         &representative_curve,
         None,
         config.excursion_protection.as_ref(),

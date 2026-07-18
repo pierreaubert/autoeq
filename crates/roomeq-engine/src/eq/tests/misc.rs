@@ -1,35 +1,14 @@
-use super::super::super::types::{DecomposedCorrectionSerdeConfig, OptimizerConfig};
 use super::super::consts::decide_schroeder_override;
 use super::super::misc::trim_ir_length_to_noise_floor;
-use hound;
 use ndarray::Array1;
+use roomeq_model::{DecomposedCorrectionSerdeConfig, OptimizerConfig, RoomDimensions};
 
-pub(super) fn write_mono_wav(samples: &[f32], sample_rate: u32) -> tempfile::NamedTempFile {
-    let temp_file = tempfile::Builder::new().suffix(".wav").tempfile().unwrap();
-    let spec = hound::WavSpec {
-        channels: 1,
-        sample_rate,
-        bits_per_sample: 32,
-        sample_format: hound::SampleFormat::Float,
-    };
-    let mut writer = hound::WavWriter::create(temp_file.path(), spec).unwrap();
-    for &sample in samples {
-        writer.write_sample(sample).unwrap();
-    }
-    writer.finalize().unwrap();
-    temp_file
-}
-
-pub(super) fn fdw_e2e_config(
-    ssir_wav_path: std::path::PathBuf,
-    fdw_enabled: bool,
-) -> OptimizerConfig {
+pub(super) fn fdw_e2e_config(fdw_enabled: bool) -> OptimizerConfig {
     OptimizerConfig {
         psychoacoustic: false,
         asymmetric_loss: false,
         min_freq: 20.0,
         max_freq: 20_000.0,
-        ssir_wav_path: Some(ssir_wav_path),
         decomposed_correction: Some(DecomposedCorrectionSerdeConfig {
             enabled: true,
             schroeder_freq: 250.0,
@@ -66,7 +45,7 @@ pub(super) fn nearest_value(freqs: &Array1<f64>, values: &Array1<f64>, target: f
 
 fn dc_config_with_dims(length: f64, width: f64, height: f64) -> DecomposedCorrectionSerdeConfig {
     DecomposedCorrectionSerdeConfig {
-        room_dimensions: Some(crate::roomeq::RoomDimensions {
+        room_dimensions: Some(RoomDimensions {
             length,
             width,
             height,

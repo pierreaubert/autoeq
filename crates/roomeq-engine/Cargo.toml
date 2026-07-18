@@ -11,6 +11,7 @@ autoeq-fir = { workspace = true }
 autoeq-optim = { workspace = true }
 log = { workspace = true }
 math-iir-fir = { workspace = true }
+math-rir = { workspace = true }
 math-optimisation = { workspace = true }
 nalgebra = { workspace = true }
 ndarray = { workspace = true }
@@ -24,3 +25,6 @@ rustfft = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }

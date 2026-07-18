@@ -1,4 +1,3 @@
-use super::super::types::DecomposedCorrectionSerdeConfig;
 use super::consts::MAX_PLAUSIBLE_BASS_RT60_SECONDS;
 use super::consts::decide_schroeder_override;
 use super::misc::adaptive_budget_for_step;
@@ -6,9 +5,10 @@ use super::misc::trim_ir_length_to_noise_floor;
 use super::prepared_single_channel_eq::prepare_single_channel_eq;
 use super::representative::representative_bass_rt60;
 use super::representative::representative_multi_measurement_curve;
+use super::resources::{EqResources, PreparedEqTarget, PreparedImpulseResponse};
 use crate::Curve;
-use crate::OptimizerConfig;
 use ndarray::Array1;
+use roomeq_model::{DecomposedCorrectionSerdeConfig, OptimizerConfig};
 
 #[path = "tests/make.rs"]
 mod make;
@@ -21,7 +21,6 @@ use make::make_fdw_e2e_ir;
 use misc::fdw_e2e_config;
 use misc::lcg_noise;
 use misc::nearest_value;
-use misc::write_mono_wav;
 
 #[test]
 fn adaptive_budget_scales_with_filter_count() {
@@ -72,15 +71,22 @@ fn fdw_e2e_downweights_hf_reflection_but_keeps_bass_mode() {
     let sample_rate = 48_000;
     let curve = make_fdw_e2e_curve();
     let ir = make_fdw_e2e_ir(sample_rate);
-    let wav = write_mono_wav(&ir, sample_rate);
+    let resources = EqResources {
+        impulse_response: Some(PreparedImpulseResponse {
+            samples: ir,
+            sample_rate: f64::from(sample_rate),
+        }),
+        ..EqResources::default()
+    };
 
-    let fdw_on = fdw_e2e_config(wav.path().to_path_buf(), true);
-    let fdw_off = fdw_e2e_config(wav.path().to_path_buf(), false);
+    let fdw_on = fdw_e2e_config(true);
+    let fdw_off = fdw_e2e_config(false);
 
-    let prep_on = prepare_single_channel_eq(&curve, &fdw_on, None, sample_rate as f64)
+    let prep_on = prepare_single_channel_eq(&curve, &fdw_on, Some(&resources), sample_rate as f64)
         .expect("FDW-enabled RoomEQ preparation should succeed");
-    let prep_off = prepare_single_channel_eq(&curve, &fdw_off, None, sample_rate as f64)
-        .expect("FDW-disabled RoomEQ preparation should succeed");
+    let prep_off =
+        prepare_single_channel_eq(&curve, &fdw_off, Some(&resources), sample_rate as f64)
+            .expect("FDW-disabled RoomEQ preparation should succeed");
 
     let bass_on = nearest_value(
         &prep_on.objective_data.freqs,
@@ -330,7 +336,7 @@ fn prepare_single_channel_eq_flat_loss_type() {
         .expect("flat loss prepare should succeed");
     assert!(matches!(
         prep.objective_data.loss_type,
-        crate::loss::LossType::SpeakerFlat
+        autoeq_optim::loss::LossType::SpeakerFlat
     ));
 }
 
@@ -364,7 +370,7 @@ fn prepare_single_channel_eq_epa_loss_type() {
         .expect("epa loss prepare should succeed");
     assert!(matches!(
         prep.objective_data.loss_type,
-        crate::loss::LossType::Epa
+        autoeq_optim::loss::LossType::Epa
     ));
 }
 
@@ -400,23 +406,17 @@ fn prepare_single_channel_eq_with_target_curve() {
         phase: None,
         ..Default::default()
     };
-    // We need a temporary CSV file for the target
-    let mut tmpfile = tempfile::NamedTempFile::new().unwrap();
-    use std::io::Write;
-    writeln!(tmpfile, "frequency,spl").unwrap();
-    for i in 0..target.freq.len() {
-        writeln!(tmpfile, "{},{}", target.freq[i], target.spl[i]).unwrap();
-    }
-    tmpfile.flush().unwrap();
-
-    let target_config = crate::roomeq::types::TargetCurveConfig::Path(tmpfile.path().to_path_buf());
+    let resources = EqResources {
+        target: Some(PreparedEqTarget::Curve(Box::new(target))),
+        ..EqResources::default()
+    };
     let config = OptimizerConfig {
         num_filters: 3,
         max_iter: 1000,
         seed: Some(42),
         ..OptimizerConfig::default()
     };
-    let prep = prepare_single_channel_eq(&curve, &config, Some(&target_config), 48000.0)
+    let prep = prepare_single_channel_eq(&curve, &config, Some(&resources), 48000.0)
         .expect("target prepare should succeed");
     assert!(!prep.objective_data.target.is_empty());
 }

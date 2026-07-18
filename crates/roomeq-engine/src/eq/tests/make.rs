@@ -1,10 +1,10 @@
-use super::super::super::types::OptimizerConfig;
 use super::super::misc::trim_ir_length_to_noise_floor;
 use super::super::multi_eq_auto_optimizer_context::MultiEqAutoOptimizerContext;
 use super::super::multi_eq_auto_optimizer_context::resolve_multi_measurement_auto_optimizer_config;
 use super::super::optimize::optimize_channel_eq;
 use crate::Curve;
 use ndarray::Array1;
+use roomeq_model::{AutoOptimizerConfig, OptimizerConfig};
 
 fn make_synthetic_room_curve() -> Curve {
     // 500-point log-spaced curve 20-20kHz with room modes
@@ -40,7 +40,7 @@ fn multi_measurement_auto_optimizer_uses_sub_context() {
         min_freq: 20.0,
         max_freq: 200.0,
         num_filters: 1,
-        auto_optimizer: Some(crate::roomeq::types::AutoOptimizerConfig {
+        auto_optimizer: Some(AutoOptimizerConfig {
             enabled: true,
             max_filters: 12,
             ..Default::default()

@@ -1,9 +1,8 @@
-use super::super::types::OptimizerConfig;
 use crate::Curve;
 use crate::PeqModel;
-use crate::loss::LossType;
-use hound;
-use roomeq_engine::config_adapter::OptimizerConfigExt;
+use crate::config_adapter::OptimizerConfigExt;
+use autoeq_optim::loss::LossType;
+use roomeq_model::OptimizerConfig;
 
 /// Find the length (in samples) at which to truncate an impulse
 /// response so the Schroeder backward integration sees clean decay
@@ -169,72 +168,11 @@ pub(super) fn build_optim_params(
     sample_rate: f64,
     loss_type: LossType,
     peq_model: PeqModel,
-) -> crate::OptimParams {
+) -> autoeq_optim::OptimParams {
     let mut params = config.to_optim_params(sample_rate);
     params.min_freq = effective_min_freq;
     params.max_freq = effective_max_freq;
     params.loss = loss_type;
     params.peq_model = peq_model;
     params
-}
-
-/// Load a measured impulse response WAV file, run SSIR analysis, and
-/// return the analysis result alongside the mono IR and its sample
-/// rate so downstream callers can also compute RT60 directly from
-/// the decoded samples without re-reading the file from disk.
-///
-/// Returns `None` when the file can't be opened, the buffer is empty,
-/// the IR is too short to be useful (< 10 ms), or SSIR didn't detect
-/// any events.
-pub(super) fn try_ssir_analysis(
-    wav_path: &std::path::Path,
-    _sample_rate: f64,
-) -> Option<(math_rir::SsirResult, Vec<f32>, f64)> {
-    let reader = hound::WavReader::open(wav_path).ok()?;
-    let spec = reader.spec();
-    let wav_sr = spec.sample_rate;
-
-    let samples: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Float => reader
-            .into_samples::<f32>()
-            .filter_map(|s| s.ok())
-            .collect(),
-        hound::SampleFormat::Int => {
-            let scale = 1.0 / (1i64 << (spec.bits_per_sample - 1)) as f32;
-            reader
-                .into_samples::<i32>()
-                .filter_map(|s| s.ok())
-                .map(|v| v as f32 * scale)
-                .collect()
-        }
-    };
-
-    if samples.is_empty() {
-        return None;
-    }
-
-    // Use first channel for mono analysis (roomeq measurements are typically mono)
-    let num_channels = spec.channels as usize;
-    let num_frames = samples.len() / num_channels;
-    let mono: Vec<f32> = if num_channels == 1 {
-        samples
-    } else {
-        (0..num_frames).map(|i| samples[i * num_channels]).collect()
-    };
-
-    // Minimum useful RIR length: 10ms
-    let min_samples = (0.010 * wav_sr as f64) as usize;
-    if mono.len() < min_samples {
-        return None;
-    }
-
-    let config = math_rir::SsirConfig::new(wav_sr as f64);
-    let result = math_rir::analyze_rir(&mono, &config);
-
-    // Only return if we actually detected something meaningful
-    if result.num_events() >= 1 {
-        Some((result, mono, wav_sr as f64))
-    } else {
-        None
-    }
 }

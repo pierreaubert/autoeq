@@ -361,6 +361,20 @@ Local progress:
   roomeq-workflow, and root retains only compatibility re-exports.
 - This prerequisite removed 2,533 root RoomEQ lines and moved 42 focused tests
   without adding an internal dependency edge.
+- The complete EQ optimization module now belongs to roomeq-engine and accepts
+  only prepared, in-memory target curves and impulse responses. CSV target
+  resolution and optional SSIR WAV decoding belong to roomeq-workflow; the
+  remaining root topology code reaches the engine through a temporary
+  config-to-resource adapter.
+- Bass RT60 spectrum analysis is exposed by roomeq-analysis, avoiding a new
+  direct math-dsp dependency from roomeq-engine. The crate graph therefore
+  remains at 43 internal edges, with zero cycles and zero exceptions.
+- The EQ slice removed another 4,235 root RoomEQ lines and moved 65 tests to
+  roomeq-engine. The current ratchets are 59,909 root Rust lines, 44,272 root
+  RoomEQ lines, 15,337 root binary lines, and 707 root unit tests.
+- WP4 remains in progress: ChannelProcessingStrategy ownership and the generic
+  single-channel topology/workflow adapters are still rooted and must move
+  before the package exit criteria are satisfied.
 
 Exit criteria:
 

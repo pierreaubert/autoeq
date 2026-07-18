@@ -2,7 +2,7 @@
 
 #![forbid(unsafe_code)]
 
-pub use autoeq_core::{AutoeqError, Curve};
+pub use autoeq_core::{AutoeqError, Curve, PeqModel};
 pub mod error {
     pub use autoeq_core::error::*;
 }
@@ -14,6 +14,8 @@ pub mod config_adapter;
 pub mod crossover;
 /// Double-bass-array optimization and phase-critical array summation.
 pub mod dba;
+/// In-memory per-channel and multi-measurement EQ optimization.
+pub mod eq;
 /// Speaker-excursion protection analysis and high-pass realization.
 pub mod excursion;
 /// RoomEQ FIR correction design.

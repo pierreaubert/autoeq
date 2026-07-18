@@ -1,7 +1,3 @@
-use super::super::spatial_robustness::{self, SpatialRobustnessConfig};
-use super::super::types::{
-    MultiMeasurementConfig, MultiMeasurementStrategy, OptimizerConfig, TargetCurveConfig,
-};
 use super::consts::backward_eliminate;
 use super::misc::adaptive_budget_for_step;
 use super::misc::build_optim_params;
@@ -10,15 +6,16 @@ use super::multi_eq_auto_optimizer_context::resolve_multi_measurement_auto_optim
 use super::prepared_single_channel_eq::prepare_single_channel_eq;
 use super::prepared_single_channel_eq::prepare_single_channel_eq_with_spin;
 use super::prepared_single_channel_eq::run_optimization_pass;
+use super::resources::{self, EqResources};
 use crate::Curve;
 use crate::PeqModel;
-use crate::loss::LossType;
-use crate::optim::{MultiObjectiveData, OptimizerBackend, RealOptimizerBackend};
-use crate::roomeq::rir_prototype::build_weighted_prototype;
-use crate::workflow::setup_objective_data;
-use clap::ValueEnum;
+use autoeq_optim::loss::LossType;
+use autoeq_optim::optim::setup::setup_objective_data;
+use autoeq_optim::optim::{MultiObjectiveData, OptimizerBackend, RealOptimizerBackend};
 use math_audio_iir_fir::Biquad;
-use ndarray::Array1;
+use roomeq_analysis::rir_prototype::build_weighted_prototype;
+use roomeq_analysis::spatial_robustness::{self, SpatialRobustnessConfig};
+use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy, OptimizerConfig};
 use std::collections::HashMap;
 use std::error::Error;
 
@@ -26,7 +23,7 @@ use std::error::Error;
 pub struct EqOptimizationResult {
     pub filters: Vec<Biquad>,
     pub loss: f64,
-    pub optimizer_evidence: Vec<crate::optim::OptimizerRunEvidence>,
+    pub optimizer_evidence: Vec<autoeq_optim::optim::OptimizerRunEvidence>,
 }
 
 impl EqOptimizationResult {
@@ -40,7 +37,7 @@ impl EqOptimizationResult {
 /// # Arguments
 /// * `curve` - Frequency response curve to optimize (on-axis measurement)
 /// * `config` - Optimizer configuration
-/// * `target_config` - Optional target curve configuration
+/// * `resources` - Optional target and impulse-response resources prepared by the workflow
 /// * `sample_rate` - Sample rate for filter design
 ///
 /// # Returns
@@ -48,10 +45,10 @@ impl EqOptimizationResult {
 pub fn optimize_channel_eq(
     curve: &Curve,
     config: &OptimizerConfig,
-    target_config: Option<&TargetCurveConfig>,
+    resources: Option<&EqResources>,
     sample_rate: f64,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
-    optimize_channel_eq_detailed(curve, config, target_config, sample_rate)
+    optimize_channel_eq_detailed(curve, config, resources, sample_rate)
         .map(EqOptimizationResult::into_legacy)
 }
 
@@ -60,13 +57,13 @@ pub fn optimize_channel_eq(
 pub fn optimize_channel_eq_detailed(
     curve: &Curve,
     config: &OptimizerConfig,
-    target_config: Option<&TargetCurveConfig>,
+    resources: Option<&EqResources>,
     sample_rate: f64,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
     optimize_channel_eq_inner(
         curve,
         config,
-        target_config,
+        resources,
         sample_rate,
         None,
         None,
@@ -80,13 +77,13 @@ pub fn optimize_channel_eq_with_spin_detailed(
     curve: &Curve,
     spin_data: &HashMap<String, Curve>,
     config: &OptimizerConfig,
-    target_config: Option<&TargetCurveConfig>,
+    resources: Option<&EqResources>,
     sample_rate: f64,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
     optimize_channel_eq_inner(
         curve,
         config,
-        target_config,
+        resources,
         sample_rate,
         Some(spin_data),
         None,
@@ -99,11 +96,11 @@ pub fn optimize_channel_eq_with_spin_detailed(
 pub fn optimize_channel_eq_with_callback(
     curve: &Curve,
     config: &OptimizerConfig,
-    target_config: Option<&TargetCurveConfig>,
+    resources: Option<&EqResources>,
     sample_rate: f64,
-    callback: crate::optim::OptimProgressCallback,
+    callback: autoeq_optim::optim::OptimProgressCallback,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
-    optimize_channel_eq_with_callback_detailed(curve, config, target_config, sample_rate, callback)
+    optimize_channel_eq_with_callback_detailed(curve, config, resources, sample_rate, callback)
         .map(EqOptimizationResult::into_legacy)
 }
 
@@ -111,14 +108,14 @@ pub fn optimize_channel_eq_with_callback(
 pub fn optimize_channel_eq_with_callback_detailed(
     curve: &Curve,
     config: &OptimizerConfig,
-    target_config: Option<&TargetCurveConfig>,
+    resources: Option<&EqResources>,
     sample_rate: f64,
-    callback: crate::optim::OptimProgressCallback,
+    callback: autoeq_optim::optim::OptimProgressCallback,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
     optimize_channel_eq_inner(
         curve,
         config,
-        target_config,
+        resources,
         sample_rate,
         None,
         Some(callback),
@@ -130,21 +127,15 @@ pub fn optimize_channel_eq_with_callback_detailed(
 fn optimize_channel_eq_adaptive(
     curve: &Curve,
     config: &OptimizerConfig,
-    target_config: Option<&TargetCurveConfig>,
+    resources: Option<&EqResources>,
     sample_rate: f64,
     spin_data: Option<&HashMap<String, Curve>>,
     backend: &dyn OptimizerBackend,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
     let prep = if let Some(spin_data) = spin_data {
-        prepare_single_channel_eq_with_spin(
-            curve,
-            config,
-            target_config,
-            sample_rate,
-            Some(spin_data),
-        )?
+        prepare_single_channel_eq_with_spin(curve, config, resources, sample_rate, Some(spin_data))?
     } else {
-        prepare_single_channel_eq(curve, config, target_config, sample_rate)?
+        prepare_single_channel_eq(curve, config, resources, sample_rate)?
     };
     let max_filters = config.num_filters;
     let base_budget_per_step = adaptive_budget_for_step(config.max_iter, max_filters, 1);
@@ -224,13 +215,13 @@ fn optimize_channel_eq_adaptive(
 fn optimize_channel_eq_inner(
     curve: &Curve,
     config: &OptimizerConfig,
-    target_config: Option<&TargetCurveConfig>,
+    resources: Option<&EqResources>,
     sample_rate: f64,
     spin_data: Option<&HashMap<String, Curve>>,
-    callback: Option<crate::optim::OptimProgressCallback>,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    let measurement_quality = autoeq_measurements::assess_measurement_quality(curve);
+    let measurement_quality = autoeq_optim::measurements::assess_measurement_quality(curve);
     let uncertainty_scaled_config =
         uncertainty_scaled_optimizer_config(config, &measurement_quality);
     let config = &uncertainty_scaled_config;
@@ -240,7 +231,7 @@ fn optimize_channel_eq_inner(
         return optimize_channel_eq_adaptive(
             curve,
             config,
-            target_config,
+            resources,
             sample_rate,
             spin_data,
             backend,
@@ -249,15 +240,9 @@ fn optimize_channel_eq_inner(
 
     // Single-pass optimization (legacy path or callback path)
     let prep = if let Some(spin_data) = spin_data {
-        prepare_single_channel_eq_with_spin(
-            curve,
-            config,
-            target_config,
-            sample_rate,
-            Some(spin_data),
-        )?
+        prepare_single_channel_eq_with_spin(curve, config, resources, sample_rate, Some(spin_data))?
     } else {
-        prepare_single_channel_eq(curve, config, target_config, sample_rate)?
+        prepare_single_channel_eq(curve, config, resources, sample_rate)?
     };
     let (filters, loss, _x, optimizer_evidence) = run_optimization_pass(
         &prep,
@@ -290,7 +275,7 @@ fn optimize_channel_eq_inner(
 /// * `curves` - Multiple frequency response curves (different positions/measurements)
 /// * `config` - Optimizer configuration
 /// * `multi_config` - Multi-measurement strategy configuration
-/// * `target_config` - Optional target curve configuration
+/// * `resources` - Optional target and impulse-response resources prepared by the workflow
 /// * `sample_rate` - Sample rate for filter design
 ///
 /// # Returns
@@ -300,10 +285,10 @@ pub fn optimize_channel_eq_multi(
     curves: &[Curve],
     config: &OptimizerConfig,
     multi_config: &MultiMeasurementConfig,
-    target_config: Option<&TargetCurveConfig>,
+    resources: Option<&EqResources>,
     sample_rate: f64,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
-    optimize_channel_eq_multi_detailed(curves, config, multi_config, target_config, sample_rate)
+    optimize_channel_eq_multi_detailed(curves, config, multi_config, resources, sample_rate)
         .map(EqOptimizationResult::into_legacy)
 }
 
@@ -312,14 +297,14 @@ pub fn optimize_channel_eq_multi_detailed(
     curves: &[Curve],
     config: &OptimizerConfig,
     multi_config: &MultiMeasurementConfig,
-    target_config: Option<&TargetCurveConfig>,
+    resources: Option<&EqResources>,
     sample_rate: f64,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
     optimize_channel_eq_multi_inner(
         curves,
         config,
         multi_config,
-        target_config,
+        resources,
         sample_rate,
         None,
         &RealOptimizerBackend::new(),
@@ -327,11 +312,11 @@ pub fn optimize_channel_eq_multi_detailed(
 }
 
 #[allow(dead_code)]
-pub(in super::super) fn optimize_channel_eq_multi_with_auto_optimizer(
+pub fn optimize_channel_eq_multi_with_auto_optimizer(
     curves: &[Curve],
     config: &OptimizerConfig,
     multi_config: &MultiMeasurementConfig,
-    target_config: Option<&TargetCurveConfig>,
+    resources: Option<&EqResources>,
     sample_rate: f64,
     auto_context: MultiEqAutoOptimizerContext,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
@@ -339,18 +324,18 @@ pub(in super::super) fn optimize_channel_eq_multi_with_auto_optimizer(
         curves,
         config,
         multi_config,
-        target_config,
+        resources,
         sample_rate,
         auto_context,
     )
     .map(EqOptimizationResult::into_legacy)
 }
 
-pub(in super::super) fn optimize_channel_eq_multi_with_auto_optimizer_detailed(
+pub fn optimize_channel_eq_multi_with_auto_optimizer_detailed(
     curves: &[Curve],
     config: &OptimizerConfig,
     multi_config: &MultiMeasurementConfig,
-    target_config: Option<&TargetCurveConfig>,
+    resources: Option<&EqResources>,
     sample_rate: f64,
     auto_context: MultiEqAutoOptimizerContext,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
@@ -360,7 +345,7 @@ pub(in super::super) fn optimize_channel_eq_multi_with_auto_optimizer_detailed(
         curves,
         &resolved_config,
         multi_config,
-        target_config,
+        resources,
         sample_rate,
         None,
         &RealOptimizerBackend::new(),
@@ -373,15 +358,15 @@ pub fn optimize_channel_eq_multi_with_callback(
     curves: &[Curve],
     config: &OptimizerConfig,
     multi_config: &MultiMeasurementConfig,
-    target_config: Option<&TargetCurveConfig>,
+    resources: Option<&EqResources>,
     sample_rate: f64,
-    callback: crate::optim::OptimProgressCallback,
+    callback: autoeq_optim::optim::OptimProgressCallback,
 ) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
     optimize_channel_eq_multi_with_callback_detailed(
         curves,
         config,
         multi_config,
-        target_config,
+        resources,
         sample_rate,
         callback,
     )
@@ -393,15 +378,15 @@ pub fn optimize_channel_eq_multi_with_callback_detailed(
     curves: &[Curve],
     config: &OptimizerConfig,
     multi_config: &MultiMeasurementConfig,
-    target_config: Option<&TargetCurveConfig>,
+    resources: Option<&EqResources>,
     sample_rate: f64,
-    callback: crate::optim::OptimProgressCallback,
+    callback: autoeq_optim::optim::OptimProgressCallback,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
     optimize_channel_eq_multi_inner(
         curves,
         config,
         multi_config,
-        target_config,
+        resources,
         sample_rate,
         Some(callback),
         &RealOptimizerBackend::new(),
@@ -413,17 +398,18 @@ fn optimize_channel_eq_multi_inner(
     curves: &[Curve],
     config: &OptimizerConfig,
     multi_config: &MultiMeasurementConfig,
-    target_config: Option<&TargetCurveConfig>,
+    resources: Option<&EqResources>,
     sample_rate: f64,
-    callback: Option<crate::optim::OptimProgressCallback>,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
     if curves.is_empty() {
         return Err("no_measurements".into());
     }
 
-    let measurement_quality = autoeq_measurements::assess_multiple_measurement_quality(curves);
-    if measurement_quality.quality == autoeq_measurements::MeasurementQuality::Unusable {
+    let measurement_quality =
+        autoeq_optim::measurements::assess_multiple_measurement_quality(curves);
+    if measurement_quality.quality == autoeq_optim::measurements::MeasurementQuality::Unusable {
         return Err(format!(
             "unusable multi-measurement input: {}",
             measurement_quality.advisories.join(", ")
@@ -479,7 +465,7 @@ fn optimize_channel_eq_multi_inner(
             curves,
             config,
             multi_config,
-            target_config,
+            resources,
             sample_rate,
             callback,
             backend,
@@ -505,9 +491,9 @@ fn optimize_channel_eq_multi_inner(
             boot_cfg.seed,
             boot_cfg.scalarisation
         );
-        let resampled = crate::roomeq::spatial_robustness::bootstrap_resampled_curves(
+        let resampled = roomeq_analysis::spatial_robustness::bootstrap_resampled_curves(
             curves,
-            &crate::roomeq::spatial_robustness::BootstrapConfig {
+            &roomeq_analysis::spatial_robustness::BootstrapConfig {
                 num_resamples: boot_cfg.num_resamples,
                 alpha: boot_cfg.alpha,
                 seed: boot_cfg.seed,
@@ -516,8 +502,8 @@ fn optimize_channel_eq_multi_inner(
         )
         .map_err(|e| -> Box<dyn Error> { Box::new(e) })?;
         uncertainty_cvar_alpha = match boot_cfg.scalarisation {
-            crate::roomeq::BootstrapScalarisation::WorstCase => None,
-            crate::roomeq::BootstrapScalarisation::Cvar => Some(boot_cfg.cvar_alpha),
+            roomeq_model::BootstrapScalarisation::WorstCase => None,
+            roomeq_model::BootstrapScalarisation::Cvar => Some(boot_cfg.cvar_alpha),
         };
         bootstrap_storage = Some(resampled);
     } else {
@@ -546,7 +532,9 @@ fn optimize_channel_eq_multi_inner(
     }
 
     // Parse PEQ model
-    let peq_model = PeqModel::from_str(&config.peq_model, true)
+    let peq_model = config
+        .peq_model
+        .parse::<PeqModel>()
         .map_err(|e| format!("Invalid PEQ model '{}': {}", config.peq_model, e))?;
 
     // Parse loss type
@@ -595,43 +583,15 @@ fn optimize_channel_eq_multi_inner(
                     curves.len()
                 );
             }
-            let smoothing_config = roomeq_engine::config_adapter::to_measurement_smoothing(
+            let smoothing_config = crate::config_adapter::to_measurement_smoothing(
                 config.psychoacoustic_smoothing_config(),
             );
             normalized_curve =
-                crate::read::smooth_psychoacoustic(&normalized_curve, &smoothing_config);
+                autoeq_optim::read::smooth_psychoacoustic(&normalized_curve, &smoothing_config);
         }
 
         // Create target curve
-        let target_curve = match target_config {
-            Some(TargetCurveConfig::Path(path)) => {
-                let target = crate::read::read_curve_from_csv(path)?;
-                crate::read::normalize_and_interpolate_response(&normalized_curve.freq, &target)
-            }
-            Some(TargetCurveConfig::Predefined(name)) => {
-                match crate::workflow::build_target_curve_by_name(
-                    name,
-                    &normalized_curve.freq,
-                    &normalized_curve,
-                ) {
-                    Ok(curve) => curve,
-                    Err(_) => {
-                        let target =
-                            crate::read::read_curve_from_csv(&std::path::PathBuf::from(name))?;
-                        crate::read::normalize_and_interpolate_response(
-                            &normalized_curve.freq,
-                            &target,
-                        )
-                    }
-                }
-            }
-            None => Curve {
-                freq: normalized_curve.freq.clone(),
-                spl: Array1::zeros(normalized_curve.freq.len()),
-                phase: None,
-                ..Default::default()
-            },
-        };
+        let target_curve = resources::target_curve(&normalized_curve, resources);
 
         let deviation_curve = Curve {
             freq: normalized_curve.freq.clone(),
@@ -648,7 +608,7 @@ fn optimize_channel_eq_multi_inner(
             loss_type,
             peq_model,
         );
-        let (mut objective_data, _use_cea) = crate::workflow::setup_objective_data(
+        let (mut objective_data, _use_cea) = setup_objective_data(
             &optim_params_multi,
             &normalized_curve,
             &target_curve,
@@ -662,11 +622,9 @@ fn optimize_channel_eq_multi_inner(
         objective_data.epa_config = config
             .epa_config
             .as_ref()
-            .map(roomeq_engine::config_adapter::to_optimizer_epa);
+            .map(crate::config_adapter::to_optimizer_epa);
         objective_data.asymmetric_loss_config =
-            roomeq_engine::config_adapter::to_optimizer_asymmetric_loss(
-                config.asymmetric_loss_config(),
-            );
+            crate::config_adapter::to_optimizer_asymmetric_loss(config.asymmetric_loss_config());
         objective_data.smoothness_penalty = optim_params_multi.smoothness_penalty.clone();
 
         if i == 0 {
@@ -691,9 +649,7 @@ fn optimize_channel_eq_multi_inner(
 
     let multi_data = MultiObjectiveData {
         objectives,
-        strategy: roomeq_engine::config_adapter::to_optimizer_multi_measurement(
-            multi_config.strategy,
-        ),
+        strategy: crate::config_adapter::to_optimizer_multi_measurement(multi_config.strategy),
         weights,
         variance_lambda: multi_config.variance_lambda,
         uncertainty_cvar_alpha,
@@ -715,8 +671,9 @@ fn optimize_channel_eq_multi_inner(
     );
 
     // Setup bounds and initial guess
-    let (lower_bounds, upper_bounds) = crate::workflow::setup_bounds(&optim_params);
-    let mut x = crate::workflow::initial_guess(&optim_params, &lower_bounds, &upper_bounds);
+    let (lower_bounds, upper_bounds) = autoeq_optim::optim::setup::setup_bounds(&optim_params);
+    let mut x =
+        autoeq_optim::optim::setup::initial_guess(&optim_params, &lower_bounds, &upper_bounds);
 
     // Clone objective data for potential local refinement
     let primary_for_refine = if config.refine {
@@ -739,7 +696,7 @@ fn optimize_channel_eq_multi_inner(
         backend.optimize_filters(&mut x, &lower_bounds, &upper_bounds, primary, &optim_params)
     };
 
-    let global_evidence = crate::optim::OptimizerRunEvidence::from_backend_result(
+    let global_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
         &optim_params.algo,
         opt_result,
         &x,
@@ -790,7 +747,7 @@ fn optimize_channel_eq_multi_inner(
             &optim_params,
             Some(&optim_params.local_algo),
         );
-        let mut local_evidence = crate::optim::OptimizerRunEvidence::from_backend_result(
+        let mut local_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
             &optim_params.local_algo,
             local_result,
             &x,
@@ -806,7 +763,8 @@ fn optimize_channel_eq_multi_inner(
             );
         }
         let local_loss = local_evidence.objective.unwrap_or(f64::INFINITY);
-        let use_local = local_evidence.confidence != crate::optim::OptimizerConfidence::Unusable
+        let use_local = local_evidence.confidence
+            != autoeq_optim::optim::OptimizerConfidence::Unusable
             && local_loss < global_loss;
         local_evidence.selected_for_output = use_local;
         optimizer_evidence[0].selected_for_output = !use_local;
@@ -832,7 +790,7 @@ fn optimize_channel_eq_multi_inner(
         global_loss
     };
 
-    let peq = crate::x2peq::x2peq(&x, sample_rate, optim_params.peq_model);
+    let peq = autoeq_core::x2peq::x2peq(&x, sample_rate, optim_params.peq_model);
     let filters: Vec<Biquad> = peq
         .into_iter()
         .map(|(_weight, biquad)| biquad)
@@ -855,7 +813,7 @@ fn optimize_channel_eq_multi_inner(
 
 fn uncertainty_scaled_optimizer_config(
     config: &OptimizerConfig,
-    quality: &autoeq_measurements::MeasurementQualityReport,
+    quality: &autoeq_optim::measurements::MeasurementQualityReport,
 ) -> OptimizerConfig {
     let mut scaled = config.clone();
     let scale = quality.correction_depth_scale.clamp(0.0, 1.0);
@@ -890,9 +848,9 @@ fn optimize_spatial_robustness(
     curves: &[Curve],
     config: &OptimizerConfig,
     multi_config: &MultiMeasurementConfig,
-    target_config: Option<&TargetCurveConfig>,
+    resources: Option<&EqResources>,
     sample_rate: f64,
-    callback: Option<crate::optim::OptimProgressCallback>,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
     // Build spatial robustness config from serde config or defaults
@@ -1009,14 +967,17 @@ fn optimize_spatial_robustness(
     // Apply psychoacoustic smoothing if enabled
     if config.psychoacoustic {
         log::info!("  Applying psychoacoustic smoothing to spatially averaged curve");
-        let smoothing_config = roomeq_engine::config_adapter::to_measurement_smoothing(
+        let smoothing_config = crate::config_adapter::to_measurement_smoothing(
             config.psychoacoustic_smoothing_config(),
         );
-        normalized_curve = crate::read::smooth_psychoacoustic(&normalized_curve, &smoothing_config);
+        normalized_curve =
+            autoeq_optim::read::smooth_psychoacoustic(&normalized_curve, &smoothing_config);
     }
 
     // Parse PEQ model
-    let peq_model = PeqModel::from_str(&config.peq_model, true)
+    let peq_model = config
+        .peq_model
+        .parse::<PeqModel>()
         .map_err(|e| format!("Invalid PEQ model '{}': {}", config.peq_model, e))?;
 
     // Parse loss type
@@ -1034,31 +995,7 @@ fn optimize_spatial_robustness(
     };
 
     // Build target curve
-    let target_curve = match target_config {
-        Some(TargetCurveConfig::Path(path)) => {
-            let target = crate::read::read_curve_from_csv(path)?;
-            crate::read::normalize_and_interpolate_response(&normalized_curve.freq, &target)
-        }
-        Some(TargetCurveConfig::Predefined(name)) => {
-            match crate::workflow::build_target_curve_by_name(
-                name,
-                &normalized_curve.freq,
-                &normalized_curve,
-            ) {
-                Ok(curve) => curve,
-                Err(_) => {
-                    let target = crate::read::read_curve_from_csv(&std::path::PathBuf::from(name))?;
-                    crate::read::normalize_and_interpolate_response(&normalized_curve.freq, &target)
-                }
-            }
-        }
-        None => Curve {
-            freq: normalized_curve.freq.clone(),
-            spl: Array1::zeros(normalized_curve.freq.len()),
-            phase: None,
-            ..Default::default()
-        },
-    };
+    let target_curve = resources::target_curve(&normalized_curve, resources);
 
     // Compute raw deviation
     let raw_deviation = &target_curve.spl - &normalized_curve.spl;
@@ -1099,15 +1036,14 @@ fn optimize_spatial_robustness(
     objective_data.epa_config = config
         .epa_config
         .as_ref()
-        .map(roomeq_engine::config_adapter::to_optimizer_epa);
+        .map(crate::config_adapter::to_optimizer_epa);
     objective_data.asymmetric_loss_config =
-        roomeq_engine::config_adapter::to_optimizer_asymmetric_loss(
-            config.asymmetric_loss_config(),
-        );
+        crate::config_adapter::to_optimizer_asymmetric_loss(config.asymmetric_loss_config());
     objective_data.smoothness_penalty = optim_params.smoothness_penalty.clone();
 
-    let (lower_bounds, upper_bounds) = crate::workflow::setup_bounds(&optim_params);
-    let mut x = crate::workflow::initial_guess(&optim_params, &lower_bounds, &upper_bounds);
+    let (lower_bounds, upper_bounds) = autoeq_optim::optim::setup::setup_bounds(&optim_params);
+    let mut x =
+        autoeq_optim::optim::setup::initial_guess(&optim_params, &lower_bounds, &upper_bounds);
 
     let opt_result = if let Some(cb) = callback {
         backend.optimize_filters_with_callback(
@@ -1128,7 +1064,7 @@ fn optimize_spatial_robustness(
         )
     };
 
-    let evidence = crate::optim::OptimizerRunEvidence::from_backend_result(
+    let evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
         &optim_params.algo,
         opt_result,
         &x,
@@ -1155,7 +1091,7 @@ fn optimize_spatial_robustness(
         .objective
         .ok_or("spatial robustness optimizer did not return a finite objective")?;
 
-    let peq = crate::x2peq::x2peq(&x, sample_rate, optim_params.peq_model);
+    let peq = autoeq_core::x2peq::x2peq(&x, sample_rate, optim_params.peq_model);
     let filters: Vec<Biquad> = peq
         .into_iter()
         .map(|(_weight, biquad)| biquad)
@@ -1178,9 +1114,10 @@ fn optimize_spatial_robustness(
 #[cfg(test)]
 mod processing_mode_tests {
     use super::*;
+    use ndarray::Array1;
 
-    use crate::roomeq::mixed_phase::MixedPhaseConfig;
-    use crate::roomeq::types::{FirConfig, ProcessingMode};
+    use crate::mixed_phase::MixedPhaseConfig;
+    use roomeq_model::{FirConfig, ProcessingMode};
 
     fn make_simple_room_curve() -> Curve {
         let n = 100;
@@ -1232,7 +1169,8 @@ mod processing_mode_tests {
             max_db: 8.0,
             ..OptimizerConfig::default()
         };
-        let quality = autoeq_measurements::assess_measurement_quality(&make_simple_room_curve());
+        let quality =
+            autoeq_optim::measurements::assess_measurement_quality(&make_simple_room_curve());
         assert_eq!(quality.correction_depth_scale, 0.75);
 
         let scaled = uncertainty_scaled_optimizer_config(&config, &quality);
@@ -1288,10 +1226,10 @@ mod processing_mode_tests {
 
         let callback_called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let callback_called_clone = std::sync::Arc::clone(&callback_called);
-        let callback: crate::optim::OptimProgressCallback =
+        let callback: autoeq_optim::optim::OptimProgressCallback =
             Box::new(move |_iter: usize, _loss: f64, _epa: Option<f64>| {
                 callback_called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
-                crate::de::CallbackAction::Continue
+                autoeq_optim::de::CallbackAction::Continue
             });
 
         let result = optimize_channel_eq_with_callback(&curve, &config, None, 48000.0, callback);
@@ -1346,7 +1284,7 @@ mod processing_mode_tests {
     /// Test MixedPhase mode configuration
     #[test]
     fn test_processing_mode_mixedphase_config() {
-        use crate::roomeq::types::MixedPhaseSerdeConfig;
+        use roomeq_model::MixedPhaseSerdeConfig;
         let mixed_phase_config = MixedPhaseSerdeConfig {
             max_fir_length_ms: 10.0,
             pre_ringing_threshold_db: -30.0,
@@ -1370,7 +1308,7 @@ mod processing_mode_tests {
 
         // MixedPhaseConfig should be used but decompose_phase will fail without phase
         let config = MixedPhaseConfig::default();
-        let result = crate::roomeq::mixed_phase::decompose_phase(&curve_without_phase, &config);
+        let result = crate::mixed_phase::decompose_phase(&curve_without_phase, &config);
         assert!(result.is_err(), "MixedPhase should fail without phase data");
     }
 
@@ -1381,7 +1319,7 @@ mod processing_mode_tests {
         assert!(curve_with_phase.phase.is_some());
 
         let config = MixedPhaseConfig::default();
-        let result = crate::roomeq::mixed_phase::decompose_phase(&curve_with_phase, &config);
+        let result = crate::mixed_phase::decompose_phase(&curve_with_phase, &config);
         assert!(
             result.is_ok(),
             "MixedPhase should succeed with phase data: {:?}",
@@ -1413,9 +1351,10 @@ mod processing_mode_tests {
 #[cfg(test)]
 mod harman_regression_tests {
     use super::*;
+    use ndarray::Array1;
 
-    use crate::roomeq::target_tilt::build_complete_target_curve;
-    use crate::roomeq::types::{TargetResponseConfig, TargetShape, UserPreference};
+    use roomeq_model::target_tilt::build_complete_target_curve;
+    use roomeq_model::{TargetResponseConfig, TargetShape, UserPreference};
 
     fn make_curve_with_freqs(freqs: Vec<f64>, spl: Vec<f64>) -> Curve {
         Curve {
@@ -1548,7 +1487,7 @@ mod harman_regression_tests {
 #[cfg(test)]
 mod multi_eq_tests {
     use super::*;
-    use crate::optim::{MockOptimizerBackend, OptimizerConfidence, OptimizerTermination};
+    use autoeq_optim::optim::{MockOptimizerBackend, OptimizerConfidence, OptimizerTermination};
     use ndarray::Array1;
 
     fn make_simple_room_curve() -> Curve {
@@ -1681,7 +1620,7 @@ mod multi_eq_tests {
             ..OptimizerConfig::default()
         };
         let multi_config = MultiMeasurementConfig::default();
-        let auto_context = crate::roomeq::eq::MultiEqAutoOptimizerContext::sub_channel();
+        let auto_context = crate::eq::MultiEqAutoOptimizerContext::sub_channel();
 
         let result = optimize_channel_eq_multi_with_auto_optimizer(
             &[curve1, curve2],
@@ -1861,10 +1800,10 @@ mod multi_eq_tests {
 
         let callback_called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let callback_called_clone = std::sync::Arc::clone(&callback_called);
-        let callback: crate::optim::OptimProgressCallback =
+        let callback: autoeq_optim::optim::OptimProgressCallback =
             Box::new(move |_iter: usize, _loss: f64, _epa: Option<f64>| {
                 callback_called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
-                crate::de::CallbackAction::Continue
+                autoeq_optim::de::CallbackAction::Continue
             });
 
         let result = optimize_channel_eq_multi_with_callback(
@@ -1900,11 +1839,11 @@ mod multi_eq_tests {
         };
         let multi_config = MultiMeasurementConfig {
             strategy: MultiMeasurementStrategy::MinimaxUncertainty,
-            bootstrap_uncertainty: Some(crate::roomeq::types::BootstrapUncertaintyConfig {
+            bootstrap_uncertainty: Some(roomeq_model::BootstrapUncertaintyConfig {
                 num_resamples: 4,
                 alpha: 0.05,
                 seed: 1,
-                scalarisation: crate::roomeq::types::BootstrapScalarisation::WorstCase,
+                scalarisation: roomeq_model::BootstrapScalarisation::WorstCase,
                 cvar_alpha: 0.25,
             }),
             ..MultiMeasurementConfig::default()
@@ -1959,14 +1898,6 @@ mod multi_eq_tests {
             phase: None,
             ..Default::default()
         };
-        let mut tmpfile = tempfile::NamedTempFile::new().unwrap();
-        use std::io::Write;
-        writeln!(tmpfile, "frequency,spl").unwrap();
-        for i in 0..target.freq.len() {
-            writeln!(tmpfile, "{}, {}", target.freq[i], target.spl[i]).unwrap();
-        }
-        tmpfile.flush().unwrap();
-
         let config = OptimizerConfig {
             algorithm: "autoeq:de".to_string(),
             strategy: "lshade".to_string(),
@@ -1978,14 +1909,16 @@ mod multi_eq_tests {
             ..OptimizerConfig::default()
         };
         let multi_config = MultiMeasurementConfig::default();
-        let target_config =
-            crate::roomeq::types::TargetCurveConfig::Path(tmpfile.path().to_path_buf());
+        let resources = EqResources {
+            target: Some(resources::PreparedEqTarget::Curve(Box::new(target))),
+            ..EqResources::default()
+        };
 
         let result = optimize_channel_eq_multi(
             &[curve1, curve2],
             &config,
             &multi_config,
-            Some(&target_config),
+            Some(&resources),
             48000.0,
         );
         assert!(
@@ -2069,11 +2002,11 @@ mod multi_eq_tests {
         };
         let multi_config = MultiMeasurementConfig {
             strategy: MultiMeasurementStrategy::SpatialRobustness,
-            bootstrap_uncertainty: Some(crate::roomeq::types::BootstrapUncertaintyConfig {
+            bootstrap_uncertainty: Some(roomeq_model::BootstrapUncertaintyConfig {
                 num_resamples: 4,
                 alpha: 0.05,
                 seed: 1,
-                scalarisation: crate::roomeq::types::BootstrapScalarisation::Cvar,
+                scalarisation: roomeq_model::BootstrapScalarisation::Cvar,
                 cvar_alpha: 0.25,
             }),
             ..MultiMeasurementConfig::default()
@@ -2088,7 +2021,9 @@ mod multi_eq_tests {
         );
     }
 
-    use crate::roomeq::rir_prototype::{DirectivityModel, DistanceWeightMode, RirPrototypeConfig};
+    use roomeq_analysis::rir_prototype::{
+        DirectivityModel, DistanceWeightMode, RirPrototypeConfig,
+    };
 
     #[test]
     fn optimize_channel_eq_multi_rir_prototype_runs() {

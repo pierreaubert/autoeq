@@ -3,6 +3,8 @@
 #![forbid(unsafe_code)]
 
 pub use autoeq_core::{AutoeqError, Curve, PeqModel};
+pub use autoeq_optim::de::CallbackAction;
+pub use autoeq_optim::optim::{OptimProgressCallback, OptimizerRunEvidence};
 pub mod error {
     pub use autoeq_core::error::*;
 }
@@ -11,6 +13,8 @@ pub mod error {
 pub mod bass_phase_confidence;
 /// Pure CEA-2034 speaker and preference correction.
 pub mod cea2034;
+/// Complete path-free preparation and execution for one channel.
+pub mod channel_execution;
 /// Path-free phase-linear, hybrid, and mixed-phase channel processing.
 pub mod channel_fir;
 /// Path-free low-latency, warped-IIR, and Kautz-modal channel processing.

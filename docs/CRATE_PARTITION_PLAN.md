@@ -468,15 +468,17 @@ Local progress:
   remain 43, with zero cycles, exceptions, or duplicate implementations; the
   ratchets are now 55,358 root Rust lines, 39,721 root RoomEQ lines, 15,337 root
   binary lines, and 641 root unit tests.
-- WP4 remains in progress: ChannelProcessingStrategy ownership and the generic
-  single-channel topology/workflow adapters are still rooted and must move
-  before the package exit criteria are satisfied.
-
-Remaining dependency order:
-
-1. Move the remaining channel preparation, optimizer clamping, and compatibility
-   tuple dispatch into owner crates, then delete the root `speaker_eq` module and
-   temporary EQ adapters.
+- WP4 is complete. roomeq-analysis owns sub-passband detection, roomeq-model
+  owns the bass-management crossover query, roomeq-engine owns deterministic
+  channel preparation, optimizer clamping, mode dispatch, and result assembly,
+  and roomeq-workflow owns measurement/target resources, callback bracketing,
+  sidecar persistence, and the compatibility result boundary. The root
+  `speaker_eq` module and temporary `eq` facade were deleted; both production
+  callers now invoke the crate workflow directly. Eleven focused owner-crate
+  tests cover the relocated policies and workflow boundary. Internal edges
+  remain 43, with zero cycles, exceptions, or duplicate implementations; the
+  ratchets are now 53,668 root Rust lines, 38,031 root RoomEQ lines, 15,337 root
+  binary lines, and 610 root unit tests.
 
 No intermediate WP4 change may add filesystem paths to an engine channel
 contract, perform measurement or artifact I/O in `roomeq-engine`, add an internal

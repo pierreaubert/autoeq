@@ -7,6 +7,24 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
+/// Resolve the active bass-management crossover frequency from room config.
+pub fn bass_management_crossover_frequency_hz(config: &RoomConfig) -> Option<f64> {
+    let system = config.system.as_ref()?;
+    let subwoofers = system.subwoofers.as_ref()?;
+    if !system.bass_management.clone().unwrap_or_default().enabled {
+        return None;
+    }
+    let crossover = config
+        .crossovers
+        .as_ref()?
+        .get(subwoofers.crossover.as_deref()?)?;
+    crossover.frequency.or_else(|| {
+        crossover
+            .frequency_range
+            .map(|(minimum, maximum)| (minimum * maximum).sqrt())
+    })
+}
+
 /// Map a user-facing channel label to its canonical home-cinema role.
 pub fn role_for_channel(channel_name: &str) -> HomeCinemaRole {
     fn normalized(channel_name: &str) -> String {
@@ -504,10 +522,49 @@ fn default_route_matrix_gain() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{CrossoverConfig, SubwooferSystemConfig, SystemConfig};
 
     #[test]
     fn default_route_matrix_gain_is_unity() {
         assert_eq!(default_route_matrix_gain(), 1.0);
+    }
+
+    #[test]
+    fn bass_management_crossover_uses_geometric_range_center() {
+        let mut crossovers = HashMap::new();
+        crossovers.insert(
+            "main".to_string(),
+            CrossoverConfig {
+                crossover_type: "LR24".to_string(),
+                frequency: None,
+                frequencies: None,
+                frequency_range: Some((80.0, 125.0)),
+            },
+        );
+        let config = RoomConfig {
+            system: Some(SystemConfig {
+                bass_management: Some(BassManagementConfig {
+                    enabled: true,
+                    ..BassManagementConfig::default()
+                }),
+                subwoofers: Some(SubwooferSystemConfig {
+                    config: crate::SubwooferStrategy::default(),
+                    crossover: Some("main".to_string()),
+                    mapping: HashMap::new(),
+                }),
+                ..SystemConfig::default()
+            }),
+            crossovers: Some(crossovers),
+            ..RoomConfig::default()
+        };
+
+        assert_eq!(bass_management_crossover_frequency_hz(&config), Some(100.0));
+        let mut default_policy = config;
+        default_policy.system.as_mut().unwrap().bass_management = None;
+        assert_eq!(
+            bass_management_crossover_frequency_hz(&default_policy),
+            Some(100.0)
+        );
     }
 }
 

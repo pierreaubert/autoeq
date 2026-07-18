@@ -2,7 +2,6 @@ use super::super::config::{RoomValidationContext, validate_room_config_staged};
 use super::super::pipeline::PipelineStepId;
 use super::super::slope;
 use super::super::types::{MeasurementSource, RoomConfig, SpeakerConfig, TargetShape};
-use crate::Curve;
 use crate::error::{AutoeqError, Result};
 use log::{debug, info, warn};
 use math_audio_dsp::analysis::compute_average_response;
@@ -25,66 +24,6 @@ use std::collections::HashMap;
 /// within the measurement range and is tricked into returning a deep
 /// mid-band null. First-above / last-above indices are robust to both
 /// failure modes.
-/// Warn when the optimizer frequency range is outside the measurement data.
-///
-/// Filters can only be placed within the frequency span the measurement
-/// actually covers. If `min_freq` falls below the lowest measured frequency,
-/// or `max_freq` above the highest, the optimizer will either find no data
-/// there (and skip the region) or interpolate through a roll-off, producing
-/// a silently degraded result. Surface the divergence as a `log::warn!` so
-/// it appears in the `roomeq` binary's stderr and in any consumer that
-/// attaches a log subscriber.
-///
-/// The tolerance is `10^0.05 ≈ 1.122` on the frequency axis — about
-/// 1/6 octave. Small numerical mismatches (19.99 Hz vs 20 Hz) are
-/// ignored, but a user who asks the optimizer to work down to 10 Hz
-/// with a measurement that only starts at 100 Hz gets the warning
-/// (100 → 10 is exactly one decade, well past 1/6 octave).
-pub(in super::super) fn warn_if_optimizer_bounds_exceed_data(
-    channel_name: &str,
-    curve: &Curve,
-    opt: &super::super::types::OptimizerConfig,
-) {
-    let Some((below, above, data_min, data_max)) = optimizer_bounds_exceed_data(curve, opt) else {
-        return;
-    };
-    if below {
-        warn!(
-            "Channel '{}': optimizer.min_freq={:.1} Hz is below measurement minimum {:.1} Hz. \
-             Filters in [{:.1} .. {:.1}] Hz will have no data to correct and will be ignored.",
-            channel_name, opt.min_freq, data_min, opt.min_freq, data_min,
-        );
-    }
-    if above {
-        warn!(
-            "Channel '{}': optimizer.max_freq={:.1} Hz is above measurement maximum {:.1} Hz. \
-             Filters in [{:.1} .. {:.1}] Hz will have no data to correct and will be ignored.",
-            channel_name, opt.max_freq, data_max, data_max, opt.max_freq,
-        );
-    }
-}
-
-fn optimizer_bounds_exceed_data(
-    curve: &Curve,
-    opt: &super::super::types::OptimizerConfig,
-) -> Option<(bool, bool, f64, f64)> {
-    let data_min = curve.freq.first().copied()?;
-    let data_max = curve.freq.last().copied()?;
-    // 10^0.05 ≈ 1.122 on the frequency axis — about 1/6 octave. Wide
-    // enough to ignore floating-point mismatches at the edges (19.99 vs
-    // 20 Hz) yet still flag genuinely out-of-range optimizer settings
-    // (e.g. asking for 10 Hz when data starts at 100 Hz).
-    let log_margin = 0.05;
-    let min_tol = data_min * 10_f64.powf(-log_margin);
-    let max_tol = data_max * 10_f64.powf(log_margin);
-    Some((
-        opt.min_freq < min_tol,
-        opt.max_freq > max_tol,
-        data_min,
-        data_max,
-    ))
-}
-
 /// Threshold in dB above which to warn about channel level differences
 pub(super) const LEVEL_DIFFERENCE_WARNING_THRESHOLD: f64 = 6.0;
 
@@ -891,54 +830,6 @@ mod tests {
     #[test]
     fn shared_target_level_empty_returns_zero() {
         assert_eq!(shared_target_level(&[]), 0.0);
-    }
-
-    #[test]
-    fn warn_if_optimizer_bounds_exceed_data_empty_curve_is_noop() {
-        let curve = crate::Curve {
-            freq: Array1::from_vec(vec![]),
-            spl: Array1::from_vec(vec![]),
-            phase: None,
-            ..Default::default()
-        };
-        let opt = OptimizerConfig::default();
-        assert!(optimizer_bounds_exceed_data(&curve, &opt).is_none());
-        warn_if_optimizer_bounds_exceed_data("left", &curve, &opt);
-    }
-
-    #[test]
-    fn optimizer_bounds_exceed_data_uses_log_frequency_tolerance() {
-        let curve = crate::Curve {
-            freq: Array1::from_vec(vec![100.0, 1_000.0, 10_000.0]),
-            spl: Array1::zeros(3),
-            phase: None,
-            ..Default::default()
-        };
-
-        let mut opt = OptimizerConfig {
-            min_freq: 50.0,
-            max_freq: 5_000.0,
-            ..Default::default()
-        };
-        let (below, above, data_min, data_max) =
-            optimizer_bounds_exceed_data(&curve, &opt).expect("non-empty curve");
-        assert!(below);
-        assert!(!above);
-        assert_eq!((data_min, data_max), (100.0, 10_000.0));
-
-        opt.min_freq = 200.0;
-        opt.max_freq = 20_000.0;
-        let (below, above, _, _) =
-            optimizer_bounds_exceed_data(&curve, &opt).expect("non-empty curve");
-        assert!(!below);
-        assert!(above);
-
-        opt.min_freq = 99.0;
-        opt.max_freq = 10_000.0;
-        let (below, above, _, _) =
-            optimizer_bounds_exceed_data(&curve, &opt).expect("non-empty curve");
-        assert!(!below, "99 Hz is within the 0.05-decade tolerance");
-        assert!(!above);
     }
 
     #[test]

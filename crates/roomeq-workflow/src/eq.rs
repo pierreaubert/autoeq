@@ -1,18 +1,12 @@
-//! Temporary compatibility adapters for the crate-owned EQ engine.
-//!
-//! Root RoomEQ orchestration still passes filesystem-backed configuration.
-//! Resolve those resources in the workflow crate, then call the in-memory
-//! engine. This module should disappear when the remaining orchestration moves
-//! to `roomeq-workflow`.
+//! Filesystem-backed adapters for the in-memory RoomEQ equalization engine.
 
 use std::error::Error;
 
+use roomeq_engine::Curve;
 use roomeq_engine::eq::{self as engine_eq, EqResources};
 use roomeq_model::{MultiMeasurementConfig, OptimizerConfig, TargetCurveConfig};
 
-use crate::Curve;
-
-pub(crate) use roomeq_engine::eq::{
+pub use roomeq_engine::eq::{
     EqOptimizationResult, MultiEqAutoOptimizerContext,
     resolve_multi_measurement_auto_optimizer_config,
 };
@@ -21,7 +15,7 @@ fn prepare_resources(
     config: &OptimizerConfig,
     target: Option<&TargetCurveConfig>,
 ) -> Result<EqResources, Box<dyn Error>> {
-    roomeq_workflow::prepare_eq_resources(config, target)
+    crate::prepare_eq_resources(config, target)
 }
 
 pub fn optimize_channel_eq_detailed(
@@ -39,7 +33,7 @@ pub fn optimize_channel_eq_with_callback_detailed(
     config: &OptimizerConfig,
     target: Option<&TargetCurveConfig>,
     sample_rate: f64,
-    callback: autoeq_optim::optim::OptimProgressCallback,
+    callback: roomeq_engine::OptimProgressCallback,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
     let resources = prepare_resources(config, target)?;
     engine_eq::optimize_channel_eq_with_callback_detailed(

@@ -76,11 +76,7 @@ fn resolve_crossover_descriptor(
             format!("missing_crossover_config:{key}"),
         );
     };
-    let frequency = crossover.frequency.or_else(|| {
-        crossover
-            .frequency_range
-            .map(|(min, max)| (min * max).sqrt())
-    });
+    let frequency = roomeq_model::home_cinema::bass_management_crossover_frequency_hz(config);
     (
         crossover.crossover_type.clone(),
         frequency,

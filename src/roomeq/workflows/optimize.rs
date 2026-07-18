@@ -16,7 +16,7 @@ use std::path::Path;
 
 /// Workflow for Stereo 2.0 (No Subwoofer)
 ///
-/// Per-channel EQ is delegated to `process_single_speaker` so that
+/// Per-channel EQ is delegated to the crate-owned channel workflow so that
 /// `excursion_protection`, `target_response`, and `cea2034_correction`
 /// all apply inside the workflow. An alignment-gain plugin is prepended
 /// to the returned DSP chain without affecting feature decisions
@@ -54,7 +54,7 @@ pub(in super::super) fn optimize_stereo_2_0_with_progress<'a>(
 /// Workflow for Stereo 2.1 (With Subwoofer)
 ///
 /// Phase 3b: per-channel features (`excursion_protection`, `target_response`,
-/// `cea2034_correction`) are applied via `process_single_speaker` at the
+/// `cea2034_correction`) are applied by the channel workflow at the
 /// Pre-EQ stage and the resulting plugin stack is inserted before the
 /// crossover HP/LP in the final DSP chain. Post-EQ remains a plain cleanup
 /// pass on the post-crossover curve, with the "do no harm" guard from

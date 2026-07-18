@@ -1,4 +1,3 @@
-use super::super::eq;
 use super::super::optimize::ChannelOptimizationResult;
 use super::super::output;
 use super::super::types::{ChannelDspChain, OptimizerConfig, RoomConfig, TargetCurveConfig};
@@ -11,6 +10,7 @@ use crate::error::{AutoeqError, Result};
 use log::warn;
 #[cfg(test)]
 use math_audio_iir_fir::Biquad;
+use roomeq_workflow::eq;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -68,20 +68,20 @@ pub(super) fn run_post_eq(
     })
 }
 
-/// Runs a single channel through `process_single_speaker` and prepends an
+/// Runs a single channel through `roomeq_workflow::process_single_channel` and prepends an
 /// alignment-gain plugin to the returned DSP chain.
 ///
 /// This is the Phase 3 feature-parity bridge: the generic per-channel path
 /// honours every `OptimizerConfig` feature (excursion protection, target
 /// tilt/response, broadband matching, CEA2034 correction). Workflows that
 /// used to call `eq::optimize_channel_eq` directly bypassed all of them.
-/// By routing each channel through `process_single_speaker` with the
+/// By routing each channel through the crate workflow with the
 /// original `MeasurementSource` (so `speaker_name` propagates to CEA2034)
 /// and a config clone carrying any workflow-specific frequency overrides,
 /// the workflow inherits the full feature matrix.
 ///
 /// The alignment gain is not applied to the curve itself — it is added as a
-/// plugin at the head of the chain. `process_single_speaker`'s internal
+/// plugin at the head of the chain. The channel workflow's internal
 /// decisions (F3 detection, passband estimation, target tilt, etc.) use
 /// relative-to-peak thresholds that are gain-invariant, so passing the raw
 /// curve is equivalent to passing an aligned one.
@@ -134,7 +134,7 @@ pub(super) fn run_channel_via_generic_path(
     let stopped = progress
         .as_ref()
         .map(|progress| Arc::clone(&progress.stopped));
-    let mut processed = super::super::speaker_eq::process_single_speaker(
+    let mut processed = roomeq_workflow::process_single_channel(
         role,
         source,
         effective_config,
@@ -172,7 +172,7 @@ pub(super) fn run_channel_via_generic_path(
             let stopped = progress
                 .as_ref()
                 .map(|progress| Arc::clone(&progress.stopped));
-            processed = super::super::speaker_eq::process_single_speaker(
+            processed = roomeq_workflow::process_single_channel(
                 role,
                 source,
                 config,

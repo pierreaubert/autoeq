@@ -73,6 +73,106 @@ pub fn detect_passband_and_mean(curve: &Curve) -> (Option<(f64, f64)>, f64) {
     (Some((f64::from(low), f64::from(high))), mean)
 }
 
+/// Detect a subwoofer's natural low and high -3 dB passband limits.
+pub fn detect_sub_passband_3db(curve: &Curve) -> Option<(f64, f64)> {
+    if curve.freq.len() < 4 || curve.spl.len() != curve.freq.len() {
+        return None;
+    }
+
+    let smoothed = autoeq_core::smooth_one_over_n_octave(curve, 1);
+    if smoothed.freq.len() < 4 {
+        return None;
+    }
+    const SUB_SEARCH_LO_HZ: f64 = 10.0;
+    const SUB_SEARCH_HI_HZ: f64 = 500.0;
+    let mut peak_idx = None;
+    let mut peak_spl = f64::NEG_INFINITY;
+    for index in 0..smoothed.freq.len() {
+        let frequency = smoothed.freq[index];
+        if !(SUB_SEARCH_LO_HZ..=SUB_SEARCH_HI_HZ).contains(&frequency) {
+            continue;
+        }
+        let level = smoothed.spl[index];
+        if level.is_finite() && level > peak_spl {
+            peak_spl = level;
+            peak_idx = Some(index);
+        }
+    }
+    let peak_idx = peak_idx?;
+
+    const IN_BAND_TOLERANCE_DB: f64 = 2.0;
+    let in_band_threshold = peak_spl - IN_BAND_TOLERANCE_DB;
+    let mut in_lo = peak_idx;
+    while in_lo > 0 && smoothed.spl[in_lo - 1] >= in_band_threshold {
+        in_lo -= 1;
+    }
+    let mut in_hi = peak_idx;
+    while in_hi + 1 < smoothed.spl.len() && smoothed.spl[in_hi + 1] >= in_band_threshold {
+        in_hi += 1;
+    }
+    let frequencies = smoothed
+        .freq
+        .iter()
+        .map(|&frequency| frequency as f32)
+        .collect::<Vec<_>>();
+    let levels = smoothed
+        .spl
+        .iter()
+        .map(|&level| level as f32)
+        .collect::<Vec<_>>();
+    let band_average = compute_average_response(
+        &frequencies,
+        &levels,
+        Some((smoothed.freq[in_lo] as f32, smoothed.freq[in_hi] as f32)),
+    ) as f64;
+    if !band_average.is_finite() {
+        return None;
+    }
+    let threshold = band_average - 3.0;
+
+    let mut low = smoothed.freq[0];
+    let mut found_low = false;
+    for index in (0..peak_idx).rev() {
+        let level = smoothed.spl[index];
+        if level <= threshold {
+            let low_frequency = smoothed.freq[index];
+            let high_frequency = smoothed.freq[index + 1];
+            let high_level = smoothed.spl[index + 1];
+            let denominator = high_level - level;
+            low = if denominator.abs() > f64::EPSILON {
+                let position = ((threshold - level) / denominator).clamp(0.0, 1.0);
+                (low_frequency.ln() + position * (high_frequency.ln() - low_frequency.ln())).exp()
+            } else {
+                low_frequency
+            };
+            found_low = true;
+            break;
+        }
+    }
+
+    let mut high = smoothed.freq[smoothed.freq.len() - 1];
+    let mut found_high = false;
+    for index in (peak_idx + 1)..smoothed.spl.len() {
+        let level = smoothed.spl[index];
+        if level <= threshold {
+            let low_frequency = smoothed.freq[index - 1];
+            let high_frequency = smoothed.freq[index];
+            let low_level = smoothed.spl[index - 1];
+            let denominator = level - low_level;
+            high = if denominator.abs() > f64::EPSILON {
+                let position = ((threshold - low_level) / denominator).clamp(0.0, 1.0);
+                (low_frequency.ln() + position * (high_frequency.ln() - low_frequency.ln())).exp()
+            } else {
+                high_frequency
+            };
+            found_high = true;
+            break;
+        }
+    }
+
+    ((found_low || found_high) && high > low).then_some((low, high))
+}
+
 fn interpolate_threshold_crossing(
     f0: f32,
     f1: f32,
@@ -90,6 +190,7 @@ fn interpolate_threshold_crossing(
 
 #[cfg(test)]
 mod tests {
+    use math_audio_iir_fir::{Biquad, BiquadFilterType};
     use ndarray::Array1;
 
     use super::*;
@@ -137,5 +238,39 @@ mod tests {
             interpolate_threshold_crossing(100.0, 200.0, 5.0, 5.0, 5.0),
             100.0
         );
+    }
+
+    #[test]
+    fn sub_passband_detection_uses_the_unmodified_measurement_curve() {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(500.0), 64);
+        let spl = freq
+            .iter()
+            .map(|&frequency| {
+                if frequency < 200.0 {
+                    80.0
+                } else {
+                    80.0 - 20.0 * ((frequency / 200.0).log2().max(0.0))
+                }
+            })
+            .collect::<Vec<_>>();
+        let raw_curve = Curve {
+            freq,
+            spl: Array1::from(spl),
+            ..Curve::default()
+        };
+        let highpass = Biquad::new(BiquadFilterType::Highpass, 80.0, 48_000.0, 0.707, 0.0);
+        let highpass_response = autoeq_core::response::compute_peq_complex_response(
+            &[highpass],
+            &raw_curve.freq,
+            48_000.0,
+        );
+        let highpass_curve =
+            autoeq_core::response::apply_complex_response(&raw_curve, &highpass_response);
+
+        let raw_band = detect_sub_passband_3db(&raw_curve).unwrap();
+        let highpass_band = detect_sub_passband_3db(&highpass_curve).unwrap();
+        assert!(raw_band.0 < 40.0);
+        assert!(highpass_band.0 > 50.0);
+        assert!((raw_band.1 - highpass_band.1).abs() < 30.0);
     }
 }

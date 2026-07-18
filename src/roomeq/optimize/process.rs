@@ -2,7 +2,6 @@ use super::super::group_processing::{
     process_cardioid, process_dba, process_multisub_group, process_speaker_group,
 };
 use super::super::pipeline::{PipelineStepId, PipelineStepStatus};
-use super::super::speaker_eq::process_single_speaker;
 use super::super::types::{RoomConfig, SpeakerConfig};
 use super::misc::generic_channel_progress_iterations;
 use super::room_optimization_progress::RoomOptimizationProgress;
@@ -208,7 +207,7 @@ pub(super) fn process_generic_channels(
 /// `probe_arrival_overrides` — optional per-channel probe-based arrival times
 /// (from the delay-detection UI step). When present and the channel name has a
 /// matching entry, this overrides the WAV-onset fallback inside
-/// `process_single_speaker`.
+/// the crate-owned single-channel workflow.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn process_speaker_internal(
     channel_name: &str,
@@ -226,7 +225,7 @@ pub(super) fn process_speaker_internal(
         SpeakerConfig::Single(source) => {
             let probe_arrival_ms =
                 probe_arrival_overrides.and_then(|m| m.get(channel_name).copied());
-            process_single_speaker(
+            roomeq_workflow::process_single_channel(
                 channel_name,
                 source,
                 room_config,

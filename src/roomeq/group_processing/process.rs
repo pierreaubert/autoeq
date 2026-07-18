@@ -1,11 +1,9 @@
 use super::super::crossover;
 use super::super::dba;
-use super::super::eq;
 use super::super::multiseat::{self, MultiSeatMeasurements};
 use super::super::multisub;
 use super::super::optimize::detect_passband_and_mean;
 use super::super::output;
-use super::super::speaker_eq::determine_optimization_bands;
 use super::super::types::{
     LEGACY_SPEAKER_GROUP_ADVISORY, MultiSeatConfig, MultiSubGroup, OptimizerConfig, RoomConfig,
     SpeakerGroup, SpeakerTopology,
@@ -24,6 +22,7 @@ use crate::read as load;
 use crate::response;
 use log::{debug, info, warn};
 use math_audio_dsp::analysis::compute_average_response;
+use roomeq_workflow::eq;
 use std::path::Path;
 
 struct AggregatedTopologyBands {
@@ -254,7 +253,13 @@ fn process_speaker_topology_impl(
     // 4. Per-Driver Linearization (Pre-Correction)
     info!("  Linearizing {} drivers...", driver_curves.len());
     let mut optimization_bands = crossover_config
-        .map(|crossover| determine_optimization_bands(driver_curves.len(), room_config, crossover))
+        .map(|crossover| {
+            roomeq_engine::crossover::determine_optimization_bands(
+                driver_curves.len(),
+                room_config,
+                crossover,
+            )
+        })
         .unwrap_or_else(|| {
             vec![
                 (

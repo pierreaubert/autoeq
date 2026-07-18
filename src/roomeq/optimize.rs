@@ -50,7 +50,6 @@ mod validation_scorecard;
 pub(in crate::roomeq) mod supporting_source;
 
 pub(in crate::roomeq) use detect::*;
-pub(in crate::roomeq) use misc::*;
 pub use room_optimization_progress::*;
 pub use room_optimization_result::*;
 pub use types::*;
@@ -111,7 +110,7 @@ pub fn optimize_room(
 /// Same as [`optimize_room`] but accepts per-channel probe-based arrival times.
 ///
 /// When the delay-detection UI step has measured arrival times with a tone
-/// burst probe, pass them here so `process_single_speaker` uses the measured
+/// burst probe, pass them here so the channel workflow uses the measured
 /// values instead of falling back to WAV-onset detection. Channels absent from
 /// `probe_arrival_ms` still use the WAV-onset fallback.
 pub fn optimize_room_with_probe_arrivals(

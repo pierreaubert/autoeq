@@ -62,18 +62,15 @@ pub use optimize::{
 
 // Extracted optimization submodules
 pub(crate) use roomeq_analysis::crossover_utils;
-pub(crate) use roomeq_model::auto_tune;
 mod group_processing; // Multi-speaker groups, multisub, DBA, cardioid, mixed-mode
-mod speaker_eq; // Single-speaker EQ optimization // Crossover and group consistency utilities
 
 #[cfg(test)]
 pub mod test_fixtures;
 
-pub use roomeq_engine::crossover;
-pub use roomeq_workflow::{dba, multisub};
-mod eq;
 pub(crate) use roomeq_analysis::frequency_grid;
+pub use roomeq_engine::crossover;
 use roomeq_workflow::fir;
+pub use roomeq_workflow::{dba, multisub};
 pub mod home_cinema;
 pub mod workflows; // Make public to access from optimize.rs or tests
 

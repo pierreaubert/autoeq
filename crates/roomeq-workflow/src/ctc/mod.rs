@@ -1,6 +1,5 @@
 //! Cross-talk cancellation / binaural transfer-matrix support.
 
-mod compute;
 mod dsp_response_cache;
 mod fft;
 mod load;

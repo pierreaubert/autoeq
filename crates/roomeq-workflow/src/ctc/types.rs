@@ -1,22 +1,16 @@
-use super::compute::compute_binaural_diagnostics;
-use super::compute::compute_delivered_response_metrics;
 use super::dsp_response_cache::apply_room_eq_dsp_to_spectrum;
 use super::load::load_hrtf_spectrum;
 use super::load::load_measured_spectrum;
 use super::load::load_raw_sweep_spectrum;
 use super::misc::CTC_ARTIFACT_VERSION;
-use super::misc::beta_for_frequency;
 use super::misc::checked_sample_rate;
-use super::misc::ctc_condition_warning;
-use super::misc::enforce_electrical_sum_headroom;
 use super::misc::invalid_ctc_configuration;
-use super::misc::reconstruction_error_to_db;
-use math_audio_dsp::{
-    TransferMatrixBin, half_spectrum_to_fir, position_errors,
-    solve_minimax_regularized_inverse_bin, solve_regularized_inverse_bin,
+use roomeq_engine::ctc::solve_prepared_ctc;
+pub(super) use roomeq_engine::ctc::{
+    PreparedCtcFilter as CtcFirFilterArtifact, PreparedCtcMatrix as MatrixSpectrum,
+    build_matrix_spectrum,
 };
-use num_complex::Complex64;
-use roomeq_engine::error::{AutoeqError, Result};
+use roomeq_engine::error::Result;
 use roomeq_model::{ChannelDspChain, CtcConfig, SystemConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -50,22 +44,6 @@ pub(super) struct CtcArtifact {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) binaural_diagnostics: Option<CtcBinauralDiagnostics>,
     pub(super) filters: Vec<CtcFirFilterArtifact>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(super) struct CtcFirFilterArtifact {
-    pub(super) speaker: String,
-    pub(super) target_ear: String,
-    pub(super) taps: Vec<f64>,
-}
-
-#[derive(Debug)]
-pub(super) struct MatrixSpectrum {
-    pub(super) source: String,
-    pub(super) speakers: Vec<String>,
-    pub(super) ears: Vec<String>,
-    pub(super) positions: Vec<String>,
-    pub(super) bins: Vec<Vec<TransferMatrixBin>>,
 }
 
 pub fn maybe_generate_recommended_xtc(
@@ -148,128 +126,19 @@ pub fn maybe_generate_recommended_xtc(
     };
     let room_eq_correction_applied = !room_eq_correction_channels.is_empty();
 
-    let target = vec![
-        Complex64::new(1.0, 0.0),
-        Complex64::new(0.0, 0.0),
-        Complex64::new(0.0, 0.0),
-        Complex64::new(1.0, 0.0),
-    ];
-    let num_bins = fft_size / 2 + 1;
-    let mut solved_bins = Vec::with_capacity(num_bins);
-    let mut max_condition = 0.0_f64;
-    let mut total_error = 0.0_f64;
-    let mut worst_position_error = 0.0_f64;
-    let mut headroom_was_limited = false;
-
-    for bin in 0..num_bins {
-        let freq = bin as f64 * sample_rate / fft_size as f64;
-        let beta = beta_for_frequency(config, freq);
-        let solved = if config.robustness == "minimax" {
-            solve_minimax_regularized_inverse_bin(
-                &spectrum.bins[bin],
-                &target,
-                beta,
-                Some(config.regularization.max_gain_db),
-                config.minimax_iterations,
-            )
-        } else {
-            solve_regularized_inverse_bin(
-                &spectrum.bins[bin],
-                &target,
-                beta,
-                Some(config.regularization.max_gain_db),
-            )
-        }
-        .map_err(|message| AutoeqError::OptimizationFailed {
-            message: format!("ctc inverse failed at bin {}: {}", bin, message),
-        })?;
-        max_condition = max_condition.max(solved.condition_number);
-        let mut values = solved.values;
-        headroom_was_limited |= enforce_electrical_sum_headroom(
-            &mut values,
-            spectrum.speakers.len(),
-            2,
-            config.regularization.max_gain_db,
-        );
-        let errors = position_errors(&spectrum.bins[bin], &values, &target).map_err(|message| {
-            AutoeqError::OptimizationFailed {
-                message: format!(
-                    "ctc reconstruction scoring failed at bin {}: {}",
-                    bin, message
-                ),
-            }
-        })?;
-        total_error += errors.iter().sum::<f64>() / errors.len().max(1) as f64;
-        worst_position_error = worst_position_error.max(errors.iter().copied().fold(0.0, f64::max));
-        solved_bins.push(values);
-    }
-    if let Some(message) = ctc_condition_warning(max_condition) {
-        log::warn!("  {}", message);
-    }
-
-    let latency_samples = config.fir_taps / 2;
-    let latency_ms = latency_samples as f64 * 1000.0 / sample_rate;
-    let max_condition_json = if max_condition.is_finite() {
-        max_condition
-    } else {
-        f64::MAX
-    };
-    let mean_reconstruction_error = total_error / num_bins as f64;
-    let mut filters = Vec::new();
-    let mut max_filter_gain_db = f64::NEG_INFINITY;
-    let mut max_electrical_sum_gain_db = f64::NEG_INFINITY;
-
-    for speaker_idx in 0..spectrum.speakers.len() {
-        for ear_idx in 0..2 {
-            let half_spectrum: Vec<Complex64> = solved_bins
-                .iter()
-                .map(|matrix| matrix[speaker_idx * 2 + ear_idx])
-                .collect();
-            let max_mag = half_spectrum.iter().map(|v| v.norm()).fold(0.0, f64::max);
-            if max_mag > 0.0 {
-                max_filter_gain_db = max_filter_gain_db.max(20.0 * max_mag.log10());
-            }
-            let taps =
-                half_spectrum_to_fir(&half_spectrum, config.fir_taps, latency_samples as f64)
-                    .map_err(|message| AutoeqError::OptimizationFailed {
-                        message: format!("ctc FIR synthesis failed: {}", message),
-                    })?;
-            filters.push(CtcFirFilterArtifact {
-                speaker: spectrum.speakers[speaker_idx].clone(),
-                target_ear: spectrum.ears[ear_idx].clone(),
-                taps,
-            });
-        }
-        let max_sum_gain = solved_bins
-            .iter()
-            .map(|matrix| {
-                let row_start = speaker_idx * 2;
-                (matrix[row_start].norm_sqr() + matrix[row_start + 1].norm_sqr()).sqrt()
-            })
-            .fold(0.0, f64::max);
-        if max_sum_gain > 0.0 {
-            max_electrical_sum_gain_db =
-                max_electrical_sum_gain_db.max(20.0 * max_sum_gain.log10());
-        }
-    }
-
-    if !max_filter_gain_db.is_finite() {
-        max_filter_gain_db = 0.0;
-    }
-    if !max_electrical_sum_gain_db.is_finite() {
-        max_electrical_sum_gain_db = 0.0;
-    }
-    let mean_crosstalk_residual_db = reconstruction_error_to_db(mean_reconstruction_error);
-    let driver_headroom_limited = headroom_was_limited
-        || max_electrical_sum_gain_db >= config.regularization.max_gain_db - 0.25;
-    let delivered_response =
-        compute_delivered_response_metrics(&spectrum, &filters, config.fir_taps, latency_samples)?;
-    let binaural_diagnostics = compute_binaural_diagnostics(
-        &spectrum,
-        &delivered_response,
-        max_condition_json,
-        driver_headroom_limited,
-    );
+    let solution = solve_prepared_ctc(&spectrum, config, sample_rate)?;
+    let latency_samples = solution.latency_samples;
+    let latency_ms = solution.latency_ms;
+    let max_filter_gain_db = solution.max_filter_gain_db;
+    let max_condition_json = solution.max_condition_number;
+    let mean_reconstruction_error = solution.mean_reconstruction_error;
+    let worst_position_error = solution.worst_position_error;
+    let mean_crosstalk_residual_db = solution.mean_crosstalk_residual_db;
+    let max_electrical_sum_gain_db = solution.max_electrical_sum_gain_db;
+    let driver_headroom_limited = solution.driver_headroom_limited;
+    let delivered_response = solution.delivered_response;
+    let binaural_diagnostics = solution.binaural_diagnostics;
+    let filters = solution.filters;
 
     std::fs::create_dir_all(output_dir)?;
     let artifact_path = output_dir.join("recommended_xtc_matrix.json");
@@ -320,35 +189,4 @@ pub fn maybe_generate_recommended_xtc(
         delivered_response: Some(delivered_response),
         binaural_diagnostics: Some(binaural_diagnostics),
     }))
-}
-
-pub(super) fn build_matrix_spectrum(
-    source: String,
-    speakers: Vec<String>,
-    ears: Vec<String>,
-    positions: Vec<String>,
-    spectra_by_position: Vec<Vec<[Vec<Complex64>; 2]>>,
-    num_bins: usize,
-) -> MatrixSpectrum {
-    let mut bins = Vec::with_capacity(num_bins);
-    for bin in 0..num_bins {
-        let mut position_bins = Vec::with_capacity(positions.len());
-        for speaker_spectra in &spectra_by_position {
-            let mut values = vec![Complex64::new(0.0, 0.0); 2 * speakers.len()];
-            for (speaker_idx, ear_spectra) in speaker_spectra.iter().enumerate() {
-                values[speaker_idx] = ear_spectra[0][bin];
-                values[speakers.len() + speaker_idx] = ear_spectra[1][bin];
-            }
-            position_bins.push(TransferMatrixBin::new(2, speakers.len(), values));
-        }
-        bins.push(position_bins);
-    }
-
-    MatrixSpectrum {
-        source,
-        speakers,
-        ears,
-        positions,
-        bins,
-    }
 }

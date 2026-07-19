@@ -6,26 +6,20 @@ use math_audio_dsp::{
 use math_audio_iir_fir::{Biquad, BiquadFilterType};
 use num_complex::Complex64;
 use roomeq_engine::error::{AutoeqError, Result};
-use roomeq_model::{CtcConfig, CtcWindowConfig};
+use roomeq_model::CtcWindowConfig;
 use std::path::Path;
 
 pub(super) const CTC_ARTIFACT_VERSION: &str = "ctc-recommended-v1";
-
-pub(super) const CTC_CONDITION_WARNING_THRESHOLD: f64 = 1.0e6;
+#[cfg(test)]
+pub(super) use roomeq_engine::ctc::{
+    CTC_CONDITION_WARNING_THRESHOLD, amplitude_to_db, beta_for_frequency, ctc_condition_warning,
+    enforce_electrical_sum_headroom, reconstruction_error_to_db,
+};
 
 pub(super) fn invalid_ctc_configuration(message: impl Into<String>) -> AutoeqError {
     let message = message.into();
     log::error!("  CTC configuration invalid: {}", message);
     AutoeqError::InvalidConfiguration { message }
-}
-
-pub(super) fn ctc_condition_warning(max_condition: f64) -> Option<String> {
-    (max_condition.is_finite() && max_condition > CTC_CONDITION_WARNING_THRESHOLD).then(|| {
-        format!(
-            "CTC transfer matrix is ill-conditioned: max condition number {:.3e} exceeds {:.3e}; filters may amplify measurement noise or need stronger regularization",
-            max_condition, CTC_CONDITION_WARNING_THRESHOLD
-        )
-    })
 }
 
 pub(super) fn biquad_filter_response(
@@ -79,33 +73,6 @@ pub(super) fn parse_biquad_filter_type(value: &str) -> Option<BiquadFilterType> 
     }
 }
 
-pub(super) fn enforce_electrical_sum_headroom(
-    values: &mut [Complex64],
-    speakers: usize,
-    ears: usize,
-    max_gain_db: f64,
-) -> bool {
-    let max_gain = 10.0_f64.powf(max_gain_db / 20.0);
-    let mut limited = false;
-    for speaker_idx in 0..speakers {
-        let row_start = speaker_idx * ears;
-        let row_end = row_start + ears;
-        let row_norm = values[row_start..row_end]
-            .iter()
-            .map(|value| value.norm_sqr())
-            .sum::<f64>()
-            .sqrt();
-        if row_norm > max_gain && row_norm > 0.0 {
-            let scale = max_gain / row_norm;
-            for value in &mut values[row_start..row_end] {
-                *value *= scale;
-            }
-            limited = true;
-        }
-    }
-    limited
-}
-
 pub(super) fn checked_sample_rate(sample_rate: f64) -> Result<u32> {
     if !sample_rate.is_finite() || sample_rate <= 0.0 || sample_rate > u32::MAX as f64 {
         return Err(AutoeqError::InvalidConfiguration {
@@ -113,22 +80,6 @@ pub(super) fn checked_sample_rate(sample_rate: f64) -> Result<u32> {
         });
     }
     Ok(sample_rate.round() as u32)
-}
-
-pub(super) fn beta_for_frequency(config: &CtcConfig, freq_hz: f64) -> f64 {
-    let beta_db = if freq_hz < 150.0 {
-        config.regularization.beta_lf_db
-    } else if freq_hz > 6000.0 {
-        config.regularization.beta_hf_db
-    } else {
-        config.regularization.beta_db
-    };
-    let robustness_scale = if config.robustness == "minimax" {
-        2.0
-    } else {
-        1.0
-    };
-    10.0_f64.powf(beta_db / 20.0) * robustness_scale
 }
 
 pub(super) fn two_channel_ir_spectrum(
@@ -250,12 +201,4 @@ pub(super) fn read_wav_channels_f64(
         }
     }
     Ok(channels)
-}
-
-pub(super) fn reconstruction_error_to_db(error: f64) -> f64 {
-    10.0 * error.max(1e-24).log10()
-}
-
-pub(super) fn amplitude_to_db(value: f64) -> f64 {
-    20.0 * value.max(1e-12).log10()
 }

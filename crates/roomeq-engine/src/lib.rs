@@ -41,6 +41,8 @@ pub mod channel_target;
 pub mod config_adapter;
 /// Multi-driver crossover optimization and polarity search.
 pub mod crossover;
+/// Path-free cross-talk cancellation matrix solving and diagnostics.
+pub mod ctc;
 /// Double-bass-array optimization and phase-critical array summation.
 pub mod dba;
 /// In-memory per-channel and multi-measurement EQ optimization.

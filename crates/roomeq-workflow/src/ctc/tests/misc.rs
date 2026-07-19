@@ -1,8 +1,8 @@
 use super::super::dsp_response_cache::DspResponseCache;
 use super::super::dsp_response_cache::channel_chain_response;
-use super::super::fft::fft_real_to_half_spectrum_f64;
 use super::super::types::CtcArtifact;
 use num_complex::Complex64;
+use roomeq_engine::ctc::fft_real_to_half_spectrum_f64;
 use roomeq_model::{ChannelDspChain, PluginConfigWrapper};
 
 #[test]

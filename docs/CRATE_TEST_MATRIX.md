@@ -6,7 +6,7 @@ architecture checker rejects a workspace package without a focused command.
 
 | Package | Focused command | Current responsibility |
 |---|---|---|
-| `autoeq` | `cargo test -p autoeq --lib` | Compatibility facade and remaining root implementation |
+| `autoeq` | `cargo test -p autoeq --lib` | Compatibility facade and thin binary launchers |
 | `autoeq-core` | `cargo test -p autoeq-core --lib` | Curves, PEQ layouts, response math, numerical primitives |
 | `autoeq-artifacts` | `cargo test -p autoeq-artifacts --lib` | Artifact-store ports and implementations |
 | `autoeq-cli` | `cargo test -p autoeq-cli --lib` | AutoEQ, benchmark, and acquisition command adapters |
@@ -23,7 +23,7 @@ architecture checker rejects a workspace package without a focused command.
 | `roomeq-export` | `cargo test -p roomeq-export --lib` | External-format contracts and rendering |
 | `roomeq-synthetic` | `cargo test -p roomeq-synthetic --lib` | Deterministic scenarios and measurements |
 | `roomeq-qa` | `cargo test -p roomeq-qa --lib` | Scenario matrices, regression runners, reports, and fuzzing |
-| `roomeq-workflow` | `cargo test -p roomeq-workflow --lib` | Resource loading and engine invocation |
+| `roomeq-workflow` | `cargo test -p roomeq-workflow --lib` | Resource loading, application orchestration, and engine invocation |
 
 Run all WP0 fitness and compatibility checks with:
 

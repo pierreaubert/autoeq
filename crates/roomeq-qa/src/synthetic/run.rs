@@ -19,21 +19,17 @@ use roomeq_engine::room_result::RoomOptimizationResult;
 use roomeq_model::{Curve, MultiSeatConfig, MultiSeatStrategy, ProcessingMode, RoomConfig};
 use std::sync::atomic::Ordering;
 
-pub(super) fn run_optimization(
-    optimizer: &dyn crate::RoomOptimizer,
-    config: &RoomConfig,
-) -> Result<RoomOptimizationResult> {
+pub(super) fn run_optimization(config: &RoomConfig) -> Result<RoomOptimizationResult> {
     let id = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir =
         std::env::temp_dir().join(format!("roomeq_qa_syn_{}_{}", std::process::id(), id));
     std::fs::create_dir_all(&temp_dir)?;
-    let result = optimizer.optimize_room(config, SAMPLE_RATE, Some(&temp_dir));
+    let result = crate::optimize_room(config, SAMPLE_RATE, Some(&temp_dir));
     let _ = std::fs::remove_dir_all(&temp_dir);
     result
 }
 
 pub(super) fn run_single_test(
-    optimizer: &dyn crate::RoomOptimizer,
     degraded: &Curve,
     mode: ProcessingMode,
     target_name: &str,
@@ -68,7 +64,7 @@ pub(super) fn run_single_test(
         }
     }
 
-    let result = match run_optimization(optimizer, &config) {
+    let result = match run_optimization(&config) {
         Ok(r) => r,
         Err(e) => {
             return TestResult {
@@ -124,7 +120,6 @@ pub(super) fn run_single_test(
 }
 
 pub(super) fn run_multisub_test(
-    optimizer: &dyn crate::RoomOptimizer,
     sub_curves: &[Curve],
     topology: &MultiSubTopology,
     option_names: &[&str],
@@ -149,7 +144,7 @@ pub(super) fn run_multisub_test(
         }
     }
 
-    let result = match run_optimization(optimizer, &config) {
+    let result = match run_optimization(&config) {
         Ok(r) => r,
         Err(e) => {
             return TestResult {
@@ -510,7 +505,6 @@ pub(super) fn report_multiseat_api_guard_tests() -> Result<bool> {
 }
 
 pub(super) fn run_multichannel_test(
-    optimizer: &dyn crate::RoomOptimizer,
     layout: &ChannelLayout,
     sub_topo: Option<&SubTopology>,
     difficulty: &DifficultyLevel,
@@ -528,7 +522,7 @@ pub(super) fn run_multichannel_test(
         build_multichannel_config(layout, sub_topo, difficulty, base_curve, sample_rate);
     config.optimizer.processing_mode = processing_mode;
 
-    let result = match run_optimization(optimizer, &config) {
+    let result = match run_optimization(&config) {
         Ok(r) => r,
         Err(e) => {
             return TestResult {

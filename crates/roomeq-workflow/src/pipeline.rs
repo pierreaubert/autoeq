@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use autoeq_artifacts::{ArtifactStore, FsArtifactStore};
-use roomeq_engine::{EngineRequest, PipelineObserver, RoomEngine};
+use roomeq_engine::{
+    EngineRequest, PipelineObserver, RoomEngine, room_result::RoomOptimizationResult,
+};
 use roomeq_model::{Curve, Result, RoomConfig};
 
 /// Application-owned data accompanying an in-memory engine request.
@@ -55,37 +57,26 @@ impl<'a> RoomPipeline<'a> {
         self
     }
 
-    /// Run with the production filesystem artifact store.
-    pub fn run_with<T, F>(self, observer: Option<Box<dyn PipelineObserver>>, kernel: F) -> Result<T>
-    where
-        F: for<'run> FnOnce(
-            EngineRequest<'run>,
-            &'run WorkflowContext<'run>,
-            Option<Box<dyn PipelineObserver>>,
-        ) -> Result<T>,
-    {
+    /// Run the canonical RoomEQ optimization workflow with the production
+    /// filesystem artifact store.
+    pub fn run(
+        self,
+        observer: Option<Box<dyn PipelineObserver>>,
+    ) -> Result<RoomOptimizationResult> {
         let artifact_store = FsArtifactStore::new();
-        self.run_with_store(&artifact_store, observer, kernel)
+        self.run_with_store(&artifact_store, observer)
     }
 
     /// Run with an injected artifact store.
     ///
     /// This is the root-free test seam for application composition. Production
-    /// uses [Self::run_with] and therefore selects the filesystem adapter here,
-    /// not in the engine.
-    pub fn run_with_store<T, F>(
+    /// uses [Self::run] and therefore selects the filesystem adapter here, not
+    /// in the engine.
+    pub fn run_with_store(
         self,
         artifact_store: &dyn ArtifactStore,
         observer: Option<Box<dyn PipelineObserver>>,
-        kernel: F,
-    ) -> Result<T>
-    where
-        F: for<'run> FnOnce(
-            EngineRequest<'run>,
-            &'run WorkflowContext<'run>,
-            Option<Box<dyn PipelineObserver>>,
-        ) -> Result<T>,
-    {
+    ) -> Result<RoomOptimizationResult> {
         let engine_request = EngineRequest {
             config: self.request.config,
             sample_rate: self.request.sample_rate,
@@ -98,7 +89,7 @@ impl<'a> RoomPipeline<'a> {
         };
 
         RoomEngine.run(engine_request, observer, move |request, observer| {
-            kernel(request, &context, observer)
+            crate::room_optimization::optimize_room_pipeline_impl(request, &context, observer)
         })
     }
 }
@@ -112,8 +103,7 @@ mod tests {
     };
 
     use autoeq_artifacts::MemoryArtifactStore;
-    use roomeq_engine::{PipelineControl, PipelineEvent, PipelineStepId, PipelineStepStatus};
-    use roomeq_model::DspGraph;
+    use roomeq_engine::{PipelineControl, PipelineEvent};
 
     use super::*;
 
@@ -134,35 +124,9 @@ mod tests {
             probe_arrival_overrides: None,
         };
 
-        let graph = RoomPipeline::new(request)
-            .run_with_store(
-                &store,
-                Some(Box::new(observer)),
-                |request, context, mut observer| {
-                    let output_dir = context.output_dir.expect("output directory");
-                    context.artifact_store.create_dir_all(output_dir)?;
-                    context
-                        .artifact_store
-                        .write(&output_dir.join("engine-smoke.txt"), b"ok")?;
-                    if let Some(observer) = observer.as_mut() {
-                        let event = PipelineEvent::new(
-                            PipelineStepId::Validation,
-                            PipelineStepStatus::Completed,
-                        );
-                        assert_eq!(observer.on_event(&event), PipelineControl::Continue);
-                    }
-                    let mut graph = DspGraph::new("1");
-                    graph.add_channel(format!("{}-hz", request.sample_rate as usize), Vec::new());
-                    Ok(graph)
-                },
-            )
-            .expect("root-free workflow run");
+        let result = RoomPipeline::new(request).run_with_store(&store, Some(Box::new(observer)));
 
-        assert!(graph.channels.contains_key("48000-hz"));
-        assert_eq!(
-            store.get(Path::new("artifacts/engine-smoke.txt")),
-            Some(b"ok".to_vec())
-        );
-        assert_eq!(event_count.load(Ordering::Relaxed), 1);
+        assert!(result.is_err(), "empty config should fail validation");
+        assert!(event_count.load(Ordering::Relaxed) > 0);
     }
 }

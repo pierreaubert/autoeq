@@ -82,10 +82,10 @@
   },
   "temporary_exceptions": [],
   "metric_budgets": {
-    "root_rust_loc": 13599,
-    "root_roomeq_rust_loc": 13059,
-    "root_binary_rust_loc": 261,
-    "root_unit_tests": 228
+    "root_rust_loc": 482,
+    "root_roomeq_rust_loc": 290,
+    "root_binary_rust_loc": 88,
+    "root_unit_tests": 0
   },
   "public_api": {
     "source": "src/lib.rs",

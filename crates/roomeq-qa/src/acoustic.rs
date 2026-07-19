@@ -143,7 +143,7 @@ struct CorpusReport {
     scenarios: Vec<ScenarioReport>,
 }
 
-pub fn run(optimizer: &impl crate::RoomPipelineRunner) -> Result<()> {
+pub fn run() -> Result<()> {
     let run_started = std::time::Instant::now();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let args = Args::parse();
@@ -173,19 +173,14 @@ pub fn run(optimizer: &impl crate::RoomPipelineRunner) -> Result<()> {
     let mut scenarios = Vec::with_capacity(selected.len());
     for scenario in selected {
         eprintln!("Acoustic corpus: {}", scenario.id);
-        let current = evaluate_variant(
-            optimizer,
-            scenario,
-            scenario.override_config.as_deref(),
-            "current",
-        )?;
+        let current = evaluate_variant(scenario, scenario.override_config.as_deref(), "current")?;
         let scorecard = current.scorecard;
         let candidate = scenario
             .candidate_override_config
             .as_deref()
             .map(|candidate_config| {
                 let candidate_evaluation =
-                    evaluate_variant(optimizer, scenario, Some(candidate_config), "candidate")?;
+                    evaluate_variant(scenario, Some(candidate_config), "candidate")?;
                 let candidate_scorecard = candidate_evaluation.scorecard;
                 let deltas = candidate_deltas(&scorecard, &candidate_scorecard);
                 let recommended = candidate_is_recommended(&candidate_scorecard, &deltas);
@@ -308,7 +303,6 @@ fn rustc_version() -> Option<String> {
 }
 
 fn evaluate_variant(
-    optimizer: &impl crate::RoomPipelineRunner,
     scenario: &AcousticCorpusScenario,
     override_config: Option<&Path>,
     variant: &str,
@@ -335,20 +329,19 @@ fn evaluate_variant(
             .or_insert_with(Vec::new)
             .push(curve.clone());
     }
-    let result = optimizer
-        .optimize_room_with_validation(
-            &room_config,
-            scenario.sample_rate,
-            None,
-            validation_measurements,
+    let result = crate::optimize_room_with_validation(
+        &room_config,
+        scenario.sample_rate,
+        None,
+        validation_measurements,
+    )
+    .map_err(|error| anyhow!(error.to_string()))
+    .with_context(|| {
+        format!(
+            "{variant} optimization failed for scenario '{}'",
+            scenario.id
         )
-        .map_err(|error| anyhow!(error.to_string()))
-        .with_context(|| {
-            format!(
-                "{variant} optimization failed for scenario '{}'",
-                scenario.id
-            )
-        })?;
+    })?;
 
     let mut channel_names: Vec<_> = result.channel_results.keys().cloned().collect();
     if !scenario.channels.is_empty() {

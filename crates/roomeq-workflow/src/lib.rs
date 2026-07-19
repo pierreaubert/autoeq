@@ -18,6 +18,7 @@ pub mod measurement;
 pub mod multisub;
 pub mod output;
 pub mod pipeline;
+pub mod room_optimization;
 pub mod sidecar;
 pub mod supporting_source;
 pub mod topology;
@@ -39,8 +40,16 @@ pub use group_processing::{
 pub use measurement::{load_curve_from_csv, load_measurement, load_source};
 pub use output::save_dsp_chain;
 pub use pipeline::{RoomPipeline, RoomPipelineRequest, WorkflowContext};
+pub use room_optimization::{
+    CallbackAction, ChannelOptimizationResult, RoomOptimizationCallback, RoomOptimizationProgress,
+    RoomOptimizationResult, SpeakerOptimizationCallback, SpeakerOptimizationResult, optimize_room,
+    optimize_room_with_probe_arrivals, optimize_speaker,
+};
 pub use roomeq_export::ExportFormat;
 pub use sidecar::{
     ReservedConvolutionSidecar, persist_convolution_sidecar, reserve_channel_convolution_sidecar,
     reserve_mixed_crossover_sidecar,
 };
+
+#[cfg(test)]
+mod test_fixtures;

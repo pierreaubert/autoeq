@@ -2,6 +2,12 @@
 
 ## Refactoring
 
+- Completed the crate-partition migration: the final RoomEQ optimization
+  kernel and focused tests now live in `roomeq-workflow`, spectral/timbre DSP
+  plugin conversion is engine-owned, CLI and QA crates call the canonical
+  workflow directly, and root `src/` is a 482-line compatibility facade with
+  thin launchers and no unit tests.
+
 - Defined the canonical crate-partition target graph and added WP0 fitness
   gates for dependency direction and cycles, shrinking temporary exceptions,
   root LOC/test ratchets, duplicate implementation ownership, public facade

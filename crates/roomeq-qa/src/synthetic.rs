@@ -53,7 +53,7 @@ use types::TestResult;
 
 /// Run the synthetic QA command and report whether the binary should exit
 /// unsuccessfully because one or more scenarios failed.
-pub fn run(optimizer: &impl crate::RoomOptimizer) -> Result<bool> {
+pub fn run() -> Result<bool> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
     let args: Vec<String> = std::env::args().collect();
@@ -325,7 +325,6 @@ pub fn run(optimizer: &impl crate::RoomOptimizer) -> Result<bool> {
             for mode in modes {
                 for combo in &option_combos {
                     let result = run_single_test(
-                        optimizer,
                         &scenario.degraded_curve,
                         mode.clone(),
                         target_name,
@@ -385,8 +384,7 @@ pub fn run(optimizer: &impl crate::RoomOptimizer) -> Result<bool> {
 
         for topo in MS_TOPOLOGIES {
             for combo in &ms_option_combos {
-                let result =
-                    run_multisub_test(optimizer, &scenario.sub_curves, topo, combo, ms_diff);
+                let result = run_multisub_test(&scenario.sub_curves, topo, combo, ms_diff);
 
                 if result.passed {
                     passed += 1;
@@ -440,7 +438,6 @@ pub fn run(optimizer: &impl crate::RoomOptimizer) -> Result<bool> {
             for difficulty in &difficulties {
                 for mode in multichannel_modes {
                     let result = run_multichannel_test(
-                        optimizer,
                         layout,
                         None,
                         difficulty,
@@ -468,7 +465,6 @@ pub fn run(optimizer: &impl crate::RoomOptimizer) -> Result<bool> {
                 for difficulty in &difficulties {
                     for mode in multichannel_modes {
                         let result = run_multichannel_test(
-                            optimizer,
                             layout,
                             Some(sub_topo),
                             difficulty,

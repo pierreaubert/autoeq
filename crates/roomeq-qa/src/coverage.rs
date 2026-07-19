@@ -18,7 +18,6 @@
 
 use anyhow::Result;
 use clap::Parser;
-use std::sync::Arc;
 
 mod args;
 mod consts;
@@ -49,7 +48,7 @@ pub const DEFAULT_MAXEVAL: usize = consts::QA_MAXEVAL;
 
 /// Run the coverage command and report whether failed cases should produce a
 /// non-zero process exit. Process termination remains the binary adapter's job.
-pub fn run(optimizer: Arc<dyn crate::RoomOptimizer>) -> Result<bool> {
+pub fn run() -> Result<bool> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
     let args = Args::parse();
@@ -102,7 +101,7 @@ pub fn run(optimizer: Arc<dyn crate::RoomOptimizer>) -> Result<bool> {
     println!();
 
     // Run tests
-    let results = run_parallel(optimizer, test_cases, args.maxeval(), args.jobs());
+    let results = run_parallel(test_cases, args.maxeval(), args.jobs());
 
     // Print results
     let mut passed = 0;
@@ -154,4 +153,36 @@ pub fn run(optimizer: Arc<dyn crate::RoomOptimizer>) -> Result<bool> {
 
     // Exit code
     Ok(args.fail && failed > 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DEFAULT_MAXEVAL, ProcessingMethod, run_regression_case};
+
+    #[test]
+    fn grouped_topology_modes_accept_final_realization() {
+        for method in [
+            ProcessingMethod::Iir,
+            ProcessingMethod::Fir,
+            ProcessingMethod::Mixed,
+            ProcessingMethod::MixedPhase,
+        ] {
+            if let Err(error) =
+                run_regression_case("small_stereo_2_2_group", method, DEFAULT_MAXEVAL)
+            {
+                panic!("{} failed: {error}", method.name());
+            }
+        }
+    }
+
+    #[test]
+    fn mso_realization_counts_as_coverage_when_flatness_is_unchanged() {
+        if let Err(error) = run_regression_case(
+            "small_stereo_2_2_mso",
+            ProcessingMethod::Iir,
+            DEFAULT_MAXEVAL,
+        ) {
+            panic!("MSO coverage failed: {error}");
+        }
+    }
 }

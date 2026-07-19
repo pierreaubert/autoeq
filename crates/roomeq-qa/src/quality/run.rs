@@ -38,20 +38,16 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
-pub(super) fn run_optimization(
-    optimizer: &dyn crate::RoomOptimizer,
-    config: &RoomConfig,
-) -> Result<RoomOptimizationResult> {
+pub(super) fn run_optimization(config: &RoomConfig) -> Result<RoomOptimizationResult> {
     let id = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!("roomeq_qa_{}_{}", std::process::id(), id));
     std::fs::create_dir_all(&temp_dir)?;
-    let result = optimizer.optimize_room(config, SAMPLE_RATE, Some(&temp_dir));
+    let result = crate::optimize_room(config, SAMPLE_RATE, Some(&temp_dir));
     let _ = std::fs::remove_dir_all(&temp_dir);
     result
 }
 
 pub(super) fn run_stereo_workflow_tests(
-    optimizer: &dyn crate::RoomOptimizer,
     name: &str,
     base_config_path: &Path,
     override_config_path: Option<&Path>,
@@ -68,8 +64,8 @@ pub(super) fn run_stereo_workflow_tests(
         apply_qa_overrides(&mut config, &format!("{name}:iir:{mutation}"));
         apply_mutation(&mut config, *mutation);
 
-        let result = run_optimization(optimizer, &config)
-            .with_context(|| format!("{} IIR {}", name, mutation))?;
+        let result =
+            run_optimization(&config).with_context(|| format!("{} IIR {}", name, mutation))?;
 
         let pre = result.combined_pre_score;
         let scorecard = compute_scorecard(&result);
@@ -101,7 +97,6 @@ pub(super) fn run_stereo_workflow_tests(
 }
 
 pub(super) fn run_generic_path_tests(
-    optimizer: &dyn crate::RoomOptimizer,
     name: &str,
     base_config_path: &Path,
     override_config_dir: &Path,
@@ -156,7 +151,7 @@ pub(super) fn run_generic_path_tests(
             );
             apply_mutation(&mut config, *mutation);
 
-            let result = run_optimization(optimizer, &config)
+            let result = run_optimization(&config)
                 .with_context(|| format!("{} {} generic {}", name, mode_name, mutation))?;
 
             let pre = result.combined_pre_score;
@@ -231,7 +226,6 @@ pub(super) fn run_generic_path_tests(
 }
 
 pub(super) fn run_cross_mode_convergence_tests(
-    optimizer: &dyn crate::RoomOptimizer,
     name: &str,
     base_config_path: &Path,
     override_config_dir: &Path,
@@ -259,7 +253,7 @@ pub(super) fn run_cross_mode_convergence_tests(
         )?;
         apply_qa_overrides(&mut config, &format!("{name}:cross-mode:{mode_name}"));
 
-        let result = run_optimization(optimizer, &config)
+        let result = run_optimization(&config)
             .with_context(|| format!("{} {} cross-mode", name, mode_name))?;
 
         writeln!(
@@ -428,7 +422,6 @@ pub(super) fn run_cross_mode_convergence_tests(
 }
 
 pub(super) fn run_option_effect_test(
-    optimizer: &dyn crate::RoomOptimizer,
     name: &str,
     fem_dir: &Path,
     fem_subdir: &str,
@@ -502,8 +495,8 @@ pub(super) fn run_option_effect_test(
         gd_profile,
     )?;
 
-    let baseline_result = run_optimization(optimizer, &baseline_config)
-        .with_context(|| format!("{} baseline", name))?;
+    let baseline_result =
+        run_optimization(&baseline_config).with_context(|| format!("{} baseline", name))?;
 
     writeln!(
         out,
@@ -535,8 +528,8 @@ pub(super) fn run_option_effect_test(
         gd_profile,
     )?;
 
-    let option_result = run_optimization(optimizer, &option_config)
-        .with_context(|| format!("{} with-options", name))?;
+    let option_result =
+        run_optimization(&option_config).with_context(|| format!("{} with-options", name))?;
 
     writeln!(
         out,

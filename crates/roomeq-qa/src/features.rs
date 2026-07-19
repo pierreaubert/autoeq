@@ -30,7 +30,7 @@ use run::run_pass;
 use step_result::print_pass_results;
 use step_result::validate_pass;
 
-pub fn run(optimizer: &impl crate::RoomOptimizer) -> Result<()> {
+pub fn run() -> Result<()> {
     let project_root = find_project_root()?;
     let recordings = discover_recordings(&project_root)?;
 
@@ -53,7 +53,7 @@ pub fn run(optimizer: &impl crate::RoomOptimizer) -> Result<()> {
 
         // --- Pass A: Flat target ---
         println!("--- Pass A: Flat target ---");
-        let pass_a = run_pass(optimizer, name, &base_config, false)?;
+        let pass_a = run_pass(name, &base_config, false)?;
         print_pass_results(&pass_a);
         let errors_a = validate_pass("Pass A", &pass_a, true);
         if errors_a.is_empty() {
@@ -69,7 +69,7 @@ pub fn run(optimizer: &impl crate::RoomOptimizer) -> Result<()> {
 
         // --- Pass B: Harman tilt ---
         println!("--- Pass B: Harman tilt ---");
-        let pass_b = run_pass(optimizer, name, &base_config, true)?;
+        let pass_b = run_pass(name, &base_config, true)?;
         print_pass_results(&pass_b);
         let errors_b = validate_pass("Pass B", &pass_b, false);
         if errors_b.is_empty() {

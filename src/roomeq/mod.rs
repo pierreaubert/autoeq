@@ -46,7 +46,6 @@ pub use config::{ValidationResult, validate_room_config};
 pub use roomeq_model::validation_rules as config;
 
 // Main optimization entry points
-pub(crate) use autoeq_artifacts::roomeq as artifacts;
 mod pipeline;
 pub use pipeline::{
     PipelineControl, PipelineEvent, PipelineObserver, PipelineStepId, PipelineStepStatus,
@@ -61,14 +60,7 @@ pub use optimize::{
 };
 
 // Extracted optimization submodules
-pub(crate) use roomeq_analysis::crossover_utils;
-
-#[cfg(test)]
-pub mod test_fixtures;
-
-pub(crate) use roomeq_analysis::frequency_grid;
 pub use roomeq_engine::crossover;
-use roomeq_workflow::fir;
 pub use roomeq_workflow::{dba, multisub};
 pub mod home_cinema;
 pub mod workflows; // Make public to access from optimize.rs or tests
@@ -167,7 +159,6 @@ pub use bass_phase_confidence::{
 pub use roomeq_engine::bass_phase_confidence;
 
 // Utility modules
-pub(crate) use roomeq_analysis::ir_waveform;
 pub(crate) use roomeq_analysis::time_align;
 pub use roomeq_synthetic as synthetic;
 // GD-Opt v2 Phase GD-1f — microphone phase calibration loader. See

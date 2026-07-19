@@ -139,48 +139,16 @@ roomeq-analysis = { workspace = true }
 roomeq-synthetic = { workspace = true }
 roomeq-workflow = { workspace = true }
 anyhow = { workspace = true }
-async-trait = { workspace = true }
-base64 = { workspace = true }
-build_html = { workspace = true }
-chrono = { workspace = true }
-clap = { workspace = true }
-csv = { workspace = true }
-directories = { workspace = true }
-env_logger = { workspace = true }
-log = { workspace = true }
-num_cpus = { workspace = true }
-num-complex = { workspace = true }
-nalgebra = { workspace = true }
-metaheuristics-nature = { workspace = true }
-rustfft = { workspace = true }
-hound = { workspace = true }
 plotly = { workspace = true, optional = true }
-rand = { workspace = true }
-rand_chacha = { workspace = true }
-reqwest = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
-schemars = { workspace = true }
-strsim = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true }
-urlencoding = { workspace = true }
-zip = { workspace = true }
 math-iir-fir = { workspace = true }
-math-dsp = { workspace = true }
 math-optimisation = { workspace = true }
-math-rir = { workspace = true }
-sofa-reader = { workspace = true }
-ndarray = { workspace = true }
-oxiblas-ndarray = { workspace = true }
-resvg = { workspace = true, optional = true }
-rayon = { workspace = true }
 
 [features]
 default = []
 plotly = ["dep:plotly", "dep:autoeq-plot", "autoeq-plot/plotly", "autoeq-cli/plotly"]
 # Static PNG export has no browser, WebDriver, display-server, or network dependency.
-plotly_static = ["plotly", "dep:resvg", "autoeq-plot/plotly_static", "autoeq-cli/plotly_static"]
+plotly_static = ["plotly", "autoeq-plot/plotly_static", "autoeq-cli/plotly_static"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 
@@ -253,7 +221,12 @@ name = "headphone_loss_validation"
 [dev-dependencies]
 tempfile = { workspace = true }
 assert_fs = { workspace = true }
+clap = { workspace = true }
+hound = { workspace = true }
+ndarray = { workspace = true }
+num-complex = { workspace = true }
 proptest = { workspace = true }
+rustfft = { workspace = true }
 serial_test = { workspace = true }
 tokio = { workspace = true }
 

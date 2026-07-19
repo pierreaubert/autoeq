@@ -1,6 +1,6 @@
 # Crate Partition Migration Plan
 
-Status: canonical; WP0-WP3 complete locally, WP4 in progress
+Status: canonical; WP0-WP11 complete locally, final consolidated verification in progress
 
 Date: 2026-07-18
 
@@ -687,6 +687,28 @@ Exit criteria:
 - No focused unit test remains in the root package.
 - The workspace dependency checker has no temporary exceptions.
 - The full verification matrix passes.
+
+WP11 local implementation state (2026-07-19):
+
+- The complete RoomEQ optimization kernel, report/correction gates, progress
+  compatibility, 228 focused tests, and shared test fixtures now belong to
+  `roomeq-workflow`. `RoomPipeline::run` is canonical there and directly
+  crosses the prepared `roomeq-engine` execution boundary.
+- `roomeq-cli` and `roomeq-qa` call the canonical workflow directly; the
+  temporary root-supplied execution traits and launcher implementations were
+  removed. Published root binaries are startup-only wrappers.
+- The final root property tests moved from `src/` to the compatibility
+  integration-test suite. Root `src/` contains no unit tests and no canonical
+  RoomEQ behavior; its RoomEQ modules are compatibility re-exports only.
+- Runtime DSP plugin conversion for spectral and inter-channel alignment is
+  engine-owned, eliminating the last two root behavior adapters.
+- Final ownership metrics are 482 root Rust lines, 290 root RoomEQ lines, 88
+  root binary lines, and zero root unit tests. The workspace remains at 57
+  direct internal edges, with zero cycles, temporary exceptions, or duplicate
+  implementations.
+- Destination, QA, CLI, root library, binary, and test targets compile. The
+  static partition fitness audit passes; runtime, strict Clippy, schema, and
+  full QA checks remain at the consolidated final verification gate.
 
 ## 9. Test ownership and verification
 

@@ -25,7 +25,8 @@ use std::path::PathBuf;
 use roomeq_engine::{PipelineControl, PipelineEvent, PipelineObserver};
 use roomeq_model::{DspChainOutput, MeasurementSource, RoomConfig, SpeakerConfig};
 use roomeq_workflow::{
-    ExportFormat, export_dsp_chain_with_convolution_sidecars, load_config, save_dsp_chain,
+    ExportFormat, RoomPipeline, RoomPipelineRequest, export_dsp_chain_with_convolution_sidecars,
+    load_config, save_dsp_chain,
 };
 
 /// Room EQ - Optimize multi-channel speaker systems
@@ -73,7 +74,7 @@ struct Args {
     dry_run: bool,
 }
 
-pub fn run_command(runner: &impl crate::RoomCommandRunner) -> Result<()> {
+pub fn run_command() -> Result<()> {
     // Initialize logger safely
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
@@ -146,7 +147,6 @@ pub fn run_command(runner: &impl crate::RoomCommandRunner) -> Result<()> {
     }
 
     execute_optimization(
-        runner,
         args.sample_rate,
         config_path,
         output_path,
@@ -190,7 +190,6 @@ fn create_progress_observer() -> Box<dyn PipelineObserver> {
 }
 
 fn execute_optimization(
-    runner: &impl crate::RoomCommandRunner,
     sample_rate: f64,
     config_path: PathBuf,
     output_path: PathBuf,
@@ -209,10 +208,15 @@ fn execute_optimization(
     // Run optimization using the library
     let observer = create_progress_observer();
     let out_dir = output_path.parent();
-    let result = runner
-        .optimize_room(&room_config, sample_rate, out_dir, Some(observer))
-        .map_err(|e| anyhow!("{}", e))
-        .with_context(|| "Room optimization failed")?;
+    let result = RoomPipeline::new(RoomPipelineRequest {
+        config: &room_config,
+        sample_rate,
+        output_dir: out_dir,
+        probe_arrival_overrides: None,
+    })
+    .run(Some(observer))
+    .map_err(|e| anyhow!("{}", e))
+    .with_context(|| "Room optimization failed")?;
 
     // Log summary
     info!(

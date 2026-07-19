@@ -16,23 +16,16 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::channel;
 use std::thread;
 
-pub(super) fn run_optimization(
-    optimizer: &dyn crate::RoomOptimizer,
-    config: &RoomConfig,
-) -> Result<RoomOptimizationResult> {
+pub(super) fn run_optimization(config: &RoomConfig) -> Result<RoomOptimizationResult> {
     let id = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!("roomeq_qa_{}_{}", std::process::id(), id));
     std::fs::create_dir_all(&temp_dir)?;
-    let result = optimizer.optimize_room(config, SAMPLE_RATE, Some(&temp_dir));
+    let result = crate::optimize_room(config, SAMPLE_RATE, Some(&temp_dir));
     let _ = std::fs::remove_dir_all(&temp_dir);
     result
 }
 
-pub(super) fn run_test_case(
-    optimizer: &dyn crate::RoomOptimizer,
-    tc: &TestCase,
-    maxeval: usize,
-) -> TestResult {
+pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
     let start = std::time::Instant::now();
 
     let name = tc.name();
@@ -71,7 +64,7 @@ pub(super) fn run_test_case(
     apply_qa_overrides(&mut config, maxeval);
 
     // Run optimization
-    let result = match run_optimization(optimizer, &config) {
+    let result = match run_optimization(&config) {
         Ok(r) => r,
         Err(e) => {
             return TestResult::failure(
@@ -106,7 +99,6 @@ pub(super) fn run_test_case(
 }
 
 pub(super) fn run_parallel(
-    optimizer: Arc<dyn crate::RoomOptimizer>,
     test_cases: Vec<TestCase>,
     maxeval: usize,
     num_jobs: usize,
@@ -118,11 +110,9 @@ pub(super) fn run_parallel(
     for tc in test_cases {
         let tx = tx.clone();
         let sem = Arc::clone(&semaphore);
-        let optimizer = Arc::clone(&optimizer);
-
         let handle = thread::spawn(move || {
             sem.acquire();
-            let result = run_test_case(optimizer.as_ref(), &tc, maxeval);
+            let result = run_test_case(&tc, maxeval);
             sem.release();
             let _ = tx.send(result);
         });
@@ -143,12 +133,10 @@ pub(super) fn run_parallel(
     results
 }
 
-/// Execute one production-backed regression scenario through an injected
-/// optimizer. This keeps the temporary root-kernel tests in the thin binary
-/// adapter until WP11 moves that kernel into its owner crate.
+/// Execute one production-backed regression scenario through the canonical
+/// RoomEQ workflow.
 #[doc(hidden)]
 pub fn run_regression_case(
-    optimizer: &dyn crate::RoomOptimizer,
     scenario: &str,
     method: ProcessingMethod,
     maxeval: usize,
@@ -159,7 +147,7 @@ pub fn run_regression_case(
         solver: super::solver::Solver::Fem,
         method,
     };
-    let result = run_test_case(optimizer, &test_case, maxeval);
+    let result = run_test_case(&test_case, maxeval);
     if result.passed {
         Ok(())
     } else {

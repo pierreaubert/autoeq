@@ -12,23 +12,18 @@ use roomeq_engine::room_result::RoomOptimizationResult;
 use roomeq_model::RoomConfig;
 use std::sync::atomic::Ordering;
 
-pub(super) fn run_optimization(
-    optimizer: &impl crate::RoomOptimizer,
-    config: &RoomConfig,
-) -> Result<RoomOptimizationResult> {
+pub(super) fn run_optimization(config: &RoomConfig) -> Result<RoomOptimizationResult> {
     let id = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir =
         std::env::temp_dir().join(format!("roomeq_qa_features_{}_{}", std::process::id(), id));
     std::fs::create_dir_all(&temp_dir)?;
-    let result = optimizer
-        .optimize_room(config, SAMPLE_RATE, Some(&temp_dir))
+    let result = crate::optimize_room(config, SAMPLE_RATE, Some(&temp_dir))
         .map_err(|error| anyhow!(error.to_string()));
     let _ = std::fs::remove_dir_all(&temp_dir);
     result
 }
 
 pub(super) fn run_pass(
-    optimizer: &impl crate::RoomOptimizer,
     recording_name: &str,
     base_config: &RoomConfig,
     with_tilt: bool,
@@ -43,7 +38,7 @@ pub(super) fn run_pass(
         // Apply this step's feature (cumulative)
         (step.apply)(&mut config);
 
-        let opt_result = run_optimization(optimizer, &config)
+        let opt_result = run_optimization(&config)
             .with_context(|| format!("{}: step '{}' failed", recording_name, step.name))?;
 
         // Compute worst (most positive) slope across channels

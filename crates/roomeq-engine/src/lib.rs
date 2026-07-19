@@ -4,12 +4,22 @@
 
 pub use autoeq_core::{AutoeqError, Curve, PeqModel};
 pub use autoeq_optim::de::CallbackAction;
-pub use autoeq_optim::optim::{OptimProgressCallback, OptimizerRunEvidence};
+pub use autoeq_optim::optim::{OptimProgressCallback, OptimizerConfidence, OptimizerRunEvidence};
+/// Acoustic analysis used by engine and workflow orchestration without adding
+/// parallel ownership of the underlying implementations.
+pub mod analysis {
+    pub use roomeq_analysis::{crossover_utils, frequency_grid, ir_waveform, slope, time_align};
+}
 pub mod error {
     pub use autoeq_core::error::*;
 }
 pub mod loss {
     pub use autoeq_optim::loss::*;
+}
+/// Runtime correction quality and acceptance contracts used at the engine
+/// execution boundary.
+pub mod quality {
+    pub use roomeq_quality::*;
 }
 pub mod response {
     pub use autoeq_core::response::*;

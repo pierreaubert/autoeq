@@ -55,7 +55,7 @@ use types::TestResult;
 
 /// Run the quality QA command and report whether failed cases should produce
 /// a non-zero process exit.
-pub fn run(optimizer: Arc<dyn crate::RoomOptimizer>) -> Result<bool> {
+pub fn run() -> Result<bool> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
     // Parse CLI args
@@ -136,7 +136,6 @@ pub fn run(optimizer: Arc<dyn crate::RoomOptimizer>) -> Result<bool> {
             let fem_dir = fem_dir.clone();
             let optim_dir = optim_dir.clone();
             let sem = Arc::clone(&semaphore);
-            let optimizer = Arc::clone(&optimizer);
             std::thread::spawn(move || -> Result<(String, Vec<TestResult>)> {
                 sem.acquire();
                 let result = match tc {
@@ -148,12 +147,7 @@ pub fn run(optimizer: Arc<dyn crate::RoomOptimizer>) -> Result<bool> {
                         let base_path = fem_dir.join(format!("{}/config.json", fem_subdir));
                         let override_path =
                             optim_dir.join(format!("{}/optimiser-iir.json", optim_subdir));
-                        run_stereo_workflow_tests(
-                            optimizer.as_ref(),
-                            name,
-                            &base_path,
-                            Some(&override_path),
-                        )
+                        run_stereo_workflow_tests(name, &base_path, Some(&override_path))
                     }
                     TestCase::Generic {
                         name,
@@ -162,7 +156,7 @@ pub fn run(optimizer: Arc<dyn crate::RoomOptimizer>) -> Result<bool> {
                     } => {
                         let base_path = fem_dir.join(format!("{}/config.json", fem_subdir));
                         let override_dir = optim_dir.join(optim_subdir);
-                        run_generic_path_tests(optimizer.as_ref(), name, &base_path, &override_dir)
+                        run_generic_path_tests(name, &base_path, &override_dir)
                     }
                     TestCase::CrossModeConvergence {
                         name,
@@ -171,12 +165,7 @@ pub fn run(optimizer: Arc<dyn crate::RoomOptimizer>) -> Result<bool> {
                     } => {
                         let base_path = fem_dir.join(format!("{}/config.json", fem_subdir));
                         let override_dir = optim_dir.join(optim_subdir);
-                        run_cross_mode_convergence_tests(
-                            optimizer.as_ref(),
-                            name,
-                            &base_path,
-                            &override_dir,
-                        )
+                        run_cross_mode_convergence_tests(name, &base_path, &override_dir)
                     }
                     TestCase::OptionEffect {
                         name,
@@ -184,7 +173,6 @@ pub fn run(optimizer: Arc<dyn crate::RoomOptimizer>) -> Result<bool> {
                         optim_subdir,
                         options,
                     } => run_option_effect_test(
-                        optimizer.as_ref(),
                         name,
                         &fem_dir,
                         fem_subdir,

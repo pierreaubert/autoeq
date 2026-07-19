@@ -5,6 +5,7 @@
 
 #![allow(dead_code)]
 
+#[path = "../../crates/autoeq-cli/tests/common/apo.rs"]
 pub mod apo;
 pub mod binary_runner;
 

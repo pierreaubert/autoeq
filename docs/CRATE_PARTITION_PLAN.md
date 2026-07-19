@@ -653,6 +653,21 @@ Exit criteria:
 - QA behavior is testable as library code without spawning Cargo recursively.
 - Root `src/bin` contains fewer than 1,000 Rust lines in total.
 
+WP10 post-state (2026-07-19):
+
+- `roomeq-qa` owns feature progression, coverage, synthetic, acoustic-corpus,
+  convergence/quality, and fuzzer command implementations. The temporary
+  production optimizer is supplied through explicit execution ports; no
+  workspace crate depends on the root facade.
+- `autoeq-cli` owns the AutoEQ, speaker-benchmark, and speaker-acquisition
+  commands. `roomeq-cli` owns the RoomEQ and recording-conversion commands.
+  Published root targets are startup/compatibility launchers.
+- Root binary Rust fell from 15,337 to 261 lines. Root Rust is 13,599 lines,
+  root unit tests are 228, direct internal edges are 57, and cycles,
+  temporary exceptions, and duplicate implementations remain zero.
+- All moved library, binary, plotting-feature, and test targets compile.
+  Runtime QA matrices remain consolidated at the final verification gate.
+
 ### WP11 — Remove the root implementation
 
 Scope:

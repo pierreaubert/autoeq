@@ -20,10 +20,13 @@ members = [
     "crates/autoeq-measurements",
     "crates/autoeq-optim",
     "crates/autoeq-workflow",
+    "crates/autoeq-cli",
     "crates/roomeq-model",
     "crates/roomeq-engine",
     "crates/roomeq-export",
     "crates/roomeq-quality",
+    "crates/roomeq-qa",
+    "crates/roomeq-cli",
     "crates/roomeq-analysis",
     "crates/roomeq-synthetic",
     "crates/roomeq-workflow",
@@ -54,10 +57,13 @@ autoeq-plot = { path = "crates/autoeq-plot" }
 autoeq-measurements = { path = "crates/autoeq-measurements" }
 autoeq-optim = { path = "crates/autoeq-optim" }
 autoeq-workflow = { path = "crates/autoeq-workflow" }
+autoeq-cli = { path = "crates/autoeq-cli" }
 roomeq-model = { path = "crates/roomeq-model" }
 roomeq-engine = { path = "crates/roomeq-engine" }
 roomeq-export = { path = "crates/roomeq-export" }
 roomeq-quality = { path = "crates/roomeq-quality" }
+roomeq-qa = { path = "crates/roomeq-qa" }
+roomeq-cli = { path = "crates/roomeq-cli" }
 roomeq-analysis = { path = "crates/roomeq-analysis" }
 roomeq-synthetic = { path = "crates/roomeq-synthetic" }
 roomeq-workflow = { path = "crates/roomeq-workflow" }
@@ -122,10 +128,13 @@ autoeq-plot = { workspace = true, optional = true }
 autoeq-measurements = { workspace = true }
 autoeq-optim = { workspace = true }
 autoeq-workflow = { workspace = true }
+autoeq-cli = { workspace = true }
 roomeq-model = { workspace = true }
 roomeq-engine = { workspace = true }
 roomeq-export = { workspace = true }
 roomeq-quality = { workspace = true }
+roomeq-qa = { workspace = true }
+roomeq-cli = { workspace = true }
 roomeq-analysis = { workspace = true }
 roomeq-synthetic = { workspace = true }
 roomeq-workflow = { workspace = true }
@@ -169,9 +178,9 @@ rayon = { workspace = true }
 
 [features]
 default = []
-plotly = ["dep:plotly", "dep:autoeq-plot", "autoeq-plot/plotly"]
+plotly = ["dep:plotly", "dep:autoeq-plot", "autoeq-plot/plotly", "autoeq-cli/plotly"]
 # Static PNG export has no browser, WebDriver, display-server, or network dependency.
-plotly_static = ["plotly", "dep:resvg", "autoeq-plot/plotly_static"]
+plotly_static = ["plotly", "dep:resvg", "autoeq-plot/plotly_static", "autoeq-cli/plotly_static"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 

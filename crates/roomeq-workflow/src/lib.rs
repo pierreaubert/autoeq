@@ -14,6 +14,7 @@ pub mod fir;
 pub mod group_measurements;
 pub mod group_processing;
 pub mod home_cinema;
+pub mod measurement;
 pub mod multisub;
 pub mod output;
 pub mod pipeline;
@@ -35,8 +36,10 @@ pub use group_processing::{
     process_cardioid, process_dba, process_multisub_group, process_speaker_group,
     process_speaker_topology,
 };
+pub use measurement::{load_curve_from_csv, load_measurement, load_source};
 pub use output::save_dsp_chain;
 pub use pipeline::{RoomPipeline, RoomPipelineRequest, WorkflowContext};
+pub use roomeq_export::ExportFormat;
 pub use sidecar::{
     ReservedConvolutionSidecar, persist_convolution_sidecar, reserve_channel_convolution_sidecar,
     reserve_mixed_crossover_sidecar,

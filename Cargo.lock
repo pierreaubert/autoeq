@@ -190,6 +190,7 @@ dependencies = [
  "assert_fs",
  "async-trait",
  "autoeq-artifacts",
+ "autoeq-cli",
  "autoeq-core",
  "autoeq-fir",
  "autoeq-measurements",
@@ -223,9 +224,11 @@ dependencies = [
  "reqwest",
  "resvg",
  "roomeq-analysis",
+ "roomeq-cli",
  "roomeq-engine",
  "roomeq-export",
  "roomeq-model",
+ "roomeq-qa",
  "roomeq-quality",
  "roomeq-synthetic",
  "roomeq-workflow",
@@ -249,6 +252,28 @@ version = "0.4.51"
 dependencies = [
  "autoeq-core",
  "tempfile",
+]
+
+[[package]]
+name = "autoeq-cli"
+version = "0.4.51"
+dependencies = [
+ "anyhow",
+ "autoeq-plot",
+ "autoeq-workflow",
+ "chrono",
+ "clap",
+ "csv",
+ "env_logger",
+ "log",
+ "ndarray",
+ "num_cpus",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "urlencoding",
 ]
 
 [[package]]
@@ -2685,6 +2710,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "roomeq-cli"
+version = "0.4.51"
+dependencies = [
+ "anyhow",
+ "clap",
+ "env_logger",
+ "log",
+ "roomeq-engine",
+ "roomeq-model",
+ "roomeq-workflow",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "roomeq-engine"
 version = "0.4.51"
 dependencies = [
@@ -2739,6 +2780,29 @@ dependencies = [
  "schemars 1.2.1",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "roomeq-qa"
+version = "0.4.51"
+dependencies = [
+ "anyhow",
+ "autoeq-optim",
+ "chrono",
+ "clap",
+ "env_logger",
+ "math-iir-fir",
+ "ndarray",
+ "rand 0.10.2",
+ "rand_chacha 0.10.0",
+ "roomeq-engine",
+ "roomeq-model",
+ "roomeq-quality",
+ "roomeq-synthetic",
+ "roomeq-workflow",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

@@ -1,1 +1,1 @@
-pub use autoeq_optim::cli::*;
+pub use autoeq_cli::*;

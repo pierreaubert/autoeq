@@ -28,6 +28,10 @@
       "autoeq-measurements",
       "autoeq-optim"
     ],
+    "autoeq-cli": [
+      "autoeq-plot",
+      "autoeq-workflow"
+    ],
     "roomeq-model": [
       "autoeq-core"
     ],
@@ -39,6 +43,19 @@
       "autoeq-core",
       "roomeq-analysis",
       "roomeq-model"
+    ],
+    "roomeq-qa": [
+      "autoeq-optim",
+      "roomeq-engine",
+      "roomeq-model",
+      "roomeq-quality",
+      "roomeq-synthetic",
+      "roomeq-workflow"
+    ],
+    "roomeq-cli": [
+      "roomeq-engine",
+      "roomeq-model",
+      "roomeq-workflow"
     ],
     "roomeq-engine": [
       "autoeq-core",
@@ -65,10 +82,10 @@
   },
   "temporary_exceptions": [],
   "metric_budgets": {
-    "root_rust_loc": 28697,
+    "root_rust_loc": 13599,
     "root_roomeq_rust_loc": 13059,
-    "root_binary_rust_loc": 15337,
-    "root_unit_tests": 300
+    "root_binary_rust_loc": 261,
+    "root_unit_tests": 228
   },
   "public_api": {
     "source": "src/lib.rs",
@@ -81,6 +98,7 @@
   "focused_tests": {
     "autoeq": "cargo test -p autoeq --lib",
     "autoeq-artifacts": "cargo test -p autoeq-artifacts --lib",
+    "autoeq-cli": "cargo test -p autoeq-cli --lib",
     "autoeq-core": "cargo test -p autoeq-core --lib",
     "autoeq-fir": "cargo test -p autoeq-fir --lib",
     "autoeq-measurements": "cargo test -p autoeq-measurements --lib",
@@ -88,10 +106,12 @@
     "autoeq-plot": "cargo test -p autoeq-plot --lib",
     "autoeq-workflow": "cargo test -p autoeq-workflow --lib",
     "roomeq-analysis": "cargo test -p roomeq-analysis --lib",
+    "roomeq-cli": "cargo test -p roomeq-cli --lib",
     "roomeq-engine": "cargo test -p roomeq-engine --lib",
     "roomeq-export": "cargo test -p roomeq-export --lib",
     "roomeq-model": "cargo test -p roomeq-model --lib",
     "roomeq-quality": "cargo test -p roomeq-quality --lib",
+    "roomeq-qa": "cargo test -p roomeq-qa --lib",
     "roomeq-synthetic": "cargo test -p roomeq-synthetic --lib",
     "roomeq-workflow": "cargo test -p roomeq-workflow --lib"
   }

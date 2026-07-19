@@ -20,6 +20,9 @@ pub mod optim {
 pub mod cli {
     pub use autoeq_optim::cli::*;
 }
+pub mod cea2034 {
+    pub use autoeq_measurements::cea2034::*;
+}
 pub use autoeq_optim::LossType;
 pub use autoeq_optim::{OptimParams, PeqModel, de};
 pub mod x2peq {

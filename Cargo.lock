@@ -2716,9 +2716,15 @@ dependencies = [
 name = "roomeq-export"
 version = "0.4.51"
 dependencies = [
- "autoeq-core",
+ "anyhow",
+ "clap",
+ "hound",
+ "math-iir-fir",
+ "num-complex",
  "roomeq-model",
  "serde_json",
+ "tempfile",
+ "zip",
 ]
 
 [[package]]
@@ -2774,6 +2780,7 @@ dependencies = [
  "ndarray",
  "num-complex",
  "roomeq-engine",
+ "roomeq-export",
  "roomeq-model",
  "rustfft",
  "serde",

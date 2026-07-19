@@ -17,6 +17,7 @@ math-iir-fir = { workspace = true }
 ndarray = { workspace = true }
 num-complex = { workspace = true }
 roomeq-engine = { workspace = true }
+roomeq-export = { workspace = true }
 roomeq-model = { workspace = true }
 rustfft = { workspace = true }
 serde = { workspace = true }

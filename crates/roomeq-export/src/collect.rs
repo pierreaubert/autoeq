@@ -1,4 +1,4 @@
-use super::super::types::{ChannelDspChain, PluginConfigWrapper};
+use roomeq_model::{ChannelDspChain, PluginConfigWrapper};
 
 /// Collect all plugins from a channel: combined (channel-level) + per-driver plugins
 pub(super) fn collect_all_plugins(chain: &ChannelDspChain) -> Vec<&PluginConfigWrapper> {

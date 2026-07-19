@@ -1,45 +1,4 @@
 use math_audio_iir_fir::BiquadFilterType;
-use std::path::Path;
-
-pub(super) fn unique_sidecar_filename(
-    dest_dir: &Path,
-    preferred: &str,
-    source_path: &Path,
-) -> anyhow::Result<String> {
-    let preferred_path = dest_dir.join(preferred);
-    if !preferred_path.exists() || same_existing_file(&preferred_path, source_path)? {
-        return Ok(preferred.to_string());
-    }
-
-    let preferred_path = Path::new(preferred);
-    let stem = preferred_path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .filter(|stem| !stem.is_empty())
-        .unwrap_or("room_eq_ir");
-    let ext = preferred_path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .filter(|ext| !ext.is_empty())
-        .map(|ext| format!(".{ext}"))
-        .unwrap_or_default();
-
-    for suffix in 2_u64..=u64::MAX {
-        let candidate = format!("{stem}_{suffix:03}{ext}");
-        let candidate_path = dest_dir.join(&candidate);
-        if !candidate_path.exists() || same_existing_file(&candidate_path, source_path)? {
-            return Ok(candidate);
-        }
-    }
-    anyhow::bail!("could not reserve a unique sidecar filename for '{preferred}'")
-}
-
-pub(super) fn same_existing_file(path: &Path, source_path: &Path) -> anyhow::Result<bool> {
-    if !path.exists() {
-        return Ok(false);
-    }
-    Ok(path.canonicalize()? == source_path)
-}
 
 /// Map filter type string to CamillaDSP filter type
 pub(super) fn camilladsp_filter_type(ft: &str) -> &str {

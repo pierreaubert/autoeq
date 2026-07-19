@@ -1,6 +1,6 @@
-use super::super::types::PluginConfigWrapper;
 use super::conformance::{ExportArtifactManifest, ExportNodeKind};
 use super::misc::camilladsp_filter_type;
+use roomeq_model::PluginConfigWrapper;
 use std::fmt::Write as FmtWrite;
 
 pub(super) fn write_camilladsp_pipeline_filter_step(

@@ -6,6 +6,14 @@ description = "RoomEQ external DSP exporters and artifact packaging"
 license = "GPL-3.0-or-later"
 
 [dependencies]
-autoeq-core = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+hound = { workspace = true }
+math-iir-fir = { workspace = true }
 roomeq-model = { workspace = true }
 serde_json = { workspace = true }
+zip = { workspace = true }
+
+[dev-dependencies]
+num-complex = { workspace = true }
+tempfile = { workspace = true }

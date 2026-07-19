@@ -75,22 +75,8 @@ pub use crate::IrWaveform;
 // DSP Chain Types
 // ============================================================================
 
-/// DSP chain output (AudioEngine PluginConfig format)
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct DspChainOutput {
-    /// Output version
-    #[serde(default = "crate::config::default_config_version")]
-    pub version: String,
-    /// Global graph-level plugins, e.g. matrix routing that combines several
-    /// programme inputs before per-output correction chains.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub global_plugins: Vec<PluginConfigWrapper>,
-    /// Per-channel DSP chains
-    pub channels: HashMap<String, ChannelDspChain>,
-    /// Metadata about the optimization
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<OptimizationMetadata>,
-}
+/// Backwards-compatible name for the canonical DSP execution/export graph.
+pub type DspChainOutput = crate::DspGraph;
 
 /// DSP chain for a single channel
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

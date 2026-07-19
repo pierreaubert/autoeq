@@ -1,4 +1,4 @@
-use super::super::types::{ChannelDspChain, DspChainOutput};
+use roomeq_model::{ChannelDspChain, DspGraph};
 
 /// Map channel name to standard short name
 pub(super) fn channel_short_name(name: &str) -> &str {
@@ -32,7 +32,7 @@ pub(super) fn channel_index(name: &str) -> Option<usize> {
 
 /// Get sorted channel list for deterministic output.
 /// Known channels sort by standard order; unknown channels sort alphabetically after.
-pub(super) fn sorted_channels(output: &DspChainOutput) -> Vec<(&String, &ChannelDspChain)> {
+pub(super) fn sorted_channels(output: &DspGraph) -> Vec<(&String, &ChannelDspChain)> {
     let mut channels: Vec<_> = output.channels.iter().collect();
     channels.sort_by(|(a, _), (b, _)| {
         let ia = channel_index(a);

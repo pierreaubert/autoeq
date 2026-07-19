@@ -1,4 +1,4 @@
-/// Map filter type string to PipeWire builtin label
+/// Map filter type string to PipeWire builtin label.
 pub(super) fn pipewire_filter_label(ft: &str) -> anyhow::Result<&'static str> {
     let label = match ft {
         "peak" => "bq_peaking",

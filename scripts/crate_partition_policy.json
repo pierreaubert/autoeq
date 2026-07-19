@@ -49,7 +49,6 @@
       "roomeq-quality"
     ],
     "roomeq-export": [
-      "autoeq-core",
       "roomeq-model"
     ],
     "roomeq-synthetic": [
@@ -66,10 +65,10 @@
   },
   "temporary_exceptions": [],
   "metric_budgets": {
-    "root_rust_loc": 35000,
-    "root_roomeq_rust_loc": 19362,
+    "root_rust_loc": 28697,
+    "root_roomeq_rust_loc": 13059,
     "root_binary_rust_loc": 15337,
-    "root_unit_tests": 378
+    "root_unit_tests": 300
   },
   "public_api": {
     "source": "src/lib.rs",

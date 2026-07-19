@@ -1,4 +1,3 @@
-use super::super::types::{ChannelDspChain, DspChainOutput, PluginConfigWrapper};
 use super::channel::sorted_channels;
 use super::export_camilladsp;
 use super::export_easyeffects;
@@ -17,7 +16,7 @@ use math_audio_iir_fir::BiquadFilterType;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::roomeq::types::*;
+use roomeq_model::*;
 use serde_json::json;
 
 mod conformance;
@@ -127,7 +126,7 @@ fn test_camilladsp_uses_second_order_filters() {
             direct_early_late_correction: None,
         },
     );
-    let output = DspChainOutput {
+    let output = DspGraph {
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels,
@@ -178,7 +177,7 @@ fn test_camilladsp_no_duplicate_yaml_keys() {
             direct_early_late_correction: None,
         },
     );
-    let output = DspChainOutput {
+    let output = DspGraph {
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels,
@@ -232,7 +231,7 @@ fn test_easyeffects_rejects_different_channel_gains() {
             direct_early_late_correction: None,
         },
     );
-    let output = DspChainOutput {
+    let output = DspGraph {
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels,
@@ -264,7 +263,7 @@ fn test_unknown_channels_sort_alphabetically() {
             },
         );
     }
-    let output = DspChainOutput {
+    let output = DspGraph {
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels,
@@ -354,7 +353,7 @@ fn test_export_with_drivers() {
         },
     );
 
-    let output = DspChainOutput {
+    let output = DspGraph {
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels,

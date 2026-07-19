@@ -1,5 +1,5 @@
-use super::super::types::PluginConfigWrapper;
 use super::types::BiquadExport;
+use roomeq_model::PluginConfigWrapper;
 
 /// Extract all biquad filters from a plugin list
 pub(super) fn extract_eq_filters(plugins: &[PluginConfigWrapper]) -> Vec<BiquadExport> {

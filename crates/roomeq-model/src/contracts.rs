@@ -1,7 +1,9 @@
-//! Small, engine-neutral contracts shared by RoomEQ execution and exporters.
+//! Engine-neutral contracts shared by RoomEQ execution and exporters.
 
+use crate::{ChannelDspChain, OptimizationMetadata, PluginConfigWrapper};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Plugin {
@@ -15,25 +17,65 @@ pub struct ChannelChain {
     pub plugins: Vec<Plugin>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// Canonical DSP execution and export graph.
+///
+/// This is deliberately the complete graph that external renderers consume:
+/// global routing plugins, stable channel identities, per-driver branches,
+/// and the metadata that carries resolved topology reports. Optimization
+/// curves remain attached to channel chains so converting an existing RoomEQ
+/// result into the canonical contract is lossless.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DspGraph {
+    /// Graph/output schema version.
+    #[serde(default = "crate::config::default_config_version")]
     pub version: String,
-    pub channels: BTreeMap<String, ChannelChain>,
+    /// Graph-level plugins such as matrix routing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub global_plugins: Vec<PluginConfigWrapper>,
+    /// Per-channel and per-driver processing chains.
+    pub channels: HashMap<String, ChannelDspChain>,
+    /// Resolved optimization and topology metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<OptimizationMetadata>,
 }
 
 impl DspGraph {
     pub fn new(version: impl Into<String>) -> Self {
         Self {
             version: version.into(),
-            channels: BTreeMap::new(),
+            global_plugins: Vec::new(),
+            channels: HashMap::new(),
+            metadata: None,
         }
     }
 
     pub fn add_channel(&mut self, name: impl Into<String>, plugins: Vec<Plugin>) {
-        self.channels.insert(name.into(), ChannelChain { plugins });
+        let name = name.into();
+        self.channels.insert(
+            name.clone(),
+            ChannelDspChain {
+                channel: name,
+                plugins: plugins
+                    .into_iter()
+                    .map(|plugin| PluginConfigWrapper {
+                        plugin_type: plugin.kind,
+                        parameters: plugin.parameters,
+                    })
+                    .collect(),
+                drivers: None,
+                initial_curve: None,
+                final_curve: None,
+                eq_response: None,
+                target_curve: None,
+                pre_ir: None,
+                post_ir: None,
+                fir_temporal_masking: None,
+                direct_early_late_correction: None,
+            },
+        );
     }
 
-    /// Validate the minimum contract shared by engines and exporters.
+    /// Validate the backend-neutral graph invariants shared by all exporters.
     pub fn validate(&self) -> Result<(), String> {
         if self.version.trim().is_empty() {
             return Err("DSP graph version must not be empty".to_string());
@@ -41,20 +83,39 @@ impl DspGraph {
         if self.channels.is_empty() {
             return Err("DSP graph requires at least one channel".to_string());
         }
+        validate_plugins("global graph", &self.global_plugins)?;
         for (name, chain) in &self.channels {
             if name.trim().is_empty() {
                 return Err("DSP graph channel names must not be empty".to_string());
             }
-            if chain
-                .plugins
-                .iter()
-                .any(|plugin| plugin.kind.trim().is_empty())
-            {
+            if chain.channel != *name {
                 return Err(format!(
-                    "DSP graph channel '{name}' contains a plugin with an empty kind"
+                    "DSP graph channel key '{name}' does not match embedded channel name '{}'",
+                    chain.channel
                 ));
+            }
+            validate_plugins(&format!("channel '{name}'"), &chain.plugins)?;
+            if let Some(drivers) = &chain.drivers {
+                for driver in drivers {
+                    validate_plugins(
+                        &format!("channel '{name}' driver '{}'", driver.name),
+                        &driver.plugins,
+                    )?;
+                }
             }
         }
         Ok(())
     }
+}
+
+fn validate_plugins(context: &str, plugins: &[PluginConfigWrapper]) -> Result<(), String> {
+    if plugins
+        .iter()
+        .any(|plugin| plugin.plugin_type.trim().is_empty())
+    {
+        return Err(format!(
+            "DSP graph {context} contains a plugin with an empty type"
+        ));
+    }
+    Ok(())
 }

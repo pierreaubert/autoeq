@@ -9,6 +9,7 @@ pub mod ctc;
 pub mod dba;
 pub mod eq;
 pub mod eq_resources;
+pub mod export;
 pub mod fir;
 pub mod group_measurements;
 pub mod group_processing;
@@ -26,6 +27,9 @@ pub use channel::{ChannelWorkflowResult, process_single_channel};
 pub use channel_measurements::prepare_channel_measurements;
 pub use config_loader::{SHALLOW_MERGE_KEYS, load_config, merge_json_objects};
 pub use eq_resources::{prepare_eq_resources, prepare_eq_target};
+pub use export::{
+    export_dsp_chain, export_dsp_chain_with_convolution_sidecars, package_convolution_sidecars,
+};
 pub use group_measurements::load_multisub_seat_measurements;
 pub use group_processing::{
     process_cardioid, process_dba, process_multisub_group, process_speaker_group,

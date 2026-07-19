@@ -1,7 +1,7 @@
-use super::super::types::DspChainOutput;
 use super::conformance::{
     validate_camilladsp_input, validate_pipewire_input, validate_serial_external_input,
 };
+use roomeq_model::DspGraph;
 use std::path::{Path, PathBuf};
 
 /// Supported export formats for DSP chain output
@@ -73,15 +73,12 @@ impl ExportFormat {
     }
 }
 
-pub fn external_export_supported(
-    output: &DspChainOutput,
-    format: ExportFormat,
-) -> anyhow::Result<()> {
+pub fn external_export_supported(output: &DspGraph, format: ExportFormat) -> anyhow::Result<()> {
     ensure_external_export_supported(output, format)
 }
 
 pub(super) fn ensure_external_export_supported(
-    output: &DspChainOutput,
+    output: &DspGraph,
     format: ExportFormat,
 ) -> anyhow::Result<()> {
     let has_routed_bass_management = has_routed_bass_management(output);
@@ -123,7 +120,7 @@ fn unsupported_graph_error(format: ExportFormat) -> anyhow::Result<()> {
     );
 }
 
-fn has_routed_bass_management(output: &DspChainOutput) -> bool {
+fn has_routed_bass_management(output: &DspGraph) -> bool {
     output
         .metadata
         .as_ref()
@@ -141,7 +138,7 @@ fn has_routed_bass_management(output: &DspChainOutput) -> bool {
         })
 }
 
-fn has_only_bass_management_matrix(output: &DspChainOutput) -> bool {
+fn has_only_bass_management_matrix(output: &DspGraph) -> bool {
     has_routed_bass_management(output)
         && output.global_plugins.iter().all(|plugin| {
             plugin.plugin_type == "matrix"

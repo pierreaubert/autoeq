@@ -1,7 +1,7 @@
 use super::super::export_format::ExportFormat;
-use super::super::render_dsp_chain;
+use super::super::render_dsp_graph as render_dsp_chain;
 use super::make::{make_routed_bass_output, make_test_output};
-use crate::roomeq::types::{ChannelDspChain, DspChainOutput, PluginConfigWrapper};
+use roomeq_model::{ChannelDspChain, DspGraph, PluginConfigWrapper};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::Write;
@@ -24,8 +24,8 @@ fn channel(name: &str, plugins: Vec<PluginConfigWrapper>) -> ChannelDspChain {
     }
 }
 
-fn output_with_plugins(plugins: Vec<PluginConfigWrapper>) -> DspChainOutput {
-    DspChainOutput {
+fn output_with_plugins(plugins: Vec<PluginConfigWrapper>) -> DspGraph {
+    DspGraph {
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels: HashMap::from([("left".to_string(), channel("left", plugins))]),
@@ -33,7 +33,7 @@ fn output_with_plugins(plugins: Vec<PluginConfigWrapper>) -> DspChainOutput {
     }
 }
 
-fn camilladsp_error(output: &DspChainOutput) -> String {
+fn camilladsp_error(output: &DspGraph) -> String {
     render_dsp_chain(output, ExportFormat::CamillaDsp, 48_000.0)
         .unwrap_err()
         .to_string()
@@ -643,7 +643,7 @@ fn camilladsp_rejects_fractional_sample_rates_before_truncation() {
 
 #[test]
 fn camilladsp_rejects_channel_identifier_collisions() {
-    let output = DspChainOutput {
+    let output = DspGraph {
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels: HashMap::from([

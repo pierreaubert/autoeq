@@ -1,6 +1,5 @@
-use super::super::super::types::{ChannelDspChain, DspChainOutput, PluginConfigWrapper};
+use super::super::build_export_package;
 use super::super::export_camilladsp;
-use super::super::export_dsp_chain_with_convolution_sidecars;
 use super::super::export_easyeffects;
 use super::super::export_equalizer_apo;
 use super::super::export_format::ExportFormat;
@@ -13,19 +12,16 @@ use super::super::export_wavelet;
 use super::super::extract::extract_eq_filters;
 use super::super::extract_gain_db;
 use super::super::misc::parse_biquad_filter_type;
-use super::super::package::package_convolution_sidecars;
-use super::super::roon_convolver::package_roon_convolution_archive;
-use crate::roomeq::{
-    BassManagementMatrix, BassManagementReport, BassManagementRoute, BassManagementRoutingGraph,
-};
+use super::super::package::{ConvolutionResource, package_convolution_sidecars};
+use super::super::roon_convolver::build_roon_convolution_archive;
+use roomeq_model::*;
 use std::collections::HashMap;
 use std::process::Command;
 
-use crate::roomeq::types::*;
 use serde_json::json;
 
-/// Build a test DspChainOutput with 2 channels, each having gain + 3 PEQ + delay
-pub(super) fn make_test_output() -> DspChainOutput {
+/// Build a test DspGraph with 2 channels, each having gain + 3 PEQ + delay.
+pub(super) fn make_test_output() -> DspGraph {
     let mut channels = HashMap::new();
 
     // Left channel: gain -2.5 dB, delay 1.5 ms, 3 PEQ bands
@@ -97,7 +93,7 @@ pub(super) fn make_test_output() -> DspChainOutput {
         },
     );
 
-    DspChainOutput {
+    DspGraph {
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels,
@@ -131,7 +127,7 @@ pub(super) fn make_test_output() -> DspChainOutput {
     }
 }
 
-pub(super) fn make_systemwide_test_output() -> DspChainOutput {
+pub(super) fn make_systemwide_test_output() -> DspGraph {
     let mut output = make_test_output();
     let plugins: Vec<_> = output.channels["left"]
         .plugins
@@ -145,7 +141,7 @@ pub(super) fn make_systemwide_test_output() -> DspChainOutput {
     output
 }
 
-fn make_single_filter_output(filter_type: &str, gain_db: f64) -> DspChainOutput {
+fn make_single_filter_output(filter_type: &str, gain_db: f64) -> DspGraph {
     let mut channels = HashMap::new();
     channels.insert(
         "left".to_string(),
@@ -176,7 +172,7 @@ fn make_single_filter_output(filter_type: &str, gain_db: f64) -> DspChainOutput 
         },
     );
 
-    DspChainOutput {
+    DspGraph {
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels,
@@ -184,7 +180,7 @@ fn make_single_filter_output(filter_type: &str, gain_db: f64) -> DspChainOutput 
     }
 }
 
-pub(super) fn make_routed_bass_output() -> DspChainOutput {
+pub(super) fn make_routed_bass_output() -> DspGraph {
     let mut channels = HashMap::new();
     for channel in ["L", "R", "LFE"] {
         let post_filter = if channel == "LFE" {
@@ -333,7 +329,7 @@ pub(super) fn make_routed_bass_output() -> DspChainOutput {
         advisories: vec!["ok".to_string()],
     };
 
-    DspChainOutput {
+    DspGraph {
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels,

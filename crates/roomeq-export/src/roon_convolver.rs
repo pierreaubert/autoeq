@@ -1,8 +1,8 @@
-use super::super::types::DspChainOutput;
 use super::collect::collect_all_plugins;
 use super::extract::extract_convolution_paths;
-use anyhow::Context;
-use std::collections::HashSet;
+use super::package::{ConvolutionResource, resource_map};
+use roomeq_model::DspGraph;
+use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, Write};
 use std::path::{Component, Path};
 use zip::write::FileOptions;
@@ -21,12 +21,11 @@ struct ArchiveChannel {
     wav_bytes: Option<Vec<u8>>,
 }
 
-pub(super) fn package_roon_convolution_archive(
-    output: &DspChainOutput,
-    source_dir: &Path,
-    archive_path: &Path,
+pub(super) fn build_roon_convolution_archive(
+    output: &DspGraph,
+    resources: &[ConvolutionResource],
     sample_rate: f64,
-) -> anyhow::Result<Option<RoonConvolutionArchive>> {
+) -> anyhow::Result<Option<(RoonConvolutionArchive, Vec<u8>)>> {
     if !sample_rate.is_finite()
         || sample_rate <= 0.0
         || sample_rate.fract() != 0.0
@@ -35,6 +34,7 @@ pub(super) fn package_roon_convolution_archive(
         anyhow::bail!("Roon convolution export requires an integral positive sample rate");
     }
     let sample_rate = sample_rate as u32;
+    let resources = resource_map(resources)?;
 
     let mut channels = Vec::new();
     let mut has_convolution = false;
@@ -61,7 +61,7 @@ pub(super) fn package_roon_convolution_archive(
         has_convolution |= !paths.is_empty();
         let wav_bytes = paths
             .first()
-            .map(|path| read_and_validate_wav(path, source_dir, sample_rate))
+            .map(|path| read_and_validate_wav(path, &resources, sample_rate))
             .transpose()?;
         channels.push(ArchiveChannel {
             name: canonical_name.to_string(),
@@ -126,19 +126,15 @@ pub(super) fn package_roon_convolution_archive(
         }
     }
     let bytes = zip.finish()?.into_inner();
-    std::fs::write(archive_path, bytes).with_context(|| {
-        format!(
-            "failed to write Roon convolution archive '{}'",
-            archive_path.display()
-        )
-    })?;
-
-    Ok(Some(RoonConvolutionArchive {
-        sample_rate,
-        channel_count: channels.len(),
-        channel_mask_hex: format!("{channel_mask:X}"),
-        config_name,
-    }))
+    Ok(Some((
+        RoonConvolutionArchive {
+            sample_rate,
+            channel_count: channels.len(),
+            channel_mask_hex: format!("{channel_mask:X}"),
+            config_name,
+        },
+        bytes,
+    )))
 }
 
 fn roon_wave_channel(name: &str) -> Option<(u32, &'static str)> {
@@ -161,7 +157,7 @@ fn archive_wav_name(index: usize, name: &str) -> String {
 
 fn read_and_validate_wav(
     ir_file: &str,
-    source_dir: &Path,
+    resources: &HashMap<&str, &[u8]>,
     sample_rate: u32,
 ) -> anyhow::Result<Vec<u8>> {
     let relative = Path::new(ir_file);
@@ -180,23 +176,14 @@ fn read_and_validate_wav(
     {
         anyhow::bail!("Roon convolution impulse '{ir_file}' must be a WAV file");
     }
-    let root = source_dir.canonicalize().with_context(|| {
-        format!(
-            "failed to resolve convolution source directory '{}'",
-            source_dir.display()
-        )
+    let bytes = resources
+        .get(ir_file)
+        .copied()
+        .ok_or_else(|| anyhow::anyhow!("missing explicit convolution resource '{ir_file}'"))?;
+    let cursor = Cursor::new(bytes);
+    let mut reader = hound::WavReader::new(cursor).map_err(|error| {
+        anyhow::anyhow!("Roon convolution impulse '{ir_file}' is not a valid WAV: {error}")
     })?;
-    let path = root
-        .join(relative)
-        .canonicalize()
-        .with_context(|| format!("Roon convolution impulse '{ir_file}' was not found"))?;
-    if !path.starts_with(&root) {
-        anyhow::bail!("Roon convolution impulse '{ir_file}' escapes its source directory");
-    }
-    let bytes = std::fs::read(&path)?;
-    let cursor = Cursor::new(&bytes);
-    let mut reader = hound::WavReader::new(cursor)
-        .with_context(|| format!("Roon convolution impulse '{ir_file}' is not a valid WAV"))?;
     let spec = reader.spec();
     if spec.channels != 1 {
         anyhow::bail!("Roon convolution impulse '{ir_file}' must be mono");
@@ -210,16 +197,20 @@ fn read_and_validate_wav(
     match spec.sample_format {
         hound::SampleFormat::Float => {
             for sample in reader.samples::<f32>() {
-                sample.with_context(|| format!("malformed samples in '{ir_file}'"))?;
+                sample.map_err(|error| {
+                    anyhow::anyhow!("malformed samples in '{ir_file}': {error}")
+                })?;
             }
         }
         hound::SampleFormat::Int => {
             for sample in reader.samples::<i32>() {
-                sample.with_context(|| format!("malformed samples in '{ir_file}'"))?;
+                sample.map_err(|error| {
+                    anyhow::anyhow!("malformed samples in '{ir_file}': {error}")
+                })?;
             }
         }
     }
-    Ok(bytes)
+    Ok(bytes.to_vec())
 }
 
 fn wav_frame_count(bytes: &[u8]) -> anyhow::Result<u32> {

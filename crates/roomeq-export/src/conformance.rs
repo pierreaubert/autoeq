@@ -1,8 +1,7 @@
-use super::super::home_cinema::BassManagementRoutingGraph;
-use super::super::types::{DspChainOutput, PluginConfigWrapper};
 use super::channel::sorted_channels;
 use super::export_format::ExportFormat;
 use super::write::camilladsp_crossover_filter_type;
+use roomeq_model::{BassManagementRoutingGraph, DspGraph, PluginConfigWrapper};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -162,7 +161,7 @@ pub(super) fn normalize_export_identifier(name: &str) -> String {
 }
 
 pub(super) fn validate_camilladsp_input(
-    output: &DspChainOutput,
+    output: &DspGraph,
     sample_rate: Option<f64>,
 ) -> anyhow::Result<()> {
     let graph = super::camilladsp_routing_graph(output);
@@ -183,7 +182,7 @@ pub(super) fn validate_camilladsp_input(
 }
 
 pub(super) fn validate_pipewire_input(
-    output: &DspChainOutput,
+    output: &DspGraph,
     sample_rate: Option<f64>,
 ) -> anyhow::Result<()> {
     if let Some(plugin) = output.global_plugins.first() {
@@ -206,7 +205,7 @@ pub(super) fn validate_pipewire_input(
 }
 
 pub(super) fn validate_serial_external_input(
-    output: &DspChainOutput,
+    output: &DspGraph,
     format: ExportFormat,
 ) -> anyhow::Result<()> {
     if output.channels.is_empty() {
@@ -500,7 +499,7 @@ fn validate_pipewire_plugin(
 }
 
 fn validate_export_input(
-    output: &DspChainOutput,
+    output: &DspGraph,
     capabilities: &ExportCapabilities,
     sample_rate: Option<f64>,
     routing_graph: Option<&BassManagementRoutingGraph>,
@@ -608,7 +607,7 @@ fn validate_export_input(
 }
 
 fn validate_camilladsp_global_plugins(
-    output: &DspChainOutput,
+    output: &DspGraph,
     routed_expected: bool,
 ) -> anyhow::Result<()> {
     for (index, plugin) in output.global_plugins.iter().enumerate() {
@@ -728,7 +727,7 @@ fn validate_camilladsp_plugin(
 }
 
 fn validate_camilladsp_routing_graph(
-    output: &DspChainOutput,
+    output: &DspGraph,
     graph: &BassManagementRoutingGraph,
     sample_rate: Option<f64>,
 ) -> anyhow::Result<()> {
@@ -792,11 +791,7 @@ fn validate_camilladsp_routing_graph(
     Ok(())
 }
 
-fn validate_channel_list(
-    output: &DspChainOutput,
-    channels: &[String],
-    kind: &str,
-) -> anyhow::Result<()> {
+fn validate_channel_list(output: &DspGraph, channels: &[String], kind: &str) -> anyhow::Result<()> {
     if channels.is_empty() {
         anyhow::bail!("CamillaDsp routed export requires at least one {kind} channel");
     }
@@ -837,7 +832,7 @@ fn validate_route_endpoint(
 }
 
 pub(super) fn routed_channel_names(
-    output: &DspChainOutput,
+    output: &DspGraph,
     graph: &BassManagementRoutingGraph,
 ) -> (Vec<String>, Vec<String>) {
     let input_channels = if graph.input_channels.is_empty() {
@@ -856,7 +851,7 @@ pub(super) fn routed_channel_names(
     (input_channels, output_channels)
 }
 
-fn routed_bass_management_declared(output: &DspChainOutput) -> bool {
+fn routed_bass_management_declared(output: &DspGraph) -> bool {
     output
         .metadata
         .as_ref()

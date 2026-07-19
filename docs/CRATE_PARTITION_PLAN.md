@@ -595,12 +595,11 @@ Completion state:
   artifact/resource handling, and CEA-2034 acquisition/cache handling now live
   in `roomeq-workflow`; prepared supporting-source and CEA-2034 DSP remain in
   `roomeq-engine`; CTC contracts remain in `roomeq-model`.
-- The remaining WP8 refinement is to split numerical-only CTC helpers out of
-  the workflow module after introducing path-free prepared matrix contracts.
-- Current ratchets are 35,000 root Rust lines, 19,362 root RoomEQ lines,
-  15,337 root binary lines, and 378 root unit tests. Direct internal edges
-  remain 43; cycles, temporary exceptions, and duplicate implementations
-  remain zero.
+- The WP8 refinement is complete: prepared CTC matrix/filter/solution
+  contracts, inverse solving, electrical-headroom limiting, FIR synthesis,
+  delivered-response metrics, and binaural diagnostics are path-free
+  `roomeq-engine` code. `roomeq-workflow` retains only resource loading,
+  adaptation, and artifact persistence.
 
 ### WP9 — Complete `roomeq-export`
 
@@ -620,6 +619,23 @@ Exit criteria:
   required.
 - Each exporter has focused parse/round-trip or semantic conformance tests in
   `roomeq-export`.
+
+Completion state:
+
+- WP9 is complete. The canonical `roomeq-model::DspGraph` is now the full
+  execution/export contract; `DspChainOutput` is a compatibility alias rather
+  than a parallel representation.
+- CamillaDSP, Equalizer APO, PipeWire, Roon, REW, coefficients, Wavelet,
+  EasyEffects, convolution sidecars, and their conformance tests are owned by
+  `roomeq-export`. The crate returns deterministic in-memory package members
+  with SHA-256 hashes and performs no production filesystem I/O.
+- `roomeq-workflow` explicitly loads graph-declared convolution resources and
+  persists returned package members. Root export code is a compatibility
+  re-export only.
+- Current ratchets are 28,697 root Rust lines, 13,059 root RoomEQ lines,
+  15,337 root binary lines, and 300 root unit tests. Direct internal edges
+  remain 43; cycles, temporary exceptions, and duplicate implementations
+  remain zero.
 
 ### WP10 — Move QA and command implementations
 

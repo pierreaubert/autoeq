@@ -92,7 +92,7 @@ oxiblas-ndarray = "0.2.1"
 
 # Optional, WebDriver-free static rendering. Charts are emitted as deterministic
 # SVG and `resvg` rasterizes them in-process to PNG.
-resvg = { version = "0.46", optional = true }
+resvg = { version = "0.47", optional = true }
 rayon = "1.11"
 
 [features]

@@ -136,3 +136,111 @@ fn persist_export_package(package: &ExportPackage, destination_dir: &Path) -> an
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use roomeq_model::{ChannelDspChain, PluginConfigWrapper, default_config_version};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    fn graph_with_plugins(plugins: Vec<PluginConfigWrapper>) -> DspGraph {
+        DspGraph {
+            version: default_config_version(),
+            global_plugins: Vec::new(),
+            channels: HashMap::from([(
+                "left".to_string(),
+                ChannelDspChain {
+                    channel: "left".to_string(),
+                    plugins,
+                    drivers: None,
+                    initial_curve: None,
+                    final_curve: None,
+                    eq_response: None,
+                    target_curve: None,
+                    pre_ir: None,
+                    post_ir: None,
+                    fir_temporal_masking: None,
+                    direct_early_late_correction: None,
+                },
+            )]),
+            metadata: None,
+        }
+    }
+
+    fn convolution_graph(reference: &str) -> DspGraph {
+        graph_with_plugins(vec![PluginConfigWrapper {
+            plugin_type: "convolution".to_string(),
+            parameters: json!({"ir_file": reference}),
+        }])
+    }
+
+    fn convolution_reference(graph: &DspGraph) -> &str {
+        graph.channels["left"].plugins[0].parameters["ir_file"]
+            .as_str()
+            .unwrap()
+    }
+
+    #[test]
+    fn export_dsp_chain_persists_rendered_content() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("room.yml");
+        let graph = graph_with_plugins(vec![PluginConfigWrapper {
+            plugin_type: "gain".to_string(),
+            parameters: json!({"gain_db": -1.5}),
+        }]);
+
+        export_dsp_chain(&graph, ExportFormat::CamillaDsp, &path, 48_000.0).unwrap();
+
+        let rendered = std::fs::read_to_string(path).unwrap();
+        assert!(rendered.contains("samplerate: 48000"));
+    }
+
+    #[test]
+    fn package_convolution_sidecars_loads_rewrites_and_persists_resource() {
+        let source = tempfile::tempdir().unwrap();
+        let destination = tempfile::tempdir().unwrap();
+        std::fs::write(source.path().join("impulse.wav"), b"new impulse").unwrap();
+        std::fs::write(destination.path().join("impulse.wav"), b"occupied").unwrap();
+
+        let packaged = package_convolution_sidecars(
+            &convolution_graph("impulse.wav"),
+            source.path(),
+            destination.path(),
+        )
+        .unwrap();
+
+        assert_eq!(convolution_reference(&packaged), "impulse_002.wav");
+        assert_eq!(
+            std::fs::read(destination.path().join("impulse_002.wav")).unwrap(),
+            b"new impulse"
+        );
+    }
+
+    #[test]
+    fn export_with_convolution_sidecars_persists_complete_package() {
+        let source = tempfile::tempdir().unwrap();
+        let destination = tempfile::tempdir().unwrap();
+        std::fs::write(source.path().join("impulse.wav"), b"impulse").unwrap();
+        let path = destination.path().join("room.yml");
+
+        export_dsp_chain_with_convolution_sidecars(
+            &convolution_graph("impulse.wav"),
+            ExportFormat::CamillaDsp,
+            &path,
+            48_000.0,
+            source.path(),
+        )
+        .unwrap();
+
+        assert!(
+            std::fs::read_to_string(path)
+                .unwrap()
+                .contains("impulse.wav")
+        );
+        assert_eq!(
+            std::fs::read(destination.path().join("impulse.wav")).unwrap(),
+            b"impulse"
+        );
+    }
+}

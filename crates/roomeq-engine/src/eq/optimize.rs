@@ -1163,6 +1163,23 @@ mod processing_mode_tests {
     }
 
     #[test]
+    fn zero_filter_config_returns_identity_without_running_backend() {
+        let curve = make_simple_room_curve();
+        let config = OptimizerConfig {
+            algorithm: "autoeq:cmaes".to_string(),
+            num_filters: 0,
+            refine: true,
+            ..OptimizerConfig::default()
+        };
+
+        let result = optimize_channel_eq_detailed(&curve, &config, None, 48_000.0).unwrap();
+
+        assert!(result.filters.is_empty());
+        assert!(result.optimizer_evidence.is_empty());
+        assert!(result.loss.is_finite());
+    }
+
+    #[test]
     fn measurement_uncertainty_scales_optimizer_gain_bounds() {
         let config = OptimizerConfig {
             min_db: -12.0,

@@ -448,6 +448,14 @@ pub(in super::super) fn run_optimization_pass(
     optim_params.num_filters = num_filters;
     optim_params.maxeval = max_iter;
 
+    if num_filters == 0 {
+        let loss = autoeq_optim::optim::compute_fitness_penalties_ref(&[], &prep.objective_data);
+        if !loss.is_finite() {
+            return Err("identity EQ objective is not finite".into());
+        }
+        return Ok((Vec::new(), loss, Vec::new(), Vec::new()));
+    }
+
     let (lower_bounds, mut upper_bounds) = autoeq_optim::optim::setup::setup_bounds(&optim_params);
 
     // Log per-filter frequency bounds for diagnostics

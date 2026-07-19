@@ -121,9 +121,9 @@ pub fn package_convolution_sidecars(
     Ok((graph, members.into_values().collect()))
 }
 
-pub(super) fn resource_map<'a>(
-    resources: &'a [ConvolutionResource],
-) -> anyhow::Result<HashMap<&'a str, &'a [u8]>> {
+pub(super) fn resource_map(
+    resources: &[ConvolutionResource],
+) -> anyhow::Result<HashMap<&str, &[u8]>> {
     let mut by_reference = HashMap::new();
     for resource in resources {
         if resource.reference.trim().is_empty() {

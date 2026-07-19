@@ -2,6 +2,14 @@ use anyhow::{Result, anyhow};
 use roomeq_engine::room_result::RoomOptimizationResult;
 use std::path::PathBuf;
 
+pub(super) fn project_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("roomeq-qa must live under <project>/crates/roomeq-qa")
+        .to_path_buf()
+}
+
 pub(super) fn all_scenarios() -> Vec<&'static str> {
     vec![
         // Small room

@@ -628,12 +628,19 @@ qa-roomeq-multi-small-stereo-22-mso: ensure-venv
 qa-roomeq-coverage: prod-autoeq
 	cargo run --bin roomeq-qa-coverage --release
 
-# Hard unit-test line-coverage gate for the library.  The full 897-test suite
-# is slow under LLVM instrumentation, so `--release` is used.  Once the crate
-# reaches 90 % line coverage this target becomes the canonical gate.
+# Hard line-coverage gate for the production RoomEQ libraries.
+# CLI adapters, QA runners, synthetic fixtures, and the root compatibility
+# facade are checked separately and are not part of the production denominator.
+# Cross-crate integration profiles are accumulated because WP11 deliberately
+# moved compatibility/workflow boundary tests out of the root library.
 [group('qa-roomeq')]
 qa-roomeq-coverage-gate:
-	cargo llvm-cov --lib --summary-only --release --fail-under-lines 90
+	cargo llvm-cov --package roomeq-model --package roomeq-analysis --package roomeq-quality --package roomeq-engine --package roomeq-export --package roomeq-workflow --lib --no-report --release
+	cargo llvm-cov --no-clean --package autoeq --test roomeq_integration_test --summary-only --release
+	cargo llvm-cov --no-clean --package autoeq --test roomeq_pipeline_test --summary-only --release
+	cargo llvm-cov --no-clean --package autoeq --test system_config_test --summary-only --release
+	cargo llvm-cov --no-clean --package autoeq --test roomeq_generated_data_test --summary-only --release
+	cargo llvm-cov report --package roomeq-model --package roomeq-analysis --package roomeq-quality --package roomeq-engine --package roomeq-export --package roomeq-workflow --summary-only --release --fail-under-lines 90
 
 [group('qa-roomeq')]
 qa-roomeq-quick: prod-autoeq

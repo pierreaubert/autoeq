@@ -17,24 +17,24 @@ pub struct ChannelChain {
     pub plugins: Vec<Plugin>,
 }
 
-/// Canonical DSP execution and export graph.
-///
-/// This is deliberately the complete graph that external renderers consume:
-/// global routing plugins, stable channel identities, per-driver branches,
-/// and the metadata that carries resolved topology reports. Optimization
-/// curves remain attached to channel chains so converting an existing RoomEQ
-/// result into the canonical contract is lossless.
+/// DSP chain output (AudioEngine PluginConfig format)
+//
+// This is the canonical graph external renderers consume: global routing
+// plugins, stable channel identities, per-driver branches, resolved topology
+// metadata, and optimization curves for lossless conversion.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(rename = "DspChainOutput")]
 pub struct DspGraph {
-    /// Graph/output schema version.
+    /// Output version
     #[serde(default = "crate::config::default_config_version")]
     pub version: String,
-    /// Graph-level plugins such as matrix routing.
+    /// Global graph-level plugins, e.g. matrix routing that combines several
+    /// programme inputs before per-output correction chains.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub global_plugins: Vec<PluginConfigWrapper>,
-    /// Per-channel and per-driver processing chains.
+    /// Per-channel DSP chains
     pub channels: HashMap<String, ChannelDspChain>,
-    /// Resolved optimization and topology metadata.
+    /// Metadata about the optimization
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<OptimizationMetadata>,
 }

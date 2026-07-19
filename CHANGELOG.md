@@ -27,6 +27,16 @@
   existing root RoomEQ entry points remain available.
 - Added crate-local README and CHANGELOG files for every extracted library.
 
+## Fixes
+
+- Treat zero-filter RoomEQ configurations as an identity optimization instead
+  of invoking an optimizer backend with an empty parameter vector.
+- Accept legacy CSV-backed inline measurement descriptors during production
+  validation, matching the canonical loader's documented CSV fallback.
+- Preserve the public RoomEQ help description and historical
+  `DspChainOutput` JSON Schema identity after moving their owners into CLI and
+  model crates.
+
 # 0.4.51
 
 ## Features

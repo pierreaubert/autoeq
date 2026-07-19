@@ -292,10 +292,10 @@ pub fn compute_delivered_response_metrics(
     let mut balance_sum_db = 0.0_f64;
     let mut balance_count = 0usize;
 
-    for bin in 0..num_bins {
+    for (bin, positions) in spectrum.bins[..num_bins].iter().enumerate() {
         let latency_phase = 2.0 * PI * bin as f64 * latency_samples as f64 / fft_size as f64;
         let undo_latency = Complex64::from_polar(1.0, latency_phase);
-        for position in &spectrum.bins[bin] {
+        for position in positions {
             let mut delivered = [Complex64::new(0.0, 0.0); 4];
             for ear_idx in 0..2 {
                 for target_ear_idx in 0..2 {

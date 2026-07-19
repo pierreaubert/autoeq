@@ -31,7 +31,12 @@ use roomeq_workflow::{
 
 /// Room EQ - Optimize multi-channel speaker systems
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(
+    author,
+    version,
+    about = "Automatic equalization for speakers, headphones and rooms!",
+    long_about = None
+)]
 struct Args {
     /// Path to room configuration JSON file
     #[arg(short, long, required_unless_present_any = ["schema", "convert"])]

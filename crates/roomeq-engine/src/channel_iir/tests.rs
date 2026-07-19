@@ -144,6 +144,40 @@ fn low_latency_assembly_orders_passes_and_builds_report() {
 }
 
 #[test]
+fn zero_filter_low_latency_request_skips_optimizer_backend() {
+    let curve = flat_curve();
+    let prepared = prepared(curve.clone());
+    let room_config = RoomConfig::default();
+    let resources = EqResources::default();
+    let target = build_target_context("left", &room_config, &curve, None);
+    let features = preprocessed(&curve);
+    let optimizer = OptimizerConfig {
+        num_filters: 0,
+        algorithm: "autoeq:cmaes".to_string(),
+        ..OptimizerConfig::default()
+    };
+
+    let result = process_iir_channel(IirChannelRequest {
+        mode: IirChannelMode::LowLatency,
+        channel_name: "left",
+        prepared: &prepared,
+        room_config: &room_config,
+        sample_rate: 48_000.0,
+        target: &target,
+        preprocessed: &features,
+        optimizer: &optimizer,
+        eq_resources: &resources,
+        callback: None,
+    })
+    .unwrap();
+
+    assert!(result.filters.is_empty());
+    assert!(result.optimizer_evidence.is_empty());
+    assert!(result.channel.plugins.is_empty());
+    assert_eq!(result.raw_post_eq_curve.spl, result.raw_pre_eq_curve.spl);
+}
+
+#[test]
 fn warped_assembly_keeps_standard_hpf_and_marks_optimized_filters() {
     let curve = flat_curve();
     let prepared = prepared(curve.clone());

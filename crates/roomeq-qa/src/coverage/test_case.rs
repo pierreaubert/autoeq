@@ -1,4 +1,5 @@
 use super::consts::OPTIM_CONFIG_DIR;
+use super::misc::project_root;
 use super::processing_method::ProcessingMethod;
 use super::room_size::RoomSize;
 use super::solver::Solver;
@@ -28,11 +29,14 @@ impl TestCase {
 
     pub(super) fn config_path(&self) -> PathBuf {
         let base = self.solver.dir();
-        PathBuf::from(base).join(&self.scenario).join("config.json")
+        project_root()
+            .join(base)
+            .join(&self.scenario)
+            .join("config.json")
     }
 
     pub(super) fn override_path(&self) -> PathBuf {
-        let optim_dir = PathBuf::from(OPTIM_CONFIG_DIR);
+        let optim_dir = project_root().join(OPTIM_CONFIG_DIR);
         optim_dir
             .join(&self.scenario)
             .join(self.method.config_file())

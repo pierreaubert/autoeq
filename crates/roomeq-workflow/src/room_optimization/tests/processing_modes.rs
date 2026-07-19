@@ -63,17 +63,22 @@ fn stereo_config_for_mode(processing_mode: ProcessingMode) -> RoomConfig {
     }
 }
 
-#[test]
-fn optimize_room_impl_workflow_phase_linear_succeeds() {
-    let config = stereo_config_for_mode(ProcessingMode::PhaseLinear);
-    let result = optimize_room_impl(
-        &config,
+fn optimize_room_with_temp_output(config: &RoomConfig) -> Result<RoomOptimizationResult> {
+    let output_dir = tempfile::tempdir()?;
+    optimize_room_impl(
+        config,
         48000.0,
-        None,
+        Some(output_dir.path()),
         None,
         None,
         &autoeq_artifacts::MemoryArtifactStore::new(),
-    );
+    )
+}
+
+#[test]
+fn optimize_room_impl_workflow_phase_linear_succeeds() {
+    let config = stereo_config_for_mode(ProcessingMode::PhaseLinear);
+    let result = optimize_room_with_temp_output(&config);
     assert!(
         result.is_ok(),
         "phase-linear stereo workflow should succeed: {:?}",
@@ -86,14 +91,7 @@ fn optimize_room_impl_workflow_phase_linear_succeeds() {
 #[test]
 fn optimize_room_impl_workflow_hybrid_succeeds() {
     let config = stereo_config_for_mode(ProcessingMode::Hybrid);
-    let result = optimize_room_impl(
-        &config,
-        48000.0,
-        None,
-        None,
-        None,
-        &autoeq_artifacts::MemoryArtifactStore::new(),
-    );
+    let result = optimize_room_with_temp_output(&config);
     assert!(
         result.is_ok(),
         "hybrid stereo workflow should succeed: {:?}",
@@ -113,14 +111,7 @@ fn optimize_room_impl_workflow_mixed_phase_succeeds() {
             ));
         }
     }
-    let result = optimize_room_impl(
-        &config,
-        48000.0,
-        None,
-        None,
-        None,
-        &autoeq_artifacts::MemoryArtifactStore::new(),
-    );
+    let result = optimize_room_with_temp_output(&config);
     assert!(
         result.is_ok(),
         "mixed-phase stereo workflow should succeed: {:?}",
@@ -162,14 +153,7 @@ fn optimize_room_impl_workflow_phase_correction_succeeds() {
         min_spatial_depth: 0.5,
         phase_smoothing_octaves: 1.0 / 6.0,
     });
-    let result = optimize_room_impl(
-        &config,
-        48000.0,
-        None,
-        None,
-        None,
-        &autoeq_artifacts::MemoryArtifactStore::new(),
-    );
+    let result = optimize_room_with_temp_output(&config);
     assert!(
         result.is_ok(),
         "workflow with phase correction should succeed: {:?}",
@@ -207,14 +191,7 @@ fn optimize_room_impl_generic_multiple_channels_phase_linear_succeeds() {
     });
     let config = room_config_with_optimizer(speakers, None, optimizer);
 
-    let result = optimize_room_impl(
-        &config,
-        48000.0,
-        None,
-        None,
-        None,
-        &autoeq_artifacts::MemoryArtifactStore::new(),
-    );
+    let result = optimize_room_with_temp_output(&config);
     assert!(
         result.is_ok(),
         "generic multi-channel phase-linear optimization should succeed: {:?}",
@@ -252,14 +229,7 @@ fn optimize_room_impl_home_cinema_workflow_succeeds() {
     };
     let config = room_config_with_optimizer(speakers, Some(system), tiny_optimizer());
 
-    let result = optimize_room_impl(
-        &config,
-        48000.0,
-        None,
-        None,
-        None,
-        &autoeq_artifacts::MemoryArtifactStore::new(),
-    );
+    let result = optimize_room_with_temp_output(&config);
     assert!(
         result.is_ok(),
         "home cinema workflow should succeed: {:?}",

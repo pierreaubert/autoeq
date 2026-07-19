@@ -18,6 +18,11 @@ pub(super) fn optimize_iir_eq(
     callback: Option<OptimProgressCallback>,
     target_tilt_curve: Option<&Curve>,
 ) -> Result<(Vec<Biquad>, Vec<OptimizerRunEvidence>)> {
+    if optimizer_config.num_filters == 0 {
+        info!("  Skipping PEQ optimization because num_filters is 0");
+        return Ok((Vec::new(), Vec::new()));
+    }
+
     if let Some(schroeder_config) = optimizer_config
         .schroeder_split
         .as_ref()

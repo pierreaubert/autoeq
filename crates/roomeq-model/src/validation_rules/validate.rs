@@ -250,7 +250,14 @@ fn validate_inline_measurement(
     source_index: usize,
     errors: &mut Vec<String>,
 ) {
-    if inline.frequencies.is_empty() || inline.frequencies.len() != inline.magnitude_db.len() {
+    let uses_csv_fallback = (inline.frequencies.is_empty() || inline.magnitude_db.is_empty())
+        && inline
+            .csv_path
+            .as_deref()
+            .is_some_and(|path| !path.trim().is_empty());
+    if !uses_csv_fallback
+        && (inline.frequencies.is_empty() || inline.frequencies.len() != inline.magnitude_db.len())
+    {
         errors.push(format!(
             "speaker '{speaker_name}' source {source_index} has invalid inline frequency/SPL data"
         ));
@@ -1301,7 +1308,7 @@ mod validate_optimizer_tests {
 
 #[cfg(test)]
 mod room_config_validation_tests {
-    use super::validate_room_config;
+    use super::{RoomValidationContext, validate_room_config, validate_room_config_staged};
     use crate::roomeq::types::{
         AreaPriorKind, AreaQuadratureKind, AreaScalarisationKind, BootstrapScalarisation,
         BootstrapUncertaintyConfig, CardioidConfig, ContinuousListeningAreaConfig, CrossoverConfig,
@@ -1309,7 +1316,7 @@ mod room_config_validation_tests {
         SpeakerConfig, SpeakerGroup, SupportingSourceGroup, SystemConfig, SystemModel,
         TargetResponseConfig, TargetShape,
     };
-    use crate::{Curve, MeasurementRef, MeasurementSingle, MeasurementSource};
+    use crate::{Curve, InlineMeasurement, MeasurementRef, MeasurementSingle, MeasurementSource};
     use std::collections::HashMap;
     use std::path::PathBuf;
 
@@ -1332,6 +1339,50 @@ mod room_config_validation_tests {
             measurement: MeasurementRef::Path(PathBuf::from(path)),
             speaker_name: speaker_name.map(String::from),
         })
+    }
+
+    fn csv_backed_inline_source(csv_path: Option<&str>) -> MeasurementSource {
+        MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Inline(InlineMeasurement {
+                frequencies: Vec::new(),
+                magnitude_db: Vec::new(),
+                phase_deg: None,
+                name: Some("legacy recording".to_string()),
+                wav_path: Some("recording.wav".to_string()),
+                csv_path: csv_path.map(String::from),
+            }),
+            speaker_name: None,
+        })
+    }
+
+    #[test]
+    fn production_validation_accepts_csv_backed_inline_measurement() {
+        let mut config = default_room();
+        config.speakers.insert(
+            "L".to_string(),
+            SpeakerConfig::Single(csv_backed_inline_source(Some("measurement.csv"))),
+        );
+
+        let report = validate_room_config_staged(&config, RoomValidationContext::production());
+
+        assert!(report.errors().next().is_none(), "{report:?}");
+    }
+
+    #[test]
+    fn production_validation_rejects_empty_inline_measurement_without_csv_fallback() {
+        let mut config = default_room();
+        config.speakers.insert(
+            "L".to_string(),
+            SpeakerConfig::Single(csv_backed_inline_source(None)),
+        );
+
+        let report = validate_room_config_staged(&config, RoomValidationContext::production());
+
+        assert!(
+            report
+                .errors()
+                .any(|error| error.contains("invalid inline frequency/SPL data"))
+        );
     }
 
     #[test]

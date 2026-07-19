@@ -1,6 +1,6 @@
 # Crate Partition Migration Plan
 
-Status: canonical; WP0-WP11 complete locally, final consolidated verification in progress
+Status: complete locally; WP0-WP11 and consolidated verification passed
 
 Date: 2026-07-18
 
@@ -707,8 +707,28 @@ WP11 local implementation state (2026-07-19):
   direct internal edges, with zero cycles, temporary exceptions, or duplicate
   implementations.
 - Destination, QA, CLI, root library, binary, and test targets compile. The
-  static partition fitness audit passes; runtime, strict Clippy, schema, and
-  full QA checks remain at the consolidated final verification gate.
+  static partition fitness audit, runtime QA, strict Clippy, schema baselines,
+  and production-library coverage gate all pass.
+
+Final consolidated verification (2026-07-19):
+
+- `python3 scripts/check_crate_partition.py` passes with 482 root Rust lines,
+  290 root RoomEQ lines, 88 root binary lines, zero root unit tests, 57 direct
+  internal edges, and zero cycles, exceptions, or duplicate implementations.
+- `cargo test -p roomeq-engine --lib` passed its 437-test suite, and
+  `cargo test -p roomeq-qa --lib` passed 35 tests. Focused zero-filter,
+  workflow export/measurement, model validation, and CTC regressions pass.
+- Consolidated RoomEQ QA is green by component: convergence/quality 93/93,
+  scenario coverage 36/36, synthetic coverage 1126/1126, and feature
+  progression 3/3 recordings. The first feature run exposed a migrated
+  CSV-fallback validation mismatch; the model fix and targeted rerun pass.
+- `just qa-roomeq-coverage-gate` now accumulates owner-crate unit coverage and
+  the cross-crate integration profiles deliberately retained in the root test
+  package. The six production RoomEQ libraries pass at 90.07% line coverage
+  (49,046 lines, 4,868 missed); CLI, QA-runner, synthetic-fixture, and root
+  facade source are outside that production denominator.
+- Strict `cargo clippy` with `-D warnings`, `cargo fmt --all -- --check`,
+  `git diff --check`, and both RoomEQ schema baseline comparisons pass.
 
 ## 9. Test ownership and verification
 
@@ -788,6 +808,7 @@ tree:
 | Production exporters remaining in root | `0` |
 | Duplicate canonical implementations | `0` |
 | Per-crate focused test commands | all green |
+| Production RoomEQ library line coverage | `>= 90%` |
 | Compatibility/schema/export checks | all green |
 | Full RoomEQ QA | green |
 
@@ -796,17 +817,12 @@ JSON schemas. If preserving all published binary wrappers makes the binary
 target impractical, the tracking issue may adjust it once, before WP10 starts;
 the root implementation and dependency gates may not be weakened.
 
-## 12. First implementation step
+## 12. Historical first implementation step
 
-Do not resume file moves immediately. Start with WP0 in a clean branch or
-worktree isolated from unrelated changes:
-
-1. Create the tracking issue from this plan when Gitea is available; until
-   then, keep the work on the local WP0 branch.
-2. Add the dependency and root-ownership fitness checker.
-3. Record the accepted API/schema baselines.
-4. Open a plan/fitness-only PR.
-5. Begin WP1 only after that PR is accepted.
+WP0 began in an isolated local worktree. The tracking issue and PR remain
+deferred until Gitea is available; the local migration proceeded only after
+the dependency/root-ownership checker and accepted API/schema baselines were
+in place.
 
 This makes progress measurable from the first implementation change and
 prevents the migration from returning to copy-first, cleanup-later behavior.

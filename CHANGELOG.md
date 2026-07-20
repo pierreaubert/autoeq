@@ -1,4 +1,4 @@
-# Unreleased
+# 0.4.52
 
 ## Features
 
@@ -215,7 +215,7 @@ add it to a docker, more work to test properly EQAPO on Windows)
   contracts against arithmetic and validation mutations. REW MDAT conversion
   now recovers embedded channel labels, accepts valid sub-zero band-edge SPL,
   and exports no free-form note bodies, with focused Python regression tests.
-- Added testing and documentation to test Roon (at least on MacOS). Roon API 
+- Added testing and documentation to test Roon (at least on MacOS). Roon API
   does not allow proper automated testing but manual testing is doable see
   documentations in `docs`.
 - Strengthened the original audit integration/negative-path matrix with parsed

@@ -112,6 +112,8 @@ pub fn run(plotter: &dyn DriverPlotter) -> Result<bool, Box<dyn Error>> {
             "--release",
             "--bin",
             "roomeq",
+            "--features",
+            "cli",
             "--",
             "--config",
             config_path.to_str().unwrap(),

@@ -1,7 +1,5 @@
 //! Stable RoomEQ configuration and output contracts.
 
-#![allow(unsafe_code)]
-
 pub use autoeq_core::{
     AutoeqError, Curve, InlineMeasurement, MeasurementMultiple, MeasurementRef, MeasurementSingle,
     MeasurementSource, PeqModel, Result, SpinoramaBundle,

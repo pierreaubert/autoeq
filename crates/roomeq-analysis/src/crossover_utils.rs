@@ -6,6 +6,7 @@
 use crate::Curve;
 use log::warn;
 use math_audio_dsp::analysis::compute_average_response;
+use ndarray::{Axis, Slice};
 use std::collections::HashMap;
 
 pub fn split_curve_at_frequency(curve: &Curve, crossover_freq: f64) -> (Curve, Curve) {
@@ -22,22 +23,34 @@ pub fn split_curve_at_frequency(curve: &Curve, crossover_freq: f64) -> (Curve, C
     let high_start = split_idx.saturating_sub(overlap_points);
 
     let low_curve = Curve {
-        freq: curve.freq.slice(ndarray::s![..low_end]).to_owned(),
-        spl: curve.spl.slice(ndarray::s![..low_end]).to_owned(),
+        freq: curve
+            .freq
+            .slice_axis(Axis(0), Slice::from(..low_end))
+            .to_owned(),
+        spl: curve
+            .spl
+            .slice_axis(Axis(0), Slice::from(..low_end))
+            .to_owned(),
         phase: curve
             .phase
             .as_ref()
-            .map(|p| p.slice(ndarray::s![..low_end]).to_owned()),
+            .map(|p| p.slice_axis(Axis(0), Slice::from(..low_end)).to_owned()),
         ..Default::default()
     };
 
     let high_curve = Curve {
-        freq: curve.freq.slice(ndarray::s![high_start..]).to_owned(),
-        spl: curve.spl.slice(ndarray::s![high_start..]).to_owned(),
+        freq: curve
+            .freq
+            .slice_axis(Axis(0), Slice::from(high_start..))
+            .to_owned(),
+        spl: curve
+            .spl
+            .slice_axis(Axis(0), Slice::from(high_start..))
+            .to_owned(),
         phase: curve
             .phase
             .as_ref()
-            .map(|p| p.slice(ndarray::s![high_start..]).to_owned()),
+            .map(|p| p.slice_axis(Axis(0), Slice::from(high_start..)).to_owned()),
         ..Default::default()
     };
 

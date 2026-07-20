@@ -5,6 +5,9 @@ edition = "2024"
 description = "Acoustic quality metrics, acceptance policies, and QA fixtures for RoomEQ"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [dependencies]
 autoeq-core = { workspace = true }
 math-iir-fir = { workspace = true }

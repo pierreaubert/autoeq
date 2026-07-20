@@ -7,6 +7,7 @@ import argparse
 import difflib
 import hashlib
 import json
+import os
 import pathlib
 import re
 import shlex
@@ -22,6 +23,14 @@ TEST_ATTRIBUTE = re.compile(
     r"#\s*\[\s*(?:[A-Za-z_][A-Za-z0-9_]*::)?test"
     r"(?:\s*\([^]]*\))?\s*\]"
 )
+UNSAFE_RUST = re.compile(
+    r"\bunsafe\s*(?:\{|fn\b|impl\b|trait\b|extern\b)|"
+    r"#\s*\[\s*unsafe\s*\("
+)
+ENVIRONMENT_MUTATION = re.compile(
+    r"\b(?:std\s*::\s*)?env\s*::\s*(?:set_var|remove_var)\s*\("
+)
+NDARRAY_SLICE_MACRO = re.compile(r"\b(?:ndarray\s*::\s*)?s\s*!\s*\[")
 
 
 def load_json(path: pathlib.Path) -> dict[str, Any]:
@@ -30,7 +39,7 @@ def load_json(path: pathlib.Path) -> dict[str, Any]:
 
 def cargo_metadata(repo_root: pathlib.Path) -> dict[str, Any]:
     command = [
-        "cargo",
+        os.environ.get("CARGO", "cargo"),
         "metadata",
         "--format-version",
         "1",
@@ -352,6 +361,68 @@ def check_crate_documentation(
     return errors
 
 
+def workspace_owned_rust_files(
+    packages: dict[str, dict[str, Any]],
+) -> list[pathlib.Path]:
+    files: set[pathlib.Path] = set()
+    for package in packages.values():
+        package_dir = pathlib.Path(package["manifest_path"]).parent
+        for directory in ("src", "tests", "examples", "benches"):
+            files.update(rust_files(package_dir / directory))
+        build_script = package_dir / "build.rs"
+        if build_script.is_file():
+            files.add(build_script)
+    return sorted(files)
+
+
+def toml_table(source: str, name: str) -> str | None:
+    match = re.search(
+        rf"^\[{re.escape(name)}\]\s*$\n(.*?)(?=^\[|\Z)",
+        source,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    return match.group(1) if match else None
+
+
+def check_workspace_safety(
+    repo_root: pathlib.Path, packages: dict[str, dict[str, Any]]
+) -> list[str]:
+    errors: list[str] = []
+    root_manifest = (repo_root / "Cargo.toml").read_text(encoding="utf-8")
+    rust_lints = toml_table(root_manifest, "workspace.lints.rust") or ""
+    if not re.search(
+        r'^unsafe_code\s*=\s*(?:"forbid"|\{[^}]*\blevel\s*=\s*"forbid"[^}]*\})\s*$',
+        rust_lints,
+        flags=re.MULTILINE,
+    ):
+        errors.append("workspace Rust lint unsafe_code must be set to forbid")
+
+    for package_name, package in sorted(packages.items()):
+        manifest_path = pathlib.Path(package["manifest_path"])
+        manifest = manifest_path.read_text(encoding="utf-8")
+        package_lints = toml_table(manifest, "lints") or ""
+        if not re.search(
+            r"^workspace\s*=\s*true\s*$", package_lints, flags=re.MULTILINE
+        ):
+            errors.append(
+                f"workspace package {package_name} does not inherit workspace lints"
+            )
+
+    patterns = (
+        ("unsafe Rust syntax", UNSAFE_RUST),
+        ("process-environment mutation", ENVIRONMENT_MUTATION),
+        ("unsafe-expanding ndarray slice macro", NDARRAY_SLICE_MACRO),
+    )
+    for file_path in workspace_owned_rust_files(packages):
+        source = file_path.read_text(encoding="utf-8", errors="replace")
+        for description, pattern in patterns:
+            for match in pattern.finditer(source):
+                line = source.count("\n", 0, match.start()) + 1
+                relative = file_path.relative_to(repo_root)
+                errors.append(f"{description}: {relative}:{line}")
+    return errors
+
+
 def package_metrics(
     packages: dict[str, dict[str, Any]], policy: dict[str, Any]
 ) -> list[tuple[str, int, int, str]]:
@@ -478,6 +549,7 @@ def main() -> int:
     errors.extend(check_metric_budgets(metrics, policy))
     errors.extend(check_focused_tests(packages, policy))
     errors.extend(check_crate_documentation(packages))
+    errors.extend(check_workspace_safety(REPO_ROOT, packages))
     errors.extend(check_public_api(REPO_ROOT, policy))
     errors.extend(check_schema_baseline_files(REPO_ROOT, policy))
 

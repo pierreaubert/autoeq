@@ -5,6 +5,9 @@ edition = "2024"
 description = "Artifact storage contracts and implementations for AutoEQ workflows"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [dependencies]
 autoeq-core = { workspace = true }
 

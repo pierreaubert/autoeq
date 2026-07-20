@@ -5,6 +5,9 @@ edition = "2024"
 description = "AutoEQ objectives, constraints, and optimizer backends"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [features]
 # Retained as a compatibility marker. RoomEQ configuration adapts to
 # `OptimParams` in `roomeq-model`, preserving the lower-layer dependency

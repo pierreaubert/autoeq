@@ -90,6 +90,9 @@ They must decrease monotonically after implementation begins.
 7. Direct dependency additions require an ownership explanation in the PR.
 8. Moving code must not create a second canonical representation of curves,
    filters, configs, results, or DSP graphs.
+9. Workspace-owned Rust must remain fully safe. Every package inherits a
+   workspace `unsafe_code = "forbid"` lint, and tests inject configuration
+   explicitly instead of mutating the process environment.
 
 ### 4.2 Runtime boundaries
 
@@ -730,6 +733,18 @@ Final consolidated verification (2026-07-19):
 - Strict `cargo clippy` with `-D warnings`, `cargo fmt --all -- --check`,
   `git diff --check`, and both RoomEQ schema baseline comparisons pass.
 
+Post-migration safety hardening (2026-07-20):
+
+- All 18 packages inherit `unsafe_code = "forbid"`; the old crate-level
+  allowances, ten environment-mutating unsafe blocks, and every
+  unsafe-expanding `ndarray::s!` use were removed.
+- Measurement acquisition and an AutoEQ speaker-workflow entry point now accept
+  explicit cache roots, so tests remain isolated and can run in parallel
+  without changing the process environment.
+- `cargo check --workspace --all-targets --locked` and strict workspace Clippy
+  pass. The five affected crate suites pass 458 tests, and the partition
+  fitness audit, formatter check, unsafe scan, and diff check are green.
+
 ## 9. Test ownership and verification
 
 ### 9.1 Test placement
@@ -807,6 +822,7 @@ tree:
 | Production callers of extracted engine | `>= 1` through workflow |
 | Production exporters remaining in root | `0` |
 | Duplicate canonical implementations | `0` |
+| Unsafe Rust or process-environment mutation | `0`; forbidden by workspace lint and fitness audit |
 | Per-crate focused test commands | all green |
 | Crate-local `README.md` and `CHANGELOG.md` | every workspace package |
 | Production RoomEQ library line coverage | `>= 90%` |

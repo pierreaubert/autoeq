@@ -5,6 +5,9 @@ edition = "2024"
 description = "AutoEQ measurement loading and preprocessing"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [features]
 default = ["api"]
 api = []

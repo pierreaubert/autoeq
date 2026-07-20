@@ -5,6 +5,9 @@ edition = "2024"
 description = "RoomEQ QA scenario matrices, runners, scorecards, and command implementations"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow = { workspace = true }
 autoeq-optim = { workspace = true }

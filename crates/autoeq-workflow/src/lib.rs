@@ -1,7 +1,5 @@
 //! High-level speaker and headphone equalization workflows.
 
-#![allow(unsafe_code)]
-
 pub use autoeq_core::iir;
 pub use autoeq_core::{AutoeqError, Curve, Result};
 pub mod error {

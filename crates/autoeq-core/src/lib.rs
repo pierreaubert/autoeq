@@ -4,10 +4,6 @@
 //! optimizer dependencies. Higher-level crates build measurement and
 //! optimization workflows on these types.
 
-// The numerical dependencies use internally audited unsafe implementations
-// behind safe APIs (for example ndarray slicing macros).
-#![allow(unsafe_code)]
-
 pub use math_audio_iir_fir as iir;
 
 pub mod curve;

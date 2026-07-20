@@ -5,6 +5,9 @@ edition = "2024"
 description = "Core curves, filter models, response math, and PEQ parameter layouts for AutoEQ"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [dependencies]
 clap = { workspace = true }
 log = { workspace = true }

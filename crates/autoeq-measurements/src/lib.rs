@@ -1,7 +1,5 @@
 //! Measurement sources, loading, preprocessing, and speaker metrics.
 
-#![allow(unsafe_code)]
-
 pub use autoeq_core::{AutoeqError, Curve, Result, build_target_curve_by_name};
 
 pub mod error {

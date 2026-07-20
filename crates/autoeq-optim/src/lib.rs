@@ -1,7 +1,5 @@
 //! Objective functions and optimization backends for AutoEQ.
 
-#![allow(unsafe_code)]
-
 pub use autoeq_core as core;
 pub use autoeq_core::iir;
 pub use autoeq_core::{AutoeqError, Curve, PeqModel, Result};

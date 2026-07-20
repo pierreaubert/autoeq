@@ -5,6 +5,9 @@ edition = "2024"
 description = "RoomEQ resource loading and application workflow composition"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow = { workspace = true }
 autoeq-artifacts = { workspace = true }

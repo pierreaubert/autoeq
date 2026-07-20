@@ -5,6 +5,9 @@ edition = "2024"
 description = "RoomEQ command-line parsing and user-facing orchestration"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }

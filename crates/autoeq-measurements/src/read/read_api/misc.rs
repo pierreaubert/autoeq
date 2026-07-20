@@ -118,15 +118,6 @@ pub(super) fn collect_trace_names(plot_data: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Return the cache directory for a headphone under `<cache_root>/headphones/org.spinorama/`.
-pub(super) fn headphone_cache_dir(headphone: &str) -> std::path::PathBuf {
-    let mut p = crate::read::directory::cache_root();
-    p.push("headphones");
-    p.push("org.spinorama");
-    p.push(crate::read::directory::sanitize_dir_name(headphone));
-    p
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

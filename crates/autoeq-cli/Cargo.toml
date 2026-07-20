@@ -5,6 +5,9 @@ edition = "2024"
 description = "AutoEQ command-line parsing and user-facing orchestration"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [features]
 default = []
 plotly = ["dep:autoeq-plot", "autoeq-plot/plotly"]

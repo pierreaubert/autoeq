@@ -1,10 +1,13 @@
 use super::extract::extract_cea2034_curves_original;
-use super::fetch::fetch_measurement_plot_data;
-use super::fetch::read_spinorama;
+use super::fetch::{
+    fetch_measurement_plot_data, fetch_measurement_plot_data_at_cache_root, read_spinorama,
+    read_spinorama_at_cache_root,
+};
 use super::types::Cea2034Data;
 use crate::Curve;
 use std::collections::HashMap;
 use std::error::Error;
+use std::path::Path;
 
 /// Load spinorama measurement with full CEA2034 spin data
 ///
@@ -25,11 +28,39 @@ pub async fn load_spinorama_with_spin(
     measurement: &str,
     curve_name: &str,
 ) -> Result<(Curve, Option<Cea2034Data>), Box<dyn Error>> {
+    load_spinorama_with_spin_from_cache_root(speaker, version, measurement, curve_name, None).await
+}
+
+/// Load spinorama measurement data using an explicit cache root.
+pub async fn load_spinorama_with_spin_at_cache_root(
+    speaker: &str,
+    version: &str,
+    measurement: &str,
+    curve_name: &str,
+    cache_root: &Path,
+) -> Result<(Curve, Option<Cea2034Data>), Box<dyn Error>> {
+    load_spinorama_with_spin_from_cache_root(
+        speaker,
+        version,
+        measurement,
+        curve_name,
+        Some(cache_root),
+    )
+    .await
+}
+
+async fn load_spinorama_with_spin_from_cache_root(
+    speaker: &str,
+    version: &str,
+    measurement: &str,
+    curve_name: &str,
+    cache_root: Option<&Path>,
+) -> Result<(Curve, Option<Cea2034Data>), Box<dyn Error>> {
     // Handle Estimated In-Room Response specially
     if measurement == "Estimated In-Room Response"
         || (measurement == "CEA2034" && curve_name == "Estimated In-Room Response")
     {
-        let plot_data = fetch_measurement_plot_data(speaker, version, "CEA2034").await?;
+        let plot_data = fetch_plot_data(speaker, version, "CEA2034", cache_root).await?;
         let curves = extract_cea2034_curves_original(&plot_data, "CEA2034")?;
 
         let pir_curve = curves
@@ -44,11 +75,16 @@ pub async fn load_spinorama_with_spin(
     }
 
     // Standard curve fetch
-    let curve = read_spinorama(speaker, version, measurement, curve_name).await?;
+    let curve = match cache_root {
+        Some(root) => {
+            read_spinorama_at_cache_root(speaker, version, measurement, curve_name, root).await?
+        }
+        None => read_spinorama(speaker, version, measurement, curve_name).await?,
+    };
 
     // Extract spin data if CEA2034
     let spin_data = if measurement == "CEA2034" {
-        let plot_data = fetch_measurement_plot_data(speaker, version, measurement).await?;
+        let plot_data = fetch_plot_data(speaker, version, measurement, cache_root).await?;
         let curves = extract_cea2034_curves_original(&plot_data, "CEA2034")?;
         Some(build_cea2034_data(curves)?)
     } else {
@@ -56,6 +92,20 @@ pub async fn load_spinorama_with_spin(
     };
 
     Ok((curve, spin_data))
+}
+
+async fn fetch_plot_data(
+    speaker: &str,
+    version: &str,
+    measurement: &str,
+    cache_root: Option<&Path>,
+) -> Result<serde_json::Value, Box<dyn Error>> {
+    match cache_root {
+        Some(root) => {
+            fetch_measurement_plot_data_at_cache_root(speaker, version, measurement, root).await
+        }
+        None => fetch_measurement_plot_data(speaker, version, measurement).await,
+    }
 }
 
 /// Build Cea2034Data from curves HashMap

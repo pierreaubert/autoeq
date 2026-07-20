@@ -11,7 +11,7 @@ use crate::x2peq;
 pub use autoeq_optim::{optimize_drivers_crossover, optimize_multisub};
 use std::collections::HashMap;
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Run complete speaker optimization from spinorama data
 ///
@@ -44,6 +44,31 @@ where
     .await
 }
 
+/// Run speaker optimization with an explicit measurement-cache root.
+///
+/// This entry point is intended for isolated workflows and tests that must not
+/// mutate process-global environment variables.
+pub async fn optimize_speaker_at_cache_root<F>(
+    input: &crate::workflow::InputConfig,
+    params: &crate::OptimParams,
+    cache_root: &Path,
+    progress_config: Option<ProgressCallbackConfig>,
+    progress_callback: Option<F>,
+) -> Result<SpeakerOptResult, Box<dyn Error>>
+where
+    F: FnMut(&ProgressUpdate) -> crate::de::CallbackAction + Send + 'static,
+{
+    optimize_speaker_with_grid_from_cache_root(
+        input,
+        params,
+        &crate::workflow::VisualizationGridConfig::default(),
+        Some(cache_root),
+        progress_config,
+        progress_callback,
+    )
+    .await
+}
+
 /// Run speaker optimization with an explicit normalization/report grid.
 pub async fn optimize_speaker_with_grid<F>(
     input: &crate::workflow::InputConfig,
@@ -55,12 +80,47 @@ pub async fn optimize_speaker_with_grid<F>(
 where
     F: FnMut(&ProgressUpdate) -> crate::de::CallbackAction + Send + 'static,
 {
+    optimize_speaker_with_grid_from_cache_root(
+        input,
+        params,
+        visualization_grid,
+        None,
+        progress_config,
+        progress_callback,
+    )
+    .await
+}
+
+async fn optimize_speaker_with_grid_from_cache_root<F>(
+    input: &crate::workflow::InputConfig,
+    params: &crate::OptimParams,
+    visualization_grid: &crate::workflow::VisualizationGridConfig,
+    cache_root: Option<&Path>,
+    progress_config: Option<ProgressCallbackConfig>,
+    progress_callback: Option<F>,
+) -> Result<SpeakerOptResult, Box<dyn Error>>
+where
+    F: FnMut(&ProgressUpdate) -> crate::de::CallbackAction + Send + 'static,
+{
     // 1. Load measurement with spin data
     let speaker = input.speaker.as_deref().unwrap_or("");
     let version = input.version.as_deref().unwrap_or("");
     let measurement = input.measurement.as_deref().unwrap_or("");
-    let (input_curve, spin_data) =
-        read::load_spinorama_with_spin(speaker, version, measurement, &input.curve_name).await?;
+    let (input_curve, spin_data) = match cache_root {
+        Some(cache_root) => {
+            read::load_spinorama_with_spin_at_cache_root(
+                speaker,
+                version,
+                measurement,
+                &input.curve_name,
+                cache_root,
+            )
+            .await?
+        }
+        None => {
+            read::load_spinorama_with_spin(speaker, version, measurement, &input.curve_name).await?
+        }
+    };
 
     // 2. Normalize to standard frequency grid
     let standard_freq = visualization_grid.create_frequency_grid(params)?;

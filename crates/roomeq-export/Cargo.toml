@@ -5,6 +5,9 @@ edition = "2024"
 description = "RoomEQ external DSP exporters and artifact packaging"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Inherited the workspace policy forbidding unsafe Rust code; cache-path tests
+  now use explicit roots instead of mutating the process environment.
 - Documented crate ownership and verification expectations.
 
 ## 0.4.51

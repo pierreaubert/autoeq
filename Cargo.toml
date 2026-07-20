@@ -49,6 +49,10 @@ exclude = [
 [workspace.package]
 version = "0.4.51"
 
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
+
 [workspace.dependencies]
 autoeq-core = { path = "crates/autoeq-core" }
 autoeq-artifacts = { path = "crates/autoeq-artifacts" }
@@ -230,8 +234,8 @@ rustfft = { workspace = true }
 serial_test = { workspace = true }
 tokio = { workspace = true }
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
+[lints]
+workspace = true
 
 [profile.release]
 # `release` is the everyday optimised profile — used by CI, `just prod-*`,

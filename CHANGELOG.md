@@ -2,6 +2,11 @@
 
 ## Refactoring
 
+- Forbid unsafe Rust code in every workspace package. Measurement-cache tests
+  now inject isolated cache roots instead of mutating the process environment,
+  ndarray slicing uses safe axis APIs, and the crate-partition checker rejects
+  unsafe syntax, unsafe-expanding slice macros, environment mutation, or crates
+  that stop inheriting the workspace lint policy.
 - Completed the crate-partition migration: the final RoomEQ optimization
   kernel and focused tests now live in `roomeq-workflow`, spectral/timbre DSP
   plugin conversion is engine-owned, CLI and QA crates call the canonical

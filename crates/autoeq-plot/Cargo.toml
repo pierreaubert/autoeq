@@ -5,6 +5,9 @@ edition = "2024"
 description = "Plotly visualizations and report generation for AutoEQ"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [features]
 default = []
 plotly = []

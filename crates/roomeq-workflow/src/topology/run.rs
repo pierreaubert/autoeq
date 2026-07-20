@@ -1,0 +1,466 @@
+use super::types::WorkflowProgressCallback;
+use super::types::WorkflowProgressCallbackFactory;
+use super::workflow::workflow_progress_callback;
+use super::workflow::workflow_progress_stopped;
+use crate::eq;
+use log::warn;
+#[cfg(test)]
+use math_audio_iir_fir::Biquad;
+use roomeq_engine::Curve;
+use roomeq_engine::error::{AutoeqError, Result};
+use roomeq_engine::output;
+use roomeq_engine::room_result::ChannelOptimizationResult;
+use roomeq_model::{
+    ChannelDspChain, MeasurementSource, OptimizerConfig, RoomConfig, TargetCurveConfig,
+};
+use std::path::Path;
+use std::sync::Arc;
+
+/// Run a Post-EQ pass with optional per-iteration progress feedback.
+///
+/// The bass-management workflows run `eq::optimize_channel_eq` once for
+/// each role (L, R, sub) after the per-channel Pre-EQ has finished. Each
+/// pass is a full DE run that can take several seconds, so the workflow
+/// hands it a callback derived from the same `WorkflowProgressCallback`
+/// factory that drives Pre-EQ iteration reporting. The UI ends up
+/// receiving the same iteration / loss / EPA stream during Post-EQ that
+/// it gets during Pre-EQ — without it the progress bar appears frozen
+/// for the duration of each pass.
+pub(crate) fn run_post_eq(
+    curve: &Curve,
+    opt_config: &OptimizerConfig,
+    target: Option<&TargetCurveConfig>,
+    sample_rate: f64,
+    progress: Option<WorkflowProgressCallback>,
+) -> Result<eq::EqOptimizationResult> {
+    let data_min_freq = curve.freq.first().copied().unwrap_or(f64::INFINITY);
+    let data_max_freq = curve.freq.last().copied().unwrap_or(f64::NEG_INFINITY);
+    let effective_min_freq = opt_config.min_freq.max(data_min_freq);
+    let effective_max_freq = opt_config.max_freq.min(data_max_freq);
+    if !effective_min_freq.is_finite()
+        || !effective_max_freq.is_finite()
+        || effective_min_freq >= effective_max_freq
+    {
+        warn!(
+            "Skipping Post-EQ: empty frequency band after intersecting configured [{:.1}, {:.1}] Hz with measurement [{:.1}, {:.1}] Hz",
+            opt_config.min_freq, opt_config.max_freq, data_min_freq, data_max_freq
+        );
+        return Ok(eq::EqOptimizationResult {
+            filters: Vec::new(),
+            loss: 0.0,
+            optimizer_evidence: Vec::new(),
+        });
+    }
+
+    let result = if let Some(WorkflowProgressCallback { callback, stopped }) = progress {
+        let res = eq::optimize_channel_eq_with_callback_detailed(
+            curve,
+            opt_config,
+            target,
+            sample_rate,
+            callback,
+        );
+        workflow_progress_stopped(&Some(stopped), "Post-EQ")?;
+        res
+    } else {
+        eq::optimize_channel_eq_detailed(curve, opt_config, target, sample_rate)
+    };
+    result.map_err(|e| AutoeqError::OptimizationFailed {
+        message: e.to_string(),
+    })
+}
+
+/// Runs a single channel through `roomeq_workflow::process_single_channel` and prepends an
+/// alignment-gain plugin to the returned DSP chain.
+///
+/// This is the Phase 3 feature-parity bridge: the generic per-channel path
+/// honours every `OptimizerConfig` feature (excursion protection, target
+/// tilt/response, broadband matching, CEA2034 correction). Workflows that
+/// used to call `eq::optimize_channel_eq` directly bypassed all of them.
+/// By routing each channel through the crate workflow with the
+/// original `MeasurementSource` (so `speaker_name` propagates to CEA2034)
+/// and a config clone carrying any workflow-specific frequency overrides,
+/// the workflow inherits the full feature matrix.
+///
+/// The alignment gain is not applied to the curve itself — it is added as a
+/// plugin at the head of the chain. The channel workflow's internal
+/// decisions (F3 detection, passband estimation, target tilt, etc.) use
+/// relative-to-peak thresholds that are gain-invariant, so passing the raw
+/// curve is equivalent to passing an aligned one.
+///
+/// `config_override` lets stereo 2.1 / home-cinema-with-sub clone
+/// `config` and narrow `optimizer.min_freq` / `max_freq` to the band of
+/// interest (e.g. Pre-EQ at `min_xo`) before the delegation call.
+#[allow(clippy::type_complexity)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_channel_via_generic_path(
+    role: &str,
+    source: &MeasurementSource,
+    config: &RoomConfig,
+    alignment_gain_db: f64,
+    sample_rate: f64,
+    output_dir: &Path,
+    progress_factory: &mut Option<&mut WorkflowProgressCallbackFactory<'_>>,
+    channel_index: usize,
+    total_channels: usize,
+    max_iterations: usize,
+) -> Result<(
+    ChannelDspChain,
+    ChannelOptimizationResult,
+    f64,
+    f64,
+    Option<Vec<f64>>,
+    Option<Vec<String>>,
+)> {
+    let derived_multiseat_config =
+        crate::home_cinema::derive_all_channel_multiseat_config(config, role, source);
+    let derived_config;
+    let effective_config = if let Some(multi_config) = derived_multiseat_config.clone() {
+        derived_config = {
+            let mut cloned = config.clone();
+            cloned.optimizer.multi_measurement = Some(multi_config);
+            cloned
+        };
+        &derived_config
+    } else {
+        config
+    };
+
+    let progress = workflow_progress_callback(
+        progress_factory,
+        role,
+        channel_index,
+        total_channels,
+        max_iterations,
+    );
+    let stopped = progress
+        .as_ref()
+        .map(|progress| Arc::clone(&progress.stopped));
+    let mut processed = crate::process_single_channel(
+        role,
+        source,
+        effective_config,
+        sample_rate,
+        output_dir,
+        progress.map(|progress| progress.callback),
+        None,
+        None,
+    )?;
+    workflow_progress_stopped(&stopped, "TopologyWorkflowExecution")?;
+
+    let mut multiseat_rejection = None;
+    if derived_multiseat_config.is_some() {
+        let acceptance = crate::home_cinema::all_channel_multiseat_acceptance(
+            config,
+            role,
+            source,
+            &processed.3,
+            &processed.4,
+        );
+        if !acceptance.accepted {
+            warn!(
+                "All-channel multi-seat correction rejected for '{}': {}. Re-running without derived multi-seat correction.",
+                role,
+                acceptance.advisories.join(", ")
+            );
+            multiseat_rejection = Some(acceptance.advisories);
+            let progress = workflow_progress_callback(
+                progress_factory,
+                role,
+                channel_index,
+                total_channels,
+                max_iterations,
+            );
+            let stopped = progress
+                .as_ref()
+                .map(|progress| Arc::clone(&progress.stopped));
+            processed = crate::process_single_channel(
+                role,
+                source,
+                config,
+                sample_rate,
+                output_dir,
+                progress.map(|progress| progress.callback),
+                None,
+                None,
+            )?;
+            workflow_progress_stopped(&stopped, "TopologyWorkflowExecution")?;
+        }
+    }
+
+    let (
+        raw_chain,
+        pre_score,
+        post_score,
+        initial_curve,
+        final_curve,
+        biquads,
+        _mean_spl,
+        _arrival_ms,
+        fir_coeffs,
+        optimizer_evidence,
+    ) = processed;
+
+    // Prepend the alignment gain plugin without touching the inner chain's
+    // existing plugins (excursion HPF, broadband shelf, CEA2034 PEQ, fine EQ).
+    let mut plugins: Vec<_> = Vec::with_capacity(raw_chain.plugins.len() + 1);
+    if alignment_gain_db.abs() > 0.01 {
+        plugins.push(output::create_gain_plugin(alignment_gain_db));
+    }
+    plugins.extend(raw_chain.plugins);
+
+    let chain = ChannelDspChain {
+        channel: role.to_string(),
+        plugins,
+        drivers: raw_chain.drivers,
+        initial_curve: raw_chain.initial_curve,
+        final_curve: raw_chain.final_curve,
+        eq_response: raw_chain.eq_response,
+        pre_ir: raw_chain.pre_ir,
+        post_ir: raw_chain.post_ir,
+        fir_temporal_masking: raw_chain.fir_temporal_masking,
+        direct_early_late_correction: raw_chain.direct_early_late_correction,
+        target_curve: raw_chain.target_curve,
+    };
+
+    let channel_result = ChannelOptimizationResult {
+        name: role.to_string(),
+        pre_score,
+        post_score,
+        initial_curve,
+        final_curve,
+        biquads,
+        fir_coeffs: fir_coeffs.clone(),
+        optimizer_evidence,
+    };
+
+    Ok((
+        chain,
+        channel_result,
+        pre_score,
+        post_score,
+        fir_coeffs,
+        multiseat_rejection,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::executor_tests::{base_optimizer, flat_curve};
+    use super::*;
+    use roomeq_model::{
+        MeasurementSource, OptimizerConfig, ProcessingMode, RoomConfig, SpeakerConfig,
+        SystemConfig, SystemModel, TargetCurveConfig, default_config_version,
+    };
+    use std::collections::HashMap;
+    use std::path::Path;
+    use std::sync::{Arc, atomic::AtomicBool};
+
+    fn tiny_optimizer() -> OptimizerConfig {
+        OptimizerConfig {
+            processing_mode: ProcessingMode::LowLatency,
+            num_filters: 1,
+            max_iter: 20,
+            population: 6,
+            seed: Some(1),
+            ..Default::default()
+        }
+    }
+
+    fn room_config(optimizer: OptimizerConfig) -> RoomConfig {
+        RoomConfig {
+            version: default_config_version(),
+            system: Some(SystemConfig {
+                model: SystemModel::Custom,
+                speakers: HashMap::from([("Left".to_string(), "left".to_string())]),
+                subwoofers: None,
+                bass_management: None,
+                ..Default::default()
+            }),
+            speakers: HashMap::from([(
+                "left".to_string(),
+                SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
+            )]),
+            crossovers: None,
+            target_curve: None,
+            optimizer,
+            provenance: Default::default(),
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        }
+    }
+
+    #[test]
+    fn run_post_eq_without_callback_runs() {
+        let opt = tiny_optimizer();
+        let curve = flat_curve();
+        let result = run_post_eq(&curve, &opt, None, 48_000.0, None).unwrap();
+        assert_valid_post_eq_result(&result.filters, result.loss);
+    }
+
+    #[test]
+    fn run_post_eq_with_callback_runs() {
+        let opt = tiny_optimizer();
+        let curve = flat_curve();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let progress = WorkflowProgressCallback {
+            callback: Box::new(|_, _, _| roomeq_engine::CallbackAction::Continue),
+            stopped: Arc::clone(&stopped),
+        };
+        let result = run_post_eq(&curve, &opt, None, 48_000.0, Some(progress)).unwrap();
+        assert!(!stopped.load(std::sync::atomic::Ordering::SeqCst));
+        assert_valid_post_eq_result(&result.filters, result.loss);
+    }
+
+    #[test]
+    fn run_post_eq_with_target_curve_runs() {
+        let opt = tiny_optimizer();
+        let curve = flat_curve();
+        let target = TargetCurveConfig::Predefined("flat".to_string());
+        let result = run_post_eq(&curve, &opt, Some(&target), 48_000.0, None).unwrap();
+        assert_valid_post_eq_result(&result.filters, result.loss);
+    }
+
+    #[test]
+    fn run_post_eq_skips_an_inverted_frequency_band() {
+        let mut opt = tiny_optimizer();
+        opt.min_freq = 400.0;
+        opt.max_freq = 80.0;
+        let curve = flat_curve();
+        let result = run_post_eq(&curve, &opt, None, 48_000.0, None).unwrap();
+        assert!(result.filters.is_empty());
+        assert_eq!(result.loss, 0.0);
+    }
+
+    fn assert_valid_post_eq_result(filters: &[Biquad], loss: f64) {
+        assert!(loss.is_finite(), "post-EQ loss must be finite");
+        for filter in filters {
+            assert!(filter.freq.is_finite() && filter.freq > 0.0);
+            assert!(filter.q.is_finite() && filter.q > 0.0);
+            assert!(filter.db_gain.is_finite());
+        }
+    }
+
+    #[test]
+    fn run_channel_via_generic_path_runs() {
+        let config = room_config(base_optimizer());
+        let source = MeasurementSource::InMemory(flat_curve());
+        let mut factory: Option<&mut WorkflowProgressCallbackFactory<'_>> = None;
+        let result = run_channel_via_generic_path(
+            "Left",
+            &source,
+            &config,
+            0.0,
+            48_000.0,
+            Path::new("."),
+            &mut factory,
+            0,
+            1,
+            config.optimizer.max_iter,
+        );
+        assert!(result.is_ok(), "generic path failed: {:?}", result.err());
+        let (chain, channel_result, pre_score, post_score, _, _) = result.unwrap();
+        assert_eq!(chain.channel, "Left");
+        assert!(pre_score.is_finite() && post_score.is_finite());
+        assert_eq!(channel_result.name, "Left");
+        assert_eq!(
+            channel_result.initial_curve.freq.len(),
+            channel_result.final_curve.freq.len()
+        );
+        assert!(channel_result.biquads.iter().all(|filter| {
+            filter.freq.is_finite() && filter.q.is_finite() && filter.db_gain.is_finite()
+        }));
+    }
+
+    #[test]
+    fn run_channel_via_generic_path_with_alignment_gain() {
+        let mut optimizer = base_optimizer();
+        optimizer.max_freq = 500.0;
+        let config = room_config(optimizer);
+        let source = MeasurementSource::InMemory(flat_curve());
+        let mut factory: Option<&mut WorkflowProgressCallbackFactory<'_>> = None;
+        let result = run_channel_via_generic_path(
+            "Left",
+            &source,
+            &config,
+            2.5,
+            48_000.0,
+            Path::new("."),
+            &mut factory,
+            0,
+            1,
+            config.optimizer.max_iter,
+        );
+        assert!(
+            result.is_ok(),
+            "generic path with gain failed: {:?}",
+            result.err()
+        );
+        let (chain, _, _, _, _, _) = result.unwrap();
+        let has_gain = chain.plugins.iter().any(|p| p.plugin_type == "gain");
+        assert!(has_gain, "alignment gain plugin should be present");
+    }
+
+    #[test]
+    fn run_channel_via_generic_path_multiseat_rejected_recovers() {
+        use roomeq_model::{MultiMeasurementStrategy, MultiSeatConfig, SystemConfig, SystemModel};
+
+        let mut optimizer = base_optimizer();
+        optimizer.max_freq = 500.0;
+        optimizer.multi_seat = Some(MultiSeatConfig {
+            all_channel_enabled: true,
+            all_channel_strategy: MultiMeasurementStrategy::SpatialRobustness,
+            max_deviation_db: 0.001,
+            ..Default::default()
+        });
+        let config = RoomConfig {
+            version: default_config_version(),
+            system: Some(SystemConfig {
+                model: SystemModel::HomeCinema,
+                speakers: HashMap::from([("Left".to_string(), "left".to_string())]),
+                subwoofers: None,
+                bass_management: None,
+                ..Default::default()
+            }),
+            speakers: HashMap::from([(
+                "left".to_string(),
+                SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
+            )]),
+            crossovers: None,
+            target_curve: None,
+            optimizer,
+            provenance: Default::default(),
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        };
+        let seat0 = flat_curve();
+        let mut seat1 = flat_curve();
+        seat1.spl += 5.0;
+        let source = MeasurementSource::InMemoryMultiple(vec![seat0, seat1]);
+        let mut factory: Option<&mut WorkflowProgressCallbackFactory<'_>> = None;
+        let result = run_channel_via_generic_path(
+            "Left",
+            &source,
+            &config,
+            0.0,
+            48_000.0,
+            Path::new("."),
+            &mut factory,
+            0,
+            1,
+            config.optimizer.max_iter,
+        );
+        assert!(
+            result.is_ok(),
+            "generic path should recover from multiseat rejection: {:?}",
+            result.err()
+        );
+        let (_, _, _, _, _, multiseat_rejection) = result.unwrap();
+        assert!(
+            multiseat_rejection.is_some(),
+            "multiseat rejection should be reported"
+        );
+    }
+}

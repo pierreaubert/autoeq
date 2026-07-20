@@ -188,59 +188,36 @@ version = "0.4.51"
 dependencies = [
  "anyhow",
  "assert_fs",
- "async-trait",
  "autoeq-artifacts",
+ "autoeq-cli",
  "autoeq-core",
  "autoeq-fir",
  "autoeq-measurements",
  "autoeq-optim",
  "autoeq-plot",
  "autoeq-workflow",
- "base64",
- "build_html",
- "chrono",
  "clap",
- "csv",
- "directories",
- "env_logger",
  "hound",
- "log",
- "math-dsp",
  "math-iir-fir",
  "math-optimisation",
- "math-rir",
- "metaheuristics-nature",
- "nalgebra",
  "ndarray",
  "num-complex",
- "num_cpus",
- "oxiblas-ndarray",
  "plotly",
  "proptest",
- "rand 0.10.2",
- "rand_chacha 0.10.0",
- "rayon",
- "reqwest",
- "resvg",
  "roomeq-analysis",
+ "roomeq-cli",
  "roomeq-engine",
  "roomeq-export",
  "roomeq-model",
+ "roomeq-qa",
  "roomeq-quality",
  "roomeq-synthetic",
+ "roomeq-workflow",
  "rustfft",
- "schemars 1.2.1",
- "serde",
  "serde_json",
  "serial_test",
- "sha2",
- "sofa-reader",
- "strsim",
  "tempfile",
- "thiserror",
  "tokio",
- "urlencoding",
- "zip",
 ]
 
 [[package]]
@@ -249,6 +226,28 @@ version = "0.4.51"
 dependencies = [
  "autoeq-core",
  "tempfile",
+]
+
+[[package]]
+name = "autoeq-cli"
+version = "0.4.51"
+dependencies = [
+ "anyhow",
+ "autoeq-plot",
+ "autoeq-workflow",
+ "chrono",
+ "clap",
+ "csv",
+ "env_logger",
+ "log",
+ "ndarray",
+ "num_cpus",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "urlencoding",
 ]
 
 [[package]]
@@ -261,6 +260,7 @@ dependencies = [
  "ndarray",
  "num-complex",
  "rustfft",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "sha2",
@@ -272,7 +272,6 @@ name = "autoeq-fir"
 version = "0.4.51"
 dependencies = [
  "autoeq-core",
- "autoeq-measurements",
  "hound",
  "math-iir-fir",
  "ndarray",
@@ -2736,21 +2735,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "roomeq-cli"
+version = "0.4.51"
+dependencies = [
+ "anyhow",
+ "clap",
+ "env_logger",
+ "log",
+ "roomeq-engine",
+ "roomeq-model",
+ "roomeq-workflow",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "roomeq-engine"
 version = "0.4.51"
 dependencies = [
  "autoeq-core",
  "autoeq-fir",
- "autoeq-measurements",
  "autoeq-optim",
- "autoeq-workflow",
  "log",
+ "math-dsp",
  "math-iir-fir",
  "math-optimisation",
+ "math-rir",
  "nalgebra",
  "ndarray",
  "num-complex",
+ "num_cpus",
  "oxiblas-ndarray",
+ "rand 0.10.2",
+ "rand_chacha 0.10.0",
  "roomeq-analysis",
  "roomeq-model",
  "roomeq-quality",
@@ -2764,22 +2782,22 @@ dependencies = [
 name = "roomeq-export"
 version = "0.4.51"
 dependencies = [
- "autoeq-core",
+ "anyhow",
  "clap",
+ "hound",
+ "math-iir-fir",
+ "num-complex",
  "roomeq-model",
- "serde",
  "serde_json",
- "sha2",
+ "tempfile",
+ "zip",
 ]
 
 [[package]]
 name = "roomeq-model"
 version = "0.4.51"
 dependencies = [
- "anyhow",
  "autoeq-core",
- "autoeq-measurements",
- "autoeq-optim",
  "clap",
  "log",
  "ndarray",
@@ -2790,14 +2808,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "roomeq-qa"
+version = "0.4.51"
+dependencies = [
+ "anyhow",
+ "autoeq-optim",
+ "chrono",
+ "clap",
+ "env_logger",
+ "math-iir-fir",
+ "ndarray",
+ "rand 0.10.2",
+ "rand_chacha 0.10.0",
+ "roomeq-engine",
+ "roomeq-model",
+ "roomeq-quality",
+ "roomeq-synthetic",
+ "roomeq-workflow",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "roomeq-quality"
 version = "0.4.51"
 dependencies = [
  "autoeq-core",
- "autoeq-measurements",
  "math-iir-fir",
  "ndarray",
  "num-complex",
+ "roomeq-model",
  "schemars 1.2.1",
  "serde",
  "serde_json",
@@ -2811,6 +2852,31 @@ dependencies = [
  "log",
  "math-iir-fir",
  "ndarray",
+]
+
+[[package]]
+name = "roomeq-workflow"
+version = "0.4.51"
+dependencies = [
+ "anyhow",
+ "autoeq-artifacts",
+ "autoeq-measurements",
+ "chrono",
+ "hound",
+ "log",
+ "math-dsp",
+ "math-iir-fir",
+ "ndarray",
+ "num-complex",
+ "roomeq-engine",
+ "roomeq-export",
+ "roomeq-model",
+ "rustfft",
+ "serde",
+ "serde_json",
+ "sofa-reader",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

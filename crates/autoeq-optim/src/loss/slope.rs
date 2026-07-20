@@ -17,45 +17,12 @@ pub fn regression_slope_per_octave_in_range(
     fmin: f64,
     fmax: f64,
 ) -> Option<f64> {
-    assert_eq!(freq.len(), y.len(), "freq and y must have same length");
-    if fmax <= fmin {
-        return None;
-    }
-
-    let mut n: usize = 0;
-    let mut sum_x = 0.0;
-    let mut sum_y = 0.0;
-    let mut sum_xy = 0.0;
-    let mut sum_x2 = 0.0;
-
-    for i in 0..freq.len() {
-        let f = freq[i];
-        if f > 0.0 && f >= fmin && f <= fmax {
-            let xi = f.log2();
-            let yi = y[i];
-            n += 1;
-            sum_x += xi;
-            sum_y += yi;
-            sum_xy += xi * yi;
-            sum_x2 += xi * xi;
-        }
-    }
-
-    if n < 2 {
-        return None;
-    }
-    let n_f = n as f64;
-    let cov_xy = sum_xy - (sum_x * sum_y) / n_f;
-    let var_x = sum_x2 - (sum_x * sum_x) / n_f;
-    if var_x.abs() < 1e-10 {
-        return None;
-    }
-    Some(cov_xy / var_x)
+    autoeq_core::regression_slope_per_octave_in_range(freq, y, fmin, fmax)
 }
 
 /// Convenience wrapper for slope per octave on a `Curve`.
 pub fn curve_slope_per_octave_in_range(curve: &crate::Curve, fmin: f64, fmax: f64) -> Option<f64> {
-    regression_slope_per_octave_in_range(&curve.freq, &curve.spl, fmin, fmax)
+    autoeq_core::curve_slope_per_octave_in_range(curve, fmin, fmax)
 }
 
 /// Calculate the standard deviation of the deviation values within a frequency range.

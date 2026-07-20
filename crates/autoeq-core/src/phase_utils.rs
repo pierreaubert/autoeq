@@ -494,9 +494,9 @@ mod tests {
     #[test]
     fn reconstruct_minimum_phase_accepts_non_contiguous_arrays() {
         let freq = Array1::from_vec(vec![20.0, -1.0, 200.0, -1.0, 2_000.0, -1.0])
-            .slice_move(ndarray::s![..;2]);
+            .slice_axis_move(ndarray::Axis(0), ndarray::Slice::new(0, None, 2));
         let spl = Array1::from_vec(vec![80.0, -1.0, 80.0, -1.0, 80.0, -1.0])
-            .slice_move(ndarray::s![..;2]);
+            .slice_axis_move(ndarray::Axis(0), ndarray::Slice::new(0, None, 2));
         assert!(freq.as_slice().is_none());
         assert!(spl.as_slice().is_none());
 

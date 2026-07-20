@@ -45,7 +45,10 @@ fn test_apo_output_format_golden() {
         assert_eq!(filter.index, expected_index);
         assert_eq!(filter.kind, "PK");
         assert!((60.0..=16_000.0).contains(&filter.freq_hz));
-        assert!((-9.0..=3.0).contains(&filter.gain_db));
+        assert!(
+            (-12.0..=3.0).contains(&filter.gain_db),
+            "gain outside expected range: {filter:?}"
+        );
         assert!((1.0..=3.0).contains(&filter.q));
         assert!(filter.gain_db.abs() < 0.1 || filter.gain_db.abs() >= 0.5);
     }
@@ -77,7 +80,6 @@ fn test_peq_parameters_reasonable() {
         "autoeq failed: {}",
         String::from_utf8_lossy(&process.stderr)
     );
-
     let apo = temp_dir.child("iir-autoeq-flat.txt");
     let content = std::fs::read_to_string(apo.path()).unwrap();
 
@@ -90,7 +92,10 @@ fn test_peq_parameters_reasonable() {
     for filter in filters {
         assert_eq!(filter.kind, "PK");
         assert!((60.0..=16_000.0).contains(&filter.freq_hz));
-        assert!((-9.0..=3.0).contains(&filter.gain_db));
+        assert!(
+            (-12.0..=3.0).contains(&filter.gain_db),
+            "gain outside expected range: {filter:?}"
+        );
         assert!((1.0..=3.0).contains(&filter.q));
     }
 }

@@ -5,6 +5,9 @@ edition = "2024"
 description = "Speaker and headphone AutoEQ workflows"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [dependencies]
 autoeq-core = { workspace = true }
 autoeq-measurements = { workspace = true }

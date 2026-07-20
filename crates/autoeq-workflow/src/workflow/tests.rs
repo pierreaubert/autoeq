@@ -457,31 +457,6 @@ fn build_target_curve_loads_from_csv_path() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn create_driver_optimization_args_has_expected_values() {
-    let args = super::misc::create_driver_optimization_args(
-        50.0,
-        5000.0,
-        48000.0,
-        "autoeq:de",
-        20,
-        6,
-        -6.0,
-        6.0,
-        Some(1),
-    );
-    assert_eq!(args.min_freq, 50.0);
-    assert_eq!(args.max_freq, 5000.0);
-    assert_eq!(args.sample_rate, 48000.0);
-    assert_eq!(args.algo, "autoeq:de");
-    assert_eq!(args.maxeval, 20);
-    assert_eq!(args.population, 6);
-    assert_eq!(args.min_db, -6.0);
-    assert_eq!(args.max_db, 6.0);
-    assert_eq!(args.seed, Some(1));
-    assert_eq!(args.loss, crate::LossType::DriversFlat);
-}
-
-#[test]
 fn interpolate_cea2034_data_preserves_keys() {
     use crate::Cea2034Data;
 
@@ -808,10 +783,7 @@ fn write_speaker_cache(speaker: &str, _version: &str, measurement: &str) -> Path
     use serde_json::json;
 
     let cache_root = std::env::temp_dir().join(format!("autoeq-test-{}-cache", std::process::id()));
-    let cache_dir = cache_root
-        .join("speakers")
-        .join("org.spinorama")
-        .join(crate::read::sanitize_dir_name(speaker));
+    let cache_dir = crate::read::data_dir_for_cache_root(&cache_root, speaker);
     std::fs::create_dir_all(&cache_dir).unwrap();
 
     let freqs: Vec<f64> = vec![20.0, 100.0, 1000.0, 5000.0, 10000.0, 20000.0];
@@ -841,13 +813,11 @@ fn write_speaker_cache(speaker: &str, _version: &str, measurement: &str) -> Path
 }
 
 #[test]
-#[serial_test::serial]
 fn optimize_speaker_with_local_cache_runs() {
     let speaker = format!("Test Speaker {}", std::process::id());
     let version = "asr";
     let measurement = "CEA2034";
     let cache_root = write_speaker_cache(&speaker, version, measurement);
-    unsafe { std::env::set_var("SOTF_CACHE_DIR", cache_root.to_str().unwrap()) };
 
     let mut args = Args::speaker_defaults();
     args.algo = "autoeq:de".to_string();
@@ -867,14 +837,14 @@ fn optimize_speaker_with_local_cache_runs() {
         curve_name: args.curve_name.clone(),
         curve_path: None,
     };
-    let result = rt.block_on(super::optimize_speaker(
+    let result = rt.block_on(super::optimize_speaker_at_cache_root(
         &input,
         &crate::OptimParams::from(&args),
+        &cache_root,
         None,
         None::<fn(&_) -> _>,
     ));
 
-    unsafe { std::env::remove_var("SOTF_CACHE_DIR") };
     std::fs::remove_dir_all(&cache_root).ok();
 
     assert!(

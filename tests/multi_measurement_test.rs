@@ -4,10 +4,9 @@ mod common;
 
 use autoeq::PeqModel;
 use autoeq::optim::{
-    MultiObjectiveData, ObjectiveData, ObjectiveDataBuilder, compute_base_fitness,
-    compute_pareto_objectives,
+    MultiMeasurementStrategy, MultiObjectiveData, ObjectiveData, ObjectiveDataBuilder,
+    compute_base_fitness, compute_pareto_objectives,
 };
-use autoeq::roomeq::MultiMeasurementStrategy;
 use ndarray::{Array1, array};
 
 /// Create a minimal ObjectiveData for testing with a given deviation curve.
@@ -254,7 +253,10 @@ fn config_serialization_roundtrip() {
 #[test]
 fn config_default_is_average() {
     let config = autoeq::roomeq::MultiMeasurementConfig::default();
-    assert_eq!(config.strategy, MultiMeasurementStrategy::Average);
+    assert_eq!(
+        config.strategy,
+        autoeq::roomeq::MultiMeasurementStrategy::Average
+    );
     assert!((config.variance_lambda - 1.0).abs() < 1e-10);
 }
 

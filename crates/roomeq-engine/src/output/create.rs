@@ -1,0 +1,319 @@
+use super::biquad::biquad_to_json;
+use super::biquad::biquad_to_warped_json;
+use math_audio_iir_fir::Biquad;
+use roomeq_model::{ChannelDspChain, DspChainOutput, OptimizationMetadata, PluginConfigWrapper};
+use serde_json::json;
+use std::collections::HashMap;
+
+/// Create a gain plugin configuration
+pub fn create_gain_plugin(gain_db: f64) -> PluginConfigWrapper {
+    PluginConfigWrapper {
+        plugin_type: "gain".to_string(),
+        parameters: json!({
+            "gain_db": gain_db
+        }),
+    }
+}
+
+/// Create a gain plugin configuration with polarity inversion
+pub fn create_gain_plugin_with_invert(gain_db: f64, invert: bool) -> PluginConfigWrapper {
+    PluginConfigWrapper {
+        plugin_type: "gain".to_string(),
+        parameters: json!({
+            "gain_db": gain_db,
+            "invert": invert
+        }),
+    }
+}
+
+/// Create an EQ plugin configuration from Biquad filters
+pub fn create_eq_plugin(filters: &[Biquad]) -> PluginConfigWrapper {
+    let filter_configs: Vec<serde_json::Value> = filters.iter().map(biquad_to_json).collect();
+
+    create_eq_plugin_from_filter_configs(filter_configs)
+}
+
+/// Create an EQ plugin configuration from already-serialized filter configs.
+pub fn create_eq_plugin_from_filter_configs(
+    filter_configs: Vec<serde_json::Value>,
+) -> PluginConfigWrapper {
+    PluginConfigWrapper {
+        plugin_type: "eq".to_string(),
+        parameters: json!({
+            "filters": filter_configs
+        }),
+    }
+}
+
+/// Create a labeled EQ plugin configuration from already-serialized filter configs.
+pub fn create_labeled_eq_plugin_from_filter_configs(
+    filter_configs: Vec<serde_json::Value>,
+    label: &str,
+) -> PluginConfigWrapper {
+    PluginConfigWrapper {
+        plugin_type: "eq".to_string(),
+        parameters: json!({
+            "label": label,
+            "filters": filter_configs
+        }),
+    }
+}
+
+/// Create an EQ plugin configuration that emits standard biquads followed by
+/// warped-biquad room-EQ filters.
+///
+/// Tagged with the `"room_eq_correction"` label so the UI's per-channel
+/// EQ filters card can distinguish the main DE-optimized Pre-EQ pass
+/// from later cleanup passes (Post-EQ) or feature passes (CEA2034,
+/// broadband, user preference).
+pub fn create_warped_eq_plugin(
+    standard_filters: &[Biquad],
+    warped_filters: &[Biquad],
+    lambda: Option<f64>,
+) -> PluginConfigWrapper {
+    let mut filter_configs: Vec<serde_json::Value> =
+        standard_filters.iter().map(biquad_to_json).collect();
+    filter_configs.extend(
+        warped_filters
+            .iter()
+            .map(|filter| biquad_to_warped_json(filter, lambda)),
+    );
+
+    create_labeled_eq_plugin_from_filter_configs(filter_configs, "room_eq_correction")
+}
+
+/// Create a labeled EQ plugin configuration from Biquad filters.
+///
+/// Adds a `label` field to the parameters JSON to identify which pass
+/// of the 3-pass pipeline this EQ belongs to. The audio engine ignores
+/// unknown keys, so this is backward-compatible.
+pub fn create_labeled_eq_plugin(filters: &[Biquad], label: &str) -> PluginConfigWrapper {
+    let filter_configs: Vec<serde_json::Value> = filters.iter().map(biquad_to_json).collect();
+
+    PluginConfigWrapper {
+        plugin_type: "eq".to_string(),
+        parameters: json!({
+            "label": label,
+            "filters": filter_configs
+        }),
+    }
+}
+
+/// Create a crossover plugin configuration
+pub fn create_crossover_plugin(
+    crossover_type: &str,
+    frequency: f64,
+    output: &str, // "low" or "high"
+) -> PluginConfigWrapper {
+    let mut parameters = json!({
+        "type": crossover_type,
+        "frequency": frequency,
+        "output": output
+    });
+    if matches!(
+        crossover_type.to_ascii_lowercase().as_str(),
+        "linearphase" | "linear_phase" | "linear-phase" | "linearphasefir" | "fir" | "lpfir"
+    ) && let Some(obj) = parameters.as_object_mut()
+    {
+        obj.insert(
+            "fir_taps".to_string(),
+            json!(math_audio_iir_fir::DEFAULT_FIR_CROSSOVER_TAPS),
+        );
+    }
+    PluginConfigWrapper {
+        plugin_type: "crossover".to_string(),
+        parameters,
+    }
+}
+
+/// Create a delay plugin configuration
+pub fn create_delay_plugin(delay_ms: f64) -> PluginConfigWrapper {
+    PluginConfigWrapper {
+        plugin_type: "delay".to_string(),
+        parameters: json!({
+            "delay_ms": delay_ms
+        }),
+    }
+}
+
+/// Create a sparse matrix plugin configuration for channel routing/mixing.
+///
+/// The matrix is row-major with shape
+/// `output_channel_map.len() x input_channel_map.len()`. For bass management
+/// we usually emit a single-output sparse matrix whose input map lists the
+/// redirected main/LFE programme channels and whose output map points at the
+/// physical subwoofer bus.
+pub fn create_sparse_matrix_plugin(
+    input_channel_map: Vec<usize>,
+    output_channel_map: Vec<usize>,
+    matrix: Vec<f32>,
+    label: &str,
+    metadata: serde_json::Value,
+) -> PluginConfigWrapper {
+    PluginConfigWrapper {
+        plugin_type: "matrix".to_string(),
+        parameters: json!({
+            "label": label,
+            "input_channel_map": input_channel_map,
+            "output_channel_map": output_channel_map,
+            "matrix": matrix,
+            "metadata": metadata,
+        }),
+    }
+}
+
+/// Create a convolution plugin configuration
+pub fn create_convolution_plugin(wav_path: &str) -> PluginConfigWrapper {
+    PluginConfigWrapper {
+        plugin_type: "convolution".to_string(),
+        parameters: json!({
+            "ir_file": wav_path
+        }),
+    }
+}
+
+const MIXED_PHASE_REPORT_TRANSPORT_KEY: &str = "_roomeq_mixed_phase_report";
+
+/// Create a convolution plugin carrying internal mixed-phase report data.
+///
+/// The marker is removed by [`take_mixed_phase_reports`] before the public DSP
+/// chain is returned, so external convolution-plugin contracts remain stable.
+pub fn create_mixed_phase_convolution_plugin(
+    wav_path: &str,
+    report: &crate::mixed_phase::MixedPhaseCorrectionReport,
+) -> PluginConfigWrapper {
+    let mut plugin = create_convolution_plugin(wav_path);
+    if let Some(parameters) = plugin.parameters.as_object_mut() {
+        parameters.insert(
+            MIXED_PHASE_REPORT_TRANSPORT_KEY.to_string(),
+            serde_json::to_value(report).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    plugin
+}
+
+/// Collect exact mixed-phase reports and remove their internal transport
+/// markers from convolution plugin parameters.
+pub fn take_mixed_phase_reports(
+    channels: &mut HashMap<String, ChannelDspChain>,
+) -> Option<HashMap<String, crate::mixed_phase::MixedPhaseCorrectionReport>> {
+    let mut reports = HashMap::new();
+    for (channel_name, chain) in channels {
+        for plugin in &mut chain.plugins {
+            let Some(parameters) = plugin.parameters.as_object_mut() else {
+                continue;
+            };
+            let Some(value) = parameters.remove(MIXED_PHASE_REPORT_TRANSPORT_KEY) else {
+                continue;
+            };
+            match serde_json::from_value(value) {
+                Ok(report) => {
+                    reports.insert(channel_name.clone(), report);
+                }
+                Err(error) => log::warn!(
+                    "failed to decode internal mixed-phase report for '{channel_name}': {error}"
+                ),
+            }
+        }
+    }
+    (!reports.is_empty()).then_some(reports)
+}
+
+/// Create complete DSP chain output
+pub fn create_dsp_chain_output(
+    channels: HashMap<String, ChannelDspChain>,
+    metadata: Option<OptimizationMetadata>,
+) -> DspChainOutput {
+    let mut global_plugins: Vec<PluginConfigWrapper> = metadata
+        .as_ref()
+        .and_then(|metadata| metadata.bass_management.as_ref())
+        .and_then(|report| report.routing_graph.as_ref())
+        .and_then(|graph| {
+            graph.matrix.as_ref().map(|matrix| {
+                create_sparse_matrix_plugin(
+                    matrix.input_channel_map.clone(),
+                    matrix.output_channel_map.clone(),
+                    matrix.matrix.clone(),
+                    "home_cinema_bass_management",
+                    bass_management_matrix_metadata(graph),
+                )
+            })
+        })
+        .into_iter()
+        .collect();
+    if let Some(ctc) = metadata.as_ref().and_then(|metadata| metadata.ctc.as_ref()) {
+        global_plugins.push(PluginConfigWrapper {
+            plugin_type: "xtc".to_string(),
+            parameters: json!({
+                "source_mode": "roomeq_recommended",
+                "recommended_matrix_file": ctc.artifact,
+                "auto_gain_enabled": false,
+                "metadata": {
+                    "source": ctc.source,
+                    "speakers": ctc.speakers,
+                    "ears": ctc.ears,
+                    "head_positions": ctc.head_positions,
+                    "latency_samples": ctc.latency_samples,
+                    "latency_ms": ctc.latency_ms,
+                    "max_filter_gain_db": ctc.max_filter_gain_db,
+                    "max_condition_number": ctc.max_condition_number,
+                    "mean_reconstruction_error": ctc.mean_reconstruction_error,
+                    "worst_position_error": ctc.worst_position_error,
+                    "mean_crosstalk_residual_db": ctc.mean_crosstalk_residual_db,
+                    "max_electrical_sum_gain_db": ctc.max_electrical_sum_gain_db,
+                    "driver_headroom_limited": ctc.driver_headroom_limited,
+                    "room_eq_correction_applied": ctc.room_eq_correction_applied,
+                    "room_eq_correction_channels": ctc.room_eq_correction_channels,
+                    "delivered_response": ctc.delivered_response,
+                }
+            }),
+        });
+    }
+
+    DspChainOutput {
+        version: roomeq_model::default_config_version(),
+        global_plugins,
+        channels,
+        metadata,
+    }
+}
+
+/// Serialize the stable metadata attached to a bass-management routing matrix.
+pub fn bass_management_matrix_metadata(
+    graph: &roomeq_model::BassManagementRoutingGraph,
+) -> serde_json::Value {
+    json!({
+        "purpose": "home_cinema_bass_management",
+        "physical_sub_output": graph.physical_sub_output,
+        "routes": graph.routes,
+        "advisories": graph.advisories,
+    })
+}
+
+/// Add a delay plugin to an existing chain
+pub fn add_delay_plugin(chain: &mut ChannelDspChain, delay_ms: f64) {
+    let plugin = create_delay_plugin(delay_ms);
+    // Insert at the beginning to ensure it applies before other processing (though usually commutative with linear filters)
+    chain.plugins.insert(0, plugin);
+}
+
+/// Create a band split plugin configuration
+pub fn create_band_split_plugin(frequency: f64, crossover_type: &str) -> PluginConfigWrapper {
+    PluginConfigWrapper {
+        plugin_type: "band_split".to_string(),
+        parameters: json!({
+            "frequency": frequency,
+            "type": crossover_type
+        }),
+    }
+}
+
+/// Create a band merge plugin configuration
+pub fn create_band_merge_plugin(bands: usize) -> PluginConfigWrapper {
+    PluginConfigWrapper {
+        plugin_type: "band_merge".to_string(),
+        parameters: json!({
+            "bands": bands
+        }),
+    }
+}

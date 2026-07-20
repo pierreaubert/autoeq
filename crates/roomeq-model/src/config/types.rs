@@ -23,7 +23,7 @@ use super::default::default_variance_threshold;
 use super::room_dimensions::RoomDimensions;
 use super::spl_calibration::SplCalibration;
 use crate::MeasurementSource;
-use crate::optim::SmoothnessPenaltyConfig;
+pub use crate::optimizer_settings::MultiMeasurementStrategy;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -359,8 +359,6 @@ pub enum MultiSeatStrategy {
     ContinuousArea,
 }
 
-pub use autoeq_optim::roomeq::MultiMeasurementStrategy;
-
 /// Correction mode for CEA2034 speaker pre-correction
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -545,17 +543,6 @@ pub struct SmoothnessPenaltyConfigSerde {
     /// L_p exponent. 1.0 = TV^2-like sparse curvature, 2.0 = L2 smoothing.
     #[serde(default = "default_smoothness_exponent")]
     pub exponent: f64,
-}
-
-impl From<&SmoothnessPenaltyConfigSerde> for SmoothnessPenaltyConfig {
-    fn from(value: &SmoothnessPenaltyConfigSerde) -> Self {
-        Self {
-            tv2_weight: value.tv2_weight,
-            schroeder_hz: value.schroeder_hz,
-            modal_weight_scale: value.modal_weight_scale,
-            exponent: value.exponent,
-        }
-    }
 }
 
 /// Measurement of inter-channel SPL consistency after optimization

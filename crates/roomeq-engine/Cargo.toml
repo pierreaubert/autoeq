@@ -5,19 +5,25 @@ edition = "2024"
 description = "RoomEQ analysis, optimization, and pipeline execution"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [dependencies]
 autoeq-core = { workspace = true }
 autoeq-fir = { workspace = true }
-autoeq-measurements = { workspace = true }
 autoeq-optim = { workspace = true }
-autoeq-workflow = { workspace = true }
 log = { workspace = true }
+math-dsp = { workspace = true }
 math-iir-fir = { workspace = true }
+math-rir = { workspace = true }
 math-optimisation = { workspace = true }
 nalgebra = { workspace = true }
 ndarray = { workspace = true }
 num-complex = { workspace = true }
+num_cpus = { workspace = true }
 oxiblas-ndarray = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
 roomeq-analysis = { workspace = true }
 roomeq-model = { workspace = true }
 roomeq-quality = { workspace = true }

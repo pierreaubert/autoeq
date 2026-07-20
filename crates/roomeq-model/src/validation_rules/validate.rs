@@ -81,11 +81,10 @@ pub fn validate_room_config_staged(
         validate_resolved_resources(config),
         Vec::new(),
     );
-    report.record(
-        ValidationStage::Acoustic,
-        validate_acoustic_inputs(config),
-        Vec::new(),
-    );
+    let acoustic_errors = validate_acoustic_inputs(config);
+    if !acoustic_errors.is_empty() || !acoustic_inputs_require_loading(config) {
+        report.record(ValidationStage::Acoustic, acoustic_errors, Vec::new());
+    }
     if let Some(target) = context.export_target.as_deref() {
         report.record(
             ValidationStage::ExportTarget,
@@ -176,21 +175,54 @@ fn validate_resolved_resources(config: &RoomConfig) -> Vec<String> {
     errors
 }
 
-fn measurement_paths(source: &MeasurementSource) -> Vec<&Path> {
+fn measurement_paths(source: &MeasurementSource) -> Vec<PathBuf> {
     match source {
-        MeasurementSource::Single(single) => single
-            .measurement
-            .path()
-            .map(PathBuf::as_path)
-            .into_iter()
-            .collect(),
+        MeasurementSource::Single(single) => {
+            measurement_path(&single.measurement).into_iter().collect()
+        }
         MeasurementSource::Multiple(multiple) => multiple
             .measurements
             .iter()
-            .filter_map(crate::MeasurementRef::path)
-            .map(PathBuf::as_path)
+            .filter_map(measurement_path)
             .collect(),
         MeasurementSource::InMemory(_) | MeasurementSource::InMemoryMultiple(_) => Vec::new(),
+    }
+}
+
+fn measurement_path(measurement: &crate::MeasurementRef) -> Option<PathBuf> {
+    match measurement {
+        crate::MeasurementRef::Path(path) | crate::MeasurementRef::Named { path, .. } => {
+            Some(path.clone())
+        }
+        crate::MeasurementRef::Inline(inline)
+            if inline.frequencies.is_empty() || inline.magnitude_db.is_empty() =>
+        {
+            inline
+                .csv_path
+                .as_deref()
+                .filter(|path| !path.trim().is_empty())
+                .map(PathBuf::from)
+        }
+        crate::MeasurementRef::Inline(_) => None,
+    }
+}
+
+fn acoustic_inputs_require_loading(config: &RoomConfig) -> bool {
+    config.speakers.values().any(|speaker| {
+        collect_sources(speaker)
+            .into_iter()
+            .any(source_requires_acoustic_loading)
+    })
+}
+
+fn source_requires_acoustic_loading(source: &MeasurementSource) -> bool {
+    match source {
+        MeasurementSource::Single(single) => measurement_path(&single.measurement).is_some(),
+        MeasurementSource::Multiple(multiple) => multiple
+            .measurements
+            .iter()
+            .any(|measurement| measurement_path(measurement).is_some()),
+        MeasurementSource::InMemory(_) | MeasurementSource::InMemoryMultiple(_) => false,
     }
 }
 
@@ -198,18 +230,80 @@ fn validate_acoustic_inputs(config: &RoomConfig) -> Vec<String> {
     let mut errors = Vec::new();
     for (speaker_name, speaker) in &config.speakers {
         for (source_index, source) in collect_sources(speaker).into_iter().enumerate() {
-            match crate::read::load_source_individual(source) {
-                Ok(curves) if curves.is_empty() => errors.push(format!(
+            let curves: Vec<&crate::Curve> = match source {
+                MeasurementSource::InMemory(curve) => vec![curve],
+                MeasurementSource::InMemoryMultiple(curves) => curves.iter().collect(),
+                MeasurementSource::Single(single) => match &single.measurement {
+                    crate::MeasurementRef::Inline(inline) => {
+                        validate_inline_measurement(
+                            inline,
+                            speaker_name,
+                            source_index,
+                            &mut errors,
+                        );
+                        Vec::new()
+                    }
+                    _ => Vec::new(),
+                },
+                MeasurementSource::Multiple(multiple) => {
+                    for measurement in &multiple.measurements {
+                        if let crate::MeasurementRef::Inline(inline) = measurement {
+                            validate_inline_measurement(
+                                inline,
+                                speaker_name,
+                                source_index,
+                                &mut errors,
+                            );
+                        }
+                    }
+                    Vec::new()
+                }
+            };
+            if matches!(source, MeasurementSource::InMemoryMultiple(curves) if curves.is_empty()) {
+                errors.push(format!(
                     "speaker '{speaker_name}' source {source_index} produced no measurement curves"
-                )),
-                Ok(_) => {}
-                Err(error) => errors.push(format!(
-                    "speaker '{speaker_name}' source {source_index} failed acoustic validation: {error}"
-                )),
+                ));
+            }
+            for curve in curves {
+                if curve.freq.is_empty() || curve.freq.len() != curve.spl.len() {
+                    errors.push(format!(
+                        "speaker '{speaker_name}' source {source_index} has invalid in-memory frequency/SPL data"
+                    ));
+                }
             }
         }
     }
     errors
+}
+
+fn validate_inline_measurement(
+    inline: &crate::InlineMeasurement,
+    speaker_name: &str,
+    source_index: usize,
+    errors: &mut Vec<String>,
+) {
+    let uses_csv_fallback = (inline.frequencies.is_empty() || inline.magnitude_db.is_empty())
+        && inline
+            .csv_path
+            .as_deref()
+            .is_some_and(|path| !path.trim().is_empty());
+    if !uses_csv_fallback
+        && (inline.frequencies.is_empty() || inline.frequencies.len() != inline.magnitude_db.len())
+    {
+        errors.push(format!(
+            "speaker '{speaker_name}' source {source_index} has invalid inline frequency/SPL data"
+        ));
+    }
+    if !uses_csv_fallback
+        && inline
+            .phase_deg
+            .as_ref()
+            .is_some_and(|phase| phase.len() != inline.frequencies.len())
+    {
+        errors.push(format!(
+            "speaker '{speaker_name}' source {source_index} has inline phase data with the wrong length"
+        ));
+    }
 }
 
 fn validate_export_target(target: &Path) -> Vec<String> {
@@ -1159,7 +1253,7 @@ mod validate_optimizer_tests {
     fn validate_psychoacoustic_smoothing_zero_n_errors() {
         let mut result = ValidationResult::valid();
         let mut config = default_config();
-        config.psychoacoustic_smoothing = Some(crate::read::PsychoacousticSmoothingConfig {
+        config.psychoacoustic_smoothing = Some(crate::PsychoacousticSmoothingConfig {
             low_freq_n: 0,
             high_freq_n: 1,
             ..Default::default()
@@ -1178,7 +1272,7 @@ mod validate_optimizer_tests {
     fn validate_asymmetric_loss_config_negative_weight_errors() {
         let mut result = ValidationResult::valid();
         let mut config = default_config();
-        config.asymmetric_loss_config = Some(crate::loss::AsymmetricLossConfig {
+        config.asymmetric_loss_config = Some(crate::AsymmetricLossConfig {
             peak_weight: -1.0,
             ..Default::default()
         });
@@ -1247,15 +1341,15 @@ mod validate_optimizer_tests {
 
 #[cfg(test)]
 mod room_config_validation_tests {
-    use super::validate_room_config;
+    use super::{RoomValidationContext, validate_room_config, validate_room_config_staged};
     use crate::roomeq::types::{
         AreaPriorKind, AreaQuadratureKind, AreaScalarisationKind, BootstrapScalarisation,
         BootstrapUncertaintyConfig, CardioidConfig, ContinuousListeningAreaConfig, CrossoverConfig,
         DBAConfig, MultiSeatConfig, MultiSeatStrategy, MultiSubGroup, OptimizerConfig, RoomConfig,
         SpeakerConfig, SpeakerGroup, SupportingSourceGroup, SystemConfig, SystemModel,
-        TargetResponseConfig, TargetShape,
+        TargetResponseConfig, TargetShape, ValidationStage,
     };
-    use crate::{Curve, MeasurementRef, MeasurementSingle, MeasurementSource};
+    use crate::{Curve, InlineMeasurement, MeasurementRef, MeasurementSingle, MeasurementSource};
     use std::collections::HashMap;
     use std::path::PathBuf;
 
@@ -1279,6 +1373,57 @@ mod room_config_validation_tests {
             measurement: MeasurementRef::Path(PathBuf::from(path)),
             speaker_name: speaker_name.map(String::from),
         })
+    }
+
+    fn csv_backed_inline_source(csv_path: Option<&str>) -> MeasurementSource {
+        MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Inline(InlineMeasurement {
+                frequencies: Vec::new(),
+                magnitude_db: Vec::new(),
+                phase_deg: None,
+                name: Some("legacy recording".to_string()),
+                wav_path: Some("recording.wav".to_string()),
+                csv_path: csv_path.map(String::from),
+            }),
+            speaker_name: None,
+        })
+    }
+
+    #[test]
+    fn model_validation_defers_csv_backed_inline_acoustic_loading() {
+        let mut config = default_room();
+        config.speakers.insert(
+            "L".to_string(),
+            SpeakerConfig::Single(csv_backed_inline_source(Some("measurement.csv"))),
+        );
+
+        let report = validate_room_config_staged(&config, RoomValidationContext::production());
+
+        assert!(!report.production_ready());
+        assert!(!report.stage_ran(ValidationStage::Acoustic));
+        assert!(
+            report
+                .errors()
+                .any(|error| error.contains("measurement path was not resolved")),
+            "{report:?}"
+        );
+    }
+
+    #[test]
+    fn production_validation_rejects_empty_inline_measurement_without_csv_fallback() {
+        let mut config = default_room();
+        config.speakers.insert(
+            "L".to_string(),
+            SpeakerConfig::Single(csv_backed_inline_source(None)),
+        );
+
+        let report = validate_room_config_staged(&config, RoomValidationContext::production());
+
+        assert!(
+            report
+                .errors()
+                .any(|error| error.contains("invalid inline frequency/SPL data"))
+        );
     }
 
     #[test]

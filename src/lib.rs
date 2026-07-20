@@ -1,28 +1,6 @@
 #![doc = include_str!("../README.md")]
 
-/// Conditional println macro that only prints when not in QA mode
-#[macro_export]
-macro_rules! qa_println {
-    // Without args parameter - always log (for contexts without args access)
-    // This pattern must come first to match string literals
-    ($fmt:literal) => {
-        log::debug!($fmt);
-    };
-    ($fmt:literal, $($arg:expr),* $(,)?) => {
-        log::debug!($fmt, $($arg),*);
-    };
-    // With args parameter - conditional logging
-    ($args:expr, $fmt:literal) => {
-        if $args.qa.is_none() {
-            log::debug!($fmt);
-        }
-    };
-    ($args:expr, $fmt:literal, $($arg:expr),* $(,)?) => {
-        if $args.qa.is_none() {
-            log::debug!($fmt, $($arg),*);
-        }
-    };
-}
+pub use autoeq_workflow::qa_println;
 
 // Re-export external crate functionality
 pub use math_audio_iir_fir as iir;
@@ -65,9 +43,6 @@ pub mod response;
 pub mod workflow;
 /// Mapping
 pub mod x2peq;
-
-#[cfg(test)]
-mod property_tests;
 
 /// Artifact storage abstraction for reports, exports, and sidecars.
 pub use autoeq_artifacts::{ArtifactStore, FsArtifactStore, MemoryArtifactStore};

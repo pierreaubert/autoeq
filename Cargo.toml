@@ -20,12 +20,16 @@ members = [
     "crates/autoeq-measurements",
     "crates/autoeq-optim",
     "crates/autoeq-workflow",
+    "crates/autoeq-cli",
     "crates/roomeq-model",
     "crates/roomeq-engine",
     "crates/roomeq-export",
     "crates/roomeq-quality",
+    "crates/roomeq-qa",
+    "crates/roomeq-cli",
     "crates/roomeq-analysis",
     "crates/roomeq-synthetic",
+    "crates/roomeq-workflow",
 ]
 # Keep the published crate under crates.io's size cap. The excluded paths are
 # QA recordings, generated test fixtures, helper shell scripts, and editor
@@ -45,6 +49,10 @@ exclude = [
 [workspace.package]
 version = "0.4.51"
 
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
+
 [workspace.dependencies]
 autoeq-core = { path = "crates/autoeq-core" }
 autoeq-artifacts = { path = "crates/autoeq-artifacts" }
@@ -53,12 +61,16 @@ autoeq-plot = { path = "crates/autoeq-plot" }
 autoeq-measurements = { path = "crates/autoeq-measurements" }
 autoeq-optim = { path = "crates/autoeq-optim" }
 autoeq-workflow = { path = "crates/autoeq-workflow" }
+autoeq-cli = { path = "crates/autoeq-cli" }
 roomeq-model = { path = "crates/roomeq-model" }
 roomeq-engine = { path = "crates/roomeq-engine" }
 roomeq-export = { path = "crates/roomeq-export" }
 roomeq-quality = { path = "crates/roomeq-quality" }
+roomeq-qa = { path = "crates/roomeq-qa" }
+roomeq-cli = { path = "crates/roomeq-cli" }
 roomeq-analysis = { path = "crates/roomeq-analysis" }
 roomeq-synthetic = { path = "crates/roomeq-synthetic" }
+roomeq-workflow = { path = "crates/roomeq-workflow" }
 anyhow = "1.0"
 async-trait = "0.1"
 base64 = "0.22"
@@ -121,56 +133,29 @@ autoeq-plot = { workspace = true, optional = true }
 autoeq-measurements = { workspace = true }
 autoeq-optim = { workspace = true }
 autoeq-workflow = { workspace = true }
+autoeq-cli = { workspace = true, optional = true }
 roomeq-model = { workspace = true }
 roomeq-engine = { workspace = true }
 roomeq-export = { workspace = true }
 roomeq-quality = { workspace = true }
+roomeq-qa = { workspace = true, optional = true }
+roomeq-cli = { workspace = true, optional = true }
 roomeq-analysis = { workspace = true }
 roomeq-synthetic = { workspace = true }
+roomeq-workflow = { workspace = true }
 anyhow = { workspace = true }
-async-trait = { workspace = true }
-base64 = { workspace = true }
-build_html = { workspace = true }
-chrono = { workspace = true }
-clap = { workspace = true }
-csv = { workspace = true }
-directories = { workspace = true }
-env_logger = { workspace = true }
-log = { workspace = true }
-num_cpus = { workspace = true }
-num-complex = { workspace = true }
-nalgebra = { workspace = true }
-metaheuristics-nature = { workspace = true }
-rustfft = { workspace = true }
-hound = { workspace = true }
 plotly = { workspace = true, optional = true }
-rand = { workspace = true }
-rand_chacha = { workspace = true }
-reqwest = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
-schemars = { workspace = true }
-sha2 = { workspace = true }
-strsim = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true }
-urlencoding = { workspace = true }
-zip = { workspace = true }
 math-iir-fir = { workspace = true }
-math-dsp = { workspace = true }
 math-optimisation = { workspace = true }
-math-rir = { workspace = true }
-sofa-reader = { workspace = true }
-ndarray = { workspace = true }
-oxiblas-ndarray = { workspace = true }
-resvg = { workspace = true, optional = true }
-rayon = { workspace = true }
 
 [features]
 default = []
-plotly = ["dep:plotly", "dep:autoeq-plot", "autoeq-plot/plotly"]
+cli = ["dep:autoeq-cli", "dep:roomeq-cli"]
+qa = ["cli", "dep:roomeq-qa"]
+plotly = ["dep:plotly", "dep:autoeq-plot", "autoeq-plot/plotly", "autoeq-cli?/plotly"]
 # Static PNG export has no browser, WebDriver, display-server, or network dependency.
-plotly_static = ["plotly", "dep:resvg", "autoeq-plot/plotly_static"]
+plotly_static = ["plotly", "autoeq-plot/plotly_static", "autoeq-cli?/plotly_static"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 
@@ -187,51 +172,57 @@ plotly_static = ["plotly", "dep:resvg", "autoeq-plot/plotly_static"]
 [[bin]]
 name = "autoeq"
 path = "src/bin/autoeq/main.rs"
+required-features = ["cli"]
 
 [[bin]]
 name = "benchmark-autoeq-speaker"
 path = "src/bin/autoeq_benchmark_speaker.rs"
+required-features = ["cli"]
 
 [[bin]]
 name = "autoeq-download-speakers"
 path = "src/bin/autoeq_download_speaker.rs"
+required-features = ["cli"]
 
 [[bin]]
 name = "roomeq"
 path = "src/bin/roomeq/main.rs"
+required-features = ["cli"]
 
 [[bin]]
 name = "roomeq-fuzzer"
 path = "src/bin/roomeq_fuzzer.rs"
-required-features = ["plotly"]
+required-features = ["qa", "plotly"]
 
 [[bin]]
 name = "roomeq-qa-quality"
 path = "src/bin/roomeq_qa_quality.rs"
+required-features = ["qa"]
 
 [[bin]]
 name = "roomeq-qa-coverage"
 path = "src/bin/roomeq_qa_coverage.rs"
+required-features = ["qa"]
 
 [[bin]]
 name = "roomeq-qa-features"
 path = "src/bin/roomeq_qa_features.rs"
+required-features = ["qa"]
 
 [[bin]]
 name = "roomeq-qa-synthetic"
 path = "src/bin/roomeq_qa_synthetic.rs"
+required-features = ["qa"]
 
 [[bin]]
 name = "roomeq-qa-acoustic"
 path = "src/bin/roomeq_qa_acoustic.rs"
+required-features = ["qa"]
 
 [[bin]]
 name = "convert-recording"
 path = "src/bin/convert_recording.rs"
-
-[[bin]]
-name = "migrate-provenance"
-path = "src/bin/migrate_provenance.rs"
+required-features = ["cli"]
 
 [lib]
 name = "autoeq"
@@ -247,12 +238,17 @@ name = "headphone_loss_validation"
 [dev-dependencies]
 tempfile = { workspace = true }
 assert_fs = { workspace = true }
+clap = { workspace = true }
+hound = { workspace = true }
+ndarray = { workspace = true }
+num-complex = { workspace = true }
 proptest = { workspace = true }
+rustfft = { workspace = true }
 serial_test = { workspace = true }
 tokio = { workspace = true }
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
+[lints]
+workspace = true
 
 [profile.release]
 # `release` is the everyday optimised profile — used by CI, `just prod-*`,

@@ -2002,11 +2002,11 @@
       ]
     },
     "IrWaveform": {
-      "description": "Impulse response waveform (time-domain)",
+      "description": "Impulse response waveform (time-domain).",
       "type": "object",
       "properties": {
         "amplitude": {
-          "description": "Amplitude (normalized so pre-IR peak = 1.0)",
+          "description": "Amplitude normalized so the pre-correction peak is one.",
           "type": "array",
           "items": {
             "type": "number",
@@ -2014,7 +2014,7 @@
           }
         },
         "time_ms": {
-          "description": "Time axis in milliseconds",
+          "description": "Time axis in milliseconds.",
           "type": "array",
           "items": {
             "type": "number",

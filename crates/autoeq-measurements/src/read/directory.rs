@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const DATA_CACHED: &str = "data_cached";
 const CACHE_BUNDLE_ID: &str = "org.spinorama.sotf";
@@ -7,7 +7,7 @@ const CACHE_ENV_VAR: &str = "SOTF_CACHE_DIR";
 /// Resolve the root cache directory used to store downloaded measurements.
 ///
 /// Resolution order:
-/// 1. `$SOTF_CACHE_DIR` if set (tests, CI, dev overrides).
+/// 1. `$SOTF_CACHE_DIR` if set (deployment, CI, or development overrides).
 /// 2. A `./data_cached` directory in the current working directory if it
 ///    already exists (preserves the in-tree dev workflow used by the
 ///    benchmark and download CLIs).
@@ -40,7 +40,15 @@ pub fn cache_root() -> PathBuf {
 /// Return the cache directory for a given speaker under
 /// `<cache_root>/speakers/org.spinorama/<sanitized name>`.
 pub fn data_dir_for(speaker: &str) -> PathBuf {
-    let mut p = cache_root();
+    data_dir_for_cache_root(&cache_root(), speaker)
+}
+
+/// Return the cache directory for `speaker` below an explicit cache root.
+///
+/// Callers that need deterministic isolation, including tests, should prefer
+/// this function over changing the process environment.
+pub fn data_dir_for_cache_root(cache_root: &Path, speaker: &str) -> PathBuf {
+    let mut p = cache_root.to_path_buf();
     p.push("speakers");
     p.push("org.spinorama");
     p.push(sanitize_dir_name(speaker));
@@ -66,10 +74,13 @@ pub fn sanitize_dir_name(name: &str) -> String {
 
 /// Return the cache directory for a headphone under
 /// `<cache_root>/headphones/org.spinorama/<sanitized name>`.
-#[cfg(test)]
-#[allow(dead_code)]
 pub fn headphone_cache_dir(headphone: &str) -> PathBuf {
-    let mut p = cache_root();
+    headphone_cache_dir_for_cache_root(&cache_root(), headphone)
+}
+
+/// Return the cache directory for `headphone` below an explicit cache root.
+pub fn headphone_cache_dir_for_cache_root(cache_root: &Path, headphone: &str) -> PathBuf {
+    let mut p = cache_root.to_path_buf();
     p.push("headphones");
     p.push("org.spinorama");
     p.push(sanitize_dir_name(headphone));

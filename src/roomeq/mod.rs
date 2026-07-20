@@ -36,7 +36,7 @@ pub use types::*;
 pub use types::RecordingConfiguration;
 
 // Configuration loading (shared between roomeq and roomeq_qa binaries)
-pub use roomeq_model::config_loader::{SHALLOW_MERGE_KEYS, load_config, merge_json_objects};
+pub use roomeq_workflow::{SHALLOW_MERGE_KEYS, load_config, merge_json_objects};
 
 // Analytic acoustic ground truth and multi-dimensional QA metrics.
 pub use roomeq_quality as acoustic_qa;
@@ -46,7 +46,6 @@ pub use config::{ValidationResult, validate_room_config};
 pub use roomeq_model::validation_rules as config;
 
 // Main optimization entry points
-pub(crate) use autoeq_artifacts::roomeq as artifacts;
 mod pipeline;
 pub use pipeline::{
     PipelineControl, PipelineEvent, PipelineObserver, PipelineStepId, PipelineStepStatus,
@@ -61,22 +60,9 @@ pub use optimize::{
 };
 
 // Extracted optimization submodules
-pub(crate) use roomeq_analysis::crossover_utils;
-pub(crate) use roomeq_model::auto_tune;
-mod group_processing; // Multi-speaker groups, multisub, DBA, cardioid, mixed-mode
-mod speaker_eq; // Single-speaker EQ optimization // Crossover and group consistency utilities
-
-#[cfg(test)]
-pub mod test_fixtures;
-
-// Individual optimization modules
 pub use roomeq_engine::crossover;
-pub use roomeq_engine::dba;
-mod eq;
-mod fir;
-pub(crate) use roomeq_analysis::frequency_grid;
+pub use roomeq_workflow::{dba, multisub};
 pub mod home_cinema;
-pub use roomeq_engine::multisub;
 pub mod workflows; // Make public to access from optimize.rs or tests
 
 // Export to external formats (CamillaDSP, APO, EasyEffects, Wavelet, PipeWire)
@@ -173,8 +159,6 @@ pub use bass_phase_confidence::{
 pub use roomeq_engine::bass_phase_confidence;
 
 // Utility modules
-pub(crate) use roomeq_analysis::ir_waveform;
-pub(crate) mod phase_utils;
 pub(crate) use roomeq_analysis::time_align;
 pub use roomeq_synthetic as synthetic;
 // GD-Opt v2 Phase GD-1f — microphone phase calibration loader. See

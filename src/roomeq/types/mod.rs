@@ -16,8 +16,7 @@ pub mod preset {
 pub use roomeq_model::preset::*;
 
 // Output types
-mod output;
-pub use output::*;
+pub use roomeq_model::output::*;
 
 // Measurement-related types (re-export from crate root)
 pub use crate::MeasurementRef;

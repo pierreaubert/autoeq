@@ -1,5 +1,5 @@
 #![allow(clippy::field_reassign_with_default)]
-use super::generate::generate_fir_correction;
+use super::generate::generate_fir_correction_prepared;
 use crate::Curve;
 #[cfg(test)]
 pub use math_audio_iir_fir::{WindowType, generate_window};
@@ -34,6 +34,15 @@ fn create_test_curve_with_phase(freqs: &[f64], spl_values: &[f64], phase_deg: &[
         freq: Array1::from(freqs.to_vec()),
         spl: Array1::from(spl_values.to_vec()),
         phase: Some(Array1::from(phase_deg.to_vec())),
+        ..Default::default()
+    }
+}
+
+fn flat_target_like(measurement: &Curve) -> Curve {
+    Curve {
+        freq: measurement.freq.clone(),
+        spl: Array1::from_elem(measurement.freq.len(), 80.0),
+        phase: None,
         ..Default::default()
     }
 }
@@ -157,7 +166,12 @@ fn test_generate_fir_correction_basic() {
     config.min_freq = 50.0;
     config.max_freq = 2000.0;
 
-    let result = generate_fir_correction(&measurement, &config, None, 48000.0);
+    let result = generate_fir_correction_prepared(
+        &measurement,
+        &config,
+        &flat_target_like(&measurement),
+        48000.0,
+    );
 
     assert!(
         result.is_ok(),
@@ -186,7 +200,12 @@ fn test_generate_fir_correction_kirkeby_mode() {
     config.min_freq = 20.0;
     config.max_freq = 500.0;
 
-    let result = generate_fir_correction(&measurement, &config, None, 48000.0);
+    let result = generate_fir_correction_prepared(
+        &measurement,
+        &config,
+        &flat_target_like(&measurement),
+        48000.0,
+    );
 
     assert!(result.is_ok(), "Kirkeby FIR correction should succeed");
     let coeffs = result.unwrap();
@@ -199,7 +218,12 @@ fn test_fir_config_missing_returns_error() {
 
     let config = OptimizerConfig::default(); // fir is None by default
 
-    let result = generate_fir_correction(&measurement, &config, None, 48000.0);
+    let result = generate_fir_correction_prepared(
+        &measurement,
+        &config,
+        &flat_target_like(&measurement),
+        48000.0,
+    );
 
     assert!(result.is_err(), "Should error when FIR config is missing");
     let err = result.unwrap_err();
@@ -222,7 +246,12 @@ fn test_invalid_phase_type_returns_error() {
         pre_ringing: None,
     });
 
-    let result = generate_fir_correction(&measurement, &config, None, 48000.0);
+    let result = generate_fir_correction_prepared(
+        &measurement,
+        &config,
+        &flat_target_like(&measurement),
+        48000.0,
+    );
 
     assert!(result.is_err(), "Should error on invalid phase type");
     let err = result.unwrap_err();

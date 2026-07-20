@@ -1,0 +1,23 @@
+use math_audio_iir_fir::Biquad;
+use serde_json::json;
+
+/// Convert Biquad filter to JSON configuration
+pub fn biquad_to_json(biquad: &Biquad) -> serde_json::Value {
+    json!({
+        "filter_type": biquad.filter_type.long_name().to_lowercase(),
+        "freq": biquad.freq,
+        "q": biquad.q,
+        "db_gain": biquad.db_gain,
+    })
+}
+
+pub fn biquad_to_warped_json(biquad: &Biquad, lambda: Option<f64>) -> serde_json::Value {
+    let mut value = biquad_to_json(biquad);
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("topology".to_string(), json!("warped_biquad"));
+        if let Some(lambda) = lambda {
+            obj.insert("lambda".to_string(), json!(lambda));
+        }
+    }
+    value
+}

@@ -1,17 +1,33 @@
 //! Measurement source handling (single file or averaging)
 
-mod inline_measurement;
+// Private path shims keep loader/tests source-compatible while canonical
+// descriptor ownership lives in autoeq-core.
+#[cfg(test)]
+mod inline_measurement {
+    pub use autoeq_core::InlineMeasurement;
+}
+#[cfg(test)]
+mod measurement_ref {
+    pub use autoeq_core::MeasurementRef;
+}
+#[cfg(test)]
+mod measurement_single {
+    pub use autoeq_core::MeasurementSingle;
+}
+#[cfg(test)]
+mod measurement_source {
+    pub use autoeq_core::MeasurementSource;
+}
+#[cfg(test)]
+mod types {
+    pub use autoeq_core::MeasurementMultiple;
+}
+
 mod load;
-mod measurement_ref;
-mod measurement_single;
-mod measurement_source;
 #[cfg(test)]
 mod tests;
-mod types;
 
-pub use inline_measurement::*;
+pub use autoeq_core::{
+    InlineMeasurement, MeasurementMultiple, MeasurementRef, MeasurementSingle, MeasurementSource,
+};
 pub use load::*;
-pub use measurement_ref::*;
-pub use measurement_single::*;
-pub use measurement_source::*;
-pub use types::*;

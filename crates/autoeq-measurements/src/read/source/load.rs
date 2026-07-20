@@ -1,5 +1,4 @@
-use super::measurement_ref::MeasurementRef;
-use super::measurement_source::MeasurementSource;
+use super::{MeasurementRef, MeasurementSource};
 use crate::Curve;
 use crate::read::{interpolate_log_space, read_curve_from_csv};
 use ndarray::Array1;
@@ -193,14 +192,23 @@ fn average_curves_power_domain(curves: &[Curve]) -> Curve {
     }
 }
 
-/// Load measurement(s) from a source and average if necessary
-pub fn load_source(source: &MeasurementSource) -> Result<Curve, Box<dyn Error>> {
+/// Load measurement(s) once and return both the representative response and
+/// the aligned individual responses.
+pub fn load_source_with_individual(
+    source: &MeasurementSource,
+) -> Result<(Curve, Vec<Curve>), Box<dyn Error>> {
     let curves = load_source_individual(source)?;
-    if curves.len() == 1 {
-        Ok(curves[0].clone())
+    let representative = if curves.len() == 1 {
+        curves[0].clone()
     } else {
-        Ok(average_curves_power_domain(&curves))
-    }
+        average_curves_power_domain(&curves)
+    };
+    Ok((representative, curves))
+}
+
+/// Load measurement(s) from a source and average if necessary.
+pub fn load_source(source: &MeasurementSource) -> Result<Curve, Box<dyn Error>> {
+    load_source_with_individual(source).map(|(representative, _)| representative)
 }
 
 #[cfg(test)]
@@ -357,6 +365,21 @@ mod tests {
         let expected =
             10.0 * ((10.0_f64.powf(80.0 / 10.0) + 10.0_f64.powf(83.0 / 10.0)) / 2.0).log10();
         assert!((avg.spl[0] - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn load_source_with_individual_reuses_aligned_curves() {
+        let first = sample_curve(0.0);
+        let second = sample_curve(3.0);
+        let source = MeasurementSource::InMemoryMultiple(vec![first, second]);
+
+        let (representative, individual) = load_source_with_individual(&source).unwrap();
+
+        assert_eq!(individual.len(), 2);
+        assert_eq!(representative.freq, individual[0].freq);
+        let expected =
+            10.0 * ((10.0_f64.powf(80.0 / 10.0) + 10.0_f64.powf(83.0 / 10.0)) / 2.0).log10();
+        assert!((representative.spl[0] - expected).abs() < 1e-6);
     }
 
     #[test]

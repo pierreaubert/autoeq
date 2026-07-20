@@ -5,6 +5,7 @@
 //! Harman / custom slope / file / derived-from-measurement) plus optional
 //! user preference shelves (bass / treble).
 
+use crate::home_cinema::{HomeCinemaRole, role_for_channel};
 use crate::{Curve, TargetResponseConfig, TargetShape};
 use ndarray::Array1;
 
@@ -77,6 +78,82 @@ pub fn build_complete_target_curve(freqs: &Array1<f64>, config: &TargetResponseC
         spl,
         phase: None,
         ..Default::default()
+    }
+}
+
+/// Apply enabled home-cinema role shaping to an already-built target curve.
+pub fn apply_role_target_curve_shape(
+    channel_name: &str,
+    target_curve: &mut Curve,
+    target: &TargetResponseConfig,
+) {
+    let Some(role_targets) = target.role_targets.as_ref().filter(|config| config.enabled) else {
+        return;
+    };
+    let role = role_for_channel(channel_name);
+
+    if role == HomeCinemaRole::Center && role_targets.center_dialog_boost_db.abs() > 0.001 {
+        apply_log_band_emphasis(
+            target_curve,
+            role_targets.center_dialog_low_hz,
+            role_targets.center_dialog_high_hz,
+            role_targets.center_dialog_boost_db,
+        );
+    }
+
+    if role_targets.cinema_x_curve_enabled
+        && role_targets.cinema_x_curve_db_per_octave.abs() > 0.001
+    {
+        apply_high_frequency_slope(
+            target_curve,
+            role_targets.cinema_x_curve_start_hz,
+            role_targets.cinema_x_curve_db_per_octave,
+        );
+    }
+
+    if let Some(distance_m) = role_targets.listening_distance_m {
+        let reference_m = role_targets.cinema_reference_distance_m;
+        if distance_m > reference_m
+            && reference_m > 0.0
+            && role_targets.distance_treble_rolloff_db_per_doubling.abs() > 0.001
+        {
+            let distance_doublings = (distance_m / reference_m).log2();
+            apply_high_frequency_slope(
+                target_curve,
+                role_targets.cinema_x_curve_start_hz,
+                -role_targets.distance_treble_rolloff_db_per_doubling.abs() * distance_doublings,
+            );
+        }
+    }
+}
+
+fn apply_log_band_emphasis(target_curve: &mut Curve, low_hz: f64, high_hz: f64, gain_db: f64) {
+    if !(low_hz > 0.0 && high_hz > low_hz) {
+        return;
+    }
+    let center_hz = (low_hz * high_hz).sqrt();
+    let half_width_oct = (high_hz / low_hz).log2() / 2.0;
+    if half_width_oct <= 0.0 {
+        return;
+    }
+
+    for (freq, spl) in target_curve.freq.iter().zip(target_curve.spl.iter_mut()) {
+        let distance_oct = (*freq / center_hz).max(1e-9).log2().abs();
+        if distance_oct <= half_width_oct {
+            let weight = 0.5 * (1.0 + (std::f64::consts::PI * distance_oct / half_width_oct).cos());
+            *spl += gain_db * weight;
+        }
+    }
+}
+
+fn apply_high_frequency_slope(target_curve: &mut Curve, start_hz: f64, slope_db_per_octave: f64) {
+    if start_hz <= 0.0 {
+        return;
+    }
+    for (freq, spl) in target_curve.freq.iter().zip(target_curve.spl.iter_mut()) {
+        if *freq > start_hz {
+            *spl += slope_db_per_octave * (*freq / start_hz).log2();
+        }
     }
 }
 
@@ -196,5 +273,27 @@ mod tests {
             "10kHz should be tilted down, got {:.2}",
             curve.spl[idx_10k]
         );
+    }
+
+    #[test]
+    fn role_shape_applies_center_dialog_emphasis() {
+        let frequencies = test_frequencies();
+        let mut curve = build_complete_target_curve(&frequencies, &TargetResponseConfig::default());
+        let target = TargetResponseConfig {
+            role_targets: Some(crate::RoleTargetConfig {
+                enabled: true,
+                center_dialog_boost_db: 3.0,
+                ..crate::RoleTargetConfig::default()
+            }),
+            ..TargetResponseConfig::default()
+        };
+
+        apply_role_target_curve_shape("Center", &mut curve, &target);
+
+        let index = frequencies
+            .iter()
+            .position(|frequency| (*frequency - 2_000.0).abs() < 1.0)
+            .unwrap();
+        assert!(curve.spl[index] > 0.0);
     }
 }

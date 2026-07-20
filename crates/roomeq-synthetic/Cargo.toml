@@ -5,6 +5,9 @@ edition = "2024"
 description = "Deterministic synthetic measurement scenarios for RoomEQ QA"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [dependencies]
 autoeq-core = { workspace = true }
 log = { workspace = true }

@@ -1,266 +1,1393 @@
-//! Experimental exporters for the canonical `roomeq-model` DSP graph.
+//! Export canonical RoomEQ DSP graphs to external audio processing formats.
 //!
-//! Production RoomEQ formats remain in the root `autoeq` crate while they are
-//! migrated. These exporters validate the graph and never emit an empty
-//! placeholder artifact.
+//! Supports:
+//! - CamillaDSP (YAML config)
+//! - Equalizer APO / Peace GUI (text config)
+//! - EasyEffects (JSON preset)
+//! - Wavelet (GraphicEQ text)
+//! - PipeWire filter-chain (SPA-JSON .conf)
+//! - Roon DSP Engine (JSON)
+//! - Room EQ Wizard Generic EQ (text)
+//! - Canonical normalized biquad coefficients (JSON)
 
-#![forbid(unsafe_code)]
-
-mod format;
-pub use format::ExternalExportFormat;
-
-use roomeq_model::{DspGraph, Plugin, ProvenanceConfig};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
+use math_audio_iir_fir::Biquad;
+use roomeq_model::{
+    BassManagementMatrix, BassManagementRoute, BassManagementRoutingGraph, ChannelDspChain,
+    DspGraph, PluginConfigWrapper,
 };
+use std::collections::{BTreeSet, HashMap};
+use std::fmt::Write as FmtWrite;
+use std::path::Path;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExportFormat {
-    Json,
-    EqualizerApo,
-}
+mod channel;
+mod collect;
+mod conformance;
+mod export_format;
+mod extract;
+mod hash;
+mod misc;
+mod package;
+mod pipewire;
+mod roon_convolver;
+#[cfg(test)]
+mod tests;
+mod types;
+mod write;
 
-/// Privacy profile applied to a packaged provenance manifest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ManifestRedaction {
-    Private,
-    Shareable,
-    Anonymous,
-}
+pub use export_format::*;
+pub use package::*;
 
-/// Sidecar emitted alongside a RoomEQ DSP export.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExportProvenanceManifest {
-    pub schema: String,
-    pub schema_version: u32,
-    pub export_format: String,
-    pub graph_sha256: String,
-    /// Hash of the bytes delivered to the target renderer.  This is distinct
-    /// from the graph hash because target formatting can change independently.
-    pub export_sha256: String,
-    /// Named package members (routing/config/filter renderings) and their
-    /// byte-level identities.  The primary export is always present.
-    #[serde(default)]
-    pub artifact_hashes: BTreeMap<String, String>,
-    pub measurement_hashes: BTreeMap<String, String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub measurement_sidecars: Option<BTreeMap<String, PathBuf>>,
-}
+use channel::channel_short_name;
+use channel::sorted_channels;
+use collect::collect_all_plugins;
+use conformance::ExportArtifactManifest;
+use conformance::ExportNodeKind;
+use conformance::normalize_export_identifier;
+use conformance::validate_camilladsp_input;
+use conformance::{routed_channel_names, validate_pipewire_input, validate_serial_external_input};
+use export_format::ensure_external_export_supported;
+use extract::extract_convolution_paths;
+use extract::extract_delay_ms;
+use extract::extract_eq_filters;
+use extract::extract_gain_db;
+use misc::WAVELET_BANDS;
+use misc::apo_filter_type;
+use misc::easyeffects_filter_type;
+use misc::parse_biquad_filter_type;
+use misc::roon_filter_type;
+use pipewire::pipewire_channel_position;
+use pipewire::pipewire_filter_label;
+use write::write_camilladsp_crossover_filter;
+use write::write_camilladsp_delay_filter;
+use write::write_camilladsp_filters_for_plugins;
+use write::write_camilladsp_pipeline_filter_step;
 
-pub fn export(graph: &DspGraph, format: ExportFormat) -> Result<String, String> {
-    graph.validate()?;
+/// Render one external artifact after applying the backend's conformance
+/// checks. This function is path-free and performs no persistence.
+pub fn render_dsp_graph(
+    graph: &DspGraph,
+    format: ExportFormat,
+    sample_rate: f64,
+) -> anyhow::Result<String> {
+    graph.validate().map_err(anyhow::Error::msg)?;
+    ensure_external_export_supported(graph, format)?;
     match format {
-        ExportFormat::Json => serde_json::to_string_pretty(graph).map_err(|e| e.to_string()),
+        ExportFormat::CamillaDsp => export_camilladsp(graph, sample_rate),
         ExportFormat::EqualizerApo => export_equalizer_apo(graph),
-    }
-}
-
-/// Render an export and its independent provenance manifest. The measurement
-/// content hashes stay stable across redaction; only private sidecar locations
-/// are removed for shareable/anonymous packages.
-pub fn export_with_provenance_manifest(
-    graph: &DspGraph,
-    format: ExportFormat,
-    provenance: &ProvenanceConfig,
-    redaction: ManifestRedaction,
-) -> Result<(String, ExportProvenanceManifest), String> {
-    let content = export(graph, format)?;
-    let graph_json = serde_json::to_vec(graph).map_err(|error| error.to_string())?;
-    let export_sha256 = hash_bytes(content.as_bytes());
-    let artifact_hashes = BTreeMap::from([("primary_export".into(), export_sha256.clone())]);
-    let measurement_hashes = provenance
-        .measurements
-        .iter()
-        .map(|(name, reference)| (name.clone(), reference.content_hash.clone()))
-        .collect();
-    let measurement_sidecars = matches!(redaction, ManifestRedaction::Private).then(|| {
-        provenance
-            .measurements
-            .iter()
-            .filter_map(|(name, reference)| {
-                reference
-                    .sidecar_path
-                    .as_ref()
-                    .map(|path| (name.clone(), path.clone()))
-            })
-            .collect()
-    });
-    Ok((
-        content,
-        ExportProvenanceManifest {
-            schema: "autoeq.roomeq-export-provenance".into(),
-            schema_version: 1,
-            export_format: format_name(format).into(),
-            graph_sha256: hash_bytes(&graph_json),
-            export_sha256,
-            artifact_hashes,
-            measurement_hashes,
-            measurement_sidecars,
-        },
-    ))
-}
-
-/// Write the primary export and a `.provenance.json` sidecar as one package.
-pub fn write_export_package(
-    graph: &DspGraph,
-    format: ExportFormat,
-    output_path: &Path,
-    provenance: &ProvenanceConfig,
-    redaction: ManifestRedaction,
-) -> Result<PathBuf, String> {
-    let (content, manifest) =
-        export_with_provenance_manifest(graph, format, provenance, redaction)?;
-    std::fs::write(output_path, content).map_err(|error| error.to_string())?;
-    let manifest_path = PathBuf::from(format!("{}.provenance.json", output_path.display()));
-    std::fs::write(
-        &manifest_path,
-        serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(manifest_path)
-}
-
-fn format_name(format: ExportFormat) -> &'static str {
-    match format {
-        ExportFormat::Json => "json",
-        ExportFormat::EqualizerApo => "equalizer_apo",
-    }
-}
-
-fn hash_bytes(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
-fn export_equalizer_apo(graph: &DspGraph) -> Result<String, String> {
-    let mut out = format!("# RoomEQ export v{}\n", graph.version);
-    for (channel, chain) in &graph.channels {
-        out.push_str(&format!("\nChannel: {channel}\n"));
-        for plugin in &chain.plugins {
-            write_plugin(&mut out, plugin)?;
+        ExportFormat::EasyEffects => export_easyeffects(graph),
+        ExportFormat::Wavelet => export_wavelet(graph, sample_rate),
+        ExportFormat::PipeWire => export_pipewire(graph, sample_rate),
+        ExportFormat::RoonDsp => export_roon(graph),
+        ExportFormat::Rew => export_rew(graph),
+        ExportFormat::BiquadCoefficients => {
+            export_normalized_biquad_coefficients(graph, sample_rate)
         }
+    }
+}
+
+/// Build the complete external artifact package in memory. `resources` and
+/// `occupied_names` are explicit adapter inputs; the export crate never
+/// discovers or writes filesystem state.
+pub fn build_export_package(
+    graph: &DspGraph,
+    format: ExportFormat,
+    main_file_name: &Path,
+    sample_rate: f64,
+    resources: &[ConvolutionResource],
+    occupied_names: &BTreeSet<String>,
+    reusable_names: &HashMap<String, String>,
+) -> anyhow::Result<ExportPackage> {
+    graph.validate().map_err(anyhow::Error::msg)?;
+    let mut members = Vec::new();
+
+    if matches!(format, ExportFormat::RoonDsp) {
+        ensure_external_export_supported(graph, format)?;
+        let archive =
+            roon_convolver::build_roon_convolution_archive(graph, resources, sample_rate)?;
+        let content = export_roon_manifest(graph, archive.as_ref().map(|(metadata, _)| metadata))?;
+        members.push(ExportPackageMember::new(
+            main_file_name,
+            content.into_bytes(),
+        )?);
+        if let Some((_, bytes)) = archive {
+            members.push(ExportPackageMember::new("room_eq_convolution.zip", bytes)?);
+        }
+        return ExportPackage::new(members);
+    }
+
+    let export_graph = if export_format_preserves_convolution_paths(format) {
+        let mut occupied_names = occupied_names.clone();
+        if let Some(name) = main_file_name.to_str() {
+            occupied_names.insert(name.to_string());
+        }
+        let (graph, sidecars) =
+            package_convolution_sidecars(graph, resources, &occupied_names, reusable_names)?;
+        members.extend(sidecars);
+        graph
+    } else {
+        graph.clone()
+    };
+    let content = render_dsp_graph(&export_graph, format, sample_rate)?;
+    members.push(ExportPackageMember::new(
+        main_file_name,
+        content.into_bytes(),
+    )?);
+    ExportPackage::new(members)
+}
+
+fn export_format_preserves_convolution_paths(format: ExportFormat) -> bool {
+    matches!(
+        format,
+        ExportFormat::CamillaDsp | ExportFormat::EqualizerApo | ExportFormat::PipeWire
+    )
+}
+
+/// Export a single serial channel as a REW Generic EQ filter-settings file.
+fn export_rew(output: &DspGraph) -> anyhow::Result<String> {
+    validate_serial_external_input(output, ExportFormat::Rew)?;
+    let channels = sorted_channels(output);
+    let (channel_name, chain) = channels
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("Rew export requires exactly one channel"))?;
+    let filters = extract_eq_filters(&chain.plugins);
+    let mut out = String::new();
+    writeln!(out, "Filter Settings file")?;
+    writeln!(out)?;
+    writeln!(out, "Equaliser: Generic")?;
+    writeln!(out, "Channel: {}", channel_short_name(channel_name))?;
+    writeln!(out, "Preamp: {:.9} dB", extract_gain_db(&chain.plugins))?;
+
+    for (index, filter) in filters.iter().enumerate() {
+        let filter_type = match filter.filter_type.as_str() {
+            "peak" => "PK",
+            "lowshelf" => "LS",
+            "highshelf" => "HS",
+            "lowpass" => "LP",
+            "highpass" | "highpassvariableq" => "HP",
+            "notch" => "NO",
+            "allpass" => "AP",
+            other => anyhow::bail!("Rew export does not support filter type '{other}'"),
+        };
+        writeln!(
+            out,
+            "Filter {:>2}: ON {filter_type} Fc {:.9} Hz Gain {:+.9} dB Q {:.9}",
+            index + 1,
+            filter.freq,
+            filter.gain_db,
+            filter.q,
+        )?;
     }
     Ok(out)
 }
 
-fn write_plugin(out: &mut String, plugin: &Plugin) -> Result<(), String> {
-    match plugin.kind.as_str() {
-        "gain" => {
-            let gain = plugin
+/// Export exact normalized coefficients using RoomEQ's canonical biquad
+/// implementation and denominator sign convention.
+fn export_normalized_biquad_coefficients(
+    output: &DspGraph,
+    sample_rate: f64,
+) -> anyhow::Result<String> {
+    validate_serial_external_input(output, ExportFormat::BiquadCoefficients)?;
+    if !sample_rate.is_finite() || sample_rate <= 0.0 {
+        anyhow::bail!("BiquadCoefficients export requires a finite positive sample rate");
+    }
+    let nyquist = sample_rate / 2.0;
+    let mut channels_json = Vec::new();
+    for (channel_name, chain) in sorted_channels(output) {
+        let filters = extract_eq_filters(&chain.plugins);
+        let mut sections = Vec::with_capacity(filters.len());
+        for (section_index, filter) in filters.iter().enumerate() {
+            if filter.freq >= nyquist {
+                anyhow::bail!(
+                    "BiquadCoefficients export requires filter frequency {} Hz to be below Nyquist ({nyquist} Hz)",
+                    filter.freq
+                );
+            }
+            let filter_type = parse_biquad_filter_type(&filter.filter_type)?;
+            let biquad = Biquad::new(
+                filter_type,
+                filter.freq,
+                sample_rate,
+                filter.q,
+                filter.gain_db,
+            );
+            let (a1, a2, b0, b1, b2) = biquad.constants();
+            sections.push(serde_json::json!({
+                "section_index": section_index,
+                "order": 2,
+                "filter_type": filter.filter_type,
+                "frequency_hz": filter.freq,
+                "q": filter.q,
+                "gain_db": filter.gain_db,
+                "a0": 1.0,
+                "a1": a1,
+                "a2": a2,
+                "b0": b0,
+                "b1": b1,
+                "b2": b2,
+            }));
+        }
+        channels_json.push(serde_json::json!({
+            "channel": channel_short_name(channel_name),
+            "source_channel": channel_name,
+            "preamp_gain_db": extract_gain_db(&chain.plugins),
+            "delay_ms": extract_delay_ms(&chain.plugins).unwrap_or(0.0),
+            "sections": sections,
+        }));
+    }
+
+    Ok(serde_json::to_string_pretty(&serde_json::json!({
+        "format": "roomeq_normalized_biquad_coefficients",
+        "version": 1,
+        "sample_rate_hz": sample_rate,
+        "coefficient_convention": "H(z) = (b0 + b1*z^-1 + b2*z^-2) / (1 + a1*z^-1 + a2*z^-2)",
+        "channels": channels_json,
+    }))?)
+}
+
+fn export_camilladsp(output: &DspGraph, sample_rate: f64) -> anyhow::Result<String> {
+    validate_camilladsp_input(output, Some(sample_rate))?;
+    if let Some(graph) = camilladsp_routing_graph(output)
+        && !graph.routes.is_empty()
+    {
+        return export_camilladsp_routed(output, &graph, sample_rate);
+    }
+
+    let mut out = String::new();
+    let mut manifest = ExportArtifactManifest::new(ExportFormat::CamillaDsp);
+    writeln!(out, "# CamillaDSP configuration")?;
+    writeln!(out, "# Generated by roomeq")?;
+    writeln!(out)?;
+
+    let channels = sorted_channels(output);
+    let num_channels = channels.len();
+
+    // Devices section
+    writeln!(out, "devices:")?;
+    writeln!(out, "  samplerate: {}", sample_rate as u32)?;
+    writeln!(out, "  chunksize: 4096")?;
+    writeln!(out, "  capture:")?;
+    writeln!(out, "    type: Stdin")?;
+    writeln!(out, "    channels: {num_channels}")?;
+    writeln!(out, "    format: S32_LE")?;
+    writeln!(out, "  playback:")?;
+    writeln!(out, "    type: Stdout")?;
+    writeln!(out, "    channels: {num_channels}")?;
+    writeln!(out, "    format: S32_LE")?;
+    writeln!(out)?;
+
+    // Filters section
+    writeln!(out, "filters:")?;
+
+    let mut channel_filter_names = Vec::with_capacity(channels.len());
+    for (ch_name, chain) in &channels {
+        let prefix = normalize_export_identifier(ch_name);
+        let filter_names =
+            write_camilladsp_filters_for_plugins(&mut out, &mut manifest, &prefix, &chain.plugins)?;
+        channel_filter_names.push(filter_names);
+    }
+    writeln!(out)?;
+
+    // Pipeline section
+    writeln!(out, "pipeline:")?;
+
+    for (i, ((ch_name, _), filter_names)) in
+        channels.iter().zip(channel_filter_names.iter()).enumerate()
+    {
+        if !filter_names.is_empty() {
+            write_camilladsp_pipeline_filter_step(
+                &mut out,
+                &mut manifest,
+                i,
+                num_channels,
+                filter_names,
+                &format!("channel '{ch_name}' pipeline"),
+            )?;
+        }
+    }
+
+    manifest.validate()?;
+    Ok(out)
+}
+
+fn export_camilladsp_routed(
+    output: &DspGraph,
+    graph: &BassManagementRoutingGraph,
+    sample_rate: f64,
+) -> anyhow::Result<String> {
+    let mut out = String::new();
+    let mut manifest = ExportArtifactManifest::new(ExportFormat::CamillaDsp);
+    writeln!(out, "# CamillaDSP configuration")?;
+    writeln!(out, "# Generated by roomeq")?;
+    writeln!(out, "# Routed bass-management graph export")?;
+    writeln!(out)?;
+
+    let (input_channels, output_channels) = routed_channel_names(output, graph);
+
+    writeln!(out, "devices:")?;
+    writeln!(out, "  samplerate: {}", sample_rate as u32)?;
+    writeln!(out, "  chunksize: 4096")?;
+    writeln!(out, "  capture:")?;
+    writeln!(out, "    type: Stdin")?;
+    writeln!(out, "    channels: {}", input_channels.len())?;
+    writeln!(out, "    format: S32_LE")?;
+    writeln!(out, "  playback:")?;
+    writeln!(out, "    type: Stdout")?;
+    writeln!(out, "    channels: {}", output_channels.len())?;
+    writeln!(out, "    format: S32_LE")?;
+    writeln!(out)?;
+
+    writeln!(out, "filters:")?;
+    let mut pre_route_filter_names = Vec::with_capacity(input_channels.len());
+    for channel_name in &input_channels {
+        let chain = output.channels.get(channel_name).ok_or_else(|| {
+            anyhow::anyhow!("missing DSP chain for CamillaDSP input channel '{channel_name}'")
+        })?;
+        let prefix = format!("pre_{}", normalize_export_identifier(channel_name));
+        let plugins = plugins_for_stage(chain, "pre_route");
+        pre_route_filter_names.push(write_camilladsp_filters_for_plugins(
+            &mut out,
+            &mut manifest,
+            &prefix,
+            &plugins,
+        )?);
+    }
+
+    let mut route_filter_names = Vec::with_capacity(graph.routes.len());
+    for (route_idx, route) in graph.routes.iter().enumerate() {
+        let prefix = camilladsp_route_prefix(route_idx, route);
+        let mut filter_names = Vec::new();
+        if let Some(freq) = route.high_pass_hz.or(route.low_pass_hz) {
+            let output = if route.high_pass_hz.is_some() {
+                "high"
+            } else {
+                "low"
+            };
+            write_camilladsp_crossover_filter(
+                &mut out,
+                &mut manifest,
+                &format!("{prefix}_crossover"),
+                &route.crossover_type,
+                freq,
+                output,
+            )?;
+            filter_names.push(format!("{prefix}_crossover"));
+        }
+        if route.delay_ms.abs() > 0.001 {
+            write_camilladsp_delay_filter(
+                &mut out,
+                &mut manifest,
+                &format!("{prefix}_delay"),
+                route.delay_ms,
+            )?;
+            filter_names.push(format!("{prefix}_delay"));
+        }
+        route_filter_names.push(filter_names);
+    }
+
+    let mut post_route_filter_names = Vec::with_capacity(output_channels.len());
+    for channel_name in &output_channels {
+        let chain = output.channels.get(channel_name).ok_or_else(|| {
+            anyhow::anyhow!("missing DSP chain for CamillaDSP output channel '{channel_name}'")
+        })?;
+        let prefix = format!("post_{}", normalize_export_identifier(channel_name));
+        let plugins = plugins_for_stage(chain, "post_route");
+        post_route_filter_names.push(write_camilladsp_filters_for_plugins(
+            &mut out,
+            &mut manifest,
+            &prefix,
+            &plugins,
+        )?);
+    }
+    writeln!(out)?;
+
+    writeln!(out, "mixers:")?;
+    write_camilladsp_route_expand_mixer(&mut out, &mut manifest, graph, input_channels.len())?;
+    write_camilladsp_route_sum_mixer(&mut out, &mut manifest, graph, output_channels.len())?;
+    writeln!(out)?;
+
+    writeln!(out, "pipeline:")?;
+    for (input_idx, (channel_name, filter_names)) in input_channels
+        .iter()
+        .zip(pre_route_filter_names.iter())
+        .enumerate()
+    {
+        if !filter_names.is_empty() {
+            write_camilladsp_pipeline_filter_step(
+                &mut out,
+                &mut manifest,
+                input_idx,
+                input_channels.len(),
+                filter_names,
+                &format!("pre-route channel '{channel_name}' pipeline"),
+            )?;
+        }
+    }
+    write_camilladsp_pipeline_mixer_step(&mut out, &mut manifest, "roomeq_route_matrix")?;
+
+    for (route_idx, filter_names) in route_filter_names.iter().enumerate() {
+        if !filter_names.is_empty() {
+            write_camilladsp_pipeline_filter_step(
+                &mut out,
+                &mut manifest,
+                route_idx,
+                graph.routes.len(),
+                filter_names,
+                &format!("route #{route_idx} pipeline"),
+            )?;
+        }
+    }
+
+    write_camilladsp_pipeline_mixer_step(&mut out, &mut manifest, "roomeq_route_sum")?;
+    for (output_idx, (channel_name, filter_names)) in output_channels
+        .iter()
+        .zip(post_route_filter_names.iter())
+        .enumerate()
+    {
+        if !filter_names.is_empty() {
+            write_camilladsp_pipeline_filter_step(
+                &mut out,
+                &mut manifest,
+                output_idx,
+                output_channels.len(),
+                filter_names,
+                &format!("post-route channel '{channel_name}' pipeline"),
+            )?;
+        }
+    }
+
+    manifest.validate()?;
+    Ok(out)
+}
+
+fn camilladsp_routing_graph(output: &DspGraph) -> Option<BassManagementRoutingGraph> {
+    output
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.bass_management.as_ref())
+        .and_then(|report| report.routing_graph.clone())
+        .or_else(|| {
+            output.global_plugins.iter().find_map(|plugin| {
+                if plugin.plugin_type != "matrix"
+                    || plugin
+                        .parameters
+                        .get("label")
+                        .and_then(|label| label.as_str())
+                        != Some("home_cinema_bass_management")
+                {
+                    return None;
+                }
+                let metadata = plugin.parameters.get("metadata")?;
+                let routes: Vec<BassManagementRoute> =
+                    serde_json::from_value(metadata.get("routes")?.clone()).ok()?;
+                let matrix = Some(BassManagementMatrix {
+                    input_channel_map: serde_json::from_value(
+                        plugin.parameters.get("input_channel_map")?.clone(),
+                    )
+                    .ok()?,
+                    output_channel_map: serde_json::from_value(
+                        plugin.parameters.get("output_channel_map")?.clone(),
+                    )
+                    .ok()?,
+                    matrix: serde_json::from_value(plugin.parameters.get("matrix")?.clone())
+                        .ok()?,
+                    route_count: routes.len(),
+                });
+                let input_channels = ordered_route_channels(
+                    &routes,
+                    |route| route.source_index,
+                    |route| &route.source_channel,
+                );
+                let output_channels = ordered_route_channels(
+                    &routes,
+                    |route| route.destination_index,
+                    |route| &route.destination,
+                );
+                Some(BassManagementRoutingGraph {
+                    physical_sub_output: metadata
+                        .get("physical_sub_output")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    input_channels,
+                    output_channels,
+                    routes,
+                    matrix,
+                    advisories: serde_json::from_value(
+                        metadata
+                            .get("advisories")
+                            .cloned()
+                            .unwrap_or_else(|| serde_json::json!([])),
+                    )
+                    .unwrap_or_default(),
+                })
+            })
+        })
+}
+
+fn ordered_route_channels<'a, F, G>(
+    routes: &'a [BassManagementRoute],
+    index: F,
+    name: G,
+) -> Vec<String>
+where
+    F: Fn(&'a BassManagementRoute) -> usize,
+    G: Fn(&'a BassManagementRoute) -> &'a String,
+{
+    let mut indexed: Vec<(usize, String)> = routes
+        .iter()
+        .map(|route| (index(route), name(route).clone()))
+        .collect();
+    indexed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    indexed.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+    indexed.into_iter().map(|(_, name)| name).collect()
+}
+
+fn plugins_for_stage(chain: &ChannelDspChain, stage: &str) -> Vec<PluginConfigWrapper> {
+    chain
+        .plugins
+        .iter()
+        .filter(|plugin| {
+            plugin
                 .parameters
-                .get("gain_db")
-                .and_then(|v| v.as_f64())
-                .ok_or("gain plugin requires gain_db")?;
-            out.push_str(&format!("Preamp: {gain:+.2} dB\n"));
-        }
-        "eq" => {
-            let p = &plugin.parameters;
-            let freq = p
-                .get("freq")
-                .and_then(|v| v.as_f64())
-                .ok_or("eq plugin requires freq")?;
-            let gain = p.get("gain_db").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let q = p.get("q").and_then(|v| v.as_f64()).unwrap_or(1.0);
-            out.push_str(&format!(
-                "Filter: ON PK Fc {freq:.2} Hz Gain {gain:+.2} dB Q {q:.4}\n"
-            ));
-        }
-        "delay" => {
-            let delay = plugin
-                .parameters
-                .get("delay_ms")
-                .and_then(|v| v.as_f64())
-                .ok_or("delay plugin requires delay_ms")?;
-            out.push_str(&format!("Delay: {delay:.3} ms\n"));
-        }
-        other => return Err(format!("unsupported plugin kind '{other}'")),
+                .get("room_eq_stage")
+                .and_then(|value| value.as_str())
+                == Some(stage)
+        })
+        .cloned()
+        .collect()
+}
+
+fn camilladsp_route_prefix(route_idx: usize, route: &BassManagementRoute) -> String {
+    format!(
+        "route_{route_idx}_{}_to_{}",
+        normalize_export_identifier(&route.source_channel),
+        normalize_export_identifier(&route.destination)
+    )
+}
+
+fn write_camilladsp_route_expand_mixer(
+    out: &mut String,
+    manifest: &mut ExportArtifactManifest,
+    graph: &BassManagementRoutingGraph,
+    input_channels: usize,
+) -> anyhow::Result<()> {
+    manifest.define_node(ExportNodeKind::Router, "roomeq_route_matrix")?;
+    writeln!(out, "  roomeq_route_matrix:")?;
+    writeln!(out, "    channels:")?;
+    writeln!(out, "      in: {input_channels}")?;
+    writeln!(out, "      out: {}", graph.routes.len())?;
+    writeln!(out, "    mapping:")?;
+    for (route_idx, route) in graph.routes.iter().enumerate() {
+        writeln!(out, "    - dest: {route_idx}")?;
+        writeln!(out, "      mute: false")?;
+        writeln!(out, "      sources:")?;
+        writeln!(out, "      - channel: {}", route.source_index)?;
+        writeln!(out, "        gain: {:.6}", route.gain_db)?;
+        writeln!(out, "        inverted: {}", route.polarity_inverted)?;
+        writeln!(out, "        mute: false")?;
+        writeln!(out, "        scale: dB")?;
     }
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+fn write_camilladsp_route_sum_mixer(
+    out: &mut String,
+    manifest: &mut ExportArtifactManifest,
+    graph: &BassManagementRoutingGraph,
+    output_channels: usize,
+) -> anyhow::Result<()> {
+    manifest.define_node(ExportNodeKind::Router, "roomeq_route_sum")?;
+    writeln!(out, "  roomeq_route_sum:")?;
+    writeln!(out, "    channels:")?;
+    writeln!(out, "      in: {}", graph.routes.len())?;
+    writeln!(out, "      out: {output_channels}")?;
+    writeln!(out, "    mapping:")?;
+    for dest_idx in 0..output_channels {
+        writeln!(out, "    - dest: {dest_idx}")?;
+        writeln!(out, "      mute: false")?;
+        writeln!(out, "      sources:")?;
+        for (route_idx, route) in graph.routes.iter().enumerate() {
+            if route.destination_index == dest_idx {
+                writeln!(out, "      - channel: {route_idx}")?;
+                writeln!(out, "        gain: 0")?;
+                writeln!(out, "        inverted: false")?;
+                writeln!(out, "        mute: false")?;
+                writeln!(out, "        scale: dB")?;
+            }
+        }
+    }
+    Ok(())
+}
 
-    #[test]
-    fn rejects_empty_graph_for_every_format() {
-        let graph = DspGraph::new("1");
-        for format in [ExportFormat::Json, ExportFormat::EqualizerApo] {
-            let error = export(&graph, format).expect_err("empty graph must not export");
-            assert!(
-                error.contains("at least one channel"),
-                "unexpected error: {error}"
+fn write_camilladsp_pipeline_mixer_step(
+    out: &mut String,
+    manifest: &mut ExportArtifactManifest,
+    name: &str,
+) -> anyhow::Result<()> {
+    manifest.reference_node(ExportNodeKind::Router, name, "pipeline");
+    writeln!(out, "- bypassed: null")?;
+    writeln!(out, "  name: {name}")?;
+    writeln!(out, "  type: Mixer")?;
+    Ok(())
+}
+
+fn export_equalizer_apo(output: &DspGraph) -> anyhow::Result<String> {
+    if let Some(graph) = camilladsp_routing_graph(output)
+        && !graph.routes.is_empty()
+    {
+        return export_equalizer_apo_routed(output, &graph);
+    }
+    if !output.global_plugins.is_empty() {
+        anyhow::bail!(
+            "Equalizer APO export cannot represent these global DSP plugins. \
+             It supports only the documented static bass-management routing subset; \
+             use CamillaDSP or Apply as Graph for this output."
+        );
+    }
+    validate_serial_external_input(output, ExportFormat::EqualizerApo)?;
+    let mut out = String::new();
+    writeln!(out, "# Equalizer APO configuration")?;
+    writeln!(out, "# Generated by roomeq")?;
+    writeln!(out)?;
+
+    let channels = sorted_channels(output);
+
+    for (ch_name, chain) in &channels {
+        let short = channel_short_name(ch_name);
+        writeln!(out, "Channel: {short}")?;
+
+        // Collect all plugins from channel + drivers
+        let plugins: Vec<PluginConfigWrapper> =
+            collect_all_plugins(chain).into_iter().cloned().collect();
+
+        // Gain (preamp)
+        let gain = extract_gain_db(&plugins);
+        if gain.abs() > 0.01 {
+            writeln!(out, "Preamp: {gain:+.9} dB")?;
+        }
+
+        // Delay
+        if let Some(delay) = extract_delay_ms(&plugins) {
+            writeln!(out, "Delay: {delay:.9} ms")?;
+        }
+
+        // EQ filters
+        let filters = extract_eq_filters(&plugins);
+        for (i, f) in filters.iter().enumerate() {
+            let ft = apo_filter_type(&f.filter_type);
+            match f.filter_type.as_str() {
+                "lowpass" | "highpass" | "highpassvariableq" => {
+                    writeln!(
+                        out,
+                        "Filter {:2}: ON {ft} Fc {:.9} Hz Q {:.9}",
+                        i + 1,
+                        f.freq,
+                        f.q
+                    )?;
+                }
+                _ => {
+                    writeln!(
+                        out,
+                        "Filter {:2}: ON {ft} Fc {:.9} Hz Gain {:+.9} dB Q {:.9}",
+                        i + 1,
+                        f.freq,
+                        f.gain_db,
+                        f.q
+                    )?;
+                }
+            }
+        }
+
+        // Convolution
+        let conv_paths = extract_convolution_paths(&plugins);
+        for path in &conv_paths {
+            writeln!(out, "Convolution: {path}")?;
+        }
+
+        writeln!(out)?;
+    }
+
+    Ok(out)
+}
+
+/// Render the static routing subset that Equalizer APO can express without
+/// hidden intermediate buses: each source feeds one route, routes may sum at
+/// a destination, and no routed destination is reused as a separate source.
+fn export_equalizer_apo_routed(
+    output: &DspGraph,
+    graph: &BassManagementRoutingGraph,
+) -> anyhow::Result<String> {
+    ensure_equalizer_apo_routing_supported(output, graph)?;
+
+    let mut out = String::new();
+    writeln!(out, "# Equalizer APO configuration")?;
+    writeln!(out, "# Generated by roomeq")?;
+    writeln!(out, "# Static RoomEQ routing graph (Channel/Copy)")?;
+    writeln!(out)?;
+
+    let mut filter_index = 1usize;
+    for route in &graph.routes {
+        let chain = output.channels.get(&route.source_channel).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Equalizer APO export is missing the pre-route chain for '{}'",
+                route.source_channel
+            )
+        })?;
+        writeln!(
+            out,
+            "Channel: {}",
+            channel_short_name(&route.source_channel)
+        )?;
+        write_equalizer_apo_plugins(
+            &mut out,
+            &plugins_for_stage(chain, "pre_route"),
+            &mut filter_index,
+        )?;
+        write_equalizer_apo_route_crossover(&mut out, route, &mut filter_index)?;
+        if route.delay_ms.abs() > 0.001 {
+            writeln!(out, "Delay: {:.3} ms", route.delay_ms)?;
+        }
+        writeln!(out)?;
+    }
+
+    writeln!(
+        out,
+        "# Route matrix: each source is filtered above, then summed here"
+    )?;
+    writeln!(out, "Copy:")?;
+    for destination in &graph.output_channels {
+        let terms: Vec<String> = graph
+            .routes
+            .iter()
+            .filter(|route| route.destination == *destination)
+            .map(|route| {
+                let gain = if route.polarity_inverted {
+                    -route.gain_linear
+                } else {
+                    route.gain_linear
+                };
+                format!("{gain:.9}*{}", channel_short_name(&route.source_channel))
+            })
+            .collect();
+        writeln!(
+            out,
+            "  {} = {}",
+            channel_short_name(destination),
+            terms.join(" + ")
+        )?;
+    }
+    writeln!(out)?;
+
+    for destination in &graph.output_channels {
+        let chain = output.channels.get(destination).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Equalizer APO export is missing the post-route chain for '{destination}'"
+            )
+        })?;
+        writeln!(out, "Channel: {}", channel_short_name(destination))?;
+        write_equalizer_apo_plugins(
+            &mut out,
+            &plugins_for_stage(chain, "post_route"),
+            &mut filter_index,
+        )?;
+        writeln!(out)?;
+    }
+    Ok(out)
+}
+
+fn ensure_equalizer_apo_routing_supported(
+    output: &DspGraph,
+    graph: &BassManagementRoutingGraph,
+) -> anyhow::Result<()> {
+    if output.global_plugins.iter().any(|plugin| {
+        plugin.plugin_type != "matrix"
+            || plugin
+                .parameters
+                .get("label")
+                .and_then(|value| value.as_str())
+                != Some("home_cinema_bass_management")
+    }) {
+        anyhow::bail!(
+            "Equalizer APO export cannot represent non-routing global DSP plugins; \
+             use CamillaDSP or Apply as Graph."
+        );
+    }
+    let mut source_count = std::collections::HashMap::<&str, usize>::new();
+    for route in &graph.routes {
+        *source_count.entry(&route.source_channel).or_default() += 1;
+        if !output.channels.contains_key(&route.source_channel)
+            || !output.channels.contains_key(&route.destination)
+        {
+            anyhow::bail!(
+                "Equalizer APO export cannot route '{}' to '{}': the graph references a missing channel.",
+                route.source_channel,
+                route.destination
+            );
+        }
+        if route.high_pass_hz.is_some() == route.low_pass_hz.is_some() {
+            anyhow::bail!(
+                "Equalizer APO export requires each routed branch to have exactly one high-pass or low-pass crossover; route '{}' -> '{}' is not representable.",
+                route.source_channel,
+                route.destination
+            );
+        }
+        if !matches!(route.crossover_type.as_str(), "LR24" | "LR48") {
+            anyhow::bail!(
+                "Equalizer APO export supports LR24 and LR48 routed crossovers; route '{}' -> '{}' requests '{}'.",
+                route.source_channel,
+                route.destination,
+                route.crossover_type
             );
         }
     }
+    if let Some((source, _)) = source_count.into_iter().find(|(_, count)| *count > 1) {
+        anyhow::bail!(
+            "Equalizer APO export cannot preserve fan-out from '{source}': route-specific filters need an intermediate bus. Use CamillaDSP or Apply as Graph."
+        );
+    }
+    let source_channels = graph
+        .routes
+        .iter()
+        .map(|route| route.source_channel.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    if let Some(route) = graph.routes.iter().find(|route| {
+        route.destination != route.source_channel
+            && source_channels.contains(route.destination.as_str())
+    }) {
+        anyhow::bail!(
+            "Equalizer APO export cannot preserve routed destination '{}' because it is also used as a source and would require an intermediate bus. Use CamillaDSP or Apply as Graph.",
+            route.destination
+        );
+    }
+    Ok(())
+}
 
-    #[test]
-    fn exports_json_and_apo() {
-        let mut graph = DspGraph::new("1");
-        graph.add_channel(
-            "L",
-            vec![Plugin {
-                kind: "gain".into(),
-                parameters: serde_json::json!({"gain_db": -3.0}),
-            }],
+fn write_equalizer_apo_route_crossover(
+    out: &mut String,
+    route: &BassManagementRoute,
+    filter_index: &mut usize,
+) -> anyhow::Result<()> {
+    let (kind, frequency) = match (route.high_pass_hz, route.low_pass_hz) {
+        (Some(frequency), None) => ("HP", frequency),
+        (None, Some(frequency)) => ("LP", frequency),
+        _ => anyhow::bail!("invalid Equalizer APO routed crossover"),
+    };
+    if !frequency.is_finite() || frequency <= 0.0 {
+        anyhow::bail!("invalid Equalizer APO crossover frequency {frequency}");
+    }
+    let sections = if route.crossover_type == "LR24" { 2 } else { 4 };
+    for _ in 0..sections {
+        writeln!(
+            out,
+            "Filter {:2}: ON {kind} Fc {frequency:.0} Hz Q 0.7071",
+            *filter_index
+        )?;
+        *filter_index += 1;
+    }
+    Ok(())
+}
+
+fn write_equalizer_apo_plugins(
+    out: &mut String,
+    plugins: &[PluginConfigWrapper],
+    filter_index: &mut usize,
+) -> anyhow::Result<()> {
+    let gain = extract_gain_db(plugins);
+    if gain.abs() > 0.01 {
+        writeln!(out, "Preamp: {gain:+.9} dB")?;
+    }
+    if let Some(delay) = extract_delay_ms(plugins) {
+        writeln!(out, "Delay: {delay:.9} ms")?;
+    }
+    for filter in extract_eq_filters(plugins) {
+        let kind = apo_filter_type(&filter.filter_type);
+        if !matches!(
+            filter.filter_type.as_str(),
+            "peak"
+                | "lowshelf"
+                | "highshelf"
+                | "lowpass"
+                | "highpass"
+                | "highpassvariableq"
+                | "notch"
+                | "bandpass"
+                | "allpass"
+        ) {
+            anyhow::bail!(
+                "Equalizer APO does not support '{}' filters",
+                filter.filter_type
+            );
+        }
+        if matches!(
+            filter.filter_type.as_str(),
+            "lowpass" | "highpass" | "highpassvariableq"
+        ) {
+            writeln!(
+                out,
+                "Filter {:2}: ON {kind} Fc {:.9} Hz Q {:.9}",
+                *filter_index, filter.freq, filter.q
+            )?;
+        } else {
+            writeln!(
+                out,
+                "Filter {:2}: ON {kind} Fc {:.9} Hz Gain {:+.9} dB Q {:.9}",
+                *filter_index, filter.freq, filter.gain_db, filter.q
+            )?;
+        }
+        *filter_index += 1;
+    }
+    for path in extract_convolution_paths(plugins) {
+        writeln!(out, "Convolution: {path}")?;
+    }
+    Ok(())
+}
+
+fn export_easyeffects(output: &DspGraph) -> anyhow::Result<String> {
+    validate_serial_external_input(output, ExportFormat::EasyEffects)?;
+    let channels = sorted_channels(output);
+
+    // Conformance requires every channel to have the same chain because this
+    // preset is system-wide. Render that common chain exactly once.
+    let mut all_filters = Vec::new();
+    let mut min_gain = 0.0f64;
+
+    for (_, chain) in channels.iter().take(1) {
+        let plugins: Vec<PluginConfigWrapper> =
+            collect_all_plugins(chain).into_iter().cloned().collect();
+        let filters = extract_eq_filters(&plugins);
+        let gain = extract_gain_db(&plugins);
+
+        // Use most negative gain as preamp to prevent clipping
+        if gain < min_gain {
+            min_gain = gain;
+        }
+
+        all_filters.extend(filters);
+    }
+
+    // Build JSON preset
+    let mut bands = serde_json::Map::new();
+    for (i, f) in all_filters.iter().enumerate().take(30) {
+        let band_key = format!("band{i}");
+        let mut band = serde_json::Map::new();
+        band.insert("frequency".to_string(), serde_json::json!(f.freq));
+        band.insert("gain".to_string(), serde_json::json!(f.gain_db));
+        band.insert("q".to_string(), serde_json::json!(f.q));
+        band.insert(
+            "type".to_string(),
+            serde_json::json!(easyeffects_filter_type(&f.filter_type)),
         );
-        assert!(
-            export(&graph, ExportFormat::Json)
-                .unwrap()
-                .contains("channels")
-        );
-        assert!(
-            export(&graph, ExportFormat::EqualizerApo)
-                .unwrap()
-                .contains("Preamp")
+        band.insert("mode".to_string(), serde_json::json!("RLC (BT)"));
+        band.insert("slope".to_string(), serde_json::json!("x1"));
+        band.insert("solo".to_string(), serde_json::json!(false));
+        band.insert("mute".to_string(), serde_json::json!(false));
+        bands.insert(band_key, serde_json::Value::Object(band));
+    }
+
+    let preset = serde_json::json!({
+        "output": {
+            "equalizer#0": {
+                "input-gain": min_gain,
+                "output-gain": 0.0,
+                "num-bands": all_filters.len().min(30),
+                "split-channels": false,
+                "left": bands,
+                "right": bands,
+            }
+        }
+    });
+
+    Ok(serde_json::to_string_pretty(&preset)?)
+}
+
+fn export_wavelet(output: &DspGraph, sample_rate: f64) -> anyhow::Result<String> {
+    validate_serial_external_input(output, ExportFormat::Wavelet)?;
+    let channels = sorted_channels(output);
+
+    // Average the response across all channels
+    let mut band_gains = [0.0f64; 9];
+    let mut n_channels = 0;
+
+    for (_, chain) in channels.iter().take(1) {
+        let plugins: Vec<PluginConfigWrapper> =
+            collect_all_plugins(chain).into_iter().cloned().collect();
+        let filters = extract_eq_filters(&plugins);
+        let gain = extract_gain_db(&plugins);
+
+        // Build Biquad chain and evaluate at each band frequency
+        let biquads: Vec<Biquad> = filters
+            .iter()
+            .map(|f| {
+                let ft = parse_biquad_filter_type(&f.filter_type)?;
+                Ok(Biquad::new(ft, f.freq, sample_rate, f.q, f.gain_db))
+            })
+            .collect::<anyhow::Result<_>>()?;
+
+        for (i, &freq) in WAVELET_BANDS.iter().enumerate() {
+            let mut db = gain;
+            for bq in &biquads {
+                db += bq.log_result(freq);
+            }
+            band_gains[i] += db;
+        }
+        n_channels += 1;
+    }
+
+    // Average across channels
+    if n_channels > 1 {
+        for g in &mut band_gains {
+            *g /= n_channels as f64;
+        }
+    }
+
+    // Format output
+    let mut out = String::new();
+    writeln!(out, "# Wavelet GraphicEQ")?;
+    writeln!(out, "# Generated by roomeq")?;
+    write!(out, "GraphicEQ:")?;
+    for (i, (&freq, &gain)) in WAVELET_BANDS.iter().zip(band_gains.iter()).enumerate() {
+        if i > 0 {
+            write!(out, ";")?;
+        }
+        write!(out, " {:.0} {:.1}", freq, gain)?;
+    }
+    writeln!(out)?;
+
+    Ok(out)
+}
+
+fn export_pipewire(output: &DspGraph, sample_rate: f64) -> anyhow::Result<String> {
+    validate_pipewire_input(output, Some(sample_rate))?;
+    let mut out = String::new();
+    writeln!(out, "# PipeWire filter-chain configuration")?;
+    writeln!(out, "# Generated by roomeq")?;
+    writeln!(out)?;
+    writeln!(out, "context.modules = [")?;
+    writeln!(out, "  {{ name = libpipewire-module-filter-chain")?;
+    writeln!(out, "    args = {{")?;
+
+    let channels = sorted_channels(output);
+    let num_channels = channels.len();
+
+    // Build channel position list
+    let positions: Vec<&str> = channels
+        .iter()
+        .map(|(name, _)| channel_short_name(name))
+        .collect();
+    let positions_str = positions
+        .iter()
+        .map(|p| format!("\"{}\"", pipewire_channel_position(p)))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    // Nodes
+    writeln!(out, "      filter.graph = {{")?;
+    writeln!(out, "        nodes = [")?;
+
+    // (node name, input port, output port), grouped per channel.
+    let mut all_nodes: Vec<Vec<(String, &'static str, &'static str)>> = Vec::new();
+
+    for (ch_idx, (ch_name, chain)) in channels.iter().enumerate() {
+        let ch_prefix = format!("ch{}_{}", ch_idx, ch_name.replace(' ', "_"));
+        let mut node_names = Vec::new();
+
+        // Render every plugin in source order. Validation above guarantees that
+        // no plugin can be silently omitted from a successful export.
+        for (plugin_index, plugin) in chain.plugins.iter().enumerate() {
+            match plugin.plugin_type.as_str() {
+                "gain" => {
+                    let gain_db = plugin.parameters["gain_db"].as_f64().unwrap();
+                    let polarity = if plugin
+                        .parameters
+                        .get("invert")
+                        .and_then(|value| value.as_bool())
+                        == Some(true)
+                    {
+                        -1.0
+                    } else {
+                        1.0
+                    };
+                    let gain = polarity * 10.0_f64.powf(gain_db / 20.0);
+                    let node_name = format!("{ch_prefix}_plugin_{plugin_index}_gain");
+                    writeln!(
+                        out,
+                        "          {{ type = builtin  name = \"{node_name}\"  label = mixer  control = {{ \"Gain 1\" = {gain:.12} }} }}"
+                    )?;
+                    node_names.push((node_name, "In 1", "Out"));
+                }
+                "delay" => {
+                    let delay_seconds = plugin.parameters["delay_ms"].as_f64().unwrap() / 1000.0;
+                    let node_name = format!("{ch_prefix}_plugin_{plugin_index}_delay");
+                    writeln!(
+                        out,
+                        "          {{ type = builtin  name = \"{node_name}\"  label = delay  config = {{ \"max-delay\" = {delay_seconds:.9} }}  control = {{ \"Delay (s)\" = {delay_seconds:.9} }} }}"
+                    )?;
+                    node_names.push((node_name, "In", "Out"));
+                }
+                "eq" => {
+                    for (filter_index, filter) in extract_eq_filters(std::slice::from_ref(plugin))
+                        .iter()
+                        .enumerate()
+                    {
+                        let label = pipewire_filter_label(&filter.filter_type)?;
+                        let node_name =
+                            format!("{ch_prefix}_plugin_{plugin_index}_eq_{filter_index}");
+                        if matches!(
+                            filter.filter_type.as_str(),
+                            "lowpass" | "highpass" | "highpassvariableq"
+                        ) {
+                            writeln!(
+                                out,
+                                "          {{ type = builtin  name = \"{node_name}\"  label = {label}  control = {{ \"Freq\" = {:.9}  \"Q\" = {:.9} }} }}",
+                                filter.freq, filter.q
+                            )?;
+                        } else {
+                            writeln!(
+                                out,
+                                "          {{ type = builtin  name = \"{node_name}\"  label = {label}  control = {{ \"Freq\" = {:.9}  \"Q\" = {:.9}  \"Gain\" = {:.9} }} }}",
+                                filter.freq, filter.q, filter.gain_db
+                            )?;
+                        }
+                        node_names.push((node_name, "In", "Out"));
+                    }
+                }
+                "crossover" => {
+                    let crossover_type = plugin.parameters["type"].as_str().unwrap();
+                    let output = plugin.parameters["output"].as_str().unwrap();
+                    let frequency = plugin.parameters["frequency"].as_f64().unwrap();
+                    let label = if output == "low" {
+                        "bq_lowpass"
+                    } else {
+                        "bq_highpass"
+                    };
+                    let q_values: &[f64] = match crossover_type.to_ascii_lowercase().as_str() {
+                        "lr24" | "linkwitzriley4" | "linkwitz-riley-4" => {
+                            &[std::f64::consts::FRAC_1_SQRT_2; 2]
+                        }
+                        "lr48" | "linkwitzriley8" | "linkwitz-riley-8" => &[
+                            0.541_196_100_146,
+                            1.306_562_964_876,
+                            0.541_196_100_146,
+                            1.306_562_964_876,
+                        ],
+                        _ => unreachable!("validated PipeWire crossover type"),
+                    };
+                    for (section, q) in q_values.iter().enumerate() {
+                        let node_name =
+                            format!("{ch_prefix}_plugin_{plugin_index}_crossover_{section}");
+                        writeln!(
+                            out,
+                            "          {{ type = builtin  name = \"{node_name}\"  label = {label}  control = {{ \"Freq\" = {frequency:.9}  \"Q\" = {q:.12} }} }}"
+                        )?;
+                        node_names.push((node_name, "In", "Out"));
+                    }
+                }
+                "convolution" => {
+                    let ir_file = plugin.parameters["ir_file"].as_str().unwrap();
+                    let node_name = format!("{ch_prefix}_plugin_{plugin_index}_convolver");
+                    writeln!(
+                        out,
+                        "          {{ type = builtin  name = \"{node_name}\"  label = convolver  config = {{ filename = {} }} }}",
+                        serde_json::to_string(ir_file)?
+                    )?;
+                    node_names.push((node_name, "In", "Out"));
+                }
+                _ => unreachable!("validated PipeWire plugin type"),
+            }
+        }
+
+        all_nodes.push(node_names);
+    }
+
+    writeln!(out, "        ]")?;
+
+    // Links: chain nodes sequentially per channel
+    writeln!(out, "        links = [")?;
+    for nodes in &all_nodes {
+        for pair in nodes.windows(2) {
+            writeln!(
+                out,
+                "          {{ output = \"{}:{}\"  input = \"{}:{}\" }}",
+                pair[0].0, pair[0].2, pair[1].0, pair[1].1
+            )?;
+        }
+    }
+    writeln!(out, "        ]")?;
+
+    // Inputs/outputs
+    writeln!(out, "        inputs  = [")?;
+    for nodes in &all_nodes {
+        if let Some((name, input, _)) = nodes.first() {
+            writeln!(out, "          \"{name}:{input}\"")?;
+        } else {
+            // No processing nodes — passthrough
+            writeln!(out, "          null")?;
+        }
+    }
+    writeln!(out, "        ]")?;
+
+    writeln!(out, "        outputs = [")?;
+    for nodes in &all_nodes {
+        if let Some((name, _, output)) = nodes.last() {
+            writeln!(out, "          \"{name}:{output}\"")?;
+        } else {
+            writeln!(out, "          null")?;
+        }
+    }
+    writeln!(out, "        ]")?;
+
+    writeln!(out, "      }}")?; // filter.graph
+
+    // Capture/playback props
+    writeln!(out, "      capture.props = {{")?;
+    writeln!(out, "        node.name = \"roomeq_filter_input\"")?;
+    writeln!(out, "        media.class = \"Audio/Sink\"")?;
+    writeln!(out, "        audio.channels = {num_channels}")?;
+    writeln!(out, "        audio.position = [ {positions_str} ]")?;
+    writeln!(out, "      }}")?;
+    writeln!(out, "      playback.props = {{")?;
+    writeln!(out, "        node.name = \"roomeq_filter_output\"")?;
+    writeln!(out, "        node.passive = true")?;
+    writeln!(out, "        stream.dont-remix = true")?;
+    writeln!(out, "        audio.channels = {num_channels}")?;
+    writeln!(out, "        audio.position = [ {positions_str} ]")?;
+    writeln!(out, "      }}")?;
+
+    writeln!(out, "    }}")?; // args
+    writeln!(out, "  }}")?; // module
+    writeln!(out, "]")?;
+
+    Ok(out)
+}
+
+/// Export a DSP chain as a Roon DSP Engine preset.
+///
+/// Roon's DSP Engine supports per-channel parametric EQ (up to 20 bands),
+/// headroom management (preamp gain), and convolution (WAV files).
+/// The output is a JSON object with per-channel sections that can be
+/// referenced when configuring Roon's DSP Engine manually.
+fn export_roon(output: &DspGraph) -> anyhow::Result<String> {
+    export_roon_manifest(output, None)
+}
+
+fn export_roon_manifest(
+    output: &DspGraph,
+    convolution_archive: Option<&roon_convolver::RoonConvolutionArchive>,
+) -> anyhow::Result<String> {
+    validate_serial_external_input(output, ExportFormat::RoonDsp)?;
+    let channels = sorted_channels(output);
+
+    let mut roon = serde_json::Map::new();
+    roon.insert(
+        "_comment".to_string(),
+        serde_json::json!(
+            "Versioned manual Roon MUSE setup manifest generated by roomeq; this JSON is not an importable Roon preset"
+        ),
+    );
+    roon.insert("manifest_version".to_string(), serde_json::json!(1));
+    roon.insert(
+        "artifact_type".to_string(),
+        serde_json::json!("roon_manual_iir_setup"),
+    );
+    roon.insert("importable_preset".to_string(), serde_json::json!(false));
+    if let Some(archive) = convolution_archive {
+        roon.insert(
+            "convolution_archive".to_string(),
+            serde_json::json!({
+                "file": "room_eq_convolution.zip",
+                "format": "roon_convolver_zip",
+                "sample_rate_hz": archive.sample_rate,
+                "channel_count": archive.channel_count,
+                "wave_channel_mask_hex": archive.channel_mask_hex,
+                "config": archive.config_name,
+            }),
         );
     }
 
-    #[test]
-    fn provenance_manifest_preserves_hashes_but_redacts_sidecars() {
-        let mut graph = DspGraph::new("1");
-        graph.add_channel(
-            "L",
-            vec![Plugin {
-                kind: "gain".into(),
-                parameters: serde_json::json!({"gain_db": -3.0}),
-            }],
+    let mut channel_configs = serde_json::Map::new();
+
+    for (ch_name, chain) in &channels {
+        let all_plugins: Vec<PluginConfigWrapper> =
+            collect_all_plugins(chain).into_iter().cloned().collect();
+
+        let mut ch = serde_json::Map::new();
+        let mut operations = Vec::new();
+
+        // Headroom / preamp gain
+        let gain = extract_gain_db(&all_plugins);
+        if gain.abs() > 0.01 {
+            ch.insert("headroom_gain_db".to_string(), serde_json::json!(gain));
+            operations.push(serde_json::json!({
+                "type": "Volume",
+                "gain_db": gain,
+            }));
+        }
+
+        // Delay (Roon doesn't have a per-channel delay in PEQ, but we include it
+        // so the user knows what value to set in Speaker Setup > Distance)
+        if let Some(delay_ms) = extract_delay_ms(&all_plugins) {
+            ch.insert("delay_ms".to_string(), serde_json::json!(delay_ms));
+            operations.push(serde_json::json!({
+                "type": "Delay",
+                "delay_ms": delay_ms,
+            }));
+        }
+
+        // Parametric EQ bands (max 20 per Roon endpoint)
+        let filters = extract_eq_filters(&all_plugins);
+        let mut bands = Vec::new();
+        for f in filters.iter().take(20) {
+            let mut band = serde_json::Map::new();
+            band.insert(
+                "type".to_string(),
+                serde_json::json!(roon_filter_type(&f.filter_type)),
+            );
+            band.insert("frequency".to_string(), serde_json::json!(f.freq));
+            band.insert("gain".to_string(), serde_json::json!(f.gain_db));
+            band.insert("q".to_string(), serde_json::json!(f.q));
+            band.insert("enabled".to_string(), serde_json::json!(true));
+            bands.push(serde_json::Value::Object(band));
+        }
+        if !bands.is_empty() {
+            ch.insert(
+                "parametric_eq".to_string(),
+                serde_json::json!({
+                    "bands": bands,
+                    "is_enabled": true
+                }),
+            );
+            operations.push(serde_json::json!({
+                "type": "Parametric EQ",
+                "bands": bands,
+            }));
+        }
+
+        // Convolution IR files
+        let conv_paths = extract_convolution_paths(&all_plugins);
+        if !conv_paths.is_empty() {
+            ch.insert(
+                "convolution".to_string(),
+                serde_json::json!({
+                    "ir_files": conv_paths,
+                    "is_enabled": true
+                }),
+            );
+        }
+
+        ch.insert(
+            "procedural_eq".to_string(),
+            serde_json::json!({ "operations": operations }),
         );
-        let mut provenance = ProvenanceConfig::default();
-        provenance.measurements.insert(
-            "L".into(),
-            roomeq_model::MeasurementProvenanceReference {
-                record_id: "record-l".into(),
-                content_hash: "a".repeat(64),
-                schema_version: 1,
-                sidecar_path: Some("private/measurement.provenance.json".into()),
-            },
-        );
-        let (_, private) = export_with_provenance_manifest(
-            &graph,
-            ExportFormat::Json,
-            &provenance,
-            ManifestRedaction::Private,
-        )
-        .unwrap();
-        let (_, shared) = export_with_provenance_manifest(
-            &graph,
-            ExportFormat::Json,
-            &provenance,
-            ManifestRedaction::Shareable,
-        )
-        .unwrap();
-        assert_eq!(private.measurement_hashes, shared.measurement_hashes);
-        assert_eq!(
-            private.artifact_hashes["primary_export"],
-            private.export_sha256
-        );
-        assert!(private.measurement_sidecars.is_some());
-        assert!(shared.measurement_sidecars.is_none());
+
+        channel_configs.insert(ch_name.to_string(), serde_json::Value::Object(ch));
     }
+
+    roon.insert(
+        "channels".to_string(),
+        serde_json::Value::Object(channel_configs),
+    );
+
+    Ok(serde_json::to_string_pretty(&serde_json::Value::Object(
+        roon,
+    ))?)
 }

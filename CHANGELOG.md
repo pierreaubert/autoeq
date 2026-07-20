@@ -11,6 +11,25 @@
 
 ## Refactoring
 
+- Forbid unsafe Rust code in every workspace package. Measurement-cache tests
+  now inject isolated cache roots instead of mutating the process environment,
+  ndarray slicing uses safe axis APIs, and the crate-partition checker rejects
+  unsafe syntax, unsafe-expanding slice macros, environment mutation, or crates
+  that stop inheriting the workspace lint policy.
+- Completed the crate-partition migration: the final RoomEQ optimization
+  kernel and focused tests now live in `roomeq-workflow`, spectral/timbre DSP
+  plugin conversion is engine-owned, CLI and QA crates call the canonical
+  workflow directly, and root `src/` is a 482-line compatibility facade with
+  thin launchers and no unit tests.
+
+- Defined the canonical crate-partition target graph and added WP0 fitness
+  gates for dependency direction and cycles, shrinking temporary exceptions,
+  root LOC/test ratchets, duplicate implementation ownership, public facade
+  and RoomEQ schema baselines, and focused per-crate verification.
+- Made `roomeq-model` an implementation-independent contract crate: neutral
+  optimizer settings and serialized output/report contracts now live there,
+  while measurement loading and optimizer/report adapters remain in their
+  owning runtime crates. Root output paths remain compatible re-exports.
 - Centralized all workspace dependency specifications, including development
   dependencies, so member manifests inherit their versions and feature sets.
 - Upgraded the direct AutoEQ optimizer random dependencies to Rand 0.10.
@@ -21,6 +40,26 @@
 - Extracted RoomEQ phase/probe time-alignment analysis into `roomeq-analysis`;
   existing root RoomEQ entry points remain available.
 - Added crate-local README and CHANGELOG files for every extracted library.
+
+## Fixes
+
+- Execute every leaf crate's focused unit-test command through a generated CI
+  matrix, lint/check all workspace targets, and run the production RoomEQ
+  coverage recipe instead of the empty root-library test target.
+- Reuse identical convolution sidecars across repeated exports and aliased
+  references while sharing resource buffers and hashing with bounded scratch
+  memory.
+- Load every file-backed and inline-CSV measurement during workflow production
+  validation so dry runs cannot report missing or malformed resources as ready.
+- Keep CLI and QA implementation crates behind opt-in root-package features so
+  default `autoeq` library consumers do not compile terminal-only code.
+- Treat zero-filter RoomEQ configurations as an identity optimization instead
+  of invoking an optimizer backend with an empty parameter vector.
+- Accept valid legacy CSV-backed inline measurement descriptors during
+  production validation, matching the canonical loader's documented fallback.
+- Preserve the public RoomEQ help description and historical
+  `DspChainOutput` JSON Schema identity after moving their owners into CLI and
+  model crates.
 
 # 0.4.51
 

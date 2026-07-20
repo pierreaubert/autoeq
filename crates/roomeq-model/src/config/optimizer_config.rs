@@ -54,8 +54,7 @@ use super::types::ProcessingMode;
 use super::types::SmoothnessPenaltyConfigSerde;
 use super::types::{HeightChannelAlignmentConfig, InterChannelTimbreMatchingConfig};
 use super::validation_bundle_config::ValidationBundleConfig;
-use crate::loss::AsymmetricLossConfig;
-use crate::read::PsychoacousticSmoothingConfig;
+use crate::{AsymmetricLossConfig, EpaConfig, PsychoacousticSmoothingConfig};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, de};
 
@@ -102,7 +101,7 @@ pub struct OptimizerConfig {
     /// When `None`, the optimizer falls back to
     /// [`EpaConfig::default`](crate::loss::epa::score::EpaConfig::default).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub epa_config: Option<crate::loss::epa::score::EpaConfig>,
+    pub epa_config: Option<EpaConfig>,
     /// Optimization algorithm
     #[serde(default = "default_algorithm")]
     pub algorithm: String,

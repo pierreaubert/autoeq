@@ -1,0 +1,118 @@
+{
+  "root_package": "autoeq",
+  "terminal_consumers": [
+    "autoeq"
+  ],
+  "allowed_direct_dependencies": {
+    "autoeq-core": [],
+    "autoeq-artifacts": [
+      "autoeq-core"
+    ],
+    "autoeq-fir": [
+      "autoeq-core"
+    ],
+    "autoeq-measurements": [
+      "autoeq-core"
+    ],
+    "autoeq-optim": [
+      "autoeq-core",
+      "autoeq-measurements"
+    ],
+    "autoeq-plot": [
+      "autoeq-core",
+      "autoeq-measurements",
+      "autoeq-optim"
+    ],
+    "autoeq-workflow": [
+      "autoeq-core",
+      "autoeq-measurements",
+      "autoeq-optim"
+    ],
+    "autoeq-cli": [
+      "autoeq-plot",
+      "autoeq-workflow"
+    ],
+    "roomeq-model": [
+      "autoeq-core"
+    ],
+    "roomeq-analysis": [
+      "autoeq-core",
+      "roomeq-model"
+    ],
+    "roomeq-quality": [
+      "autoeq-core",
+      "roomeq-analysis",
+      "roomeq-model"
+    ],
+    "roomeq-qa": [
+      "autoeq-optim",
+      "roomeq-engine",
+      "roomeq-model",
+      "roomeq-quality",
+      "roomeq-synthetic",
+      "roomeq-workflow"
+    ],
+    "roomeq-cli": [
+      "roomeq-engine",
+      "roomeq-model",
+      "roomeq-workflow"
+    ],
+    "roomeq-engine": [
+      "autoeq-core",
+      "autoeq-fir",
+      "autoeq-optim",
+      "roomeq-analysis",
+      "roomeq-model",
+      "roomeq-quality"
+    ],
+    "roomeq-export": [
+      "roomeq-model"
+    ],
+    "roomeq-synthetic": [
+      "autoeq-core",
+      "roomeq-model"
+    ],
+    "roomeq-workflow": [
+      "autoeq-artifacts",
+      "autoeq-measurements",
+      "roomeq-engine",
+      "roomeq-export",
+      "roomeq-model"
+    ]
+  },
+  "temporary_exceptions": [],
+  "metric_budgets": {
+    "root_rust_loc": 482,
+    "root_roomeq_rust_loc": 290,
+    "root_binary_rust_loc": 88,
+    "root_unit_tests": 0
+  },
+  "public_api": {
+    "source": "src/lib.rs",
+    "baseline": "docs/baselines/root_public_api.txt"
+  },
+  "schema_baselines": {
+    "input": "src/bin/roomeq/input_schema.json",
+    "output": "src/bin/roomeq/output_schema.json"
+  },
+  "focused_tests": {
+    "autoeq": "cargo test -p autoeq --lib",
+    "autoeq-artifacts": "cargo test -p autoeq-artifacts --lib",
+    "autoeq-cli": "cargo test -p autoeq-cli --lib",
+    "autoeq-core": "cargo test -p autoeq-core --lib",
+    "autoeq-fir": "cargo test -p autoeq-fir --lib",
+    "autoeq-measurements": "cargo test -p autoeq-measurements --lib",
+    "autoeq-optim": "cargo test -p autoeq-optim --lib",
+    "autoeq-plot": "cargo test -p autoeq-plot --lib",
+    "autoeq-workflow": "cargo test -p autoeq-workflow --lib",
+    "roomeq-analysis": "cargo test -p roomeq-analysis --lib",
+    "roomeq-cli": "cargo test -p roomeq-cli --lib",
+    "roomeq-engine": "cargo test -p roomeq-engine --lib",
+    "roomeq-export": "cargo test -p roomeq-export --lib",
+    "roomeq-model": "cargo test -p roomeq-model --lib",
+    "roomeq-quality": "cargo test -p roomeq-quality --lib",
+    "roomeq-qa": "cargo test -p roomeq-qa --lib",
+    "roomeq-synthetic": "cargo test -p roomeq-synthetic --lib",
+    "roomeq-workflow": "cargo test -p roomeq-workflow --lib"
+  }
+}

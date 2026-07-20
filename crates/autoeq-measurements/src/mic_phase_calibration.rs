@@ -430,7 +430,7 @@ frequency_hz,mag_db,phase_deg,coherence
                 .into_iter()
                 .flat_map(|value| [value, -1.0])
                 .collect::<Array1<f64>>()
-                .slice_move(ndarray::s![..;2])
+                .slice_axis_move(ndarray::Axis(0), ndarray::Slice::new(0, None, 2))
         };
         let cal = MicPhaseCalibration {
             freq: strided(vec![100.0, 200.0]),

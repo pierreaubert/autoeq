@@ -11,9 +11,10 @@
 //! pressure wave cancellation pattern characteristic of DBA systems.
 
 use crate::Curve;
+use crate::config_adapter::OptimizerConfigExt;
+use autoeq_optim::DriverOptimizationResult;
 use autoeq_optim::loss::{DriverMeasurement, DriversLossData};
-use autoeq_optim::{CrossoverType, LossType, RoomOptimizerConfig};
-use autoeq_workflow::DriverOptimizationResult;
+use autoeq_optim::{CrossoverType, LossType};
 use ndarray::Array1;
 use std::error::Error;
 
@@ -27,8 +28,13 @@ fn complex_to_spl_phase(z: num_complex::Complex64) -> (f64, f64) {
     (20.0 * magnitude.log10(), z.arg().to_degrees())
 }
 
-use autoeq_measurements::read as load;
-use roomeq_model::{DBAConfig, MeasurementSource, OptimizerConfig};
+use roomeq_model::OptimizerConfig;
+
+/// Prepared, in-memory input for Double Bass Array optimization.
+pub struct DbaPreparedInput {
+    pub front: Vec<Curve>,
+    pub rear: Vec<Curve>,
+}
 
 pub struct DbaOptimizationResult {
     pub driver: DriverOptimizationResult,
@@ -52,24 +58,24 @@ pub struct DbaOptimizationResult {
 /// The optimizer uses complex summation to model constructive/destructive
 /// interference between front and rear arrays.
 pub fn optimize_dba(
-    dba_config: &DBAConfig,
+    input: &DbaPreparedInput,
     config: &OptimizerConfig,
     sample_rate: f64,
 ) -> Result<(DriverOptimizationResult, Curve), Box<dyn Error>> {
-    let result = optimize_dba_detailed(dba_config, config, sample_rate)?;
+    let result = optimize_dba_detailed(input, config, sample_rate)?;
     Ok((result.driver, result.combined_curve))
 }
 
 pub fn optimize_dba_detailed(
-    dba_config: &DBAConfig,
+    input: &DbaPreparedInput,
     config: &OptimizerConfig,
     sample_rate: f64,
 ) -> Result<DbaOptimizationResult, Box<dyn Error>> {
     // 1. Load and Sum Front Array
-    let front_curve = sum_array_response(&dba_config.front)?;
+    let front_curve = sum_array_response(&input.front)?;
 
     // 2. Load and Sum Rear Array
-    let rear_curve = sum_array_response(&dba_config.rear)?;
+    let rear_curve = sum_array_response(&input.rear)?;
 
     // 3. Create optimization targets
     // We have 2 "drivers": Front Aggregate and Rear Aggregate
@@ -108,8 +114,10 @@ pub fn optimize_dba_detailed(
 
     let mut optim_params = config.to_optim_params(sample_rate);
     optim_params.loss = LossType::MultiSubFlat;
-    let objective_data =
-        autoeq_workflow::setup_multisub_objective_data(&optim_params, drivers_data.clone());
+    let objective_data = autoeq_optim::optim::setup::setup_multisub_objective_data(
+        &optim_params,
+        drivers_data.clone(),
+    );
 
     // Custom bounds: [Gain1, Gain2, Delay1, Delay2]
     // Index 0: Front Gain -> 0 (Locked)
@@ -195,23 +203,17 @@ pub fn optimize_dba_detailed(
 /// If any measurement is missing phase data, this returns an error. DBA is a
 /// phase-critical feature and should not invent coherence from magnitude-only
 /// data.
-pub fn sum_array_response(sources: &[MeasurementSource]) -> Result<Curve, Box<dyn Error>> {
-    if sources.is_empty() {
+pub fn sum_array_response(curves: &[Curve]) -> Result<Curve, Box<dyn Error>> {
+    if curves.is_empty() {
         return Err("Empty array".into());
     }
 
-    // Load all and check for phase data
-    let mut curves = Vec::new();
-    for source in sources {
-        let curve = load::load_source(source)?;
+    for (index, curve) in curves.iter().enumerate() {
         if curve.phase.is_none() {
-            return Err(format!(
-                "DBA array summation requires phase data for source {:?}",
-                source
-            )
-            .into());
+            return Err(
+                format!("DBA array summation requires phase data for curve {index}").into(),
+            );
         }
-        curves.push(curve);
     }
 
     // Reference freq from first
@@ -223,9 +225,9 @@ pub fn sum_array_response(sources: &[MeasurementSource]) -> Result<Curve, Box<dy
 
     let mut sum_complex = Array1::<Complex64>::zeros(ref_freq.len());
 
-    for curve in &curves {
+    for curve in curves {
         // Interpolate to ref grid
-        let interp = autoeq_measurements::read::interpolate_log_space(&ref_freq, curve);
+        let interp = autoeq_core::interpolate_log_space(&ref_freq, curve);
 
         for i in 0..ref_freq.len() {
             let spl = interp.spl[i];
@@ -276,8 +278,8 @@ fn compute_dba_combined_curve(
     use num_complex::Complex64;
     use std::f64::consts::PI;
 
-    let front = autoeq_measurements::read::interpolate_log_space(freq_grid, front_curve);
-    let rear = autoeq_measurements::read::interpolate_log_space(freq_grid, rear_curve);
+    let front = autoeq_core::interpolate_log_space(freq_grid, front_curve);
+    let rear = autoeq_core::interpolate_log_space(freq_grid, rear_curve);
     let front_phase = front
         .phase
         .as_ref()
@@ -319,7 +321,6 @@ fn compute_dba_combined_curve(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use roomeq_model::MeasurementSource;
 
     #[test]
     fn test_invert_polarity() {
@@ -350,7 +351,7 @@ mod tests {
             ..Default::default()
         };
 
-        let err = sum_array_response(&[MeasurementSource::InMemory(curve)]).unwrap_err();
+        let err = sum_array_response(&[curve]).unwrap_err();
         assert!(
             err.to_string().contains("requires phase data"),
             "unexpected error: {err}"
@@ -372,11 +373,7 @@ mod tests {
             ..Default::default()
         };
 
-        let summed = sum_array_response(&[
-            MeasurementSource::InMemory(curve_a),
-            MeasurementSource::InMemory(curve_b),
-        ])
-        .unwrap();
+        let summed = sum_array_response(&[curve_a, curve_b]).unwrap();
 
         assert!(summed.phase.is_some());
         assert!((summed.phase.as_ref().unwrap()[0] - 45.0).abs() < 1e-6);
@@ -397,11 +394,7 @@ mod tests {
             ..Default::default()
         };
 
-        let summed = sum_array_response(&[
-            MeasurementSource::InMemory(curve_a),
-            MeasurementSource::InMemory(curve_b),
-        ])
-        .unwrap();
+        let summed = sum_array_response(&[curve_a, curve_b]).unwrap();
 
         assert_eq!(summed.spl[0], -240.0);
         assert_eq!(summed.phase.as_ref().unwrap()[0], 0.0);

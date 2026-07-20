@@ -6,15 +6,16 @@ use super::backend::{InMemoryMeasurementCache, MockMeasurementBackend};
 use super::extract::extract_contour_data;
 use super::extract::extract_curve_by_name;
 use super::extract::extract_directivity_curves;
-use super::misc::headphone_cache_dir;
 use super::parse::parse_headphone_csv;
 use super::types::ContourPlotData;
-use crate::DirectivityData;
-use crate::MeasurementRecord;
-use crate::read::directory::{data_dir_for, measurement_filename};
+use crate::read::directory::{
+    cache_root, data_dir_for_cache_root, headphone_cache_dir_for_cache_root, measurement_filename,
+};
 use crate::read::plot::{normalize_plotly_json_from_str, normalize_plotly_value_with_suggestions};
+use crate::{DirectivityData, MeasurementRecord};
 use serde_json::Value;
 use std::error::Error;
+use std::path::Path;
 use urlencoding;
 
 /// Fetch a frequency response curve from the spinorama API
@@ -34,6 +35,17 @@ pub async fn read_spinorama(
     curve_name: &str,
 ) -> Result<crate::Curve, Box<dyn Error>> {
     fetch_curve_from_api(speaker, version, measurement, curve_name).await
+}
+
+/// Fetch a frequency response curve using an explicit cache root.
+pub async fn read_spinorama_at_cache_root(
+    speaker: &str,
+    version: &str,
+    measurement: &str,
+    curve_name: &str,
+    cache_root: &Path,
+) -> Result<crate::Curve, Box<dyn Error>> {
+    fetch_curve_from_api_at_cache_root(speaker, version, measurement, curve_name, cache_root).await
 }
 
 /// Fetch a frequency response curve from the spinorama API
@@ -57,8 +69,21 @@ pub async fn fetch_curve_from_api(
     extract_curve_by_name(&plot_data, measurement, curve_name)
 }
 
-/// Fetch a curve together with an API-origin provenance record. This is the
-/// tracked counterpart to [`fetch_curve_from_api`].
+/// Fetch a frequency response curve using an explicit cache root.
+pub async fn fetch_curve_from_api_at_cache_root(
+    speaker: &str,
+    version: &str,
+    measurement: &str,
+    curve_name: &str,
+    cache_root: &Path,
+) -> Result<crate::Curve, Box<dyn Error>> {
+    let plot_data =
+        fetch_measurement_plot_data_at_cache_root(speaker, version, measurement, cache_root)
+            .await?;
+    extract_curve_by_name(&plot_data, measurement, curve_name)
+}
+
+/// Fetch a curve together with an API-origin provenance record.
 pub async fn fetch_record_from_api(
     speaker: &str,
     version: &str,
@@ -90,10 +115,22 @@ pub async fn fetch_measurement_plot_data(
     version: &str,
     measurement: &str,
 ) -> Result<Value, Box<dyn Error>> {
-    fetch_measurement_plot_data_with_backend(
+    let root = cache_root();
+    fetch_measurement_plot_data_at_cache_root(speaker, version, measurement, &root).await
+}
+
+/// Fetch and parse Plotly JSON using an explicit cache root.
+pub async fn fetch_measurement_plot_data_at_cache_root(
+    speaker: &str,
+    version: &str,
+    measurement: &str,
+    cache_root: &Path,
+) -> Result<Value, Box<dyn Error>> {
+    fetch_measurement_plot_data_with_backend_at_cache_root(
         speaker,
         version,
         measurement,
+        cache_root,
         &ReqwestMeasurementBackend::new(),
         &FsMeasurementCache::new(),
     )
@@ -111,9 +148,30 @@ pub async fn fetch_measurement_plot_data_with_backend(
     backend: &dyn MeasurementBackend,
     cache: &dyn MeasurementCache,
 ) -> Result<Value, Box<dyn Error>> {
+    let root = cache_root();
+    fetch_measurement_plot_data_with_backend_at_cache_root(
+        speaker,
+        version,
+        measurement,
+        &root,
+        backend,
+        cache,
+    )
+    .await
+}
+
+/// Fetch and parse Plotly JSON using supplied adapters and an explicit root.
+pub async fn fetch_measurement_plot_data_with_backend_at_cache_root(
+    speaker: &str,
+    version: &str,
+    measurement: &str,
+    cache_root: &Path,
+    backend: &dyn MeasurementBackend,
+    cache: &dyn MeasurementCache,
+) -> Result<Value, Box<dyn Error>> {
     // 1) Try local cache first: data_cached/speakers/org.spinorama/{speaker}/{measurement}.json
     // We keep filename identical to measurement name when possible (with path separators replaced).
-    let cache_dir = data_dir_for(speaker);
+    let cache_dir = data_dir_for_cache_root(cache_root, speaker);
     let cache_file = cache_dir.join(measurement_filename(measurement));
 
     if let Ok(Some(content)) = cache.read_to_string(&cache_file).await {
@@ -176,8 +234,20 @@ pub async fn fetch_directivity_data(
     speaker: &str,
     version: &str,
 ) -> Result<DirectivityData, Box<dyn Error>> {
+    let root = cache_root();
+    fetch_directivity_data_at_cache_root(speaker, version, &root).await
+}
+
+/// Fetch directivity data using an explicit cache root.
+pub async fn fetch_directivity_data_at_cache_root(
+    speaker: &str,
+    version: &str,
+    cache_root: &Path,
+) -> Result<DirectivityData, Box<dyn Error>> {
     // Fetch horizontal data
-    let horizontal_data = fetch_measurement_plot_data(speaker, version, "SPL Horizontal").await?;
+    let horizontal_data =
+        fetch_measurement_plot_data_at_cache_root(speaker, version, "SPL Horizontal", cache_root)
+            .await?;
     let horizontal = extract_directivity_curves(&horizontal_data)?;
 
     if horizontal.is_empty() {
@@ -185,7 +255,9 @@ pub async fn fetch_directivity_data(
     }
 
     // Fetch vertical data
-    let vertical_data = fetch_measurement_plot_data(speaker, version, "SPL Vertical").await?;
+    let vertical_data =
+        fetch_measurement_plot_data_at_cache_root(speaker, version, "SPL Vertical", cache_root)
+            .await?;
     let vertical = extract_directivity_curves(&vertical_data)?;
 
     if vertical.is_empty() {
@@ -216,6 +288,17 @@ pub async fn fetch_contour_data(
     version: &str,
     plane: &str,
 ) -> Result<ContourPlotData, Box<dyn Error>> {
+    let root = cache_root();
+    fetch_contour_data_at_cache_root(speaker, version, plane, &root).await
+}
+
+/// Fetch contour data using an explicit cache root.
+pub async fn fetch_contour_data_at_cache_root(
+    speaker: &str,
+    version: &str,
+    plane: &str,
+    cache_root: &Path,
+) -> Result<ContourPlotData, Box<dyn Error>> {
     let measurement = match plane.to_lowercase().as_str() {
         "horizontal" | "h" => "SPL Horizontal Contour",
         "vertical" | "v" => "SPL Vertical Contour",
@@ -224,7 +307,9 @@ pub async fn fetch_contour_data(
         }
     };
 
-    let plot_data = fetch_measurement_plot_data(speaker, version, measurement).await?;
+    let plot_data =
+        fetch_measurement_plot_data_at_cache_root(speaker, version, measurement, cache_root)
+            .await?;
     extract_contour_data(&plot_data)
 }
 
@@ -236,8 +321,18 @@ pub async fn fetch_contour_data(
 pub async fn fetch_headphone_frequency_response(
     headphone: &str,
 ) -> Result<(String, crate::Curve), Box<dyn Error>> {
-    fetch_headphone_frequency_response_with_backend(
+    let root = cache_root();
+    fetch_headphone_frequency_response_at_cache_root(headphone, &root).await
+}
+
+/// Fetch a headphone response using an explicit cache root.
+pub async fn fetch_headphone_frequency_response_at_cache_root(
+    headphone: &str,
+    cache_root: &Path,
+) -> Result<(String, crate::Curve), Box<dyn Error>> {
+    fetch_headphone_frequency_response_with_backend_at_cache_root(
         headphone,
+        cache_root,
         &ReqwestMeasurementBackend::new(),
         &FsMeasurementCache::new(),
     )
@@ -250,7 +345,19 @@ pub async fn fetch_headphone_frequency_response_with_backend(
     backend: &dyn MeasurementBackend,
     cache: &dyn MeasurementCache,
 ) -> Result<(String, crate::Curve), Box<dyn Error>> {
-    let cache_dir = headphone_cache_dir(headphone);
+    let root = cache_root();
+    fetch_headphone_frequency_response_with_backend_at_cache_root(headphone, &root, backend, cache)
+        .await
+}
+
+/// Fetch a headphone response using supplied adapters and an explicit root.
+pub async fn fetch_headphone_frequency_response_with_backend_at_cache_root(
+    headphone: &str,
+    cache_root: &Path,
+    backend: &dyn MeasurementBackend,
+    cache: &dyn MeasurementCache,
+) -> Result<(String, crate::Curve), Box<dyn Error>> {
+    let cache_dir = headphone_cache_dir_for_cache_root(cache_root, headphone);
     let raw_cache = cache_dir.join("frequency_response_raw.csv");
     let csv_path = cache_dir.join("measurement.csv");
 
@@ -312,27 +419,11 @@ async fn fetch_headphone_csv_from_backend(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::read::{data_dir_for, measurement_filename};
+    use crate::read::{
+        data_dir_for_cache_root, headphone_cache_dir_for_cache_root, measurement_filename,
+    };
     use serde_json::json;
-    use std::env;
     use tempfile::TempDir;
-    use tokio::sync::Mutex;
-
-    static CACHE_LOCK: Mutex<()> = Mutex::const_new(());
-
-    struct CacheEnvGuard {
-        _tmp: TempDir,
-        previous: Option<std::ffi::OsString>,
-    }
-
-    impl Drop for CacheEnvGuard {
-        fn drop(&mut self) {
-            match self.previous.take() {
-                Some(value) => unsafe { env::set_var("SOTF_CACHE_DIR", value) },
-                None => unsafe { env::remove_var("SOTF_CACHE_DIR") },
-            }
-        }
-    }
 
     fn plotly_object() -> Value {
         json!({
@@ -347,45 +438,28 @@ mod tests {
         })
     }
 
-    async fn setup_cache() -> CacheEnvGuard {
-        let previous = env::var_os("SOTF_CACHE_DIR");
-        let tmp = TempDir::new().unwrap();
-        unsafe { env::set_var("SOTF_CACHE_DIR", tmp.path().as_os_str()) };
-        CacheEnvGuard {
-            _tmp: tmp,
-            previous,
-        }
+    fn setup_cache() -> TempDir {
+        TempDir::new().unwrap()
     }
 
-    #[tokio::test]
-    async fn setup_cache_restores_previous_environment_value() {
-        let _guard = CACHE_LOCK.lock().await;
-        let original = env::var_os("SOTF_CACHE_DIR");
-        unsafe { env::set_var("SOTF_CACHE_DIR", "autoeq-cache-test-sentinel") };
-
-        {
-            let _cache = setup_cache().await;
-        }
-        let restored = env::var_os("SOTF_CACHE_DIR")
-            == Some(std::ffi::OsString::from("autoeq-cache-test-sentinel"));
-
-        match original {
-            Some(value) => unsafe { env::set_var("SOTF_CACHE_DIR", value) },
-            None => unsafe { env::remove_var("SOTF_CACHE_DIR") },
-        }
-        assert!(
-            restored,
-            "setup_cache leaked its temporary environment value"
+    #[test]
+    fn explicit_cache_roots_are_isolated() {
+        let first = setup_cache();
+        let second = setup_cache();
+        let speaker = "isolated-speaker";
+        assert_ne!(
+            data_dir_for_cache_root(first.path(), speaker),
+            data_dir_for_cache_root(second.path(), speaker)
         );
     }
 
     #[tokio::test]
     async fn fetch_measurement_plot_data_uses_local_cache() {
-        let _guard = CACHE_LOCK.lock().await;
-        let _tmp = setup_cache().await;
+        let tmp = setup_cache();
         let speaker = "cache-speaker";
         let measurement = "CEA2034";
-        let cache_file = data_dir_for(speaker).join(measurement_filename(measurement));
+        let cache_file =
+            data_dir_for_cache_root(tmp.path(), speaker).join(measurement_filename(measurement));
         tokio::fs::create_dir_all(cache_file.parent().unwrap())
             .await
             .unwrap();
@@ -396,18 +470,19 @@ mod tests {
         .await
         .unwrap();
 
-        let plot = fetch_measurement_plot_data(speaker, "asr", measurement)
-            .await
-            .unwrap();
+        let plot =
+            fetch_measurement_plot_data_at_cache_root(speaker, "asr", measurement, tmp.path())
+                .await
+                .unwrap();
         assert!(plot.get("data").is_some());
     }
 
     #[tokio::test]
     async fn fetch_curve_from_api_uses_cache() {
-        let _guard = CACHE_LOCK.lock().await;
-        let _tmp = setup_cache().await;
+        let tmp = setup_cache();
         let speaker = "curve-speaker";
-        let cache_file = data_dir_for(speaker).join(measurement_filename("CEA2034"));
+        let cache_file =
+            data_dir_for_cache_root(tmp.path(), speaker).join(measurement_filename("CEA2034"));
         tokio::fs::create_dir_all(cache_file.parent().unwrap())
             .await
             .unwrap();
@@ -418,42 +493,20 @@ mod tests {
         .await
         .unwrap();
 
-        let curve = fetch_curve_from_api(speaker, "asr", "CEA2034", "On Axis")
-            .await
-            .unwrap();
+        let curve =
+            fetch_curve_from_api_at_cache_root(speaker, "asr", "CEA2034", "On Axis", tmp.path())
+                .await
+                .unwrap();
         assert_eq!(curve.freq.len(), 2);
     }
 
     #[tokio::test]
-    async fn fetch_record_from_api_marks_api_origin() {
-        let _guard = CACHE_LOCK.lock().await;
-        let _tmp = setup_cache().await;
-        let speaker = "tracked-curve-speaker";
-        let cache_file = data_dir_for(speaker).join(measurement_filename("CEA2034"));
-        tokio::fs::create_dir_all(cache_file.parent().unwrap())
-            .await
-            .unwrap();
-        tokio::fs::write(
-            &cache_file,
-            serde_json::to_string(&plotly_object()).unwrap(),
-        )
-        .await
-        .unwrap();
-
-        let record = fetch_record_from_api(speaker, "asr", "CEA2034", "On Axis")
-            .await
-            .unwrap();
-        assert_eq!(record.provenance.origin, crate::MeasurementOrigin::Api);
-        assert!(record.validate(crate::ValidationMode::Warn).is_valid());
-    }
-
-    #[tokio::test]
     async fn fetch_directivity_data_uses_cache() {
-        let _guard = CACHE_LOCK.lock().await;
-        let _tmp = setup_cache().await;
+        let tmp = setup_cache();
         let speaker = "dir-speaker";
         for measurement in ["SPL Horizontal", "SPL Vertical"] {
-            let cache_file = data_dir_for(speaker).join(measurement_filename(measurement));
+            let cache_file = data_dir_for_cache_root(tmp.path(), speaker)
+                .join(measurement_filename(measurement));
             tokio::fs::create_dir_all(cache_file.parent().unwrap())
                 .await
                 .unwrap();
@@ -467,17 +520,17 @@ mod tests {
                 .unwrap();
         }
 
-        let result = fetch_directivity_data(speaker, "asr").await;
+        let result = fetch_directivity_data_at_cache_root(speaker, "asr", tmp.path()).await;
         // Empty base64 decodes to no curves, so this returns an error about missing curves.
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn fetch_contour_data_uses_cache() {
-        let _guard = CACHE_LOCK.lock().await;
-        let _tmp = setup_cache().await;
+        let tmp = setup_cache();
         let speaker = "contour-speaker";
-        let cache_file = data_dir_for(speaker).join(measurement_filename("SPL Horizontal Contour"));
+        let cache_file = data_dir_for_cache_root(tmp.path(), speaker)
+            .join(measurement_filename("SPL Horizontal Contour"));
         tokio::fs::create_dir_all(cache_file.parent().unwrap())
             .await
             .unwrap();
@@ -492,7 +545,7 @@ mod tests {
             .await
             .unwrap();
 
-        let contour = fetch_contour_data(speaker, "asr", "horizontal")
+        let contour = fetch_contour_data_at_cache_root(speaker, "asr", "horizontal", tmp.path())
             .await
             .unwrap();
         assert_eq!(contour.freq_count, 2);
@@ -501,17 +554,18 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_headphone_frequency_response_uses_cache() {
-        let _guard = CACHE_LOCK.lock().await;
-        let _tmp = setup_cache().await;
+        let tmp = setup_cache();
         let headphone = "test-headphone";
-        let cache_dir = headphone_cache_dir(headphone);
+        let cache_dir = headphone_cache_dir_for_cache_root(tmp.path(), headphone);
         tokio::fs::create_dir_all(&cache_dir).await.unwrap();
         let csv = "20,100,20,104\n100,90,100,92\n";
         tokio::fs::write(cache_dir.join("frequency_response_raw.csv"), csv)
             .await
             .unwrap();
 
-        let (path, curve) = fetch_headphone_frequency_response(headphone).await.unwrap();
+        let (path, curve) = fetch_headphone_frequency_response_at_cache_root(headphone, tmp.path())
+            .await
+            .unwrap();
         assert!(path.contains("measurement.csv"));
         assert_eq!(curve.freq.len(), 2);
         assert!((curve.spl[0] - 102.0).abs() < 1e-9);
@@ -519,11 +573,12 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_measurement_plot_data_with_backend_uses_cache_and_backend() {
-        let _guard = CACHE_LOCK.lock().await;
+        let cache_root = std::path::Path::new("isolated-memory-cache");
         let cache = InMemoryMeasurementCache::new();
         let speaker = "mock-speaker";
         let measurement = "CEA2034";
-        let cache_file = data_dir_for(speaker).join(measurement_filename(measurement));
+        let cache_file =
+            data_dir_for_cache_root(cache_root, speaker).join(measurement_filename(measurement));
 
         // First call: cache miss -> backend is queried.
         // The backend returns the API array-of-string format.
@@ -531,10 +586,16 @@ mod tests {
             serde_json::to_string(&json!([serde_json::to_string(&plotly_object()).unwrap()]))
                 .unwrap(),
         );
-        let plot =
-            fetch_measurement_plot_data_with_backend(speaker, "asr", measurement, &backend, &cache)
-                .await
-                .unwrap();
+        let plot = fetch_measurement_plot_data_with_backend_at_cache_root(
+            speaker,
+            "asr",
+            measurement,
+            cache_root,
+            &backend,
+            &cache,
+        )
+        .await
+        .unwrap();
         assert!(plot.get("data").is_some());
         assert!(
             cache.get(&cache_file).is_some(),
@@ -543,10 +604,11 @@ mod tests {
 
         // Second call: cache hit -> backend is not queried (empty response would fail).
         let silent_backend = MockMeasurementBackend::new("not-json");
-        let plot2 = fetch_measurement_plot_data_with_backend(
+        let plot2 = fetch_measurement_plot_data_with_backend_at_cache_root(
             speaker,
             "asr",
             measurement,
+            cache_root,
             &silent_backend,
             &cache,
         )

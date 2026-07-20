@@ -1,8 +1,7 @@
 use super::misc::pressure2spl;
 use super::misc::spl2pressure;
 use super::misc::spl2pressure2;
-use ndarray::s;
-use ndarray::{Array1, Array2, Axis};
+use ndarray::{Array1, Array2, Axis, Slice};
 
 /// Compute the CEA2034 spinorama from SPL data (internal implementation)
 ///
@@ -37,7 +36,7 @@ pub(super) fn cea2034_array(
     }
 
     // ER: indices 2..=6 per original logic - vectorized
-    let er_rows = cea.slice(s![2..=6, ..]);
+    let er_rows = cea.slice_axis(Axis(0), Slice::from(2..7));
     let er_pressures = er_rows.mapv(|v| {
         let p = 10f64.powf((v - 105.0) / 20.0);
         p * p

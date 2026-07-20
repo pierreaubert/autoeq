@@ -16,8 +16,8 @@ AutoEQ and RoomEQ are Rust CLIs for computing corrections.
 
 ## Workspace crates
 
-`autoeq` remains the compatibility facade and CLI package while implementation
-moves into focused crates. The current library layers are:
+`autoeq` is now a compatibility facade and thin-launcher package; canonical
+implementation lives in focused crates. The current library layers are:
 
 - `autoeq-core` — curves, PEQ models, response math, and parameter layouts
 - `autoeq-measurements` — loading and preprocessing measurement data
@@ -25,16 +25,26 @@ moves into focused crates. The current library layers are:
 - `autoeq-workflow` — speaker and headphone application workflows
 - `autoeq-artifacts` — report/export artifact storage
 - `autoeq-fir` — FIR design and WAV serialization
-- `roomeq-model`, `roomeq-engine`, and `roomeq-export` — RoomEQ contracts,
-  execution boundary, and external-DSP rendering
+- `roomeq-model`, `roomeq-engine`, `roomeq-workflow`, and `roomeq-export` —
+  RoomEQ contracts, deterministic processing, application orchestration, and
+  external-DSP rendering
 - `roomeq-quality` — acoustic-quality metrics, acceptance policies, and QA
   fixtures
 - `roomeq-analysis` — measurement analysis, beginning with phase/probe time
   alignment and channel-delay calculation
+- `roomeq-synthetic` and `roomeq-qa` — deterministic scenarios, regression
+  matrices, reports, and fuzzing
+- `autoeq-cli` and `roomeq-cli` — command parsing and user-facing adapters
 
-Each crate has its own README and changelog under `crates/`. Existing
-`autoeq::*` public paths remain available while the RoomEQ pipeline, analysis,
-quality, plotting, and CLI layers are extracted incrementally.
+Existing `autoeq::*` public paths remain available as compatibility re-exports.
+Production RoomEQ now runs through `roomeq-cli -> roomeq-workflow ->
+roomeq-engine`; no workspace crate depends on the root facade.
+
+The authoritative extraction sequence, target dependency graph, ownership
+rules, and completion gates are documented in the
+[Crate Partition Migration Plan](docs/CRATE_PARTITION_PLAN.md).
+Focused verification commands for every current workspace package are listed
+in the [Crate Test Matrix](docs/CRATE_TEST_MATRIX.md).
 
 The authoritative extraction sequence, target dependency graph, ownership
 rules, and completion gates are documented in the
@@ -144,7 +154,7 @@ configuration and writes a structured result suitable for reporting, export,
 or direct application by SotF:
 
 ```bash
-cargo run --release --bin roomeq -- \
+cargo run --release --features cli --bin roomeq -- \
   --config path/to/room.json \
   --output path/to/result.json
 ```
@@ -167,11 +177,16 @@ Then:
 
 ```bash
 cargo install autoeq \
+   --features cli \
    --bin autoeq \
    --bin roomeq \
    --bin autoeq-download-speakers \
    --bin convert-recording
 ```
+
+The root package keeps terminal adapters opt-in: use `--features cli` for the
+shipping commands and `--features qa` for QA/fuzzer binaries. Default library
+builds retain the compatibility API without compiling terminal-only crates.
 
 ## Development
 

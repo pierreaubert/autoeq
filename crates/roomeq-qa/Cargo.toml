@@ -1,0 +1,30 @@
+[package]
+name = "roomeq-qa"
+version.workspace = true
+edition = "2024"
+description = "RoomEQ QA scenario matrices, runners, scorecards, and command implementations"
+license = "GPL-3.0-or-later"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+autoeq-optim = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+env_logger = { workspace = true }
+math-iir-fir = { workspace = true }
+ndarray = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+roomeq-engine = { workspace = true }
+roomeq-model = { workspace = true }
+roomeq-quality = { workspace = true }
+roomeq-synthetic = { workspace = true }
+roomeq-workflow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

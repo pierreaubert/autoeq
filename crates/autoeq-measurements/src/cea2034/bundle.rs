@@ -8,35 +8,8 @@
 use super::compute_pir_from_lw_er_sp;
 use crate::Curve;
 use crate::error::AutoeqError;
+pub use autoeq_core::SpinoramaBundle;
 use std::collections::HashMap;
-
-/// A complete CEA2034 / Spinorama measurement bundle.
-#[derive(Debug, Clone)]
-pub struct SpinoramaBundle {
-    /// On Axis response
-    pub on_axis: Curve,
-    /// Listening Window response
-    pub listening_window: Curve,
-    /// Early Reflections response
-    pub early_reflections: Curve,
-    /// Sound Power response
-    pub sound_power: Curve,
-    /// Estimated In-Room Response (PIR)
-    pub estimated_in_room: Curve,
-    /// Early Reflections Directivity Index (On Axis - ER)
-    pub er_di: Curve,
-    /// Sound Power Directivity Index (On Axis - SP)
-    pub sp_di: Curve,
-    /// All curves as a HashMap (for backward compatibility with JSON/extraction code)
-    pub curves: HashMap<String, Curve>,
-}
-
-impl SpinoramaBundle {
-    /// Return the PIR curve, which is always derived from the spin data.
-    pub fn pir(&self) -> &Curve {
-        &self.estimated_in_room
-    }
-}
 
 /// Fluent builder for [`SpinoramaBundle`].
 ///

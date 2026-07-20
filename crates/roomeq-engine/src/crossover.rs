@@ -15,7 +15,50 @@ use log::{info, warn};
 use ndarray::Array1;
 use std::error::Error;
 
-use roomeq_model::OptimizerConfig;
+use roomeq_model::{CrossoverConfig, OptimizerConfig, RoomConfig};
+
+/// Determine one optimizer frequency band per ordered speaker driver.
+pub fn determine_optimization_bands(
+    driver_count: usize,
+    room_config: &RoomConfig,
+    crossover_config: &CrossoverConfig,
+) -> Vec<(f64, f64)> {
+    let global_min = room_config.optimizer.min_freq;
+    let global_max = room_config.optimizer.max_freq;
+    let crossover_points = if let Some(frequencies) = &crossover_config.frequencies {
+        frequencies.clone()
+    } else if let Some(frequency) = crossover_config.frequency {
+        vec![frequency]
+    } else {
+        Vec::new()
+    };
+    let crossover_bounds = |index: usize| -> (f64, f64) {
+        if let Some(range) = crossover_config.frequency_range {
+            return range;
+        }
+        crossover_points
+            .get(index)
+            .copied()
+            .map(|frequency| (frequency, frequency))
+            .unwrap_or((80.0, 3_000.0))
+    };
+
+    (0..driver_count)
+        .map(|index| {
+            let minimum = if index == 0 {
+                global_min
+            } else {
+                crossover_bounds(index - 1).0 * 0.5
+            };
+            let maximum = if index + 1 == driver_count {
+                global_max
+            } else {
+                crossover_bounds(index).1 * 2.0
+            };
+            (minimum.max(global_min), maximum.min(global_max))
+        })
+        .collect()
+}
 
 /// Apply polarity inversion to a driver curve.
 ///
@@ -153,7 +196,7 @@ fn optimize_crossover_impl(
     let num_combinations = 1 << (n_drivers - 1);
 
     struct OptimizationResult {
-        result: autoeq_workflow::DriverOptimizationResult,
+        result: autoeq_optim::DriverOptimizationResult,
         inversions: Vec<bool>,
         data: DriversLossData,
     }
@@ -198,7 +241,7 @@ fn optimize_crossover_impl(
         let drivers_data = DriversLossData::new_ordered(modified_drivers, crossover_type);
 
         // Run optimization
-        let result = autoeq_workflow::optimize_drivers_crossover(
+        let result = autoeq_optim::optimize_drivers_crossover(
             drivers_data.clone(),
             xover_min_freq,
             xover_max_freq,
@@ -310,6 +353,78 @@ fn optimize_crossover_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn crossover_config() -> CrossoverConfig {
+        CrossoverConfig {
+            crossover_type: "LR24".to_string(),
+            frequency: None,
+            frequencies: None,
+            frequency_range: None,
+        }
+    }
+
+    #[test]
+    fn optimization_bands_cover_fixed_frequency_range() {
+        let room_config = RoomConfig {
+            optimizer: OptimizerConfig {
+                min_freq: 20.0,
+                max_freq: 20_000.0,
+                ..OptimizerConfig::default()
+            },
+            ..RoomConfig::default()
+        };
+        let crossover = CrossoverConfig {
+            frequency_range: Some((200.0, 3_000.0)),
+            ..crossover_config()
+        };
+
+        assert_eq!(
+            determine_optimization_bands(3, &room_config, &crossover),
+            vec![(20.0, 6_000.0), (100.0, 6_000.0), (100.0, 20_000.0)]
+        );
+    }
+
+    #[test]
+    fn optimization_bands_accept_one_or_many_fixed_frequencies() {
+        let room_config = RoomConfig {
+            optimizer: OptimizerConfig {
+                min_freq: 20.0,
+                max_freq: 20_000.0,
+                ..OptimizerConfig::default()
+            },
+            ..RoomConfig::default()
+        };
+        let one = CrossoverConfig {
+            frequency: Some(1_000.0),
+            ..crossover_config()
+        };
+        let many = CrossoverConfig {
+            frequencies: Some(vec![200.0, 2_000.0]),
+            ..crossover_config()
+        };
+
+        assert_eq!(determine_optimization_bands(2, &room_config, &one).len(), 2);
+        assert_eq!(
+            determine_optimization_bands(3, &room_config, &many).len(),
+            3
+        );
+    }
+
+    #[test]
+    fn optimization_bands_fall_back_without_crossover_frequency() {
+        let room_config = RoomConfig {
+            optimizer: OptimizerConfig {
+                min_freq: 20.0,
+                max_freq: 20_000.0,
+                ..OptimizerConfig::default()
+            },
+            ..RoomConfig::default()
+        };
+        let bands = determine_optimization_bands(2, &room_config, &crossover_config());
+
+        assert_eq!(bands[0].0, 20.0);
+        assert_eq!(bands[1].1, 20_000.0);
+    }
     use ndarray::Array1;
 
     #[test]

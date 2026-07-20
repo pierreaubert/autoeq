@@ -5,11 +5,11 @@ edition = "2024"
 description = "RoomEQ configuration, pipeline, and DSP-chain contracts"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [dependencies]
 autoeq-core = { workspace = true }
-autoeq-measurements = { workspace = true }
-autoeq-optim = { workspace = true }
-anyhow = { workspace = true }
 clap = { workspace = true }
 log = { workspace = true }
 ndarray = { workspace = true }

@@ -1,0 +1,536 @@
+use super::misc::differential_evolution_minimize;
+use super::misc::grouped_home_cinema_roles;
+use super::types::SubDriverInfo;
+use crate::Curve;
+use crate::home_cinema;
+use crate::topology::{
+    all_curves_have_usable_phase, all_curves_share_frequency_grid, bass_management_objective,
+    complex_sum_mains, curve_has_usable_phase, predict_bass_management_sum,
+};
+use autoeq_core::interpolate_log_space;
+use roomeq_model::RoomConfig;
+use std::collections::{BTreeMap, HashMap};
+
+#[allow(dead_code)]
+pub fn refine_bass_management_sub_outputs(
+    config: &RoomConfig,
+    main_roles: &[String],
+    aligned_pre_eq_curves: &HashMap<String, Curve>,
+    group_results: &mut BTreeMap<String, home_cinema::BassManagementGroupReport>,
+    sub_outputs: &mut [home_cinema::BassManagementSubOutputReport],
+    drivers: Option<&[SubDriverInfo]>,
+    sample_rate: f64,
+) -> Vec<String> {
+    let Some(drivers) = drivers else {
+        return Vec::new();
+    };
+    if drivers.len() != sub_outputs.len() || drivers.is_empty() {
+        return vec!["joint_sub_output_skipped_driver_metadata_mismatch".to_string()];
+    }
+    if drivers.iter().any(|driver| {
+        driver
+            .initial_curve
+            .as_ref()
+            .map(|curve| !curve_has_usable_phase(curve))
+            .unwrap_or(true)
+    }) {
+        return vec!["joint_sub_output_skipped_missing_phase".to_string()];
+    }
+
+    let mut group_inputs = Vec::new();
+    for (group_id, roles) in grouped_home_cinema_roles(main_roles) {
+        let Some(group) = group_results.get(&group_id) else {
+            continue;
+        };
+        if group.selected_crossover_hz.is_none() {
+            continue;
+        }
+        let main_refs: Vec<&Curve> = roles
+            .iter()
+            .filter_map(|role| aligned_pre_eq_curves.get(role))
+            .collect();
+        if main_refs.len() != roles.len()
+            || !all_curves_have_usable_phase(&main_refs)
+            || !all_curves_share_frequency_grid(&main_refs)
+        {
+            continue;
+        }
+        group_inputs.push((group_id, complex_sum_mains(&main_refs)));
+    }
+    if group_inputs.is_empty() {
+        return vec!["joint_sub_output_skipped_no_phase_valid_groups".to_string()];
+    }
+
+    let mut lower_bounds = Vec::new();
+    let mut upper_bounds = Vec::new();
+    let mut initial = Vec::new();
+    for output in sub_outputs.iter() {
+        let is_dba_front = output.strategy_source == "dba_front";
+        let is_dba_rear = output.strategy_source == "dba_rear";
+        if is_dba_front {
+            lower_bounds.extend_from_slice(&[output.gain_db, 0.0, 0.0]);
+            upper_bounds.extend_from_slice(&[output.gain_db, 0.001, 0.0]);
+        } else if is_dba_rear {
+            lower_bounds.extend_from_slice(&[config.optimizer.min_db.min(-30.0), 0.0, 1.0]);
+            upper_bounds.extend_from_slice(&[0.0, 100.0, 1.0]);
+        } else {
+            let gain_span = config.optimizer.max_db.max(6.0);
+            lower_bounds.push(output.gain_db - gain_span);
+            upper_bounds.push(output.gain_db + gain_span);
+            lower_bounds.push(0.0);
+            upper_bounds.push(20.0);
+            lower_bounds.push(0.0);
+            upper_bounds.push(1.0);
+        }
+        initial.extend_from_slice(&[
+            output.gain_db,
+            output.delay_ms.max(0.0),
+            f64::from(output.polarity_inverted),
+        ]);
+    }
+
+    let decode = |params: &[f64]| -> Vec<home_cinema::BassManagementSubOutputReport> {
+        let min_delay = params
+            .chunks_exact(3)
+            .map(|chunk| chunk[1].max(0.0))
+            .fold(f64::INFINITY, f64::min);
+        let min_delay = if min_delay.is_finite() {
+            min_delay
+        } else {
+            0.0
+        };
+        sub_outputs
+            .iter()
+            .enumerate()
+            .map(|(idx, output)| {
+                let base = idx * 3;
+                let gain = params[base].clamp(lower_bounds[base], upper_bounds[base]);
+                let delay = params[base + 1].clamp(lower_bounds[base + 1], upper_bounds[base + 1])
+                    - min_delay;
+                let polarity = params[base + 2]
+                    .round()
+                    .clamp(lower_bounds[base + 2], upper_bounds[base + 2])
+                    >= 0.5;
+                home_cinema::BassManagementSubOutputReport {
+                    output_role: output.output_role.clone(),
+                    gain_db: gain,
+                    delay_ms: delay.max(0.0),
+                    polarity_inverted: polarity,
+                    strategy_source: output.strategy_source.clone(),
+                    headroom_contribution_db: gain,
+                }
+            })
+            .collect()
+    };
+
+    let objective = |params: &[f64]| -> f64 {
+        let decoded = decode(params);
+        let mut total = 0.0;
+        for (group_id, virtual_main) in &group_inputs {
+            let Some(group) = group_results.get(group_id) else {
+                continue;
+            };
+            let Some(freq) = group.selected_crossover_hz else {
+                continue;
+            };
+            let Some(virtual_sub) =
+                sum_sub_output_responses_on_grid(&virtual_main.freq, drivers, &decoded)
+            else {
+                return 1.0e12;
+            };
+            let predicted = predict_bass_management_sum(
+                virtual_main,
+                &virtual_sub,
+                &group.crossover_type,
+                freq,
+                sample_rate,
+                0.0,
+                group.trim_db,
+                group.main_delay_ms,
+                group.bass_route_delay_ms,
+                group.polarity_inverted,
+            );
+            let Some(loss) = bass_management_objective(predicted.as_ref(), freq) else {
+                return 1.0e12;
+            };
+            total += loss;
+        }
+
+        let gain_power = decoded
+            .iter()
+            .map(|output| 10.0_f64.powf(output.gain_db / 10.0))
+            .sum::<f64>();
+        let gain_power_db = 10.0 * gain_power.max(1e-12).log10();
+        let allowed = config
+            .system
+            .as_ref()
+            .and_then(|system| system.bass_management.as_ref())
+            .map(|bm| bm.headroom_margin_db)
+            .unwrap_or(6.0);
+        let headroom_excess = (gain_power_db - allowed).max(0.0);
+        total + headroom_excess * headroom_excess * 2.0
+    };
+
+    let baseline = objective(&initial);
+    let (best, best_score) = differential_evolution_minimize(
+        &lower_bounds,
+        &upper_bounds,
+        &initial,
+        &objective,
+        config.optimizer.population,
+        config.optimizer.max_iter,
+        config.optimizer.seed.unwrap_or(0x5ab_014),
+    );
+    if best_score >= baseline - 1.0e-6 {
+        return vec!["joint_sub_output_no_improvement".to_string()];
+    }
+
+    let decoded = decode(&best);
+    for (target, optimized) in sub_outputs.iter_mut().zip(decoded) {
+        *target = optimized;
+    }
+
+    for (group_id, virtual_main) in group_inputs {
+        if let Some(group) = group_results.get_mut(&group_id)
+            && let Some(freq) = group.selected_crossover_hz
+            && let Some(virtual_sub) =
+                sum_sub_output_responses_on_grid(&virtual_main.freq, drivers, sub_outputs)
+        {
+            let predicted = predict_bass_management_sum(
+                &virtual_main,
+                &virtual_sub,
+                &group.crossover_type,
+                freq,
+                sample_rate,
+                0.0,
+                group.trim_db,
+                group.main_delay_ms,
+                group.bass_route_delay_ms,
+                group.polarity_inverted,
+            );
+            group.objective_after = bass_management_objective(predicted.as_ref(), freq);
+            group.advisories.retain(|advisory| {
+                advisory != "ok" && advisory != "joint_sub_output_no_improvement"
+            });
+            group
+                .advisories
+                .push("joint_sub_output_de_optimized".to_string());
+        }
+    }
+
+    vec!["joint_sub_output_de_optimized".to_string()]
+}
+
+pub fn sum_sub_output_responses_on_grid(
+    target_freq: &ndarray::Array1<f64>,
+    drivers: &[SubDriverInfo],
+    outputs: &[home_cinema::BassManagementSubOutputReport],
+) -> Option<Curve> {
+    use num_complex::Complex;
+    if drivers.len() != outputs.len() || drivers.is_empty() {
+        return None;
+    }
+
+    let mut complex_sum = vec![Complex::new(0.0, 0.0); target_freq.len()];
+    for (driver, output) in drivers.iter().zip(outputs.iter()) {
+        let curve = driver.initial_curve.as_ref()?;
+        if !curve_has_usable_phase(curve) {
+            return None;
+        }
+        let interpolated = interpolate_log_space(target_freq, curve);
+        let phase = interpolated.phase.as_ref()?;
+        for idx in 0..target_freq.len() {
+            let freq_hz = target_freq[idx];
+            let gain_db = output.gain_db;
+            let delay_phase = -360.0 * freq_hz * output.delay_ms / 1000.0;
+            let polarity_phase = if output.polarity_inverted { 180.0 } else { 0.0 };
+            let mag = 10.0_f64.powf((interpolated.spl[idx] + gain_db) / 20.0);
+            let phase_rad = (phase[idx] + delay_phase + polarity_phase).to_radians();
+            complex_sum[idx] += Complex::from_polar(mag, phase_rad);
+        }
+    }
+
+    let mut spl = ndarray::Array1::<f64>::zeros(target_freq.len());
+    let mut phase = ndarray::Array1::<f64>::zeros(target_freq.len());
+    for (idx, value) in complex_sum.iter().enumerate() {
+        spl[idx] = 20.0 * value.norm().max(1e-12).log10();
+        phase[idx] = value.arg().to_degrees();
+    }
+
+    Some(Curve {
+        freq: target_freq.clone(),
+        spl,
+        phase: Some(phase),
+        ..Default::default()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::home_cinema::BassManagementSubOutputReport;
+    use ndarray::Array1;
+    use roomeq_model::{
+        BassManagementConfig, OptimizerConfig, ProcessingMode, RoomConfig, SystemConfig,
+        SystemModel, default_config_version,
+    };
+    use std::collections::{BTreeMap, HashMap};
+
+    fn flat_curve_with_phase() -> crate::Curve {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(20_000.0), 32);
+        let spl = Array1::from_elem(freq.len(), 80.0);
+        let phase = Some(Array1::from_elem(freq.len(), 0.0));
+        crate::Curve {
+            freq,
+            spl,
+            phase,
+            ..Default::default()
+        }
+    }
+
+    fn flat_curve_without_phase() -> crate::Curve {
+        let mut c = flat_curve_with_phase();
+        c.phase = None;
+        c
+    }
+
+    fn driver(name: &str, curve: Option<crate::Curve>, inverted: bool) -> SubDriverInfo {
+        SubDriverInfo {
+            name: name.to_string(),
+            gain: 0.0,
+            delay: 0.0,
+            inverted,
+            initial_curve: curve,
+        }
+    }
+
+    fn output(
+        name: &str,
+        gain_db: f64,
+        delay_ms: f64,
+        inverted: bool,
+        source: &str,
+    ) -> BassManagementSubOutputReport {
+        BassManagementSubOutputReport {
+            output_role: name.to_string(),
+            gain_db,
+            delay_ms,
+            polarity_inverted: inverted,
+            strategy_source: source.to_string(),
+            headroom_contribution_db: gain_db,
+        }
+    }
+
+    fn tiny_optimizer() -> OptimizerConfig {
+        OptimizerConfig {
+            processing_mode: ProcessingMode::LowLatency,
+            max_iter: 20,
+            population: 6,
+            seed: Some(1),
+            ..Default::default()
+        }
+    }
+
+    fn base_room_config() -> RoomConfig {
+        RoomConfig {
+            version: default_config_version(),
+            system: Some(SystemConfig {
+                model: SystemModel::HomeCinema,
+                speakers: HashMap::new(),
+                subwoofers: None,
+                bass_management: Some(BassManagementConfig {
+                    enabled: true,
+                    optimize_groups: true,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            speakers: HashMap::new(),
+            crossovers: None,
+            target_curve: None,
+            optimizer: tiny_optimizer(),
+            provenance: Default::default(),
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        }
+    }
+
+    #[test]
+    fn sum_sub_output_responses_empty_returns_none() {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(200.0), 8);
+        assert!(sum_sub_output_responses_on_grid(&freq, &[], &[]).is_none());
+    }
+
+    #[test]
+    fn sum_sub_output_responses_mismatch_returns_none() {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(200.0), 8);
+        let drivers = vec![driver("sub1", Some(flat_curve_with_phase()), false)];
+        let outputs = vec![
+            output("sub1", 0.0, 0.0, false, "default"),
+            output("sub2", 0.0, 0.0, false, "default"),
+        ];
+        assert!(sum_sub_output_responses_on_grid(&freq, &drivers, &outputs).is_none());
+    }
+
+    #[test]
+    fn sum_sub_output_responses_missing_phase_returns_none() {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(200.0), 8);
+        let drivers = vec![driver("sub1", Some(flat_curve_without_phase()), false)];
+        let outputs = vec![output("sub1", 0.0, 0.0, false, "default")];
+        assert!(sum_sub_output_responses_on_grid(&freq, &drivers, &outputs).is_none());
+    }
+
+    #[test]
+    fn sum_sub_output_responses_combines_in_phase() {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(200.0), 8);
+        let drivers = vec![
+            driver("sub1", Some(flat_curve_with_phase()), false),
+            driver("sub2", Some(flat_curve_with_phase()), false),
+        ];
+        let outputs = vec![
+            output("sub1", 0.0, 0.0, false, "default"),
+            output("sub2", 0.0, 0.0, false, "default"),
+        ];
+        let sum = sum_sub_output_responses_on_grid(&freq, &drivers, &outputs);
+        assert!(sum.is_some());
+        let sum = sum.unwrap();
+        assert_eq!(sum.freq.len(), freq.len());
+        assert!(sum.phase.is_some());
+        // Two identical in-phase 80 dB sources sum to ~86 dB.
+        assert!((sum.spl[0] - 86.02).abs() < 0.1);
+    }
+
+    #[test]
+    fn sum_sub_output_respects_polarity_and_delay() {
+        let freq = Array1::from_vec(vec![100.0]);
+        let mut curve = flat_curve_with_phase();
+        curve.freq = freq.clone();
+        curve.spl = Array1::from_elem(1, 80.0);
+        curve.phase = Some(Array1::from_elem(1, 0.0));
+
+        let drivers = vec![driver("sub1", Some(curve.clone()), false)];
+        let inverted = output("sub1", 0.0, 0.0, true, "default");
+        let inverted_sum = sum_sub_output_responses_on_grid(&freq, &drivers, &[inverted]).unwrap();
+        assert!((inverted_sum.phase.unwrap()[0] - 180.0).abs() < 0.01);
+
+        let delayed = output("sub1", 0.0, 1.0, false, "default");
+        let delayed_sum = sum_sub_output_responses_on_grid(&freq, &drivers, &[delayed]).unwrap();
+        // 1 ms delay at 100 Hz is -36 degrees.
+        assert!((delayed_sum.phase.unwrap()[0] - (-36.0)).abs() < 0.1);
+    }
+
+    #[test]
+    fn refine_with_none_drivers_returns_empty() {
+        let config = base_room_config();
+        let mut group_results = BTreeMap::new();
+        let mut outputs = vec![output("LFE", 0.0, 0.0, false, "default")];
+        let advisories = refine_bass_management_sub_outputs(
+            &config,
+            &["Left".to_string()],
+            &HashMap::new(),
+            &mut group_results,
+            &mut outputs,
+            None,
+            48_000.0,
+        );
+        assert!(advisories.is_empty());
+    }
+
+    #[test]
+    fn refine_mismatch_returns_advisory() {
+        let config = base_room_config();
+        let mut group_results = BTreeMap::new();
+        let mut outputs = vec![output("LFE", 0.0, 0.0, false, "default")];
+        let drivers = vec![
+            driver("sub1", Some(flat_curve_with_phase()), false),
+            driver("sub2", Some(flat_curve_with_phase()), false),
+        ];
+        let advisories = refine_bass_management_sub_outputs(
+            &config,
+            &["Left".to_string()],
+            &HashMap::new(),
+            &mut group_results,
+            &mut outputs,
+            Some(&drivers),
+            48_000.0,
+        );
+        assert!(
+            advisories.contains(&"joint_sub_output_skipped_driver_metadata_mismatch".to_string())
+        );
+    }
+
+    #[test]
+    fn refine_missing_phase_returns_advisory() {
+        let config = base_room_config();
+        let mut group_results = BTreeMap::new();
+        let mut outputs = vec![output("LFE", 0.0, 0.0, false, "default")];
+        let drivers = vec![driver("sub1", Some(flat_curve_without_phase()), false)];
+        let advisories = refine_bass_management_sub_outputs(
+            &config,
+            &["Left".to_string()],
+            &HashMap::new(),
+            &mut group_results,
+            &mut outputs,
+            Some(&drivers),
+            48_000.0,
+        );
+        assert!(advisories.contains(&"joint_sub_output_skipped_missing_phase".to_string()));
+    }
+
+    #[test]
+    fn refine_no_valid_groups_returns_advisory() {
+        let config = base_room_config();
+        let mut group_results = BTreeMap::new();
+        let mut outputs = vec![output("LFE", 0.0, 0.0, false, "default")];
+        let drivers = vec![driver("sub1", Some(flat_curve_with_phase()), false)];
+        let advisories = refine_bass_management_sub_outputs(
+            &config,
+            &["Left".to_string()],
+            &HashMap::new(),
+            &mut group_results,
+            &mut outputs,
+            Some(&drivers),
+            48_000.0,
+        );
+        assert!(advisories.contains(&"joint_sub_output_skipped_no_phase_valid_groups".to_string()));
+    }
+
+    #[test]
+    fn refine_runs_with_valid_group() {
+        let config = base_room_config();
+        let mut group_results = BTreeMap::new();
+        group_results.insert(
+            "lcr".to_string(),
+            crate::home_cinema::BassManagementGroupReport {
+                group_id: "lcr".to_string(),
+                roles: vec!["Left".to_string()],
+                crossover_type: "LR24".to_string(),
+                selected_crossover_hz: Some(80.0),
+                configured_crossover_hz: Some(80.0),
+                main_delay_ms: 0.0,
+                bass_route_delay_ms: 0.0,
+                polarity_inverted: false,
+                trim_db: 0.0,
+                objective_before: Some(1.0),
+                objective_after: Some(1.0),
+                advisories: vec!["ok".to_string()],
+            },
+        );
+        let mut aligned = HashMap::new();
+        aligned.insert("Left".to_string(), flat_curve_with_phase());
+        let mut outputs = vec![output("LFE", 0.0, 0.0, false, "default")];
+        let drivers = vec![driver("LFE", Some(flat_curve_with_phase()), false)];
+        let advisories = refine_bass_management_sub_outputs(
+            &config,
+            &["Left".to_string()],
+            &aligned,
+            &mut group_results,
+            &mut outputs,
+            Some(&drivers),
+            48_000.0,
+        );
+        // With identical flat curves the optimizer finds no improvement.
+        assert!(advisories.contains(&"joint_sub_output_no_improvement".to_string()));
+    }
+}

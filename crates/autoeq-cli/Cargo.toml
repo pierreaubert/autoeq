@@ -1,0 +1,34 @@
+[package]
+name = "autoeq-cli"
+version.workspace = true
+edition = "2024"
+description = "AutoEQ command-line parsing and user-facing orchestration"
+license = "GPL-3.0-or-later"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+plotly = ["dep:autoeq-plot", "autoeq-plot/plotly"]
+plotly_static = ["plotly", "autoeq-plot/plotly_static"]
+
+[dependencies]
+anyhow = { workspace = true }
+autoeq-plot = { workspace = true, optional = true }
+autoeq-workflow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+csv = { workspace = true }
+env_logger = { workspace = true }
+log = { workspace = true }
+ndarray = { workspace = true }
+num_cpus = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+urlencoding = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

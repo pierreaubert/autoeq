@@ -5,6 +5,7 @@ use super::error::PhaseArrivalError;
 use super::estimate::estimate_arrival_from_phase;
 use super::estimate::estimate_arrival_from_phase_detailed;
 use super::find::find_arrival_time;
+use super::find::find_arrival_time_samples;
 use super::find::find_arrival_time_with_reference;
 use super::misc::calculate_alignment_delays;
 use super::misc::phase_arrival_regression_band;
@@ -139,6 +140,19 @@ fn test_find_arrival_time_uses_rms_noise_floor_not_peak() {
     let result = find_arrival_time(wav.path(), None).unwrap();
 
     assert_eq!(result.arrival_samples, arrival);
+}
+
+#[test]
+fn test_find_arrival_time_samples_is_path_free() {
+    let sr = 48_000_u32;
+    let arrival = 1_200_usize;
+    let mut samples = vec![0.0_f32; 4_096];
+    samples[arrival] = 0.1;
+
+    let result = find_arrival_time_samples(&samples, sr, None).unwrap();
+
+    assert_eq!(result.arrival_samples, arrival);
+    assert!((result.arrival_ms - 25.0).abs() < 1e-9);
 }
 
 #[test]

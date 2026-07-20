@@ -29,6 +29,9 @@ mod speaker_suggestions;
 // Re-export commonly used functions
 pub use clamp::clamp_positive_only;
 pub use directory::data_dir_for;
+pub use directory::data_dir_for_cache_root;
+pub use directory::headphone_cache_dir;
+pub use directory::headphone_cache_dir_for_cache_root;
 pub use directory::measurement_filename;
 pub use directory::sanitize_dir_name;
 pub use interpolate::*;
@@ -44,6 +47,5 @@ pub use smooth::PsychoacousticSmoothingConfig;
 pub use smooth::smooth_gaussian;
 pub use smooth::smooth_one_over_n_octave;
 pub use smooth::smooth_psychoacoustic;
-pub use smooth::smooth_psychoacoustic_record;
 pub use source::*;
 pub use speaker_suggestions::*;

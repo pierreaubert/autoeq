@@ -12,14 +12,14 @@ pub mod crossover_utils;
 pub mod frequency_grid;
 pub mod impulse_analysis;
 pub mod ir_waveform;
-mod ir_waveform_types;
 pub mod listening_area;
 pub mod reflection_cancel;
+pub mod response_metrics;
 pub mod rir_prototype;
 pub mod slope;
 pub mod spatial_robustness;
 pub mod temporal_targets;
-pub use ir_waveform_types::IrWaveform;
+pub use roomeq_model::IrWaveform;
 
 pub mod time_align {
     //! Time alignment utilities for speaker measurements.

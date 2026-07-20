@@ -1,257 +1,113 @@
-//! Experimental RoomEQ execution boundary.
-//!
-//! A run requires both an optimizer and an explicit DSP graph builder. The
-//! production RoomEQ pipeline remains in the root `autoeq` crate until its
-//! orchestration is migrated; this crate must not synthesize placeholder
-//! success results.
+//! In-memory RoomEQ execution and deterministic processing.
 
 #![forbid(unsafe_code)]
 
-pub use autoeq_core::{AutoeqError, Curve};
+pub use autoeq_core::{AutoeqError, Curve, PeqModel};
+pub use autoeq_optim::de::CallbackAction;
+pub use autoeq_optim::optim::{OptimProgressCallback, OptimizerConfidence, OptimizerRunEvidence};
+/// Acoustic analysis used by engine and workflow orchestration without adding
+/// parallel ownership of the underlying implementations.
+pub mod analysis {
+    pub use roomeq_analysis::{crossover_utils, frequency_grid, ir_waveform, slope, time_align};
+}
 pub mod error {
     pub use autoeq_core::error::*;
 }
+pub mod loss {
+    pub use autoeq_optim::loss::*;
+}
+/// Runtime correction quality and acceptance contracts used at the engine
+/// execution boundary.
+pub mod quality {
+    pub use roomeq_quality::*;
+}
+pub mod response {
+    pub use autoeq_core::response::*;
+}
 
-use autoeq_optim::{OptimizationProblem, OptimizationResult};
-use roomeq_model::{ConfigValidationReport, DspGraph, RoomConfig, ValidationStage};
-
+/// Deterministic bass-management planning, prediction, and joint optimization.
+pub mod bass_management;
 /// Measurement-confidence gate for bass-band phase correction.
 pub mod bass_phase_confidence;
-/// Multi-driver crossover optimization with polarity search.
+/// Pure CEA-2034 speaker and preference correction.
+pub mod cea2034;
+/// Complete path-free preparation and execution for one channel.
+pub mod channel_execution;
+/// Path-free phase-linear, hybrid, and mixed-phase channel processing.
+pub mod channel_fir;
+/// Path-free low-latency, warped-IIR, and Kautz-modal channel processing.
+pub mod channel_iir;
+/// Complete path-free input prepared for channel processing.
+pub mod channel_input;
+/// Prepared, path-free measurement inputs for channel processing.
+pub mod channel_measurements;
+mod channel_optimizer;
+/// Deterministic preprocessing for a prepared channel.
+pub mod channel_preprocessing;
+/// Shared results and logical sidecar references for channel processing.
+pub mod channel_result;
+/// Target preparation for one channel.
+pub mod channel_target;
+pub mod config_adapter;
+/// Multi-driver crossover optimization and polarity search.
 pub mod crossover;
-/// Double-bass-array optimization with phase-critical array summation.
+/// Path-free cross-talk cancellation matrix solving and diagnostics.
+pub mod ctc;
+/// Double-bass-array optimization and phase-critical array summation.
 pub mod dba;
+/// In-memory per-channel and multi-measurement EQ optimization.
+pub mod eq;
 /// Speaker-excursion protection analysis and high-pass realization.
 pub mod excursion;
 /// RoomEQ FIR correction design.
 pub mod fir;
 /// Group-delay optimization and IIR all-pass alignment.
 pub mod gd_opt;
+/// Pure group and topology execution helpers.
+pub mod group;
+/// Prepared group/topology execution and DSP graph construction.
+pub mod group_processing;
 /// Role-aware height-channel spectral, phase, and arrival-time alignment.
 pub mod height_channel_alignment;
+/// In-memory home-cinema policy, routing, reporting, and seat analysis.
+pub mod home_cinema;
 /// Inter-channel tonal matching using broadband spectral correction.
 pub mod inter_channel_timbre_matching;
+/// Path-free frequency-split FIR/IIR channel processing.
+pub mod mixed_crossover;
 /// Mixed IIR/FIR phase decomposition and excess-phase correction.
 pub mod mixed_phase;
-/// Multi-seat and continuous-listening-area subwoofer optimization.
+/// Multi-seat continuous-listening-area subwoofer optimization.
 pub mod multiseat;
 /// Multi-subwoofer optimization and all-pass alignment.
 pub mod multisub;
+/// Deterministic DSP-chain and response assembly.
+pub mod output;
 pub mod phase_alignment;
+/// Prepared pipeline requests, observable events, and the production execution port.
+pub mod pipeline;
 /// Progress reporting for long-running RoomEQ operations.
 pub mod progress;
-/// Runtime loading and validation of measurement-provenance sidecars.
-pub mod provenance;
-/// Broadband spectral and inter-channel response alignment.
+pub mod report_adapter;
+/// Shared in-memory results returned by RoomEQ execution workflows.
+pub mod room_result;
+/// Broadband spectral inter-channel response alignment.
 pub mod spectral_align;
+pub use roomeq_analysis::spatial_robustness;
 /// Supporting-source room compensation filter design.
 pub mod supporting_source;
-
-/// A narrow execution boundary. The engine owns orchestration; concrete
-/// optimizers and exporters remain replaceable and independently testable.
-pub trait RoomOptimizer {
-    fn optimize(&self, problem: &OptimizationProblem) -> Result<OptimizationResult, String>;
+/// Deterministic topology, crossover, and bass-routing primitives.
+pub mod topology;
+/// Path-free time-alignment analysis used by workflow preparation.
+pub mod time_align {
+    pub use roomeq_analysis::time_align::{
+        ArrivalTimeResult, ProbeDelayResult, detect_delay_with_probe, find_arrival_time_samples,
+    };
 }
 
-/// Builds the realized DSP graph from a validated configuration and completed
-/// optimization. Requiring this boundary prevents successful runs with an
-/// empty placeholder graph.
-pub trait RoomGraphBuilder {
-    fn build_graph(
-        &self,
-        config: &RoomConfig,
-        optimization: &OptimizationResult,
-    ) -> Result<DspGraph, String>;
-}
-
-/// Input to one deterministic engine run.
-pub struct EngineRequest<'a> {
-    pub config: &'a RoomConfig,
-    pub problem: OptimizationProblem,
-}
-
-#[derive(Debug, Clone)]
-pub struct EngineResult {
-    pub optimization: OptimizationResult,
-    pub graph: DspGraph,
-    pub validation: ConfigValidationReport,
-}
-
-/// Stateless coordinator useful both in production and unit tests.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct RoomEngine;
-
-impl RoomEngine {
-    pub fn validation_report(request: &EngineRequest<'_>) -> ConfigValidationReport {
-        let mut report = request.config.validation_report();
-        let mut errors = report.stage(ValidationStage::Structural).errors.clone();
-        let provenance = provenance::validate_provenance_references(request.config);
-        errors.extend(provenance.errors);
-        if let Err(error) = request.problem.validate() {
-            errors.push(error);
-        }
-        report.record(ValidationStage::Structural, errors, provenance.warnings);
-        report
-    }
-
-    pub fn validate(request: &EngineRequest<'_>) -> Result<(), String> {
-        let report = Self::validation_report(request);
-        report.errors().next().cloned().map_or(Ok(()), Err)
-    }
-
-    pub fn run<O: RoomOptimizer, G: RoomGraphBuilder>(
-        &self,
-        request: EngineRequest<'_>,
-        optimizer: &O,
-        graph_builder: &G,
-    ) -> Result<EngineResult, String> {
-        let mut validation = Self::validation_report(&request);
-        if let Some(error) = validation.errors().next().cloned() {
-            return Err(error);
-        }
-        let optimization = optimizer.optimize(&request.problem)?;
-        let graph = graph_builder.build_graph(request.config, &optimization)?;
-        match graph.validate() {
-            Ok(()) => validation.record(ValidationStage::ExportTarget, Vec::new(), Vec::new()),
-            Err(error) => {
-                validation.record(
-                    ValidationStage::ExportTarget,
-                    vec![error.clone()],
-                    Vec::new(),
-                );
-                return Err(error);
-            }
-        }
-        Ok(EngineResult {
-            optimization,
-            graph,
-            validation,
-        })
-    }
-}
-
-/// Adapter for simple closures in tests and small integrations.
-impl<F> RoomOptimizer for F
-where
-    F: Fn(&OptimizationProblem) -> Result<OptimizationResult, String>,
-{
-    fn optimize(&self, problem: &OptimizationProblem) -> Result<OptimizationResult, String> {
-        self(problem)
-    }
-}
-
-/// Adapter for graph-building closures in tests and integrations.
-impl<F> RoomGraphBuilder for F
-where
-    F: Fn(&RoomConfig, &OptimizationResult) -> Result<DspGraph, String>,
-{
-    fn build_graph(
-        &self,
-        config: &RoomConfig,
-        optimization: &OptimizationResult,
-    ) -> Result<DspGraph, String> {
-        self(config, optimization)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use roomeq_model::RoomConfig;
-
-    #[test]
-    fn validates_before_calling_optimizer() {
-        let mut config = RoomConfig::default();
-        config.speakers.insert(
-            "L".into(),
-            roomeq_model::SpeakerConfig::Single(roomeq_model::MeasurementSource::Single(
-                roomeq_model::MeasurementSingle {
-                    measurement: roomeq_model::MeasurementRef::Path("left.csv".into()),
-                    speaker_name: None,
-                },
-            )),
-        );
-        let request = EngineRequest {
-            config: &config,
-            problem: OptimizationProblem::new(vec![0.0], vec![1.0], |_: &[f64]| 0.0),
-        };
-        let optimizer = |_p: &OptimizationProblem| {
-            Ok(OptimizationResult {
-                parameters: vec![0.5],
-                objective: 0.0,
-                status: "ok".into(),
-            })
-        };
-        let graph_builder = |_config: &RoomConfig, _optimization: &OptimizationResult| {
-            let mut graph = DspGraph::new("1");
-            graph.add_channel("L", Vec::new());
-            Ok(graph)
-        };
-        let result = RoomEngine.run(request, &optimizer, &graph_builder).unwrap();
-        assert_eq!(result.optimization.parameters, vec![0.5]);
-        assert!(
-            !result.graph.channels.is_empty(),
-            "a successful engine run must not return an empty DSP graph"
-        );
-        assert_eq!(
-            result
-                .validation
-                .stage(ValidationStage::ExportTarget)
-                .status,
-            roomeq_model::ValidationStageStatus::Passed
-        );
-        assert!(
-            !result.validation.production_ready(),
-            "the extracted engine must not claim resource/acoustic stages that it did not run"
-        );
-    }
-
-    #[test]
-    fn rejects_invalid_room_config_before_optimizer() {
-        let config = RoomConfig::default();
-        let request = EngineRequest {
-            config: &config,
-            problem: OptimizationProblem::new(vec![0.0], vec![1.0], |_: &[f64]| 0.0),
-        };
-        let optimizer = |_p: &OptimizationProblem| panic!("optimizer must not be called");
-        let graph_builder = |_config: &RoomConfig, _optimization: &OptimizationResult| {
-            panic!("graph builder must not be called")
-        };
-        let error = RoomEngine
-            .run(request, &optimizer, &graph_builder)
-            .unwrap_err();
-        assert!(error.contains("at least one speaker"));
-    }
-
-    #[test]
-    fn rejects_empty_graph_after_optimization() {
-        let mut config = RoomConfig::default();
-        config.speakers.insert(
-            "L".into(),
-            roomeq_model::SpeakerConfig::Single(roomeq_model::MeasurementSource::Single(
-                roomeq_model::MeasurementSingle {
-                    measurement: roomeq_model::MeasurementRef::Path("left.csv".into()),
-                    speaker_name: None,
-                },
-            )),
-        );
-        let request = EngineRequest {
-            config: &config,
-            problem: OptimizationProblem::new(vec![0.0], vec![1.0], |_: &[f64]| 0.0),
-        };
-        let optimizer = |_p: &OptimizationProblem| {
-            Ok(OptimizationResult {
-                parameters: vec![0.5],
-                objective: 0.0,
-                status: "ok".into(),
-            })
-        };
-        let graph_builder =
-            |_config: &RoomConfig, _optimization: &OptimizationResult| Ok(DspGraph::new("1"));
-
-        let error = RoomEngine
-            .run(request, &optimizer, &graph_builder)
-            .expect_err("empty graph must be rejected");
-        assert!(error.contains("at least one channel"));
-    }
-}
+pub use channel_input::{PreparedCea2034, PreparedChannelInput};
+pub use channel_measurements::PreparedChannelMeasurements;
+pub use pipeline::{
+    EngineRequest, PipelineControl, PipelineEvent, PipelineObserver, PipelineStepId,
+    PipelineStepStatus, RoomEngine,
+};

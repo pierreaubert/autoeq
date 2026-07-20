@@ -1,0 +1,87 @@
+use super::consts::SAMPLE_RATE;
+use super::consts::SLOPE_FMAX;
+use super::consts::SLOPE_FMIN;
+use super::consts::TEMP_DIR_COUNTER;
+use super::consts::make_baseline;
+use super::misc::avg_epa_preference;
+use super::types::StepResult;
+use super::types::feature_steps;
+use anyhow::{Context, Result, anyhow};
+use autoeq_optim::loss::regression_slope_per_octave_in_range;
+use roomeq_engine::room_result::RoomOptimizationResult;
+use roomeq_model::RoomConfig;
+use std::sync::atomic::Ordering;
+
+pub(super) fn run_optimization(config: &RoomConfig) -> Result<RoomOptimizationResult> {
+    let id = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir =
+        std::env::temp_dir().join(format!("roomeq_qa_features_{}_{}", std::process::id(), id));
+    std::fs::create_dir_all(&temp_dir)?;
+    let result = crate::optimize_room(config, SAMPLE_RATE, Some(&temp_dir))
+        .map_err(|error| anyhow!(error.to_string()));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    result
+}
+
+pub(super) fn run_pass(
+    recording_name: &str,
+    base_config: &RoomConfig,
+    with_tilt: bool,
+) -> Result<Vec<StepResult>> {
+    let steps = feature_steps();
+    let mut results = Vec::with_capacity(steps.len());
+
+    // Start from baseline with all features OFF
+    let mut config = make_baseline(base_config, with_tilt);
+
+    for step in &steps {
+        // Apply this step's feature (cumulative)
+        (step.apply)(&mut config);
+
+        let opt_result = run_optimization(&config)
+            .with_context(|| format!("{}: step '{}' failed", recording_name, step.name))?;
+
+        // Compute worst (most positive) slope across channels
+        let mut worst_slope: Option<f64> = None;
+        for ch_result in opt_result.channel_results.values() {
+            let curve = &ch_result.final_curve;
+            if let Some(slope) = regression_slope_per_octave_in_range(
+                &curve.freq,
+                &curve.spl,
+                SLOPE_FMIN,
+                SLOPE_FMAX,
+            ) {
+                worst_slope = Some(worst_slope.map_or(slope, |w: f64| w.max(slope)));
+            }
+        }
+        let worst_slope = worst_slope.ok_or_else(|| {
+            anyhow!(
+                "{}: step '{}' — no channel produced a valid slope in {}-{} Hz",
+                recording_name,
+                step.name,
+                SLOPE_FMIN,
+                SLOPE_FMAX
+            )
+        })?;
+
+        let epa_preference = avg_epa_preference(&opt_result);
+        let correction_reverted = opt_result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .is_some_and(|report| !report.reverted_stages.is_empty());
+
+        results.push(StepResult {
+            name: step.name,
+            pre_score: opt_result.combined_pre_score,
+            post_score: opt_result.combined_post_score,
+            worst_slope,
+            changes_loss: step.changes_loss,
+            allows_perceptual_tradeoff: step.allows_perceptual_tradeoff,
+            epa_preference,
+            correction_reverted,
+        });
+    }
+
+    Ok(results)
+}

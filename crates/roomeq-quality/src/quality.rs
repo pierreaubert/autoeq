@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 
 use super::metrics::{log_frequency_weights, percentile};
 use autoeq_core::Curve;
+pub use roomeq_model::{
+    AcousticQualityScorecard, QualityPartitionMetrics, TemporalQualityEvidence,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct QualityEvaluationConfig {
@@ -31,16 +34,6 @@ impl QualityEvaluationConfig {
         }
         Ok(())
     }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct TemporalQualityEvidence {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pre_ringing_energy_db: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub latency_ms: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub available_headroom_db: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -88,52 +81,6 @@ pub fn derive_temporal_quality_evidence(
         latency_ms: Some(latency_ms),
         available_headroom_db: Some(-max_boost_db.max(0.0)),
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct QualityPartitionMetrics {
-    pub curve_count: usize,
-    pub pre_weighted_rms_median_db: f64,
-    pub post_weighted_rms_median_db: f64,
-    pub improvement_median_db: f64,
-    /// Smallest per-position improvement. Negative values are regressions.
-    #[serde(default)]
-    pub worst_position_improvement_db: f64,
-    pub pre_p95_abs_residual_db: f64,
-    pub post_p95_abs_residual_db: f64,
-    pub post_worst_abs_residual_db: f64,
-    pub mean_normalized_seat_spread_db: f64,
-    pub max_normalized_seat_spread_db: f64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bass_post_weighted_rms_db: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub upper_post_weighted_rms_db: Option<f64>,
-    /// Median RMS curvature of the residual below Schroeder frequency.
-    ///
-    /// This is measured in dB/octave² and distinguishes a response with
-    /// narrow modal ripple from one with the same band RMS but a smooth tilt.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bass_pre_modal_roughness_db_per_octave2: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bass_post_modal_roughness_db_per_octave2: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bass_modal_roughness_improvement_db_per_octave2: Option<f64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct AcousticQualityScorecard {
-    pub training: QualityPartitionMetrics,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub held_out: Option<QualityPartitionMetrics>,
-    pub correction_rms_db: f64,
-    pub max_boost_db: f64,
-    pub max_cut_db: f64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub induced_group_delay_rms_ms: Option<f64>,
-    pub temporal: TemporalQualityEvidence,
-    pub evaluated_band_hz: [f64; 2],
-    pub measurement_overlap_hz: [f64; 2],
-    pub finite: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]

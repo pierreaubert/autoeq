@@ -5,10 +5,18 @@ edition = "2024"
 description = "RoomEQ external DSP exporters and artifact packaging"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [dependencies]
-autoeq-core = { workspace = true }
+anyhow = { workspace = true }
 clap = { workspace = true }
+hound = { workspace = true }
+math-iir-fir = { workspace = true }
 roomeq-model = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
+zip = { workspace = true }
+
+[dev-dependencies]
+num-complex = { workspace = true }
+tempfile = { workspace = true }

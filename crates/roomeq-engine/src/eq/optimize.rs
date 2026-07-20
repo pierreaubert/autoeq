@@ -1,0 +1,2131 @@
+use super::consts::backward_eliminate;
+use super::misc::adaptive_budget_for_step;
+use super::misc::build_optim_params;
+use super::multi_eq_auto_optimizer_context::MultiEqAutoOptimizerContext;
+use super::multi_eq_auto_optimizer_context::resolve_multi_measurement_auto_optimizer_config;
+use super::prepared_single_channel_eq::prepare_single_channel_eq;
+use super::prepared_single_channel_eq::prepare_single_channel_eq_with_spin;
+use super::prepared_single_channel_eq::run_optimization_pass;
+use super::resources::{self, EqResources};
+use crate::Curve;
+use crate::PeqModel;
+use autoeq_optim::loss::LossType;
+use autoeq_optim::optim::setup::setup_objective_data;
+use autoeq_optim::optim::{MultiObjectiveData, OptimizerBackend, RealOptimizerBackend};
+use math_audio_iir_fir::Biquad;
+use roomeq_analysis::rir_prototype::build_weighted_prototype;
+use roomeq_analysis::spatial_robustness::{self, SpatialRobustnessConfig};
+use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy, OptimizerConfig};
+use std::collections::HashMap;
+use std::error::Error;
+
+#[derive(Debug, Clone)]
+pub struct EqOptimizationResult {
+    pub filters: Vec<Biquad>,
+    pub loss: f64,
+    pub optimizer_evidence: Vec<autoeq_optim::optim::OptimizerRunEvidence>,
+}
+
+impl EqOptimizationResult {
+    fn into_legacy(self) -> (Vec<Biquad>, f64) {
+        (self.filters, self.loss)
+    }
+}
+
+/// Optimize EQ filters for a single channel using autoeq's workflow
+///
+/// # Arguments
+/// * `curve` - Frequency response curve to optimize (on-axis measurement)
+/// * `config` - Optimizer configuration
+/// * `resources` - Optional target and impulse-response resources prepared by the workflow
+/// * `sample_rate` - Sample rate for filter design
+///
+/// # Returns
+/// * Tuple of (optimized Biquad filters, final loss value)
+pub fn optimize_channel_eq(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+    optimize_channel_eq_detailed(curve, config, resources, sample_rate)
+        .map(EqOptimizationResult::into_legacy)
+}
+
+/// Detailed variant of [`optimize_channel_eq`] retaining termination,
+/// evaluation-budget, seed, constraint, restart, and confidence evidence.
+pub fn optimize_channel_eq_detailed(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    optimize_channel_eq_inner(
+        curve,
+        config,
+        resources,
+        sample_rate,
+        None,
+        None,
+        &RealOptimizerBackend::new(),
+    )
+}
+
+/// Optimize one channel with the CEA-2034 spinorama curves required by the
+/// speaker-score objective.
+pub fn optimize_channel_eq_with_spin_detailed(
+    curve: &Curve,
+    spin_data: &HashMap<String, Curve>,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    optimize_channel_eq_inner(
+        curve,
+        config,
+        resources,
+        sample_rate,
+        Some(spin_data),
+        None,
+        &RealOptimizerBackend::new(),
+    )
+}
+
+/// Optimize EQ filters for a single channel with per-iteration progress callback
+#[allow(dead_code)]
+pub fn optimize_channel_eq_with_callback(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    callback: autoeq_optim::optim::OptimProgressCallback,
+) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+    optimize_channel_eq_with_callback_detailed(curve, config, resources, sample_rate, callback)
+        .map(EqOptimizationResult::into_legacy)
+}
+
+/// Callback variant retaining structured optimizer evidence.
+pub fn optimize_channel_eq_with_callback_detailed(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    callback: autoeq_optim::optim::OptimProgressCallback,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    optimize_channel_eq_inner(
+        curve,
+        config,
+        resources,
+        sample_rate,
+        None,
+        Some(callback),
+        &RealOptimizerBackend::new(),
+    )
+}
+
+/// Forward iterative optimization: try 1..=max_filters, stop when improvement stalls.
+fn optimize_channel_eq_adaptive(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    spin_data: Option<&HashMap<String, Curve>>,
+    backend: &dyn OptimizerBackend,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    let prep = if let Some(spin_data) = spin_data {
+        prepare_single_channel_eq_with_spin(curve, config, resources, sample_rate, Some(spin_data))?
+    } else {
+        prepare_single_channel_eq(curve, config, resources, sample_rate)?
+    };
+    let max_filters = config.num_filters;
+    let base_budget_per_step = adaptive_budget_for_step(config.max_iter, max_filters, 1);
+
+    let mut best_filters: Vec<Biquad> = vec![];
+    let mut best_loss = f64::INFINITY;
+    let mut optimizer_evidence = Vec::new();
+
+    log::info!(
+        "  Adaptive filter selection: up to {} filters, threshold={:.6}, base budget/step={}",
+        max_filters,
+        config.min_filter_improvement,
+        base_budget_per_step
+    );
+
+    for k in 1..=max_filters {
+        let budget_per_step = adaptive_budget_for_step(config.max_iter, max_filters, k);
+        let (filters, loss, _x, mut pass_evidence) =
+            run_optimization_pass(&prep, k, budget_per_step, config, None, backend)?;
+
+        let improvement = best_loss - loss;
+        log::info!(
+            "  Adaptive: k={}/{}, loss={:.6}, improvement={:.6}",
+            k,
+            max_filters,
+            loss,
+            improvement
+        );
+
+        if k > 1 && improvement < config.min_filter_improvement {
+            for evidence in &mut pass_evidence {
+                evidence.selected_for_output = false;
+            }
+            optimizer_evidence.extend(pass_evidence);
+            log::info!(
+                "  Stopping at {} filters: improvement {:.6} < threshold {:.6}",
+                k - 1,
+                improvement,
+                config.min_filter_improvement
+            );
+            break;
+        }
+
+        for evidence in &mut optimizer_evidence {
+            evidence.selected_for_output = false;
+        }
+        optimizer_evidence.extend(pass_evidence);
+        best_filters = filters;
+        best_loss = loss;
+    }
+
+    // Backward elimination
+    if config.elimination_threshold > 0.0 && best_filters.len() > 1 {
+        let (pruned, pruned_loss) = backward_eliminate(
+            best_filters,
+            &prep.objective_data,
+            prep.peq_model,
+            config.elimination_threshold,
+        );
+        best_filters = pruned;
+        best_loss = pruned_loss;
+    }
+
+    log::info!(
+        "  Adaptive EQ optimization: {} filters, final loss={:.6}",
+        best_filters.len(),
+        best_loss
+    );
+
+    Ok(EqOptimizationResult {
+        filters: best_filters,
+        loss: best_loss,
+        optimizer_evidence,
+    })
+}
+
+fn optimize_channel_eq_inner(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    spin_data: Option<&HashMap<String, Curve>>,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+    backend: &dyn OptimizerBackend,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    let measurement_quality = autoeq_optim::measurements::assess_measurement_quality(curve);
+    let uncertainty_scaled_config =
+        uncertainty_scaled_optimizer_config(config, &measurement_quality);
+    let config = &uncertainty_scaled_config;
+
+    // Use adaptive filter selection when enabled and no callback
+    if config.min_filter_improvement > 0.0 && config.num_filters > 1 && callback.is_none() {
+        return optimize_channel_eq_adaptive(
+            curve,
+            config,
+            resources,
+            sample_rate,
+            spin_data,
+            backend,
+        );
+    }
+
+    // Single-pass optimization (legacy path or callback path)
+    let prep = if let Some(spin_data) = spin_data {
+        prepare_single_channel_eq_with_spin(curve, config, resources, sample_rate, Some(spin_data))?
+    } else {
+        prepare_single_channel_eq(curve, config, resources, sample_rate)?
+    };
+    let (filters, loss, _x, optimizer_evidence) = run_optimization_pass(
+        &prep,
+        config.num_filters,
+        config.max_iter,
+        config,
+        callback,
+        backend,
+    )?;
+
+    log::info!(
+        "EQ optimization: {} filters, final loss={:.6}",
+        filters.len(),
+        loss
+    );
+
+    Ok(EqOptimizationResult {
+        filters,
+        loss,
+        optimizer_evidence,
+    })
+}
+
+/// Optimize EQ filters across multiple measurement curves simultaneously.
+///
+/// Finds a single shared EQ that works well across all measurements,
+/// using the configured multi-measurement strategy to combine per-curve losses.
+///
+/// # Arguments
+/// * `curves` - Multiple frequency response curves (different positions/measurements)
+/// * `config` - Optimizer configuration
+/// * `multi_config` - Multi-measurement strategy configuration
+/// * `resources` - Optional target and impulse-response resources prepared by the workflow
+/// * `sample_rate` - Sample rate for filter design
+///
+/// # Returns
+/// * Tuple of (optimized Biquad filters, final loss value)
+#[allow(dead_code)]
+pub fn optimize_channel_eq_multi(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+    optimize_channel_eq_multi_detailed(curves, config, multi_config, resources, sample_rate)
+        .map(EqOptimizationResult::into_legacy)
+}
+
+/// Detailed multi-measurement variant retaining optimizer evidence.
+pub fn optimize_channel_eq_multi_detailed(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    optimize_channel_eq_multi_inner(
+        curves,
+        config,
+        multi_config,
+        resources,
+        sample_rate,
+        None,
+        &RealOptimizerBackend::new(),
+    )
+}
+
+#[allow(dead_code)]
+pub fn optimize_channel_eq_multi_with_auto_optimizer(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    auto_context: MultiEqAutoOptimizerContext,
+) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+    optimize_channel_eq_multi_with_auto_optimizer_detailed(
+        curves,
+        config,
+        multi_config,
+        resources,
+        sample_rate,
+        auto_context,
+    )
+    .map(EqOptimizationResult::into_legacy)
+}
+
+pub fn optimize_channel_eq_multi_with_auto_optimizer_detailed(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    auto_context: MultiEqAutoOptimizerContext,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    let resolved_config =
+        resolve_multi_measurement_auto_optimizer_config(curves, config, auto_context);
+    optimize_channel_eq_multi_inner(
+        curves,
+        &resolved_config,
+        multi_config,
+        resources,
+        sample_rate,
+        None,
+        &RealOptimizerBackend::new(),
+    )
+}
+
+/// Optimize EQ across multiple measurement curves with per-iteration progress callback
+#[allow(dead_code)]
+pub fn optimize_channel_eq_multi_with_callback(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    callback: autoeq_optim::optim::OptimProgressCallback,
+) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+    optimize_channel_eq_multi_with_callback_detailed(
+        curves,
+        config,
+        multi_config,
+        resources,
+        sample_rate,
+        callback,
+    )
+    .map(EqOptimizationResult::into_legacy)
+}
+
+/// Callback variant retaining structured optimizer evidence.
+pub fn optimize_channel_eq_multi_with_callback_detailed(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    callback: autoeq_optim::optim::OptimProgressCallback,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    optimize_channel_eq_multi_inner(
+        curves,
+        config,
+        multi_config,
+        resources,
+        sample_rate,
+        Some(callback),
+        &RealOptimizerBackend::new(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn optimize_channel_eq_multi_inner(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+    backend: &dyn OptimizerBackend,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    if curves.is_empty() {
+        return Err("no_measurements".into());
+    }
+
+    let measurement_quality =
+        autoeq_optim::measurements::assess_multiple_measurement_quality(curves);
+    if measurement_quality.quality == autoeq_optim::measurements::MeasurementQuality::Unusable {
+        return Err(format!(
+            "unusable multi-measurement input: {}",
+            measurement_quality.advisories.join(", ")
+        )
+        .into());
+    }
+    let uncertainty_scaled_config =
+        uncertainty_scaled_optimizer_config(config, &measurement_quality);
+    let config = &uncertainty_scaled_config;
+
+    // Optionally collapse multiple measurements into a distance- and
+    // directivity-weighted prototype before applying the chosen strategy.
+    let mut prototype_holder: Vec<Curve> = Vec::with_capacity(1);
+    let curves: &[Curve] = if let Some(rir_cfg) = &multi_config.rir_prototype {
+        if multi_config.weights.is_some() {
+            log::warn!(
+                "multi_measurement.weights is ignored when rir_prototype is enabled; \
+                 the prototype builder has already collapsed the measurements into a single curve"
+            );
+        }
+        log::info!(
+            "Building RIR prototype from {} measurements (distance_mode={:?}, directivity={:?})",
+            curves.len(),
+            rir_cfg.distance_mode,
+            rir_cfg.directivity,
+        );
+        let prototype = build_weighted_prototype(curves, rir_cfg)
+            .map_err(|e| format!("Failed to build RIR prototype: {}", e))?;
+        if matches!(
+            multi_config.strategy,
+            MultiMeasurementStrategy::SpatialRobustness
+                | MultiMeasurementStrategy::MinimaxUncertainty
+        ) {
+            log::warn!(
+                "rir_prototype collapses {} measurements into one curve; \
+                 {:?} strategy will operate on the prototype only",
+                curves.len(),
+                multi_config.strategy
+            );
+        }
+        prototype_holder.push(prototype.curve);
+        &prototype_holder
+    } else {
+        curves
+    };
+
+    // =========================================================================
+    // SpatialRobustness strategy: early return with single-curve optimization
+    // on the RMS-averaged curve, using correction depth mask to scale deviation.
+    // =========================================================================
+    if multi_config.strategy == MultiMeasurementStrategy::SpatialRobustness {
+        return optimize_spatial_robustness(
+            curves,
+            config,
+            multi_config,
+            resources,
+            sample_rate,
+            callback,
+            backend,
+        );
+    }
+
+    // =========================================================================
+    // MinimaxUncertainty strategy: materialise B bootstrap-resampled curves at
+    // setup time, then run the standard multi-objective machinery over the
+    // resampled bank. The MinimaxUncertainty arm in `compute_multi_objective_fitness`
+    // takes max (or CVaR mean of the worst α-tail) across the B resampled losses.
+    // =========================================================================
+    let bootstrap_storage: Option<Vec<Curve>>;
+    let uncertainty_cvar_alpha: Option<f64>;
+    if multi_config.strategy == MultiMeasurementStrategy::MinimaxUncertainty {
+        let boot_cfg = multi_config
+            .bootstrap_uncertainty
+            .clone()
+            .unwrap_or_default();
+        log::info!(
+            "  MinimaxUncertainty: generating {} bootstrap resamples (seed {}, scalarisation {:?})",
+            boot_cfg.num_resamples,
+            boot_cfg.seed,
+            boot_cfg.scalarisation
+        );
+        let resampled = roomeq_analysis::spatial_robustness::bootstrap_resampled_curves(
+            curves,
+            &roomeq_analysis::spatial_robustness::BootstrapConfig {
+                num_resamples: boot_cfg.num_resamples,
+                alpha: boot_cfg.alpha,
+                seed: boot_cfg.seed,
+            },
+            multi_config.weights.as_deref(),
+        )
+        .map_err(|e| -> Box<dyn Error> { Box::new(e) })?;
+        uncertainty_cvar_alpha = match boot_cfg.scalarisation {
+            roomeq_model::BootstrapScalarisation::WorstCase => None,
+            roomeq_model::BootstrapScalarisation::Cvar => Some(boot_cfg.cvar_alpha),
+        };
+        bootstrap_storage = Some(resampled);
+    } else {
+        bootstrap_storage = None;
+        uncertainty_cvar_alpha = None;
+    }
+    let curves: &[Curve] = match &bootstrap_storage {
+        Some(v) => v.as_slice(),
+        None => curves,
+    };
+
+    // Clamp optimizer frequency range to the measurement data range of the first curve
+    let data_min_freq = curves[0].freq[0];
+    let data_max_freq = curves[0].freq[curves[0].freq.len() - 1];
+    let effective_min_freq = config.min_freq.max(data_min_freq);
+    let effective_max_freq = config.max_freq.min(data_max_freq);
+
+    if effective_max_freq < config.max_freq || effective_min_freq > config.min_freq {
+        log::warn!(
+            "  Clamping optimizer freq range [{:.1}, {:.1}] to measurement data range [{:.1}, {:.1}]",
+            config.min_freq,
+            config.max_freq,
+            effective_min_freq,
+            effective_max_freq
+        );
+    }
+
+    // Parse PEQ model
+    let peq_model = config
+        .peq_model
+        .parse::<PeqModel>()
+        .map_err(|e| format!("Invalid PEQ model '{}': {}", config.peq_model, e))?;
+
+    // Parse loss type
+    let loss_type = match config.loss_type.as_str() {
+        "flat" => {
+            if config.asymmetric_loss {
+                log::info!("  Using asymmetric loss (peaks penalized 2x more than dips)");
+                LossType::SpeakerFlatAsymmetric
+            } else {
+                LossType::SpeakerFlat
+            }
+        }
+        "score" => LossType::SpeakerScore,
+        "epa" => LossType::Epa,
+        _ => return Err(format!("Unknown loss type: {}", config.loss_type).into()),
+    };
+
+    // Build one ObjectiveData per curve
+    let mut objectives = Vec::with_capacity(curves.len());
+    // We'll use the first curve to build Args and as the "primary"
+    let mut primary_objective = None;
+
+    for (i, curve) in curves.iter().enumerate() {
+        // Normalize each curve independently
+        let mut sum = 0.0;
+        let mut count = 0;
+        for j in 0..curve.freq.len() {
+            if curve.freq[j] >= effective_min_freq && curve.freq[j] <= effective_max_freq {
+                sum += curve.spl[j];
+                count += 1;
+            }
+        }
+        let mean_spl = if count > 0 { sum / count as f64 } else { 0.0 };
+        let mut normalized_curve = Curve {
+            freq: curve.freq.clone(),
+            spl: &curve.spl - mean_spl,
+            phase: curve.phase.clone(),
+            ..Default::default()
+        };
+
+        // Apply psychoacoustic smoothing if enabled
+        if config.psychoacoustic {
+            if i == 0 {
+                log::info!(
+                    "  Applying psychoacoustic smoothing to {} curves",
+                    curves.len()
+                );
+            }
+            let smoothing_config = crate::config_adapter::to_measurement_smoothing(
+                config.psychoacoustic_smoothing_config(),
+            );
+            normalized_curve =
+                autoeq_optim::read::smooth_psychoacoustic(&normalized_curve, &smoothing_config);
+        }
+
+        // Create target curve
+        let target_curve = resources::target_curve(&normalized_curve, resources);
+
+        let deviation_curve = Curve {
+            freq: normalized_curve.freq.clone(),
+            spl: &target_curve.spl - &normalized_curve.spl,
+            phase: None,
+            ..Default::default()
+        };
+
+        let optim_params_multi = build_optim_params(
+            config,
+            effective_min_freq,
+            effective_max_freq,
+            sample_rate,
+            loss_type,
+            peq_model,
+        );
+        let (mut objective_data, _use_cea) = setup_objective_data(
+            &optim_params_multi,
+            &normalized_curve,
+            &target_curve,
+            &deviation_curve,
+            &None,
+        )?;
+
+        // Propagate EPA configuration from OptimizerConfig into the
+        // ObjectiveData so `compute_base_fitness` uses the user-provided
+        // weights when `loss_type == LossType::Epa`.
+        objective_data.epa_config = config
+            .epa_config
+            .as_ref()
+            .map(crate::config_adapter::to_optimizer_epa);
+        objective_data.asymmetric_loss_config =
+            crate::config_adapter::to_optimizer_asymmetric_loss(config.asymmetric_loss_config());
+        objective_data.smoothness_penalty = optim_params_multi.smoothness_penalty.clone();
+
+        if i == 0 {
+            primary_objective = Some(objective_data.clone());
+        }
+        objectives.push(objective_data);
+    }
+
+    // Normalize weights
+    let n = objectives.len();
+    let weights = match &multi_config.weights {
+        Some(w) if w.len() == n => {
+            let sum: f64 = w.iter().sum();
+            if sum > 0.0 {
+                w.iter().map(|wi| wi / sum).collect()
+            } else {
+                vec![1.0 / n as f64; n]
+            }
+        }
+        _ => vec![1.0 / n as f64; n],
+    };
+
+    let multi_data = MultiObjectiveData {
+        objectives,
+        strategy: crate::config_adapter::to_optimizer_multi_measurement(multi_config.strategy),
+        weights,
+        variance_lambda: multi_config.variance_lambda,
+        uncertainty_cvar_alpha,
+    };
+
+    // Wrap multi-objective data into the primary ObjectiveData
+    let Some(mut primary) = primary_objective else {
+        return Err("multi-measurement optimization requires at least one objective".into());
+    };
+    primary.multi_objective = Some(multi_data);
+
+    let optim_params = build_optim_params(
+        config,
+        effective_min_freq,
+        effective_max_freq,
+        sample_rate,
+        loss_type,
+        peq_model,
+    );
+
+    // Setup bounds and initial guess
+    let (lower_bounds, upper_bounds) = autoeq_optim::optim::setup::setup_bounds(&optim_params);
+    let mut x =
+        autoeq_optim::optim::setup::initial_guess(&optim_params, &lower_bounds, &upper_bounds);
+
+    // Clone objective data for potential local refinement
+    let primary_for_refine = if config.refine {
+        Some(primary.clone())
+    } else {
+        None
+    };
+
+    // Run global optimization
+    let opt_result = if let Some(cb) = callback {
+        backend.optimize_filters_with_callback(
+            &mut x,
+            &lower_bounds,
+            &upper_bounds,
+            primary,
+            &optim_params,
+            cb,
+        )
+    } else {
+        backend.optimize_filters(&mut x, &lower_bounds, &upper_bounds, primary, &optim_params)
+    };
+
+    let global_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
+        &optim_params.algo,
+        opt_result,
+        &x,
+        &lower_bounds,
+        &upper_bounds,
+        optim_params.maxeval,
+        optim_params.seed,
+    );
+    if !global_evidence.converged {
+        if global_evidence.best_effort {
+            log::warn!(
+                "  Multi-measurement global optimization did not fully converge: {}",
+                global_evidence.status
+            );
+        } else {
+            return Err(format!(
+                "multi-measurement global optimizer produced unusable result: {}",
+                global_evidence.status
+            )
+            .into());
+        }
+    }
+    let global_loss = global_evidence
+        .objective
+        .ok_or("multi-measurement optimizer did not return a finite objective")?;
+    let mut optimizer_evidence = vec![global_evidence];
+
+    // Local refinement (COBYLA) to polish the global solution.
+    //
+    // Local optimizers are not guaranteed to monotonically improve their
+    // input — for some seeds the cobyla refine produces a worse point
+    // than DE found (regression surfaced by the multi-channel
+    // small_stereo_2_2_group QA case after the C-FFI nlopt → pure-Rust
+    // cobyla swap). Snapshot the global result and roll back if the
+    // refine regresses.
+    let final_loss = if let Some(refine_data) = primary_for_refine {
+        log::info!(
+            "  Running local refinement ({}) from global loss={:.6}",
+            config.local_algo,
+            global_loss
+        );
+        let x_before_refine = x.to_vec();
+        let local_result = backend.optimize_filters_with_algo_override(
+            &mut x,
+            &lower_bounds,
+            &upper_bounds,
+            refine_data,
+            &optim_params,
+            Some(&optim_params.local_algo),
+        );
+        let mut local_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
+            &optim_params.local_algo,
+            local_result,
+            &x,
+            &lower_bounds,
+            &upper_bounds,
+            optim_params.maxeval,
+            optim_params.seed,
+        );
+        if !local_evidence.converged {
+            log::warn!(
+                "  Multi-measurement local refinement did not fully converge: {}",
+                local_evidence.status
+            );
+        }
+        let local_loss = local_evidence.objective.unwrap_or(f64::INFINITY);
+        let use_local = local_evidence.confidence
+            != autoeq_optim::optim::OptimizerConfidence::Unusable
+            && local_loss < global_loss;
+        local_evidence.selected_for_output = use_local;
+        optimizer_evidence[0].selected_for_output = !use_local;
+        optimizer_evidence.push(local_evidence);
+        if use_local {
+            log::info!(
+                "  Local refinement: {:.6} -> {:.6} (improved {:.6})",
+                global_loss,
+                local_loss,
+                global_loss - local_loss
+            );
+            local_loss
+        } else {
+            log::info!(
+                "  Local refinement did not improve ({:.6} -> {:.6}), keeping global result",
+                global_loss,
+                local_loss
+            );
+            x.copy_from_slice(&x_before_refine);
+            global_loss
+        }
+    } else {
+        global_loss
+    };
+
+    let peq = autoeq_core::x2peq::x2peq(&x, sample_rate, optim_params.peq_model);
+    let filters: Vec<Biquad> = peq
+        .into_iter()
+        .map(|(_weight, biquad)| biquad)
+        .filter(|b| b.db_gain.abs() >= 0.05)
+        .collect();
+
+    log::info!(
+        "Multi-measurement EQ optimization ({:?}): {} filters, final loss={:.6}",
+        multi_config.strategy,
+        filters.len(),
+        final_loss
+    );
+
+    Ok(EqOptimizationResult {
+        filters,
+        loss: final_loss,
+        optimizer_evidence,
+    })
+}
+
+fn uncertainty_scaled_optimizer_config(
+    config: &OptimizerConfig,
+    quality: &autoeq_optim::measurements::MeasurementQualityReport,
+) -> OptimizerConfig {
+    let mut scaled = config.clone();
+    let scale = quality.correction_depth_scale.clamp(0.0, 1.0);
+    scaled.min_db = config.min_db * scale;
+    scaled.max_db = config.max_db * scale;
+    if scale < 1.0 {
+        log::info!(
+            "Measurement confidence {:?} limits correction depth to {:.0}%: [{:.1}, {:.1}] dB -> [{:.1}, {:.1}] dB",
+            quality.quality,
+            scale * 100.0,
+            config.min_db,
+            config.max_db,
+            scaled.min_db,
+            scaled.max_db,
+        );
+    }
+    scaled
+}
+
+/// Spatial robustness optimization.
+///
+/// Instead of running multi-objective optimization across all curves, this:
+/// 1. Computes RMS power average across all positions
+/// 2. Computes per-frequency spatial variance
+/// 3. Builds a correction depth mask (high correction where consistent, low where variable)
+/// 4. Scales the target deviation by the mask before single-curve optimization
+///
+/// The mask ensures the optimizer focuses filter resources on spatially consistent
+/// features (room modes) and avoids wasting filters on position-dependent effects
+/// (comb filtering from reflections).
+fn optimize_spatial_robustness(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+    backend: &dyn OptimizerBackend,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    // Build spatial robustness config from serde config or defaults
+    let sr_config = match &multi_config.spatial_robustness {
+        Some(sc) => SpatialRobustnessConfig {
+            variance_threshold_db: sc.variance_threshold_db,
+            transition_width_db: sc.transition_width_db,
+            min_correction_depth: sc.min_correction_depth,
+            mask_smoothing_octaves: sc.mask_smoothing_octaves,
+        },
+        None => SpatialRobustnessConfig::default(),
+    };
+
+    // Analyze spatial robustness, optionally with bootstrap confidence bands.
+    let mut analysis = if let Some(boot_cfg) = multi_config.bootstrap_uncertainty.as_ref() {
+        let bootstrap = spatial_robustness::BootstrapConfig {
+            num_resamples: boot_cfg.num_resamples,
+            alpha: boot_cfg.alpha,
+            seed: boot_cfg.seed,
+        };
+        spatial_robustness::analyze_spatial_robustness_with_bootstrap(
+            curves,
+            &sr_config,
+            &bootstrap,
+            multi_config.weights.as_deref(),
+        )?
+    } else {
+        spatial_robustness::try_analyze_spatial_robustness_weighted(
+            curves,
+            &sr_config,
+            multi_config.weights.as_deref(),
+        )?
+    };
+
+    if let Some(bootstrap) = analysis.bootstrap.as_ref() {
+        let confidence_width = &bootstrap.upper.spl - &bootstrap.lower.spl;
+        let uncertainty_depth = spatial_robustness::correction_depth_mask(
+            &analysis.averaged_curve.freq,
+            &confidence_width,
+            &sr_config,
+        );
+        analysis.correction_depth = &analysis.correction_depth * &uncertainty_depth;
+        let mean_width =
+            confidence_width.iter().sum::<f64>() / confidence_width.len().max(1) as f64;
+        log::info!(
+            "  Bootstrap uncertainty mask: mean CI width={:.2} dB, depth multiplier mean={:.2}",
+            mean_width,
+            uncertainty_depth.iter().sum::<f64>() / uncertainty_depth.len().max(1) as f64,
+        );
+    }
+
+    log::info!(
+        "  Spatial robustness: {} positions, variance range {:.1}-{:.1} dB",
+        curves.len(),
+        analysis
+            .spatial_variance
+            .iter()
+            .cloned()
+            .fold(f64::INFINITY, f64::min),
+        analysis
+            .spatial_variance
+            .iter()
+            .cloned()
+            .fold(f64::NEG_INFINITY, f64::max),
+    );
+
+    let mean_depth =
+        analysis.correction_depth.iter().sum::<f64>() / analysis.correction_depth.len() as f64;
+    log::info!(
+        "  Correction depth: mean={:.2}, min={:.2}, max={:.2}",
+        mean_depth,
+        analysis
+            .correction_depth
+            .iter()
+            .cloned()
+            .fold(f64::INFINITY, f64::min),
+        analysis
+            .correction_depth
+            .iter()
+            .cloned()
+            .fold(f64::NEG_INFINITY, f64::max),
+    );
+
+    // Use the RMS-averaged curve as input to the single-curve optimizer.
+    // The correction depth mask is applied by scaling the deviation curve:
+    // where depth is low, the deviation appears small → optimizer won't place filters there.
+    let averaged_curve = &analysis.averaged_curve;
+
+    // Clamp frequency range
+    let data_min_freq = averaged_curve.freq[0];
+    let data_max_freq = averaged_curve.freq[averaged_curve.freq.len() - 1];
+    let effective_min_freq = config.min_freq.max(data_min_freq);
+    let effective_max_freq = config.max_freq.min(data_max_freq);
+
+    // Normalize by subtracting mean SPL in optimization range
+    let mut sum = 0.0;
+    let mut count = 0;
+    for i in 0..averaged_curve.freq.len() {
+        if averaged_curve.freq[i] >= effective_min_freq
+            && averaged_curve.freq[i] <= effective_max_freq
+        {
+            sum += averaged_curve.spl[i];
+            count += 1;
+        }
+    }
+    let mean_spl = if count > 0 { sum / count as f64 } else { 0.0 };
+    let mut normalized_curve = Curve {
+        freq: averaged_curve.freq.clone(),
+        spl: &averaged_curve.spl - mean_spl,
+        phase: averaged_curve.phase.clone(),
+        ..Default::default()
+    };
+
+    // Apply psychoacoustic smoothing if enabled
+    if config.psychoacoustic {
+        log::info!("  Applying psychoacoustic smoothing to spatially averaged curve");
+        let smoothing_config = crate::config_adapter::to_measurement_smoothing(
+            config.psychoacoustic_smoothing_config(),
+        );
+        normalized_curve =
+            autoeq_optim::read::smooth_psychoacoustic(&normalized_curve, &smoothing_config);
+    }
+
+    // Parse PEQ model
+    let peq_model = config
+        .peq_model
+        .parse::<PeqModel>()
+        .map_err(|e| format!("Invalid PEQ model '{}': {}", config.peq_model, e))?;
+
+    // Parse loss type
+    let loss_type = match config.loss_type.as_str() {
+        "flat" => {
+            if config.asymmetric_loss {
+                LossType::SpeakerFlatAsymmetric
+            } else {
+                LossType::SpeakerFlat
+            }
+        }
+        "score" => LossType::SpeakerScore,
+        "epa" => LossType::Epa,
+        _ => return Err(format!("Unknown loss type: {}", config.loss_type).into()),
+    };
+
+    // Build target curve
+    let target_curve = resources::target_curve(&normalized_curve, resources);
+
+    // Compute raw deviation
+    let raw_deviation = &target_curve.spl - &normalized_curve.spl;
+
+    // Apply correction depth mask to deviation.
+    // This is the key spatial robustness step: the deviation at frequencies where the
+    // spatial variance is high gets scaled down, so the optimizer doesn't try to correct
+    // position-dependent features.
+    let masked_deviation = &raw_deviation * &analysis.correction_depth;
+
+    let deviation_curve = Curve {
+        freq: normalized_curve.freq.clone(),
+        spl: masked_deviation,
+        phase: None,
+        ..Default::default()
+    };
+
+    let optim_params = build_optim_params(
+        config,
+        effective_min_freq,
+        effective_max_freq,
+        sample_rate,
+        loss_type,
+        peq_model,
+    );
+
+    // Setup objective data with the masked deviation
+    let (mut objective_data, _use_cea) = setup_objective_data(
+        &optim_params,
+        &normalized_curve,
+        &target_curve,
+        &deviation_curve,
+        &None,
+    )?;
+
+    // Propagate EPA config so compute_base_fitness uses user-provided
+    // weights when loss_type == LossType::Epa.
+    objective_data.epa_config = config
+        .epa_config
+        .as_ref()
+        .map(crate::config_adapter::to_optimizer_epa);
+    objective_data.asymmetric_loss_config =
+        crate::config_adapter::to_optimizer_asymmetric_loss(config.asymmetric_loss_config());
+    objective_data.smoothness_penalty = optim_params.smoothness_penalty.clone();
+
+    let (lower_bounds, upper_bounds) = autoeq_optim::optim::setup::setup_bounds(&optim_params);
+    let mut x =
+        autoeq_optim::optim::setup::initial_guess(&optim_params, &lower_bounds, &upper_bounds);
+
+    let opt_result = if let Some(cb) = callback {
+        backend.optimize_filters_with_callback(
+            &mut x,
+            &lower_bounds,
+            &upper_bounds,
+            objective_data,
+            &optim_params,
+            cb,
+        )
+    } else {
+        backend.optimize_filters(
+            &mut x,
+            &lower_bounds,
+            &upper_bounds,
+            objective_data,
+            &optim_params,
+        )
+    };
+
+    let evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
+        &optim_params.algo,
+        opt_result,
+        &x,
+        &lower_bounds,
+        &upper_bounds,
+        optim_params.maxeval,
+        optim_params.seed,
+    );
+    if !evidence.converged {
+        if evidence.best_effort {
+            log::warn!(
+                "  Spatial robustness optimization did not fully converge: {}",
+                evidence.status
+            );
+        } else {
+            return Err(format!(
+                "spatial robustness optimizer produced unusable result: {}",
+                evidence.status
+            )
+            .into());
+        }
+    }
+    let final_loss = evidence
+        .objective
+        .ok_or("spatial robustness optimizer did not return a finite objective")?;
+
+    let peq = autoeq_core::x2peq::x2peq(&x, sample_rate, optim_params.peq_model);
+    let filters: Vec<Biquad> = peq
+        .into_iter()
+        .map(|(_weight, biquad)| biquad)
+        .filter(|b| b.db_gain.abs() >= 0.05)
+        .collect();
+
+    log::info!(
+        "Spatial robustness EQ: {} filters, final loss={:.6}",
+        filters.len(),
+        final_loss
+    );
+
+    Ok(EqOptimizationResult {
+        filters,
+        loss: final_loss,
+        optimizer_evidence: vec![evidence],
+    })
+}
+
+#[cfg(test)]
+mod processing_mode_tests {
+    use super::*;
+    use ndarray::Array1;
+
+    use crate::mixed_phase::MixedPhaseConfig;
+    use roomeq_model::{FirConfig, ProcessingMode};
+
+    fn make_simple_room_curve() -> Curve {
+        let n = 100;
+        let log_min = 20.0_f64.ln();
+        let log_max = 20000.0_f64.ln();
+        let freqs: Vec<f64> = (0..n)
+            .map(|i| (log_min + (log_max - log_min) * i as f64 / (n - 1) as f64).exp())
+            .collect();
+        let spl: Vec<f64> = freqs
+            .iter()
+            .map(|&f| 10.0 * (-((f.log2() - 80.0_f64.log2()).powi(2) / 0.3).exp()))
+            .collect();
+        Curve {
+            freq: Array1::from_vec(freqs),
+            spl: Array1::from_vec(spl),
+            phase: None,
+            ..Default::default()
+        }
+    }
+
+    fn make_room_curve_with_phase() -> Curve {
+        let n = 100;
+        let log_min = 20.0_f64.ln();
+        let log_max = 20000.0_f64.ln();
+        let freqs: Vec<f64> = (0..n)
+            .map(|i| (log_min + (log_max - log_min) * i as f64 / (n - 1) as f64).exp())
+            .collect();
+        let spl: Vec<f64> = freqs
+            .iter()
+            .map(|&f| 10.0 * (-((f.log2() - 80.0_f64.log2()).powi(2) / 0.3).exp()))
+            .collect();
+        // Add minimum phase (negative group delay = phase leading)
+        let phase: Vec<f64> = freqs
+            .iter()
+            .map(|&f| -30.0 * (f / 1000.0).log10())
+            .collect();
+        Curve {
+            freq: Array1::from_vec(freqs),
+            spl: Array1::from_vec(spl),
+            phase: Some(Array1::from_vec(phase)),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn zero_filter_config_returns_identity_without_running_backend() {
+        let curve = make_simple_room_curve();
+        let config = OptimizerConfig {
+            algorithm: "autoeq:cmaes".to_string(),
+            num_filters: 0,
+            refine: true,
+            ..OptimizerConfig::default()
+        };
+
+        let result = optimize_channel_eq_detailed(&curve, &config, None, 48_000.0).unwrap();
+
+        assert!(result.filters.is_empty());
+        assert!(result.optimizer_evidence.is_empty());
+        assert!(result.loss.is_finite());
+    }
+
+    #[test]
+    fn measurement_uncertainty_scales_optimizer_gain_bounds() {
+        let config = OptimizerConfig {
+            min_db: -12.0,
+            max_db: 8.0,
+            ..OptimizerConfig::default()
+        };
+        let quality =
+            autoeq_optim::measurements::assess_measurement_quality(&make_simple_room_curve());
+        assert_eq!(quality.correction_depth_scale, 0.75);
+
+        let scaled = uncertainty_scaled_optimizer_config(&config, &quality);
+        assert_eq!(scaled.min_db, -9.0);
+        assert_eq!(scaled.max_db, 6.0);
+    }
+
+    /// Test LowLatency mode (IIR only) - default processing mode
+    #[test]
+    fn test_processing_mode_lowlatency_config() {
+        let config = OptimizerConfig {
+            processing_mode: ProcessingMode::LowLatency,
+            ..OptimizerConfig::default()
+        };
+        assert_eq!(config.processing_mode, ProcessingMode::LowLatency);
+    }
+
+    /// Test LowLatency mode produces valid IIR filters
+    #[test]
+    fn test_optimize_channel_eq_lowlatency() {
+        let curve = make_simple_room_curve();
+        let config = OptimizerConfig {
+            processing_mode: ProcessingMode::LowLatency,
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 3,
+            max_iter: 1000,
+            population: 10,
+            seed: Some(42),
+            ..OptimizerConfig::default()
+        };
+
+        let result = optimize_channel_eq(&curve, &config, None, 48000.0);
+        assert!(result.is_ok(), "LowLatency optimization should succeed");
+        let (filters, loss) = result.unwrap();
+        assert!(!filters.is_empty(), "should produce IIR filters");
+        assert!(loss.is_finite(), "loss should be finite, got {}", loss);
+    }
+
+    /// Test optimize_channel_eq_with_callback invokes callback
+    #[test]
+    fn test_optimize_channel_eq_with_callback_invoked() {
+        let curve = make_simple_room_curve();
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 2,
+            max_iter: 1000,
+            population: 8,
+            seed: Some(42),
+            ..OptimizerConfig::default()
+        };
+
+        let callback_called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let callback_called_clone = std::sync::Arc::clone(&callback_called);
+        let callback: autoeq_optim::optim::OptimProgressCallback =
+            Box::new(move |_iter: usize, _loss: f64, _epa: Option<f64>| {
+                callback_called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+                autoeq_optim::de::CallbackAction::Continue
+            });
+
+        let result = optimize_channel_eq_with_callback(&curve, &config, None, 48000.0, callback);
+        assert!(
+            result.is_ok(),
+            "optimization with callback should succeed: {:?}",
+            result.err()
+        );
+        assert!(
+            callback_called.load(std::sync::atomic::Ordering::SeqCst),
+            "callback should have been invoked"
+        );
+    }
+
+    /// Test PhaseLinear mode configuration
+    #[test]
+    fn test_processing_mode_phaselinear_config() {
+        let fir_config = FirConfig {
+            taps: 4096,
+            phase: "kirkeby".to_string(),
+            correct_excess_phase: false,
+            phase_smoothing: 0.167,
+            pre_ringing: None,
+        };
+        let config = OptimizerConfig {
+            processing_mode: ProcessingMode::PhaseLinear,
+            fir: Some(fir_config),
+            ..OptimizerConfig::default()
+        };
+        assert_eq!(config.processing_mode, ProcessingMode::PhaseLinear);
+        assert!(config.fir.is_some());
+    }
+
+    /// Test Hybrid mode configuration
+    #[test]
+    fn test_processing_mode_hybrid_config() {
+        let fir_config = FirConfig {
+            taps: 4096,
+            phase: "kirkeby".to_string(),
+            correct_excess_phase: false,
+            phase_smoothing: 0.167,
+            pre_ringing: None,
+        };
+        let config = OptimizerConfig {
+            processing_mode: ProcessingMode::Hybrid,
+            fir: Some(fir_config),
+            ..OptimizerConfig::default()
+        };
+        assert_eq!(config.processing_mode, ProcessingMode::Hybrid);
+    }
+
+    /// Test MixedPhase mode configuration
+    #[test]
+    fn test_processing_mode_mixedphase_config() {
+        use roomeq_model::MixedPhaseSerdeConfig;
+        let mixed_phase_config = MixedPhaseSerdeConfig {
+            max_fir_length_ms: 10.0,
+            pre_ringing_threshold_db: -30.0,
+            min_spatial_depth: 0.5,
+            phase_smoothing_octaves: 1.0 / 6.0,
+        };
+        let config = OptimizerConfig {
+            processing_mode: ProcessingMode::MixedPhase,
+            mixed_phase: Some(mixed_phase_config),
+            ..OptimizerConfig::default()
+        };
+        assert_eq!(config.processing_mode, ProcessingMode::MixedPhase);
+        assert!(config.mixed_phase.is_some());
+    }
+
+    /// Test MixedPhase mode requires phase data
+    #[test]
+    fn test_mixedphase_requires_phase_data() {
+        let curve_without_phase = make_simple_room_curve();
+        assert!(curve_without_phase.phase.is_none());
+
+        // MixedPhaseConfig should be used but decompose_phase will fail without phase
+        let config = MixedPhaseConfig::default();
+        let result = crate::mixed_phase::decompose_phase(&curve_without_phase, &config);
+        assert!(result.is_err(), "MixedPhase should fail without phase data");
+    }
+
+    /// Test MixedPhase mode with phase data succeeds
+    #[test]
+    fn test_mixedphase_with_phase_data() {
+        let curve_with_phase = make_room_curve_with_phase();
+        assert!(curve_with_phase.phase.is_some());
+
+        let config = MixedPhaseConfig::default();
+        let result = crate::mixed_phase::decompose_phase(&curve_with_phase, &config);
+        assert!(
+            result.is_ok(),
+            "MixedPhase should succeed with phase data: {:?}",
+            result.err()
+        );
+    }
+
+    /// Test that ProcessingMode enum has expected variants
+    #[test]
+    fn test_processing_mode_variants() {
+        // Verify all variants exist and can be compared
+        let modes = [
+            ProcessingMode::LowLatency,
+            ProcessingMode::PhaseLinear,
+            ProcessingMode::Hybrid,
+            ProcessingMode::MixedPhase,
+        ];
+
+        // Verify each variant is different from others
+        assert_ne!(modes[0], modes[1]);
+        assert_ne!(modes[0], modes[2]);
+        assert_ne!(modes[0], modes[3]);
+        assert_ne!(modes[1], modes[2]);
+        assert_ne!(modes[1], modes[3]);
+        assert_ne!(modes[2], modes[3]);
+    }
+}
+
+#[cfg(test)]
+mod harman_regression_tests {
+    use super::*;
+    use ndarray::Array1;
+
+    use roomeq_model::target_tilt::build_complete_target_curve;
+    use roomeq_model::{TargetResponseConfig, TargetShape, UserPreference};
+
+    fn make_curve_with_freqs(freqs: Vec<f64>, spl: Vec<f64>) -> Curve {
+        Curve {
+            freq: Array1::from_vec(freqs),
+            spl: Array1::from_vec(spl),
+            phase: None,
+            ..Default::default()
+        }
+    }
+
+    fn harman_curve(freqs: &[f64], bass_shelf_db: f64) -> Curve {
+        let config = TargetResponseConfig {
+            shape: TargetShape::Harman,
+            preference: UserPreference {
+                bass_shelf_db,
+                bass_shelf_freq: 200.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        build_complete_target_curve(&Array1::from_vec(freqs.to_vec()), &config)
+    }
+
+    /// Regression test: optimization should not produce NaN or Inf loss with Harman target
+    #[test]
+    fn test_harman_target_no_nan_loss() {
+        let freqs = vec![100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0];
+        let spl = vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let curve = make_curve_with_freqs(freqs, spl);
+
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 3,
+            max_iter: 1000,
+            population: 10,
+            seed: Some(42),
+            tolerance: 1e-3,
+            atolerance: 1e-3,
+            ..OptimizerConfig::default()
+        };
+
+        let result = optimize_channel_eq(&curve, &config, None, 48000.0);
+        assert!(
+            result.is_ok(),
+            "Optimization should succeed with Harman target"
+        );
+
+        let (_, loss) = result.unwrap();
+        assert!(loss.is_finite(), "Loss should be finite, got {}", loss);
+        assert!(loss >= 0.0, "Loss should be non-negative");
+    }
+
+    /// Regression test: Harman target curve at reference frequency should be ~0 dB
+    #[test]
+    fn test_harman_target_reference_frequency() {
+        let freqs: Vec<f64> = (0..100)
+            .map(|i| 20.0 * (1000.0 / 20.0_f64).powf(i as f64 / 99.0))
+            .collect();
+        let curve = harman_curve(&freqs, 0.0);
+
+        let idx_ref = freqs
+            .iter()
+            .position(|f| (f - 1000.0).abs() < freqs[1] - freqs[0])
+            .unwrap_or(freqs.len() / 2);
+
+        assert!(
+            curve.spl[idx_ref].abs() < 0.1,
+            "At 1kHz reference, target should be ~0 dB, got {:.4}",
+            curve.spl[idx_ref]
+        );
+    }
+
+    /// Regression test: Harman target with bass boost adds bass below shelf freq
+    #[test]
+    fn test_harman_target_with_bass_boost() {
+        let freqs: Vec<f64> = (0..100)
+            .map(|i| 20.0 * (1000.0 / 20.0_f64).powf(i as f64 / 99.0))
+            .collect();
+        let curve = harman_curve(&freqs, 6.0);
+
+        let freq_step = freqs[1] - freqs[0];
+
+        let idx_bass = freqs
+            .iter()
+            .position(|f| (f - 100.0).abs() < freq_step * 2.0)
+            .unwrap_or(5);
+        assert!(
+            curve.spl[idx_bass] > 4.0,
+            "At 100Hz with +6dB bass boost, should have >4dB boost, got {:.2}",
+            curve.spl[idx_bass]
+        );
+
+        let idx_ref = freqs
+            .iter()
+            .position(|f| (f - 1000.0).abs() < freq_step * 2.0)
+            .unwrap_or(freqs.len() / 2);
+        assert!(
+            curve.spl[idx_ref].abs() < 0.5,
+            "At 1kHz reference, should be ~0 dB, got {:.4}",
+            curve.spl[idx_ref]
+        );
+    }
+
+    /// Regression test: Harman target has downward tilt at high frequencies
+    #[test]
+    fn test_harman_target_high_frequency_tilt() {
+        let freqs: Vec<f64> = (0..100)
+            .map(|i| 20.0 * (1000.0 / 20.0_f64).powf(i as f64 / 99.0))
+            .collect();
+        let curve = harman_curve(&freqs, 0.0);
+
+        let freq_step = freqs[1] - freqs[0];
+
+        let idx_low = freqs
+            .iter()
+            .position(|f| (f - 200.0).abs() < freq_step * 2.0)
+            .unwrap_or(10);
+        let idx_high = freqs.len() - 1;
+
+        assert!(
+            curve.spl[idx_high] < curve.spl[idx_low] - 1.0,
+            "High freq should be significantly below low freq (tilt), got low={:.2}, high={:.2}",
+            curve.spl[idx_low],
+            curve.spl[idx_high]
+        );
+    }
+}
+
+#[cfg(test)]
+mod multi_eq_tests {
+    use super::*;
+    use autoeq_optim::optim::{MockOptimizerBackend, OptimizerConfidence, OptimizerTermination};
+    use ndarray::Array1;
+
+    fn make_simple_room_curve() -> Curve {
+        let n = 100;
+        let log_min = 20.0_f64.ln();
+        let log_max = 20000.0_f64.ln();
+        let freqs: Vec<f64> = (0..n)
+            .map(|i| (log_min + (log_max - log_min) * i as f64 / (n - 1) as f64).exp())
+            .collect();
+        let spl: Vec<f64> = freqs
+            .iter()
+            .map(|&f| 10.0 * (-((f.log2() - 80.0_f64.log2()).powi(2) / 0.3).exp()))
+            .collect();
+        Curve {
+            freq: Array1::from_vec(freqs),
+            spl: Array1::from_vec(spl),
+            phase: None,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn multi_eq_detailed_reports_ok_non_convergence_as_low_confidence() {
+        let curve = make_simple_room_curve();
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            num_filters: 1,
+            max_iter: 25,
+            refine: false,
+            ..OptimizerConfig::default()
+        };
+        let backend = MockOptimizerBackend::ok(
+            "not converged: maximum evaluation budget reached (nfev=25)",
+            1.5,
+        );
+
+        let result = optimize_channel_eq_multi_inner(
+            &[curve],
+            &config,
+            &MultiMeasurementConfig::default(),
+            None,
+            48_000.0,
+            None,
+            &backend,
+        )
+        .expect("a finite in-bounds best-effort result remains reportable");
+
+        assert_eq!(result.optimizer_evidence.len(), 1);
+        let evidence = &result.optimizer_evidence[0];
+        assert_eq!(evidence.termination, OptimizerTermination::EvaluationLimit);
+        assert_eq!(evidence.confidence, OptimizerConfidence::Low);
+        assert!(!evidence.converged);
+        assert!(evidence.best_effort);
+        assert_eq!(evidence.evaluation_count, Some(25));
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_rejects_mismatched_measurement_grids() {
+        let first = make_simple_room_curve();
+        let mut second = first.clone();
+        second.freq[10] *= 1.001;
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            num_filters: 1,
+            max_iter: 1,
+            population: 4,
+            seed: Some(42),
+            ..OptimizerConfig::default()
+        };
+
+        let error = optimize_channel_eq_multi(
+            &[first, second],
+            &config,
+            &MultiMeasurementConfig::default(),
+            None,
+            48_000.0,
+        )
+        .expect_err("mismatched grids must be rejected before optimization");
+
+        assert!(
+            error.to_string().contains("mismatched_measurement_grids"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_basic() {
+        let curve1 = make_simple_room_curve();
+        let mut curve2 = curve1.clone();
+        curve2.spl = curve2.spl.mapv(|s| s + 1.0);
+
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 3,
+            max_iter: 2000,
+            population: 10,
+            seed: Some(42),
+            min_filter_improvement: 0.0,
+            ..OptimizerConfig::default()
+        };
+        let multi_config = MultiMeasurementConfig::default();
+
+        let result =
+            optimize_channel_eq_multi(&[curve1, curve2], &config, &multi_config, None, 48000.0);
+        assert!(
+            result.is_ok(),
+            "multi optimization should succeed: {:?}",
+            result.err()
+        );
+        let (filters, loss) = result.unwrap();
+        assert!(!filters.is_empty());
+        assert!(loss.is_finite());
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_with_auto_optimizer_runs() {
+        let curve1 = make_simple_room_curve();
+        let mut curve2 = curve1.clone();
+        curve2.spl = curve2.spl.mapv(|s| s + 1.0);
+
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 2,
+            max_iter: 1000,
+            population: 8,
+            seed: Some(42),
+            min_filter_improvement: 0.0,
+            ..OptimizerConfig::default()
+        };
+        let multi_config = MultiMeasurementConfig::default();
+        let auto_context = crate::eq::MultiEqAutoOptimizerContext::sub_channel();
+
+        let result = optimize_channel_eq_multi_with_auto_optimizer(
+            &[curve1, curve2],
+            &config,
+            &multi_config,
+            None,
+            48000.0,
+            auto_context,
+        );
+        assert!(
+            result.is_ok(),
+            "multi optimization with auto optimizer should succeed: {:?}",
+            result.err()
+        );
+        let (filters, loss) = result.unwrap();
+        assert!(!filters.is_empty());
+        assert!(loss.is_finite());
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_spatial_robustness() {
+        let curve1 = make_simple_room_curve();
+        let mut curve2 = curve1.clone();
+        curve2.spl = curve2.spl.mapv(|s| s + 2.0);
+
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 3,
+            max_iter: 2000,
+            population: 10,
+            seed: Some(42),
+            min_filter_improvement: 0.0,
+            ..OptimizerConfig::default()
+        };
+        let multi_config = MultiMeasurementConfig {
+            strategy: MultiMeasurementStrategy::SpatialRobustness,
+            ..MultiMeasurementConfig::default()
+        };
+
+        let result =
+            optimize_channel_eq_multi(&[curve1, curve2], &config, &multi_config, None, 48000.0);
+        assert!(
+            result.is_ok(),
+            "spatial robustness should succeed: {:?}",
+            result.err()
+        );
+        let (filters, loss) = result.unwrap();
+        assert!(!filters.is_empty());
+        assert!(loss.is_finite());
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_weighted_sum() {
+        let curve1 = make_simple_room_curve();
+        let mut curve2 = curve1.clone();
+        curve2.spl = curve2.spl.mapv(|s| s + 1.5);
+
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 3,
+            max_iter: 2000,
+            population: 10,
+            seed: Some(42),
+            min_filter_improvement: 0.0,
+            ..OptimizerConfig::default()
+        };
+        let multi_config = MultiMeasurementConfig {
+            strategy: MultiMeasurementStrategy::WeightedSum,
+            weights: Some(vec![1.0, 2.0]),
+            ..MultiMeasurementConfig::default()
+        };
+
+        let result =
+            optimize_channel_eq_multi(&[curve1, curve2], &config, &multi_config, None, 48000.0);
+        assert!(
+            result.is_ok(),
+            "weighted sum should succeed: {:?}",
+            result.err()
+        );
+        let (filters, loss) = result.unwrap();
+        assert!(!filters.is_empty());
+        assert!(loss.is_finite());
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_minimax() {
+        let curve1 = make_simple_room_curve();
+        let mut curve2 = curve1.clone();
+        curve2.spl = curve2.spl.mapv(|s| s + 3.0);
+
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 3,
+            max_iter: 2000,
+            population: 10,
+            seed: Some(42),
+            min_filter_improvement: 0.0,
+            ..OptimizerConfig::default()
+        };
+        let multi_config = MultiMeasurementConfig {
+            strategy: MultiMeasurementStrategy::Minimax,
+            ..MultiMeasurementConfig::default()
+        };
+
+        let result =
+            optimize_channel_eq_multi(&[curve1, curve2], &config, &multi_config, None, 48000.0);
+        assert!(result.is_ok(), "minimax should succeed: {:?}", result.err());
+        let (filters, loss) = result.unwrap();
+        assert!(!filters.is_empty());
+        assert!(loss.is_finite());
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_variance_penalized() {
+        let curve1 = make_simple_room_curve();
+        let mut curve2 = curve1.clone();
+        curve2.spl = curve2.spl.mapv(|s| s + 2.5);
+
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 3,
+            max_iter: 2000,
+            population: 10,
+            seed: Some(42),
+            min_filter_improvement: 0.0,
+            ..OptimizerConfig::default()
+        };
+        let multi_config = MultiMeasurementConfig {
+            strategy: MultiMeasurementStrategy::VariancePenalized,
+            variance_lambda: 2.0,
+            ..MultiMeasurementConfig::default()
+        };
+
+        let result =
+            optimize_channel_eq_multi(&[curve1, curve2], &config, &multi_config, None, 48000.0);
+        assert!(
+            result.is_ok(),
+            "variance penalized should succeed: {:?}",
+            result.err()
+        );
+        let (filters, loss) = result.unwrap();
+        assert!(!filters.is_empty());
+        assert!(loss.is_finite());
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_empty_curves_returns_error() {
+        let config = OptimizerConfig::default();
+        let multi_config = MultiMeasurementConfig::default();
+        let err = optimize_channel_eq_multi(&[], &config, &multi_config, None, 48000.0)
+            .expect_err("empty measurement sets must fail closed");
+
+        assert_eq!(err.to_string(), "no_measurements");
+    }
+
+    #[test]
+    fn test_optimize_channel_eq_multi_with_callback() {
+        let curve1 = make_simple_room_curve();
+        let mut curve2 = curve1.clone();
+        curve2.spl = curve2.spl.mapv(|s| s + 1.0);
+
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 2,
+            max_iter: 1000,
+            population: 8,
+            seed: Some(42),
+            min_filter_improvement: 0.0,
+            ..OptimizerConfig::default()
+        };
+        let multi_config = MultiMeasurementConfig::default();
+
+        let callback_called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let callback_called_clone = std::sync::Arc::clone(&callback_called);
+        let callback: autoeq_optim::optim::OptimProgressCallback =
+            Box::new(move |_iter: usize, _loss: f64, _epa: Option<f64>| {
+                callback_called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+                autoeq_optim::de::CallbackAction::Continue
+            });
+
+        let result = optimize_channel_eq_multi_with_callback(
+            &[curve1, curve2],
+            &config,
+            &multi_config,
+            None,
+            48000.0,
+            callback,
+        );
+        assert!(
+            result.is_ok(),
+            "multi with callback should succeed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_minimax_uncertainty() {
+        let curve1 = make_simple_room_curve();
+        let mut curve2 = curve1.clone();
+        curve2.spl = curve2.spl.mapv(|s| s + 1.0);
+
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 2,
+            max_iter: 1000,
+            population: 8,
+            seed: Some(42),
+            min_filter_improvement: 0.0,
+            ..OptimizerConfig::default()
+        };
+        let multi_config = MultiMeasurementConfig {
+            strategy: MultiMeasurementStrategy::MinimaxUncertainty,
+            bootstrap_uncertainty: Some(roomeq_model::BootstrapUncertaintyConfig {
+                num_resamples: 4,
+                alpha: 0.05,
+                seed: 1,
+                scalarisation: roomeq_model::BootstrapScalarisation::WorstCase,
+                cvar_alpha: 0.25,
+            }),
+            ..MultiMeasurementConfig::default()
+        };
+
+        let result =
+            optimize_channel_eq_multi(&[curve1, curve2], &config, &multi_config, None, 48000.0);
+        assert!(
+            result.is_ok(),
+            "minimax uncertainty should succeed: {:?}",
+            result.err()
+        );
+        let (filters, loss) = result.unwrap();
+        assert!(!filters.is_empty());
+        assert!(loss.is_finite());
+    }
+
+    #[test]
+    fn optimize_channel_eq_adaptive_filter_selection() {
+        let curve = make_simple_room_curve();
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 4,
+            max_iter: 1000,
+            population: 8,
+            seed: Some(42),
+            min_filter_improvement: 0.001,
+            ..OptimizerConfig::default()
+        };
+
+        let result = optimize_channel_eq(&curve, &config, None, 48000.0);
+        assert!(
+            result.is_ok(),
+            "adaptive filter selection should succeed: {:?}",
+            result.err()
+        );
+        let (filters, loss) = result.unwrap();
+        assert!(!filters.is_empty());
+        assert!(loss.is_finite());
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_with_target_curve() {
+        let curve1 = make_simple_room_curve();
+        let mut curve2 = curve1.clone();
+        curve2.spl = curve2.spl.mapv(|s| s + 1.0);
+
+        let target = Curve {
+            freq: curve1.freq.clone(),
+            spl: Array1::zeros(curve1.freq.len()),
+            phase: None,
+            ..Default::default()
+        };
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 2,
+            max_iter: 1000,
+            population: 8,
+            seed: Some(42),
+            min_filter_improvement: 0.0,
+            ..OptimizerConfig::default()
+        };
+        let multi_config = MultiMeasurementConfig::default();
+        let resources = EqResources {
+            target: Some(resources::PreparedEqTarget::Curve(Box::new(target))),
+            ..EqResources::default()
+        };
+
+        let result = optimize_channel_eq_multi(
+            &[curve1, curve2],
+            &config,
+            &multi_config,
+            Some(&resources),
+            48000.0,
+        );
+        assert!(
+            result.is_ok(),
+            "multi with target curve should succeed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_with_psychoacoustic() {
+        let curve1 = make_simple_room_curve();
+        let mut curve2 = curve1.clone();
+        curve2.spl = curve2.spl.mapv(|s| s + 1.0);
+
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 2,
+            max_iter: 1000,
+            population: 8,
+            seed: Some(42),
+            psychoacoustic: true,
+            min_filter_improvement: 0.0,
+            ..OptimizerConfig::default()
+        };
+        let multi_config = MultiMeasurementConfig::default();
+
+        let result =
+            optimize_channel_eq_multi(&[curve1, curve2], &config, &multi_config, None, 48000.0);
+        assert!(
+            result.is_ok(),
+            "multi with psychoacoustic should succeed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_with_refine() {
+        let curve1 = make_simple_room_curve();
+        let mut curve2 = curve1.clone();
+        curve2.spl = curve2.spl.mapv(|s| s + 1.0);
+
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 2,
+            max_iter: 1000,
+            population: 8,
+            seed: Some(42),
+            refine: true,
+            min_filter_improvement: 0.0,
+            ..OptimizerConfig::default()
+        };
+        let multi_config = MultiMeasurementConfig::default();
+
+        let result =
+            optimize_channel_eq_multi(&[curve1, curve2], &config, &multi_config, None, 48000.0);
+        assert!(
+            result.is_ok(),
+            "multi with refine should succeed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn optimize_channel_eq_spatial_robustness_with_bootstrap() {
+        let curve1 = make_simple_room_curve();
+        let mut curve2 = curve1.clone();
+        curve2.spl = curve2.spl.mapv(|s| s + 2.0);
+
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 2,
+            max_iter: 1000,
+            population: 8,
+            seed: Some(42),
+            min_filter_improvement: 0.0,
+            ..OptimizerConfig::default()
+        };
+        let multi_config = MultiMeasurementConfig {
+            strategy: MultiMeasurementStrategy::SpatialRobustness,
+            bootstrap_uncertainty: Some(roomeq_model::BootstrapUncertaintyConfig {
+                num_resamples: 4,
+                alpha: 0.05,
+                seed: 1,
+                scalarisation: roomeq_model::BootstrapScalarisation::Cvar,
+                cvar_alpha: 0.25,
+            }),
+            ..MultiMeasurementConfig::default()
+        };
+
+        let result =
+            optimize_channel_eq_multi(&[curve1, curve2], &config, &multi_config, None, 48000.0);
+        assert!(
+            result.is_ok(),
+            "spatial robustness with bootstrap should succeed: {:?}",
+            result.err()
+        );
+    }
+
+    use roomeq_analysis::rir_prototype::{
+        DirectivityModel, DistanceWeightMode, RirPrototypeConfig,
+    };
+
+    #[test]
+    fn optimize_channel_eq_multi_rir_prototype_runs() {
+        let reference = make_simple_room_curve();
+        let mut far = reference.clone();
+        far.spl = far.spl.mapv(|s| s + 2.0);
+        let mut off_axis = reference.clone();
+        off_axis.spl = off_axis.spl.mapv(|s| s - 2.0);
+
+        let multi_config = MultiMeasurementConfig {
+            strategy: MultiMeasurementStrategy::Average,
+            weights: None,
+            variance_lambda: 1.0,
+            spatial_robustness: None,
+            bootstrap_uncertainty: None,
+            rir_prototype: Some(RirPrototypeConfig {
+                reference_position: [0.0, 0.0, 0.0],
+                source_position: [0.0, 2.5, 0.0],
+                microphone_positions: vec![[0.0, 0.0, 0.0], [0.5, 0.1, 0.0], [-0.5, 0.1, 0.0]],
+                distance_mode: DistanceWeightMode::InverseSquare,
+                directivity: DirectivityModel::Omnidirectional,
+                frequency_dependent_directivity: false,
+            }),
+        };
+
+        let config = OptimizerConfig {
+            loss_type: "flat".to_string(),
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 3,
+            max_iter: 500,
+            population: 8,
+            seed: Some(42),
+            ..OptimizerConfig::default()
+        };
+
+        let result = optimize_channel_eq_multi(
+            &[reference, far, off_axis],
+            &config,
+            &multi_config,
+            None,
+            48000.0,
+        );
+
+        assert!(result.is_ok(), "optimization failed: {:?}", result.err());
+        let (filters, loss) = result.unwrap();
+        assert!(!filters.is_empty());
+        assert!(loss.is_finite(), "loss should be finite, got {}", loss);
+    }
+
+    #[test]
+    fn optimize_channel_eq_multi_rir_prototype_none_uses_plain_average_path() {
+        let c1 = make_simple_room_curve();
+        let mut c2 = c1.clone();
+        c2.spl = c2.spl.mapv(|s| s + 1.5);
+
+        let multi_config = MultiMeasurementConfig {
+            strategy: MultiMeasurementStrategy::Average,
+            weights: None,
+            variance_lambda: 1.0,
+            spatial_robustness: None,
+            bootstrap_uncertainty: None,
+            rir_prototype: None,
+        };
+
+        let config = OptimizerConfig {
+            loss_type: "flat".to_string(),
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 2,
+            max_iter: 500,
+            population: 8,
+            seed: Some(42),
+            ..OptimizerConfig::default()
+        };
+
+        let result = optimize_channel_eq_multi(&[c1, c2], &config, &multi_config, None, 48000.0);
+
+        assert!(
+            result.is_ok(),
+            "plain average path failed: {:?}",
+            result.err()
+        );
+        let (filters, loss) = result.unwrap();
+        assert!(!filters.is_empty());
+        assert!(loss.is_finite());
+    }
+}

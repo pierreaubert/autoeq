@@ -1,5 +1,4 @@
 use super::build::build_target_curve;
-use super::misc::create_driver_optimization_args;
 use super::misc::interpolate_cea2034_data;
 use super::types::DriverOptimizationResult;
 use super::types::HeadphoneOptResult;
@@ -12,6 +11,7 @@ pub use crate::optim::setup::*;
 use crate::read;
 use crate::x2peq;
 use autoeq_measurements::{MeasurementOrigin, MeasurementRecord, OperationContext, ToolIdentity};
+use autoeq_optim::create_driver_optimization_params as create_driver_optimization_args;
 use chrono::Utc;
 use serde_json::json;
 use std::collections::HashMap;

@@ -1,5 +1,5 @@
 use crate::Curve;
-use autoeq_workflow::DriverOptimizationResult;
+use autoeq_optim::DriverOptimizationResult;
 
 /// Separate spatial and temporal views of an optimized multi-sub system.
 #[derive(Debug, Clone)]

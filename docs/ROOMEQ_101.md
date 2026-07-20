@@ -2,7 +2,8 @@
 
 # RoomEQ — How it Works
 
-`roomeq` is the multi-channel room-equalization engine in the `autoeq` crate.
+`roomeq` is the multi-channel room-equalization stack exposed through the
+`autoeq` compatibility facade.
 Given one or more measurement curves of a loudspeaker system in a real room,
 it produces a per-channel DSP chain (gain, delays, IIR biquads, optional FIR
 convolution kernels, and crossovers) that compensates the system toward a
@@ -10,8 +11,8 @@ psychoacoustically motivated target.
 
 This article walks through every stage of the pipeline, the data structures
 flowing between them, and the algorithms that drive each stage. It is meant
-both as a reader's guide and as an implementation map of the code under
-`crates/autoeq/src/roomeq/`.
+both as a reader's guide and as an implementation map of the focused
+`roomeq-*` crates.
 
 ---
 
@@ -53,9 +54,10 @@ the bass-management report, and version metadata.
 
 ## 2. The high-level pipeline
 
-`optimize_room()` is the public entry point in
-`crates/autoeq/src/roomeq/optimize.rs`. It dispatches into
-`RoomPipeline::run()` with an observer that translates internal
+`optimize_room()` and `RoomPipeline::run()` are canonical in
+`crates/roomeq-workflow/src/room_optimization.rs` and
+`crates/roomeq-workflow/src/pipeline.rs`. The root `autoeq::roomeq` path is a
+compatibility re-export. The workflow uses an observer that translates internal
 `PipelineEvent`s into user-visible `RoomOptimizationProgress` updates.
 The pipeline emits the following stages in order:
 
@@ -872,48 +874,19 @@ native SotF graph export until equivalent PipeWire graph rendering is added.
 ## 7. Code map
 
 ```text
-crates/autoeq/src/roomeq/
-├── mod.rs                    # public re-exports and module wiring
-├── pipeline.rs               # RoomPipeline / Event / Observer
-├── optimize.rs               # optimize_room, optimize_speaker, RoomOptimizationResult
-├── workflows.rs              # topology dispatch (stereo, home cinema, custom)
-│   └── bass_management.rs    # group crossover optimisation
-├── speaker_eq.rs             # process_single_speaker, multi-meas strategies
-│   └── schroeder.rs          # optimize_eq_with_optional_schroeder
-├── group_processing.rs       # multi-driver crossover, multisub, DBA, cardioid, mixed-mode
-├── eq.rs                     # core EQ search adapter (autoeq::optim wrapper)
-├── crossover.rs              # crossover filter design (LR / BW)
-├── time_align.rs             # WAV onset + probe-burst delay detection
-├── multiseat.rs              # MSO objectives + modal-basis SFM optimisation
-├── phase_alignment.rs        # sub/main delay+polarity grid+refine
-├── target_tilt.rs            # build_complete_target_curve
-├── excursion.rs              # F3 detection + protection HPF
-├── multisub.rs               # multi-sub flat optimisation
-├── dba.rs                    # double bass array
-├── cea2034_correction.rs     # 3-pass speaker pre-correction
-├── mixed_phase.rs            # IIR + excess-phase FIR
-├── impulse_analysis.rs       # decomposed correction (modes/refl/steady)
-├── reflection_cancel.rs      # Johnston first-reflection canceller
-├── spatial_robustness.rs     # Brännmark / Sternad multi-position
-├── spectral_align.rs         # inter-channel shelf+gain alignment
-├── voice_of_god.rs           # narrow-band timbre matching across channels
-├── fir.rs                    # FIR generation from biquad set
-├── ir_waveform.rs            # pre/post IR computation
-├── output.rs                 # DSP-chain construction and serialisation
-├── export.rs                 # CamillaDSP / APO / EasyEffects / … exporters
-├── home_cinema.rs            # bass management report, headroom, signal-flow advisories
-├── supporting_source/        # Brooks-Park supporting-source room compensation
-│   ├── filter.rs             # support FIR design and precedence limits
-│   ├── velvet.rs             # velvet-noise decorrelation
-│   └── drr.rs                # direct-to-reverberant ratio diagnostics
-├── bass_phase_confidence.rs  # bass-phase coherence gate for GD-Opt v2
-├── gd_opt.rs                 # group-delay optimisation v2 (LowLatency IIR)
-├── frequency_grid.rs         # grid validation, common-range computation
-├── slope.rs                  # broadband slope estimation
-├── temporal_targets.rs       # perceptual decay / temporal-masking thresholds
-├── synthetic.rs              # synthetic measurements for QA
-├── progress.rs               # multi-stage progress reporter
-└── types/                    # config / output data structures
+crates/
+├── roomeq-model/             # config, validation, DSP graph, report contracts
+├── roomeq-analysis/          # acoustic, spatial, temporal, and alignment analysis
+├── roomeq-quality/           # scorecards and correction-acceptance policy
+├── roomeq-engine/            # prepared-input DSP and topology execution
+├── roomeq-workflow/          # RoomPipeline, optimization orchestration, resources, artifacts
+│   └── src/room_optimization/ # reports, correction gates, progress, focused tests
+├── roomeq-export/            # external DSP formats and package rendering
+├── roomeq-synthetic/         # deterministic synthetic measurements
+├── roomeq-qa/                # scenario matrices, quality gates, and fuzzing
+└── roomeq-cli/               # command parsing and user-facing diagnostics
+
+src/roomeq/                   # compatibility re-exports only
 ```
 
 ---

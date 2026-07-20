@@ -36,7 +36,7 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           mkdir -p target/qa
-          cargo run --release --bin roomeq-qa-acoustic -- \
+          cargo run --release --features qa --bin roomeq-qa-acoustic -- \
             --tier nightly \
             --baseline data_tests/roomeq/acoustic_corpus/baseline.linux-x86_64.json \
             --output target/qa/roomeq-acoustic.json \

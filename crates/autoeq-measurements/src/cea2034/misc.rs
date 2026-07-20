@@ -1,5 +1,4 @@
-use ndarray::s;
-use ndarray::{Array1, Array2};
+use ndarray::{Array1, Array2, Axis, Slice};
 
 /// Convert SPL values to pressure values
 ///
@@ -62,7 +61,7 @@ pub(super) fn spl2pressure2(spl: &Array2<f64>) -> Array2<f64> {
 /// # Formula
 /// mad = mean(|x - mean(x)|)
 pub(super) fn mad(spl: &Array1<f64>, imin: usize, imax: usize) -> f64 {
-    let slice = spl.slice(s![imin..imax]).to_owned();
+    let slice = spl.slice_axis(Axis(0), Slice::from(imin..imax)).to_owned();
     let m = slice.mean().unwrap_or(0.0);
     let diffs = slice.mapv(|v| (v - m).abs());
     diffs.mean().unwrap_or(0.0)
@@ -206,7 +205,11 @@ pub fn lfx(freq: &Array1<f64>, lw: &Array1<f64>, sp: &Array1<f64>) -> f64 {
     if lw_min >= lw_max {
         return (300.0_f64).log10();
     }
-    let lw_ref = lw.slice(s![lw_min..lw_max]).mean().unwrap_or(0.0) - 6.0;
+    let lw_ref = lw
+        .slice_axis(Axis(0), Slice::from(lw_min..lw_max))
+        .mean()
+        .unwrap_or(0.0)
+        - 6.0;
     // Collect indices where freq <= 300 Hz AND SP <= (LW_ref)
     let mut indices: Vec<usize> = Vec::new();
     for (i, (&f, &spv)) in freq.iter().zip(sp.iter()).enumerate() {
@@ -256,7 +259,11 @@ pub fn sm(freq: &Array1<f64>, spl: &Array1<f64>) -> f64 {
     if f_min >= f_max {
         return f64::NAN;
     }
-    let x: Array1<f64> = freq.slice(s![f_min..f_max]).mapv(|v| v.log10());
-    let y: Array1<f64> = spl.slice(s![f_min..f_max]).to_owned();
+    let x: Array1<f64> = freq
+        .slice_axis(Axis(0), Slice::from(f_min..f_max))
+        .mapv(|v| v.log10());
+    let y: Array1<f64> = spl
+        .slice_axis(Axis(0), Slice::from(f_min..f_max))
+        .to_owned();
     r_squared(&x, &y)
 }

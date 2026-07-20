@@ -1,0 +1,443 @@
+//! Room EQ - Multi-channel room equalization optimizer
+//!
+//! Copyright (C) 2025-2026 Pierre Aubert pierre(at)spinorama(dot)org
+//!
+//! This program is free software: you can redistribute it and/or modify
+//! it under the terms of the GNU General Public License as published by
+//! the Free Software Foundation, either version 3 of the License, or
+//! (at your option) any later version.
+//!
+//! This program is distributed in the hope that it will be useful,
+//! but WITHOUT ANY WARRANTY; without even the implied warranty of
+//! MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//! GNU General Public License for more details.
+//!
+//! You should have received a copy of the GNU General Public License
+//! along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+use anyhow::{Context, Result, anyhow};
+use clap::Parser;
+use log::{info, warn};
+use schemars::schema_for;
+use std::path::PathBuf;
+
+// Use the library types
+use roomeq_engine::{PipelineControl, PipelineEvent, PipelineObserver};
+use roomeq_model::{DspChainOutput, MeasurementRef, MeasurementSource, RoomConfig, SpeakerConfig};
+use roomeq_workflow::{
+    ExportFormat, RoomPipeline, RoomPipelineRequest, export_dsp_chain_with_convolution_sidecars,
+    load_config, save_dsp_chain,
+};
+
+/// Room EQ - Optimize multi-channel speaker systems
+#[derive(Parser, Debug)]
+#[command(
+    author,
+    version,
+    about = "Automatic equalization for speakers, headphones and rooms!",
+    long_about = None
+)]
+struct Args {
+    /// Path to room configuration JSON file
+    #[arg(short, long, required_unless_present_any = ["schema", "convert"])]
+    config: Option<PathBuf>,
+
+    /// Output DSP chain JSON file
+    #[arg(short, long, required_unless_present_any = ["schema", "convert"])]
+    output: Option<PathBuf>,
+
+    /// Sample rate for filter design (default: 48000 Hz)
+    #[arg(long, default_value_t = 48000.0)]
+    sample_rate: f64,
+
+    /// Verbose output (deprecated, use RUST_LOG env var)
+    #[arg(short, long)]
+    verbose: bool,
+
+    /// Dump JSON schema and exit. Values: "input" (RoomConfig), "output" (DspChainOutput)
+    #[arg(long, value_name = "TYPE")]
+    schema: Option<String>,
+
+    /// Path to override config JSON file (overrides any section: optimizer, speakers, crossovers, etc.)
+    #[arg(long, alias = "optim-config")]
+    override_config: Option<PathBuf>,
+
+    /// Export DSP chain (camilladsp, apo, easyeffects, wavelet, pipewire, roon, rew, coefficients)
+    #[arg(long, value_enum)]
+    export_format: Option<ExportFormat>,
+
+    /// Export output file path (defaults to output path with format-appropriate extension)
+    #[arg(long)]
+    export_path: Option<PathBuf>,
+
+    /// Convert an existing DSP chain JSON to an export format (no optimization)
+    #[arg(long)]
+    convert: Option<PathBuf>,
+
+    /// Validate configuration and check measurement files exist, but do not run optimization
+    #[arg(long)]
+    dry_run: bool,
+}
+
+pub fn run_command() -> Result<()> {
+    // Initialize logger safely
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    let args = Args::parse();
+
+    if let Some(schema_type) = &args.schema {
+        let json = match schema_type.as_str() {
+            "input" => {
+                let schema = schema_for!(RoomConfig);
+                serde_json::to_string_pretty(&schema).unwrap()
+            }
+            "output" => {
+                let schema = schema_for!(DspChainOutput);
+                serde_json::to_string_pretty(&schema).unwrap()
+            }
+            other => {
+                eprintln!("Unknown schema type: {other}. Use 'input' or 'output'.");
+                std::process::exit(1);
+            }
+        };
+        println!("{json}");
+        return Ok(());
+    }
+
+    if args.verbose {
+        warn!("The --verbose flag is deprecated. Use RUST_LOG=debug instead.");
+    }
+
+    // Convert mode: load existing DSP chain JSON and export
+    if let Some(convert_path) = &args.convert {
+        let format = args
+            .export_format
+            .ok_or_else(|| anyhow!("--export-format is required with --convert"))?;
+
+        let json_str = std::fs::read_to_string(convert_path)
+            .with_context(|| format!("Failed to read DSP chain from {:?}", convert_path))?;
+        let dsp_output: DspChainOutput = serde_json::from_str(&json_str)
+            .with_context(|| format!("Failed to parse DSP chain from {:?}", convert_path))?;
+
+        let export_path = args
+            .export_path
+            .unwrap_or_else(|| convert_path.with_extension(format.default_extension()));
+        let source_dir = convert_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+
+        info!("Converting {:?} to {:?} format", convert_path, format);
+        export_dsp_chain_with_convolution_sidecars(
+            &dsp_output,
+            format,
+            &export_path,
+            args.sample_rate,
+            source_dir,
+        )?;
+        info!("Exported to {:?}", export_path);
+        return Ok(());
+    }
+
+    // Unwrap required args (safe because of required_unless_present)
+    let config_path = args
+        .config
+        .ok_or_else(|| anyhow!("Config file is required"))?;
+    let output_path = args
+        .output
+        .ok_or_else(|| anyhow!("Output file is required"))?;
+
+    // Dry-run mode: validate config and check files exist
+    if args.dry_run {
+        return run_dry_run(config_path, args.override_config);
+    }
+
+    execute_optimization(
+        args.sample_rate,
+        config_path,
+        output_path,
+        args.override_config,
+        args.export_format,
+        args.export_path,
+    )
+}
+
+/// Pipeline observer that logs to stderr.
+fn create_progress_observer() -> Box<dyn PipelineObserver> {
+    Box::new(|event: &PipelineEvent| {
+        // Status messages (no real iteration data) — log the message directly
+        if let Some(msg) = &event.message {
+            info!("  {}", msg);
+            return PipelineControl::Continue;
+        }
+
+        let iteration = event.iteration.unwrap_or(0);
+        let max_iterations = event.max_iterations.unwrap_or(0);
+        let pct = if max_iterations > 0 {
+            (iteration as f64 / max_iterations as f64) * 100.0
+        } else {
+            0.0
+        };
+        // Log every 100 iterations
+        if iteration.is_multiple_of(100) {
+            info!(
+                "  [{}] ({}/{}) {:.1}% | iter {}/{} | loss: {:.6}",
+                event.channel.as_deref().unwrap_or(""),
+                event.channel_index.unwrap_or(0) + 1,
+                event.total_channels.unwrap_or(0),
+                pct,
+                iteration,
+                max_iterations,
+                event.loss.unwrap_or(0.0)
+            );
+        }
+        PipelineControl::Continue
+    })
+}
+
+fn execute_optimization(
+    sample_rate: f64,
+    config_path: PathBuf,
+    output_path: PathBuf,
+    override_config_path: Option<PathBuf>,
+    export_format: Option<ExportFormat>,
+    export_path: Option<PathBuf>,
+) -> Result<()> {
+    // Load room configuration
+    info!("Loading room configuration from {:?}", config_path);
+
+    let (room_config, _config_dir, _validation) =
+        load_config(&config_path, override_config_path.as_deref())?;
+
+    info!("Found {} speakers", room_config.speakers.len());
+
+    // Run optimization using the library
+    let observer = create_progress_observer();
+    let out_dir = output_path.parent();
+    let result = RoomPipeline::new(RoomPipelineRequest {
+        config: &room_config,
+        sample_rate,
+        output_dir: out_dir,
+        probe_arrival_overrides: None,
+    })
+    .run(Some(observer))
+    .map_err(|e| anyhow!("{}", e))
+    .with_context(|| "Room optimization failed")?;
+
+    // Log summary
+    info!(
+        "Average pre-score: {:.4}, post-score: {:.4}",
+        result.combined_pre_score, result.combined_post_score
+    );
+
+    // Save output
+    info!("Saving DSP chain to {:?}", output_path);
+
+    let dsp_output = result.to_dsp_chain_output();
+    save_dsp_chain(&dsp_output, &output_path)
+        .map_err(|e| anyhow!("{}", e))
+        .with_context(|| format!("Failed to save DSP chain to {:?}", output_path))?;
+
+    // Export to external format if requested
+    if let Some(format) = export_format {
+        let path = export_path.unwrap_or_else(|| format.default_export_path(&output_path));
+        let source_dir = output_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        info!("Exporting DSP chain to {:?} ({:?})", path, format);
+        export_dsp_chain_with_convolution_sidecars(
+            &dsp_output,
+            format,
+            &path,
+            sample_rate,
+            source_dir,
+        )?;
+        info!("Exported to {:?}", path);
+    }
+
+    info!("Done!");
+
+    Ok(())
+}
+
+/// Validate configuration and check measurement files exist without running optimization
+fn run_dry_run(config_path: PathBuf, override_config_path: Option<PathBuf>) -> Result<()> {
+    info!("Loading room configuration from {:?}", config_path);
+
+    let (room_config, _config_dir, validation) =
+        load_config(&config_path, override_config_path.as_deref())?;
+
+    println!("\n=== Configuration Validation ===\n");
+
+    // Run validation
+    if validation.production_ready() {
+        println!("Configuration: VALID");
+    } else {
+        println!("Configuration: INVALID");
+    }
+
+    let warnings = validation.warnings().collect::<Vec<_>>();
+    if !warnings.is_empty() {
+        println!("\nWarnings:");
+        for warning in warnings {
+            println!("  - {}", warning);
+        }
+    }
+
+    let errors = validation.errors().collect::<Vec<_>>();
+    let error_count = errors.len();
+    if !errors.is_empty() {
+        println!("\nErrors:");
+        for error in &errors {
+            println!("  - {}", error);
+        }
+    }
+
+    println!("\n=== Speaker Configuration ===\n");
+    println!("Found {} speakers:", room_config.speakers.len());
+
+    let mut file_errors = Vec::new();
+
+    for (name, speaker_config) in &room_config.speakers {
+        println!("\n  Speaker: {}", name);
+
+        // Get measurement paths for this speaker
+        let paths = collect_measurement_paths(speaker_config);
+        for path in &paths {
+            if path.exists() {
+                println!("    [OK] {:?}", path);
+            } else {
+                println!("    [MISSING] {:?}", path);
+                file_errors.push(format!("Speaker '{}': file not found: {:?}", name, path));
+            }
+        }
+    }
+
+    println!("\n=== Result ===\n");
+
+    if error_count > 0 || !file_errors.is_empty() {
+        println!("VALIDATION FAILED");
+        if error_count > 0 {
+            println!("  {} configuration error(s)", error_count);
+        }
+        if !file_errors.is_empty() {
+            println!("  {} file(s) missing", file_errors.len());
+            for error in &file_errors {
+                println!("    - {}", error);
+            }
+        }
+        anyhow::bail!("Configuration validation failed");
+    }
+
+    println!("All checks passed! Configuration is valid and all files exist.");
+    Ok(())
+}
+
+/// Collect all measurement file paths from a speaker configuration
+fn collect_measurement_paths(speaker_config: &SpeakerConfig) -> Vec<std::path::PathBuf> {
+    fn extract_paths_from_source(source: &MeasurementSource) -> Vec<std::path::PathBuf> {
+        fn measurement_path(measurement: &MeasurementRef) -> Option<std::path::PathBuf> {
+            match measurement {
+                MeasurementRef::Path(path) | MeasurementRef::Named { path, .. } => {
+                    Some(path.clone())
+                }
+                MeasurementRef::Inline(inline)
+                    if inline.frequencies.is_empty() || inline.magnitude_db.is_empty() =>
+                {
+                    inline.csv_path.as_deref().map(std::path::PathBuf::from)
+                }
+                MeasurementRef::Inline(_) => None,
+            }
+        }
+
+        let mut paths = Vec::new();
+        match source {
+            MeasurementSource::Single(single) => {
+                if let Some(path) = measurement_path(&single.measurement) {
+                    paths.push(path);
+                }
+            }
+            MeasurementSource::Multiple(mult) => {
+                for measurement in &mult.measurements {
+                    if let Some(path) = measurement_path(measurement) {
+                        paths.push(path);
+                    }
+                }
+            }
+            MeasurementSource::InMemory(_) | MeasurementSource::InMemoryMultiple(_) => {}
+        }
+        paths
+    }
+
+    match speaker_config {
+        SpeakerConfig::Single(source) => extract_paths_from_source(source),
+        SpeakerConfig::Group(group) => {
+            let mut paths = Vec::new();
+            for source in &group.measurements {
+                paths.extend(extract_paths_from_source(source));
+            }
+            paths
+        }
+        SpeakerConfig::Topology(topology) => {
+            let mut paths = Vec::new();
+            for driver in &topology.drivers {
+                paths.extend(extract_paths_from_source(&driver.measurement));
+            }
+            paths
+        }
+        SpeakerConfig::MultiSub(ms) => {
+            let mut paths = Vec::new();
+            for source in &ms.subwoofers {
+                paths.extend(extract_paths_from_source(source));
+            }
+            paths
+        }
+        SpeakerConfig::Dba(dba) => {
+            let mut paths = Vec::new();
+            for source in &dba.front {
+                paths.extend(extract_paths_from_source(source));
+            }
+            for source in &dba.rear {
+                paths.extend(extract_paths_from_source(source));
+            }
+            paths
+        }
+        SpeakerConfig::Cardioid(cardioid) => {
+            let mut paths = Vec::new();
+            paths.extend(extract_paths_from_source(&cardioid.front));
+            paths.extend(extract_paths_from_source(&cardioid.rear));
+            paths
+        }
+        SpeakerConfig::SupportingSource(group) => {
+            let mut paths = Vec::new();
+            paths.extend(extract_paths_from_source(&group.primary));
+            paths.extend(extract_paths_from_source(&group.support));
+            paths
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::Args;
+
+    #[test]
+    fn schema_input_succeeds() {
+        let args = Args::try_parse_from(["roomeq", "--schema", "input"]);
+        assert!(args.is_ok(), "{args:?}");
+        assert_eq!(args.unwrap().schema, Some("input".to_string()));
+    }
+
+    #[test]
+    fn missing_required_config_and_output_fails() {
+        let args = Args::try_parse_from(["roomeq"]);
+        assert!(args.is_err());
+    }
+
+    #[test]
+    fn sample_rate_default_is_48000() {
+        let args = Args::try_parse_from(["roomeq", "--schema", "input"]).unwrap();
+        assert_eq!(args.sample_rate, 48000.0);
+    }
+}

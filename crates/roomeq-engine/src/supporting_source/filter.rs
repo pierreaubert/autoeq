@@ -25,9 +25,9 @@ pub fn compute_supporting_source_filter(
     let common_freq = common_frequency_grid(&primary.freq, &support.freq, &target.freq)?;
 
     // 2. Interpolate all curves onto the common grid.
-    let primary_i = autoeq_measurements::read::interpolate_log_space(&common_freq, primary);
-    let support_i = autoeq_measurements::read::interpolate_log_space(&common_freq, support);
-    let target_i = autoeq_measurements::read::interpolate_log_space(&common_freq, target);
+    let primary_i = autoeq_core::interpolate_log_space(&common_freq, primary);
+    let support_i = autoeq_core::interpolate_log_space(&common_freq, support);
+    let target_i = autoeq_core::interpolate_log_space(&common_freq, target);
 
     // 3. Smooth to 1/3-octave.
     let primary_smooth = smooth_one_third_octave(&primary_i)?;
@@ -145,9 +145,7 @@ fn common_frequency_grid(a: &Array1<f64>, b: &Array1<f64>, c: &Array1<f64>) -> R
 
 /// Smooth a curve to 1/3-octave resolution.
 fn smooth_one_third_octave(curve: &Curve) -> Result<Curve> {
-    Ok(autoeq_measurements::read::smooth_one_over_n_octave(
-        curve, 3,
-    ))
+    Ok(autoeq_core::smooth_one_over_n_octave(curve, 3))
 }
 
 /// Apply no-cancellation floor and precedence ceiling.

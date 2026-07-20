@@ -5,12 +5,15 @@ edition = "2024"
 description = "Acoustic quality metrics, acceptance policies, and QA fixtures for RoomEQ"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [dependencies]
 autoeq-core = { workspace = true }
-autoeq-measurements = { workspace = true }
 math-iir-fir = { workspace = true }
 ndarray = { workspace = true }
 num-complex = { workspace = true }
+roomeq-model = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

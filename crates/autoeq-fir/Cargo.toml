@@ -5,9 +5,11 @@ edition = "2024"
 description = "FIR filter design and serialization for AutoEQ"
 license = "GPL-3.0-or-later"
 
+[lints]
+workspace = true
+
 [dependencies]
 autoeq-core = { workspace = true }
-autoeq-measurements = { workspace = true }
 hound = { workspace = true }
 math-iir-fir = { workspace = true }
 ndarray = { workspace = true }

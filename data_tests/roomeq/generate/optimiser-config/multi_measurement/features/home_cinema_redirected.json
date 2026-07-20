@@ -1,0 +1,91 @@
+{
+  "system": {
+    "model": "home_cinema",
+    "speakers": {
+      "L": "left",
+      "R": "right",
+      "C": "center",
+      "SL": "surround_left",
+      "SR": "surround_right",
+      "TFL": "top_front_left",
+      "TFR": "top_front_right",
+      "TRL": "top_rear_left",
+      "TRR": "top_rear_right",
+      "LFE": "lfe"
+    },
+    "subwoofers": {
+      "config": "single",
+      "crossover": "first",
+      "lfe": "L"
+    },
+    "bass_management": {
+      "enabled": true,
+      "redirect_bass": true,
+      "lfe_channel": "LFE",
+      "lfe_playback_gain_db": 10.0,
+      "apply_lfe_gain_to_chain": false,
+      "sub_trim_db": 0.0,
+      "max_sub_boost_db": 6.0,
+      "headroom_margin_db": 6.0,
+      "group_crossovers": {
+        "lcr": "first",
+        "surround": "first",
+        "height": "first"
+      },
+      "optimize_groups": true,
+      "headroom_model": {
+        "model": "cinema_correlated",
+        "lr_correlation": 0.75,
+        "lcr_correlation": 0.5,
+        "surround_height_correlation": 0.35
+      }
+    }
+  },
+  "optimizer": {
+    "multi_measurement": {
+      "strategy": "variance_penalized",
+      "variance_lambda": 1.0
+    },
+    "phase_alignment": {
+      "enabled": true,
+      "min_freq": 50.0,
+      "max_freq": 120.0,
+      "optimize_polarity": true,
+      "max_delay_ms": 20.0
+    },
+    "group_delay": {
+      "enabled": true,
+      "max_delay_ms": 20.0,
+      "ap_per_channel": 2,
+      "ap_min_q": 0.3,
+      "ap_max_q": 10.0,
+      "optimize_polarity": true,
+      "coherence_threshold": 0.8,
+      "min_improvement_db": 0.5,
+      "max_iter": 200,
+      "popsize": 10,
+      "tol": 0.000001,
+      "adaptive_allpass": true
+    },
+    "inter_channel_timbre_matching": {
+      "enabled": true,
+      "reference_channel": "C",
+      "min_improvement_db": 0.05
+    },
+    "target_response": {
+      "shape": "from_measurement",
+      "broadband_precorrection": true,
+      "role_targets": {
+        "enabled": true,
+        "center_dialog_boost_db": 1.0,
+        "height_treble_shelf_db": -1.0,
+        "surround_treble_shelf_db": -0.5,
+        "lfe_bass_shelf_db": 2.0,
+        "cinema_x_curve_enabled": true,
+        "cinema_x_curve_start_hz": 2000.0,
+        "cinema_x_curve_db_per_octave": -0.5,
+        "listening_distance_m": 5.0
+      }
+    }
+  }
+}

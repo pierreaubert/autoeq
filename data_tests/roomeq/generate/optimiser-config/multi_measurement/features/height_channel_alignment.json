@@ -1,0 +1,41 @@
+{
+  "system": null,
+  "optimizer": {
+    "multi_measurement": {
+      "strategy": "variance_penalized",
+      "variance_lambda": 1.0
+    },
+    "inter_channel_timbre_matching": {
+      "enabled": true,
+      "reference_channel": "center",
+      "min_improvement_db": 0.05
+    },
+    "height_channel_alignment": {
+      "enabled": true,
+      "match_timbre": true,
+      "match_level": true,
+      "match_arrival_time": true,
+      "match_phase": true,
+      "min_timbre_improvement_db": 0.05,
+      "max_delay_ms": 20.0,
+      "reference_channels": {
+        "top_front": "left",
+        "top_rear": "surround_left"
+      }
+    },
+    "target_response": {
+      "shape": "from_measurement",
+      "broadband_precorrection": true,
+      "role_targets": {
+        "enabled": true,
+        "center_dialog_boost_db": 1.0,
+        "height_treble_shelf_db": -1.0,
+        "surround_treble_shelf_db": -0.5,
+        "cinema_x_curve_enabled": true,
+        "cinema_x_curve_start_hz": 2000.0,
+        "cinema_x_curve_db_per_octave": -0.5,
+        "listening_distance_m": 5.0
+      }
+    }
+  }
+}

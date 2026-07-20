@@ -186,19 +186,23 @@ demo-headphone-loss:
 	--target "./data_tests/targets/harman-over-ear-2018.csv"
 
 # ----------------------------------------------------------------------
-# QA 
+# QA
 # ----------------------------------------------------------------------
 
-qa : qa-autoeq qa-roomeq
+qa : qa-autoeq-all qa-roomeq-all qa-export-all
 
 # ----------------------------------------------------------------------
 # QA AUTOEQ
 # ----------------------------------------------------------------------
 
+alias qa-autoeq := qa-autoeq-all
+alias qa-roomeq := qa-roomeq-all
+
 [group('qa-autoeq')]
-qa-autoeq: prod-autoeq \
+qa-autoeq-all: prod-autoeq \
 	qa-ascilab-6b \
-	qa-jbl-m2-flat qa-jbl-m2-score \
+	qa-jbl-m2-flat \
+	qa-jbl-m2-score \
 	qa-beyerdynamic-dt1990pro \
 	qa-edifierw830nb
 
@@ -304,7 +308,7 @@ export-test-systems-help:
 	@echo "======================================"
 	@echo
 	@echo "Structural checks, no external tools required:"
-	@echo "  cargo test -p autoeq export::tests"
+	@echo "  cargo test --release -p roomeq-export"
 	@echo "  just qa-export-camilladsp  # requires the real CamillaDSP binary"
 	@echo "  just qa-export-pipewire    # runs PipeWire validation in Docker"
 	@echo "  just qa-export-portable    # semantic APO/EasyEffects/Wavelet/Roon checks"
@@ -328,9 +332,9 @@ export-test-systems-help:
 	@echo "If no placeholder is present, the path is appended as the final argument."
 	@echo
 	@echo "Examples:"
-	@echo "  ROOMEQ_CAMILLADSP_VALIDATE_CMD='camilladsp --check {config}' cargo test -p autoeq tool_contract_camilladsp"
-	@echo "  ROOMEQ_PIPEWIRE_VALIDATE_CMD='path/to/validate-pipewire {config}' cargo test -p autoeq tool_contract_pipewire"
-	@echo "  ROOMEQ_EASYEFFECTS_VALIDATE_CMD='path/to/validate-easyeffects {config}' cargo test -p autoeq tool_contract_easyeffects"
+	@echo "  ROOMEQ_CAMILLADSP_VALIDATE_CMD='camilladsp --check {config}' cargo test --release -p roomeq-export tool_contract_camilladsp"
+	@echo "  ROOMEQ_PIPEWIRE_VALIDATE_CMD='path/to/validate-pipewire {config}' cargo test --release -p roomeq-export tool_contract_pipewire"
+	@echo "  ROOMEQ_EASYEFFECTS_VALIDATE_CMD='path/to/validate-easyeffects {config}' cargo test --release -p roomeq-export tool_contract_easyeffects"
 	@echo
 	@echo "Manual/application-backed validators:"
 	@echo "  Equalizer APO: install on Windows and point ROOMEQ_EQUALIZER_APO_VALIDATE_CMD at an import/syntax-check script."
@@ -386,9 +390,9 @@ install-export-test-systems:
 	echo "Next:"
 	echo "  1. Run: just export-test-systems-help"
 	echo "  2. Set ROOMEQ_*_VALIDATE_CMD variables for real tool smoke tests."
-	echo "  3. Run: cargo test -p autoeq export::tests"
+	echo "  3. Run: cargo test --release -p roomeq-export"
 
-[group('qa')]
+[group('qa-export')]
 qa-export-camilladsp:
 	#!/usr/bin/env bash
 	set -euo pipefail
@@ -399,31 +403,31 @@ qa-export-camilladsp:
 		exit 1
 	fi
 	ROOMEQ_CAMILLADSP_VALIDATE_CMD="$validator --check {config}" \
-		cargo nextest run -p autoeq --lib --no-tests fail -E 'test(/camilladsp/)'
+		cargo nextest run --release -p roomeq-export --lib --no-tests fail -E 'test(/camilladsp/)'
 
-[group('qa')]
+[group('qa-export')]
 qa-export-portable:
 	#!/usr/bin/env bash
 	set -euo pipefail
 	# Roon and Wavelet have no supported headless importer. These tests parse each
 	# generated artifact independently and reconstruct its frequency response;
 	# optional application validators remain available through ROOMEQ_*_VALIDATE_CMD.
-	cargo nextest run -p autoeq --lib --no-tests fail \
+	cargo nextest run --release -p roomeq-export --lib --no-tests fail \
 		-E 'test(/equalizer_apo|easyeffects|wavelet|roon/)'
 
-[group('qa')]
+[group('qa-export')]
 qa-export-roon-setup:
 	#!/usr/bin/env bash
 	set -euo pipefail
 	scripts/roon-qa/setup.sh
 
-[group('qa')]
+[group('qa-export')]
 qa-export-roon-app:
 	#!/usr/bin/env bash
 	set -euo pipefail
 	scripts/roon-qa/run-app-qa.sh
 
-[group('qa')]
+[group('qa-export')]
 qa-export-all: qa-export-portable qa-export-camilladsp qa-export-pipewire
 	#!/usr/bin/env bash
 	set -euo pipefail
@@ -432,7 +436,7 @@ qa-export-all: qa-export-portable qa-export-camilladsp qa-export-pipewire
 		*) echo "Equalizer APO engine QA requires Windows; portable APO semantics passed." ;;
 	esac
 
-[group('qa')]
+[group('qa-export')]
 qa-export-equalizer-apo:
 	#!/usr/bin/env bash
 	set -euo pipefail
@@ -443,9 +447,9 @@ qa-export-equalizer-apo:
 		exit 1
 	fi
 	ROOMEQ_EQUALIZER_APO_PCM_CMD="powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-equalizer-apo-benchmark.ps1 -Benchmark '$benchmark' -Config '{config}' -InputFile '{input}' -OutputFile '{output}'" \
-		cargo nextest run -p autoeq --lib --no-tests fail -E 'test(/equalizer_apo/)'
+		cargo nextest run --release -p roomeq-export --lib --no-tests fail -E 'test(/equalizer_apo/)'
 
-[group('qa')]
+[group('qa-export')]
 qa-export-pipewire:
 	#!/usr/bin/env bash
 	set -euo pipefail
@@ -484,7 +488,8 @@ qa-export-pipewire:
 		bash -lc 'ROOMEQ_PIPEWIRE_VALIDATE_CMD="bash scripts/validate-pipewire-config.sh {config}" bash scripts/run-pipewire-export-tests.sh'
 
 [group('qa-roomeq')]
-qa-roomeq: qa-roomeq-small-stereo-20 \
+qa-roomeq-all: \
+	qa-roomeq-small-stereo-20 \
 	qa-roomeq-small-stereo-21 \
 	qa-roomeq-small-stereo-22 \
 	qa-roomeq-convergence \
@@ -664,45 +669,45 @@ qa-roomeq-multiseat-guards:
 
 [group('qa-roomeq')]
 qa-roomeq-home-cinema:
-	cargo test -p roomeq-model --lib -- --nocapture
-	cargo test -p roomeq-engine --lib -- --nocapture
-	cargo test -p roomeq-workflow --lib -- --nocapture
+	cargo test --release -p roomeq-model --lib -- --nocapture
+	cargo test --release -p roomeq-engine --lib -- --nocapture
+	cargo test --release -p roomeq-workflow --lib -- --nocapture
 
 [group('qa-roomeq')]
 qa-roomeq-all-channel-multiseat:
-	cargo test -p roomeq-engine --lib -- --nocapture
-	cargo test -p roomeq-workflow --lib -- --nocapture
+	cargo test --release -p roomeq-engine --lib -- --nocapture
+	cargo test --release -p roomeq-workflow --lib -- --nocapture
 
 [group('qa-roomeq')]
 qa-roomeq-bass-management:
-	cargo test -p roomeq-model --lib -- --nocapture
-	cargo test -p roomeq-engine --lib -- --nocapture
-	cargo test -p roomeq-workflow --lib -- --nocapture
+	cargo test --release -p roomeq-model --lib -- --nocapture
+	cargo test --release -p roomeq-engine --lib -- --nocapture
+	cargo test --release -p roomeq-workflow --lib -- --nocapture
 
 [group('qa-roomeq')]
 qa-roomeq-dsp-consistency:
-	cargo test -p roomeq-engine --lib -- --nocapture
-	cargo test -p roomeq-workflow --lib -- --nocapture
+	cargo test --release -p roomeq-engine --lib -- --nocapture
+	cargo test --release -p roomeq-workflow --lib -- --nocapture
 
 [group('qa-roomeq')]
 qa-roomeq-phase-critical:
-	cargo test -p roomeq-analysis --lib -- --nocapture
-	cargo test -p roomeq-engine --lib -- --nocapture
-	cargo test -p roomeq-workflow --lib -- --nocapture
+	cargo test --release -p roomeq-analysis --lib -- --nocapture
+	cargo test --release -p roomeq-engine --lib -- --nocapture
+	cargo test --release -p roomeq-workflow --lib -- --nocapture
 	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --multiseat-guards-only
 
 [group('qa-roomeq')]
 qa-roomeq-perceptual:
 	# nextest's explicit no-test failure prevents stale filters from producing a false-green QA run.
-	cargo nextest run -p autoeq-optim --lib --no-tests fail -E 'test(/loss::epa::/)'
-	cargo nextest run -p roomeq-workflow --lib --no-tests fail -E 'test(/generate_validation_bundle_report_creates_json|correction_report_(rejected_guardrails|failed_constraints_and_null_advisory)/)'
-	cargo nextest run -p roomeq-workflow --lib --no-tests fail -E 'test(/home_cinema_(no_sub|with_sub)_multiseat_rejection_reports|run_channel_via_generic_path_multiseat_rejected_recovers|all_channel_multiseat_acceptance_rejects_subs/)'
-	cargo nextest run -p roomeq-qa --lib --no-tests fail -E 'test(/scorecard_/)'
+	cargo nextest run --release -p autoeq-optim --lib --no-tests fail -E 'test(/loss::epa::/)'
+	cargo nextest run --release -p roomeq-workflow --lib --no-tests fail -E 'test(/generate_validation_bundle_report_creates_json|correction_report_(rejected_guardrails|failed_constraints_and_null_advisory)/)'
+	cargo nextest run --release -p roomeq-workflow --lib --no-tests fail -E 'test(/home_cinema_(no_sub|with_sub)_multiseat_rejection_reports|run_channel_via_generic_path_multiseat_rejected_recovers|all_channel_multiseat_acceptance_rejects_subs/)'
+	cargo nextest run --release -p roomeq-qa --lib --no-tests fail -E 'test(/scorecard_/)'
 
 [group('qa-roomeq')]
 qa-roomeq-gd:
-	cargo test -p roomeq-engine --lib -- --nocapture
-	cargo test -p roomeq-workflow --lib -- --nocapture
+	cargo test --release -p roomeq-engine --lib -- --nocapture
+	cargo test --release -p roomeq-workflow --lib -- --nocapture
 
 [group('qa-roomeq')]
 qa-roomeq-features:
@@ -711,16 +716,16 @@ qa-roomeq-features:
 # Supporting-source room compensation QA: integration test + targeted lib tests.
 [group('qa-roomeq')]
 qa-roomeq-supporting-source:
-	cargo test -p autoeq --test roomeq_supporting_source -- --nocapture
-	cargo test -p roomeq-workflow supporting_source --lib -- --nocapture
+	cargo test --release -p autoeq --test roomeq_supporting_source -- --nocapture
+	cargo test --release -p roomeq-workflow supporting_source --lib -- --nocapture
 
 # Compact CI-friendly QA run: bounded fuzzer + small coverage subset.
 # Typical wall time under 3 minutes on modern hardware.
 [group('qa-roomeq')]
 qa-roomeq-ci:
 	cargo run --bin roomeq-fuzzer --release --features="qa,plotly" -- -n 50 --seed 42 --skip-kautz-modal
-	cargo run --features qa --bin roomeq-qa-coverage --release -- --quick --maxeval 200
-	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --multiseat-guards-only
+	cargo run --features qa --bin roomeq-qa-coverage --release --features="cli" -- --quick --maxeval 200
+	cargo run --features qa --bin roomeq-qa-synthetic --features="cli" --release -- --multiseat-guards-only
 	# Leaf-crate unit coverage is enforced by the preceding CI matrix job.
 	just qa-roomeq-perceptual
 
@@ -729,11 +734,11 @@ qa-roomeq-ci:
 # the exhaustive combinatorics.
 [group('qa-roomeq')]
 qa-audibility-pr:
-	cargo test -p autoeq-core --doc
-	cargo test -p autoeq-measurements quality
-	cargo test -p roomeq-quality acoustic_qa_pr_ --lib
-	cargo test -p roomeq-workflow correction_acceptance --lib
-	cargo test -p roomeq-workflow final_safety_gate --lib
+	cargo test --release -p autoeq-core --doc
+	cargo test --release -p autoeq-measurements quality
+	cargo test --release -p roomeq-quality acoustic_qa_pr_ --lib
+	cargo test --release -p roomeq-workflow correction_acceptance --lib
+	cargo test --release -p roomeq-workflow final_safety_gate --lib
 	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --pr
 	cargo run --features qa --bin roomeq-qa-acoustic --release -- --tier pr
 
@@ -779,12 +784,12 @@ qa-roomeq-subsystem-coverage:
 [group('qa-roomeq')]
 qa-roomeq-mutation-smoke:
 	mkdir -p target/qa
-	cargo mutants --package autoeq --file 'src/roomeq/acoustic_qa/**/*.rs' --baseline skip --timeout 60 --shard 1/50 --sharding round-robin -j 4 -o target/qa/roomeq-mutants-smoke -- roomeq::acoustic_qa
+	cargo mutants --profile release --package autoeq --file 'src/roomeq/acoustic_qa/**/*.rs' --baseline skip --timeout 60 --shard 1/50 --sharding round-robin -j 4 -o target/qa/roomeq-mutants-smoke -- roomeq::acoustic_qa
 
 # Exhaustive mutation testing for quality metrics, acceptance, and corpus contracts.
 [group('qa-roomeq')]
 qa-roomeq-mutation:
-	cargo mutants --package autoeq --file 'src/roomeq/acoustic_qa/**/*.rs'
+	cargo mutants --profile release --package autoeq --file 'src/roomeq/acoustic_qa/**/*.rs'
 
 # Unit contracts for privacy-safe REW MDAT conversion.
 [group('qa-roomeq')]
@@ -801,5 +806,5 @@ qa-audibility-nightly:
 
 # Backend semantic/PCM validation. External backends are mandatory here so a
 # release cannot silently skip correctness checks.
-[group('qa')]
+[group('qa-export')]
 qa-export-equivalence: qa-export-all

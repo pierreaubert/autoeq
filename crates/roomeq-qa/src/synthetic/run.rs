@@ -1,6 +1,7 @@
 use super::build::build_config;
 use super::build::build_multichannel_config;
 use super::build::build_multisub_config;
+use super::build::configure_processing_mode;
 use super::channel_layout::ChannelLayout;
 use super::consts::MS_OPTIONS;
 use super::consts::OPTIONS;
@@ -520,7 +521,7 @@ pub(super) fn run_multichannel_test(
 
     let mut config =
         build_multichannel_config(layout, sub_topo, difficulty, base_curve, sample_rate);
-    config.optimizer.processing_mode = processing_mode;
+    configure_processing_mode(&mut config.optimizer, processing_mode);
 
     let result = match run_optimization(&config) {
         Ok(r) => r,

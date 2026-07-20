@@ -1,6 +1,7 @@
 use super::misc::same_frequency_grid;
 use autoeq_optim::loss::epa::score::{
-    compute_epa_multichannel_normalized, compute_epa_normalized, infer_epa_channel_role,
+    compute_epa_multichannel_normalized, compute_epa_normalized, epa_channel_energy_weight,
+    infer_epa_channel_role,
 };
 use roomeq_model::EpaConfig;
 use roomeq_model::{ChannelDspChain, CurveData, EpaChannelMetrics, EpaMultichannelMetrics};
@@ -59,18 +60,24 @@ pub fn compute_epa_multichannel(
             let (Some(initial), Some(final_)) = (&chain.initial_curve, &chain.final_curve) else {
                 return None;
             };
-            Some((name.as_str(), initial, final_))
+            let role = infer_epa_channel_role(name);
+            (epa_channel_energy_weight(role) > 0.0).then_some((
+                name.as_str(),
+                initial,
+                final_,
+                role,
+            ))
         })
         .collect();
     entries.sort_by(|a, b| a.0.cmp(b.0));
 
-    let (_, first_initial, _) = entries.first()?;
+    let (_, first_initial, _, _) = entries.first()?;
     let freqs = first_initial.freq.as_slice();
     if freqs.is_empty() {
         return None;
     }
 
-    if !entries.iter().all(|(_, initial, final_)| {
+    if !entries.iter().all(|(_, initial, final_, _)| {
         same_frequency_grid(freqs, &initial.freq) && same_frequency_grid(freqs, &final_.freq)
     }) {
         log::warn!("Skipping multichannel EPA aggregation: channel frequency grids do not match");
@@ -79,11 +86,11 @@ pub fn compute_epa_multichannel(
 
     let pre_channels: Vec<_> = entries
         .iter()
-        .map(|(name, initial, _)| (initial.spl.as_slice(), infer_epa_channel_role(name)))
+        .map(|(_, initial, _, role)| (initial.spl.as_slice(), *role))
         .collect();
     let post_channels: Vec<_> = entries
         .iter()
-        .map(|(name, _, final_)| (final_.spl.as_slice(), infer_epa_channel_role(name)))
+        .map(|(_, _, final_, role)| (final_.spl.as_slice(), *role))
         .collect();
 
     let pre = crate::report_adapter::to_epa_score(compute_epa_multichannel_normalized(

@@ -763,6 +763,34 @@ fn test_compute_eq_response() {
 }
 
 #[test]
+fn multichannel_epa_ignores_mismatched_zero_weight_lfe_grid() {
+    let main = crate::Curve {
+        freq: Array1::from(vec![20.0, 100.0, 1000.0, 5000.0, 20000.0]),
+        spl: Array1::zeros(5),
+        ..Default::default()
+    };
+    let lfe = crate::Curve {
+        freq: Array1::from(vec![20.0, 80.0, 200.0]),
+        spl: Array1::zeros(3),
+        ..Default::default()
+    };
+    let mut channels = HashMap::new();
+    channels.insert(
+        "Left".to_string(),
+        build_channel_dsp_chain_with_curves("Left", None, vec![], &[], Some(&main), Some(&main)),
+    );
+    channels.insert(
+        "LFE".to_string(),
+        build_channel_dsp_chain_with_curves("LFE", None, vec![], &[], Some(&lfe), Some(&lfe)),
+    );
+
+    assert!(
+        super::compute::compute_epa_multichannel(&channels, &Default::default()).is_some(),
+        "zero-weight LFE must not invalidate aggregation of full-range channels"
+    );
+}
+
+#[test]
 fn test_build_channel_dsp_chain_with_curves() {
     let freq = Array1::from(vec![100.0, 1000.0, 10000.0]);
     let initial = crate::Curve {

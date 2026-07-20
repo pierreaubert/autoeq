@@ -6,8 +6,8 @@ use super::types::SubTopology;
 use math_audio_iir_fir::{Biquad, BiquadFilterType};
 use roomeq_model::{
     CardioidConfig, CrossoverConfig, Curve, DBAConfig, FirConfig, MeasurementSource,
-    MixedPhaseSerdeConfig, MultiSubGroup, ProcessingMode, RoomConfig, SpeakerConfig,
-    SubwooferStrategy, SubwooferSystemConfig, SystemConfig, default_config_version,
+    MixedPhaseSerdeConfig, MultiSubGroup, OptimizerConfig, ProcessingMode, RoomConfig,
+    SpeakerConfig, SubwooferStrategy, SubwooferSystemConfig, SystemConfig, default_config_version,
 };
 use roomeq_synthetic::{
     generate_cardioid_scenario, generate_channel_curve, generate_dba_scenario,
@@ -44,34 +44,70 @@ pub(super) fn build_config(degraded: &Curve, mode: ProcessingMode) -> RoomConfig
     config.optimizer.population = 50;
     config.optimizer.refine = false;
     config.optimizer.seed = Some(SEED);
-    config.optimizer.processing_mode = mode;
     config.optimizer.num_filters = 3;
     config.optimizer.min_freq = 20.0;
     config.optimizer.max_freq = 20000.0;
-
-    // FIR config required for PhaseLinear, Hybrid, and MixedPhase modes
-    match &config.optimizer.processing_mode {
-        ProcessingMode::PhaseLinear | ProcessingMode::Hybrid => {
-            config.optimizer.fir = Some(FirConfig {
-                taps: 2048,
-                phase: "kirkeby".to_string(),
-                correct_excess_phase: false,
-                phase_smoothing: 0.167,
-                pre_ringing: None,
-            });
-        }
-        ProcessingMode::MixedPhase => {
-            config.optimizer.mixed_phase = Some(MixedPhaseSerdeConfig {
-                max_fir_length_ms: 10.0,
-                pre_ringing_threshold_db: -30.0,
-                min_spatial_depth: 0.5,
-                phase_smoothing_octaves: 0.167,
-            });
-        }
-        _ => {}
-    }
+    configure_processing_mode(&mut config.optimizer, mode);
 
     config
+}
+
+pub(super) fn configure_processing_mode(optimizer: &mut OptimizerConfig, mode: ProcessingMode) {
+    optimizer.processing_mode = mode;
+
+    match optimizer.processing_mode {
+        ProcessingMode::PhaseLinear | ProcessingMode::Hybrid => {
+            optimizer.max_freq = optimizer.max_freq.min(1500.0);
+            optimizer.fir.get_or_insert_with(default_qa_fir_config);
+        }
+        ProcessingMode::MixedPhase => {
+            optimizer.fir.get_or_insert_with(default_qa_fir_config);
+            optimizer
+                .mixed_phase
+                .get_or_insert_with(default_qa_mixed_phase_config);
+        }
+        ProcessingMode::LowLatency | ProcessingMode::WarpedIir | ProcessingMode::KautzModal => {}
+    }
+}
+
+fn default_qa_fir_config() -> FirConfig {
+    FirConfig {
+        taps: 2048,
+        phase: "kirkeby".to_string(),
+        correct_excess_phase: false,
+        phase_smoothing: 0.167,
+        pre_ringing: None,
+    }
+}
+
+fn default_qa_mixed_phase_config() -> MixedPhaseSerdeConfig {
+    MixedPhaseSerdeConfig {
+        max_fir_length_ms: 10.0,
+        pre_ringing_threshold_db: -30.0,
+        min_spatial_depth: 0.5,
+        phase_smoothing_octaves: 0.167,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn processing_modes_install_required_qa_configuration() {
+        for mode in [ProcessingMode::PhaseLinear, ProcessingMode::Hybrid] {
+            let mut optimizer = OptimizerConfig::default();
+            configure_processing_mode(&mut optimizer, mode.clone());
+            assert_eq!(optimizer.processing_mode, mode);
+            assert!(optimizer.fir.is_some());
+            assert_eq!(optimizer.max_freq, 1500.0);
+        }
+
+        let mut optimizer = OptimizerConfig::default();
+        configure_processing_mode(&mut optimizer, ProcessingMode::MixedPhase);
+        assert!(optimizer.fir.is_some());
+        assert!(optimizer.mixed_phase.is_some());
+    }
 }
 
 pub(super) fn build_multisub_config(sub_curves: &[Curve], allpass: bool) -> RoomConfig {

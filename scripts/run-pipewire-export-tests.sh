@@ -7,7 +7,7 @@ set -euo pipefail
 # an empty selection, especially when a container's dependency download fails.
 test_list="$(mktemp)"
 trap 'rm -f "$test_list"' EXIT
-if ! cargo test -p autoeq --lib pipewire -- --list >"$test_list"; then
+if ! cargo test --release -p roomeq-export --lib pipewire -- --list >"$test_list"; then
     echo "Could not discover PipeWire export tests." >&2
     exit 1
 fi
@@ -16,4 +16,4 @@ if ! grep -q ': test$' "$test_list"; then
     exit 1
 fi
 
-cargo test -p autoeq --lib pipewire -- --nocapture
+cargo test --release -p roomeq-export --lib pipewire -- --nocapture

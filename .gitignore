@@ -27,6 +27,8 @@ _site
 !artifacts.md
 !docs/CRATE_PARTITION_PLAN.md
 !docs/CRATE_TEST_MATRIX.md
+!crates/*/README.md
+!crates/*/CHANGELOG.md
 
 # python
 __pycache__

@@ -333,6 +333,25 @@ def check_focused_tests(
     return errors
 
 
+def check_crate_documentation(
+    packages: dict[str, dict[str, Any]],
+) -> list[str]:
+    errors: list[str] = []
+    for package_name, package in sorted(packages.items()):
+        package_dir = pathlib.Path(package["manifest_path"]).parent
+        for file_name in ("README.md", "CHANGELOG.md"):
+            path = package_dir / file_name
+            if not path.is_file():
+                errors.append(
+                    f"workspace package {package_name} is missing {file_name}"
+                )
+            elif not path.read_text(encoding="utf-8").strip():
+                errors.append(
+                    f"workspace package {package_name} has empty {file_name}"
+                )
+    return errors
+
+
 def package_metrics(
     packages: dict[str, dict[str, Any]], policy: dict[str, Any]
 ) -> list[tuple[str, int, int, str]]:
@@ -458,6 +477,7 @@ def main() -> int:
     metrics = root_metrics(REPO_ROOT)
     errors.extend(check_metric_budgets(metrics, policy))
     errors.extend(check_focused_tests(packages, policy))
+    errors.extend(check_crate_documentation(packages))
     errors.extend(check_public_api(REPO_ROOT, policy))
     errors.extend(check_schema_baseline_files(REPO_ROOT, policy))
 

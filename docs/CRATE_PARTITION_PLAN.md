@@ -808,6 +808,7 @@ tree:
 | Production exporters remaining in root | `0` |
 | Duplicate canonical implementations | `0` |
 | Per-crate focused test commands | all green |
+| Crate-local `README.md` and `CHANGELOG.md` | every workspace package |
 | Production RoomEQ library line coverage | `>= 90%` |
 | Compatibility/schema/export checks | all green |
 | Full RoomEQ QA | green |

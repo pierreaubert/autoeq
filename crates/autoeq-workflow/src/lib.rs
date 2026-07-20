@@ -21,7 +21,7 @@ pub mod cli {
     pub use autoeq_optim::cli::*;
 }
 pub use autoeq_optim::LossType;
-pub use autoeq_optim::{OptimParams, PeqModel, de};
+pub use autoeq_optim::{OptimParams, OptimizationRunDescriptor, PeqModel, de};
 pub mod x2peq {
     pub use autoeq_core::x2peq::*;
 }

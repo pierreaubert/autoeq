@@ -116,6 +116,7 @@ fn execute_topology_workflow_home_cinema_with_sub_returns_result() {
         crossovers: Some(crossovers),
         target_curve: None,
         optimizer: tiny_optimizer(),
+        provenance: Default::default(),
         recording_config: None,
         ctc: None,
         cea2034_cache: None,

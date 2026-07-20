@@ -3,6 +3,46 @@
 RoomEQ consumes a JSON configuration file describing the room, speakers,
 measurements, and optimizer settings. The top-level object is a `RoomConfig`.
 
+## Measurement provenance
+
+The optional top-level `provenance` object links each speaker measurement to a
+versioned `.provenance.json` sidecar without embedding private acquisition data
+in the RoomEQ config. `validation_mode` defaults to `"warn"` for legacy
+configurations; use `"strict"` to require every configured speaker to have a
+sidecar whose record ID and SHA-256 content hash match the reference.
+
+```json
+{
+  "provenance": {
+    "validation_mode": "strict",
+    "measurements": {
+      "L": {
+        "record_id": "api:4c8d...",
+        "content_hash": "4c8d7a2bfefb8e5b8e8f95f7b10f7c6dd5ac5aa938aeac181c35d7f94b34d0e2",
+        "schema_version": 1,
+        "sidecar_path": "measurements/left.csv.provenance.json"
+      }
+    }
+  }
+}
+```
+
+Validation never fetches source URLs or referenced assets. `roomeq` accepts
+`--provenance-validation off|warn|strict` to override this policy for one run.
+It writes `<artifact>.provenance.json` next to the DSP chain and any requested
+external export; use `--provenance-redaction shareable` or `anonymous` to omit
+local sidecar paths while retaining measurement and artifact hashes.
+
+Upgrade a supported legacy sidecar without re-importing its measurement:
+
+```bash
+migrate-provenance measurements/left.csv.provenance.json
+```
+
+The command writes the current schema deterministically and creates a
+`.bak` file for an in-place migration. Pass an explicit second path to retain
+the original sidecar unchanged.
+
 ## Inter-channel timbre matching
 
 Use `optimizer.inter_channel_timbre_matching` to reduce residual broadband

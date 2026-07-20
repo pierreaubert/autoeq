@@ -7,5 +7,8 @@ license = "GPL-3.0-or-later"
 
 [dependencies]
 autoeq-core = { workspace = true }
+clap = { workspace = true }
 roomeq-model = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }

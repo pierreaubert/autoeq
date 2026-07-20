@@ -83,6 +83,7 @@ fn room_config_with_in_memory_speakers(speakers: HashMap<String, SpeakerConfig>)
         crossovers: None,
         target_curve: None,
         optimizer: OptimizerConfig::default(),
+        provenance: Default::default(),
         recording_config: None,
         ctc: None,
         cea2034_cache: None,

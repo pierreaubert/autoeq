@@ -19,6 +19,7 @@ use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use log::{info, warn};
 use schemars::schema_for;
+use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 
 // Use the library types
@@ -71,6 +72,14 @@ struct Args {
     /// Validate configuration and check measurement files exist, but do not run optimization
     #[arg(long)]
     dry_run: bool,
+
+    /// Override measurement provenance validation for this run: off, warn, or strict
+    #[arg(long, value_parser = ["off", "warn", "strict"])]
+    provenance_validation: Option<String>,
+
+    /// Redact provenance manifests: private keeps sidecar paths; shareable and anonymous remove them
+    #[arg(long, default_value = "private", value_parser = ["private", "shareable", "anonymous"])]
+    provenance_redaction: String,
 }
 
 fn main() -> Result<()> {
@@ -142,7 +151,11 @@ fn main() -> Result<()> {
 
     // Dry-run mode: validate config and check files exist
     if args.dry_run {
-        return run_dry_run(config_path, args.override_config);
+        return run_dry_run(
+            config_path,
+            args.override_config,
+            args.provenance_validation,
+        );
     }
 
     run(
@@ -152,6 +165,8 @@ fn main() -> Result<()> {
         args.override_config,
         args.export_format,
         args.export_path,
+        args.provenance_validation,
+        args.provenance_redaction,
     )
 }
 
@@ -195,12 +210,16 @@ fn run(
     override_config_path: Option<PathBuf>,
     export_format: Option<ExportFormat>,
     export_path: Option<PathBuf>,
+    provenance_validation: Option<String>,
+    provenance_redaction: String,
 ) -> Result<()> {
     // Load room configuration
     info!("Loading room configuration from {:?}", config_path);
 
-    let (room_config, _config_dir, _validation) =
+    let (mut room_config, _config_dir, _validation) =
         load_config(&config_path, override_config_path.as_deref())?;
+    apply_provenance_validation_override(&mut room_config, provenance_validation.as_deref())?;
+    validate_provenance(&room_config)?;
 
     info!("Found {} speakers", room_config.speakers.len());
 
@@ -230,6 +249,7 @@ fn run(
     save_dsp_chain(&dsp_output, &output_path)
         .map_err(|e| anyhow!("{}", e))
         .with_context(|| format!("Failed to save DSP chain to {:?}", output_path))?;
+    write_provenance_manifest(&output_path, &room_config, &provenance_redaction)?;
 
     // Export to external format if requested
     if let Some(format) = export_format {
@@ -245,6 +265,7 @@ fn run(
             sample_rate,
             source_dir,
         )?;
+        write_provenance_manifest(&path, &room_config, &provenance_redaction)?;
         info!("Exported to {:?}", path);
     }
 
@@ -254,11 +275,17 @@ fn run(
 }
 
 /// Validate configuration and check measurement files exist without running optimization
-fn run_dry_run(config_path: PathBuf, override_config_path: Option<PathBuf>) -> Result<()> {
+fn run_dry_run(
+    config_path: PathBuf,
+    override_config_path: Option<PathBuf>,
+    provenance_validation: Option<String>,
+) -> Result<()> {
     info!("Loading room configuration from {:?}", config_path);
 
-    let (room_config, _config_dir, validation) =
+    let (mut room_config, _config_dir, validation) =
         load_config(&config_path, override_config_path.as_deref())?;
+    apply_provenance_validation_override(&mut room_config, provenance_validation.as_deref())?;
+    validate_provenance(&room_config)?;
 
     println!("\n=== Configuration Validation ===\n");
 
@@ -324,6 +351,85 @@ fn run_dry_run(config_path: PathBuf, override_config_path: Option<PathBuf>) -> R
 
     println!("All checks passed! Configuration is valid and all files exist.");
     Ok(())
+}
+
+fn apply_provenance_validation_override(
+    config: &mut RoomConfig,
+    override_mode: Option<&str>,
+) -> Result<()> {
+    let Some(override_mode) = override_mode else {
+        return Ok(());
+    };
+    config.provenance.validation_mode = match override_mode {
+        "off" => autoeq::roomeq::ProvenanceValidationMode::Off,
+        "warn" => autoeq::roomeq::ProvenanceValidationMode::Warn,
+        "strict" => autoeq::roomeq::ProvenanceValidationMode::Strict,
+        _ => anyhow::bail!("unsupported provenance validation mode '{override_mode}'"),
+    };
+    Ok(())
+}
+
+fn validate_provenance(config: &RoomConfig) -> Result<()> {
+    let validation = roomeq_engine::provenance::validate_provenance_references(config);
+    for warning in validation.warnings {
+        warn!("Provenance: {warning}");
+    }
+    if validation.errors.is_empty() {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "Provenance validation failed:\n{}",
+            validation.errors.join("\n")
+        )
+    }
+}
+
+fn write_provenance_manifest(
+    artifact_path: &std::path::Path,
+    config: &RoomConfig,
+    redaction: &str,
+) -> Result<()> {
+    let artifact = std::fs::read(artifact_path)
+        .with_context(|| format!("Failed to hash output artifact {artifact_path:?}"))?;
+    let measurements = config
+        .provenance
+        .measurements
+        .iter()
+        .map(|(channel, reference)| {
+            let sidecar_path = (redaction == "private")
+                .then(|| reference.sidecar_path.as_ref())
+                .flatten()
+                .map(|path| path.to_string_lossy().into_owned());
+            (
+                channel.clone(),
+                serde_json::json!({
+                    "record_id": reference.record_id,
+                    "content_hash": reference.content_hash,
+                    "schema_version": reference.schema_version,
+                    "sidecar_path": sidecar_path,
+                }),
+            )
+        })
+        .collect::<serde_json::Map<String, serde_json::Value>>();
+    let manifest = serde_json::json!({
+        "schema": "autoeq.roomeq-export-provenance",
+        "schema_version": 1,
+        "artifact_sha256": hash_bytes(&artifact),
+        "redaction": redaction,
+        "measurements": measurements,
+    });
+    let path = PathBuf::from(format!("{}.provenance.json", artifact_path.display()));
+    std::fs::write(&path, serde_json::to_vec_pretty(&manifest)?)
+        .with_context(|| format!("Failed to write provenance manifest {path:?}"))?;
+    info!("Wrote provenance manifest to {:?}", path);
+    Ok(())
+}
+
+fn hash_bytes(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// Collect all measurement file paths from a speaker configuration
@@ -424,5 +530,21 @@ mod tests {
     fn sample_rate_default_is_48000() {
         let args = Args::try_parse_from(["roomeq", "--schema", "input"]).unwrap();
         assert_eq!(args.sample_rate, 48000.0);
+    }
+
+    #[test]
+    fn provenance_flags_accept_supported_values() {
+        let args = Args::try_parse_from([
+            "roomeq",
+            "--schema",
+            "input",
+            "--provenance-validation",
+            "strict",
+            "--provenance-redaction",
+            "anonymous",
+        ])
+        .unwrap();
+        assert_eq!(args.provenance_validation.as_deref(), Some("strict"));
+        assert_eq!(args.provenance_redaction, "anonymous");
     }
 }

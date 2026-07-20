@@ -44,6 +44,13 @@ impl RoomConfigBuilder {
         self
     }
 
+    /// Set measurement provenance references and validation policy.
+    #[must_use]
+    pub fn provenance(mut self, provenance: super::ProvenanceConfig) -> Self {
+        self.0.provenance = provenance;
+        self
+    }
+
     /// Set the system configuration.
     #[must_use]
     pub fn system(mut self, system: SystemConfig) -> Self {

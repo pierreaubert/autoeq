@@ -422,6 +422,7 @@ pub(super) fn generate_stratified_config(
         },
         target_curve,
         optimizer,
+        provenance: Default::default(),
         recording_config: None,
         ctc: None,
         cea2034_cache: None,
@@ -654,6 +655,7 @@ pub(super) fn generate_random_mixed_config(
             seed: Some(rng.random()),
             ..OptimizerConfig::default()
         },
+        provenance: Default::default(),
         recording_config: None,
         ctc: None,
         cea2034_cache: None,

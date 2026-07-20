@@ -152,6 +152,7 @@ mod tests {
             optimizer: OptimizerConfig::default(),
             target_curve: None,
             crossovers: None,
+            provenance: Default::default(),
             recording_config: None,
             cea2034_cache: None,
             ctc: None,

@@ -85,6 +85,7 @@ rand_chacha = "0.10.0"
 reqwest = { version = "0.13", features = ["json"] }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
+sha2 = "0.10"
 schemars = "1.2"
 strsim = "0.11"
 thiserror = "2.0.17"
@@ -149,6 +150,7 @@ reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true }
+sha2 = { workspace = true }
 strsim = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
@@ -226,6 +228,10 @@ path = "src/bin/roomeq_qa_acoustic.rs"
 [[bin]]
 name = "convert-recording"
 path = "src/bin/convert_recording.rs"
+
+[[bin]]
+name = "migrate-provenance"
+path = "src/bin/migrate_provenance.rs"
 
 [lib]
 name = "autoeq"

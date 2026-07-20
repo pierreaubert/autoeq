@@ -37,6 +37,7 @@ fn cardioid_rejects_missing_phase() {
         crossovers: None,
         target_curve: None,
         optimizer: OptimizerConfig::default(),
+        provenance: Default::default(),
         recording_config: None,
         ctc: None,
         cea2034_cache: None,
@@ -118,6 +119,7 @@ fn cardioid_flat_response_does_not_regress() {
             seed: Some(42),
             ..Default::default()
         },
+        provenance: Default::default(),
         recording_config: None,
         ctc: None,
         cea2034_cache: None,
@@ -202,6 +204,7 @@ fn multisub_uses_production_multiseat_path_when_subs_have_seat_measurements() {
             }),
             ..OptimizerConfig::default()
         },
+        provenance: Default::default(),
         recording_config: None,
         ctc: None,
         cea2034_cache: None,
@@ -343,6 +346,7 @@ fn production_multiseat_path_emits_per_sub_and_global_eq_when_enabled() {
             }),
             ..OptimizerConfig::default()
         },
+        provenance: Default::default(),
         recording_config: None,
         ctc: None,
         cea2034_cache: None,
@@ -433,6 +437,7 @@ mod coverage_tests {
             crossovers: None,
             target_curve: None,
             optimizer,
+            provenance: Default::default(),
             recording_config: None,
             ctc: None,
             cea2034_cache: None,

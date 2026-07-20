@@ -2,76 +2,7 @@ use super::super::types::DspChainOutput;
 use super::conformance::{
     validate_camilladsp_input, validate_pipewire_input, validate_serial_external_input,
 };
-use std::path::{Path, PathBuf};
-
-/// Supported export formats for DSP chain output
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum ExportFormat {
-    /// CamillaDSP YAML configuration
-    #[value(name = "camilladsp")]
-    CamillaDsp,
-    /// Equalizer APO / Peace GUI text format (also works with PipeWire parametric-equalizer module)
-    #[value(name = "apo")]
-    EqualizerApo,
-    /// EasyEffects JSON preset
-    #[value(name = "easyeffects")]
-    EasyEffects,
-    /// Wavelet GraphicEQ text format
-    #[value(name = "wavelet")]
-    Wavelet,
-    /// PipeWire filter-chain SPA-JSON configuration
-    #[value(name = "pipewire")]
-    PipeWire,
-    /// Roon DSP Engine preset (JSON)
-    #[value(name = "roon")]
-    RoonDsp,
-    /// Room EQ Wizard Generic EQ filter settings text
-    #[value(name = "rew")]
-    Rew,
-    /// Raw normalized biquad coefficients with channel/order metadata
-    #[value(name = "coefficients", alias = "biquad-coefficients")]
-    BiquadCoefficients,
-}
-
-impl ExportFormat {
-    pub fn default_extension(&self) -> &'static str {
-        match self {
-            ExportFormat::CamillaDsp => "yaml",
-            ExportFormat::EqualizerApo => "txt",
-            ExportFormat::EasyEffects => "json",
-            ExportFormat::Wavelet => "txt",
-            ExportFormat::PipeWire => "conf",
-            ExportFormat::RoonDsp => "json",
-            ExportFormat::Rew => "txt",
-            ExportFormat::BiquadCoefficients => "json",
-        }
-    }
-
-    pub fn default_file_name(&self) -> &'static str {
-        match self {
-            ExportFormat::CamillaDsp => "room_eq_cdsp.yaml",
-            ExportFormat::EqualizerApo => "room_eq.txt",
-            ExportFormat::EasyEffects => "room_eq.json",
-            ExportFormat::Wavelet => "room_eq.txt",
-            ExportFormat::PipeWire => "room_eq.conf",
-            ExportFormat::RoonDsp => "room_eq.json",
-            ExportFormat::Rew => "room_eq_rew.txt",
-            ExportFormat::BiquadCoefficients => "room_eq_biquads.json",
-        }
-    }
-
-    pub fn default_export_path(&self, output_path: &Path) -> PathBuf {
-        if matches!(self, ExportFormat::CamillaDsp)
-            && let Some(stem) = output_path.file_stem().and_then(|stem| stem.to_str())
-        {
-            let mut path = output_path.to_path_buf();
-            path.set_file_name(format!("{stem}_cdsp.{}", self.default_extension()));
-            return path;
-        }
-
-        output_path.with_extension(self.default_extension())
-    }
-}
+pub use roomeq_export::ExternalExportFormat as ExportFormat;
 
 pub fn external_export_supported(
     output: &DspChainOutput,

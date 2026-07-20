@@ -54,6 +54,19 @@ impl<'a> RoomPipeline<'a> {
         self,
         observer: Option<Box<dyn PipelineObserver>>,
     ) -> Result<RoomOptimizationResult> {
+        let provenance =
+            roomeq_engine::provenance::validate_provenance_references(self.request.config);
+        for warning in provenance.warnings {
+            log::warn!("RoomEQ provenance: {warning}");
+        }
+        if !provenance.errors.is_empty() {
+            return Err(crate::AutoeqError::InvalidConfiguration {
+                message: format!(
+                    "RoomEQ provenance validation failed:\n{}",
+                    provenance.errors.join("\n")
+                ),
+            });
+        }
         let mut result = super::optimize::optimize_room_pipeline_impl(self.request, observer)?;
         if !self.validation_measurements.is_empty() {
             attach_validation_scorecard(
@@ -496,6 +509,7 @@ mod tests {
             crossovers: None,
             target_curve: None,
             optimizer: OptimizerConfig::default(),
+            provenance: Default::default(),
             recording_config: None,
             ctc: None,
             cea2034_cache: None,

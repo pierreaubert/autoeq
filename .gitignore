@@ -25,6 +25,7 @@ fuzzer_output
 _site
 [a-z]*.md
 !artifacts.md
+!docs/CRATE_PARTITION_PLAN.md
 
 # python
 __pycache__

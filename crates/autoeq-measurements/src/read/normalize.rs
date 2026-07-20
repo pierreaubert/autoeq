@@ -1,5 +1,7 @@
-use crate::Curve;
+use crate::{Curve, MeasurementRecord, ProvenanceError};
 use ndarray::Array1;
+use serde_json::json;
+use std::collections::BTreeMap;
 
 use super::interpolate::*;
 
@@ -44,6 +46,30 @@ pub fn normalize_and_interpolate_response(
     let mut interpolated = interpolate_log_space(standard_freq, curve);
     interpolated.spl = normalize_response(&interpolated, NORMALIZE_LOW_FREQ, NORMALIZE_HIGH_FREQ);
     interpolated
+}
+
+/// Normalize and resample a tracked record, preserving the exact operation
+/// parameters in its transformation ledger.
+pub fn normalize_and_interpolate_record(
+    standard_freq: &ndarray::Array1<f64>,
+    record: &MeasurementRecord,
+) -> Result<MeasurementRecord, ProvenanceError> {
+    let mut parameters = BTreeMap::new();
+    parameters.insert("target_frequency_hz".into(), json!(standard_freq.to_vec()));
+    parameters.insert(
+        "normalization_frequency_min_hz".into(),
+        json!(NORMALIZE_LOW_FREQ),
+    );
+    parameters.insert(
+        "normalization_frequency_max_hz".into(),
+        json!(NORMALIZE_HIGH_FREQ),
+    );
+    record.transformed(
+        normalize_and_interpolate_response(standard_freq, &record.curve),
+        "normalize_and_interpolate",
+        parameters,
+        true,
+    )
 }
 
 /// Interpolate a frequency response curve WITHOUT normalizing.

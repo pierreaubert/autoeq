@@ -53,6 +53,7 @@ fn stereo_config() -> RoomConfig {
             seed: Some(7),
             ..OptimizerConfig::default()
         },
+        provenance: Default::default(),
         recording_config: None,
         ctc: None,
         cea2034_cache: None,

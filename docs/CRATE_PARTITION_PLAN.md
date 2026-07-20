@@ -1,0 +1,529 @@
+# Crate Partition Migration Plan
+
+Status: proposed canonical execution plan
+
+Date: 2026-07-18
+
+Tracking issue: create before implementation starts
+
+Supersedes: the crate-split roadmap in `ARCHITECTURE.md`
+
+## 1. Objective
+
+Partition the codebase into cohesive crates that can be compiled and tested
+independently, with a small, explicit, acyclic dependency graph.
+
+The root `autoeq` package becomes a compatibility facade and a collection of
+thin binary entry points. It must not remain the owner of AutoEQ or RoomEQ
+implementation code.
+
+The migration is complete only when:
+
+- behavior is owned by a focused crate;
+- tests live with the behavior they prove;
+- dependencies point from application layers toward domain layers;
+- the root package contains compatibility re-exports and process startup only;
+- production AutoEQ and RoomEQ use the extracted implementations;
+- no copied implementation remains under both `src/` and `crates/`.
+
+## 2. Non-goals
+
+This migration does not, by itself:
+
+- change optimizer mathematics, acoustic policy, filter behavior, schemas, or
+  export semantics;
+- redesign public JSON contracts unless decoupling requires a compatible type
+  relocation;
+- introduce a generic `utils` crate;
+- split code merely to reduce file size;
+- preserve internal module paths that are not public API;
+- combine unrelated algorithm cleanup with ownership moves.
+
+Behavioral improvements should be implemented before or after a migration
+slice, not hidden inside it.
+
+## 3. Current baseline
+
+Baseline captured on 2026-07-18 from the current worktree:
+
+| Area | Rust lines | Approximate tests |
+|---|---:|---:|
+| Root `src/` | 67,786 | 825 |
+| Root `src/roomeq/` | 51,820 | 744 |
+| Root `src/bin/` | 15,666 | 78 |
+| Root top-level facade modules | 300 | 3 |
+| Extracted `crates/` | 74,139 | 1,202 |
+| Integration `tests/` | 6,871 | 142 |
+
+The largest remaining root ownership clusters are:
+
+| Cluster | Rust lines |
+|---|---:|
+| `roomeq/optimize*` | 13,345 |
+| `roomeq/workflows*` | 9,470 |
+| `roomeq/export*` | 6,241 |
+| `roomeq/speaker_eq*` | 4,756 |
+| `roomeq/eq*` | 4,345 |
+| `roomeq/home_cinema*` | 3,519 |
+| `roomeq/group_processing*` | 2,713 |
+| `roomeq/ctc*` | 2,748 |
+| `roomeq/output*` | 2,513 |
+
+These numbers are migration fitness metrics, not estimates of code quality.
+They must decrease monotonically after implementation begins.
+
+## 4. Architectural rules
+
+### 4.1 Dependency direction
+
+1. No workspace crate may depend on the root `autoeq` package.
+2. Dependencies must be acyclic.
+3. A lower-level contract crate must not re-export a higher-level service or
+   application crate.
+4. Shared types belong in the lowest stable owner needed by their consumers;
+   they must not be placed in a new catch-all crate.
+5. Traits for external behavior are defined by the consuming domain layer.
+   Filesystem, network, optimizer, and artifact adapters are implemented by an
+   application or adapter layer.
+6. Re-exports for compatibility belong in the root facade, not in domain
+   crates.
+7. Direct dependency additions require an ownership explanation in the PR.
+8. Moving code must not create a second canonical representation of curves,
+   filters, configs, results, or DSP graphs.
+
+### 4.2 Runtime boundaries
+
+- Model crates own data contracts and validation, not execution.
+- Analysis and quality crates are deterministic and operate on in-memory data.
+- Engine crates own deterministic processing and orchestration over prepared
+  inputs.
+- Workflow crates own I/O composition: loading, cache/resume, artifact stores,
+  sidecars, and calls into engines and exporters.
+- Export crates render validated contracts but do not run optimization.
+- CLI crates parse arguments and invoke workflows.
+- QA crates assemble scenarios and assertions through public APIs.
+
+### 4.3 Migration mechanics
+
+1. Move one coherent vertical slice per PR.
+2. Move its focused tests in the same PR.
+3. Delete the root implementation in that PR.
+4. Preserve a root re-export or thin delegating adapter only when public
+   compatibility requires it.
+5. Do not land copy-only extraction commits.
+6. Do not move a file based only on its name; move it when its dependencies
+   satisfy the destination crate's contract.
+7. Do not make unrelated worktree changes part of a migration commit.
+
+## 5. Target crate graph
+
+An arrow means "depends directly on". The root facade is a terminal consumer
+and is intentionally omitted from the main graph.
+
+```text
+autoeq-core
+
+autoeq-measurements --> autoeq-core
+autoeq-optim        --> autoeq-core, autoeq-measurements
+autoeq-fir          --> autoeq-core
+autoeq-artifacts    --> autoeq-core
+autoeq-plot         --> autoeq-core, autoeq-measurements, autoeq-optim
+autoeq-workflow     --> autoeq-core, autoeq-measurements, autoeq-optim
+
+roomeq-model        --> autoeq-core
+roomeq-analysis     --> autoeq-core, roomeq-model
+roomeq-quality      --> autoeq-core, roomeq-analysis, roomeq-model
+roomeq-engine       --> autoeq-core, autoeq-optim, autoeq-fir,
+                        roomeq-model, roomeq-analysis, roomeq-quality
+roomeq-export       --> autoeq-core, roomeq-model
+roomeq-workflow     --> autoeq-measurements, autoeq-artifacts,
+                        roomeq-model, roomeq-engine, roomeq-export
+roomeq-synthetic    --> autoeq-core, roomeq-model
+roomeq-qa           --> roomeq-model, roomeq-workflow,
+                        roomeq-quality, roomeq-synthetic
+
+autoeq-cli          --> autoeq-workflow, autoeq-plot
+roomeq-cli          --> roomeq-model, roomeq-workflow
+```
+
+The exact CLI package names may be adjusted before their work package starts,
+but their dependency direction and responsibilities may not be folded back
+into the root facade.
+
+### 5.1 Explicitly forbidden target edges
+
+- `roomeq-model -> autoeq-measurements`
+- `roomeq-model -> autoeq-optim`
+- `roomeq-engine -> autoeq-workflow`
+- `roomeq-engine -> roomeq-export`
+- `roomeq-analysis -> roomeq-engine`
+- `roomeq-quality -> roomeq-engine`
+- `roomeq-export -> roomeq-engine`
+- any workspace crate `-> autoeq` root facade
+
+Temporary exceptions must be recorded in the tracking issue with the work
+package that removes them. The exception list may only shrink.
+
+## 6. Crate ownership
+
+| Crate | Owns | Must not own |
+|---|---|---|
+| `autoeq-core` | Curve/value types, PEQ layouts, response math, canonical numerical primitives | I/O, optimizer backends, plotting, RoomEQ policy |
+| `autoeq-measurements` | Measurement sources, parsing, calibration, provenance, normalization, interpolation, smoothing, CEA-2034 acquisition data | Optimization orchestration, CLI commands |
+| `autoeq-optim` | Objectives, bounds, constraints, optimizer backends, optimizer evidence | Filesystem/network acquisition, application workflows |
+| `autoeq-fir` | Pure FIR design and byte/WAV encoding primitives | File-path resolution, artifact placement |
+| `autoeq-artifacts` | Artifact-store ports and filesystem/in-memory implementations | Acoustic policy, optimization |
+| `autoeq-plot` | Rendering prepared plot/report data | Measurement acquisition, optimization execution |
+| `autoeq-workflow` | Speaker/headphone application use cases over prepared ports | CLI parsing, RoomEQ orchestration |
+| `roomeq-model` | Room config, neutral optimizer settings, validation reports, channel/result/DSP graph contracts, serde/schema compatibility | Measurement loaders, optimizer implementations, filesystem, rendering |
+| `roomeq-analysis` | In-memory acoustic analysis, alignment evidence, spatial/temporal analysis | I/O, optimization orchestration, artifact writing |
+| `roomeq-quality` | Metrics, acceptance policies, corpus-independent scorecards | Scenario execution, I/O, optimizer calls |
+| `roomeq-engine` | In-memory RoomEQ pipeline, processing strategies, topology execution, filter/DSP graph construction | Config file loading, network, artifact persistence, external-format rendering |
+| `roomeq-export` | External-format validation, rendering, package-member generation | Optimization, config loading, hidden filesystem discovery |
+| `roomeq-workflow` | Config/measurement loading, path resolution, provenance validation, cache/resume, engine invocation, export coordination, artifact persistence | DSP mathematics, CLI parsing |
+| `roomeq-synthetic` | Deterministic synthetic measurements and scenario primitives | QA policy, process execution |
+| `roomeq-qa` | QA scenario matrices, runners, reports, regression assertions | Production pipeline implementations |
+| CLI crates | Argument parsing, command selection, user-facing diagnostics | Domain algorithms and test fixtures |
+| root `autoeq` | Compatibility re-exports and thin binary startup | Canonical implementation |
+
+## 7. Root-module destination map
+
+| Current root area | Destination | Notes |
+|---|---|---|
+| `roomeq/types` | `roomeq-model` | Move output/result contracts as well as config-facing types. |
+| `roomeq/output` | contracts to `roomeq-model`; builders to `roomeq-engine` | Builders consume typed contracts and return a validated graph. |
+| `roomeq/eq` | `roomeq-engine` | Pure prepared-input EQ stages. Loading stays in workflow. |
+| `roomeq/speaker_eq` | `roomeq-engine` | Processing strategies and channel execution. |
+| `roomeq/group_processing` | `roomeq-engine` | Group/topology execution over prepared inputs. |
+| `roomeq/home_cinema` | model types to `roomeq-model`; execution to `roomeq-engine` | Keep role contracts separate from processing. |
+| `roomeq/optimize` | result contracts to model; processing to engine; I/O/report persistence to workflow | Split by responsibility before moving. |
+| `roomeq/pipeline` | in-memory state machine to engine; application composition to workflow | The production workflow must call the extracted engine. |
+| `roomeq/workflows` | deterministic topology strategies to engine; resource composition to workflow | Move complete topology slices. |
+| `roomeq/ctc` | contracts to model; analysis/processing to engine | SOFA/resource loading belongs in workflow adapters. |
+| `roomeq/cea2034_correction` | prepared-data processing to engine; acquisition to measurements/workflow | Do not pull API/cache code into engine. |
+| `roomeq/export` | `roomeq-export` | Every production format and packaging conformance test moves. |
+| `roomeq/test_fixtures` | crate-local test support or `roomeq-qa` | No production crate depends on QA fixtures. |
+| AutoEQ binaries | CLI crate plus thin root wrappers | Preserve published binary names. |
+| RoomEQ/converter binaries | `roomeq-cli` plus thin root wrappers | Schema generation uses model types. |
+| RoomEQ QA/fuzzer binaries | `roomeq-qa` plus thin root wrappers | Production crates expose no QA command code. |
+
+## 8. Work packages
+
+Every package below gets a tracking-issue checklist item and one or more
+reviewable PRs. Do not start a later package merely because a file is easy to
+move; satisfy the earlier dependency gate first.
+
+### WP0 — Record and enforce the architecture
+
+Scope:
+
+- Create the tracking issue and link this document.
+- Add a workspace dependency-boundary checker based on `cargo metadata`.
+- Encode allowed and temporarily tolerated direct edges.
+- Add root Rust-LOC and test-location reporting.
+- Record public root API and JSON schema baselines.
+- Document the focused test command for every crate.
+
+Exit criteria:
+
+- CI reports forbidden edges, dependency cycles, root LOC, and duplicate
+  source ownership.
+- The temporary-exception list is explicit and can only shrink.
+- No implementation code has moved yet.
+
+### WP1 — Make `roomeq-model` a real contract crate
+
+Scope:
+
+- Move `src/roomeq/types/output.rs` and other neutral result/DSP contracts into
+  `roomeq-model`.
+- Replace optimizer-owned config types with neutral model enums/structs where
+  serialization requires them.
+- Put adapters from model settings to optimizer settings in `roomeq-engine`.
+- Remove `autoeq_measurements` and `autoeq_optim` re-exports from
+  `roomeq-model`.
+- Preserve JSON/schema compatibility with golden round-trip tests.
+
+Exit criteria:
+
+- `roomeq-model` depends directly on `autoeq-core` only among workspace
+  implementation crates.
+- The root output type module is a compatibility re-export or is deleted.
+- All model tests pass without compiling optimizer backends or measurement I/O.
+
+### WP2 — Remove dependency inversions in `roomeq-engine`
+
+Scope:
+
+- Remove `roomeq-engine -> autoeq-workflow`.
+- Move reusable driver/multisub optimization services to `autoeq-optim` or
+  implement the RoomEQ-specific orchestration in `roomeq-engine`.
+- Pass prepared target curves into FIR/engine APIs rather than loading target
+  files inside the engine.
+- Separate pure measurement transforms from source loading; retain only the
+  smallest justified engine dependency on measurement primitives until it can
+  be removed.
+- Define engine-owned ports for optional external services.
+
+Exit criteria:
+
+- The forbidden engine-to-workflow edge is gone.
+- Engine unit tests use in-memory inputs and deterministic injected adapters.
+- No new filesystem or network access exists in engine code.
+
+### WP3 — Establish `roomeq-workflow` and the production engine call
+
+Scope:
+
+- Create the application crate.
+- Move configuration loading, path resolution, measurement acquisition,
+  provenance validation, cache/resume, and artifact-store composition into it.
+- Move the observable pipeline request/response boundary to the appropriate
+  model/engine owners.
+- Make the production RoomEQ command invoke `roomeq-workflow`, which invokes
+  `roomeq-engine`.
+- Delete the unused placeholder-only execution path or make it the actual
+  production path.
+
+Exit criteria:
+
+- `RoomEngine` (or its replacement) has a production caller outside tests.
+- A minimal generic RoomEQ run succeeds without importing root implementation
+  modules.
+- Root keeps only a compatibility delegation for the migrated entry point.
+
+### WP4 — Move the generic single-channel vertical slice
+
+Scope:
+
+- Prepared single-channel EQ.
+- `ChannelProcessingStrategy` implementations.
+- Filter synthesis and channel result assembly.
+- Acceptance/safety outcome propagation.
+- Focused tests currently under `eq`, `speaker_eq`, `optimize`, and `output`.
+
+Exit criteria:
+
+- The generic single-channel workflow is entirely crate-owned.
+- Corresponding root implementations and unit tests are deleted.
+- Root public entry points delegate to the extracted workflow.
+- Output and schema golden tests remain byte/semantics compatible as
+  appropriate.
+
+### WP5 — Move groups and explicit speaker topology
+
+Scope:
+
+- Group consistency and preprocessing.
+- Driver topology, crossover, polarity, delay, and gain orchestration.
+- Group DSP graph construction and reports.
+- Group-specific tests and fixtures.
+
+Exit criteria:
+
+- No production code remains under `src/roomeq/group_processing`.
+- Group tests run under the owning crate.
+- No engine dependency is added outside the allowed graph.
+
+### WP6 — Move stereo, subwoofer, DBA, and cardioid workflows
+
+Scope:
+
+- Stereo 2.0 and 2.1 strategies.
+- Multi-sub, DBA, cardioid, and phase-alignment orchestration.
+- Bass routing primitives needed by these workflows.
+- Associated optimization evidence and result construction.
+
+Exit criteria:
+
+- These workflows run through `roomeq-workflow -> roomeq-engine`.
+- Root topology workflow implementations are deleted.
+- Focused topology tests no longer require `cargo test -p autoeq --lib`.
+
+### WP7 — Move home cinema and bass management
+
+Scope:
+
+- Home-cinema role resolution and target policy contracts to model.
+- Multi-seat and channel-role execution to engine.
+- Bass-management preprocessing, optimization, headroom, and routing.
+- Timing, coverage, and report construction.
+
+Exit criteria:
+
+- `src/roomeq/workflows/home_cinema.rs` and
+  `src/roomeq/workflows/bass_management/` are deleted.
+- Model tests cover role/config/schema behavior.
+- Engine tests cover processing.
+- Workflow tests cover resources and end-to-end composition.
+
+### WP8 — Move CTC, supporting-source, and CEA-2034 correction workflows
+
+Scope:
+
+- Split CTC contracts, pure processing, and resource loading into their target
+  layers.
+- Complete supporting-source orchestration around the already extracted DSP.
+- Split CEA-2034 acquisition/cache from prepared-data correction.
+- Move their reports and focused tests.
+
+Exit criteria:
+
+- No production CTC or CEA-2034 correction implementation remains in root.
+- Engine tests do not require filesystem resources unless explicitly testing
+  an injected adapter.
+
+### WP9 — Complete `roomeq-export`
+
+Scope:
+
+- Move every production external exporter and its conformance tests.
+- Use the canonical `roomeq-model::DspGraph` contract.
+- Return explicit package members and hashes; let workflow/artifact stores
+  perform persistence.
+- Preserve fail-closed behavior for unsupported topology or plugin semantics.
+
+Exit criteria:
+
+- CamillaDSP, Equalizer APO, PipeWire, Roon, REW, coefficients, Wavelet,
+  EasyEffects, convolution, and packaging are crate-owned.
+- `src/roomeq/export*` is deleted except for compatibility re-exports if still
+  required.
+- Each exporter has focused parse/round-trip or semantic conformance tests in
+  `roomeq-export`.
+
+### WP10 — Move QA and command implementations
+
+Scope:
+
+- Create `roomeq-qa` for scenario matrices, runners, scorecards, and reports.
+- Move fuzzer and QA binary implementation modules out of root.
+- Move AutoEQ and RoomEQ command implementations into CLI adapter crates.
+- Keep published root binary targets as thin wrappers if packaging requires
+  them.
+
+Exit criteria:
+
+- Root binary wrappers contain argument handoff/startup only.
+- QA behavior is testable as library code without spawning Cargo recursively.
+- Root `src/bin` contains fewer than 1,000 Rust lines in total.
+
+### WP11 — Remove the root implementation
+
+Scope:
+
+- Remove all remaining canonical implementation under `src/roomeq`.
+- Keep only documented compatibility re-exports for the agreed deprecation
+  interval.
+- Move or delete root unit tests; retain only compatibility and true
+  cross-crate integration tests.
+- Remove obsolete root dependencies and features.
+- Update README, architecture documentation, schemas, and crate changelogs.
+
+Exit criteria:
+
+- Root `src/` contains fewer than 2,000 Rust lines.
+- No production behavior has dual ownership.
+- No focused unit test remains in the root package.
+- The workspace dependency checker has no temporary exceptions.
+- The full verification matrix passes.
+
+## 9. Test ownership and verification
+
+### 9.1 Test placement
+
+- Pure numerical invariant: core, analysis, quality, FIR, or optimizer owner.
+- Config/schema/serde invariant: model owner.
+- Pipeline stage behavior over prepared inputs: engine owner.
+- Filesystem, sidecar, cache, or resource resolution: workflow owner.
+- Export syntax and semantic fidelity: export owner.
+- Scenario/regression thresholds: QA owner.
+- Public compatibility path: root facade.
+- Full command invocation: a small number of root integration tests.
+
+When a production function moves, its focused tests move before the root tests
+are deleted. Tests must use the destination crate's public or crate-private
+surface, not import the root facade.
+
+### 9.2 Per-PR verification ladder
+
+Run in this order:
+
+1. `cargo test -p <destination-crate> --lib`
+2. tests for direct workspace consumers reported by the dependency checker
+3. `cargo check -p autoeq --lib --bins`
+4. root compatibility tests affected by the moved public paths
+5. `cargo fmt --check`
+6. `git diff --check`
+
+Run broader RoomEQ QA only at behavior-bearing milestones or before landing a
+work package. Pure moves should rely on focused tests plus schema/API checks,
+then share one milestone QA run rather than repeatedly running the entire
+matrix.
+
+### 9.3 Milestone verification
+
+At the end of WP4, WP6, WP7, WP9, and WP11:
+
+- run the relevant focused RoomEQ QA recipes;
+- compare generated JSON schemas with the accepted baseline;
+- compare representative DSP output and external export semantics;
+- record root LOC, tests moved, and dependency edges removed;
+- run `just qa-roomeq` at WP11 and any earlier milestone that changes
+  production behavior.
+
+## 10. PR acceptance checklist
+
+Every migration PR must answer:
+
+- What behavior changed ownership?
+- Which old files were deleted?
+- Which tests moved, and which crate now runs them?
+- Which public paths remain compatible?
+- Which direct workspace edges were added or removed?
+- Did root Rust LOC decrease?
+- Is any implementation temporarily duplicated? The accepted answer is no.
+- Are JSON/schema/export contracts unchanged? If not, where is the separately
+  approved behavior change?
+- Which focused and consumer tests passed?
+- Which temporary architecture exception did this PR remove?
+
+## 11. Completion gates
+
+The migration is complete only when all gates are proven from the current
+tree:
+
+| Gate | Target |
+|---|---|
+| Root Rust LOC | `< 2,000` |
+| Root binary Rust LOC | `< 1,000` |
+| Root production RoomEQ modules | `0` |
+| Root focused unit tests | `0` |
+| Workspace crates depending on root facade | `0` |
+| Dependency cycles | `0` |
+| Temporary forbidden-edge exceptions | `0` |
+| Production callers of extracted engine | `>= 1` through workflow |
+| Production exporters remaining in root | `0` |
+| Duplicate canonical implementations | `0` |
+| Per-crate focused test commands | all green |
+| Compatibility/schema/export checks | all green |
+| Full RoomEQ QA | green |
+
+The line targets include compatibility and startup code but exclude generated
+JSON schemas. If preserving all published binary wrappers makes the binary
+target impractical, the tracking issue may adjust it once, before WP10 starts;
+the root implementation and dependency gates may not be weakened.
+
+## 12. First implementation step
+
+Do not resume file moves immediately. Start with WP0 in a clean branch or
+worktree after the current unrelated changes are committed or parked:
+
+1. Create the tracking issue from this plan.
+2. Add the dependency and root-ownership fitness checker.
+3. Record the accepted API/schema baselines.
+4. Open a plan/fitness-only PR.
+5. Begin WP1 only after that PR is accepted.
+
+This makes progress measurable from the first implementation change and
+prevents the migration from returning to copy-first, cleanup-later behavior.

@@ -1,5 +1,14 @@
 # Unreleased
 
+## Features
+
+- Add versioned measurement-provenance sidecars with canonical curve hashes,
+  validation/redaction policies, tracked CSV/API loading, and transformation
+  ledgers. RoomEQ configs can reference sidecars in warning or strict mode,
+  and generated DSP/export artifacts include a redacted provenance manifest.
+  `migrate-provenance` deterministically upgrades supported legacy sidecars
+  while retaining a backup for in-place migrations.
+
 ## Refactoring
 
 - Centralized all workspace dependency specifications, including development

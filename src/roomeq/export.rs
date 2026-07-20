@@ -13,6 +13,7 @@
 use super::home_cinema::{BassManagementMatrix, BassManagementRoute, BassManagementRoutingGraph};
 use super::types::{ChannelDspChain, DspChainOutput, PluginConfigWrapper};
 use math_audio_iir_fir::Biquad;
+pub use roomeq_export::ExternalExportFormat as ExportFormat;
 use std::fmt::Write as FmtWrite;
 use std::path::Path;
 

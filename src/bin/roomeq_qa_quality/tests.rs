@@ -110,6 +110,7 @@ fn empty_room_config() -> RoomConfig {
         crossovers: None,
         target_curve: None,
         optimizer: Default::default(),
+        provenance: Default::default(),
         recording_config: None,
         ctc: None,
         cea2034_cache: None,

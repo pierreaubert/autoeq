@@ -1,6 +1,7 @@
 use super::ctc_config::CtcConfig;
 use super::default::{default_config_version, validate_config_version};
 use super::optimizer_config::OptimizerConfig;
+use super::provenance_config::ProvenanceConfig;
 use super::speaker_config::SpeakerConfig;
 use super::types::CrossoverConfig;
 use super::types::RecordingConfiguration;
@@ -32,6 +33,9 @@ pub struct RoomConfig {
     /// Optimizer configuration
     #[serde(default)]
     pub optimizer: OptimizerConfig,
+    /// Versioned measurement-sidecar references and validation policy.
+    #[serde(default, skip_serializing_if = "is_default_provenance")]
+    pub provenance: ProvenanceConfig,
     /// Recording configuration (device settings, signal parameters used during capture)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recording_config: Option<RecordingConfiguration>,
@@ -53,6 +57,7 @@ impl Default for RoomConfig {
             crossovers: None,
             target_curve: None,
             optimizer: OptimizerConfig::default(),
+            provenance: ProvenanceConfig::default(),
             recording_config: None,
             ctc: None,
             cea2034_cache: None,
@@ -130,6 +135,7 @@ impl RoomConfig {
             }
         }
         errors.extend(self.optimizer.gain_envelope_errors());
+        errors.extend(self.provenance.structural_errors(self.speakers.keys()));
         if !self.optimizer.min_freq.is_finite()
             || !self.optimizer.max_freq.is_finite()
             || self.optimizer.min_freq <= 0.0
@@ -163,5 +169,11 @@ impl RoomConfig {
         if let Some(ctc) = &mut self.ctc {
             ctc.resolve_paths(&base_dir);
         }
+        self.provenance.resolve_paths(&base_dir);
     }
+}
+
+fn is_default_provenance(provenance: &ProvenanceConfig) -> bool {
+    provenance.measurements.is_empty()
+        && provenance.validation_mode == super::ProvenanceValidationMode::Warn
 }

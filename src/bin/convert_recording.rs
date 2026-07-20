@@ -5,10 +5,13 @@
 //!
 //! If output is not specified, the input file is overwritten and a .bak backup is created.
 
+use autoeq::roomeq::MeasurementProvenanceReference;
 use autoeq::{
-    DspChainOutput, InlineMeasurement, MeasurementRef, MeasurementSource, OptimizerConfig,
+    Curve, DspChainOutput, InlineMeasurement, MeasurementRef, MeasurementSource, OptimizerConfig,
     RecordingConfiguration, RoomConfig, SpeakerConfig,
 };
+use autoeq_measurements::{MeasurementRecord, write_sidecar};
+use ndarray::Array1;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -160,10 +163,63 @@ fn convert_legacy_to_room_config(legacy: &LegacyMeasurementsFile) -> RoomConfig 
         crossovers: None,
         target_curve: None,
         optimizer: OptimizerConfig::default(),
+        provenance: Default::default(),
         recording_config,
         ctc: None,
         cea2034_cache: None,
     }
+}
+
+/// Write deterministic provenance sidecars for legacy inline curve data and
+/// attach portable relative references to the converted RoomConfig.
+fn migrate_legacy_provenance(
+    legacy: &LegacyMeasurementsFile,
+    config: &mut RoomConfig,
+    output_path: &std::path::Path,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    let output_dir = output_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let mut migrated = 0;
+    for channel in &legacy.channels {
+        let measurement = &channel.measurement;
+        if measurement.frequencies.len() < 2
+            || measurement.frequencies.len() != measurement.magnitude_db.len()
+        {
+            continue;
+        }
+        let phase = (measurement.phase_deg.len() == measurement.frequencies.len())
+            .then(|| Array1::from_iter(measurement.phase_deg.iter().copied().map(f64::from)));
+        let curve = Curve {
+            freq: Array1::from_iter(measurement.frequencies.iter().copied().map(f64::from)),
+            spl: Array1::from_iter(measurement.magnitude_db.iter().copied().map(f64::from)),
+            phase,
+            ..Default::default()
+        };
+        let Ok(record) = MeasurementRecord::legacy(curve) else {
+            // Legacy JSON sometimes contains incomplete/unsorted preview data;
+            // preserve it as legacy config rather than manufacturing evidence.
+            continue;
+        };
+        let data_path =
+            output_dir.join(format!("{}.csv", sanitize_filename(&channel.channel_name)));
+        let sidecar_path = write_sidecar(&data_path, &record)?;
+        let portable_path = sidecar_path
+            .file_name()
+            .map(PathBuf::from)
+            .unwrap_or(sidecar_path);
+        config.provenance.measurements.insert(
+            channel.channel_name.clone(),
+            MeasurementProvenanceReference {
+                record_id: record.id,
+                content_hash: record.provenance.content_hash,
+                schema_version: record.provenance.schema_version,
+                sidecar_path: Some(portable_path),
+            },
+        );
+        migrated += 1;
+    }
+    Ok(migrated)
 }
 
 fn is_legacy_recording_format(json: &str) -> bool {
@@ -340,12 +396,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  {} channel(s)", legacy.channels.len());
 
     // Convert to new format
-    let room_config = convert_legacy_to_room_config(&legacy);
+    let mut room_config = convert_legacy_to_room_config(&legacy);
+    let migrated = migrate_legacy_provenance(&legacy, &mut room_config, &output_path)?;
 
     // Write output
     let output_json = serde_json::to_string_pretty(&room_config)?;
     write_output(&input_path, &output_path, &output_json)?;
     println!("  {} speaker(s)", room_config.speakers.len());
+    println!("  {migrated} provenance sidecar(s) written");
     println!("Conversion complete!");
 
     Ok(())
@@ -353,8 +411,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_recording_args;
+    use super::{
+        LegacyChannelMeasurement, LegacyMeasurementsFile, LegacyRecordingResult,
+        convert_legacy_to_room_config, migrate_legacy_provenance, parse_recording_args,
+    };
     use std::path::PathBuf;
+    use tempfile::tempdir;
 
     #[test]
     fn single_input_uses_input_as_output() {
@@ -380,5 +442,48 @@ mod tests {
     fn missing_input_errors() {
         let args = vec!["prog".to_string()];
         assert!(parse_recording_args(&args).is_err());
+    }
+
+    #[test]
+    fn legacy_curve_migration_writes_sidecar_and_config_reference() {
+        let legacy = LegacyMeasurementsFile {
+            version: Some(1),
+            configuration: None,
+            channels: vec![LegacyChannelMeasurement {
+                channel_name: "L".into(),
+                is_group: false,
+                group_drivers: Vec::new(),
+                measurement: LegacyRecordingResult {
+                    channel: 0,
+                    wav_path: None,
+                    csv_path: None,
+                    frequencies: vec![20.0, 1_000.0],
+                    magnitude_db: vec![1.0, -2.0],
+                    phase_deg: Vec::new(),
+                    impulse_response: None,
+                    impulse_time_ms: None,
+                    excess_group_delay_ms: None,
+                    thd_percent: None,
+                    harmonic_distortion_db: None,
+                    rt60_ms: None,
+                    clarity_c50_db: None,
+                    clarity_c80_db: None,
+                    spectrogram_db: None,
+                },
+            }],
+        };
+        let dir = tempdir().unwrap();
+        let output = dir.path().join("room.json");
+        let mut config = convert_legacy_to_room_config(&legacy);
+        assert_eq!(
+            migrate_legacy_provenance(&legacy, &mut config, &output).unwrap(),
+            1
+        );
+        let reference = config.provenance.measurements.get("L").unwrap();
+        assert!(
+            dir.path()
+                .join(reference.sidecar_path.as_ref().unwrap())
+                .exists()
+        );
     }
 }

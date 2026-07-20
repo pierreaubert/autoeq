@@ -1,3 +1,4 @@
+use crate::OptimizationRunDescriptor;
 use crate::iir::Biquad;
 
 /// Progress update sent to callback during optimization
@@ -29,4 +30,6 @@ pub struct OptimizationOutput {
     pub params: Vec<f64>,
     /// Optimization history: (iteration, loss)
     pub history: Vec<(usize, f64)>,
+    /// Serializable optimizer settings and outcome for provenance ledgers.
+    pub optimization_run: OptimizationRunDescriptor,
 }

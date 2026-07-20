@@ -1,7 +1,9 @@
-use crate::cea2034::Curve;
+use crate::{MeasurementRecord, ProvenanceError, cea2034::Curve};
 use ndarray::Array1;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::collections::BTreeMap;
 
 use super::interpolate::mean_over_log_frequency;
 
@@ -89,6 +91,21 @@ pub fn smooth_psychoacoustic(curve: &Curve, config: &PsychoacousticSmoothingConf
         noise_floor_db: curve.noise_floor_db.clone(),
         ..Default::default()
     }
+}
+
+/// Apply psychoacoustic smoothing while recording its configuration.
+pub fn smooth_psychoacoustic_record(
+    record: &MeasurementRecord,
+    config: &PsychoacousticSmoothingConfig,
+) -> Result<MeasurementRecord, ProvenanceError> {
+    let mut parameters = BTreeMap::new();
+    parameters.insert("config".into(), json!(config));
+    record.transformed(
+        smooth_psychoacoustic(&record.curve, config),
+        "smooth_psychoacoustic",
+        parameters,
+        true,
+    )
 }
 
 /// Calculate variable smoothing N based on frequency

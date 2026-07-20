@@ -535,6 +535,7 @@ fn room_config_roundtrip_and_resolve_paths() {
         crossovers: Some(crossovers),
         target_curve: Some(TargetCurveConfig::Predefined("flat".into())),
         optimizer: OptimizerConfig::default(),
+        provenance: Default::default(),
         recording_config: None,
         ctc: Some(CtcConfig::default()),
         cea2034_cache: None,

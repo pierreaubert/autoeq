@@ -1,7 +1,19 @@
 use crate::Cea2034Data;
 use crate::Curve;
+use crate::OptimizationRunDescriptor;
 use crate::error::{AutoeqError, Result};
 use crate::iir::Biquad;
+use autoeq_measurements::MeasurementRecord;
+
+/// Tracked evidence emitted by a high-level optimization workflow.  Numerical
+/// callers can continue to use the curves in [`VisualizationCurves`], while
+/// reporting/export code can follow this chain back to the acquired input.
+#[derive(Debug, Clone)]
+pub struct OptimizationLineage {
+    pub input: MeasurementRecord,
+    pub normalized_input: MeasurementRecord,
+    pub corrected_output: MeasurementRecord,
+}
 
 /// All curves needed for visualization after optimization
 #[derive(Debug, Clone)]
@@ -147,6 +159,10 @@ pub struct SpeakerOptResult {
     pub initial_loss: f64,
     /// Final loss value
     pub final_loss: f64,
+    /// Reproducible optimizer settings and stopping outcome.
+    pub optimization_run: OptimizationRunDescriptor,
+    /// Complete record chain for the public workflow boundary.
+    pub lineage: OptimizationLineage,
 }
 
 /// Complete headphone optimization result
@@ -162,6 +178,10 @@ pub struct HeadphoneOptResult {
     pub initial_loss: f64,
     /// Final loss value
     pub final_loss: f64,
+    /// Reproducible optimizer settings and stopping outcome.
+    pub optimization_run: OptimizationRunDescriptor,
+    /// Complete record chain for the public workflow boundary.
+    pub lineage: OptimizationLineage,
 }
 
 /// Result of driver crossover optimization

@@ -1,6 +1,8 @@
-use crate::Curve;
+use crate::{Curve, MeasurementRecord, ProvenanceError};
 use autoeq_core::phase_utils::unwrap_phase_degrees;
 use ndarray::Array1;
+use serde_json::json;
+use std::collections::BTreeMap;
 
 /// Helper to interpolate a single value array in log frequency space
 fn interpolate_log_space_vals(
@@ -185,6 +187,23 @@ pub fn interpolate_log_space(freq_out: &Array1<f64>, curve: &Curve) -> Curve {
         noise_floor_db: noise_floor_db_out,
         ..Default::default()
     }
+}
+
+/// Interpolate a tracked record and record the target grid in its provenance
+/// ledger. Values outside the measured grid may be extrapolated, so this is
+/// marked as a lossy operation.
+pub fn interpolate_log_space_record(
+    freq_out: &Array1<f64>,
+    record: &MeasurementRecord,
+) -> Result<MeasurementRecord, ProvenanceError> {
+    let mut parameters = BTreeMap::new();
+    parameters.insert("target_frequency_hz".into(), json!(freq_out.to_vec()));
+    record.transformed(
+        interpolate_log_space(freq_out, &record.curve),
+        "interpolate_log_space",
+        parameters,
+        true,
+    )
 }
 
 /// Create a standard logarithmic frequency grid

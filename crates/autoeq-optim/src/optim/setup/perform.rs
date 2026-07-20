@@ -1,4 +1,5 @@
 use super::super::de::optimize_filters_autoeq_with_callback;
+use super::super::run_descriptor::OptimizationRunResult;
 use super::super::{ObjectiveData, optimize_filters_with_algo_override};
 use super::misc::initial_guess;
 use super::misc::resolves_to_backend;
@@ -17,20 +18,28 @@ pub fn perform_optimization(
     params: &crate::OptimParams,
     objective_data: &ObjectiveData,
 ) -> Result<Vec<f64>, Box<dyn Error>> {
-    perform_optimization_with_callback(
+    Ok(perform_optimization_with_run_descriptor(
         params,
         objective_data,
         Box::new(|_intermediate| crate::de::CallbackAction::Continue),
-    )
+    )?
+    .parameters)
 }
 
-/// Run optimization with a DE progress callback (only used for AutoEQ DE).
-pub fn perform_optimization_with_callback(
+/// Run optimization and retain the serializable descriptor required by a
+/// provenance-aware workflow boundary.
+pub fn perform_optimization_with_run_descriptor(
     params: &crate::OptimParams,
     objective_data: &ObjectiveData,
     callback: Box<dyn FnMut(&crate::de::DEIntermediate) -> crate::de::CallbackAction + Send>,
-) -> Result<Vec<f64>, Box<dyn Error>> {
+) -> Result<OptimizationRunResult, Box<dyn Error>> {
     let (lower_bounds, upper_bounds) = setup_bounds(params);
+    let mut descriptor = super::super::run_descriptor::OptimizationRunDescriptor::started(
+        params,
+        objective_data,
+        &lower_bounds,
+        &upper_bounds,
+    );
     let mut x = initial_guess(params, &lower_bounds, &upper_bounds);
 
     let result = if resolves_to_backend(&params.algo, "autoeq:de") {
@@ -54,19 +63,15 @@ pub fn perform_optimization_with_callback(
         )
     };
 
-    let global_fun = match result {
-        Ok((_status, val)) => val,
-        Err((e, _final_value)) => {
-            return Err(std::io::Error::other(e).into());
-        }
+    let (global_status, global_fun) = match result {
+        Ok((status, value)) => (status, value),
+        Err((error, _final_value)) => return Err(std::io::Error::other(error).into()),
     };
+    let mut stopping_reason = global_status;
+    let mut objective_value = global_fun;
 
     if params.refine && !resolves_to_backend(&params.algo, "autoeq:bo") {
-        // Snapshot the global optimum before refine — local optimizers
-        // are not guaranteed to monotonically improve the input. If the
-        // refine ends up at a worse point (cobyla can wander outside the
-        // basin DE found, e.g. small_stereo_2_2_group with the pure-Rust
-        // cobyla path), restore the DE result rather than ship a regression.
+        // Local solvers are not guaranteed to improve the global optimum.
         let x_pre_refine = x.clone();
         let local_result = optimize_filters_with_algo_override(
             &mut x,
@@ -77,26 +82,43 @@ pub fn perform_optimization_with_callback(
             Some(&params.local_algo),
         );
         match local_result {
-            Ok((_local_status, local_val)) => {
-                if !local_val.is_finite() || local_val > global_fun {
+            Ok((local_status, local_value)) => {
+                if !local_value.is_finite() || local_value > global_fun {
                     if !params.quiet {
                         log::warn!(
                             "Local refine ({}) regressed: {:.6} -> {:.6}; keeping global result.",
                             params.local_algo,
                             global_fun,
-                            local_val,
+                            local_value,
                         );
                     }
                     x = x_pre_refine;
+                    stopping_reason =
+                        format!("{stopping_reason}; local refine rejected: {local_status}");
+                } else {
+                    stopping_reason = format!("{stopping_reason}; local refine: {local_status}");
+                    objective_value = local_value;
                 }
             }
-            Err((e, _final_value)) => {
-                return Err(std::io::Error::other(e).into());
-            }
+            Err((error, _final_value)) => return Err(std::io::Error::other(error).into()),
         }
     }
 
-    Ok(x)
+    descriptor.finished(stopping_reason);
+    Ok(OptimizationRunResult {
+        parameters: x,
+        objective_value,
+        descriptor,
+    })
+}
+
+/// Run optimization with a DE progress callback (only used for AutoEQ DE).
+pub fn perform_optimization_with_callback(
+    params: &crate::OptimParams,
+    objective_data: &ObjectiveData,
+    callback: Box<dyn FnMut(&crate::de::DEIntermediate) -> crate::de::CallbackAction + Send>,
+) -> Result<Vec<f64>, Box<dyn Error>> {
+    Ok(perform_optimization_with_run_descriptor(params, objective_data, callback)?.parameters)
 }
 
 /// Run optimization with progress callback at configurable intervals
@@ -214,14 +236,16 @@ where
         }
     };
 
-    let params = perform_optimization_with_callback(params, objective_data, Box::new(de_callback))?;
+    let run =
+        perform_optimization_with_run_descriptor(params, objective_data, Box::new(de_callback))?;
 
     let final_history = Arc::try_unwrap(history)
         .map(|m| m.into_inner().unwrap())
         .unwrap_or_default();
 
     Ok(OptimizationOutput {
-        params,
+        params: run.parameters,
         history: final_history,
+        optimization_run: run.descriptor,
     })
 }

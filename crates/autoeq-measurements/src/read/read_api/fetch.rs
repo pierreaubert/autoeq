@@ -10,6 +10,7 @@ use super::misc::headphone_cache_dir;
 use super::parse::parse_headphone_csv;
 use super::types::ContourPlotData;
 use crate::DirectivityData;
+use crate::MeasurementRecord;
 use crate::read::directory::{data_dir_for, measurement_filename};
 use crate::read::plot::{normalize_plotly_json_from_str, normalize_plotly_value_with_suggestions};
 use serde_json::Value;
@@ -54,6 +55,25 @@ pub async fn fetch_curve_from_api(
     // Fetch the full measurement once, then extract the requested curve
     let plot_data = fetch_measurement_plot_data(speaker, version, measurement).await?;
     extract_curve_by_name(&plot_data, measurement, curve_name)
+}
+
+/// Fetch a curve together with an API-origin provenance record. This is the
+/// tracked counterpart to [`fetch_curve_from_api`].
+pub async fn fetch_record_from_api(
+    speaker: &str,
+    version: &str,
+    measurement: &str,
+    curve_name: &str,
+) -> Result<MeasurementRecord, Box<dyn Error>> {
+    let curve = fetch_curve_from_api(speaker, version, measurement, curve_name).await?;
+    let uri = format!(
+        "https://api.spinorama.org/v1/speaker/{}/version/{}/measurements/{}?measurement_format=json#{}",
+        urlencoding::encode(speaker),
+        urlencoding::encode(version),
+        urlencoding::encode(measurement),
+        urlencoding::encode(curve_name),
+    );
+    MeasurementRecord::from_api(curve, uri).map_err(|error| error.into())
 }
 
 /// Fetch and parse the full Plotly JSON object for a given measurement (single HTTP GET)
@@ -402,6 +422,29 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(curve.freq.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn fetch_record_from_api_marks_api_origin() {
+        let _guard = CACHE_LOCK.lock().await;
+        let _tmp = setup_cache().await;
+        let speaker = "tracked-curve-speaker";
+        let cache_file = data_dir_for(speaker).join(measurement_filename("CEA2034"));
+        tokio::fs::create_dir_all(cache_file.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(
+            &cache_file,
+            serde_json::to_string(&plotly_object()).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let record = fetch_record_from_api(speaker, "asr", "CEA2034", "On Axis")
+            .await
+            .unwrap();
+        assert_eq!(record.provenance.origin, crate::MeasurementOrigin::Api);
+        assert!(record.validate(crate::ValidationMode::Warn).is_valid());
     }
 
     #[tokio::test]

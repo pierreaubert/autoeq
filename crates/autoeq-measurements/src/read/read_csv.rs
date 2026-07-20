@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
-use crate::Curve;
+use crate::{Curve, MeasurementOrigin, MeasurementRecord};
 use ndarray::Array1;
 
 /// Load frequency response data from a CSV or text file
@@ -119,6 +119,14 @@ pub fn read_curve_from_csv(path: &PathBuf) -> Result<Curve, Box<dyn Error>> {
     // No-op when phase is absent or arrays disagree in length.
     curve.decompose_into_cache();
     Ok(curve)
+}
+
+/// Read a CSV into a tracked measurement record. The curve-only
+/// [`read_curve_from_csv`] adapter remains available for legacy callers.
+pub fn read_record_from_csv(path: &PathBuf) -> Result<MeasurementRecord, Box<dyn Error>> {
+    let curve = read_curve_from_csv(path)?;
+    MeasurementRecord::from_source_path(curve, MeasurementOrigin::Csv, path)
+        .map_err(|error| error.into())
 }
 
 /// Load driver measurement data from a CSV file.

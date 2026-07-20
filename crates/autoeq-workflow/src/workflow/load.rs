@@ -1,5 +1,6 @@
 use crate::Curve;
 use crate::read;
+use autoeq_measurements::MeasurementRecord;
 use std::collections::HashMap;
 use std::error::Error;
 
@@ -57,6 +58,34 @@ pub async fn load_input_curve(
     };
 
     Ok((input_curve, spin_data))
+}
+
+/// Load the selected input as a tracked measurement record.
+///
+/// The existing [`load_input_curve`] remains the compatibility surface for
+/// callers that have not yet adopted provenance-aware workflow results.
+pub async fn load_input_record(
+    input: &crate::workflow::InputConfig,
+) -> Result<MeasurementRecord, Box<dyn Error>> {
+    if let (Some(speaker), Some(version), Some(measurement)) =
+        (&input.speaker, &input.version, &input.measurement)
+    {
+        if measurement != "Estimated In-Room Response" {
+            return read::fetch_record_from_api(speaker, version, measurement, &input.curve_name)
+                .await;
+        }
+
+        let (curve, _) = load_input_curve(input).await?;
+        let source = format!(
+            "https://api.spinorama.org/v1/speaker/{speaker}/version/{version}/measurements/CEA2034"
+        );
+        return MeasurementRecord::from_api(curve, source).map_err(|error| error.into());
+    }
+
+    let path = input.curve_path.as_ref().ok_or(
+        "Either --curve or all of --speaker, --version, and --measurement must be provided",
+    )?;
+    read::read_record_from_csv(path)
 }
 
 /// Load driver measurements from CSV file paths

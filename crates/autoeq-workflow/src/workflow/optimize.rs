@@ -3,6 +3,7 @@ use super::misc::create_driver_optimization_args;
 use super::misc::interpolate_cea2034_data;
 use super::types::DriverOptimizationResult;
 use super::types::HeadphoneOptResult;
+use super::types::OptimizationLineage;
 use super::types::SpeakerOptResult;
 use super::types::compute_visualization_curves;
 use crate::Curve;
@@ -10,9 +11,63 @@ use crate::iir::Biquad;
 pub use crate::optim::setup::*;
 use crate::read;
 use crate::x2peq;
+use autoeq_measurements::{MeasurementOrigin, MeasurementRecord, OperationContext, ToolIdentity};
+use chrono::Utc;
+use serde_json::json;
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
+
+fn workflow_lineage(
+    input: MeasurementRecord,
+    normalized_curve: Curve,
+    corrected_curve: Curve,
+    target_curve: &Curve,
+    run: &crate::OptimizationRunDescriptor,
+) -> Result<OptimizationLineage, Box<dyn Error>> {
+    let mut normalize_parameters = std::collections::BTreeMap::new();
+    normalize_parameters.insert("method".into(), json!("normalize_and_interpolate"));
+    normalize_parameters.insert(
+        "output_grid_hash".into(),
+        json!(normalized_curve.content_hash()?),
+    );
+    let normalized_input = input.transformed(
+        normalized_curve,
+        "normalization_interpolation",
+        normalize_parameters,
+        true,
+    )?;
+
+    let mut optimization_parameters = std::collections::BTreeMap::new();
+    optimization_parameters.insert(
+        "target_curve_hash".into(),
+        json!(target_curve.content_hash()?),
+    );
+    optimization_parameters.insert("optimizer_run".into(), serde_json::to_value(run)?);
+    let corrected_output = normalized_input.transformed_with_context(
+        corrected_curve,
+        "optimization_filter_synthesis",
+        optimization_parameters,
+        false,
+        Some(OperationContext {
+            executed_at: Some(Utc::now().to_rfc3339()),
+            tool: Some(ToolIdentity {
+                application: Some("autoeq-workflow".into()),
+                version: Some(env!("CARGO_PKG_VERSION").into()),
+                compiler: Some(run.platform.compiler.clone()),
+                os: Some(run.platform.operating_system.clone()),
+                architecture: Some(run.platform.architecture.clone()),
+                ..Default::default()
+            }),
+            determinism: Some(autoeq_measurements::Determinism::PlatformSensitive),
+        }),
+    )?;
+    Ok(OptimizationLineage {
+        input,
+        normalized_input,
+        corrected_output,
+    })
+}
 
 /// Run complete speaker optimization from spinorama data
 ///
@@ -62,6 +117,12 @@ where
     let measurement = input.measurement.as_deref().unwrap_or("");
     let (input_curve, spin_data) =
         read::load_spinorama_with_spin(speaker, version, measurement, &input.curve_name).await?;
+    let input_record = MeasurementRecord::from_api(
+        input_curve.clone(),
+        format!(
+            "https://api.spinorama.org/v1/speaker/{speaker}/version/{version}/measurements/{measurement}"
+        ),
+    )?;
 
     // 2. Normalize to standard frequency grid
     let standard_freq = visualization_grid.create_frequency_grid(params)?;
@@ -104,18 +165,18 @@ where
     )?;
 
     // 6. Run optimization
-    let (opt_params, history) = if let (Some(config), Some(callback)) =
+    let (opt_params, history, optimization_run) = if let (Some(config), Some(callback)) =
         (progress_config, progress_callback)
     {
         let output = perform_optimization_with_progress(params, &objective_data, config, callback)?;
-        (output.params, output.history)
+        (output.params, output.history, output.optimization_run)
     } else {
-        let p = perform_optimization_with_callback(
+        let output = perform_optimization_with_run_descriptor(
             params,
             &objective_data,
             Box::new(|_| crate::de::CallbackAction::Continue),
         )?;
-        (p, Vec::new())
+        (output.parameters, Vec::new(), output.descriptor)
     };
 
     // 7. Convert to biquads
@@ -128,6 +189,18 @@ where
     let frequencies: Vec<f64> = standard_freq.iter().copied().collect();
     let curves =
         compute_visualization_curves(&frequencies, &input_normalized, &target_curve, &biquads)?;
+    let corrected_curve = Curve {
+        freq: standard_freq.clone(),
+        spl: ndarray::Array1::from_vec(curves.corrected_curve.clone()),
+        ..Default::default()
+    };
+    let lineage = workflow_lineage(
+        input_record,
+        input_normalized.clone(),
+        corrected_curve,
+        &target_curve,
+        &optimization_run,
+    )?;
 
     let initial_loss = history.first().map(|x| x.1).unwrap_or(0.0);
     let final_loss = history.last().map(|x| x.1).unwrap_or(0.0);
@@ -143,6 +216,8 @@ where
         history,
         initial_loss,
         final_loss,
+        optimization_run,
+        lineage,
     })
 }
 
@@ -190,7 +265,12 @@ where
     F: FnMut(&ProgressUpdate) -> crate::de::CallbackAction + Send + 'static,
 {
     // 1. Load measurement
-    let input_curve = read::read_curve_from_csv(curve_path)?;
+    let input_record = MeasurementRecord::from_source_path(
+        read::read_curve_from_csv(curve_path)?,
+        MeasurementOrigin::Csv,
+        curve_path,
+    )?;
+    let input_curve = input_record.curve.clone();
 
     // 2. Normalize to standard frequency grid
     let standard_freq = visualization_grid.create_frequency_grid(params)?;
@@ -215,18 +295,18 @@ where
     )?;
 
     // 5. Run optimization
-    let (opt_params, history) = if let (Some(config), Some(callback)) =
+    let (opt_params, history, optimization_run) = if let (Some(config), Some(callback)) =
         (progress_config, progress_callback)
     {
         let output = perform_optimization_with_progress(params, &objective_data, config, callback)?;
-        (output.params, output.history)
+        (output.params, output.history, output.optimization_run)
     } else {
-        let p = perform_optimization_with_callback(
+        let output = perform_optimization_with_run_descriptor(
             params,
             &objective_data,
             Box::new(|_| crate::de::CallbackAction::Continue),
         )?;
-        (p, Vec::new())
+        (output.parameters, Vec::new(), output.descriptor)
     };
 
     // 6. Convert to biquads
@@ -243,6 +323,18 @@ where
         &target_normalized,
         &biquads,
     )?;
+    let corrected_curve = Curve {
+        freq: standard_freq.clone(),
+        spl: ndarray::Array1::from_vec(curves.corrected_curve.clone()),
+        ..Default::default()
+    };
+    let lineage = workflow_lineage(
+        input_record,
+        input_normalized.clone(),
+        corrected_curve,
+        &target_normalized,
+        &optimization_run,
+    )?;
 
     let initial_loss = history.first().map(|x| x.1).unwrap_or(0.0);
     let final_loss = history.last().map(|x| x.1).unwrap_or(0.0);
@@ -253,6 +345,8 @@ where
         history,
         initial_loss,
         final_loss,
+        optimization_run,
+        lineage,
     })
 }
 

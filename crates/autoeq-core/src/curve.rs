@@ -1,5 +1,6 @@
 use ndarray::Array1;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::error::{AutoeqError, Result};
 
@@ -71,6 +72,30 @@ impl Default for Curve {
 }
 
 impl Curve {
+    /// Return the versioned canonical byte representation used for content
+    /// identity. Derived cache fields are deliberately excluded: they are
+    /// implementation details which are recomputed when a measurement loads.
+    pub fn canonical_content_bytes(&self) -> Result<Vec<u8>> {
+        self.validate("curve content hash")?;
+
+        let mut bytes = b"autoeq.curve.content.v1\0".to_vec();
+        append_array(&mut bytes, b"freq", &self.freq);
+        append_array(&mut bytes, b"spl", &self.spl);
+        append_optional_array(&mut bytes, b"phase", self.phase.as_ref());
+        append_optional_array(&mut bytes, b"coherence", self.coherence.as_ref());
+        append_optional_array(&mut bytes, b"noise_floor_db", self.noise_floor_db.as_ref());
+        Ok(bytes)
+    }
+
+    /// SHA-256 fingerprint of the persisted numerical measurement content.
+    ///
+    /// `-0.0` is canonicalised to `0.0`, while invalid/non-finite values are
+    /// rejected by [`Self::validate`] before hashing.
+    pub fn content_hash(&self) -> Result<String> {
+        let digest = Sha256::digest(self.canonical_content_bytes()?);
+        Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+    }
+
     /// Validate a frequency grid used by public DSP and optimization APIs.
     pub fn validate_frequency_grid(freq: &Array1<f64>, context: &str) -> Result<()> {
         if freq.len() < 2 {
@@ -234,6 +259,23 @@ impl Curve {
     }
 }
 
+fn append_array(bytes: &mut Vec<u8>, name: &[u8], values: &Array1<f64>) {
+    bytes.extend_from_slice(&(name.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(name);
+    bytes.extend_from_slice(&(values.len() as u64).to_le_bytes());
+    for value in values {
+        let canonical = if *value == 0.0 { 0.0 } else { *value };
+        bytes.extend_from_slice(&canonical.to_bits().to_le_bytes());
+    }
+}
+
+fn append_optional_array(bytes: &mut Vec<u8>, name: &[u8], values: Option<&Array1<f64>>) {
+    bytes.push(values.is_some() as u8);
+    if let Some(values) = values {
+        append_array(bytes, name, values);
+    }
+}
+
 #[cfg(test)]
 mod validation_tests {
     use super::*;
@@ -314,6 +356,27 @@ mod validation_tests {
         let mut phase_mismatch = valid_curve();
         phase_mismatch.phase = Some(Array1::zeros(2));
         assert!(phase_mismatch.validate("test curve").is_err());
+    }
+
+    #[test]
+    fn content_hash_is_stable_and_excludes_derived_caches() {
+        let curve = valid_curve();
+        let expected = curve.content_hash().unwrap();
+
+        let mut cached = curve.clone();
+        cached.min_phase = Some(Array1::from_vec(vec![1.0, 2.0, 3.0]));
+        cached.excess_phase = Some(Array1::from_vec(vec![4.0, 5.0, 6.0]));
+        cached.excess_delay_ms = Some(1.5);
+        assert_eq!(cached.content_hash().unwrap(), expected);
+
+        let mut signed_zero = curve;
+        signed_zero.spl[0] = -0.0;
+        let mut zero = signed_zero.clone();
+        zero.spl[0] = 0.0;
+        assert_eq!(
+            signed_zero.content_hash().unwrap(),
+            zero.content_hash().unwrap()
+        );
     }
 }
 

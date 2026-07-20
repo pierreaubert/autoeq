@@ -588,6 +588,33 @@ fn optimize_headphone_with_csv_runs() {
             && filter.db_gain.is_finite()
             && (args.min_freq..=args.max_freq).contains(&filter.freq)
     }));
+    assert_eq!(
+        opt.lineage.input.provenance.origin,
+        autoeq_measurements::MeasurementOrigin::Csv
+    );
+    assert_eq!(
+        opt.lineage
+            .normalized_input
+            .provenance
+            .ledger
+            .last()
+            .unwrap()
+            .operation,
+        "normalization_interpolation"
+    );
+    let optimization = opt
+        .lineage
+        .corrected_output
+        .provenance
+        .ledger
+        .iter()
+        .find(|entry| entry.operation == "optimization_filter_synthesis")
+        .unwrap();
+    assert!(optimization.tool.is_some());
+    assert_eq!(
+        optimization.determinism,
+        Some(autoeq_measurements::Determinism::PlatformSensitive)
+    );
 
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -871,6 +898,18 @@ fn optimize_speaker_with_local_cache_runs() {
             && filter.db_gain.is_finite()
             && (args.min_freq..=args.max_freq).contains(&filter.freq)
     }));
+    assert_eq!(
+        opt.lineage.input.provenance.origin,
+        autoeq_measurements::MeasurementOrigin::Api
+    );
+    assert!(
+        opt.lineage
+            .corrected_output
+            .provenance
+            .ledger
+            .iter()
+            .any(|entry| entry.operation == "optimization_filter_synthesis")
+    );
 }
 
 // ---------------------------------------------------------------------------

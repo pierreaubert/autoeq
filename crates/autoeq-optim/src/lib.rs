@@ -42,6 +42,9 @@ pub mod smoothness_penalty_config;
 pub use loss::{CrossoverType, HeadphoneLossData, LossType, SpeakerLossData};
 pub use math_audio_optimisation as de;
 pub use optim::params::OptimParams;
+pub use optim::run_descriptor::{
+    OptimizationRunDescriptor, OptimizationRunResult, OptimizerExecutionPlatform, ParameterBounds,
+};
 pub use optim::{MultiObjectiveData, ObjectiveData, ObjectiveDataBuilder};
 pub use penalty_mode::PenaltyMode;
 pub use problem::{ObjectiveEvaluator, OptimizationProblem, OptimizationResult};

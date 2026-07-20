@@ -40,6 +40,8 @@ pub mod multisub;
 pub mod phase_alignment;
 /// Progress reporting for long-running RoomEQ operations.
 pub mod progress;
+/// Runtime loading and validation of measurement-provenance sidecars.
+pub mod provenance;
 /// Broadband spectral and inter-channel response alignment.
 pub mod spectral_align;
 /// Supporting-source room compensation filter design.
@@ -83,10 +85,12 @@ impl RoomEngine {
     pub fn validation_report(request: &EngineRequest<'_>) -> ConfigValidationReport {
         let mut report = request.config.validation_report();
         let mut errors = report.stage(ValidationStage::Structural).errors.clone();
+        let provenance = provenance::validate_provenance_references(request.config);
+        errors.extend(provenance.errors);
         if let Err(error) = request.problem.validate() {
             errors.push(error);
         }
-        report.record(ValidationStage::Structural, errors, Vec::new());
+        report.record(ValidationStage::Structural, errors, provenance.warnings);
         report
     }
 

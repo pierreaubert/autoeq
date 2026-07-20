@@ -206,7 +206,7 @@ qa-autoeq: prod-autoeq \
 qa-ascilab-6b:
 	./target/release/autoeq --speaker="AsciLab F6B" --version asr --measurement CEA2034 \
 	--algo autoeq:de --loss speaker-score -n 7 --min-freq=30 --max-q=6 \
-	--maxeval 100000 --qa 0.5
+	--maxeval 100000 --seed 4 --qa 0.5
 
 [group('qa-autoeq')]
 qa-jbl-m2-flat:

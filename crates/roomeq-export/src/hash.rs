@@ -14,60 +14,70 @@ const ROUND_CONSTANTS: [u32; 64] = [
 ];
 
 pub(super) fn sha256_hex(input: &[u8]) -> String {
-    let mut padded = input.to_vec();
     let bit_len = (input.len() as u64).wrapping_mul(8);
-    padded.push(0x80);
-    while padded.len() % 64 != 56 {
-        padded.push(0);
-    }
-    padded.extend_from_slice(&bit_len.to_be_bytes());
-
     let mut state = INITIAL_STATE;
-    for chunk in padded.chunks_exact(64) {
-        let mut schedule = [0_u32; 64];
-        for (word, bytes) in schedule.iter_mut().zip(chunk.chunks_exact(4)) {
-            *word = u32::from_be_bytes(bytes.try_into().expect("four-byte SHA-256 word"));
-        }
-        for index in 16..64 {
-            let s0 = schedule[index - 15].rotate_right(7)
-                ^ schedule[index - 15].rotate_right(18)
-                ^ (schedule[index - 15] >> 3);
-            let s1 = schedule[index - 2].rotate_right(17)
-                ^ schedule[index - 2].rotate_right(19)
-                ^ (schedule[index - 2] >> 10);
-            schedule[index] = schedule[index - 16]
-                .wrapping_add(s0)
-                .wrapping_add(schedule[index - 7])
-                .wrapping_add(s1);
-        }
+    let mut chunks = input.chunks_exact(64);
+    for chunk in &mut chunks {
+        compress(&mut state, chunk);
+    }
 
-        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = state;
-        for index in 0..64 {
-            let upper_e = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-            let choose = (e & f) ^ ((!e) & g);
-            let temp1 = h
-                .wrapping_add(upper_e)
-                .wrapping_add(choose)
-                .wrapping_add(ROUND_CONSTANTS[index])
-                .wrapping_add(schedule[index]);
-            let upper_a = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-            let majority = (a & b) ^ (a & c) ^ (b & c);
-            let temp2 = upper_a.wrapping_add(majority);
-            h = g;
-            g = f;
-            f = e;
-            e = d.wrapping_add(temp1);
-            d = c;
-            c = b;
-            b = a;
-            a = temp1.wrapping_add(temp2);
-        }
-        for (slot, value) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
-            *slot = slot.wrapping_add(value);
-        }
+    // SHA-256 padding needs at most two blocks. Keeping it on the stack avoids
+    // cloning an arbitrarily large convolution resource just to hash it.
+    let remainder = chunks.remainder();
+    let mut tail = [0_u8; 128];
+    tail[..remainder.len()].copy_from_slice(remainder);
+    tail[remainder.len()] = 0x80;
+    let padded_len = if remainder.len() < 56 { 64 } else { 128 };
+    tail[padded_len - 8..padded_len].copy_from_slice(&bit_len.to_be_bytes());
+    for chunk in tail[..padded_len].chunks_exact(64) {
+        compress(&mut state, chunk);
     }
 
     state.iter().map(|word| format!("{word:08x}")).collect()
+}
+
+fn compress(state: &mut [u32; 8], chunk: &[u8]) {
+    let mut schedule = [0_u32; 64];
+    for (word, bytes) in schedule.iter_mut().zip(chunk.chunks_exact(4)) {
+        *word = u32::from_be_bytes(bytes.try_into().expect("four-byte SHA-256 word"));
+    }
+    for index in 16..64 {
+        let s0 = schedule[index - 15].rotate_right(7)
+            ^ schedule[index - 15].rotate_right(18)
+            ^ (schedule[index - 15] >> 3);
+        let s1 = schedule[index - 2].rotate_right(17)
+            ^ schedule[index - 2].rotate_right(19)
+            ^ (schedule[index - 2] >> 10);
+        schedule[index] = schedule[index - 16]
+            .wrapping_add(s0)
+            .wrapping_add(schedule[index - 7])
+            .wrapping_add(s1);
+    }
+
+    let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *state;
+    for index in 0..64 {
+        let upper_e = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+        let choose = (e & f) ^ ((!e) & g);
+        let temp1 = h
+            .wrapping_add(upper_e)
+            .wrapping_add(choose)
+            .wrapping_add(ROUND_CONSTANTS[index])
+            .wrapping_add(schedule[index]);
+        let upper_a = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+        let majority = (a & b) ^ (a & c) ^ (b & c);
+        let temp2 = upper_a.wrapping_add(majority);
+        h = g;
+        g = f;
+        f = e;
+        e = d.wrapping_add(temp1);
+        d = c;
+        c = b;
+        b = a;
+        a = temp1.wrapping_add(temp2);
+    }
+    for (slot, value) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
+        *slot = slot.wrapping_add(value);
+    }
 }
 
 #[cfg(test)]
@@ -83,6 +93,10 @@ mod tests {
         assert_eq!(
             sha256_hex(b"abc"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            sha256_hex(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
         );
     }
 }

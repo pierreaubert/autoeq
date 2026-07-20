@@ -36,11 +36,17 @@ fn package_convolution_sidecars_returns_hashed_member_and_rewritten_graph() {
     let resources = [resource("L_fir_96000hz.wav", b"wav".to_vec())];
 
     let (packaged, members) =
-        package_convolution_sidecars(&output, &resources, &BTreeSet::new()).unwrap();
+        package_convolution_sidecars(
+            &output,
+            &resources,
+            &BTreeSet::new(),
+            &HashMap::new(),
+        )
+        .unwrap();
 
     assert_eq!(members.len(), 1);
     assert_eq!(members[0].relative_path, Path::new("L_fir_96000hz.wav"));
-    assert_eq!(members[0].bytes, b"wav");
+    assert_eq!(members[0].bytes.as_ref(), b"wav");
     assert_eq!(members[0].sha256.len(), 64);
     assert_eq!(convolution_path(&packaged, "left"), "L_fir_96000hz.wav");
 }
@@ -53,14 +59,55 @@ fn package_convolution_sidecars_avoids_explicit_destination_collisions() {
     let occupied = BTreeSet::from(["L_fir_96000hz.wav".to_string()]);
 
     let (packaged, members) =
-        package_convolution_sidecars(&output, &resources, &occupied).unwrap();
+        package_convolution_sidecars(&output, &resources, &occupied, &HashMap::new()).unwrap();
 
     assert_eq!(members[0].relative_path, Path::new("L_fir_96000hz_002.wav"));
-    assert_eq!(members[0].bytes, b"new");
+    assert_eq!(members[0].bytes.as_ref(), b"new");
     assert_eq!(
         convolution_path(&packaged, "left"),
         "L_fir_96000hz_002.wav"
     );
+}
+
+#[test]
+fn package_convolution_sidecars_reuses_existing_identical_member() {
+    let mut output = make_test_output();
+    add_convolution(&mut output, "left", "L_fir_96000hz.wav");
+    let resources = [resource("L_fir_96000hz.wav", b"wav".to_vec())];
+    let occupied = BTreeSet::from(["L_fir_96000hz.wav".to_string()]);
+    let reusable = HashMap::from([(
+        "L_fir_96000hz.wav".to_string(),
+        "L_fir_96000hz.wav".to_string(),
+    )]);
+
+    let (packaged, members) =
+        package_convolution_sidecars(&output, &resources, &occupied, &reusable).unwrap();
+
+    assert!(members.is_empty());
+    assert_eq!(convolution_path(&packaged, "left"), "L_fir_96000hz.wav");
+}
+
+#[test]
+fn package_convolution_sidecars_deduplicates_reference_aliases_by_content() {
+    let mut output = make_test_output();
+    add_convolution(&mut output, "left", "relative/shared.wav");
+    add_convolution(&mut output, "right", "/absolute/shared.wav");
+    let resources = [
+        resource("relative/shared.wav", b"same wav".to_vec()),
+        resource("/absolute/shared.wav", b"same wav".to_vec()),
+    ];
+
+    let (packaged, members) = package_convolution_sidecars(
+        &output,
+        &resources,
+        &BTreeSet::new(),
+        &HashMap::new(),
+    )
+    .unwrap();
+
+    assert_eq!(members.len(), 1);
+    assert_eq!(convolution_path(&packaged, "left"), "shared.wav");
+    assert_eq!(convolution_path(&packaged, "right"), "shared.wav");
 }
 
 #[test]
@@ -76,6 +123,7 @@ fn export_package_uses_selected_sample_rate_and_explicit_sidecar() {
         96_000.0,
         &resources,
         &BTreeSet::new(),
+        &HashMap::new(),
     )
     .unwrap();
 
@@ -84,7 +132,7 @@ fn export_package_uses_selected_sample_rate_and_explicit_sidecar() {
             .member(Path::new("room_eq_cdsp.yaml"))
             .unwrap()
             .bytes
-            .clone(),
+            .to_vec(),
     )
     .unwrap();
     assert!(yaml.contains("samplerate: 96000"));
@@ -105,6 +153,7 @@ fn roon_export_builds_deterministic_routed_convolver_archive() {
         48_000.0,
         &resources,
         &BTreeSet::new(),
+        &HashMap::new(),
     )
     .unwrap();
     let manifest: serde_json::Value = serde_json::from_slice(
@@ -159,6 +208,7 @@ fn roon_export_builds_deterministic_routed_convolver_archive() {
         48_000.0,
         &resources,
         &BTreeSet::new(),
+        &HashMap::new(),
     )
     .unwrap();
     assert_eq!(first, second);
@@ -256,7 +306,7 @@ fn convolution_path<'a>(output: &'a DspGraph, channel: &str) -> &'a str {
 fn resource(reference: &str, bytes: Vec<u8>) -> ConvolutionResource {
     ConvolutionResource {
         reference: reference.to_string(),
-        bytes,
+        bytes: bytes.into(),
     }
 }
 

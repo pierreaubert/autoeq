@@ -15,7 +15,7 @@ use roomeq_model::{
     BassManagementMatrix, BassManagementRoute, BassManagementRoutingGraph, ChannelDspChain,
     DspGraph, PluginConfigWrapper,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as FmtWrite;
 use std::path::Path;
 
@@ -95,6 +95,7 @@ pub fn build_export_package(
     sample_rate: f64,
     resources: &[ConvolutionResource],
     occupied_names: &BTreeSet<String>,
+    reusable_names: &HashMap<String, String>,
 ) -> anyhow::Result<ExportPackage> {
     graph.validate().map_err(anyhow::Error::msg)?;
     let mut members = Vec::new();
@@ -119,7 +120,8 @@ pub fn build_export_package(
         if let Some(name) = main_file_name.to_str() {
             occupied_names.insert(name.to_string());
         }
-        let (graph, sidecars) = package_convolution_sidecars(graph, resources, &occupied_names)?;
+        let (graph, sidecars) =
+            package_convolution_sidecars(graph, resources, &occupied_names, reusable_names)?;
         members.extend(sidecars);
         graph
     } else {

@@ -1,6 +1,6 @@
 # Root compatibility-facade declarations accepted at the WP0 baseline.
 # The architecture checker extracts and compares these declarations in order.
-pub use autoeq_cli::qa_println;
+pub use autoeq_workflow::qa_println;
 pub use math_audio_iir_fir as iir;
 pub use math_audio_optimisation as de;
 pub mod cea2034;

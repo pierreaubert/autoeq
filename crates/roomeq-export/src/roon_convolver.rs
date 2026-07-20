@@ -5,6 +5,7 @@ use roomeq_model::DspGraph;
 use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, Write};
 use std::path::{Component, Path};
+use std::sync::Arc;
 use zip::write::FileOptions;
 
 #[derive(Debug)]
@@ -18,7 +19,7 @@ pub(super) struct RoonConvolutionArchive {
 struct ArchiveChannel {
     name: String,
     mask: u32,
-    wav_bytes: Option<Vec<u8>>,
+    wav_bytes: Option<Arc<[u8]>>,
 }
 
 pub(super) fn build_roon_convolution_archive(
@@ -157,9 +158,9 @@ fn archive_wav_name(index: usize, name: &str) -> String {
 
 fn read_and_validate_wav(
     ir_file: &str,
-    resources: &HashMap<&str, &[u8]>,
+    resources: &HashMap<&str, &Arc<[u8]>>,
     sample_rate: u32,
-) -> anyhow::Result<Vec<u8>> {
+) -> anyhow::Result<Arc<[u8]>> {
     let relative = Path::new(ir_file);
     if relative.is_absolute()
         || relative
@@ -180,7 +181,7 @@ fn read_and_validate_wav(
         .get(ir_file)
         .copied()
         .ok_or_else(|| anyhow::anyhow!("missing explicit convolution resource '{ir_file}'"))?;
-    let cursor = Cursor::new(bytes);
+    let cursor = Cursor::new(bytes.as_ref());
     let mut reader = hound::WavReader::new(cursor).map_err(|error| {
         anyhow::anyhow!("Roon convolution impulse '{ir_file}' is not a valid WAV: {error}")
     })?;
@@ -210,7 +211,7 @@ fn read_and_validate_wav(
             }
         }
     }
-    Ok(bytes.to_vec())
+    Ok(Arc::clone(bytes))
 }
 
 fn wav_frame_count(bytes: &[u8]) -> anyhow::Result<u32> {

@@ -34,10 +34,20 @@
 
 ## Fixes
 
+- Execute every leaf crate's focused unit-test command through a generated CI
+  matrix, lint/check all workspace targets, and run the production RoomEQ
+  coverage recipe instead of the empty root-library test target.
+- Reuse identical convolution sidecars across repeated exports and aliased
+  references while sharing resource buffers and hashing with bounded scratch
+  memory.
+- Load every file-backed and inline-CSV measurement during workflow production
+  validation so dry runs cannot report missing or malformed resources as ready.
+- Keep CLI and QA implementation crates behind opt-in root-package features so
+  default `autoeq` library consumers do not compile terminal-only code.
 - Treat zero-filter RoomEQ configurations as an identity optimization instead
   of invoking an optimizer backend with an empty parameter vector.
-- Accept legacy CSV-backed inline measurement descriptors during production
-  validation, matching the canonical loader's documented CSV fallback.
+- Accept valid legacy CSV-backed inline measurement descriptors during
+  production validation, matching the canonical loader's documented fallback.
 - Preserve the public RoomEQ help description and historical
   `DspChainOutput` JSON Schema identity after moving their owners into CLI and
   model crates.

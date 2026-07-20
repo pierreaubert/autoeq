@@ -2,7 +2,7 @@ use log::{debug, info, warn};
 use math_audio_dsp::analysis::compute_average_response;
 use roomeq_engine::analysis::slope;
 use roomeq_engine::pipeline::PipelineStepId;
-use roomeq_model::validation_rules::{RoomValidationContext, validate_room_config_staged};
+use roomeq_model::validation_rules::RoomValidationContext;
 use roomeq_model::{AutoeqError, Result};
 use roomeq_model::{MeasurementSource, RoomConfig, SpeakerConfig, TargetShape};
 use std::collections::HashMap;
@@ -173,7 +173,10 @@ pub(super) fn prepare_room_config(config: &RoomConfig) -> RoomConfig {
 }
 
 pub(super) fn validate_room_config_or_fail(config: &RoomConfig) -> Result<()> {
-    let validation = validate_room_config_staged(config, RoomValidationContext::production());
+    let validation = crate::config_loader::validate_room_config_for_workflow(
+        config,
+        RoomValidationContext::production(),
+    );
     for warning in validation.warnings() {
         eprintln!("Warning: {warning}");
     }
@@ -181,36 +184,14 @@ pub(super) fn validate_room_config_or_fail(config: &RoomConfig) -> Result<()> {
         eprintln!("Error: {error}");
     }
     if !validation.production_ready() {
+        let errors = validation.errors().map(String::as_str).collect::<Vec<_>>();
         return Err(AutoeqError::OptimizationFailed {
             message: format!(
-                "Configuration validation failed with {} errors",
-                validation.errors().count()
+                "Configuration validation failed with {} errors: {}",
+                errors.len(),
+                errors.join("; ")
             ),
         });
-    }
-    for (speaker_name, speaker) in &config.speakers {
-        for (source_index, source) in roomeq_model::validation_rules::collect_sources(speaker)
-            .into_iter()
-            .enumerate()
-        {
-            match autoeq_measurements::read::load_source_individual(source) {
-                Ok(curves) if curves.is_empty() => {
-                    return Err(AutoeqError::OptimizationFailed {
-                        message: format!(
-                            "speaker '{speaker_name}' source {source_index} produced no measurement curves"
-                        ),
-                    });
-                }
-                Ok(_) => {}
-                Err(error) => {
-                    return Err(AutoeqError::OptimizationFailed {
-                        message: format!(
-                            "speaker '{speaker_name}' source {source_index} failed acoustic validation: {error}"
-                        ),
-                    });
-                }
-            }
-        }
     }
     Ok(())
 }

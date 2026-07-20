@@ -33,6 +33,8 @@ def generate_schema(kind: str) -> object:
             "--locked",
             "-p",
             "autoeq",
+            "--features",
+            "cli",
             "--bin",
             "roomeq",
             "--",

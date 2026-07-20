@@ -1,1 +1,1 @@
-pub use autoeq_cli::*;
+pub use autoeq_workflow::cli::*;

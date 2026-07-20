@@ -6,8 +6,10 @@ use roomeq_export::{
     convolution_resource_references, render_dsp_graph,
 };
 use roomeq_model::DspGraph;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Render and persist one external artifact without packaging sidecars.
 pub fn export_dsp_chain(
@@ -38,6 +40,7 @@ pub fn export_dsp_chain_with_convolution_sidecars(
         .context("external export path must include a file name")?;
     let resources = load_convolution_resources(graph, source_dir)?;
     let occupied_names = occupied_member_names(destination_dir)?;
+    let reusable_names = reusable_member_names(destination_dir, &resources, &occupied_names)?;
     let package = build_export_package(
         graph,
         format,
@@ -45,6 +48,7 @@ pub fn export_dsp_chain_with_convolution_sidecars(
         sample_rate,
         &resources,
         &occupied_names,
+        &reusable_names,
     )?;
     persist_export_package(&package, destination_dir)
 }
@@ -58,8 +62,13 @@ pub fn package_convolution_sidecars(
 ) -> anyhow::Result<DspGraph> {
     let resources = load_convolution_resources(graph, source_dir)?;
     let occupied_names = occupied_member_names(destination_dir)?;
-    let (graph, members) =
-        roomeq_export::package_convolution_sidecars(graph, &resources, &occupied_names)?;
+    let reusable_names = reusable_member_names(destination_dir, &resources, &occupied_names)?;
+    let (graph, members) = roomeq_export::package_convolution_sidecars(
+        graph,
+        &resources,
+        &occupied_names,
+        &reusable_names,
+    )?;
     persist_export_package(&ExportPackage::new(members)?, destination_dir)?;
     Ok(graph)
 }
@@ -84,9 +93,93 @@ fn load_convolution_resources(
                     path.display()
                 )
             })?;
-            Ok(ConvolutionResource { reference, bytes })
+            Ok(ConvolutionResource {
+                reference,
+                bytes: Arc::from(bytes),
+            })
         })
         .collect()
+}
+
+fn reusable_member_names(
+    directory: &Path,
+    resources: &[ConvolutionResource],
+    occupied_names: &BTreeSet<String>,
+) -> anyhow::Result<HashMap<String, String>> {
+    let mut reusable = HashMap::new();
+    for resource in resources {
+        let preferred = Path::new(&resource.reference)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("room_eq_ir.wav");
+        for candidate in occupied_names {
+            if member_name_is_variant(preferred, candidate)
+                && same_existing_content(&directory.join(candidate), &resource.bytes)?
+            {
+                reusable.insert(resource.reference.clone(), candidate.clone());
+                break;
+            }
+        }
+    }
+    Ok(reusable)
+}
+
+fn member_name_is_variant(preferred: &str, candidate: &str) -> bool {
+    if candidate == preferred {
+        return true;
+    }
+    let preferred = Path::new(preferred);
+    let stem = preferred
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or("room_eq_ir");
+    let extension = preferred
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .filter(|extension| !extension.is_empty())
+        .map(|extension| format!(".{extension}"))
+        .unwrap_or_default();
+    let Some(suffix) = candidate
+        .strip_prefix(&format!("{stem}_"))
+        .and_then(|candidate| candidate.strip_suffix(&extension))
+    else {
+        return false;
+    };
+    suffix.len() >= 3 && suffix.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn same_existing_content(path: &Path, expected: &[u8]) -> anyhow::Result<bool> {
+    let metadata = match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => metadata,
+        Ok(_) => return Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to inspect existing export member '{}'",
+                    path.display()
+                )
+            });
+        }
+    };
+    if metadata.len() != expected.len() as u64 {
+        return Ok(false);
+    }
+    let mut file = std::fs::File::open(path)?;
+    let mut offset = 0;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            return Ok(offset == expected.len());
+        }
+        if expected.get(offset..offset + count) != Some(&buffer[..count]) {
+            return Ok(false);
+        }
+        offset += count;
+    }
 }
 
 fn occupied_member_names(directory: &Path) -> anyhow::Result<BTreeSet<String>> {
@@ -234,13 +327,34 @@ mod tests {
         .unwrap();
 
         assert!(
-            std::fs::read_to_string(path)
+            std::fs::read_to_string(&path)
                 .unwrap()
                 .contains("impulse.wav")
         );
         assert_eq!(
             std::fs::read(destination.path().join("impulse.wav")).unwrap(),
             b"impulse"
+        );
+
+        export_dsp_chain_with_convolution_sidecars(
+            &convolution_graph("impulse.wav"),
+            ExportFormat::CamillaDsp,
+            &path,
+            48_000.0,
+            source.path(),
+        )
+        .unwrap();
+
+        let mut names = std::fs::read_dir(destination.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(names, ["impulse.wav", "room.yml"]);
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("impulse.wav")
         );
     }
 }

@@ -133,7 +133,7 @@ esac
 
 # Build roomeq first (avoids repeated compilation)
 echo "=== Building roomeq (release) ==="
-cargo build --bin roomeq --release
+cargo build --features cli --bin roomeq --release
 
 ROOMEQ="./target/release/roomeq"
 

@@ -8,12 +8,12 @@ The `autoeq` binary optimizes EQ for individual speakers or headphones.
 
 ```bash
 # From spinorama.org API data
-cargo run --bin autoeq --release -- \
+cargo run --features cli --bin autoeq --release -- \
   --speaker="JBL M2" --version eac --measurement CEA2034 \
   --algo autoeq:cobyla -n 7
 
 # From local CSV file (format: frequency,spl)
-cargo run --bin autoeq --release -- \
+cargo run --features cli --bin autoeq --release -- \
   --curve measurements.csv --target harman.csv \
   --algo autoeq:de -n 5
 ```
@@ -49,10 +49,10 @@ curl "http://api.spinorama.org/v1/speakers/JBL%20M2/versions/eac/measurements"
 
 ```bash
 # List all available algorithms
-cargo run --bin autoeq --release -- --algo-list
+cargo run --features cli --bin autoeq --release -- --algo-list
 
 # Recommended: global search + local refinement
-cargo run --bin autoeq --release -- \
+cargo run --features cli --bin autoeq --release -- \
   --algo autoeq:isres --refine --local-algo cobyla \
   --speaker="KEF R3" --version asr --measurement CEA2034
 ```
@@ -63,10 +63,10 @@ When using `autoeq:de`, additional parameters control the optimizer:
 
 ```bash
 # List available strategies
-cargo run --bin autoeq --release -- --strategy-list
+cargo run --features cli --bin autoeq --release -- --strategy-list
 
 # Use adaptive strategy
-cargo run --bin autoeq --release -- \
+cargo run --features cli --bin autoeq --release -- \
   --algo autoeq:de --strategy adaptivebin \
   --adaptive-weight-f 0.8 --adaptive-weight-cr 0.7 \
   --speaker="KEF R3" --version asr --measurement CEA2034
@@ -84,7 +84,7 @@ cargo run --bin autoeq --release -- \
 ## Headphone Example
 
 ```bash
-cargo run --bin autoeq --release -- \
+cargo run --features cli --bin autoeq --release -- \
   --curve headphone_measurement.csv \
   --target harman-over-ear-2018.csv \
   --loss headphone-score \

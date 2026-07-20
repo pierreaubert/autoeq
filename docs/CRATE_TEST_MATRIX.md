@@ -3,6 +3,9 @@
 This is the focused verification inventory for the crate-partition migration.
 The executable source of truth is `scripts/crate_partition_policy.json`; the
 architecture checker rejects a workspace package without a focused command.
+CI obtains its parallel job list from this policy through
+`scripts/run_crate_test_matrix.py`; adding a package to the policy therefore
+adds its leaf-crate test job without editing workflow YAML.
 
 | Package | Focused command | Current responsibility |
 |---|---|---|

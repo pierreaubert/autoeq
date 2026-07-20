@@ -1,6 +1,6 @@
 #![doc = include_str!("../README.md")]
 
-pub use autoeq_cli::qa_println;
+pub use autoeq_workflow::qa_println;
 
 // Re-export external crate functionality
 pub use math_audio_iir_fir as iir;

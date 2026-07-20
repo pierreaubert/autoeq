@@ -81,11 +81,10 @@ pub fn validate_room_config_staged(
         validate_resolved_resources(config),
         Vec::new(),
     );
-    report.record(
-        ValidationStage::Acoustic,
-        validate_acoustic_inputs(config),
-        Vec::new(),
-    );
+    let acoustic_errors = validate_acoustic_inputs(config);
+    if !acoustic_errors.is_empty() || !acoustic_inputs_require_loading(config) {
+        report.record(ValidationStage::Acoustic, acoustic_errors, Vec::new());
+    }
     if let Some(target) = context.export_target.as_deref() {
         report.record(
             ValidationStage::ExportTarget,
@@ -176,21 +175,54 @@ fn validate_resolved_resources(config: &RoomConfig) -> Vec<String> {
     errors
 }
 
-fn measurement_paths(source: &MeasurementSource) -> Vec<&Path> {
+fn measurement_paths(source: &MeasurementSource) -> Vec<PathBuf> {
     match source {
-        MeasurementSource::Single(single) => single
-            .measurement
-            .path()
-            .map(PathBuf::as_path)
-            .into_iter()
-            .collect(),
+        MeasurementSource::Single(single) => {
+            measurement_path(&single.measurement).into_iter().collect()
+        }
         MeasurementSource::Multiple(multiple) => multiple
             .measurements
             .iter()
-            .filter_map(crate::MeasurementRef::path)
-            .map(PathBuf::as_path)
+            .filter_map(measurement_path)
             .collect(),
         MeasurementSource::InMemory(_) | MeasurementSource::InMemoryMultiple(_) => Vec::new(),
+    }
+}
+
+fn measurement_path(measurement: &crate::MeasurementRef) -> Option<PathBuf> {
+    match measurement {
+        crate::MeasurementRef::Path(path) | crate::MeasurementRef::Named { path, .. } => {
+            Some(path.clone())
+        }
+        crate::MeasurementRef::Inline(inline)
+            if inline.frequencies.is_empty() || inline.magnitude_db.is_empty() =>
+        {
+            inline
+                .csv_path
+                .as_deref()
+                .filter(|path| !path.trim().is_empty())
+                .map(PathBuf::from)
+        }
+        crate::MeasurementRef::Inline(_) => None,
+    }
+}
+
+fn acoustic_inputs_require_loading(config: &RoomConfig) -> bool {
+    config.speakers.values().any(|speaker| {
+        collect_sources(speaker)
+            .into_iter()
+            .any(source_requires_acoustic_loading)
+    })
+}
+
+fn source_requires_acoustic_loading(source: &MeasurementSource) -> bool {
+    match source {
+        MeasurementSource::Single(single) => measurement_path(&single.measurement).is_some(),
+        MeasurementSource::Multiple(multiple) => multiple
+            .measurements
+            .iter()
+            .any(|measurement| measurement_path(measurement).is_some()),
+        MeasurementSource::InMemory(_) | MeasurementSource::InMemoryMultiple(_) => false,
     }
 }
 
@@ -262,10 +294,11 @@ fn validate_inline_measurement(
             "speaker '{speaker_name}' source {source_index} has invalid inline frequency/SPL data"
         ));
     }
-    if inline
-        .phase_deg
-        .as_ref()
-        .is_some_and(|phase| phase.len() != inline.frequencies.len())
+    if !uses_csv_fallback
+        && inline
+            .phase_deg
+            .as_ref()
+            .is_some_and(|phase| phase.len() != inline.frequencies.len())
     {
         errors.push(format!(
             "speaker '{speaker_name}' source {source_index} has inline phase data with the wrong length"
@@ -1314,7 +1347,7 @@ mod room_config_validation_tests {
         BootstrapUncertaintyConfig, CardioidConfig, ContinuousListeningAreaConfig, CrossoverConfig,
         DBAConfig, MultiSeatConfig, MultiSeatStrategy, MultiSubGroup, OptimizerConfig, RoomConfig,
         SpeakerConfig, SpeakerGroup, SupportingSourceGroup, SystemConfig, SystemModel,
-        TargetResponseConfig, TargetShape,
+        TargetResponseConfig, TargetShape, ValidationStage,
     };
     use crate::{Curve, InlineMeasurement, MeasurementRef, MeasurementSingle, MeasurementSource};
     use std::collections::HashMap;
@@ -1356,7 +1389,7 @@ mod room_config_validation_tests {
     }
 
     #[test]
-    fn production_validation_accepts_csv_backed_inline_measurement() {
+    fn model_validation_defers_csv_backed_inline_acoustic_loading() {
         let mut config = default_room();
         config.speakers.insert(
             "L".to_string(),
@@ -1365,7 +1398,14 @@ mod room_config_validation_tests {
 
         let report = validate_room_config_staged(&config, RoomValidationContext::production());
 
-        assert!(report.errors().next().is_none(), "{report:?}");
+        assert!(!report.production_ready());
+        assert!(!report.stage_ran(ValidationStage::Acoustic));
+        assert!(
+            report
+                .errors()
+                .any(|error| error.contains("measurement path was not resolved")),
+            "{report:?}"
+        );
     }
 
     #[test]

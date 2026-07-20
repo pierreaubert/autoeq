@@ -132,13 +132,13 @@ autoeq-plot = { workspace = true, optional = true }
 autoeq-measurements = { workspace = true }
 autoeq-optim = { workspace = true }
 autoeq-workflow = { workspace = true }
-autoeq-cli = { workspace = true }
+autoeq-cli = { workspace = true, optional = true }
 roomeq-model = { workspace = true }
 roomeq-engine = { workspace = true }
 roomeq-export = { workspace = true }
 roomeq-quality = { workspace = true }
-roomeq-qa = { workspace = true }
-roomeq-cli = { workspace = true }
+roomeq-qa = { workspace = true, optional = true }
+roomeq-cli = { workspace = true, optional = true }
 roomeq-analysis = { workspace = true }
 roomeq-synthetic = { workspace = true }
 roomeq-workflow = { workspace = true }
@@ -150,9 +150,11 @@ math-optimisation = { workspace = true }
 
 [features]
 default = []
-plotly = ["dep:plotly", "dep:autoeq-plot", "autoeq-plot/plotly", "autoeq-cli/plotly"]
+cli = ["dep:autoeq-cli", "dep:roomeq-cli"]
+qa = ["cli", "dep:roomeq-qa"]
+plotly = ["dep:plotly", "dep:autoeq-plot", "autoeq-plot/plotly", "autoeq-cli?/plotly"]
 # Static PNG export has no browser, WebDriver, display-server, or network dependency.
-plotly_static = ["plotly", "autoeq-plot/plotly_static", "autoeq-cli/plotly_static"]
+plotly_static = ["plotly", "autoeq-plot/plotly_static", "autoeq-cli?/plotly_static"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 
@@ -169,47 +171,57 @@ plotly_static = ["plotly", "autoeq-plot/plotly_static", "autoeq-cli/plotly_stati
 [[bin]]
 name = "autoeq"
 path = "src/bin/autoeq/main.rs"
+required-features = ["cli"]
 
 [[bin]]
 name = "benchmark-autoeq-speaker"
 path = "src/bin/autoeq_benchmark_speaker.rs"
+required-features = ["cli"]
 
 [[bin]]
 name = "autoeq-download-speakers"
 path = "src/bin/autoeq_download_speaker.rs"
+required-features = ["cli"]
 
 [[bin]]
 name = "roomeq"
 path = "src/bin/roomeq/main.rs"
+required-features = ["cli"]
 
 [[bin]]
 name = "roomeq-fuzzer"
 path = "src/bin/roomeq_fuzzer.rs"
-required-features = ["plotly"]
+required-features = ["qa", "plotly"]
 
 [[bin]]
 name = "roomeq-qa-quality"
 path = "src/bin/roomeq_qa_quality.rs"
+required-features = ["qa"]
 
 [[bin]]
 name = "roomeq-qa-coverage"
 path = "src/bin/roomeq_qa_coverage.rs"
+required-features = ["qa"]
 
 [[bin]]
 name = "roomeq-qa-features"
 path = "src/bin/roomeq_qa_features.rs"
+required-features = ["qa"]
 
 [[bin]]
 name = "roomeq-qa-synthetic"
 path = "src/bin/roomeq_qa_synthetic.rs"
+required-features = ["qa"]
 
 [[bin]]
 name = "roomeq-qa-acoustic"
 path = "src/bin/roomeq_qa_acoustic.rs"
+required-features = ["qa"]
 
 [[bin]]
 name = "convert-recording"
 path = "src/bin/convert_recording.rs"
+required-features = ["cli"]
 
 [lib]
 name = "autoeq"

@@ -18,22 +18,22 @@ prod: prod-autoeq prod-roomeq
 
 [group('build')]
 prod-autoeq:
-	cargo build --release --bin autoeq
-	cargo build --release --bin benchmark-autoeq-speaker
-	cargo build --release --bin autoeq-download-speakers
+	cargo build --release --features cli --bin autoeq
+	cargo build --release --features cli --bin benchmark-autoeq-speaker
+	cargo build --release --features cli --bin autoeq-download-speakers
 
 [group('build')]
 prod-roomeq:
-	cargo build --release --bin roomeq
-	cargo build --release --bin roomeq-qa-quality
-	cargo build --release --bin roomeq-qa-coverage
-	cargo build --release --bin roomeq-qa-features
-	cargo build --release --bin roomeq-qa-synthetic
-	cargo build --release --bin convert-recording
+	cargo build --release --features cli --bin roomeq
+	cargo build --release --features qa --bin roomeq-qa-quality
+	cargo build --release --features qa --bin roomeq-qa-coverage
+	cargo build --release --features qa --bin roomeq-qa-features
+	cargo build --release --features qa --bin roomeq-qa-synthetic
+	cargo build --release --features cli --bin convert-recording
 
 [group('build')]
 dev:
-	cargo build --bins
+	cargo build --bins --all-features
 
 # ----------------------------------------------------------------------
 # TEST
@@ -42,11 +42,11 @@ dev:
 
 [group('test')]
 check:
-	cargo check --lib --bins --tests --examples
+	cargo check --workspace --all-targets --all-features
 
 [group('test')]
 test:
-	cargo test --lib --bins --tests --examples --release
+	cargo test --workspace --all-targets --all-features --release
 
 # Each optimizer internally forks rayon evaluators over all
 # cores, so the effective thread count is num_cpus × num_cpus. On small-
@@ -107,18 +107,18 @@ dist: dist-autoeq dist-roomeq dist-plot-bins
 
 [group('dist')]
 dist-autoeq:
-	cargo build --profile dist --bin autoeq
-	cargo build --profile dist --bin benchmark-autoeq-speaker
-	cargo build --profile dist --bin autoeq-download-speakers
+	cargo build --profile dist --features cli --bin autoeq
+	cargo build --profile dist --features cli --bin benchmark-autoeq-speaker
+	cargo build --profile dist --features cli --bin autoeq-download-speakers
 
 [group('dist')]
 dist-roomeq:
-	cargo build --profile dist --bin roomeq
+	cargo build --profile dist --features cli --bin roomeq
 
 # Plotly-gated bins (skipped by `--workspace` because of required-features).
 [group('dist')]
 dist-plot-bins:
-	cargo build --profile dist --bin roomeq-fuzzer --features plotly
+	cargo build --profile dist --bin roomeq-fuzzer --features qa,plotly
 
 # ----------------------------------------------------------------------
 # CLEAN
@@ -137,7 +137,7 @@ clean:
 
 [group('download')]
 download-speakers:
-	cargo run --bin autoeq-download-speakers --release
+	cargo run --features cli --bin autoeq-download-speakers --release
 
 # ----------------------------------------------------------------------
 # BENCH
@@ -150,7 +150,7 @@ bench-autoeq: bench-autoeq-speaker
 bench-autoeq-speaker:
 	# either jobs=1 or --no-parallel ; or a mix if you have a lot of
 	# CPU cores
-	cargo run --release --bin benchmark-autoeq-speaker -- --qa --jobs 1
+	cargo run --release --features cli --bin benchmark-autoeq-speaker -- --qa --jobs 1
 
 # The `benchmark-convergence` binary lives in the `math-optimisation` crate
 # (github.com/pierreaubert/math-audio). Clone that repository to run it.
@@ -503,9 +503,9 @@ qa-roomeq-convergence jobs="":
 	#!/usr/bin/env bash
 	set -euo pipefail
 	if [ -n "{{jobs}}" ]; then
-	  cargo run --bin roomeq-qa-quality --release -- --jobs {{jobs}}
+	  cargo run --features qa --bin roomeq-qa-quality --release -- --jobs {{jobs}}
 	else
-	  cargo run --bin roomeq-qa-quality --release
+	  cargo run --features qa --bin roomeq-qa-quality --release
 	fi
 
 [group('qa-roomeq')]
@@ -513,7 +513,7 @@ qa-roomeq-small-stereo-20: ensure-venv
 	@for method in iir fir mixed; do \
 	  for algo in fem; do \
 	      mkdir -p ./data_generated/roomeq/generated/$algo/small_stereo_2_0; \
-	      cargo run --bin roomeq --release -- \
+	      cargo run --features cli --bin roomeq --release -- \
 	        --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_0/config.json \
 		    --override-config ./data_tests/roomeq/generate/optimiser-config/small_stereo_2_0/optimiser-$method.json \
 		    --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_0/dsp_$method.json; \
@@ -528,7 +528,7 @@ qa-roomeq-small-stereo-21: ensure-venv
 	@for method in iir fir mixed; do \
 	  for algo in fem; do \
 	    mkdir -p ./data_generated/roomeq/generated/$algo/small_stereo_2_1; \
-	    cargo run --bin roomeq --release -- \
+	    cargo run --features cli --bin roomeq --release -- \
 	        --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_1/config.json \
 		    --override-config ./data_tests/roomeq/generate/optimiser-config/small_stereo_2_1/optimiser-$method.json \
 		    --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_1/dsp_$method.json; \
@@ -543,7 +543,7 @@ qa-roomeq-small-stereo-22: ensure-venv
 	@for method in iir fir mixed; do \
 	  for algo in fem; do \
 	    mkdir -p ./data_generated/roomeq/generated/$algo/small_stereo_2_2; \
-	    cargo run --bin roomeq --release -- \
+	    cargo run --features cli --bin roomeq --release -- \
 	        --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_2/config.json \
 		    --override-config ./data_tests/roomeq/generate/optimiser-config/small_stereo_2_2/optimiser-$method.json \
 		    --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_2/dsp_$method.json; \
@@ -557,7 +557,7 @@ qa-roomeq-small-stereo-51: ensure-venv
 	@for method in iir fir mixed; do \
 	  for algo in fem; do \
 	    mkdir -p ./data_generated/roomeq/generated/$algo/medium_surround_5_1; \
-	    cargo run --bin roomeq --release -- \
+	    cargo run --features cli --bin roomeq --release -- \
 	        --config       ./data_tests/roomeq/generate/$algo/medium_surround_5_1/config.json \
 		    --override-config ./data_tests/roomeq/generate/optimiser-config/medium_surround_5_1/optimiser-$method.json \
 		    --output       ./data_generated/roomeq/generated/$algo/medium_surround_5_1/dsp_$method.json; \
@@ -584,7 +584,7 @@ qa-roomeq-multi-small-stereo-20: ensure-venv
 	  for algo in fem; do \
 	    mkdir -p ./data_generated/roomeq/generated/$algo/small_stereo_2_0; \
 	    echo "=== Multi-measurement $strategy ($algo) small_stereo_2_0 ==="; \
-	    cargo run --bin roomeq --release -- \
+	    cargo run --features cli --bin roomeq --release -- \
 	      --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_0/config.json \
 	      --override-config ./data_tests/roomeq/generate/optimiser-config/multi_measurement/$strategy.json \
 	      --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_0/dsp_iir_multi_$strategy.json; \
@@ -599,7 +599,7 @@ qa-roomeq-multi-small-stereo-21: ensure-venv
 	  for algo in fem; do \
 	    mkdir -p ./data_generated/roomeq/generated/$algo/small_stereo_2_1; \
 	    echo "=== Multi-measurement $strategy ($algo) small_stereo_2_1 ==="; \
-	    cargo run --bin roomeq --release -- \
+	    cargo run --features cli --bin roomeq --release -- \
 	      --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_1/config.json \
 	      --override-config ./data_tests/roomeq/generate/optimiser-config/multi_measurement/$strategy.json \
 	      --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_1/dsp_iir_multi_$strategy.json; \
@@ -614,7 +614,7 @@ qa-roomeq-multi-small-stereo-22-mso: ensure-venv
 	  for algo in fem; do \
 	    mkdir -p ./data_generated/roomeq/generated/$algo/small_stereo_2_2_mso; \
 	    echo "=== Multi-measurement $strategy ($algo) small_stereo_2_2_mso ==="; \
-	    cargo run --bin roomeq --release -- \
+	    cargo run --features cli --bin roomeq --release -- \
 	      --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_2_mso/config.json \
 	      --override-config ./data_tests/roomeq/generate/optimiser-config/multi_measurement/$strategy.json \
 	      --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_2_mso/dsp_iir_multi_$strategy.json; \
@@ -626,7 +626,7 @@ qa-roomeq-multi-small-stereo-22-mso: ensure-venv
 # New comprehensive QA using roomeq-qa-full binary
 [group('qa-roomeq')]
 qa-roomeq-coverage: prod-autoeq
-	cargo run --bin roomeq-qa-coverage --release
+	cargo run --features qa --bin roomeq-qa-coverage --release
 
 # Hard line-coverage gate for the production RoomEQ libraries.
 # CLI adapters, QA runners, synthetic fixtures, and the root compatibility
@@ -644,110 +644,84 @@ qa-roomeq-coverage-gate:
 
 [group('qa-roomeq')]
 qa-roomeq-quick: prod-autoeq
-	cargo run --bin roomeq-qa-coverage --release -- --quick --maxeval 200
+	cargo run --features qa --bin roomeq-qa-coverage --release -- --quick --maxeval 200
 
 [group('qa-roomeq')]
 qa-roomeq-list:
-	cargo run --bin roomeq-qa-coverage --release -- --list
+	cargo run --features qa --bin roomeq-qa-coverage --release -- --list
 
 [group('qa-roomeq')]
 qa-roomeq-matrix:
-	cargo run --bin roomeq-qa-coverage --release -- --matrix
+	cargo run --features qa --bin roomeq-qa-coverage --release -- --matrix
 
 [group('qa-roomeq')]
 qa-roomeq-synthetic:
-	cargo run --bin roomeq-qa-synthetic --no-default-features --release
+	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release
 
 [group('qa-roomeq')]
 qa-roomeq-multiseat-guards:
-	cargo run --bin roomeq-qa-synthetic --no-default-features --release -- --multiseat-guards-only
+	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --multiseat-guards-only
 
 [group('qa-roomeq')]
 qa-roomeq-home-cinema:
-	cargo test -p autoeq home_cinema --lib -- --nocapture
-	cargo test -p autoeq validate_bass_management --lib -- --nocapture
-	cargo test -p autoeq derives_all_channel_multiseat_primary_weights --lib -- --nocapture
-	cargo test -p autoeq skips_all_channel_multiseat_on_grid_mismatch --lib -- --nocapture
-	cargo test -p autoeq skips_all_channel_multiseat_on_invalid_weight_policy --lib -- --nocapture
-	cargo test -p autoeq reports_grid_mismatch_as_channel_skip --lib -- --nocapture
-	cargo test -p autoeq skips_all_channel_multiseat_when_primary_seat_is_invalid --lib -- --nocapture
-	cargo test -p autoeq rejects_all_channel_multiseat_when_constraints_fail --lib -- --nocapture
-	cargo test -p autoeq rejects_all_channel_multiseat_when_broadband_level_collapses --lib -- --nocapture
-	cargo test -p autoeq reports_guardrail_rejection_without_claiming_applied --lib -- --nocapture
-	cargo test -p autoeq home_cinema_all_channel_multiseat_guardrail_reruns_and_reports_rejection --lib -- --nocapture
-	cargo test -p autoeq reports_all_channel_multiseat_null_guard --lib -- --nocapture
-	cargo test -p autoeq reports_all_channel_multiseat_by_role_group_and_excludes_subs --lib -- --nocapture
+	cargo test -p roomeq-model --lib -- --nocapture
+	cargo test -p roomeq-engine --lib -- --nocapture
+	cargo test -p roomeq-workflow --lib -- --nocapture
 
 [group('qa-roomeq')]
 qa-roomeq-all-channel-multiseat:
-	cargo test -p autoeq derives_all_channel_multiseat_primary_weights --lib -- --nocapture
-	cargo test -p autoeq skips_all_channel_multiseat_on_grid_mismatch --lib -- --nocapture
-	cargo test -p autoeq skips_all_channel_multiseat_on_invalid_weight_policy --lib -- --nocapture
-	cargo test -p autoeq reports_grid_mismatch_as_channel_skip --lib -- --nocapture
-	cargo test -p autoeq skips_all_channel_multiseat_when_primary_seat_is_invalid --lib -- --nocapture
-	cargo test -p autoeq rejects_all_channel_multiseat_when_constraints_fail --lib -- --nocapture
-	cargo test -p autoeq rejects_all_channel_multiseat_when_broadband_level_collapses --lib -- --nocapture
-	cargo test -p autoeq reports_guardrail_rejection_without_claiming_applied --lib -- --nocapture
-	cargo test -p autoeq home_cinema_all_channel_multiseat_guardrail_reruns_and_reports_rejection --lib -- --nocapture
-	cargo test -p autoeq reports_all_channel_multiseat_null_guard --lib -- --nocapture
-	cargo test -p autoeq reports_all_channel_multiseat_by_role_group_and_excludes_subs --lib -- --nocapture
+	cargo test -p roomeq-engine --lib -- --nocapture
+	cargo test -p roomeq-workflow --lib -- --nocapture
 
 [group('qa-roomeq')]
 qa-roomeq-bass-management:
-	cargo test -p autoeq bass_management_ --lib -- --nocapture
-	cargo test -p autoeq estimated_bass_bus_peak_gain --lib -- --nocapture
-	cargo test -p autoeq representative_bass_route_signature_ --lib -- --nocapture
+	cargo test -p roomeq-model --lib -- --nocapture
+	cargo test -p roomeq-engine --lib -- --nocapture
+	cargo test -p roomeq-workflow --lib -- --nocapture
 
 [group('qa-roomeq')]
 qa-roomeq-dsp-consistency:
-	cargo test -p autoeq reported_ --lib -- --nocapture
-	cargo test -p autoeq timing_diagnostics --lib -- --nocapture
+	cargo test -p roomeq-engine --lib -- --nocapture
+	cargo test -p roomeq-workflow --lib -- --nocapture
 
 [group('qa-roomeq')]
 qa-roomeq-phase-critical:
-	cargo test -p autoeq gd_opt --lib -- --nocapture
-	cargo test -p autoeq try_run_phase_linear_fir_gd --lib -- --nocapture
-	cargo test -p autoeq frequency_grid --lib -- --nocapture
-	cargo run --bin roomeq-qa-synthetic --no-default-features --release -- --multiseat-guards-only
+	cargo test -p roomeq-analysis --lib -- --nocapture
+	cargo test -p roomeq-engine --lib -- --nocapture
+	cargo test -p roomeq-workflow --lib -- --nocapture
+	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --multiseat-guards-only
 
 [group('qa-roomeq')]
 qa-roomeq-perceptual:
 	# nextest's explicit no-test failure prevents stale filters from producing a false-green QA run.
 	cargo nextest run -p autoeq-optim --lib --no-tests fail -E 'test(/loss::epa::/)'
-	cargo nextest run -p autoeq --lib --no-tests fail -E 'test(/generate_validation_bundle_report_creates_json|correction_report_(rejected_guardrails|failed_constraints_and_null_advisory)/)'
-	cargo nextest run -p autoeq --lib --no-tests fail -E 'test(/home_cinema_(no_sub|with_sub)_multiseat_rejection_reports|run_channel_via_generic_path_multiseat_rejected_recovers|all_channel_multiseat_acceptance_rejects_subs/)'
-	cargo nextest run -p autoeq --bin roomeq-qa-quality --no-tests fail -E 'test(/scorecard_/)'
+	cargo nextest run -p roomeq-workflow --lib --no-tests fail -E 'test(/generate_validation_bundle_report_creates_json|correction_report_(rejected_guardrails|failed_constraints_and_null_advisory)/)'
+	cargo nextest run -p roomeq-workflow --lib --no-tests fail -E 'test(/home_cinema_(no_sub|with_sub)_multiseat_rejection_reports|run_channel_via_generic_path_multiseat_rejected_recovers|all_channel_multiseat_acceptance_rejects_subs/)'
+	cargo nextest run -p roomeq-qa --lib --no-tests fail -E 'test(/scorecard_/)'
 
 [group('qa-roomeq')]
 qa-roomeq-gd:
-	cargo test -p autoeq gd_opt -- --nocapture
-	cargo test -p autoeq try_run_phase_linear_fir_gd --lib -- --nocapture
+	cargo test -p roomeq-engine --lib -- --nocapture
+	cargo test -p roomeq-workflow --lib -- --nocapture
 
 [group('qa-roomeq')]
 qa-roomeq-features:
-	cargo run --bin roomeq-qa-features --no-default-features --release
+	cargo run --features qa --bin roomeq-qa-features --no-default-features --release
 
 # Supporting-source room compensation QA: integration test + targeted lib tests.
 [group('qa-roomeq')]
 qa-roomeq-supporting-source:
 	cargo test -p autoeq --test roomeq_supporting_source -- --nocapture
-	cargo test -p autoeq supporting_source --lib -- --nocapture
+	cargo test -p roomeq-workflow supporting_source --lib -- --nocapture
 
 # Compact CI-friendly QA run: bounded fuzzer + small coverage subset.
 # Typical wall time under 3 minutes on modern hardware.
 [group('qa-roomeq')]
 qa-roomeq-ci:
-	cargo run --bin roomeq-fuzzer --release  --features="plotly" -- -n 50 --seed 42 --skip-kautz-modal
-	cargo run --bin roomeq-qa-coverage --release -- --quick --maxeval 200
-	cargo test -p autoeq reported_ --lib -- --nocapture
-	cargo test -p autoeq timing_diagnostics --lib -- --nocapture
-	cargo test -p autoeq gd_opt --lib -- --nocapture
-	cargo test -p autoeq try_run_phase_linear_fir_gd --lib -- --nocapture
-	cargo test -p autoeq frequency_grid --lib -- --nocapture
-	cargo run --bin roomeq-qa-synthetic --no-default-features --release -- --multiseat-guards-only
-	cargo test -p autoeq home_cinema --lib -- --nocapture
-	cargo test -p autoeq bass_management_ --lib -- --nocapture
-	cargo test -p autoeq validate_bass_management --lib -- --nocapture
+	cargo run --bin roomeq-fuzzer --release --features="qa,plotly" -- -n 50 --seed 42 --skip-kautz-modal
+	cargo run --features qa --bin roomeq-qa-coverage --release -- --quick --maxeval 200
+	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --multiseat-guards-only
+	# Leaf-crate unit coverage is enforced by the preceding CI matrix job.
 	just qa-roomeq-perceptual
 
 # Audibility-first PR gate: deterministic, offline, and bounded. The synthetic
@@ -757,20 +731,20 @@ qa-roomeq-ci:
 qa-audibility-pr:
 	cargo test -p autoeq-core --doc
 	cargo test -p autoeq-measurements quality
-	cargo test -p autoeq acoustic_qa_pr_ --lib
-	cargo test -p autoeq correction_acceptance --lib
-	cargo test -p autoeq final_safety_gate --lib
-	cargo run --bin roomeq-qa-synthetic --no-default-features --release -- --pr
-	cargo run --bin roomeq-qa-acoustic --release -- --tier pr
+	cargo test -p roomeq-quality acoustic_qa_pr_ --lib
+	cargo test -p roomeq-workflow correction_acceptance --lib
+	cargo test -p roomeq-workflow final_safety_gate --lib
+	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --pr
+	cargo run --features qa --bin roomeq-qa-acoustic --release -- --tier pr
 
 # Repository-backed real/FEM corpus with calibrated blocking quality gates.
 [group('qa-roomeq')]
 qa-roomeq-acoustic-pr:
-	cargo run --bin roomeq-qa-acoustic --release -- --tier pr
+	cargo run --features qa --bin roomeq-qa-acoustic --release -- --tier pr
 
 [group('qa-roomeq')]
 qa-roomeq-acoustic-nightly:
-	cargo run --bin roomeq-qa-acoustic --release -- --tier nightly
+	cargo run --features qa --bin roomeq-qa-acoustic --release -- --tier nightly
 
 # Human + machine report, trend history, and explicit PR resource budgets.
 [group('qa-roomeq')]
@@ -781,12 +755,12 @@ qa-roomeq-acoustic-report baseline="":
 	if [ -n "{{baseline}}" ]; then
 	  baseline_args+=(--baseline "{{baseline}}")
 	fi
-	cargo run --bin roomeq-qa-acoustic --release -- --tier pr "${baseline_args[@]}" --output target/qa/roomeq-acoustic.json --markdown-output target/qa/roomeq-acoustic.md --history target/qa/roomeq-acoustic-history.ndjson --max-runtime-ms 900000 --max-peak-rss-kib 4194304
+	cargo run --features qa --bin roomeq-qa-acoustic --release -- --tier pr "${baseline_args[@]}" --output target/qa/roomeq-acoustic.json --markdown-output target/qa/roomeq-acoustic.md --history target/qa/roomeq-acoustic-history.ndjson --max-runtime-ms 900000 --max-peak-rss-kib 4194304
 
 # Deterministically replace paired snapshots after an intentional quality change.
 [group('qa-roomeq')]
 qa-roomeq-acoustic-recalibrate:
-	cargo run --bin roomeq-qa-acoustic --release -- --tier nightly --recalibrate-baseline
+	cargo run --features qa --bin roomeq-qa-acoustic --release -- --tier nightly --recalibrate-baseline
 
 # Per-subsystem coverage floors, stricter around the acoustic acceptance layer.
 [group('qa-roomeq')]
@@ -821,7 +795,7 @@ qa-roomeq-mdat:
 [group('qa-roomeq')]
 qa-audibility-nightly:
 	just qa-roomeq-convergence
-	cargo run --bin roomeq-qa-synthetic --no-default-features --release -- --full-matrix
+	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --full-matrix
 	just qa-roomeq-acoustic-nightly
 	just qa-roomeq-coverage-gate
 

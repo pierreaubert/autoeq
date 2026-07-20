@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Include inline CSV fallback paths in dry-run resource reporting.
 - Inherited the workspace policy forbidding unsafe Rust code.
 - Documented crate ownership and verification expectations.
 

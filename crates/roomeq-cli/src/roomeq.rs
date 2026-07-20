@@ -23,7 +23,7 @@ use std::path::PathBuf;
 
 // Use the library types
 use roomeq_engine::{PipelineControl, PipelineEvent, PipelineObserver};
-use roomeq_model::{DspChainOutput, MeasurementSource, RoomConfig, SpeakerConfig};
+use roomeq_model::{DspChainOutput, MeasurementRef, MeasurementSource, RoomConfig, SpeakerConfig};
 use roomeq_workflow::{
     ExportFormat, RoomPipeline, RoomPipelineRequest, export_dsp_chain_with_convolution_sidecars,
     load_config, save_dsp_chain,
@@ -335,17 +335,31 @@ fn run_dry_run(config_path: PathBuf, override_config_path: Option<PathBuf>) -> R
 /// Collect all measurement file paths from a speaker configuration
 fn collect_measurement_paths(speaker_config: &SpeakerConfig) -> Vec<std::path::PathBuf> {
     fn extract_paths_from_source(source: &MeasurementSource) -> Vec<std::path::PathBuf> {
+        fn measurement_path(measurement: &MeasurementRef) -> Option<std::path::PathBuf> {
+            match measurement {
+                MeasurementRef::Path(path) | MeasurementRef::Named { path, .. } => {
+                    Some(path.clone())
+                }
+                MeasurementRef::Inline(inline)
+                    if inline.frequencies.is_empty() || inline.magnitude_db.is_empty() =>
+                {
+                    inline.csv_path.as_deref().map(std::path::PathBuf::from)
+                }
+                MeasurementRef::Inline(_) => None,
+            }
+        }
+
         let mut paths = Vec::new();
         match source {
             MeasurementSource::Single(single) => {
-                if let Some(p) = single.measurement.path() {
-                    paths.push(p.clone());
+                if let Some(path) = measurement_path(&single.measurement) {
+                    paths.push(path);
                 }
             }
             MeasurementSource::Multiple(mult) => {
-                for m in &mult.measurements {
-                    if let Some(p) = m.path() {
-                        paths.push(p.clone());
+                for measurement in &mult.measurements {
+                    if let Some(path) = measurement_path(measurement) {
+                        paths.push(path);
                     }
                 }
             }

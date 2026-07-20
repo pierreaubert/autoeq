@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 from scripts import check_crate_partition as checker
+from scripts import run_crate_test_matrix as matrix_runner
 
 
 def package(name: str, dependencies: list[str]) -> dict:
@@ -171,6 +172,28 @@ mod tests;
                 "pub use model::{ Config, Result, };",
             ],
         )
+
+
+class FocusedTestMatrixTests(unittest.TestCase):
+    def test_lists_and_builds_policy_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            policy_path = pathlib.Path(temporary_directory) / "policy.json"
+            policy_path.write_text(
+                '{"focused_tests":{"core":"cargo test -p core --lib"}}',
+                encoding="utf-8",
+            )
+
+            tests = matrix_runner.focused_tests(policy_path)
+
+        self.assertEqual(tests, {"core": "cargo test -p core --lib"})
+        self.assertEqual(
+            matrix_runner.command_for_package(tests, "core", release=True),
+            ["cargo", "test", "-p", "core", "--lib", "--release"],
+        )
+
+    def test_rejects_unknown_package(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unknown focused-test package"):
+            matrix_runner.command_for_package({}, "missing", release=False)
 
 
 if __name__ == "__main__":

@@ -3,8 +3,10 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use roomeq_model::validation_rules::{RoomValidationContext, validate_room_config_staged};
-use roomeq_model::{ConfigValidationReport, RoomConfig};
+use roomeq_model::validation_rules::{
+    RoomValidationContext, collect_sources, validate_room_config_staged,
+};
+use roomeq_model::{ConfigValidationReport, RoomConfig, ValidationStage};
 
 /// Keys that are shallow-merged by the override file.
 ///
@@ -66,13 +68,43 @@ pub fn load_config(
     room_config.validate_version().map_err(anyhow::Error::msg)?;
     room_config.resolve_paths(&config_dir);
 
-    let validation = validate_room_config_staged(&room_config, RoomValidationContext::production());
+    let validation =
+        validate_room_config_for_workflow(&room_config, RoomValidationContext::production());
     Ok((room_config, config_dir, validation))
+}
+
+/// Run model-owned validation and resolve the acoustic stage through the
+/// measurement adapter. This is the canonical production validation entry
+/// point for filesystem-capable workflows.
+pub fn validate_room_config_for_workflow(
+    config: &RoomConfig,
+    context: RoomValidationContext,
+) -> ConfigValidationReport {
+    let mut report = validate_room_config_staged(config, context);
+    let mut errors = Vec::new();
+    for (speaker_name, speaker) in &config.speakers {
+        for (source_index, source) in collect_sources(speaker).into_iter().enumerate() {
+            match autoeq_measurements::read::load_source_individual(source) {
+                Ok(curves) if curves.is_empty() => errors.push(format!(
+                    "speaker '{speaker_name}' source {source_index} produced no measurement curves"
+                )),
+                Ok(_) => {}
+                Err(error) => errors.push(format!(
+                    "speaker '{speaker_name}' source {source_index} failed acoustic validation: {error}"
+                )),
+            }
+        }
+    }
+    report.record(ValidationStage::Acoustic, errors, Vec::new());
+    report
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use roomeq_model::{
+        InlineMeasurement, MeasurementRef, MeasurementSingle, MeasurementSource, SpeakerConfig,
+    };
 
     fn write_config(dir: &tempfile::TempDir, name: &str, content: &str) -> PathBuf {
         let path = dir.path().join(name);
@@ -143,6 +175,59 @@ mod tests {
         let dir = tempfile::TempDir::new().expect("temp config directory");
         let path = write_config(&dir, "invalid.json", "not json");
         assert!(load_config(&path, None).is_err());
+    }
+
+    #[test]
+    fn load_config_reports_malformed_measurement_as_acoustic_failure() {
+        let dir = tempfile::TempDir::new().expect("temp config directory");
+        std::fs::write(dir.path().join("broken.csv"), "not measurement data\n").unwrap();
+        let path = write_config(
+            &dir,
+            "room.json",
+            r#"{"version":"1.0.0","speakers":{"left":"broken.csv"},"optimizer":{}}"#,
+        );
+
+        let (_, _, validation) = load_config(&path, None).expect("deserialize config");
+
+        assert!(!validation.production_ready());
+        assert!(
+            validation
+                .stage(ValidationStage::Acoustic)
+                .errors
+                .iter()
+                .any(|error| error.contains("failed acoustic validation"))
+        );
+    }
+
+    #[test]
+    fn workflow_validation_rejects_missing_inline_csv_fallback() {
+        let dir = tempfile::TempDir::new().expect("temp config directory");
+        let mut config = RoomConfig::default();
+        config.speakers.insert(
+            "left".to_string(),
+            SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
+                measurement: MeasurementRef::Inline(InlineMeasurement {
+                    frequencies: Vec::new(),
+                    magnitude_db: Vec::new(),
+                    phase_deg: None,
+                    name: Some("legacy".to_string()),
+                    wav_path: None,
+                    csv_path: Some("missing.csv".to_string()),
+                }),
+                speaker_name: None,
+            })),
+        );
+        config.resolve_paths(dir.path());
+
+        let validation =
+            validate_room_config_for_workflow(&config, RoomValidationContext::production());
+
+        assert!(!validation.production_ready());
+        assert!(
+            validation
+                .errors()
+                .any(|error| error.contains("missing.csv"))
+        );
     }
 
     #[test]

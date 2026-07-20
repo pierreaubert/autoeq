@@ -150,7 +150,7 @@ configuration and writes a structured result suitable for reporting, export,
 or direct application by SotF:
 
 ```bash
-cargo run --release --bin roomeq -- \
+cargo run --release --features cli --bin roomeq -- \
   --config path/to/room.json \
   --output path/to/result.json
 ```
@@ -173,11 +173,16 @@ Then:
 
 ```bash
 cargo install autoeq \
+   --features cli \
    --bin autoeq \
    --bin roomeq \
    --bin autoeq-download-speakers \
    --bin convert-recording
 ```
+
+The root package keeps terminal adapters opt-in: use `--features cli` for the
+shipping commands and `--features qa` for QA/fuzzer binaries. Default library
+builds retain the compatibility API without compiling terminal-only crates.
 
 ## Development
 

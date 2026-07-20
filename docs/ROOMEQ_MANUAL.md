@@ -19,7 +19,7 @@
 ## Usage
 
 ```bash
-cargo run --bin roomeq -- --config <config.json> --output <output.json> [OPTIONS]
+cargo run --features cli --bin roomeq -- --config <config.json> --output <output.json> [OPTIONS]
 ```
 
 ### Options

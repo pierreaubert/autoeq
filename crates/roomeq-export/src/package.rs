@@ -3,27 +3,32 @@ use anyhow::Context;
 use roomeq_model::{DspGraph, PluginConfigWrapper};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 /// Explicit resource supplied by a workflow adapter for a convolution path in
 /// the canonical graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConvolutionResource {
     pub reference: String,
-    pub bytes: Vec<u8>,
+    pub bytes: Arc<[u8]>,
 }
 
 /// One deterministic export package member.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportPackageMember {
     pub relative_path: PathBuf,
-    pub bytes: Vec<u8>,
+    pub bytes: Arc<[u8]>,
     pub sha256: String,
 }
 
 impl ExportPackageMember {
-    pub fn new(relative_path: impl Into<PathBuf>, bytes: Vec<u8>) -> anyhow::Result<Self> {
+    pub fn new(
+        relative_path: impl Into<PathBuf>,
+        bytes: impl Into<Arc<[u8]>>,
+    ) -> anyhow::Result<Self> {
         let relative_path = relative_path.into();
         validate_member_path(&relative_path)?;
+        let bytes = bytes.into();
         let sha256 = sha256_hex(&bytes);
         Ok(Self {
             relative_path,
@@ -83,37 +88,67 @@ pub fn package_convolution_sidecars(
     graph: &DspGraph,
     resources: &[ConvolutionResource],
     occupied_names: &BTreeSet<String>,
+    reusable_names: &HashMap<String, String>,
 ) -> anyhow::Result<(DspGraph, Vec<ExportPackageMember>)> {
     let resources = resource_map(resources)?;
-    let mut graph = graph.clone();
     let mut packaged_by_reference = HashMap::new();
     let mut assigned = occupied_names.clone();
     let mut members = BTreeMap::<String, ExportPackageMember>::new();
 
-    rewrite_plugins(
-        &mut graph.global_plugins,
-        &resources,
-        &mut packaged_by_reference,
-        &mut assigned,
-        &mut members,
-    )?;
+    let mut content_groups = Vec::<(Arc<[u8]>, Vec<String>)>::new();
+    for reference in convolution_resource_references(graph) {
+        let bytes = resources.get(reference.as_str()).copied().ok_or_else(|| {
+            anyhow::anyhow!("missing explicit convolution resource '{reference}'")
+        })?;
+        if let Some((_, references)) = content_groups
+            .iter_mut()
+            .find(|(packaged, _)| packaged.as_ref() == bytes.as_ref())
+        {
+            references.push(reference);
+        } else {
+            content_groups.push((Arc::clone(bytes), vec![reference]));
+        }
+    }
+    for (bytes, references) in content_groups {
+        let reusable = references
+            .iter()
+            .filter_map(|reference| reusable_names.get(reference))
+            .min()
+            .cloned();
+        let packaged_name = if let Some(existing) = reusable {
+            if !assigned.contains(&existing) {
+                anyhow::bail!(
+                    "reusable convolution member '{existing}' is not an occupied destination"
+                );
+            }
+            existing
+        } else {
+            let preferred = Path::new(&references[0])
+                .file_name()
+                .and_then(|name| name.to_str())
+                .filter(|name| !name.is_empty())
+                .unwrap_or("room_eq_ir.wav");
+            let packaged_name = unique_member_name(preferred, &assigned);
+            assigned.insert(packaged_name.clone());
+            members.insert(
+                packaged_name.clone(),
+                ExportPackageMember::new(&packaged_name, Arc::clone(&bytes))?,
+            );
+            packaged_name
+        };
+        for reference in references {
+            packaged_by_reference.insert(reference, packaged_name.clone());
+        }
+    }
+
+    let mut graph = graph.clone();
+
+    rewrite_plugins(&mut graph.global_plugins, &packaged_by_reference)?;
     for chain in graph.channels.values_mut() {
-        rewrite_plugins(
-            &mut chain.plugins,
-            &resources,
-            &mut packaged_by_reference,
-            &mut assigned,
-            &mut members,
-        )?;
+        rewrite_plugins(&mut chain.plugins, &packaged_by_reference)?;
         if let Some(drivers) = chain.drivers.as_mut() {
             for driver in drivers {
-                rewrite_plugins(
-                    &mut driver.plugins,
-                    &resources,
-                    &mut packaged_by_reference,
-                    &mut assigned,
-                    &mut members,
-                )?;
+                rewrite_plugins(&mut driver.plugins, &packaged_by_reference)?;
             }
         }
     }
@@ -123,15 +158,14 @@ pub fn package_convolution_sidecars(
 
 pub(super) fn resource_map(
     resources: &[ConvolutionResource],
-) -> anyhow::Result<HashMap<&str, &[u8]>> {
+) -> anyhow::Result<HashMap<&str, &Arc<[u8]>>> {
     let mut by_reference = HashMap::new();
     for resource in resources {
         if resource.reference.trim().is_empty() {
             anyhow::bail!("convolution resource reference must not be empty");
         }
-        if let Some(previous) =
-            by_reference.insert(resource.reference.as_str(), resource.bytes.as_slice())
-            && previous != resource.bytes
+        if let Some(previous) = by_reference.insert(resource.reference.as_str(), &resource.bytes)
+            && previous.as_ref() != resource.bytes.as_ref()
         {
             anyhow::bail!(
                 "convolution resource '{}' was supplied with conflicting bytes",
@@ -144,10 +178,7 @@ pub(super) fn resource_map(
 
 fn rewrite_plugins(
     plugins: &mut [PluginConfigWrapper],
-    resources: &HashMap<&str, &[u8]>,
-    packaged_by_reference: &mut HashMap<String, String>,
-    assigned: &mut BTreeSet<String>,
-    members: &mut BTreeMap<String, ExportPackageMember>,
+    packaged_by_reference: &HashMap<String, String>,
 ) -> anyhow::Result<()> {
     for plugin in plugins {
         if plugin.plugin_type != "convolution" {
@@ -159,26 +190,12 @@ fn rewrite_plugins(
             .and_then(serde_json::Value::as_str)
             .context("convolution plugin requires string field 'ir_file'")?
             .to_string();
-        let packaged_name = if let Some(existing) = packaged_by_reference.get(&reference) {
-            existing.clone()
-        } else {
-            let bytes = resources.get(reference.as_str()).copied().ok_or_else(|| {
+        let packaged_name = packaged_by_reference
+            .get(&reference)
+            .cloned()
+            .ok_or_else(|| {
                 anyhow::anyhow!("missing explicit convolution resource '{reference}'")
             })?;
-            let preferred = Path::new(&reference)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .filter(|name| !name.is_empty())
-                .unwrap_or("room_eq_ir.wav");
-            let packaged_name = unique_member_name(preferred, assigned);
-            assigned.insert(packaged_name.clone());
-            members.insert(
-                packaged_name.clone(),
-                ExportPackageMember::new(&packaged_name, bytes.to_vec())?,
-            );
-            packaged_by_reference.insert(reference.clone(), packaged_name.clone());
-            packaged_name
-        };
         let parameters = plugin
             .parameters
             .as_object_mut()

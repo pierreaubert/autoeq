@@ -550,60 +550,54 @@ qa-roomeq-small-stereo-51: ensure-venv
 	done
 
 # ----------------------------------------------------------------------
-# QA ROOMEQ — Multi-Measurement (5 listening positions per speaker)
-# Tests the multi-objective optimization across all strategies.
-# Requires data generated with 5 LPs (run `just generate-roomeq-data` first).
+# QA ROOMEQ — Multi-Measurement
+# Tests every generated FEM scenario across all multi-measurement strategies,
+# then exercises focused home-cinema and height-channel feature configurations.
+# Requires generated data (run `just generate-roomeq-data` first).
 # ----------------------------------------------------------------------
 
 [group('qa-roomeq-multi')]
-qa-roomeq-multi-measurement: \
-	qa-roomeq-multi-small-stereo-20 \
-	qa-roomeq-multi-small-stereo-21 \
-	qa-roomeq-multi-small-stereo-22-mso
-
-[group('qa-roomeq-multi')]
-qa-roomeq-multi-small-stereo-20: ensure-venv
-	@for strategy in minimax weighted_sum variance_penalized; do \
-	  for algo in fem; do \
-	    mkdir -p ./data_generated/roomeq/generated/$algo/small_stereo_2_0; \
-	    echo "=== Multi-measurement $strategy ($algo) small_stereo_2_0 ==="; \
+qa-roomeq-multi-measurement: ensure-venv
+	#!/usr/bin/env bash
+	set -euo pipefail
+	scenario_root="./data_tests/roomeq/generate/fem"
+	override_root="./data_tests/roomeq/generate/optimiser-config/multi_measurement"
+	output_root="./data_generated/roomeq/generated/fem"
+	shopt -s nullglob
+	configs=("$scenario_root"/*/config.json)
+	if (( ${#configs[@]} == 0 )); then
+	  echo "No FEM RoomEQ scenarios found under $scenario_root" >&2
+	  exit 1
+	fi
+	for config in "${configs[@]}"; do
+	  scenario="$(basename "$(dirname "$config")")"
+	  scenario_output="$output_root/$scenario"
+	  mkdir -p "$scenario_output"
+	  for strategy in minimax weighted_sum variance_penalized; do
+	    output="$scenario_output/dsp_iir_multi_$strategy.json"
+	    echo "=== Multi-measurement $strategy (fem) $scenario ==="
 	    cargo run --bin roomeq --release -- \
-	      --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_0/config.json \
-	      --override-config ./data_tests/roomeq/generate/optimiser-config/multi_measurement/$strategy.json \
-	      --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_0/dsp_iir_multi_$strategy.json; \
-	    ./venv/bin/python3 ./scripts/display-roomeq.py \
-	                     ./data_generated/roomeq/generated/$algo/small_stereo_2_0/dsp_iir_multi_$strategy.json; \
-	  done \
+	      --config "$config" \
+	      --override-config "$override_root/$strategy.json" \
+	      --output "$output"
+	    ./venv/bin/python3 ./scripts/display-roomeq.py "$output"
+	  done
 	done
-
-[group('qa-roomeq-multi')]
-qa-roomeq-multi-small-stereo-21: ensure-venv
-	@for strategy in minimax weighted_sum variance_penalized; do \
-	  for algo in fem; do \
-	    mkdir -p ./data_generated/roomeq/generated/$algo/small_stereo_2_1; \
-	    echo "=== Multi-measurement $strategy ($algo) small_stereo_2_1 ==="; \
-	    cargo run --bin roomeq --release -- \
-	      --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_1/config.json \
-	      --override-config ./data_tests/roomeq/generate/optimiser-config/multi_measurement/$strategy.json \
-	      --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_1/dsp_iir_multi_$strategy.json; \
-	    ./venv/bin/python3 ./scripts/display-roomeq.py \
-	                     ./data_generated/roomeq/generated/$algo/small_stereo_2_1/dsp_iir_multi_$strategy.json; \
-	  done \
-	done
-
-[group('qa-roomeq-multi')]
-qa-roomeq-multi-small-stereo-22-mso: ensure-venv
-	@for strategy in minimax weighted_sum variance_penalized; do \
-	  for algo in fem; do \
-	    mkdir -p ./data_generated/roomeq/generated/$algo/small_stereo_2_2_mso; \
-	    echo "=== Multi-measurement $strategy ($algo) small_stereo_2_2_mso ==="; \
-	    cargo run --bin roomeq --release -- \
-	      --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_2_mso/config.json \
-	      --override-config ./data_tests/roomeq/generate/optimiser-config/multi_measurement/$strategy.json \
-	      --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_2_mso/dsp_iir_multi_$strategy.json; \
-	    ./venv/bin/python3 ./scripts/display-roomeq.py \
-	                     ./data_generated/roomeq/generated/$algo/small_stereo_2_2_mso/dsp_iir_multi_$strategy.json; \
-	  done \
+	for feature_case in \
+	  "medium_surround_5_1:home_cinema_lfe_only" \
+	  "medium_surround_5_1_4:home_cinema_redirected" \
+	  "medium_surround_5_1_4:height_channel_alignment"; do
+	  scenario="${feature_case%%:*}"
+	  feature="${feature_case#*:}"
+	  config="$scenario_root/$scenario/config.json"
+	  override="$override_root/features/$feature.json"
+	  output="$output_root/$scenario/dsp_iir_multi_$feature.json"
+	  echo "=== Multi-measurement feature pass $feature (fem) $scenario ==="
+	  cargo run --bin roomeq --release -- \
+	    --config "$config" \
+	    --override-config "$override" \
+	    --output "$output"
+	  ./venv/bin/python3 ./scripts/display-roomeq.py "$output"
 	done
 
 # New comprehensive QA using roomeq-qa-full binary

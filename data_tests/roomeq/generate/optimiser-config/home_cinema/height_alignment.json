@@ -1,0 +1,24 @@
+{
+  "optimizer": {
+    "processing_mode": "low_latency",
+    "multi_measurement": { "strategy": "variance_penalized", "variance_lambda": 1.0 },
+    "inter_channel_timbre_matching": {
+      "enabled": true,
+      "reference_channel": "C",
+      "min_improvement_db": 0.05
+    },
+    "height_channel_alignment": {
+      "enabled": true,
+      "match_timbre": true,
+      "match_level": true,
+      "match_arrival_time": true,
+      "match_phase": true,
+      "min_timbre_improvement_db": 0.05,
+      "max_delay_ms": 20.0,
+      "reference_channels": {
+        "top_front": "L",
+        "top_rear": "SL"
+      }
+    }
+  }
+}

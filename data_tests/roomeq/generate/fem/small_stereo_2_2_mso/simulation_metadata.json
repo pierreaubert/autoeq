@@ -1,0 +1,14 @@
+{
+  "version": "1.1.0",
+  "generator": "sonium-sim-room",
+  "scenario": "small_stereo_2_2_mso",
+  "solver_backend": "fast-hybrid",
+  "modal_damping_ratio": 0.005,
+  "modal_damping_enabled": true,
+  "source_directivity_convention": "receiver_only_low_band: isotropic room excitation, receiver-side directivity",
+  "atmospheric_absorption_model": "ISO 9613-1 fixed 20C/50%RH/101325Pa",
+  "frequency_band_model": "hybrid: analytical shoebox modes blend into coherent image sources; high band is synthetic extension",
+  "high_frequency_extension": "enabled: deterministic synthetic speaker/room tail anchored at simulated cutoff to 20 kHz",
+  "coherence_model": "deterministic noiseless simulation: coherence=1.0 for every frequency bin",
+  "noise_floor_model": "synthetic finite sentinel: noise_floor_db=-120; not a measured ambient-noise estimate"
+}

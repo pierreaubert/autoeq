@@ -3,12 +3,12 @@
   "system": {
     "model": "home_cinema",
     "speakers": {
-      "SL": "surround_left",
-      "SR": "surround_right",
-      "R": "right",
+      "LFE": "lfe",
       "L": "left",
+      "SL": "surround_left",
+      "R": "right",
       "C": "center",
-      "LFE": "lfe"
+      "SR": "surround_right"
     },
     "subwoofers": {
       "config": "single",
@@ -17,12 +17,36 @@
     }
   },
   "speakers": {
-    "left": "left_lp0.csv",
-    "right": "right_lp0.csv",
-    "surround_right": "surround_right_lp0.csv",
-    "lfe": "subwoofer_lp0.csv",
-    "surround_left": "surround_left_lp0.csv",
-    "center": "center_lp0.csv"
+    "left": {
+      "measurements": [
+        "left_lp0.csv"
+      ]
+    },
+    "right": {
+      "measurements": [
+        "right_lp0.csv"
+      ]
+    },
+    "surround_left": {
+      "measurements": [
+        "surround_left_lp0.csv"
+      ]
+    },
+    "lfe": {
+      "measurements": [
+        "subwoofer_lp0.csv"
+      ]
+    },
+    "surround_right": {
+      "measurements": [
+        "surround_right_lp0.csv"
+      ]
+    },
+    "center": {
+      "measurements": [
+        "center_lp0.csv"
+      ]
+    }
   },
   "crossovers": {
     "first": {
@@ -31,24 +55,25 @@
     }
   },
   "optimizer": {
-    "mode": "iir",
     "processing_mode": "low_latency",
     "loss_type": "flat",
     "algorithm": "autoeq:de",
+    "strategy": "currenttobest1bin",
     "num_filters": 7,
+    "min_filter_improvement": 0.01,
+    "elimination_threshold": 0.01,
     "min_q": 0.5,
-    "max_q": 6.0,
+    "max_q": 10.0,
     "min_db": -12.0,
-    "max_db": 4.0,
+    "max_db": 12.0,
     "min_freq": 20.0,
-    "max_freq": 500.0,
+    "max_freq": 999.9999999999998,
     "max_iter": 5000,
-    "population": 50,
+    "population": 30,
     "peq_model": "pk",
     "seed": 42,
     "refine": true,
-    "local_algo": "cobyla",
-    "psychoacoustic": true,
-    "asymmetric_loss": true
+    "asymmetric_loss": true,
+    "smooth_n": 3
   }
 }

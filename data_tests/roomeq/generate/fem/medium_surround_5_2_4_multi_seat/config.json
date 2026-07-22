@@ -1,0 +1,162 @@
+{
+  "version": "1.2.0",
+  "system": {
+    "model": "home_cinema",
+    "speakers": {
+      "C": "center",
+      "LFE": "lfe",
+      "L": "left",
+      "SL": "surround_left",
+      "SR": "surround_right",
+      "TFL": "top_front_left",
+      "TFR": "top_front_right",
+      "TRL": "top_rear_left",
+      "R": "right",
+      "TRR": "top_rear_right"
+    },
+    "subwoofers": {
+      "config": "mso",
+      "crossover": "first",
+      "lfe": "L"
+    }
+  },
+  "speakers": {
+    "center": {
+      "measurements": [
+        "center_lp0.csv",
+        "center_lp1.csv",
+        "center_lp2.csv",
+        "center_lp3.csv",
+        "center_lp4.csv"
+      ]
+    },
+    "top_front_left": {
+      "measurements": [
+        "top_front_left_lp0.csv",
+        "top_front_left_lp1.csv",
+        "top_front_left_lp2.csv",
+        "top_front_left_lp3.csv",
+        "top_front_left_lp4.csv"
+      ]
+    },
+    "left": {
+      "measurements": [
+        "left_lp0.csv",
+        "left_lp1.csv",
+        "left_lp2.csv",
+        "left_lp3.csv",
+        "left_lp4.csv"
+      ]
+    },
+    "surround_left": {
+      "measurements": [
+        "surround_left_lp0.csv",
+        "surround_left_lp1.csv",
+        "surround_left_lp2.csv",
+        "surround_left_lp3.csv",
+        "surround_left_lp4.csv"
+      ]
+    },
+    "top_front_right": {
+      "measurements": [
+        "top_front_right_lp0.csv",
+        "top_front_right_lp1.csv",
+        "top_front_right_lp2.csv",
+        "top_front_right_lp3.csv",
+        "top_front_right_lp4.csv"
+      ]
+    },
+    "top_rear_right": {
+      "measurements": [
+        "top_rear_right_lp0.csv",
+        "top_rear_right_lp1.csv",
+        "top_rear_right_lp2.csv",
+        "top_rear_right_lp3.csv",
+        "top_rear_right_lp4.csv"
+      ]
+    },
+    "lfe": {
+      "name": "subs",
+      "subwoofers": [
+        {
+          "measurements": [
+            "sub1_lp0.csv",
+            "sub1_lp1.csv",
+            "sub1_lp2.csv",
+            "sub1_lp3.csv",
+            "sub1_lp4.csv"
+          ]
+        },
+        {
+          "measurements": [
+            "sub2_lp0.csv",
+            "sub2_lp1.csv",
+            "sub2_lp2.csv",
+            "sub2_lp3.csv",
+            "sub2_lp4.csv"
+          ]
+        }
+      ],
+      "allpass_optimization": false
+    },
+    "surround_right": {
+      "measurements": [
+        "surround_right_lp0.csv",
+        "surround_right_lp1.csv",
+        "surround_right_lp2.csv",
+        "surround_right_lp3.csv",
+        "surround_right_lp4.csv"
+      ]
+    },
+    "top_rear_left": {
+      "measurements": [
+        "top_rear_left_lp0.csv",
+        "top_rear_left_lp1.csv",
+        "top_rear_left_lp2.csv",
+        "top_rear_left_lp3.csv",
+        "top_rear_left_lp4.csv"
+      ]
+    },
+    "right": {
+      "measurements": [
+        "right_lp0.csv",
+        "right_lp1.csv",
+        "right_lp2.csv",
+        "right_lp3.csv",
+        "right_lp4.csv"
+      ]
+    }
+  },
+  "crossovers": {
+    "first": {
+      "type": "LR24",
+      "frequency": 80.0
+    }
+  },
+  "optimizer": {
+    "processing_mode": "low_latency",
+    "loss_type": "flat",
+    "algorithm": "autoeq:de",
+    "strategy": "currenttobest1bin",
+    "num_filters": 7,
+    "min_filter_improvement": 0.01,
+    "elimination_threshold": 0.01,
+    "min_q": 0.5,
+    "max_q": 10.0,
+    "min_db": -12.0,
+    "max_db": 12.0,
+    "min_freq": 20.0,
+    "max_freq": 999.9999999999998,
+    "max_iter": 5000,
+    "population": 30,
+    "peq_model": "pk",
+    "seed": 42,
+    "refine": true,
+    "asymmetric_loss": true,
+    "smooth_n": 3,
+    "multi_measurement": {
+      "strategy": "minimax",
+      "variance_lambda": 1.0
+    }
+  }
+}

@@ -407,6 +407,16 @@ fn run_optional_export_validator(env_var: &str, extension: &str, content: &str) 
     };
     let mut saw_placeholder = false;
     let mut command = Command::new(program);
+    // Cargo and nextest do not guarantee that test processes start in the
+    // workspace root. Optional validator recipes intentionally reference
+    // repository scripts (for example `scripts/validate-pipewire-config.sh`),
+    // so give every validator a stable workspace-relative working directory.
+    command.current_dir(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("roomeq-export must live below the workspace crates directory"),
+    );
     for part in parts {
         if part.contains("{config}") || part.contains("{file}") {
             saw_placeholder = true;

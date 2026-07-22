@@ -19,6 +19,10 @@ pub(super) struct Args {
     #[arg(long)]
     pub(super) matrix: bool,
 
+    /// Run only the correctness-gated home-cinema feature matrix
+    #[arg(long)]
+    pub(super) home_cinema: bool,
+
     /// Output JUnit XML to file
     #[arg(long)]
     pub(super) junit: Option<PathBuf>,
@@ -26,6 +30,10 @@ pub(super) struct Args {
     /// Filter by scenario name (substring match)
     #[arg(long)]
     pub(super) scenario: Option<String>,
+
+    /// Filter by test-case name (substring match)
+    #[arg(long = "case")]
+    pub(super) case_name: Option<String>,
 
     /// Filter by solver (only `fem` is supported; retained for compatibility)
     #[arg(long)]
@@ -69,7 +77,9 @@ mod tests {
     fn defaults_are_expected() {
         let args = Args::try_parse_from(["roomeq-qa-coverage"]).unwrap();
         assert!(args.junit.is_none());
+        assert!(!args.home_cinema);
         assert!(args.scenario.is_none());
+        assert!(args.case_name.is_none());
         assert!(args.solver.is_none());
         assert!(args.mode.is_none());
         assert!(args.jobs.is_none());

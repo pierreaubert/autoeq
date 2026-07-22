@@ -71,7 +71,14 @@ pub(in super::super) fn preprocess_multisub_mso(
         .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!("MSO optimization failed: {}", e),
     })?;
-    let combined = optimized.combined_response.legacy_combined_curve();
+    // Keep the spatial magnitude used for multi-seat EQ, but carry the
+    // primary-seat complex phase/coherence into crossover timing. The legacy
+    // curve alone is intentionally magnitude-only.
+    let mut combined = optimized.combined_response.legacy_combined_curve();
+    if let Some(primary) = optimized.combined_response.primary_seat_complex.as_ref() {
+        combined.phase = primary.phase.clone();
+        combined.coherence = primary.coherence.clone();
+    }
     let result = optimized.base;
 
     info!(
@@ -379,6 +386,7 @@ mod tests {
         let drivers = result.drivers.unwrap();
         assert!(!drivers.is_empty());
         assert!(result.combined_curve.spl.iter().all(|v| v.is_finite()));
+        assert!(result.combined_curve.phase.is_some());
     }
 
     #[test]

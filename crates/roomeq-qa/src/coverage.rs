@@ -22,6 +22,7 @@ use clap::Parser;
 mod args;
 mod consts;
 mod counting_semaphore;
+mod home_cinema;
 mod is;
 mod misc;
 mod processing_method;
@@ -32,6 +33,7 @@ mod test_case;
 mod test_result;
 
 use args::Args;
+use home_cinema::build_home_cinema_matrix;
 use misc::all_scenarios;
 use misc::find_project_root;
 use misc::scenario_description;
@@ -65,7 +67,14 @@ pub fn run() -> Result<bool> {
     }
 
     // Build test matrix
-    let test_cases = build_test_matrix(args.quick, args.solver.as_deref(), args.mode.as_deref());
+    let mut test_cases = if args.home_cinema {
+        build_home_cinema_matrix(args.mode.as_deref())
+    } else {
+        build_test_matrix(args.quick, args.solver.as_deref(), args.mode.as_deref())
+    };
+    if !args.quick && !args.home_cinema {
+        test_cases.extend(build_home_cinema_matrix(args.mode.as_deref()));
+    }
 
     // Show matrix
     if args.matrix {
@@ -79,6 +88,15 @@ pub fn run() -> Result<bool> {
         test_cases
             .into_iter()
             .filter(|tc| tc.scenario.to_lowercase().contains(&filter_lower))
+            .collect()
+    } else {
+        test_cases
+    };
+    let test_cases: Vec<TestCase> = if let Some(ref filter) = args.case_name {
+        let filter_lower = filter.to_lowercase();
+        test_cases
+            .into_iter()
+            .filter(|test_case| test_case.name().to_lowercase().contains(&filter_lower))
             .collect()
     } else {
         test_cases

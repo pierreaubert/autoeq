@@ -131,7 +131,10 @@ pub fn apply_complex_response(curve: &Curve, response: &[Complex64]) -> Curve {
         freq: curve.freq.clone(),
         spl: new_spl,
         phase: Some(new_phase),
-        ..Default::default()
+        // Filtering changes magnitude/phase, not measurement provenance or
+        // confidence. Preserve coherence, noise floor, quality metadata and
+        // any other side-channel data needed by later phase-aware stages.
+        ..curve.clone()
     }
 }
 
@@ -270,6 +273,7 @@ mod tests {
             freq: Array1::from(vec![100.0, 1000.0]),
             spl: Array1::from(vec![0.0, 10.0]),
             phase: None,
+            coherence: Some(Array1::from(vec![0.8, 0.9])),
             ..Default::default()
         };
         let identity = vec![Complex64::new(1.0, 0.0), Complex64::new(1.0, 0.0)];
@@ -278,6 +282,7 @@ mod tests {
         assert!((out.spl[1] - 10.0).abs() < 1e-12);
         assert!(out.phase.is_some());
         assert!(out.phase.unwrap()[0].abs() < 1e-12);
+        assert_eq!(out.coherence.unwrap().to_vec(), vec![0.8, 0.9]);
     }
 
     #[test]

@@ -605,22 +605,12 @@ qa-roomeq-multi-measurement: ensure-venv
 	    ./venv/bin/python3 ./scripts/display-roomeq.py "$output"
 	  done
 	done
-	for feature_case in \
-	  "medium_surround_5_1:home_cinema_lfe_only" \
-	  "medium_surround_5_1_4:home_cinema_redirected" \
-	  "medium_surround_5_1_4:height_channel_alignment"; do
-	  scenario="${feature_case%%:*}"
-	  feature="${feature_case#*:}"
-	  config="$scenario_root/$scenario/config.json"
-	  override="$override_root/features/$feature.json"
-	  output="$output_root/$scenario/dsp_iir_multi_$feature.json"
-	  echo "=== Multi-measurement feature pass $feature (fem) $scenario ==="
-	  cargo run --features cli --bin roomeq --release -- \
-	    --config "$config" \
-	    --override-config "$override" \
-	    --output "$output"
-	  ./venv/bin/python3 ./scripts/display-roomeq.py "$output"
-	done
+	echo "=== Correctness-gated home-cinema feature matrix ==="
+	cargo run --features qa --bin roomeq-qa-coverage --release -- --home-cinema
+
+[group('qa-roomeq-multi')]
+qa-roomeq-home-cinema-configs:
+	cargo run --features qa --bin roomeq-qa-coverage --release -- --home-cinema
 
 # New comprehensive QA using roomeq-qa-full binary
 [group('qa-roomeq')]

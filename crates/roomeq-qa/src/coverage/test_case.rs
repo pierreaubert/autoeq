@@ -1,4 +1,5 @@
 use super::consts::OPTIM_CONFIG_DIR;
+use super::home_cinema::HomeCinemaExpectations;
 use super::misc::project_root;
 use super::processing_method::ProcessingMethod;
 use super::room_size::RoomSize;
@@ -15,16 +16,21 @@ pub(super) struct TestCase {
     pub(super) description: String,
     pub(super) solver: Solver,
     pub(super) method: ProcessingMethod,
+    pub(super) case_name: Option<String>,
+    pub(super) override_file: Option<PathBuf>,
+    pub(super) home_cinema_expectations: Option<HomeCinemaExpectations>,
 }
 
 impl TestCase {
     pub(super) fn name(&self) -> String {
-        format!(
-            "{} {} {}",
-            self.scenario,
-            self.solver.name(),
-            self.method.name()
-        )
+        self.case_name.clone().unwrap_or_else(|| {
+            format!(
+                "{} {} {}",
+                self.scenario,
+                self.solver.name(),
+                self.method.name()
+            )
+        })
     }
 
     pub(super) fn config_path(&self) -> PathBuf {
@@ -37,6 +43,9 @@ impl TestCase {
 
     pub(super) fn override_path(&self) -> PathBuf {
         let optim_dir = project_root().join(OPTIM_CONFIG_DIR);
+        if let Some(override_file) = &self.override_file {
+            return optim_dir.join(override_file);
+        }
         optim_dir
             .join(&self.scenario)
             .join(self.method.config_file())

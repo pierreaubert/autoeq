@@ -33,6 +33,14 @@ pub(in super::super) fn try_run_gd_opt(
     let mut missing_coherence = false;
 
     for (name, ch) in &sorted_channels {
+        // Bass timing and phase are owned by MSO/bass-management alignment.
+        // A routed LFE output is not backed by one directly addressable source,
+        // so including it makes adaptive sweep bootstrap fail for every channel.
+        if config.system.is_some()
+            && roomeq_engine::home_cinema::role_for_channel(name).is_sub_or_lfe()
+        {
+            continue;
+        }
         // Curve.phase is in degrees — convert to radians for GD computation
         let phase = match ch.final_curve.phase.as_ref() {
             Some(p) => p.mapv(|deg| deg.to_radians()),

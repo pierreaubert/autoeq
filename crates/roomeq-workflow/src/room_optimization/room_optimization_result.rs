@@ -27,7 +27,7 @@ pub(super) fn apply_final_correction_safety_gate(
         let regressed = !channel.post_score.is_finite()
             || (channel.pre_score.is_finite() && channel.post_score > channel.pre_score + epsilon);
 
-        let target = result
+        let mut target = result
             .channels
             .get(name)
             .and_then(|chain| chain.target_curve.clone())
@@ -39,9 +39,18 @@ pub(super) fn apply_final_correction_safety_gate(
                 target.phase = None;
                 target
             });
+        align_target_level(&channel.initial_curve, &mut target);
+        let acceptance_post = result
+            .channels
+            .get(name)
+            .and_then(|chain| {
+                let baseline = routed_baseline_curve(chain, &channel.initial_curve, sample_rate)?;
+                remove_routing_transfer(&channel.initial_curve, &baseline, &channel.final_curve)
+            })
+            .unwrap_or_else(|| channel.final_curve.clone());
         let report = evaluate_correction_acceptance(
             &channel.initial_curve,
-            &channel.final_curve,
+            &acceptance_post,
             &target,
             None,
             CorrectionAcceptancePolicy::RuntimeSafety,
@@ -316,7 +325,18 @@ fn runtime_acceptance_evidence(
         .collect();
     let training_post: Vec<_> = names
         .iter()
-        .map(|name| result.channel_results[name].final_curve.clone())
+        .map(|name| {
+            let channel = &result.channel_results[name];
+            result
+                .channels
+                .get(name)
+                .and_then(|chain| {
+                    let baseline =
+                        routed_baseline_curve(chain, &channel.initial_curve, sample_rate)?;
+                    remove_routing_transfer(&channel.initial_curve, &baseline, &channel.final_curve)
+                })
+                .unwrap_or_else(|| channel.final_curve.clone())
+        })
         .collect();
     let min_freq_hz = training_pre
         .iter()
@@ -564,6 +584,69 @@ impl CorrectionStage {
     }
 }
 
+fn correction_free_chain(chain: &ChannelDspChain) -> ChannelDspChain {
+    let mut baseline = chain.clone();
+    for stage in correction_stages(chain) {
+        remove_correction_stage(&mut baseline, stage);
+    }
+    baseline
+}
+
+fn align_target_level(reference: &roomeq_model::Curve, target: &mut roomeq_model::Curve) {
+    if reference.spl.len() != target.spl.len() || reference.spl.is_empty() {
+        return;
+    }
+    let offset = reference
+        .spl
+        .iter()
+        .zip(&target.spl)
+        .map(|(reference, target)| reference - target)
+        .sum::<f64>()
+        / reference.spl.len() as f64;
+    if offset.is_finite() {
+        target.spl.mapv_inplace(|spl| spl + offset);
+    }
+}
+
+fn routed_baseline_curve(
+    chain: &ChannelDspChain,
+    initial: &roomeq_model::Curve,
+    sample_rate: f64,
+) -> Option<roomeq_model::Curve> {
+    let baseline = correction_free_chain(chain);
+    crate::ctc::apply_channel_dsp_chain_to_curve(&baseline, initial, sample_rate).ok()
+}
+
+/// Remove the non-correction routing transfer (level alignment, crossover,
+/// delay and driver summation) from a realized curve. This keeps the acoustic
+/// safety gate focused on PEQ/FIR/MSO correction instead of treating an
+/// intentional bass-management high-pass as a broadband response regression.
+fn remove_routing_transfer(
+    initial: &roomeq_model::Curve,
+    routed_baseline: &roomeq_model::Curve,
+    realized: &roomeq_model::Curve,
+) -> Option<roomeq_model::Curve> {
+    if initial.freq != routed_baseline.freq
+        || initial.freq != realized.freq
+        || initial.spl.len() != routed_baseline.spl.len()
+        || initial.spl.len() != realized.spl.len()
+    {
+        return None;
+    }
+
+    let mut corrected = realized.clone();
+    corrected.spl = &realized.spl - &routed_baseline.spl + &initial.spl;
+    corrected.phase = match (
+        initial.phase.as_ref(),
+        routed_baseline.phase.as_ref(),
+        realized.phase.as_ref(),
+    ) {
+        (Some(initial), Some(baseline), Some(realized)) => Some(realized - baseline + initial),
+        _ => realized.phase.clone(),
+    };
+    Some(corrected)
+}
+
 fn revert_regressed_correction_stages(
     chain: &ChannelDspChain,
     initial: &roomeq_model::Curve,
@@ -578,12 +661,15 @@ fn revert_regressed_correction_stages(
     use roomeq_engine::quality::{CorrectionAcceptancePolicy, evaluate_correction_acceptance};
 
     let stages = correction_stages(chain);
+    let routed_baseline = routed_baseline_curve(chain, initial, sample_rate)?;
     let mut active_chain = chain.clone();
     let mut active_curve =
         crate::ctc::apply_channel_dsp_chain_to_curve(&active_chain, initial, sample_rate).ok()?;
+    let active_acceptance_curve =
+        remove_routing_transfer(initial, &routed_baseline, &active_curve)?;
     let mut active_report = evaluate_correction_acceptance(
         initial,
-        &active_curve,
+        &active_acceptance_curve,
         target,
         None,
         CorrectionAcceptancePolicy::RuntimeSafety,
@@ -597,9 +683,11 @@ fn revert_regressed_correction_stages(
         let candidate_curve =
             crate::ctc::apply_channel_dsp_chain_to_curve(&candidate_chain, initial, sample_rate)
                 .ok()?;
+        let candidate_acceptance_curve =
+            remove_routing_transfer(initial, &routed_baseline, &candidate_curve)?;
         let candidate_report = evaluate_correction_acceptance(
             initial,
-            &candidate_curve,
+            &candidate_acceptance_curve,
             target,
             None,
             CorrectionAcceptancePolicy::RuntimeSafety,

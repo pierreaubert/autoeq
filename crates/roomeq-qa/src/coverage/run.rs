@@ -2,6 +2,7 @@ use super::consts::SAMPLE_RATE;
 use super::consts::TEMP_DIR_COUNTER;
 use super::consts::apply_qa_overrides;
 use super::counting_semaphore::CountingSemaphore;
+use super::home_cinema::validate_home_cinema_result;
 use super::misc::avg_epa_preference;
 use super::processing_method::ProcessingMethod;
 use super::processing_method::validate_result;
@@ -83,7 +84,14 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
     let epa_pref = avg_epa_preference(&result);
     let dur = start.elapsed().as_millis() as u64;
 
-    let validation_failures = validate_result(&result, tc.room_size(), tc.method, &config);
+    let mut validation_failures = validate_result(&result, tc.room_size(), tc.method, &config);
+    if let Some(expectations) = tc.home_cinema_expectations {
+        validation_failures.extend(validate_home_cinema_result(
+            &result,
+            tc.method,
+            expectations,
+        ));
+    }
 
     TestResult::success(
         &name,
@@ -146,6 +154,9 @@ pub fn run_regression_case(
         description: scenario.to_string(),
         solver: super::solver::Solver::Fem,
         method,
+        case_name: None,
+        override_file: None,
+        home_cinema_expectations: None,
     };
     let result = run_test_case(&test_case, maxeval);
     if result.passed {

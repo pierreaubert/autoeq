@@ -32,6 +32,7 @@ pub(super) fn all_scenarios() -> Vec<&'static str> {
         "medium_surround_5_0",
         "medium_surround_5_1",
         "medium_surround_5_1_4",
+        "medium_surround_5_2_4_multi_seat",
         // Large room surround
         "large_surround_5_1",
         "large_surround_5_1_4",
@@ -56,6 +57,9 @@ pub(super) fn scenario_description(name: &str) -> String {
         "medium_surround_5_0" => "Medium 5x4x2.5m, 5.0 surround, fullrange".to_string(),
         "medium_surround_5_1" => "Medium 5x4x2.5m, 5.1 surround".to_string(),
         "medium_surround_5_1_4" => "Medium 5x4x2.5m, 5.1.4 immersive audio".to_string(),
+        "medium_surround_5_2_4_multi_seat" => {
+            "Medium 5x4x2.5m, 5.2.4 immersive audio, 5 seats".to_string()
+        }
         "large_surround_5_1" => "Large 7x5.5x2.6m, 5.1 surround".to_string(),
         "large_surround_5_1_4" => "Large 7x5.5x2.6m, 5.1.4 immersive audio".to_string(),
         _ => name.to_string(),

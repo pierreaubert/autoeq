@@ -478,26 +478,88 @@ fn optimize_home_cinema_with_sub(
     }
 
     // 3. Bass-managed virtual main
-    let main_refs: Vec<&Curve> = main_roles
+    let crossover_grid = aligned_pre_eq_curves[&main_roles[0]].freq.clone();
+    let aligned_main_phase_curves: Vec<Curve> = main_roles
         .iter()
-        .map(|r| &aligned_pre_eq_curves[r])
+        .map(|role| {
+            autoeq_measurements::read::interpolate_log_space(
+                &crossover_grid,
+                &aligned_pre_eq_curves[role],
+            )
+        })
         .collect();
-    let sub_curve = &aligned_pre_eq_curves[&sub_role];
-    let mut measured_phase_check_refs: Vec<&Curve> =
-        main_roles.iter().map(|r| &aligned_curves[r]).collect();
-    measured_phase_check_refs.push(&aligned_curves[&sub_role]);
+    let main_refs: Vec<&Curve> = aligned_main_phase_curves.iter().collect();
+    let sub_curve_aligned = autoeq_measurements::read::interpolate_log_space(
+        &crossover_grid,
+        &aligned_pre_eq_curves[&sub_role],
+    );
+    let sub_curve = &sub_curve_aligned;
+    // `load_source` intentionally power-averages multi-seat magnitudes and
+    // drops phase. Crossover timing must instead use one synchronously
+    // measured seat (the configured primary seat), just as MSO does.
+    let primary_seat = config
+        .optimizer
+        .multi_seat
+        .as_ref()
+        .map(|multi_seat| multi_seat.primary_seat)
+        .unwrap_or(0);
+    let measured_main_curves: Vec<Curve> = main_roles
+        .iter()
+        .map(|role| {
+            let source = resolve_single_source(role, config, sys)?;
+            let individual = autoeq_measurements::read::load_source_individual(source)
+                .map_err(|error| AutoeqError::InvalidMeasurement {
+                    message: error.to_string(),
+                })?;
+            let index = if individual.len() == 1 { 0 } else { primary_seat };
+            let mut curve = individual.get(index).cloned().ok_or_else(|| {
+                AutoeqError::InvalidConfiguration {
+                    message: format!(
+                        "primary seat {primary_seat} unavailable for home-cinema channel '{role}' with {} measurement(s)",
+                        individual.len()
+                    ),
+                }
+            })?;
+            let gain = *gains.get(role).unwrap_or(&0.0);
+            curve.spl.mapv_inplace(|spl| spl + gain);
+            Ok(autoeq_measurements::read::interpolate_log_space(
+                &crossover_grid,
+                &curve,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut measured_phase_check_refs: Vec<&Curve> = measured_main_curves.iter().collect();
+    measured_phase_check_refs.push(sub_curve);
     let mut phase_check_refs = main_refs.clone();
     phase_check_refs.push(sub_curve);
     let measured_phase_available = all_curves_have_usable_phase(&measured_phase_check_refs);
-    let shared_grid_available = all_curves_share_frequency_grid(&measured_phase_check_refs)
-        && all_curves_share_frequency_grid(&phase_check_refs);
+    let measured_grid_available = all_curves_share_frequency_grid(&measured_phase_check_refs);
+    let processed_grid_available = all_curves_share_frequency_grid(&phase_check_refs);
+    let shared_grid_available = measured_grid_available && processed_grid_available;
     let phase_available = measured_phase_available && shared_grid_available;
     let mut optimization_advisories = Vec::new();
     if !measured_phase_available {
         optimization_advisories.push("missing_phase_crossover_alignment_skipped".to_string());
+        let mut missing_roles: Vec<_> = main_roles
+            .iter()
+            .zip(&measured_main_curves)
+            .filter_map(|(role, curve)| {
+                (!roomeq_engine::topology::curve_has_usable_phase(curve)).then_some(role.as_str())
+            })
+            .collect();
+        if !roomeq_engine::topology::curve_has_usable_phase(&aligned_curves[&sub_role]) {
+            missing_roles.push(sub_role.as_str());
+        }
+        optimization_advisories.push(format!(
+            "missing_phase_channels:{}",
+            missing_roles.join(",")
+        ));
     } else if !shared_grid_available {
         optimization_advisories
             .push("frequency_grid_mismatch_crossover_alignment_skipped".to_string());
+        optimization_advisories.push(format!(
+            "crossover_grid_status:measured={measured_grid_available},processed={processed_grid_available}"
+        ));
     }
     let virtual_main = if phase_available {
         complex_sum_mains(&main_refs)

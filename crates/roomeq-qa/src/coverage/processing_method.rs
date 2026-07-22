@@ -1,6 +1,5 @@
 use super::consts::BASS_MANAGED_CHANNEL_REGRESSION_EPSILON;
 use super::is::has_subwoofer_channel;
-use super::is::is_bass_managed_coverage_scenario;
 use super::is::is_subwoofer_channel;
 use super::is::qa_primary_score_pair;
 use super::misc::all_scenarios;
@@ -97,17 +96,14 @@ pub(super) fn build_test_matrix(
                     continue;
                 }
 
-                if is_bass_managed_coverage_scenario(scenario)
-                    && !matches!(method, ProcessingMethod::Iir)
-                {
-                    continue;
-                }
-
                 test_cases.push(TestCase {
                     scenario: scenario.to_string(),
                     description: scenario_description(scenario),
                     solver: *solver,
                     method: *method,
+                    case_name: None,
+                    override_file: None,
+                    home_cinema_expectations: None,
                 });
             }
         }

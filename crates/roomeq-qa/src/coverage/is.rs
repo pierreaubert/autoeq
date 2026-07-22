@@ -1,18 +1,6 @@
 use roomeq_engine::room_result::{ChannelOptimizationResult, RoomOptimizationResult};
 use roomeq_model::RoomConfig;
 
-pub(super) fn is_bass_managed_coverage_scenario(scenario: &str) -> bool {
-    // These scenarios route bass through dedicated sub/LFE paths. The
-    // low-latency workflow is the stable coverage contract for that path; FIR
-    // and hybrid phase modes are exercised by targeted QA instead.
-    scenario.contains("_2_1")
-        || scenario.contains("_5_1")
-        || scenario.contains("multi_sub")
-        || scenario.contains("multi_seat_2_1")
-        || scenario.contains("2_2_mso")
-        || scenario.contains("2_2_cardioid")
-}
-
 pub(super) fn is_subwoofer_channel(config: &RoomConfig, channel_name: &str) -> bool {
     if let Some(system) = &config.system
         && let Some(subwoofers) = &system.subwoofers

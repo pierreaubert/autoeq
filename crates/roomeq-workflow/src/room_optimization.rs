@@ -969,6 +969,45 @@ fn assemble_workflow_result(
         )?;
     }
 
+    // Topology workflows return a pre-assembled result and therefore do not
+    // pass through `assemble_generic_result`, where height alignment
+    // historically lived. Apply the same feature before GD optimization so
+    // home-cinema configurations do not silently ignore it.
+    if let Some(height_config) = config
+        .optimizer
+        .height_channel_alignment
+        .as_ref()
+        .filter(|height| height.enabled)
+    {
+        let stage_outcome =
+            apply_topology_height_alignment(&mut result, height_config, config, sample_rate);
+        let event = match stage_outcome.status {
+            StageStatus::Applied | StageStatus::Degraded => PipelineEvent::completed(
+                PipelineStepId::HeightChannelAlignment,
+                format!("Height-channel alignment: {:?}", stage_outcome.status),
+            ),
+            StageStatus::Skipped | StageStatus::Failed => PipelineEvent::skipped(
+                PipelineStepId::HeightChannelAlignment,
+                format!(
+                    "Height-channel alignment: {:?} ({})",
+                    stage_outcome.status,
+                    stage_outcome.advisories.join(", ")
+                ),
+            ),
+        };
+        emit_pipeline_event(observer_shared, event.with_overall_progress(0.964))?;
+        result.metadata.stage_outcomes.push(stage_outcome);
+    } else {
+        emit_pipeline_event(
+            observer_shared,
+            PipelineEvent::skipped(
+                PipelineStepId::HeightChannelAlignment,
+                "Height-channel alignment not enabled",
+            )
+            .with_overall_progress(0.964),
+        )?;
+    }
+
     emit_pipeline_event(
         observer_shared,
         PipelineEvent::started(
@@ -1145,6 +1184,8 @@ fn assemble_workflow_result(
             .with_overall_progress(0.98),
         )?;
     }
+    room_optimization_result::apply_final_correction_safety_gate(&mut result, sample_rate);
+
     emit_pipeline_event(
         observer_shared,
         PipelineEvent::started(PipelineStepId::MetadataRefresh, "Refreshing reports")
@@ -1167,6 +1208,154 @@ fn assemble_workflow_result(
     )?;
 
     Ok(result)
+}
+
+fn apply_topology_height_alignment(
+    result: &mut RoomOptimizationResult,
+    height_config: &roomeq_model::HeightChannelAlignmentConfig,
+    config: &RoomConfig,
+    sample_rate: f64,
+) -> StageOutcome {
+    let channel_arrivals: HashMap<String, f64> = result
+        .channel_results
+        .iter()
+        .filter_map(|(name, channel)| {
+            let (phase_min, phase_max) =
+                roomeq_engine::analysis::time_align::phase_arrival_regression_band(
+                    &channel.initial_curve,
+                    200.0,
+                    2000.0,
+                )?;
+            roomeq_engine::analysis::time_align::estimate_arrival_from_phase_detailed(
+                &channel.initial_curve,
+                phase_min,
+                phase_max,
+            )
+            .ok()
+            .map(|arrival| (name.clone(), arrival))
+        })
+        .collect();
+    let corrected_curves = collect_current_final_curves(&result.channel_results);
+    let mut height_results =
+        match roomeq_engine::height_channel_alignment::compute_height_channel_alignment(
+            &corrected_curves,
+            &channel_arrivals,
+            height_config,
+            sample_rate,
+            config.optimizer.min_freq,
+            config.optimizer.max_freq,
+        ) {
+            Ok(results) => results,
+            Err(error) => {
+                return StageOutcome {
+                    stage: "height_channel_alignment".to_string(),
+                    status: StageStatus::Failed,
+                    advisories: vec![format!("height_alignment_failed: {error}")],
+                };
+            }
+        };
+
+    let failed_count = height_results
+        .values()
+        .filter(|height| {
+            height.status == roomeq_engine::height_channel_alignment::HeightAlignmentStatus::Failed
+        })
+        .count();
+    let mut applied_count = 0;
+    for (channel_name, height_result) in &mut height_results {
+        let mut applied = false;
+        if let Some(alignment) = &height_result.alignment {
+            let (eq_plugin, gain_plugin) =
+                roomeq_engine::spectral_align::create_alignment_plugins(alignment, sample_rate);
+            if let Some(chain) = result.channels.get_mut(channel_name) {
+                if let Some(eq) = eq_plugin {
+                    chain.plugins.push(eq);
+                }
+                if let Some(gain) = gain_plugin {
+                    chain.plugins.push(gain);
+                }
+            }
+            let filters =
+                roomeq_engine::spectral_align::create_alignment_filters(alignment, sample_rate);
+            sync_reported_biquad_adjustment(
+                channel_name,
+                &mut result.channel_results,
+                &mut result.channels,
+                &filters,
+                sample_rate,
+            );
+            if alignment.flat_gain_db.abs() >= roomeq_engine::spectral_align::MIN_CORRECTION_DB {
+                sync_reported_gain_adjustment(
+                    channel_name,
+                    &mut result.channel_results,
+                    &mut result.channels,
+                    alignment.flat_gain_db,
+                    false,
+                );
+            }
+            applied = true;
+        }
+        let delay_applied = height_result.delay_ms > 0.01
+            && result.channels.get_mut(channel_name).is_some_and(|chain| {
+                if chain
+                    .plugins
+                    .iter()
+                    .any(|plugin| plugin.plugin_type == "delay")
+                {
+                    height_result
+                        .advisories
+                        .push("height_arrival_already_aligned".to_string());
+                    false
+                } else {
+                    chain
+                        .plugins
+                        .insert(0, output::create_delay_plugin(height_result.delay_ms));
+                    true
+                }
+            });
+        if delay_applied {
+            sync_reported_phase_adjustment(
+                channel_name,
+                &mut result.channel_results,
+                &mut result.channels,
+                height_result.delay_ms,
+                false,
+            );
+            applied = true;
+        }
+        applied_count += usize::from(applied);
+    }
+
+    let mut advisories = height_results
+        .values()
+        .flat_map(|height| height.advisories.iter().cloned())
+        .collect::<Vec<_>>();
+    if height_results.is_empty() {
+        advisories.push("no_height_channels".to_string());
+    }
+    advisories.sort();
+    advisories.dedup();
+    let degraded = advisories.iter().any(|advisory| {
+        advisory.ends_with("_missing")
+            || advisory.ends_with("_untrustworthy")
+            || advisory == "height_objective_acceptance_failed"
+            || advisory == "height_arrives_after_reference"
+            || advisory == "height_delay_limit_exceeded"
+    });
+    let status = if applied_count > 0 && (failed_count > 0 || degraded) {
+        StageStatus::Degraded
+    } else if failed_count > 0 {
+        StageStatus::Failed
+    } else if applied_count > 0 {
+        StageStatus::Applied
+    } else {
+        StageStatus::Skipped
+    };
+    StageOutcome {
+        stage: "height_channel_alignment".to_string(),
+        status,
+        advisories,
+    }
 }
 
 fn assemble_generic_result(

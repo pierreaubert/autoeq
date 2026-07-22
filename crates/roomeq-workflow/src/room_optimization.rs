@@ -1184,7 +1184,13 @@ fn assemble_workflow_result(
             .with_overall_progress(0.98),
         )?;
     }
-    room_optimization_result::apply_final_correction_safety_gate(&mut result, sample_rate);
+    room_optimization_result::apply_final_correction_safety_gate(
+        &mut result,
+        sample_rate,
+        config.optimizer.smooth_n,
+        (config.optimizer.min_freq, config.optimizer.max_freq),
+        output_dir.unwrap_or(Path::new(".")),
+    );
 
     emit_pipeline_event(
         observer_shared,
@@ -2413,7 +2419,13 @@ fn assemble_generic_result(
         )?;
     }
 
-    room_optimization_result::apply_final_correction_safety_gate(&mut result, sample_rate);
+    room_optimization_result::apply_final_correction_safety_gate(
+        &mut result,
+        sample_rate,
+        config.optimizer.smooth_n,
+        (config.optimizer.min_freq, config.optimizer.max_freq),
+        output_dir.unwrap_or(Path::new(".")),
+    );
 
     emit_pipeline_event(
         observer_shared,

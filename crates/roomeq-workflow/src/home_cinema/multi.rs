@@ -82,7 +82,15 @@ pub fn multi_seat_correction_report(
             continue;
         }
         let role_group = role.group();
-        let target_band_hz = role.default_target_band_hz();
+        let mut target_band_hz = roomeq_model::home_cinema::role_score_band(config, &channel);
+        if role.is_bass_managed_candidate()
+            && let Some(crossover_hz) =
+                roomeq_model::home_cinema::bass_management_crossover_frequency_hz(config)
+        {
+            // Match the realized high-pass acceptance band. The transition
+            // region is routing, not a seat-specific correction residual.
+            target_band_hz.0 = target_band_hz.0.max(crossover_hz + 20.0);
+        }
         let source = single_measurement_source(&speaker);
         let seat_count = source.and_then(measurement_source_count).unwrap_or(0);
         max_seat_count = max_seat_count.max(seat_count);

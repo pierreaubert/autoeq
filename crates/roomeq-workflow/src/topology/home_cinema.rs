@@ -362,6 +362,7 @@ fn optimize_home_cinema_with_sub(
 
     // 2. Pre-EQ
     let mut pre_eq_plugins: HashMap<String, Vec<PluginConfigWrapper>> = HashMap::new();
+    let mut pre_eq_initial_curves: HashMap<String, Curve> = HashMap::new();
     let mut linearized_curves: HashMap<String, Curve> = HashMap::new();
     let mut optimizer_evidence_by_channel: HashMap<String, Vec<OptimizerRunEvidence>> =
         HashMap::new();
@@ -402,6 +403,7 @@ fn optimize_home_cinema_with_sub(
             multi_seat_rejections.insert(role.clone(), advisories);
         }
         pre_eq_plugins.insert(role.clone(), mark_plugins_stage(chain.plugins, "pre_route"));
+        pre_eq_initial_curves.insert(role.clone(), ch_result.initial_curve.clone());
         optimizer_evidence_by_channel.insert(role.clone(), ch_result.optimizer_evidence);
         linearized_curves.insert(role.clone(), ch_result.final_curve);
     }
@@ -441,6 +443,7 @@ fn optimize_home_cinema_with_sub(
             sub_role.clone(),
             mark_plugins_stage(chain.plugins, "pre_route"),
         );
+        pre_eq_initial_curves.insert(sub_role.clone(), ch_result.initial_curve.clone());
         optimizer_evidence_by_channel.insert(sub_role.clone(), ch_result.optimizer_evidence);
         linearized_curves.insert(sub_role.clone(), ch_result.final_curve);
     }
@@ -892,6 +895,38 @@ fn optimize_home_cinema_with_sub(
             optimization_advisories.push("sub_gain_limited_for_headroom".to_string());
         }
     }
+
+    // Joint bass-management optimization updates group crossover frequency,
+    // type, and delay. Re-render the main routes from that accepted solution
+    // before post-EQ and export so reported curves and the canonical DSP graph
+    // describe the same serial processing.
+    for role in main_roles {
+        let group_id =
+            engine_home_cinema::group_id_for_role(engine_home_cinema::role_for_channel(role));
+        let group = group_results_by_id.get(group_id);
+        let role_xover_type = group
+            .map(|group| group.crossover_type.as_str())
+            .unwrap_or(xover_type_str);
+        let role_xover_freq = group
+            .and_then(|group| group.selected_crossover_hz)
+            .unwrap_or(final_xo_freq);
+        let role_main_delay = group
+            .map(|group| group.main_delay_ms)
+            .unwrap_or(main_delay_post);
+        main_post_curves.insert(
+            role.clone(),
+            apply_chain(
+                &aligned_pre_eq_curves[role],
+                role_xover_type,
+                role_xover_freq,
+                false,
+                main_gain_post,
+                role_main_delay,
+                false,
+            ),
+        );
+    }
+
     let route_applied_sub_gain_db = sub_output_results
         .iter()
         .map(|output| output.gain_db)
@@ -1192,7 +1227,11 @@ fn optimize_home_cinema_with_sub(
             intermediate.clone()
         };
 
-        let initial_data: CurveData = (&aligned_curves[role]).into();
+        // The canonical DSP graph owns level alignment, while its PEQ was
+        // designed against the generic channel workflow's prepared input.
+        // Preserve that exact input so reconstructing the final response does
+        // not apply alignment twice or evaluate PEQ against a different curve.
+        let initial_data: CurveData = (&pre_eq_initial_curves[role]).into();
         let final_data: CurveData = (&final_curve_obj).into();
         let eq_resp = output::compute_eq_response(&initial_data, &final_data);
         let chain = ChannelDspChain {
@@ -1323,7 +1362,8 @@ fn optimize_home_cinema_with_sub(
             .collect()
     });
 
-    let sub_initial_data: CurveData = (&aligned_curves[&sub_role]).into();
+    // The sub PEQ uses the preprocessed combined measurement as its input.
+    let sub_initial_data: CurveData = (&pre_eq_initial_curves[&sub_role]).into();
     let sub_final_data: CurveData = (&final_sub_curve).into();
     let sub_eq_resp = output::compute_eq_response(&sub_initial_data, &sub_final_data);
     let sub_chain = ChannelDspChain {
@@ -1378,7 +1418,7 @@ fn optimize_home_cinema_with_sub(
                 name: role.clone(),
                 pre_score,
                 post_score,
-                initial_curve: aligned_curves[role].clone(),
+                initial_curve: pre_eq_initial_curves[role].clone(),
                 final_curve: final_curve_obj,
                 biquads: post_eq_filters.get(role).cloned().unwrap_or_default(),
                 fir_coeffs: None,
@@ -1400,7 +1440,7 @@ fn optimize_home_cinema_with_sub(
                 name: sub_role.clone(),
                 pre_score,
                 post_score,
-                initial_curve: aligned_curves[&sub_role].clone(),
+                initial_curve: pre_eq_initial_curves[&sub_role].clone(),
                 final_curve: final_sub_curve.clone(),
                 biquads: post_eq_filters.get(&sub_role).cloned().unwrap_or_default(),
                 fir_coeffs: None,

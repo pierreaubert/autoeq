@@ -392,6 +392,64 @@ fn biquad_filter_response_peak_and_errors() {
 }
 
 #[test]
+fn serialized_biquad_response_matches_canonical_peq_response() {
+    let filter = math_audio_iir_fir::Biquad::new(
+        math_audio_iir_fir::BiquadFilterType::Peak,
+        80.0,
+        48_000.0,
+        2.87,
+        6.58,
+    );
+    let serialized = roomeq_engine::output::biquad_to_json(&filter);
+    let frequency = 97.2;
+    let serialized_response = biquad_filter_response(&serialized, frequency, 48_000.0).unwrap();
+    let canonical_response = roomeq_engine::response::compute_peq_complex_response(
+        &[filter],
+        &ndarray::arr1(&[frequency]),
+        48_000.0,
+    )[0];
+    assert!(
+        (serialized_response - canonical_response).norm() < 1e-12,
+        "serialized={serialized_response:?}, canonical={canonical_response:?}"
+    );
+}
+
+#[test]
+fn ctc_lr24_response_matches_topology_crossover_response() {
+    let frequencies = ndarray::arr1(&[25.4, 58.1, 60.5, 97.2, 1_000.0]);
+    let topology = roomeq_engine::topology::compute_crossover_complex_response(
+        "LR24",
+        56.5685,
+        48_000.0,
+        false,
+        &frequencies,
+    );
+    for (frequency, expected) in frequencies.iter().zip(topology) {
+        let actual =
+            math_audio_dsp::lr4_crossover_response("high", 56.5685, *frequency, 48_000.0).unwrap();
+        assert!(
+            (actual - expected).norm() < 1e-12,
+            "{frequency} Hz: ctc={actual:?}, topology={expected:?}"
+        );
+    }
+
+    let at_corner = math_audio_dsp::lr4_crossover_response("high", 60.0, 60.5, 48_000.0).unwrap();
+    let corner_db = 20.0 * at_corner.norm().log10();
+    assert!((-6.5..-5.5).contains(&corner_db), "corner={corner_db}");
+    let topology_at_corner = roomeq_engine::topology::compute_crossover_complex_response(
+        "LR24",
+        60.0,
+        48_000.0,
+        false,
+        &ndarray::arr1(&[60.5]),
+    )[0];
+    assert!(
+        (topology_at_corner - at_corner).norm() < 1e-12,
+        "ctc={at_corner:?}, topology={topology_at_corner:?}"
+    );
+}
+
+#[test]
 fn checked_sample_rate_bounds() {
     assert_eq!(checked_sample_rate(48_000.0).unwrap(), 48_000);
     assert!(checked_sample_rate(0.0).is_err());

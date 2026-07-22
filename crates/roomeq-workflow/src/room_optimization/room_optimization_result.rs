@@ -6,16 +6,24 @@ use std::path::Path;
 pub(super) fn apply_final_correction_safety_gate(
     result: &mut RoomOptimizationResult,
     sample_rate: f64,
+    smoothing_n: usize,
+    evaluation_band: (f64, f64),
+    sidecar_dir: &Path,
 ) {
-    use roomeq_engine::quality::{
-        CorrectionAcceptancePolicy, CorrectionDecision, evaluate_correction_acceptance,
-    };
+    use roomeq_engine::quality::CorrectionDecision;
 
     let optimizer_confidence = refresh_optimizer_evidence(result);
     let optimizer_rejected =
         optimizer_confidence == Some(roomeq_engine::OptimizerConfidence::Unusable);
     let mut reverted = if optimizer_rejected {
-        let reverted = revert_all_correction_stages(result, sample_rate);
+        let reverted = revert_all_correction_stages(
+            result,
+            sample_rate,
+            smoothing_n,
+            evaluation_band,
+            sidecar_dir,
+            true,
+        );
         refresh_combined_scores(result);
         reverted
     } else {
@@ -23,10 +31,13 @@ pub(super) fn apply_final_correction_safety_gate(
     };
     let mut accepted_report = None;
     for (name, channel) in &mut result.channel_results {
-        let epsilon = (channel.pre_score.abs() * 1e-4).max(1e-6);
-        let regressed = !channel.post_score.is_finite()
-            || (channel.pre_score.is_finite() && channel.post_score > channel.pre_score + epsilon);
-
+        if result
+            .channels
+            .get(name)
+            .is_some_and(is_graph_routed_bass_output)
+        {
+            continue;
+        }
         let mut target = result
             .channels
             .get(name)
@@ -48,14 +59,22 @@ pub(super) fn apply_final_correction_safety_gate(
                 remove_routing_transfer(&channel.initial_curve, &baseline, &channel.final_curve)
             })
             .unwrap_or_else(|| channel.final_curve.clone());
-        let report = evaluate_correction_acceptance(
-            &channel.initial_curve,
-            &acceptance_post,
-            &target,
-            None,
-            CorrectionAcceptancePolicy::RuntimeSafety,
-        )
-        .ok();
+        let report = result.channels.get(name).and_then(|chain| {
+            evaluate_passband_correction_acceptance(
+                chain,
+                &channel.initial_curve,
+                &acceptance_post,
+                &target,
+                smoothing_n,
+                evaluation_band,
+            )
+        });
+        let regressed = report.as_ref().is_none_or(|report| {
+            let epsilon = (report.metrics.pre_target_weighted_rms_db.abs() * 1e-4).max(1e-6);
+            !report.metrics.post_target_weighted_rms_db.is_finite()
+                || report.metrics.post_target_weighted_rms_db
+                    > report.metrics.pre_target_weighted_rms_db + epsilon
+        });
         if report.as_ref().is_some_and(|report| {
             accepted_report.as_ref().is_none_or(
                 |current: &roomeq_engine::quality::CorrectionAcceptanceReport| {
@@ -100,6 +119,9 @@ pub(super) fn apply_final_correction_safety_gate(
                     &channel.initial_curve,
                     &target,
                     sample_rate,
+                    smoothing_n,
+                    evaluation_band,
+                    sidecar_dir,
                 )
             });
             if let Some((chain, curve, stages, report)) = stage_revert {
@@ -155,7 +177,7 @@ pub(super) fn apply_final_correction_safety_gate(
         result.metadata.post_score = result.combined_post_score;
     }
     if let Some(mut report) = accepted_report {
-        if !reverted.is_empty() {
+        if optimizer_rejected || !reverted.is_empty() {
             report.accepted = false;
             report.decision = if reverted.len() == result.channel_results.len()
                 && reverted.iter().all(|stage| !stage.contains(':'))
@@ -171,9 +193,25 @@ pub(super) fn apply_final_correction_safety_gate(
             });
             report.reverted_stages = reverted;
         }
-        if let Some((quality, realization, policy)) =
-            runtime_acceptance_evidence(result, sample_rate)
-        {
+        if let Some((quality, realization, policy)) = runtime_acceptance_evidence(
+            result,
+            sample_rate,
+            smoothing_n,
+            evaluation_band,
+            sidecar_dir,
+        ) {
+            log::debug!(
+                "Runtime acceptance: pre/post RMS {:.4}/{:.4} dB, p95 {:.4} dB, worst {:.4} dB, worst-position improvement {:.4} dB, max boost {:.4} dB, induced GD {:?} ms, realization max {:?} dB, failed {:?}",
+                quality.training.pre_weighted_rms_median_db,
+                quality.training.post_weighted_rms_median_db,
+                quality.training.post_p95_abs_residual_db,
+                quality.training.post_worst_abs_residual_db,
+                quality.training.worst_position_improvement_db,
+                quality.max_boost_db,
+                quality.induced_group_delay_rms_ms,
+                realization.max_abs_error_db,
+                realization.failed_channels,
+            );
             let _ = roomeq_engine::quality::enforce_runtime_acceptance_evidence(
                 &mut report,
                 quality,
@@ -184,7 +222,14 @@ pub(super) fn apply_final_correction_safety_gate(
                 is_runtime_quality_violation(violation)
                     && violation != "audibility_regression_reverted"
             }) {
-                let runtime_reverted = revert_all_correction_stages(result, sample_rate);
+                let runtime_reverted = revert_all_correction_stages(
+                    result,
+                    sample_rate,
+                    smoothing_n,
+                    evaluation_band,
+                    sidecar_dir,
+                    false,
+                );
                 if !runtime_reverted.is_empty() {
                     report.accepted = false;
                     report.decision = CorrectionDecision::RevertedStage;
@@ -210,9 +255,13 @@ pub(super) fn apply_final_correction_safety_gate(
                                 .collect(),
                         });
                     refresh_combined_scores(result);
-                    if let Some((quality, realization, _)) =
-                        runtime_acceptance_evidence(result, sample_rate)
-                    {
+                    if let Some((quality, realization, _)) = runtime_acceptance_evidence(
+                        result,
+                        sample_rate,
+                        smoothing_n,
+                        evaluation_band,
+                        sidecar_dir,
+                    ) {
                         report.acoustic_quality = Some(quality);
                         report.realization_quality = Some(realization);
                     }
@@ -312,42 +361,59 @@ fn refresh_optimizer_evidence(
 fn runtime_acceptance_evidence(
     result: &RoomOptimizationResult,
     sample_rate: f64,
+    smoothing_n: usize,
+    evaluation_band: (f64, f64),
+    sidecar_dir: &Path,
 ) -> Option<(
     roomeq_engine::quality::AcousticQualityScorecard,
     roomeq_engine::quality::RealizationQualityEvidence,
     roomeq_engine::quality::RuntimeAcceptancePolicy,
 )> {
-    let mut names: Vec<_> = result.channel_results.keys().cloned().collect();
-    names.sort();
-    let training_pre: Vec<_> = names
-        .iter()
-        .map(|name| result.channel_results[name].initial_curve.clone())
-        .collect();
-    let training_post: Vec<_> = names
-        .iter()
-        .map(|name| {
-            let channel = &result.channel_results[name];
+    let mut names: Vec<_> = result
+        .channel_results
+        .keys()
+        .filter(|name| {
             result
                 .channels
-                .get(name)
-                .and_then(|chain| {
-                    let baseline =
-                        routed_baseline_curve(chain, &channel.initial_curve, sample_rate)?;
-                    remove_routing_transfer(&channel.initial_curve, &baseline, &channel.final_curve)
-                })
-                .unwrap_or_else(|| channel.final_curve.clone())
+                .get(*name)
+                .is_none_or(|chain| !is_graph_routed_bass_output(chain))
         })
+        .cloned()
         .collect();
+    names.sort();
+    let mut training_pre = Vec::with_capacity(names.len());
+    let mut training_post = Vec::with_capacity(names.len());
+    for name in &names {
+        let channel = &result.channel_results[name];
+        let post = result
+            .channels
+            .get(name)
+            .and_then(|chain| {
+                let baseline = routed_baseline_curve(chain, &channel.initial_curve, sample_rate)?;
+                remove_routing_transfer(&channel.initial_curve, &baseline, &channel.final_curve)
+            })
+            .unwrap_or_else(|| channel.final_curve.clone());
+        let chain = result.channels.get(name)?;
+        let passband = passband_curves(chain, &[&channel.initial_curve, &post], evaluation_band)?;
+        training_pre.push(roomeq_engine::smooth_one_over_n_octave(
+            &passband[0],
+            smoothing_n,
+        ));
+        training_post.push(roomeq_engine::smooth_one_over_n_octave(
+            &passband[1],
+            smoothing_n,
+        ));
+    }
     let min_freq_hz = training_pre
         .iter()
         .chain(&training_post)
         .map(|curve| curve.freq[0])
-        .fold(0.0, f64::max);
+        .fold(f64::INFINITY, f64::min);
     let max_freq_hz = training_pre
         .iter()
         .chain(&training_post)
         .filter_map(|curve| curve.freq.last().copied())
-        .fold(f64::INFINITY, f64::min);
+        .fold(0.0, f64::max);
     if max_freq_hz <= min_freq_hz {
         return None;
     }
@@ -358,22 +424,36 @@ fn runtime_acceptance_evidence(
         &training_post,
         sample_rate,
     );
-    let quality = roomeq_engine::quality::evaluate_acoustic_quality(
-        &training_pre,
-        &training_post,
-        &[],
-        &[],
-        None,
-        roomeq_engine::quality::QualityEvaluationConfig {
-            min_freq_hz,
-            max_freq_hz,
-            schroeder_hz: None,
-            normalize_level: true,
-        },
-        temporal,
-    )
-    .ok()?;
-    let realization = runtime_realization_quality(result, &names, sample_rate);
+    let mut channel_quality = Vec::with_capacity(names.len());
+    for (name, (pre, post)) in names.iter().zip(training_pre.iter().zip(&training_post)) {
+        let scorecard = roomeq_engine::quality::evaluate_acoustic_quality(
+            std::slice::from_ref(pre),
+            std::slice::from_ref(post),
+            &[],
+            &[],
+            None,
+            roomeq_engine::quality::QualityEvaluationConfig {
+                min_freq_hz: pre.freq[0].max(post.freq[0]),
+                max_freq_hz: pre.freq.last().copied()?.min(post.freq.last().copied()?),
+                schroeder_hz: None,
+                normalize_level: true,
+            },
+            Default::default(),
+        )
+        .ok()?;
+        log::debug!(
+            "Runtime acoustic quality '{}': RMS {:.4} -> {:.4} dB, p95 {:.4} dB, worst {:.4} dB",
+            name,
+            scorecard.training.pre_weighted_rms_median_db,
+            scorecard.training.post_weighted_rms_median_db,
+            scorecard.training.post_p95_abs_residual_db,
+            scorecard.training.post_worst_abs_residual_db,
+        );
+        channel_quality.push(scorecard);
+    }
+    let quality = aggregate_runtime_quality(&channel_quality, temporal, min_freq_hz, max_freq_hz)?;
+    let realization =
+        runtime_realization_quality(result, &names, sample_rate, evaluation_band, sidecar_dir);
     let has_fir = result
         .channel_results
         .values()
@@ -384,24 +464,126 @@ fn runtime_acceptance_evidence(
                 .iter()
                 .any(|plugin| plugin.plugin_type == "convolution")
         });
-    let has_iir = result.channels.values().any(|chain| {
+    let has_partial_band_fir = result.channels.values().any(|chain| {
         chain.plugins.iter().any(|plugin| {
-            correction_stage(plugin).is_some_and(|stage| stage != CorrectionStage::Fir)
+            if plugin.plugin_type != "convolution" {
+                return false;
+            }
+            plugin
+                .parameters
+                .get("ir_file")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|path| {
+                    path.contains("_residual_fir_")
+                        || path.contains("_excess_phase_fir_")
+                        || path.contains("_band_fir_")
+                })
         })
     });
-    let output_class = match (has_fir, has_iir) {
-        (true, true) => roomeq_engine::quality::RuntimeOutputClass::Hybrid,
-        (true, false) => roomeq_engine::quality::RuntimeOutputClass::Fir,
-        (false, _) => roomeq_engine::quality::RuntimeOutputClass::LowLatencyIir,
+    let output_class = if !has_fir {
+        roomeq_engine::quality::RuntimeOutputClass::LowLatencyIir
+    } else if has_partial_band_fir {
+        roomeq_engine::quality::RuntimeOutputClass::Hybrid
+    } else {
+        // Full-band phase-linear FIR may be accompanied by PEQ/crossover
+        // biquads. Those do not turn its latency contract into the stricter
+        // partial-band hybrid contract.
+        roomeq_engine::quality::RuntimeOutputClass::Fir
     };
     let policy = roomeq_engine::quality::RuntimeAcceptancePolicy::for_output_class(output_class);
     Some((quality, realization, policy))
+}
+
+fn aggregate_runtime_quality(
+    scorecards: &[roomeq_engine::quality::AcousticQualityScorecard],
+    temporal: roomeq_engine::quality::TemporalQualityEvidence,
+    min_freq_hz: f64,
+    max_freq_hz: f64,
+) -> Option<roomeq_engine::quality::AcousticQualityScorecard> {
+    let first = scorecards.first()?;
+    let median = |mut values: Vec<f64>| {
+        values.sort_by(f64::total_cmp);
+        let middle = values.len() / 2;
+        if values.len() % 2 == 0 {
+            (values[middle - 1] + values[middle]) * 0.5
+        } else {
+            values[middle]
+        }
+    };
+    let metric = |select: fn(&roomeq_model::QualityPartitionMetrics) -> f64| {
+        median(
+            scorecards
+                .iter()
+                .map(|scorecard| select(&scorecard.training))
+                .collect(),
+        )
+    };
+    let mut aggregate = first.clone();
+    aggregate.training.curve_count = scorecards.len();
+    aggregate.training.pre_weighted_rms_median_db =
+        metric(|metrics| metrics.pre_weighted_rms_median_db);
+    aggregate.training.post_weighted_rms_median_db =
+        metric(|metrics| metrics.post_weighted_rms_median_db);
+    aggregate.training.improvement_median_db = metric(|metrics| metrics.improvement_median_db);
+    aggregate.training.worst_position_improvement_db = scorecards
+        .iter()
+        .map(|scorecard| scorecard.training.worst_position_improvement_db)
+        .fold(f64::INFINITY, f64::min);
+    aggregate.training.pre_p95_abs_residual_db = scorecards
+        .iter()
+        .map(|scorecard| scorecard.training.pre_p95_abs_residual_db)
+        .fold(0.0, f64::max);
+    aggregate.training.post_p95_abs_residual_db = scorecards
+        .iter()
+        .map(|scorecard| scorecard.training.post_p95_abs_residual_db)
+        .fold(0.0, f64::max);
+    aggregate.training.post_worst_abs_residual_db = scorecards
+        .iter()
+        .map(|scorecard| scorecard.training.post_worst_abs_residual_db)
+        .fold(0.0, f64::max);
+    aggregate.training.mean_normalized_seat_spread_db = 0.0;
+    aggregate.training.max_normalized_seat_spread_db = 0.0;
+    aggregate.correction_rms_db =
+        metric_from_scorecards(scorecards, |scorecard| scorecard.correction_rms_db);
+    aggregate.max_boost_db = scorecards
+        .iter()
+        .map(|scorecard| scorecard.max_boost_db)
+        .fold(f64::NEG_INFINITY, f64::max);
+    aggregate.max_cut_db = scorecards
+        .iter()
+        .map(|scorecard| scorecard.max_cut_db)
+        .fold(f64::INFINITY, f64::min);
+    aggregate.induced_group_delay_rms_ms = scorecards
+        .iter()
+        .filter_map(|scorecard| scorecard.induced_group_delay_rms_ms)
+        .max_by(f64::total_cmp);
+    aggregate.temporal = temporal;
+    aggregate.evaluated_band_hz = [min_freq_hz, max_freq_hz];
+    aggregate.measurement_overlap_hz = [min_freq_hz, max_freq_hz];
+    aggregate.finite = scorecards.iter().all(|scorecard| scorecard.finite);
+    Some(aggregate)
+}
+
+fn metric_from_scorecards(
+    scorecards: &[roomeq_engine::quality::AcousticQualityScorecard],
+    select: impl Fn(&roomeq_engine::quality::AcousticQualityScorecard) -> f64,
+) -> f64 {
+    let mut values: Vec<_> = scorecards.iter().map(select).collect();
+    values.sort_by(f64::total_cmp);
+    let middle = values.len() / 2;
+    if values.len() % 2 == 0 {
+        (values[middle - 1] + values[middle]) * 0.5
+    } else {
+        values[middle]
+    }
 }
 
 fn runtime_realization_quality(
     result: &RoomOptimizationResult,
     names: &[String],
     sample_rate: f64,
+    evaluation_band: (f64, f64),
+    sidecar_dir: &Path,
 ) -> roomeq_engine::quality::RealizationQualityEvidence {
     let mut evaluated_channels = 0;
     let mut max_abs_error_db = 0.0_f64;
@@ -412,13 +594,18 @@ fn runtime_realization_quality(
             failed_channels.push(name.clone());
             continue;
         };
-        let Ok(realized) = crate::ctc::apply_channel_dsp_chain_to_curve(
+        let realized = match apply_logical_channel_chain(
             chain,
             &channel.initial_curve,
             sample_rate,
-        ) else {
-            failed_channels.push(name.clone());
-            continue;
+            sidecar_dir,
+        ) {
+            Ok(realized) => realized,
+            Err(error) => {
+                log::debug!("Runtime realization '{}' failed: {}", name, error);
+                failed_channels.push(name.clone());
+                continue;
+            }
         };
         if realized.freq.len() != channel.final_curve.freq.len()
             || realized.spl.len() != channel.final_curve.spl.len()
@@ -431,12 +618,28 @@ fn runtime_realization_quality(
             failed_channels.push(name.clone());
             continue;
         }
-        let channel_error = realized
+        let Some((low, high)) = route_passband(chain, &channel.initial_curve, evaluation_band)
+        else {
+            failed_channels.push(name.clone());
+            continue;
+        };
+        let (error_frequency, realized_at_error, expected_at_error, channel_error) = realized
             .spl
             .iter()
             .zip(&channel.final_curve.spl)
-            .map(|(left, right)| (left - right).abs())
-            .fold(0.0_f64, f64::max);
+            .zip(&realized.freq)
+            .filter(|(_, frequency)| **frequency >= low && **frequency <= high)
+            .map(|((left, right), frequency)| (*frequency, *left, *right, (left - right).abs()))
+            .max_by(|left, right| left.3.total_cmp(&right.3))
+            .unwrap_or((0.0, 0.0, 0.0, 0.0));
+        log::debug!(
+            "Runtime realization '{}': max error {:.4} dB at {:.1} Hz (graph {:.4}, reported {:.4})",
+            name,
+            channel_error,
+            error_frequency,
+            realized_at_error,
+            expected_at_error,
+        );
         if !channel_error.is_finite() {
             failed_channels.push(name.clone());
             continue;
@@ -471,6 +674,10 @@ fn is_runtime_quality_violation(violation: &str) -> bool {
 fn revert_all_correction_stages(
     result: &mut RoomOptimizationResult,
     sample_rate: f64,
+    smoothing_n: usize,
+    evaluation_band: (f64, f64),
+    sidecar_dir: &Path,
+    include_graph_routed_bass: bool,
 ) -> Vec<String> {
     let names: Vec<_> = result.channel_results.keys().cloned().collect();
     let mut reverted = Vec::new();
@@ -478,6 +685,9 @@ fn revert_all_correction_stages(
         let Some(existing_chain) = result.channels.get(&name) else {
             continue;
         };
+        if !include_graph_routed_bass && is_graph_routed_bass_output(existing_chain) {
+            continue;
+        }
         let stages = correction_stages(existing_chain);
         if stages.is_empty() {
             continue;
@@ -488,11 +698,11 @@ fn revert_all_correction_stages(
         }
         let initial = result.channel_results[&name].initial_curve.clone();
         let Ok(final_curve) =
-            crate::ctc::apply_channel_dsp_chain_to_curve(&chain, &initial, sample_rate)
+            apply_logical_channel_chain(&chain, &initial, sample_rate, sidecar_dir)
         else {
             continue;
         };
-        let target = chain
+        let mut target = chain
             .target_curve
             .clone()
             .map(roomeq_model::Curve::from)
@@ -503,12 +713,14 @@ fn revert_all_correction_stages(
                 target.phase = None;
                 target
             });
-        let post_score = roomeq_engine::quality::evaluate_correction_acceptance(
+        align_target_level(&initial, &mut target);
+        let post_score = evaluate_passband_correction_acceptance(
+            &chain,
             &initial,
             &final_curve,
             &target,
-            None,
-            roomeq_engine::quality::CorrectionAcceptancePolicy::RuntimeSafety,
+            smoothing_n,
+            evaluation_band,
         )
         .map(|report| report.metrics.post_target_weighted_rms_db)
         .unwrap_or(result.channel_results[&name].pre_score);
@@ -592,6 +804,168 @@ fn correction_free_chain(chain: &ChannelDspChain) -> ChannelDspChain {
     baseline
 }
 
+fn apply_logical_channel_chain(
+    chain: &ChannelDspChain,
+    curve: &roomeq_model::Curve,
+    sample_rate: f64,
+    sidecar_dir: &Path,
+) -> Result<roomeq_model::Curve> {
+    // ChannelOptimizationResult stores the logical combined response. Physical
+    // sub-driver branches are validated by bass-management output evidence and
+    // cannot be re-applied to that already-combined curve.
+    let mut logical = chain.clone();
+    logical.drivers = None;
+    for plugin in &mut logical.plugins {
+        if plugin.plugin_type != "convolution" {
+            continue;
+        }
+        let Some(ir_file) = plugin
+            .parameters
+            .get("ir_file")
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        let ir_path = Path::new(ir_file);
+        if ir_path.is_relative() {
+            plugin.parameters["ir_file"] =
+                serde_json::Value::String(sidecar_dir.join(ir_path).to_string_lossy().into_owned());
+        }
+    }
+    crate::ctc::apply_channel_dsp_chain_to_curve(&logical, curve, sample_rate)
+}
+
+fn is_graph_routed_bass_output(chain: &ChannelDspChain) -> bool {
+    chain.drivers.is_some()
+        || chain.plugins.iter().any(|plugin| {
+            plugin.plugin_type == "crossover"
+                && plugin
+                    .parameters
+                    .get("output")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("low")
+                && (plugin
+                    .parameters
+                    .get("room_eq_stage")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("route_owned")
+                    || plugin
+                        .parameters
+                        .get("label")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("room_eq_route_owned"))
+        })
+}
+
+fn route_passband(
+    chain: &ChannelDspChain,
+    curve: &roomeq_model::Curve,
+    evaluation_band: (f64, f64),
+) -> Option<(f64, f64)> {
+    let mut low = curve.freq.first().copied()?.max(evaluation_band.0);
+    let mut high = curve.freq.last().copied()?.min(evaluation_band.1);
+    for plugin in &chain.plugins {
+        if plugin.plugin_type != "crossover" {
+            continue;
+        }
+        let route_owned = plugin
+            .parameters
+            .get("room_eq_stage")
+            .and_then(serde_json::Value::as_str)
+            == Some("route_owned")
+            || plugin
+                .parameters
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                == Some("room_eq_route_owned");
+        if !route_owned {
+            continue;
+        }
+        let Some(frequency) = plugin
+            .parameters
+            .get("frequency")
+            .and_then(serde_json::Value::as_f64)
+            .filter(|value| value.is_finite() && *value > 0.0)
+        else {
+            continue;
+        };
+        match plugin
+            .parameters
+            .get("output")
+            .and_then(serde_json::Value::as_str)
+        {
+            Some("high") => low = low.max(frequency + 20.0),
+            Some("low") => high = high.min(frequency),
+            _ => {}
+        }
+    }
+    (high > low).then_some((low, high))
+}
+
+fn crop_curve_to_band(
+    curve: &roomeq_model::Curve,
+    low: f64,
+    high: f64,
+) -> Option<roomeq_model::Curve> {
+    let indices: Vec<_> = curve
+        .freq
+        .iter()
+        .enumerate()
+        .filter_map(|(index, frequency)| (*frequency >= low && *frequency <= high).then_some(index))
+        .collect();
+    if indices.len() < 2 {
+        return None;
+    }
+    let select = |values: &ndarray::Array1<f64>| {
+        ndarray::Array1::from_iter(indices.iter().map(|index| values[*index]))
+    };
+    Some(roomeq_model::Curve {
+        freq: select(&curve.freq),
+        spl: select(&curve.spl),
+        phase: curve.phase.as_ref().map(select),
+        coherence: curve.coherence.as_ref().map(select),
+        noise_floor_db: curve.noise_floor_db.as_ref().map(select),
+        min_phase: curve.min_phase.as_ref().map(select),
+        excess_phase: curve.excess_phase.as_ref().map(select),
+        excess_delay_ms: curve.excess_delay_ms,
+    })
+}
+
+fn passband_curves(
+    chain: &ChannelDspChain,
+    curves: &[&roomeq_model::Curve],
+    evaluation_band: (f64, f64),
+) -> Option<Vec<roomeq_model::Curve>> {
+    let reference = curves.first()?;
+    let (low, high) = route_passband(chain, reference, evaluation_band)?;
+    curves
+        .iter()
+        .map(|curve| crop_curve_to_band(curve, low, high))
+        .collect()
+}
+
+fn evaluate_passband_correction_acceptance(
+    chain: &ChannelDspChain,
+    initial: &roomeq_model::Curve,
+    post: &roomeq_model::Curve,
+    target: &roomeq_model::Curve,
+    smoothing_n: usize,
+    evaluation_band: (f64, f64),
+) -> Option<roomeq_engine::quality::CorrectionAcceptanceReport> {
+    let curves: Vec<_> = passband_curves(chain, &[initial, post, target], evaluation_band)?
+        .iter()
+        .map(|curve| roomeq_engine::smooth_one_over_n_octave(curve, smoothing_n))
+        .collect();
+    roomeq_engine::quality::evaluate_correction_acceptance(
+        &curves[0],
+        &curves[1],
+        &curves[2],
+        None,
+        roomeq_engine::quality::CorrectionAcceptancePolicy::RuntimeSafety,
+    )
+    .ok()
+}
+
 fn align_target_level(reference: &roomeq_model::Curve, target: &mut roomeq_model::Curve) {
     if reference.spl.len() != target.spl.len() || reference.spl.is_empty() {
         return;
@@ -614,7 +988,7 @@ fn routed_baseline_curve(
     sample_rate: f64,
 ) -> Option<roomeq_model::Curve> {
     let baseline = correction_free_chain(chain);
-    crate::ctc::apply_channel_dsp_chain_to_curve(&baseline, initial, sample_rate).ok()
+    apply_logical_channel_chain(&baseline, initial, sample_rate, Path::new(".")).ok()
 }
 
 /// Remove the non-correction routing transfer (level alignment, crossover,
@@ -652,47 +1026,48 @@ fn revert_regressed_correction_stages(
     initial: &roomeq_model::Curve,
     target: &roomeq_model::Curve,
     sample_rate: f64,
+    smoothing_n: usize,
+    evaluation_band: (f64, f64),
+    sidecar_dir: &Path,
 ) -> Option<(
     ChannelDspChain,
     roomeq_model::Curve,
     BTreeSet<CorrectionStage>,
     roomeq_engine::quality::CorrectionAcceptanceReport,
 )> {
-    use roomeq_engine::quality::{CorrectionAcceptancePolicy, evaluate_correction_acceptance};
-
     let stages = correction_stages(chain);
     let routed_baseline = routed_baseline_curve(chain, initial, sample_rate)?;
     let mut active_chain = chain.clone();
     let mut active_curve =
-        crate::ctc::apply_channel_dsp_chain_to_curve(&active_chain, initial, sample_rate).ok()?;
+        apply_logical_channel_chain(&active_chain, initial, sample_rate, sidecar_dir).ok()?;
     let active_acceptance_curve =
         remove_routing_transfer(initial, &routed_baseline, &active_curve)?;
-    let mut active_report = evaluate_correction_acceptance(
+    let mut active_report = evaluate_passband_correction_acceptance(
+        chain,
         initial,
         &active_acceptance_curve,
         target,
-        None,
-        CorrectionAcceptancePolicy::RuntimeSafety,
-    )
-    .ok()?;
+        smoothing_n,
+        evaluation_band,
+    )?;
     let mut reverted = BTreeSet::new();
 
     for stage in stages {
         let mut candidate_chain = active_chain.clone();
         remove_correction_stage(&mut candidate_chain, stage);
         let candidate_curve =
-            crate::ctc::apply_channel_dsp_chain_to_curve(&candidate_chain, initial, sample_rate)
+            apply_logical_channel_chain(&candidate_chain, initial, sample_rate, sidecar_dir)
                 .ok()?;
         let candidate_acceptance_curve =
             remove_routing_transfer(initial, &routed_baseline, &candidate_curve)?;
-        let candidate_report = evaluate_correction_acceptance(
+        let candidate_report = evaluate_passband_correction_acceptance(
+            &candidate_chain,
             initial,
             &candidate_acceptance_curve,
             target,
-            None,
-            CorrectionAcceptancePolicy::RuntimeSafety,
-        )
-        .ok()?;
+            smoothing_n,
+            evaluation_band,
+        )?;
         if candidate_report.metrics.post_target_weighted_rms_db
             + (active_report.metrics.pre_target_weighted_rms_db.abs() * 1e-6).max(1e-9)
             < active_report.metrics.post_target_weighted_rms_db
@@ -892,7 +1267,13 @@ mod tests {
             .unwrap()
             .optimizer_evidence = vec![evidence];
 
-        apply_final_correction_safety_gate(&mut result, 48_000.0);
+        apply_final_correction_safety_gate(
+            &mut result,
+            48_000.0,
+            3,
+            (20.0, 20_000.0),
+            Path::new("."),
+        );
 
         let report = result
             .metadata
@@ -927,7 +1308,13 @@ mod tests {
             .unwrap()
             .optimizer_evidence = vec![evidence];
 
-        apply_final_correction_safety_gate(&mut result, 48_000.0);
+        apply_final_correction_safety_gate(
+            &mut result,
+            48_000.0,
+            3,
+            (20.0, 20_000.0),
+            Path::new("."),
+        );
 
         let report = result.metadata.correction_acceptance.as_ref().unwrap();
         assert!(!report.accepted);
@@ -1059,13 +1446,23 @@ mod tests {
         let channel = result.channel_results.get_mut("left").unwrap();
         channel.pre_score = 1.0;
         channel.post_score = 2.0;
-        channel.final_curve.spl += 6.0;
+        for (index, spl) in channel.final_curve.spl.iter_mut().enumerate() {
+            if index % 2 == 0 {
+                *spl += 12.0;
+            }
+        }
         let chain = result.channels.get_mut("left").unwrap();
         chain.plugins = vec![roomeq_model::PluginConfigWrapper {
             plugin_type: "eq".to_string(),
             parameters: serde_json::json!({"filters": []}),
         }];
-        apply_final_correction_safety_gate(&mut result, 48_000.0);
+        apply_final_correction_safety_gate(
+            &mut result,
+            48_000.0,
+            3,
+            (20.0, 20_000.0),
+            Path::new("."),
+        );
         assert_eq!(result.channel_results["left"].post_score, 1.0);
         assert!(result.channels["left"].plugins.is_empty());
         assert_eq!(
@@ -1091,6 +1488,32 @@ mod tests {
     }
 
     #[test]
+    fn final_safety_gate_ignores_legacy_score_regression_when_canonical_curve_is_safe() {
+        let mut result = single_channel_room_result("left");
+        let channel = result.channel_results.get_mut("left").unwrap();
+        channel.pre_score = 1.0;
+        channel.post_score = 2.0;
+        channel.final_curve = channel.initial_curve.clone();
+        result.channels.get_mut("left").unwrap().final_curve = Some((&channel.final_curve).into());
+
+        apply_final_correction_safety_gate(
+            &mut result,
+            48_000.0,
+            3,
+            (20.0, 20_000.0),
+            Path::new("."),
+        );
+
+        assert!(
+            result
+                .metadata
+                .stage_outcomes
+                .iter()
+                .all(|outcome| !outcome.stage.starts_with("final_correction_safety_"))
+        );
+    }
+
+    #[test]
     fn final_safety_gate_reverts_peq_stage_without_removing_gain() {
         let mut result = single_channel_room_result("left");
         let channel = result.channel_results.get_mut("left").unwrap();
@@ -1109,7 +1532,13 @@ mod tests {
             roomeq_engine::output::create_labeled_eq_plugin(&[filter], "room_eq_correction"),
         ];
 
-        apply_final_correction_safety_gate(&mut result, 48_000.0);
+        apply_final_correction_safety_gate(
+            &mut result,
+            48_000.0,
+            3,
+            (20.0, 20_000.0),
+            Path::new("."),
+        );
 
         assert_eq!(result.channels["left"].plugins.len(), 1);
         assert_eq!(result.channels["left"].plugins[0].plugin_type, "gain");
@@ -1142,7 +1571,13 @@ mod tests {
                 "room_eq_correction",
             )];
 
-        apply_final_correction_safety_gate(&mut result, 48_000.0);
+        apply_final_correction_safety_gate(
+            &mut result,
+            48_000.0,
+            3,
+            (20.0, 20_000.0),
+            Path::new("."),
+        );
 
         assert!(result.channels["left"].plugins.is_empty());
         let report = result

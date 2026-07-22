@@ -79,12 +79,34 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
         }
     };
 
-    let pre = result.combined_pre_score;
-    let post = result.combined_post_score;
+    let (pre, post) = if tc.home_cinema_expectations.is_some() {
+        result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .and_then(|acceptance| acceptance.acoustic_quality.as_ref())
+            .map(|quality| {
+                (
+                    quality.training.pre_weighted_rms_median_db,
+                    quality.training.post_weighted_rms_median_db,
+                )
+            })
+            .unwrap_or((result.combined_pre_score, result.combined_post_score))
+    } else {
+        (result.combined_pre_score, result.combined_post_score)
+    };
     let epa_pref = avg_epa_preference(&result);
     let dur = start.elapsed().as_millis() as u64;
 
-    let mut validation_failures = validate_result(&result, tc.room_size(), tc.method, &config);
+    // Home-cinema cases use the canonical, passband-aware runtime acceptance
+    // report below. The generic scalar scores mix unlike channel targets and
+    // graph-routed bass, so treating them as an additional acoustic gate can
+    // reject a physically accepted realization.
+    let mut validation_failures = if tc.home_cinema_expectations.is_some() {
+        Vec::new()
+    } else {
+        validate_result(&result, tc.room_size(), tc.method, &config)
+    };
     if let Some(expectations) = tc.home_cinema_expectations {
         validation_failures.extend(validate_home_cinema_result(
             &result,

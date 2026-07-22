@@ -9,6 +9,9 @@ use std::f64::consts::PI;
 
 /// Lowest response magnitude exposed to optimization and reporting.
 pub const MIN_FILTER_RESPONSE_DB: f64 = -40.0;
+/// Finite floor used when reconstructing a physical serialized DSP graph.
+/// This prevents `log10(0)` without clipping legitimate crossover stopbands.
+pub const MIN_REALIZATION_RESPONSE_DB: f64 = -240.0;
 
 fn validate_response_grid(freqs: &Array1<f64>, sample_rate: f64, context: &str) -> Result<()> {
     if !sample_rate.is_finite() || sample_rate <= 0.0 {
@@ -104,6 +107,15 @@ pub fn try_compute_fir_complex_response(
 
 /// Apply complex filter response (magnitude and phase) to a curve
 pub fn apply_complex_response(curve: &Curve, response: &[Complex64]) -> Curve {
+    apply_complex_response_with_min_db(curve, response, MIN_FILTER_RESPONSE_DB)
+}
+
+/// Apply a complex response with an explicit finite magnitude floor.
+pub fn apply_complex_response_with_min_db(
+    curve: &Curve,
+    response: &[Complex64],
+    min_response_db: f64,
+) -> Curve {
     if response.len() != curve.freq.len() {
         log::warn!(
             "Complex response length {} does not match curve length {}; unmatched bins are preserved",
@@ -119,7 +131,7 @@ pub fn apply_complex_response(curve: &Curve, response: &[Complex64]) -> Curve {
         .unwrap_or_else(|| Array1::zeros(curve.freq.len()));
 
     for (i, &h) in response.iter().take(curve.freq.len()).enumerate() {
-        let h_mag_db = (20.0 * h.norm().log10()).max(MIN_FILTER_RESPONSE_DB);
+        let h_mag_db = (20.0 * h.norm().log10()).max(min_response_db);
         let h_phase_deg = h.arg().to_degrees();
 
         new_spl[i] = curve.spl[i] + h_mag_db;

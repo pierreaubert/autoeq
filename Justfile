@@ -313,7 +313,7 @@ export-test-systems-help:
 	@echo "  just qa-export-pipewire    # runs PipeWire validation in Docker"
 	@echo "  just qa-export-portable    # semantic APO/EasyEffects/Wavelet/Roon checks"
 	@echo "  just qa-export-all         # portable + CamillaDSP + PipeWire matrix"
-	@echo "  just qa-export-equalizer-apo  # requires a Windows VM validator command"
+	@echo "  just qa-export-equalizer-apo  # native Windows, or a Windows UTM VM on macOS"
 	@echo "  just qa-export-roon-setup  # one-time private macOS Roon/BlackHole setup"
 	@echo "  just qa-export-roon-app    # licensed interactive macOS Roon smoke test"
 	@echo
@@ -323,6 +323,7 @@ export-test-systems-help:
 	@echo "Optional validator environment variables:"
 	@echo "  ROOMEQ_CAMILLADSP_VALIDATE_CMD"
 	@echo "  ROOMEQ_EQUALIZER_APO_VALIDATE_CMD"
+	@echo "  ROOMEQ_EQUALIZER_APO_UTM_VM"
 	@echo "  ROOMEQ_EASYEFFECTS_VALIDATE_CMD"
 	@echo "  ROOMEQ_WAVELET_VALIDATE_CMD"
 	@echo "  ROOMEQ_PIPEWIRE_VALIDATE_CMD"
@@ -337,7 +338,8 @@ export-test-systems-help:
 	@echo "  ROOMEQ_EASYEFFECTS_VALIDATE_CMD='path/to/validate-easyeffects {config}' cargo test --release -p roomeq-export tool_contract_easyeffects"
 	@echo
 	@echo "Manual/application-backed validators:"
-	@echo "  Equalizer APO: install on Windows and point ROOMEQ_EQUALIZER_APO_VALIDATE_CMD at an import/syntax-check script."
+	@echo "  Equalizer APO: install in Windows; macOS defaults to the UTM VM named 'Win11 ARM AutoEQ'."
+	@echo "  Set ROOMEQ_EQUALIZER_APO_UTM_VM when the VM has another complete name or UUID."
 	@echo "  Wavelet: Android app; keep structural tests unless you provide a custom validator script."
 	@echo "  Roon: normally manual import/configuration; keep structural JSON tests unless you provide a custom validator script."
 
@@ -432,7 +434,7 @@ qa-export-all: qa-export-portable qa-export-camilladsp qa-export-pipewire
 	#!/usr/bin/env bash
 	set -euo pipefail
 	case "$(uname -s)" in
-		MINGW*|MSYS*|CYGWIN*) just qa-export-equalizer-apo ;;
+		Darwin|MINGW*|MSYS*|CYGWIN*) just qa-export-equalizer-apo ;;
 		*) echo "Equalizer APO engine QA requires Windows; portable APO semantics passed." ;;
 	esac
 
@@ -440,14 +442,27 @@ qa-export-all: qa-export-portable qa-export-camilladsp qa-export-pipewire
 qa-export-equalizer-apo:
 	#!/usr/bin/env bash
 	set -euo pipefail
-	benchmark="${ROOMEQ_EQUALIZER_APO_BENCHMARK:-C:\\Program Files\\EqualizerAPO\\Benchmark.exe}"
-	if [[ ! -f "$benchmark" ]]; then
-		echo "Equalizer APO Benchmark.exe not found: $benchmark" >&2
-		echo "Install Equalizer APO on Windows or set ROOMEQ_EQUALIZER_APO_BENCHMARK." >&2
-		exit 1
-	fi
-	ROOMEQ_EQUALIZER_APO_PCM_CMD="powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-equalizer-apo-benchmark.ps1 -Benchmark '$benchmark' -Config '{config}' -InputFile '{input}' -OutputFile '{output}'" \
-		cargo nextest run --release -p roomeq-export --lib --no-tests fail -E 'test(/equalizer_apo/)'
+	case "$(uname -s)" in
+		Darwin)
+			runner="$(pwd)/scripts/run-equalizer-apo-utm.sh"
+			ROOMEQ_EQUALIZER_APO_PCM_CMD="bash '$runner' '{config}' '{input}' '{output}'" \
+				cargo nextest run --release -p roomeq-export --lib --no-tests fail -E 'test(/equalizer_apo/)'
+			;;
+		MINGW*|MSYS*|CYGWIN*)
+			benchmark="${ROOMEQ_EQUALIZER_APO_BENCHMARK:-C:\\Program Files\\EqualizerAPO\\Benchmark.exe}"
+			if [[ ! -f "$benchmark" ]]; then
+				echo "Equalizer APO Benchmark.exe not found: $benchmark" >&2
+				echo "Install Equalizer APO on Windows or set ROOMEQ_EQUALIZER_APO_BENCHMARK." >&2
+				exit 1
+			fi
+			ROOMEQ_EQUALIZER_APO_PCM_CMD="powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-equalizer-apo-benchmark.ps1 -Benchmark '$benchmark' -Config '{config}' -InputFile '{input}' -OutputFile '{output}'" \
+				cargo nextest run --release -p roomeq-export --lib --no-tests fail -E 'test(/equalizer_apo/)'
+			;;
+		*)
+			echo "Equalizer APO engine QA requires Windows or macOS with a Windows UTM VM." >&2
+			exit 1
+			;;
+	esac
 
 [group('qa-export')]
 qa-export-pipewire:

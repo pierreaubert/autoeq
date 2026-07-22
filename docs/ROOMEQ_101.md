@@ -851,14 +851,18 @@ EasyEffects and Wavelet accept only gain/EQ chains that are identical on every
 channel, because their exported presets are system-wide rather than independent
 per-channel graphs.
 
-Equalizer APO also has a native Windows engine test. The
+Equalizer APO also has a Windows engine test. The
 `qa-export-equalizer-apo` recipe runs the official `Benchmark.exe`, which loads
 Equalizer APO's real `FilterEngine`, processes a deterministic WAV through the
 generated configuration, and compares the measured result with RoomEQ's
-expected response. Set `ROOMEQ_EQUALIZER_APO_BENCHMARK` when Equalizer APO is
-installed outside its standard location; the test needs permission to
-temporarily update Equalizer APO's `ConfigPath` registry value and restores it
-afterward.
+expected response. It runs directly on Windows; on macOS it starts the Windows
+UTM VM named `Win11 ARM AutoEQ`, transfers the generated artifacts through the
+UTM guest agent, runs the benchmark in the guest, and copies the rendered WAV
+back. Set `ROOMEQ_EQUALIZER_APO_UTM_VM` to use another complete VM name or UUID.
+The VM needs the UTM Windows guest tools and Equalizer APO installed. Set
+`ROOMEQ_EQUALIZER_APO_BENCHMARK` when Equalizer APO is installed outside its
+standard guest path. The benchmark helper temporarily updates Equalizer APO's
+`ConfigPath` registry value and restores it afterward.
 
 The PipeWire exporter preserves the per-channel plugin order and has native
 coverage for signed gain/polarity, delay, all RoomEQ biquad variants, LR24 and

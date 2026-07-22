@@ -8,7 +8,7 @@ use math_audio_dsp::{fir_complex_response, lr4_crossover_response};
 use num_complex::Complex64;
 use roomeq_engine::Curve;
 use roomeq_engine::error::{AutoeqError, Result};
-use roomeq_engine::response::try_apply_complex_response;
+use roomeq_engine::response::{MIN_REALIZATION_RESPONSE_DB, apply_complex_response_with_min_db};
 use roomeq_model::{ChannelDspChain, PluginConfigWrapper, SystemConfig};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -77,7 +77,11 @@ pub fn apply_channel_dsp_chain_to_curve(
         .iter()
         .map(|frequency| channel_chain_response(chain, *frequency, sample_rate, &mut cache))
         .collect::<Result<Vec<_>>>()?;
-    try_apply_complex_response(curve, &response)
+    Ok(apply_complex_response_with_min_db(
+        curve,
+        &response,
+        MIN_REALIZATION_RESPONSE_DB,
+    ))
 }
 
 pub(super) struct DspResponseCache {

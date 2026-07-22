@@ -281,9 +281,10 @@ add it to a docker, more work to test properly EQAPO on Windows)
   high-precision gain, frequency, delay, and filter parameters. Use
   `just qa-export-portable` or `just qa-export-all` to run the expanded matrix.
 - Added a full Equalizer APO engine contract using its official
-  `Benchmark.exe`. On Windows, `just qa-export-equalizer-apo` now feeds a
+  `Benchmark.exe`. On Windows, `just qa-export-equalizer-apo` feeds a
   deterministic WAV through Equalizer APO's real `FilterEngine` and checks the
-  measured output gain against RoomEQ's expected response.
+  measured output gain against RoomEQ's expected response. On macOS, the same
+  recipe now starts a Windows UTM VM and runs the engine contract in the guest.
 
 # 0.4.48
 

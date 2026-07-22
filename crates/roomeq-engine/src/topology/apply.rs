@@ -51,5 +51,9 @@ pub fn apply_crossover_response_to_curve(
 ) -> Curve {
     let resp =
         compute_crossover_complex_response(type_str, freq, sample_rate, is_lowpass, &curve.freq);
-    response::apply_complex_response(curve, &resp)
+    response::apply_complex_response_with_min_db(
+        curve,
+        &resp,
+        response::MIN_REALIZATION_RESPONSE_DB,
+    )
 }

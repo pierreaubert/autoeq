@@ -201,6 +201,15 @@ pub(super) fn encode_result_as_params(
         let offset = ch_idx * per_ch;
         params[offset] = ch_result.delay_ms;
 
+        // A zero-valued AP frequency/Q is outside the configured bounds and
+        // does not represent an identity section. Seed newly added adaptive
+        // sections at the least intrusive valid corner until optimization
+        // moves them to a useful location.
+        for i in 0..config.ap_per_channel {
+            params[offset + 1 + i * 2] = config.ap_max_freq;
+            params[offset + 1 + i * 2 + 1] = config.ap_min_q;
+        }
+
         for (i, ap) in ch_result.ap_filters.iter().enumerate() {
             if i < config.ap_per_channel {
                 params[offset + 1 + i * 2] = ap.freq;

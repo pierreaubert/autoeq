@@ -32,9 +32,16 @@ pub(super) fn decode_per_channel(
         // (use single-channel slice for pre/post comparison)
         let single_ch = &channels[ch_idx..ch_idx + 1];
 
-        // Pre: identity params for 1 channel
-        let id_1ch = vec![0.0; param_count(1, config)];
-        let pre_rms = compute_sum_gd_rms(single_ch, &id_1ch, band_indices, config);
+        // Pre: a true identity path has no AP sections and no polarity
+        // control. Zero AP frequency/Q parameters are invalid and must not be
+        // used as a proxy for identity.
+        let identity_config = GdOptConfig {
+            ap_per_channel: 0,
+            optimize_polarity: false,
+            ..config.clone()
+        };
+        let id_1ch = vec![0.0; param_count(1, &identity_config)];
+        let pre_rms = compute_sum_gd_rms(single_ch, &id_1ch, band_indices, &identity_config);
 
         // Post: this channel's params, re-encoded for 1 channel
         let per_ch_size =

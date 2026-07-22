@@ -11,6 +11,7 @@ use super::misc::MAX_AP_BUDGET;
 use super::misc::same_frequency_grid;
 use super::types::ChannelMeasurementInput;
 use super::types::GroupDelayOptResult;
+use super::types::encode_result_as_params;
 use super::types::normalize_per_channel_controls;
 use autoeq_optim::optim::scalar::{ScalarOptimConfig, optimize_bounded_scalar};
 use roomeq_model::{MixedModeConfig, ProcessingMode};
@@ -28,6 +29,15 @@ pub fn optimize_group_delay(
     channels: &[ChannelMeasurementInput],
     band: (f64, f64),
     config: &GdOptConfig,
+) -> Result<GroupDelayOptResult, String> {
+    optimize_group_delay_with_initial(channels, band, config, None)
+}
+
+fn optimize_group_delay_with_initial(
+    channels: &[ChannelMeasurementInput],
+    band: (f64, f64),
+    config: &GdOptConfig,
+    initial_result: Option<&GroupDelayOptResult>,
 ) -> Result<GroupDelayOptResult, String> {
     let n_ch = channels.len();
     if n_ch < 2 {
@@ -65,8 +75,14 @@ pub fn optimize_group_delay(
     let mean_coherence = compute_mean_coherence(channels, &band_indices);
 
     // Compute pre-optimisation sum GD RMS
-    let identity_params = vec![0.0; param_count(n_ch, config)];
-    let sum_gd_pre_rms_ms = compute_sum_gd_rms(channels, &identity_params, &band_indices, config);
+    let identity_config = GdOptConfig {
+        ap_per_channel: 0,
+        optimize_polarity: false,
+        ..config.clone()
+    };
+    let identity_params = vec![0.0; param_count(n_ch, &identity_config)];
+    let sum_gd_pre_rms_ms =
+        compute_sum_gd_rms(channels, &identity_params, &band_indices, &identity_config);
 
     // Build bounds for DE
     let bounds = build_bounds(n_ch, config);
@@ -77,7 +93,38 @@ pub fn optimize_group_delay(
 
     let loss_fn = |x: &[f64]| -> f64 { gd_loss(channels_ref, x, band_indices_ref, config_ref) };
 
-    let initial = identity_params.clone();
+    let mut initial = initial_result
+        .map(|result| encode_result_as_params(result, config))
+        .unwrap_or_else(|| {
+            let empty = GroupDelayOptResult {
+                band,
+                per_channel: (0..n_ch)
+                    .map(|_| super::types::ChannelGdResult {
+                        delay_ms: 0.0,
+                        polarity_inverted: false,
+                        ap_filters: Vec::new(),
+                        channel_gd_pre_rms_ms: 0.0,
+                        channel_gd_post_rms_ms: 0.0,
+                    })
+                    .collect(),
+                sum_gd_pre_rms_ms: 0.0,
+                sum_gd_post_rms_ms: 0.0,
+                mean_coherence: 0.0,
+                improvement_db: 0.0,
+            };
+            encode_result_as_params(&empty, config)
+        });
+    if initial_result.is_some() {
+        let stride = 1 + config.ap_per_channel * 2 + usize::from(config.optimize_polarity);
+        let delays: Vec<_> = (0..n_ch).map(|channel| initial[channel * stride]).collect();
+        let min_delay = delays.iter().copied().fold(f64::INFINITY, f64::min);
+        let max_delay = delays.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let common_delay = 0.5 * (min_delay + max_delay);
+        for channel in 0..n_ch {
+            initial[channel * stride] = (initial[channel * stride] - common_delay)
+                .clamp(-config.max_delay_ms, config.max_delay_ms);
+        }
+    }
     let report = optimize_bounded_scalar(
         &bounds,
         &initial,
@@ -139,7 +186,7 @@ pub fn optimize_group_delay_adaptive(
         return Err("Adaptive AP bootstrap requires at least 2 sweep realisations (N >= 2)".into());
     }
     if sweep_realisations.len() < 4 {
-        log::warn!(
+        log::info!(
             "GD-Opt adaptive bootstrap has only {} sweep realisations; variance estimate is unstable below N=4",
             sweep_realisations.len()
         );
@@ -159,7 +206,8 @@ pub fn optimize_group_delay_adaptive(
             ..config.clone()
         };
 
-        let trial_result = optimize_group_delay(channels, band, &trial_config)?;
+        let trial_result =
+            optimize_group_delay_with_initial(channels, band, &trial_config, Some(&best_result))?;
 
         // Bootstrap test: for each sweep realisation, compute GD RMS
         // with and without the k-th AP filter.
@@ -184,6 +232,11 @@ pub fn optimize_group_delay_adaptive(
         // Identical positive improvements are maximally consistent evidence,
         // not insignificant merely because their sample variance is zero.
         let significant = bootstrap_improvement_is_significant(mean_improvement, sigma);
+        log::warn!(
+            "GD-Opt adaptive AP trial k={k}: mean bootstrap improvement={mean_improvement:.4} ms, sigma={sigma:.4} ms, significant={significant}, aggregate RMS={:.4} -> {:.4} ms",
+            best_result.sum_gd_post_rms_ms,
+            trial_result.sum_gd_post_rms_ms,
+        );
 
         if significant && trial_result.sum_gd_post_rms_ms < best_result.sum_gd_post_rms_ms {
             best_result = trial_result;

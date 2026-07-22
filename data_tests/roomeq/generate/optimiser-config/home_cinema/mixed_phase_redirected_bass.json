@@ -9,8 +9,8 @@
       "lfe_channel": "LFE",
       "lfe_playback_gain_db": 10.0,
       "apply_lfe_gain_to_chain": false,
-      "sub_trim_db": -3.0,
-      "max_sub_boost_db": 3.0,
+      "sub_trim_db": -6.0,
+      "max_sub_boost_db": 2.0,
       "headroom_margin_db": 18.0,
       "group_crossovers": { "lcr": "first", "surround": "first", "height": "first" },
       "optimize_groups": true
@@ -18,17 +18,19 @@
   },
   "optimizer": {
     "processing_mode": "mixed_phase",
+    "max_db": 6.5,
+    "max_q": 5.0,
     "fir": {
-      "taps": 2048,
+      "taps": 1024,
       "phase": "kirkeby",
       "correct_excess_phase": true,
       "phase_smoothing": 0.167
     },
     "mixed_phase": {
-      "max_fir_length_ms": 10.0,
+      "max_fir_length_ms": 2.0,
       "pre_ringing_threshold_db": -30.0,
       "min_spatial_depth": 0.5,
-      "phase_smoothing_octaves": 0.167
+      "phase_smoothing_octaves": 0.75
     },
     "multi_measurement": { "strategy": "variance_penalized", "variance_lambda": 1.0 },
     "phase_alignment": {

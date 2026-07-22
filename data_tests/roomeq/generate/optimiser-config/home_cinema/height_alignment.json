@@ -1,18 +1,23 @@
 {
   "optimizer": {
     "processing_mode": "low_latency",
-    "multi_measurement": { "strategy": "variance_penalized", "variance_lambda": 1.0 },
+    "max_db": 5.0,
+    "max_q": 3.0,
+    "multi_measurement": {
+      "strategy": "variance_penalized",
+      "variance_lambda": 1.0
+    },
     "inter_channel_timbre_matching": {
-      "enabled": true,
+      "enabled": false,
       "reference_channel": "C",
       "min_improvement_db": 0.05
     },
     "height_channel_alignment": {
       "enabled": true,
-      "match_timbre": true,
+      "match_timbre": false,
       "match_level": true,
-      "match_arrival_time": true,
-      "match_phase": true,
+      "match_arrival_time": false,
+      "match_phase": false,
       "min_timbre_improvement_db": 0.05,
       "max_delay_ms": 20.0,
       "reference_channels": {

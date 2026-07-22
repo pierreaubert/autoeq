@@ -9,7 +9,7 @@
       "lfe_channel": "LFE",
       "lfe_playback_gain_db": 10.0,
       "apply_lfe_gain_to_chain": false,
-      "sub_trim_db": -3.0,
+      "sub_trim_db": -5.0,
       "max_sub_boost_db": 3.0,
       "headroom_margin_db": 18.0,
       "group_crossovers": { "lcr": "first", "surround": "first", "height": "first" },
@@ -18,8 +18,12 @@
   },
   "optimizer": {
     "processing_mode": "phase_linear",
+    "max_freq": 800.0,
+    "max_db": 12.0,
+    "max_q": 10.0,
+    "num_filters": 14,
     "fir": {
-      "taps": 4096,
+      "taps": 1248,
       "phase": "kirkeby",
       "correct_excess_phase": true,
       "phase_smoothing": 0.167

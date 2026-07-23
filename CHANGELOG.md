@@ -41,8 +41,36 @@
   existing root RoomEQ entry points remain available.
 - Added crate-local README and CHANGELOG files for every extracted library.
 
+## QA improvements
+
+- Expanded deterministic home-cinema QA with Sonium fast-hybrid and FEM
+  fixtures covering 5.1.2, 7.1.2, 7.1.4, 7.1.6, 9.1.6, multi-seat and
+  four- and eight-sub systems. The matrix exercises IIR, linear-phase FIR,
+  hybrid, mixed-phase and supported Kautz paths together with redirected
+  bass, LFE-only routing, height/time/phase alignment, group delay,
+  excursion protection, Schroeder splitting, channel matching, MSO, SFM
+  modal-basis optimization and runtime safety reversion.
+- Added `qa-roomeq-cinema-full` as the long-running cinema release gate,
+  combining the directed home-cinema corpus, the full synthetic matrix and
+  feature progression tests. Synthetic QA can now be filtered by processing
+  mode, difficulty, layout and subwoofer topology for focused diagnosis.
+- Extended Windows Equalizer APO verification through the macOS UTM guest
+  workflow, refreshed generated home-cinema fixtures, and restored the Roon
+  manual-QA documentation.
+
 ## Fixes
 
+- Corrected RoomEQ group-delay and Sonium phase conventions, primary-seat and
+  height-channel timing alignment, multi-seat/modal-basis validation, and
+  bass-management headroom realization for routed home-cinema systems.
+- Made home-cinema post-EQ acceptance use the same crossover scoring band as
+  final reporting, stopped report refresh from mixing flat-loss and weighted
+  RMS units, and score routed subwoofers only through their crossover instead
+  of treating the intentional low-pass rolloff as an error.
+- Preserved strict acoustic-regression failures while recognizing a documented
+  runtime-policy stage reversion as a successful safety outcome; Kautz
+  synthetic fixtures now contain production-detectable modal resonances
+  without altering the IIR/FIR/mixed fixtures.
 - Execute every leaf crate's focused unit-test command through a generated CI
   matrix, lint/check all workspace targets, and run the production RoomEQ
   coverage recipe instead of the empty root-library test target.

@@ -7,15 +7,7 @@ pub(in super::super) fn recompute_curve_flatness_score(
     min_freq: f64,
     max_freq: f64,
 ) -> f64 {
-    let freqs_f32: Vec<f32> = curve.freq.iter().map(|&f| f as f32).collect();
-    let spl_f32: Vec<f32> = curve.spl.iter().map(|&s| s as f32).collect();
-    let mean = compute_average_response(
-        &freqs_f32,
-        &spl_f32,
-        Some((min_freq as f32, max_freq as f32)),
-    ) as f64;
-    let normalized_spl = &curve.spl - mean;
-    roomeq_engine::loss::flat_loss(&curve.freq, &normalized_spl, min_freq, max_freq)
+    roomeq_engine::topology::compute_flat_loss(curve, min_freq, max_freq)
 }
 
 pub(in super::super) fn should_apply_spectral_shelves(
@@ -82,7 +74,11 @@ pub(in super::super) fn final_score_band_for_channel(
 
     if is_subwoofer_channel(config, channel_name) {
         let crossover_max = crossover_max.unwrap_or(160.0);
-        max_freq = max_freq.min((crossover_max * 2.0).clamp(120.0, 250.0));
+        // Routed subwoofer scores stop at crossover. Extending the refreshed
+        // score above it treats the intentional low-pass rolloff as response
+        // error and makes the refreshed metric disagree with the topology
+        // optimizer's pre/post scores.
+        max_freq = max_freq.min(crossover_max);
     } else if config
         .system
         .as_ref()
@@ -620,6 +616,17 @@ mod tests {
             "flat curve should have low flatness score: {}",
             score
         );
+    }
+
+    #[test]
+    fn recompute_curve_flatness_score_matches_topology_metric() {
+        let mut curve = small_curve();
+        for (index, spl) in curve.spl.iter_mut().enumerate() {
+            *spl += (index as f64 * 0.7).sin() * 6.0;
+        }
+        let expected = roomeq_engine::topology::compute_flat_loss(&curve, 20.0, 20_000.0);
+        let actual = recompute_curve_flatness_score(&curve, 20.0, 20_000.0);
+        assert_eq!(actual, expected);
     }
 
     #[test]

@@ -41,4 +41,10 @@ pub(super) fn apply_qa_overrides(config: &mut RoomConfig, maxeval: usize) {
     }
 }
 
+pub(super) fn apply_home_cinema_qa_overrides(config: &mut RoomConfig, maxeval: usize) {
+    let configured_filter_count = config.optimizer.num_filters;
+    apply_qa_overrides(config, maxeval);
+    config.optimizer.num_filters = configured_filter_count;
+}
+
 pub(super) static TEMP_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);

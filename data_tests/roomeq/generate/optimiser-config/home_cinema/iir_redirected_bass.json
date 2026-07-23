@@ -9,7 +9,7 @@
       "lfe_channel": "LFE",
       "lfe_playback_gain_db": 10.0,
       "apply_lfe_gain_to_chain": false,
-      "sub_trim_db": -6.0,
+      "sub_trim_db": -7.0,
       "max_sub_boost_db": 3.0,
       "headroom_margin_db": 18.0,
       "group_crossovers": { "lcr": "first", "surround": "first", "height": "first" },

@@ -35,7 +35,7 @@ pub(super) struct Args {
     #[arg(long = "case")]
     pub(super) case_name: Option<String>,
 
-    /// Filter by solver (only `fem` is supported; retained for compatibility)
+    /// Filter by solver (`fem` or `fast-hybrid`)
     #[arg(long)]
     pub(super) solver: Option<String>,
 

@@ -1,0 +1,33 @@
+{
+  "optimizer": {
+    "processing_mode": "mixed_phase",
+    "max_freq": 1500.0,
+    "max_db": 8.0,
+    "num_filters": 10,
+    "fir": {
+      "taps": 2048,
+      "phase": "kirkeby",
+      "correct_excess_phase": true,
+      "phase_smoothing": 0.167
+    },
+    "mixed_phase": {
+      "max_fir_length_ms": 15.0,
+      "pre_ringing_threshold_db": -30.0,
+      "min_spatial_depth": 0.5,
+      "phase_smoothing_octaves": 0.167
+    },
+    "multi_measurement": { "strategy": "spatial_robustness", "variance_lambda": 1.0 },
+    "multi_seat": {
+      "enabled": true,
+      "strategy": "modal_basis",
+      "primary_seat": 0,
+      "optimize_polarity": true,
+      "allpass_filters_per_sub": 1,
+      "per_sub_peq": true,
+      "global_eq": true,
+      "all_channel_enabled": true,
+      "all_channel_strategy": "spatial_robustness",
+      "seat_weights": [1.0, 0.8, 0.8, 0.6, 0.6]
+    }
+  }
+}

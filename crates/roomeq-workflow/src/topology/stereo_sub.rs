@@ -559,12 +559,11 @@ impl WorkflowExecutor for Stereo21Executor {
             )?;
             let filters = post_eq_result.filters;
 
-            let pre = compute_flat_loss(post_curve, opt_config.min_freq, main_post_max_freq);
+            let pre = compute_flat_loss(post_curve, final_xo_freq, main_post_max_freq);
             let eq_resp =
                 response::compute_peq_complex_response(&filters, &post_curve.freq, sample_rate);
             let post_curve_after = response::apply_complex_response(post_curve, &eq_resp);
-            let post =
-                compute_flat_loss(&post_curve_after, opt_config.min_freq, main_post_max_freq);
+            let post = compute_flat_loss(&post_curve_after, final_xo_freq, main_post_max_freq);
             if post < pre {
                 optimizer_evidence_by_channel
                     .entry(role.to_string())
@@ -673,12 +672,16 @@ impl WorkflowExecutor for Stereo21Executor {
             }
 
             let eqs = post_eq_filters.get(role);
-            if let Some(e) = eqs {
+            if let Some(e) = eqs
+                && !e.is_empty()
+            {
                 plugins.push(output::create_labeled_eq_plugin(e, "post_eq"));
             }
 
             let intermediate = if role == "L" { &l_post } else { &r_post };
-            let final_curve_obj = if let Some(e) = eqs {
+            let final_curve_obj = if let Some(e) = eqs
+                && !e.is_empty()
+            {
                 let resp =
                     response::compute_peq_complex_response(e, &intermediate.freq, sample_rate);
                 response::apply_complex_response(intermediate, &resp)
@@ -733,11 +736,15 @@ impl WorkflowExecutor for Stereo21Executor {
         }
 
         let sub_eqs = post_eq_filters.get(&sub_role);
-        if let Some(e) = sub_eqs {
+        if let Some(e) = sub_eqs
+            && !e.is_empty()
+        {
             sub_plugins.push(output::create_labeled_eq_plugin(e, "post_eq"));
         }
 
-        let final_sub_curve = if let Some(e) = sub_eqs {
+        let final_sub_curve = if let Some(e) = sub_eqs
+            && !e.is_empty()
+        {
             let resp = response::compute_peq_complex_response(e, &sub_post.freq, sample_rate);
             response::apply_complex_response(&sub_post, &resp)
         } else {
@@ -804,7 +811,9 @@ impl WorkflowExecutor for Stereo21Executor {
         for role in ["L", "R"] {
             let intermediate = if role == "L" { &l_post } else { &r_post };
             let pre_score = compute_flat_loss(intermediate, final_xo_freq, max_freq);
-            let final_curve_obj = if let Some(e) = post_eq_filters.get(role) {
+            let final_curve_obj = if let Some(e) = post_eq_filters.get(role)
+                && !e.is_empty()
+            {
                 let resp =
                     response::compute_peq_complex_response(e, &intermediate.freq, sample_rate);
                 response::apply_complex_response(intermediate, &resp)

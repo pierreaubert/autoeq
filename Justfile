@@ -627,6 +627,18 @@ qa-roomeq-multi-measurement: ensure-venv
 qa-roomeq-home-cinema-configs:
 	cargo run --features qa --bin roomeq-qa-coverage --release -- --home-cinema
 
+# Exhaustive offline cinema QA. The Sonium corpus covers 5.1.2, 7.1.2,
+# 7.4.4, 7.1.6, 9.1.6, and 9.8.6 (five seats, up to eight physical subs).
+# This is intentionally a scheduled/local gate rather than a PR gate; allow up
+# to 12 hours on a typical development workstation.
+[group('qa-roomeq')]
+qa-roomeq-cinema-full jobs="4" maxeval="5000":
+	cargo run --features qa --bin roomeq-qa-coverage --release -- --home-cinema --jobs {{jobs}} --maxeval {{maxeval}}
+	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --full-matrix
+	cargo run --features qa --bin roomeq-qa-features --no-default-features --release
+	# Acoustic baseline regression is a separate cross-product gate:
+	# `just qa-roomeq-acoustic-nightly`.
+
 # New comprehensive QA using roomeq-qa-full binary
 [group('qa-roomeq')]
 qa-roomeq-coverage: prod-autoeq

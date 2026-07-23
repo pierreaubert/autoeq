@@ -23,6 +23,11 @@ pub(super) const QA_MAXEVAL: usize = 15000;
 /// Global counter for unique temp dir names across threads
 pub(super) static TEMP_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
+/// Strong low-frequency resonance used only by Kautz QA cases so production
+/// mode detection has an unambiguous mode to decompose.
+pub(super) const KAUTZ_REFERENCE_MODES: &[(f64, f64, f64)] =
+    &[(28.0, 8.0, 10.0), (150.0, 6.0, 8.0)];
+
 pub(super) const EASY: DifficultyLevel = DifficultyLevel {
     name: "easy",
     modes: &[(80.0, 2.0, -3.0), (150.0, 2.0, 3.0), (250.0, 2.0, -2.0)],
@@ -63,8 +68,8 @@ pub(super) const ALL_DIFFICULTIES: &[DifficultyLevel] = &[EASY, MEDIUM, HARD];
 pub(super) const MS_EASY: MultiSubDifficulty = MultiSubDifficulty {
     name: "easy",
     n_subs: 2,
-    shared_modes: &[(60.0, 3.0, -5.0), (100.0, 3.0, 4.0)],
-    per_sub_modes: &[],
+    shared_modes: &[(60.0, 3.0, -6.0), (100.0, 3.0, 5.0)],
+    per_sub_modes: &[&[(70.0, 3.0, -4.0)], &[(120.0, 3.0, 4.0)]],
     delays_ms: &[0.0, 2.0],
     noise_rms: 0.3,
 };
@@ -190,6 +195,13 @@ pub(super) const LAYOUT_7_1_4: ChannelLayout = ChannelLayout {
     heights: &["TFL", "TFR", "TRL", "TRR"],
 };
 
+pub(super) const LAYOUT_7_1_6: ChannelLayout = ChannelLayout {
+    name: "7.1.6",
+    mains: &["L", "R", "C", "SL", "SR", "SBL", "SBR"],
+    heights: &["TFL", "TFR", "TML", "TMR", "TRL", "TRR"],
+    has_lfe: true,
+};
+
 pub(super) const LAYOUT_9_1_4: ChannelLayout = ChannelLayout {
     name: "9.1.4",
     mains: &["L", "R", "C", "SL", "SR", "SBL", "SBR", "WL", "WR"],
@@ -215,6 +227,7 @@ pub(super) const ALL_LAYOUTS: &[ChannelLayout] = &[
     LAYOUT_5_1_4,
     LAYOUT_7_1_2,
     LAYOUT_7_1_4,
+    LAYOUT_7_1_6,
     LAYOUT_9_1_4,
     LAYOUT_9_1_6,
 ];
@@ -229,6 +242,8 @@ pub(super) const SUB_MSO_AP: SubTopology = SubTopology {
 
 pub(super) const SUB_MSO_4: SubTopology = SubTopology { name: "mso_4sub" };
 
+pub(super) const SUB_MSO_8: SubTopology = SubTopology { name: "mso_8sub" };
+
 pub(super) const SUB_CARDIOID: SubTopology = SubTopology { name: "cardioid" };
 
 pub(super) const SUB_DBA: SubTopology = SubTopology { name: "dba" };
@@ -238,6 +253,7 @@ pub(super) const ALL_SUB_TOPOS: &[SubTopology] = &[
     SUB_MSO,
     SUB_MSO_AP,
     SUB_MSO_4,
+    SUB_MSO_8,
     SUB_CARDIOID,
     SUB_DBA,
 ];

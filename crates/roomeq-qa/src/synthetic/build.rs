@@ -1,4 +1,5 @@
 use super::channel_layout::ChannelLayout;
+use super::consts::KAUTZ_REFERENCE_MODES;
 use super::consts::QA_MAXEVAL;
 use super::consts::SEED;
 use super::types::DifficultyLevel;
@@ -92,6 +93,8 @@ fn default_qa_mixed_phase_config() -> MixedPhaseSerdeConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::synthetic::consts::{EASY, LAYOUT_2_0, LAYOUT_7_1_6, SUB_MSO_8};
+    use roomeq_synthetic::generate_flat_curve;
 
     #[test]
     fn processing_modes_install_required_qa_configuration() {
@@ -107,6 +110,52 @@ mod tests {
         configure_processing_mode(&mut optimizer, ProcessingMode::MixedPhase);
         assert!(optimizer.fir.is_some());
         assert!(optimizer.mixed_phase.is_some());
+    }
+
+    #[test]
+    fn extended_cinema_layout_builds_eight_physical_subs() {
+        let base = generate_flat_curve(20.0, 20_000.0, 100);
+        let config = build_multichannel_config(
+            &LAYOUT_7_1_6,
+            Some(&SUB_MSO_8),
+            &EASY,
+            &base,
+            ProcessingMode::LowLatency,
+            48_000.0,
+        );
+
+        assert_eq!(config.system.as_ref().unwrap().speakers.len(), 14);
+        match config.speakers.get("lfe").unwrap() {
+            SpeakerConfig::MultiSub(group) => assert_eq!(group.subwoofers.len(), 8),
+            other => panic!("expected eight-sub MSO group, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn easy_fixture_contains_a_detectable_kautz_mode() {
+        let base = generate_flat_curve(20.0, 20_000.0, 200);
+        let config = build_multichannel_config(
+            &LAYOUT_2_0,
+            None,
+            &EASY,
+            &base,
+            ProcessingMode::KautzModal,
+            48_000.0,
+        );
+        let SpeakerConfig::Single(MeasurementSource::InMemory(curve)) =
+            config.speakers.get("l").unwrap()
+        else {
+            panic!("expected an in-memory left-channel fixture");
+        };
+        let modes = roomeq_analysis::impulse_analysis::detect_room_modes(
+            &curve.freq,
+            &curve.spl,
+            &roomeq_analysis::impulse_analysis::DecomposedCorrectionConfig::default(),
+        );
+        assert!(
+            modes.iter().any(|mode| (mode.frequency - 28.0).abs() < 5.0),
+            "expected the easy fixture's 28 Hz reference resonance to be detected: {modes:?}"
+        );
     }
 }
 
@@ -162,6 +211,7 @@ pub(super) fn build_multichannel_config(
     sub_topo: Option<&SubTopology>,
     difficulty: &DifficultyLevel,
     base_curve: &Curve,
+    processing_mode: ProcessingMode,
     sample_rate: f64,
 ) -> RoomConfig {
     let mut speakers = HashMap::new();
@@ -170,7 +220,15 @@ pub(super) fn build_multichannel_config(
     let modes_biquad: Vec<Biquad> = difficulty
         .modes
         .iter()
-        .map(|&(freq, q, gain)| Biquad::new(BiquadFilterType::Peak, freq, sample_rate, q, gain))
+        .copied()
+        .chain(
+            (processing_mode == ProcessingMode::KautzModal)
+                .then_some(KAUTZ_REFERENCE_MODES)
+                .into_iter()
+                .flatten()
+                .copied(),
+        )
+        .map(|(freq, q, gain)| Biquad::new(BiquadFilterType::Peak, freq, sample_rate, q, gain))
         .collect();
 
     // Generate per-main-channel curves
@@ -275,13 +333,15 @@ pub(super) fn build_multichannel_config(
                     mapping: HashMap::new(),
                 })
             }
-            "mso_4sub" => {
+            "mso_4sub" | "mso_8sub" => {
+                let sub_count = if sub_topo.name == "mso_8sub" { 8 } else { 4 };
+                let delays: Vec<f64> = (0..sub_count).map(|index| index as f64 * 2.0).collect();
                 let ms = generate_multisub_scenario(
                     "lfe",
-                    4,
+                    sub_count,
                     &bass_modes,
                     &[],
-                    &[0.0, 2.0, 4.0, 6.0],
+                    &delays,
                     difficulty.noise_rms * 0.3,
                     SEED.wrapping_add(9000),
                     sample_rate,

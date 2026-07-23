@@ -22,9 +22,14 @@ impl DriversLossData {
     /// * `drivers` - Vector of driver measurements (will be sorted by frequency)
     /// * `crossover_type` - Type of crossover filter to use
     pub fn new(mut drivers: Vec<DriverMeasurement>, crossover_type: CrossoverType) -> Self {
+        let max_drivers = if crossover_type == CrossoverType::None {
+            usize::MAX
+        } else {
+            4
+        };
         assert!(
-            drivers.len() >= 2 && drivers.len() <= 4,
-            "Must have 2-4 drivers, got {}",
+            drivers.len() >= 2 && drivers.len() <= max_drivers,
+            "Must have at least 2 drivers and at most 4 when using crossovers, got {}",
             drivers.len()
         );
 
@@ -40,9 +45,14 @@ impl DriversLossData {
 
     /// Create loss data while preserving the caller's explicit acoustic-band order.
     pub fn new_ordered(drivers: Vec<DriverMeasurement>, crossover_type: CrossoverType) -> Self {
+        let max_drivers = if crossover_type == CrossoverType::None {
+            usize::MAX
+        } else {
+            4
+        };
         assert!(
-            drivers.len() >= 2 && drivers.len() <= 4,
-            "Must have 2-4 drivers, got {}",
+            drivers.len() >= 2 && drivers.len() <= max_drivers,
+            "Must have at least 2 drivers and at most 4 when using crossovers, got {}",
             drivers.len()
         );
         Self::from_ordered(drivers, crossover_type)
@@ -72,6 +82,33 @@ impl DriversLossData {
             crossover_type,
             freq_grid,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn measurement(offset: f64) -> DriverMeasurement {
+        DriverMeasurement {
+            freq: ndarray::Array1::from_vec(vec![20.0, 80.0, 200.0]),
+            spl: ndarray::Array1::from_vec(vec![70.0 + offset; 3]),
+            phase: None,
+        }
+    }
+
+    #[test]
+    fn no_crossover_supports_eight_subwoofers() {
+        let drivers = (0..8).map(|index| measurement(index as f64)).collect();
+        let data = DriversLossData::new(drivers, CrossoverType::None);
+        assert_eq!(data.drivers.len(), 8);
+    }
+
+    #[test]
+    #[should_panic(expected = "at most 4 when using crossovers")]
+    fn crossover_still_rejects_more_than_four_drivers() {
+        let drivers = (0..5).map(|index| measurement(index as f64)).collect();
+        let _ = DriversLossData::new(drivers, CrossoverType::LinkwitzRiley4);
     }
 }
 

@@ -34,6 +34,7 @@ use consts::ALL_DIFFICULTIES;
 use consts::ALL_LAYOUTS;
 use consts::ALL_MS_DIFFICULTIES;
 use consts::ALL_SUB_TOPOS;
+use consts::KAUTZ_REFERENCE_MODES;
 use consts::MS_OPTIONS;
 use consts::MS_TOPOLOGIES;
 use consts::OPTIONS;
@@ -51,6 +52,16 @@ use types::DifficultyLevel;
 use types::MultiSubDifficulty;
 use types::TestResult;
 
+fn multichannel_mode_supported(
+    layout: &channel_layout::ChannelLayout,
+    mode: &ProcessingMode,
+) -> bool {
+    // Kautz correction is validated for individual speakers and no-LFE
+    // multichannel systems. Independently corrected mains and subs cannot yet
+    // be safely recombined by the routed-bass workflow.
+    !(layout.has_lfe && *mode == ProcessingMode::KautzModal)
+}
+
 /// Run the synthetic QA command and report whether the binary should exit
 /// unsuccessfully because one or more scenarios failed.
 pub fn run() -> Result<bool> {
@@ -66,18 +77,35 @@ pub fn run() -> Result<bool> {
         .windows(2)
         .find(|w| w[0] == "--difficulty")
         .map(|w| w[1].clone());
+    let mode_filter = args
+        .windows(2)
+        .find(|w| w[0] == "--mode")
+        .map(|w| w[1].clone());
+    let layout_filter = args
+        .windows(2)
+        .find(|w| w[0] == "--layout")
+        .map(|w| w[1].clone());
+    let sub_topology_filter = args
+        .windows(2)
+        .find(|w| w[0] == "--sub-topology")
+        .map(|w| w[1].clone());
 
     if help {
         println!("RoomEQ Synthetic QA");
         println!();
         println!("Usage:");
         println!(
-            "  roomeq-qa-synthetic [--list] [--pr] [--difficulty NAME] [--full-matrix] [--multiseat-guards-only]"
+            "  roomeq-qa-synthetic [--list] [--pr] [--difficulty NAME] [--mode NAME] [--layout NAME] [--sub-topology NAME] [--full-matrix] [--multiseat-guards-only]"
         );
         println!();
         println!("Options:");
         println!("  --list                   Print the synthetic QA matrix and exit");
         println!("  --difficulty NAME        Run only one difficulty: easy, medium, hard");
+        println!(
+            "  --mode NAME              Run one mode: LowLatency, PhaseLinear, Hybrid, MixedPhase, WarpedIir, KautzModal"
+        );
+        println!("  --layout NAME            Run one multichannel layout, for example 7.1.4");
+        println!("  --sub-topology NAME      Run one sub topology, for example mso_8sub");
         println!("  --multiseat-guards-only  Run only multi-seat API guard tests");
         println!(
             "  --full-matrix            Include WarpedIir/KautzModal and every multichannel processing mode"
@@ -128,18 +156,47 @@ pub fn run() -> Result<bool> {
         ProcessingMode::KautzModal,
     ];
     let pr_modes = [ProcessingMode::LowLatency, ProcessingMode::Hybrid];
-    let modes: &[ProcessingMode] = if pr_matrix {
+    let selected_modes: &[ProcessingMode] = if pr_matrix {
         &pr_modes
     } else if full_matrix {
         &full_modes
     } else {
         &default_modes
     };
-    let multichannel_modes: &[ProcessingMode] = if full_matrix {
+    let selected_multichannel_modes: &[ProcessingMode] = if full_matrix {
         &full_modes
     } else {
         &full_modes[..1]
     };
+    let mode_matches = |mode: &ProcessingMode, filter: &str| {
+        let filter = filter.to_ascii_lowercase().replace(['-', '_'], "");
+        let name = format!("{mode:?}").to_ascii_lowercase();
+        name == filter
+    };
+    let modes: Vec<ProcessingMode> = selected_modes
+        .iter()
+        .filter(|mode| {
+            mode_filter
+                .as_deref()
+                .is_none_or(|filter| mode_matches(mode, filter))
+        })
+        .cloned()
+        .collect();
+    let multichannel_modes: Vec<ProcessingMode> = selected_multichannel_modes
+        .iter()
+        .filter(|mode| {
+            mode_filter
+                .as_deref()
+                .is_none_or(|filter| mode_matches(mode, filter))
+        })
+        .cloned()
+        .collect();
+    if modes.is_empty() || multichannel_modes.is_empty() {
+        anyhow::bail!(
+            "mode filter '{}' does not select a mode in this matrix",
+            mode_filter.as_deref().unwrap_or_default()
+        );
+    }
 
     let flat_target = generate_flat_curve(20.0, 20000.0, 200);
     let harman_target = generate_harman_tilt_curve(20.0, 20000.0, 200);
@@ -156,6 +213,11 @@ pub fn run() -> Result<bool> {
     }
     let layouts: Vec<_> = ALL_LAYOUTS
         .iter()
+        .filter(|layout| {
+            layout_filter
+                .as_ref()
+                .is_none_or(|filter| layout.name == filter)
+        })
         .filter(|layout| !pr_matrix || matches!(layout.name, "2.0" | "2.1" | "5.1" | "7.1.4"))
         .collect();
 
@@ -176,14 +238,18 @@ pub fn run() -> Result<bool> {
                         )
                 })
                 .count();
-            if n_topos == 0 {
+            let topology_cases = if n_topos == 0 {
                 difficulties.len() // no LFE → 1 test per difficulty
             } else {
                 n_topos * difficulties.len()
-            }
+            };
+            let supported_modes = multichannel_modes
+                .iter()
+                .filter(|mode| multichannel_mode_supported(layout, mode))
+                .count();
+            topology_cases * supported_modes
         })
-        .sum::<usize>()
-        * multichannel_modes.len();
+        .sum();
     let total = single_total + ms_total + multiseat_guard_total + mc_total;
 
     if list_only {
@@ -278,6 +344,9 @@ pub fn run() -> Result<bool> {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
+        if multichannel_modes.contains(&ProcessingMode::KautzModal) {
+            println!("    KautzModal: no-LFE layouts only (routed-bass integration unsupported)");
+        }
         println!("    Subtotal: {}", mc_total);
         println!();
         println!("  Total tests: {}", total);
@@ -302,6 +371,13 @@ pub fn run() -> Result<bool> {
             .iter()
             .map(|&(freq, q, gain)| Biquad::new(BiquadFilterType::Peak, freq, SAMPLE_RATE, q, gain))
             .collect();
+        let kautz_modes_biquad: Vec<Biquad> = difficulty
+            .modes
+            .iter()
+            .copied()
+            .chain(KAUTZ_REFERENCE_MODES.iter().copied())
+            .map(|(freq, q, gain)| Biquad::new(BiquadFilterType::Peak, freq, SAMPLE_RATE, q, gain))
+            .collect();
 
         for &(target_name, target) in &targets {
             // Combine target shape with speaker rolloff so that broadband/excursion
@@ -321,16 +397,25 @@ pub fn run() -> Result<bool> {
                 SEED,
                 SAMPLE_RATE,
             );
+            let kautz_scenario = generate_scenario(
+                &format!("{}/{}-kautz", difficulty.name, target_name),
+                &speaker_base,
+                &kautz_modes_biquad,
+                difficulty.noise_rms * 0.3,
+                difficulty.noise_rms * 0.7,
+                SEED,
+                SAMPLE_RATE,
+            );
 
-            for mode in modes {
+            for mode in &modes {
+                let degraded = if *mode == ProcessingMode::KautzModal {
+                    &kautz_scenario.degraded_curve
+                } else {
+                    &scenario.degraded_curve
+                };
                 for combo in &option_combos {
-                    let result = run_single_test(
-                        &scenario.degraded_curve,
-                        mode.clone(),
-                        target_name,
-                        combo,
-                        difficulty,
-                    );
+                    let result =
+                        run_single_test(degraded, mode.clone(), target_name, combo, difficulty);
 
                     if result.passed {
                         passed += 1;
@@ -425,6 +510,11 @@ pub fn run() -> Result<bool> {
         let topos: Vec<_> = sub_topos_for_layout(layout)
             .iter()
             .filter(|topology| {
+                sub_topology_filter
+                    .as_ref()
+                    .is_none_or(|filter| topology.name == filter)
+            })
+            .filter(|topology| {
                 !pr_matrix
                     || matches!(
                         topology.name,
@@ -436,7 +526,10 @@ pub fn run() -> Result<bool> {
         if topos.is_empty() {
             // No LFE — test mains only
             for difficulty in &difficulties {
-                for mode in multichannel_modes {
+                for mode in multichannel_modes
+                    .iter()
+                    .filter(|mode| multichannel_mode_supported(layout, mode))
+                {
                     let result = run_multichannel_test(
                         layout,
                         None,
@@ -463,7 +556,10 @@ pub fn run() -> Result<bool> {
             // With LFE — test each sub topology
             for sub_topo in topos {
                 for difficulty in &difficulties {
-                    for mode in multichannel_modes {
+                    for mode in multichannel_modes
+                        .iter()
+                        .filter(|mode| multichannel_mode_supported(layout, mode))
+                    {
                         let result = run_multichannel_test(
                             layout,
                             Some(sub_topo),

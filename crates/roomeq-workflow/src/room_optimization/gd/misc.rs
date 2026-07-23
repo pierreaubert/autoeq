@@ -19,16 +19,31 @@ pub(super) fn existing_fir_convolution_filename(chain: &ChannelDspChain) -> Opti
     })
 }
 
-pub(super) fn source_for_output_channel<'a>(
+pub(in crate::room_optimization) fn source_for_output_channel<'a>(
     config: &'a RoomConfig,
     channel_name: &str,
 ) -> Option<&'a MeasurementSource> {
-    let speaker_config = if let Some(system) = &config.system {
-        let measurement_key = system.speakers.get(channel_name)?;
-        config.speakers.get(measurement_key)?
-    } else {
-        config.speakers.get(channel_name)?
-    };
+    let speaker_config = config
+        .speakers
+        .get(channel_name)
+        .or_else(|| {
+            config
+                .speakers
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(channel_name))
+                .map(|(_, speaker)| speaker)
+        })
+        .or_else(|| {
+            let system = config.system.as_ref()?;
+            let measurement_key = system.speakers.get(channel_name).or_else(|| {
+                system
+                    .speakers
+                    .iter()
+                    .find(|(role, _)| role.eq_ignore_ascii_case(channel_name))
+                    .map(|(_, measurement_key)| measurement_key)
+            })?;
+            config.speakers.get(measurement_key)
+        })?;
 
     match speaker_config {
         SpeakerConfig::Single(source) => Some(source),

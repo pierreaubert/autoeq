@@ -671,6 +671,34 @@ fn assemble_workflow_result(
         SystemModel::Custom => "Custom",
     };
     let mut workflow_refresh_needed = false;
+    let channel_arrivals = phase_arrivals_for_channels(config, &result.channel_results);
+
+    if channel_arrivals.len() > 1 {
+        let alignment_delays =
+            roomeq_engine::analysis::time_align::calculate_alignment_delays(&channel_arrivals);
+        for (channel_name, delay_ms) in &alignment_delays {
+            let applied = if *delay_ms > 0.01
+                && let Some(chain) = result.channels.get_mut(channel_name)
+            {
+                chain
+                    .plugins
+                    .insert(0, output::create_delay_plugin(*delay_ms));
+                true
+            } else {
+                false
+            };
+            if applied {
+                sync_reported_phase_adjustment(
+                    channel_name,
+                    &mut result.channel_results,
+                    &mut result.channels,
+                    *delay_ms,
+                    false,
+                );
+                workflow_refresh_needed = true;
+            }
+        }
+    }
 
     // Send post-workflow summary
     let summary: Vec<String> = result
@@ -1008,6 +1036,8 @@ fn assemble_workflow_result(
         )?;
     }
 
+    result.metadata.timing_diagnostics =
+        build_timing_diagnostics(config, &channel_arrivals, &result.channels);
     emit_pipeline_event(
         observer_shared,
         PipelineEvent::started(
@@ -1216,31 +1246,48 @@ fn assemble_workflow_result(
     Ok(result)
 }
 
+fn phase_arrivals_for_channels(
+    config: &RoomConfig,
+    channel_results: &HashMap<String, roomeq_engine::room_result::ChannelOptimizationResult>,
+) -> HashMap<String, f64> {
+    let primary_seat = config
+        .optimizer
+        .multi_seat
+        .as_ref()
+        .map(|policy| policy.primary_seat)
+        .unwrap_or(0);
+    channel_results
+        .keys()
+        .filter_map(|channel_name| {
+            let source = gd::source_for_output_channel(config, channel_name)?;
+            let curves = autoeq_measurements::load_source_individual(source).ok()?;
+            let curve = curves.get(primary_seat)?;
+            let (phase_min, phase_max) =
+                roomeq_engine::analysis::time_align::phase_arrival_regression_band(
+                    curve, 200.0, 2_000.0,
+                )?;
+            let arrival =
+                roomeq_engine::analysis::time_align::estimate_arrival_from_phase_detailed(
+                    curve, phase_min, phase_max,
+                )
+                .ok()?;
+            Some((channel_name.clone(), arrival))
+        })
+        .collect()
+}
+
 fn apply_topology_height_alignment(
     result: &mut RoomOptimizationResult,
     height_config: &roomeq_model::HeightChannelAlignmentConfig,
     config: &RoomConfig,
     sample_rate: f64,
 ) -> StageOutcome {
-    let channel_arrivals: HashMap<String, f64> = result
-        .channel_results
-        .iter()
-        .filter_map(|(name, channel)| {
-            let (phase_min, phase_max) =
-                roomeq_engine::analysis::time_align::phase_arrival_regression_band(
-                    &channel.initial_curve,
-                    200.0,
-                    2000.0,
-                )?;
-            roomeq_engine::analysis::time_align::estimate_arrival_from_phase_detailed(
-                &channel.initial_curve,
-                phase_min,
-                phase_max,
-            )
-            .ok()
-            .map(|arrival| (name.clone(), arrival))
-        })
-        .collect();
+    let mut channel_arrivals = phase_arrivals_for_channels(config, &result.channel_results);
+    for (channel_name, arrival_ms) in &mut channel_arrivals {
+        if let Some(chain) = result.channels.get(channel_name) {
+            *arrival_ms += total_chain_delay_ms(chain);
+        }
+    }
     let corrected_curves = collect_current_final_curves(&result.channel_results);
     let mut height_results =
         match roomeq_engine::height_channel_alignment::compute_height_channel_alignment(
@@ -1389,9 +1436,22 @@ fn assemble_generic_result(
     let phase_ir_sync = channel_arrivals.is_empty() && channel_results.len() > 1;
     if phase_ir_sync {
         for (channel_name, result) in &channel_results {
+            // Multi-measurement aggregation intentionally drops phase because
+            // averaging wrapped complex arrival across seats is not physical.
+            // Use the configured primary seat for channel timing instead.
+            let primary_seat = config
+                .optimizer
+                .multi_seat
+                .as_ref()
+                .map(|policy| policy.primary_seat)
+                .unwrap_or(0);
+            let primary_curve = gd::source_for_output_channel(config, channel_name)
+                .and_then(|source| autoeq_measurements::load_source_individual(source).ok())
+                .and_then(|curves| curves.get(primary_seat).cloned());
+            let phase_curve = primary_curve.as_ref().unwrap_or(&result.initial_curve);
             let Some((phase_min, phase_max)) =
                 roomeq_engine::analysis::time_align::phase_arrival_regression_band(
-                    &result.initial_curve,
+                    phase_curve,
                     200.0,
                     2000.0,
                 )
@@ -1404,7 +1464,7 @@ fn assemble_generic_result(
             };
 
             match roomeq_engine::analysis::time_align::estimate_arrival_from_phase_detailed(
-                &result.initial_curve,
+                phase_curve,
                 phase_min,
                 phase_max,
             ) {

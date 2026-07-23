@@ -1,6 +1,6 @@
 use super::consts::SAMPLE_RATE;
 use super::consts::TEMP_DIR_COUNTER;
-use super::consts::apply_qa_overrides;
+use super::consts::{apply_home_cinema_qa_overrides, apply_qa_overrides};
 use super::counting_semaphore::CountingSemaphore;
 use super::home_cinema::validate_home_cinema_result;
 use super::misc::avg_epa_preference;
@@ -62,7 +62,11 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
         }
     };
 
-    apply_qa_overrides(&mut config, maxeval);
+    if tc.home_cinema_expectations.is_some() && tc.solver.name() == "fast-hybrid" {
+        apply_home_cinema_qa_overrides(&mut config, maxeval);
+    } else {
+        apply_qa_overrides(&mut config, maxeval);
+    }
 
     // Run optimization
     let result = match run_optimization(&config) {
@@ -110,6 +114,7 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
     if let Some(expectations) = tc.home_cinema_expectations {
         validation_failures.extend(validate_home_cinema_result(
             &result,
+            &config,
             tc.method,
             expectations,
         ));

@@ -1,6 +1,7 @@
 //! RoomEQ Full QA: Comprehensive Scenario Testing
 //!
-//! Tests all roomeq scenarios with the FEM solver × IIR/FIR/Mixed modes.
+//! Tests the general FEM corpus across processing modes and a correctness-gated
+//! FEM/Sonium fast-hybrid home-cinema feature matrix.
 //! Validates both the library and CLI binary output.
 //!
 //! Checks performed per test case:
@@ -68,12 +69,15 @@ pub fn run() -> Result<bool> {
 
     // Build test matrix
     let mut test_cases = if args.home_cinema {
-        build_home_cinema_matrix(args.mode.as_deref())
+        build_home_cinema_matrix(args.solver.as_deref(), args.mode.as_deref())
     } else {
         build_test_matrix(args.quick, args.solver.as_deref(), args.mode.as_deref())
     };
     if !args.quick && !args.home_cinema {
-        test_cases.extend(build_home_cinema_matrix(args.mode.as_deref()));
+        test_cases.extend(build_home_cinema_matrix(
+            args.solver.as_deref(),
+            args.mode.as_deref(),
+        ));
     }
 
     // Show matrix

@@ -184,6 +184,8 @@ fn source_for_output_channel_system_role_map() {
         ..room_config_with_in_memory_speakers(speakers)
     };
     assert!(source_for_output_channel(&config, "Left").is_some());
+    assert!(source_for_output_channel(&config, "left_meas").is_some());
+    assert!(source_for_output_channel(&config, "LEFT_MEAS").is_some());
     assert!(source_for_output_channel(&config, "Right").is_none());
 }
 

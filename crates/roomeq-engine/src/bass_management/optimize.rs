@@ -18,6 +18,16 @@ use math_audio_dsp::analysis::compute_average_response;
 use roomeq_model::{CrossoverConfig, RoomConfig};
 use std::collections::{BTreeMap, HashMap};
 
+const JOINT_HEADROOM_SAFETY_DB: f64 = 0.1;
+
+fn joint_headroom_gain_reduction_db(margin_db: f64) -> f64 {
+    if margin_db.is_finite() {
+        (JOINT_HEADROOM_SAFETY_DB - margin_db).max(0.0)
+    } else {
+        0.0
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn optimize_home_cinema_group_crossovers(
     config: &RoomConfig,
@@ -784,7 +794,26 @@ pub fn optimize_bass_management_joint_solution(
         return vec!["joint_optimizer_no_improvement".to_string()];
     }
 
-    let (mut decoded_groups, decoded_outputs) = decode(&best);
+    let (mut decoded_groups, mut decoded_outputs) = decode(&best);
+    let optimization = joint_bass_management_report_from_parts(&decoded_groups, &decoded_outputs);
+    let graph = home_cinema::bass_management_routing_graph(config, Some(&optimization));
+    let headroom_gain_reduction_db = home_cinema::effective_bass_management(config)
+        .and_then(|effective| {
+            home_cinema::simulate_bass_bus_headroom(
+                graph.as_ref(),
+                &effective.config.headroom_model,
+                effective.config.headroom_margin_db,
+                sample_rate,
+            )
+        })
+        .map(|headroom| joint_headroom_gain_reduction_db(headroom.margin_db))
+        .unwrap_or(0.0);
+    if headroom_gain_reduction_db > 0.0 {
+        for output in &mut decoded_outputs {
+            output.gain_db -= headroom_gain_reduction_db;
+            output.headroom_contribution_db = output.gain_db;
+        }
+    }
     for ((_, _, _, virtual_main), group) in group_inputs.iter().zip(decoded_groups.iter_mut()) {
         if let Some(freq) = group.selected_crossover_hz
             && let Some(virtual_sub) = sum_sub_output_responses_on_grid(
@@ -826,6 +855,11 @@ pub fn optimize_bass_management_joint_solution(
         group
             .advisories
             .push("joint_route_de_optimized".to_string());
+        if headroom_gain_reduction_db > 0.0 {
+            group
+                .advisories
+                .push("joint_route_headroom_limited".to_string());
+        }
     }
     for group in decoded_groups {
         group_results.insert(group.group_id.clone(), group);
@@ -833,7 +867,11 @@ pub fn optimize_bass_management_joint_solution(
     for (target, optimized) in sub_outputs.iter_mut().zip(decoded_outputs) {
         *target = optimized;
     }
-    vec!["joint_route_de_optimized".to_string()]
+    let mut advisories = vec!["joint_route_de_optimized".to_string()];
+    if headroom_gain_reduction_db > 0.0 {
+        advisories.push("joint_route_headroom_limited".to_string());
+    }
+    advisories
 }
 
 #[cfg(test)]
@@ -847,6 +885,15 @@ mod tests {
         SystemConfig, SystemModel,
     };
     use std::collections::{BTreeMap, HashMap};
+
+    #[test]
+    fn joint_headroom_reduction_preserves_safety_reserve() {
+        assert!((joint_headroom_gain_reduction_db(-0.03) - 0.13).abs() < 1.0e-12);
+        assert!((joint_headroom_gain_reduction_db(0.05) - 0.05).abs() < 1.0e-12);
+        assert_eq!(joint_headroom_gain_reduction_db(0.1), 0.0);
+        assert_eq!(joint_headroom_gain_reduction_db(1.0), 0.0);
+        assert_eq!(joint_headroom_gain_reduction_db(f64::NAN), 0.0);
+    }
 
     fn flat_curve_with_phase() -> crate::Curve {
         let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(20_000.0), 96);

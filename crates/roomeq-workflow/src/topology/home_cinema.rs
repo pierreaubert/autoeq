@@ -1073,11 +1073,15 @@ fn optimize_home_cinema_with_sub(
         )?;
         let filters = post_eq_result.filters;
 
-        let pre = compute_flat_loss(post_curve, opt_config.min_freq, main_post_max_freq);
+        // Evaluate acceptance over the same band reported in the final channel
+        // score. The optimizer keeps its 20 Hz crossover guard band, but a
+        // candidate must not damage that guard band enough to regress the
+        // published response score.
+        let pre = compute_flat_loss(post_curve, role_xover_freq, main_post_max_freq);
         let eq_resp =
             response::compute_peq_complex_response(&filters, &post_curve.freq, sample_rate);
         let post_curve_after = response::apply_complex_response(post_curve, &eq_resp);
-        let post = compute_flat_loss(&post_curve_after, opt_config.min_freq, main_post_max_freq);
+        let post = compute_flat_loss(&post_curve_after, role_xover_freq, main_post_max_freq);
         if post < pre {
             optimizer_evidence_by_channel
                 .entry(role.clone())

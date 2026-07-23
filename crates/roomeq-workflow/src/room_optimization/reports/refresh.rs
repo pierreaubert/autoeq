@@ -1,4 +1,5 @@
 use super::super::room_optimization_result::RoomOptimizationResult;
+use super::super::room_optimization_result::routed_baseline_curve;
 use super::super::*;
 use super::build::build_bootstrap_uncertainty_report;
 use super::build::build_perceptual_policy_report;
@@ -15,6 +16,14 @@ pub(in super::super) fn refresh_final_reports(
     for ch_result in result.channel_results.values_mut() {
         let (score_min_freq, score_max_freq) =
             final_score_band_for_channel(config, &ch_result.name);
+        if let Some(baseline) = result
+            .channels
+            .get(&ch_result.name)
+            .and_then(|chain| routed_baseline_curve(chain, &ch_result.initial_curve, sample_rate))
+        {
+            ch_result.pre_score =
+                recompute_curve_flatness_score(&baseline, score_min_freq, score_max_freq);
+        }
         ch_result.post_score =
             recompute_curve_flatness_score(&ch_result.final_curve, score_min_freq, score_max_freq);
         if let Some(chain) = result.channels.get_mut(&ch_result.name) {

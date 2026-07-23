@@ -2812,6 +2812,7 @@ name = "roomeq-qa"
 version = "0.4.52"
 dependencies = [
  "anyhow",
+ "autoeq-measurements",
  "autoeq-optim",
  "chrono",
  "clap",
@@ -2820,6 +2821,7 @@ dependencies = [
  "ndarray",
  "rand 0.10.2",
  "rand_chacha 0.10.0",
+ "roomeq-analysis",
  "roomeq-engine",
  "roomeq-model",
  "roomeq-quality",

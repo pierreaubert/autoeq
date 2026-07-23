@@ -1,0 +1,30 @@
+{
+  "optimizer": {
+    "processing_mode": "phase_linear",
+    "max_freq": 1200.0,
+    "max_db": 8.0,
+    "num_filters": 10,
+    "fir": {
+      "taps": 2048,
+      "phase": "linear",
+      "correct_excess_phase": true,
+      "phase_smoothing": 0.167
+    },
+    "multi_measurement": { "strategy": "variance_penalized", "variance_lambda": 1.0 },
+    "multi_seat": {
+      "enabled": true,
+      "strategy": "average",
+      "primary_seat": 0,
+      "all_channel_enabled": true,
+      "all_channel_strategy": "variance_penalized",
+      "seat_weights": [1.0, 0.8, 0.8, 0.6, 0.6]
+    },
+    "phase_alignment": {
+      "enabled": true,
+      "min_freq": 50.0,
+      "max_freq": 120.0,
+      "optimize_polarity": true,
+      "max_delay_ms": 20.0
+    }
+  }
+}

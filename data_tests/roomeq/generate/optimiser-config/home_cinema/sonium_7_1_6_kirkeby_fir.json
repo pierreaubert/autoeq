@@ -1,0 +1,33 @@
+{
+  "optimizer": {
+    "processing_mode": "phase_linear",
+    "max_freq": 1200.0,
+    "max_db": 8.0,
+    "num_filters": 10,
+    "fir": {
+      "taps": 2048,
+      "phase": "kirkeby",
+      "correct_excess_phase": true,
+      "phase_smoothing": 0.167
+    },
+    "multi_measurement": { "strategy": "spatial_robustness", "variance_lambda": 1.0 },
+    "multi_seat": {
+      "enabled": true,
+      "strategy": "minimize_variance",
+      "primary_seat": 0,
+      "all_channel_enabled": true,
+      "all_channel_strategy": "spatial_robustness",
+      "seat_weights": [1.0, 0.8, 0.8, 0.6, 0.6]
+    },
+    "height_channel_alignment": {
+      "enabled": true,
+      "match_timbre": false,
+      "match_level": true,
+      "match_arrival_time": false,
+      "match_phase": true,
+      "min_timbre_improvement_db": 0.01,
+      "max_delay_ms": 20.0,
+      "reference_channels": { "top_front": "L", "top_middle": "L", "top_rear": "SL" }
+    }
+  }
+}

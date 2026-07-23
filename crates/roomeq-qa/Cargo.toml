@@ -27,4 +27,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+autoeq-measurements = { workspace = true }
+roomeq-analysis = { workspace = true }
 tempfile = { workspace = true }

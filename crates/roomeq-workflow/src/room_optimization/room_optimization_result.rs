@@ -126,7 +126,12 @@ pub(super) fn apply_final_correction_safety_gate(
             });
             if let Some((chain, curve, stages, report)) = stage_revert {
                 channel.final_curve = curve;
-                channel.post_score = report.metrics.post_target_weighted_rms_db;
+                // `pre_score`/`post_score` are topology-specific flat-loss
+                // values. Do not replace one side with the safety gate's
+                // psychoacoustic weighted-RMS metric after a revert; those
+                // units are not comparable. A revert is conservatively
+                // reported as no topology-score improvement.
+                channel.post_score = channel.pre_score;
                 if stages.contains(&CorrectionStage::Peq) {
                     channel.biquads.clear();
                 }
@@ -504,7 +509,7 @@ fn aggregate_runtime_quality(
     let median = |mut values: Vec<f64>| {
         values.sort_by(f64::total_cmp);
         let middle = values.len() / 2;
-        if values.len() % 2 == 0 {
+        if values.len().is_multiple_of(2) {
             (values[middle - 1] + values[middle]) * 0.5
         } else {
             values[middle]
@@ -714,7 +719,7 @@ fn revert_all_correction_stages(
                 target
             });
         align_target_level(&initial, &mut target);
-        let post_score = evaluate_passband_correction_acceptance(
+        let _post_score = evaluate_passband_correction_acceptance(
             &chain,
             &initial,
             &final_curve,
@@ -726,7 +731,9 @@ fn revert_all_correction_stages(
         .unwrap_or(result.channel_results[&name].pre_score);
         if let Some(channel) = result.channel_results.get_mut(&name) {
             channel.final_curve = final_curve.clone();
-            channel.post_score = post_score;
+            // See the stage-revert path above: preserve the topology metric's
+            // units and report a conservative identity-equivalent score.
+            channel.post_score = channel.pre_score;
             channel.biquads.clear();
             channel.fir_coeffs = None;
         }
@@ -982,7 +989,7 @@ fn align_target_level(reference: &roomeq_model::Curve, target: &mut roomeq_model
     }
 }
 
-fn routed_baseline_curve(
+pub(in super::super) fn routed_baseline_curve(
     chain: &ChannelDspChain,
     initial: &roomeq_model::Curve,
     sample_rate: f64,

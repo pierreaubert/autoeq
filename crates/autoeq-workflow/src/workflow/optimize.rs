@@ -363,7 +363,7 @@ where
 /// * `drivers_data` - Driver measurements with crossover type
 /// * `min_freq`, `max_freq` - Optimization frequency range (Hz)
 /// * `sample_rate` - Sample rate for filter design (Hz)
-/// * `algorithm` - Optimization algorithm (e.g., "nlopt:cobyla", "autoeq:de")
+/// * `algorithm` - Optimization algorithm (e.g., "autoeq:cobyla", "autoeq:de")
 /// * `max_iter` - Maximum number of iterations/evaluations
 /// * `min_db`, `max_db` - Per-driver gain bounds (dB)
 ///
@@ -378,7 +378,7 @@ where
 ///     100.0,    // min_freq
 ///     10000.0,  // max_freq
 ///     48000.0,  // sample_rate
-///     "nlopt:cobyla",
+///     "autoeq:cobyla",
 ///     5000,     // max_iter
 ///     -12.0,    // min_db
 ///     12.0,     // max_db

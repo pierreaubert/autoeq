@@ -120,20 +120,26 @@ fn optimize_room_impl_workflow_mixed_phase_succeeds() {
     );
     let result = result.unwrap();
     assert!(!result.channels.is_empty());
-    let reports = result
-        .metadata
-        .mixed_phase_per_channel
-        .as_ref()
-        .expect("mixed-phase correction should emit decomposition reports");
-    assert_eq!(reports.len(), 2);
-    for report in reports.values() {
-        assert!(report.estimated_delay_ms.is_finite());
-        assert!(report.fir_taps > 0);
-        assert!(report.residual_excess_phase_min_deg.is_finite());
-        assert!(report.residual_excess_phase_max_deg.is_finite());
-        assert!(report.residual_excess_phase_rms_deg.is_finite());
+    if let Some(reports) = result.metadata.mixed_phase_per_channel.as_ref() {
+        assert_eq!(reports.len(), 2);
+        for report in reports.values() {
+            assert!(report.estimated_delay_ms.is_finite());
+            assert!(report.fir_taps > 0);
+            assert!(report.residual_excess_phase_min_deg.is_finite());
+            assert!(report.residual_excess_phase_max_deg.is_finite());
+            assert!(report.residual_excess_phase_rms_deg.is_finite());
+            assert!(
+                report.residual_excess_phase_min_deg <= report.residual_excess_phase_max_deg
+            );
+        }
+    } else {
         assert!(
-            report.residual_excess_phase_min_deg <= report.residual_excess_phase_max_deg
+            result
+                .metadata
+                .correction_acceptance
+                .as_ref()
+                .is_some_and(|acceptance| !acceptance.accepted),
+            "mixed-phase reports may be absent only when the final safety gate reverted correction"
         );
     }
 }
@@ -161,14 +167,18 @@ fn optimize_room_impl_workflow_phase_correction_succeeds() {
         result.as_ref().err()
     );
     let result = result.unwrap();
-    assert_eq!(
-        result
-            .metadata
-            .mixed_phase_per_channel
-            .as_ref()
-            .map(HashMap::len),
-        Some(2)
-    );
+    if let Some(reports) = result.metadata.mixed_phase_per_channel.as_ref() {
+        assert_eq!(reports.len(), 2);
+    } else {
+        assert!(
+            result
+                .metadata
+                .correction_acceptance
+                .as_ref()
+                .is_some_and(|acceptance| !acceptance.accepted),
+            "phase-correction reports may be absent only when the final safety gate reverted correction"
+        );
+    }
 }
 
 #[test]

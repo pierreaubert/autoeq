@@ -2,7 +2,6 @@
 
 use super::generic::GenericExecutor;
 use super::home_cinema::HomeCinemaExecutor;
-use super::multiseat::MultiseatExecutor;
 use super::stereo::Stereo20Executor;
 use super::stereo_sub::Stereo21Executor;
 use super::types::{WorkflowAssembly, WorkflowExecutor};
@@ -323,47 +322,6 @@ fn home_cinema_executor_with_sub_runs() {
     assert!(result.channel_results.contains_key("Right"));
     assert!(result.channel_results.contains_key("Center"));
     assert!(result.channel_results.contains_key("LFE"));
-}
-
-#[test]
-fn multiseat_executor_disabled_skips() {
-    let mut speakers = HashMap::new();
-    speakers.insert(
-        "left".to_string(),
-        SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
-    );
-    let sys = SystemConfig {
-        model: SystemModel::Custom,
-        speakers: HashMap::from([("Left".to_string(), "left".to_string())]),
-        subwoofers: None,
-        bass_management: None,
-        ..Default::default()
-    };
-    let config = RoomConfig {
-        version: default_config_version(),
-        system: Some(sys.clone()),
-        speakers,
-        crossovers: None,
-        target_curve: None,
-        optimizer: base_optimizer(),
-        provenance: Default::default(),
-        recording_config: None,
-        ctc: None,
-        cea2034_cache: None,
-    };
-
-    let mut assembly = make_assembly(&config, &sys);
-    let result = MultiseatExecutor.execute(&mut assembly);
-    assert!(
-        result.is_ok(),
-        "disabled multiseat executor should return unchanged result: {:?}",
-        result.err()
-    );
-    let result = result.unwrap();
-    assert!(result.channels.is_empty());
-    assert!(result.channel_results.is_empty());
-    assert_eq!(result.combined_pre_score, 0.0);
-    assert_eq!(result.combined_post_score, 0.0);
 }
 
 #[test]

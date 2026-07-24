@@ -74,8 +74,8 @@ pub struct Args {
     #[arg(long, default_value = "Listening Window")]
     pub curve_name: String,
 
-    /// Optimization algorithm to use (e.g., isres, cobyla)
-    #[arg(long, default_value = "nlopt:cobyla")]
+    /// Optimization algorithm to use (e.g., autoeq:isres, autoeq:cobyla)
+    #[arg(long, default_value = "autoeq:cobyla")]
     pub algo: String,
 
     /// Optional population size for population-based algorithms (e.g., ISRES)
@@ -466,6 +466,11 @@ mod tests {
         assert_eq!(args.smooth_n, 1);
         assert!(!args.refine);
         assert_eq!(args.peq_model, PeqModel::Pk);
+    }
+
+    #[test]
+    fn parsed_cli_uses_canonical_cobyla_default() {
+        assert_eq!(parsed_base().algo, "autoeq:cobyla");
     }
 
     #[test]

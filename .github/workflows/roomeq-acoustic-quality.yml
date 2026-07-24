@@ -3,8 +3,11 @@ name: RoomEQ acoustic quality
 on:
   pull_request:
     paths:
+      - "crates/roomeq-*/**"
+      - "crates/autoeq-core/**"
+      - "crates/autoeq-measurements/**"
+      - "crates/autoeq-optim/**"
       - "src/roomeq/**"
-      - "src/bin/roomeq_qa_acoustic.rs"
       - "data_tests/roomeq/**"
       - "scripts/mdat2csv.py"
       - "scripts/test_mdat2csv.py"

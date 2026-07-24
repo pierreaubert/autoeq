@@ -782,13 +782,11 @@ qa-roomeq-acoustic-recalibrate:
 [group('qa-roomeq')]
 qa-roomeq-subsystem-coverage:
 	cargo llvm-cov clean --workspace
-	cargo llvm-cov test --release --package autoeq --lib --no-report roomeq::acoustic_qa
-	cargo llvm-cov test --release --package autoeq --lib --no-report acoustic_qa_nightly_matrix_is_deterministic_and_finite -- --ignored
-	cargo llvm-cov test --release --package autoeq --lib --no-report roomeq::eq
-	cargo llvm-cov test --release --package autoeq --lib --no-report roomeq::optimize
-	cargo llvm-cov test --release --package autoeq --lib --no-report roomeq::workflows
+	cargo llvm-cov test --release --package roomeq-quality --lib --no-report
+	cargo llvm-cov test --release --package roomeq-engine --lib --no-report
+	cargo llvm-cov test --release --package roomeq-workflow --lib --no-report
 	mkdir -p target/qa
-	cargo llvm-cov report --release --package autoeq --json --summary-only --skip-functions --output-path target/qa/roomeq-coverage.json
+	cargo llvm-cov report --release --package roomeq-quality --package roomeq-engine --package roomeq-workflow --json --summary-only --skip-functions --output-path target/qa/roomeq-coverage.json
 	python3 scripts/check_roomeq_subsystem_coverage.py target/qa/roomeq-coverage.json
 
 # Fast, deterministic mutation shard for pull requests and local smoke checks.

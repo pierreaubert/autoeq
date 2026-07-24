@@ -1,9 +1,10 @@
 //! Unified optimizer backend trait.
 //!
-//! All filter-fitting algorithms (AutoEQ DE, NLopt, metaheuristics_nature)
+//! All filter-fitting algorithms (AutoEQ native backends and
+//! metaheuristics_nature)
 //! implement [`FilterOptimizer`]. The registry maps algorithm names with
-//! library prefixes (`"autoeq:de"`, `"nlopt:cobyla"`, `"mh:pso"`, …) plus
-//! their unprefixed legacy aliases to concrete optimizer impls.
+//! library prefixes (`"autoeq:de"`, `"autoeq:cobyla"`, `"mh:pso"`, …) plus
+//! their unprefixed legacy aliases to concrete optimizer implementations.
 //!
 //! This module replaces the old per-library `match` dispatchers in
 //! [`super::optimize_filters`] and the parallel `AlgorithmInfo` table.
@@ -45,7 +46,7 @@ pub struct ConstraintCapabilities {
 /// Implementations live in [`super::de`], [`super::mh`], and [`super::nlopt`]
 /// (the last is feature-gated behind `nlopt`).
 pub trait FilterOptimizer: Send + Sync {
-    /// Canonical algorithm name with library prefix (e.g. `"nlopt:cobyla"`).
+    /// Canonical algorithm name with library prefix (e.g. `"autoeq:cobyla"`).
     fn name(&self) -> &'static str;
 
     /// Source library label shown in the algorithm list (e.g. `"NLOPT"`).

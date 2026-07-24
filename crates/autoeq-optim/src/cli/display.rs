@@ -1,17 +1,7 @@
-use super::super::optim::{AlgorithmType, get_all_algorithms};
+use super::super::optim::get_all_algorithms;
 use super::peq_model::PeqModel;
 use std::fmt::Write as _;
 use std::process;
-
-fn constraint_label(algo: &crate::optim::AlgorithmInfo) -> &'static str {
-    if algo.supports_nonlinear_constraints {
-        "✅ Nonlinear"
-    } else if algo.supports_linear_constraints {
-        "🔶 Linear only"
-    } else {
-        "❌ None"
-    }
-}
 
 /// Render the algorithm list to a string (used by tests and by the CLI printer).
 pub fn render_algorithm_list() -> String {
@@ -22,88 +12,14 @@ pub fn render_algorithm_list() -> String {
     let algorithms = get_all_algorithms();
 
     // Group algorithms by library
-    let mut nlopt_algos = Vec::new();
     let mut metaheuristics_algos = Vec::new();
     let mut autoeq_algos = Vec::new();
 
     for algo in &algorithms {
         match algo.library {
-            "NLOPT" => nlopt_algos.push(algo),
             "Metaheuristics" => metaheuristics_algos.push(algo),
             "AutoEQ" => autoeq_algos.push(algo),
             _ => {} // Skip unknown libraries
-        }
-    }
-
-    // Display NLOPT algorithms
-    if !nlopt_algos.is_empty() {
-        let _ = writeln!(out, "📊 NLOPT Library Algorithms:");
-
-        // Separate global and local algorithms
-        let mut global = Vec::new();
-        let mut local = Vec::new();
-
-        for algo in nlopt_algos {
-            match algo.algorithm_type {
-                AlgorithmType::Global => global.push(algo),
-                AlgorithmType::Local => local.push(algo),
-            }
-        }
-
-        if !global.is_empty() {
-            let _ = writeln!(
-                out,
-                "   🌍 Global Optimizers (best for exploring solution space):"
-            );
-            for algo in global {
-                let _ = write!(out, "   - {:<20}", algo.name);
-                let _ = write!(out, " | Constraints: ");
-                let _ = write!(out, "{}", constraint_label(algo));
-
-                // Add specific descriptions
-                let description = match algo.name {
-                    "nlopt:isres" => {
-                        " | Improved Stochastic Ranking Evolution Strategy (recommended)"
-                    }
-                    "nlopt:ags" => " | Adaptive Geometric Search",
-                    "nlopt:origdirect" => " | DIRECT global optimization (original version)",
-                    "nlopt:crs2lm" => " | Controlled Random Search with local mutation",
-                    "nlopt:direct" => " | DIRECT global optimization",
-                    "nlopt:directl" => " | DIRECT-L (locally biased version)",
-                    "nlopt:gmlsl" => " | Global Multi-Level Single-Linkage",
-                    "nlopt:gmlsllds" => " | GMLSL with low-discrepancy sequence",
-                    "nlopt:stogo" => " | Stochastic Global Optimization",
-                    "nlopt:stogorand" => " | StoGO with randomized search",
-                    _ => "",
-                };
-                let _ = writeln!(out, "{}", description);
-            }
-            let _ = writeln!(out);
-        }
-
-        if !local.is_empty() {
-            let _ = writeln!(
-                out,
-                "   🎯 Local Optimizers (fast refinement from good starting points):"
-            );
-            for algo in local {
-                let _ = write!(out, "   - {:<20}", algo.name);
-                let _ = write!(out, " | Constraints: ");
-                let _ = write!(out, "{}", constraint_label(algo));
-
-                let description = match algo.name {
-                    "nlopt:cobyla" => {
-                        " | Constrained Optimization BY Linear Approximations (recommended for local)"
-                    }
-                    "nlopt:bobyqa" => " | Bound Optimization BY Quadratic Approximation",
-                    "nlopt:neldermead" => " | Nelder-Mead simplex algorithm",
-                    "nlopt:sbplx" => " | Subplex (variant of Nelder-Mead)",
-                    "nlopt:slsqp" => " | Sequential Least SQuares Programming",
-                    _ => "",
-                };
-                let _ = writeln!(out, "{}", description);
-            }
-            let _ = writeln!(out);
         }
     }
 
@@ -148,7 +64,13 @@ pub fn render_algorithm_list() -> String {
             }
 
             let description = match algo.name {
-                "autoeq:de" => " | Adaptive DE with constraint handling (experimental)",
+                "autoeq:cobyla" => " | Pure-Rust constrained local optimization",
+                "autoeq:isres" => " | Pure-Rust stochastic constrained global optimization",
+                "autoeq:cmaes" => " | Covariance Matrix Adaptation Evolution Strategy",
+                "autoeq:bo" => " | Gaussian-process Bayesian optimization",
+                "autoeq:nsga2" => " | NSGA-II multi-objective optimization",
+                "autoeq:nsga3" => " | NSGA-III many-objective optimization",
+                "autoeq:de" => " | Adaptive Differential Evolution with constraint handling",
                 _ => "",
             };
             let _ = writeln!(out, "{}", description);
@@ -156,26 +78,48 @@ pub fn render_algorithm_list() -> String {
         let _ = writeln!(out);
     }
 
+    let _ = writeln!(out, "Deprecated NLopt compatibility aliases:");
+    let _ = writeln!(
+        out,
+        "   nlopt:cobyla, nlopt:slsqp, nlopt:bobyqa, nlopt:neldermead, nlopt:sbplx"
+    );
+    let _ = writeln!(out, "      → autoeq:cobyla");
+    let _ = writeln!(out, "   nlopt:isres, nlopt:ags, nlopt:origdirect");
+    let _ = writeln!(out, "      → autoeq:isres");
+    let _ = writeln!(
+        out,
+        "   nlopt:crs2lm, nlopt:direct, nlopt:directl, nlopt:gmlsl,"
+    );
+    let _ = writeln!(out, "   nlopt:gmlsllds, nlopt:stogo, nlopt:stogorand");
+    let _ = writeln!(out, "      → autoeq:de");
+    let _ = writeln!(
+        out,
+        "   These names are migration aliases, not separate available backends.\n"
+    );
+
     let _ = writeln!(out, "Usage Examples:");
     let _ = writeln!(out, "==============\n");
     let _ = writeln!(out, "  # Use ISRES (recommended global optimizer):");
-    let _ = writeln!(out, "  autoeq --algo nlopt:isres --curve input.csv\n");
+    let _ = writeln!(out, "  autoeq --algo autoeq:isres --curve input.csv\n");
     let _ = writeln!(out, "  # Use COBYLA (fast local optimizer):");
-    let _ = writeln!(out, "  autoeq --algo nlopt:cobyla --curve input.csv\n");
+    let _ = writeln!(out, "  autoeq --algo autoeq:cobyla --curve input.csv\n");
     let _ = writeln!(out, "  # Use Differential Evolution from metaheuristics:");
     let _ = writeln!(out, "  autoeq --algo mh:de --curve input.csv\n");
-    let _ = writeln!(out, "  # Backward compatibility (maps to nlopt:cobyla):");
+    let _ = writeln!(
+        out,
+        "  # Short compatibility alias (maps to autoeq:cobyla):"
+    );
     let _ = writeln!(out, "  autoeq --algo cobyla --curve input.csv\n");
 
     let _ = writeln!(out, "Recommendations:");
     let _ = writeln!(out, "===============\n");
     let _ = writeln!(
         out,
-        "  🎯 For best results: nlopt:isres (global) + --refine with nlopt:cobyla (local)"
+        "  🎯 For best results: autoeq:isres (global) + --refine with autoeq:cobyla (local)"
     );
     let _ = writeln!(
         out,
-        "  ⚡ For speed: nlopt:cobyla (if you have a good initial guess)"
+        "  ⚡ For speed: autoeq:cobyla (if you have a good initial guess)"
     );
     let _ = writeln!(
         out,
@@ -426,7 +370,12 @@ mod tests {
     fn render_algorithm_list_contains_headers_and_known_algorithms() {
         let s = render_algorithm_list();
         assert!(s.contains("Available Optimization Algorithms"));
-        assert!(s.contains("autoeq:de") || s.contains("mh:de"));
+        assert!(s.contains("autoeq:cobyla"));
+        assert!(s.contains("autoeq:isres"));
+        assert!(s.contains("autoeq:de"));
+        assert!(!s.contains("NLOPT Library Algorithms"));
+        assert!(s.contains("Deprecated NLopt compatibility aliases"));
+        assert!(s.contains("not separate available backends"));
         assert!(s.contains("Usage Examples"));
         assert!(s.contains("Recommendations"));
     }

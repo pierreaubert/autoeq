@@ -7,10 +7,8 @@
 //! them into the objective via penalty weights.
 //!
 //! Crossover monotonicity for multi-driver `DriversFlat` is exposed
-//! separately as [`build_crossover_monotonicity_constraint`]; only the NLopt
-//! backend registers it today (preserved behaviour from the previous
-//! per-library code in `optim/nlopt.rs:106-115`). The AutoEQ DE path has
-//! never registered it; revisit that asymmetry in a follow-up if needed.
+//! separately as [`build_crossover_monotonicity_constraint`]. The pure-Rust
+//! COBYLA and ISRES backends register it; the AutoEQ DE path does not.
 
 use super::backend::{ConstraintCapabilities, ConstraintInstallation, NativeConstraint};
 use super::{ObjectiveData, PenaltyMode};
@@ -40,8 +38,7 @@ pub fn install_constraints(
 }
 
 /// Build the three core PEQ constraints, each guarded by the same enable
-/// conditions used by the previous per-backend code (`optim/de.rs:519-554`,
-/// `optim/nlopt.rs:93-115`).
+/// conditions retained from the pre-registry backend implementations.
 pub fn build_constraint_set(obj: &ObjectiveData) -> Vec<NativeConstraint> {
     let mut out: Vec<NativeConstraint> = Vec::new();
 
@@ -61,9 +58,8 @@ pub fn build_constraint_set(obj: &ObjectiveData) -> Vec<NativeConstraint> {
 /// Crossover monotonicity for `DriversFlat` multi-driver layouts.
 ///
 /// Returns `None` unless `loss_type == DriversFlat` with at least one
-/// crossover (i.e. ≥ 2 drivers). Today this is registered only by the NLopt
-/// backend — exposed as a free function so future backends opt in
-/// explicitly rather than picking it up by accident.
+/// crossover (i.e. ≥ 2 drivers). COBYLA and ISRES opt in explicitly rather
+/// than every backend picking it up by accident.
 pub fn build_crossover_monotonicity_constraint(obj: &ObjectiveData) -> Option<NativeConstraint> {
     use crate::LossType;
     if obj.loss_type != LossType::DriversFlat {
@@ -74,9 +70,9 @@ pub fn build_crossover_monotonicity_constraint(obj: &ObjectiveData) -> Option<Na
         return None;
     }
 
-    // 0.15 log10 ≈ 40% frequency separation. Matches the value previously
-    // hard-coded in `optim/nlopt.rs:58` so this is a behaviour-preserving
-    // move, not a tuning change.
+    // 0.15 log10 ≈ 40% frequency separation. This is the established
+    // behavior-preserving value retained by the pure-Rust constrained
+    // backends, not a new tuning choice.
     let data = CrossoverMonotonicityConstraintData {
         n_drivers: drivers.drivers.len(),
         min_log_separation: 0.15,
@@ -101,8 +97,8 @@ pub fn build_crossover_monotonicity_constraint(obj: &ObjectiveData) -> Option<Na
             // Match the original `constraint_crossover_monotonicity`
             // (constraints/crossover_monotonicity.rs:57): it returns the
             // signed maximum violation, which can be negative when the
-            // constraint is comfortably satisfied. NLopt treats fc(x) <= 0
-            // as feasible regardless of sign, so do not clamp to 0.
+            // constraint is comfortably satisfied. Native constrained
+            // backends treat fc(x) <= 0 as feasible, so do not clamp to 0.
             max_violation
         }),
         tol: 1e-6,

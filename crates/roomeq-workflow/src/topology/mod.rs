@@ -5,8 +5,6 @@ mod bass_management;
 mod executor_tests;
 mod generic;
 mod home_cinema;
-mod multiseat;
-mod multisub;
 mod optimize;
 mod run;
 mod stereo;

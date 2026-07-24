@@ -7,10 +7,10 @@ import sys
 
 
 THRESHOLDS = {
-    "src/roomeq/acoustic_qa/": 90.0,
-    "src/roomeq/eq/": 85.0,
-    "src/roomeq/optimize/": 80.0,
-    "src/roomeq/workflows/": 75.0,
+    "crates/roomeq-quality/src/": 90.0,
+    "crates/roomeq-engine/src/eq/": 85.0,
+    "crates/roomeq-workflow/src/room_optimization/": 80.0,
+    "crates/roomeq-workflow/src/topology/": 75.0,
 }
 
 
@@ -41,4 +41,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

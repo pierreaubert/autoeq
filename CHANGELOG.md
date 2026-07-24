@@ -60,6 +60,16 @@
 
 ## Fixes
 
+- Use the canonical pure-Rust COBYLA backend by default and list only real
+  optimizer backends as available, while documenting removed NLopt names
+  explicitly as migration aliases.
+- Remove unreachable standalone topology executor stubs, including the
+  multi-seat path that could fabricate a zero-score success; multi-seat,
+  multi-sub, and bass-management behavior remains composed by supported
+  stereo and home-cinema workflows.
+- Repoint acoustic-quality path filters and per-subsystem coverage floors at
+  the post-partition `crates/roomeq-*` owners instead of the root compatibility
+  facade.
 - Corrected RoomEQ group-delay and Sonium phase conventions, primary-seat and
   height-channel timing alignment, multi-seat/modal-basis validation, and
   bass-management headroom realization for routed home-cinema systems.

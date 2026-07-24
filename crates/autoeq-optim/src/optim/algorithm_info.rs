@@ -4,9 +4,9 @@ pub use super::backend::{AlgorithmType, FilterOptimizer};
 /// registry now, kept for callers in `cli.rs` that print algorithm tables).
 #[derive(Debug, Clone)]
 pub struct AlgorithmInfo {
-    /// Algorithm name with library prefix (e.g., "nlopt:isres", "mh:de", "autoeq:de")
+    /// Algorithm name with library prefix (e.g., "autoeq:isres", "mh:de", "autoeq:de")
     pub name: &'static str,
-    /// Library providing this algorithm (e.g., "NLOPT", "Metaheuristics", "AutoEQ")
+    /// Library providing this algorithm (e.g., "Metaheuristics", "AutoEQ")
     pub library: &'static str,
     /// Classification as global or local optimizer
     pub algorithm_type: AlgorithmType,

@@ -1,7 +1,8 @@
 // This module is now a thin facade over route-specific workflow executors.
 // The implementation bodies live in `stereo.rs`, `stereo_sub.rs`,
-// `home_cinema.rs`, `generic.rs`, `multiseat.rs`, `multisub.rs`, and
-// `bass_management/executor.rs`.
+// `home_cinema.rs`, and `generic.rs`. Multi-seat, multi-sub, and
+// bass-management behavior is composed inside those supported topology
+// executors rather than exposed as standalone workflows.
 
 use super::home_cinema::HomeCinemaExecutor;
 use super::stereo::Stereo20Executor;

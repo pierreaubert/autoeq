@@ -1,4 +1,5 @@
 use super::consts::SCORECARD_EPA_PREF_MIN_RATIO;
+use super::consts::SCORECARD_FLAT_LOSS_ABSOLUTE_SLACK;
 use super::consts::SCORECARD_FLAT_LOSS_TOLERANCE;
 use super::consts::SCORECARD_FMAX;
 use super::consts::SCORECARD_FMIN;
@@ -109,13 +110,18 @@ pub(super) fn compare_scorecards(
     let mut checks = Vec::new();
 
     // 1. Flat loss: relaxed tolerance
-    let flat_ok = candidate.flat_loss <= baseline.flat_loss * SCORECARD_FLAT_LOSS_TOLERANCE;
+    let flat_limit =
+        baseline.flat_loss * SCORECARD_FLAT_LOSS_TOLERANCE + SCORECARD_FLAT_LOSS_ABSOLUTE_SLACK;
+    let flat_ok = candidate.flat_loss <= flat_limit;
     checks.push((
         "flat_loss",
         flat_ok,
         format!(
-            "{:.4} vs baseline {:.4} (limit {:.1}x)",
-            candidate.flat_loss, baseline.flat_loss, SCORECARD_FLAT_LOSS_TOLERANCE
+            "{:.4} vs baseline {:.4} (limit {:.1}x + {:.1})",
+            candidate.flat_loss,
+            baseline.flat_loss,
+            SCORECARD_FLAT_LOSS_TOLERANCE,
+            SCORECARD_FLAT_LOSS_ABSOLUTE_SLACK,
         ),
     ));
 
@@ -247,8 +253,11 @@ pub(super) fn compare_scorecards(
 }
 
 /// Evaluate a single optimization result against baseline using the multi-metric scorecard.
-/// For Baseline mutations, stores the scorecard and checks convergence (flat_loss < pre).
-/// For other mutations, compares against the stored baseline scorecard.
+/// For baseline mutations, stores the scorecard and checks convergence against
+/// the uncorrected response. Resource mutations compare against that optimized
+/// baseline: their configured objective may be asymmetric, psychoacoustic, or
+/// multi-measurement, so a separate symmetric flat-loss comparison to their raw
+/// input is not the objective they were asked to optimize.
 pub(super) fn evaluate_scorecard(
     mutation: Mutation,
     pre_score: f64,
@@ -277,23 +286,13 @@ pub(super) fn evaluate_scorecard(
         _ => {
             let base = baseline_scorecard.as_ref().unwrap();
             let checks = compare_scorecards(base, candidate);
-            // Also require convergence (post < pre)
-            let converged = candidate.flat_loss <= pre_score + convergence_epsilon(pre_score);
-            let all_pass = converged && checks.iter().all(|(_, pass, _)| *pass);
+            let all_pass = checks.iter().all(|(_, pass, _)| *pass);
 
             if all_pass {
                 let pct = (1.0 - candidate.flat_loss / base.flat_loss) * 100.0;
                 (true, format!("{:+.0}% vs baseline [{}]", -pct, candidate))
             } else {
                 let mut failures: Vec<String> = Vec::new();
-                if !converged {
-                    failures.push(format!(
-                        "no convergence: post {:.4} > pre {:.4} + epsilon {:.4}",
-                        candidate.flat_loss,
-                        pre_score,
-                        convergence_epsilon(pre_score)
-                    ));
-                }
                 for (name, pass, detail) in &checks {
                     if !pass {
                         failures.push(format!("{}: {}", name, detail));

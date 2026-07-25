@@ -134,9 +134,11 @@ pub fn enforce_runtime_acceptance_evidence(
     let partitions =
         std::iter::once(&acoustic_quality.training).chain(acoustic_quality.held_out.as_ref());
     let mut max_p95 = 0.0_f64;
+    let mut max_pre_p95 = 0.0_f64;
     let mut max_worst = 0.0_f64;
     let mut worst_position_improvement = f64::INFINITY;
     for partition in partitions {
+        max_pre_p95 = max_pre_p95.max(partition.pre_p95_abs_residual_db);
         max_p95 = max_p95.max(partition.post_p95_abs_residual_db);
         max_worst = max_worst.max(partition.post_worst_abs_residual_db);
         worst_position_improvement =
@@ -145,10 +147,16 @@ pub fn enforce_runtime_acceptance_evidence(
     if !acoustic_quality.finite {
         violations.push("acoustic_quality_non_finite".to_string());
     }
-    if max_p95 > policy.max_post_p95_abs_residual_db {
+    // Absolute residual limits must not turn a beneficial correction into a
+    // worse identity fallback merely because the uncorrected room already
+    // exceeds the limit. The limit becomes a hard violation when the
+    // correction also regresses the residual distribution; independently
+    // measured worst-position regression remains guarded below.
+    let residual_regressed = max_p95 > max_pre_p95 + 1e-6;
+    if max_p95 > policy.max_post_p95_abs_residual_db && residual_regressed {
         violations.push("post_p95_residual_limit_exceeded".to_string());
     }
-    if max_worst > policy.max_post_worst_abs_residual_db {
+    if max_worst > policy.max_post_worst_abs_residual_db && residual_regressed {
         violations.push("post_worst_residual_limit_exceeded".to_string());
     }
     if worst_position_improvement < -policy.max_worst_position_regression_db {
@@ -430,6 +438,45 @@ mod tests {
         assert!(report.accepted);
         assert_eq!(report.runtime_policy, Some(policy));
         assert!(report.realization_quality.is_some());
+    }
+
+    #[test]
+    fn runtime_policy_keeps_non_regressing_correction_when_room_exceeds_residual_limit() {
+        let target = curve(&[0.0; 4]);
+        let pre = curve(&[8.0, -8.0, 7.0, -7.0]);
+        let post = curve(&[8.0, -8.0, 7.0, -7.0]);
+        let mut report = evaluate_correction_acceptance(
+            &pre,
+            &post,
+            &target,
+            None,
+            CorrectionAcceptancePolicy::RuntimeSafety,
+        )
+        .unwrap();
+        let mut scorecard = runtime_scorecard();
+        scorecard.training.pre_p95_abs_residual_db = 20.0;
+        scorecard.training.post_p95_abs_residual_db = 20.0;
+        scorecard.training.post_worst_abs_residual_db = 30.0;
+
+        enforce_runtime_acceptance_evidence(
+            &mut report,
+            scorecard,
+            RealizationQualityEvidence {
+                evaluated_channels: 2,
+                max_abs_error_db: Some(0.01),
+                failed_channels: Vec::new(),
+            },
+            RuntimeAcceptancePolicy::for_output_class(RuntimeOutputClass::LowLatencyIir),
+        )
+        .unwrap();
+
+        assert!(report.accepted);
+        assert!(
+            !report
+                .violations
+                .iter()
+                .any(|violation| violation.contains("residual_limit_exceeded"))
+        );
     }
 
     #[test]

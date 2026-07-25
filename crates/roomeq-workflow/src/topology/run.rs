@@ -82,11 +82,11 @@ pub(crate) fn run_post_eq(
 /// and a config clone carrying any workflow-specific frequency overrides,
 /// the workflow inherits the full feature matrix.
 ///
-/// The alignment gain is not applied to the curve itself — it is added as a
-/// plugin at the head of the chain. The channel workflow's internal
-/// decisions (F3 detection, passband estimation, target tilt, etc.) use
-/// relative-to-peak thresholds that are gain-invariant, so passing the raw
-/// curve is equivalent to passing an aligned one.
+/// The alignment gain is added after the channel workflow has made its
+/// internal decisions (F3 detection, passband estimation, target tilt, etc.),
+/// which all use gain-invariant relative-to-peak thresholds. The same gain is
+/// then applied to the reported final curve so it remains the canonical
+/// response of the serialized DSP chain.
 ///
 /// `config_override` lets stereo 2.1 / home-cinema-with-sub clone
 /// `config` and narrow `optimizer.min_freq` / `max_freq` to the band of
@@ -193,7 +193,7 @@ pub(crate) fn run_channel_via_generic_path(
         pre_score,
         post_score,
         initial_curve,
-        final_curve,
+        mut final_curve,
         biquads,
         _mean_spl,
         _arrival_ms,
@@ -206,6 +206,7 @@ pub(crate) fn run_channel_via_generic_path(
     let mut plugins: Vec<_> = Vec::with_capacity(raw_chain.plugins.len() + 1);
     if alignment_gain_db.abs() > 0.01 {
         plugins.push(output::create_gain_plugin(alignment_gain_db));
+        final_curve.spl.mapv_inplace(|spl| spl + alignment_gain_db);
     }
     plugins.extend(raw_chain.plugins);
 
@@ -214,7 +215,7 @@ pub(crate) fn run_channel_via_generic_path(
         plugins,
         drivers: raw_chain.drivers,
         initial_curve: raw_chain.initial_curve,
-        final_curve: raw_chain.final_curve,
+        final_curve: Some((&final_curve).into()),
         eq_response: raw_chain.eq_response,
         pre_ir: raw_chain.pre_ir,
         post_ir: raw_chain.post_ir,
@@ -397,9 +398,25 @@ mod tests {
             "generic path with gain failed: {:?}",
             result.err()
         );
-        let (chain, _, _, _, _, _) = result.unwrap();
+        let (chain, channel_result, _, _, _, _) = result.unwrap();
         let has_gain = chain.plugins.iter().any(|p| p.plugin_type == "gain");
         assert!(has_gain, "alignment gain plugin should be present");
+        let realized = crate::ctc::apply_channel_dsp_chain_to_curve(
+            &chain,
+            &channel_result.initial_curve,
+            48_000.0,
+        )
+        .unwrap();
+        let max_realization_error = realized
+            .spl
+            .iter()
+            .zip(&channel_result.final_curve.spl)
+            .map(|(realized, reported)| (realized - reported).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(
+            max_realization_error < 1e-9,
+            "reported final curve must include the alignment gain; max error was {max_realization_error}"
+        );
     }
 
     #[test]

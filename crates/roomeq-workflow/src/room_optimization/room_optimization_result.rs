@@ -69,12 +69,41 @@ pub(super) fn apply_final_correction_safety_gate(
                 evaluation_band,
             )
         });
+        let topology_epsilon = (channel.pre_score.abs() * 1e-4).max(1e-6);
+        let topology_improved = channel.pre_score.is_finite()
+            && channel.post_score < channel.pre_score - topology_epsilon;
         let regressed = report.as_ref().is_none_or(|report| {
-            let epsilon = (report.metrics.pre_target_weighted_rms_db.abs() * 1e-4).max(1e-6);
-            !report.metrics.post_target_weighted_rms_db.is_finite()
+            // FIR windowing and response evaluation can leave sub-millidecibel
+            // residuals on an otherwise exactly flat fixture. Do not classify
+            // that numerical floor as an audible target-RMS regression.
+            let epsilon = (report.metrics.pre_target_weighted_rms_db.abs() * 1e-4).max(1e-4);
+            let target_weighted_regressed = !report.metrics.post_target_weighted_rms_db.is_finite()
                 || report.metrics.post_target_weighted_rms_db
-                    > report.metrics.pre_target_weighted_rms_db + epsilon
+                    > report.metrics.pre_target_weighted_rms_db + epsilon;
+            let regression_ratio = if report.metrics.pre_target_weighted_rms_db > 1e-9 {
+                (report.metrics.post_target_weighted_rms_db
+                    - report.metrics.pre_target_weighted_rms_db)
+                    / report.metrics.pre_target_weighted_rms_db
+            } else {
+                f64::INFINITY
+            };
+            // Asymmetric and multi-measurement objectives can trade a small
+            // increase in symmetric target RMS for a meaningful improvement in
+            // their configured topology score. Preserve that bounded tradeoff;
+            // larger or objective-wide regressions still fall back safely.
+            target_weighted_regressed && (!topology_improved || regression_ratio > 0.05)
         });
+        if let Some(report) = &report {
+            log::debug!(
+                "Final correction safety '{}': topology {:.4} -> {:.4}, target-weighted RMS {:.4} -> {:.4}, regressed={}",
+                name,
+                channel.pre_score,
+                channel.post_score,
+                report.metrics.pre_target_weighted_rms_db,
+                report.metrics.post_target_weighted_rms_db,
+                regressed,
+            );
+        }
         if report.as_ref().is_some_and(|report| {
             accepted_report.as_ref().is_none_or(
                 |current: &roomeq_engine::quality::CorrectionAcceptanceReport| {
@@ -275,6 +304,85 @@ pub(super) fn apply_final_correction_safety_gate(
         }
         result.metadata.correction_acceptance = Some(report);
     }
+    reconcile_group_delay_summary(result);
+}
+
+fn reconcile_group_delay_summary(result: &mut RoomOptimizationResult) {
+    let Some(summary) = result.metadata.group_delay.as_mut() else {
+        return;
+    };
+    if summary.channel_names.is_empty() {
+        summary.applied = false;
+        return;
+    }
+
+    let mut applied = false;
+    let mut delays = Vec::with_capacity(summary.channel_names.len());
+    let mut polarities = Vec::with_capacity(summary.channel_names.len());
+    let mut ap_counts = Vec::with_capacity(summary.channel_names.len());
+    for name in &summary.channel_names {
+        let plugins = result
+            .channels
+            .get(name)
+            .map(|chain| chain.plugins.as_slice())
+            .unwrap_or_default();
+        let mut delay_ms = 0.0;
+        let mut polarity_inverted = false;
+        let mut ap_count = 0;
+        for plugin in plugins {
+            let label = plugin
+                .parameters
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            if !label.starts_with("group_delay") {
+                continue;
+            }
+            applied = true;
+            match label {
+                "group_delay_delay" => {
+                    delay_ms = plugin
+                        .parameters
+                        .get("delay_ms")
+                        .and_then(serde_json::Value::as_f64)
+                        .unwrap_or(0.0);
+                }
+                "group_delay_polarity" => {
+                    polarity_inverted = plugin
+                        .parameters
+                        .get("invert")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false);
+                }
+                "group_delay_allpass" => {
+                    ap_count = plugin
+                        .parameters
+                        .get("filters")
+                        .and_then(serde_json::Value::as_array)
+                        .map(|filters| {
+                            filters
+                                .iter()
+                                .filter(|filter| {
+                                    filter
+                                        .get("filter_type")
+                                        .and_then(serde_json::Value::as_str)
+                                        == Some("allpass")
+                                })
+                                .count()
+                        })
+                        .unwrap_or(0);
+                }
+                _ => {}
+            }
+        }
+        delays.push(delay_ms);
+        polarities.push(polarity_inverted);
+        ap_counts.push(ap_count);
+    }
+    summary.per_channel_delay_ms = delays;
+    summary.per_channel_polarity_inverted = polarities;
+    summary.per_channel_ap_count = ap_counts;
+    summary.applied = applied;
 }
 
 const OPTIMIZER_ACCEPTANCE_POLICY_VERSION: &str = "1.0.0";
@@ -1105,18 +1213,21 @@ fn correction_stages(chain: &ChannelDspChain) -> BTreeSet<CorrectionStage> {
 }
 
 fn correction_stage(plugin: &roomeq_model::PluginConfigWrapper) -> Option<CorrectionStage> {
+    let label = plugin
+        .parameters
+        .get("label")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if label.contains("group_delay") {
+        return Some(CorrectionStage::GroupDelay);
+    }
     if plugin.plugin_type == "convolution" {
         return Some(CorrectionStage::Fir);
     }
     if plugin.plugin_type != "eq" {
         return None;
     }
-    let label = plugin
-        .parameters
-        .get("label")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    if label.contains("allpass") || label.contains("group_delay") {
+    if label.contains("allpass") {
         Some(CorrectionStage::GroupDelay)
     } else if label.contains("mso") || label.contains("multisub") {
         Some(CorrectionStage::Mso)
@@ -1251,6 +1362,33 @@ mod tests {
         let output = result.to_dsp_chain_output();
         assert!(output.channels.contains_key("left"));
         assert!(output.metadata.is_some());
+    }
+
+    #[test]
+    fn group_delay_summary_tracks_the_final_exported_graph() {
+        let mut result = single_channel_room_result("left");
+        result.metadata.group_delay = Some(roomeq_model::GroupDelayOptSummary {
+            band: (20.0, 300.0),
+            channel_names: vec!["left".to_string()],
+            per_channel_delay_ms: vec![3.0],
+            per_channel_polarity_inverted: vec![true],
+            per_channel_ap_count: vec![1],
+            sum_gd_pre_rms_ms: 2.0,
+            sum_gd_post_rms_ms: 1.0,
+            mean_coherence: 0.9,
+            improvement_db: 6.0,
+            advisory: "success".to_string(),
+            applied: true,
+        });
+        result.channels.get_mut("left").unwrap().plugins = vec![];
+
+        reconcile_group_delay_summary(&mut result);
+
+        let summary = result.metadata.group_delay.unwrap();
+        assert!(!summary.applied);
+        assert_eq!(summary.per_channel_delay_ms, [0.0]);
+        assert_eq!(summary.per_channel_polarity_inverted, [false]);
+        assert_eq!(summary.per_channel_ap_count, [0]);
     }
 
     #[test]

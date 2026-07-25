@@ -114,6 +114,39 @@ pub(super) fn enable_gd_trusted_measurements(
     multi_position: bool,
     profile: Option<GroupDelayQaProfile>,
 ) -> Result<()> {
+    enable_gd_measurements(
+        config,
+        fem_dir,
+        fem_subdir,
+        multi_position,
+        profile,
+        Some(GD_QA_SYNTHETIC_COHERENCE),
+    )
+}
+
+pub(super) fn enable_gd_missing_coherence_measurements(
+    config: &mut RoomConfig,
+    fem_dir: &Path,
+    fem_subdir: &str,
+) -> Result<()> {
+    enable_gd_measurements(
+        config,
+        fem_dir,
+        fem_subdir,
+        false,
+        Some(GroupDelayQaProfile::MissingCoherenceDelayOnly),
+        None,
+    )
+}
+
+fn enable_gd_measurements(
+    config: &mut RoomConfig,
+    fem_dir: &Path,
+    fem_subdir: &str,
+    multi_position: bool,
+    profile: Option<GroupDelayQaProfile>,
+    coherence: Option<f64>,
+) -> Result<()> {
     let data_dir = fem_dir.join(fem_subdir);
     let speaker_keys: Vec<String> = config.speakers.keys().cloned().collect();
     let adaptive_ap_key = if profile == Some(GroupDelayQaProfile::AdaptiveAllPass) {
@@ -138,10 +171,16 @@ pub(super) fn enable_gd_trusted_measurements(
 
             let mut curve = load_measurement(&MeasurementRef::Path(path.clone()))
                 .map_err(|e| anyhow!("failed to load {}: {}", path.display(), e))?;
-            curve.coherence = Some(ndarray::Array1::from_elem(
-                curve.freq.len(),
-                GD_QA_SYNTHETIC_COHERENCE,
-            ));
+            // These cases isolate temporal correction. Keep the measured phase
+            // and frequency grid but flatten magnitude so FIR/all-pass
+            // acceptance is not dominated by an unrelated, deliberately
+            // under-budget spectral inversion.
+            if !curve.spl.is_empty() {
+                let mean = curve.spl.iter().sum::<f64>() / curve.spl.len() as f64;
+                curve.spl.fill(mean);
+            }
+            curve.coherence =
+                coherence.map(|value| ndarray::Array1::from_elem(curve.freq.len(), value));
             if adaptive_ap_key.as_deref() == Some(key.as_str()) {
                 set_gd_adaptive_fixture_phase(&mut curve, 2.0 + sweep_idx as f64 * 0.02, true);
             } else if adaptive_ap_key.is_some() {

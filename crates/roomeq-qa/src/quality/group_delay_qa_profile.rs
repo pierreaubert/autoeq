@@ -1,3 +1,4 @@
+use super::enable::enable_gd_missing_coherence_measurements;
 use super::enable::enable_gd_trusted_measurements;
 use super::enable::enable_multi_measurement_paths;
 use super::enable::enable_multisub_multi_seat_paths;
@@ -125,7 +126,9 @@ pub(super) fn prepare_option_measurement_paths(
     if needs_multisub_multi_seat {
         enable_multisub_multi_seat_paths(config, fem_dir, fem_subdir);
     }
-    if needs_gd_trusted_measurements {
+    if gd_profile == Some(GroupDelayQaProfile::MissingCoherenceDelayOnly) {
+        enable_gd_missing_coherence_measurements(config, fem_dir, fem_subdir)?;
+    } else if needs_gd_trusted_measurements {
         enable_gd_trusted_measurements(
             config,
             fem_dir,

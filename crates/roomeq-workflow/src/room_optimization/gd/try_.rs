@@ -4,6 +4,7 @@ use super::misc::apply_gd_opt_result;
 use super::misc::build_gd_sweep_realisations;
 use super::misc::coherence_average_gd_realisations;
 use super::misc::existing_fir_convolution_filename;
+use super::misc::tag_group_delay_plugin;
 
 /// Attempt to run GD-Opt v2 on the channel results.
 ///
@@ -497,7 +498,7 @@ pub(in super::super) fn try_run_phase_linear_fir_gd(
         }
 
         if let Some(chain) = channel_chains.get_mut(name.as_str()) {
-            let has_convolution = chain.plugins.iter().any(|plugin| {
+            let existing_convolution = chain.plugins.iter_mut().find(|plugin| {
                 plugin.plugin_type == "convolution"
                     && plugin
                         .parameters
@@ -505,10 +506,14 @@ pub(in super::super) fn try_run_phase_linear_fir_gd(
                         .and_then(|value| value.as_str())
                         == Some(filename.as_str())
             });
-            if !has_convolution {
-                chain
-                    .plugins
-                    .push(roomeq_engine::output::create_convolution_plugin(&filename));
+            if let Some(plugin) = existing_convolution {
+                plugin.parameters["label"] =
+                    serde_json::Value::String("group_delay_phase_linear".to_string());
+            } else {
+                chain.plugins.push(tag_group_delay_plugin(
+                    roomeq_engine::output::create_convolution_plugin(&filename),
+                    "group_delay_phase_linear",
+                ));
             }
         }
 

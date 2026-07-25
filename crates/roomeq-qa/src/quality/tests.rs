@@ -280,6 +280,33 @@ fn scorecard_allows_small_roughness_regression_when_baseline_already_violates_li
     assert!(roughness.1, "{}", roughness.2);
 }
 
+#[test]
+fn scorecard_allows_absolute_slack_at_flat_loss_ratio_boundary() {
+    let baseline = MetricScorecard {
+        flat_loss: 9.0,
+        peak_residual_db: 10.0,
+        epa_preference: None,
+        epa_sharpness: None,
+        epa_roughness: None,
+        group_delay_std_ms: None,
+    };
+    let candidate = MetricScorecard {
+        flat_loss: 13.75,
+        peak_residual_db: 10.0,
+        epa_preference: None,
+        epa_sharpness: None,
+        epa_roughness: None,
+        group_delay_std_ms: None,
+    };
+
+    let checks = compare_scorecards(&baseline, &candidate);
+    let flat_loss = checks
+        .iter()
+        .find(|(name, _, _)| *name == "flat_loss")
+        .expect("flat-loss check");
+    assert!(flat_loss.1, "{}", flat_loss.2);
+}
+
 fn scorecard_with_epa(
     preference: Option<f64>,
     sharpness: Option<f64>,

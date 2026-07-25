@@ -200,6 +200,7 @@ pub(super) fn apply_option_override(config: &mut RoomConfig, option: &OptionOver
             match profile {
                 GroupDelayQaProfile::PhaseLinearFir => {
                     config.optimizer.processing_mode = ProcessingMode::PhaseLinear;
+                    config.optimizer.max_freq = config.optimizer.max_freq.min(1_500.0);
                     config.optimizer.fir = Some(FirConfig {
                         taps: 2048,
                         phase: "linear".to_string(),
@@ -210,6 +211,13 @@ pub(super) fn apply_option_override(config: &mut RoomConfig, option: &OptionOver
                 }
                 GroupDelayQaProfile::MixedPhase => {
                     config.optimizer.processing_mode = ProcessingMode::MixedPhase;
+                    config.optimizer.fir = Some(FirConfig {
+                        taps: 2048,
+                        phase: "kirkeby".to_string(),
+                        correct_excess_phase: false,
+                        phase_smoothing: 0.167,
+                        pre_ringing: None,
+                    });
                     config.optimizer.mixed_phase = Some(MixedPhaseSerdeConfig {
                         max_fir_length_ms: 10.0,
                         pre_ringing_threshold_db: -30.0,

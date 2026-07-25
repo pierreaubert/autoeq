@@ -1,6 +1,19 @@
 use super::super::types::ChannelOptimizationResult;
 use super::super::*;
 
+pub(super) fn tag_group_delay_plugin(
+    mut plugin: roomeq_model::PluginConfigWrapper,
+    label: &str,
+) -> roomeq_model::PluginConfigWrapper {
+    if let Some(parameters) = plugin.parameters.as_object_mut() {
+        parameters.insert(
+            "label".to_string(),
+            serde_json::Value::String(label.to_string()),
+        );
+    }
+    plugin
+}
+
 pub(super) fn existing_fir_convolution_filename(chain: &ChannelDspChain) -> Option<String> {
     chain.plugins.iter().find_map(|plugin| {
         if plugin.plugin_type != "convolution" {
@@ -266,21 +279,24 @@ pub(in super::super) fn apply_gd_opt_result(
         let mut inserted_for_channel = false;
         if let Some(chain) = channel_chains.get_mut(name.as_str()) {
             if ch_result.polarity_inverted {
-                chain
-                    .plugins
-                    .push(output::create_gain_plugin_with_invert(0.0, true));
+                chain.plugins.push(tag_group_delay_plugin(
+                    output::create_gain_plugin_with_invert(0.0, true),
+                    "group_delay_polarity",
+                ));
                 inserted_for_channel = true;
             }
             if ch_result.delay_ms > 0.01 {
-                chain
-                    .plugins
-                    .push(output::create_delay_plugin(ch_result.delay_ms));
+                chain.plugins.push(tag_group_delay_plugin(
+                    output::create_delay_plugin(ch_result.delay_ms),
+                    "group_delay_delay",
+                ));
                 inserted_for_channel = true;
             }
             if !ch_result.ap_filters.is_empty() {
-                chain
-                    .plugins
-                    .push(output::create_eq_plugin(&ch_result.ap_filters));
+                chain.plugins.push(tag_group_delay_plugin(
+                    output::create_eq_plugin(&ch_result.ap_filters),
+                    "group_delay_allpass",
+                ));
                 inserted_for_channel = true;
             }
         }

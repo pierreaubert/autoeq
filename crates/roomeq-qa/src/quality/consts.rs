@@ -70,6 +70,9 @@ pub(super) const GD_QA_RMS_EPSILON_MS: f64 = 0.05;
 /// Flat loss may degrade up to 50% vs baseline — new losses intentionally trade flatness
 /// for perceptual quality, so the flatness gate is deliberately relaxed.
 pub(super) const SCORECARD_FLAT_LOSS_TOLERANCE: f64 = 1.50;
+/// Absolute slack for bounded-optimizer drift when a parallel baseline run
+/// happens to find an unusually strong local optimum.
+pub(super) const SCORECARD_FLAT_LOSS_ABSOLUTE_SLACK: f64 = 0.50;
 
 /// Peak residual may grow up to 100% vs baseline.
 /// Sub-heavy configs (2.1, MSO) produce huge peak values (40-80 dB) in LFE

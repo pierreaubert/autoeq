@@ -1,3 +1,30 @@
+# 0.4.53
+
+## Fixes
+
+- Keep beneficial RoomEQ corrections when an already-poor room exceeds
+  absolute residual limits but the correction does not regress them, preserve
+  bounded improvements from asymmetric and multi-measurement objectives, and
+  ignore sub-millidecibel FIR realization noise in the final safety gate.
+- Include topology alignment gain in canonical final curves so runtime
+  realization checks no longer blame or remove safe group-delay, all-pass, or
+  FIR stages for a pre-existing graph/report mismatch.
+- Label every group-delay DSP stage and reconcile its optimization summary
+  against the final exported graph after safety reversion, including delay,
+  polarity, all-pass, and phase-linear convolution controls.
+
+## QA improvements
+
+- Exercise missing-coherence, delay-only, fixed/adaptive all-pass,
+  phase-linear FIR, and mixed-phase group-delay paths with realistic temporal
+  fixtures and export/report consistency checks.
+- Validate minimax and variance-penalized runs using the aggregate metrics
+  actually exported by the result model instead of treating per-channel
+  scores as per-position scores.
+- Make convergence comparisons robust to intentional safety fallbacks and
+  bounded parallel optimizer drift while retaining flat-loss, residual,
+  psychoacoustic, realization, and runtime-policy gates.
+
 # 0.4.52
 
 ## Features

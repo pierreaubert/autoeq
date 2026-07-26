@@ -167,6 +167,7 @@ fn test_mixedphase_with_phase_data() {
                 correct_excess_phase: true,
                 phase_smoothing: 0.167,
                 pre_ringing: None,
+                max_boost_db: None,
             }),
             ..OptimizerConfig::default()
         },

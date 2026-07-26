@@ -165,6 +165,7 @@ pub(super) fn apply_option_override(config: &mut RoomConfig, option: &OptionOver
                         threshold_db: -30.0,
                         max_time_s: 0.005,
                     }),
+                    max_boost_db: None,
                 });
             } else if let Some(ref mut fir) = config.optimizer.fir {
                 fir.pre_ringing = Some(PreRingingSerdeConfig {
@@ -207,6 +208,7 @@ pub(super) fn apply_option_override(config: &mut RoomConfig, option: &OptionOver
                         correct_excess_phase: false,
                         phase_smoothing: 0.167,
                         pre_ringing: None,
+                        max_boost_db: None,
                     });
                 }
                 GroupDelayQaProfile::MixedPhase => {
@@ -217,6 +219,7 @@ pub(super) fn apply_option_override(config: &mut RoomConfig, option: &OptionOver
                         correct_excess_phase: false,
                         phase_smoothing: 0.167,
                         pre_ringing: None,
+                        max_boost_db: None,
                     });
                     config.optimizer.mixed_phase = Some(MixedPhaseSerdeConfig {
                         max_fir_length_ms: 10.0,

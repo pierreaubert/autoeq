@@ -18,8 +18,8 @@ use roomeq_engine::room_result::{ChannelOptimizationResult, RoomOptimizationResu
 use roomeq_engine::topology::{
     align_channels_to_lowest, all_curves_have_usable_phase, all_curves_share_frequency_grid,
     apply_crossover_response_to_curve, apply_delay_and_polarity_to_curve, average_mains_magnitude,
-    bass_management_objective, complex_sum_mains, compute_flat_loss, normalize_crossover_delays,
-    predict_bass_management_sum, select_bass_management_crossover_type,
+    bass_management_objective, complex_sum_mains, compute_flat_loss, mark_route_owned_plugin,
+    normalize_crossover_delays, predict_bass_management_sum, select_bass_management_crossover_type,
 };
 use roomeq_engine::{PipelineStepId, PipelineStepStatus};
 use roomeq_model::{
@@ -689,7 +689,7 @@ impl WorkflowExecutor for Stereo21Executor {
                 intermediate.clone()
             };
 
-            let initial_data: CurveData = (&aligned_curves[role]).into();
+            let initial_data: CurveData = (&curves[role]).into();
             let final_data: CurveData = (&final_curve_obj).into();
             let eq_resp = output::compute_eq_response(&initial_data, &final_data);
             let chain = ChannelDspChain {
@@ -718,11 +718,11 @@ impl WorkflowExecutor for Stereo21Executor {
             sub_plugins.extend(stack.clone());
         }
 
-        sub_plugins.push(output::create_crossover_plugin(
+        sub_plugins.push(mark_route_owned_plugin(output::create_crossover_plugin(
             xover_type_str,
             final_xo_freq,
             "low",
-        ));
+        )));
 
         if sub_inverted || sub_gain_post.abs() > 0.01 {
             sub_plugins.push(output::create_gain_plugin_with_invert(
@@ -783,7 +783,7 @@ impl WorkflowExecutor for Stereo21Executor {
                 .collect()
         });
 
-        let sub_initial_data: CurveData = (&aligned_curves[&sub_role]).into();
+        let sub_initial_data: CurveData = (&curves[&sub_role]).into();
         let sub_final_data: CurveData = (&final_sub_curve).into();
         let sub_eq_resp = output::compute_eq_response(&sub_initial_data, &sub_final_data);
         let sub_chain = ChannelDspChain {
@@ -830,7 +830,7 @@ impl WorkflowExecutor for Stereo21Executor {
                     name: role.to_string(),
                     pre_score,
                     post_score,
-                    initial_curve: aligned_curves[role].clone(),
+                    initial_curve: curves[role].clone(),
                     final_curve: final_curve_obj,
                     biquads: post_eq_filters.get(role).cloned().unwrap_or_default(),
                     fir_coeffs: None,
@@ -852,7 +852,7 @@ impl WorkflowExecutor for Stereo21Executor {
                     name: sub_role.clone(),
                     pre_score,
                     post_score,
-                    initial_curve: aligned_curves[&sub_role].clone(),
+                    initial_curve: curves[&sub_role].clone(),
                     final_curve: final_sub_curve.clone(),
                     biquads: post_eq_filters.get(&sub_role).cloned().unwrap_or_default(),
                     fir_coeffs: None,

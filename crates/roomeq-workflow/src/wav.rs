@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+#[derive(Debug)]
 pub(crate) struct DecodedMonoWav {
     pub(crate) samples: Vec<f32>,
     pub(crate) sample_rate: u32,
@@ -71,5 +72,52 @@ mod tests {
 
         assert_eq!(decoded.sample_rate, 48_000);
         assert_eq!(decoded.samples, vec![0.25, 0.5]);
+    }
+
+    #[test]
+    fn decodes_integer_samples_normalized_to_full_scale() {
+        let file = tempfile::Builder::new().suffix(".wav").tempfile().unwrap();
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(file.path(), spec).unwrap();
+        for sample in [0_i16, i16::MAX / 2, -i16::MAX / 2] {
+            writer.write_sample(sample).unwrap();
+        }
+        writer.finalize().unwrap();
+
+        let decoded = decode_first_channel(file.path()).unwrap();
+
+        assert_eq!(decoded.samples.len(), 3);
+        assert!((decoded.samples[1] - 0.5).abs() < 1e-4);
+        assert!((decoded.samples[2] + 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn missing_file_is_an_error_not_a_panic() {
+        let missing = Path::new("/nonexistent/definitely_missing.wav");
+        assert!(decode_first_channel(missing).is_err());
+    }
+
+    #[test]
+    fn empty_wav_is_rejected() {
+        let file = tempfile::Builder::new().suffix(".wav").tempfile().unwrap();
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let writer = hound::WavWriter::create(file.path(), spec).unwrap();
+        writer.finalize().unwrap();
+
+        let error = decode_first_channel(file.path()).unwrap_err();
+        assert!(
+            error.contains("no samples"),
+            "empty WAV should be reported as such, got: {error}"
+        );
     }
 }

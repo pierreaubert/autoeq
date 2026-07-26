@@ -115,6 +115,16 @@ pub fn evaluate_correction_acceptance(
     })
 }
 
+/// Minimum p95 residual increase (dB) treated as a real distribution
+/// regression by [`enforce_runtime_acceptance_evidence`]. Matches the
+/// worst-position regression guard already present in the runtime policy.
+const RESIDUAL_REGRESSION_TOLERANCE_DB: f64 = 0.25;
+
+/// Relative p95 residual increase treated as a real distribution regression,
+/// so the tolerance scales with the room's residual level (5 %, mirroring the
+/// per-channel safety gate's regression-ratio band).
+const RESIDUAL_REGRESSION_RELATIVE: f64 = 0.05;
+
 /// Apply the production acceptance policy to evidence derived from the final
 /// canonical DSP graph. This is deliberately separate from the curve-only
 /// fixture policies so runtime decisions cannot silently omit evidence that
@@ -151,8 +161,16 @@ pub fn enforce_runtime_acceptance_evidence(
     // worse identity fallback merely because the uncorrected room already
     // exceeds the limit. The limit becomes a hard violation when the
     // correction also regresses the residual distribution; independently
-    // measured worst-position regression remains guarded below.
-    let residual_regressed = max_p95 > max_pre_p95 + 1e-6;
+    // measured worst-position regression remains guarded below. The p95/worst
+    // statistics are computed on smoothed curves and wobble at the sub-dB
+    // level between runs, and an absolute dB tolerance is meaningless across
+    // rooms with wildly different residual scales: a 0.4 dB change matters on
+    // a 4 dB residual but is noise on a 27 dB one. Require both a floor and a
+    // relative (5 %) regression before calling the distribution degraded —
+    // the same relative band the per-channel safety gate uses.
+    let regression_tolerance =
+        RESIDUAL_REGRESSION_TOLERANCE_DB.max(RESIDUAL_REGRESSION_RELATIVE * max_pre_p95);
+    let residual_regressed = max_p95 > max_pre_p95 + regression_tolerance;
     if max_p95 > policy.max_post_p95_abs_residual_db && residual_regressed {
         violations.push("post_p95_residual_limit_exceeded".to_string());
     }
@@ -476,6 +494,48 @@ mod tests {
                 .violations
                 .iter()
                 .any(|violation| violation.contains("residual_limit_exceeded"))
+        );
+    }
+
+    #[test]
+    fn runtime_policy_tolerates_small_relative_p95_wobble_on_bad_rooms() {
+        let target = curve(&[0.0; 4]);
+        let pre = curve(&[8.0, -8.0, 7.0, -7.0]);
+        let post = curve(&[8.0, -8.0, 7.0, -7.0]);
+        let mut report = evaluate_correction_acceptance(
+            &pre,
+            &post,
+            &target,
+            None,
+            CorrectionAcceptancePolicy::RuntimeSafety,
+        )
+        .unwrap();
+        let mut scorecard = runtime_scorecard();
+        // On an already-poor room (p95 residual ~27 dB), a sub-half-dB p95
+        // wobble is measurement noise, not a distribution regression.
+        scorecard.training.pre_p95_abs_residual_db = 27.2;
+        scorecard.training.post_p95_abs_residual_db = 27.65;
+        scorecard.training.post_worst_abs_residual_db = 30.0;
+
+        enforce_runtime_acceptance_evidence(
+            &mut report,
+            scorecard,
+            RealizationQualityEvidence {
+                evaluated_channels: 2,
+                max_abs_error_db: Some(0.01),
+                failed_channels: Vec::new(),
+            },
+            RuntimeAcceptancePolicy::for_output_class(RuntimeOutputClass::LowLatencyIir),
+        )
+        .unwrap();
+
+        assert!(
+            !report
+                .violations
+                .iter()
+                .any(|violation| violation.contains("residual_limit_exceeded")),
+            "relative p95 wobble should not trip residual limits: {:?}",
+            report.violations
         );
     }
 

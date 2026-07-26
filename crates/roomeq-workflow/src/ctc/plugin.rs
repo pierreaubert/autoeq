@@ -2,7 +2,6 @@ use super::dsp_response_cache::DspResponseCache;
 use super::dsp_response_cache::convolution_response;
 use super::dsp_response_cache::mixed_band_response;
 use super::misc::biquad_filter_response;
-use math_audio_dsp::lr4_crossover_response;
 use num_complex::Complex64;
 use roomeq_engine::error::{AutoeqError, Result};
 use roomeq_model::PluginConfigWrapper;
@@ -93,11 +92,34 @@ pub(super) fn plugin_response(
                 .get("output")
                 .and_then(|value| value.as_str())
                 .unwrap_or("both");
-            lr4_crossover_response(output, frequency, freq, sample_rate).map_err(|message| {
-                AutoeqError::InvalidConfiguration {
-                    message: format!("unsupported RoomEQ crossover in CTC joint path: {message}"),
+            // Honor the declared crossover type (LR24/LR48/BW..., or a
+            // linear-phase FIR): the reported final curves are computed with
+            // `create_crossover_filters`, so realizing every plugin as a
+            // fixed LR4 response makes the exported graph disagree with the
+            // report by tens of dB below the cutoff.
+            let type_str = plugin
+                .parameters
+                .get("type")
+                .and_then(|value| value.as_str())
+                .unwrap_or("lr4");
+            let is_lowpass = match output.to_ascii_lowercase().as_str() {
+                "low" | "lowpass" | "lp" => true,
+                "high" | "highpass" | "hp" => false,
+                "both" => return Ok(Complex64::new(1.0, 0.0)),
+                other => {
+                    return Err(AutoeqError::InvalidConfiguration {
+                        message: format!("unsupported crossover output mode '{other}'"),
+                    });
                 }
-            })
+            };
+            let response = roomeq_engine::topology::compute_crossover_complex_response(
+                type_str,
+                frequency,
+                sample_rate,
+                is_lowpass,
+                &ndarray::array![freq],
+            );
+            Ok(response[0])
         }
         "delay" => {
             let delay_ms = plugin

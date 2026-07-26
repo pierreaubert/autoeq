@@ -19,6 +19,7 @@ fn optimizer_for_mode(processing_mode: ProcessingMode) -> OptimizerConfig {
             correct_excess_phase: false,
             phase_smoothing: 1.0 / 6.0,
             pre_ringing: None,
+            max_boost_db: None,
         }),
         mixed_phase: Some(roomeq_model::MixedPhaseSerdeConfig {
             max_fir_length_ms: 5.0,
@@ -199,6 +200,7 @@ fn optimize_room_impl_generic_multiple_channels_phase_linear_succeeds() {
         correct_excess_phase: false,
         phase_smoothing: 1.0 / 6.0,
         pre_ringing: None,
+            max_boost_db: None,
     });
     let config = room_config_with_optimizer(speakers, None, optimizer);
 

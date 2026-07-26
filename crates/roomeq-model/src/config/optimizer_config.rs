@@ -147,6 +147,12 @@ pub struct OptimizerConfig {
     /// Random seed for reproducible results (None for random)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<u64>,
+    /// Number of threads for parallel objective evaluation. `None` uses all
+    /// available cores. Note that a fixed seed only gives bit-reproducible
+    /// results when this is pinned (1 = fully deterministic): parallel
+    /// evaluation order otherwise depends on machine load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parallel_threads: Option<usize>,
     /// Whether to run local refinement after global optimization
     #[serde(default = "default_refine")]
     pub refine: bool,
@@ -314,6 +320,7 @@ impl Default for OptimizerConfig {
             mixed_phase: None,
             phase_correction: None,
             seed: None,
+            parallel_threads: None,
             refine: default_refine(),
             local_algo: default_local_algo(),
             bo_initial_samples: None,

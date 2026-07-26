@@ -1,0 +1,12 @@
+{
+  "optimizer": {
+    "mode": "mixed",
+    "min_db": -12.0,
+    "max_db": 2.0,
+    "fir": {
+      "taps": 256,
+      "phase": "kirkeby",
+      "max_boost_db": 10.0
+    }
+  }
+}

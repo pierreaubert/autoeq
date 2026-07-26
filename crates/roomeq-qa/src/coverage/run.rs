@@ -1,6 +1,6 @@
 use super::consts::SAMPLE_RATE;
 use super::consts::TEMP_DIR_COUNTER;
-use super::consts::{apply_home_cinema_qa_overrides, apply_qa_overrides};
+use super::consts::{apply_legacy_fast_overrides, apply_qa_overrides};
 use super::counting_semaphore::CountingSemaphore;
 use super::home_cinema::validate_home_cinema_result;
 use super::misc::avg_epa_preference;
@@ -62,8 +62,17 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
         }
     };
 
-    if tc.home_cinema_expectations.is_some() && tc.solver.name() == "fast-hybrid" {
-        apply_home_cinema_qa_overrides(&mut config, maxeval);
+    if tc.home_cinema_expectations.is_some() {
+        // Home-cinema cases validate workflow features (routing, alignment,
+        // MSO) and their expectations were calibrated against the legacy fast
+        // setup. Fast-hybrid cases keep their configured filter count; FEM
+        // cases historically ran with 3 filters.
+        let num_filters = if tc.solver.name() == "fast-hybrid" {
+            None
+        } else {
+            Some(3)
+        };
+        apply_legacy_fast_overrides(&mut config, maxeval, num_filters);
     } else {
         apply_qa_overrides(&mut config, maxeval);
     }

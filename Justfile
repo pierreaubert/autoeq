@@ -652,10 +652,10 @@ qa-roomeq-coverage: prod-autoeq
 [group('qa-roomeq')]
 qa-roomeq-coverage-gate:
 	cargo llvm-cov --package roomeq-model --package roomeq-analysis --package roomeq-quality --package roomeq-engine --package roomeq-export --package roomeq-workflow --lib --no-report --release
-	cargo llvm-cov --no-clean --package autoeq --test roomeq_integration_test --summary-only --release
-	cargo llvm-cov --no-clean --package autoeq --test roomeq_pipeline_test --summary-only --release
-	cargo llvm-cov --no-clean --package autoeq --test system_config_test --summary-only --release
-	cargo llvm-cov --no-clean --package autoeq --test roomeq_generated_data_test --summary-only --release
+	cargo llvm-cov --no-clean --package autoeq --features cli --test roomeq_integration_test --summary-only --release
+	cargo llvm-cov --no-clean --package autoeq --features cli --test roomeq_pipeline_test --summary-only --release
+	cargo llvm-cov --no-clean --package autoeq --features cli --test system_config_test --summary-only --release
+	cargo llvm-cov --no-clean --package autoeq --features cli --test roomeq_generated_data_test --summary-only --release
 	cargo llvm-cov report --package roomeq-model --package roomeq-analysis --package roomeq-quality --package roomeq-engine --package roomeq-export --package roomeq-workflow --summary-only --release --fail-under-lines 90
 
 [group('qa-roomeq')]
@@ -731,11 +731,13 @@ qa-roomeq-supporting-source:
 	cargo test --release -p roomeq-workflow supporting_source --lib -- --nocapture
 
 # Compact CI-friendly QA run: bounded fuzzer + small coverage subset.
-# Typical wall time under 3 minutes on modern hardware.
+# Typical wall time under 5 minutes on modern hardware. The coverage quick
+# subset keeps each scenario's tuned optimizer (bare local-optimizer runs
+# cannot improve the FEM corpus and are rejected by the final safety gate).
 [group('qa-roomeq')]
 qa-roomeq-ci:
 	cargo run --bin roomeq-fuzzer --release --features="qa,plotly" -- -n 50 --seed 42 --skip-kautz-modal
-	cargo run --features qa --bin roomeq-qa-coverage --release --features="cli" -- --quick --maxeval 200
+	cargo run --features qa --bin roomeq-qa-coverage --release --features="cli" -- --quick
 	cargo run --features qa --bin roomeq-qa-synthetic --features="cli" --release -- --multiseat-guards-only
 	# Leaf-crate unit coverage is enforced by the preceding CI matrix job.
 	just qa-roomeq-perceptual

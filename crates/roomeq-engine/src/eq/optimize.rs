@@ -1270,6 +1270,7 @@ mod processing_mode_tests {
             correct_excess_phase: false,
             phase_smoothing: 0.167,
             pre_ringing: None,
+            max_boost_db: None,
         };
         let config = OptimizerConfig {
             processing_mode: ProcessingMode::PhaseLinear,
@@ -1289,6 +1290,7 @@ mod processing_mode_tests {
             correct_excess_phase: false,
             phase_smoothing: 0.167,
             pre_ringing: None,
+            max_boost_db: None,
         };
         let config = OptimizerConfig {
             processing_mode: ProcessingMode::Hybrid,

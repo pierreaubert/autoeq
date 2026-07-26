@@ -60,6 +60,7 @@ pub(super) fn option_pre_ringing(config: &mut RoomConfig) {
                 threshold_db: -30.0,
                 max_time_s: 0.005,
             }),
+            max_boost_db: None,
         });
     } else if let Some(ref mut fir) = config.optimizer.fir {
         fir.pre_ringing = Some(PreRingingSerdeConfig {

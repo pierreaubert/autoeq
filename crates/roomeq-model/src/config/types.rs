@@ -474,6 +474,12 @@ pub struct FirConfig {
     /// Phase smoothing width in octaves (default: 0.167 = 1/6 octave)
     #[serde(default = "default_phase_smoothing")]
     pub phase_smoothing: f64,
+    /// Maximum per-frequency correction boost in dB. When set, the
+    /// target-vs-measurement delta is clamped to at most this many dB of
+    /// boost before the FIR is designed, mirroring the runtime acceptance
+    /// policy's `max_boost_db` guard. `None` keeps the uncapped behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_boost_db: Option<f64>,
     /// Pre-ringing suppression configuration
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pre_ringing: Option<PreRingingSerdeConfig>,
@@ -487,6 +493,7 @@ impl Default for FirConfig {
             correct_excess_phase: false,
             phase_smoothing: default_phase_smoothing(),
             pre_ringing: None,
+            max_boost_db: None,
         }
     }
 }

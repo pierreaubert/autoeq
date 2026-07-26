@@ -175,10 +175,17 @@ fn test_roomeq_multidriver_config() {
         .expect("plugins should be an array");
 
     // Multi-driver exports keep active-crossover DSP on each driver branch.
-    assert!(
-        plugins.is_empty(),
-        "multi-driver channel should not need channel-level plugins"
-    );
+    // The EQ computed on the combined (summed) response is intentionally
+    // placed at channel level, upstream of the crossover split — see
+    // `build_multidriver_dsp_chain` ("Build combined EQ (applied to summed
+    // output)"). Any other plugin type at channel level would be a bug.
+    for plugin in plugins {
+        assert_eq!(
+            plugin["plugin_type"].as_str().unwrap_or_default(),
+            "eq",
+            "multi-driver channel-level plugins may only carry the combined-response EQ, got: {plugin}"
+        );
+    }
 
     let drivers = left_channel["drivers"]
         .as_array()

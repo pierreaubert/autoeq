@@ -3,7 +3,7 @@
     "mode": "fir",
     "loss_type": "flat",
     "fir": {
-      "taps": 4096,
+      "taps": 2048,
       "phase": "kirkeby"
     },
     "algorithm": "autoeq:de",

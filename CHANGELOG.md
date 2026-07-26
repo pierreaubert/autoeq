@@ -2,6 +2,63 @@
 
 ## Fixes
 
+- Skip the post-workflow PhaseLinear FIR on channels whose chain already
+  carries correction stages: that FIR is designed from the raw measurement, so
+  generating it on top of an existing correction stacked a second full
+  correction and regressed the response (stereo 2.1 FIR mode).
+- Scale the runtime residual-regression tolerance with the room's residual
+  level (max of 0.25 dB and 5 % of the pre-correction p95), mirroring the
+  per-channel safety gate's regression band: on already-poor rooms, sub-dB
+  p95 wobble no longer discards beneficial corrections.
+- Add `parallel_threads` to the RoomEQ optimizer config: seeded runs are only
+  bit-reproducible when evaluation threads are pinned (parallel DE evaluation
+  order depends on machine load); QA pins it to 1 so concurrent scenarios
+  cannot perturb each other's results.
+- Design the Hybrid-mode post-workflow FIR against the routing-removed final
+  curve on bass-managed channels: the reported final curve carries the
+  intentional crossover high-pass whose dragged-down band mean made the
+  residual FIR bake a bogus broadband tilt (~-12 dB) that the runtime
+  acceptance gate then rightly reverted.
+- Add an optional `max_boost_db` cap to `FirConfig`: the target-vs-measurement
+  delta is clamped before FIR design, so phase-linear corrections cannot chase
+  deep nulls past the runtime acceptance policy's boost guard.
+- Align `test_roomeq_multidriver_config` with the documented multi-driver
+  architecture: the combined-response EQ intentionally lives at channel level
+  upstream of the active-crossover split (the test wrongly demanded empty
+  channel plugins and broke whenever the optimizer produced a combined EQ).
+- Remove the dead `optimize_speaker_with_local_cache_runs` test: the
+  `optimize_speaker_at_cache_root` API it exercised was dropped during the
+  crate partition, leaving the workspace uncompilable under
+  `--all-targets --all-features`.
+- Build the `roomeq` binary in the llvm-cov integration-test invocations of
+  `qa-roomeq-coverage-gate` (`--features cli`); the gate previously failed
+  before running any test.
+- Honor the declared crossover type (LR24/LR48/BW…, linear-phase FIR) when
+  realizing `crossover` DSP plugins: the runtime realization always computed a
+  fixed LR4 response, so bass-managed graphs disagreed with their reported
+  final curves by tens of dB below the cutoff and valid corrections were
+  reverted as "realization errors".
+- Store raw (pre-alignment) measurements as stereo 2.1 channel initial curves:
+  the alignment gain was baked into the stored initial curve *and* present as
+  a gain plugin, so runtime realization double-counted it and reverted the
+  correction.
+- Treat sub-0.25 dB p95/worst residual wobble as noise instead of a
+  distribution regression in the runtime acceptance policy, so an
+  already-poor room keeps a beneficial correction (matches the existing
+  worst-position regression guard).
+- Mark the stereo 2.1 subwoofer crossover as a route-owned stage so the sub
+  chain is validated as a graph-routed bass output instead of failing runtime
+  acceptance on sub-sonic clamp-region noise.
+- Stop forcing a bare local optimizer (COBYLA, 3 filters, no refine) over the
+  tuned per-scenario RoomEQ QA configs: the weakened setup could not improve
+  multi-measurement FEM scenarios, and the final safety gate then reported
+  "no improvement" (`post == pre`). QA now only pins the seed and caps the
+  evaluation budget.
+- Do not throttle correction depth to the Poor level (35 %) for
+  high-confidence (e.g. simulated, coherence ~= 1, high-SNR) multi-seat data:
+  seat-to-seat variance there is genuine room behavior that the
+  multi-measurement objective already prices in; it now maps to Degraded
+  (75 %) instead.
 - Keep beneficial RoomEQ corrections when an already-poor room exceeds
   absolute residual limits but the correction does not regress them, preserve
   bounded improvements from asymmetric and multi-measurement objectives, and
@@ -15,6 +72,14 @@
 
 ## QA improvements
 
+- Cover the `wav.rs` integer-decoding and error paths (missing file, empty
+  WAV) that dragged the weakest gated file to 67.7 % line coverage.
+- Calibrate the FEM scenario optimizer configs against the runtime acceptance
+  policy (filter Q/gain bounds, correction band, FIR tap counts) so the
+  scenario matrix exercises releasable corrections; `qa-roomeq-coverage` went
+  from 41/90 to 81/90 PASS.
+- Make the `qa-roomeq-ci` quick coverage subset meaningful again by running it
+  with the scenario-tuned optimizers instead of a 200-evaluation local budget.
 - Exercise missing-coherence, delay-only, fixed/adaptive all-pass,
   phase-linear FIR, and mixed-phase group-delay paths with realistic temporal
   fixtures and export/report consistency checks.

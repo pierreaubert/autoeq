@@ -91,7 +91,7 @@ impl OptimizerConfigExt for OptimizerConfig {
             adaptive_weight_f: 0.9,
             adaptive_weight_cr: 0.9,
             no_parallel: false,
-            parallel_threads: num_cpus::get(),
+            parallel_threads: self.parallel_threads.unwrap_or_else(num_cpus::get),
             seed: self.seed,
             quiet: false,
         }

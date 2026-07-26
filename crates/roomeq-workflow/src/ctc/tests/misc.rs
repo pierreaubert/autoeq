@@ -70,6 +70,40 @@ fn joint_room_eq_path_models_driver_crossover_branches() {
     assert!(high < 0.05, "lowpass driver should reject HF, got {high}");
 }
 
+#[test]
+fn crossover_plugin_honors_declared_type_order() {
+    let make = |type_str: &str| {
+        test_channel_chain(
+            vec![PluginConfigWrapper {
+                plugin_type: "crossover".to_string(),
+                parameters: serde_json::json!({
+                    "type": type_str,
+                    "frequency": 80.0,
+                    "output": "high"
+                }),
+            }],
+            None,
+        )
+    };
+    let mut cache = DspResponseCache::new(48_000);
+    let lr24 = channel_chain_response(&make("LR24"), 20.0, 48_000.0, &mut cache)
+        .unwrap()
+        .norm();
+    let lr48 = channel_chain_response(&make("LR48"), 20.0, 48_000.0, &mut cache)
+        .unwrap()
+        .norm();
+    let lr24_db = 20.0 * lr24.log10();
+    let lr48_db = 20.0 * lr48.log10();
+    // Two octaves below an 80 Hz cutoff: an LR24 high-pass sits around
+    // -40 dB while an LR48 high-pass is down ~90 dB. The realization must
+    // follow the declared type, not a fixed LR4 response.
+    assert!(lr24_db > -60.0, "LR24 high-pass at 20 Hz, got {lr24_db} dB");
+    assert!(
+        lr48_db < lr24_db - 30.0,
+        "LR48 must attenuate well below LR24 at 20 Hz: {lr48_db} vs {lr24_db} dB"
+    );
+}
+
 pub(super) fn test_channel_chain(
     plugins: Vec<PluginConfigWrapper>,
     drivers: Option<Vec<roomeq_model::DriverDspChain>>,

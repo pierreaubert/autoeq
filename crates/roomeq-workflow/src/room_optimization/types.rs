@@ -187,6 +187,7 @@ pub(super) fn collect_generic_channel_results(
                         config.target_curve.as_ref(),
                         sample_rate,
                         output_dir,
+                        None,
                     )
                 };
             post_generated_fir = generated.clone();

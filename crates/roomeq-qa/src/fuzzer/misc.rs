@@ -65,6 +65,7 @@ pub(super) fn fir_config(phase: &str) -> FirConfig {
         correct_excess_phase: phase == "kirkeby",
         phase_smoothing: 0.167,
         pre_ringing: None,
+        max_boost_db: None,
     }
 }
 

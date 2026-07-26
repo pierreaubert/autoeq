@@ -1,7 +1,11 @@
 {
   "optimizer": {
     "population": 300,
-    "max_q": 10.0,
-    "max_db": 12.0
+    "max_q": 4.0,
+    "min_db": -12.0,
+    "max_db": 6.0,
+    "mixed_phase": {
+      "max_fir_length_ms": 6.0
+    }
   }
 }

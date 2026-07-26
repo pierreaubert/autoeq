@@ -143,9 +143,22 @@ pub fn assess_multiple_measurement_quality(curves: &[Curve]) -> MeasurementQuali
     report.mean_seat_variance_db = Some(mean_variance);
     report.max_seat_variance_db = Some(max_variance);
     if max_variance > 6.0 {
-        report.quality = report.quality.max(MeasurementQuality::Poor);
-        report.correction_depth_scale = report.correction_depth_scale.min(0.35);
-        report.advisories.push("high_spatial_variance".to_string());
+        // High seat-to-seat variance marks position-dependent response. Only
+        // throttle correction depth to the Poor level when the measurements
+        // themselves carry uncertainty: with high-confidence (e.g. simulated,
+        // coherence ~= 1, high-SNR) data the variance is genuine room behavior
+        // that the multi-measurement objective already prices in.
+        if report.quality == MeasurementQuality::Good {
+            report.quality = MeasurementQuality::Degraded;
+            report.correction_depth_scale = report.correction_depth_scale.min(0.75);
+            report
+                .advisories
+                .push("high_spatial_variance_high_confidence".to_string());
+        } else {
+            report.quality = report.quality.max(MeasurementQuality::Poor);
+            report.correction_depth_scale = report.correction_depth_scale.min(0.35);
+            report.advisories.push("high_spatial_variance".to_string());
+        }
     } else if max_variance > 3.0 {
         report.quality = report.quality.max(MeasurementQuality::Degraded);
         report.correction_depth_scale = report.correction_depth_scale.min(0.75);

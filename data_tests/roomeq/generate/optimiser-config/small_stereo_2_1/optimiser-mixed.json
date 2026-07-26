@@ -21,16 +21,16 @@
     "mode": "mixed",
     "loss_type": "flat",
     "fir": {
-      "taps": 4096,
-      "phase": "kirkeby"
+      "taps": 256,
+      "phase": "kirkeby",
+      "max_boost_db": 10.0
     },
-    "loss_type": "flat",
     "algorithm": "autoeq:de",
     "num_filters": 9,
     "min_q": 0.5,
     "max_q": 6.0,
     "min_db": -12.0,
-    "max_db": 8.0,
+    "max_db": 2.0,
     "min_freq": 20.0,
     "max_freq": 16000.0,
     "max_iter": 25000,
@@ -45,7 +45,10 @@
   "crossovers": {
     "first": {
       "type": "LR48",
-      "frequency_range": [60,150]
+      "frequency_range": [
+        60,
+        150
+      ]
     }
   }
 }

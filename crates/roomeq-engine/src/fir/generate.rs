@@ -75,6 +75,26 @@ pub fn generate_fir_correction_prepared(
     let fir_config = config.fir.as_ref().ok_or("FIR configuration missing")?;
     let n_taps = fir_config.taps;
 
+    // Optional boost cap: clamp the target-vs-measurement delta to at most
+    // `max_boost_db` of positive correction per frequency before designing
+    // the filter, so the FIR cannot chase deep nulls past the runtime
+    // acceptance policy's boost guard.
+    let capped_target;
+    let target_curve = if let Some(max_boost_db) = fir_config.max_boost_db {
+        let mut capped = target_curve.clone();
+        capped.spl = ndarray::Array1::from_iter(
+            target_curve
+                .spl
+                .iter()
+                .zip(measurement.spl.iter())
+                .map(|(&target, &measured)| measured + (target - measured).min(max_boost_db)),
+        );
+        capped_target = capped;
+        &capped_target
+    } else {
+        target_curve
+    };
+
     if fir_config.phase.to_lowercase() == "kirkeby" {
         // Use Kirkeby regularized inversion with optional excess phase correction
         let coeffs = autoeq_fir::generate_kirkeby_correction_with_smoothing(

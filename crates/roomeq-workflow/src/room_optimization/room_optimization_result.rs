@@ -235,9 +235,10 @@ pub(super) fn apply_final_correction_safety_gate(
             sidecar_dir,
         ) {
             log::debug!(
-                "Runtime acceptance: pre/post RMS {:.4}/{:.4} dB, p95 {:.4} dB, worst {:.4} dB, worst-position improvement {:.4} dB, max boost {:.4} dB, induced GD {:?} ms, realization max {:?} dB, failed {:?}",
+                "Runtime acceptance: pre/post RMS {:.4}/{:.4} dB, pre p95 {:.4} dB, p95 {:.4} dB, worst {:.4} dB, worst-position improvement {:.4} dB, max boost {:.4} dB, induced GD {:?} ms, realization max {:?} dB, failed {:?}",
                 quality.training.pre_weighted_rms_median_db,
                 quality.training.post_weighted_rms_median_db,
+                quality.training.pre_p95_abs_residual_db,
                 quality.training.post_p95_abs_residual_db,
                 quality.training.post_worst_abs_residual_db,
                 quality.training.worst_position_improvement_db,
@@ -252,6 +253,7 @@ pub(super) fn apply_final_correction_safety_gate(
                 realization,
                 policy,
             );
+            log::debug!("Runtime acceptance violations: {:?}", report.violations);
             if report.violations.iter().any(|violation| {
                 is_runtime_quality_violation(violation)
                     && violation != "audibility_regression_reverted"
@@ -1104,6 +1106,32 @@ pub(in super::super) fn routed_baseline_curve(
 ) -> Option<roomeq_model::Curve> {
     let baseline = correction_free_chain(chain);
     apply_logical_channel_chain(&baseline, initial, sample_rate, Path::new(".")).ok()
+}
+
+/// Input curve for the Hybrid-mode post-workflow FIR design.
+///
+/// On routed (bass-managed) channels the reported final curve includes the
+/// intentional crossover high-pass, so its full-band mean is dragged far
+/// below the midrange level; designing the residual FIR against that curve
+/// bakes a bogus broadband tilt into the filter. Design against the
+/// routing-removed curve instead. Unrouted channels keep the reported final
+/// curve unchanged.
+pub(in super::super) fn hybrid_fir_design_input(
+    chain: &ChannelDspChain,
+    initial: &roomeq_model::Curve,
+    final_curve: &roomeq_model::Curve,
+    sample_rate: f64,
+) -> roomeq_model::Curve {
+    let has_crossover = chain
+        .plugins
+        .iter()
+        .any(|plugin| plugin.plugin_type == "crossover");
+    if !has_crossover {
+        return final_curve.clone();
+    }
+    routed_baseline_curve(chain, initial, sample_rate)
+        .and_then(|baseline| remove_routing_transfer(initial, &baseline, final_curve))
+        .unwrap_or_else(|| final_curve.clone())
 }
 
 /// Remove the non-correction routing transfer (level alignment, crossover,

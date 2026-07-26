@@ -16,6 +16,7 @@ pub(in super::super) fn refresh_final_reports(
     for ch_result in result.channel_results.values_mut() {
         let (score_min_freq, score_max_freq) =
             final_score_band_for_channel(config, &ch_result.name);
+        let (topology_pre, topology_post) = (ch_result.pre_score, ch_result.post_score);
         if let Some(baseline) = result
             .channels
             .get(&ch_result.name)
@@ -26,6 +27,16 @@ pub(in super::super) fn refresh_final_reports(
         }
         ch_result.post_score =
             recompute_curve_flatness_score(&ch_result.final_curve, score_min_freq, score_max_freq);
+        log::debug!(
+            "refresh_final_reports '{}': band=[{:.0},{:.0}] topology {:.4}->{:.4}, refreshed {:.4}->{:.4}",
+            ch_result.name,
+            score_min_freq,
+            score_max_freq,
+            topology_pre,
+            topology_post,
+            ch_result.pre_score,
+            ch_result.post_score,
+        );
         if let Some(chain) = result.channels.get_mut(&ch_result.name) {
             chain.final_curve = Some((&ch_result.final_curve).into());
         }

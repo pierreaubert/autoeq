@@ -33,6 +33,24 @@ fn low_confidence_and_high_variance_limit_correction() {
 }
 
 #[test]
+fn high_confidence_high_variance_does_not_force_poor() {
+    // Exact (e.g. simulated) data: coherence ~= 1, large SNR. Seat-to-seat
+    // variance is then genuine room behavior, not measurement uncertainty, so
+    // it must not throttle correction depth to the Poor level — the
+    // multi-measurement objective already prices spatial variance in.
+    let mut left = curve(vec![70.0, 85.0, 70.0]);
+    left.coherence = Some(Array1::from(vec![0.99, 0.99, 0.99]));
+    left.noise_floor_db = Some(Array1::from(vec![40.0, 40.0, 40.0]));
+    let mut right = curve(vec![85.0, 70.0, 85.0]);
+    right.coherence = Some(Array1::from(vec![0.99, 0.99, 0.99]));
+    right.noise_floor_db = Some(Array1::from(vec![40.0, 40.0, 40.0]));
+    let report = assess_multiple_measurement_quality(&[left, right]);
+    assert!(report.max_seat_variance_db.unwrap() > 6.0);
+    assert_ne!(report.quality, MeasurementQuality::Poor);
+    assert!(report.correction_depth_scale > 0.35);
+}
+
+#[test]
 fn mismatched_grids_are_unusable() {
     let left = curve(vec![80.0, 80.0, 80.0]);
     let mut right = curve(vec![80.0, 80.0, 80.0]);

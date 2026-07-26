@@ -1,10 +1,35 @@
 use super::super::*;
 use super::types::GeneratedFir;
 
+/// Whether the post-workflow stage should generate a FIR for a channel.
+///
+/// The stage exists for channels that have no correction of their own yet
+/// (e.g. plain IIR workflows that still want a Hybrid residual FIR). In
+/// PhaseLinear mode the FIR is designed from the *raw* measurement, so
+/// generating it on a channel whose chain already carries correction stages
+/// (biquads or convolution) stacks a second, full correction on top of the
+/// first one and wrecks the response.
+pub(in super::super) fn should_post_generate_fir(
+    mode: roomeq_model::ProcessingMode,
+    has_fir_coeffs: bool,
+    chain_has_correction: bool,
+) -> bool {
+    if has_fir_coeffs {
+        return false;
+    }
+    if mode == roomeq_model::ProcessingMode::PhaseLinear && chain_has_correction {
+        return false;
+    }
+    true
+}
+
 /// Post-generate FIR coefficients for a channel that only has IIR results.
 ///
 /// For Hybrid mode, uses the IIR-corrected curve as FIR input;
-/// for PhaseLinear (FIR-only) mode, uses the raw measurement.
+/// for PhaseLinear (FIR-only) mode, uses the raw measurement. When the
+/// channel's DSP `chain` is provided, Hybrid-mode input is evaluated on the
+/// routing-removed curve so an intentional bass-management high-pass cannot
+/// tilt the design (see `hybrid_fir_design_input`).
 pub(in super::super) fn post_generate_fir(
     name: &str,
     initial_curve: &Curve,
@@ -13,9 +38,21 @@ pub(in super::super) fn post_generate_fir(
     target_curve: Option<&roomeq_model::TargetCurveConfig>,
     sample_rate: f64,
     output_dir: Option<&Path>,
+    chain: Option<&roomeq_model::ChannelDspChain>,
 ) -> Option<GeneratedFir> {
+    let hybrid_input;
     let fir_input = match config.processing_mode {
-        ProcessingMode::Hybrid => final_curve,
+        ProcessingMode::Hybrid => {
+            hybrid_input = chain.map(|chain| {
+                super::super::room_optimization_result::hybrid_fir_design_input(
+                    chain,
+                    initial_curve,
+                    final_curve,
+                    sample_rate,
+                )
+            });
+            hybrid_input.as_ref().unwrap_or(final_curve)
+        }
         _ => initial_curve,
     };
     match fir::generate_fir_correction(fir_input, config, target_curve, sample_rate) {
@@ -199,6 +236,7 @@ mod tests {
             correct_excess_phase: false,
             phase_smoothing: 1.0 / 6.0,
             pre_ringing: None,
+            max_boost_db: None,
         }
     }
 
@@ -237,6 +275,7 @@ mod tests {
             None,
             48_000.0,
             None,
+            None,
         );
         assert!(
             result.is_some(),
@@ -263,6 +302,7 @@ mod tests {
             None,
             48_000.0,
             None,
+            None,
         );
         assert!(result.is_some(), "hybrid FIR generation should succeed");
     }
@@ -283,11 +323,95 @@ mod tests {
             None,
             48_000.0,
             None,
+            None,
         );
         assert!(
             result.is_none(),
             "FIR generation should fail without FirConfig"
         );
+    }
+
+    #[test]
+    fn post_generate_fir_hybrid_on_routed_channel_has_no_level_tilt() {
+        // Bass-managed channel: the reported final curve carries the
+        // intentional crossover high-pass. The residual FIR must be designed
+        // against the routing-removed curve; designing against the reported
+        // curve bakes a large bogus broadband cut into the filter.
+        let initial = small_curve();
+        let final_curve = roomeq_engine::topology::apply_crossover_response_to_curve(
+            &initial, "LR24", 80.0, 48_000.0, false,
+        );
+        let chain = roomeq_model::ChannelDspChain {
+            channel: "left".to_string(),
+            plugins: vec![roomeq_engine::output::create_crossover_plugin(
+                "LR24", 80.0, "high",
+            )],
+            drivers: None,
+            initial_curve: Some((&initial).into()),
+            final_curve: Some((&final_curve).into()),
+            eq_response: None,
+            pre_ir: None,
+            post_ir: None,
+            fir_temporal_masking: None,
+            direct_early_late_correction: None,
+            target_curve: None,
+        };
+        let mut config = OptimizerConfig {
+            processing_mode: roomeq_model::ProcessingMode::Hybrid,
+            fir: Some(fir_config()),
+            ..OptimizerConfig::default()
+        };
+        config.max_freq = 10_000.0;
+
+        let generated = post_generate_fir(
+            "left",
+            &initial,
+            &final_curve,
+            &config,
+            None,
+            48_000.0,
+            None,
+            Some(&chain),
+        )
+        .expect("hybrid FIR generation should succeed");
+        let freqs = Array1::from(vec![1_000.0]);
+        let response = roomeq_engine::response::compute_fir_complex_response(
+            &generated.coeffs,
+            &freqs,
+            48_000.0,
+        );
+        let magnitude_db = 20.0 * response[0].norm().log10();
+        assert!(
+            magnitude_db.abs() <= 2.0,
+            "residual FIR on a routed channel should be near unity at 1 kHz, got {magnitude_db:.2} dB"
+        );
+    }
+
+    #[test]
+    fn post_generate_fir_skipped_when_phase_linear_channel_already_has_correction() {
+        assert!(!super::should_post_generate_fir(
+            roomeq_model::ProcessingMode::PhaseLinear,
+            false,
+            true,
+        ));
+        // Hybrid still completes its IIR correction with a residual FIR.
+        assert!(super::should_post_generate_fir(
+            roomeq_model::ProcessingMode::Hybrid,
+            false,
+            true,
+        ));
+        // PhaseLinear on an uncorrected channel still generates the full FIR.
+        assert!(super::should_post_generate_fir(
+            roomeq_model::ProcessingMode::PhaseLinear,
+            false,
+            false,
+        ));
+        // Existing coefficients are never regenerated.
+        assert!(!super::should_post_generate_fir(
+            roomeq_model::ProcessingMode::Hybrid,
+            true,
+            false,
+        ));
     }
 
     #[test]

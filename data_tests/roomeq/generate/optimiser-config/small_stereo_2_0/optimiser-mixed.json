@@ -3,7 +3,7 @@
     "mode": "mixed",
     "loss_type": "flat",
     "fir": {
-      "taps": 4096,
+      "taps": 512,
       "phase": "kirkeby"
     },
     "algorithm": "autoeq:de",

@@ -78,6 +78,7 @@ fn default_qa_fir_config() -> FirConfig {
         correct_excess_phase: false,
         phase_smoothing: 0.167,
         pre_ringing: None,
+        max_boost_db: None,
     }
 }
 

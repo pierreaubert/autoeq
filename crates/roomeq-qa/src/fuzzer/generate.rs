@@ -625,6 +625,7 @@ pub(super) fn generate_random_mixed_config(
             correct_excess_phase: false,
             phase_smoothing: 0.167,
             pre_ringing: None,
+            max_boost_db: None,
         })
     } else {
         None

@@ -1,0 +1,11 @@
+{
+  "optimizer": {
+    "fir": {
+      "taps": 512,
+      "phase": "kirkeby"
+    },
+    "mixed_phase": {
+      "max_fir_length_ms": 6.0
+    }
+  }
+}

@@ -755,8 +755,18 @@ fn assemble_workflow_result(
         let out_dir = output_dir.unwrap_or(Path::new("."));
         let names: Vec<String> = result.channel_results.keys().cloned().collect();
         for name in names {
+            let chain_has_correction = result.channels.get(&name).is_some_and(|chain| {
+                chain
+                    .plugins
+                    .iter()
+                    .any(|plugin| matches!(plugin.plugin_type.as_str(), "eq" | "convolution"))
+            });
             let generated = if let Some(ch) = result.channel_results.get_mut(&name) {
-                if ch.fir_coeffs.is_some() {
+                if !should_post_generate_fir(
+                    config.optimizer.processing_mode.clone(),
+                    ch.fir_coeffs.is_some(),
+                    chain_has_correction,
+                ) {
                     None
                 } else {
                     let generated = post_generate_fir(
@@ -767,6 +777,7 @@ fn assemble_workflow_result(
                         config.target_curve.as_ref(),
                         sample_rate,
                         Some(out_dir),
+                        result.channels.get(&name),
                     );
                     if let Some(generated) = &generated {
                         ch.fir_coeffs = Some(generated.coeffs.clone());

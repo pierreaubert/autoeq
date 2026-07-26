@@ -47,6 +47,76 @@ fn flat_target_like(measurement: &Curve) -> Curve {
     }
 }
 
+fn kirkeby_config(max_boost_db: Option<f64>) -> OptimizerConfig {
+    let mut config = OptimizerConfig::default();
+    config.fir = Some(FirConfig {
+        taps: 2048,
+        phase: "kirkeby".to_string(),
+        correct_excess_phase: false,
+        phase_smoothing: 0.167,
+        pre_ringing: None,
+        max_boost_db,
+    });
+    config.min_freq = 20.0;
+    config.max_freq = 20_000.0;
+    config
+}
+
+/// Response of an FIR correction at a given frequency, in dB.
+fn fir_response_db(coeffs: &[f64], freq: f64, sample_rate: f64) -> f64 {
+    let freqs = Array1::from(vec![freq]);
+    let response = crate::response::compute_fir_complex_response(coeffs, &freqs, sample_rate);
+    20.0 * response[0].norm().log10()
+}
+
+#[test]
+fn fir_max_boost_db_clamps_correction_boost() {
+    // Measurement with a deep in-band null at 100 Hz: an uncapped Kirkeby
+    // inversion tries to fill it with far more than 12 dB of boost, while the
+    // capped design must stay near the configured limit.
+    let freqs: Vec<f64> = (0..200)
+        .map(|i| 20.0 * (1000.0_f64).powf(i as f64 / 199.0))
+        .collect();
+    let spl: Vec<f64> = freqs
+        .iter()
+        .map(|&f| {
+            if (60.0..=160.0).contains(&f) {
+                55.0
+            } else {
+                80.0
+            }
+        })
+        .collect();
+    let measurement = create_test_curve(&freqs, &spl);
+    let target = flat_target_like(&measurement);
+
+    let uncapped =
+        generate_fir_correction_prepared(&measurement, &kirkeby_config(None), &target, 48_000.0)
+            .expect("uncapped FIR design should succeed");
+    let uncapped_boost = fir_response_db(&uncapped, 100.0, 48_000.0);
+    assert!(
+        uncapped_boost > 12.0,
+        "uncapped design should boost the 100 Hz null well past 12 dB, got {uncapped_boost:.2} dB"
+    );
+
+    let capped = generate_fir_correction_prepared(
+        &measurement,
+        &kirkeby_config(Some(12.0)),
+        &target,
+        48_000.0,
+    )
+    .expect("capped FIR design should succeed");
+    let capped_boost = fir_response_db(&capped, 100.0, 48_000.0);
+    assert!(
+        capped_boost <= 14.0,
+        "capped design should not exceed the 12 dB boost limit (with FIR smoothing margin), got {capped_boost:.2} dB"
+    );
+    assert!(
+        capped_boost < uncapped_boost,
+        "capped boost ({capped_boost:.2} dB) should be below uncapped ({uncapped_boost:.2} dB)"
+    );
+}
+
 // Window function tests - using the re-exported functions from math-iir-fir
 
 #[test]
@@ -162,6 +232,7 @@ fn test_generate_fir_correction_basic() {
         correct_excess_phase: false,
         phase_smoothing: 0.167,
         pre_ringing: None,
+        max_boost_db: None,
     });
     config.min_freq = 50.0;
     config.max_freq = 2000.0;
@@ -196,6 +267,7 @@ fn test_generate_fir_correction_kirkeby_mode() {
         correct_excess_phase: false,
         phase_smoothing: 0.167,
         pre_ringing: None,
+        max_boost_db: None,
     });
     config.min_freq = 20.0;
     config.max_freq = 500.0;
@@ -244,6 +316,7 @@ fn test_invalid_phase_type_returns_error() {
         correct_excess_phase: false,
         phase_smoothing: 0.167,
         pre_ringing: None,
+        max_boost_db: None,
     });
 
     let result = generate_fir_correction_prepared(

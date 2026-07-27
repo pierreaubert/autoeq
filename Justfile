@@ -562,13 +562,13 @@ qa-roomeq-small-stereo-21: ensure-venv
 qa-roomeq-small-stereo-22: ensure-venv
 	@for method in iir fir mixed; do \
 	  for algo in fem; do \
-	    mkdir -p ./data_generated/roomeq/generated/$algo/small_stereo_2_2; \
+	    mkdir -p ./data_generated/roomeq/generated/$algo/small_stereo_2_2_group; \
 	    cargo run --features cli --bin roomeq --release -- \
-	        --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_2/config.json \
-		    --override-config ./data_tests/roomeq/generate/optimiser-config/small_stereo_2_2/optimiser-$method.json \
-		    --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_2/dsp_$method.json; \
+	        --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_2_group/config.json \
+		    --override-config ./data_tests/roomeq/generate/optimiser-config/small_stereo_2_2_group/optimiser-$method.json \
+		    --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_2_group/dsp_$method.json; \
 		./venv/bin/python3 ./scripts/display-roomeq.py \
-		                   ./data_generated/roomeq/generated/$algo/small_stereo_2_2/dsp_$method.json; \
+		                   ./data_generated/roomeq/generated/$algo/small_stereo_2_2_group/dsp_$method.json; \
 	  done \
 	done
 

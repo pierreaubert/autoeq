@@ -10,7 +10,9 @@ use super::test_case::TestCase;
 use autoeq_optim::loss::calculate_standard_deviation_in_range;
 use autoeq_optim::loss::phase_aware::{compute_group_delay, unwrap_phase_degrees};
 use roomeq_engine::room_result::RoomOptimizationResult;
-use roomeq_model::{ChannelDspChain, ProcessingMode, RoomConfig, SubwooferStrategy};
+use roomeq_model::{
+    ChannelDspChain, CorrectionDecision, ProcessingMode, RoomConfig, SubwooferStrategy,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ProcessingMethod {
@@ -146,6 +148,19 @@ fn correction_stage_was_reverted(
         })
 }
 
+fn has_safe_correction_fallback(result: &RoomOptimizationResult) -> bool {
+    result
+        .metadata
+        .correction_acceptance
+        .as_ref()
+        .is_some_and(|report| {
+            matches!(
+                report.decision,
+                CorrectionDecision::RevertedStage | CorrectionDecision::IdentityFallback
+            )
+        })
+}
+
 fn has_meaningful_mso_realization(result: &RoomOptimizationResult, config: &RoomConfig) -> bool {
     let is_mso = config
         .system
@@ -208,7 +223,10 @@ pub(super) fn validate_result(
         ));
         return failures; // remaining checks meaningless if no improvement at all
     }
-    if post == pre && !has_meaningful_mso_realization(result, config) {
+    if post == pre
+        && !has_meaningful_mso_realization(result, config)
+        && !has_safe_correction_fallback(result)
+    {
         failures.push(format!(
             "no improvement: post {:.4} >= pre {:.4}",
             post, pre

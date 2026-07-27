@@ -157,7 +157,8 @@ fn target_tilt_validator_accepts_response_that_does_not_regress_from_target() {
     let option = result_with_channel_slopes(1.0, 0.8, -0.8);
     let config = empty_room_config();
 
-    let (pass, detail) = validate_target_tilt(-0.8, &baseline, &config, &option, 1, false, false);
+    let (pass, detail) =
+        validate_target_tilt(-0.8, &baseline, &config, &option, 1, false, false, false);
 
     assert!(pass, "{detail}");
 }
@@ -168,7 +169,7 @@ fn target_tilt_validator_rejects_response_that_regresses_from_target() {
     let option = result_with_channel_slopes(0.0, 1.0, -0.8);
     let config = empty_room_config();
 
-    let (pass, _) = validate_target_tilt(-0.8, &baseline, &config, &option, 1, false, false);
+    let (pass, _) = validate_target_tilt(-0.8, &baseline, &config, &option, 1, false, false, false);
 
     assert!(!pass);
 }
@@ -179,9 +180,24 @@ fn target_tilt_validator_rejects_wrong_target_curve_slope() {
     let option = result_with_channel_slopes(0.0, 0.0, 0.0);
     let config = empty_room_config();
 
-    let (pass, _) = validate_target_tilt(-0.8, &baseline, &config, &option, 1, false, false);
+    let (pass, _) = validate_target_tilt(-0.8, &baseline, &config, &option, 1, false, false, false);
 
     assert!(!pass);
+}
+
+#[test]
+fn target_tilt_validator_allows_excursion_protection_slope_tradeoff() {
+    let baseline = result_with_channel_slopes(0.0, 0.0, 0.0);
+    let option = result_with_channel_slopes(1.6, 5.3, -0.8);
+    let config = empty_room_config();
+
+    let (without_excursion, _) =
+        validate_target_tilt(-0.8, &baseline, &config, &option, 3, false, false, false);
+    let (with_excursion, detail) =
+        validate_target_tilt(-0.8, &baseline, &config, &option, 3, false, false, true);
+
+    assert!(!without_excursion);
+    assert!(with_excursion, "{detail}");
 }
 
 #[test]
@@ -291,7 +307,7 @@ fn scorecard_allows_absolute_slack_at_flat_loss_ratio_boundary() {
         group_delay_std_ms: None,
     };
     let candidate = MetricScorecard {
-        flat_loss: 13.75,
+        flat_loss: 14.25,
         peak_residual_db: 10.0,
         epa_preference: None,
         epa_sharpness: None,

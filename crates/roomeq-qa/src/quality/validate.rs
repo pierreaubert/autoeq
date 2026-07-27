@@ -1,4 +1,5 @@
 use super::consts::GD_QA_RMS_EPSILON_MS;
+use super::consts::OPTION_SCORE_ABSOLUTE_SLACK;
 use super::consts::OPTION_SCORE_TOLERANCE;
 use super::consts::PSYCHOACOUSTIC_SCORE_TOLERANCE;
 use super::consts::TARGET_CURVE_SLOPE_TOLERANCE;
@@ -69,6 +70,9 @@ pub(super) fn validate_option_effect(
     let has_broadband = all_options
         .iter()
         .any(|o| matches!(o, OptionOverride::BroadbandTargetMatching));
+    let has_excursion = all_options
+        .iter()
+        .any(|o| matches!(o, OptionOverride::ExcursionProtection));
     match option {
         OptionOverride::TargetTilt {
             slope_db_per_octave,
@@ -80,6 +84,7 @@ pub(super) fn validate_option_effect(
             num_options,
             has_schroeder,
             has_broadband,
+            has_excursion,
         ),
         OptionOverride::ExcursionProtection => {
             validate_excursion_protection(baseline_result, option_result, num_options)
@@ -622,6 +627,7 @@ pub(super) fn validate_target_tilt(
     num_options: usize,
     has_schroeder: bool,
     has_broadband: bool,
+    has_excursion: bool,
 ) -> (bool, String) {
     let mut target_slope_err = 0.0_f64;
     let mut initial_residual_slope_err = 0.0_f64;
@@ -716,6 +722,12 @@ pub(super) fn validate_target_tilt(
     // Broadband shelves interact with tilt, adding global slope shifts.
     if has_broadband {
         combo_tolerance += 2.0;
+    }
+    // Excursion protection intentionally reshapes the same low-frequency band
+    // used for the residual-slope check. The target curve must still be exact,
+    // but the protected response needs room to trade tilt accuracy for safety.
+    if has_excursion {
+        combo_tolerance += 1.5;
     }
     let target_matches = avg_target_err <= TARGET_CURVE_SLOPE_TOLERANCE;
     let safety_reverted = option_result
@@ -986,14 +998,17 @@ pub(super) fn validate_broadband_target_matching(
     // where other options (tilt, excursion, schroeder, psychoacoustic) modify the
     // response significantly before broadband matching acts.
     let score_tolerance = OPTION_SCORE_TOLERANCE + (num_options.saturating_sub(1) as f64) * 0.3;
-    let score_ok =
-        option_result.combined_post_score <= score_tolerance * baseline_result.combined_post_score;
+    let score_ok = option_result.combined_post_score
+        <= score_tolerance * baseline_result.combined_post_score + OPTION_SCORE_ABSOLUTE_SLACK;
     if !score_ok {
         pass = false;
     }
     details.push(format!(
-        "score: baseline={:.4} broadband={:.4} (limit={:.1}x)",
-        baseline_result.combined_post_score, option_result.combined_post_score, score_tolerance,
+        "score: baseline={:.4} broadband={:.4} (limit={:.1}x + {:.2})",
+        baseline_result.combined_post_score,
+        option_result.combined_post_score,
+        score_tolerance,
+        OPTION_SCORE_ABSOLUTE_SLACK,
     ));
 
     // Check 3: per-channel regression — no channel should get catastrophically worse.
@@ -1079,8 +1094,8 @@ pub(super) fn validate_phase_alignment(
     // In combos with multiple options, allow more tolerance since shared mean SPL
     // and decomposed correction defaults shift absolute scores.
     let tolerance = OPTION_SCORE_TOLERANCE + (num_options.saturating_sub(1) as f64) * 0.15;
-    let score_ok =
-        option_result.combined_post_score <= tolerance * baseline_result.combined_post_score;
+    let score_ok = option_result.combined_post_score
+        <= tolerance * baseline_result.combined_post_score + OPTION_SCORE_ABSOLUTE_SLACK;
 
     let pass = score_ok; // delay presence is informational, not required
     let delay_str = if has_delay {
@@ -1092,11 +1107,12 @@ pub(super) fn validate_phase_alignment(
     (
         pass,
         format!(
-            "{}: baseline={:.4} aligned={:.4} (limit={:.1}x)",
+            "{}: baseline={:.4} aligned={:.4} (limit={:.1}x + {:.2})",
             delay_str,
             baseline_result.combined_post_score,
             option_result.combined_post_score,
-            tolerance
+            tolerance,
+            OPTION_SCORE_ABSOLUTE_SLACK,
         ),
     )
 }

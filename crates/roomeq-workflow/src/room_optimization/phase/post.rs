@@ -30,6 +30,7 @@ pub(in super::super) fn should_post_generate_fir(
 /// channel's DSP `chain` is provided, Hybrid-mode input is evaluated on the
 /// routing-removed curve so an intentional bass-management high-pass cannot
 /// tilt the design (see `hybrid_fir_design_input`).
+#[allow(clippy::too_many_arguments)]
 pub(in super::super) fn post_generate_fir(
     name: &str,
     initial_curve: &Curve,

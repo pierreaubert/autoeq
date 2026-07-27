@@ -129,6 +129,7 @@ fn low_latency_assembly_orders_passes_and_builds_report() {
         vec![
             "cea2034_speaker_correction",
             "broadband",
+            "excursion_protection",
             "room_eq_correction",
             "user_preference"
         ]
@@ -223,10 +224,16 @@ fn warped_assembly_keeps_standard_hpf_and_marks_optimized_filters() {
         .find(|plugin| plugin_label(plugin) == Some("room_eq_correction"))
         .unwrap();
     let filters = room_eq.parameters["filters"].as_array().unwrap();
-    assert_eq!(filters.len(), 2);
-    assert!(filters[0].get("topology").is_none());
-    assert_eq!(filters[1]["topology"], "warped_biquad");
-    assert_eq!(filters[1]["lambda"], 0.5);
+    assert_eq!(filters.len(), 1);
+    assert_eq!(filters[0]["topology"], "warped_biquad");
+    assert_eq!(filters[0]["lambda"], 0.5);
+    let excursion = result
+        .channel
+        .plugins
+        .iter()
+        .find(|plugin| plugin_label(plugin) == Some("excursion_protection"))
+        .unwrap();
+    assert_eq!(excursion.parameters["filters"].as_array().unwrap().len(), 1);
 }
 
 #[test]

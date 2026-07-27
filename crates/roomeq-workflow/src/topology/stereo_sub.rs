@@ -155,6 +155,7 @@ impl WorkflowExecutor for Stereo21Executor {
 
         // 3. Pre-EQ
         let mut pre_eq_plugins: HashMap<String, Vec<PluginConfigWrapper>> = HashMap::new();
+        let mut pre_eq_targets: HashMap<String, Option<CurveData>> = HashMap::new();
         let mut linearized_curves: HashMap<String, Curve> = HashMap::new();
         let mut optimizer_evidence_by_channel: HashMap<
             String,
@@ -194,6 +195,7 @@ impl WorkflowExecutor for Stereo21Executor {
                     total_channels,
                     max_iterations,
                 )?;
+            pre_eq_targets.insert(role.to_string(), chain.target_curve.clone());
             pre_eq_plugins.insert(role.to_string(), chain.plugins);
             optimizer_evidence_by_channel.insert(role.to_string(), ch_result.optimizer_evidence);
             linearized_curves.insert(role.to_string(), ch_result.final_curve);
@@ -230,6 +232,7 @@ impl WorkflowExecutor for Stereo21Executor {
                     total_channels,
                     max_iterations,
                 )?;
+            pre_eq_targets.insert(sub_role.clone(), chain.target_curve.clone());
             pre_eq_plugins.insert(sub_role.clone(), chain.plugins);
             optimizer_evidence_by_channel.insert(sub_role.clone(), ch_result.optimizer_evidence);
             linearized_curves.insert(sub_role.clone(), ch_result.final_curve);
@@ -657,11 +660,11 @@ impl WorkflowExecutor for Stereo21Executor {
                 plugins.extend(stack.clone());
             }
 
-            plugins.push(output::create_crossover_plugin(
+            plugins.push(mark_route_owned_plugin(output::create_crossover_plugin(
                 xover_type_str,
                 final_xo_freq,
                 "high",
-            ));
+            )));
 
             if main_gain_post.abs() > 0.01 {
                 plugins.push(output::create_gain_plugin(main_gain_post));
@@ -703,7 +706,7 @@ impl WorkflowExecutor for Stereo21Executor {
                 post_ir: None,
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
-                target_curve: None,
+                target_curve: pre_eq_targets.get(role).cloned().flatten(),
             };
             channel_chains.insert(role.to_string(), chain);
         }
@@ -797,7 +800,7 @@ impl WorkflowExecutor for Stereo21Executor {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
-            target_curve: None,
+            target_curve: pre_eq_targets.get(&sub_role).cloned().flatten(),
         };
         channel_chains.insert(sub_role.clone(), sub_chain);
 

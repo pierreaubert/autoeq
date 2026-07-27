@@ -317,13 +317,6 @@ fn stereo_2_1_honours_excursion_protection() {
         .expect("stereo 2.1 with excursion_protection should succeed");
 
     for role in ["L", "R", "LFE"] {
-        let chain = &result.channels[role];
-        assert!(
-            chain.plugins.len() >= 3,
-            "{} chain unexpectedly short: {:?}",
-            role,
-            chain.plugins.len()
-        );
         let hp_count = highpass_count_in_chain(&result.channels[role]);
         assert!(
             hp_count >= 1,

@@ -1255,7 +1255,9 @@ fn correction_stage(plugin: &roomeq_model::PluginConfigWrapper) -> Option<Correc
     if plugin.plugin_type != "eq" {
         return None;
     }
-    if label.contains("allpass") {
+    if label == "excursion_protection" {
+        None
+    } else if label.contains("allpass") {
         Some(CorrectionStage::GroupDelay)
     } else if label.contains("mso") || label.contains("multisub") {
         Some(CorrectionStage::Mso)

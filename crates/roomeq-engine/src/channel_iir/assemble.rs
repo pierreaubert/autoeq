@@ -105,16 +105,21 @@ fn assemble_dsp_chain(
     let mut eq_plugins = Vec::new();
     let mut post_eq_plugins = Vec::new();
 
+    if !request.preprocessed.excursion_filters.is_empty() {
+        eq_plugins.push(output::create_labeled_eq_plugin(
+            &request.preprocessed.excursion_filters,
+            "excursion_protection",
+        ));
+    }
+
     match optimizer_output {
         IirOptimizerOutput::LowLatency {
             eq_filters,
             preference_filters,
         } => {
-            let mut room_filters = request.preprocessed.excursion_filters.clone();
-            room_filters.extend(eq_filters.iter().cloned());
-            if !room_filters.is_empty() {
+            if !eq_filters.is_empty() {
                 eq_plugins.push(output::create_labeled_eq_plugin(
-                    &room_filters,
+                    eq_filters,
                     "room_eq_correction",
                 ));
             }
@@ -125,9 +130,9 @@ fn assemble_dsp_chain(
             preference_filters,
             warped_lambda,
         } => {
-            if !eq_filters.is_empty() || !request.preprocessed.excursion_filters.is_empty() {
+            if !eq_filters.is_empty() {
                 eq_plugins.push(output::create_warped_eq_plugin(
-                    &request.preprocessed.excursion_filters,
+                    &[],
                     eq_filters,
                     Some(*warped_lambda),
                 ));
@@ -139,13 +144,7 @@ fn assemble_dsp_chain(
             preference_filters,
             ..
         } => {
-            let mut filter_configs: Vec<serde_json::Value> = request
-                .preprocessed
-                .excursion_filters
-                .iter()
-                .map(output::biquad_to_json)
-                .collect();
-            filter_configs.push(create_kautz_filter_config(kautz_sections));
+            let filter_configs = vec![create_kautz_filter_config(kautz_sections)];
             eq_plugins.push(output::create_labeled_eq_plugin_from_filter_configs(
                 filter_configs,
                 "kautz_modal",

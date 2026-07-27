@@ -36,6 +36,50 @@ pub(super) fn apply_final_correction_safety_gate(
             .get(name)
             .is_some_and(is_graph_routed_bass_output)
         {
+            let topology_epsilon = (channel.pre_score.abs() * 1e-4).max(1e-6);
+            let topology_regressed = !channel.post_score.is_finite()
+                || channel.post_score > channel.pre_score + topology_epsilon;
+            if topology_regressed {
+                let existing_chain = result.channels.get(name).cloned();
+                if let Some(mut chain) = existing_chain {
+                    let stages = correction_stages(&chain);
+                    for stage in &stages {
+                        remove_correction_stage(&mut chain, *stage);
+                    }
+                    if !stages.is_empty()
+                        && let Ok(final_curve) = apply_logical_channel_chain(
+                            &chain,
+                            &channel.initial_curve,
+                            sample_rate,
+                            sidecar_dir,
+                        )
+                    {
+                        channel.final_curve = final_curve.clone();
+                        channel.post_score = channel.pre_score;
+                        channel.biquads.clear();
+                        channel.fir_coeffs = None;
+                        chain.final_curve = Some((&final_curve).into());
+                        chain.eq_response = None;
+                        result.channels.insert(name.clone(), chain);
+                        let stage_names: Vec<_> = stages
+                            .iter()
+                            .map(|stage| format!("{name}:{}", stage.as_str()))
+                            .collect();
+                        reverted.extend(stage_names.iter().cloned());
+                        result
+                            .metadata
+                            .stage_outcomes
+                            .push(roomeq_model::StageOutcome {
+                                stage: format!("final_correction_safety_{name}"),
+                                status: roomeq_model::StageStatus::Degraded,
+                                advisories: stage_names
+                                    .iter()
+                                    .map(|stage| format!("topology_regression_reverted_{stage}"))
+                                    .collect(),
+                            });
+                    }
+                }
+            }
             continue;
         }
         let mut target = result
@@ -104,13 +148,19 @@ pub(super) fn apply_final_correction_safety_gate(
                 regressed,
             );
         }
-        if report.as_ref().is_some_and(|report| {
-            accepted_report.as_ref().is_none_or(
-                |current: &roomeq_engine::quality::CorrectionAcceptanceReport| {
-                    report.metrics.improvement_db < current.metrics.improvement_db
-                },
-            )
-        }) {
+        let has_revertible_correction_stage = result
+            .channels
+            .get(name)
+            .is_some_and(|chain| !correction_stages(chain).is_empty());
+        if (!regressed || has_revertible_correction_stage)
+            && report.as_ref().is_some_and(|report| {
+                accepted_report.as_ref().is_none_or(
+                    |current: &roomeq_engine::quality::CorrectionAcceptanceReport| {
+                        report.metrics.improvement_db < current.metrics.improvement_db
+                    },
+                )
+            })
+        {
             accepted_report = report;
         }
 
@@ -186,16 +236,61 @@ pub(super) fn apply_final_correction_safety_gate(
                             .collect(),
                     });
             } else {
-                result
-                    .metadata
-                    .stage_outcomes
-                    .push(roomeq_model::StageOutcome {
-                        stage: format!("final_correction_safety_{name}"),
-                        status: roomeq_model::StageStatus::Degraded,
-                        advisories: vec![
-                            "audibility_regression_has_no_revertible_correction_stage".to_string(),
-                        ],
-                    });
+                let mut fallback = result.channels.get(name).cloned();
+                let stages = fallback.as_ref().map(correction_stages).unwrap_or_default();
+                if let Some(chain) = fallback.as_mut() {
+                    for stage in &stages {
+                        remove_correction_stage(chain, *stage);
+                    }
+                }
+                let fallback_curve = fallback.as_ref().and_then(|chain| {
+                    apply_logical_channel_chain(
+                        chain,
+                        &channel.initial_curve,
+                        sample_rate,
+                        sidecar_dir,
+                    )
+                    .ok()
+                });
+                if let (Some(mut chain), Some(curve)) = (fallback, fallback_curve)
+                    && !stages.is_empty()
+                {
+                    channel.final_curve = curve.clone();
+                    channel.post_score = channel.pre_score;
+                    channel.biquads.clear();
+                    channel.fir_coeffs = None;
+                    chain.final_curve = Some((&curve).into());
+                    chain.eq_response = None;
+                    result.channels.insert(name.clone(), chain);
+                    let stage_names: Vec<_> = stages
+                        .iter()
+                        .map(|stage| format!("{name}:{}", stage.as_str()))
+                        .collect();
+                    reverted.extend(stage_names.iter().cloned());
+                    result
+                        .metadata
+                        .stage_outcomes
+                        .push(roomeq_model::StageOutcome {
+                            stage: format!("final_correction_safety_{name}"),
+                            status: roomeq_model::StageStatus::Degraded,
+                            advisories: stage_names
+                                .iter()
+                                .map(|stage| format!("audibility_regression_reverted_{stage}"))
+                                .collect(),
+                        });
+                } else {
+                    result
+                        .metadata
+                        .stage_outcomes
+                        .push(roomeq_model::StageOutcome {
+                            stage: format!("final_correction_safety_{name}"),
+                            status: roomeq_model::StageStatus::Degraded,
+                            advisories: vec![
+                                "audibility_regression_has_no_revertible_correction_stage"
+                                    .to_string(),
+                            ],
+                        });
+                }
             }
         }
     }
@@ -1686,6 +1781,69 @@ mod tests {
                 .iter()
                 .all(|outcome| !outcome.stage.starts_with("final_correction_safety_"))
         );
+    }
+
+    #[test]
+    fn final_safety_gate_reverts_graph_routed_bass_topology_regression() {
+        let mut result = single_channel_room_result("lfe");
+        let channel = result.channel_results.get_mut("lfe").unwrap();
+        channel.pre_score = 1.0;
+        channel.post_score = 2.0;
+        channel.final_curve = channel.initial_curve.clone();
+        let chain = result.channels.get_mut("lfe").unwrap();
+        chain.drivers = Some(Vec::new());
+        chain.plugins = vec![roomeq_model::PluginConfigWrapper {
+            plugin_type: "eq".to_string(),
+            parameters: serde_json::json!({
+                "label": "room_eq_correction",
+                "filters": [],
+            }),
+        }];
+
+        apply_final_correction_safety_gate(
+            &mut result,
+            48_000.0,
+            3,
+            (20.0, 20_000.0),
+            Path::new("."),
+        );
+
+        assert_eq!(result.channel_results["lfe"].post_score, 1.0);
+        assert!(result.channels["lfe"].plugins.is_empty());
+        assert!(result.metadata.stage_outcomes.iter().any(|outcome| {
+            outcome.stage == "final_correction_safety_lfe"
+                && outcome
+                    .advisories
+                    .contains(&"topology_regression_reverted_lfe:peq".to_string())
+        }));
+    }
+
+    #[test]
+    fn final_safety_gate_does_not_reject_stage_less_routing_residual() {
+        let mut result = single_channel_room_result("left");
+        let channel = result.channel_results.get_mut("left").unwrap();
+        channel.pre_score = 2.0;
+        channel.post_score = 1.0;
+        channel.final_curve.spl += 12.0;
+        let chain = result.channels.get_mut("left").unwrap();
+        chain.plugins = vec![roomeq_engine::output::create_gain_plugin(0.0)];
+        chain.final_curve = Some((&channel.final_curve).into());
+
+        apply_final_correction_safety_gate(
+            &mut result,
+            48_000.0,
+            3,
+            (20.0, 20_000.0),
+            Path::new("."),
+        );
+
+        assert!(result.metadata.correction_acceptance.is_none());
+        assert!(result.metadata.stage_outcomes.iter().any(|outcome| {
+            outcome.stage == "final_correction_safety_left"
+                && outcome.advisories.contains(
+                    &"audibility_regression_has_no_revertible_correction_stage".to_string(),
+                )
+        }));
     }
 
     #[test]

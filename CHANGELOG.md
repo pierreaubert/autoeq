@@ -1,3 +1,10 @@
+# 0.4.54
+
+## Fixes
+
+- Preparing for release: just lint, just test and just qa are clean on
+  MacOS, need the same on Linux and Windows
+
 # 0.4.53
 
 ## Fixes

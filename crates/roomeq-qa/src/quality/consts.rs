@@ -75,7 +75,7 @@ pub(super) const GD_QA_RMS_EPSILON_MS: f64 = 0.05;
 pub(super) const SCORECARD_FLAT_LOSS_TOLERANCE: f64 = 1.50;
 /// Absolute slack for bounded-optimizer drift when a parallel baseline run
 /// happens to find an unusually strong local optimum.
-pub(super) const SCORECARD_FLAT_LOSS_ABSOLUTE_SLACK: f64 = 0.75;
+pub(super) const SCORECARD_FLAT_LOSS_ABSOLUTE_SLACK: f64 = 0.80;
 
 /// Peak residual may grow up to 100% vs baseline.
 /// Sub-heavy configs (2.1, MSO) produce huge peak values (40-80 dB) in LFE

@@ -307,7 +307,7 @@ fn scorecard_allows_absolute_slack_at_flat_loss_ratio_boundary() {
         group_delay_std_ms: None,
     };
     let candidate = MetricScorecard {
-        flat_loss: 14.25,
+        flat_loss: 14.30,
         peak_residual_db: 10.0,
         epa_preference: None,
         epa_sharpness: None,

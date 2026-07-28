@@ -47,7 +47,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.4.53"
+version = "0.4.54"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

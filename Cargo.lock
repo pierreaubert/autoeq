@@ -184,7 +184,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "autoeq"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "anyhow",
  "assert_fs",
@@ -222,7 +222,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-artifacts"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "autoeq-core",
  "tempfile",
@@ -230,7 +230,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-cli"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "anyhow",
  "autoeq-plot",
@@ -252,7 +252,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-core"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "clap",
  "log",
@@ -269,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-fir"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "autoeq-core",
  "hound",
@@ -282,7 +282,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-measurements"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "async-trait",
  "autoeq-core",
@@ -304,7 +304,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-optim"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "autoeq-core",
  "autoeq-measurements",
@@ -325,7 +325,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-plot"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "anyhow",
  "autoeq-core",
@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-workflow"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "autoeq-core",
  "autoeq-measurements",
@@ -2714,7 +2714,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-analysis"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "autoeq-core",
  "hound",
@@ -2736,7 +2736,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-cli"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "anyhow",
  "clap",
@@ -2752,7 +2752,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-engine"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "autoeq-core",
  "autoeq-fir",
@@ -2780,7 +2780,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-export"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "anyhow",
  "clap",
@@ -2795,7 +2795,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-model"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "autoeq-core",
  "clap",
@@ -2809,7 +2809,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-qa"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "anyhow",
  "autoeq-measurements",
@@ -2834,7 +2834,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-quality"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "autoeq-core",
  "math-iir-fir",
@@ -2848,7 +2848,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-synthetic"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "autoeq-core",
  "log",
@@ -2858,7 +2858,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-workflow"
-version = "0.4.54"
+version = "0.5.54"
 dependencies = [
  "anyhow",
  "autoeq-artifacts",

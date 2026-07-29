@@ -29,6 +29,13 @@ use roomeq_model::{
 
 const TIMBRE_MATCHING_PARALLEL_DRIFT_DB: f64 = 0.75;
 
+pub(super) struct TargetTiltValidationOptions {
+    pub(super) num_options: usize,
+    pub(super) has_schroeder: bool,
+    pub(super) has_broadband: bool,
+    pub(super) has_excursion: bool,
+}
+
 fn normalized_room_timbre_spread(
     result: &RoomOptimizationResult,
     reference_channel: &str,
@@ -81,10 +88,12 @@ pub(super) fn validate_option_effect(
             baseline_result,
             option_config,
             option_result,
-            num_options,
-            has_schroeder,
-            has_broadband,
-            has_excursion,
+            TargetTiltValidationOptions {
+                num_options,
+                has_schroeder,
+                has_broadband,
+                has_excursion,
+            },
         ),
         OptionOverride::ExcursionProtection => {
             validate_excursion_protection(baseline_result, option_result, num_options)
@@ -624,10 +633,7 @@ pub(super) fn validate_target_tilt(
     _baseline_result: &RoomOptimizationResult,
     option_config: &RoomConfig,
     option_result: &RoomOptimizationResult,
-    num_options: usize,
-    has_schroeder: bool,
-    has_broadband: bool,
-    has_excursion: bool,
+    options: TargetTiltValidationOptions,
 ) -> (bool, String) {
     let mut target_slope_err = 0.0_f64;
     let mut initial_residual_slope_err = 0.0_f64;
@@ -712,21 +718,22 @@ pub(super) fn validate_target_tilt(
     // correctly applied to scoring.
     // Widen tolerance for combos: other options (excursion HPF, schroeder split,
     // psychoacoustic) can distort the slope in the 100-500 Hz measurement band.
-    let mut combo_tolerance = TILT_SLOPE_TOLERANCE * (1.0 + (num_options.saturating_sub(1) as f64));
+    let mut combo_tolerance =
+        TILT_SLOPE_TOLERANCE * (1.0 + (options.num_options.saturating_sub(1) as f64));
     // Schroeder split at 300 Hz bisects the 100-500 Hz slope measurement range,
     // creating two independently-optimized zones with different tilt behavior.
     // This fundamentally limits slope accuracy across the crossover.
-    if has_schroeder {
+    if options.has_schroeder {
         combo_tolerance += 3.0;
     }
     // Broadband shelves interact with tilt, adding global slope shifts.
-    if has_broadband {
+    if options.has_broadband {
         combo_tolerance += 2.0;
     }
     // Excursion protection intentionally reshapes the same low-frequency band
     // used for the residual-slope check. The target curve must still be exact,
     // but the protected response needs room to trade tilt accuracy for safety.
-    if has_excursion {
+    if options.has_excursion {
         combo_tolerance += 1.5;
     }
     let target_matches = avg_target_err <= TARGET_CURVE_SLOPE_TOLERANCE;

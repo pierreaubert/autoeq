@@ -1321,7 +1321,7 @@ fn revert_regressed_correction_stages(
 }
 
 fn correction_stages(chain: &ChannelDspChain) -> BTreeSet<CorrectionStage> {
-    chain
+    let mut stages: BTreeSet<_> = chain
         .plugins
         .iter()
         .chain(
@@ -1332,7 +1332,24 @@ fn correction_stages(chain: &ChannelDspChain) -> BTreeSet<CorrectionStage> {
                 .flat_map(|driver| driver.plugins.iter()),
         )
         .filter_map(correction_stage)
-        .collect()
+        .collect();
+
+    // MSO alignment is emitted as per-driver gain/delay plugins.  Those
+    // plugins are not correction stages on their own because ordinary routing
+    // gains/delays must remain intact, but a routed multi-sub chain needs the
+    // whole alignment stage to be revertible when its LFE score regresses.
+    if chain.drivers.as_ref().is_some_and(|drivers| {
+        drivers.iter().any(|driver| {
+            driver
+                .plugins
+                .iter()
+                .any(|plugin| matches!(plugin.plugin_type.as_str(), "gain" | "delay"))
+        })
+    }) {
+        stages.insert(CorrectionStage::Mso);
+    }
+
+    stages
 }
 
 fn correction_stage(plugin: &roomeq_model::PluginConfigWrapper) -> Option<CorrectionStage> {
@@ -1367,9 +1384,11 @@ fn remove_correction_stage(chain: &mut ChannelDspChain, stage: CorrectionStage) 
         .retain(|plugin| correction_stage(plugin) != Some(stage));
     if let Some(drivers) = &mut chain.drivers {
         for driver in drivers {
-            driver
-                .plugins
-                .retain(|plugin| correction_stage(plugin) != Some(stage));
+            driver.plugins.retain(|plugin| {
+                correction_stage(plugin) != Some(stage)
+                    && !(stage == CorrectionStage::Mso
+                        && matches!(plugin.plugin_type.as_str(), "gain" | "delay"))
+            });
         }
     }
 }
@@ -1815,6 +1834,46 @@ mod tests {
                 && outcome
                     .advisories
                     .contains(&"topology_regression_reverted_lfe:peq".to_string())
+        }));
+    }
+
+    #[test]
+    fn final_safety_gate_reverts_mso_driver_alignment_regression() {
+        let mut result = single_channel_room_result("lfe");
+        let channel = result.channel_results.get_mut("lfe").unwrap();
+        channel.pre_score = 1.0;
+        channel.post_score = 2.0;
+        channel.final_curve = channel.initial_curve.clone();
+        result.channels.get_mut("lfe").unwrap().drivers =
+            Some(vec![roomeq_model::DriverDspChain {
+                name: "subs_1".to_string(),
+                index: 0,
+                plugins: vec![
+                    roomeq_engine::output::create_gain_plugin(2.0),
+                    roomeq_engine::output::create_delay_plugin(2.0),
+                ],
+                initial_curve: None,
+            }]);
+
+        apply_final_correction_safety_gate(
+            &mut result,
+            48_000.0,
+            3,
+            (20.0, 20_000.0),
+            Path::new("."),
+        );
+
+        assert_eq!(result.channel_results["lfe"].post_score, 1.0);
+        assert!(
+            result.channels["lfe"].drivers.as_ref().unwrap()[0]
+                .plugins
+                .is_empty()
+        );
+        assert!(result.metadata.stage_outcomes.iter().any(|outcome| {
+            outcome.stage == "final_correction_safety_lfe"
+                && outcome
+                    .advisories
+                    .contains(&"topology_regression_reverted_lfe:mso".to_string())
         }));
     }
 

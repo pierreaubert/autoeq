@@ -127,8 +127,9 @@ dist-plot-bins:
 clean:
 	cargo clean
 	find . -name '*~' -exec rm {} \; -print
-	rm -f *.wav
-	rm -fr fuzzer_output
+	rm -f *.wav *.log TAGS ETAGS
+	rm -fr fuzzer_output mutants.out
+	rm -fr venv .tokensave .venv
 	rm -fr data_generated
 
 # ----------------------------------------------------------------------

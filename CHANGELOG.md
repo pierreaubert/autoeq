@@ -1,9 +1,12 @@
-# 0.4.54
+# 0.5.54
+
+Major stable version 0.5
 
 ## Fixes
 
 - Preparing for release: just lint, just test and just qa are clean on
   MacOS, need the same on Linux and Windows
+- Fix MSO test  
 
 # 0.4.53
 

@@ -161,17 +161,40 @@ fn optimize_room_with_group_delay_enabled_succeeds() {
 #[test]
 fn optimize_room_with_phase_alignment_enabled_succeeds() {
     let mut config = stereo_2_1_config();
+    let mut phased = flat_curve();
+    phased.phase = Some(ndarray::Array1::zeros(phased.freq.len()));
+    for name in ["left", "right", "sub"] {
+        config.speakers.insert(
+            name.to_string(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(phased.clone())),
+        );
+    }
     config.optimizer.allow_delay = Some(true);
     config.optimizer.phase_alignment = Some(roomeq_model::PhaseAlignmentConfig {
         enabled: true,
         ..Default::default()
     });
-    let result = optimize_room(&config, 48000.0, None, None);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&events);
+    let observer = Box::new(move |event: &PipelineEvent| {
+        observed.lock().unwrap().push((event.step_id, event.status));
+        PipelineControl::Continue
+    });
+    let result = RoomPipeline::new(RoomPipelineRequest {
+        config: &config,
+        sample_rate: 48_000.0,
+        output_dir: None,
+        probe_arrival_overrides: None,
+    })
+    .run(Some(observer));
     assert!(
         result.is_ok(),
         "optimize_room with phase alignment should succeed: {:?}",
         result.err()
     );
+    assert!(events.lock().unwrap().iter().any(|(step, status)| {
+        *step == PipelineStepId::PhaseAlignment && *status == PipelineStepStatus::Started
+    }));
 }
 
 #[test]

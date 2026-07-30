@@ -248,6 +248,27 @@ fn test_export_easyeffects() {
 }
 
 #[test]
+fn easyeffects_rejects_more_than_thirty_bands() {
+    let mut output = make_systemwide_test_output();
+    let filters: Vec<_> = (0..31)
+        .map(|i| serde_json::json!({
+            "filter_type": "peak",
+            "freq": 100.0 + f64::from(i) * 100.0,
+            "q": 1.0,
+            "db_gain": 0.0,
+        }))
+        .collect();
+    output.channels.get_mut("left").unwrap().plugins = vec![PluginConfigWrapper {
+        plugin_type: "eq".to_string(),
+        parameters: serde_json::json!({"filters": filters}),
+    }];
+    output.channels.get_mut("right").unwrap().plugins = output.channels["left"].plugins.clone();
+
+    let error = export_easyeffects(&output).expect_err("31 bands must not be truncated");
+    assert!(error.to_string().contains("at most 30 EQ bands"));
+}
+
+#[test]
 fn tool_contract_easyeffects_json_has_mirrored_stereo_preset() {
     let output = make_systemwide_test_output();
     let result = export_easyeffects(&output).unwrap();

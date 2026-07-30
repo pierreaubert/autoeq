@@ -14,6 +14,7 @@ use roomeq_model::{
     ChannelDspChain, MeasurementSource, OptimizerConfig, RoomConfig, TargetCurveConfig,
 };
 use std::path::Path;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Run a Post-EQ pass with optional per-iteration progress feedback.
@@ -104,6 +105,7 @@ pub(crate) fn run_channel_via_generic_path(
     channel_index: usize,
     total_channels: usize,
     max_iterations: usize,
+    probe_arrival_overrides: Option<&HashMap<String, f64>>,
 ) -> Result<(
     ChannelDspChain,
     ChannelOptimizationResult,
@@ -143,7 +145,7 @@ pub(crate) fn run_channel_via_generic_path(
         sample_rate,
         output_dir,
         progress.map(|progress| progress.callback),
-        None,
+        probe_arrival_overrides.and_then(|overrides| overrides.get(role).copied()),
         None,
     )?;
     workflow_progress_stopped(&stopped, "TopologyWorkflowExecution")?;
@@ -181,7 +183,7 @@ pub(crate) fn run_channel_via_generic_path(
                 sample_rate,
                 output_dir,
                 progress.map(|progress| progress.callback),
-                None,
+                probe_arrival_overrides.and_then(|overrides| overrides.get(role).copied()),
                 None,
             )?;
             workflow_progress_stopped(&stopped, "TopologyWorkflowExecution")?;
@@ -359,6 +361,7 @@ mod tests {
             0,
             1,
             config.optimizer.max_iter,
+            None,
         );
         assert!(result.is_ok(), "generic path failed: {:?}", result.err());
         let (chain, channel_result, pre_score, post_score, _, _) = result.unwrap();
@@ -392,6 +395,7 @@ mod tests {
             0,
             1,
             config.optimizer.max_iter,
+            None,
         );
         assert!(
             result.is_ok(),
@@ -468,6 +472,7 @@ mod tests {
             0,
             1,
             config.optimizer.max_iter,
+            None,
         );
         assert!(
             result.is_ok(),

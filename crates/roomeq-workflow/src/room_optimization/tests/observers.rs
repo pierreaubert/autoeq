@@ -255,6 +255,7 @@ fn assemble_workflow_result_observer_stop_on_summary() {
         sys,
         48000.0,
         None,
+        None,
         &observer,
         &autoeq_artifacts::MemoryArtifactStore::new(),
     );

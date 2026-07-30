@@ -36,7 +36,7 @@ impl Default for TargetResponseConfig {
     fn default() -> Self {
         Self {
             shape: TargetShape::Flat,
-            slope_db_per_octave: 0.0,
+            slope_db_per_octave: default_tilt_slope(),
             reference_freq: default_tilt_reference_freq(),
             curve_path: None,
             preference: UserPreference::default(),

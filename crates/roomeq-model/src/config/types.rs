@@ -25,7 +25,7 @@ use super::spl_calibration::SplCalibration;
 use crate::MeasurementSource;
 pub use crate::optimizer_settings::MultiMeasurementStrategy;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -267,10 +267,13 @@ pub struct BassAnchorChannelResultLegacy {
 pub enum ProcessingMode {
     /// Low-latency mode (IIR filters only) - < 5ms latency
     #[default]
+    #[serde(alias = "iir")]
     LowLatency,
     /// Phase-linear mode (FIR filters only) - High latency allowed
+    #[serde(alias = "fir")]
     PhaseLinear,
     /// Hybrid mode (IIR for bass, FIR for mids/highs) - Variable latency
+    #[serde(alias = "mixed")]
     Hybrid,
     /// Mixed-phase mode (IIR for minimum-phase + excess phase FIR)
     /// Requires phase data in measurements. Low latency (~10ms).
@@ -450,13 +453,43 @@ pub struct CrossoverConfig {
 }
 
 /// Target curve configuration
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(untagged)]
+#[derive(Debug, Clone, JsonSchema)]
+#[schemars(with = "String")]
 pub enum TargetCurveConfig {
     /// Predefined target (e.g. "flat", "harman")
     Predefined(String),
     /// Path to CSV file (freq, spl columns)
     Path(PathBuf),
+}
+
+impl Serialize for TargetCurveConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Predefined(name) => serializer.serialize_str(name),
+            Self::Path(path) => serializer.serialize_str(&path.to_string_lossy()),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for TargetCurveConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            // These names are deliberate public RoomEQ targets. Every other
+            // string is a CSV path, so a typo cannot silently select flat.
+            "flat" | "harman" | "Listening Window" | "Sound Power"
+            | "Early Reflections" | "Estimated In-Room Response" => {
+                Ok(Self::Predefined(value))
+            }
+            _ => Ok(Self::Path(PathBuf::from(value))),
+        }
+    }
 }
 
 /// FIR filter configuration

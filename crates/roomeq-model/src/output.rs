@@ -313,10 +313,14 @@ pub struct SupportingSourceReport {
     pub fir_length: usize,
     /// Compensation band in Hz.
     pub compensation_band_hz: (f64, f64),
-    /// DRR before compensation (dB) summary.
-    pub drr_before_db: StatisticalSummary,
-    /// DRR after compensation (dB) summary.
-    pub drr_after_db: StatisticalSummary,
+    /// DRR before compensation (dB) summary, available only with time-gated
+    /// impulse-response evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drr_before_db: Option<StatisticalSummary>,
+    /// DRR after compensation (dB) summary, available only with time-gated
+    /// impulse-response evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drr_after_db: Option<StatisticalSummary>,
     /// Whether target constraints (floor/ceiling) were active.
     pub target_constraints_active: bool,
     /// Number of frequency bins where the precedence ceiling was hit.
@@ -365,9 +369,11 @@ pub struct RoomOptimizerEvidence {
 /// Optimization metadata
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct OptimizationMetadata {
-    /// Pre-optimization score
+    /// Raw-measurement score before optimization, evaluated over the same
+    /// role/crossover-aware band as `post_score`.
     pub pre_score: f64,
-    /// Post-optimization score
+    /// Final deployed-response score, evaluated over the channel's
+    /// role/crossover-aware band (lower is better).
     pub post_score: f64,
     /// Optimization algorithm used
     pub algorithm: String,
@@ -377,9 +383,9 @@ pub struct OptimizationMetadata {
     /// Note: `pre_score` and `post_score` are *not* values of this loss
     /// function — they are always computed by
     /// `crate::roomeq::workflows::compute_flat_loss` over the
-    /// `[min_freq, max_freq]` evaluation window so that runs with
-    /// different `loss_type` values stay on the same scale and can be
-    /// compared directly. To compare *perceptual* outcomes across
+    /// role/crossover-aware evaluation window so that routes do not penalize
+    /// intentional crossover rolloff. Runs with different `loss_type` values
+    /// stay on the same scale within that channel role. To compare *perceptual* outcomes across
     /// loss types use `epa_per_channel.{pre,post}.preference` instead,
     /// which is computed identically for every run.
     #[serde(default, skip_serializing_if = "Option::is_none")]

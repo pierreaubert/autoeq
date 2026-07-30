@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 /// - High frequencies (> 1 kHz): Coarse resolution (1/6 octave) to ignore comb filtering
 /// - Transition region (100 Hz - 1 kHz): Gradual interpolation between the two
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(default)]
 pub struct PsychoacousticSmoothingConfig {
     /// Smoothing resolution below low_freq (bands per octave, e.g., 48 for 1/48 octave)
     pub low_freq_n: usize,
@@ -44,6 +45,7 @@ impl Default for PsychoacousticSmoothingConfig {
 /// to the loss function at call time (see
 /// [`crate::roomeq::impulse_analysis::build_null_suppression_mask`]).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(default)]
 pub struct AsymmetricLossConfig {
     /// Weight for positive errors (peaks above `transition_freq`). Default: 2.0
     pub peak_weight: f64,
@@ -77,6 +79,7 @@ impl Default for AsymmetricLossConfig {
 
 /// Frequency band configuration for weighted loss
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
 pub struct FrequencyBandWeights {
     /// Bass band minimum frequency (Hz)
     pub bass_min: f64,
@@ -111,6 +114,20 @@ impl Default for FrequencyBandWeights {
             mid_weight: 1.0,
             treble_weight: 0.8,
         }
+    }
+}
+
+#[cfg(test)]
+mod frequency_band_weights_tests {
+    use super::*;
+
+    #[test]
+    fn partial_frequency_band_weights_inherit_defaults() {
+        let parsed: FrequencyBandWeights =
+            serde_json::from_str(r#"{"bass_weight": 3.5}"#).unwrap();
+        assert_eq!(parsed.bass_weight, 3.5);
+        assert_eq!(parsed.mid_weight, FrequencyBandWeights::default().mid_weight);
+        assert_eq!(parsed.treble_max, FrequencyBandWeights::default().treble_max);
     }
 }
 
@@ -219,6 +236,7 @@ fn default_flatness_erb_weight() -> f64 {
 
 /// Configuration for EPA scoring.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
 pub struct EpaConfig {
     /// Listening level in phon (affects loudness computation)
     pub listening_level_phon: f64,
@@ -285,6 +303,8 @@ pub enum MultiMeasurementStrategy {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum CrossoverType {
     Butterworth2,
+    #[serde(alias = "BW24", alias = "Butterworth24")]
+    Butterworth4,
     LinkwitzRiley2,
     #[default]
     #[serde(alias = "LR24")]
@@ -302,6 +322,7 @@ impl std::str::FromStr for CrossoverType {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.to_lowercase().as_str() {
             "butterworth2" | "bw2" | "butterworth12" | "bw12" => Ok(Self::Butterworth2),
+            "butterworth4" | "bw4" | "butterworth24" | "bw24" => Ok(Self::Butterworth4),
             "lr2" | "lr12" | "linkwitzriley2" | "linkwitzriley12" => Ok(Self::LinkwitzRiley2),
             "lr4" | "lr24" | "linkwitzriley4" | "linkwitzriley24" => Ok(Self::LinkwitzRiley4),
             "lr8" | "lr48" | "linkwitzriley8" | "linkwitzriley48" => Ok(Self::LinkwitzRiley8),

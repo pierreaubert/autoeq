@@ -108,7 +108,7 @@ Major stable version 0.5
   validation/redaction policies, tracked CSV/API loading, and transformation
   ledgers. RoomEQ configs can reference sidecars in warning or strict mode,
   and generated DSP/export artifacts include a redacted provenance manifest.
-  `migrate-provenance` deterministically upgrades supported legacy sidecars
+  `migrate_provenance` deterministically upgrades supported legacy sidecars
   while retaining a backup for in-place migrations.
 
 ## Refactoring
@@ -898,7 +898,7 @@ add it to a docker, more work to test properly EQAPO on Windows)
 
 ## Documentation
 
-- Added a [guide](docs/roomeq_explained.md) for roomeq
+- Added a [guide](docs/ROOMEQ_MANUAL.md) for roomeq
 
 ## New features
 

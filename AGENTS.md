@@ -1,4 +1,4 @@
-# autoeq (crate: `autoeq`, version: 0.4.46)
+# autoeq (crate: `autoeq`, version: 0.5.54)
 
 Core automatic equalization stack for speakers, headphones, and RoomEQ workflows.
 
@@ -118,6 +118,6 @@ cargo run --release --bin roomeq -- \
 ## Docs to keep in sync
 
 - `CHANGELOG.md`
-- `docs/roomeq_explained.md`
-- `bin/roomeq/INPUT_FORMAT.md`
-- `bin/roomeq/input_schema.json`
+- `docs/ROOMEQ_MANUAL.md`
+- `src/bin/roomeq/INPUT_FORMAT.md`
+- `src/bin/roomeq/input_schema.json`

@@ -1,7 +1,7 @@
 //! Deterministically upgrade a measurement-provenance sidecar to the current
 //! interchange schema.
 //!
-//! Usage: `migrate-provenance <input.provenance.json> [output.provenance.json]`
+//! Usage: `migrate_provenance <input.provenance.json> [output.provenance.json]`
 
 use autoeq_measurements::{PROVENANCE_SCHEMA_VERSION, read_sidecar_file};
 use std::path::PathBuf;
@@ -11,7 +11,7 @@ fn parse_args(args: &[String]) -> Result<(PathBuf, PathBuf), String> {
         let program = args
             .first()
             .map(String::as_str)
-            .unwrap_or("migrate-provenance");
+            .unwrap_or("migrate_provenance");
         return Err(format!(
             "Usage: {program} <input.provenance.json> [output.provenance.json]"
         ));

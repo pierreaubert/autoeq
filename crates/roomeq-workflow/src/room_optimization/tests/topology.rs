@@ -156,6 +156,31 @@ fn select_topology_route_speaker_group_falls_back_to_generic() {
 }
 
 #[test]
+fn select_topology_route_special_bass_configs_without_system_subs_are_generic() {
+    let system = |key: &str| SystemConfig {
+        model: SystemModel::Stereo,
+        speakers: HashMap::from([("Left".to_string(), key.to_string())]),
+        subwoofers: None,
+        bass_management: None,
+        ..Default::default()
+    };
+    let source = || MeasurementSource::InMemory(flat_curve());
+    let cases = vec![
+        ("multi", SpeakerConfig::MultiSub(roomeq_model::MultiSubGroup { name: "m".into(), speaker_name: None, subwoofers: vec![source()], allpass_optimization: false })),
+        ("cardioid", SpeakerConfig::Cardioid(Box::new(roomeq_model::CardioidConfig { name: "c".into(), speaker_name: None, front: source(), rear: source(), separation_meters: 1.0 }))),
+        ("dba", SpeakerConfig::Dba(roomeq_model::DBAConfig { name: "d".into(), speaker_name: None, front: vec![source()], rear: vec![source()] })),
+    ];
+    for (key, speaker) in cases {
+        let config = base_room_config(HashMap::from([(key.to_string(), speaker)]), Some(system(key)));
+        assert_eq!(
+            select_topology_route(&config, &observer_none()).unwrap(),
+            TopologyRoute::Generic,
+            "{key} must not enter the Stereo 2.0 route"
+        );
+    }
+}
+
+#[test]
 fn validate_room_optimization_empty_speakers_fails() {
     let config = RoomConfig {
         version: roomeq_model::default_config_version(),
@@ -309,6 +334,7 @@ fn assemble_workflow_result_persists_channels() {
         &config,
         sys,
         48000.0,
+        None,
         None,
         &observer_none(),
         &autoeq_artifacts::MemoryArtifactStore::new(),

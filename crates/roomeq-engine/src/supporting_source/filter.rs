@@ -1,6 +1,6 @@
 //! Core supporting-source filter computation.
 
-use super::{SupportingSourceFilter, compute_drr, generate_velvet_noise};
+use super::{SupportingSourceFilter, generate_velvet_noise};
 use crate::Curve;
 use crate::error::{AutoeqError, Result};
 use ndarray::Array1;
@@ -12,6 +12,9 @@ use rustfft::FftPlanner;
 /// This is a safety clamp to prevent the filter from requesting absurd
 /// headroom when the support measurement is weak or noisy.
 const MAX_SUPPORT_GAIN_DB: f64 = 24.0;
+/// Target mean inter-impulse interval for velvet decorrelation. This is the
+/// 3–5 ms range used by the supporting-source design, centred at 4 ms.
+const VELVET_MEAN_SPACING_MS: f64 = 4.0;
 
 /// Compute the supporting-source filter from averaged magnitude responses.
 pub fn compute_supporting_source_filter(
@@ -77,28 +80,35 @@ pub fn compute_supporting_source_filter(
     if config.decorrelation == SupportingSourceDecorrelation::VelvetNoise
         && config.velvet_noise_taps > 0
     {
-        let velvet = generate_velvet_noise(
-            config.velvet_noise_taps,
-            0.3, // ~1 impulse per 3 samples by default; tune later
-            0xdeadbeef,
-        );
+        let target_spacing_samples = (sample_rate * VELVET_MEAN_SPACING_MS / 1_000.0).max(1.0);
+        // The generator samples uniformly from [1, 1/density], so its mean
+        // spacing is approximately (1 + 1/density) / 2.
+        let density = 1.0 / (2.0 * target_spacing_samples - 1.0);
+        let velvet = generate_velvet_noise(config.velvet_noise_taps, density, 0xdeadbeef);
         taps = convolve_fir(&taps, &velvet);
         // Truncate back to requested length (the tail is mostly velvet tail).
         taps.truncate(config.fir_taps);
     }
 
-    // 12. Normalize.
+    // 12. Keep exported convolution IRs peak-bounded, while returning the
+    // removed level for an explicit gain stage in the deployed graph.
     let max_abs = taps.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
-    if max_abs > 0.0 {
-        let scale = 1.0 / max_abs;
-        for v in &mut taps {
-            *v *= scale;
+    let normalization_gain_db = if max_abs > 0.0 {
+        for tap in &mut taps {
+            *tap /= max_abs;
         }
-    }
+        20.0 * max_abs.log10()
+    } else {
+        0.0
+    };
 
-    // 13. DRR diagnostics.
-    let (drr_before_db, drr_after_db) =
-        compute_drr(&primary_smooth, &support_smooth, &support_gain_db, 0.5);
+    // A magnitude response has no direct/late time split. Do not manufacture
+    // an absolute DRR by assigning a fixed fraction of the same response to
+    // both fields: that makes the reported pre-compensation value tautological.
+    // Populate these only when the supporting-source input contract carries
+    // time-gated impulse evidence.
+    let drr_before_db = None;
+    let drr_after_db = None;
 
     let constrained_target = Curve {
         freq: common_freq,
@@ -108,6 +118,7 @@ pub fn compute_supporting_source_filter(
 
     Ok(SupportingSourceFilter {
         taps,
+        normalization_gain_db,
         constrained_target,
         support_gain_db,
         drr_before_db,
@@ -165,24 +176,25 @@ fn constrain_target(
         }
 
         // Precedence ceiling.
-        let limit_db = limit_at_freq(freq[i], limits);
-        let ceiling = primary[i] + limit_db;
-        if d_mod[i] > ceiling {
-            d_mod[i] = ceiling;
-            hits += 1;
+        if let Some(limit_db) = limit_at_freq(freq[i], limits) {
+            let ceiling = primary[i] + limit_db;
+            if d_mod[i] > ceiling {
+                d_mod[i] = ceiling;
+                hits += 1;
+            }
         }
     }
 
     (d_mod, hits)
 }
 
-fn limit_at_freq(f: f64, limits: &[PrecedenceLimitBand]) -> f64 {
+fn limit_at_freq(f: f64, limits: &[PrecedenceLimitBand]) -> Option<f64> {
     for band in limits {
         if f >= band.low_hz && f <= band.high_hz {
-            return band.limit_db;
+            return Some(band.limit_db);
         }
     }
-    0.0
+    None
 }
 
 /// Compute supporting-source gain in dB: sqrt(d² - p²) / s.
@@ -374,6 +386,17 @@ mod tests {
     }
 
     #[test]
+    fn uncovered_precedence_frequencies_are_not_clamped_or_counted() {
+        let target = Array1::from_vec(vec![90.0, 90.0]);
+        let primary = Array1::from_vec(vec![80.0, 80.0]);
+        let freq = Array1::from_vec(vec![50.0, 1_000.0]);
+        let limits = vec![PrecedenceLimitBand { low_hz: 100.0, high_hz: 500.0, limit_db: 3.0 }];
+        let (constrained, hits) = constrain_target(&target, &primary, &limits, &freq);
+        assert_eq!(constrained, target);
+        assert_eq!(hits, 0);
+    }
+
+    #[test]
     fn support_gain_fills_primary_notch() {
         let freq = Array1::logspace(10.0, f64::log10(100.0), f64::log10(10000.0), 100);
         let mut primary_spl = Array1::from_elem(100, 0.0);
@@ -437,7 +460,7 @@ mod tests {
                 .unwrap();
         assert!(result.taps.iter().all(|v| v.is_finite()));
         assert!(result.support_gain_db.iter().all(|v| v.is_finite()));
-        assert!(result.drr_before_db.iter().all(|v| v.is_finite()));
-        assert!(result.drr_after_db.iter().all(|v| v.is_finite()));
+        assert!(result.drr_before_db.is_none());
+        assert!(result.drr_after_db.is_none());
     }
 }

@@ -463,6 +463,10 @@ pub fn build_target_curve_by_name(
     input_curve: &Curve,
 ) -> Curve {
     let spl = match curve_name {
+        "flat" => Array1::zeros(frequencies.len()),
+        "harman" => Array1::from_shape_fn(frequencies.len(), |index| {
+            -0.8 * (frequencies[index].max(1e-12) / 1000.0).log2()
+        }),
         "Listening Window" => {
             let log_minimum = 1000.0_f64.log10();
             let log_maximum = 20000.0_f64.log10();

@@ -2481,7 +2481,7 @@
           "minimum": 0
         },
         "loss_type": {
-          "description": "Loss function that the optimizer minimized.\nOne of `\"flat\"`, `\"score\"`, `\"epa\"`.\n\nNote: `pre_score` and `post_score` are *not* values of this loss\nfunction — they are always computed by\n`crate::roomeq::workflows::compute_flat_loss` over the\n`[min_freq, max_freq]` evaluation window so that runs with\ndifferent `loss_type` values stay on the same scale and can be\ncompared directly. To compare *perceptual* outcomes across\nloss types use `epa_per_channel.{pre,post}.preference` instead,\nwhich is computed identically for every run.",
+          "description": "Loss function that the optimizer minimized.\nOne of `\"flat\"`, `\"score\"`, `\"epa\"`.\n\nNote: `pre_score` and `post_score` are *not* values of this loss\nfunction — they are always computed by\n`crate::roomeq::workflows::compute_flat_loss` over the\nrole/crossover-aware evaluation window so that routes do not penalize\nintentional crossover rolloff. Runs with different `loss_type` values\nstay on the same scale within that channel role. To compare *perceptual* outcomes across\nloss types use `epa_per_channel.{pre,post}.preference` instead,\nwhich is computed identically for every run.",
           "type": [
             "string",
             "null"
@@ -2553,12 +2553,12 @@
           ]
         },
         "post_score": {
-          "description": "Post-optimization score",
+          "description": "Final deployed-response score, evaluated over the channel's\nrole/crossover-aware band (lower is better).",
           "type": "number",
           "format": "double"
         },
         "pre_score": {
-          "description": "Pre-optimization score",
+          "description": "Raw-measurement score before optimization, evaluated over the same\nrole/crossover-aware band as `post_score`.",
           "type": "number",
           "format": "double"
         },
@@ -3407,12 +3407,26 @@
           "format": "double"
         },
         "drr_after_db": {
-          "description": "DRR after compensation (dB) summary.",
-          "$ref": "#/$defs/StatisticalSummary"
+          "description": "DRR after compensation (dB) summary, available only with time-gated\nimpulse-response evidence.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StatisticalSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "drr_before_db": {
-          "description": "DRR before compensation (dB) summary.",
-          "$ref": "#/$defs/StatisticalSummary"
+          "description": "DRR before compensation (dB) summary, available only with time-gated\nimpulse-response evidence.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StatisticalSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "enabled": {
           "description": "Whether supporting-source processing was enabled for this logical channel.",
@@ -3450,8 +3464,6 @@
         "delay_ms",
         "fir_length",
         "compensation_band_hz",
-        "drr_before_db",
-        "drr_after_db",
         "target_constraints_active",
         "precedence_limit_hits"
       ]

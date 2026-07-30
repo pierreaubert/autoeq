@@ -58,7 +58,7 @@ pub fn derive_temporal_quality_evidence(
         .iter()
         .filter_map(|channel| channel.pre_ringing_audible_db)
         .reduce(f64::max)
-        .unwrap_or(if has_fir { -120.0 } else { -300.0 });
+        .or_else(|| (!has_fir).then_some(-300.0));
     let latency_ms = channels
         .iter()
         .map(|channel| {
@@ -77,7 +77,7 @@ pub fn derive_temporal_quality_evidence(
         .map(|(post, pre)| post - pre)
         .fold(0.0_f64, f64::max);
     TemporalQualityEvidence {
-        pre_ringing_energy_db: Some(pre_ringing_energy_db),
+        pre_ringing_energy_db,
         latency_ms: Some(latency_ms),
         available_headroom_db: Some(-max_boost_db.max(0.0)),
     }
@@ -784,6 +784,22 @@ mod tests {
         assert_eq!(evidence.pre_ringing_energy_db, Some(-30.0));
         assert_eq!(evidence.latency_ms, Some(5.0));
         assert_eq!(evidence.available_headroom_db, Some(-3.0));
+    }
+
+    #[test]
+    fn temporal_evidence_does_not_invent_safe_pre_ringing_for_fir_without_measurement() {
+        let curve = curve(&[20.0, 100.0, 1_000.0], &[0.0, 0.0, 0.0]);
+        let evidence = derive_temporal_quality_evidence(
+            &[TemporalChannelEvidence {
+                pre_ringing_audible_db: None,
+                main_time_ms: None,
+                fir_taps: Some(481),
+            }],
+            &[curve.clone()],
+            &[curve],
+            48_000.0,
+        );
+        assert_eq!(evidence.pre_ringing_energy_db, None);
     }
 
     #[test]

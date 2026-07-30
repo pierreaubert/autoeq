@@ -71,7 +71,7 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct OptimizerConfig {
     /// Processing mode — selects the filter class used for correction.
-    #[serde(default)]
+    #[serde(default, alias = "mode")]
     pub processing_mode: ProcessingMode,
     /// FIR configuration (used when `processing_mode` requires FIR filters)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -520,8 +520,10 @@ impl OptimizerConfig {
     /// base latency (everything except `LowLatency`). Callers can override
     /// explicitly via the `allow_delay` field.
     pub fn allow_delay(&self) -> bool {
-        self.allow_delay
-            .unwrap_or(self.processing_mode != ProcessingMode::LowLatency)
+        self.allow_delay.unwrap_or_else(|| {
+            self.processing_mode != ProcessingMode::LowLatency
+                || self.phase_alignment.as_ref().is_some_and(|config| config.enabled)
+        })
     }
 
     /// Get the maximum allowed boost at a given frequency.

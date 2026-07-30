@@ -553,6 +553,11 @@ Default `precedence_limits`:
 ]
 ```
 
+Only frequencies covered by a `PrecedenceLimitBand` receive a precedence
+ceiling. Gaps between custom bands are intentionally unconstrained (apart from
+the configured compensation band and gain safety limits) and do not contribute
+to `precedence_limit_hits`.
+
 ---
 
 ## Crossovers Configuration
@@ -628,12 +633,12 @@ Controls the optimization algorithm, constraints, and advanced features.
 ```json
 {
   "optimizer": {
-    "mode": "iir",
+    "processing_mode": "low_latency",
     "loss_type": "flat",
     "algorithm": "autoeq:cmaes",
     "num_filters": 7,
     "min_q": 0.5,
-    "max_q": 6.0,
+    "max_q": 3.0,
     "min_db": -12.0,
     "max_db": 4.0,
     "min_freq": 20.0,
@@ -696,9 +701,8 @@ Controls the optimization algorithm, constraints, and advanced features.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `mode` | string | `"iir"` | Optimization mode: `"iir"`, `"fir"`, `"mixed"`, or `"mixed_phase"` |
 | `processing_mode` | string | `"low_latency"` | V2 processing mode: `"low_latency"`, `"phase_linear"`, `"hybrid"`, `"mixed_phase"`, `"warped_iir"`, or `"kautz_modal"` |
-| `fir` | object | - | FIR configuration (when mode is `"fir"` or `"mixed"`) |
+| `fir` | object | - | FIR configuration (when `processing_mode` is `"phase_linear"` or `"hybrid"`) |
 | `mixed_config` | object | - | Mixed mode configuration for frequency-based crossover |
 | `mixed_phase` | object | - | Mixed-phase correction config (when processing_mode is `"mixed_phase"`) |
 | `loss_type` | string | `"flat"` | Loss function: `"flat"`, `"score"`, or `"epa"` (see [Loss Types](#loss-types) and [EPA Configuration](#epa-configuration)) |
@@ -706,13 +710,13 @@ Controls the optimization algorithm, constraints, and advanced features.
 | `algorithm` | string | `"autoeq:cmaes"` | Optimization algorithm |
 | `num_filters` | integer | `7` | Number of PEQ filters per channel |
 | `min_q` | number | `0.5` | Minimum Q factor |
-| `max_q` | number | `6.0` | Maximum Q factor |
+| `max_q` | number | `3.0` | Maximum Q factor |
 | `min_db` | number | `-12.0` | Minimum gain in dB |
 | `max_db` | number | `4.0` | Maximum gain in dB |
 | `min_freq` | number (Hz) | `20.0` | Minimum frequency |
 | `max_freq` | number (Hz) | `1600.0` | Maximum frequency |
 | `max_iter` | integer | `50000` | Maximum optimization iterations |
-| `population` | integer | `50` | Population size for population-based optimizers |
+| `population` | integer | `300` | Population size for population-based optimizers |
 | `peq_model` | string | `"pk"` | PEQ model type |
 | `seed` | integer | - | Random seed for reproducible results |
 | `refine` | boolean | `true` | Enable hybrid two-stage optimization (DE global + COBYLA local) |
@@ -878,12 +882,12 @@ for the EPA score fields.
 
 ## FIR Configuration
 
-When `mode` is `"fir"` or `"mixed"`, a WAV file is generated per channel (e.g., `left_fir.wav`) and referenced in the output JSON via a convolution plugin.
+When `processing_mode` is `"phase_linear"` or `"hybrid"`, a WAV file is generated per channel (e.g., `left_fir.wav`) and referenced in the output JSON via a convolution plugin.
 
 ```json
 {
   "optimizer": {
-    "mode": "fir",
+    "processing_mode": "phase_linear",
     "fir": {
       "taps": 4096,
       "phase": "kirkeby",
@@ -898,7 +902,7 @@ With pre-ringing suppression:
 ```json
 {
   "optimizer": {
-    "mode": "fir",
+    "processing_mode": "phase_linear",
     "fir": {
       "taps": 4096,
       "phase": "kirkeby",
@@ -930,12 +934,12 @@ With pre-ringing suppression:
 
 ## Mixed Mode Configuration
 
-When `mode` is `"mixed"` and `mixed_config` is provided, the optimizer uses different filter types for different frequency bands separated by a crossover.
+When `processing_mode` is `"hybrid"` and `mixed_config` is provided, the optimizer uses different filter types for different frequency bands separated by a crossover.
 
 ```json
 {
   "optimizer": {
-    "mode": "mixed",
+    "processing_mode": "hybrid",
     "mixed_config": {
       "crossover_freq": 300.0,
       "crossover_type": "LR24",
@@ -1126,7 +1130,7 @@ Applies different Q constraints below and above the Schroeder frequency:
       "enabled": true,
       "schroeder_freq": 300,
       "low_freq_config": {
-        "max_q": 10.0,
+        "max_q": 5.0,
         "min_q": 0.5,
         "allow_boost": false
       },
@@ -1177,7 +1181,7 @@ With automatic Schroeder frequency from room dimensions:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `max_q` | number | `10.0` | Maximum Q factor for low frequency filters |
+| `max_q` | number | `5.0` | Maximum Q factor for low frequency filters |
 | `min_q` | number | `0.5` | Minimum Q factor |
 | `allow_boost` | boolean | `false` | Allow boost (`true`) or cuts only (`false`). Cuts-only is recommended for room modes. |
 | `max_db` | number | - | Maximum boost/cut in dB for below-Schroeder filters. Room modes can be 15+ dB. When set, allows wider range than the global `max_db`. Omit to use global `max_db`. |
@@ -1535,7 +1539,7 @@ Applies frequency-dependent correction weights based on acoustic decomposition. 
 {
   "optimizer": {
     "decomposed_correction": {
-      "schroeder_freq": 200,
+      "schroeder_freq": 250,
       "room_dimensions": {
         "length": 4.0,
         "width": 3.0,
@@ -1558,7 +1562,7 @@ Applies frequency-dependent correction weights based on acoustic decomposition. 
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `schroeder_freq` | number (Hz) | `200` | Fallback Schroeder frequency when no IR or no `room_dimensions`. Below: modal, above: statistical. |
+| `schroeder_freq` | number (Hz) | `250` | Fallback Schroeder frequency when no IR or no `room_dimensions`. Below: modal, above: statistical. |
 | `room_dimensions` | object | - | Optional L × W × H in metres. When both this and `ssir_wav_path` are set, the optimizer measures RT60 from the recorded impulse response (Schroeder backward integration) and computes the Schroeder frequency as `2000 · √(RT60 / V)`, overriding the fallback `schroeder_freq` above. |
 | `min_mode_q` | number | `3.0` | Minimum Q to qualify as a room mode |
 | `min_mode_prominence_db` | number | `3.0` | Minimum prominence (dB) for mode detection |
@@ -1610,8 +1614,8 @@ After independent per-channel EQ optimization, channels may have residual SPL di
   "optimizer": {
     "channel_matching": {
       "enabled": true,
-      "threshold_db": 1.5,
-      "max_filters": 3
+      "threshold_db": 0.75,
+      "max_filters": 5
     }
   }
 }
@@ -1620,8 +1624,8 @@ After independent per-channel EQ optimization, channels may have residual SPL di
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | boolean | `true` | Enable inter-channel matching correction |
-| `threshold_db` | number (dB) | `1.5` | Midrange ICD RMS threshold below which no correction is applied |
-| `max_filters` | integer | `3` | Maximum additional PEQ filters per channel for matching |
+| `threshold_db` | number (dB) | `0.75` | Midrange ICD RMS threshold below which no correction is applied |
+| `max_filters` | integer | `5` | Maximum additional PEQ filters per channel for matching |
 
 The matching filters are labeled `"channel_matching"` in the output DSP chain and target the largest per-frequency deviations from the group average. The inter-channel deviation (ICD) metric is reported in the output metadata.
 
@@ -1672,7 +1676,7 @@ freq,spl,phase
 
 ```json
 {
-  "version": "1.3.0",
+  "version": "2.1.0",
   "system": {
     "model": "stereo",
     "speakers": {

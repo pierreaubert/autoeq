@@ -6,6 +6,8 @@ use crate::Curve;
 pub enum CrossoverType {
     /// 2nd order Butterworth (12 dB/octave)
     Butterworth2,
+    /// 4th order Butterworth (24 dB/octave)
+    Butterworth4,
     /// 2nd order Linkwitz-Riley (12 dB/octave)
     LinkwitzRiley2,
     /// 4th order Linkwitz-Riley (24 dB/octave) — most common
@@ -27,6 +29,7 @@ impl CrossoverType {
     pub fn to_plugin_string(&self) -> &'static str {
         match self {
             CrossoverType::Butterworth2 => "Butterworth12",
+            CrossoverType::Butterworth4 => "Butterworth24",
             CrossoverType::LinkwitzRiley2 => "LR12",
             CrossoverType::LinkwitzRiley4 => "LR24",
             CrossoverType::LinkwitzRiley8 => "LR48",
@@ -39,6 +42,7 @@ impl CrossoverType {
     pub fn display_name(&self) -> &'static str {
         match self {
             CrossoverType::Butterworth2 => "2nd order Butterworth",
+            CrossoverType::Butterworth4 => "4th order Butterworth",
             CrossoverType::LinkwitzRiley2 => "2nd order Linkwitz-Riley",
             CrossoverType::LinkwitzRiley4 => "4th order Linkwitz-Riley",
             CrossoverType::LinkwitzRiley8 => "8th order Linkwitz-Riley",
@@ -54,6 +58,7 @@ impl std::str::FromStr for CrossoverType {
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "butterworth2" | "bw2" | "butterworth12" | "bw12" => Ok(CrossoverType::Butterworth2),
+            "butterworth4" | "bw4" | "butterworth24" | "bw24" => Ok(CrossoverType::Butterworth4),
             "lr2" | "lr12" | "linkwitzriley2" | "linkwitzriley12" => {
                 Ok(CrossoverType::LinkwitzRiley2)
             }
@@ -74,6 +79,19 @@ impl std::str::FromStr for CrossoverType {
 impl std::fmt::Display for CrossoverType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.to_plugin_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CrossoverType;
+    use std::str::FromStr;
+
+    #[test]
+    fn butterworth24_alias_parses_and_preserves_order() {
+        let crossover = CrossoverType::from_str("BW24").expect("BW24 must be supported");
+        assert_eq!(crossover, CrossoverType::Butterworth4);
+        assert_eq!(crossover.to_plugin_string(), "Butterworth24");
     }
 }
 

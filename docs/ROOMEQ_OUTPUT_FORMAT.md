@@ -18,6 +18,7 @@ check-jsonschema --schemafile output_schema.json dsp_chain.json
 ```json
 {
   "version": "2.1.0",
+  "global_plugins": [ ... ],
   "channels": { ... },
   "metadata": { ... }
 }
@@ -27,7 +28,8 @@ check-jsonschema --schemafile output_schema.json dsp_chain.json
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `version` | string | Output format version |
+| `version` | string | Shared RoomEQ config/output schema version emitted by the current RoomEQ build; it is not copied from the input file's declared version |
+| `global_plugins` | array | Graph-level plugins, such as matrix/routing stages applied before per-channel chains; omitted when empty |
 | `channels` | object | Map of channel names to DSP chains |
 | `metadata` | object | Optimization metadata (optional) |
 
@@ -70,6 +72,7 @@ Each channel contains an ordered list of plugins that process audio in sequence.
 | `pre_ir` | IrWaveform or null | Impulse response before correction (requires phase data) |
 | `post_ir` | IrWaveform or null | Impulse response after correction (requires phase data) |
 | `fir_temporal_masking` | TemporalIrMaskingMetrics or null | True FIR impulse-response temporal masking metrics for FIR, mixed-phase, hybrid, or standalone phase-correction filters. |
+| `direct_early_late_correction` | object or null | Direct/early/late correction-energy diagnostic, when that policy is enabled. |
 
 ---
 
@@ -489,16 +492,27 @@ Information about the optimization process.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `pre_score` | number | Loss function value before optimization |
-| `post_score` | number | Loss function value after optimization (lower is better) |
+| `pre_score` | number | Raw-measurement flatness score before optimization, evaluated over the channel's role/crossover-aware band |
+| `post_score` | number | Final deployed-response flatness score over that same role/crossover-aware band (lower is better) |
 | `algorithm` | string | Algorithm used for optimization |
-| `loss_type` | string or null | Loss function that the optimizer minimized (`"flat"`, `"score"`, or `"epa"`). Note that `pre_score` / `post_score` are *not* the value of this loss function — they are always computed by `compute_flat_loss` over `[min_freq, max_freq]` so that runs with different `loss_type` values stay on the same scale. To compare perceptual outcomes across loss types use `epa_per_channel.{pre,post}.preference`, which is computed identically for every run. |
+| `loss_type` | string or null | Loss function that the optimizer minimized (`"flat"`, `"score"`, or `"epa"`). Note that `pre_score` / `post_score` are *not* the value of this loss function — they are always computed by `compute_flat_loss` over the same role/crossover-aware band. To compare perceptual outcomes across loss types use `epa_per_channel.{pre,post}.preference`, which is computed identically for every run. |
 | `iterations` | integer | Maximum iterations configured |
 | `timestamp` | string | ISO 8601 timestamp of optimization |
 | `inter_channel_deviation` | object or null | Inter-channel SPL consistency metric (present when >1 channel) |
 | `epa_per_channel` | object or null | Per-channel EPA psychoacoustic metrics computed on the pre-EQ and post-EQ frequency responses. Emitted for every channel that has both `initial_curve` and `final_curve` populated, regardless of `loss_type`. See [EPA Per-Channel Metrics](#epa-per-channel-metrics). |
 | `epa_multichannel` | object or null | Whole-system EPA metrics after BS.1770-style channel-energy aggregation. Main/front channels use unit energy weight, surround channels use +1.5 dB, and LFE/subwoofer channels are excluded. |
+| `group_delay` | object or null | Group-delay optimization result, including a skip advisory when GD-Opt was attempted but not applied. |
 | `mixed_phase_per_channel` | object or null | Per-channel mixed-phase decomposition report from the exact excess-phase data used to generate each FIR. See [Mixed-Phase Correction Report](#mixed-phase-correction-report). |
+| `perceptual_metrics` | object or null | Perceptual scorecard for the final exported DSP response. |
+| `home_cinema_layout` | object or null | Resolved home-cinema role/layout interpretation used for routing and role-aware scoring. |
+| `multi_seat_coverage` | object or null | Measurement-position coverage summary. |
+| `multi_seat_correction` | object or null | All-channel multi-seat correction result and any rejected-channel advisories. |
+| `bass_management` | object or null | Applied bass-management routing, trim, headroom, and crossover optimization report. |
+| `timing_diagnostics` | object or null | Measured arrival and final-delay localization diagnostics. |
+| `ctc` | object or null | Cross-talk-cancellation artifact and conditioning summary. |
+| `perceptual_policy` | object or null | Resolved perceptual policy values. |
+| `bootstrap_uncertainty` | object or null | Bootstrap uncertainty summary, when robustness estimation ran. |
+| `validation_bundle` | object or null | Descriptor for generated ABX/MUSHRA validation assets. |
 | `perceptual_metrics.fir_pre_ringing_audible_db` | number or null | Worst FIR pre-ringing audible energy across channels, dB relative to each FIR main impulse peak. |
 | `perceptual_metrics.fir_post_ringing_audible_db` | number or null | Worst FIR post-ringing audible energy across channels, dB relative to each FIR main impulse peak. |
 | `perceptual_metrics.fir_temporal_masking_penalty` | number or null | Worst scalar FIR temporal masking penalty across channels. |
@@ -557,7 +571,9 @@ Measures how closely all channels match each other in SPL after optimization. Co
 
 When a `SupportingSourceGroup` is processed, `metadata.supporting_source` is a
 map from logical channel role to a per-channel report describing the computed
-support FIR and its effect on direct-to-reverberant ratio (DRR).
+support FIR. Absolute DRR is emitted only when time-gated impulse-response
+evidence is available; magnitude-only measurements do not identify a direct
+versus late-energy split.
 
 ```json
 {
@@ -570,11 +586,12 @@ support FIR and its effect on direct-to-reverberant ratio (DRR).
         "delay_ms": 10.0,
         "fir_length": 8192,
         "compensation_band_hz": [70.0, 20000.0],
-        "drr_before_db": { "mean": 12.5, "std": 3.1 },
-        "drr_after_db": { "mean": 15.2, "std": 2.8 },
         "target_constraints_active": true,
         "precedence_limit_hits": 4,
-        "advisories": ["primary:high_spatial_variance"]
+        "advisories": [
+          "primary:high_spatial_variance",
+          "drr_unavailable_without_time_gated_ir"
+        ]
       }
     }
   }
@@ -589,11 +606,17 @@ support FIR and its effect on direct-to-reverberant ratio (DRR).
 | `delay_ms` | number | Delay applied to the supporting source (ms) |
 | `fir_length` | integer | Length of the generated support FIR (taps) |
 | `compensation_band_hz` | [min, max] | Compensation band in Hz |
-| `drr_before_db` | object | DRR summary before compensation (`mean`, `std`) |
-| `drr_after_db` | object | DRR summary after compensation (`mean`, `std`) |
+| `drr_before_db` | object/null | DRR summary before compensation (`mean`, `std`), emitted only with time-gated impulse-response evidence |
+| `drr_after_db` | object/null | DRR summary after compensation (`mean`, `std`), emitted only with time-gated impulse-response evidence |
 | `target_constraints_active` | boolean | Whether target floor/ceiling constraints were active |
 | `precedence_limit_hits` | integer | Number of frequency bins where the precedence ceiling was hit |
-| `advisories` | array of strings | Optional spatial-robustness or measurement advisories (e.g. `primary:high_spatial_variance`, `support:single_position_measurement`) |
+| `advisories` | array of strings | Processing, spatial-robustness, or measurement advisories (e.g. `primary_eq_bypassed_to_preserve_direct_sound`, `drr_unavailable_without_time_gated_ir`, `primary:high_spatial_variance`) |
+
+Supporting-source primary and support channel `pre_score`/`post_score` values are
+currently placeholders (`0.0`): this path is a spatial-compensation design, not
+the ordinary per-channel optimizer. The report includes
+`scores_not_computed_for_supporting_source`. Its configured support delay is
+emitted only when `optimizer.allow_delay` permits delay insertion.
 
 ---
 

@@ -10,6 +10,7 @@ use super::build::build_multisub_dsp_chain;
 use super::build::build_multisub_dsp_chain_advanced;
 use super::build::build_multisub_dsp_chain_with_allpass;
 use super::build::build_multisub_dsp_chain_with_curves;
+use super::build::build_supporting_source_dsp_chains;
 use super::create::add_delay_plugin;
 use super::create::create_band_merge_plugin;
 use super::create::create_band_split_plugin;
@@ -27,7 +28,7 @@ use super::misc::extend_curve_to_full_range;
 use super::misc::get_driver_name;
 use math_audio_iir_fir::Biquad;
 use ndarray::Array1;
-use roomeq_model::{ChannelDspChain, MixedModeConfig, OptimizationMetadata};
+use roomeq_model::{ChannelDspChain, MixedModeConfig, OptimizationMetadata, SupportingSourceConfig, SupportingSourceDecorrelation};
 use std::collections::HashMap;
 
 use math_audio_iir_fir::BiquadFilterType;
@@ -40,6 +41,57 @@ fn test_create_gain_plugin() {
         plugin.parameters.get("gain_db").unwrap().as_f64().unwrap(),
         -3.5
     );
+}
+
+#[test]
+fn supporting_source_restores_peak_normalization_gain_before_convolution() {
+    let (_, support) = build_supporting_source_dsp_chains(
+        "Left",
+        "Left_support",
+        2.0,
+        6.0,
+        "left_support.wav",
+        None,
+        None,
+        None,
+    );
+    assert_eq!(support.plugins[0].plugin_type, "gain");
+    assert!((support.plugins[0].parameters["gain_db"].as_f64().unwrap() - 6.0).abs() < 1e-12);
+    assert_eq!(support.plugins[1].plugin_type, "delay");
+    assert_eq!(support.plugins[2].plugin_type, "convolution");
+
+    // A peak-normalized unity FIR followed by the emitted gain must retain
+    // the requested broadband +6 dB level at deployment.
+    let normalized_fir_peak = 1.0_f64;
+    let deployed_peak = normalized_fir_peak
+        * 10.0_f64.powf(support.plugins[0].parameters["gain_db"].as_f64().unwrap() / 20.0);
+    assert!((20.0 * deployed_peak.log10() - 6.0).abs() < 1e-12);
+}
+
+#[test]
+fn computed_supporting_filter_gain_is_recovered_by_emitted_chain() {
+    let freq = Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), 128);
+    let curve = |spl| crate::Curve { freq: freq.clone(), spl: Array1::from_elem(128, spl), ..Default::default() };
+    let config = SupportingSourceConfig {
+        fir_taps: 256,
+        decorrelation: SupportingSourceDecorrelation::None,
+        ..Default::default()
+    };
+    let filter = crate::supporting_source::compute_supporting_source_filter(
+        &curve(80.0), &curve(80.0), &curve(86.0), &config, 48_000.0,
+    ).unwrap();
+    assert!(filter.normalization_gain_db.abs() > 1e-6);
+    let (_, chain) = build_supporting_source_dsp_chains(
+        "L", "L_support", 0.0, filter.normalization_gain_db, "support.wav", None, None, None,
+    );
+    let deployed_gain_db = chain.plugins.iter()
+        .find(|plugin| plugin.plugin_type == "gain")
+        .and_then(|plugin| plugin.parameters["gain_db"].as_f64())
+        .unwrap();
+    assert!((deployed_gain_db - filter.normalization_gain_db).abs() < 1e-12);
+    let normalized_peak = filter.taps.iter().map(|tap| tap.abs()).fold(0.0_f64, f64::max);
+    let recovered_peak = normalized_peak * 10.0_f64.powf(deployed_gain_db / 20.0);
+    assert!((20.0 * recovered_peak.log10() - filter.normalization_gain_db).abs() < 1e-9);
 }
 
 #[test]

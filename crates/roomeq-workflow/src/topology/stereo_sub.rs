@@ -194,6 +194,7 @@ impl WorkflowExecutor for Stereo21Executor {
                     channel_index,
                     total_channels,
                     max_iterations,
+                    assembly.probe_arrival_overrides,
                 )?;
             pre_eq_targets.insert(role.to_string(), chain.target_curve.clone());
             pre_eq_plugins.insert(role.to_string(), chain.plugins);
@@ -231,6 +232,7 @@ impl WorkflowExecutor for Stereo21Executor {
                     2,
                     total_channels,
                     max_iterations,
+                    assembly.probe_arrival_overrides,
                 )?;
             pre_eq_targets.insert(sub_role.clone(), chain.target_curve.clone());
             pre_eq_plugins.insert(sub_role.clone(), chain.plugins);
@@ -813,7 +815,7 @@ impl WorkflowExecutor for Stereo21Executor {
 
         for role in ["L", "R"] {
             let intermediate = if role == "L" { &l_post } else { &r_post };
-            let pre_score = compute_flat_loss(intermediate, final_xo_freq, max_freq);
+            let pre_score = compute_flat_loss(&curves[role], final_xo_freq, max_freq);
             let final_curve_obj = if let Some(e) = post_eq_filters.get(role)
                 && !e.is_empty()
             {
@@ -845,7 +847,7 @@ impl WorkflowExecutor for Stereo21Executor {
         }
 
         {
-            let pre_score = compute_flat_loss(&sub_post, sub_min_score, final_xo_freq);
+            let pre_score = compute_flat_loss(&curves[&sub_role], sub_min_score, final_xo_freq);
             let post_score = compute_flat_loss(&final_sub_curve, sub_min_score, final_xo_freq);
             pre_scores.push(pre_score);
             post_scores.push(post_score);

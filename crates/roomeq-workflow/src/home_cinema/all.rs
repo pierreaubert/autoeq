@@ -25,6 +25,11 @@ pub fn derive_all_channel_multiseat_config(
     }
     let policy = all_channel_multiseat_policy(config);
     if policy.primary_seat >= curves.len() {
+        log::warn!(
+            "all-channel multi-seat disabled for '{channel_name}': primary_seat {} is outside {} available seats",
+            policy.primary_seat,
+            curves.len()
+        );
         return None;
     }
     let (weights, weight_advisories) = resolve_all_channel_seat_weights(&policy, curves.len());

@@ -302,6 +302,7 @@ fn assemble_workflow_result_empty_channels_succeeds() {
         sys,
         48000.0,
         None,
+        None,
         &observer_none(),
         &autoeq_artifacts::MemoryArtifactStore::new(),
     )

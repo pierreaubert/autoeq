@@ -449,7 +449,9 @@ corrections work):
 
 $$ f_S \approx 2000 \sqrt{\frac{T_{60}}{V}} $$
 
-(or the simplified `11885 / √V` from room volume alone).
+
+Room volume alone is insufficient: the estimate also requires the measured or
+assumed reverberation time `T60`.
 
 ```mermaid
 flowchart TB

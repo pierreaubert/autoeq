@@ -2,7 +2,10 @@
 
 #![forbid(unsafe_code)]
 
-pub use autoeq_core::{AutoeqError, Curve, PeqModel, smooth_one_over_n_octave};
+pub use autoeq_core::{
+    AutoeqError, Curve, PeqModel, curve_transforms::build_target_curve_by_name,
+    smooth_one_over_n_octave,
+};
 pub use autoeq_optim::de::CallbackAction;
 pub use autoeq_optim::optim::{OptimProgressCallback, OptimizerConfidence, OptimizerRunEvidence};
 /// Acoustic analysis used by engine and workflow orchestration without adding

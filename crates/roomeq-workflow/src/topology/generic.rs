@@ -82,6 +82,7 @@ impl WorkflowExecutor for GenericExecutor {
                     channel_index,
                     total_channels,
                     max_iterations,
+                    assembly.probe_arrival_overrides,
                 )?;
 
             info!(

@@ -100,16 +100,25 @@ fn resolve_room_target(room_config: &RoomConfig) -> Result<Curve> {
 
     match config {
         TargetCurveConfig::Predefined(name) => {
-            if name.eq_ignore_ascii_case("flat") {
-                Ok(flat_target())
-            } else {
-                Err(AutoeqError::InvalidConfiguration {
-                    message: format!(
-                        "Predefined target '{}' not yet supported for supporting source",
-                        name
-                    ),
-                })
-            }
+            let canonical = match name.to_ascii_lowercase().as_str() {
+                "flat" => "flat",
+                "harman" => "harman",
+                "listening window" => "Listening Window",
+                "sound power" => "Sound Power",
+                "early reflections" => "Early Reflections",
+                "estimated in-room response" => "Estimated In-Room Response",
+                _ => {
+                    return Err(AutoeqError::InvalidConfiguration {
+                        message: format!("Unsupported predefined target '{name}' for supporting source"),
+                    });
+                }
+            };
+            let reference = flat_target();
+            Ok(roomeq_engine::build_target_curve_by_name(
+                canonical,
+                &reference.freq,
+                &reference,
+            ))
         }
         TargetCurveConfig::Path(path) => {
             read_curve_from_csv(path).map_err(|e| AutoeqError::InvalidMeasurement {
@@ -187,18 +196,30 @@ pub fn process_supporting_source_channel(
 
     let wav_relative = wav_name; // the DSP chain references the file by basename
 
+    let applied_delay_ms = if room_config.optimizer.allow_delay() {
+        group.supporting_source.delay_ms
+    } else {
+        0.0
+    };
     let (primary_chain, support_chain) = roomeq_engine::output::build_supporting_source_dsp_chains(
         logical_role,
         &support_name,
-        group.supporting_source.delay_ms,
+        applied_delay_ms,
+        filter.normalization_gain_db,
         &wav_relative,
         Some(&primary),
         Some(&support),
         Some(&filter.constrained_target),
     );
 
-    let (drr_before_mean, drr_before_std) = db_summary(&filter.drr_before_db);
-    let (drr_after_mean, drr_after_std) = db_summary(&filter.drr_after_db);
+    let drr_before_db = filter.drr_before_db.as_deref().map(|values| {
+        let (mean, std) = db_summary(values);
+        StatisticalSummary { mean, std }
+    });
+    let drr_after_db = filter.drr_after_db.as_deref().map(|values| {
+        let (mean, std) = db_summary(values);
+        StatisticalSummary { mean, std }
+    });
 
     let support_final_spl: ndarray::Array1<f64> = support
         .spl
@@ -234,12 +255,21 @@ pub fn process_supporting_source_channel(
     };
 
     let band_hz = group.supporting_source.freq_range_hz;
-    let mut advisories = Vec::new();
+    let mut advisories = vec![
+        "primary_eq_bypassed_to_preserve_direct_sound".to_string(),
+        "scores_not_computed_for_supporting_source".to_string(),
+    ];
+    if applied_delay_ms != group.supporting_source.delay_ms {
+        advisories.push("support_delay_disabled_by_allow_delay".to_string());
+    }
     advisories.extend(
         spatial_robustness_advisories(&group.primary, band_hz)
             .into_iter()
             .map(|a| format!("primary:{}", a)),
     );
+    if drr_before_db.is_none() || drr_after_db.is_none() {
+        advisories.push("drr_unavailable_without_time_gated_ir".to_string());
+    }
     advisories.extend(
         spatial_robustness_advisories(&group.support, band_hz)
             .into_iter()
@@ -250,17 +280,11 @@ pub fn process_supporting_source_channel(
         enabled: true,
         primary_output: logical_role.to_string(),
         support_output: support_name,
-        delay_ms: group.supporting_source.delay_ms,
+        delay_ms: applied_delay_ms,
         fir_length: filter.taps.len(),
         compensation_band_hz: band_hz,
-        drr_before_db: StatisticalSummary {
-            mean: drr_before_mean,
-            std: drr_before_std,
-        },
-        drr_after_db: StatisticalSummary {
-            mean: drr_after_mean,
-            std: drr_after_std,
-        },
+        drr_before_db,
+        drr_after_db,
         target_constraints_active: filter.precedence_limit_hits > 0
             || group.supporting_source.precedence_limits.len() > 1,
         precedence_limit_hits: filter.precedence_limit_hits,
@@ -423,7 +447,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_room_target_rejects_non_flat_predefined() {
+    fn resolve_room_target_supports_harman_predefined() {
         let room_config = RoomConfig {
             version: default_config_version(),
             system: None,
@@ -436,7 +460,20 @@ mod tests {
             cea2034_cache: None,
             ctc: None,
         };
-        assert!(resolve_room_target(&room_config).is_err());
+        let target = resolve_room_target(&room_config).unwrap();
+        let index_1khz = target
+            .freq
+            .iter()
+            .enumerate()
+            .min_by(|(_, left), (_, right)| {
+                (*left - 1_000.0)
+                    .abs()
+                    .total_cmp(&(*right - 1_000.0).abs())
+            })
+            .map(|(index, _)| index)
+            .unwrap();
+        assert!(target.spl[index_1khz].abs() < 0.1);
+        assert!(target.spl[0] > target.spl[target.spl.len() - 1]);
     }
 
     #[test]
@@ -493,5 +530,45 @@ mod tests {
         assert_eq!(report.primary_output, "L");
         assert_eq!(report.support_output, "L_support");
         assert_eq!(report.fir_length, 128);
+        assert!(report.drr_before_db.is_none());
+        assert!(report.drr_after_db.is_none());
+        assert!(
+            report
+                .advisories
+                .iter()
+                .any(|advisory| advisory == "drr_unavailable_without_time_gated_ir")
+        );
+        assert!(report.advisories.iter().any(|advisory| {
+            advisory == "primary_eq_bypassed_to_preserve_direct_sound"
+        }));
+        assert!(report.advisories.iter().any(|advisory| {
+            advisory == "scores_not_computed_for_supporting_source"
+        }));
+    }
+
+    #[test]
+    fn supporting_source_obeys_allow_delay() {
+        let mut room_config = RoomConfig {
+            version: default_config_version(), system: None, speakers: HashMap::new(),
+            optimizer: OptimizerConfig::default(), target_curve: None, crossovers: None,
+            provenance: Default::default(), recording_config: None, cea2034_cache: None, ctc: None,
+        };
+        room_config.optimizer.allow_delay = Some(false);
+        let group = SupportingSourceGroup {
+            name: "test".to_string(), speaker_name: None,
+            primary: MeasurementSource::InMemory(flat_curve(80.0)),
+            support: MeasurementSource::InMemory(flat_curve(80.0)),
+            supporting_source: SupportingSourceConfig { delay_ms: 3.0, fir_taps: 128, decorrelation: SupportingSourceDecorrelation::None, ..Default::default() },
+        };
+        let output_dir = std::env::temp_dir();
+        let ((_, support_chain), _, report) = process_supporting_source_channel(
+            "L", &group, &room_config, 48_000.0, &output_dir, None,
+        )
+        .unwrap();
+        assert_eq!(report.delay_ms, 0.0);
+        assert!(!support_chain.plugins.iter().any(|plugin| plugin.plugin_type == "delay"));
+        assert!(report.advisories.iter().any(|advisory| {
+            advisory == "support_delay_disabled_by_allow_delay"
+        }));
     }
 }

@@ -197,12 +197,12 @@ pub fn enforce_runtime_acceptance_evidence(
     {
         violations.push("latency_limit_exceeded".to_string());
     }
-    if acoustic_quality
-        .temporal
-        .pre_ringing_energy_db
-        .is_some_and(|value| value > policy.max_pre_ringing_energy_db)
-    {
-        violations.push("pre_ringing_limit_exceeded".to_string());
+    match acoustic_quality.temporal.pre_ringing_energy_db {
+        Some(value) if value > policy.max_pre_ringing_energy_db => {
+            violations.push("pre_ringing_limit_exceeded".to_string());
+        }
+        None => violations.push("pre_ringing_evidence_missing".to_string()),
+        _ => {}
     }
     if acoustic_quality
         .induced_group_delay_rms_ms
@@ -596,6 +596,31 @@ mod tests {
                 report.violations
             );
         }
+    }
+
+    #[test]
+    fn runtime_policy_rejects_missing_pre_ringing_evidence() {
+        let mut report = evaluate_correction_acceptance(
+            &curve(&[0.0; 4]),
+            &curve(&[0.0; 4]),
+            &curve(&[0.0; 4]),
+            None,
+            CorrectionAcceptancePolicy::RuntimeSafety,
+        )
+        .unwrap();
+        let mut scorecard = runtime_scorecard();
+        scorecard.temporal.pre_ringing_energy_db = None;
+        enforce_runtime_acceptance_evidence(
+            &mut report,
+            scorecard,
+            RealizationQualityEvidence {
+                evaluated_channels: 1,
+                max_abs_error_db: Some(0.0),
+                failed_channels: Vec::new(),
+            },
+            RuntimeAcceptancePolicy::for_output_class(RuntimeOutputClass::Hybrid),
+        );
+        assert!(report.violations.iter().any(|v| v == "pre_ringing_evidence_missing"));
     }
 
     #[test]

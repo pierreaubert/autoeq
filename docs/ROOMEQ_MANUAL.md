@@ -299,7 +299,7 @@ Typical Schroeder frequencies:
       "enabled": true,
       "schroeder_freq": 300,
       "low_freq_config": {
-        "max_q": 10.0,
+        "max_q": 5.0,
         "min_q": 0.5,
         "allow_boost": false
       },
@@ -317,7 +317,7 @@ Typical Schroeder frequencies:
 | `enabled` | boolean | false | Enable Schroeder split |
 | `schroeder_freq` | number | 300 | Schroeder frequency (Hz) |
 | `room_dimensions` | object | - | Optional room dimensions for auto-calculation |
-| `low_freq_config.max_q` | number | 10.0 | Max Q for low-freq filters |
+| `low_freq_config.max_q` | number | 5.0 | Max Q for low-freq filters |
 | `low_freq_config.min_q` | number | 0.5 | Min Q for low-freq filters |
 | `low_freq_config.allow_boost` | boolean | false | Allow boosts (not recommended) |
 | `high_freq_config.max_q` | number | 1.0 | Max Q for high-freq filters |
@@ -340,7 +340,9 @@ Typical Schroeder frequencies:
 }
 ```
 
-The Schroeder frequency is calculated as: `fs ≈ 11885 / √V` where V is room volume in m³.
+When RT60 and room volume are available, RoomEQ calculates the Schroeder
+frequency as `f_S ≈ 2000 · √(RT60 / V)`, where RT60 is seconds and V is room
+volume in m³.
 
 ### Phase Alignment
 
@@ -484,11 +486,13 @@ and a configurable compensation band.
 
 For each `SupportingSourceGroup`, RoomEQ emits two output channels (e.g.
 `L` and `L_support`, or `WideLeft` and `WideLeft_support` in a home-cinema
-layout). The supporting channel contains a `convolution` plugin loading the
-generated FIR WAV file. A per-channel report is written to
-`metadata.supporting_source`, including DRR summaries, precedence-limit hits,
-and optional spatial-robustness advisories when the measurement contains a
-single position or high inter-position variance.
+layout). The primary output intentionally bypasses ordinary RoomEQ EQ, so its
+direct sound remains unchanged; the configured optimizer does not apply to
+that primary path. The supporting channel contains a `convolution` plugin
+loading the generated FIR WAV file. `metadata.supporting_source` records this
+as `primary_eq_bypassed_to_preserve_direct_sound`, along with precedence-limit
+and spatial-robustness advisories. Absolute DRR summaries are present only
+when time-gated impulse-response evidence is available.
 
 ### Complete Configuration Examples
 

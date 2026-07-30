@@ -25,6 +25,7 @@ pub(super) fn build_crossover_filters_for_driver(
         let xover_freq = crossover_freqs[driver_index - 1];
         let hp_peq = match crossover_type {
             CrossoverType::Butterworth2 => peq_butterworth_highpass(2, xover_freq, sample_rate),
+            CrossoverType::Butterworth4 => peq_butterworth_highpass(4, xover_freq, sample_rate),
             CrossoverType::LinkwitzRiley2 => peq_linkwitzriley_highpass(2, xover_freq, sample_rate),
             CrossoverType::LinkwitzRiley4 => peq_linkwitzriley_highpass(4, xover_freq, sample_rate),
             CrossoverType::LinkwitzRiley8 => peq_linkwitzriley_highpass(8, xover_freq, sample_rate),
@@ -37,6 +38,7 @@ pub(super) fn build_crossover_filters_for_driver(
         let xover_freq = crossover_freqs[driver_index];
         let lp_peq = match crossover_type {
             CrossoverType::Butterworth2 => peq_butterworth_lowpass(2, xover_freq, sample_rate),
+            CrossoverType::Butterworth4 => peq_butterworth_lowpass(4, xover_freq, sample_rate),
             CrossoverType::LinkwitzRiley2 => peq_linkwitzriley_lowpass(2, xover_freq, sample_rate),
             CrossoverType::LinkwitzRiley4 => peq_linkwitzriley_lowpass(4, xover_freq, sample_rate),
             CrossoverType::LinkwitzRiley8 => peq_linkwitzriley_lowpass(8, xover_freq, sample_rate),

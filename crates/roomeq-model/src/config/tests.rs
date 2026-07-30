@@ -31,10 +31,10 @@ use super::speaker_topology::{
 use super::spl_calibration::SplCalibration;
 use super::types::{
     CrossoverConfig, CtcHeadPositionConfig, CtcHrtfSpeakerConfig, CtcMeasurementFileConfig,
-    MultiMeasurementStrategy, PerceptualPolicyPreset, RecordingConfiguration, SystemConfig,
-    SystemModel, TargetCurveConfig, TargetShape,
+    MultiMeasurementStrategy, PerceptualPolicyPreset, ProcessingMode, RecordingConfiguration,
+    SystemConfig, SystemModel, TargetCurveConfig, TargetShape,
 };
-use crate::{AsymmetricLossConfig, PsychoacousticSmoothingConfig};
+use crate::{AsymmetricLossConfig, EpaConfig, PsychoacousticSmoothingConfig};
 use crate::{MeasurementRef, MeasurementSingle, MeasurementSource};
 use std::collections::HashMap;
 use std::path::PathBuf;

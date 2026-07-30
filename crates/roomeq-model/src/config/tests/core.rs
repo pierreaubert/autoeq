@@ -521,3 +521,15 @@ fn config_types_default_roundtrip() {
     let back: AreaQuadratureKind = serde_json::from_str(&json).unwrap();
     assert_eq!(back, quad);
 }
+
+#[test]
+fn enabled_phase_alignment_allows_delay_in_low_latency_mode_unless_overridden() {
+    use super::*;
+
+    let mut config = OptimizerConfig::default();
+    assert!(!config.allow_delay());
+    config.phase_alignment = Some(PhaseAlignmentConfig::default());
+    assert!(config.allow_delay());
+    config.allow_delay = Some(false);
+    assert!(!config.allow_delay());
+}

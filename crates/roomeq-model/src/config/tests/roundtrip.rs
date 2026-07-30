@@ -41,6 +41,51 @@ fn room_config_resolve_paths_makes_relative_base_absolute() {
 }
 
 #[test]
+fn documented_legacy_mode_and_target_csv_are_not_silently_ignored() {
+    let config: RoomConfig = serde_json::from_str(
+        r#"{
+            "version":"1.0.0",
+            "speakers":{},
+            "optimizer":{"mode":"fir"},
+            "target_curve":"targets/custom.csv"
+        }"#,
+    )
+    .expect("documented compatibility input must deserialize");
+
+    assert_eq!(config.optimizer.processing_mode, ProcessingMode::PhaseLinear);
+    assert!(matches!(
+        config.target_curve,
+        Some(TargetCurveConfig::Path(path)) if path == PathBuf::from("targets/custom.csv")
+    ));
+}
+
+#[test]
+fn partial_optimizer_policy_blocks_inherit_their_defaults() {
+    let config: RoomConfig = serde_json::from_str(
+        r#"{
+            "version":"1.0.0",
+            "speakers":{},
+            "optimizer":{
+                "epa_config":{"listening_level_phon":70.0},
+                "psychoacoustic_smoothing":{"high_freq_n":12},
+                "asymmetric_loss_config":{"peak_weight":3.0}
+            }
+        }"#,
+    )
+    .expect("partial documented optimizer blocks must deserialize");
+
+    let epa = config.optimizer.epa_config.expect("EPA configuration");
+    assert_eq!(epa.listening_level_phon, 70.0);
+    assert_eq!(epa.target_sharpness, EpaConfig::default().target_sharpness);
+    let smoothing = config.optimizer.psychoacoustic_smoothing.expect("smoothing");
+    assert_eq!(smoothing.high_freq_n, 12);
+    assert_eq!(smoothing.low_freq_n, PsychoacousticSmoothingConfig::default().low_freq_n);
+    let asymmetric = config.optimizer.asymmetric_loss_config.expect("asymmetric loss");
+    assert_eq!(asymmetric.peak_weight, 3.0);
+    assert_eq!(asymmetric.bass_peak_weight, AsymmetricLossConfig::default().bass_peak_weight);
+}
+
+#[test]
 fn cardioid_config_roundtrip_and_resolve_paths() {
     let mut cfg = CardioidConfig {
         name: "sub-cardioid".into(),

@@ -3,6 +3,7 @@ use roomeq_engine::room_result::RoomOptimizationResult;
 use roomeq_engine::{PipelineStepId, PipelineStepStatus};
 use roomeq_model::{RoomConfig, SystemConfig};
 use std::path::Path;
+use std::collections::HashMap;
 use std::sync::{Arc, atomic::AtomicBool};
 
 pub struct WorkflowProgressCallback {
@@ -22,6 +23,7 @@ pub(crate) struct WorkflowAssembly<'cfg, 'p, 's> {
     pub sys: &'cfg SystemConfig,
     pub sample_rate: f64,
     pub output_dir: &'cfg Path,
+    pub probe_arrival_overrides: Option<&'cfg HashMap<String, f64>>,
     pub progress_factory: Option<&'p mut WorkflowProgressCallbackFactory<'p>>,
     pub stage_callback: Option<&'s mut WorkflowStageCallback<'s>>,
 }

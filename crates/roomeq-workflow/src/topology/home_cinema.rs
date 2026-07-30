@@ -45,12 +45,7 @@ impl WorkflowExecutor for HomeCinemaExecutor {
         let has_sub = sys.speakers.contains_key(&sub_role);
 
         // Classify channels into main and sub
-        let main_roles: Vec<String> = sys
-            .speakers
-            .keys()
-            .filter(|r| *r != &sub_role && !engine_home_cinema::role_for_channel(r).is_sub_or_lfe())
-            .cloned()
-            .collect();
+        let main_roles = canonical_main_roles(sys, &sub_role);
 
         // Partition mains into single-source and supporting-source channels.
         let mut single_roles: Vec<String> = Vec::new();
@@ -97,6 +92,28 @@ impl WorkflowExecutor for HomeCinemaExecutor {
             supporting_roles.len(),
             if has_sub { " + bass-managed sub" } else { "" }
         );
+
+        // Bass-management and score aggregation require a primary main. Do
+        // not let a schema-valid supporting-only layout reach `main_roles[0]`.
+        if single_roles.is_empty() && has_sub {
+            return Err(AutoeqError::InvalidConfiguration {
+                message: "Home-cinema supporting-source layouts with bass management require at least one Single main channel to establish a crossover reference".to_string(),
+            });
+        }
+
+        if single_roles.is_empty() {
+            let mut result = supporting_only_home_cinema_result(config);
+            process_supporting_source_channels(
+                config,
+                sys,
+                sample_rate,
+                output_dir,
+                &mut result.channels,
+                &mut result.channel_results,
+                &mut result.metadata,
+            )?;
+            return Ok(result);
+        }
 
         // Load bass output if present (handles Single, MultiSub/MSO, Cardioid, DBA)
         let sub_preprocess = if has_sub {
@@ -181,6 +198,55 @@ impl WorkflowExecutor for HomeCinemaExecutor {
     }
 }
 
+fn canonical_main_roles(sys: &SystemConfig, sub_role: &str) -> Vec<String> {
+    let mut roles: Vec<String> = sys
+        .speakers
+        .keys()
+        .filter(|role| {
+            *role != sub_role && !engine_home_cinema::role_for_channel(role).is_sub_or_lfe()
+        })
+        .cloned()
+        .collect();
+    roles.sort();
+    roles
+}
+
+fn supporting_only_home_cinema_result(config: &RoomConfig) -> RoomOptimizationResult {
+    RoomOptimizationResult {
+        channels: HashMap::new(),
+        channel_results: HashMap::new(),
+        combined_pre_score: 0.0,
+        combined_post_score: 0.0,
+        metadata: OptimizationMetadata {
+            pre_score: 0.0,
+            post_score: 0.0,
+            algorithm: config.optimizer.algorithm.clone(),
+            loss_type: Some(config.optimizer.loss_type.clone()),
+            iterations: config.optimizer.max_iter,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            inter_channel_deviation: None,
+            epa_per_channel: None,
+            epa_multichannel: None,
+            group_delay: None,
+            mixed_phase_per_channel: None,
+            perceptual_metrics: None,
+            home_cinema_layout: Some(engine_home_cinema::analyze_layout(config)),
+            multi_seat_coverage: Some(crate::home_cinema::multi_seat_coverage(config)),
+            multi_seat_correction: None,
+            bass_management: None,
+            timing_diagnostics: None,
+            ctc: None,
+            perceptual_policy: None,
+            bootstrap_uncertainty: None,
+            validation_bundle: None,
+            supporting_source: None,
+            correction_acceptance: None,
+            optimizer_evidence: None,
+            stage_outcomes: Vec::new(),
+        },
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn optimize_home_cinema_no_sub(
     config: &RoomConfig,
@@ -224,6 +290,7 @@ fn optimize_home_cinema_no_sub(
                 channel_index,
                 total_channels,
                 max_iterations,
+                assembly.probe_arrival_overrides,
             )?;
         if let Some(advisories) = multiseat_rejection {
             multi_seat_rejections.insert(role.clone(), advisories);
@@ -398,6 +465,7 @@ fn optimize_home_cinema_with_sub(
                 channel_index,
                 total_channels,
                 max_iterations,
+                assembly.probe_arrival_overrides,
             )?;
         if let Some(advisories) = multiseat_rejection {
             multi_seat_rejections.insert(role.clone(), advisories);
@@ -438,6 +506,7 @@ fn optimize_home_cinema_with_sub(
                 main_roles.len(),
                 total_channels,
                 max_iterations,
+                assembly.probe_arrival_overrides,
             )?;
         pre_eq_plugins.insert(
             sub_role.clone(),
@@ -1400,7 +1469,11 @@ fn optimize_home_cinema_with_sub(
             .get(group_id)
             .and_then(|g| g.selected_crossover_hz)
             .unwrap_or(final_xo_freq);
-        let pre_score = compute_flat_loss(intermediate, role_xover_freq, max_freq);
+        let pre_score = compute_flat_loss(
+            &pre_eq_initial_curves[role],
+            role_xover_freq,
+            max_freq,
+        );
         let final_curve_obj = if let Some(e) = post_eq_filters.get(role) {
             if !e.is_empty() {
                 let resp =
@@ -1434,7 +1507,11 @@ fn optimize_home_cinema_with_sub(
     }
 
     {
-        let pre_score = compute_flat_loss(&sub_post, sub_min_score, bass_route_upper_hz);
+        let pre_score = compute_flat_loss(
+            &pre_eq_initial_curves[&sub_role],
+            sub_min_score,
+            bass_route_upper_hz,
+        );
         let post_score = compute_flat_loss(&final_sub_curve, sub_min_score, bass_route_upper_hz);
         pre_scores.push(pre_score);
         post_scores.push(post_score);
@@ -1525,7 +1602,7 @@ fn optimize_home_cinema_with_sub(
 mod tests {
     use super::super::executor_tests::{flat_curve, flat_curve_with_phase, make_assembly};
     use super::super::types::WorkflowExecutor;
-    use super::HomeCinemaExecutor;
+    use super::{HomeCinemaExecutor, canonical_main_roles};
     use roomeq_model::{
         BassManagementConfig, CrossoverConfig, MeasurementSource, MultiMeasurementStrategy,
         MultiSeatConfig, OptimizerConfig, ProcessingMode, RoomConfig, SpeakerConfig,
@@ -1534,6 +1611,24 @@ mod tests {
         TargetCurveConfig, default_config_version,
     };
     use std::collections::HashMap;
+
+    #[test]
+    fn canonical_main_roles_is_independent_of_map_insertion_order() {
+        let mut first = SystemConfig::default();
+        first.speakers.insert("Right".into(), "right".into());
+        first.speakers.insert("LFE".into(), "sub".into());
+        first.speakers.insert("Left".into(), "left".into());
+        let mut second = SystemConfig::default();
+        second.speakers.insert("Left".into(), "left".into());
+        second.speakers.insert("Right".into(), "right".into());
+        second.speakers.insert("LFE".into(), "sub".into());
+
+        assert_eq!(
+            canonical_main_roles(&first, "LFE"),
+            canonical_main_roles(&second, "LFE")
+        );
+        assert_eq!(canonical_main_roles(&first, "LFE"), vec!["Left", "Right"]);
+    }
 
     fn tiny_optimizer() -> OptimizerConfig {
         OptimizerConfig {
@@ -1789,6 +1884,7 @@ mod tests {
             sys: &sys,
             sample_rate: 48000.0,
             output_dir: temp_dir.path(),
+            probe_arrival_overrides: None,
             progress_factory: None,
             stage_callback: None,
         };
@@ -1811,6 +1907,80 @@ mod tests {
                 .unwrap()
                 .contains_key("WideLeft")
         );
+    }
+
+    #[test]
+    fn home_cinema_supporting_only_no_sub_emits_primary_and_support() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut speakers = HashMap::new();
+        speakers.insert(
+            "wide".to_string(),
+            SpeakerConfig::SupportingSource(SupportingSourceGroup {
+                name: "Wide".to_string(),
+                speaker_name: None,
+                primary: MeasurementSource::InMemory(flat_curve()),
+                support: MeasurementSource::InMemory(flat_curve()),
+                supporting_source: SupportingSourceConfig {
+                    delay_ms: 2.0,
+                    fir_taps: 128,
+                    decorrelation: SupportingSourceDecorrelation::None,
+                    ..Default::default()
+                },
+            }),
+        );
+        let sys = SystemConfig {
+            model: SystemModel::HomeCinema,
+            speakers: HashMap::from([("WideLeft".to_string(), "wide".to_string())]),
+            subwoofers: None,
+            bass_management: None,
+            ..Default::default()
+        };
+        let config = room_config(speakers, &sys, tiny_optimizer(), None, None);
+        let mut assembly = super::super::types::WorkflowAssembly {
+            config: &config,
+            sys: &sys,
+            sample_rate: 48_000.0,
+            output_dir: temp_dir.path(),
+            probe_arrival_overrides: None,
+            progress_factory: None,
+            stage_callback: None,
+        };
+        let result = HomeCinemaExecutor.execute(&mut assembly).expect("supporting-only layout");
+        assert!(result.channels.contains_key("WideLeft"));
+        assert!(result.channels.contains_key("WideLeft_support"));
+    }
+
+    #[test]
+    fn home_cinema_supporting_only_with_sub_returns_configuration_error() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let speakers = HashMap::from([(
+            "wide".to_string(),
+            SpeakerConfig::SupportingSource(SupportingSourceGroup {
+                name: "Wide".to_string(), speaker_name: None,
+                primary: MeasurementSource::InMemory(flat_curve()),
+                support: MeasurementSource::InMemory(flat_curve()),
+                supporting_source: SupportingSourceConfig { fir_taps: 128, decorrelation: SupportingSourceDecorrelation::None, ..Default::default() },
+            }),
+        )]);
+        let sys = SystemConfig {
+            model: SystemModel::HomeCinema,
+            speakers: HashMap::from([
+                ("WideLeft".to_string(), "wide".to_string()),
+                ("LFE".to_string(), "missing_sub".to_string()),
+            ]),
+            subwoofers: Some(SubwooferSystemConfig {
+                config: SubwooferStrategy::Single, crossover: None, mapping: HashMap::new(),
+            }),
+            bass_management: None,
+            ..Default::default()
+        };
+        let config = room_config(speakers, &sys, tiny_optimizer(), None, None);
+        let mut assembly = super::super::types::WorkflowAssembly {
+            config: &config, sys: &sys, sample_rate: 48_000.0, output_dir: temp_dir.path(),
+            probe_arrival_overrides: None, progress_factory: None, stage_callback: None,
+        };
+        let error = HomeCinemaExecutor.execute(&mut assembly).unwrap_err();
+        assert!(error.to_string().contains("require at least one Single main"));
     }
 
     #[test]

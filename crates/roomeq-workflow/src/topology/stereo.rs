@@ -68,6 +68,7 @@ impl WorkflowExecutor for Stereo20Executor {
                     channel_index,
                     total_channels,
                     max_iterations,
+                    assembly.probe_arrival_overrides,
                 )?;
 
             info!(

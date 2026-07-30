@@ -66,6 +66,7 @@ pub(crate) fn make_assembly<'cfg, 'p, 's>(
         sys,
         sample_rate: 48000.0,
         output_dir: Path::new("."),
+        probe_arrival_overrides: None,
         progress_factory: None,
         stage_callback: None,
     }

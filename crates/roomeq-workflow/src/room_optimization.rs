@@ -207,7 +207,13 @@ fn select_topology_route(
     let has_group = sys.speakers.values().any(|key| {
         matches!(
             config.speakers.get(key),
-            Some(SpeakerConfig::Group(_) | SpeakerConfig::Topology(_))
+            Some(
+                SpeakerConfig::Group(_)
+                    | SpeakerConfig::Topology(_)
+                    | SpeakerConfig::MultiSub(_)
+                    | SpeakerConfig::Cardioid(_)
+                    | SpeakerConfig::Dba(_)
+            )
         )
     });
 
@@ -249,11 +255,26 @@ fn select_topology_route(
     }
 }
 
+#[cfg(test)]
 fn execute_topology_workflow(
     config: &RoomConfig,
     sys: &SystemConfig,
     sample_rate: f64,
     output_dir: Option<&Path>,
+    observer_shared: &SharedPipelineObserver,
+    route: TopologyRoute,
+) -> Result<RoomOptimizationResult> {
+    execute_topology_workflow_with_probe_arrivals(
+        config, sys, sample_rate, output_dir, None, observer_shared, route,
+    )
+}
+
+fn execute_topology_workflow_with_probe_arrivals(
+    config: &RoomConfig,
+    sys: &SystemConfig,
+    sample_rate: f64,
+    output_dir: Option<&Path>,
+    probe_arrival_overrides: Option<&HashMap<String, f64>>,
     observer_shared: &SharedPipelineObserver,
     route: TopologyRoute,
 ) -> Result<RoomOptimizationResult> {
@@ -386,27 +407,30 @@ fn execute_topology_workflow(
     };
 
     match route {
-        TopologyRoute::Stereo2_0 => crate::topology::optimize_stereo_2_0_with_progress(
+        TopologyRoute::Stereo2_0 => crate::topology::optimize_stereo_2_0_with_progress_and_probe_arrivals(
             config,
             sys,
             sample_rate,
             output_dir.unwrap_or(Path::new(".")),
+            probe_arrival_overrides,
             Some(&mut workflow_progress_factory),
             Some(&mut workflow_stage_callback),
         ),
-        TopologyRoute::Stereo2_1 => crate::topology::optimize_stereo_2_1_with_progress(
+        TopologyRoute::Stereo2_1 => crate::topology::optimize_stereo_2_1_with_progress_and_probe_arrivals(
             config,
             sys,
             sample_rate,
             output_dir.unwrap_or(Path::new(".")),
+            probe_arrival_overrides,
             Some(&mut workflow_progress_factory),
             Some(&mut workflow_stage_callback),
         ),
-        TopologyRoute::HomeCinema => crate::topology::optimize_home_cinema_with_progress(
+        TopologyRoute::HomeCinema => crate::topology::optimize_home_cinema_with_progress_and_probe_arrivals(
             config,
             sys,
             sample_rate,
             output_dir.unwrap_or(Path::new(".")),
+            probe_arrival_overrides,
             Some(&mut workflow_progress_factory),
             Some(&mut workflow_stage_callback),
         ),
@@ -471,11 +495,12 @@ fn optimize_room_impl(
                 .ok_or_else(|| AutoeqError::InvalidConfiguration {
                     message: format!("topology route {route:?} requires system configuration"),
                 })?;
-            let workflow_result = execute_topology_workflow(
+            let workflow_result = execute_topology_workflow_with_probe_arrivals(
                 config,
                 sys,
                 sample_rate,
                 output_dir,
+                probe_arrival_overrides,
                 &observer_shared,
                 route,
             )?;
@@ -485,6 +510,7 @@ fn optimize_room_impl(
                 sys,
                 sample_rate,
                 output_dir,
+                probe_arrival_overrides,
                 &observer_shared,
                 store,
             )?
@@ -656,6 +682,7 @@ fn assemble_workflow_result(
     sys: &SystemConfig,
     sample_rate: f64,
     output_dir: Option<&Path>,
+    probe_arrival_overrides: Option<&HashMap<String, f64>>,
     observer_shared: &SharedPipelineObserver,
     store: &dyn autoeq_artifacts::ArtifactStore,
 ) -> Result<RoomOptimizationResult> {
@@ -671,9 +698,17 @@ fn assemble_workflow_result(
         SystemModel::Custom => "Custom",
     };
     let mut workflow_refresh_needed = false;
-    let channel_arrivals = phase_arrivals_for_channels(config, &result.channel_results);
+    let channel_arrivals = phase_arrivals_for_channels(
+        config,
+        &result.channel_results,
+        probe_arrival_overrides,
+    );
 
-    if channel_arrivals.len() > 1 {
+    // Probe arrivals are explicit measurement metadata and must respect the
+    // normal delay policy. Phase-derived arrivals are the topology equivalent
+    // of generic-route auto IR sync and may insert alignment delays.
+    let phase_ir_sync = probe_arrival_overrides.is_none();
+    if (config.optimizer.allow_delay() || phase_ir_sync) && channel_arrivals.len() > 1 {
         let alignment_delays =
             roomeq_engine::analysis::time_align::calculate_alignment_delays(&channel_arrivals);
         for (channel_name, delay_ms) in &alignment_delays {
@@ -698,6 +733,18 @@ fn assemble_workflow_result(
                 workflow_refresh_needed = true;
             }
         }
+    }
+
+    // Topology executors own crossover/routing, but sub-main phase alignment
+    // remains a final-channel operation. Run the same optimizer used by the
+    // generic route after their chains have been assembled.
+    if apply_topology_phase_alignment(
+        config,
+        &mut result.channel_results,
+        &mut result.channels,
+        observer_shared,
+    )? {
+        workflow_refresh_needed = true;
     }
 
     // Send post-workflow summary
@@ -1260,6 +1307,7 @@ fn assemble_workflow_result(
 fn phase_arrivals_for_channels(
     config: &RoomConfig,
     channel_results: &HashMap<String, roomeq_engine::room_result::ChannelOptimizationResult>,
+    probe_arrival_overrides: Option<&HashMap<String, f64>>,
 ) -> HashMap<String, f64> {
     let primary_seat = config
         .optimizer
@@ -1270,6 +1318,11 @@ fn phase_arrivals_for_channels(
     channel_results
         .keys()
         .filter_map(|channel_name| {
+            if let Some(arrival_ms) = probe_arrival_overrides
+                .and_then(|overrides| overrides.get(channel_name).copied())
+            {
+                return Some((channel_name.clone(), arrival_ms));
+            }
             let source = gd::source_for_output_channel(config, channel_name)?;
             let curves = autoeq_measurements::load_source_individual(source).ok()?;
             let curve = curves.get(primary_seat)?;
@@ -1287,13 +1340,73 @@ fn phase_arrivals_for_channels(
         .collect()
 }
 
+fn apply_topology_phase_alignment(
+    config: &RoomConfig,
+    channel_results: &mut HashMap<String, roomeq_engine::room_result::ChannelOptimizationResult>,
+    channel_chains: &mut HashMap<String, ChannelDspChain>,
+    observer_shared: &SharedPipelineObserver,
+) -> Result<bool> {
+    let Some(phase_config) = config
+        .optimizer
+        .phase_alignment
+        .as_ref()
+        .filter(|phase| phase.enabled && config.optimizer.allow_delay())
+    else {
+        return Ok(false);
+    };
+    let curves = collect_current_final_curves(channel_results);
+    let pairings = find_sub_main_pairings(config, &curves);
+    if pairings.is_empty() {
+        return Ok(false);
+    }
+    send_progress(
+        observer_shared,
+        PipelineStepId::PhaseAlignment,
+        PipelineStepStatus::Started,
+        &RoomOptimizationProgress {
+            current_speaker: String::new(), speaker_index: 0, total_speakers: pairings.len(),
+            iteration: 0, max_iterations: 0, loss: 0.0, overall_progress: 0.0,
+            message: Some("Running topology phase alignment...".to_string()),
+            epa_preference: None, step_id: None, step_status: None,
+        },
+    )?;
+    let mut results = HashMap::new();
+    for (sub_name, main_name) in pairings {
+        let Some(sub_curve) = curves.get(&sub_name) else { continue };
+        let Some(main_curve) = curves.get(&main_name) else { continue };
+        if sub_curve.phase.is_none() || main_curve.phase.is_none() {
+            continue;
+        }
+        match phase_alignment::optimize_phase_alignment(sub_curve, main_curve, phase_config) {
+            Ok(result) => {
+                results.insert(main_name, (result.delay_ms, result.invert_polarity, sub_name));
+            }
+            Err(error) => warn!("Topology phase alignment failed: {error}"),
+        }
+    }
+    for (main_name, (_, invert, _)) in &results {
+        if *invert && let Some(chain) = channel_chains.get_mut(main_name) {
+            chain.plugins.insert(0, output::create_gain_plugin_with_invert(0.0, true));
+            sync_reported_phase_adjustment(main_name, channel_results, channel_chains, 0.0, true);
+        }
+    }
+    apply_phase_alignment_delay_schedule(&results, channel_results, channel_chains);
+    if !results.is_empty() {
+        emit_pipeline_event(
+            observer_shared,
+            PipelineEvent::completed(PipelineStepId::PhaseAlignment, "Topology phase alignment complete"),
+        )?;
+    }
+    Ok(!results.is_empty())
+}
+
 fn apply_topology_height_alignment(
     result: &mut RoomOptimizationResult,
     height_config: &roomeq_model::HeightChannelAlignmentConfig,
     config: &RoomConfig,
     sample_rate: f64,
 ) -> StageOutcome {
-    let mut channel_arrivals = phase_arrivals_for_channels(config, &result.channel_results);
+    let mut channel_arrivals = phase_arrivals_for_channels(config, &result.channel_results, None);
     for (channel_name, arrival_ms) in &mut channel_arrivals {
         if let Some(chain) = result.channels.get(channel_name) {
             *arrival_ms += total_chain_delay_ms(chain);

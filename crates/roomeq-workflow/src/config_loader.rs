@@ -37,6 +37,34 @@ pub fn merge_json_objects(base: &mut serde_json::Value, overrides: &serde_json::
     }
 }
 
+/// Migrate the legacy `optimizer.mode` spelling before deserialization.
+///
+/// Serde aliases preserve compatibility but cannot report their use. Doing the
+/// small JSON-level migration here keeps user-facing file loads visible and
+/// makes an explicitly supplied `processing_mode` win deterministically.
+fn migrate_legacy_optimizer_mode(config: &mut serde_json::Value) {
+    let Some(optimizer) = config
+        .as_object_mut()
+        .and_then(|root| root.get_mut("optimizer"))
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    let Some(mode) = optimizer.remove("mode") else {
+        return;
+    };
+    if optimizer.contains_key("processing_mode") {
+        log::warn!(
+            "optimizer.mode is deprecated and ignored because optimizer.processing_mode is also set"
+        );
+    } else {
+        log::warn!(
+            "optimizer.mode is deprecated; use optimizer.processing_mode (low_latency, phase_linear, hybrid, or mixed_phase)"
+        );
+        optimizer.insert("processing_mode".to_string(), mode);
+    }
+}
+
 /// Load, merge, deserialize, validate, and path-resolve a RoomEQ config.
 ///
 /// Returns the resolved configuration, the directory containing the base
@@ -57,6 +85,7 @@ pub fn load_config(
             serde_json::from_str(&override_json).context("Failed to parse override config JSON")?;
         merge_json_objects(&mut config_value, &override_value);
     }
+    migrate_legacy_optimizer_mode(&mut config_value);
 
     let config_dir = base_config_path
         .parent()
@@ -140,6 +169,24 @@ mod tests {
 
         assert!(base["speakers"].get("right").is_some());
         assert!(base["speakers"].get("left").is_none());
+    }
+
+    #[test]
+    fn legacy_optimizer_mode_is_migrated_to_processing_mode() {
+        let mut config = serde_json::json!({ "optimizer": { "mode": "fir" } });
+        migrate_legacy_optimizer_mode(&mut config);
+        assert_eq!(config["optimizer"]["processing_mode"], "fir");
+        assert!(config["optimizer"].get("mode").is_none());
+    }
+
+    #[test]
+    fn canonical_processing_mode_wins_over_legacy_mode() {
+        let mut config = serde_json::json!({
+            "optimizer": { "mode": "fir", "processing_mode": "low_latency" }
+        });
+        migrate_legacy_optimizer_mode(&mut config);
+        assert_eq!(config["optimizer"]["processing_mode"], "low_latency");
+        assert!(config["optimizer"].get("mode").is_none());
     }
 
     #[test]

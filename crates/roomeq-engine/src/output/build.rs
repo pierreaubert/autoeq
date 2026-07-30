@@ -731,6 +731,7 @@ pub fn build_supporting_source_dsp_chains(
     logical_channel: &str,
     support_channel_name: &str,
     delay_ms: f64,
+    normalization_gain_db: f64,
     fir_wav_path: &str,
     primary_initial: Option<&crate::Curve>,
     support_initial: Option<&crate::Curve>,
@@ -751,6 +752,9 @@ pub fn build_supporting_source_dsp_chains(
     };
 
     let mut support_plugins = Vec::new();
+    if normalization_gain_db.abs() > 1e-9 {
+        support_plugins.push(create_gain_plugin(normalization_gain_db));
+    }
     if delay_ms.abs() > 0.001 {
         support_plugins.push(create_delay_plugin(delay_ms));
     }

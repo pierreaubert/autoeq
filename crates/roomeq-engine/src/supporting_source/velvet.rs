@@ -100,4 +100,26 @@ mod tests {
         let seq = generate_velvet_noise(0, 0.1, 1);
         assert!(seq.is_empty());
     }
+
+    #[test]
+    fn density_for_four_ms_at_48khz_keeps_impulses_in_the_recommended_range() {
+        let target_spacing_samples = 48_000.0 * 0.004;
+        let density = 1.0 / (2.0 * target_spacing_samples - 1.0);
+        let sequence = generate_velvet_noise(48_000, density, 0xdeadbeef);
+        let positions: Vec<_> = sequence
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &tap)| (tap != 0.0).then_some(index))
+            .collect();
+        let mean_spacing_samples = positions
+            .windows(2)
+            .map(|window| (window[1] - window[0]) as f64)
+            .sum::<f64>()
+            / (positions.len() - 1) as f64;
+        let mean_spacing_ms = mean_spacing_samples * 1_000.0 / 48_000.0;
+        assert!(
+            (3.0..=5.0).contains(&mean_spacing_ms),
+            "mean spacing was {mean_spacing_ms:.2} ms"
+        );
+    }
 }

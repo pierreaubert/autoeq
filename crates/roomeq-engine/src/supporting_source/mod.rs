@@ -19,14 +19,19 @@ use crate::Curve;
 pub struct SupportingSourceFilter {
     /// Minimum-phase FIR taps applied to the supporting source.
     pub taps: Vec<f64>,
+    /// Gain removed by peak-normalizing `taps`, restored as a separate DSP
+    /// gain stage before convolution.
+    pub normalization_gain_db: f64,
     /// Effective target after constraints (for diagnostics).
     pub constrained_target: Curve,
     /// Supporting-source gain response in dB.
     pub support_gain_db: Vec<f64>,
-    /// DRR before compensation (dB per frequency bin).
-    pub drr_before_db: Vec<f64>,
-    /// DRR after compensation (dB per frequency bin).
-    pub drr_after_db: Vec<f64>,
+    /// DRR before compensation (dB per frequency bin), when it was derived
+    /// from time-gated impulse-response evidence.
+    pub drr_before_db: Option<Vec<f64>>,
+    /// DRR after compensation (dB per frequency bin), when it was derived
+    /// from time-gated impulse-response evidence.
+    pub drr_after_db: Option<Vec<f64>>,
     /// Number of precedence-limit hits (diagnostic).
     pub precedence_limit_hits: usize,
 }

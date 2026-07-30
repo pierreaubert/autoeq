@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import difflib
+import argparse
 import json
 import os
 import pathlib
@@ -61,10 +62,17 @@ def generate_schema(kind: str) -> object:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--update", action="store_true", help="replace baselines with generated schemas")
+    args = parser.parse_args()
     failed = False
     for kind, baseline_path in SCHEMAS.items():
         expected = json.loads(baseline_path.read_text(encoding="utf-8"))
         actual = generate_schema(kind)
+        if args.update:
+            baseline_path.write_text(canonical_json(actual), encoding="utf-8")
+            print(f"UPDATED RoomEQ {kind} schema: {baseline_path.relative_to(REPO_ROOT)}")
+            continue
         if actual == expected:
             print(f"PASS RoomEQ {kind} schema: {baseline_path.relative_to(REPO_ROOT)}")
             continue

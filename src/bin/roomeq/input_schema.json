@@ -327,36 +327,34 @@
         "bass_dip_weight": {
           "description": "Weight for bass dips (below `transition_freq`). Default: 1.0\n\nHistorically this defaulted to 0.2 (near-ignore) as a crude\nproxy for \"do not fight acoustic nulls\". With explicit narrow-null\nsuppression in place, broad bass dips (SBIR, baffle step) become\nlegitimate correction targets and the dip weight is aligned with\nthe mid/treble default.",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 1.0
         },
         "bass_peak_weight": {
           "description": "Weight for bass peaks (below `transition_freq`). Default: 5.0",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 5.0
         },
         "dip_weight": {
           "description": "Weight for negative errors (dips above `transition_freq`). Default: 1.0",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 1.0
         },
         "peak_weight": {
           "description": "Weight for positive errors (peaks above `transition_freq`). Default: 2.0",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 2.0
         },
         "transition_freq": {
           "description": "Transition frequency between bass and mid/treble weighting. Default: 300.0 Hz",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 300.0
         }
-      },
-      "required": [
-        "peak_weight",
-        "dip_weight",
-        "bass_peak_weight",
-        "bass_dip_weight",
-        "transition_freq"
-      ]
+      }
     },
     "AudibilityDeadbandConfig": {
       "description": "Audibility/JND deadband applied to spectral objective residuals after\nperceptual or octave smoothing.",
@@ -1557,12 +1555,14 @@
       "properties": {
         "activity_weight": {
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 0.2
         },
         "evaluation_weight": {
           "description": "Weights for the three EPA dimensions in the composite score",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 0.6
         },
         "flatness_band_weight": {
           "description": "Band weight for the flatness component of the EPA loss.\nDefault 0.0 (see `flatness_erb_weight`).",
@@ -1594,21 +1594,25 @@
         "listening_level_phon": {
           "description": "Listening level in phon (affects loudness computation)",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 75.0
         },
         "max_roughness": {
           "description": "Maximum acceptable roughness (above this, penalty increases)",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 0.5
         },
         "potency_weight": {
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 0.2
         },
         "target_sharpness": {
           "description": "Target sharpness in acum (1.0 = natural broadband noise character)",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 1.2
         },
         "temporal_masking": {
           "description": "Temporal-masking penalties for modal ringing and FIR phase behavior.\n\nModal data is used as an optimizer-cheap proxy for post-masked room\ndecay audibility. When FIR coefficients are exported, the FIR impulse\nresponse is also analyzed directly for pre/post ringing audibility.",
@@ -1626,15 +1630,7 @@
             "weight": 0.15
           }
         }
-      },
-      "required": [
-        "listening_level_phon",
-        "target_sharpness",
-        "max_roughness",
-        "evaluation_weight",
-        "potency_weight",
-        "activity_weight"
-      ]
+      }
     },
     "ExcursionProtectionConfig": {
       "description": "Excursion protection configuration",
@@ -1699,6 +1695,14 @@
           "type": "boolean",
           "default": false
         },
+        "max_boost_db": {
+          "description": "Maximum per-frequency correction boost in dB. When set, the\ntarget-vs-measurement delta is clamped to at most this many dB of\nboost before the FIR is designed, mirroring the runtime acceptance\npolicy's `max_boost_db` guard. `None` keeps the uncapped behavior.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
         "phase": {
           "description": "Phase response type: \"linear\" or \"kirkeby\"",
           "type": "string",
@@ -1737,60 +1741,58 @@
         "bass_max": {
           "description": "Bass band maximum frequency (Hz)",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 200.0
         },
         "bass_min": {
           "description": "Bass band minimum frequency (Hz)",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 20.0
         },
         "bass_weight": {
           "description": "Weight for bass band (default: 2.0 - bass is more critical for room correction)",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 2.0
         },
         "mid_max": {
           "description": "Midrange band maximum frequency (Hz)",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 4000.0
         },
         "mid_min": {
           "description": "Midrange band minimum frequency (Hz)",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 200.0
         },
         "mid_weight": {
           "description": "Weight for midrange band (default: 1.0)",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 1.0
         },
         "treble_max": {
           "description": "Treble band maximum frequency (Hz)",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 20000.0
         },
         "treble_min": {
           "description": "Treble band minimum frequency (Hz)",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 4000.0
         },
         "treble_weight": {
           "description": "Weight for treble band (default: 0.8 - less critical for room issues)",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 0.8
         }
-      },
-      "required": [
-        "bass_min",
-        "bass_max",
-        "mid_min",
-        "mid_max",
-        "treble_min",
-        "treble_max",
-        "bass_weight",
-        "mid_weight",
-        "treble_weight"
-      ]
+      }
     },
     "GroupDelayOptimizationConfig": {
       "description": "Group-delay optimization configuration.",
@@ -2863,6 +2865,15 @@
           "default": 7,
           "minimum": 0
         },
+        "parallel_threads": {
+          "description": "Number of threads for parallel objective evaluation. `None` uses all\navailable cores. Note that a fixed seed only gives bit-reproducible\nresults when this is pinned (1 = fully deterministic): parallel\nevaluation order otherwise depends on machine load.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
         "peq_model": {
           "description": "PEQ model (e.g. \"pk\", \"ls-pk-hs\", \"free\")",
           "type": "string",
@@ -3295,32 +3306,30 @@
         "high_freq": {
           "description": "Upper transition frequency in Hz (default: 1000 Hz)",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 1000.0
         },
         "high_freq_n": {
           "description": "Smoothing resolution above high_freq (bands per octave, e.g., 6 for 1/6 octave)",
           "type": "integer",
           "format": "uint",
+          "default": 6,
           "minimum": 0
         },
         "low_freq": {
           "description": "Lower transition frequency in Hz (default: 100 Hz)",
           "type": "number",
-          "format": "double"
+          "format": "double",
+          "default": 100.0
         },
         "low_freq_n": {
           "description": "Smoothing resolution below low_freq (bands per octave, e.g., 48 for 1/48 octave)",
           "type": "integer",
           "format": "uint",
+          "default": 48,
           "minimum": 0
         }
-      },
-      "required": [
-        "low_freq_n",
-        "high_freq_n",
-        "low_freq",
-        "high_freq"
-      ]
+      }
     },
     "RecordingConfiguration": {
       "description": "Recording configuration stored with measurements\nContains device settings and signal parameters used during measurement capture",
@@ -4462,16 +4471,7 @@
     },
     "TargetCurveConfig": {
       "description": "Target curve configuration",
-      "anyOf": [
-        {
-          "description": "Predefined target (e.g. \"flat\", \"harman\")",
-          "type": "string"
-        },
-        {
-          "description": "Path to CSV file (freq, spl columns)",
-          "type": "string"
-        }
-      ]
+      "type": "string"
     },
     "TargetResponseConfig": {
       "description": "Unified target response configuration for room correction",

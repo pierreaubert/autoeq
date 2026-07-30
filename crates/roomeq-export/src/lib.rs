@@ -965,9 +965,16 @@ fn export_easyeffects(output: &DspGraph) -> anyhow::Result<String> {
         all_filters.extend(filters);
     }
 
+    if all_filters.len() > 30 {
+        anyhow::bail!(
+            "EasyEffects supports at most 30 EQ bands, but this export has {}",
+            all_filters.len()
+        );
+    }
+
     // Build JSON preset
     let mut bands = serde_json::Map::new();
-    for (i, f) in all_filters.iter().enumerate().take(30) {
+    for (i, f) in all_filters.iter().enumerate() {
         let band_key = format!("band{i}");
         let mut band = serde_json::Map::new();
         band.insert("frequency".to_string(), serde_json::json!(f.freq));

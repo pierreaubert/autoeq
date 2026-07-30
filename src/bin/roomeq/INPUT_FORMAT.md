@@ -8,8 +8,9 @@ measurements, and optimizer settings. The top-level object is a `RoomConfig`.
 The optional top-level `provenance` object links each speaker measurement to a
 versioned `.provenance.json` sidecar without embedding private acquisition data
 in the RoomEQ config. `validation_mode` defaults to `"warn"` for legacy
-configurations; use `"strict"` to require every configured speaker to have a
-sidecar whose record ID and SHA-256 content hash match the reference.
+configurations. RoomEQ currently records these references in the input/output
+contract but does not validate sidecars at CLI runtime; do not rely on this
+field as an integrity or SHA-256 enforcement mechanism.
 
 ```json
 {
@@ -27,16 +28,10 @@ sidecar whose record ID and SHA-256 content hash match the reference.
 }
 ```
 
-Validation never fetches source URLs or referenced assets. `roomeq` accepts
-`--provenance-validation off|warn|strict` to override this policy for one run.
-It writes `<artifact>.provenance.json` next to the DSP chain and any requested
-external export; use `--provenance-redaction shareable` or `anonymous` to omit
-local sidecar paths while retaining measurement and artifact hashes.
-
 Upgrade a supported legacy sidecar without re-importing its measurement:
 
 ```bash
-migrate-provenance measurements/left.csv.provenance.json
+migrate_provenance measurements/left.csv.provenance.json
 ```
 
 The command writes the current schema deterministically and creates a

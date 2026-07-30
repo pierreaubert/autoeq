@@ -214,6 +214,66 @@ fn optimize_room_with_probe_arrivals_uses_overrides() {
 }
 
 #[test]
+fn refreshed_topology_pre_score_uses_raw_curve_not_intermediate_score() {
+    let config = minimal_room_config(ProcessingMode::LowLatency);
+    let mut result = single_channel_room_result("left");
+    let channel = result.channel_results.get_mut("left").unwrap();
+    let mut raw = flat_curve();
+    let middle = raw.spl.len() / 2;
+    raw.spl[middle] += 12.0;
+    channel.initial_curve = raw.clone();
+    channel.final_curve = flat_curve();
+    // Simulate a topology intermediate that was already made perfectly flat.
+    channel.pre_score = 0.0;
+    channel.post_score = 0.0;
+
+    super::refresh_final_reports(&mut result, &config, 48_000.0);
+    let expected = super::recompute_curve_flatness_score(
+        &raw,
+        config.optimizer.min_freq,
+        config.optimizer.max_freq,
+    );
+    let refreshed = result.channel_results["left"].pre_score;
+    assert!((refreshed - expected).abs() < 1e-12);
+    assert!(refreshed > 0.0, "raw deviation must remain visible in pre_score");
+}
+
+#[test]
+fn topology_stereo_route_records_probe_arrival_overrides() {
+    let mut config = minimal_room_config(ProcessingMode::LowLatency);
+    config.speakers.insert(
+        "right".to_string(),
+        SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
+    );
+    config.system = Some(SystemConfig {
+        model: SystemModel::Stereo,
+        speakers: HashMap::from([
+            ("Left".to_string(), "left".to_string()),
+            ("Right".to_string(), "right".to_string()),
+        ]),
+        ..Default::default()
+    });
+    let arrivals = HashMap::from([("Left".to_string(), 5.0), ("Right".to_string(), 8.0)]);
+
+    let result =
+        optimize_room_with_probe_arrivals(&config, 48_000.0, None, None, &arrivals).unwrap();
+    let timing = result
+        .metadata
+        .timing_diagnostics
+        .expect("topology route must retain supplied probe arrivals");
+    assert_eq!(timing.channels.len(), 2);
+    assert!(timing.channels.iter().any(|channel| {
+        channel.name == "Left" && (channel.measured_arrival_ms - 5.0).abs() < 1e-9
+    }));
+    assert!(timing.channels.iter().any(|channel| {
+        channel.name == "Right" && (channel.measured_arrival_ms - 8.0).abs() < 1e-9
+    }));
+    assert!(result.channels.values().all(|chain| {
+        !chain.plugins.iter().any(|plugin| plugin.plugin_type == "delay")
+    }), "probe-arrival topology alignment must respect allow_delay=false");
+}
+
+#[test]
 fn optimize_room_pipeline_events_are_emitted() {
     let config = minimal_room_config(ProcessingMode::LowLatency);
     let event_count = Arc::new(AtomicUsize::new(0));

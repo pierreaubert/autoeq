@@ -18,7 +18,6 @@
     }
   },
   "optimizer": {
-    "mode": "iir",
     "loss_type": "flat",
     "algorithm": "autoeq:de",
     "num_filters": 9,
@@ -35,12 +34,16 @@
     "refine": true,
     "local_algo": "cobyla",
     "psychoacoustic": true,
-    "asymmetric_loss": true
+    "asymmetric_loss": true,
+    "processing_mode": "low_latency"
   },
   "crossovers": {
     "first": {
       "type": "LR48",
-      "frequency_range": [60,150]
+      "frequency_range": [
+        60,
+        150
+      ]
     }
   }
 }

@@ -56,20 +56,61 @@ pub(in super::super) fn should_apply_spectral_shelves(
     icd_improvement > flatness_regression + 1e-6
 }
 
+/// Highest excursion-protection HPF frequency in a deployed chain, if any.
+///
+/// The protective high-pass is intentional: score bands must start at or above
+/// it, otherwise the deliberate bass rolloff is counted as response error
+/// (same treatment as the bass-management crossover).
+pub(in super::super) fn excursion_hpf_hz_from_chain(chain: &ChannelDspChain) -> Option<f64> {
+    chain
+        .plugins
+        .iter()
+        .filter(|plugin| {
+            plugin.plugin_type == "eq"
+                && plugin.parameters.get("label").and_then(|v| v.as_str())
+                    == Some("excursion_protection")
+        })
+        .filter_map(|plugin| plugin.parameters.get("filters"))
+        .filter_map(|filters| filters.as_array())
+        .flatten()
+        .filter_map(|filter| filter.get("freq").and_then(|v| v.as_f64()))
+        .filter(|freq| freq.is_finite() && *freq > 0.0)
+        .reduce(f64::max)
+}
+
+/// Crossover frequency the topology optimizer actually applied, if any.
+///
+/// With `frequency_range` crossovers there is no static `frequency` in the
+/// config; scoring below the applied high-pass would treat the intentional
+/// rolloff as response error, so callers that have the optimized value must
+/// prefer it over the config fallback.
+pub(in super::super) fn applied_bass_crossover_hz(result: &RoomOptimizationResult) -> Option<f64> {
+    result
+        .metadata
+        .bass_management
+        .as_ref()
+        .and_then(|bm| bm.optimization.as_ref())
+        .and_then(|opt| opt.optimized_crossover_hz)
+        .filter(|hz| hz.is_finite() && *hz > 0.0)
+}
+
 pub(in super::super) fn final_score_band_for_channel(
     config: &RoomConfig,
     channel_name: &str,
+    applied_crossover_hz: Option<f64>,
 ) -> (f64, f64) {
     let min_freq = config.optimizer.min_freq;
     let mut max_freq = config.optimizer.max_freq;
     if config.system.is_none() {
         return (min_freq, max_freq.max(min_freq));
     }
-    let crossover_max = config.crossovers.as_ref().and_then(|xos| {
-        xos.values()
-            .filter_map(|xo| xo.frequency)
-            .filter(|freq| freq.is_finite() && *freq > 0.0)
-            .reduce(f64::max)
+    let crossover_max = applied_crossover_hz.or_else(|| {
+        config.crossovers.as_ref().and_then(|xos| {
+            xos.values()
+                .filter_map(|xo| xo.frequency)
+                .filter(|freq| freq.is_finite() && *freq > 0.0)
+                .reduce(f64::max)
+        })
     });
 
     if is_subwoofer_channel(config, channel_name) {
@@ -660,7 +701,7 @@ mod tests {
     #[test]
     fn final_score_band_no_system_uses_optimizer_range() {
         let config = room_config_default();
-        let (min, max) = final_score_band_for_channel(&config, "left");
+        let (min, max) = final_score_band_for_channel(&config, "left", None);
         assert_eq!(min, config.optimizer.min_freq);
         assert_eq!(max, config.optimizer.max_freq);
     }
@@ -1072,5 +1113,201 @@ mod tests {
         let store = autoeq_artifacts::MemoryArtifactStore::new();
         generate_validation_bundle_report(&mut result, &config, None, &store).unwrap();
         assert!(result.metadata.validation_bundle.is_none());
+    }
+
+    fn stereo_21_config_range_crossover() -> RoomConfig {
+        let mut config = room_config_default();
+        config.system = Some(roomeq_model::SystemConfig {
+            model: roomeq_model::SystemModel::Stereo,
+            speakers: HashMap::from([
+                ("L".to_string(), "left".to_string()),
+                ("LFE".to_string(), "sub".to_string()),
+            ]),
+            subwoofers: Some(roomeq_model::SubwooferSystemConfig {
+                config: roomeq_model::SubwooferStrategy::Single,
+                crossover: Some("first".to_string()),
+                mapping: HashMap::from([("sub".to_string(), "L".to_string())]),
+            }),
+            ..Default::default()
+        });
+        config.crossovers = Some(HashMap::from([(
+            "first".to_string(),
+            roomeq_model::CrossoverConfig {
+                crossover_type: "LR48".to_string(),
+                frequency: None,
+                frequencies: None,
+                frequency_range: Some((60.0, 150.0)),
+            },
+        )]));
+        config.optimizer.min_freq = 20.0;
+        config.optimizer.max_freq = 16_000.0;
+        config
+    }
+
+    #[test]
+    fn final_score_band_mains_prefers_applied_crossover_over_range_fallback() {
+        let config = stereo_21_config_range_crossover();
+        let (min, max) = final_score_band_for_channel(&config, "L", Some(119.15));
+        assert!(
+            (min - 119.15).abs() < 1e-9,
+            "mains band must start at the applied crossover, got {min}"
+        );
+        assert!((max - 16_000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn final_score_band_sub_caps_at_applied_crossover() {
+        let config = stereo_21_config_range_crossover();
+        let (min, max) = final_score_band_for_channel(&config, "LFE", Some(119.15));
+        assert!((min - 20.0).abs() < 1e-9);
+        assert!(
+            (max - 119.15).abs() < 1e-9,
+            "sub band must stop at the applied crossover, got {max}"
+        );
+    }
+
+    #[test]
+    fn final_score_band_range_only_crossover_falls_back_to_80() {
+        let config = stereo_21_config_range_crossover();
+        let (min, _) = final_score_band_for_channel(&config, "L", None);
+        assert!(
+            (min - 80.0).abs() < 1e-9,
+            "without an applied crossover the static fallback is 80 Hz, got {min}"
+        );
+    }
+
+    fn optimization_report(optimized_crossover_hz: Option<f64>) -> roomeq_model::BassManagementOptimizationReport {
+        roomeq_model::BassManagementOptimizationReport {
+            applied: true,
+            phase_required: true,
+            phase_available: true,
+            configured_crossover_hz: None,
+            optimized_crossover_hz,
+            crossover_range_hz: Some((60.0, 150.0)),
+            crossover_type: "LR48".to_string(),
+            main_delay_ms: 0.0,
+            sub_delay_ms: 0.0,
+            relative_sub_delay_ms: 0.0,
+            sub_polarity_inverted: false,
+            requested_sub_gain_db: 0.0,
+            applied_sub_gain_db: 0.0,
+            gain_limited: false,
+            estimated_bass_bus_peak_gain_db: None,
+            objective_before: None,
+            objective_after: None,
+            group_results: Vec::new(),
+            sub_output_results: Vec::new(),
+            advisories: Vec::new(),
+        }
+    }
+
+    fn bass_management_report(
+        optimization: Option<roomeq_model::BassManagementOptimizationReport>,
+    ) -> roomeq_model::BassManagementReport {
+        roomeq_model::BassManagementReport {
+            enabled: true,
+            crossover_type: "LR48".to_string(),
+            crossover_frequency_hz: None,
+            redirected_bass_enabled: true,
+            lfe_channel: "LFE".to_string(),
+            lfe_playback_gain_db: 0.0,
+            lfe_gain_applied_to_chain: false,
+            sub_trim_db: 0.0,
+            max_sub_boost_db: 0.0,
+            headroom_margin_db: 0.0,
+            applied_sub_gain_db: None,
+            gain_limited: false,
+            physical_sub_output: "LFE".to_string(),
+            redirected_bass_channel_count: 1,
+            main_high_pass_hz: None,
+            sub_low_pass_hz: None,
+            lfe_headroom_required_db: 0.0,
+            signal_flow: Vec::new(),
+            signal_flow_advisories: Vec::new(),
+            routing_graph: None,
+            optimization,
+            groups: Vec::new(),
+            sub_outputs: Vec::new(),
+            headroom_simulation: None,
+            advisory: "ok".to_string(),
+        }
+    }
+
+    #[test]
+    fn excursion_hpf_hz_from_chain_reads_labeled_plugin() {
+        let chain = ChannelDspChain {
+            channel: "left".to_string(),
+            plugins: vec![
+                PluginConfigWrapper {
+                    plugin_type: "eq".to_string(),
+                    parameters: json!({"label": "excursion_protection", "filters": [
+                        {"filter_type": "highpass", "freq": 85.0, "q": 0.707, "db_gain": 0.0},
+                        {"filter_type": "highpass", "freq": 85.0, "q": 1.31, "db_gain": 0.0}
+                    ]}),
+                },
+                PluginConfigWrapper {
+                    plugin_type: "eq".to_string(),
+                    parameters: json!({"label": "room_eq_correction", "filters": [
+                        {"filter_type": "peak", "freq": 120.0, "q": 2.0, "db_gain": -3.0}
+                    ]}),
+                },
+            ],
+            drivers: None,
+            initial_curve: None,
+            final_curve: None,
+            eq_response: None,
+            target_curve: None,
+            pre_ir: None,
+            post_ir: None,
+            fir_temporal_masking: None,
+            direct_early_late_correction: None,
+        };
+        assert_eq!(excursion_hpf_hz_from_chain(&chain), Some(85.0));
+    }
+
+    #[test]
+    fn excursion_hpf_hz_from_chain_none_without_labeled_plugin() {
+        let chain = ChannelDspChain {
+            channel: "left".to_string(),
+            plugins: vec![PluginConfigWrapper {
+                plugin_type: "eq".to_string(),
+                parameters: json!({"label": "room_eq_correction", "filters": [
+                    {"filter_type": "highpass", "freq": 85.0, "q": 0.707, "db_gain": 0.0}
+                ]}),
+            }],
+            drivers: None,
+            initial_curve: None,
+            final_curve: None,
+            eq_response: None,
+            target_curve: None,
+            pre_ir: None,
+            post_ir: None,
+            fir_temporal_masking: None,
+            direct_early_late_correction: None,
+        };
+        assert_eq!(excursion_hpf_hz_from_chain(&chain), None);
+    }
+
+    #[test]
+    fn applied_bass_crossover_hz_reads_optimized_value() {
+        let mut result = result_with_channel("L");
+        result.metadata.bass_management =
+            Some(bass_management_report(Some(optimization_report(Some(119.15)))));
+        assert_eq!(applied_bass_crossover_hz(&result), Some(119.15));
+    }
+
+    #[test]
+    fn applied_bass_crossover_hz_none_without_optimization() {
+        let mut result = result_with_channel("L");
+        assert_eq!(applied_bass_crossover_hz(&result), None);
+        result.metadata.bass_management = Some(bass_management_report(None));
+        assert_eq!(applied_bass_crossover_hz(&result), None);
+        result.metadata.bass_management =
+            Some(bass_management_report(Some(optimization_report(Some(f64::NAN)))));
+        assert_eq!(
+            applied_bass_crossover_hz(&result),
+            None,
+            "non-finite optimized crossover must be ignored"
+        );
     }
 }

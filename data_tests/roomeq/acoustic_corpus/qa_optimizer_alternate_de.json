@@ -1,7 +1,6 @@
 {
   "optimizer": {
     "algorithm": "autoeq:de",
-    "mode": "iir",
     "processing_mode": "low_latency",
     "loss_type": "flat",
     "num_filters": 4,

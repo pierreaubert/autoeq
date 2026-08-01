@@ -9,7 +9,10 @@ use roomeq_workflow::merge_json_objects;
 use std::path::{Path, PathBuf};
 
 pub(super) fn convergence_epsilon(pre_score: f64) -> f64 {
-    (pre_score.abs() * 0.001).max(1e-6)
+    // 0.1 mdB floor: FIR windowing and response round-trips leave residuals at
+    // this scale on exactly-flat fixtures, which is numerical noise, not a
+    // regression.
+    (pre_score.abs() * 0.001).max(1e-4)
 }
 
 pub(super) fn load_config_for_generic_path(

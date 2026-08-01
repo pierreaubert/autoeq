@@ -2,7 +2,10 @@ use super::consts::qa_seed;
 use super::metric_scorecard::MetricScorecard;
 use super::metric_scorecard::compare_scorecards;
 use super::option_override::OptionOverride;
-use super::validate::{TargetTiltValidationOptions, validate_option_effect, validate_target_tilt};
+use super::validate::{
+    TargetTiltValidationOptions, validate_option_effect, validate_phase_alignment,
+    validate_target_tilt,
+};
 use roomeq_model::{
     ChannelDspChain, Curve, OptimizationMetadata, RoomConfig, StageOutcome, StageStatus,
 };
@@ -425,4 +428,46 @@ fn scorecard_rejects_large_psychoacoustic_regressions() {
 fn qa_seed_is_stable_and_label_specific() {
     assert_eq!(qa_seed("case:a"), qa_seed("case:a"));
     assert_ne!(qa_seed("case:a"), qa_seed("case:b"));
+}
+
+#[test]
+fn target_reshaping_options_are_only_tilt_and_broadband() {
+    assert!(
+        OptionOverride::TargetTilt {
+            slope_db_per_octave: -0.8
+        }
+        .reshapes_target()
+    );
+    assert!(OptionOverride::BroadbandTargetMatching.reshapes_target());
+    assert!(!OptionOverride::Psychoacoustic.reshapes_target());
+    assert!(!OptionOverride::ExcursionProtection.reshapes_target());
+    assert!(!OptionOverride::PhaseAlignment.reshapes_target());
+    assert!(!OptionOverride::AsymmetricLoss.reshapes_target());
+}
+
+#[test]
+fn phase_alignment_validator_skips_flat_ratio_when_target_reshaped() {
+    let mut baseline = result_with_channel_slopes(0.0, 0.0, 0.0);
+    baseline.combined_post_score = 10.0;
+    let mut option = result_with_channel_slopes(0.0, 0.0, 0.0);
+    // Inflated by a companion tilt option; exceeds any flat-ratio limit.
+    option.combined_post_score = 17.0;
+
+    let (pass_without, _) = validate_phase_alignment(&baseline, &option, 1, false);
+    assert!(
+        !pass_without,
+        "flat-ratio gate must reject 17.0 vs 10.0 without target reshaping"
+    );
+
+    let (pass_with, reason) = validate_phase_alignment(&baseline, &option, 3, true);
+    assert!(
+        pass_with,
+        "target-reshaped combo should skip the flat-ratio gate: {reason}"
+    );
+    assert!(reason.contains("target reshaped"));
+
+    // The exemption is not a blank cheque: non-finite scores still fail.
+    option.combined_post_score = f64::NAN;
+    let (pass_nan, _) = validate_phase_alignment(&baseline, &option, 3, true);
+    assert!(!pass_nan, "non-finite scores must fail even when reshaped");
 }

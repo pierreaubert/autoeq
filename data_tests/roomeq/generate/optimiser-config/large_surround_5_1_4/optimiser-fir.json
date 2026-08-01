@@ -1,12 +1,12 @@
 {
   "optimizer": {
-    "mode": "fir",
     "fir": {
       "taps": 1024,
       "phase": "kirkeby",
       "max_boost_db": 10.0
     },
     "min_db": -12.0,
-    "max_db": 2.0
+    "max_db": 2.0,
+    "processing_mode": "phase_linear"
   }
 }

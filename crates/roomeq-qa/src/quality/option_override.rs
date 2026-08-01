@@ -30,6 +30,20 @@ pub(super) enum OptionOverride {
     },
 }
 
+impl OptionOverride {
+    /// Options that deliberately reshape the optimization target away from
+    /// "flat". Flat-loss score ratios against a flat-target baseline are not
+    /// a meaningful acceptance gate when these are active: the optimizer is
+    /// minimizing deviation from a shaped target, so flat loss worsens by
+    /// design (a -0.8 dB/oct tilt alone adds ~2.3 dB RMS of flat deviation).
+    pub(super) fn reshapes_target(&self) -> bool {
+        matches!(
+            self,
+            OptionOverride::TargetTilt { .. } | OptionOverride::BroadbandTargetMatching
+        )
+    }
+}
+
 impl std::fmt::Display for OptionOverride {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

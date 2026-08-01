@@ -275,7 +275,15 @@ pub(super) fn validate_result(
         if is_subwoofer_channel(config, name) {
             continue;
         }
-        let regression_epsilon = if has_sub {
+        let regression_epsilon = if method == ProcessingMethod::MixedPhase {
+            // The mixed-phase excess-phase FIR is unity-magnitude by design,
+            // but its short finite taps carry inherent comb ripple (~hundreds
+            // of Hz period) that adds raw roughness the smoothed runtime
+            // acceptance metric does not see. The acceptance gate's smoothed
+            // quality verdict (and the identity-fallback checks) remain the
+            // authoritative regression guards for this mode.
+            0.5
+        } else if has_sub {
             BASS_MANAGED_CHANNEL_REGRESSION_EPSILON
         } else {
             0.0

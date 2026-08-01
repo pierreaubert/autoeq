@@ -51,7 +51,7 @@ pub(super) fn assemble_iir_result(
     };
     let post_score = channel_target::flatness_score_in_range(
         &score_curve,
-        request.target.min_freq,
+        request.preprocessed.score_min_freq,
         request.target.max_freq,
     );
     info!(

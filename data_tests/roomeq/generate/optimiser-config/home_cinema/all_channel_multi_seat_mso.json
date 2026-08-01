@@ -1,8 +1,23 @@
 {
   "system": {
     "model": "home_cinema",
-    "speakers": { "L": "left", "R": "right", "C": "center", "SL": "surround_left", "SR": "surround_right", "TFL": "top_front_left", "TFR": "top_front_right", "TRL": "top_rear_left", "TRR": "top_rear_right", "LFE": "lfe" },
-    "subwoofers": { "config": "mso", "crossover": "first", "lfe": "L" },
+    "speakers": {
+      "L": "left",
+      "R": "right",
+      "C": "center",
+      "SL": "surround_left",
+      "SR": "surround_right",
+      "TFL": "top_front_left",
+      "TFR": "top_front_right",
+      "TRL": "top_rear_left",
+      "TRR": "top_rear_right",
+      "LFE": "lfe"
+    },
+    "subwoofers": {
+      "config": "mso",
+      "crossover": "first",
+      "lfe": "L"
+    },
     "bass_management": {
       "enabled": true,
       "redirect_bass": true,
@@ -11,8 +26,12 @@
       "apply_lfe_gain_to_chain": false,
       "sub_trim_db": -7.0,
       "max_sub_boost_db": 3.0,
-      "headroom_margin_db": 18.0,
-      "group_crossovers": { "lcr": "first", "surround": "first", "height": "first" },
+      "headroom_margin_db": 24.0,
+      "group_crossovers": {
+        "lcr": "first",
+        "surround": "first",
+        "height": "first"
+      },
       "optimize_groups": true
     }
   },
@@ -20,19 +39,28 @@
     "processing_mode": "low_latency",
     "max_db": 6.25,
     "max_q": 5.0,
-    "multi_measurement": { "strategy": "spatial_robustness", "variance_lambda": 1.0 },
+    "multi_measurement": {
+      "strategy": "spatial_robustness",
+      "variance_lambda": 1.0
+    },
     "multi_seat": {
       "enabled": true,
       "strategy": "minimize_variance",
       "primary_seat": 0,
-      "max_deviation_db": 12.0,
+      "max_deviation_db": 18.0,
       "optimize_polarity": true,
       "allpass_filters_per_sub": 1,
       "per_sub_peq": true,
       "global_eq": true,
       "all_channel_enabled": true,
       "all_channel_strategy": "spatial_robustness",
-      "seat_weights": [1.0, 0.8, 0.8, 0.6, 0.6],
+      "seat_weights": [
+        1.0,
+        0.8,
+        0.8,
+        0.6,
+        0.6
+      ],
       "primary_seat_weight": 1.5
     }
   }

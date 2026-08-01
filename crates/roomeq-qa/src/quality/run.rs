@@ -19,6 +19,7 @@ use super::metric_scorecard::compare_scorecards;
 use super::metric_scorecard::compute_scorecard;
 use super::metric_scorecard::evaluate_scorecard;
 use super::metric_scorecard::placeholder_scorecard;
+use super::misc::convergence_epsilon;
 use super::misc::load_config_for_generic_path;
 use super::misc::max_curve_difference_db;
 use super::mutation::Mutation;
@@ -578,8 +579,19 @@ pub(super) fn run_option_effect_test(
         2..=3 => option_result.combined_pre_score * 0.05, // 5% for 2-3 options
         _ => option_result.combined_pre_score * 0.15,     // 15% for 4+ options
     };
-    let converged =
-        option_result.combined_post_score < option_result.combined_pre_score + convergence_margin;
+    // Target-reshaping options (tilt, broadband matching) deliberately move the
+    // response away from flat, so the flat-loss convergence gate is not a valid
+    // acceptance criterion for combos containing them; the per-option validators
+    // above (tilt slope error, broadband shelves, double-tilt check) are the
+    // authoritative gates in that case.
+    let target_reshaped = options.iter().any(OptionOverride::reshapes_target);
+    let converged = option_result.combined_post_score
+        < option_result.combined_pre_score
+            + convergence_margin
+            // Degenerate flat-in/flat-out fixtures (e.g. group-delay isolation
+            // with 0 dB EQ bounds) score exactly 0 == 0: count equality as
+            // non-regression instead of failing the strict comparison.
+            + convergence_epsilon(option_result.combined_pre_score);
 
     // Run scorecard comparison (informational for option tests — per-option
     // validators remain the primary gates, but EPA/peak/GD violations are surfaced)
@@ -590,11 +602,20 @@ pub(super) fn run_option_effect_test(
         .map(|(name, _, detail)| format!("{}: {}", name, detail))
         .collect();
 
-    if !converged {
+    if !converged && target_reshaped {
+        writeln!(
+            out,
+            "  convergence: SKIP  (flat-loss gate n/a: option set reshapes the target; post {:.6} vs pre {:.6} informational)",
+            option_result.combined_post_score, option_result.combined_pre_score
+        )
+        .unwrap();
+    } else if !converged {
         all_pass = false;
         let reason = format!(
-            "no convergence: post {:.4} >= pre {:.4}",
-            option_result.combined_post_score, option_result.combined_pre_score
+            "no convergence: post {:.6} >= pre {:.6} (+{:.6} margin)",
+            option_result.combined_post_score,
+            option_result.combined_pre_score,
+            convergence_margin + convergence_epsilon(option_result.combined_pre_score)
         );
         writeln!(out, "  convergence: FAIL  ({})", reason).unwrap();
         results.push(TestResult {

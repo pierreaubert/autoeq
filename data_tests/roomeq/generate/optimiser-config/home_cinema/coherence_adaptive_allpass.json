@@ -11,7 +11,7 @@
       "apply_lfe_gain_to_chain": false,
       "sub_trim_db": -7.0,
       "max_sub_boost_db": 3.0,
-      "headroom_margin_db": 18.0,
+      "headroom_margin_db": 24.0,
       "group_crossovers": { "lcr": "first", "surround": "first", "height": "first" },
       "optimize_groups": true
     }

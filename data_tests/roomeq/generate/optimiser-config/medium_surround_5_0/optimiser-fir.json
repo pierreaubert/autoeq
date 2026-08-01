@@ -1,6 +1,5 @@
 {
   "optimizer": {
-    "mode": "fir",
     "loss_type": "flat",
     "algorithm": "autoeq:de",
     "num_filters": 7,
@@ -21,6 +20,7 @@
     "fir": {
       "taps": 2048,
       "phase": "kirkeby"
-    }
+    },
+    "processing_mode": "phase_linear"
   }
 }

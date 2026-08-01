@@ -938,6 +938,32 @@ fn optimize_spatial_robustness(
     // The correction depth mask is applied by scaling the deviation curve:
     // where depth is low, the deviation appears small → optimizer won't place filters there.
     let averaged_curve = &analysis.averaged_curve;
+    {
+        let (spl_min, spl_max) = averaged_curve.spl.iter().fold(
+            (f64::INFINITY, f64::NEG_INFINITY),
+            |(lo, hi), &v| (lo.min(v), hi.max(v)),
+        );
+        log::debug!(
+            "  Spatial robustness input: {} curves, averaged n={} spl_range=[{:.6}, {:.6}] dB",
+            curves.len(),
+            averaged_curve.freq.len(),
+            spl_min,
+            spl_max
+        );
+        for (idx, curve) in curves.iter().enumerate() {
+            let (lo, hi) = curve.spl.iter().fold(
+                (f64::INFINITY, f64::NEG_INFINITY),
+                |(lo, hi), &v| (lo.min(v), hi.max(v)),
+            );
+            log::debug!(
+                "    seat curve {}: n={} spl_range=[{:.6}, {:.6}] dB",
+                idx,
+                curve.freq.len(),
+                lo,
+                hi
+            );
+        }
+    }
 
     // Clamp frequency range
     let data_min_freq = averaged_curve.freq[0];
@@ -1005,6 +1031,15 @@ fn optimize_spatial_robustness(
     // spatial variance is high gets scaled down, so the optimizer doesn't try to correct
     // position-dependent features.
     let masked_deviation = &raw_deviation * &analysis.correction_depth;
+
+    let band_len = raw_deviation.len().max(1) as f64;
+    let raw_rms = (raw_deviation.iter().map(|v| v * v).sum::<f64>() / band_len).sqrt();
+    let masked_rms = (masked_deviation.iter().map(|v| v * v).sum::<f64>() / band_len).sqrt();
+    log::debug!(
+        "  Spatial robustness deviation: raw_rms={:.6} dB, masked_rms={:.6} dB",
+        raw_rms,
+        masked_rms
+    );
 
     let deviation_curve = Curve {
         freq: normalized_curve.freq.clone(),

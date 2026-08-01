@@ -57,9 +57,11 @@ pub(in super::super) fn channel_matching_worsens_reported_scores(
     config: &RoomConfig,
     baseline: &HashMap<String, ChannelOptimizationResult>,
 ) -> Option<(String, f64, f64)> {
+    let applied_crossover_hz = super::misc::applied_bass_crossover_hz(result);
     result.channel_results.iter().find_map(|(name, ch)| {
         let before = baseline.get(name)?.post_score;
-        let (score_min, score_max) = final_score_band_for_channel(config, name);
+        let (score_min, score_max) =
+            final_score_band_for_channel(config, name, applied_crossover_hz);
         let after = recompute_curve_flatness_score(&ch.final_curve, score_min, score_max);
         if after > before + 1e-6 {
             Some((name.clone(), before, after))

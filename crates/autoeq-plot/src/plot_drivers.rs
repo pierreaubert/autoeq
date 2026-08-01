@@ -91,6 +91,9 @@ pub fn plot_drivers(
                     crate::loss::CrossoverType::Butterworth2 => {
                         crate::iir::peq_butterworth_highpass(2, xover_freq, sample_rate)
                     }
+                    crate::loss::CrossoverType::Butterworth4 => {
+                        crate::iir::peq_butterworth_highpass(4, xover_freq, sample_rate)
+                    }
                     crate::loss::CrossoverType::LinkwitzRiley2 => {
                         crate::iir::peq_linkwitzriley_highpass(2, xover_freq, sample_rate)
                     }
@@ -134,6 +137,9 @@ pub fn plot_drivers(
                 let lp_filter = match drivers_data.crossover_type {
                     crate::loss::CrossoverType::Butterworth2 => {
                         crate::iir::peq_butterworth_lowpass(2, xover_freq, sample_rate)
+                    }
+                    crate::loss::CrossoverType::Butterworth4 => {
+                        crate::iir::peq_butterworth_lowpass(4, xover_freq, sample_rate)
                     }
                     crate::loss::CrossoverType::LinkwitzRiley2 => {
                         crate::iir::peq_linkwitzriley_lowpass(2, xover_freq, sample_rate)

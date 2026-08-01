@@ -508,7 +508,7 @@ Information about the optimization process.
 | `multi_seat_coverage` | object or null | Measurement-position coverage summary. |
 | `multi_seat_correction` | object or null | All-channel multi-seat correction result and any rejected-channel advisories. |
 | `bass_management` | object or null | Applied bass-management routing, trim, headroom, and crossover optimization report. |
-| `timing_diagnostics` | object or null | Measured arrival and final-delay localization diagnostics. |
+| `timing_diagnostics` | object or null | Measured arrival and final-delay localization diagnostics. `arrival_spread_after_ms`, the alignment reference, and the per-channel offsets grade the time-alignment stage only: intentional `route_owned` and `phase_alignment` delays are excluded from the after-spread, while per-channel `applied_delay_ms` and `final_arrival_ms` still report the deployed totals. |
 | `ctc` | object or null | Cross-talk-cancellation artifact and conditioning summary. |
 | `perceptual_policy` | object or null | Resolved perceptual policy values. |
 | `bootstrap_uncertainty` | object or null | Bootstrap uncertainty summary, when robustness estimation ran. |
@@ -517,7 +517,7 @@ Information about the optimization process.
 | `perceptual_metrics.fir_post_ringing_audible_db` | number or null | Worst FIR post-ringing audible energy across channels, dB relative to each FIR main impulse peak. |
 | `perceptual_metrics.fir_temporal_masking_penalty` | number or null | Worst scalar FIR temporal masking penalty across channels. |
 | `supporting_source` | object or null | Per-channel supporting-source room-compensation reports. Present when at least one `SupportingSourceGroup` was processed. |
-| `correction_acceptance` | object or null | Versioned final runtime decision. Includes enforced spectral/spatial/boost/headroom/temporal/realization limits, violations, and correction stages reverted before output. |
+| `correction_acceptance` | object or null | Versioned final runtime decision. Includes enforced spectral/spatial/boost/headroom/temporal/realization limits, violations, and correction stages reverted before output. Mixed-phase output is exempt from the pre-ringing budget: its unity-magnitude excess-phase FIR carries the phase correction in its precursor by design (budget enforced at design time via `pre_ringing_threshold_db`). |
 | `optimizer_evidence` | object or null | Versioned room-level optimizer confidence plus every per-channel backend run. Each run records termination, convergence/best-effort status, objective, evaluation count/limit, seed, bound violation, restart history, and whether it supplied the emitted parameters. Selected `unusable` evidence cannot pass production acceptance. |
 | `stage_outcomes` | array | Machine-readable applied/skipped/degraded/failed outcomes for optional processing and safety stages. |
 

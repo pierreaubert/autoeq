@@ -1,6 +1,5 @@
 {
   "optimizer": {
-    "mode": "iir",
     "loss_type": "flat",
     "algorithm": "autoeq:de",
     "num_filters": 7,
@@ -20,6 +19,7 @@
     "asymmetric_loss": true,
     "mixed_phase": {
       "max_fir_length_ms": 6.0
-    }
+    },
+    "processing_mode": "low_latency"
   }
 }

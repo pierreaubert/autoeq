@@ -18,7 +18,6 @@
     }
   },
   "optimizer": {
-    "mode": "mixed",
     "loss_type": "flat",
     "fir": {
       "taps": 256,
@@ -40,7 +39,8 @@
     "refine": true,
     "local_algo": "cobyla",
     "psychoacoustic": true,
-    "asymmetric_loss": true
+    "asymmetric_loss": true,
+    "processing_mode": "hybrid"
   },
   "crossovers": {
     "first": {

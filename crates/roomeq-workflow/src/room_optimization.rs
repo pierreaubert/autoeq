@@ -676,6 +676,7 @@ fn apply_inter_channel_timbre_matching_stage(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn assemble_workflow_result(
     mut result: RoomOptimizationResult,
     config: &RoomConfig,
@@ -1272,12 +1273,17 @@ fn assemble_workflow_result(
             .with_overall_progress(0.98),
         )?;
     }
+    // The runtime acceptance gate reads FIR temporal-masking evidence; stages
+    // that add FIR taps late (e.g. redirected bass) must have that evidence
+    // computed before the gate runs, not only in the post-gate refresh.
+    refresh_temporal_ir_evidence(&mut result, config, sample_rate);
     room_optimization_result::apply_final_correction_safety_gate(
         &mut result,
         sample_rate,
         config.optimizer.smooth_n,
         (config.optimizer.min_freq, config.optimizer.max_freq),
         output_dir.unwrap_or(Path::new(".")),
+        config.optimizer.processing_mode.clone(),
     );
 
     emit_pipeline_event(
@@ -1795,7 +1801,10 @@ fn assemble_generic_result(
                 roomeq_engine::spectral_align::create_alignment_filters(result, sample_rate);
 
             let (apply_shelves, apply_gain) = if channel_results.contains_key(channel_name) {
-                let (score_min, score_max) = final_score_band_for_channel(config, channel_name);
+                // No topology result yet at this stage: the applied crossover
+                // is unknown, so fall back to the configured static value.
+                let (score_min, score_max) =
+                    final_score_band_for_channel(config, channel_name, None);
                 let shelves_ok = should_apply_spectral_shelves(
                     &curves,
                     channel_name,
@@ -2603,12 +2612,14 @@ fn assemble_generic_result(
         )?;
     }
 
+    refresh_temporal_ir_evidence(&mut result, config, sample_rate);
     room_optimization_result::apply_final_correction_safety_gate(
         &mut result,
         sample_rate,
         config.optimizer.smooth_n,
         (config.optimizer.min_freq, config.optimizer.max_freq),
         output_dir.unwrap_or(Path::new(".")),
+        config.optimizer.processing_mode.clone(),
     );
 
     emit_pipeline_event(

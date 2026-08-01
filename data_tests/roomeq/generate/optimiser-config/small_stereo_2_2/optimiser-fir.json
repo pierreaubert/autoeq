@@ -31,12 +31,11 @@
     }
   },
   "optimizer": {
-    "mode": "fir",
     "fir": {
       "taps": 4096,
       "phase": "kirkeby"
     },
-    "processing_mode": "low_latency",
+    "processing_mode": "phase_linear",
     "loss_type": "flat",
     "algorithm": "autoeq:de",
     "num_filters": 7,

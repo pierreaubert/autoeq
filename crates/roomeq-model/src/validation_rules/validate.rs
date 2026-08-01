@@ -112,7 +112,6 @@ fn validate_room_config_rules(config: &RoomConfig) -> ValidationResult {
         && let Some(ref tr) = config.optimizer.target_response
     {
         let has_shape = tr.shape != TargetShape::Flat
-            || tr.slope_db_per_octave.abs() > 1e-6
             || tr.preference.bass_shelf_db.abs() > 1e-6
             || tr.preference.treble_shelf_db.abs() > 1e-6
             || tr.broadband_precorrection;

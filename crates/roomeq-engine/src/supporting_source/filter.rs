@@ -463,4 +463,54 @@ mod tests {
         assert!(result.drr_before_db.is_none());
         assert!(result.drr_after_db.is_none());
     }
+
+    #[test]
+    fn normalization_gain_roundtrip_restores_designed_response() {
+        // The deployed graph convolves with the peak-normalized taps and
+        // applies `normalization_gain_db` as a separate gain stage. The
+        // product must reproduce the designed filter magnitude
+        // (`support_gain_db`) at every in-band frequency bin.
+        let freq = Array1::logspace(10.0, f64::log10(100.0), f64::log10(10000.0), 100);
+        let primary = flat_curve(freq.as_slice().unwrap(), 0.0);
+        let support = flat_curve(freq.as_slice().unwrap(), 0.0);
+        let mut target = primary.clone();
+        target.spl += 6.0;
+        let config = SupportingSourceConfig {
+            decorrelation: SupportingSourceDecorrelation::None,
+            ..Default::default()
+        };
+        let result =
+            compute_supporting_source_filter(&primary, &support, &target, &config, 48000.0)
+                .unwrap();
+
+        // Exported taps are peak-normalized; the removed level is exported as
+        // a finite dB gain for the deployed graph's gain stage.
+        let max_abs = result.taps.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
+        assert!(
+            (max_abs - 1.0).abs() < 1e-12,
+            "taps must be peak-normalized, max_abs={max_abs}"
+        );
+        assert!(result.normalization_gain_db.is_finite());
+
+        // Numerically evaluate the deployed chain: gain stage x normalized FIR.
+        let sample_rate = 48000.0;
+        let mut worst_err_db = 0.0_f64;
+        for (i, &f) in freq.iter().enumerate().skip(3).take(94) {
+            let omega = 2.0 * std::f64::consts::PI * f / sample_rate;
+            let (mut re, mut im) = (0.0_f64, 0.0_f64);
+            for (t, &tap) in result.taps.iter().enumerate() {
+                re += tap * (omega * t as f64).cos();
+                im -= tap * (omega * t as f64).sin();
+            }
+            let deployed_db = 20.0 * (re * re + im * im).sqrt().max(1e-12).log10()
+                + result.normalization_gain_db;
+            worst_err_db = worst_err_db.max((deployed_db - result.support_gain_db[i]).abs());
+        }
+        assert!(
+            worst_err_db < 0.5,
+            "gain stage x normalized FIR must reproduce the designed support gain; \
+             worst error {worst_err_db:.3} dB (normalization_gain_db={:.2} dB)",
+            result.normalization_gain_db
+        );
+    }
 }

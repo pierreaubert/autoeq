@@ -45,6 +45,7 @@ fn preprocessed(curve: &Curve) -> PreprocessedFeatures {
         broadband_mean_shift: 0.0,
         broadband_enabled: false,
         norm_range: Some((20.0, 20_000.0)),
+        score_min_freq: 20.0,
     }
 }
 

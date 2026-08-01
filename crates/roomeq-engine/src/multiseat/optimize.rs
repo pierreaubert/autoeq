@@ -26,6 +26,7 @@ use super::types::ModalBasis;
 use super::types::MsoSolution;
 use super::types::MultiSeatOptimizationResult;
 use super::types::log_mso_regression_breakdown;
+use super::types::mso_resource_penalty;
 use crate::error::{AutoeqError, Result};
 use log::{debug, info, warn};
 use ndarray::Array1;
@@ -442,6 +443,13 @@ pub(super) fn optimize_continuous_mso(
 }
 
 /// Optimize for minimum variance across seats
+///
+/// The search objective augments pure seat variance with the shared MSO
+/// resource penalty (output preservation, headroom pressure, low-extension
+/// preservation). Without it, degenerate solutions that *mute* the combined
+/// output (e.g. inverting one of two identical subs so both cancel) win on
+/// variance alone: silence has zero seat-to-seat variance. The reported
+/// before/after objective stays the pure variance metric.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn optimize_minimize_variance(
     interpolated: &[Vec<Vec<Complex64>>],
@@ -451,7 +459,7 @@ pub(super) fn optimize_minimize_variance(
     sample_rate: f64,
     min_freq: f64,
     max_freq: f64,
-    _objective_context: &MsoObjectiveContext,
+    objective_context: &MsoObjectiveContext,
 ) -> MsoSolution {
     let options = MsoSearchOptions::from_config(config, min_freq, max_freq);
     optimize_continuous_mso(
@@ -469,7 +477,7 @@ pub(super) fn optimize_minimize_variance(
                 min_freq,
                 max_freq,
             );
-            variance_from_responses(&r)
+            variance_from_responses(&r) + mso_resource_penalty(&r, objective_context)
         },
     )
 }

@@ -60,6 +60,35 @@ pub(in super::super) fn total_chain_delay_ms(chain: &ChannelDspChain) -> f64 {
         .sum()
 }
 
+/// Delay added by the arrival-time alignment stage only.
+///
+/// Later stages add their own intentional delays — bass-management routing
+/// (`route_owned`) and crossover phase alignment (`phase_alignment`) — which
+/// deliberately trade time alignment for summation and must not be read as
+/// arrival misalignment by the timing diagnostics.
+pub(in super::super) fn time_alignment_chain_delay_ms(chain: &ChannelDspChain) -> f64 {
+    const INTENTIONAL_STAGES: [&str; 2] = ["route_owned", "phase_alignment"];
+    chain
+        .plugins
+        .iter()
+        .filter(|plugin| plugin.plugin_type == "delay")
+        .filter(|plugin| {
+            let stage = plugin
+                .parameters
+                .get("room_eq_stage")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            !INTENTIONAL_STAGES.contains(&stage)
+        })
+        .filter_map(|plugin| {
+            plugin
+                .parameters
+                .get("delay_ms")
+                .and_then(|value| value.as_f64())
+        })
+        .sum()
+}
+
 pub(in super::super) fn compute_phase_alignment_delay_schedule(
     phase_alignment_results: &HashMap<String, (f64, bool, String)>,
 ) -> HashMap<String, f64> {

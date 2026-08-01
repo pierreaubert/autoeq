@@ -396,7 +396,15 @@ pub fn rule_schroeder_split(ctx: &mut ValidationContext<'_>) {
         .opt
         .target_response
         .as_ref()
-        .map(|t| t.slope_db_per_octave.abs() > f64::EPSILON)
+        .map(|t| match t.shape {
+            // Mirrors build_complete_target_curve: Harman always carries a
+            // -0.8 dB/oct tilt, Custom reads the slope field, and every
+            // other shape (notably Flat, whose slope field keeps the inert
+            // -0.8 default) has no effective tilt.
+            crate::config::TargetShape::Harman => true,
+            crate::config::TargetShape::Custom => t.slope_db_per_octave.abs() > f64::EPSILON,
+            _ => false,
+        })
         .unwrap_or(false);
     if has_slope {
         ctx.add_warning(
@@ -1225,6 +1233,9 @@ mod optimizer_rule_tests {
             ..Default::default()
         });
         config.target_response = Some(crate::roomeq::types::TargetResponseConfig {
+            // Custom is the only shape that reads `slope_db_per_octave`;
+            // the Flat default ignores it.
+            shape: crate::roomeq::types::TargetShape::Custom,
             slope_db_per_octave: 1.0,
             ..Default::default()
         });
@@ -1232,6 +1243,132 @@ mod optimizer_rule_tests {
         assert!(result.warnings.iter().any(|w| {
             w.contains("schroeder_split is enabled together with a non-zero target slope")
         }));
+    }
+
+    #[test]
+    fn rule_schroeder_split_harman_shape_warns() {
+        // Harman always carries a -0.8 dB/oct tilt even though the slope
+        // field is not read for that shape.
+        let mut config = default_config();
+        config.schroeder_split = Some(crate::roomeq::types::SchroederSplitConfig {
+            enabled: true,
+            ..Default::default()
+        });
+        config.target_response = Some(crate::roomeq::types::TargetResponseConfig {
+            shape: crate::roomeq::types::TargetShape::Harman,
+            ..Default::default()
+        });
+        let result = run_rule(rule_schroeder_split, &config);
+        assert!(result.warnings.iter().any(|w| {
+            w.contains("schroeder_split is enabled together with a non-zero target slope")
+        }));
+    }
+
+    #[test]
+    fn rule_schroeder_split_flat_default_is_silent() {
+        // The Flat shape ignores `slope_db_per_octave`; its inert -0.8
+        // default must not trigger the warning.
+        let mut config = default_config();
+        config.schroeder_split = Some(crate::roomeq::types::SchroederSplitConfig {
+            enabled: true,
+            ..Default::default()
+        });
+        config.target_response = Some(crate::roomeq::types::TargetResponseConfig::default());
+        let result = run_rule(rule_schroeder_split, &config);
+        assert!(result.warnings.iter().all(|w| {
+            !w.contains("schroeder_split is enabled together with a non-zero target slope")
+        }));
+    }
+
+    #[test]
+    fn rule_mixed_config_fir_band_high_crossover_bounds() {
+        let mut config = default_config();
+        config.mixed_config = Some(crate::roomeq::types::MixedModeConfig {
+            crossover_freq: 5.0,
+            crossover_type: "LR24".to_string(),
+            fir_band: "high".to_string(),
+        });
+        config.processing_mode = crate::roomeq::types::ProcessingMode::Hybrid;
+        config.min_freq = 20.0;
+        config.max_freq = 20000.0;
+        let result = run_rule(rule_mixed_config, &config);
+        assert!(result.errors.iter().any(|e| {
+            e.contains("fir_band='high', crossover_freq (5) must be greater than min_freq")
+        }));
+
+        let mut config = default_config();
+        config.mixed_config = Some(crate::roomeq::types::MixedModeConfig {
+            crossover_freq: 25000.0,
+            crossover_type: "LR24".to_string(),
+            fir_band: "high".to_string(),
+        });
+        config.processing_mode = crate::roomeq::types::ProcessingMode::Hybrid;
+        config.min_freq = 20.0;
+        config.max_freq = 20000.0;
+        let result = run_rule(rule_mixed_config, &config);
+        assert!(result.errors.iter().any(|e| {
+            e.contains("fir_band='high', crossover_freq (25000) must be less than max_freq")
+        }));
+    }
+
+    #[test]
+    fn rule_asymmetric_loss_config_negative_weights_errors() {
+        let mut config = default_config();
+        config.asymmetric_loss_config = Some(crate::AsymmetricLossConfig {
+            peak_weight: -1.0,
+            ..Default::default()
+        });
+        let result = run_rule(rule_asymmetric_loss, &config);
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.contains("asymmetric_loss_config weights must be non-negative")));
+    }
+
+    #[test]
+    fn rule_early_late_correction_window_order_errors() {
+        let mut config = default_config();
+        config.early_late_correction = Some(crate::config::EarlyLateCorrectionConfig {
+            enabled: true,
+            direct_window_ms: 10.0,
+            early_window_ms: 5.0,
+            ..Default::default()
+        });
+        let result = run_rule(rule_early_late_correction, &config);
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.contains("windows must satisfy 0 < direct < early < late")));
+    }
+
+    #[test]
+    fn rule_auto_optimizer_min_filters_zero_errors() {
+        let mut config = default_config();
+        config.auto_optimizer = Some(crate::config::AutoOptimizerConfig {
+            enabled: true,
+            min_filters: 0,
+            ..Default::default()
+        });
+        let result = run_rule(rule_auto_optimizer, &config);
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.contains("auto_optimizer.min_filters must be at least 1")));
+    }
+
+    #[test]
+    fn rule_multi_seat_max_deviation_negative_errors() {
+        let mut config = default_config();
+        config.multi_seat = Some(crate::roomeq::types::MultiSeatConfig {
+            enabled: true,
+            max_deviation_db: -1.0,
+            ..Default::default()
+        });
+        let result = run_rule(rule_multi_seat, &config);
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.contains("multi_seat.max_deviation_db (-1) must be non-negative")));
     }
 
     #[test]

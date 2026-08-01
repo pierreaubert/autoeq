@@ -113,9 +113,12 @@ pub(super) fn validate_option_effect(
             option_config,
             num_options,
         ),
-        OptionOverride::PhaseAlignment => {
-            validate_phase_alignment(baseline_result, option_result, num_options)
-        }
+        OptionOverride::PhaseAlignment => validate_phase_alignment(
+            baseline_result,
+            option_result,
+            num_options,
+            all_options.iter().any(OptionOverride::reshapes_target),
+        ),
         OptionOverride::MultiMeasurementMinimax => {
             validate_multi_measurement_minimax(baseline_result, option_result, num_options)
         }
@@ -1089,6 +1092,7 @@ pub(super) fn validate_phase_alignment(
     baseline_result: &RoomOptimizationResult,
     option_result: &RoomOptimizationResult,
     num_options: usize,
+    target_reshaped: bool,
 ) -> (bool, String) {
     // Check that at least one channel has a delay plugin
     let has_delay = option_result.channels.values().any(|chain| {
@@ -1101,8 +1105,16 @@ pub(super) fn validate_phase_alignment(
     // In combos with multiple options, allow more tolerance since shared mean SPL
     // and decomposed correction defaults shift absolute scores.
     let tolerance = OPTION_SCORE_TOLERANCE + (num_options.saturating_sub(1) as f64) * 0.15;
-    let score_ok = option_result.combined_post_score
-        <= tolerance * baseline_result.combined_post_score + OPTION_SCORE_ABSOLUTE_SLACK;
+    // When companion options reshape the target (tilt, broadband matching), the
+    // option run's flat-loss score inflates by design and a flat-loss ratio
+    // against the flat-target baseline cannot isolate phase alignment's effect;
+    // only require a finite score in that case.
+    let score_ok = if target_reshaped {
+        option_result.combined_post_score.is_finite()
+    } else {
+        option_result.combined_post_score
+            <= tolerance * baseline_result.combined_post_score + OPTION_SCORE_ABSOLUTE_SLACK
+    };
 
     let pass = score_ok; // delay presence is informational, not required
     let delay_str = if has_delay {
@@ -1114,12 +1126,15 @@ pub(super) fn validate_phase_alignment(
     (
         pass,
         format!(
-            "{}: baseline={:.4} aligned={:.4} (limit={:.1}x + {:.2})",
+            "{}: baseline={:.4} aligned={:.4} ({})",
             delay_str,
             baseline_result.combined_post_score,
             option_result.combined_post_score,
-            tolerance,
-            OPTION_SCORE_ABSOLUTE_SLACK,
+            if target_reshaped {
+                "flat-ratio gate skipped: target reshaped".to_string()
+            } else {
+                format!("limit={:.1}x + {:.2}", tolerance, OPTION_SCORE_ABSOLUTE_SLACK)
+            }
         ),
     )
 }

@@ -114,6 +114,15 @@ pub(in super::super) fn apply_phase_alignment_delay_schedule(
     for (channel_name, delay_ms) in &schedule {
         let applied = if let Some(chain) = channel_chains.get_mut(channel_name.as_str()) {
             output::add_delay_plugin(chain, *delay_ms);
+            // Tag the stage so timing diagnostics can tell intentional
+            // crossover phase-alignment delays apart from the arrival-time
+            // alignment they would otherwise masquerade as.
+            if let Some(plugin) = chain.plugins.first_mut() {
+                plugin.parameters["label"] =
+                    serde_json::Value::String("room_eq_phase_alignment".to_string());
+                plugin.parameters["room_eq_stage"] =
+                    serde_json::Value::String("phase_alignment".to_string());
+            }
             true
         } else {
             false

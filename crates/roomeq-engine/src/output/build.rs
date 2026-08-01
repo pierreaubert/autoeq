@@ -727,6 +727,7 @@ pub fn build_mixed_mode_crossover_chain(
 /// Returns `(primary_chain, support_chain)`. The primary chain is left empty
 /// (direct sound untouched) and the support chain contains the delay and the
 /// convolution plugin referencing the FIR WAV file.
+#[allow(clippy::too_many_arguments)]
 pub fn build_supporting_source_dsp_chains(
     logical_channel: &str,
     support_channel_name: &str,

@@ -403,3 +403,48 @@ fn test_continuous_mso_returns_valid_solution() {
     assert!(delays[1] >= MSO_DELAY_MIN_MS && delays[1] <= MSO_DELAY_MAX_MS);
     let _ = (has_fractional_gain, has_fractional_delay);
 }
+
+#[test]
+fn test_minimize_variance_does_not_collapse_identical_subs() {
+    // Both subs measure identically at each seat (the seats differ from each
+    // other). Pure seat-variance minimization can "win" by inverting one sub
+    // so the pair cancels to silence; the resource penalty in the search
+    // objective must keep the combined output audible.
+    let seat0 = create_test_curve(0.0, 0.0);
+    let seat1 = create_test_curve(2.0, 10.0);
+    let measurements = vec![
+        vec![seat0.clone(), seat1.clone()],
+        vec![seat0, seat1],
+    ];
+    let ms = MultiSeatMeasurements::new(measurements).expect("Should create");
+
+    let config = MultiSeatConfig {
+        enabled: true,
+        strategy: MultiSeatStrategy::MinimizeVariance,
+        optimize_polarity: true,
+        ..Default::default()
+    };
+    let result =
+        optimize_multiseat(&ms, &config, (20.0, 120.0), 48000.0).expect("Should optimize");
+
+    let freqs = create_eval_frequency_grid(&ms, 20.0, 120.0);
+    let interpolated = interpolate_all_measurements(&ms, &freqs).expect("Should interpolate");
+    let responses = compute_combined_responses(
+        &interpolated,
+        &freqs,
+        &result.gains,
+        &result.delays,
+        &result.polarities,
+        &result.allpass_filters,
+        48000.0,
+        20.0,
+        120.0,
+    );
+    let sample_count = responses.iter().map(Vec::len).sum::<usize>().max(1) as f64;
+    let mean_level = responses.iter().flatten().sum::<f64>() / sample_count;
+    assert!(
+        mean_level > 60.0,
+        "MSO collapsed the combined output (mean level {mean_level:.1} dB); \
+         variance minimization must not mute the system"
+    );
+}

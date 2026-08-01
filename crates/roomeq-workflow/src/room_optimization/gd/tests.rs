@@ -3,7 +3,7 @@ use super::misc::{
     corrected_realisation_to_gd_input, existing_fir_convolution_filename,
     gd_phase_response_for_curve, interpolate_optional_array_log, source_for_output_channel,
 };
-use super::{try_run_gd_opt, try_run_phase_linear_fir_gd};
+use super::{effective_optimize_polarity, try_run_gd_opt, try_run_phase_linear_fir_gd};
 use crate::room_optimization::types::ChannelOptimizationResult;
 use math_audio_iir_fir::{Biquad, BiquadFilterType};
 use ndarray::Array1;
@@ -111,6 +111,17 @@ fn optimizer_with_gd(gd: GroupDelayOptimizationConfig) -> OptimizerConfig {
         seed: Some(42),
         ..Default::default()
     }
+}
+
+#[test]
+fn missing_coherence_gates_polarity_off_in_both_gd_paths() {
+    // The IIR path gates polarity inline; the FIR path (and any future path)
+    // must apply the same rule through the shared helper so the
+    // `missing_coherence_delay_only` advisory is honest.
+    assert!(effective_optimize_polarity(true, false));
+    assert!(!effective_optimize_polarity(true, true));
+    assert!(!effective_optimize_polarity(false, false));
+    assert!(!effective_optimize_polarity(false, true));
 }
 
 #[test]
@@ -1062,7 +1073,9 @@ fn try_run_phase_linear_fir_gd_missing_coherence_delay_only() {
     );
     let mut config = room_config_with_in_memory_speakers(speakers);
     config.optimizer.processing_mode = roomeq_model::ProcessingMode::PhaseLinear;
-    config.optimizer = optimizer_with_gd(gd_config_with_small_budget());
+    let mut gd = gd_config_with_small_budget();
+    gd.optimize_polarity = true;
+    config.optimizer = optimizer_with_gd(gd);
     config.optimizer.fir = Some(roomeq_model::FirConfig {
         taps: 64,
         ..Default::default()
@@ -1072,7 +1085,13 @@ fn try_run_phase_linear_fir_gd_missing_coherence_delay_only() {
     let mut left = channel_result("left", 2.0);
     left.final_curve.coherence = None;
     left.initial_curve.coherence = None;
-    let mut right = channel_result("right", 0.0);
+    // Anti-phase right channel: same GD slope as left but shifted 180 degrees,
+    // so a polarity flip is the only control that could "align" the sum.
+    // With coherence missing, that flip must stay gated off (delay-only),
+    // exactly like the IIR GD path.
+    let mut right = channel_result("right", 2.0);
+    right.final_curve.phase = right.final_curve.phase.map(|p| p + 180.0);
+    right.initial_curve.phase = right.initial_curve.phase.map(|p| p + 180.0);
     right.final_curve.coherence = None;
     right.initial_curve.coherence = None;
     channel_results.insert("left".to_string(), left);
@@ -1088,6 +1107,14 @@ fn try_run_phase_linear_fir_gd_missing_coherence_delay_only() {
     )
     .unwrap();
     assert!(summary.advisory.contains("missing_coherence_delay_only"));
+    assert!(
+        summary
+            .per_channel_polarity_inverted
+            .iter()
+            .all(|inverted| !inverted),
+        "missing coherence must gate polarity optimization off (delay-only), got {:?}",
+        summary.per_channel_polarity_inverted
+    );
 }
 
 #[test]

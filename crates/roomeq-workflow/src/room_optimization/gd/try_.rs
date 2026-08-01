@@ -6,6 +6,16 @@ use super::misc::coherence_average_gd_realisations;
 use super::misc::existing_fir_convolution_filename;
 use super::misc::tag_group_delay_plugin;
 
+/// Polarity optimization requires trusted phase (coherence). Both GD paths
+/// must gate it off under missing coherence, matching the
+/// `missing_coherence_delay_only` advisory they report.
+pub(in super::super) fn effective_optimize_polarity(
+    user_optimize_polarity: bool,
+    missing_coherence: bool,
+) -> bool {
+    user_optimize_polarity && !missing_coherence
+}
+
 /// Attempt to run GD-Opt v2 on the channel results.
 ///
 /// Returns `Some(GroupDelayOptSummary)` if GD-Opt was attempted (success or
@@ -404,7 +414,10 @@ pub(in super::super) fn try_run_phase_linear_fir_gd(
         ap_max_freq: 300.0,
         ap_min_q: gd_user_config.ap_min_q,
         ap_max_q: gd_user_config.ap_max_q,
-        optimize_polarity: gd_user_config.optimize_polarity,
+        optimize_polarity: effective_optimize_polarity(
+            gd_user_config.optimize_polarity,
+            missing_coherence,
+        ),
         algorithm: config.optimizer.algorithm.clone(),
         strategy: config.optimizer.strategy.clone(),
         max_iter: gd_user_config.max_iter,

@@ -17,6 +17,7 @@ use super::multi_seat_measurements::create_eval_frequency_grid;
 use super::optimize::optimize_continuous_mso;
 use super::primary::primary_constrained_from_responses;
 use super::types::ModalBasis;
+use super::types::mso_resource_penalty;
 use crate::Curve;
 use ndarray::Array1;
 use num_complex::Complex64;
@@ -112,6 +113,33 @@ fn test_average_objective_rejects_output_collapse() {
         average_perceptual_from_responses(&collapsed_but_flat, &context)
             > average_perceptual_from_responses(&slightly_rippled_preserved, &context),
         "MSO average objective should prefer small ripple over large broadband output loss"
+    );
+}
+
+#[test]
+fn test_minimize_variance_search_objective_rejects_output_collapse() {
+    // Polarity-cancelling two identical subs mutes the system; silence has
+    // near-zero seat-to-seat variance, so the *pure* variance metric prefers
+    // it. The penalized search objective must prefer the preserved solution.
+    let preserved = vec![vec![92.0, 88.0, 91.0], vec![90.0, 89.5, 87.0]];
+    let collapsed = vec![
+        vec![-160.0, -161.0, -159.5],
+        vec![-160.5, -160.0, -161.0],
+    ];
+    let context = MsoObjectiveContext::from_baseline(&preserved);
+
+    assert!(
+        variance_from_responses(&collapsed) < variance_from_responses(&preserved),
+        "pure variance should (wrongly) prefer the collapsed output"
+    );
+    let collapsed_objective =
+        variance_from_responses(&collapsed) + mso_resource_penalty(&collapsed, &context);
+    let preserved_objective =
+        variance_from_responses(&preserved) + mso_resource_penalty(&preserved, &context);
+    assert!(
+        collapsed_objective > preserved_objective,
+        "penalized search objective should prefer preserved output: \
+         collapsed={collapsed_objective}, preserved={preserved_objective}"
     );
 }
 

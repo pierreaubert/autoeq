@@ -45,17 +45,31 @@ pub(in super::super) fn build_timing_diagnostics(
     for (name, arrival_ms) in arrivals_ms {
         let applied_delay_ms = chains.get(name).map(total_chain_delay_ms).unwrap_or(0.0);
         let final_arrival_ms = arrival_ms + applied_delay_ms;
-        channels.push(roomeq_engine::home_cinema::ChannelTimingReport {
-            name: name.clone(),
-            role: roomeq_engine::home_cinema::role_for_channel(name),
-            measured_arrival_ms: *arrival_ms,
-            acoustic_distance_m: arrival_ms * 0.343,
-            applied_delay_ms,
-            final_arrival_ms,
-            final_offset_from_reference_ms: 0.0,
-        });
+        // The after-spread grades the arrival-time alignment stage, so it is
+        // computed without the intentional routing / crossover phase-alignment
+        // delays that later stages add on purpose. Per-channel
+        // `applied_delay_ms` / `final_arrival_ms` still report the deployed
+        // total latency.
+        let aligned_delay_ms = chains
+            .get(name)
+            .map(time_alignment_chain_delay_ms)
+            .unwrap_or(0.0);
+        channels.push((
+            aligned_delay_ms,
+            roomeq_engine::home_cinema::ChannelTimingReport {
+                name: name.clone(),
+                role: roomeq_engine::home_cinema::role_for_channel(name),
+                measured_arrival_ms: *arrival_ms,
+                acoustic_distance_m: arrival_ms * 0.343,
+                applied_delay_ms,
+                final_arrival_ms,
+                final_offset_from_reference_ms: 0.0,
+            },
+        ));
     }
-    channels.sort_by(|a, b| a.name.cmp(&b.name));
+    channels.sort_by(|a, b| a.1.name.cmp(&b.1.name));
+    let aligned_delays: Vec<f64> = channels.iter().map(|(delay, _)| *delay).collect();
+    let mut channels: Vec<_> = channels.into_iter().map(|(_, report)| report).collect();
 
     let before_values: Vec<f64> = channels
         .iter()
@@ -63,7 +77,8 @@ pub(in super::super) fn build_timing_diagnostics(
         .collect();
     let after_values: Vec<f64> = channels
         .iter()
-        .map(|channel| channel.final_arrival_ms)
+        .zip(&aligned_delays)
+        .map(|(channel, aligned_delay_ms)| channel.measured_arrival_ms + aligned_delay_ms)
         .collect();
     let arrival_spread_before_ms = spread(&before_values).unwrap_or(0.0);
     let arrival_spread_after_ms = spread(&after_values).unwrap_or(0.0);
@@ -71,12 +86,13 @@ pub(in super::super) fn build_timing_diagnostics(
     let reference_channel = reference_arrival_ms.and_then(|reference| {
         channels
             .iter()
-            .find(|channel| (channel.final_arrival_ms - reference).abs() < 1e-6)
-            .map(|channel| channel.name.clone())
+            .zip(&after_values)
+            .find(|(_, aligned)| (*aligned - reference).abs() < 1e-6)
+            .map(|(channel, _)| channel.name.clone())
     });
     if let Some(reference) = reference_arrival_ms {
-        for channel in &mut channels {
-            channel.final_offset_from_reference_ms = channel.final_arrival_ms - reference;
+        for (channel, aligned) in channels.iter_mut().zip(&after_values) {
+            channel.final_offset_from_reference_ms = aligned - reference;
         }
     }
 
@@ -113,6 +129,68 @@ mod tests {
     use super::*;
 
     #[test]
+    fn perceptual_policy_report_none_by_default() {
+        assert!(build_perceptual_policy_report(&RoomConfig::default()).is_none());
+    }
+
+    #[test]
+    fn perceptual_policy_report_reflects_configured_policy() {
+        let mut config = RoomConfig::default();
+        config.optimizer.perceptual_policy = Some(roomeq_model::PerceptualPolicyConfig {
+            preset: roomeq_model::PerceptualPolicyPreset::Reference,
+            ..Default::default()
+        });
+
+        let report = build_perceptual_policy_report(&config).expect("policy report");
+
+        assert_eq!(
+            report.preset,
+            roomeq_model::PerceptualPolicyPreset::Reference
+        );
+        assert_eq!(report.loss_type, config.optimizer.loss_type);
+        assert_eq!(
+            report.high_frequency_correction,
+            config.optimizer.high_frequency_correction
+        );
+    }
+
+    #[test]
+    fn bootstrap_uncertainty_report_none_by_default() {
+        assert!(build_bootstrap_uncertainty_report(&RoomConfig::default()).is_none());
+    }
+
+    #[test]
+    fn bootstrap_uncertainty_report_marks_spatial_robustness_depth_mask() {
+        let mut config = RoomConfig::default();
+        config.optimizer.multi_measurement = Some(roomeq_model::MultiMeasurementConfig {
+            strategy: roomeq_model::MultiMeasurementStrategy::SpatialRobustness,
+            bootstrap_uncertainty: Some(roomeq_model::BootstrapUncertaintyConfig::default()),
+            ..Default::default()
+        });
+
+        let report = build_bootstrap_uncertainty_report(&config).expect("bootstrap report");
+
+        assert!(report.used_for_correction_depth_mask);
+        assert_eq!(
+            report.num_resamples,
+            roomeq_model::BootstrapUncertaintyConfig::default().num_resamples
+        );
+    }
+
+    #[test]
+    fn bootstrap_uncertainty_report_unmasks_non_spatial_robustness() {
+        let mut config = RoomConfig::default();
+        config.optimizer.multi_measurement = Some(roomeq_model::MultiMeasurementConfig {
+            bootstrap_uncertainty: Some(roomeq_model::BootstrapUncertaintyConfig::default()),
+            ..Default::default()
+        });
+
+        let report = build_bootstrap_uncertainty_report(&config).expect("bootstrap report");
+
+        assert!(!report.used_for_correction_depth_mask);
+    }
+
+    #[test]
     fn timing_diagnostics_returns_none_without_arrivals() {
         assert!(
             build_timing_diagnostics(&RoomConfig::default(), &HashMap::new(), &HashMap::new())
@@ -142,5 +220,59 @@ mod tests {
                 .iter()
                 .any(|advisory| advisory == "post_dsp_arrivals_not_aligned")
         );
+    }
+
+    #[test]
+    fn timing_diagnostics_excludes_intentional_stage_delays_from_after_spread() {
+        // Arrival-time alignment brings both channels to the same arrival.
+        // A later phase-alignment stage then delays one channel by nearly a
+        // full crossover period on purpose; the after-spread must grade the
+        // time-alignment stage only, while per-channel latency still reports
+        // the deployed total.
+        let arrivals = HashMap::from([("R".to_string(), 12.0), ("L".to_string(), 10.0)]);
+        let delay_plugin = |delay_ms: f64, stage: Option<&str>| {
+            let mut parameters = serde_json::json!({"delay_ms": delay_ms});
+            if let Some(stage) = stage {
+                parameters["room_eq_stage"] = serde_json::Value::String(stage.to_string());
+            }
+            roomeq_model::PluginConfigWrapper {
+                plugin_type: "delay".to_string(),
+                parameters,
+            }
+        };
+        let chain = |plugins| roomeq_model::ChannelDspChain {
+            channel: String::new(),
+            plugins,
+            drivers: None,
+            initial_curve: None,
+            final_curve: None,
+            eq_response: None,
+            target_curve: None,
+            pre_ir: None,
+            post_ir: None,
+            fir_temporal_masking: None,
+            direct_early_late_correction: None,
+        };
+        let chains = HashMap::from([
+            ("R".to_string(), chain(vec![])),
+            (
+                "L".to_string(),
+                chain(vec![
+                    delay_plugin(2.0, None),
+                    delay_plugin(14.756, Some("phase_alignment")),
+                    delay_plugin(20.0, Some("route_owned")),
+                ]),
+            ),
+        ]);
+
+        let report = build_timing_diagnostics(&RoomConfig::default(), &arrivals, &chains)
+            .expect("timing report");
+
+        assert!(report.arrival_spread_after_ms.abs() < 1e-12);
+        let left = &report.channels[0];
+        assert_eq!(left.name, "L");
+        assert!((left.applied_delay_ms - 36.756).abs() < 1e-9);
+        assert!((left.final_arrival_ms - 46.756).abs() < 1e-9);
+        assert!((left.final_offset_from_reference_ms - 0.0).abs() < 1e-12);
     }
 }

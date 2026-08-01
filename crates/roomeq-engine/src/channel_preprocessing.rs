@@ -22,6 +22,10 @@ pub struct PreprocessedFeatures {
     pub broadband_mean_shift: f64,
     pub broadband_enabled: bool,
     pub norm_range: Option<(f64, f64)>,
+    /// Lower edge of the flatness-score band. Raised to the excursion
+    /// protection HPF frequency when active so the intentional protective
+    /// rolloff is not scored as response error.
+    pub score_min_freq: f64,
 }
 
 pub struct BroadbandPreCorrection {
@@ -71,7 +75,19 @@ pub fn preprocess_channel(
         target.min_freq,
         target.max_freq,
     );
-    let pre_score = flatness_score_in_range(&curve, target.min_freq, target.max_freq);
+    // Score from the excursion HPF upward: the protective rolloff below it is
+    // intentional and must not be counted as response error (same treatment as
+    // the bass-management crossover in the report refresh path).
+    let excursion_hpf_hz = excursion_filters
+        .iter()
+        .filter(|f| f.filter_type == BiquadFilterType::Highpass)
+        .map(|f| f.freq)
+        .filter(|f| f.is_finite() && *f > 0.0)
+        .reduce(f64::max);
+    let score_min_freq = excursion_hpf_hz.map_or(target.min_freq, |hz| {
+        target.min_freq.max(hz).min(target.max_freq)
+    });
+    let pre_score = flatness_score_in_range(&curve, score_min_freq, target.max_freq);
     let channel_mean_spl = roomeq_analysis::response_metrics::mean_response_in_range(
         &curve,
         target.min_freq,
@@ -106,6 +122,7 @@ pub fn preprocess_channel(
         broadband_mean_shift: broadband.mean_shift,
         broadband_enabled,
         norm_range,
+        score_min_freq,
     }
 }
 
@@ -502,6 +519,55 @@ mod tests {
             apply_excursion_filters_to_curve(curve.clone(), &filters, 48_000.0).spl,
             curve.spl
         );
+    }
+
+    #[test]
+    fn excursion_protection_raises_score_band_floor() {
+        let curve = flat_curve();
+        let prepared = prepared(curve.clone());
+        let config = RoomConfig {
+            optimizer: OptimizerConfig {
+                min_freq: 20.0,
+                max_freq: 500.0,
+                excursion_protection: Some(ExcursionProtectionConfig {
+                    enabled: true,
+                    auto_detect_f3: false,
+                    manual_f3_hz: Some(60.0),
+                    ..ExcursionProtectionConfig::default()
+                }),
+                ..OptimizerConfig::default()
+            },
+            ..RoomConfig::default()
+        };
+        let mut target = crate::channel_target::build_target_context("left", &config, &curve, None);
+        let features = preprocess_channel("left", &prepared, &config, 48_000.0, None, &mut target);
+
+        assert!(
+            features.score_min_freq > 20.0,
+            "score band must start at the excursion HPF, got {}",
+            features.score_min_freq
+        );
+        assert!(features.score_min_freq <= 500.0);
+        let expected =
+            flatness_score_in_range(&features.curve, features.score_min_freq, 500.0);
+        assert_eq!(target.pre_score, expected);
+    }
+
+    #[test]
+    fn no_excursion_protection_keeps_optimizer_score_band() {
+        let curve = flat_curve();
+        let prepared = prepared(curve.clone());
+        let config = RoomConfig {
+            optimizer: OptimizerConfig {
+                min_freq: 20.0,
+                max_freq: 500.0,
+                ..OptimizerConfig::default()
+            },
+            ..RoomConfig::default()
+        };
+        let mut target = crate::channel_target::build_target_context("left", &config, &curve, None);
+        let features = preprocess_channel("left", &prepared, &config, 48_000.0, None, &mut target);
+        assert_eq!(features.score_min_freq, 20.0);
     }
 
     #[test]

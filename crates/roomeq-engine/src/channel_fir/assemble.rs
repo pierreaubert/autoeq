@@ -23,7 +23,7 @@ pub(super) fn assemble_fir_result(
         corrected_curves(request, &optimizer_output, &display_initial);
     let post_score = channel_target::flatness_score_in_range(
         &final_curve,
-        request.target.min_freq,
+        request.preprocessed.score_min_freq,
         request.target.max_freq,
     );
     info!(

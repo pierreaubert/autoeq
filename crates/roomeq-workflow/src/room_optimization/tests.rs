@@ -239,6 +239,31 @@ fn refreshed_topology_pre_score_uses_raw_curve_not_intermediate_score() {
 }
 
 #[test]
+fn refresh_builds_multi_seat_correction_report_when_missing() {
+    // Generic topology routes (e.g. multi-sub) run the multi-seat objective
+    // but never populate `multi_seat_correction`; the final refresh must
+    // synthesize the report from the optimized channel results.
+    let mut config = minimal_room_config(ProcessingMode::LowLatency);
+    config.optimizer.multi_seat = Some(roomeq_model::MultiSeatConfig::default());
+    let mut result = single_channel_room_result("left");
+    assert!(result.metadata.multi_seat_correction.is_none());
+
+    super::refresh_final_reports(&mut result, &config, 48_000.0);
+
+    assert!(result.metadata.multi_seat_correction.is_some());
+}
+
+#[test]
+fn refresh_leaves_multi_seat_correction_absent_without_config() {
+    let config = minimal_room_config(ProcessingMode::LowLatency);
+    let mut result = single_channel_room_result("left");
+
+    super::refresh_final_reports(&mut result, &config, 48_000.0);
+
+    assert!(result.metadata.multi_seat_correction.is_none());
+}
+
+#[test]
 fn topology_stereo_route_records_probe_arrival_overrides() {
     let mut config = minimal_room_config(ProcessingMode::LowLatency);
     config.speakers.insert(

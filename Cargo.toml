@@ -107,7 +107,7 @@ zip = { version = "0.6.6", default-features = false }
 tempfile = "3.23"
 assert_fs = "1.0"
 proptest = { version = "1.8", default-features = false, features = ["std"] }
-serial_test = "3"
+serial_test = "4"
 
 # Math-Audio crates from GitHub
 math-iir-fir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }

@@ -732,7 +732,7 @@
       "type": "object",
       "properties": {
         "correction_mode": {
-          "description": "Correction mode: flat, score, or auto (flat near-field, score far-field)",
+          "description": "Correction mode: flat or auto (flat Listening Window pre-correction).\n`score` is rejected by validation: the Harman speaker score is\nanechoic-only and unsupported in roomeq.",
           "$ref": "#/$defs/Cea2034CorrectionMode",
           "default": "auto"
         },
@@ -1704,7 +1704,7 @@
           "format": "double"
         },
         "phase": {
-          "description": "Phase response type: \"linear\" or \"kirkeby\"",
+          "description": "Phase response type: \"linear\", \"minimum\", or \"kirkeby\"",
           "type": "string",
           "default": "kirkeby"
         },
@@ -3980,7 +3980,7 @@
           "default": 2.0
         },
         "variance_threshold_db": {
-          "description": "Variance threshold (dB) below which full correction is allowed. Default: 3.0",
+          "description": "Threshold (dB) below which full correction is allowed. Despite the field\nname, this is compared against the per-frequency *standard deviation*\nacross positions, not the variance. Default: 3.0",
           "type": "number",
           "format": "double",
           "default": 3.0

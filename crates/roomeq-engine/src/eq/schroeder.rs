@@ -157,9 +157,10 @@ pub fn optimize_with_schroeder_split_detailed(
     })?;
     let high_eq_filters = high_result.filters;
 
-    // Post-optimization Q clamping: NLopt COBYLA can violate bounds slightly (or
-    // significantly with low maxeval). Enforce the configured Q constraints on the
-    // returned filters to guarantee the Schroeder split invariant.
+    // Post-optimization Q clamping: optimizer backends can violate bounds
+    // slightly (or significantly with low maxeval). Enforce the configured Q
+    // constraints on the returned filters to guarantee the Schroeder split
+    // invariant.
     let low_eq_filters = clamp_filter_q(low_eq_filters, low_config.min_q, low_config.max_q);
     let high_eq_filters =
         clamp_filter_q(high_eq_filters, optimizer.min_q.max(0.3), high_config.max_q);

@@ -623,8 +623,10 @@ emitted only when `optimizer.allow_delay` permits delay insertion.
 ## External Exports
 
 `roomeq --export-format <FORMAT>` can render the DSP chain for an external
-consumer. Exporters validate the complete source graph and return an error when
-the target cannot preserve required plugins or routing.
+consumer. Exporters validate the source graph and return an error for the
+constraints each target enforces; coverage is per-format and not exhaustive, so
+an export that succeeds is not a guarantee that every plugin or routing nuance
+survived the translation (see the per-format rows below).
 
 | CLI value | Artifact | Important constraints |
 |-----------|----------|-----------------------|

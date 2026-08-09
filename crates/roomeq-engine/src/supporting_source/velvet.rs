@@ -10,9 +10,10 @@
 ///
 /// # Arguments
 /// * `n_taps` - Total length of the output sequence.
-/// * `density` - Average number of non-zero impulses per unit length. The
+/// * `density` - Spacing control: the gap between successive impulses is drawn
+///   uniformly from `[1, 1/density]` samples, so the realized mean spacing is
+///   about `(1 + 1/density) / 2` (roughly half the naive `1/density` rate). The
 ///   paper's recommended velvet noise has about 1 impulse per 3–5 ms.
-///   Default behaviour uses a fixed seed-derived grid for reproducibility.
 /// * `seed` - Deterministic seed.
 ///
 /// # Returns

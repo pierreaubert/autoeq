@@ -498,7 +498,7 @@ pub struct FirConfig {
     /// Number of taps (coefficients)
     #[serde(default = "default_fir_taps")]
     pub taps: usize,
-    /// Phase response type: "linear" or "kirkeby"
+    /// Phase response type: "linear", "minimum", or "kirkeby"
     #[serde(default = "default_fir_phase")]
     pub phase: String,
     /// Whether to correct excess phase (only applies to kirkeby mode)
@@ -603,7 +603,9 @@ pub struct InterChannelDeviation {
 /// Serializable spatial robustness configuration for JSON config files
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SpatialRobustnessSerdeConfig {
-    /// Variance threshold (dB) below which full correction is allowed. Default: 3.0
+    /// Threshold (dB) below which full correction is allowed. Despite the field
+    /// name, this is compared against the per-frequency *standard deviation*
+    /// across positions, not the variance. Default: 3.0
     #[serde(default = "default_variance_threshold")]
     pub variance_threshold_db: f64,
     /// Transition width (dB) for sigmoid blending. Default: 2.0

@@ -10,7 +10,9 @@ use ndarray::Array1;
 /// Configuration for spatial robustness analysis.
 #[derive(Debug, Clone)]
 pub struct SpatialRobustnessConfig {
-    /// Variance threshold (dB) below which full correction is allowed.
+    /// Threshold (dB) below which full correction is allowed. Despite the
+    /// field name, this is compared against the per-frequency *standard
+    /// deviation* across positions, not the variance.
     /// Default: 3.0 dB
     pub variance_threshold_db: f64,
 

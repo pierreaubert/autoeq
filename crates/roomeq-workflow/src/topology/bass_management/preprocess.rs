@@ -14,7 +14,7 @@ use roomeq_model::{
 /// Dispatches by SpeakerConfig variant:
 /// - Single: load curve, no drivers
 /// - MultiSub + Mso: run MSO optimization, return combined + per-sub gains/delays
-/// - MultiSub + Single: average all subs, return combined + per-sub info (zero gains/delays)
+/// - MultiSub + Single: power-sum all subs, return combined + per-sub info (zero gains/delays)
 /// - MultiSub + Dba: error (should use SpeakerConfig::Dba)
 /// - Cardioid: simulate combined response from front + delayed/inverted rear
 /// - Dba: run DBA optimization, return combined + front/rear info
@@ -107,7 +107,7 @@ pub(in super::super) fn preprocess_multisub_mso(
     })
 }
 
-/// Independent subs: average all sub curves, return combined + per-sub info (zero gains/delays)
+/// Independent subs: power-sum all sub curves, return combined + per-sub info (zero gains/delays)
 pub(in super::super) fn preprocess_multisub_independent(
     ms: &MultiSubGroup,
 ) -> Result<SubPreprocessResult> {

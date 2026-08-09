@@ -41,7 +41,8 @@ pub fn detect_room_modes(
         }
 
         // Compute prominence: how much this peak rises above the local baseline
-        // Local baseline = average of values at edges of a +/- 1 octave window
+        // Local baseline = median of all values within a +/- 1 octave window
+        // (excluding the center point)
         let f_low = freq[i] / 2.0; // -1 octave
         let f_high = freq[i] * 2.0; // +1 octave
         let baseline = compute_local_baseline(freq, spl, i, f_low, f_high);

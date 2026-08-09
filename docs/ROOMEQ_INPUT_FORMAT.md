@@ -1514,7 +1514,7 @@ When a speaker has multiple measurements (different listening positions), contro
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `variance_threshold_db` | number | `3.0` | Variance threshold (dB) below which full correction is allowed |
+| `variance_threshold_db` | number | `3.0` | Spatial standard-deviation threshold (dB) below which full correction is allowed (compared against the per-frequency std dev across positions, not the variance, despite the field name) |
 | `transition_width_db` | number | `2.0` | Transition width (dB) for sigmoid blending |
 | `min_correction_depth` | number | `0.1` | Minimum correction depth (0.0-1.0) |
 | `mask_smoothing_octaves` | number | `0.167` | Smoothing width in octaves for the correction depth mask |
@@ -1549,7 +1549,7 @@ Applies frequency-dependent correction weights based on acoustic decomposition. 
       "min_mode_prominence_db": 3.0,
       "mode_correction_weight": 1.0,
       "early_reflection_weight": 0.3,
-      "steady_state_weight": 0.5,
+      "steady_state_weight": 0.4,
       "fdw_enabled": true,
       "fdw_cycles": 8.0,
       "fdw_min_window_ms": 3.0,
@@ -1568,7 +1568,7 @@ Applies frequency-dependent correction weights based on acoustic decomposition. 
 | `min_mode_prominence_db` | number | `3.0` | Minimum prominence (dB) for mode detection |
 | `mode_correction_weight` | number | `1.0` | Correction weight for room modes (0.0-1.0) |
 | `early_reflection_weight` | number | `0.3` | Correction weight for early reflections (0.0-1.0) |
-| `steady_state_weight` | number | `0.5` | Correction weight for steady-state above Schroeder (0.0-1.0) |
+| `steady_state_weight` | number | `0.4` | Correction weight for steady-state above Schroeder (0.0-1.0) |
 | `fdw_enabled` | boolean | `true` | Enable Frequency-Dependent Windowing when `ssir_wav_path` provides an impulse response |
 | `fdw_cycles` | number | `8.0` | FDW window length in cycles before min/max clamping |
 | `fdw_min_window_ms` | number | `3.0` | Minimum FDW window length |

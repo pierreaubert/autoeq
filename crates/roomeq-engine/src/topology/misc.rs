@@ -68,8 +68,8 @@ pub fn align_channels_to_lowest(
 /// management is phase-critical, so the workflows skip delay/polarity
 /// optimization instead of inventing 0 deg phase.
 ///
-/// Expects every input curve to share the same frequency grid. Empty or
-/// single-element input panics — callers always supply ≥ 1 main.
+/// Expects every input curve to share the same frequency grid. Empty input
+/// panics — callers always supply ≥ 1 main.
 pub fn complex_sum_mains(curves: &[&Curve]) -> Curve {
     use num_complex::Complex;
     assert!(!curves.is_empty(), "complex_sum_mains needs ≥ 1 curve");

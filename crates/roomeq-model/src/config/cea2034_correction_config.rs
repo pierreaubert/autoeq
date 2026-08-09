@@ -20,7 +20,9 @@ pub struct Cea2034CorrectionConfig {
     /// Measurement version on spinorama.org (default: "asr")
     #[serde(default = "default_cea2034_version")]
     pub version: String,
-    /// Correction mode: flat, score, or auto (flat near-field, score far-field)
+    /// Correction mode: flat or auto (flat Listening Window pre-correction).
+    /// `score` is rejected by validation: the Harman speaker score is
+    /// anechoic-only and unsupported in roomeq.
     #[serde(default)]
     pub correction_mode: Cea2034CorrectionMode,
     /// Manual listening distance override in meters

@@ -2,6 +2,19 @@
 
 Major stable version 0.5
 
+## Documentation
+
+- RoomEQ audit (see `20260809-errors.md`): correct `steady_state_weight`
+  default 0.5 → 0.4 in `docs/ROOMEQ_INPUT_FORMAT.md`; clarify that
+  `variance_threshold_db` is compared against the per-frequency standard
+  deviation (not variance) in the model docs, `ROOMEQ_INPUT_FORMAT.md`, and
+  `input_schema.json`; document the accepted FIR phase type `"minimum"`
+  alongside `"linear"`/`"kirkeby"`; fix stale code comments (NLopt Q-clamp
+  rationale, `complex_sum_mains` contract, peak-relative arrival threshold,
+  median local baseline, multi-sub power-sum, velvet-noise `density` contract,
+  CEA-2034 `correction_mode`, unused `optimize_speaker` callback); soften the
+  overstated export-validation guarantee in `ROOMEQ_OUTPUT_FORMAT.md`.
+
 ## Fixes
 
 - Compute the FIR temporal evidence (IR waveforms and temporal masking)

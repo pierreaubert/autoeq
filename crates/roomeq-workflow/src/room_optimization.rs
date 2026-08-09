@@ -2645,7 +2645,7 @@ fn assemble_generic_result(
 /// * `optimizer_config` - Optimizer parameters
 /// * `target_curve` - Optional target curve configuration
 /// * `sample_rate` - Sample rate for filter design
-/// * `callback` - Optional progress callback
+/// * `callback` - Optional progress callback (currently unused; reserved)
 ///
 /// # Returns
 /// * `SpeakerOptimizationResult` containing DSP chain and optimization results

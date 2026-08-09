@@ -8,12 +8,14 @@ use std::path::Path;
 /// Find the arrival time (signal onset) in a WAV file
 ///
 /// This function loads a WAV file and finds the first point where the signal
-/// exceeds a threshold above the noise floor, representing the arrival of sound.
+/// exceeds the detection threshold, representing the arrival of sound.
 /// Works with both impulse responses and log sweep recordings.
 ///
 /// # Arguments
 /// * `wav_path` - Path to the WAV file (impulse response or sweep recording)
-/// * `threshold_db` - Threshold above noise floor to consider as "arrival" (default: -40 dB)
+/// * `threshold_db` - Threshold relative to the peak amplitude to consider as
+///   "arrival" (default: -40 dB). The effective threshold is the larger of this
+///   peak-relative level and 20 dB above the estimated RMS noise floor.
 ///
 /// # Returns
 /// * `ArrivalTimeResult` containing arrival time in samples and milliseconds

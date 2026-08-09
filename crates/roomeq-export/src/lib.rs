@@ -38,6 +38,7 @@ pub use export_format::*;
 pub use package::*;
 
 use channel::channel_short_name;
+use channel::equalizer_apo_channel_name;
 use channel::sorted_channels;
 use collect::collect_all_plugins;
 use conformance::ExportArtifactManifest;
@@ -149,7 +150,7 @@ fn export_rew(output: &DspGraph) -> anyhow::Result<String> {
     let (channel_name, chain) = channels
         .first()
         .ok_or_else(|| anyhow::anyhow!("Rew export requires exactly one channel"))?;
-    let filters = extract_eq_filters(&chain.plugins);
+    let filters = extract_eq_filters(&chain.plugins)?;
     let mut out = String::new();
     writeln!(out, "Filter Settings file")?;
     writeln!(out)?;
@@ -162,8 +163,8 @@ fn export_rew(output: &DspGraph) -> anyhow::Result<String> {
             "peak" => "PK",
             "lowshelf" => "LS",
             "highshelf" => "HS",
-            "lowpass" => "LP",
-            "highpass" | "highpassvariableq" => "HP",
+            "lowpass" => "LPQ",
+            "highpass" | "highpassvariableq" => "HPQ",
             "notch" => "NO",
             "allpass" => "AP",
             other => anyhow::bail!("Rew export does not support filter type '{other}'"),
@@ -193,7 +194,7 @@ fn export_normalized_biquad_coefficients(
     let nyquist = sample_rate / 2.0;
     let mut channels_json = Vec::new();
     for (channel_name, chain) in sorted_channels(output) {
-        let filters = extract_eq_filters(&chain.plugins);
+        let filters = extract_eq_filters(&chain.plugins)?;
         let mut sections = Vec::with_capacity(filters.len());
         for (section_index, filter) in filters.iter().enumerate() {
             if filter.freq >= nyquist {
@@ -653,7 +654,7 @@ fn export_equalizer_apo(output: &DspGraph) -> anyhow::Result<String> {
     let channels = sorted_channels(output);
 
     for (ch_name, chain) in &channels {
-        let short = channel_short_name(ch_name);
+        let short = equalizer_apo_channel_name(ch_name);
         writeln!(out, "Channel: {short}")?;
 
         // Collect all plugins from channel + drivers
@@ -672,7 +673,7 @@ fn export_equalizer_apo(output: &DspGraph) -> anyhow::Result<String> {
         }
 
         // EQ filters
-        let filters = extract_eq_filters(&plugins);
+        let filters = extract_eq_filters(&plugins)?;
         for (i, f) in filters.iter().enumerate() {
             let ft = apo_filter_type(&f.filter_type);
             match f.filter_type.as_str() {
@@ -736,7 +737,7 @@ fn export_equalizer_apo_routed(
         writeln!(
             out,
             "Channel: {}",
-            channel_short_name(&route.source_channel)
+            equalizer_apo_channel_name(&route.source_channel)
         )?;
         write_equalizer_apo_plugins(
             &mut out,
@@ -754,9 +755,8 @@ fn export_equalizer_apo_routed(
         out,
         "# Route matrix: each source is filtered above, then summed here"
     )?;
-    writeln!(out, "Copy:")?;
     for destination in &graph.output_channels {
-        let terms: Vec<String> = graph
+        let terms: Vec<(f64, &str)> = graph
             .routes
             .iter()
             .filter(|route| route.destination == *destination)
@@ -766,14 +766,23 @@ fn export_equalizer_apo_routed(
                 } else {
                     route.gain_linear
                 };
-                format!("{gain:.9}*{}", channel_short_name(&route.source_channel))
+                (gain, equalizer_apo_channel_name(&route.source_channel))
             })
             .collect();
+        let mut expression = String::new();
+        for (index, (gain, source)) in terms.into_iter().enumerate() {
+            if index == 0 {
+                write!(expression, "{gain:.9}*{source}")?;
+            } else if gain.is_sign_negative() {
+                write!(expression, " - {:.9}*{source}", gain.abs())?;
+            } else {
+                write!(expression, " + {gain:.9}*{source}")?;
+            }
+        }
         writeln!(
             out,
-            "  {} = {}",
-            channel_short_name(destination),
-            terms.join(" + ")
+            "Copy: {}={expression}",
+            equalizer_apo_channel_name(destination)
         )?;
     }
     writeln!(out)?;
@@ -784,7 +793,7 @@ fn export_equalizer_apo_routed(
                 "Equalizer APO export is missing the post-route chain for '{destination}'"
             )
         })?;
-        writeln!(out, "Channel: {}", channel_short_name(destination))?;
+        writeln!(out, "Channel: {}", equalizer_apo_channel_name(destination))?;
         write_equalizer_apo_plugins(
             &mut out,
             &plugins_for_stage(chain, "post_route"),
@@ -868,8 +877,8 @@ fn write_equalizer_apo_route_crossover(
     filter_index: &mut usize,
 ) -> anyhow::Result<()> {
     let (kind, frequency) = match (route.high_pass_hz, route.low_pass_hz) {
-        (Some(frequency), None) => ("HP", frequency),
-        (None, Some(frequency)) => ("LP", frequency),
+        (Some(frequency), None) => ("HPQ", frequency),
+        (None, Some(frequency)) => ("LPQ", frequency),
         _ => anyhow::bail!("invalid Equalizer APO routed crossover"),
     };
     if !frequency.is_finite() || frequency <= 0.0 {
@@ -892,6 +901,16 @@ fn write_equalizer_apo_plugins(
     plugins: &[PluginConfigWrapper],
     filter_index: &mut usize,
 ) -> anyhow::Result<()> {
+    if plugins.iter().any(|plugin| {
+        plugin.plugin_type == "gain"
+            && plugin
+                .parameters
+                .get("invert")
+                .and_then(|value| value.as_bool())
+                == Some(true)
+    }) {
+        anyhow::bail!("Equalizer APO routed export cannot represent gain-plugin inversion");
+    }
     let gain = extract_gain_db(plugins);
     if gain.abs() > 0.01 {
         writeln!(out, "Preamp: {gain:+.9} dB")?;
@@ -899,7 +918,7 @@ fn write_equalizer_apo_plugins(
     if let Some(delay) = extract_delay_ms(plugins) {
         writeln!(out, "Delay: {delay:.9} ms")?;
     }
-    for filter in extract_eq_filters(plugins) {
+    for filter in extract_eq_filters(plugins)? {
         let kind = apo_filter_type(&filter.filter_type);
         if !matches!(
             filter.filter_type.as_str(),
@@ -949,18 +968,14 @@ fn export_easyeffects(output: &DspGraph) -> anyhow::Result<String> {
     // Conformance requires every channel to have the same chain because this
     // preset is system-wide. Render that common chain exactly once.
     let mut all_filters = Vec::new();
-    let mut min_gain = 0.0f64;
+    let mut input_gain = 0.0f64;
 
     for (_, chain) in channels.iter().take(1) {
         let plugins: Vec<PluginConfigWrapper> =
             collect_all_plugins(chain).into_iter().cloned().collect();
-        let filters = extract_eq_filters(&plugins);
+        let filters = extract_eq_filters(&plugins)?;
         let gain = extract_gain_db(&plugins);
-
-        // Use most negative gain as preamp to prevent clipping
-        if gain < min_gain {
-            min_gain = gain;
-        }
+        input_gain = gain;
 
         all_filters.extend(filters);
     }
@@ -984,7 +999,7 @@ fn export_easyeffects(output: &DspGraph) -> anyhow::Result<String> {
             "type".to_string(),
             serde_json::json!(easyeffects_filter_type(&f.filter_type)),
         );
-        band.insert("mode".to_string(), serde_json::json!("RLC (BT)"));
+        band.insert("mode".to_string(), serde_json::json!("APO (DR)"));
         band.insert("slope".to_string(), serde_json::json!("x1"));
         band.insert("solo".to_string(), serde_json::json!(false));
         band.insert("mute".to_string(), serde_json::json!(false));
@@ -994,7 +1009,7 @@ fn export_easyeffects(output: &DspGraph) -> anyhow::Result<String> {
     let preset = serde_json::json!({
         "output": {
             "equalizer#0": {
-                "input-gain": min_gain,
+                "input-gain": input_gain,
                 "output-gain": 0.0,
                 "num-bands": all_filters.len().min(30),
                 "split-channels": false,
@@ -1011,14 +1026,14 @@ fn export_wavelet(output: &DspGraph, sample_rate: f64) -> anyhow::Result<String>
     validate_serial_external_input(output, ExportFormat::Wavelet)?;
     let channels = sorted_channels(output);
 
-    // Average the response across all channels
-    let mut band_gains = [0.0f64; 9];
-    let mut n_channels = 0;
+    // Conformance requires identical channel chains, so render the canonical
+    // first channel once rather than pretending to average duplicates.
+    let mut band_gains = [0.0f64; WAVELET_BANDS.len()];
 
     for (_, chain) in channels.iter().take(1) {
         let plugins: Vec<PluginConfigWrapper> =
             collect_all_plugins(chain).into_iter().cloned().collect();
-        let filters = extract_eq_filters(&plugins);
+        let filters = extract_eq_filters(&plugins)?;
         let gain = extract_gain_db(&plugins);
 
         // Build Biquad chain and evaluate at each band frequency
@@ -1036,14 +1051,6 @@ fn export_wavelet(output: &DspGraph, sample_rate: f64) -> anyhow::Result<String>
                 db += bq.log_result(freq);
             }
             band_gains[i] += db;
-        }
-        n_channels += 1;
-    }
-
-    // Average across channels
-    if n_channels > 1 {
-        for g in &mut band_gains {
-            *g /= n_channels as f64;
         }
     }
 
@@ -1132,7 +1139,7 @@ fn export_pipewire(output: &DspGraph, sample_rate: f64) -> anyhow::Result<String
                     node_names.push((node_name, "In", "Out"));
                 }
                 "eq" => {
-                    for (filter_index, filter) in extract_eq_filters(std::slice::from_ref(plugin))
+                    for (filter_index, filter) in extract_eq_filters(std::slice::from_ref(plugin))?
                         .iter()
                         .enumerate()
                     {
@@ -1203,6 +1210,15 @@ fn export_pipewire(output: &DspGraph, sample_rate: f64) -> anyhow::Result<String
             }
         }
 
+        if node_names.is_empty() {
+            let node_name = format!("{ch_prefix}_passthrough");
+            writeln!(
+                out,
+                "          {{ type = builtin  name = \"{node_name}\"  label = copy }}"
+            )?;
+            node_names.push((node_name, "In", "Out"));
+        }
+
         all_nodes.push(node_names);
     }
 
@@ -1224,22 +1240,15 @@ fn export_pipewire(output: &DspGraph, sample_rate: f64) -> anyhow::Result<String
     // Inputs/outputs
     writeln!(out, "        inputs  = [")?;
     for nodes in &all_nodes {
-        if let Some((name, input, _)) = nodes.first() {
-            writeln!(out, "          \"{name}:{input}\"")?;
-        } else {
-            // No processing nodes — passthrough
-            writeln!(out, "          null")?;
-        }
+        let (name, input, _) = nodes.first().expect("each channel has a processing node");
+        writeln!(out, "          \"{name}:{input}\"")?;
     }
     writeln!(out, "        ]")?;
 
     writeln!(out, "        outputs = [")?;
     for nodes in &all_nodes {
-        if let Some((name, _, output)) = nodes.last() {
-            writeln!(out, "          \"{name}:{output}\"")?;
-        } else {
-            writeln!(out, "          null")?;
-        }
+        let (name, _, output) = nodes.last().expect("each channel has a processing node");
+        writeln!(out, "          \"{name}:{output}\"")?;
     }
     writeln!(out, "        ]")?;
 
@@ -1341,13 +1350,13 @@ fn export_roon_manifest(
         }
 
         // Parametric EQ bands (max 20 per Roon endpoint)
-        let filters = extract_eq_filters(&all_plugins);
+        let filters = extract_eq_filters(&all_plugins)?;
         let mut bands = Vec::new();
         for f in filters.iter().take(20) {
             let mut band = serde_json::Map::new();
             band.insert(
                 "type".to_string(),
-                serde_json::json!(roon_filter_type(&f.filter_type)),
+                serde_json::json!(roon_filter_type(&f.filter_type)?),
             );
             band.insert("frequency".to_string(), serde_json::json!(f.freq));
             band.insert("gain".to_string(), serde_json::json!(f.gain_db));

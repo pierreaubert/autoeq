@@ -196,14 +196,90 @@ pub fn rule_gain_bounds(ctx: &mut ValidationContext<'_>) {
 }
 
 pub fn rule_excursion_protection(ctx: &mut ValidationContext<'_>) {
-    if let Some(excursion) = &ctx.opt.excursion_protection
-        && (excursion.f3_reference_min_hz <= 0.0
-            || excursion.f3_reference_max_hz <= excursion.f3_reference_min_hz)
+    let Some(excursion) = &ctx.opt.excursion_protection else {
+        return;
+    };
+    if excursion.f3_reference_min_hz <= 0.0
+        || excursion.f3_reference_max_hz <= excursion.f3_reference_min_hz
     {
         ctx.add_error(format!(
             "excursion_protection F3 reference band must satisfy 0 < min < max (got {:.1}..{:.1})",
             excursion.f3_reference_min_hz, excursion.f3_reference_max_hz
         ));
+    }
+    if !matches!(excursion.filter_order, 2 | 4 | 6 | 8) {
+        ctx.add_error(format!(
+            "excursion_protection.filter_order ({}) must be one of 2, 4, 6, or 8",
+            excursion.filter_order
+        ));
+    }
+}
+
+pub fn rule_phase_alignment(ctx: &mut ValidationContext<'_>) {
+    let Some(phase) = &ctx.opt.phase_alignment else {
+        return;
+    };
+    if phase.min_freq <= 0.0 || phase.max_freq <= phase.min_freq {
+        ctx.add_error(format!(
+            "phase_alignment requires 0 < min_freq < max_freq (got {}..{})",
+            phase.min_freq, phase.max_freq
+        ));
+    }
+    if !phase.max_delay_ms.is_finite() || phase.max_delay_ms <= 0.0 {
+        ctx.add_error("phase_alignment.max_delay_ms must be finite and positive");
+    }
+}
+
+pub fn rule_group_delay(ctx: &mut ValidationContext<'_>) {
+    let Some(group_delay) = &ctx.opt.group_delay else {
+        return;
+    };
+    if group_delay.ap_min_q <= 0.0 || group_delay.ap_min_q > group_delay.ap_max_q {
+        ctx.add_error(format!(
+            "group_delay requires 0 < ap_min_q <= ap_max_q (got {}..{})",
+            group_delay.ap_min_q, group_delay.ap_max_q
+        ));
+    }
+    if !group_delay.max_delay_ms.is_finite() || group_delay.max_delay_ms <= 0.0 {
+        ctx.add_error("group_delay.max_delay_ms must be finite and positive");
+    }
+    if !group_delay.coherence_threshold.is_finite()
+        || !(0.0..=1.0).contains(&group_delay.coherence_threshold)
+    {
+        ctx.add_error("group_delay.coherence_threshold must be in [0, 1]");
+    }
+    if !group_delay.min_improvement_db.is_finite() || group_delay.min_improvement_db < 0.0 {
+        ctx.add_error("group_delay.min_improvement_db must be finite and non-negative");
+    }
+    if !group_delay.tol.is_finite() || group_delay.tol <= 0.0 {
+        ctx.add_error("group_delay.tol must be finite and positive");
+    }
+    if group_delay.max_iter == 0 {
+        ctx.add_error("group_delay.max_iter must be at least 1");
+    }
+    if group_delay.popsize == 0 {
+        ctx.add_error("group_delay.popsize must be at least 1");
+    }
+}
+
+pub fn rule_smoothness_penalty(ctx: &mut ValidationContext<'_>) {
+    let Some(smoothness) = &ctx.opt.smoothness_penalty else {
+        return;
+    };
+    if !smoothness.tv2_weight.is_finite() || smoothness.tv2_weight < 0.0 {
+        ctx.add_error("smoothness_penalty.tv2_weight must be finite and non-negative");
+    }
+    if !smoothness.modal_weight_scale.is_finite() || smoothness.modal_weight_scale < 0.0 {
+        ctx.add_error("smoothness_penalty.modal_weight_scale must be finite and non-negative");
+    }
+    if !smoothness.exponent.is_finite() || smoothness.exponent <= 0.0 {
+        ctx.add_error("smoothness_penalty.exponent must be finite and positive");
+    }
+    if smoothness
+        .schroeder_hz
+        .is_some_and(|frequency| !frequency.is_finite() || frequency <= 0.0)
+    {
+        ctx.add_error("smoothness_penalty.schroeder_hz must be finite and positive");
     }
 }
 
@@ -388,8 +464,29 @@ pub fn rule_phase_linear_max_freq(ctx: &mut ValidationContext<'_>) {
 }
 
 pub fn rule_schroeder_split(ctx: &mut ValidationContext<'_>) {
-    if !ctx.opt.schroeder_split.as_ref().is_some_and(|s| s.enabled) {
+    let Some(split) = ctx
+        .opt
+        .schroeder_split
+        .as_ref()
+        .filter(|split| split.enabled)
+    else {
         return;
+    };
+
+    if split.low_freq_config.min_q <= 0.0
+        || split.low_freq_config.min_q > split.low_freq_config.max_q
+    {
+        ctx.add_error(format!(
+            "schroeder_split requires 0 < low_freq_config.min_q <= max_q (got {}..{})",
+            split.low_freq_config.min_q, split.low_freq_config.max_q
+        ));
+    }
+    let high_min_q = ctx.opt.min_q.max(0.3);
+    if !split.high_freq_config.max_q.is_finite() || high_min_q > split.high_freq_config.max_q {
+        ctx.add_error(format!(
+            "schroeder_split high-frequency max_q ({}) must be at least effective min_q ({high_min_q})",
+            split.high_freq_config.max_q
+        ));
     }
 
     let has_slope = ctx
@@ -555,6 +652,9 @@ pub fn run_optimizer_validation_rules(ctx: &mut ValidationContext<'_>) {
     rule_gain_bounds(ctx);
     rule_gain_envelopes(ctx);
     rule_excursion_protection(ctx);
+    rule_phase_alignment(ctx);
+    rule_group_delay(ctx);
+    rule_smoothness_penalty(ctx);
     rule_auto_optimizer(ctx);
     rule_multi_seat(ctx);
     rule_max_iter(ctx);
@@ -1319,10 +1419,12 @@ mod optimizer_rule_tests {
             ..Default::default()
         });
         let result = run_rule(rule_asymmetric_loss, &config);
-        assert!(result
-            .errors
-            .iter()
-            .any(|e| e.contains("asymmetric_loss_config weights must be non-negative")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("asymmetric_loss_config weights must be non-negative"))
+        );
     }
 
     #[test]
@@ -1335,10 +1437,12 @@ mod optimizer_rule_tests {
             ..Default::default()
         });
         let result = run_rule(rule_early_late_correction, &config);
-        assert!(result
-            .errors
-            .iter()
-            .any(|e| e.contains("windows must satisfy 0 < direct < early < late")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("windows must satisfy 0 < direct < early < late"))
+        );
     }
 
     #[test]
@@ -1350,10 +1454,12 @@ mod optimizer_rule_tests {
             ..Default::default()
         });
         let result = run_rule(rule_auto_optimizer, &config);
-        assert!(result
-            .errors
-            .iter()
-            .any(|e| e.contains("auto_optimizer.min_filters must be at least 1")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("auto_optimizer.min_filters must be at least 1"))
+        );
     }
 
     #[test]
@@ -1365,10 +1471,12 @@ mod optimizer_rule_tests {
             ..Default::default()
         });
         let result = run_rule(rule_multi_seat, &config);
-        assert!(result
-            .errors
-            .iter()
-            .any(|e| e.contains("multi_seat.max_deviation_db (-1) must be non-negative")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("multi_seat.max_deviation_db (-1) must be non-negative"))
+        );
     }
 
     #[test]
@@ -1468,6 +1576,83 @@ mod optimizer_rule_tests {
                 .warnings
                 .iter()
                 .any(|w| w.contains("mixed_config specified but processing_mode is not Hybrid"))
+        );
+    }
+
+    #[test]
+    fn rule_group_delay_rejects_every_invalid_numeric_contract() {
+        let mut group_delay = crate::GroupDelayOptimizationConfig::default();
+        group_delay.ap_min_q = 4.0;
+        group_delay.ap_max_q = 2.0;
+        group_delay.max_delay_ms = 0.0;
+        group_delay.coherence_threshold = 1.1;
+        group_delay.min_improvement_db = -0.1;
+        group_delay.tol = 0.0;
+        group_delay.max_iter = 0;
+        group_delay.popsize = 0;
+        let mut config = default_config();
+        config.group_delay = Some(group_delay);
+
+        let result = run_rule(rule_group_delay, &config);
+        for field in [
+            "ap_min_q",
+            "max_delay_ms",
+            "coherence_threshold",
+            "min_improvement_db",
+            "tol",
+            "max_iter",
+            "popsize",
+        ] {
+            assert!(
+                result.errors.iter().any(|error| error.contains(field)),
+                "missing validation error for {field}: {:?}",
+                result.errors
+            );
+        }
+    }
+
+    #[test]
+    fn phase_excursion_smoothness_and_schroeder_contracts_are_validated() {
+        let mut config = default_config();
+        config.phase_alignment = Some(crate::PhaseAlignmentConfig {
+            min_freq: 100.0,
+            max_freq: 80.0,
+            ..Default::default()
+        });
+        assert!(!run_rule(rule_phase_alignment, &config).is_valid);
+
+        config.excursion_protection = Some(crate::ExcursionProtectionConfig {
+            filter_order: 3,
+            ..Default::default()
+        });
+        let excursion = run_rule(rule_excursion_protection, &config);
+        assert!(
+            excursion
+                .errors
+                .iter()
+                .any(|error| error.contains("filter_order"))
+        );
+
+        config.smoothness_penalty = Some(crate::SmoothnessPenaltyConfigSerde {
+            tv2_weight: -1.0,
+            modal_weight_scale: -0.5,
+            exponent: 0.0,
+            schroeder_hz: Some(0.0),
+        });
+        let smoothness = run_rule(rule_smoothness_penalty, &config);
+        assert_eq!(smoothness.errors.len(), 4);
+
+        config.min_q = 2.0;
+        config.schroeder_split = Some(crate::SchroederSplitConfig {
+            enabled: true,
+            ..Default::default()
+        });
+        let schroeder = run_rule(rule_schroeder_split, &config);
+        assert!(
+            schroeder
+                .errors
+                .iter()
+                .any(|error| error.contains("high-frequency max_q"))
         );
     }
 }

@@ -193,7 +193,8 @@ pub struct OptimizerConfig {
     /// defaults are preserved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub perceptual_policy: Option<PerceptualPolicyConfig>,
-    /// Audibility/JND deadband for spectral residual objectives.
+    /// Heuristic deadband for spectral residual objectives. Thresholds are
+    /// optimizer tuning values rather than literal psychoacoustic JNDs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audibility_deadband: Option<AudibilityDeadbandConfig>,
     /// Safeguards for high-frequency correction above the conservative range.
@@ -353,10 +354,7 @@ impl Default for OptimizerConfig {
             height_channel_alignment: None,
             removed_vog_alias: None,
             multi_measurement: None,
-            decomposed_correction: Some(DecomposedCorrectionSerdeConfig {
-                enabled: true,
-                ..Default::default()
-            }),
+            decomposed_correction: None,
             cea2034_correction: None,
             sub_config: None,
             channel_matching: None,
@@ -511,6 +509,9 @@ impl OptimizerConfig {
         let mut smoothing = self.psychoacoustic_smoothing_config();
         smoothing.high_freq_n = smoothing.high_freq_n.min(hf.smoothing_n.max(1));
         smoothing.high_freq = smoothing.high_freq.min(hf.start_hz);
+        if smoothing.high_freq <= smoothing.low_freq {
+            smoothing.low_freq = smoothing.high_freq * 0.5;
+        }
         self.psychoacoustic_smoothing = Some(smoothing);
     }
 
@@ -522,7 +523,10 @@ impl OptimizerConfig {
     pub fn allow_delay(&self) -> bool {
         self.allow_delay.unwrap_or_else(|| {
             self.processing_mode != ProcessingMode::LowLatency
-                || self.phase_alignment.as_ref().is_some_and(|config| config.enabled)
+                || self
+                    .phase_alignment
+                    .as_ref()
+                    .is_some_and(|config| config.enabled)
         })
     }
 

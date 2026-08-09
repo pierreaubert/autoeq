@@ -1176,7 +1176,9 @@ mod tests {
         );
     }
 
-    fn optimization_report(optimized_crossover_hz: Option<f64>) -> roomeq_model::BassManagementOptimizationReport {
+    fn optimization_report(
+        optimized_crossover_hz: Option<f64>,
+    ) -> roomeq_model::BassManagementOptimizationReport {
         roomeq_model::BassManagementOptimizationReport {
             applied: true,
             phase_required: true,
@@ -1291,8 +1293,9 @@ mod tests {
     #[test]
     fn applied_bass_crossover_hz_reads_optimized_value() {
         let mut result = result_with_channel("L");
-        result.metadata.bass_management =
-            Some(bass_management_report(Some(optimization_report(Some(119.15)))));
+        result.metadata.bass_management = Some(bass_management_report(Some(optimization_report(
+            Some(119.15),
+        ))));
         assert_eq!(applied_bass_crossover_hz(&result), Some(119.15));
     }
 
@@ -1302,8 +1305,9 @@ mod tests {
         assert_eq!(applied_bass_crossover_hz(&result), None);
         result.metadata.bass_management = Some(bass_management_report(None));
         assert_eq!(applied_bass_crossover_hz(&result), None);
-        result.metadata.bass_management =
-            Some(bass_management_report(Some(optimization_report(Some(f64::NAN)))));
+        result.metadata.bass_management = Some(bass_management_report(Some(optimization_report(
+            Some(f64::NAN),
+        ))));
         assert_eq!(
             applied_bass_crossover_hz(&result),
             None,

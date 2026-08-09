@@ -73,7 +73,7 @@ fn normalized_biquad_export_round_trips_canonical_transfer_functions() {
     assert_eq!(channels[0]["preamp_gain_db"], -2.5);
     assert_eq!(channels[0]["delay_ms"], 1.5);
 
-    let source_filters = extract_eq_filters(&output.channels["left"].plugins);
+    let source_filters = extract_eq_filters(&output.channels["left"].plugins).unwrap();
     let sections = channels[0]["sections"].as_array().unwrap();
     assert_eq!(sections.len(), source_filters.len());
     for (index, (source, section)) in source_filters.iter().zip(sections).enumerate() {
@@ -193,8 +193,10 @@ fn equalizer_apo_routed_export_uses_channel_and_copy_for_supported_static_mix() 
     assert!(result.contains("# Static RoomEQ routing graph (Channel/Copy)"));
     assert!(result.contains("Channel: L"));
     assert!(result.contains("Channel: R"));
-    assert!(result.contains("Filter  1: ON LP Fc 80 Hz Q 0.7071"));
-    assert!(result.contains("Copy:\n  LFE = 0.501187234*L + -0.501187234*R"));
+    assert!(result.contains("Filter  1: ON LPQ Fc 80 Hz Q 0.7071"));
+    assert!(result.contains("Copy: LFE=0.501187234*L - 0.501187234*R"));
+    assert!(!result.contains("Copy:\n"));
+    assert!(!result.contains(" + -"));
     assert!(result.contains("Channel: LFE"));
     run_optional_export_validator("ROOMEQ_EQUALIZER_APO_VALIDATE_CMD", "txt", &result);
 }
@@ -205,6 +207,44 @@ fn equalizer_apo_routed_export_explains_unsupported_fan_out() {
     let err = export_equalizer_apo(&output).unwrap_err();
     assert!(err.to_string().contains("cannot preserve fan-out"));
     assert!(err.to_string().contains("Use CamillaDSP or Apply as Graph"));
+}
+
+#[test]
+fn equalizer_apo_routed_export_rejects_gain_plugin_inversion() {
+    let mut output = make_routed_bass_output();
+    let graph = output
+        .metadata
+        .as_mut()
+        .unwrap()
+        .bass_management
+        .as_mut()
+        .unwrap()
+        .routing_graph
+        .as_mut()
+        .unwrap();
+    graph.routes.retain(|route| {
+        route.destination == "LFE" && matches!(route.source_channel.as_str(), "L" | "R")
+    });
+    graph.input_channels = vec!["L".to_string(), "R".to_string()];
+    graph.output_channels = vec!["LFE".to_string()];
+    output.channels.get_mut("L").unwrap().plugins.push(PluginConfigWrapper {
+        plugin_type: "gain".to_string(),
+        parameters: serde_json::json!({
+            "gain_db": 0.0,
+            "invert": true,
+            "room_eq_stage": "pre_route",
+        }),
+    });
+
+    let error = export_equalizer_apo(&output).unwrap_err();
+    assert!(error.to_string().contains("cannot represent gain-plugin inversion"));
+}
+
+#[test]
+fn apo_and_rew_preserve_variable_q_crossovers() {
+    let output = make_single_filter_output("highpassvariableq", 0.0);
+    assert!(export_equalizer_apo(&output).unwrap().contains(" ON HPQ "));
+    assert!(export_rew(&output).unwrap().contains(" ON HPQ "));
 }
 
 #[test]
@@ -285,9 +325,27 @@ fn tool_contract_easyeffects_json_has_mirrored_stereo_preset() {
         assert!(band["gain"].as_f64().unwrap().is_finite());
         assert_eq!(band["solo"], serde_json::json!(false));
         assert_eq!(band["mute"], serde_json::json!(false));
+        assert_eq!(band["mode"], serde_json::json!("APO (DR)"));
     }
 
     run_optional_export_validator("ROOMEQ_EASYEFFECTS_VALIDATE_CMD", "json", &result);
+}
+
+#[test]
+fn easyeffects_preserves_positive_input_gain() {
+    let mut output = make_systemwide_test_output();
+    for chain in output.channels.values_mut() {
+        let gain = chain
+            .plugins
+            .iter_mut()
+            .find(|plugin| plugin.plugin_type == "gain")
+            .unwrap();
+        gain.parameters["gain_db"] = serde_json::json!(3.0);
+    }
+
+    let preset: serde_json::Value =
+        serde_json::from_str(&export_easyeffects(&output).unwrap()).unwrap();
+    assert_eq!(preset["output"]["equalizer#0"]["input-gain"], 3.0);
 }
 
 #[test]
@@ -302,7 +360,9 @@ fn test_export_wavelet() {
         .find(|l| l.starts_with("GraphicEQ:"))
         .unwrap();
     let parts: Vec<&str> = line.trim_start_matches("GraphicEQ:").split(';').collect();
-    assert_eq!(parts.len(), 9);
+    assert_eq!(parts.len(), WAVELET_BANDS.len());
+    assert_eq!(parts.first().unwrap().split_whitespace().next(), Some("20"));
+    assert_eq!(parts.last().unwrap().split_whitespace().next(), Some("20000"));
 }
 
 #[test]
@@ -341,6 +401,18 @@ fn test_export_pipewire() {
     assert!(result.contains("audio.channels = 2"));
     assert!(result.contains("\"FL\""));
     assert!(result.contains("\"FR\""));
+}
+
+#[test]
+fn pipewire_uses_copy_nodes_for_pluginless_channels() {
+    let mut output = make_test_output();
+    output.channels.get_mut("right").unwrap().plugins.clear();
+
+    let result = export_pipewire(&output, 48_000.0).unwrap();
+    assert!(result.contains("name = \"ch1_right_passthrough\"  label = copy"));
+    assert!(!result.lines().any(|line| line.trim() == "null"));
+    assert!(result.contains("\"ch1_right_passthrough:In\""));
+    assert!(result.contains("\"ch1_right_passthrough:Out\""));
 }
 
 #[test]
@@ -585,7 +657,7 @@ fn pipewire_rendered_controls_match_the_canonical_magnitude_response() {
     let output = make_test_output();
     let conf = export_pipewire(&output, 48_000.0).unwrap();
     let chain = &output.channels["left"];
-    let canonical_filters = extract_eq_filters(&chain.plugins);
+    let canonical_filters = extract_eq_filters(&chain.plugins).unwrap();
     let canonical_biquads: Vec<_> = canonical_filters
         .iter()
         .map(|filter| {
@@ -753,6 +825,7 @@ fn tool_contract_pipewire_accepts_every_native_biquad_and_convolver() {
 fn canonical_serial_db(chain: &ChannelDspChain, frequency: f64, sample_rate: f64) -> f64 {
     extract_gain_db(&chain.plugins)
         + extract_eq_filters(&chain.plugins)
+            .unwrap()
             .iter()
             .map(|filter| {
                 math_audio_iir_fir::Biquad::new(

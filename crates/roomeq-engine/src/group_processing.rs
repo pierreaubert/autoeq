@@ -10,6 +10,7 @@ use crate::multisub;
 use crate::output;
 use autoeq_core::{Curve, response};
 use autoeq_optim::loss::{CrossoverType, DriverMeasurement, DriversLossData, drivers_flat_loss};
+use autoeq_optim::optim::OptimProgressCallback;
 use log::{debug, info, warn};
 use math_audio_dsp::analysis::compute_average_response;
 use math_audio_iir_fir::Biquad;
@@ -171,6 +172,26 @@ pub fn process_speaker_group(
     prepared: &PreparedSpeakerTopology,
     eq_resources: &EqResources,
 ) -> Result<GroupProcessingResult> {
+    process_speaker_group_with_callback(
+        channel_name,
+        group,
+        room_config,
+        sample_rate,
+        prepared,
+        eq_resources,
+        None,
+    )
+}
+
+pub fn process_speaker_group_with_callback(
+    channel_name: &str,
+    group: &SpeakerGroup,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    prepared: &PreparedSpeakerTopology,
+    eq_resources: &EqResources,
+    callback: Option<OptimProgressCallback>,
+) -> Result<GroupProcessingResult> {
     warn!("  {LEGACY_SPEAKER_GROUP_ADVISORY}");
     process_speaker_topology_impl(
         channel_name,
@@ -180,6 +201,7 @@ pub fn process_speaker_group(
         prepared,
         eq_resources,
         true,
+        callback,
     )
 }
 
@@ -191,6 +213,26 @@ pub fn process_speaker_topology(
     prepared: &PreparedSpeakerTopology,
     eq_resources: &EqResources,
 ) -> Result<GroupProcessingResult> {
+    process_speaker_topology_with_callback(
+        channel_name,
+        topology,
+        room_config,
+        sample_rate,
+        prepared,
+        eq_resources,
+        None,
+    )
+}
+
+pub fn process_speaker_topology_with_callback(
+    channel_name: &str,
+    topology: &SpeakerTopology,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    prepared: &PreparedSpeakerTopology,
+    eq_resources: &EqResources,
+    callback: Option<OptimProgressCallback>,
+) -> Result<GroupProcessingResult> {
     process_speaker_topology_impl(
         channel_name,
         topology,
@@ -199,6 +241,7 @@ pub fn process_speaker_topology(
         prepared,
         eq_resources,
         false,
+        callback,
     )
 }
 
@@ -210,6 +253,7 @@ fn process_speaker_topology_impl(
     prepared: &PreparedSpeakerTopology,
     eq_resources: &EqResources,
     legacy_ordering: bool,
+    callback: Option<OptimProgressCallback>,
 ) -> Result<GroupProcessingResult> {
     group
         .validate()
@@ -489,12 +533,21 @@ fn process_speaker_topology_impl(
     let max_freq = room_config.optimizer.max_freq;
     let pre_global_eq_score = flat_loss_score(&combined_curve, min_freq, max_freq);
 
-    let global_result = eq::optimize_channel_eq_detailed(
-        &combined_curve,
-        &room_config.optimizer,
-        Some(eq_resources),
-        sample_rate,
-    )
+    let global_result = match callback {
+        Some(callback) => eq::optimize_channel_eq_with_callback_detailed(
+            &combined_curve,
+            &room_config.optimizer,
+            Some(eq_resources),
+            sample_rate,
+            callback,
+        ),
+        None => eq::optimize_channel_eq_detailed(
+            &combined_curve,
+            &room_config.optimizer,
+            Some(eq_resources),
+            sample_rate,
+        ),
+    }
     .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!(
             "Global EQ optimization failed for channel {}: {}",
@@ -612,6 +665,29 @@ pub fn process_multisub_group(
     eq_resources: &EqResources,
     flat_eq_resources: &EqResources,
 ) -> Result<GroupProcessingResult> {
+    process_multisub_group_with_callback(
+        channel_name,
+        group,
+        room_config,
+        sample_rate,
+        prepared,
+        eq_resources,
+        flat_eq_resources,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn process_multisub_group_with_callback(
+    channel_name: &str,
+    group: &MultiSubGroup,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    prepared: &PreparedMultiSubGroup,
+    eq_resources: &EqResources,
+    flat_eq_resources: &EqResources,
+    callback: Option<OptimProgressCallback>,
+) -> Result<GroupProcessingResult> {
     if prepared.subwoofers.len() != group.subwoofers.len() {
         return Err(AutoeqError::InvalidMeasurement {
             message: format!(
@@ -640,7 +716,7 @@ pub fn process_multisub_group(
                     eq_resources,
                     flat_eq_resources,
                 };
-                return process_multisub_group_multiseat(&context, seat_measurements);
+                return process_multisub_group_multiseat(&context, seat_measurements, callback);
             }
             None => warn!(
                 "  Multi-seat optimization is enabled for multi-sub group '{}' but subwoofer sources do not contain at least two seat measurements each; using single-seat multi-sub path",
@@ -698,12 +774,21 @@ pub fn process_multisub_group(
         &room_config.optimizer,
         eq::MultiEqAutoOptimizerContext::sub_channel(),
     );
-    let eq_result = eq::optimize_channel_eq_detailed(
-        &combined_curve,
-        &multisub_eq_optimizer,
-        Some(eq_resources),
-        sample_rate,
-    )
+    let eq_result = match callback {
+        Some(callback) => eq::optimize_channel_eq_with_callback_detailed(
+            &combined_curve,
+            &multisub_eq_optimizer,
+            Some(eq_resources),
+            sample_rate,
+            callback,
+        ),
+        None => eq::optimize_channel_eq_detailed(
+            &combined_curve,
+            &multisub_eq_optimizer,
+            Some(eq_resources),
+            sample_rate,
+        ),
+    }
     .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!("EQ optimization failed for multi-sub sum: {}", e),
     })?;
@@ -793,6 +878,7 @@ pub fn process_multisub_group(
 fn process_multisub_group_multiseat(
     context: &MultiSubExecutionContext<'_>,
     seat_measurements: Vec<Vec<Curve>>,
+    callback: Option<OptimProgressCallback>,
 ) -> Result<GroupProcessingResult> {
     let MultiSubExecutionContext {
         channel_name,
@@ -904,14 +990,27 @@ fn process_multisub_group_multiseat(
 
     let mut global_evidence_start = None;
     let mut eq_filters = if multi_seat_config.global_eq {
-        let result = eq::optimize_channel_eq_multi_with_auto_optimizer_detailed(
-            &combined_seat_curves,
-            &room_config.optimizer,
-            &peq_config,
-            Some(eq_resources),
-            sample_rate,
-            eq::MultiEqAutoOptimizerContext::sub_channel(),
-        )
+        let result = match callback {
+            Some(callback) => {
+                eq::optimize_channel_eq_multi_with_auto_optimizer_and_callback_detailed(
+                    &combined_seat_curves,
+                    &room_config.optimizer,
+                    &peq_config,
+                    Some(eq_resources),
+                    sample_rate,
+                    eq::MultiEqAutoOptimizerContext::sub_channel(),
+                    callback,
+                )
+            }
+            None => eq::optimize_channel_eq_multi_with_auto_optimizer_detailed(
+                &combined_seat_curves,
+                &room_config.optimizer,
+                &peq_config,
+                Some(eq_resources),
+                sample_rate,
+                eq::MultiEqAutoOptimizerContext::sub_channel(),
+            ),
+        }
         .map_err(|e| AutoeqError::OptimizationFailed {
             message: format!("Global multi-seat EQ failed for multi-sub sum: {}", e),
         })?;
@@ -926,6 +1025,13 @@ fn process_multisub_group_multiseat(
         );
         filters
     } else {
+        // Multi-seat gain/delay optimization does not currently expose an
+        // iterative hook. Still report its realized loss so callers never
+        // lose an explicitly supplied progress callback silently.
+        if let Some(mut callback) = callback {
+            let realized_loss = flat_loss_score(&combined_curve, min_freq, max_freq);
+            let _ = callback(0, realized_loss, None);
+        }
         Vec::new()
     };
 
@@ -1024,6 +1130,24 @@ pub fn process_dba(
     prepared: &DbaPreparedInput,
     eq_resources: &EqResources,
 ) -> Result<GroupProcessingResult> {
+    process_dba_with_callback(
+        channel_name,
+        room_config,
+        sample_rate,
+        prepared,
+        eq_resources,
+        None,
+    )
+}
+
+pub fn process_dba_with_callback(
+    channel_name: &str,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    prepared: &DbaPreparedInput,
+    eq_resources: &EqResources,
+    callback: Option<OptimProgressCallback>,
+) -> Result<GroupProcessingResult> {
     let dba_result = dba::optimize_dba_detailed(prepared, &room_config.optimizer, sample_rate)
         .map_err(|e| AutoeqError::OptimizationFailed {
             message: format!("DBA optimization failed: {}", e),
@@ -1037,12 +1161,21 @@ pub fn process_dba(
         result.gains[0], result.gains[1], result.delays[1]
     );
 
-    let eq_result = eq::optimize_channel_eq_detailed(
-        &combined_curve,
-        &room_config.optimizer,
-        Some(eq_resources),
-        sample_rate,
-    )
+    let eq_result = match callback {
+        Some(callback) => eq::optimize_channel_eq_with_callback_detailed(
+            &combined_curve,
+            &room_config.optimizer,
+            Some(eq_resources),
+            sample_rate,
+            callback,
+        ),
+        None => eq::optimize_channel_eq_detailed(
+            &combined_curve,
+            &room_config.optimizer,
+            Some(eq_resources),
+            sample_rate,
+        ),
+    }
     .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!("EQ optimization failed for DBA sum: {}", e),
     })?;
@@ -1138,6 +1271,26 @@ pub fn process_cardioid(
     prepared: &PreparedCardioidInput,
     eq_resources: &EqResources,
 ) -> Result<GroupProcessingResult> {
+    process_cardioid_with_callback(
+        channel_name,
+        config,
+        room_config,
+        sample_rate,
+        prepared,
+        eq_resources,
+        None,
+    )
+}
+
+pub fn process_cardioid_with_callback(
+    channel_name: &str,
+    config: &CardioidConfig,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    prepared: &PreparedCardioidInput,
+    eq_resources: &EqResources,
+    callback: Option<OptimProgressCallback>,
+) -> Result<GroupProcessingResult> {
     let front_curve = prepared.front.clone();
     let rear_curve = prepared.rear.clone();
     if front_curve.phase.is_none() || rear_curve.phase.is_none() {
@@ -1225,12 +1378,21 @@ pub fn process_cardioid(
     let max_freq = room_config.optimizer.max_freq;
     let pre_score = flat_loss_score(&combined_curve, min_freq, max_freq);
 
-    let eq_result = eq::optimize_channel_eq_detailed(
-        &combined_curve,
-        &room_config.optimizer,
-        Some(eq_resources),
-        sample_rate,
-    )
+    let eq_result = match callback {
+        Some(callback) => eq::optimize_channel_eq_with_callback_detailed(
+            &combined_curve,
+            &room_config.optimizer,
+            Some(eq_resources),
+            sample_rate,
+            callback,
+        ),
+        None => eq::optimize_channel_eq_detailed(
+            &combined_curve,
+            &room_config.optimizer,
+            Some(eq_resources),
+            sample_rate,
+        ),
+    }
     .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!("EQ optimization failed for Cardioid sum: {}", e),
     })?;

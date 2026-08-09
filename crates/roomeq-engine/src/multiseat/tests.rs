@@ -122,10 +122,7 @@ fn test_minimize_variance_search_objective_rejects_output_collapse() {
     // near-zero seat-to-seat variance, so the *pure* variance metric prefers
     // it. The penalized search objective must prefer the preserved solution.
     let preserved = vec![vec![92.0, 88.0, 91.0], vec![90.0, 89.5, 87.0]];
-    let collapsed = vec![
-        vec![-160.0, -161.0, -159.5],
-        vec![-160.5, -160.0, -161.0],
-    ];
+    let collapsed = vec![vec![-160.0, -161.0, -159.5], vec![-160.5, -160.0, -161.0]];
     let context = MsoObjectiveContext::from_baseline(&preserved);
 
     assert!(

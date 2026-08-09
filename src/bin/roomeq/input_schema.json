@@ -32,20 +32,6 @@
         "algorithm": "autoeq:cmaes",
         "asymmetric_loss": true,
         "atolerance": 0.00001,
-        "decomposed_correction": {
-          "early_reflection_weight": 0.3,
-          "enabled": true,
-          "fdw_cycles": 8.0,
-          "fdw_enabled": true,
-          "fdw_max_window_ms": 500.0,
-          "fdw_min_window_ms": 3.0,
-          "fdw_smoothing_octaves": 0.041666666666666664,
-          "min_mode_prominence_db": 3.0,
-          "min_mode_q": 3.0,
-          "mode_correction_weight": 1.0,
-          "schroeder_freq": 250.0,
-          "steady_state_weight": 0.4
-        },
         "elimination_threshold": 0.005,
         "local_algo": "cobyla",
         "loss_type": "flat",
@@ -357,7 +343,7 @@
       }
     },
     "AudibilityDeadbandConfig": {
-      "description": "Audibility/JND deadband applied to spectral objective residuals after\nperceptual or octave smoothing.",
+      "description": "Heuristic residual deadband applied after perceptual or octave smoothing.\n\nThe band thresholds are optimizer tuning values, not literal\npsychoacoustic JND estimates.",
       "type": "object",
       "properties": {
         "bass_db": {
@@ -398,7 +384,7 @@
           "description": "Schroeder fallback used when no measured value is available.",
           "type": "number",
           "format": "double",
-          "default": 250.0
+          "default": 300.0
         },
         "treble_db": {
           "description": "Treble threshold in dB.",
@@ -1419,7 +1405,7 @@
           "description": "Schroeder frequency (Hz). Below: modal, above: statistical.\n\nWhen `room_dimensions` is also provided AND an impulse response is\navailable, this value is overridden at run time by a\nmeasurement-driven Schroeder frequency: the optimizer measures\nRT60 from the IR via Schroeder backward integration and plugs it\ninto `f_S ≈ 2000 · √(RT60 / V)` with V from `room_dimensions`. In\nthat case this field is used only as the fallback if the RT60 fit\nfails.",
           "type": "number",
           "format": "double",
-          "default": 250.0
+          "default": 300.0
         },
         "steady_state_weight": {
           "description": "Correction weight for steady-state above Schroeder (0.0-1.0). Default: 0.4",
@@ -2523,7 +2509,7 @@
           "default": 0.00001
         },
         "audibility_deadband": {
-          "description": "Audibility/JND deadband for spectral residual objectives.",
+          "description": "Heuristic deadband for spectral residual objectives. Thresholds are\noptimizer tuning values rather than literal psychoacoustic JNDs.",
           "anyOf": [
             {
               "$ref": "#/$defs/AudibilityDeadbandConfig"

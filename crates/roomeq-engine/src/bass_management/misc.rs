@@ -179,7 +179,11 @@ pub fn joint_bass_management_report_from_parts(
             .unwrap_or(false),
         requested_sub_gain_db: applied_gain,
         applied_sub_gain_db: applied_gain,
-        gain_limited: false,
+        gain_limited: groups.iter().any(|group| {
+            group.advisories.iter().any(|advisory| {
+                advisory.contains("gain_limited") || advisory.contains("trim_limited")
+            })
+        }),
         estimated_bass_bus_peak_gain_db: None,
         objective_before: groups
             .iter()
@@ -282,5 +286,26 @@ mod tests {
             representative_bass_route_signature(Some(&graph), "fallback", 80.0),
             ("linkwitz-riley24".to_string(), 120.0)
         );
+    }
+
+    #[test]
+    fn joint_report_propagates_gain_limiting_advisories() {
+        let group = home_cinema::BassManagementGroupReport {
+            group_id: "fronts".to_string(),
+            roles: vec!["L".to_string(), "R".to_string()],
+            crossover_type: "LR24".to_string(),
+            selected_crossover_hz: Some(80.0),
+            configured_crossover_hz: Some(80.0),
+            main_delay_ms: 0.0,
+            bass_route_delay_ms: 0.0,
+            polarity_inverted: false,
+            trim_db: 0.0,
+            objective_before: None,
+            objective_after: None,
+            advisories: vec!["trim_limited_for_headroom".to_string()],
+        };
+
+        let report = joint_bass_management_report_from_parts(&[group], &[]);
+        assert!(report.gain_limited);
     }
 }

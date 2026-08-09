@@ -352,6 +352,30 @@ pub fn optimize_channel_eq_multi_with_auto_optimizer_detailed(
     )
 }
 
+/// Auto-optimizer variant retaining per-iteration progress reporting.
+#[allow(clippy::too_many_arguments)]
+pub fn optimize_channel_eq_multi_with_auto_optimizer_and_callback_detailed(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    auto_context: MultiEqAutoOptimizerContext,
+    callback: autoeq_optim::optim::OptimProgressCallback,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    let resolved_config =
+        resolve_multi_measurement_auto_optimizer_config(curves, config, auto_context);
+    optimize_channel_eq_multi_inner(
+        curves,
+        &resolved_config,
+        multi_config,
+        resources,
+        sample_rate,
+        Some(callback),
+        &RealOptimizerBackend::new(),
+    )
+}
+
 /// Optimize EQ across multiple measurement curves with per-iteration progress callback
 #[allow(dead_code)]
 pub fn optimize_channel_eq_multi_with_callback(
@@ -626,6 +650,8 @@ fn optimize_channel_eq_multi_inner(
         objective_data.asymmetric_loss_config =
             crate::config_adapter::to_optimizer_asymmetric_loss(config.asymmetric_loss_config());
         objective_data.smoothness_penalty = optim_params_multi.smoothness_penalty.clone();
+        objective_data.max_boost_envelope = config.max_boost_envelope.clone();
+        objective_data.min_cut_envelope = config.min_cut_envelope.clone();
 
         if i == 0 {
             primary_objective = Some(objective_data.clone());
@@ -660,6 +686,7 @@ fn optimize_channel_eq_multi_inner(
         return Err("multi-measurement optimization requires at least one objective".into());
     };
     primary.multi_objective = Some(multi_data);
+    let final_objective = primary.clone();
 
     let optim_params = build_optim_params(
         config,
@@ -732,7 +759,7 @@ fn optimize_channel_eq_multi_inner(
     // small_stereo_2_2_group QA case after the C-FFI nlopt → pure-Rust
     // cobyla swap). Snapshot the global result and roll back if the
     // refine regresses.
-    let final_loss = if let Some(refine_data) = primary_for_refine {
+    let _optimizer_loss = if let Some(refine_data) = primary_for_refine {
         log::info!(
             "  Running local refinement ({}) from global loss={:.6}",
             config.local_algo,
@@ -790,7 +817,27 @@ fn optimize_channel_eq_multi_inner(
         global_loss
     };
 
-    let peq = autoeq_core::x2peq::x2peq(&x, sample_rate, optim_params.peq_model);
+    let x_after_boost = if let Some(envelope) = &config.max_boost_envelope {
+        autoeq_optim::optim::clamp_gains_to_envelope(&x, envelope, optim_params.peq_model)
+    } else {
+        x.to_vec()
+    };
+    let x_final = if let Some(envelope) = &config.min_cut_envelope {
+        autoeq_optim::optim::clamp_cuts_to_envelope(
+            &x_after_boost,
+            envelope,
+            optim_params.peq_model,
+        )
+    } else {
+        x_after_boost
+    };
+    let final_loss = autoeq_optim::optim::compute_fitness_penalties_ref(&x_final, &final_objective);
+    for evidence in &mut optimizer_evidence {
+        if evidence.selected_for_output {
+            evidence.objective = Some(final_loss);
+        }
+    }
+    let peq = autoeq_core::x2peq::x2peq(&x_final, sample_rate, optim_params.peq_model);
     let filters: Vec<Biquad> = peq
         .into_iter()
         .map(|(_weight, biquad)| biquad)
@@ -939,10 +986,12 @@ fn optimize_spatial_robustness(
     // where depth is low, the deviation appears small → optimizer won't place filters there.
     let averaged_curve = &analysis.averaged_curve;
     {
-        let (spl_min, spl_max) = averaged_curve.spl.iter().fold(
-            (f64::INFINITY, f64::NEG_INFINITY),
-            |(lo, hi), &v| (lo.min(v), hi.max(v)),
-        );
+        let (spl_min, spl_max) = averaged_curve
+            .spl
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &v| {
+                (lo.min(v), hi.max(v))
+            });
         log::debug!(
             "  Spatial robustness input: {} curves, averaged n={} spl_range=[{:.6}, {:.6}] dB",
             curves.len(),
@@ -951,10 +1000,12 @@ fn optimize_spatial_robustness(
             spl_max
         );
         for (idx, curve) in curves.iter().enumerate() {
-            let (lo, hi) = curve.spl.iter().fold(
-                (f64::INFINITY, f64::NEG_INFINITY),
-                |(lo, hi), &v| (lo.min(v), hi.max(v)),
-            );
+            let (lo, hi) = curve
+                .spl
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &v| {
+                    (lo.min(v), hi.max(v))
+                });
             log::debug!(
                 "    seat curve {}: n={} spl_range=[{:.6}, {:.6}] dB",
                 idx,
@@ -1075,6 +1126,9 @@ fn optimize_spatial_robustness(
     objective_data.asymmetric_loss_config =
         crate::config_adapter::to_optimizer_asymmetric_loss(config.asymmetric_loss_config());
     objective_data.smoothness_penalty = optim_params.smoothness_penalty.clone();
+    objective_data.max_boost_envelope = config.max_boost_envelope.clone();
+    objective_data.min_cut_envelope = config.min_cut_envelope.clone();
+    let final_objective = objective_data.clone();
 
     let (lower_bounds, upper_bounds) = autoeq_optim::optim::setup::setup_bounds(&optim_params);
     let mut x =
@@ -1099,7 +1153,7 @@ fn optimize_spatial_robustness(
         )
     };
 
-    let evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
+    let mut evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
         &optim_params.algo,
         opt_result,
         &x,
@@ -1122,11 +1176,27 @@ fn optimize_spatial_robustness(
             .into());
         }
     }
-    let final_loss = evidence
+    let _optimizer_loss = evidence
         .objective
         .ok_or("spatial robustness optimizer did not return a finite objective")?;
+    let x_after_boost = if let Some(envelope) = &config.max_boost_envelope {
+        autoeq_optim::optim::clamp_gains_to_envelope(&x, envelope, optim_params.peq_model)
+    } else {
+        x.to_vec()
+    };
+    let x_final = if let Some(envelope) = &config.min_cut_envelope {
+        autoeq_optim::optim::clamp_cuts_to_envelope(
+            &x_after_boost,
+            envelope,
+            optim_params.peq_model,
+        )
+    } else {
+        x_after_boost
+    };
+    let final_loss = autoeq_optim::optim::compute_fitness_penalties_ref(&x_final, &final_objective);
+    evidence.objective = Some(final_loss);
 
-    let peq = autoeq_core::x2peq::x2peq(&x, sample_rate, optim_params.peq_model);
+    let peq = autoeq_core::x2peq::x2peq(&x_final, sample_rate, optim_params.peq_model);
     let filters: Vec<Biquad> = peq
         .into_iter()
         .map(|(_weight, biquad)| biquad)

@@ -285,9 +285,12 @@ pub fn apply_broadband_precorrection(
 
     let shelf_filters = spectral_align::create_alignment_filters(&alignment, sample_rate);
     let mut plugins = Vec::new();
-    if alignment.flat_gain_db.abs() >= spectral_align::MIN_CORRECTION_DB {
+    let exported_flat_gain = if alignment.flat_gain_db.abs() >= spectral_align::MIN_CORRECTION_DB {
         plugins.push(output::create_gain_plugin(alignment.flat_gain_db));
-    }
+        alignment.flat_gain_db
+    } else {
+        0.0
+    };
     if !shelf_filters.is_empty() {
         plugins.push(output::create_labeled_eq_plugin(
             &shelf_filters,
@@ -315,7 +318,7 @@ pub fn apply_broadband_precorrection(
         ));
     }
     let mut shifted = curve.clone();
-    shifted.spl += alignment.flat_gain_db;
+    shifted.spl += exported_flat_gain;
     let corrected = if filters.is_empty() {
         shifted
     } else {
@@ -344,7 +347,7 @@ pub fn apply_broadband_precorrection(
             curve_for_optim: corrected,
             plugins,
             biquads: filters,
-            mean_shift: alignment.flat_gain_db,
+            mean_shift: exported_flat_gain,
         }
     }
 }
@@ -548,8 +551,7 @@ mod tests {
             features.score_min_freq
         );
         assert!(features.score_min_freq <= 500.0);
-        let expected =
-            flatness_score_in_range(&features.curve, features.score_min_freq, 500.0);
+        let expected = flatness_score_in_range(&features.curve, features.score_min_freq, 500.0);
         assert_eq!(target.pre_score, expected);
     }
 

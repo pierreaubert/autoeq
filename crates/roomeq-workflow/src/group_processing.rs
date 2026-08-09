@@ -53,15 +53,34 @@ pub fn process_speaker_group(
     sample_rate: f64,
     _output_dir: &Path,
 ) -> Result<GroupProcessingResult> {
+    process_speaker_group_with_callback(
+        channel_name,
+        group,
+        room_config,
+        sample_rate,
+        _output_dir,
+        None,
+    )
+}
+
+pub fn process_speaker_group_with_callback(
+    channel_name: &str,
+    group: &SpeakerGroup,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    _output_dir: &Path,
+    callback: Option<roomeq_engine::OptimProgressCallback>,
+) -> Result<GroupProcessingResult> {
     let prepared = prepare_topology(channel_name, &group.to_legacy_topology())?;
     let resources = prepare_resources(room_config, true)?;
-    engine::process_speaker_group(
+    engine::process_speaker_group_with_callback(
         channel_name,
         group,
         room_config,
         sample_rate,
         &prepared,
         &resources,
+        callback,
     )
 }
 
@@ -72,15 +91,34 @@ pub fn process_speaker_topology(
     sample_rate: f64,
     _output_dir: &Path,
 ) -> Result<GroupProcessingResult> {
+    process_speaker_topology_with_callback(
+        channel_name,
+        topology,
+        room_config,
+        sample_rate,
+        _output_dir,
+        None,
+    )
+}
+
+pub fn process_speaker_topology_with_callback(
+    channel_name: &str,
+    topology: &SpeakerTopology,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    _output_dir: &Path,
+    callback: Option<roomeq_engine::OptimProgressCallback>,
+) -> Result<GroupProcessingResult> {
     let prepared = prepare_topology(channel_name, topology)?;
     let resources = prepare_resources(room_config, true)?;
-    engine::process_speaker_topology(
+    engine::process_speaker_topology_with_callback(
         channel_name,
         topology,
         room_config,
         sample_rate,
         &prepared,
         &resources,
+        callback,
     )
 }
 
@@ -90,6 +128,24 @@ pub fn process_multisub_group(
     room_config: &RoomConfig,
     sample_rate: f64,
     _output_dir: &Path,
+) -> Result<GroupProcessingResult> {
+    process_multisub_group_with_callback(
+        channel_name,
+        group,
+        room_config,
+        sample_rate,
+        _output_dir,
+        None,
+    )
+}
+
+pub fn process_multisub_group_with_callback(
+    channel_name: &str,
+    group: &MultiSubGroup,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    _output_dir: &Path,
+    callback: Option<roomeq_engine::OptimProgressCallback>,
 ) -> Result<GroupProcessingResult> {
     let subwoofers = group
         .subwoofers
@@ -112,7 +168,7 @@ pub fn process_multisub_group(
     };
     let resources = prepare_resources(room_config, true)?;
     let flat_resources = prepare_resources(room_config, false)?;
-    engine::process_multisub_group(
+    engine::process_multisub_group_with_callback(
         channel_name,
         group,
         room_config,
@@ -120,6 +176,7 @@ pub fn process_multisub_group(
         &prepared,
         &resources,
         &flat_resources,
+        callback,
     )
 }
 
@@ -130,17 +187,36 @@ pub fn process_dba(
     sample_rate: f64,
     _output_dir: &Path,
 ) -> Result<GroupProcessingResult> {
+    process_dba_with_callback(
+        channel_name,
+        config,
+        room_config,
+        sample_rate,
+        _output_dir,
+        None,
+    )
+}
+
+pub fn process_dba_with_callback(
+    channel_name: &str,
+    config: &DBAConfig,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    _output_dir: &Path,
+    callback: Option<roomeq_engine::OptimProgressCallback>,
+) -> Result<GroupProcessingResult> {
     let prepared =
         crate::dba::prepare_dba(config).map_err(|error| AutoeqError::InvalidMeasurement {
             message: format!("Failed to prepare DBA measurements: {error}"),
         })?;
     let resources = prepare_resources(room_config, true)?;
-    engine::process_dba(
+    engine::process_dba_with_callback(
         channel_name,
         room_config,
         sample_rate,
         &prepared,
         &resources,
+        callback,
     )
 }
 
@@ -150,6 +226,24 @@ pub fn process_cardioid(
     room_config: &RoomConfig,
     sample_rate: f64,
     _output_dir: &Path,
+) -> Result<GroupProcessingResult> {
+    process_cardioid_with_callback(
+        channel_name,
+        config,
+        room_config,
+        sample_rate,
+        _output_dir,
+        None,
+    )
+}
+
+pub fn process_cardioid_with_callback(
+    channel_name: &str,
+    config: &CardioidConfig,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    _output_dir: &Path,
+    callback: Option<roomeq_engine::OptimProgressCallback>,
 ) -> Result<GroupProcessingResult> {
     let front = autoeq_measurements::read::load_source(&config.front).map_err(|error| {
         AutoeqError::InvalidMeasurement {
@@ -163,13 +257,14 @@ pub fn process_cardioid(
     })?;
     let prepared = PreparedCardioidInput { front, rear };
     let resources = prepare_resources(room_config, true)?;
-    engine::process_cardioid(
+    engine::process_cardioid_with_callback(
         channel_name,
         config,
         room_config,
         sample_rate,
         &prepared,
         &resources,
+        callback,
     )
 }
 

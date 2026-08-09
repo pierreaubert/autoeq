@@ -73,6 +73,10 @@ pub(super) fn percentile(mut values: Vec<f64>, quantile: f64) -> f64 {
         return 0.0;
     }
     values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    if (quantile - 0.5).abs() <= f64::EPSILON && values.len().is_multiple_of(2) {
+        let upper = values.len() / 2;
+        return (values[upper - 1] + values[upper]) * 0.5;
+    }
     let index = ((values.len() - 1) as f64 * quantile.clamp(0.0, 1.0)).ceil() as usize;
     values[index.min(values.len() - 1)]
 }

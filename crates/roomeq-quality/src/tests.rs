@@ -4,6 +4,25 @@ use math_audio_iir_fir::{Biquad, BiquadFilterType};
 use num_complex::Complex64;
 
 #[test]
+fn noisy_measurement_uses_configured_magnitude_rms_without_changing_phase() {
+    let clean = vec![Complex64::from_polar(1.0, 0.7); 20_000];
+    let noisy = perturb_transfer(&clean, MeasurementNoise::Noisy { rms_db: 3.0 }, 42);
+    let errors_db: Vec<_> = noisy
+        .iter()
+        .map(|value| 20.0 * value.norm().log10())
+        .collect();
+    let rms =
+        (errors_db.iter().map(|error| error * error).sum::<f64>() / errors_db.len() as f64).sqrt();
+    assert!((rms - 3.0).abs() < 0.05, "observed RMS {rms}");
+    assert!(noisy.iter().all(|value| (value.arg() - 0.7).abs() < 1e-12));
+}
+
+#[test]
+fn percentile_uses_conventional_even_sample_median() {
+    assert_eq!(metrics::percentile(vec![1.0, 9.0], 0.5), 5.0);
+}
+
+#[test]
 fn acoustic_qa_pr_analytic_oracles_are_valid_and_self_consistent() {
     let thresholds = AcceptanceThresholds::default();
     let suite = analytic_oracle_suite();

@@ -335,34 +335,25 @@ fn test_invalid_phase_type_returns_error() {
 }
 
 #[test]
-fn fractional_delay_preserves_impulse_shape_better_than_rounding() {
-    // An impulse at sample 5: [0,0,0,0,0,1,0,0,0,0]
-    let coeffs: Vec<f64> = (0..10).map(|i| if i == 5 { 1.0 } else { 0.0 }).collect();
-    // Target delay: 2.3 samples
-    let delay_ms = 2.3 / 48000.0 * 1000.0;
+fn fractional_delay_preserves_high_frequency_magnitude() {
+    let mut coeffs = vec![0.0; 256];
+    coeffs[64] = 1.0;
+    let shifted = super::apply_fractional_sample_shift(&coeffs, 0.5);
+    let frequency = 20_000.0;
+    let sample_rate = 48_000.0;
+    let omega = 2.0 * std::f64::consts::PI * frequency / sample_rate;
+    let response = shifted
+        .iter()
+        .enumerate()
+        .map(|(index, value)| num_complex::Complex64::from_polar(*value, -omega * index as f64))
+        .sum::<num_complex::Complex64>();
+    let magnitude_db = 20.0 * response.norm().log10();
 
-    // Old integer-rounding method
-    let old_samples = (delay_ms * 1e-3 * 48000.0f64).round() as isize;
-    let old_shifted = super::apply_sample_shift(&coeffs, old_samples);
-
-    // New fractional method
-    let new_shifted = super::apply_fractional_sample_shift(&coeffs, 2.3);
-
-    // The integer method rounds to 2 samples, so impulse is at index 7
-    assert_eq!(old_shifted[7], 1.0);
-    assert_eq!(old_shifted[6], 0.0);
-
-    // The fractional method should spread the impulse between 7 and 8
     assert!(
-        new_shifted[7] > 0.6 && new_shifted[7] < 0.8,
-        "fractional delay should place 0.7 of impulse at idx 7, got {}",
-        new_shifted[7]
+        magnitude_db > -0.5,
+        "fractional delay introduced {magnitude_db:.3} dB at 20 kHz"
     );
-    assert!(
-        new_shifted[8] > 0.2 && new_shifted[8] < 0.4,
-        "fractional delay should place 0.3 of impulse at idx 8, got {}",
-        new_shifted[8]
-    );
+    assert!((shifted.iter().sum::<f64>() - 1.0).abs() < 1e-12);
 }
 
 #[test]
@@ -379,19 +370,11 @@ fn fractional_delay_is_zero_for_integer_shift() {
 
 #[test]
 fn fractional_delay_handles_negative_shift() {
-    let coeffs: Vec<f64> = vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
+    let mut coeffs = vec![0.0; 64];
+    coeffs[32] = 1.0;
     // Negative shift = advance by 1.5 samples
     let shifted = super::apply_fractional_sample_shift(&coeffs, -1.5);
-    // Original impulse at idx 3; after advancing 1.5, it should be at idx 1.5
-    // So we expect energy at idx 1 and 2
-    assert!(
-        shifted[1] > 0.4 && shifted[1] < 0.6,
-        "expected ~0.5 at idx 1, got {}",
-        shifted[1]
-    );
-    assert!(
-        shifted[2] > 0.4 && shifted[2] < 0.6,
-        "expected ~0.5 at idx 2, got {}",
-        shifted[2]
-    );
+    assert!(shifted[30].abs() > 0.5);
+    assert!(shifted[31].abs() > 0.5);
+    assert!((shifted.iter().sum::<f64>() - 1.0).abs() < 1e-12);
 }

@@ -120,7 +120,9 @@ pub fn compute_supporting_source_filter(
         taps,
         normalization_gain_db,
         constrained_target,
-        support_gain_db,
+        // Report the same finite, band-windowed response used to design the
+        // deployed FIR. Its frequency grid is `constrained_target.freq`.
+        support_gain_db: gain_curve.spl.to_vec(),
         drr_before_db,
         drr_after_db,
         precedence_limit_hits: precedence_hits,
@@ -390,7 +392,11 @@ mod tests {
         let target = Array1::from_vec(vec![90.0, 90.0]);
         let primary = Array1::from_vec(vec![80.0, 80.0]);
         let freq = Array1::from_vec(vec![50.0, 1_000.0]);
-        let limits = vec![PrecedenceLimitBand { low_hz: 100.0, high_hz: 500.0, limit_db: 3.0 }];
+        let limits = vec![PrecedenceLimitBand {
+            low_hz: 100.0,
+            high_hz: 500.0,
+            limit_db: 3.0,
+        }];
         let (constrained, hits) = constrain_target(&target, &primary, &limits, &freq);
         assert_eq!(constrained, target);
         assert_eq!(hits, 0);
@@ -492,18 +498,37 @@ mod tests {
         );
         assert!(result.normalization_gain_db.is_finite());
 
+        assert_eq!(
+            result.support_gain_db.len(),
+            result.constrained_target.freq.len()
+        );
+        assert!(
+            result
+                .constrained_target
+                .freq
+                .iter()
+                .zip(&result.support_gain_db)
+                .filter(|(frequency, _)| {
+                    **frequency < config.freq_range_hz.0 || **frequency > config.freq_range_hz.1
+                })
+                .all(|(_, gain)| (*gain + 120.0).abs() < 1e-12)
+        );
+
         // Numerically evaluate the deployed chain: gain stage x normalized FIR.
         let sample_rate = 48000.0;
         let mut worst_err_db = 0.0_f64;
-        for (i, &f) in freq.iter().enumerate().skip(3).take(94) {
+        for (i, &f) in result.constrained_target.freq.iter().enumerate() {
+            if f < config.freq_range_hz.0 || f > config.freq_range_hz.1 {
+                continue;
+            }
             let omega = 2.0 * std::f64::consts::PI * f / sample_rate;
             let (mut re, mut im) = (0.0_f64, 0.0_f64);
             for (t, &tap) in result.taps.iter().enumerate() {
                 re += tap * (omega * t as f64).cos();
                 im -= tap * (omega * t as f64).sin();
             }
-            let deployed_db = 20.0 * (re * re + im * im).sqrt().max(1e-12).log10()
-                + result.normalization_gain_db;
+            let deployed_db =
+                20.0 * (re * re + im * im).sqrt().max(1e-12).log10() + result.normalization_gain_db;
             worst_err_db = worst_err_db.max((deployed_db - result.support_gain_db[i]).abs());
         }
         assert!(

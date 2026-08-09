@@ -266,6 +266,69 @@ fn optimize_speaker_single_channel_succeeds() {
 }
 
 #[test]
+fn optimize_speaker_forwards_progress_callback() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let source = SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve()));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_callback = Arc::clone(&calls);
+    let callback: SpeakerOptimizationCallback = Box::new(move |progress| {
+        assert_eq!(progress.current_speaker, "left");
+        calls_for_callback.fetch_add(1, Ordering::Relaxed);
+        CallbackAction::Continue
+    });
+
+    optimize_speaker(
+        "left",
+        &source,
+        &tiny_optimizer(),
+        None,
+        48_000.0,
+        Some(callback),
+    )
+    .unwrap();
+    assert!(calls.load(Ordering::Relaxed) > 0);
+}
+
+#[test]
+fn optimize_speaker_topology_forwards_progress_callback() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let source = SpeakerConfig::Topology(SpeakerTopology {
+        name: "full-range".to_string(),
+        speaker_name: None,
+        drivers: vec![SpeakerDriver {
+            id: "driver".to_string(),
+            role: SpeakerDriverRole::FullRange,
+            measurement: MeasurementSource::InMemory(flat_curve()),
+            crossover_band: None,
+        }],
+        parallel_groups: Vec::new(),
+        crossover: None,
+    });
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_callback = Arc::clone(&calls);
+    let callback: SpeakerOptimizationCallback = Box::new(move |progress| {
+        assert_eq!(progress.current_speaker, "center");
+        calls_for_callback.fetch_add(1, Ordering::Relaxed);
+        CallbackAction::Continue
+    });
+
+    optimize_speaker(
+        "center",
+        &source,
+        &tiny_optimizer(),
+        None,
+        48_000.0,
+        Some(callback),
+    )
+    .unwrap();
+    assert!(calls.load(Ordering::Relaxed) > 0);
+}
+
+#[test]
 fn validate_room_optimization_single_speaker_succeeds() {
     let config = minimal_room_config(ProcessingMode::LowLatency);
     let observer = observer_none();

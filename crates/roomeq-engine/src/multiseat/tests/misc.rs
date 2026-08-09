@@ -412,10 +412,7 @@ fn test_minimize_variance_does_not_collapse_identical_subs() {
     // objective must keep the combined output audible.
     let seat0 = create_test_curve(0.0, 0.0);
     let seat1 = create_test_curve(2.0, 10.0);
-    let measurements = vec![
-        vec![seat0.clone(), seat1.clone()],
-        vec![seat0, seat1],
-    ];
+    let measurements = vec![vec![seat0.clone(), seat1.clone()], vec![seat0, seat1]];
     let ms = MultiSeatMeasurements::new(measurements).expect("Should create");
 
     let config = MultiSeatConfig {
@@ -424,8 +421,7 @@ fn test_minimize_variance_does_not_collapse_identical_subs() {
         optimize_polarity: true,
         ..Default::default()
     };
-    let result =
-        optimize_multiseat(&ms, &config, (20.0, 120.0), 48000.0).expect("Should optimize");
+    let result = optimize_multiseat(&ms, &config, (20.0, 120.0), 48000.0).expect("Should optimize");
 
     let freqs = create_eval_frequency_grid(&ms, 20.0, 120.0);
     let interpolated = interpolate_all_measurements(&ms, &freqs).expect("Should interpolate");

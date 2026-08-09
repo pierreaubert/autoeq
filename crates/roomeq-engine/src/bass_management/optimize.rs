@@ -56,11 +56,13 @@ pub fn optimize_home_cinema_group_crossovers(
         let mut phase_refs = main_refs.clone();
         phase_refs.push(sub_curve);
         let measured_phase_available = all_curves_have_usable_phase(&measured_refs);
+        let processed_phase_available = all_curves_have_usable_phase(&phase_refs);
         let shared_grid_available = all_curves_share_frequency_grid(&measured_refs)
             && all_curves_share_frequency_grid(&phase_refs);
-        let phase_available = measured_phase_available && shared_grid_available;
+        let phase_available =
+            measured_phase_available && processed_phase_available && shared_grid_available;
 
-        if !measured_phase_available {
+        if !measured_phase_available || !processed_phase_available {
             advisories.push("missing_phase_group_crossover_alignment_skipped".to_string());
         } else if !shared_grid_available {
             advisories

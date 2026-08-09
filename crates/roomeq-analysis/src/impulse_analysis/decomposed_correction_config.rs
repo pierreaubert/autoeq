@@ -4,12 +4,16 @@ use super::types::DecomposedCorrectionResult;
 use super::types::log_temporal_mode_summary;
 use ndarray::Array1;
 
+/// Default Schroeder frequency used when no room-specific value is supplied.
+/// Keep this aligned with the RoomEQ model's 300 Hz fallback.
+pub const DEFAULT_SCHROEDER_FREQ_HZ: f64 = 300.0;
+
 /// Configuration for decomposed correction analysis.
 #[derive(Debug, Clone)]
 pub struct DecomposedCorrectionConfig {
     /// Schroeder frequency (Hz) separating modal and statistical regions.
     /// Below this: room modes dominate. Above: diffuse field.
-    /// Default: 250.0 Hz (typical for medium rooms)
+    /// Default: 300.0 Hz (typical for medium rooms)
     pub schroeder_freq: f64,
 
     /// Minimum Q factor to consider a peak as a room mode.
@@ -61,7 +65,7 @@ pub struct DecomposedCorrectionConfig {
 impl Default for DecomposedCorrectionConfig {
     fn default() -> Self {
         Self {
-            schroeder_freq: 250.0,
+            schroeder_freq: DEFAULT_SCHROEDER_FREQ_HZ,
             min_mode_q: 3.0,
             min_mode_prominence_db: 3.0,
             mode_correction_weight: 1.0,

@@ -24,7 +24,8 @@ pub struct SupportingSourceFilter {
     pub normalization_gain_db: f64,
     /// Effective target after constraints (for diagnostics).
     pub constrained_target: Curve,
-    /// Supporting-source gain response in dB.
+    /// Band-windowed supporting-source gain response in dB, on the same
+    /// frequency grid as `constrained_target`.
     pub support_gain_db: Vec<f64>,
     /// DRR before compensation (dB per frequency bin), when it was derived
     /// from time-gated impulse-response evidence.

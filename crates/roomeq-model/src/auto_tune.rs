@@ -276,12 +276,15 @@ fn apply_gain_bounds(
         && let Some(zero_boost_until) = zero_boost_until_hz(context)
     {
         let release = (zero_boost_until * 1.25).min(context.effective_max_freq);
-        resolved.max_boost_envelope = Some(vec![
+        let mut envelope = vec![
             (context.effective_min_freq, 0.0),
             (zero_boost_until, 0.0),
             (release, needed_boost),
-            (context.effective_max_freq, needed_boost),
-        ]);
+        ];
+        if release < context.effective_max_freq {
+            envelope.push((context.effective_max_freq, needed_boost));
+        }
+        resolved.max_boost_envelope = Some(envelope);
     }
 }
 
@@ -352,11 +355,13 @@ fn estimate_feature_q(smoothed: &[(f64, f64)], center_idx: usize) -> Option<f64>
         return None;
     }
 
-    let half_abs = center_abs * 0.5;
+    // Q bandwidth is measured at the half-power level: 3 dB below the
+    // feature's peak height, not at half its dB height.
+    let half_power_abs = (center_abs - 3.0).max(0.0);
     let mut low = center_freq;
     for i in (0..center_idx).rev() {
         low = smoothed[i].0;
-        if smoothed[i].1.abs() <= half_abs {
+        if smoothed[i].1.abs() <= half_power_abs {
             break;
         }
     }
@@ -364,7 +369,7 @@ fn estimate_feature_q(smoothed: &[(f64, f64)], center_idx: usize) -> Option<f64>
     let mut high = center_freq;
     for &(freq, value) in smoothed.iter().skip(center_idx + 1) {
         high = freq;
-        if value.abs() <= half_abs {
+        if value.abs() <= half_power_abs {
             break;
         }
     }
@@ -457,6 +462,40 @@ mod tests {
         assert_eq!(envelope[0].1, 0.0);
         assert_eq!(envelope[1].1, 0.0);
         assert!(envelope[2].1 > 0.0);
+    }
+
+    #[test]
+    fn auto_optimizer_deduplicates_terminal_boost_envelope_point() {
+        let curve = test_curve();
+        let config = OptimizerConfig {
+            auto_optimizer: Some(AutoOptimizerConfig {
+                enabled: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut ctx = context();
+        ctx.schroeder_hz = Some(250.0);
+        ctx.detected_f3_hz = None;
+        ctx.effective_max_freq = 300.0;
+
+        let resolved = resolve_auto_optimizer_config(&curve, &config, &ctx);
+        let envelope = resolved.max_boost_envelope.as_ref().unwrap();
+        assert_eq!(envelope.len(), 3);
+        assert!(envelope.windows(2).all(|points| points[0].0 < points[1].0));
+        assert!(resolved.gain_envelope_errors().is_empty());
+    }
+
+    #[test]
+    fn feature_q_uses_three_db_bandwidth() {
+        let feature = [
+            (80.0, 8.0),
+            (90.0, 9.0),
+            (100.0, 12.0),
+            (110.0, 9.0),
+            (120.0, 8.0),
+        ];
+        assert_eq!(estimate_feature_q(&feature, 2), Some(5.0));
     }
 
     #[test]

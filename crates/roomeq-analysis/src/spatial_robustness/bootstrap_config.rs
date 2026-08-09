@@ -11,7 +11,7 @@
 /// noise is highly non-Gaussian (modal frequencies, comb-filter dips).
 #[derive(Debug, Clone)]
 pub struct BootstrapConfig {
-    /// Number of bootstrap resamples B. Typical: 200..1000. Default: 500.
+    /// Number of bootstrap resamples B. Typical: 200..1000. Default: 400.
     pub num_resamples: usize,
     /// Two-sided confidence level α — band covers `[α/2, 1-α/2]`. Default: 0.10 (90 % CI).
     pub alpha: f64,
@@ -22,7 +22,7 @@ pub struct BootstrapConfig {
 impl Default for BootstrapConfig {
     fn default() -> Self {
         Self {
-            num_resamples: 500,
+            num_resamples: 400,
             alpha: 0.10,
             seed: 0xC0FFEE,
         }

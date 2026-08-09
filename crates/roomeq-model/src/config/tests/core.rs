@@ -289,17 +289,11 @@ fn target_shape_canonical_wire_format() {
 }
 
 #[test]
-fn test_optimizer_config_default_has_decomposed_correction_enabled() {
+fn test_optimizer_config_default_matches_omitted_decomposed_correction() {
     let config = OptimizerConfig::default();
-    let dc = config
-        .decomposed_correction
-        .expect("decomposed_correction should be Some by default");
-    assert!(
-        dc.enabled,
-        "decomposed_correction should be enabled by default"
-    );
-    assert_eq!(dc.schroeder_freq, 250.0);
-    assert_eq!(dc.steady_state_weight, 0.4);
+    let deserialized: OptimizerConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+    assert!(config.decomposed_correction.is_none());
+    assert!(deserialized.decomposed_correction.is_none());
 }
 
 #[test]
@@ -432,10 +426,34 @@ fn perceptual_policy_tightens_generated_high_frequency_smoothing() {
 }
 
 #[test]
+fn high_frequency_smoothing_guard_preserves_valid_transition_order() {
+    let mut config = OptimizerConfig {
+        max_freq: 8_000.0,
+        psychoacoustic_smoothing: Some(PsychoacousticSmoothingConfig {
+            low_freq_n: 48,
+            high_freq_n: 6,
+            low_freq: 1_000.0,
+            high_freq: 2_000.0,
+        }),
+        high_frequency_correction: Some(HighFrequencyCorrectionConfig {
+            start_hz: 500.0,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    config.apply_high_frequency_correction_defaults(true);
+    let smoothing = config.psychoacoustic_smoothing.unwrap();
+    assert!(smoothing.low_freq > 0.0);
+    assert!(smoothing.low_freq < smoothing.high_freq);
+    assert_eq!(smoothing.high_freq, 500.0);
+}
+
+#[test]
 fn test_decomposed_correction_serde_config_default() {
     let dc = DecomposedCorrectionSerdeConfig::default();
     assert!(dc.enabled);
-    assert_eq!(dc.schroeder_freq, 250.0);
+    assert_eq!(dc.schroeder_freq, 300.0);
     assert_eq!(dc.steady_state_weight, 0.4);
     assert_eq!(dc.min_mode_q, 3.0);
     assert_eq!(dc.min_mode_prominence_db, 3.0);

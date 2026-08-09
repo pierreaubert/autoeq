@@ -111,7 +111,7 @@
       ]
     },
     "AudibilityDeadbandConfig": {
-      "description": "Audibility/JND deadband applied to spectral objective residuals after\nperceptual or octave smoothing.",
+      "description": "Heuristic residual deadband applied after perceptual or octave smoothing.\n\nThe band thresholds are optimizer tuning values, not literal\npsychoacoustic JND estimates.",
       "type": "object",
       "properties": {
         "bass_db": {
@@ -152,7 +152,7 @@
           "description": "Schroeder fallback used when no measured value is available.",
           "type": "number",
           "format": "double",
-          "default": 250.0
+          "default": 300.0
         },
         "treble_db": {
           "description": "Treble threshold in dB.",

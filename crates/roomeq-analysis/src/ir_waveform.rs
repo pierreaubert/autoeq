@@ -77,6 +77,11 @@ pub fn compute_channel_ir_waveforms(
         let angle = -2.0 * PI * f * delay_s;
         *h *= Complex64::from_polar(1.0, angle);
     }
+    // A real IFFT requires self-conjugate DC and Nyquist bins. Fractional
+    // delays rotate Nyquist away from the real axis, so restore the invariant
+    // after applying every complex correction.
+    post_spectrum[0] = Complex64::new(post_spectrum[0].re, 0.0);
+    post_spectrum[n_bins - 1] = Complex64::new(post_spectrum[n_bins - 1].re, 0.0);
 
     let post_ir_raw = spectrum_to_impulse_response(&post_spectrum, FFT_SIZE);
 

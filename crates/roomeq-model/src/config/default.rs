@@ -353,7 +353,7 @@ pub(super) fn default_variance_lambda() -> f64 {
 }
 
 pub(super) fn default_decomposed_schroeder() -> f64 {
-    250.0
+    default_schroeder_freq()
 }
 
 pub(super) fn default_decomposed_min_q() -> f64 {

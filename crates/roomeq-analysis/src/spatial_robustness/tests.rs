@@ -219,7 +219,7 @@ fn bootstrap_config_default_values() {
     use super::bootstrap_config::BootstrapConfig;
 
     let config = BootstrapConfig::default();
-    assert_eq!(config.num_resamples, 500);
+    assert_eq!(config.num_resamples, 400);
     assert!((config.alpha - 0.10).abs() < 1e-9);
     assert_eq!(config.seed, 0xC0FFEE);
 }

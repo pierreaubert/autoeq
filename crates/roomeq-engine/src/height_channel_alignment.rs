@@ -281,7 +281,17 @@ pub fn compute_height_channel_alignment(
                     sample_rate,
                 )
             })
-            .flatten();
+            .flatten()
+            .map(|mut candidate| {
+                if !config.match_timbre {
+                    candidate.lowshelf_gain_db = 0.0;
+                    candidate.highshelf_gain_db = 0.0;
+                }
+                if !config.match_level {
+                    candidate.flat_gain_db = 0.0;
+                }
+                candidate
+            });
         let had_candidate = candidate.is_some();
         let (alignment, timbre_after, level_after, phase_after) = if let Some(candidate) = candidate
         {
@@ -489,6 +499,33 @@ mod tests {
                 .advisories
                 .contains(&"height_phase_or_coherence_untrustworthy".to_string())
         );
+    }
+
+    #[test]
+    fn level_only_alignment_does_not_apply_timbre_shelves() {
+        let curves = HashMap::from([
+            ("L".to_string(), curve(0.0, 0.0, false)),
+            ("TFL".to_string(), curve(4.0, 2.0, false)),
+        ]);
+        let result = compute_height_channel_alignment(
+            &curves,
+            &HashMap::new(),
+            &HeightChannelAlignmentConfig {
+                match_timbre: false,
+                match_level: true,
+                match_arrival_time: false,
+                ..Default::default()
+            },
+            48_000.0,
+            80.0,
+            16_000.0,
+        )
+        .unwrap();
+
+        let alignment = result["TFL"].alignment.as_ref().unwrap();
+        assert_eq!(alignment.lowshelf_gain_db, 0.0);
+        assert_eq!(alignment.highshelf_gain_db, 0.0);
+        assert!(alignment.flat_gain_db.abs() > 0.0);
     }
 
     #[test]

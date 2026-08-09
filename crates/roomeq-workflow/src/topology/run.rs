@@ -13,8 +13,8 @@ use roomeq_engine::room_result::ChannelOptimizationResult;
 use roomeq_model::{
     ChannelDspChain, MeasurementSource, OptimizerConfig, RoomConfig, TargetCurveConfig,
 };
-use std::path::Path;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 /// Run a Post-EQ pass with optional per-iteration progress feedback.

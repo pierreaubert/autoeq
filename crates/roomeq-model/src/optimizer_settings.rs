@@ -123,11 +123,16 @@ mod frequency_band_weights_tests {
 
     #[test]
     fn partial_frequency_band_weights_inherit_defaults() {
-        let parsed: FrequencyBandWeights =
-            serde_json::from_str(r#"{"bass_weight": 3.5}"#).unwrap();
+        let parsed: FrequencyBandWeights = serde_json::from_str(r#"{"bass_weight": 3.5}"#).unwrap();
         assert_eq!(parsed.bass_weight, 3.5);
-        assert_eq!(parsed.mid_weight, FrequencyBandWeights::default().mid_weight);
-        assert_eq!(parsed.treble_max, FrequencyBandWeights::default().treble_max);
+        assert_eq!(
+            parsed.mid_weight,
+            FrequencyBandWeights::default().mid_weight
+        );
+        assert_eq!(
+            parsed.treble_max,
+            FrequencyBandWeights::default().treble_max
+        );
     }
 }
 

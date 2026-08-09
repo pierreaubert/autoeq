@@ -25,8 +25,18 @@ impl Default for AudibilityDeadbandConfig {
             bass_mid_hz: 250.0,
             mid_treble_hz: 2_000.0,
             disable_below_schroeder: true,
-            schroeder_hz: 250.0,
+            schroeder_hz: 300.0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AudibilityDeadbandConfig;
+
+    #[test]
+    fn deadband_default_uses_canonical_schroeder_fallback() {
+        assert_eq!(AudibilityDeadbandConfig::default().schroeder_hz, 300.0);
     }
 }
 

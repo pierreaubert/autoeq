@@ -19,12 +19,7 @@ fn supporting_source_output_names(result: &RoomOptimizationResult) -> BTreeSet<S
         .supporting_source
         .iter()
         .flat_map(|reports| reports.values())
-        .flat_map(|report| {
-            [
-                report.primary_output.clone(),
-                report.support_output.clone(),
-            ]
-        })
+        .flat_map(|report| [report.primary_output.clone(), report.support_output.clone()])
         .collect()
 }
 
@@ -671,12 +666,21 @@ fn runtime_acceptance_evidence(
                 remove_routing_transfer(&channel.initial_curve, &baseline, &channel.final_curve)
             })
             .unwrap_or_else(|| channel.final_curve.clone());
-        let chain = result.channels.get(name)?;
-        let passband = passband_curves(
-            chain,
-            &[&channel.initial_curve, &post],
-            excursion_aware_band(chain, evaluation_band),
-        )?;
+        let passband = if let Some(chain) = result.channels.get(name) {
+            passband_curves(
+                chain,
+                &[&channel.initial_curve, &post],
+                excursion_aware_band(chain, evaluation_band),
+            )?
+        } else {
+            // Keep the safety gate active even when graph assembly failed for
+            // one channel. Realization evidence will mark that channel failed;
+            // the acoustic side can still be evaluated from its result curves.
+            vec![
+                crop_curve_to_band(&channel.initial_curve, evaluation_band.0, evaluation_band.1)?,
+                crop_curve_to_band(&post, evaluation_band.0, evaluation_band.1)?,
+            ]
+        };
         training_pre.push(roomeq_engine::smooth_one_over_n_octave(
             &passband[0],
             smoothing_n,
@@ -905,8 +909,7 @@ fn runtime_realization_quality(
             chain,
             &channel.initial_curve,
             excursion_aware_band(chain, evaluation_band),
-        )
-        else {
+        ) else {
             failed_channels.push(name.clone());
             continue;
         };
@@ -1064,7 +1067,10 @@ fn runtime_temporal_quality_evidence(
     let channels: Vec<_> = names
         .iter()
         .map(|name| {
-            let masking = result.channels[name].fir_temporal_masking.as_ref();
+            let masking = result
+                .channels
+                .get(name)
+                .and_then(|chain| chain.fir_temporal_masking.as_ref());
             roomeq_engine::quality::TemporalChannelEvidence {
                 pre_ringing_audible_db: if phase_only_fir {
                     None
@@ -1734,11 +1740,7 @@ mod tests {
             post_ringing_audible_db: -40.0,
             penalty: 1.0,
         });
-        result
-            .channel_results
-            .get_mut("left")
-            .unwrap()
-            .fir_coeffs = Some(vec![0.0; 64]);
+        result.channel_results.get_mut("left").unwrap().fir_coeffs = Some(vec![0.0; 64]);
 
         let names = vec!["left".to_string()];
         // Mixed-phase FIRs are unity-magnitude excess-phase corrections whose
@@ -1965,8 +1967,7 @@ mod tests {
         channel.initial_curve.spl[0] += 1.0;
         channel.final_curve = channel.initial_curve.clone();
         channel.final_curve.spl[0] += 0.0177;
-        result.channels.get_mut("left").unwrap().final_curve =
-            Some((&channel.final_curve).into());
+        result.channels.get_mut("left").unwrap().final_curve = Some((&channel.final_curve).into());
 
         apply_final_correction_safety_gate(
             &mut result,
@@ -1982,8 +1983,13 @@ mod tests {
             .correction_acceptance
             .as_ref()
             .expect("acceptance report");
-        assert!(report.metrics.post_target_weighted_rms_db > report.metrics.pre_target_weighted_rms_db);
-        assert!(report.accepted, "bounded tradeoff must stay accepted: {report:?}");
+        assert!(
+            report.metrics.post_target_weighted_rms_db > report.metrics.pre_target_weighted_rms_db
+        );
+        assert!(
+            report.accepted,
+            "bounded tradeoff must stay accepted: {report:?}"
+        );
         assert_eq!(report.decision, CorrectionDecision::Accepted);
         assert!(
             !report
@@ -2192,6 +2198,26 @@ mod tests {
         );
         assert_eq!(report.decision, CorrectionDecision::RevertedStage);
         assert_eq!(report.reverted_stages, ["left:peq"]);
+    }
+
+    #[test]
+    fn runtime_acceptance_retains_acoustic_evidence_without_dsp_chain() {
+        let mut result = single_channel_room_result("left");
+        result.channels.remove("left");
+
+        let (acoustic, realization, _) = runtime_acceptance_evidence(
+            &result,
+            48_000.0,
+            3,
+            (20.0, 20_000.0),
+            Path::new("."),
+            roomeq_model::ProcessingMode::LowLatency,
+        )
+        .expect("missing graph assembly must not suppress runtime evidence");
+
+        assert!(acoustic.finite);
+        assert_eq!(realization.evaluated_channels, 0);
+        assert_eq!(realization.failed_channels, ["left"]);
     }
 
     #[test]

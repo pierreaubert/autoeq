@@ -18,9 +18,7 @@ pub(in super::super) fn refresh_final_reports(
     let excursion_floors: HashMap<String, f64> = result
         .channels
         .iter()
-        .filter_map(|(name, chain)| {
-            excursion_hpf_hz_from_chain(chain).map(|hz| (name.clone(), hz))
-        })
+        .filter_map(|(name, chain)| excursion_hpf_hz_from_chain(chain).map(|hz| (name.clone(), hz)))
         .collect();
     for ch_result in result.channel_results.values_mut() {
         let (mut score_min_freq, score_max_freq) =
@@ -94,18 +92,13 @@ pub(in super::super) fn refresh_final_reports(
     result.metadata.post_score = avg_post;
     result.metadata.home_cinema_layout = Some(roomeq_engine::home_cinema::analyze_layout(config));
     result.metadata.multi_seat_coverage = Some(crate::home_cinema::multi_seat_coverage(config));
-    if result.metadata.multi_seat_correction.is_none()
-        && config.optimizer.multi_seat.is_some()
-    {
+    if result.metadata.multi_seat_correction.is_none() && config.optimizer.multi_seat.is_some() {
         // Non-HomeCinema topology routes (e.g. Generic multi-sub) run the
         // multi-seat objective but never built the correction report; derive
         // it from the optimized channel results here.
-        result.metadata.multi_seat_correction =
-            Some(crate::home_cinema::multi_seat_correction_report(
-                config,
-                &result.channel_results,
-                None,
-            ));
+        result.metadata.multi_seat_correction = Some(
+            crate::home_cinema::multi_seat_correction_report(config, &result.channel_results, None),
+        );
     }
     let existing_bass_management = result.metadata.bass_management.clone();
     result.metadata.bass_management = if let Some(existing) = existing_bass_management {
@@ -263,9 +256,7 @@ mod tests {
     fn direct_early_late_reports_populated_when_enabled_with_irs() {
         let pre_ir = roomeq_model::IrWaveform {
             time_ms: (0..16).map(|i| i as f64 * 0.1).collect(),
-            amplitude: (0..16)
-                .map(|i| if i == 0 { 1.0 } else { 0.0 })
-                .collect(),
+            amplitude: (0..16).map(|i| if i == 0 { 1.0 } else { 0.0 }).collect(),
         };
         let mut post_ir = pre_ir.clone();
         post_ir.amplitude[0] = 0.5;
@@ -283,11 +274,7 @@ mod tests {
 
         refresh_direct_early_late_reports(&mut result, &config);
 
-        assert!(
-            result.channels["L"]
-                .direct_early_late_correction
-                .is_some()
-        );
+        assert!(result.channels["L"].direct_early_late_correction.is_some());
     }
 
     #[test]
@@ -302,20 +289,14 @@ mod tests {
 
         refresh_direct_early_late_reports(&mut result, &config);
 
-        assert!(
-            result.channels["L"]
-                .direct_early_late_correction
-                .is_none()
-        );
+        assert!(result.channels["L"].direct_early_late_correction.is_none());
     }
 
     #[test]
     fn direct_early_late_reports_untouched_when_disabled() {
         let impulse_ir = || roomeq_model::IrWaveform {
             time_ms: (0..16).map(|i| i as f64 * 0.1).collect(),
-            amplitude: (0..16)
-                .map(|i| if i == 0 { 1.0 } else { 0.0 })
-                .collect(),
+            amplitude: (0..16).map(|i| if i == 0 { 1.0 } else { 0.0 }).collect(),
         };
         let mut result = single_channel_room_result("L");
         let chain = result.channels.get_mut("L").expect("chain");
@@ -324,11 +305,7 @@ mod tests {
 
         refresh_direct_early_late_reports(&mut result, &RoomConfig::default());
 
-        assert!(
-            result.channels["L"]
-                .direct_early_late_correction
-                .is_none()
-        );
+        assert!(result.channels["L"].direct_early_late_correction.is_none());
     }
 }
 

@@ -39,30 +39,51 @@ pub(super) fn apply_sample_shift(coeffs: &[f64], shift: isize) -> Vec<f64> {
     shifted
 }
 
-/// Shift FIR coefficients by a fractional number of samples using linear
-/// interpolation. Positive shift = later (delays the signal).
+/// Shift FIR coefficients by a fractional number of samples using a
+/// 16-tap Lanczos-windowed sinc interpolator. Positive shift = later.
+///
+/// The previous two-tap linear interpolator multiplied the complete FIR
+/// response by a triangular-kernel response, causing severe high-frequency
+/// droop. Windowed sinc approximates the ideal `e^-jΩD` fractional delay while
+/// retaining a compact, deterministic kernel.
 pub(super) fn apply_fractional_sample_shift(coeffs: &[f64], shift: f64) -> Vec<f64> {
     let n = coeffs.len();
     if shift.abs() < 1e-9 {
         return coeffs.to_vec();
     }
+    let integer_shift = shift.round();
+    if (shift - integer_shift).abs() < 1e-9 {
+        return apply_sample_shift(coeffs, integer_shift as isize);
+    }
+    const HALF_WIDTH: isize = 8;
     let mut shifted = vec![0.0; n];
-    #[allow(clippy::needless_range_loop)]
-    for i in 0..n {
+    for (i, output) in shifted.iter_mut().enumerate() {
         let src = i as f64 - shift;
-        let idx = src.floor();
-        let frac = src - idx;
-        let idx = idx as isize;
-        if idx < 0 || idx >= n as isize {
-            continue;
+        let base = src.floor() as isize;
+        let frac = src - base as f64;
+        let mut normalization = 0.0;
+        let mut value = 0.0;
+        for offset in (-HALF_WIDTH + 1)..=HALF_WIDTH {
+            let distance = frac - offset as f64;
+            let weight = sinc(distance) * sinc(distance / HALF_WIDTH as f64);
+            normalization += weight;
+            let index = base + offset;
+            if (0..n as isize).contains(&index) {
+                value += weight * coeffs[index as usize];
+            }
         }
-        let v0 = coeffs[idx as usize];
-        if frac.abs() < 1e-9 || idx + 1 >= n as isize {
-            shifted[i] = v0;
-        } else {
-            let v1 = coeffs[(idx + 1) as usize];
-            shifted[i] = (1.0 - frac) * v0 + frac * v1;
+        if normalization.abs() > 1e-12 {
+            *output = value / normalization;
         }
     }
     shifted
+}
+
+fn sinc(value: f64) -> f64 {
+    if value.abs() < 1e-12 {
+        1.0
+    } else {
+        let angle = std::f64::consts::PI * value;
+        angle.sin() / angle
+    }
 }

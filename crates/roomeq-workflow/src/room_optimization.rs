@@ -51,6 +51,7 @@ use misc::LEVEL_DIFFERENCE_WARNING_THRESHOLD;
 use misc::channels_for_generic_optimization;
 use misc::compute_shared_mean_spl;
 use misc::find_sub_main_pairings;
+use misc::generic_channel_progress_iterations;
 use misc::identify_acoustic_groups;
 use misc::is_subwoofer_channel;
 use misc::optimizer_progress_iterations;
@@ -265,7 +266,13 @@ fn execute_topology_workflow(
     route: TopologyRoute,
 ) -> Result<RoomOptimizationResult> {
     execute_topology_workflow_with_probe_arrivals(
-        config, sys, sample_rate, output_dir, None, observer_shared, route,
+        config,
+        sys,
+        sample_rate,
+        output_dir,
+        None,
+        observer_shared,
+        route,
     )
 }
 
@@ -407,33 +414,39 @@ fn execute_topology_workflow_with_probe_arrivals(
     };
 
     match route {
-        TopologyRoute::Stereo2_0 => crate::topology::optimize_stereo_2_0_with_progress_and_probe_arrivals(
-            config,
-            sys,
-            sample_rate,
-            output_dir.unwrap_or(Path::new(".")),
-            probe_arrival_overrides,
-            Some(&mut workflow_progress_factory),
-            Some(&mut workflow_stage_callback),
-        ),
-        TopologyRoute::Stereo2_1 => crate::topology::optimize_stereo_2_1_with_progress_and_probe_arrivals(
-            config,
-            sys,
-            sample_rate,
-            output_dir.unwrap_or(Path::new(".")),
-            probe_arrival_overrides,
-            Some(&mut workflow_progress_factory),
-            Some(&mut workflow_stage_callback),
-        ),
-        TopologyRoute::HomeCinema => crate::topology::optimize_home_cinema_with_progress_and_probe_arrivals(
-            config,
-            sys,
-            sample_rate,
-            output_dir.unwrap_or(Path::new(".")),
-            probe_arrival_overrides,
-            Some(&mut workflow_progress_factory),
-            Some(&mut workflow_stage_callback),
-        ),
+        TopologyRoute::Stereo2_0 => {
+            crate::topology::optimize_stereo_2_0_with_progress_and_probe_arrivals(
+                config,
+                sys,
+                sample_rate,
+                output_dir.unwrap_or(Path::new(".")),
+                probe_arrival_overrides,
+                Some(&mut workflow_progress_factory),
+                Some(&mut workflow_stage_callback),
+            )
+        }
+        TopologyRoute::Stereo2_1 => {
+            crate::topology::optimize_stereo_2_1_with_progress_and_probe_arrivals(
+                config,
+                sys,
+                sample_rate,
+                output_dir.unwrap_or(Path::new(".")),
+                probe_arrival_overrides,
+                Some(&mut workflow_progress_factory),
+                Some(&mut workflow_stage_callback),
+            )
+        }
+        TopologyRoute::HomeCinema => {
+            crate::topology::optimize_home_cinema_with_progress_and_probe_arrivals(
+                config,
+                sys,
+                sample_rate,
+                output_dir.unwrap_or(Path::new(".")),
+                probe_arrival_overrides,
+                Some(&mut workflow_progress_factory),
+                Some(&mut workflow_stage_callback),
+            )
+        }
         TopologyRoute::Generic => Err(AutoeqError::InvalidConfiguration {
             message: "execute_topology_workflow called with generic route".to_string(),
         }),
@@ -699,11 +712,8 @@ fn assemble_workflow_result(
         SystemModel::Custom => "Custom",
     };
     let mut workflow_refresh_needed = false;
-    let channel_arrivals = phase_arrivals_for_channels(
-        config,
-        &result.channel_results,
-        probe_arrival_overrides,
-    );
+    let channel_arrivals =
+        phase_arrivals_for_channels(config, &result.channel_results, probe_arrival_overrides);
 
     // Probe arrivals are explicit measurement metadata and must respect the
     // normal delay policy. Phase-derived arrivals are the topology equivalent
@@ -1324,8 +1334,8 @@ fn phase_arrivals_for_channels(
     channel_results
         .keys()
         .filter_map(|channel_name| {
-            if let Some(arrival_ms) = probe_arrival_overrides
-                .and_then(|overrides| overrides.get(channel_name).copied())
+            if let Some(arrival_ms) =
+                probe_arrival_overrides.and_then(|overrides| overrides.get(channel_name).copied())
             {
                 return Some((channel_name.clone(), arrival_ms));
             }
@@ -1370,29 +1380,45 @@ fn apply_topology_phase_alignment(
         PipelineStepId::PhaseAlignment,
         PipelineStepStatus::Started,
         &RoomOptimizationProgress {
-            current_speaker: String::new(), speaker_index: 0, total_speakers: pairings.len(),
-            iteration: 0, max_iterations: 0, loss: 0.0, overall_progress: 0.0,
+            current_speaker: String::new(),
+            speaker_index: 0,
+            total_speakers: pairings.len(),
+            iteration: 0,
+            max_iterations: 0,
+            loss: 0.0,
+            overall_progress: 0.0,
             message: Some("Running topology phase alignment...".to_string()),
-            epa_preference: None, step_id: None, step_status: None,
+            epa_preference: None,
+            step_id: None,
+            step_status: None,
         },
     )?;
     let mut results = HashMap::new();
     for (sub_name, main_name) in pairings {
-        let Some(sub_curve) = curves.get(&sub_name) else { continue };
-        let Some(main_curve) = curves.get(&main_name) else { continue };
+        let Some(sub_curve) = curves.get(&sub_name) else {
+            continue;
+        };
+        let Some(main_curve) = curves.get(&main_name) else {
+            continue;
+        };
         if sub_curve.phase.is_none() || main_curve.phase.is_none() {
             continue;
         }
         match phase_alignment::optimize_phase_alignment(sub_curve, main_curve, phase_config) {
             Ok(result) => {
-                results.insert(main_name, (result.delay_ms, result.invert_polarity, sub_name));
+                results.insert(
+                    main_name,
+                    (result.delay_ms, result.invert_polarity, sub_name),
+                );
             }
             Err(error) => warn!("Topology phase alignment failed: {error}"),
         }
     }
     for (main_name, (_, invert, _)) in &results {
         if *invert && let Some(chain) = channel_chains.get_mut(main_name) {
-            chain.plugins.insert(0, output::create_gain_plugin_with_invert(0.0, true));
+            chain
+                .plugins
+                .insert(0, output::create_gain_plugin_with_invert(0.0, true));
             sync_reported_phase_adjustment(main_name, channel_results, channel_chains, 0.0, true);
         }
     }
@@ -1400,7 +1426,10 @@ fn apply_topology_phase_alignment(
     if !results.is_empty() {
         emit_pipeline_event(
             observer_shared,
-            PipelineEvent::completed(PipelineStepId::PhaseAlignment, "Topology phase alignment complete"),
+            PipelineEvent::completed(
+                PipelineStepId::PhaseAlignment,
+                "Topology phase alignment complete",
+            ),
         )?;
     }
     Ok(!results.is_empty())
@@ -1739,12 +1768,6 @@ fn assemble_generic_result(
         )?;
         let min_freq = config.optimizer.min_freq;
         let max_freq = config.optimizer.max_freq;
-        let sample_rate = config
-            .recording_config
-            .as_ref()
-            .and_then(|rc| rc.playback_sample_rate)
-            .unwrap_or(48000) as f64;
-
         // Compute post-EQ mean SPL per channel for the level spread warning
         let mut post_eq_means: HashMap<String, f64> = HashMap::new();
         for (channel_name, final_curve) in &spectral_curves {
@@ -2645,7 +2668,7 @@ fn assemble_generic_result(
 /// * `optimizer_config` - Optimizer parameters
 /// * `target_curve` - Optional target curve configuration
 /// * `sample_rate` - Sample rate for filter design
-/// * `callback` - Optional progress callback (currently unused; reserved)
+/// * `callback` - Optional per-iteration optimizer progress callback
 ///
 /// # Returns
 /// * `SpeakerOptimizationResult` containing DSP chain and optimization results
@@ -2655,7 +2678,7 @@ pub fn optimize_speaker(
     optimizer_config: &OptimizerConfig,
     target_curve: Option<&TargetCurveConfig>,
     sample_rate: f64,
-    _callback: Option<SpeakerOptimizationCallback>,
+    callback: Option<SpeakerOptimizationCallback>,
 ) -> Result<SpeakerOptimizationResult> {
     let optimizer_config = optimizer_config.clone();
 
@@ -2672,6 +2695,33 @@ pub fn optimize_speaker(
         cea2034_cache: None,
         provenance: Default::default(),
     };
+    let max_iterations = generic_channel_progress_iterations(&room_config);
+    let channel_for_progress = channel_name.to_string();
+    let eq_callback: Option<roomeq_engine::OptimProgressCallback> = callback.map(|mut callback| {
+        Box::new(move |iteration, loss, epa_preference| {
+            let action = callback(&RoomOptimizationProgress {
+                current_speaker: channel_for_progress.clone(),
+                speaker_index: 0,
+                total_speakers: 1,
+                iteration,
+                max_iterations,
+                loss,
+                overall_progress: if max_iterations > 0 {
+                    (iteration as f64 / max_iterations as f64).min(1.0)
+                } else {
+                    0.0
+                },
+                message: None,
+                epa_preference,
+                step_id: None,
+                step_status: None,
+            });
+            match action {
+                CallbackAction::Continue => roomeq_engine::CallbackAction::Continue,
+                CallbackAction::Stop => roomeq_engine::CallbackAction::Stop,
+            }
+        }) as roomeq_engine::OptimProgressCallback
+    });
 
     let (
         chain,
@@ -2690,7 +2740,7 @@ pub fn optimize_speaker(
         &room_config,
         sample_rate,
         None,
-        None,
+        eq_callback,
         None, // no shared mean for standalone single-channel optimization
         None, // no probe_arrival_overrides on the standalone path
     )?;

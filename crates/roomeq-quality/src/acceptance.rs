@@ -620,7 +620,12 @@ mod tests {
             },
             RuntimeAcceptancePolicy::for_output_class(RuntimeOutputClass::Hybrid),
         );
-        assert!(report.violations.iter().any(|v| v == "pre_ringing_evidence_missing"));
+        assert!(
+            report
+                .violations
+                .iter()
+                .any(|v| v == "pre_ringing_evidence_missing")
+        );
     }
 
     #[test]

@@ -422,9 +422,12 @@ pub fn perturb_transfer(
         .map(|&value| {
             let uniform = xorshift64(&mut state) as f64 / u64::MAX as f64;
             let centered = (uniform - 0.5) * 2.0;
-            let magnitude = 10.0_f64.powf(centered * rms_db / 20.0);
-            let phase = centered * rms_db.to_radians();
-            value * Complex64::from_polar(magnitude, phase)
+            // A uniform [-1, 1] variate has RMS 1/sqrt(3), so scale it to
+            // make the configured dB value the actual RMS magnitude error.
+            // `rms_db` is not a phase-angle contract; leave phase unchanged.
+            let error_db = centered * rms_db * 3.0_f64.sqrt();
+            let magnitude = 10.0_f64.powf(error_db / 20.0);
+            value * magnitude
         })
         .collect()
 }

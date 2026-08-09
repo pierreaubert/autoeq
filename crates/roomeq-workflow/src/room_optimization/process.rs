@@ -4,9 +4,10 @@ use super::room_optimization_progress::send_progress;
 use super::types::MixedModeResult;
 use super::types::SharedPipelineObserver;
 use super::types::SpeakerProcessResult;
-use crate::{
-    process_cardioid, process_dba, process_multisub_group, process_speaker_group,
-    process_speaker_topology,
+use crate::group_processing::{
+    process_cardioid_with_callback, process_dba_with_callback,
+    process_multisub_group_with_callback, process_speaker_group_with_callback,
+    process_speaker_topology_with_callback,
 };
 use log::info;
 use roomeq_engine::pipeline::{PipelineStepId, PipelineStepStatus};
@@ -237,21 +238,46 @@ pub(super) fn process_speaker_internal(
                 shared_mean_spl,
             )
         }
-        SpeakerConfig::Group(group) => {
-            process_speaker_group(channel_name, group, room_config, sample_rate, output_dir)
-        }
-        SpeakerConfig::Topology(topology) => {
-            process_speaker_topology(channel_name, topology, room_config, sample_rate, output_dir)
-        }
-        SpeakerConfig::MultiSub(group) => {
-            process_multisub_group(channel_name, group, room_config, sample_rate, output_dir)
-        }
-        SpeakerConfig::Dba(config) => {
-            process_dba(channel_name, config, room_config, sample_rate, output_dir)
-        }
-        SpeakerConfig::Cardioid(config) => {
-            process_cardioid(channel_name, config, room_config, sample_rate, output_dir)
-        }
+        SpeakerConfig::Group(group) => process_speaker_group_with_callback(
+            channel_name,
+            group,
+            room_config,
+            sample_rate,
+            output_dir,
+            callback,
+        ),
+        SpeakerConfig::Topology(topology) => process_speaker_topology_with_callback(
+            channel_name,
+            topology,
+            room_config,
+            sample_rate,
+            output_dir,
+            callback,
+        ),
+        SpeakerConfig::MultiSub(group) => process_multisub_group_with_callback(
+            channel_name,
+            group,
+            room_config,
+            sample_rate,
+            output_dir,
+            callback,
+        ),
+        SpeakerConfig::Dba(config) => process_dba_with_callback(
+            channel_name,
+            config,
+            room_config,
+            sample_rate,
+            output_dir,
+            callback,
+        ),
+        SpeakerConfig::Cardioid(config) => process_cardioid_with_callback(
+            channel_name,
+            config,
+            room_config,
+            sample_rate,
+            output_dir,
+            callback,
+        ),
         SpeakerConfig::SupportingSource(_group) => {
             Err(roomeq_model::AutoeqError::InvalidConfiguration {
                 message: format!(

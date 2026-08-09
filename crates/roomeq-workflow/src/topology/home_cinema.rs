@@ -605,21 +605,23 @@ fn optimize_home_cinema_with_sub(
     let mut phase_check_refs = main_refs.clone();
     phase_check_refs.push(sub_curve);
     let measured_phase_available = all_curves_have_usable_phase(&measured_phase_check_refs);
+    let processed_phase_available = all_curves_have_usable_phase(&phase_check_refs);
     let measured_grid_available = all_curves_share_frequency_grid(&measured_phase_check_refs);
     let processed_grid_available = all_curves_share_frequency_grid(&phase_check_refs);
     let shared_grid_available = measured_grid_available && processed_grid_available;
-    let phase_available = measured_phase_available && shared_grid_available;
+    let phase_available =
+        measured_phase_available && processed_phase_available && shared_grid_available;
     let mut optimization_advisories = Vec::new();
-    if !measured_phase_available {
+    if !measured_phase_available || !processed_phase_available {
         optimization_advisories.push("missing_phase_crossover_alignment_skipped".to_string());
         let mut missing_roles: Vec<_> = main_roles
             .iter()
-            .zip(&measured_main_curves)
+            .zip(&main_refs)
             .filter_map(|(role, curve)| {
                 (!roomeq_engine::topology::curve_has_usable_phase(curve)).then_some(role.as_str())
             })
             .collect();
-        if !roomeq_engine::topology::curve_has_usable_phase(&aligned_curves[&sub_role]) {
+        if !roomeq_engine::topology::curve_has_usable_phase(sub_curve) {
             missing_roles.push(sub_role.as_str());
         }
         optimization_advisories.push(format!(
@@ -1469,11 +1471,7 @@ fn optimize_home_cinema_with_sub(
             .get(group_id)
             .and_then(|g| g.selected_crossover_hz)
             .unwrap_or(final_xo_freq);
-        let pre_score = compute_flat_loss(
-            &pre_eq_initial_curves[role],
-            role_xover_freq,
-            max_freq,
-        );
+        let pre_score = compute_flat_loss(&pre_eq_initial_curves[role], role_xover_freq, max_freq);
         let final_curve_obj = if let Some(e) = post_eq_filters.get(role) {
             if !e.is_empty() {
                 let resp =
@@ -1945,7 +1943,9 @@ mod tests {
             progress_factory: None,
             stage_callback: None,
         };
-        let result = HomeCinemaExecutor.execute(&mut assembly).expect("supporting-only layout");
+        let result = HomeCinemaExecutor
+            .execute(&mut assembly)
+            .expect("supporting-only layout");
         assert!(result.channels.contains_key("WideLeft"));
         assert!(result.channels.contains_key("WideLeft_support"));
     }
@@ -1956,10 +1956,15 @@ mod tests {
         let speakers = HashMap::from([(
             "wide".to_string(),
             SpeakerConfig::SupportingSource(SupportingSourceGroup {
-                name: "Wide".to_string(), speaker_name: None,
+                name: "Wide".to_string(),
+                speaker_name: None,
                 primary: MeasurementSource::InMemory(flat_curve()),
                 support: MeasurementSource::InMemory(flat_curve()),
-                supporting_source: SupportingSourceConfig { fir_taps: 128, decorrelation: SupportingSourceDecorrelation::None, ..Default::default() },
+                supporting_source: SupportingSourceConfig {
+                    fir_taps: 128,
+                    decorrelation: SupportingSourceDecorrelation::None,
+                    ..Default::default()
+                },
             }),
         )]);
         let sys = SystemConfig {
@@ -1969,18 +1974,29 @@ mod tests {
                 ("LFE".to_string(), "missing_sub".to_string()),
             ]),
             subwoofers: Some(SubwooferSystemConfig {
-                config: SubwooferStrategy::Single, crossover: None, mapping: HashMap::new(),
+                config: SubwooferStrategy::Single,
+                crossover: None,
+                mapping: HashMap::new(),
             }),
             bass_management: None,
             ..Default::default()
         };
         let config = room_config(speakers, &sys, tiny_optimizer(), None, None);
         let mut assembly = super::super::types::WorkflowAssembly {
-            config: &config, sys: &sys, sample_rate: 48_000.0, output_dir: temp_dir.path(),
-            probe_arrival_overrides: None, progress_factory: None, stage_callback: None,
+            config: &config,
+            sys: &sys,
+            sample_rate: 48_000.0,
+            output_dir: temp_dir.path(),
+            probe_arrival_overrides: None,
+            progress_factory: None,
+            stage_callback: None,
         };
         let error = HomeCinemaExecutor.execute(&mut assembly).unwrap_err();
-        assert!(error.to_string().contains("require at least one Single main"));
+        assert!(
+            error
+                .to_string()
+                .contains("require at least one Single main")
+        );
     }
 
     #[test]

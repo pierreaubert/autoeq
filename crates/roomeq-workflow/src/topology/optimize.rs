@@ -13,39 +13,72 @@ use super::types::{
 use roomeq_engine::error::Result;
 use roomeq_engine::room_result::RoomOptimizationResult;
 use roomeq_model::{RoomConfig, SystemConfig};
-use std::path::Path;
 use std::collections::HashMap;
+use std::path::Path;
 
 pub(crate) fn optimize_stereo_2_0_with_progress_and_probe_arrivals<'a>(
-    config: &RoomConfig, sys: &SystemConfig, sample_rate: f64, output_dir: &Path,
+    config: &RoomConfig,
+    sys: &SystemConfig,
+    sample_rate: f64,
+    output_dir: &Path,
     probe_arrival_overrides: Option<&'a HashMap<String, f64>>,
     progress_factory: Option<&'a mut WorkflowProgressCallbackFactory<'a>>,
     stage_callback: Option<&'a mut WorkflowStageCallback<'a>>,
 ) -> Result<RoomOptimizationResult> {
     let executor = Stereo20Executor;
-    let mut assembly = WorkflowAssembly { config, sys, sample_rate, output_dir, probe_arrival_overrides, progress_factory, stage_callback };
+    let mut assembly = WorkflowAssembly {
+        config,
+        sys,
+        sample_rate,
+        output_dir,
+        probe_arrival_overrides,
+        progress_factory,
+        stage_callback,
+    };
     executor.execute(&mut assembly)
 }
 
 pub(crate) fn optimize_stereo_2_1_with_progress_and_probe_arrivals<'a>(
-    config: &RoomConfig, sys: &SystemConfig, sample_rate: f64, output_dir: &Path,
+    config: &RoomConfig,
+    sys: &SystemConfig,
+    sample_rate: f64,
+    output_dir: &Path,
     probe_arrival_overrides: Option<&'a HashMap<String, f64>>,
     progress_factory: Option<&'a mut WorkflowProgressCallbackFactory<'a>>,
     stage_callback: Option<&'a mut WorkflowStageCallback<'a>>,
 ) -> Result<RoomOptimizationResult> {
     let executor = Stereo21Executor;
-    let mut assembly = WorkflowAssembly { config, sys, sample_rate, output_dir, probe_arrival_overrides, progress_factory, stage_callback };
+    let mut assembly = WorkflowAssembly {
+        config,
+        sys,
+        sample_rate,
+        output_dir,
+        probe_arrival_overrides,
+        progress_factory,
+        stage_callback,
+    };
     executor.execute(&mut assembly)
 }
 
 pub(crate) fn optimize_home_cinema_with_progress_and_probe_arrivals<'a>(
-    config: &RoomConfig, sys: &SystemConfig, sample_rate: f64, output_dir: &Path,
+    config: &RoomConfig,
+    sys: &SystemConfig,
+    sample_rate: f64,
+    output_dir: &Path,
     probe_arrival_overrides: Option<&'a HashMap<String, f64>>,
     progress_factory: Option<&'a mut WorkflowProgressCallbackFactory<'a>>,
     stage_callback: Option<&'a mut WorkflowStageCallback<'a>>,
 ) -> Result<RoomOptimizationResult> {
     let executor = HomeCinemaExecutor;
-    let mut assembly = WorkflowAssembly { config, sys, sample_rate, output_dir, probe_arrival_overrides, progress_factory, stage_callback };
+    let mut assembly = WorkflowAssembly {
+        config,
+        sys,
+        sample_rate,
+        output_dir,
+        probe_arrival_overrides,
+        progress_factory,
+        stage_callback,
+    };
     executor.execute(&mut assembly)
 }
 

@@ -132,11 +132,10 @@ fn process_hybrid(mut request: FirChannelRequest<'_>) -> Result<ChannelProcessin
 
     let iir_response = response::compute_peq_complex_response(
         &eq_result.filters,
-        &request.preprocessed.curve.freq,
+        &optimization_curve.freq,
         request.sample_rate,
     );
-    let residual_curve =
-        response::apply_complex_response(&request.preprocessed.curve, &iir_response);
+    let residual_curve = response::apply_complex_response(&optimization_curve, &iir_response);
     let coefficients = crate::fir::generate_fir_correction_with_resources(
         &residual_curve,
         request.optimizer,

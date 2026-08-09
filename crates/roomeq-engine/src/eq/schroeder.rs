@@ -41,6 +41,23 @@ pub fn optimize_with_schroeder_split_detailed(
 
     let low_config = &schroeder_config.low_freq_config;
     let high_config = &schroeder_config.high_freq_config;
+    let high_min_q = optimizer.min_q.max(0.3);
+    if low_config.min_q > low_config.max_q {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "Schroeder low-frequency min_q ({}) exceeds max_q ({})",
+                low_config.min_q, low_config.max_q
+            ),
+        });
+    }
+    if high_min_q > high_config.max_q {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "Schroeder high-frequency min_q ({high_min_q}) exceeds max_q ({})",
+                high_config.max_q
+            ),
+        });
+    }
 
     let has_non_flat_target = optimizer
         .target_response
@@ -64,15 +81,25 @@ pub fn optimize_with_schroeder_split_detailed(
                 message: format!("Low-frequency EQ optimization failed: {e}"),
             })?;
         return Ok(SchroederOptimizationResult {
-            low_filters: result.filters,
+            low_filters: clamp_filter_q(result.filters, low_config.min_q, low_config.max_q),
             high_filters: Vec::new(),
             optimizer_evidence: result.optimizer_evidence,
         });
     }
     if schroeder_freq <= optimizer.min_freq {
         let high_optimizer = OptimizerConfig {
-            min_q: optimizer.min_q.max(0.3),
+            num_filters: if high_config.shelving_only {
+                optimizer.num_filters.min(2)
+            } else {
+                optimizer.num_filters
+            },
+            min_q: high_min_q,
             max_q: high_config.max_q,
+            peq_model: if high_config.shelving_only {
+                "ls-pk-hs".to_string()
+            } else {
+                optimizer.peq_model.clone()
+            },
             ..optimizer.clone()
         };
         let result = optimize_channel_eq_detailed(curve, &high_optimizer, None, sample_rate)
@@ -81,7 +108,7 @@ pub fn optimize_with_schroeder_split_detailed(
             })?;
         return Ok(SchroederOptimizationResult {
             low_filters: Vec::new(),
-            high_filters: result.filters,
+            high_filters: clamp_filter_q(result.filters, high_min_q, high_config.max_q),
             optimizer_evidence: result.optimizer_evidence,
         });
     }
@@ -133,11 +160,20 @@ pub fn optimize_with_schroeder_split_detailed(
 
     // High frequency optimization (above Schroeder)
     let high_optimizer = OptimizerConfig {
-        num_filters: high_filters,
+        num_filters: if high_config.shelving_only {
+            high_filters.min(2)
+        } else {
+            high_filters
+        },
         min_freq: schroeder_freq,
         max_freq: optimizer.max_freq,
-        min_q: optimizer.min_q.max(0.3), // Ensure minimum Q for broad filters
+        min_q: high_min_q, // Ensure minimum Q for broad filters
         max_q: high_config.max_q,
+        peq_model: if high_config.shelving_only {
+            "ls-pk-hs".to_string()
+        } else {
+            optimizer.peq_model.clone()
+        },
         ..optimizer.clone()
     };
 
@@ -162,8 +198,7 @@ pub fn optimize_with_schroeder_split_detailed(
     // constraints on the returned filters to guarantee the Schroeder split
     // invariant.
     let low_eq_filters = clamp_filter_q(low_eq_filters, low_config.min_q, low_config.max_q);
-    let high_eq_filters =
-        clamp_filter_q(high_eq_filters, optimizer.min_q.max(0.3), high_config.max_q);
+    let high_eq_filters = clamp_filter_q(high_eq_filters, high_min_q, high_config.max_q);
 
     let mut optimizer_evidence = low_result.optimizer_evidence;
     optimizer_evidence.extend(high_result.optimizer_evidence);
@@ -322,5 +357,58 @@ mod tests {
             optimize_with_schroeder_split_detailed(&curve, &optimizer, &split, 48_000.0).unwrap();
         assert!(!result.low_filters.is_empty());
         assert!(result.high_filters.is_empty());
+        assert!(result.low_filters.iter().all(|filter| {
+            filter.q >= split.low_freq_config.min_q && filter.q <= split.low_freq_config.max_q
+        }));
+    }
+
+    #[test]
+    fn schroeder_split_rejects_inverted_high_q_bounds_without_panicking() {
+        let curve = curve_with_bass_peak_and_treble_tilt();
+        let optimizer = OptimizerConfig {
+            num_filters: 2,
+            min_q: 2.0,
+            ..Default::default()
+        };
+        let split = SchroederSplitConfig {
+            enabled: true,
+            ..Default::default()
+        };
+
+        let error = optimize_with_schroeder_split_detailed(&curve, &optimizer, &split, 48_000.0)
+            .unwrap_err();
+        assert!(error.to_string().contains("min_q (2) exceeds max_q (1)"));
+    }
+
+    #[test]
+    fn shelving_only_high_pass_emits_no_peak_filters() {
+        let curve = curve_with_bass_peak_and_treble_tilt();
+        let optimizer = OptimizerConfig {
+            num_filters: 4,
+            max_iter: 20,
+            population: 6,
+            refine: false,
+            min_freq: 400.0,
+            max_freq: 2_000.0,
+            psychoacoustic: false,
+            ..Default::default()
+        };
+        let mut split = SchroederSplitConfig {
+            enabled: true,
+            schroeder_freq: 200.0,
+            ..Default::default()
+        };
+        split.high_freq_config.shelving_only = true;
+
+        let result =
+            optimize_with_schroeder_split_detailed(&curve, &optimizer, &split, 48_000.0).unwrap();
+        assert!(result.low_filters.is_empty());
+        assert!(!result.high_filters.is_empty());
+        assert!(result.high_filters.len() <= 2);
+        assert!(result.high_filters.iter().all(|filter| matches!(
+            filter.filter_type,
+            math_audio_iir_fir::BiquadFilterType::Lowshelf
+                | math_audio_iir_fir::BiquadFilterType::Highshelf
+        )));
     }
 }

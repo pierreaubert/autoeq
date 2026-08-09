@@ -726,7 +726,7 @@ Controls the optimization algorithm, constraints, and advanced features.
 | `asymmetric_loss` | boolean | `true` | Penalize peaks 2x more than dips (psychoacoustically correct) |
 | `asymmetric_loss_config` | object | - | Optional peak/dip weighting config. Defaults preserve peak `2.0`, dip `1.0`, bass peak `5.0`, bass dip `1.0`, transition `300 Hz` |
 | `perceptual_policy` | object | - | Product preset (`reference`, `music`, `cinema`, `night`, `speech`) that fills coherent defaults for target, smoothing, loss, robustness, early-cue, and validation settings |
-| `audibility_deadband` | object | - | JND-style residual deadband applied after smoothing so sub-threshold errors do not consume filters |
+| `audibility_deadband` | object | - | Heuristic residual deadband applied after smoothing so small errors do not consume filters; band thresholds are optimizer tuning values, not literal psychoacoustic JNDs |
 | `high_frequency_correction` | object | - | Safer opt-in high-frequency behavior: stronger smoothing/deadband and default-Q capping above `start_hz` |
 | `early_late_correction` | object | - | Direct/early/late correction-energy report windows for FIR and mixed-phase safety advisories |
 | `validation_bundle` | object | - | Emit `roomeq_validation_bundle.json` with loudness-matched ABX/MUSHRA descriptors and perceptual regression summaries |
@@ -1534,12 +1534,14 @@ When a speaker has multiple measurements (different listening positions), contro
 ## Decomposed Correction
 
 Applies frequency-dependent correction weights based on acoustic decomposition. Room modes get aggressive correction, steady-state response gets gentle correction, early reflections get reduced correction.
+The feature is opt-in: omitting `decomposed_correction` disables it. When the
+object is present, its nested `enabled` field defaults to `true`.
 
 ```json
 {
   "optimizer": {
     "decomposed_correction": {
-      "schroeder_freq": 250,
+      "schroeder_freq": 300,
       "room_dimensions": {
         "length": 4.0,
         "width": 3.0,
@@ -1562,7 +1564,7 @@ Applies frequency-dependent correction weights based on acoustic decomposition. 
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `schroeder_freq` | number (Hz) | `250` | Fallback Schroeder frequency when no IR or no `room_dimensions`. Below: modal, above: statistical. |
+| `schroeder_freq` | number (Hz) | `300` | Fallback Schroeder frequency when no IR or no `room_dimensions`. Below: modal, above: statistical. |
 | `room_dimensions` | object | - | Optional L × W × H in metres. When both this and `ssir_wav_path` are set, the optimizer measures RT60 from the recorded impulse response (Schroeder backward integration) and computes the Schroeder frequency as `2000 · √(RT60 / V)`, overriding the fallback `schroeder_freq` above. |
 | `min_mode_q` | number | `3.0` | Minimum Q to qualify as a room mode |
 | `min_mode_prominence_db` | number | `3.0` | Minimum prominence (dB) for mode detection |

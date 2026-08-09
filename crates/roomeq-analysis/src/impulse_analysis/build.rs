@@ -176,7 +176,7 @@ pub fn build_ssir_correction_weights(
     //    a measured RT60 and known room volume, neither of which the
     //    SSIR path currently threads through. Until that plumbing
     //    exists, trust the caller-provided `config.schroeder_freq` —
-    //    which defaults to a sensible 250 Hz and can be overridden per
+    //    which defaults to a sensible 300 Hz and can be overridden per
     //    room in the JSON config. The config value stays accurate
     //    across rooms because the user can override it, whereas the
     //    heuristic was broken by physics regardless of input.
@@ -194,7 +194,7 @@ pub fn build_ssir_correction_weights(
         config.early_reflection_weight
     } else {
         // Dry room — can correct more
-        config.early_reflection_weight * 1.5_f64.min(1.0)
+        (config.early_reflection_weight * 1.5).min(1.0)
     };
 
     // 5. Build per-frequency correction weights using the SSIR-derived boundary

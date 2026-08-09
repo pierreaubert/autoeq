@@ -21,8 +21,18 @@ pub(super) fn assemble_fir_result(
     let display_initial = output::extend_curve_to_full_range(raw_curve);
     let (final_curve, display_final) =
         corrected_curves(request, &optimizer_output, &display_initial);
+    let score_curve = if let Some(tilt_curve) = &request.target.target_tilt_curve {
+        Curve {
+            freq: final_curve.freq.clone(),
+            spl: &final_curve.spl - &tilt_curve.spl,
+            phase: final_curve.phase.clone(),
+            ..Curve::default()
+        }
+    } else {
+        final_curve.clone()
+    };
     let post_score = channel_target::flatness_score_in_range(
-        &final_curve,
+        &score_curve,
         request.preprocessed.score_min_freq,
         request.target.max_freq,
     );
@@ -71,7 +81,14 @@ fn assemble_dsp_chain(
     request: &FirChannelRequest<'_>,
     optimizer_output: &FirOptimizerOutput,
 ) -> FirDspAssembly {
-    let mut plugins = request.preprocessed.broadband_plugins.clone();
+    let mut plugins = request.preprocessed.cea2034_plugins.clone();
+    plugins.extend(request.preprocessed.broadband_plugins.iter().cloned());
+    if !request.preprocessed.excursion_filters.is_empty() {
+        plugins.push(output::create_labeled_eq_plugin(
+            &request.preprocessed.excursion_filters,
+            "excursion_protection",
+        ));
+    }
     match optimizer_output {
         FirOptimizerOutput::PhaseLinear {
             sidecar_reference, ..
@@ -117,6 +134,17 @@ fn assemble_dsp_chain(
             }
         }
     }
+    let preference_filters = crate::channel_iir::preference_filters(
+        request.room_config,
+        request.target,
+        request.sample_rate,
+    );
+    if !preference_filters.is_empty() {
+        plugins.push(output::create_labeled_eq_plugin(
+            &preference_filters,
+            "user_preference",
+        ));
+    }
     FirDspAssembly { plugins }
 }
 
@@ -125,6 +153,12 @@ fn corrected_curves(
     optimizer_output: &FirOptimizerOutput,
     display_initial: &Curve,
 ) -> (Curve, Curve) {
+    let display_preprocessed = display_preprocessed_curve(request, display_initial);
+    let preference_filters = crate::channel_iir::preference_filters(
+        request.room_config,
+        request.target,
+        request.sample_rate,
+    );
     match optimizer_output {
         FirOptimizerOutput::PhaseLinear { coefficients, .. } => {
             let response = response::compute_fir_complex_response(
@@ -136,12 +170,17 @@ fn corrected_curves(
                 response::apply_complex_response(&request.preprocessed.curve_for_optim, &response);
             let display_response = response::compute_fir_complex_response(
                 coefficients,
-                &display_initial.freq,
+                &display_preprocessed.freq,
                 request.sample_rate,
             );
             let display_final =
-                response::apply_complex_response(display_initial, &display_response);
-            (final_curve, display_final)
+                response::apply_complex_response(&display_preprocessed, &display_response);
+            apply_preference_filters(
+                final_curve,
+                display_final,
+                &preference_filters,
+                request.sample_rate,
+            )
         }
         FirOptimizerOutput::Hybrid {
             eq_filters,
@@ -153,8 +192,10 @@ fn corrected_curves(
                 &request.preprocessed.curve.freq,
                 request.sample_rate,
             );
-            let after_iir =
-                response::apply_complex_response(&request.preprocessed.curve, &iir_response);
+            let after_iir = response::apply_complex_response(
+                &request.preprocessed.curve_for_optim,
+                &iir_response,
+            );
             let fir_response = response::compute_fir_complex_response(
                 coefficients,
                 &request.preprocessed.curve.freq,
@@ -164,19 +205,24 @@ fn corrected_curves(
 
             let display_iir_response = response::compute_peq_complex_response(
                 eq_filters,
-                &display_initial.freq,
+                &display_preprocessed.freq,
                 request.sample_rate,
             );
             let display_after_iir =
-                response::apply_complex_response(display_initial, &display_iir_response);
+                response::apply_complex_response(&display_preprocessed, &display_iir_response);
             let display_fir_response = response::compute_fir_complex_response(
                 coefficients,
-                &display_initial.freq,
+                &display_preprocessed.freq,
                 request.sample_rate,
             );
             let display_final =
                 response::apply_complex_response(&display_after_iir, &display_fir_response);
-            (final_curve, display_final)
+            apply_preference_filters(
+                final_curve,
+                display_final,
+                &preference_filters,
+                request.sample_rate,
+            )
         }
         FirOptimizerOutput::MixedPhase {
             eq_filters,
@@ -197,19 +243,58 @@ fn corrected_curves(
 
             let display_eq_response = response::compute_peq_complex_response(
                 eq_filters,
-                &display_initial.freq,
+                &display_preprocessed.freq,
                 request.sample_rate,
             );
             let display_after_eq =
-                response::apply_complex_response(display_initial, &display_eq_response);
+                response::apply_complex_response(&display_preprocessed, &display_eq_response);
             let display_final = apply_optional_fir(
                 display_after_eq,
                 fir_coefficients.as_deref(),
                 request.sample_rate,
             );
-            (final_curve, display_final)
+            apply_preference_filters(
+                final_curve,
+                display_final,
+                &preference_filters,
+                request.sample_rate,
+            )
         }
     }
+}
+
+fn display_preprocessed_curve(request: &FirChannelRequest<'_>, display_initial: &Curve) -> Curve {
+    let mut curve = display_initial.clone();
+    curve.spl += request.preprocessed.broadband_mean_shift;
+    let mut filters = request.preprocessed.excursion_filters.clone();
+    filters.extend(request.preprocessed.cea2034_filters.iter().cloned());
+    filters.extend(request.preprocessed.broadband_biquads.iter().cloned());
+    if filters.is_empty() {
+        curve
+    } else {
+        let response =
+            response::compute_peq_complex_response(&filters, &curve.freq, request.sample_rate);
+        response::apply_complex_response(&curve, &response)
+    }
+}
+
+fn apply_preference_filters(
+    final_curve: Curve,
+    display_final: Curve,
+    filters: &[math_audio_iir_fir::Biquad],
+    sample_rate: f64,
+) -> (Curve, Curve) {
+    if filters.is_empty() {
+        return (final_curve, display_final);
+    }
+    let final_response =
+        response::compute_peq_complex_response(filters, &final_curve.freq, sample_rate);
+    let display_response =
+        response::compute_peq_complex_response(filters, &display_final.freq, sample_rate);
+    (
+        response::apply_complex_response(&final_curve, &final_response),
+        response::apply_complex_response(&display_final, &display_response),
+    )
 }
 
 fn apply_optional_fir(curve: Curve, coefficients: Option<&[f64]>, sample_rate: f64) -> Curve {

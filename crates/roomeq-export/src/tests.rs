@@ -1,4 +1,4 @@
-use super::channel::sorted_channels;
+use super::channel::{equalizer_apo_channel_name, sorted_channels};
 use super::export_camilladsp;
 use super::export_easyeffects;
 use super::export_equalizer_apo;
@@ -33,11 +33,22 @@ fn test_extract_eq_filters() {
             ]
         }),
     }];
-    let filters = extract_eq_filters(&plugins);
+    let filters = extract_eq_filters(&plugins).unwrap();
     assert_eq!(filters.len(), 2);
     assert_eq!(filters[0].filter_type, "peak");
     assert_eq!(filters[0].freq, 100.0);
     assert_eq!(filters[1].filter_type, "highshelf");
+}
+
+#[test]
+fn malformed_eq_filters_are_rejected_instead_of_fabricated() {
+    let plugins = vec![PluginConfigWrapper {
+        plugin_type: "eq".to_string(),
+        parameters: json!({"filters": [{"filter_type": "peak"}]}),
+    }];
+
+    let error = extract_eq_filters(&plugins).unwrap_err();
+    assert!(error.to_string().contains("requires finite numeric 'freq'"));
 }
 
 #[test]
@@ -275,6 +286,44 @@ fn test_unknown_channels_sort_alphabetically() {
 }
 
 #[test]
+fn standard_channel_order_places_rears_before_surrounds() {
+    let mut channels = HashMap::new();
+    for name in ["surround_right", "back_left", "surround_left", "back_right"] {
+        channels.insert(
+            name.to_string(),
+            ChannelDspChain {
+                channel: name.to_string(),
+                plugins: Vec::new(),
+                drivers: None,
+                initial_curve: None,
+                final_curve: None,
+                eq_response: None,
+                target_curve: None,
+                pre_ir: None,
+                post_ir: None,
+                fir_temporal_masking: None,
+                direct_early_late_correction: None,
+            },
+        );
+    }
+    let output = DspGraph {
+        version: "1.3.0".to_string(),
+        global_plugins: Vec::new(),
+        channels,
+        metadata: None,
+    };
+
+    let names: Vec<_> = sorted_channels(&output)
+        .into_iter()
+        .map(|(name, _)| name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        ["back_left", "back_right", "surround_left", "surround_right"]
+    );
+}
+
+#[test]
 fn test_highpassvariableq_mapped_correctly() {
     // Bug: highpassvariableq fell through to Peak
     assert_eq!(
@@ -282,13 +331,20 @@ fn test_highpassvariableq_mapped_correctly() {
         BiquadFilterType::HighpassVariableQ
     );
     assert_eq!(camilladsp_filter_type("highpassvariableq"), "Highpass");
-    assert_eq!(apo_filter_type("highpassvariableq"), "HP");
+    assert_eq!(apo_filter_type("highpassvariableq"), "HPQ");
     assert_eq!(easyeffects_filter_type("highpassvariableq"), "Hi-pass");
     assert_eq!(
         pipewire_filter_label("highpassvariableq").unwrap(),
         "bq_highpass"
     );
-    assert_eq!(roon_filter_type("highpassvariableq"), "High Pass");
+    assert_eq!(roon_filter_type("highpassvariableq").unwrap(), "High Pass");
+    assert!(roon_filter_type("allpass").is_err());
+}
+
+#[test]
+fn equalizer_apo_uses_physical_rear_channel_names() {
+    assert_eq!(equalizer_apo_channel_name("back_left"), "RL");
+    assert_eq!(equalizer_apo_channel_name("back_right"), "RR");
 }
 
 #[test]

@@ -1133,7 +1133,10 @@ pub(super) fn validate_phase_alignment(
             if target_reshaped {
                 "flat-ratio gate skipped: target reshaped".to_string()
             } else {
-                format!("limit={:.1}x + {:.2}", tolerance, OPTION_SCORE_ABSOLUTE_SLACK)
+                format!(
+                    "limit={:.1}x + {:.2}",
+                    tolerance, OPTION_SCORE_ABSOLUTE_SLACK
+                )
             }
         ),
     )

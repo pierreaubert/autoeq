@@ -31,28 +31,18 @@ pub(crate) fn optimize_maybe_multi(
             .multi_measurement
             .as_ref()
             .expect("multi-measurement config checked above");
-        let tilted_curves;
-        let curves = if let Some(tilt) = target_tilt_curve {
-            tilted_curves = measurements
-                .individual()
-                .iter()
-                .map(|curve| Curve {
-                    freq: curve.freq.clone(),
-                    spl: &curve.spl - &tilt.spl,
-                    phase: curve.phase.clone(),
-                    ..Curve::default()
-                })
-                .collect::<Vec<_>>();
-            tilted_curves.as_slice()
-        } else {
-            measurements.individual()
-        };
+        let processed_curves = apply_representative_preprocessing_to_individuals(
+            measurements.representative(),
+            measurements.individual(),
+            optimization_curve,
+        );
+        let curves = processed_curves.as_slice();
         info!(
             "  Multi-measurement optimization ({:?}) with {} curves{}",
             multi_config.strategy,
             curves.len(),
             if target_tilt_curve.is_some() {
-                " (tilt applied)"
+                " (preprocessing and tilt applied)"
             } else {
                 ""
             }
@@ -102,6 +92,23 @@ pub(crate) fn optimize_maybe_multi(
             message: format!("EQ optimization failed for channel {channel_name}: {error}"),
         })
     }
+}
+
+fn apply_representative_preprocessing_to_individuals(
+    representative_raw: &Curve,
+    individual_raw: &[Curve],
+    representative_optimization: &Curve,
+) -> Vec<Curve> {
+    individual_raw
+        .iter()
+        .map(|curve| {
+            crate::topology::apply_curve_delta_to_reference_curve(
+                curve,
+                representative_raw,
+                representative_optimization,
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -184,6 +191,33 @@ mod tests {
                 None,
             )
             .is_ok()
+        );
+    }
+
+    #[test]
+    fn multi_measurement_curves_receive_representative_preprocessing_delta() {
+        let representative = curve(80.0);
+        let individual = vec![curve(79.0), curve(81.0)];
+        let mut optimization = representative.clone();
+        optimization.spl += 6.0;
+
+        let processed = apply_representative_preprocessing_to_individuals(
+            &representative,
+            &individual,
+            &optimization,
+        );
+
+        assert!(
+            processed[0]
+                .spl
+                .iter()
+                .all(|value| (*value - 85.0).abs() < 1e-12)
+        );
+        assert!(
+            processed[1]
+                .spl
+                .iter()
+                .all(|value| (*value - 87.0).abs() < 1e-12)
         );
     }
 }

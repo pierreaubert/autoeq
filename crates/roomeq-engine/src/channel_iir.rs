@@ -122,7 +122,7 @@ pub fn process_iir_channel(mut request: IirChannelRequest<'_>) -> Result<IirChan
     }
 }
 
-fn preference_filters(
+pub(crate) fn preference_filters(
     room_config: &RoomConfig,
     target: &TargetContext,
     sample_rate: f64,

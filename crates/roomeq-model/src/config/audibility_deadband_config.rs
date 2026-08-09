@@ -8,8 +8,10 @@ use super::default::default_true;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Audibility/JND deadband applied to spectral objective residuals after
-/// perceptual or octave smoothing.
+/// Heuristic residual deadband applied after perceptual or octave smoothing.
+///
+/// The band thresholds are optimizer tuning values, not literal
+/// psychoacoustic JND estimates.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct AudibilityDeadbandConfig {
     /// Enable the deadband.

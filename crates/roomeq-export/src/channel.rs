@@ -15,6 +15,18 @@ pub(super) fn channel_short_name(name: &str) -> &str {
     }
 }
 
+/// Map channel names to Equalizer APO's built-in channel identifiers.
+///
+/// APO calls the rear channels `RL`/`RR`; `BL`/`BR` would create unrelated
+/// virtual channels and leave the physical rear outputs unprocessed.
+pub(super) fn equalizer_apo_channel_name(name: &str) -> &str {
+    match channel_short_name(name) {
+        "BL" => "RL",
+        "BR" => "RR",
+        other => other,
+    }
+}
+
 /// Map channel name to standard channel index (None for unknown channels)
 pub(super) fn channel_index(name: &str) -> Option<usize> {
     match name {
@@ -22,10 +34,10 @@ pub(super) fn channel_index(name: &str) -> Option<usize> {
         "right" => Some(1),
         "center" => Some(2),
         "lfe" | "sub" | "subwoofer" => Some(3),
-        "surround_left" => Some(4),
-        "surround_right" => Some(5),
-        "back_left" => Some(6),
-        "back_right" => Some(7),
+        "back_left" => Some(4),
+        "back_right" => Some(5),
+        "surround_left" => Some(6),
+        "surround_right" => Some(7),
         _ => None,
     }
 }

@@ -7,8 +7,7 @@ pub fn apply_delay_and_polarity_to_curve(curve: &Curve, delay_ms: f64, invert: b
         return adjusted;
     };
     let delay_s = delay_ms / 1000.0;
-    for (idx, phase_deg) in phase.iter_mut().enumerate() {
-        let freq_hz = adjusted.freq[idx];
+    for (phase_deg, &freq_hz) in phase.iter_mut().zip(adjusted.freq.iter()) {
         *phase_deg -= 360.0 * freq_hz * delay_s;
         if invert {
             *phase_deg += 180.0;
@@ -56,4 +55,26 @@ pub fn apply_crossover_response_to_curve(
         &resp,
         response::MIN_REALIZATION_RESPONSE_DB,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::Array1;
+
+    #[test]
+    fn delay_handles_phase_vectors_longer_than_frequency_grid() {
+        let curve = Curve {
+            freq: Array1::from(vec![100.0, 200.0]),
+            spl: Array1::zeros(2),
+            phase: Some(Array1::from(vec![0.0, 0.0, 123.0])),
+            ..Default::default()
+        };
+
+        let adjusted = apply_delay_and_polarity_to_curve(&curve, 1.0, false);
+        let phase = adjusted.phase.unwrap();
+        assert_eq!(phase[0], -36.0);
+        assert_eq!(phase[1], -72.0);
+        assert_eq!(phase[2], 123.0);
+    }
 }

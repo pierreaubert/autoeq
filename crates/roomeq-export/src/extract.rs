@@ -2,27 +2,49 @@ use super::types::BiquadExport;
 use roomeq_model::PluginConfigWrapper;
 
 /// Extract all biquad filters from a plugin list
-pub(super) fn extract_eq_filters(plugins: &[PluginConfigWrapper]) -> Vec<BiquadExport> {
+pub(super) fn extract_eq_filters(
+    plugins: &[PluginConfigWrapper],
+) -> anyhow::Result<Vec<BiquadExport>> {
     let mut filters = Vec::new();
-    for p in plugins {
-        if p.plugin_type == "eq"
-            && let Some(arr) = p.parameters.get("filters").and_then(|v| v.as_array())
-        {
-            for f in arr {
-                filters.push(BiquadExport {
-                    filter_type: f
-                        .get("filter_type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("peak")
-                        .to_string(),
-                    freq: f.get("freq").and_then(|v| v.as_f64()).unwrap_or(1000.0),
-                    q: f.get("q").and_then(|v| v.as_f64()).unwrap_or(1.0),
-                    gain_db: f.get("db_gain").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                });
-            }
+    for (plugin_index, plugin) in plugins.iter().enumerate() {
+        if plugin.plugin_type != "eq" {
+            continue;
+        }
+        let arr = plugin
+            .parameters
+            .get("filters")
+            .and_then(|value| value.as_array())
+            .ok_or_else(|| {
+                anyhow::anyhow!("EQ plugin #{plugin_index} requires an array field 'filters'")
+            })?;
+        for (filter_index, value) in arr.iter().enumerate() {
+            let filter = value.as_object().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "EQ plugin #{plugin_index} filter #{filter_index} must be an object"
+                )
+            })?;
+            let context = format!("EQ plugin #{plugin_index} filter #{filter_index}");
+            let required_f64 = |name: &str| {
+                filter
+                    .get(name)
+                    .and_then(|value| value.as_f64())
+                    .filter(|value| value.is_finite())
+                    .ok_or_else(|| anyhow::anyhow!("{context} requires finite numeric '{name}'"))
+            };
+            filters.push(BiquadExport {
+                filter_type: filter
+                    .get("filter_type")
+                    .and_then(|value| value.as_str())
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("{context} requires string 'filter_type'"))?
+                    .to_string(),
+                freq: required_f64("freq")?,
+                q: required_f64("q")?,
+                gain_db: required_f64("db_gain")?,
+            });
         }
     }
-    filters
+    Ok(filters)
 }
 
 /// Sum all gain values from gain plugins

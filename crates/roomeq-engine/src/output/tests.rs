@@ -28,7 +28,10 @@ use super::misc::extend_curve_to_full_range;
 use super::misc::get_driver_name;
 use math_audio_iir_fir::Biquad;
 use ndarray::Array1;
-use roomeq_model::{ChannelDspChain, MixedModeConfig, OptimizationMetadata, SupportingSourceConfig, SupportingSourceDecorrelation};
+use roomeq_model::{
+    ChannelDspChain, MixedModeConfig, OptimizationMetadata, SupportingSourceConfig,
+    SupportingSourceDecorrelation,
+};
 use std::collections::HashMap;
 
 use math_audio_iir_fir::BiquadFilterType;
@@ -71,25 +74,47 @@ fn supporting_source_restores_peak_normalization_gain_before_convolution() {
 #[test]
 fn computed_supporting_filter_gain_is_recovered_by_emitted_chain() {
     let freq = Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), 128);
-    let curve = |spl| crate::Curve { freq: freq.clone(), spl: Array1::from_elem(128, spl), ..Default::default() };
+    let curve = |spl| crate::Curve {
+        freq: freq.clone(),
+        spl: Array1::from_elem(128, spl),
+        ..Default::default()
+    };
     let config = SupportingSourceConfig {
         fir_taps: 256,
         decorrelation: SupportingSourceDecorrelation::None,
         ..Default::default()
     };
     let filter = crate::supporting_source::compute_supporting_source_filter(
-        &curve(80.0), &curve(80.0), &curve(86.0), &config, 48_000.0,
-    ).unwrap();
+        &curve(80.0),
+        &curve(80.0),
+        &curve(86.0),
+        &config,
+        48_000.0,
+    )
+    .unwrap();
     assert!(filter.normalization_gain_db.abs() > 1e-6);
     let (_, chain) = build_supporting_source_dsp_chains(
-        "L", "L_support", 0.0, filter.normalization_gain_db, "support.wav", None, None, None,
+        "L",
+        "L_support",
+        0.0,
+        filter.normalization_gain_db,
+        "support.wav",
+        None,
+        None,
+        None,
     );
-    let deployed_gain_db = chain.plugins.iter()
+    let deployed_gain_db = chain
+        .plugins
+        .iter()
         .find(|plugin| plugin.plugin_type == "gain")
         .and_then(|plugin| plugin.parameters["gain_db"].as_f64())
         .unwrap();
     assert!((deployed_gain_db - filter.normalization_gain_db).abs() < 1e-12);
-    let normalized_peak = filter.taps.iter().map(|tap| tap.abs()).fold(0.0_f64, f64::max);
+    let normalized_peak = filter
+        .taps
+        .iter()
+        .map(|tap| tap.abs())
+        .fold(0.0_f64, f64::max);
     let recovered_peak = normalized_peak * 10.0_f64.powf(deployed_gain_db / 20.0);
     assert!((20.0 * recovered_peak.log10() - filter.normalization_gain_db).abs() < 1e-9);
 }

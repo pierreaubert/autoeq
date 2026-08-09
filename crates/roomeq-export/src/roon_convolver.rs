@@ -99,11 +99,12 @@ pub(super) fn build_roon_convolution_archive(
         channels.len(),
         channel_mask
     );
-    config.push_str(
-        &std::iter::repeat_n("0", channels.len() * 2)
-            .collect::<Vec<_>>()
-            .join(" "),
-    );
+    let zero_delays = std::iter::repeat_n("0", channels.len())
+        .collect::<Vec<_>>()
+        .join(" ");
+    config.push_str(&zero_delays);
+    config.push('\n');
+    config.push_str(&zero_delays);
     config.push('\n');
     for (index, channel) in channels.iter().enumerate() {
         let wav_name = archive_wav_name(index, &channel.name);

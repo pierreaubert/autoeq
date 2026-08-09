@@ -194,7 +194,7 @@ fn roon_export_builds_deterministic_routed_convolver_archive() {
         .unwrap();
     assert_eq!(
         config,
-        "48000 2 2 3\n0 0 0 0\nfilters/00_L.wav\n0\n0.0\n0.0\nfilters/01_R.wav\n0\n1.0\n1.0\n"
+        "48000 2 2 3\n0 0\n0 0\nfilters/00_L.wav\n0\n0.0\n0.0\nfilters/01_R.wav\n0\n1.0\n1.0\n"
     );
     let right = archive.by_name("filters/01_R.wav").unwrap();
     assert_eq!(right.size(), 44 + 64 * 4);

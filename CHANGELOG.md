@@ -17,6 +17,10 @@ Major stable version 0.5
 
 ## Fixes
 
+- Align the decomposed-correction Schroeder fallback at 300 Hz across the
+  RoomEQ model, analysis, and Kautz modal paths; update the analysis default
+  documentation and regression coverage accordingly.
+
 - Compute the FIR temporal evidence (IR waveforms and temporal masking)
   *before* the final correction safety gate instead of only during the later
   report refresh: the runtime acceptance policy's pre-ringing and latency

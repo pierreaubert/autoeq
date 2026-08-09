@@ -483,10 +483,12 @@ impl<'de> Deserialize<'de> for TargetCurveConfig {
         match value.as_str() {
             // These names are deliberate public RoomEQ targets. Every other
             // string is a CSV path, so a typo cannot silently select flat.
-            "flat" | "harman" | "Listening Window" | "Sound Power"
-            | "Early Reflections" | "Estimated In-Room Response" => {
-                Ok(Self::Predefined(value))
-            }
+            "flat"
+            | "harman"
+            | "Listening Window"
+            | "Sound Power"
+            | "Early Reflections"
+            | "Estimated In-Room Response" => Ok(Self::Predefined(value)),
             _ => Ok(Self::Path(PathBuf::from(value))),
         }
     }

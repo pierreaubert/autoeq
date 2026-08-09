@@ -49,19 +49,40 @@ pub fn estimate_arrival_from_phase_detailed(
         });
     }
 
-    // Linear regression in radians: φ_rad = φ₀ - 2π·τ·f  →  slope = dφ/df
-    let n = points.len() as f64;
-    let sum_f: f64 = points.iter().map(|(f, _)| f).sum();
-    let sum_phi: f64 = points.iter().map(|(_, p)| p.to_radians()).sum();
-    let sum_f2: f64 = points.iter().map(|(f, _)| f * f).sum();
-    let sum_f_phi: f64 = points.iter().map(|(f, p)| f * p.to_radians()).sum();
+    // Linear regression in radians: φ_rad = φ₀ - 2π·τ·f. Weight each bin by
+    // its represented linear-frequency interval so a log-spaced grid does not
+    // give the densely sampled LF end disproportionate influence.
+    let weights: Vec<f64> = (0..points.len())
+        .map(|index| match index {
+            0 => (points[1].0 - points[0].0) * 0.5,
+            index if index + 1 == points.len() => (points[index].0 - points[index - 1].0) * 0.5,
+            index => (points[index + 1].0 - points[index - 1].0) * 0.5,
+        })
+        .collect();
+    let sum_w: f64 = weights.iter().sum();
+    let sum_f: f64 = points.iter().zip(&weights).map(|((f, _), w)| w * f).sum();
+    let sum_phi: f64 = points
+        .iter()
+        .zip(&weights)
+        .map(|((_, phase), weight)| weight * phase.to_radians())
+        .sum();
+    let sum_f2: f64 = points
+        .iter()
+        .zip(&weights)
+        .map(|((frequency, _), weight)| weight * frequency * frequency)
+        .sum();
+    let sum_f_phi: f64 = points
+        .iter()
+        .zip(&weights)
+        .map(|((frequency, phase), weight)| weight * frequency * phase.to_radians())
+        .sum();
 
-    let denom = n * sum_f2 - sum_f * sum_f;
+    let denom = sum_w * sum_f2 - sum_f * sum_f;
     if denom.abs() < 1e-12 {
         return Err(PhaseArrivalError::DegenerateRegression);
     }
 
-    let slope = (n * sum_f_phi - sum_f * sum_phi) / denom;
+    let slope = (sum_w * sum_f_phi - sum_f * sum_phi) / denom;
 
     // τ = -slope / (2π), convert seconds → milliseconds
     let delay_ms = -slope / (2.0 * PI) * 1000.0;

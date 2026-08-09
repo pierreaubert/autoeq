@@ -180,7 +180,10 @@ fn test_full_decomposed_analysis() {
     let config = DecomposedCorrectionConfig::default();
     let result = analyze_decomposed_correction(&freq, &spl, &config);
 
-    assert_eq!(result.schroeder_freq, 250.0);
+    assert_eq!(
+        result.schroeder_freq,
+        super::decomposed_correction_config::DEFAULT_SCHROEDER_FREQ_HZ
+    );
     assert!(!result.correction_weights.iter().any(|w| w.is_nan()));
     assert!(
         result
@@ -427,7 +430,10 @@ fn test_estimate_dip_q_one_sided_uses_edge_bounded_fallback() {
 #[test]
 fn test_decomposed_correction_config_defaults() {
     let config = DecomposedCorrectionConfig::default();
-    assert_eq!(config.schroeder_freq, 250.0);
+    assert_eq!(
+        config.schroeder_freq,
+        super::decomposed_correction_config::DEFAULT_SCHROEDER_FREQ_HZ
+    );
     assert_eq!(config.steady_state_weight, 0.4);
     assert_eq!(config.min_mode_q, 3.0);
     assert_eq!(config.min_mode_prominence_db, 3.0);

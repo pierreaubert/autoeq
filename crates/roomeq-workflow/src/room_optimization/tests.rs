@@ -9,8 +9,8 @@ use roomeq_model::MeasurementSource;
 use roomeq_model::{
     BassManagementConfig, ChannelDspChain, CrossoverConfig, MultiMeasurementConfig,
     MultiMeasurementStrategy, MultiSubGroup, OptimizerConfig, ProcessingMode, RoomConfig,
-    SpeakerConfig, SpeakerGroup, SubwooferStrategy, SubwooferSystemConfig, SystemConfig,
-    SystemModel,
+    SpeakerConfig, SpeakerDriver, SpeakerDriverRole, SpeakerGroup, SpeakerTopology,
+    SubwooferStrategy, SubwooferSystemConfig, SystemConfig, SystemModel,
 };
 use std::collections::HashMap;
 use std::sync::{
@@ -235,7 +235,10 @@ fn refreshed_topology_pre_score_uses_raw_curve_not_intermediate_score() {
     );
     let refreshed = result.channel_results["left"].pre_score;
     assert!((refreshed - expected).abs() < 1e-12);
-    assert!(refreshed > 0.0, "raw deviation must remain visible in pre_score");
+    assert!(
+        refreshed > 0.0,
+        "raw deviation must remain visible in pre_score"
+    );
 }
 
 #[test]
@@ -293,9 +296,15 @@ fn topology_stereo_route_records_probe_arrival_overrides() {
     assert!(timing.channels.iter().any(|channel| {
         channel.name == "Right" && (channel.measured_arrival_ms - 8.0).abs() < 1e-9
     }));
-    assert!(result.channels.values().all(|chain| {
-        !chain.plugins.iter().any(|plugin| plugin.plugin_type == "delay")
-    }), "probe-arrival topology alignment must respect allow_delay=false");
+    assert!(
+        result.channels.values().all(|chain| {
+            !chain
+                .plugins
+                .iter()
+                .any(|plugin| plugin.plugin_type == "delay")
+        }),
+        "probe-arrival topology alignment must respect allow_delay=false"
+    );
 }
 
 #[test]

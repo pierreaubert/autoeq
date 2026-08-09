@@ -2,8 +2,8 @@ use roomeq_engine::error::Result;
 use roomeq_engine::room_result::RoomOptimizationResult;
 use roomeq_engine::{PipelineStepId, PipelineStepStatus};
 use roomeq_model::{RoomConfig, SystemConfig};
-use std::path::Path;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, atomic::AtomicBool};
 
 pub struct WorkflowProgressCallback {

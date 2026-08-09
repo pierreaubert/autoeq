@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub(super) struct BiquadExport {
     pub(super) filter_type: String,
     pub(super) freq: f64,

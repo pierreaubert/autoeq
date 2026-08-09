@@ -549,7 +549,7 @@ pub(in super::super) fn run_optimization_pass(
     let mut optimizer_evidence = vec![global_evidence];
 
     // Local refinement (COBYLA)
-    let final_loss = if config.refine {
+    let _optimizer_loss = if config.refine {
         log::info!(
             "  Running local refinement ({}) from global loss={:.6}",
             config.local_algo,
@@ -615,6 +615,13 @@ pub(in super::super) fn run_optimization_pass(
     } else {
         x_after_boost
     };
+    let final_loss =
+        autoeq_optim::optim::compute_fitness_penalties_ref(&x_final, &prep.objective_data);
+    for evidence in &mut optimizer_evidence {
+        if evidence.selected_for_output {
+            evidence.objective = Some(final_loss);
+        }
+    }
 
     // Convert to Biquad filters, pruning near-zero gain
     let peq = autoeq_core::x2peq::x2peq(&x_final, prep.sample_rate, prep.peq_model);
@@ -624,5 +631,5 @@ pub(in super::super) fn run_optimization_pass(
         .filter(|b| b.db_gain.abs() >= 0.05)
         .collect();
 
-    Ok((filters, final_loss, x, optimizer_evidence))
+    Ok((filters, final_loss, x_final, optimizer_evidence))
 }

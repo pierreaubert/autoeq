@@ -109,7 +109,9 @@ fn resolve_room_target(room_config: &RoomConfig) -> Result<Curve> {
                 "estimated in-room response" => "Estimated In-Room Response",
                 _ => {
                     return Err(AutoeqError::InvalidConfiguration {
-                        message: format!("Unsupported predefined target '{name}' for supporting source"),
+                        message: format!(
+                            "Unsupported predefined target '{name}' for supporting source"
+                        ),
                     });
                 }
             };
@@ -221,12 +223,14 @@ pub fn process_supporting_source_channel(
         StatisticalSummary { mean, std }
     });
 
-    let support_final_spl: ndarray::Array1<f64> = support
-        .spl
-        .iter()
-        .zip(&filter.support_gain_db)
-        .map(|(&s, &g)| s + g)
-        .collect();
+    let gain_curve = Curve {
+        freq: filter.constrained_target.freq.clone(),
+        spl: ndarray::Array1::from(filter.support_gain_db.clone()),
+        ..Default::default()
+    };
+    let gain_on_support_grid =
+        autoeq_measurements::read::interpolate_log_space(&support.freq, &gain_curve);
+    let support_final_spl = &support.spl + &gain_on_support_grid.spl;
     let support_final_curve = Curve {
         freq: support.freq.clone(),
         spl: support_final_spl,
@@ -285,8 +289,7 @@ pub fn process_supporting_source_channel(
         compensation_band_hz: band_hz,
         drr_before_db,
         drr_after_db,
-        target_constraints_active: filter.precedence_limit_hits > 0
-            || group.supporting_source.precedence_limits.len() > 1,
+        target_constraints_active: filter.precedence_limit_hits > 0,
         precedence_limit_hits: filter.precedence_limit_hits,
         advisories,
     };
@@ -466,9 +469,7 @@ mod tests {
             .iter()
             .enumerate()
             .min_by(|(_, left), (_, right)| {
-                (*left - 1_000.0)
-                    .abs()
-                    .total_cmp(&(*right - 1_000.0).abs())
+                (*left - 1_000.0).abs().total_cmp(&(*right - 1_000.0).abs())
             })
             .map(|(index, _)| index)
             .unwrap();
@@ -538,37 +539,69 @@ mod tests {
                 .iter()
                 .any(|advisory| advisory == "drr_unavailable_without_time_gated_ir")
         );
-        assert!(report.advisories.iter().any(|advisory| {
-            advisory == "primary_eq_bypassed_to_preserve_direct_sound"
-        }));
-        assert!(report.advisories.iter().any(|advisory| {
-            advisory == "scores_not_computed_for_supporting_source"
-        }));
+        assert!(
+            report
+                .advisories
+                .iter()
+                .any(|advisory| { advisory == "primary_eq_bypassed_to_preserve_direct_sound" })
+        );
+        assert!(
+            report
+                .advisories
+                .iter()
+                .any(|advisory| { advisory == "scores_not_computed_for_supporting_source" })
+        );
     }
 
     #[test]
     fn supporting_source_obeys_allow_delay() {
         let mut room_config = RoomConfig {
-            version: default_config_version(), system: None, speakers: HashMap::new(),
-            optimizer: OptimizerConfig::default(), target_curve: None, crossovers: None,
-            provenance: Default::default(), recording_config: None, cea2034_cache: None, ctc: None,
+            version: default_config_version(),
+            system: None,
+            speakers: HashMap::new(),
+            optimizer: OptimizerConfig::default(),
+            target_curve: None,
+            crossovers: None,
+            provenance: Default::default(),
+            recording_config: None,
+            cea2034_cache: None,
+            ctc: None,
         };
         room_config.optimizer.allow_delay = Some(false);
         let group = SupportingSourceGroup {
-            name: "test".to_string(), speaker_name: None,
+            name: "test".to_string(),
+            speaker_name: None,
             primary: MeasurementSource::InMemory(flat_curve(80.0)),
             support: MeasurementSource::InMemory(flat_curve(80.0)),
-            supporting_source: SupportingSourceConfig { delay_ms: 3.0, fir_taps: 128, decorrelation: SupportingSourceDecorrelation::None, ..Default::default() },
+            supporting_source: SupportingSourceConfig {
+                delay_ms: 3.0,
+                fir_taps: 128,
+                decorrelation: SupportingSourceDecorrelation::None,
+                ..Default::default()
+            },
         };
         let output_dir = std::env::temp_dir();
         let ((_, support_chain), _, report) = process_supporting_source_channel(
-            "L", &group, &room_config, 48_000.0, &output_dir, None,
+            "L",
+            &group,
+            &room_config,
+            48_000.0,
+            &output_dir,
+            None,
         )
         .unwrap();
         assert_eq!(report.delay_ms, 0.0);
-        assert!(!support_chain.plugins.iter().any(|plugin| plugin.plugin_type == "delay"));
-        assert!(report.advisories.iter().any(|advisory| {
-            advisory == "support_delay_disabled_by_allow_delay"
-        }));
+        assert!(
+            !support_chain
+                .plugins
+                .iter()
+                .any(|plugin| plugin.plugin_type == "delay")
+        );
+        assert!(
+            report
+                .advisories
+                .iter()
+                .any(|advisory| { advisory == "support_delay_disabled_by_allow_delay" })
+        );
     }
 }

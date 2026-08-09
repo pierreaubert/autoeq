@@ -101,6 +101,9 @@ Major stable version 0.5
   crossover rather than the configured one, so reported pre/post scores
   match the deployed chain when the runtime lowers the crossover
   (stereo 2.1).
+- Preserve delegated stereo 2.1 Pre-EQ biquads in channel results and make
+  runtime acceptance target-aware, so explicit target-response shaping is
+  not discarded as a flat-response or worst-position regression.
 - Stop the final safety gate and runtime acceptance from stripping or
   scoring supporting-source channels: their convolution/gain stages are
   excluded from correction-stage reversion and from per-channel acceptance

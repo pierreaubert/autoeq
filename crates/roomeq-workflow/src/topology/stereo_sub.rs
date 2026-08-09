@@ -161,6 +161,7 @@ impl WorkflowExecutor for Stereo21Executor {
             String,
             Vec<roomeq_engine::OptimizerRunEvidence>,
         > = HashMap::new();
+        let mut pre_eq_filters = HashMap::new();
 
         let total_channels = 3;
         let max_iterations = config.optimizer.max_iter;
@@ -198,6 +199,7 @@ impl WorkflowExecutor for Stereo21Executor {
                 )?;
             pre_eq_targets.insert(role.to_string(), chain.target_curve.clone());
             pre_eq_plugins.insert(role.to_string(), chain.plugins);
+            pre_eq_filters.insert(role.to_string(), ch_result.biquads);
             optimizer_evidence_by_channel.insert(role.to_string(), ch_result.optimizer_evidence);
             linearized_curves.insert(role.to_string(), ch_result.final_curve);
         }
@@ -236,6 +238,7 @@ impl WorkflowExecutor for Stereo21Executor {
                 )?;
             pre_eq_targets.insert(sub_role.clone(), chain.target_curve.clone());
             pre_eq_plugins.insert(sub_role.clone(), chain.plugins);
+            pre_eq_filters.insert(sub_role.clone(), ch_result.biquads);
             optimizer_evidence_by_channel.insert(sub_role.clone(), ch_result.optimizer_evidence);
             linearized_curves.insert(sub_role.clone(), ch_result.final_curve);
         }
@@ -829,6 +832,8 @@ impl WorkflowExecutor for Stereo21Executor {
 
             pre_scores.push(pre_score);
             post_scores.push(post_score);
+            let mut filters = pre_eq_filters.get(role).cloned().unwrap_or_default();
+            filters.extend(post_eq_filters.get(role).cloned().unwrap_or_default());
             channel_results.insert(
                 role.to_string(),
                 ChannelOptimizationResult {
@@ -837,7 +842,7 @@ impl WorkflowExecutor for Stereo21Executor {
                     post_score,
                     initial_curve: curves[role].clone(),
                     final_curve: final_curve_obj,
-                    biquads: post_eq_filters.get(role).cloned().unwrap_or_default(),
+                    biquads: filters,
                     fir_coeffs: None,
                     optimizer_evidence: optimizer_evidence_by_channel
                         .remove(role)
@@ -851,6 +856,8 @@ impl WorkflowExecutor for Stereo21Executor {
             let post_score = compute_flat_loss(&final_sub_curve, sub_min_score, final_xo_freq);
             pre_scores.push(pre_score);
             post_scores.push(post_score);
+            let mut filters = pre_eq_filters.get(&sub_role).cloned().unwrap_or_default();
+            filters.extend(post_eq_filters.get(&sub_role).cloned().unwrap_or_default());
             channel_results.insert(
                 sub_role.clone(),
                 ChannelOptimizationResult {
@@ -859,7 +866,7 @@ impl WorkflowExecutor for Stereo21Executor {
                     post_score,
                     initial_curve: curves[&sub_role].clone(),
                     final_curve: final_sub_curve.clone(),
-                    biquads: post_eq_filters.get(&sub_role).cloned().unwrap_or_default(),
+                    biquads: filters,
                     fir_coeffs: None,
                     optimizer_evidence: optimizer_evidence_by_channel
                         .remove(&sub_role)

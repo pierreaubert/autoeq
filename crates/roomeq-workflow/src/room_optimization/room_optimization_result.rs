@@ -656,8 +656,22 @@ fn runtime_acceptance_evidence(
     names.sort();
     let mut training_pre = Vec::with_capacity(names.len());
     let mut training_post = Vec::with_capacity(names.len());
+    let mut training_targets = Vec::with_capacity(names.len());
     for name in &names {
         let channel = &result.channel_results[name];
+        let target = result
+            .channels
+            .get(name)
+            .and_then(|chain| chain.target_curve.clone())
+            .map(roomeq_model::Curve::from)
+            .map(|mut target| {
+                // Target curves are serialized at the optimizer's display
+                // level. Align their absolute level to the measured channel
+                // before using them for runtime residual metrics, matching
+                // the per-channel acceptance gate above.
+                align_target_level(&channel.initial_curve, &mut target);
+                target
+            });
         let post = result
             .channels
             .get(name)
@@ -689,6 +703,7 @@ fn runtime_acceptance_evidence(
             &passband[1],
             smoothing_n,
         ));
+        training_targets.push(target);
     }
     let min_freq_hz = training_pre
         .iter()
@@ -712,13 +727,18 @@ fn runtime_acceptance_evidence(
         processing_mode,
     );
     let mut channel_quality = Vec::with_capacity(names.len());
-    for (name, (pre, post)) in names.iter().zip(training_pre.iter().zip(&training_post)) {
+    for (name, ((pre, post), target)) in names.iter().zip(
+        training_pre
+            .iter()
+            .zip(&training_post)
+            .zip(&training_targets),
+    ) {
         let scorecard = roomeq_engine::quality::evaluate_acoustic_quality(
             std::slice::from_ref(pre),
             std::slice::from_ref(post),
             &[],
             &[],
-            None,
+            target.as_ref(),
             roomeq_engine::quality::QualityEvaluationConfig {
                 min_freq_hz: pre.freq[0].max(post.freq[0]),
                 max_freq_hz: pre.freq.last().copied()?.min(post.freq.last().copied()?),

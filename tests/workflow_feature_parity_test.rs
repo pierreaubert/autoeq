@@ -201,6 +201,7 @@ fn stereo_2_0_runs_with_target_response_tilt() {
     let optimizer = OptimizerConfig {
         max_iter: 100,
         num_filters: 3,
+        seed: Some(1),
         target_response: Some(TargetResponseConfig {
             shape: TargetShape::Custom,
             slope_db_per_octave: -0.8,
@@ -338,6 +339,7 @@ fn stereo_2_1_honours_target_response() {
     let optimizer = OptimizerConfig {
         max_iter: 100,
         num_filters: 3,
+        seed: Some(1),
         target_response: Some(TargetResponseConfig {
             shape: TargetShape::Custom,
             slope_db_per_octave: -0.8,

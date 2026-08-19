@@ -40,6 +40,43 @@ class Mdat2CsvTests(unittest.TestCase):
         self.assertEqual(names, ['Front Left'])
         self.assertNotIn('private', names[0])
 
+    def test_measurement_title_is_preferred_over_embedded_notes(self):
+        notes = (
+            'Front Left\n'
+            'CDSP Straight Through - REFERENCE\n'
+            'Kef R3M ported (part of 5.1 config)\n'
+            'Room dimensions and timing details'
+        ).encode('utf-8')
+        title = b'L r3m_ported_48k_FL_260706a_direct Jul 6 -20 dBFS'
+        data = (
+            bytes(8)
+            + b'\x74'
+            + struct.pack('>H', len(notes))
+            + notes
+            + b'\x74'
+            + struct.pack('>H', len(title))
+            + title
+        )
+        ir_arrays = [(0, 1, 0, '[F')]
+
+        names = mdat2csv.find_measurement_names(data, ir_arrays, [len(data)])
+
+        self.assertEqual(names, ['L r3m_ported_48k_FL_260706a_direct'])
+
+    def test_real_mdat_uses_measurement_title(self):
+        path = (
+            Path(__file__).resolve().parents[1]
+            / 'data_tests/roomeq/measured/5_1_kef'
+            / '260706a_1800_cdsp_straightthru_baseline.mdat'
+        )
+
+        measurements = mdat2csv.parse_mdat(path)
+
+        self.assertEqual(
+            measurements[0]['name'],
+            'L r3m_ported_48k_FL_260706a_direct',
+        )
+
     def test_html_descriptions_do_not_retain_raw_metadata(self):
         html = b'<BODY>Jul 6<BR>18:00<BR>20 to 20000 Hz<BR>20 to 90 dB SPL</HTML>'
 

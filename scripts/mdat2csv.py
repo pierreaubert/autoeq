@@ -312,13 +312,43 @@ def _measurement_label(metadata):
     return None
 
 
+_MEASUREMENT_DATE_SUFFIX = re.compile(
+    r"\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+    r"\s+\d{1,2}(?:,\s*\d{4})?\b.*$",
+    re.IGNORECASE,
+)
+
+
+def _measurement_title(metadata):
+    """Return a serialized REW measurement title, if it looks like one."""
+    if "\n" in metadata or "\r" in metadata:
+        return None
+
+    label = _measurement_label(metadata)
+    lowered = label.lower()
+    if (
+        not label
+        or "/" in label
+        or "\\" in label
+        or ":" in label
+        or "calibration" in lowered
+        or lowered.endswith((".txt", ".csv", ".wav"))
+    ):
+        return None
+    if not any("_" in token for token in label.split()):
+        return None
+
+    title = _MEASUREMENT_DATE_SUFFIX.sub("", label).strip()
+    return title or None
+
+
 def find_measurement_names(data, ir_arrays, measurement_ends):
     """
-    Recover short measurement labels without retaining embedded REW notes.
+    Recover REW measurement titles without retaining embedded REW notes.
 
-    REW commonly serializes the channel label as the first line of a longer
-    notes string. The remaining lines can contain room dimensions, equipment,
-    and timing details, so this function deliberately returns only that label.
+    REW serializes the measurement title separately from a longer notes string.
+    Prefer the single-line, identifier-like title and fall back to the first
+    line of the notes for older or incomplete files.
     """
     names = []
     element_sizes = {'[F': 4, '[D': 8, '[I': 4}
@@ -327,6 +357,7 @@ def find_measurement_names(data, ir_arrays, measurement_ends):
         measurement_end = measurement_ends[index]
         search_area = data[ir_end:measurement_end]
         candidates = []
+        title_candidates = []
         pos = 0
         while pos < len(search_area) - 3:
             if search_area[pos] == 0x74:  # TC_STRING
@@ -341,13 +372,20 @@ def find_measurement_names(data, ir_arrays, measurement_ends):
                             label = _measurement_label(s)
                             if label and not label.startswith(('[', 'L[')):
                                 candidates.append((len(s), label))
+                                title = _measurement_title(s)
+                                if title:
+                                    title_candidates.append(title)
                     except UnicodeDecodeError:
                         pass
             # Advance one byte even after a plausible token. Serialized array
             # payloads can contain false TC_STRING bytes; jumping by their
             # apparent length could skip the real metadata token.
             pos += 1
-        names.append(max(candidates, default=(0, None))[1])
+        names.append(
+            title_candidates[0]
+            if title_candidates
+            else max(candidates, default=(0, None))[1]
+        )
     return names
 
 

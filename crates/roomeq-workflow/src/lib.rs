@@ -27,7 +27,9 @@ mod wav;
 pub use arrival::{prepare_channel_arrival_time, prepare_channel_input};
 pub use channel::{ChannelWorkflowResult, process_single_channel};
 pub use channel_measurements::prepare_channel_measurements;
-pub use config_loader::{SHALLOW_MERGE_KEYS, load_config, merge_json_objects};
+pub use config_loader::{
+    SHALLOW_MERGE_KEYS, load_config, load_config_with_frequency_samples, merge_json_objects,
+};
 pub use eq_resources::{prepare_eq_resources, prepare_eq_target};
 pub use export::{
     export_dsp_chain, export_dsp_chain_with_convolution_sidecars, package_convolution_sidecars,
@@ -37,7 +39,12 @@ pub use group_processing::{
     process_cardioid, process_dba, process_multisub_group, process_speaker_group,
     process_speaker_topology,
 };
-pub use measurement::{load_curve_from_csv, load_measurement, load_source};
+pub use measurement::{
+    DEFAULT_FREQUENCY_SAMPLES, load_curve_from_csv, load_curve_from_csv_with_frequency_samples,
+    load_measurement, load_measurement_with_frequency_samples, load_source, load_source_individual,
+    load_source_individual_with_frequency_samples, load_source_with_frequency_samples,
+    load_source_with_individual, load_source_with_individual_with_frequency_samples,
+};
 pub use output::save_dsp_chain;
 pub use pipeline::{RoomPipeline, RoomPipelineRequest, WorkflowContext};
 pub use room_optimization::{

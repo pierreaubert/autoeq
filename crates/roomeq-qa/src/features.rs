@@ -13,9 +13,10 @@
 //! - The full feature stack improves over raw measurement
 //!
 //! Usage:
-//!   cargo run --bin roomeq-qa-features --no-default-features --release
+//!   cargo run --bin roomeq-qa-features --no-default-features --release -- [--scenario 5_1_kef]
 
 use anyhow::{Context, Result};
+use clap::Parser;
 use roomeq_workflow::load_config;
 
 mod consts;
@@ -30,9 +31,21 @@ use run::run_pass;
 use step_result::print_pass_results;
 use step_result::validate_pass;
 
+#[derive(Debug, Parser)]
+#[command(
+    name = "roomeq-qa-features",
+    about = "Run RoomEQ feature progression QA"
+)]
+struct Args {
+    /// Run only the named recording directory, for example `5_1_kef`.
+    #[arg(long)]
+    scenario: Option<String>,
+}
+
 pub fn run() -> Result<()> {
+    let args = Args::parse();
     let project_root = find_project_root()?;
-    let recordings = discover_recordings(&project_root)?;
+    let recordings = discover_recordings(&project_root, args.scenario.as_deref())?;
 
     println!(
         "RoomEQ Feature Progression QA — {} recording(s)\n",
@@ -103,5 +116,23 @@ pub fn run() -> Result<()> {
             eprintln!("{}", e);
         }
         anyhow::bail!("{fail_count}/{total} feature-progression recordings failed");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Args;
+    use clap::Parser;
+
+    #[test]
+    fn scenario_flag_is_optional() {
+        let args = Args::try_parse_from(["roomeq-qa-features"]).unwrap();
+        assert!(args.scenario.is_none());
+    }
+
+    #[test]
+    fn scenario_flag_selects_a_named_recording() {
+        let args = Args::try_parse_from(["roomeq-qa-features", "--scenario", "5_1_kef"]).unwrap();
+        assert_eq!(args.scenario.as_deref(), Some("5_1_kef"));
     }
 }

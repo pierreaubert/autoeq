@@ -48,13 +48,14 @@ fn optimize_speaker_group_no_measurements_fails() {
 #[test]
 fn optimize_room_impl_stereo_2_1_workflow_succeeds() {
     let config = stereo_2_1_config();
-    let result = optimize_room_impl(
+    let result = optimize_room_impl_with_frequency_samples(
         &config,
         48000.0,
         None,
         None,
         None,
         &autoeq_artifacts::MemoryArtifactStore::new(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
     );
     assert!(
         result.is_ok(),

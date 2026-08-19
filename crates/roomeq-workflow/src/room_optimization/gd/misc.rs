@@ -113,10 +113,11 @@ pub(super) fn corrected_realisation_to_gd_input(
     })
 }
 
-pub(super) fn build_gd_sweep_realisations(
+pub(super) fn build_gd_sweep_realisations_with_frequency_samples(
     config: &RoomConfig,
     channel_results: &HashMap<String, ChannelOptimizationResult>,
     channel_names: &[String],
+    frequency_samples: usize,
 ) -> Option<Vec<Vec<roomeq_engine::gd_opt::ChannelMeasurementInput>>> {
     let mut per_channel: Vec<Vec<roomeq_engine::gd_opt::ChannelMeasurementInput>> = Vec::new();
 
@@ -125,7 +126,10 @@ pub(super) fn build_gd_sweep_realisations(
             log::debug!("GD-Opt adaptive bootstrap: no measurement source for '{name}'");
             return None;
         };
-        let raw_curves = match autoeq_measurements::read::load_source_individual(source) {
+        let raw_curves = match crate::measurement::load_source_individual_with_frequency_samples(
+            source,
+            frequency_samples,
+        ) {
             Ok(curves) => curves,
             Err(error) => {
                 log::debug!(

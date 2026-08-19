@@ -9,6 +9,8 @@ use roomeq_engine::{
 };
 use roomeq_model::{Curve, Result, RoomConfig};
 
+use crate::DEFAULT_FREQUENCY_SAMPLES;
+
 /// Application-owned data accompanying an in-memory engine request.
 pub struct WorkflowContext<'a> {
     /// Optional destination for generated artifacts.
@@ -36,6 +38,7 @@ pub struct RoomPipelineRequest<'a> {
 pub struct RoomPipeline<'a> {
     request: RoomPipelineRequest<'a>,
     validation_measurements: HashMap<String, Vec<Curve>>,
+    frequency_samples: usize,
 }
 
 impl<'a> RoomPipeline<'a> {
@@ -44,7 +47,15 @@ impl<'a> RoomPipeline<'a> {
         Self {
             request,
             validation_measurements: HashMap::new(),
+            frequency_samples: DEFAULT_FREQUENCY_SAMPLES,
         }
+    }
+
+    /// Set the number of log-frequency samples used when reducing dense
+    /// measurements before optimization.
+    pub fn with_frequency_samples(mut self, frequency_samples: usize) -> Self {
+        self.frequency_samples = frequency_samples;
+        self
     }
 
     /// Attach measurements excluded from optimization for runtime quality
@@ -89,7 +100,12 @@ impl<'a> RoomPipeline<'a> {
         };
 
         RoomEngine.run(engine_request, observer, move |request, observer| {
-            crate::room_optimization::optimize_room_pipeline_impl(request, &context, observer)
+            crate::room_optimization::optimize_room_pipeline_impl_with_frequency_samples(
+                request,
+                &context,
+                observer,
+                self.frequency_samples,
+            )
         })
     }
 }

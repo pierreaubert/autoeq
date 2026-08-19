@@ -1,5 +1,7 @@
 //! Resource-owning adapters for prepared group/topology engine execution.
 
+use crate::group_measurements::load_multisub_seat_measurements_with_frequency_samples;
+use crate::measurement::load_source_with_frequency_samples;
 use std::path::Path;
 
 use roomeq_engine::eq::EqResources;
@@ -24,16 +26,17 @@ fn prepare_resources(room_config: &RoomConfig, include_target: bool) -> Result<E
     })
 }
 
-fn prepare_topology(
+fn prepare_topology_with_frequency_samples(
     channel_name: &str,
     topology: &SpeakerTopology,
+    frequency_samples: usize,
 ) -> Result<PreparedSpeakerTopology> {
     let drivers = topology
         .drivers
         .iter()
         .enumerate()
         .map(|(index, driver)| {
-            autoeq_measurements::read::load_source(&driver.measurement).map_err(|error| {
+            load_source_with_frequency_samples(&driver.measurement, frequency_samples).map_err(|error| {
                 AutoeqError::InvalidMeasurement {
                     message: format!(
                         "Failed to load driver '{}' ({index}) measurement for channel {channel_name}: {error}",
@@ -71,7 +74,31 @@ pub fn process_speaker_group_with_callback(
     _output_dir: &Path,
     callback: Option<roomeq_engine::OptimProgressCallback>,
 ) -> Result<GroupProcessingResult> {
-    let prepared = prepare_topology(channel_name, &group.to_legacy_topology())?;
+    process_speaker_group_with_callback_and_frequency_samples(
+        channel_name,
+        group,
+        room_config,
+        sample_rate,
+        _output_dir,
+        callback,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+}
+
+pub fn process_speaker_group_with_callback_and_frequency_samples(
+    channel_name: &str,
+    group: &SpeakerGroup,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    _output_dir: &Path,
+    callback: Option<roomeq_engine::OptimProgressCallback>,
+    frequency_samples: usize,
+) -> Result<GroupProcessingResult> {
+    let prepared = prepare_topology_with_frequency_samples(
+        channel_name,
+        &group.to_legacy_topology(),
+        frequency_samples,
+    )?;
     let resources = prepare_resources(room_config, true)?;
     engine::process_speaker_group_with_callback(
         channel_name,
@@ -109,7 +136,28 @@ pub fn process_speaker_topology_with_callback(
     _output_dir: &Path,
     callback: Option<roomeq_engine::OptimProgressCallback>,
 ) -> Result<GroupProcessingResult> {
-    let prepared = prepare_topology(channel_name, topology)?;
+    process_speaker_topology_with_callback_and_frequency_samples(
+        channel_name,
+        topology,
+        room_config,
+        sample_rate,
+        _output_dir,
+        callback,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+}
+
+pub fn process_speaker_topology_with_callback_and_frequency_samples(
+    channel_name: &str,
+    topology: &SpeakerTopology,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    _output_dir: &Path,
+    callback: Option<roomeq_engine::OptimProgressCallback>,
+    frequency_samples: usize,
+) -> Result<GroupProcessingResult> {
+    let prepared =
+        prepare_topology_with_frequency_samples(channel_name, topology, frequency_samples)?;
     let resources = prepare_resources(room_config, true)?;
     engine::process_speaker_topology_with_callback(
         channel_name,
@@ -147,12 +195,32 @@ pub fn process_multisub_group_with_callback(
     _output_dir: &Path,
     callback: Option<roomeq_engine::OptimProgressCallback>,
 ) -> Result<GroupProcessingResult> {
+    process_multisub_group_with_callback_and_frequency_samples(
+        channel_name,
+        group,
+        room_config,
+        sample_rate,
+        _output_dir,
+        callback,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+}
+
+pub fn process_multisub_group_with_callback_and_frequency_samples(
+    channel_name: &str,
+    group: &MultiSubGroup,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    _output_dir: &Path,
+    callback: Option<roomeq_engine::OptimProgressCallback>,
+    frequency_samples: usize,
+) -> Result<GroupProcessingResult> {
     let subwoofers = group
         .subwoofers
         .iter()
         .enumerate()
         .map(|(index, source)| {
-            autoeq_measurements::read::load_source(source).map_err(|error| {
+            load_source_with_frequency_samples(source, frequency_samples).map_err(|error| {
                 AutoeqError::InvalidMeasurement {
                     message: format!(
                         "Failed to load subwoofer {index} measurement for group '{}': {error}",
@@ -164,7 +232,10 @@ pub fn process_multisub_group_with_callback(
         .collect::<Result<Vec<_>>>()?;
     let prepared = PreparedMultiSubGroup {
         subwoofers,
-        seat_measurements: crate::load_multisub_seat_measurements(group)?,
+        seat_measurements: load_multisub_seat_measurements_with_frequency_samples(
+            group,
+            frequency_samples,
+        )?,
     };
     let resources = prepare_resources(room_config, true)?;
     let flat_resources = prepare_resources(room_config, false)?;
@@ -205,8 +276,28 @@ pub fn process_dba_with_callback(
     _output_dir: &Path,
     callback: Option<roomeq_engine::OptimProgressCallback>,
 ) -> Result<GroupProcessingResult> {
-    let prepared =
-        crate::dba::prepare_dba(config).map_err(|error| AutoeqError::InvalidMeasurement {
+    process_dba_with_callback_and_frequency_samples(
+        channel_name,
+        config,
+        room_config,
+        sample_rate,
+        _output_dir,
+        callback,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+}
+
+pub fn process_dba_with_callback_and_frequency_samples(
+    channel_name: &str,
+    config: &DBAConfig,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    _output_dir: &Path,
+    callback: Option<roomeq_engine::OptimProgressCallback>,
+    frequency_samples: usize,
+) -> Result<GroupProcessingResult> {
+    let prepared = crate::dba::prepare_dba_with_frequency_samples(config, frequency_samples)
+        .map_err(|error| AutoeqError::InvalidMeasurement {
             message: format!("Failed to prepare DBA measurements: {error}"),
         })?;
     let resources = prepare_resources(room_config, true)?;
@@ -245,16 +336,38 @@ pub fn process_cardioid_with_callback(
     _output_dir: &Path,
     callback: Option<roomeq_engine::OptimProgressCallback>,
 ) -> Result<GroupProcessingResult> {
-    let front = autoeq_measurements::read::load_source(&config.front).map_err(|error| {
-        AutoeqError::InvalidMeasurement {
-            message: format!("Failed to load Front measurement: {error}"),
-        }
-    })?;
-    let rear = autoeq_measurements::read::load_source(&config.rear).map_err(|error| {
-        AutoeqError::InvalidMeasurement {
-            message: format!("Failed to load Rear measurement: {error}"),
-        }
-    })?;
+    process_cardioid_with_callback_and_frequency_samples(
+        channel_name,
+        config,
+        room_config,
+        sample_rate,
+        _output_dir,
+        callback,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+}
+
+pub fn process_cardioid_with_callback_and_frequency_samples(
+    channel_name: &str,
+    config: &CardioidConfig,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    _output_dir: &Path,
+    callback: Option<roomeq_engine::OptimProgressCallback>,
+    frequency_samples: usize,
+) -> Result<GroupProcessingResult> {
+    let front =
+        load_source_with_frequency_samples(&config.front, frequency_samples).map_err(|error| {
+            AutoeqError::InvalidMeasurement {
+                message: format!("Failed to load Front measurement: {error}"),
+            }
+        })?;
+    let rear =
+        load_source_with_frequency_samples(&config.rear, frequency_samples).map_err(|error| {
+            AutoeqError::InvalidMeasurement {
+                message: format!("Failed to load Rear measurement: {error}"),
+            }
+        })?;
     let prepared = PreparedCardioidInput { front, rear };
     let resources = prepare_resources(room_config, true)?;
     engine::process_cardioid_with_callback(

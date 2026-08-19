@@ -1,7 +1,7 @@
 use super::super::types::ChannelOptimizationResult;
 use super::super::*;
 use super::misc::apply_gd_opt_result;
-use super::misc::build_gd_sweep_realisations;
+use super::misc::build_gd_sweep_realisations_with_frequency_samples;
 use super::misc::coherence_average_gd_realisations;
 use super::misc::existing_fir_convolution_filename;
 use super::misc::tag_group_delay_plugin;
@@ -16,15 +16,12 @@ pub(in super::super) fn effective_optimize_polarity(
     user_optimize_polarity && !missing_coherence
 }
 
-/// Attempt to run GD-Opt v2 on the channel results.
-///
-/// Returns `Some(GroupDelayOptSummary)` if GD-Opt was attempted (success or
-/// advisory skip), `None` if fewer than 2 channels have phase data.
-pub(in super::super) fn try_run_gd_opt(
+pub(in super::super) fn try_run_gd_opt_with_frequency_samples(
     config: &RoomConfig,
     channel_results: &mut HashMap<String, ChannelOptimizationResult>,
     channel_chains: &mut HashMap<String, ChannelDspChain>,
     sample_rate: f64,
+    frequency_samples: usize,
 ) -> Option<roomeq_engine::gd_opt::GroupDelayOptSummary> {
     use roomeq_engine::gd_opt::*;
 
@@ -170,8 +167,12 @@ pub(in super::super) fn try_run_gd_opt(
         optimize_polarity = false;
         advisory_override = Some(GdOptAdvisory::MissingCoherenceDelayOnly);
     } else if gd_user_config.adaptive_allpass && ap_per_channel > 0 {
-        adaptive_realisations =
-            build_gd_sweep_realisations(config, channel_results, &gd_channel_names);
+        adaptive_realisations = build_gd_sweep_realisations_with_frequency_samples(
+            config,
+            channel_results,
+            &gd_channel_names,
+            frequency_samples,
+        );
         if let Some(realisations) = adaptive_realisations.as_ref() {
             if let Some(averaged_channels) = coherence_average_gd_realisations(realisations) {
                 // Multi-position magnitude aggregation intentionally drops

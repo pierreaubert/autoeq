@@ -1,5 +1,6 @@
 //! Resolve channel measurement sources before entering the RoomEQ engine.
 
+use crate::measurement::load_source_with_individual_with_frequency_samples;
 use autoeq_measurements::MeasurementSource;
 use roomeq_engine::PreparedChannelMeasurements;
 
@@ -8,11 +9,20 @@ use roomeq_engine::PreparedChannelMeasurements;
 pub fn prepare_channel_measurements(
     source: &MeasurementSource,
 ) -> Result<PreparedChannelMeasurements, Box<dyn std::error::Error>> {
+    prepare_channel_measurements_with_frequency_samples(source, crate::DEFAULT_FREQUENCY_SAMPLES)
+}
+
+/// Prepare channel measurements with a configurable frequency grid.
+pub fn prepare_channel_measurements_with_frequency_samples(
+    source: &MeasurementSource,
+    frequency_samples: usize,
+) -> Result<PreparedChannelMeasurements, Box<dyn std::error::Error>> {
     let multi_measurement_source = matches!(
         source,
         MeasurementSource::Multiple(_) | MeasurementSource::InMemoryMultiple(_)
     );
-    let (representative, individual) = autoeq_measurements::load_source_with_individual(source)?;
+    let (representative, individual) =
+        load_source_with_individual_with_frequency_samples(source, frequency_samples)?;
 
     Ok(PreparedChannelMeasurements::new(
         representative,

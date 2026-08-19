@@ -12,7 +12,10 @@ pub(super) fn avg_epa_preference(result: &RoomOptimizationResult) -> Option<f64>
     Some(sum / epa.len() as f64)
 }
 
-pub(super) fn discover_recordings(project_root: &Path) -> Result<Vec<(String, PathBuf)>> {
+pub(super) fn discover_recordings(
+    project_root: &Path,
+    scenario: Option<&str>,
+) -> Result<Vec<(String, PathBuf)>> {
     let qa_data_dir = project_root.join("data_tests/roomeq/measured");
     if !qa_data_dir.exists() {
         return Err(anyhow!("QA data directory not found: {:?}", qa_data_dir));
@@ -37,7 +40,33 @@ pub(super) fn discover_recordings(project_root: &Path) -> Result<Vec<(String, Pa
         return Err(anyhow!("No recordings found in {:?}", qa_data_dir));
     }
 
-    Ok(recordings)
+    select_recordings(recordings, scenario, &qa_data_dir)
+}
+
+fn select_recordings(
+    recordings: Vec<(String, PathBuf)>,
+    scenario: Option<&str>,
+    qa_data_dir: &Path,
+) -> Result<Vec<(String, PathBuf)>> {
+    let Some(scenario) = scenario else {
+        return Ok(recordings);
+    };
+
+    let available = recordings
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    recordings
+        .into_iter()
+        .find(|(name, _)| name == scenario)
+        .map(|recording| vec![recording])
+        .ok_or_else(|| {
+            anyhow!(
+                "Recording '{scenario}' not found in {:?}. Available recordings: {available}",
+                qa_data_dir
+            )
+        })
 }
 
 pub(super) fn find_project_root() -> Result<PathBuf> {
@@ -55,5 +84,41 @@ pub(super) fn find_project_root() -> Result<PathBuf> {
                 "Could not find project root (Cargo.toml with [workspace])"
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_recordings;
+    use std::path::{Path, PathBuf};
+
+    fn recordings() -> Vec<(String, PathBuf)> {
+        vec![
+            (
+                "2_0_fidelia".to_string(),
+                PathBuf::from("2_0_fidelia/recordings.json"),
+            ),
+            (
+                "5_1_kef".to_string(),
+                PathBuf::from("5_1_kef/recordings.json"),
+            ),
+        ]
+    }
+
+    #[test]
+    fn selecting_a_scenario_returns_only_that_recording() {
+        let selected =
+            select_recordings(recordings(), Some("5_1_kef"), Path::new("measured")).unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].0, "5_1_kef");
+    }
+
+    #[test]
+    fn selecting_an_unknown_scenario_lists_available_recordings() {
+        let error = select_recordings(recordings(), Some("missing"), Path::new("measured"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("Recording 'missing' not found"));
+        assert!(error.contains("2_0_fidelia, 5_1_kef"));
     }
 }

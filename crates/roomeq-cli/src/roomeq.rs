@@ -25,9 +25,19 @@ use std::path::PathBuf;
 use roomeq_engine::{PipelineControl, PipelineEvent, PipelineObserver};
 use roomeq_model::{DspChainOutput, MeasurementRef, MeasurementSource, RoomConfig, SpeakerConfig};
 use roomeq_workflow::{
-    ExportFormat, RoomPipeline, RoomPipelineRequest, export_dsp_chain_with_convolution_sidecars,
-    load_config, save_dsp_chain,
+    DEFAULT_FREQUENCY_SAMPLES, ExportFormat, RoomPipeline, RoomPipelineRequest,
+    export_dsp_chain_with_convolution_sidecars, load_config_with_frequency_samples, save_dsp_chain,
 };
+
+fn parse_frequency_samples(value: &str) -> std::result::Result<usize, String> {
+    let samples = value
+        .parse::<usize>()
+        .map_err(|error| format!("frequency sample count must be a positive integer: {error}"))?;
+    if samples == 0 {
+        return Err("frequency sample count must be at least 1".to_string());
+    }
+    Ok(samples)
+}
 
 /// Room EQ - Optimize multi-channel speaker systems
 #[derive(Parser, Debug)]
@@ -49,6 +59,10 @@ struct Args {
     /// Sample rate for filter design (default: 48000 Hz)
     #[arg(long, default_value_t = 48000.0)]
     sample_rate: f64,
+
+    /// Number of log-frequency points used to interpolate dense measurements
+    #[arg(long, default_value_t = DEFAULT_FREQUENCY_SAMPLES, value_parser = parse_frequency_samples)]
+    freq_samples: usize,
 
     /// Verbose output (deprecated, use RUST_LOG env var)
     #[arg(short, long)]
@@ -148,11 +162,12 @@ pub fn run_command() -> Result<()> {
 
     // Dry-run mode: validate config and check files exist
     if args.dry_run {
-        return run_dry_run(config_path, args.override_config);
+        return run_dry_run(config_path, args.override_config, args.freq_samples);
     }
 
     execute_optimization(
         args.sample_rate,
+        args.freq_samples,
         config_path,
         output_path,
         args.override_config,
@@ -196,6 +211,7 @@ fn create_progress_observer() -> Box<dyn PipelineObserver> {
 
 fn execute_optimization(
     sample_rate: f64,
+    freq_samples: usize,
     config_path: PathBuf,
     output_path: PathBuf,
     override_config_path: Option<PathBuf>,
@@ -205,8 +221,11 @@ fn execute_optimization(
     // Load room configuration
     info!("Loading room configuration from {:?}", config_path);
 
-    let (room_config, _config_dir, _validation) =
-        load_config(&config_path, override_config_path.as_deref())?;
+    let (room_config, _config_dir, _validation) = load_config_with_frequency_samples(
+        &config_path,
+        override_config_path.as_deref(),
+        freq_samples,
+    )?;
 
     info!("Found {} speakers", room_config.speakers.len());
 
@@ -219,6 +238,7 @@ fn execute_optimization(
         output_dir: out_dir,
         probe_arrival_overrides: None,
     })
+    .with_frequency_samples(freq_samples)
     .run(Some(observer))
     .map_err(|e| anyhow!("{}", e))
     .with_context(|| "Room optimization failed")?;
@@ -260,11 +280,18 @@ fn execute_optimization(
 }
 
 /// Validate configuration and check measurement files exist without running optimization
-fn run_dry_run(config_path: PathBuf, override_config_path: Option<PathBuf>) -> Result<()> {
+fn run_dry_run(
+    config_path: PathBuf,
+    override_config_path: Option<PathBuf>,
+    freq_samples: usize,
+) -> Result<()> {
     info!("Loading room configuration from {:?}", config_path);
 
-    let (room_config, _config_dir, validation) =
-        load_config(&config_path, override_config_path.as_deref())?;
+    let (room_config, _config_dir, validation) = load_config_with_frequency_samples(
+        &config_path,
+        override_config_path.as_deref(),
+        freq_samples,
+    )?;
 
     println!("\n=== Configuration Validation ===\n");
 
@@ -439,5 +466,27 @@ mod tests {
     fn sample_rate_default_is_48000() {
         let args = Args::try_parse_from(["roomeq", "--schema", "input"]).unwrap();
         assert_eq!(args.sample_rate, 48000.0);
+    }
+
+    #[test]
+    fn frequency_sample_default_is_200() {
+        let args = Args::try_parse_from(["roomeq", "--schema", "input"]).unwrap();
+        assert_eq!(
+            args.freq_samples,
+            roomeq_workflow::DEFAULT_FREQUENCY_SAMPLES
+        );
+    }
+
+    #[test]
+    fn frequency_sample_option_accepts_custom_value() {
+        let args =
+            Args::try_parse_from(["roomeq", "--schema", "input", "--freq-samples", "96"]).unwrap();
+        assert_eq!(args.freq_samples, 96);
+    }
+
+    #[test]
+    fn frequency_sample_option_rejects_zero() {
+        let args = Args::try_parse_from(["roomeq", "--schema", "input", "--freq-samples", "0"]);
+        assert!(args.is_err());
     }
 }

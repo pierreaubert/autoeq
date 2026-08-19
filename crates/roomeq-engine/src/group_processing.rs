@@ -200,8 +200,10 @@ pub fn process_speaker_group_with_callback(
         sample_rate,
         prepared,
         eq_resources,
-        true,
-        callback,
+        SpeakerTopologyProcessingOptions {
+            legacy_ordering: true,
+            callback,
+        },
     )
 }
 
@@ -240,9 +242,16 @@ pub fn process_speaker_topology_with_callback(
         sample_rate,
         prepared,
         eq_resources,
-        false,
-        callback,
+        SpeakerTopologyProcessingOptions {
+            legacy_ordering: false,
+            callback,
+        },
     )
+}
+
+struct SpeakerTopologyProcessingOptions {
+    legacy_ordering: bool,
+    callback: Option<OptimProgressCallback>,
 }
 
 fn process_speaker_topology_impl(
@@ -252,8 +261,7 @@ fn process_speaker_topology_impl(
     sample_rate: f64,
     prepared: &PreparedSpeakerTopology,
     eq_resources: &EqResources,
-    legacy_ordering: bool,
-    callback: Option<OptimProgressCallback>,
+    options: SpeakerTopologyProcessingOptions,
 ) -> Result<GroupProcessingResult> {
     group
         .validate()
@@ -278,7 +286,7 @@ fn process_speaker_topology_impl(
     debug!("  Loaded {} driver measurements", drivers.len());
 
     // Legacy inputs retain the old inferred ordering. Explicit topology order is authoritative.
-    if legacy_ordering {
+    if options.legacy_ordering {
         drivers.sort_by(|(_, a), (_, b)| {
             let get_mean = |c: &Curve| {
                 let (passband, _) = detect_passband_and_mean(c);
@@ -328,7 +336,7 @@ fn process_speaker_topology_impl(
                     message: format!("Crossover configuration '{}' not found", crossover_ref),
                 })?,
         )
-    } else if acoustic_band_count > 1 || legacy_ordering {
+    } else if acoustic_band_count > 1 || options.legacy_ordering {
         return Err(AutoeqError::InvalidConfiguration {
             message:
                 "Speaker topology with multiple acoustic bands requires crossover configuration"
@@ -533,7 +541,7 @@ fn process_speaker_topology_impl(
     let max_freq = room_config.optimizer.max_freq;
     let pre_global_eq_score = flat_loss_score(&combined_curve, min_freq, max_freq);
 
-    let global_result = match callback {
+    let global_result = match options.callback {
         Some(callback) => eq::optimize_channel_eq_with_callback_detailed(
             &combined_curve,
             &room_config.optimizer,

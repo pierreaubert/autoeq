@@ -1,9 +1,12 @@
 use super::misc::{
-    apply_gd_opt_result, build_gd_sweep_realisations, coherence_average_gd_realisations,
-    corrected_realisation_to_gd_input, existing_fir_convolution_filename,
-    gd_phase_response_for_curve, interpolate_optional_array_log, source_for_output_channel,
+    apply_gd_opt_result, build_gd_sweep_realisations_with_frequency_samples,
+    coherence_average_gd_realisations, corrected_realisation_to_gd_input,
+    existing_fir_convolution_filename, gd_phase_response_for_curve, interpolate_optional_array_log,
+    source_for_output_channel,
 };
-use super::{effective_optimize_polarity, try_run_gd_opt, try_run_phase_linear_fir_gd};
+use super::{
+    effective_optimize_polarity, try_run_gd_opt_with_frequency_samples, try_run_phase_linear_fir_gd,
+};
 use crate::room_optimization::types::ChannelOptimizationResult;
 use math_audio_iir_fir::{Biquad, BiquadFilterType};
 use ndarray::Array1;
@@ -302,7 +305,15 @@ fn build_gd_sweep_realisations_requires_at_least_two_sweeps() {
     results.insert("left".to_string(), channel_result("left", 0.0));
 
     // Single InMemory source yields one realisation — not enough.
-    assert!(build_gd_sweep_realisations(&config, &results, &["left".to_string()]).is_none());
+    assert!(
+        build_gd_sweep_realisations_with_frequency_samples(
+            &config,
+            &results,
+            &["left".to_string()],
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -318,10 +329,11 @@ fn build_gd_sweep_realisations_with_multiple_sweeps() {
     results.insert("left".to_string(), channel_result("left", 0.0));
     results.insert("right".to_string(), channel_result("right", 0.0));
 
-    let realisations = build_gd_sweep_realisations(
+    let realisations = build_gd_sweep_realisations_with_frequency_samples(
         &config,
         &results,
         &["left".to_string(), "right".to_string()],
+        crate::DEFAULT_FREQUENCY_SAMPLES,
     )
     .unwrap();
     assert_eq!(realisations.len(), 2);
@@ -342,10 +354,11 @@ fn build_gd_sweep_realisations_missing_channel_returns_none() {
     results.insert("left".to_string(), channel_result("left", 0.0));
 
     assert!(
-        build_gd_sweep_realisations(
+        build_gd_sweep_realisations_with_frequency_samples(
             &config,
             &results,
-            &["left".to_string(), "right".to_string()]
+            &["left".to_string(), "right".to_string()],
+            crate::DEFAULT_FREQUENCY_SAMPLES,
         )
         .is_none()
     );
@@ -489,7 +502,16 @@ fn try_run_gd_opt_disabled_returns_none() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    assert!(try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).is_none());
+    assert!(
+        try_run_gd_opt_with_frequency_samples(
+            &config,
+            &mut channel_results,
+            &mut channel_chains,
+            48000.0,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -517,8 +539,14 @@ fn try_run_gd_opt_no_phase_data_advisory() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    let summary =
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).unwrap();
+    let summary = try_run_gd_opt_with_frequency_samples(
+        &config,
+        &mut channel_results,
+        &mut channel_chains,
+        48000.0,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(summary.advisory.contains("no_phase_data"));
 }
 
@@ -537,7 +565,16 @@ fn try_run_gd_opt_single_channel_returns_none() {
     let mut channel_chains = HashMap::new();
     channel_chains.insert("left".to_string(), dsp_chain("left"));
 
-    assert!(try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).is_none());
+    assert!(
+        try_run_gd_opt_with_frequency_samples(
+            &config,
+            &mut channel_results,
+            &mut channel_chains,
+            48000.0,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -563,8 +600,14 @@ fn try_run_gd_opt_frequency_grid_mismatch_advisory() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    let summary =
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).unwrap();
+    let summary = try_run_gd_opt_with_frequency_samples(
+        &config,
+        &mut channel_results,
+        &mut channel_chains,
+        48000.0,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(summary.advisory.contains("frequency_grid_mismatch"));
 }
 
@@ -590,8 +633,14 @@ fn try_run_gd_opt_empty_band_advisory() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    let summary =
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).unwrap();
+    let summary = try_run_gd_opt_with_frequency_samples(
+        &config,
+        &mut channel_results,
+        &mut channel_chains,
+        48000.0,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(summary.advisory.contains("empty_band"));
 }
 
@@ -622,8 +671,14 @@ fn try_run_gd_opt_coherence_below_threshold() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    let summary =
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).unwrap();
+    let summary = try_run_gd_opt_with_frequency_samples(
+        &config,
+        &mut channel_results,
+        &mut channel_chains,
+        48000.0,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(summary.advisory.contains("coherence_below_threshold"));
 }
 
@@ -650,8 +705,14 @@ fn try_run_gd_opt_successful_optimization() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    let summary =
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).unwrap();
+    let summary = try_run_gd_opt_with_frequency_samples(
+        &config,
+        &mut channel_results,
+        &mut channel_chains,
+        48000.0,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(summary.advisory.contains("success") || summary.advisory.contains("minimal"));
 }
 
@@ -789,8 +850,14 @@ fn try_run_gd_opt_missing_coherence_runs_delay_only() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    let summary =
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).unwrap();
+    let summary = try_run_gd_opt_with_frequency_samples(
+        &config,
+        &mut channel_results,
+        &mut channel_chains,
+        48000.0,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(summary.advisory.contains("missing_coherence_delay_only"));
 }
 
@@ -818,8 +885,14 @@ fn try_run_gd_opt_mixed_phase_mode_runs() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    let summary =
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).unwrap();
+    let summary = try_run_gd_opt_with_frequency_samples(
+        &config,
+        &mut channel_results,
+        &mut channel_chains,
+        48000.0,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(summary.advisory.contains("success") || summary.advisory.contains("minimal"));
 }
 
@@ -843,8 +916,14 @@ fn try_run_gd_opt_adaptive_allpass_with_bootstrap_realisations() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    let summary =
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).unwrap();
+    let summary = try_run_gd_opt_with_frequency_samples(
+        &config,
+        &mut channel_results,
+        &mut channel_chains,
+        48000.0,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(summary.advisory.contains("success") || summary.advisory.contains("minimal"));
 }
 
@@ -876,8 +955,14 @@ fn try_run_gd_opt_adaptive_allpass_with_system_role_bootstrap_realisations() {
     channel_chains.insert("L".to_string(), dsp_chain("L"));
     channel_chains.insert("R".to_string(), dsp_chain("R"));
 
-    let summary =
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).unwrap();
+    let summary = try_run_gd_opt_with_frequency_samples(
+        &config,
+        &mut channel_results,
+        &mut channel_chains,
+        48000.0,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(
         !summary
             .advisory
@@ -914,7 +999,16 @@ fn try_run_gd_opt_hybrid_mode_band_exceeds_crossover_advisory() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    assert!(try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).is_none());
+    assert!(
+        try_run_gd_opt_with_frequency_samples(
+            &config,
+            &mut channel_results,
+            &mut channel_chains,
+            48000.0,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -984,8 +1078,14 @@ fn try_run_gd_opt_with_crossover_config_uses_crossover_freq() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    let summary =
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).unwrap();
+    let summary = try_run_gd_opt_with_frequency_samples(
+        &config,
+        &mut channel_results,
+        &mut channel_chains,
+        48000.0,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(summary.advisory.contains("success") || summary.advisory.contains("minimal"));
 }
 
@@ -1014,8 +1114,14 @@ fn try_run_gd_opt_mixed_phase_mode_ap_limited() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    let summary =
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).unwrap();
+    let summary = try_run_gd_opt_with_frequency_samples(
+        &config,
+        &mut channel_results,
+        &mut channel_chains,
+        48000.0,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(summary.advisory.contains("success") || summary.advisory.contains("minimal"));
 }
 
@@ -1141,8 +1247,14 @@ fn try_run_gd_opt_phase_linear_mode_maps_to_advisory() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    let summary =
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).unwrap();
+    let summary = try_run_gd_opt_with_frequency_samples(
+        &config,
+        &mut channel_results,
+        &mut channel_chains,
+        48000.0,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(summary.advisory.contains("phase_linear_no_target"));
 }
 
@@ -1170,8 +1282,14 @@ fn try_run_gd_opt_adaptive_allpass_without_bootstrap_disables_aps() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    let summary =
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).unwrap();
+    let summary = try_run_gd_opt_with_frequency_samples(
+        &config,
+        &mut channel_results,
+        &mut channel_chains,
+        48000.0,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(
         summary.advisory.contains("success")
             || summary.advisory.contains("minimal")
@@ -1213,8 +1331,14 @@ fn try_run_gd_opt_empty_ap_range_runs_delay_only() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    let summary =
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).unwrap();
+    let summary = try_run_gd_opt_with_frequency_samples(
+        &config,
+        &mut channel_results,
+        &mut channel_chains,
+        48000.0,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(summary.advisory.contains("success") || summary.advisory.contains("minimal"));
 }
 
@@ -1242,8 +1366,14 @@ fn try_run_gd_opt_minimal_improvement_advisory() {
     channel_chains.insert("left".to_string(), dsp_chain("left"));
     channel_chains.insert("right".to_string(), dsp_chain("right"));
 
-    let summary =
-        try_run_gd_opt(&config, &mut channel_results, &mut channel_chains, 48000.0).unwrap();
+    let summary = try_run_gd_opt_with_frequency_samples(
+        &config,
+        &mut channel_results,
+        &mut channel_chains,
+        48000.0,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(summary.advisory.contains("minimal"));
 }
 

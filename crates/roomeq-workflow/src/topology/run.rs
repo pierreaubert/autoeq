@@ -88,13 +88,9 @@ pub(crate) fn run_post_eq(
 /// which all use gain-invariant relative-to-peak thresholds. The same gain is
 /// then applied to the reported final curve so it remains the canonical
 /// response of the serialized DSP chain.
-///
-/// `config_override` lets stereo 2.1 / home-cinema-with-sub clone
-/// `config` and narrow `optimizer.min_freq` / `max_freq` to the band of
-/// interest (e.g. Pre-EQ at `min_xo`) before the delegation call.
 #[allow(clippy::type_complexity)]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn run_channel_via_generic_path(
+pub(crate) fn run_channel_via_generic_path_with_frequency_samples(
     role: &str,
     source: &MeasurementSource,
     config: &RoomConfig,
@@ -106,6 +102,7 @@ pub(crate) fn run_channel_via_generic_path(
     total_channels: usize,
     max_iterations: usize,
     probe_arrival_overrides: Option<&HashMap<String, f64>>,
+    frequency_samples: usize,
 ) -> Result<(
     ChannelDspChain,
     ChannelOptimizationResult,
@@ -115,7 +112,12 @@ pub(crate) fn run_channel_via_generic_path(
     Option<Vec<String>>,
 )> {
     let derived_multiseat_config =
-        crate::home_cinema::derive_all_channel_multiseat_config(config, role, source);
+        crate::home_cinema::derive_all_channel_multiseat_config_with_frequency_samples(
+            config,
+            role,
+            source,
+            frequency_samples,
+        );
     let derived_config;
     let effective_config = if let Some(multi_config) = derived_multiseat_config.clone() {
         derived_config = {
@@ -138,7 +140,7 @@ pub(crate) fn run_channel_via_generic_path(
     let stopped = progress
         .as_ref()
         .map(|progress| Arc::clone(&progress.stopped));
-    let mut processed = crate::process_single_channel(
+    let mut processed = crate::channel::process_single_channel_with_frequency_samples(
         role,
         source,
         effective_config,
@@ -147,18 +149,21 @@ pub(crate) fn run_channel_via_generic_path(
         progress.map(|progress| progress.callback),
         probe_arrival_overrides.and_then(|overrides| overrides.get(role).copied()),
         None,
+        frequency_samples,
     )?;
     workflow_progress_stopped(&stopped, "TopologyWorkflowExecution")?;
 
     let mut multiseat_rejection = None;
     if derived_multiseat_config.is_some() {
-        let acceptance = crate::home_cinema::all_channel_multiseat_acceptance(
-            config,
-            role,
-            source,
-            &processed.3,
-            &processed.4,
-        );
+        let acceptance =
+            crate::home_cinema::all_channel_multiseat_acceptance_with_frequency_samples(
+                config,
+                role,
+                source,
+                &processed.3,
+                &processed.4,
+                frequency_samples,
+            );
         if !acceptance.accepted {
             warn!(
                 "All-channel multi-seat correction rejected for '{}': {}. Re-running without derived multi-seat correction.",
@@ -176,7 +181,7 @@ pub(crate) fn run_channel_via_generic_path(
             let stopped = progress
                 .as_ref()
                 .map(|progress| Arc::clone(&progress.stopped));
-            processed = crate::process_single_channel(
+            processed = crate::channel::process_single_channel_with_frequency_samples(
                 role,
                 source,
                 config,
@@ -185,6 +190,7 @@ pub(crate) fn run_channel_via_generic_path(
                 progress.map(|progress| progress.callback),
                 probe_arrival_overrides.and_then(|overrides| overrides.get(role).copied()),
                 None,
+                frequency_samples,
             )?;
             workflow_progress_stopped(&stopped, "TopologyWorkflowExecution")?;
         }
@@ -350,7 +356,7 @@ mod tests {
         let config = room_config(base_optimizer());
         let source = MeasurementSource::InMemory(flat_curve());
         let mut factory: Option<&mut WorkflowProgressCallbackFactory<'_>> = None;
-        let result = run_channel_via_generic_path(
+        let result = run_channel_via_generic_path_with_frequency_samples(
             "Left",
             &source,
             &config,
@@ -362,6 +368,7 @@ mod tests {
             1,
             config.optimizer.max_iter,
             None,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
         );
         assert!(result.is_ok(), "generic path failed: {:?}", result.err());
         let (chain, channel_result, pre_score, post_score, _, _) = result.unwrap();
@@ -384,7 +391,7 @@ mod tests {
         let config = room_config(optimizer);
         let source = MeasurementSource::InMemory(flat_curve());
         let mut factory: Option<&mut WorkflowProgressCallbackFactory<'_>> = None;
-        let result = run_channel_via_generic_path(
+        let result = run_channel_via_generic_path_with_frequency_samples(
             "Left",
             &source,
             &config,
@@ -396,6 +403,7 @@ mod tests {
             1,
             config.optimizer.max_iter,
             None,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
         );
         assert!(
             result.is_ok(),
@@ -461,7 +469,7 @@ mod tests {
         seat1.spl += 5.0;
         let source = MeasurementSource::InMemoryMultiple(vec![seat0, seat1]);
         let mut factory: Option<&mut WorkflowProgressCallbackFactory<'_>> = None;
-        let result = run_channel_via_generic_path(
+        let result = run_channel_via_generic_path_with_frequency_samples(
             "Left",
             &source,
             &config,
@@ -473,6 +481,7 @@ mod tests {
             1,
             config.optimizer.max_iter,
             None,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
         );
         assert!(
             result.is_ok(),

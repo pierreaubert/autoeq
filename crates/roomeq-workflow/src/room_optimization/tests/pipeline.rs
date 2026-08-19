@@ -47,7 +47,12 @@ fn prepare_room_optimization_without_system_succeeds() {
     );
     let config = room_config_with_optimizer(speakers, None, tiny_optimizer());
 
-    let (observer, prepared) = prepare_room_optimization(&config, None).unwrap();
+    let (observer, prepared) = prepare_room_optimization_with_frequency_samples(
+        &config,
+        None,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(prepared.system.is_none());
     assert!(observer.lock().unwrap().is_none());
 }
@@ -71,7 +76,12 @@ fn prepare_room_optimization_with_system_and_bass_management_succeeds() {
     };
     let config = room_config_with_optimizer(speakers, Some(system), tiny_optimizer());
 
-    let (_observer, prepared) = prepare_room_optimization(&config, None).unwrap();
+    let (_observer, prepared) = prepare_room_optimization_with_frequency_samples(
+        &config,
+        None,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(
         prepared
             .system
@@ -104,7 +114,11 @@ fn validate_room_optimization_mismatched_multi_measurement_weights_fails() {
     });
     let config = room_config_with_optimizer(speakers, None, optimizer);
 
-    let result = validate_room_optimization(&config, &observer_none());
+    let result = validate_room_optimization_with_frequency_samples(
+        &config,
+        &observer_none(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    );
     assert!(
         result.is_err(),
         "mismatched multi-measurement weights should fail validation: {:?}",
@@ -126,7 +140,11 @@ fn validate_room_optimization_missing_measurements_fails() {
     );
     let config = room_config_with_optimizer(speakers, None, tiny_optimizer());
 
-    let result = validate_room_optimization(&config, &observer_none());
+    let result = validate_room_optimization_with_frequency_samples(
+        &config,
+        &observer_none(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    );
     assert!(
         result.is_err(),
         "speaker group with no measurements should fail validation: {:?}",
@@ -264,7 +282,14 @@ fn execute_generic_channels_stops_on_observer_request() {
         |_event: &PipelineEvent| -> PipelineControl { PipelineControl::Stop },
     ))));
 
-    let result = execute_generic_channels(&config, 48000.0, None, None, &observer);
+    let result = execute_generic_channels_with_frequency_samples(
+        &config,
+        48000.0,
+        None,
+        None,
+        &observer,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    );
     assert!(
         result.is_err(),
         "generic channel optimization should halt when observer requests stop"
@@ -296,7 +321,7 @@ fn assemble_workflow_result_empty_channels_succeeds() {
         metadata: empty_metadata(),
     };
 
-    let assembled = assemble_workflow_result(
+    let assembled = assemble_workflow_result_with_frequency_samples(
         result,
         &config,
         sys,
@@ -305,6 +330,7 @@ fn assemble_workflow_result_empty_channels_succeeds() {
         None,
         &observer_none(),
         &autoeq_artifacts::MemoryArtifactStore::new(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
     )
     .unwrap();
     assert!(assembled.channel_results.is_empty());
@@ -366,7 +392,7 @@ fn assemble_generic_result_non_empty_success() {
         channel_arrivals: HashMap::new(),
     };
 
-    let assembled = assemble_generic_result(
+    let assembled = assemble_generic_result_with_frequency_samples(
         generic,
         1,
         &config,
@@ -374,6 +400,7 @@ fn assemble_generic_result_non_empty_success() {
         None,
         &observer_none(),
         &autoeq_artifacts::MemoryArtifactStore::new(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
     )
     .unwrap();
     assert!(
@@ -404,13 +431,14 @@ fn optimize_room_impl_without_probe_arrivals_succeeds() {
     );
     let config = room_config_with_optimizer(speakers, None, tiny_optimizer());
 
-    let result = optimize_room_impl(
+    let result = optimize_room_impl_with_frequency_samples(
         &config,
         48000.0,
         None,
         None,
         None,
         &autoeq_artifacts::MemoryArtifactStore::new(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
     );
     assert!(
         result.is_ok(),
@@ -430,13 +458,14 @@ fn optimize_room_impl_with_probe_arrivals_succeeds() {
     let mut probe = HashMap::new();
     probe.insert("left".to_string(), 5.0);
 
-    let result = optimize_room_impl(
+    let result = optimize_room_impl_with_frequency_samples(
         &config,
         48000.0,
         None,
         Some(&probe),
         None,
         &autoeq_artifacts::MemoryArtifactStore::new(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
     );
     assert!(
         result.is_ok(),
@@ -463,13 +492,14 @@ fn optimize_room_impl_progress_callback_receives_updates() {
         });
     let observer = callback_pipeline_observer(callback);
 
-    let result = optimize_room_impl(
+    let result = optimize_room_impl_with_frequency_samples(
         &config,
         48000.0,
         None,
         None,
         Some(observer),
         &autoeq_artifacts::MemoryArtifactStore::new(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
     );
     assert!(
         result.is_ok(),
@@ -492,13 +522,14 @@ fn optimize_room_impl_pipeline_observer_stop_halts() {
     let config = room_config_with_optimizer(speakers, None, tiny_optimizer());
     let observer = Box::new(|_event: &PipelineEvent| -> PipelineControl { PipelineControl::Stop });
 
-    let result = optimize_room_impl(
+    let result = optimize_room_impl_with_frequency_samples(
         &config,
         48000.0,
         None,
         None,
         Some(observer),
         &autoeq_artifacts::MemoryArtifactStore::new(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
     );
     assert!(
         result.is_err(),

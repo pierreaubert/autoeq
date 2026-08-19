@@ -67,13 +67,14 @@ fn stereo_config_for_mode(processing_mode: ProcessingMode) -> RoomConfig {
 
 fn optimize_room_with_temp_output(config: &RoomConfig) -> Result<RoomOptimizationResult> {
     let output_dir = tempfile::tempdir()?;
-    optimize_room_impl(
+    optimize_room_impl_with_frequency_samples(
         config,
         48000.0,
         Some(output_dir.path()),
         None,
         None,
         &autoeq_artifacts::MemoryArtifactStore::new(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
     )
 }
 
@@ -129,9 +130,7 @@ fn optimize_room_impl_workflow_mixed_phase_succeeds() {
             assert!(report.residual_excess_phase_min_deg.is_finite());
             assert!(report.residual_excess_phase_max_deg.is_finite());
             assert!(report.residual_excess_phase_rms_deg.is_finite());
-            assert!(
-                report.residual_excess_phase_min_deg <= report.residual_excess_phase_max_deg
-            );
+            assert!(report.residual_excess_phase_min_deg <= report.residual_excess_phase_max_deg);
         }
     } else {
         assert!(
@@ -200,7 +199,7 @@ fn optimize_room_impl_generic_multiple_channels_phase_linear_succeeds() {
         correct_excess_phase: false,
         phase_smoothing: 1.0 / 6.0,
         pre_ringing: None,
-            max_boost_db: None,
+        max_boost_db: None,
     });
     let config = room_config_with_optimizer(speakers, None, optimizer);
 
@@ -332,7 +331,11 @@ fn optimize_speaker_topology_forwards_progress_callback() {
 fn validate_room_optimization_single_speaker_succeeds() {
     let config = minimal_room_config(ProcessingMode::LowLatency);
     let observer = observer_none();
-    let result = validate_room_optimization(&config, &observer);
+    let result = validate_room_optimization_with_frequency_samples(
+        &config,
+        &observer,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    );
     assert!(
         result.is_ok(),
         "single-speaker config should validate: {:?}",

@@ -1,5 +1,8 @@
 //! RoomEQ configuration-file loading and application path resolution.
 
+use crate::measurement::{
+    DEFAULT_FREQUENCY_SAMPLES, load_source_individual_with_frequency_samples,
+};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -73,6 +76,20 @@ pub fn load_config(
     base_config_path: &Path,
     override_config_path: Option<&Path>,
 ) -> Result<(RoomConfig, PathBuf, ConfigValidationReport)> {
+    load_config_with_frequency_samples(
+        base_config_path,
+        override_config_path,
+        DEFAULT_FREQUENCY_SAMPLES,
+    )
+}
+
+/// Load, merge, deserialize, and validate a RoomEQ config using a custom
+/// measurement interpolation grid.
+pub fn load_config_with_frequency_samples(
+    base_config_path: &Path,
+    override_config_path: Option<&Path>,
+    frequency_samples: usize,
+) -> Result<(RoomConfig, PathBuf, ConfigValidationReport)> {
     let config_json = std::fs::read_to_string(base_config_path)
         .with_context(|| format!("Failed to read config: {base_config_path:?}"))?;
     let mut config_value: serde_json::Value =
@@ -97,8 +114,11 @@ pub fn load_config(
     room_config.validate_version().map_err(anyhow::Error::msg)?;
     room_config.resolve_paths(&config_dir);
 
-    let validation =
-        validate_room_config_for_workflow(&room_config, RoomValidationContext::production());
+    let validation = validate_room_config_for_workflow_with_frequency_samples(
+        &room_config,
+        RoomValidationContext::production(),
+        frequency_samples,
+    );
     Ok((room_config, config_dir, validation))
 }
 
@@ -109,11 +129,25 @@ pub fn validate_room_config_for_workflow(
     config: &RoomConfig,
     context: RoomValidationContext,
 ) -> ConfigValidationReport {
+    validate_room_config_for_workflow_with_frequency_samples(
+        config,
+        context,
+        DEFAULT_FREQUENCY_SAMPLES,
+    )
+}
+
+/// Validate a RoomEQ configuration using a custom measurement interpolation
+/// grid.
+pub fn validate_room_config_for_workflow_with_frequency_samples(
+    config: &RoomConfig,
+    context: RoomValidationContext,
+    frequency_samples: usize,
+) -> ConfigValidationReport {
     let mut report = validate_room_config_staged(config, context);
     let mut errors = Vec::new();
     for (speaker_name, speaker) in &config.speakers {
         for (source_index, source) in collect_sources(speaker).into_iter().enumerate() {
-            match autoeq_measurements::read::load_source_individual(source) {
+            match load_source_individual_with_frequency_samples(source, frequency_samples) {
                 Ok(curves) if curves.is_empty() => errors.push(format!(
                     "speaker '{speaker_name}' source {source_index} produced no measurement curves"
                 )),

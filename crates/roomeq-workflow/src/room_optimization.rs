@@ -49,14 +49,14 @@ pub use types::*;
 use misc::ARRIVAL_TIME_WARNING_THRESHOLD_MS;
 use misc::LEVEL_DIFFERENCE_WARNING_THRESHOLD;
 use misc::channels_for_generic_optimization;
-use misc::compute_shared_mean_spl;
+use misc::compute_shared_mean_spl_with_frequency_samples;
 use misc::find_sub_main_pairings;
 use misc::generic_channel_progress_iterations;
 use misc::identify_acoustic_groups;
 use misc::is_subwoofer_channel;
 use misc::optimizer_progress_iterations;
-use misc::prepare_room_config;
-use misc::validate_room_config_or_fail;
+use misc::prepare_room_config_with_frequency_samples;
+use misc::validate_room_config_or_fail_with_frequency_samples;
 use process::process_generic_channels;
 use process::process_speaker_internal;
 use room_optimization_callback_observer::callback_pipeline_observer;
@@ -122,18 +122,20 @@ pub fn optimize_room_with_probe_arrivals(
     .run(callback.map(callback_pipeline_observer))
 }
 
-pub(super) fn optimize_room_pipeline_impl(
+pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
     request: roomeq_engine::EngineRequest<'_>,
     context: &crate::WorkflowContext<'_>,
     observer: Option<Box<dyn PipelineObserver>>,
+    frequency_samples: usize,
 ) -> Result<RoomOptimizationResult> {
-    let mut result = optimize_room_impl(
+    let mut result = optimize_room_impl_with_frequency_samples(
         request.config,
         request.sample_rate,
         context.output_dir,
         request.probe_arrival_overrides,
         observer,
         context.artifact_store,
+        frequency_samples,
     )?;
     if !context.validation_measurements.is_empty() {
         validation_scorecard::attach_validation_scorecard(
@@ -145,9 +147,10 @@ pub(super) fn optimize_room_pipeline_impl(
     Ok(result)
 }
 
-fn prepare_room_optimization(
+fn prepare_room_optimization_with_frequency_samples(
     config: &RoomConfig,
     observer: Option<Box<dyn PipelineObserver>>,
+    frequency_samples: usize,
 ) -> Result<(SharedPipelineObserver, RoomConfig)> {
     let observer_shared: SharedPipelineObserver = Arc::new(Mutex::new(observer));
 
@@ -159,7 +162,7 @@ fn prepare_room_optimization(
         ),
     )?;
 
-    let config = prepare_room_config(config);
+    let config = prepare_room_config_with_frequency_samples(config, frequency_samples);
 
     emit_pipeline_event(
         &observer_shared,
@@ -172,15 +175,16 @@ fn prepare_room_optimization(
     Ok((observer_shared, config))
 }
 
-fn validate_room_optimization(
+fn validate_room_optimization_with_frequency_samples(
     config: &RoomConfig,
     observer_shared: &SharedPipelineObserver,
+    frequency_samples: usize,
 ) -> Result<()> {
     emit_pipeline_event(
         observer_shared,
         PipelineEvent::started(PipelineStepId::Validation, "Validating room configuration"),
     )?;
-    validate_room_config_or_fail(config)?;
+    validate_room_config_or_fail_with_frequency_samples(config, frequency_samples)?;
     emit_pipeline_event(
         observer_shared,
         PipelineEvent::completed(PipelineStepId::Validation, "Room configuration validated"),
@@ -273,9 +277,11 @@ fn execute_topology_workflow(
         None,
         observer_shared,
         route,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_topology_workflow_with_probe_arrivals(
     config: &RoomConfig,
     sys: &SystemConfig,
@@ -284,6 +290,7 @@ fn execute_topology_workflow_with_probe_arrivals(
     probe_arrival_overrides: Option<&HashMap<String, f64>>,
     observer_shared: &SharedPipelineObserver,
     route: TopologyRoute,
+    frequency_samples: usize,
 ) -> Result<RoomOptimizationResult> {
     let workflow_name = match sys.model {
         SystemModel::Stereo => {
@@ -423,6 +430,7 @@ fn execute_topology_workflow_with_probe_arrivals(
                 probe_arrival_overrides,
                 Some(&mut workflow_progress_factory),
                 Some(&mut workflow_stage_callback),
+                frequency_samples,
             )
         }
         TopologyRoute::Stereo2_1 => {
@@ -434,6 +442,7 @@ fn execute_topology_workflow_with_probe_arrivals(
                 probe_arrival_overrides,
                 Some(&mut workflow_progress_factory),
                 Some(&mut workflow_stage_callback),
+                frequency_samples,
             )
         }
         TopologyRoute::HomeCinema => {
@@ -445,6 +454,7 @@ fn execute_topology_workflow_with_probe_arrivals(
                 probe_arrival_overrides,
                 Some(&mut workflow_progress_factory),
                 Some(&mut workflow_stage_callback),
+                frequency_samples,
             )
         }
         TopologyRoute::Generic => Err(AutoeqError::InvalidConfiguration {
@@ -453,18 +463,23 @@ fn execute_topology_workflow_with_probe_arrivals(
     }
 }
 
-fn execute_generic_channels(
+fn execute_generic_channels_with_frequency_samples(
     config: &RoomConfig,
     sample_rate: f64,
     output_dir: Option<&Path>,
     probe_arrival_overrides: Option<&HashMap<String, f64>>,
     observer_shared: &SharedPipelineObserver,
+    frequency_samples: usize,
 ) -> Result<(GenericChannelCollection, usize)> {
     let channels_to_process = channels_for_generic_optimization(config);
     let total_speakers = channels_to_process.len();
     info!("Processing {} channels", total_speakers);
 
-    let shared_mean_spl = compute_shared_mean_spl(config, &channels_to_process);
+    let shared_mean_spl = compute_shared_mean_spl_with_frequency_samples(
+        config,
+        &channels_to_process,
+        frequency_samples,
+    );
     let results = process_generic_channels(
         channels_to_process,
         config,
@@ -473,6 +488,7 @@ fn execute_generic_channels(
         shared_mean_spl,
         probe_arrival_overrides,
         observer_shared,
+        frequency_samples,
     )?;
 
     let collection = collect_generic_channel_results(
@@ -487,16 +503,22 @@ fn execute_generic_channels(
     Ok((collection, total_speakers))
 }
 
-fn optimize_room_impl(
+fn optimize_room_impl_with_frequency_samples(
     config: &RoomConfig,
     sample_rate: f64,
     output_dir: Option<&Path>,
     probe_arrival_overrides: Option<&HashMap<String, f64>>,
     observer: Option<Box<dyn PipelineObserver>>,
     store: &dyn autoeq_artifacts::ArtifactStore,
+    frequency_samples: usize,
 ) -> Result<RoomOptimizationResult> {
-    let (observer_shared, config) = prepare_room_optimization(config, observer)?;
-    validate_room_optimization(&config, &observer_shared)?;
+    let (observer_shared, config) =
+        prepare_room_optimization_with_frequency_samples(config, observer, frequency_samples)?;
+    validate_room_optimization_with_frequency_samples(
+        &config,
+        &observer_shared,
+        frequency_samples,
+    )?;
     let route = select_topology_route(&config, &observer_shared)?;
     let config = &config;
 
@@ -516,8 +538,9 @@ fn optimize_room_impl(
                 probe_arrival_overrides,
                 &observer_shared,
                 route,
+                frequency_samples,
             )?;
-            assemble_workflow_result(
+            assemble_workflow_result_with_frequency_samples(
                 workflow_result,
                 config,
                 sys,
@@ -526,6 +549,7 @@ fn optimize_room_impl(
                 probe_arrival_overrides,
                 &observer_shared,
                 store,
+                frequency_samples,
             )?
         }
         TopologyRoute::Generic => {
@@ -536,14 +560,15 @@ fn optimize_room_impl(
                     "Selected generic channel optimization",
                 ),
             )?;
-            let (generic, total_speakers) = execute_generic_channels(
+            let (generic, total_speakers) = execute_generic_channels_with_frequency_samples(
                 config,
                 sample_rate,
                 output_dir,
                 probe_arrival_overrides,
                 &observer_shared,
+                frequency_samples,
             )?;
-            assemble_generic_result(
+            assemble_generic_result_with_frequency_samples(
                 generic,
                 total_speakers,
                 config,
@@ -551,6 +576,7 @@ fn optimize_room_impl(
                 output_dir,
                 &observer_shared,
                 store,
+                frequency_samples,
             )?
         }
     };
@@ -690,7 +716,7 @@ fn apply_inter_channel_timbre_matching_stage(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn assemble_workflow_result(
+fn assemble_workflow_result_with_frequency_samples(
     mut result: RoomOptimizationResult,
     config: &RoomConfig,
     sys: &SystemConfig,
@@ -699,6 +725,7 @@ fn assemble_workflow_result(
     probe_arrival_overrides: Option<&HashMap<String, f64>>,
     observer_shared: &SharedPipelineObserver,
     store: &dyn autoeq_artifacts::ArtifactStore,
+    frequency_samples: usize,
 ) -> Result<RoomOptimizationResult> {
     let workflow_name = match sys.model {
         SystemModel::Stereo => {
@@ -712,8 +739,12 @@ fn assemble_workflow_result(
         SystemModel::Custom => "Custom",
     };
     let mut workflow_refresh_needed = false;
-    let channel_arrivals =
-        phase_arrivals_for_channels(config, &result.channel_results, probe_arrival_overrides);
+    let channel_arrivals = phase_arrivals_for_channels_with_frequency_samples(
+        config,
+        &result.channel_results,
+        probe_arrival_overrides,
+        frequency_samples,
+    );
 
     // Probe arrivals are explicit measurement metadata and must respect the
     // normal delay policy. Phase-derived arrivals are the topology equivalent
@@ -1076,8 +1107,13 @@ fn assemble_workflow_result(
         .as_ref()
         .filter(|height| height.enabled)
     {
-        let stage_outcome =
-            apply_topology_height_alignment(&mut result, height_config, config, sample_rate);
+        let stage_outcome = apply_topology_height_alignment_with_frequency_samples(
+            &mut result,
+            height_config,
+            config,
+            sample_rate,
+            frequency_samples,
+        );
         let event = match stage_outcome.status {
             StageStatus::Applied | StageStatus::Degraded => PipelineEvent::completed(
                 PipelineStepId::HeightChannelAlignment,
@@ -1144,11 +1180,12 @@ fn assemble_workflow_result(
                 output_dir,
             )
         } else {
-            try_run_gd_opt(
+            try_run_gd_opt_with_frequency_samples(
                 config,
                 &mut result.channel_results,
                 &mut result.channels,
                 sample_rate,
+                frequency_samples,
             )
         };
     if let Some(summary) = workflow_group_delay_summary {
@@ -1320,10 +1357,11 @@ fn assemble_workflow_result(
     Ok(result)
 }
 
-fn phase_arrivals_for_channels(
+fn phase_arrivals_for_channels_with_frequency_samples(
     config: &RoomConfig,
     channel_results: &HashMap<String, roomeq_engine::room_result::ChannelOptimizationResult>,
     probe_arrival_overrides: Option<&HashMap<String, f64>>,
+    frequency_samples: usize,
 ) -> HashMap<String, f64> {
     let primary_seat = config
         .optimizer
@@ -1340,7 +1378,11 @@ fn phase_arrivals_for_channels(
                 return Some((channel_name.clone(), arrival_ms));
             }
             let source = gd::source_for_output_channel(config, channel_name)?;
-            let curves = autoeq_measurements::load_source_individual(source).ok()?;
+            let curves = crate::measurement::load_source_individual_with_frequency_samples(
+                source,
+                frequency_samples,
+            )
+            .ok()?;
             let curve = curves.get(primary_seat)?;
             let (phase_min, phase_max) =
                 roomeq_engine::analysis::time_align::phase_arrival_regression_band(
@@ -1435,13 +1477,19 @@ fn apply_topology_phase_alignment(
     Ok(!results.is_empty())
 }
 
-fn apply_topology_height_alignment(
+fn apply_topology_height_alignment_with_frequency_samples(
     result: &mut RoomOptimizationResult,
     height_config: &roomeq_model::HeightChannelAlignmentConfig,
     config: &RoomConfig,
     sample_rate: f64,
+    frequency_samples: usize,
 ) -> StageOutcome {
-    let mut channel_arrivals = phase_arrivals_for_channels(config, &result.channel_results, None);
+    let mut channel_arrivals = phase_arrivals_for_channels_with_frequency_samples(
+        config,
+        &result.channel_results,
+        None,
+        frequency_samples,
+    );
     for (channel_name, arrival_ms) in &mut channel_arrivals {
         if let Some(chain) = result.channels.get(channel_name) {
             *arrival_ms += total_chain_delay_ms(chain);
@@ -1570,7 +1618,8 @@ fn apply_topology_height_alignment(
     }
 }
 
-fn assemble_generic_result(
+#[allow(clippy::too_many_arguments)]
+fn assemble_generic_result_with_frequency_samples(
     generic: GenericChannelCollection,
     total_speakers: usize,
     config: &RoomConfig,
@@ -1578,6 +1627,7 @@ fn assemble_generic_result(
     output_dir: Option<&Path>,
     observer_shared: &SharedPipelineObserver,
     store: &dyn autoeq_artifacts::ArtifactStore,
+    frequency_samples: usize,
 ) -> Result<RoomOptimizationResult> {
     let GenericChannelCollection {
         mut channel_chains,
@@ -1605,7 +1655,13 @@ fn assemble_generic_result(
                 .map(|policy| policy.primary_seat)
                 .unwrap_or(0);
             let primary_curve = gd::source_for_output_channel(config, channel_name)
-                .and_then(|source| autoeq_measurements::load_source_individual(source).ok())
+                .and_then(|source| {
+                    crate::measurement::load_source_individual_with_frequency_samples(
+                        source,
+                        frequency_samples,
+                    )
+                    .ok()
+                })
                 .and_then(|curves| curves.get(primary_seat).cloned());
             let phase_curve = primary_curve.as_ref().unwrap_or(&result.initial_curve);
             let Some((phase_min, phase_max)) =
@@ -2449,11 +2505,12 @@ fn assemble_generic_result(
             output_dir,
         )
     } else {
-        try_run_gd_opt(
+        try_run_gd_opt_with_frequency_samples(
             config,
             &mut channel_results,
             &mut channel_chains,
             sample_rate,
+            frequency_samples,
         )
     };
     emit_pipeline_event(
@@ -2743,6 +2800,7 @@ pub fn optimize_speaker(
         eq_callback,
         None, // no shared mean for standalone single-channel optimization
         None, // no probe_arrival_overrides on the standalone path
+        crate::DEFAULT_FREQUENCY_SAMPLES,
     )?;
 
     Ok(SpeakerOptimizationResult {

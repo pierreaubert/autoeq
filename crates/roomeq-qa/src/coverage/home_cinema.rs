@@ -778,7 +778,7 @@ mod tests {
             let SpeakerConfig::Single(source) = speaker else {
                 continue;
             };
-            let curves = autoeq_measurements::load_source_individual(source).unwrap();
+            let curves = roomeq_workflow::load_source_individual(source).unwrap();
             let curve = &curves[0];
             let band = roomeq_engine::analysis::time_align::phase_arrival_regression_band(
                 curve, 200.0, 2_000.0,

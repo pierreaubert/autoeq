@@ -9,7 +9,12 @@ fn prepare_room_optimization_with_observer_emits_event() {
         PipelineControl::Continue
     });
 
-    let (_shared, prepared) = prepare_room_optimization(&config, Some(observer)).unwrap();
+    let (_shared, prepared) = prepare_room_optimization_with_frequency_samples(
+        &config,
+        Some(observer),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert!(prepared.speakers.contains_key("left"));
 }
 
@@ -77,7 +82,12 @@ fn optimize_room_pipeline_impl_direct_call() {
         artifact_store: &store,
         validation_measurements: &validation_measurements,
     };
-    let result = optimize_room_pipeline_impl(request, &context, None);
+    let result = optimize_room_pipeline_impl_with_frequency_samples(
+        request,
+        &context,
+        None,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    );
     assert!(
         result.is_ok(),
         "pipeline impl direct call should succeed: {:?}",
@@ -92,7 +102,11 @@ fn prepare_room_optimization_observer_stop_on_started() {
         PipelineStepId::ConfigPreparation,
         PipelineStepStatus::Started,
     );
-    let result = prepare_room_optimization(&config, observer);
+    let result = prepare_room_optimization_with_frequency_samples(
+        &config,
+        observer,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    );
     assert!(
         result.is_err(),
         "observer stop on preparation started should error"
@@ -106,7 +120,11 @@ fn prepare_room_optimization_observer_stop_on_completed() {
         PipelineStepId::ConfigPreparation,
         PipelineStepStatus::Completed,
     );
-    let result = prepare_room_optimization(&config, observer);
+    let result = prepare_room_optimization_with_frequency_samples(
+        &config,
+        observer,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    );
     assert!(
         result.is_err(),
         "observer stop on preparation completed should error"
@@ -117,7 +135,11 @@ fn prepare_room_optimization_observer_stop_on_completed() {
 fn validate_room_optimization_observer_stop_on_started() {
     let config = minimal_room_config(ProcessingMode::LowLatency);
     let observer = shared_stop_on_observer(PipelineStepId::Validation, PipelineStepStatus::Started);
-    let result = validate_room_optimization(&config, &observer);
+    let result = validate_room_optimization_with_frequency_samples(
+        &config,
+        &observer,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    );
     assert!(
         result.is_err(),
         "observer stop on validation started should error"
@@ -129,7 +151,11 @@ fn validate_room_optimization_observer_stop_on_completed() {
     let config = minimal_room_config(ProcessingMode::LowLatency);
     let observer =
         shared_stop_on_observer(PipelineStepId::Validation, PipelineStepStatus::Completed);
-    let result = validate_room_optimization(&config, &observer);
+    let result = validate_room_optimization_with_frequency_samples(
+        &config,
+        &observer,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    );
     assert!(
         result.is_err(),
         "observer stop on validation completed should error"
@@ -174,8 +200,15 @@ fn execute_generic_channels_multiple_speakers() {
         SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
     );
     let config = room_config_with_optimizer(speakers, None, tiny_optimizer());
-    let (generic, total) =
-        execute_generic_channels(&config, 48000.0, None, None, &observer_none()).unwrap();
+    let (generic, total) = execute_generic_channels_with_frequency_samples(
+        &config,
+        48000.0,
+        None,
+        None,
+        &observer_none(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert_eq!(total, 2);
     assert!(generic.channel_results.contains_key("left"));
     assert!(generic.channel_results.contains_key("right"));
@@ -196,8 +229,15 @@ fn execute_generic_channels_with_probe_arrivals() {
     let mut probe = HashMap::new();
     probe.insert("left".to_string(), 1.0);
     probe.insert("right".to_string(), 2.0);
-    let (_generic, total) =
-        execute_generic_channels(&config, 48000.0, None, Some(&probe), &observer_none()).unwrap();
+    let (_generic, total) = execute_generic_channels_with_frequency_samples(
+        &config,
+        48000.0,
+        None,
+        Some(&probe),
+        &observer_none(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert_eq!(total, 2);
 }
 
@@ -228,8 +268,15 @@ fn execute_generic_channels_with_group_speaker() {
     );
     let mut config = room_config_with_optimizer(speakers, None, tiny_optimizer());
     config.crossovers = Some(crossovers);
-    let (generic, total) =
-        execute_generic_channels(&config, 48000.0, None, None, &observer_none()).unwrap();
+    let (generic, total) = execute_generic_channels_with_frequency_samples(
+        &config,
+        48000.0,
+        None,
+        None,
+        &observer_none(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert_eq!(total, 1);
     assert!(generic.channel_results.contains_key("group"));
 }
@@ -249,7 +296,7 @@ fn assemble_workflow_result_observer_stop_on_summary() {
         PipelineStepId::TopologyWorkflowExecution,
         PipelineStepStatus::Completed,
     );
-    let assembled = assemble_workflow_result(
+    let assembled = assemble_workflow_result_with_frequency_samples(
         result,
         &config,
         sys,
@@ -258,6 +305,7 @@ fn assemble_workflow_result_observer_stop_on_summary() {
         None,
         &observer,
         &autoeq_artifacts::MemoryArtifactStore::new(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
     );
     assert!(
         assembled.is_err(),
@@ -348,7 +396,7 @@ fn assemble_generic_result_with_observer_emits_events() {
     let config = room_config_with_optimizer(speakers, None, optimizer);
     let generic = two_channel_generic_collection();
     let (observer, count) = counting_observer();
-    let result = assemble_generic_result(
+    let result = assemble_generic_result_with_frequency_samples(
         generic,
         2,
         &config,
@@ -356,6 +404,7 @@ fn assemble_generic_result_with_observer_emits_events() {
         None,
         &observer,
         &autoeq_artifacts::MemoryArtifactStore::new(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
     )
     .unwrap();
     assert!(result.channel_results.contains_key("left"));
@@ -381,7 +430,7 @@ fn assemble_generic_result_multiple_channels_time_alignment() {
     optimizer.allow_delay = Some(true);
     let config = room_config_with_optimizer(speakers, None, optimizer);
     let generic = two_channel_generic_collection();
-    let result = assemble_generic_result(
+    let result = assemble_generic_result_with_frequency_samples(
         generic,
         2,
         &config,
@@ -389,6 +438,7 @@ fn assemble_generic_result_multiple_channels_time_alignment() {
         None,
         &observer_none(),
         &autoeq_artifacts::MemoryArtifactStore::new(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
     )
     .unwrap();
     assert!(result.channels.contains_key("left"));

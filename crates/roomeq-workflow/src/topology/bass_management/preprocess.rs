@@ -1,5 +1,6 @@
+use crate::measurement::load_source_with_frequency_samples;
 use crate::{dba, multisub as multisub_resources};
-use autoeq_measurements::read::{interpolate_log_space, load_source};
+use autoeq_measurements::read::interpolate_log_space;
 use log::info;
 use roomeq_engine::Curve;
 use roomeq_engine::bass_management::{SubDriverInfo, SubPreprocessResult};
@@ -19,32 +20,47 @@ use roomeq_model::{
 /// - Cardioid: simulate combined response from front + delayed/inverted rear
 /// - Dba: run DBA optimization, return combined + front/rear info
 /// - Group: error (handled by generic path)
-pub(in super::super) fn preprocess_sub(
+pub(in super::super) fn preprocess_sub_with_frequency_samples(
     lfe_config: &SpeakerConfig,
     strategy: &SubwooferStrategy,
     optimizer: &OptimizerConfig,
     sample_rate: f64,
+    frequency_samples: usize,
 ) -> Result<SubPreprocessResult> {
     match lfe_config {
         SpeakerConfig::Single(source) => {
-            let curve = load_source(source).map_err(|e| AutoeqError::InvalidMeasurement {
-                message: e.to_string(),
-            })?;
+            let curve =
+                load_source_with_frequency_samples(source, frequency_samples).map_err(|e| {
+                    AutoeqError::InvalidMeasurement {
+                        message: e.to_string(),
+                    }
+                })?;
             Ok(SubPreprocessResult {
                 combined_curve: curve,
                 drivers: None,
             })
         }
         SpeakerConfig::MultiSub(ms) => match strategy {
-            SubwooferStrategy::Mso => preprocess_multisub_mso(ms, optimizer, sample_rate),
-            SubwooferStrategy::Single => preprocess_multisub_independent(ms),
+            SubwooferStrategy::Mso => preprocess_multisub_mso_with_frequency_samples(
+                ms,
+                optimizer,
+                sample_rate,
+                frequency_samples,
+            ),
+            SubwooferStrategy::Single => {
+                preprocess_multisub_independent_with_frequency_samples(ms, frequency_samples)
+            }
             SubwooferStrategy::Dba => Err(AutoeqError::InvalidConfiguration {
                 message: "SubwooferStrategy::Dba requires SpeakerConfig::Dba, not MultiSub"
                     .to_string(),
             }),
         },
-        SpeakerConfig::Cardioid(c) => preprocess_cardioid(c),
-        SpeakerConfig::Dba(d) => preprocess_dba(d, optimizer, sample_rate),
+        SpeakerConfig::Cardioid(c) => {
+            preprocess_cardioid_with_frequency_samples(c, frequency_samples)
+        }
+        SpeakerConfig::Dba(d) => {
+            preprocess_dba_with_frequency_samples(d, optimizer, sample_rate, frequency_samples)
+        }
         SpeakerConfig::Group(_) | SpeakerConfig::Topology(_) => {
             Err(AutoeqError::InvalidConfiguration {
                 message:
@@ -60,15 +76,21 @@ pub(in super::super) fn preprocess_sub(
 }
 
 /// MSO: optimize inter-sub gains/delays, return combined curve + per-sub info
-pub(in super::super) fn preprocess_multisub_mso(
+pub(in super::super) fn preprocess_multisub_mso_with_frequency_samples(
     ms: &MultiSubGroup,
     optimizer: &OptimizerConfig,
     sample_rate: f64,
+    frequency_samples: usize,
 ) -> Result<SubPreprocessResult> {
     info!("  MSO optimization for {} subwoofers", ms.subwoofers.len());
 
-    let optimized = multisub_resources::optimize_multisub(&ms.subwoofers, optimizer, sample_rate)
-        .map_err(|e| AutoeqError::OptimizationFailed {
+    let optimized = multisub_resources::optimize_multisub_with_frequency_samples(
+        &ms.subwoofers,
+        optimizer,
+        sample_rate,
+        frequency_samples,
+    )
+    .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!("MSO optimization failed: {}", e),
     })?;
     // Keep the spatial magnitude used for multi-seat EQ, but carry the
@@ -89,8 +111,10 @@ pub(in super::super) fn preprocess_multisub_mso(
     // Load individual curves for driver info
     let mut drivers = Vec::new();
     for (i, source) in ms.subwoofers.iter().enumerate() {
-        let curve = load_source(source).map_err(|e| AutoeqError::InvalidMeasurement {
-            message: e.to_string(),
+        let curve = load_source_with_frequency_samples(source, frequency_samples).map_err(|e| {
+            AutoeqError::InvalidMeasurement {
+                message: e.to_string(),
+            }
         })?;
         drivers.push(SubDriverInfo {
             name: format!("{}_{}", ms.name, i + 1),
@@ -108,8 +132,9 @@ pub(in super::super) fn preprocess_multisub_mso(
 }
 
 /// Independent subs: power-sum all sub curves, return combined + per-sub info (zero gains/delays)
-pub(in super::super) fn preprocess_multisub_independent(
+pub(in super::super) fn preprocess_multisub_independent_with_frequency_samples(
     ms: &MultiSubGroup,
+    frequency_samples: usize,
 ) -> Result<SubPreprocessResult> {
     info!(
         "  Independent sub averaging for {} subwoofers",
@@ -118,8 +143,10 @@ pub(in super::super) fn preprocess_multisub_independent(
 
     let mut curves = Vec::new();
     for source in &ms.subwoofers {
-        let curve = load_source(source).map_err(|e| AutoeqError::InvalidMeasurement {
-            message: e.to_string(),
+        let curve = load_source_with_frequency_samples(source, frequency_samples).map_err(|e| {
+            AutoeqError::InvalidMeasurement {
+                message: e.to_string(),
+            }
         })?;
         curves.push(curve);
     }
@@ -161,13 +188,22 @@ pub(in super::super) fn preprocess_multisub_independent(
 }
 
 /// Cardioid: simulate combined response from front + delayed/inverted rear sub
-pub(in super::super) fn preprocess_cardioid(c: &CardioidConfig) -> Result<SubPreprocessResult> {
-    let front_curve = load_source(&c.front).map_err(|e| AutoeqError::InvalidMeasurement {
-        message: format!("Cardioid front: {}", e),
-    })?;
-    let rear_curve = load_source(&c.rear).map_err(|e| AutoeqError::InvalidMeasurement {
-        message: format!("Cardioid rear: {}", e),
-    })?;
+pub(in super::super) fn preprocess_cardioid_with_frequency_samples(
+    c: &CardioidConfig,
+    frequency_samples: usize,
+) -> Result<SubPreprocessResult> {
+    let front_curve =
+        load_source_with_frequency_samples(&c.front, frequency_samples).map_err(|e| {
+            AutoeqError::InvalidMeasurement {
+                message: format!("Cardioid front: {}", e),
+            }
+        })?;
+    let rear_curve =
+        load_source_with_frequency_samples(&c.rear, frequency_samples).map_err(|e| {
+            AutoeqError::InvalidMeasurement {
+                message: format!("Cardioid rear: {}", e),
+            }
+        })?;
 
     if !is_valid_frequency_grid(&front_curve.freq) || !is_valid_frequency_grid(&rear_curve.freq) {
         return Err(AutoeqError::InvalidMeasurement {
@@ -265,18 +301,19 @@ pub(in super::super) fn preprocess_cardioid(c: &CardioidConfig) -> Result<SubPre
 }
 
 /// DBA: run DBA optimization, return combined curve + front/rear driver info
-pub(in super::super) fn preprocess_dba(
+pub(in super::super) fn preprocess_dba_with_frequency_samples(
     d: &DBAConfig,
     optimizer: &OptimizerConfig,
     sample_rate: f64,
+    frequency_samples: usize,
 ) -> Result<SubPreprocessResult> {
     info!("  DBA optimization");
 
-    let optimized = dba::optimize_dba(d, optimizer, sample_rate).map_err(|e| {
-        AutoeqError::OptimizationFailed {
-            message: format!("DBA optimization failed: {}", e),
-        }
-    })?;
+    let optimized =
+        dba::optimize_dba_with_frequency_samples(d, optimizer, sample_rate, frequency_samples)
+            .map_err(|e| AutoeqError::OptimizationFailed {
+                message: format!("DBA optimization failed: {}", e),
+            })?;
     let result = optimized.driver;
     let combined = optimized.combined_curve;
 
@@ -286,12 +323,12 @@ pub(in super::super) fn preprocess_dba(
     );
 
     // Load front and rear array responses for display
-    let front_curve =
-        dba::sum_array_response(&d.front).map_err(|e| AutoeqError::InvalidMeasurement {
-            message: format!("DBA front array: {}", e),
-        })?;
-    let rear_curve =
-        dba::sum_array_response(&d.rear).map_err(|e| AutoeqError::InvalidMeasurement {
+    let front_curve = dba::sum_array_response_with_frequency_samples(&d.front, frequency_samples)
+        .map_err(|e| AutoeqError::InvalidMeasurement {
+        message: format!("DBA front array: {}", e),
+    })?;
+    let rear_curve = dba::sum_array_response_with_frequency_samples(&d.rear, frequency_samples)
+        .map_err(|e| AutoeqError::InvalidMeasurement {
             message: format!("DBA rear array: {}", e),
         })?;
 
@@ -355,11 +392,12 @@ mod tests {
     fn preprocess_sub_single_returns_finite_combined_curve() {
         let curve = make_curve(16, 80.0, None);
         let config = SpeakerConfig::Single(MeasurementSource::InMemory(curve));
-        let result = preprocess_sub(
+        let result = preprocess_sub_with_frequency_samples(
             &config,
             &SubwooferStrategy::Single,
             &tiny_optimizer(),
             48000.0,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
         );
         assert!(result.is_ok(), "expected Ok, got Err: {:?}", result.err());
         let result = result.unwrap();
@@ -379,7 +417,13 @@ mod tests {
             allpass_optimization: false,
         };
         let config = SpeakerConfig::MultiSub(subs);
-        let result = preprocess_sub(&config, &SubwooferStrategy::Mso, &tiny_optimizer(), 48000.0);
+        let result = preprocess_sub_with_frequency_samples(
+            &config,
+            &SubwooferStrategy::Mso,
+            &tiny_optimizer(),
+            48000.0,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+        );
         assert!(result.is_ok(), "expected Ok, got Err: {:?}", result.err());
         let result = result.unwrap();
         assert!(result.drivers.is_some());
@@ -401,11 +445,12 @@ mod tests {
             allpass_optimization: false,
         };
         let config = SpeakerConfig::MultiSub(subs);
-        let result = preprocess_sub(
+        let result = preprocess_sub_with_frequency_samples(
             &config,
             &SubwooferStrategy::Single,
             &tiny_optimizer(),
             48000.0,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
         );
         assert!(result.is_ok(), "expected Ok, got Err: {:?}", result.err());
         let result = result.unwrap();
@@ -425,11 +470,12 @@ mod tests {
             crossover: None,
         };
         let config = SpeakerConfig::Group(group);
-        let result = preprocess_sub(
+        let result = preprocess_sub_with_frequency_samples(
             &config,
             &SubwooferStrategy::Single,
             &tiny_optimizer(),
             48000.0,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
         );
         assert!(result.is_err(), "expected Err for Group config");
     }
@@ -445,7 +491,8 @@ mod tests {
             rear: MeasurementSource::InMemory(rear),
             separation_meters: 1.0,
         };
-        let result = preprocess_cardioid(&config);
+        let result =
+            preprocess_cardioid_with_frequency_samples(&config, crate::DEFAULT_FREQUENCY_SAMPLES);
         assert!(result.is_ok(), "expected Ok, got Err: {:?}", result.err());
         let result = result.unwrap();
         assert!(result.drivers.is_some());
@@ -465,7 +512,8 @@ mod tests {
             rear: MeasurementSource::InMemory(rear),
             separation_meters: 1.0,
         };
-        let result = preprocess_cardioid(&config);
+        let result =
+            preprocess_cardioid_with_frequency_samples(&config, crate::DEFAULT_FREQUENCY_SAMPLES);
         assert!(result.is_err(), "expected Err for mismatched grids");
     }
 
@@ -481,7 +529,8 @@ mod tests {
             rear: MeasurementSource::InMemory(rear),
             separation_meters: 1.0,
         };
-        let result = preprocess_cardioid(&config);
+        let result =
+            preprocess_cardioid_with_frequency_samples(&config, crate::DEFAULT_FREQUENCY_SAMPLES);
         assert!(result.is_err(), "expected Err for mismatched SPL lengths");
     }
 
@@ -497,7 +546,8 @@ mod tests {
             rear: MeasurementSource::InMemory(rear),
             separation_meters: 1.0,
         };
-        let result = preprocess_cardioid(&config);
+        let result =
+            preprocess_cardioid_with_frequency_samples(&config, crate::DEFAULT_FREQUENCY_SAMPLES);
         assert!(result.is_err(), "expected Err for mismatched phase lengths");
     }
 
@@ -511,7 +561,12 @@ mod tests {
             front: vec![MeasurementSource::InMemory(front_curve)],
             rear: vec![MeasurementSource::InMemory(rear_curve)],
         };
-        let result = preprocess_dba(&config, &tiny_optimizer(), 48000.0);
+        let result = preprocess_dba_with_frequency_samples(
+            &config,
+            &tiny_optimizer(),
+            48000.0,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+        );
         assert!(result.is_ok(), "expected Ok, got Err: {:?}", result.err());
         let result = result.unwrap();
         assert!(result.drivers.is_some());

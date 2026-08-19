@@ -1,9 +1,10 @@
 // Stereo 2.0 workflow executor.
 
 use super::bass_management::resolve_single_source;
-use super::run::run_channel_via_generic_path;
+use super::run::run_channel_via_generic_path_with_frequency_samples;
 use super::supporting_source::{
-    load_single_source_curves, partition_roles, process_supporting_source_channels,
+    load_single_source_curves_with_frequency_samples, partition_roles,
+    process_supporting_source_channels_with_frequency_samples,
 };
 use super::types::{WorkflowAssembly, WorkflowExecutor};
 use super::workflow::workflow_stage_event;
@@ -33,7 +34,12 @@ impl WorkflowExecutor for Stereo20Executor {
         let (single_roles, _supporting_roles) = partition_roles(config, sys)?;
 
         // 2. Load single-source measurements
-        let curves = load_single_source_curves(config, sys, &single_roles)?;
+        let curves = load_single_source_curves_with_frequency_samples(
+            config,
+            sys,
+            &single_roles,
+            assembly.frequency_samples,
+        )?;
 
         // 3. Alignment
         let mut ranges = HashMap::new();
@@ -57,7 +63,7 @@ impl WorkflowExecutor for Stereo20Executor {
             info!("  Optimizing '{}' with alignment gain {:.2} dB", role, gain);
 
             let (chain, ch_result, pre_score, post_score, _fir, _multiseat_rejection) =
-                run_channel_via_generic_path(
+                run_channel_via_generic_path_with_frequency_samples(
                     role,
                     source,
                     config,
@@ -69,6 +75,7 @@ impl WorkflowExecutor for Stereo20Executor {
                     total_channels,
                     max_iterations,
                     assembly.probe_arrival_overrides,
+                    assembly.frequency_samples,
                 )?;
 
             info!(
@@ -141,7 +148,7 @@ impl WorkflowExecutor for Stereo20Executor {
         };
 
         // 5. Process supporting-source channels.
-        process_supporting_source_channels(
+        process_supporting_source_channels_with_frequency_samples(
             config,
             sys,
             sample_rate,
@@ -149,6 +156,7 @@ impl WorkflowExecutor for Stereo20Executor {
             &mut channel_chains,
             &mut channel_results,
             &mut metadata,
+            assembly.frequency_samples,
         )?;
 
         Ok(RoomOptimizationResult {

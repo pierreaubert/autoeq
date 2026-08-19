@@ -127,7 +127,10 @@ pub(super) fn optimizer_progress_iterations(config: &RoomConfig) -> usize {
     }
 }
 
-pub(super) fn prepare_room_config(config: &RoomConfig) -> RoomConfig {
+pub(super) fn prepare_room_config_with_frequency_samples(
+    config: &RoomConfig,
+    frequency_samples: usize,
+) -> RoomConfig {
     let mut config = config.clone();
 
     config.optimizer.apply_perceptual_policy_defaults();
@@ -148,7 +151,8 @@ pub(super) fn prepare_room_config(config: &RoomConfig) -> RoomConfig {
         .is_some_and(|t| t.shape == TargetShape::FromMeasurement)
         && config.optimizer.from_measurement_slope_override.is_none()
     {
-        let resolved = resolve_from_measurement_slope(&config);
+        let resolved =
+            resolve_from_measurement_slope_with_frequency_samples(&config, frequency_samples);
         config.optimizer.from_measurement_slope_override = Some(resolved);
     }
 
@@ -172,10 +176,14 @@ pub(super) fn prepare_room_config(config: &RoomConfig) -> RoomConfig {
     config
 }
 
-pub(super) fn validate_room_config_or_fail(config: &RoomConfig) -> Result<()> {
-    let validation = crate::config_loader::validate_room_config_for_workflow(
+pub(super) fn validate_room_config_or_fail_with_frequency_samples(
+    config: &RoomConfig,
+    frequency_samples: usize,
+) -> Result<()> {
+    let validation = crate::config_loader::validate_room_config_for_workflow_with_frequency_samples(
         config,
         RoomValidationContext::production(),
+        frequency_samples,
     );
     for warning in validation.warnings() {
         eprintln!("Warning: {warning}");
@@ -223,9 +231,10 @@ pub(super) fn channels_for_generic_optimization(
     }
 }
 
-pub(super) fn compute_shared_mean_spl(
+pub(super) fn compute_shared_mean_spl_with_frequency_samples(
     config: &RoomConfig,
     channels_to_process: &[(String, SpeakerConfig)],
+    frequency_samples: usize,
 ) -> Option<f64> {
     if channels_to_process.len() <= 1 {
         return None;
@@ -238,7 +247,8 @@ pub(super) fn compute_shared_mean_spl(
 
     for (_name, speaker_config) in channels_to_process {
         if let SpeakerConfig::Single(source) = speaker_config
-            && let Ok(curve) = autoeq_measurements::read::load_source(source)
+            && let Ok(curve) =
+                crate::measurement::load_source_with_frequency_samples(source, frequency_samples)
         {
             let freqs_f32: Vec<f32> = curve.freq.iter().map(|&f| f as f32).collect();
             let spl_f32: Vec<f32> = curve.spl.iter().map(|&s| s as f32).collect();
@@ -368,7 +378,10 @@ pub(super) fn bed_channel_priority(role: roomeq_engine::home_cinema::HomeCinemaR
 /// 2. If no bed channels, fall back to the first non-sub channel
 ///    (sorted alphabetically for determinism).
 /// 3. If no curve is loadable / regressable, return 0.0 (flat).
-pub(super) fn resolve_from_measurement_slope(config: &RoomConfig) -> f64 {
+pub(super) fn resolve_from_measurement_slope_with_frequency_samples(
+    config: &RoomConfig,
+    frequency_samples: usize,
+) -> f64 {
     let mut bed_channels: Vec<(u8, &str, &MeasurementSource)> = Vec::new();
     let mut other_channels: Vec<(&str, &MeasurementSource)> = Vec::new();
     for (channel_name, speaker_config) in &config.speakers {
@@ -390,7 +403,7 @@ pub(super) fn resolve_from_measurement_slope(config: &RoomConfig) -> f64 {
 
     let mut slopes: Vec<f64> = Vec::with_capacity(bed_channels.len());
     for (_, name, source) in &bed_channels {
-        match autoeq_measurements::read::load_source(source) {
+        match crate::measurement::load_source_with_frequency_samples(source, frequency_samples) {
             Ok(curve) => {
                 if let Some(s) = slope::estimate_slope_db_per_octave(
                     &curve,
@@ -431,7 +444,7 @@ pub(super) fn resolve_from_measurement_slope(config: &RoomConfig) -> f64 {
     // No bed channels usable — fall back to the first non-sub channel
     // we can load (sorted for determinism).
     for (name, source) in &other_channels {
-        match autoeq_measurements::read::load_source(source) {
+        match crate::measurement::load_source_with_frequency_samples(source, frequency_samples) {
             Ok(curve) => {
                 let s = slope::estimate_slope_db_per_octave(
                     &curve,
@@ -704,7 +717,11 @@ mod tests {
             ("right".to_string(), SpeakerConfig::Single(single_source())),
         ];
         let config = room_config_with_speakers(HashMap::new());
-        let mean = compute_shared_mean_spl(&config, &channels);
+        let mean = compute_shared_mean_spl_with_frequency_samples(
+            &config,
+            &channels,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+        );
         assert!(mean.is_some_and(|m| (m - 80.0).abs() < 1.0));
     }
 
@@ -712,7 +729,14 @@ mod tests {
     fn compute_shared_mean_spl_single_channel_returns_none() {
         let channels = vec![("left".to_string(), SpeakerConfig::Single(single_source()))];
         let config = room_config_with_speakers(HashMap::new());
-        assert!(compute_shared_mean_spl(&config, &channels).is_none());
+        assert!(
+            compute_shared_mean_spl_with_frequency_samples(
+                &config,
+                &channels,
+                crate::DEFAULT_FREQUENCY_SAMPLES,
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -742,7 +766,10 @@ mod tests {
         speakers.insert("right".to_string(), SpeakerConfig::Single(single_source()));
         speakers.insert("lfe".to_string(), SpeakerConfig::Single(single_source()));
         let config = room_config_with_speakers(speakers);
-        let slope = resolve_from_measurement_slope(&config);
+        let slope = resolve_from_measurement_slope_with_frequency_samples(
+            &config,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+        );
         assert!(slope.abs() < 0.1, "expected ~0 dB/oct, got {}", slope);
     }
 
@@ -815,7 +842,13 @@ mod tests {
     #[test]
     fn validate_room_config_or_fail_empty_speakers_fails() {
         let config = room_config_with_speakers(HashMap::new());
-        assert!(validate_room_config_or_fail(&config).is_err());
+        assert!(
+            validate_room_config_or_fail_with_frequency_samples(
+                &config,
+                crate::DEFAULT_FREQUENCY_SAMPLES,
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -832,7 +865,11 @@ mod tests {
             SpeakerConfig::Single(source),
         )]));
 
-        let error = validate_room_config_or_fail(&config).unwrap_err();
+        let error = validate_room_config_or_fail_with_frequency_samples(
+            &config,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+        )
+        .unwrap_err();
         assert!(error.to_string().contains("failed acoustic validation"));
     }
 }

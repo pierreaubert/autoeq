@@ -1,3 +1,4 @@
+use crate::measurement::load_source_individual_with_frequency_samples;
 use autoeq_measurements::{Curve, MeasurementSource};
 use roomeq_engine::home_cinema::{
     apply_result_delta_to_seat, band_metrics, curves_share_frequency_grid,
@@ -12,6 +13,20 @@ pub fn derive_all_channel_multiseat_config(
     channel_name: &str,
     source: &MeasurementSource,
 ) -> Option<MultiMeasurementConfig> {
+    derive_all_channel_multiseat_config_with_frequency_samples(
+        config,
+        channel_name,
+        source,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+}
+
+pub fn derive_all_channel_multiseat_config_with_frequency_samples(
+    config: &RoomConfig,
+    channel_name: &str,
+    source: &MeasurementSource,
+    frequency_samples: usize,
+) -> Option<MultiMeasurementConfig> {
     if config.optimizer.multi_measurement.is_some() || !all_channel_multiseat_enabled(config) {
         return None;
     }
@@ -19,7 +34,7 @@ pub fn derive_all_channel_multiseat_config(
     if role.is_sub_or_lfe() || measurement_source_count(source).unwrap_or(0) < 2 {
         return None;
     }
-    let curves = autoeq_measurements::load_source_individual(source).ok()?;
+    let curves = load_source_individual_with_frequency_samples(source, frequency_samples).ok()?;
     if curves.len() < 2 || !curves_share_frequency_grid(&curves) {
         return None;
     }
@@ -53,6 +68,24 @@ pub fn all_channel_multiseat_acceptance(
     initial_curve: &Curve,
     final_curve: &Curve,
 ) -> AllChannelMultiSeatAcceptance {
+    all_channel_multiseat_acceptance_with_frequency_samples(
+        config,
+        channel_name,
+        source,
+        initial_curve,
+        final_curve,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+}
+
+pub fn all_channel_multiseat_acceptance_with_frequency_samples(
+    config: &RoomConfig,
+    channel_name: &str,
+    source: &MeasurementSource,
+    initial_curve: &Curve,
+    final_curve: &Curve,
+    frequency_samples: usize,
+) -> AllChannelMultiSeatAcceptance {
     const TARGET_FIT_COLLAPSE_TOLERANCE_DB: f64 = 0.5;
     const BROADBAND_LEVEL_SHIFT_TOLERANCE_DB: f64 = 3.0;
 
@@ -67,7 +100,7 @@ pub fn all_channel_multiseat_acceptance(
         };
     }
 
-    let curves = match autoeq_measurements::load_source_individual(source) {
+    let curves = match load_source_individual_with_frequency_samples(source, frequency_samples) {
         Ok(curves) => curves,
         Err(err) => {
             return AllChannelMultiSeatAcceptance {

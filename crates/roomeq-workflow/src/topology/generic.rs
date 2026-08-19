@@ -5,7 +5,7 @@
 // through the generic per-channel path (the same path used by stereo and
 // home-cinema workflows) and aggregates the results.
 
-use super::run::run_channel_via_generic_path;
+use super::run::run_channel_via_generic_path_with_frequency_samples;
 use super::types::{WorkflowAssembly, WorkflowExecutor};
 use super::workflow::workflow_stage_event;
 use log::info;
@@ -71,7 +71,7 @@ impl WorkflowExecutor for GenericExecutor {
 
             info!("  Optimizing '{}' via generic path", role);
             let (chain, ch_result, pre_score, post_score, _fir, _multiseat_rejection) =
-                run_channel_via_generic_path(
+                run_channel_via_generic_path_with_frequency_samples(
                     role,
                     source,
                     config,
@@ -83,6 +83,7 @@ impl WorkflowExecutor for GenericExecutor {
                     total_channels,
                     max_iterations,
                     assembly.probe_arrival_overrides,
+                    assembly.frequency_samples,
                 )?;
 
             info!(

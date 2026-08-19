@@ -65,6 +65,7 @@ pub(crate) fn make_assembly<'cfg, 'p, 's>(
         config,
         sys,
         sample_rate: 48000.0,
+        frequency_samples: crate::DEFAULT_FREQUENCY_SAMPLES,
         output_dir: Path::new("."),
         probe_arrival_overrides: None,
         progress_factory: None,

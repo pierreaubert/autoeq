@@ -10,12 +10,14 @@ use super::stereo_sub::Stereo21Executor;
 use super::types::{
     WorkflowAssembly, WorkflowExecutor, WorkflowProgressCallbackFactory, WorkflowStageCallback,
 };
+use crate::DEFAULT_FREQUENCY_SAMPLES;
 use roomeq_engine::error::Result;
 use roomeq_engine::room_result::RoomOptimizationResult;
 use roomeq_model::{RoomConfig, SystemConfig};
 use std::collections::HashMap;
 use std::path::Path;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn optimize_stereo_2_0_with_progress_and_probe_arrivals<'a>(
     config: &RoomConfig,
     sys: &SystemConfig,
@@ -24,12 +26,14 @@ pub(crate) fn optimize_stereo_2_0_with_progress_and_probe_arrivals<'a>(
     probe_arrival_overrides: Option<&'a HashMap<String, f64>>,
     progress_factory: Option<&'a mut WorkflowProgressCallbackFactory<'a>>,
     stage_callback: Option<&'a mut WorkflowStageCallback<'a>>,
+    frequency_samples: usize,
 ) -> Result<RoomOptimizationResult> {
     let executor = Stereo20Executor;
     let mut assembly = WorkflowAssembly {
         config,
         sys,
         sample_rate,
+        frequency_samples,
         output_dir,
         probe_arrival_overrides,
         progress_factory,
@@ -38,6 +42,7 @@ pub(crate) fn optimize_stereo_2_0_with_progress_and_probe_arrivals<'a>(
     executor.execute(&mut assembly)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn optimize_stereo_2_1_with_progress_and_probe_arrivals<'a>(
     config: &RoomConfig,
     sys: &SystemConfig,
@@ -46,12 +51,14 @@ pub(crate) fn optimize_stereo_2_1_with_progress_and_probe_arrivals<'a>(
     probe_arrival_overrides: Option<&'a HashMap<String, f64>>,
     progress_factory: Option<&'a mut WorkflowProgressCallbackFactory<'a>>,
     stage_callback: Option<&'a mut WorkflowStageCallback<'a>>,
+    frequency_samples: usize,
 ) -> Result<RoomOptimizationResult> {
     let executor = Stereo21Executor;
     let mut assembly = WorkflowAssembly {
         config,
         sys,
         sample_rate,
+        frequency_samples,
         output_dir,
         probe_arrival_overrides,
         progress_factory,
@@ -60,6 +67,7 @@ pub(crate) fn optimize_stereo_2_1_with_progress_and_probe_arrivals<'a>(
     executor.execute(&mut assembly)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn optimize_home_cinema_with_progress_and_probe_arrivals<'a>(
     config: &RoomConfig,
     sys: &SystemConfig,
@@ -68,12 +76,14 @@ pub(crate) fn optimize_home_cinema_with_progress_and_probe_arrivals<'a>(
     probe_arrival_overrides: Option<&'a HashMap<String, f64>>,
     progress_factory: Option<&'a mut WorkflowProgressCallbackFactory<'a>>,
     stage_callback: Option<&'a mut WorkflowStageCallback<'a>>,
+    frequency_samples: usize,
 ) -> Result<RoomOptimizationResult> {
     let executor = HomeCinemaExecutor;
     let mut assembly = WorkflowAssembly {
         config,
         sys,
         sample_rate,
+        frequency_samples,
         output_dir,
         probe_arrival_overrides,
         progress_factory,
@@ -112,6 +122,7 @@ pub fn optimize_stereo_2_0_with_progress<'a>(
         config,
         sys,
         sample_rate,
+        frequency_samples: DEFAULT_FREQUENCY_SAMPLES,
         output_dir,
         probe_arrival_overrides: None,
         progress_factory,
@@ -150,6 +161,7 @@ pub fn optimize_stereo_2_1_with_progress<'a>(
         config,
         sys,
         sample_rate,
+        frequency_samples: DEFAULT_FREQUENCY_SAMPLES,
         output_dir,
         probe_arrival_overrides: None,
         progress_factory,
@@ -185,6 +197,7 @@ pub fn optimize_home_cinema_with_progress<'a>(
         config,
         sys,
         sample_rate,
+        frequency_samples: DEFAULT_FREQUENCY_SAMPLES,
         output_dir: _output_dir,
         probe_arrival_overrides: None,
         progress_factory,

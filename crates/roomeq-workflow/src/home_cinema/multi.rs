@@ -1,5 +1,6 @@
 use super::all::all_channel_multiseat_enabled;
 use super::all::all_channel_multiseat_policy;
+use crate::measurement::load_source_individual_with_frequency_samples;
 use roomeq_engine::home_cinema::{
     curves_share_frequency_grid, default_all_channel_spatial_robustness, logical_speaker_configs,
     measurement_source_count, optional_max, predicted_seat_report,
@@ -69,6 +70,20 @@ pub fn multi_seat_correction_report(
     channel_results: &HashMap<String, roomeq_engine::room_result::ChannelOptimizationResult>,
     rejected_channels: Option<&HashMap<String, Vec<String>>>,
 ) -> MultiSeatCorrectionReport {
+    multi_seat_correction_report_with_frequency_samples(
+        config,
+        channel_results,
+        rejected_channels,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+}
+
+pub fn multi_seat_correction_report_with_frequency_samples(
+    config: &RoomConfig,
+    channel_results: &HashMap<String, roomeq_engine::room_result::ChannelOptimizationResult>,
+    rejected_channels: Option<&HashMap<String, Vec<String>>>,
+    frequency_samples: usize,
+) -> MultiSeatCorrectionReport {
     let policy = all_channel_multiseat_policy(config);
     let enabled = all_channel_multiseat_enabled(config);
     let mut channels = Vec::new();
@@ -122,7 +137,8 @@ pub fn multi_seat_correction_report(
             status = "rejected_guardrails".to_string();
             channel_advisories.extend(rejection_advisories.clone());
         } else if let Some(result) = channel_results.get(&channel) {
-            match autoeq_measurements::load_source_individual(source.unwrap()) {
+            match load_source_individual_with_frequency_samples(source.unwrap(), frequency_samples)
+            {
                 Ok(curves) if curves.len() == seat_count => {
                     let same_grid = curves_share_frequency_grid(&curves);
                     if !same_grid {

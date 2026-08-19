@@ -10,9 +10,10 @@ use roomeq_engine::error::{AutoeqError, Result};
 use roomeq_engine::{Curve, OptimProgressCallback, OptimizerRunEvidence};
 use roomeq_model::{ChannelDspChain, MeasurementSource, ProcessingMode, RoomConfig};
 
+use crate::arrival::prepare_channel_input_with_frequency_samples;
 use crate::{
-    persist_convolution_sidecar, prepare_channel_input, prepare_eq_target,
-    reserve_channel_convolution_sidecar, reserve_mixed_crossover_sidecar,
+    persist_convolution_sidecar, prepare_eq_target, reserve_channel_convolution_sidecar,
+    reserve_mixed_crossover_sidecar,
 };
 
 /// Compatibility result consumed by the remaining root topology workflows.
@@ -41,12 +42,39 @@ pub fn process_single_channel(
     probe_arrival_ms: Option<f64>,
     shared_mean_spl: Option<f64>,
 ) -> Result<ChannelWorkflowResult> {
-    let prepared = prepare_channel_input(
+    process_single_channel_with_frequency_samples(
+        channel_name,
+        source,
+        room_config,
+        sample_rate,
+        output_dir,
+        callback,
+        probe_arrival_ms,
+        shared_mean_spl,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+}
+
+/// Process one channel using a configurable measurement frequency grid.
+#[allow(clippy::too_many_arguments)]
+pub fn process_single_channel_with_frequency_samples(
+    channel_name: &str,
+    source: &MeasurementSource,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    output_dir: &Path,
+    callback: Option<OptimProgressCallback>,
+    probe_arrival_ms: Option<f64>,
+    shared_mean_spl: Option<f64>,
+    frequency_samples: usize,
+) -> Result<ChannelWorkflowResult> {
+    let prepared = prepare_channel_input_with_frequency_samples(
         channel_name,
         source,
         room_config,
         sample_rate,
         probe_arrival_ms,
+        frequency_samples,
     )
     .map_err(|error| AutoeqError::InvalidMeasurement {
         message: format!("Failed to load measurement for channel {channel_name}: {error}"),

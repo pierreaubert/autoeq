@@ -1,24 +1,32 @@
 //! Measurement-source preparation for multi-sub and group workflows.
 
+use crate::measurement::load_source_individual_with_frequency_samples;
 use roomeq_engine::Curve;
 use roomeq_engine::error::{AutoeqError, Result};
 use roomeq_model::MultiSubGroup;
 
 /// Load and validate per-subwoofer seat measurements before engine execution.
 pub fn load_multisub_seat_measurements(group: &MultiSubGroup) -> Result<Option<Vec<Vec<Curve>>>> {
+    load_multisub_seat_measurements_with_frequency_samples(group, crate::DEFAULT_FREQUENCY_SAMPLES)
+}
+
+/// Load multi-sub seat measurements using a configurable frequency grid.
+pub fn load_multisub_seat_measurements_with_frequency_samples(
+    group: &MultiSubGroup,
+    frequency_samples: usize,
+) -> Result<Option<Vec<Vec<Curve>>>> {
     let mut per_sub = Vec::with_capacity(group.subwoofers.len());
     let mut expected_seats = None;
     let mut any_multi_seat = false;
 
     for (sub_index, source) in group.subwoofers.iter().enumerate() {
-        let curves = autoeq_measurements::load_source_individual(source).map_err(|error| {
-            AutoeqError::InvalidMeasurement {
+        let curves = load_source_individual_with_frequency_samples(source, frequency_samples)
+            .map_err(|error| AutoeqError::InvalidMeasurement {
                 message: format!(
                     "Failed to load seat measurements for sub {sub_index} in group '{}': {error}",
                     group.name
                 ),
-            }
-        })?;
+            })?;
         if curves.len() > 1 {
             any_multi_seat = true;
         }

@@ -166,12 +166,40 @@ fn select_topology_route_special_bass_configs_without_system_subs_are_generic() 
     };
     let source = || MeasurementSource::InMemory(flat_curve());
     let cases = vec![
-        ("multi", SpeakerConfig::MultiSub(roomeq_model::MultiSubGroup { name: "m".into(), speaker_name: None, subwoofers: vec![source()], allpass_optimization: false })),
-        ("cardioid", SpeakerConfig::Cardioid(Box::new(roomeq_model::CardioidConfig { name: "c".into(), speaker_name: None, front: source(), rear: source(), separation_meters: 1.0 }))),
-        ("dba", SpeakerConfig::Dba(roomeq_model::DBAConfig { name: "d".into(), speaker_name: None, front: vec![source()], rear: vec![source()] })),
+        (
+            "multi",
+            SpeakerConfig::MultiSub(roomeq_model::MultiSubGroup {
+                name: "m".into(),
+                speaker_name: None,
+                subwoofers: vec![source()],
+                allpass_optimization: false,
+            }),
+        ),
+        (
+            "cardioid",
+            SpeakerConfig::Cardioid(Box::new(roomeq_model::CardioidConfig {
+                name: "c".into(),
+                speaker_name: None,
+                front: source(),
+                rear: source(),
+                separation_meters: 1.0,
+            })),
+        ),
+        (
+            "dba",
+            SpeakerConfig::Dba(roomeq_model::DBAConfig {
+                name: "d".into(),
+                speaker_name: None,
+                front: vec![source()],
+                rear: vec![source()],
+            }),
+        ),
     ];
     for (key, speaker) in cases {
-        let config = base_room_config(HashMap::from([(key.to_string(), speaker)]), Some(system(key)));
+        let config = base_room_config(
+            HashMap::from([(key.to_string(), speaker)]),
+            Some(system(key)),
+        );
         assert_eq!(
             select_topology_route(&config, &observer_none()).unwrap(),
             TopologyRoute::Generic,
@@ -195,7 +223,11 @@ fn validate_room_optimization_empty_speakers_fails() {
         cea2034_cache: None,
     };
     let observer = observer_none();
-    let result = validate_room_optimization(&config, &observer);
+    let result = validate_room_optimization_with_frequency_samples(
+        &config,
+        &observer,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    );
     assert!(result.is_err(), "empty speakers should fail validation");
 }
 
@@ -303,8 +335,15 @@ fn execute_topology_workflow_home_cinema_without_sub() {
 fn execute_generic_channels_single_speaker() {
     let config = minimal_room_config(ProcessingMode::LowLatency);
     let observer = observer_none();
-    let (generic, total_speakers) =
-        execute_generic_channels(&config, 48000.0, None, None, &observer).unwrap();
+    let (generic, total_speakers) = execute_generic_channels_with_frequency_samples(
+        &config,
+        48000.0,
+        None,
+        None,
+        &observer,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
     assert_eq!(total_speakers, 1);
     assert!(
         generic.channel_results.contains_key("left"),
@@ -329,7 +368,7 @@ fn assemble_workflow_result_persists_channels() {
     let result = single_channel_room_result("left");
     let sys = config.system.as_ref().unwrap();
 
-    let assembled = assemble_workflow_result(
+    let assembled = assemble_workflow_result_with_frequency_samples(
         result,
         &config,
         sys,
@@ -338,6 +377,7 @@ fn assemble_workflow_result_persists_channels() {
         None,
         &observer_none(),
         &autoeq_artifacts::MemoryArtifactStore::new(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
     );
     assert!(
         assembled.is_ok(),
@@ -364,7 +404,7 @@ fn assemble_generic_result_empty_channels_fails() {
         channel_arrivals: HashMap::new(),
     };
 
-    let assembled = assemble_generic_result(
+    let assembled = assemble_generic_result_with_frequency_samples(
         generic,
         0,
         &config,
@@ -372,6 +412,7 @@ fn assemble_generic_result_empty_channels_fails() {
         None,
         &observer_none(),
         &autoeq_artifacts::MemoryArtifactStore::new(),
+        crate::DEFAULT_FREQUENCY_SAMPLES,
     );
     assert!(
         assembled.is_err() || assembled.as_ref().unwrap().channel_results.is_empty(),

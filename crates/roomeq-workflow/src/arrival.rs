@@ -9,7 +9,6 @@ use roomeq_engine::eq::{EqResources, PreparedImpulseResponse};
 use roomeq_engine::{PreparedCea2034, PreparedChannelInput};
 use roomeq_model::RoomConfig;
 
-use crate::channel_measurements::prepare_channel_measurements;
 use crate::wav::decode_first_channel;
 
 const DEFAULT_MLS_ORDER: u8 = 16;
@@ -185,7 +184,30 @@ pub fn prepare_channel_input(
     sample_rate: f64,
     probe_arrival_ms: Option<f64>,
 ) -> Result<PreparedChannelInput, Box<dyn std::error::Error>> {
-    let measurements = prepare_channel_measurements(source)?;
+    prepare_channel_input_with_frequency_samples(
+        channel_name,
+        source,
+        room_config,
+        sample_rate,
+        probe_arrival_ms,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+}
+
+/// Resolve channel resources using a configurable measurement frequency grid.
+pub fn prepare_channel_input_with_frequency_samples(
+    channel_name: &str,
+    source: &MeasurementSource,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    probe_arrival_ms: Option<f64>,
+    frequency_samples: usize,
+) -> Result<PreparedChannelInput, Box<dyn std::error::Error>> {
+    let measurements =
+        crate::channel_measurements::prepare_channel_measurements_with_frequency_samples(
+            source,
+            frequency_samples,
+        )?;
     let decoded = decode_source_wav(channel_name, source);
     let arrival_time_ms = arrival_time_from_decoded(
         channel_name,

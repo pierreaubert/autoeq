@@ -1,12 +1,12 @@
 // Stereo 2.1 workflow executor.
 
 use super::bass_management::*;
-use super::run::run_channel_via_generic_path;
+use super::run::run_channel_via_generic_path_with_frequency_samples;
 use super::run::run_post_eq;
 use super::types::{WorkflowAssembly, WorkflowExecutor};
 use super::workflow::workflow_progress_callback;
 use super::workflow::workflow_stage_event;
-use autoeq_measurements::read::load_source;
+use crate::measurement::load_source_with_frequency_samples;
 use log::info;
 use math_audio_dsp::analysis::compute_average_response;
 use roomeq_engine::Curve;
@@ -67,9 +67,10 @@ impl WorkflowExecutor for Stereo21Executor {
                     });
                 }
             };
-            let curve = load_source(source).map_err(|e| AutoeqError::InvalidMeasurement {
-                message: e.to_string(),
-            })?;
+            let curve = load_source_with_frequency_samples(source, assembly.frequency_samples)
+                .map_err(|e| AutoeqError::InvalidMeasurement {
+                    message: e.to_string(),
+                })?;
             curves.insert(role.to_string(), curve);
         }
 
@@ -95,11 +96,12 @@ impl WorkflowExecutor for Stereo21Executor {
                     message: format!("Missing speaker config for key '{}'", lfe_meas_key),
                 })?;
 
-        let sub_preprocess = preprocess_sub(
+        let sub_preprocess = preprocess_sub_with_frequency_samples(
             lfe_speaker_config,
             &sub_sys.config,
             &config.optimizer,
             sample_rate,
+            assembly.frequency_samples,
         )?;
         curves.insert(sub_role.clone(), sub_preprocess.combined_curve.clone());
 
@@ -184,7 +186,7 @@ impl WorkflowExecutor for Stereo21Executor {
                 role, min_xo
             );
             let (chain, ch_result, _pre_score, _post_score, _fir, _multiseat_rejection) =
-                run_channel_via_generic_path(
+                run_channel_via_generic_path_with_frequency_samples(
                     role,
                     source,
                     &per_config,
@@ -196,6 +198,7 @@ impl WorkflowExecutor for Stereo21Executor {
                     total_channels,
                     max_iterations,
                     assembly.probe_arrival_overrides,
+                    assembly.frequency_samples,
                 )?;
             pre_eq_targets.insert(role.to_string(), chain.target_curve.clone());
             pre_eq_plugins.insert(role.to_string(), chain.plugins);
@@ -223,7 +226,7 @@ impl WorkflowExecutor for Stereo21Executor {
                 sub_role, max_xo
             );
             let (chain, ch_result, _pre_score, _post_score, _fir, _multiseat_rejection) =
-                run_channel_via_generic_path(
+                run_channel_via_generic_path_with_frequency_samples(
                     &sub_role,
                     &sub_source,
                     &sub_config,
@@ -235,6 +238,7 @@ impl WorkflowExecutor for Stereo21Executor {
                     total_channels,
                     max_iterations,
                     assembly.probe_arrival_overrides,
+                    assembly.frequency_samples,
                 )?;
             pre_eq_targets.insert(sub_role.clone(), chain.target_curve.clone());
             pre_eq_plugins.insert(sub_role.clone(), chain.plugins);

@@ -1,8 +1,9 @@
 //! Supporting-source room-compensation processing.
 
-use autoeq_measurements::read::{
-    interpolate_log_space, load_source, load_source_individual, read_curve_from_csv,
+use crate::measurement::{
+    load_source_individual_with_frequency_samples, load_source_with_frequency_samples,
 };
+use autoeq_measurements::read::{interpolate_log_space, read_curve_from_csv};
 use roomeq_engine::Curve;
 use roomeq_engine::error::{AutoeqError, Result};
 use roomeq_engine::room_result::ChannelOptimizationResult;
@@ -16,8 +17,12 @@ use std::path::Path;
 
 /// Compute mean per-frequency standard deviation (in dB) across multiple
 /// measurement positions inside the compensation band.
-fn spatial_variance_db(source: &MeasurementSource, band_hz: (f64, f64)) -> Option<f64> {
-    let curves = load_source_individual(source).ok()?;
+fn spatial_variance_db_with_frequency_samples(
+    source: &MeasurementSource,
+    band_hz: (f64, f64),
+    frequency_samples: usize,
+) -> Option<f64> {
+    let curves = load_source_individual_with_frequency_samples(source, frequency_samples).ok()?;
     if curves.len() < 2 {
         return None;
     }
@@ -49,8 +54,12 @@ fn spatial_variance_db(source: &MeasurementSource, band_hz: (f64, f64)) -> Optio
 }
 
 /// Build spatial-robustness advisories for a supporting-source measurement.
-fn spatial_robustness_advisories(source: &MeasurementSource, band_hz: (f64, f64)) -> Vec<String> {
-    match spatial_variance_db(source, band_hz) {
+fn spatial_robustness_advisories_with_frequency_samples(
+    source: &MeasurementSource,
+    band_hz: (f64, f64),
+    frequency_samples: usize,
+) -> Vec<String> {
+    match spatial_variance_db_with_frequency_samples(source, band_hz, frequency_samples) {
         Some(var_db) if var_db > 6.0 => vec!["high_spatial_variance".to_string()],
         Some(var_db) if var_db > 3.0 => vec!["moderate_spatial_variance".to_string()],
         Some(_) => Vec::new(),
@@ -157,18 +166,50 @@ pub fn process_supporting_source_channel(
     (ChannelOptimizationResult, ChannelOptimizationResult),
     SupportingSourceReport,
 )> {
-    let primary = load_source(&group.primary).map_err(|e| AutoeqError::InvalidMeasurement {
-        message: format!(
-            "Failed to load primary measurement for '{}': {}",
-            logical_role, e
-        ),
-    })?;
-    let support = load_source(&group.support).map_err(|e| AutoeqError::InvalidMeasurement {
-        message: format!(
-            "Failed to load support measurement for '{}': {}",
-            logical_role, e
-        ),
-    })?;
+    process_supporting_source_channel_with_frequency_samples(
+        logical_role,
+        group,
+        room_config,
+        sample_rate,
+        output_dir,
+        naming,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+}
+
+/// Process a supporting-source channel using a configurable RoomEQ frequency grid.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+pub fn process_supporting_source_channel_with_frequency_samples(
+    logical_role: &str,
+    group: &SupportingSourceGroup,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    output_dir: &Path,
+    naming: Option<&SupportingSourceOutputNaming>,
+    frequency_samples: usize,
+) -> Result<(
+    (ChannelDspChain, ChannelDspChain),
+    (ChannelOptimizationResult, ChannelOptimizationResult),
+    SupportingSourceReport,
+)> {
+    let primary =
+        load_source_with_frequency_samples(&group.primary, frequency_samples).map_err(|e| {
+            AutoeqError::InvalidMeasurement {
+                message: format!(
+                    "Failed to load primary measurement for '{}': {}",
+                    logical_role, e
+                ),
+            }
+        })?;
+    let support =
+        load_source_with_frequency_samples(&group.support, frequency_samples).map_err(|e| {
+            AutoeqError::InvalidMeasurement {
+                message: format!(
+                    "Failed to load support measurement for '{}': {}",
+                    logical_role, e
+                ),
+            }
+        })?;
 
     let target = resolve_supporting_source_target(group, room_config)?;
 
@@ -267,17 +308,25 @@ pub fn process_supporting_source_channel(
         advisories.push("support_delay_disabled_by_allow_delay".to_string());
     }
     advisories.extend(
-        spatial_robustness_advisories(&group.primary, band_hz)
-            .into_iter()
-            .map(|a| format!("primary:{}", a)),
+        spatial_robustness_advisories_with_frequency_samples(
+            &group.primary,
+            band_hz,
+            frequency_samples,
+        )
+        .into_iter()
+        .map(|a| format!("primary:{}", a)),
     );
     if drr_before_db.is_none() || drr_after_db.is_none() {
         advisories.push("drr_unavailable_without_time_gated_ir".to_string());
     }
     advisories.extend(
-        spatial_robustness_advisories(&group.support, band_hz)
-            .into_iter()
-            .map(|a| format!("support:{}", a)),
+        spatial_robustness_advisories_with_frequency_samples(
+            &group.support,
+            band_hz,
+            frequency_samples,
+        )
+        .into_iter()
+        .map(|a| format!("support:{}", a)),
     );
 
     let report = SupportingSourceReport {

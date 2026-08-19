@@ -1,13 +1,15 @@
 // Home-cinema workflow executor (X.0 / X.1, any channel count).
 
 use super::bass_management::*;
-use super::run::run_channel_via_generic_path;
+use super::run::run_channel_via_generic_path_with_frequency_samples;
 use super::run::run_post_eq;
-use super::supporting_source::process_supporting_source_channels;
+use super::supporting_source::process_supporting_source_channels_with_frequency_samples;
 use super::types::{WorkflowAssembly, WorkflowExecutor};
 use super::workflow::workflow_progress_callback;
 use super::workflow::workflow_stage_event;
-use autoeq_measurements::read::load_source;
+use crate::measurement::{
+    load_source_individual_with_frequency_samples, load_source_with_frequency_samples,
+};
 use log::info;
 use roomeq_engine::error::{AutoeqError, Result};
 use roomeq_engine::room_result::{ChannelOptimizationResult, RoomOptimizationResult};
@@ -66,7 +68,8 @@ impl WorkflowExecutor for HomeCinemaExecutor {
                 })?;
             match cfg {
                 SpeakerConfig::Single(s) => {
-                    let curve = load_source(s).map_err(|e| AutoeqError::InvalidMeasurement {
+                    let curve = load_source_with_frequency_samples(s, assembly.frequency_samples)
+                        .map_err(|e| AutoeqError::InvalidMeasurement {
                         message: e.to_string(),
                     })?;
                     curves.insert(role.clone(), curve);
@@ -103,7 +106,7 @@ impl WorkflowExecutor for HomeCinemaExecutor {
 
         if single_roles.is_empty() {
             let mut result = supporting_only_home_cinema_result(config);
-            process_supporting_source_channels(
+            process_supporting_source_channels_with_frequency_samples(
                 config,
                 sys,
                 sample_rate,
@@ -111,6 +114,7 @@ impl WorkflowExecutor for HomeCinemaExecutor {
                 &mut result.channels,
                 &mut result.channel_results,
                 &mut result.metadata,
+                assembly.frequency_samples,
             )?;
             return Ok(result);
         }
@@ -139,11 +143,12 @@ impl WorkflowExecutor for HomeCinemaExecutor {
                     .ok_or(AutoeqError::InvalidConfiguration {
                         message: format!("Missing speaker config for key '{}'", lfe_meas_key),
                     })?;
-            let sp = preprocess_sub(
+            let sp = preprocess_sub_with_frequency_samples(
                 lfe_speaker_config,
                 &sub_sys.config,
                 &config.optimizer,
                 sample_rate,
+                assembly.frequency_samples,
             )?;
             curves.insert(sub_role.clone(), sp.combined_curve.clone());
             Some(sp)
@@ -183,7 +188,7 @@ impl WorkflowExecutor for HomeCinemaExecutor {
                 "Processing {} supporting-source channel(s) after mains",
                 supporting_roles.len()
             );
-            process_supporting_source_channels(
+            process_supporting_source_channels_with_frequency_samples(
                 config,
                 sys,
                 sample_rate,
@@ -191,6 +196,7 @@ impl WorkflowExecutor for HomeCinemaExecutor {
                 &mut result.channels,
                 &mut result.channel_results,
                 &mut result.metadata,
+                assembly.frequency_samples,
             )?;
         }
 
@@ -279,7 +285,7 @@ fn optimize_home_cinema_no_sub(
         info!("  Optimizing '{}' with alignment gain {:.2} dB", role, gain);
 
         let (chain, ch_result, pre_score, post_score, _fir, multiseat_rejection) =
-            run_channel_via_generic_path(
+            run_channel_via_generic_path_with_frequency_samples(
                 role,
                 source,
                 config,
@@ -291,6 +297,7 @@ fn optimize_home_cinema_no_sub(
                 total_channels,
                 max_iterations,
                 assembly.probe_arrival_overrides,
+                assembly.frequency_samples,
             )?;
         if let Some(advisories) = multiseat_rejection {
             multi_seat_rejections.insert(role.clone(), advisories);
@@ -325,11 +332,14 @@ fn optimize_home_cinema_no_sub(
     let epa_cfg = config.optimizer.epa_config.clone().unwrap_or_default();
     let epa_per_channel = output::compute_epa_per_channel(&channel_chains, &epa_cfg);
     let epa_multichannel = output::compute_epa_multichannel(&channel_chains, &epa_cfg);
-    let multi_seat_correction = Some(crate::home_cinema::multi_seat_correction_report(
-        config,
-        &channel_results,
-        Some(&multi_seat_rejections),
-    ));
+    let multi_seat_correction = Some(
+        crate::home_cinema::multi_seat_correction_report_with_frequency_samples(
+            config,
+            &channel_results,
+            Some(&multi_seat_rejections),
+            assembly.frequency_samples,
+        ),
+    );
     Ok(RoomOptimizationResult {
         channels: channel_chains,
         channel_results,
@@ -454,7 +464,7 @@ fn optimize_home_cinema_with_sub(
             role, min_xo
         );
         let (chain, ch_result, _pre, _post, _fir, multiseat_rejection) =
-            run_channel_via_generic_path(
+            run_channel_via_generic_path_with_frequency_samples(
                 role,
                 source,
                 &per_config,
@@ -466,6 +476,7 @@ fn optimize_home_cinema_with_sub(
                 total_channels,
                 max_iterations,
                 assembly.probe_arrival_overrides,
+                assembly.frequency_samples,
             )?;
         if let Some(advisories) = multiseat_rejection {
             multi_seat_rejections.insert(role.clone(), advisories);
@@ -495,7 +506,7 @@ fn optimize_home_cinema_with_sub(
             sub_role, max_xo
         );
         let (chain, ch_result, _pre, _post, _fir, _multiseat_rejection) =
-            run_channel_via_generic_path(
+            run_channel_via_generic_path_with_frequency_samples(
                 &sub_role,
                 &sub_source,
                 &sub_config,
@@ -507,6 +518,7 @@ fn optimize_home_cinema_with_sub(
                 total_channels,
                 max_iterations,
                 assembly.probe_arrival_overrides,
+                assembly.frequency_samples,
             )?;
         pre_eq_plugins.insert(
             sub_role.clone(),
@@ -579,7 +591,10 @@ fn optimize_home_cinema_with_sub(
         .iter()
         .map(|role| {
             let source = resolve_single_source(role, config, sys)?;
-            let individual = autoeq_measurements::read::load_source_individual(source)
+            let individual = load_source_individual_with_frequency_samples(
+                source,
+                assembly.frequency_samples,
+            )
                 .map_err(|error| AutoeqError::InvalidMeasurement {
                     message: error.to_string(),
                 })?;
@@ -1541,11 +1556,14 @@ fn optimize_home_cinema_with_sub(
     let epa_cfg = config.optimizer.epa_config.clone().unwrap_or_default();
     let epa_per_channel = output::compute_epa_per_channel(&channel_chains, &epa_cfg);
     let epa_multichannel = output::compute_epa_multichannel(&channel_chains, &epa_cfg);
-    let multi_seat_correction = Some(crate::home_cinema::multi_seat_correction_report(
-        config,
-        &channel_results,
-        Some(&multi_seat_rejections),
-    ));
+    let multi_seat_correction = Some(
+        crate::home_cinema::multi_seat_correction_report_with_frequency_samples(
+            config,
+            &channel_results,
+            Some(&multi_seat_rejections),
+            assembly.frequency_samples,
+        ),
+    );
     workflow_stage_event(
         &mut assembly.stage_callback,
         PipelineStepId::TopologyWorkflowExecution,
@@ -1881,6 +1899,7 @@ mod tests {
             config: &config,
             sys: &sys,
             sample_rate: 48000.0,
+            frequency_samples: crate::DEFAULT_FREQUENCY_SAMPLES,
             output_dir: temp_dir.path(),
             probe_arrival_overrides: None,
             progress_factory: None,
@@ -1938,6 +1957,7 @@ mod tests {
             config: &config,
             sys: &sys,
             sample_rate: 48_000.0,
+            frequency_samples: crate::DEFAULT_FREQUENCY_SAMPLES,
             output_dir: temp_dir.path(),
             probe_arrival_overrides: None,
             progress_factory: None,
@@ -1986,6 +2006,7 @@ mod tests {
             config: &config,
             sys: &sys,
             sample_rate: 48_000.0,
+            frequency_samples: crate::DEFAULT_FREQUENCY_SAMPLES,
             output_dir: temp_dir.path(),
             probe_arrival_overrides: None,
             progress_factory: None,

@@ -4,10 +4,13 @@ use super::room_optimization_progress::send_progress;
 use super::types::MixedModeResult;
 use super::types::SharedPipelineObserver;
 use super::types::SpeakerProcessResult;
+use crate::channel::process_single_channel_with_frequency_samples;
 use crate::group_processing::{
-    process_cardioid_with_callback, process_dba_with_callback,
-    process_multisub_group_with_callback, process_speaker_group_with_callback,
-    process_speaker_topology_with_callback,
+    process_cardioid_with_callback_and_frequency_samples,
+    process_dba_with_callback_and_frequency_samples,
+    process_multisub_group_with_callback_and_frequency_samples,
+    process_speaker_group_with_callback_and_frequency_samples,
+    process_speaker_topology_with_callback_and_frequency_samples,
 };
 use log::info;
 use roomeq_engine::pipeline::{PipelineStepId, PipelineStepStatus};
@@ -17,6 +20,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn process_generic_channels(
     channels_to_process: Vec<(String, SpeakerConfig)>,
     config: &RoomConfig,
@@ -25,6 +29,7 @@ pub(super) fn process_generic_channels(
     shared_mean_spl: Option<f64>,
     probe_arrival_overrides: Option<&HashMap<String, f64>>,
     observer_shared: &SharedPipelineObserver,
+    frequency_samples: usize,
 ) -> Result<Vec<SpeakerProcessResult>> {
     let total_speakers = channels_to_process.len();
 
@@ -123,6 +128,7 @@ pub(super) fn process_generic_channels(
             eq_callback,
             shared_mean_spl,
             probe_arrival_overrides,
+            frequency_samples,
         );
 
         match result {
@@ -220,6 +226,7 @@ pub(super) fn process_speaker_internal(
     callback: Option<roomeq_engine::OptimProgressCallback>,
     shared_mean_spl: Option<f64>,
     probe_arrival_overrides: Option<&HashMap<String, f64>>,
+    frequency_samples: usize,
 ) -> Result<MixedModeResult> {
     let output_dir = output_dir.unwrap_or(Path::new("."));
 
@@ -227,7 +234,7 @@ pub(super) fn process_speaker_internal(
         SpeakerConfig::Single(source) => {
             let probe_arrival_ms =
                 probe_arrival_overrides.and_then(|m| m.get(channel_name).copied());
-            crate::process_single_channel(
+            process_single_channel_with_frequency_samples(
                 channel_name,
                 source,
                 room_config,
@@ -236,47 +243,57 @@ pub(super) fn process_speaker_internal(
                 callback,
                 probe_arrival_ms,
                 shared_mean_spl,
+                frequency_samples,
             )
         }
-        SpeakerConfig::Group(group) => process_speaker_group_with_callback(
+        SpeakerConfig::Group(group) => process_speaker_group_with_callback_and_frequency_samples(
             channel_name,
             group,
             room_config,
             sample_rate,
             output_dir,
             callback,
+            frequency_samples,
         ),
-        SpeakerConfig::Topology(topology) => process_speaker_topology_with_callback(
-            channel_name,
-            topology,
-            room_config,
-            sample_rate,
-            output_dir,
-            callback,
-        ),
-        SpeakerConfig::MultiSub(group) => process_multisub_group_with_callback(
-            channel_name,
-            group,
-            room_config,
-            sample_rate,
-            output_dir,
-            callback,
-        ),
-        SpeakerConfig::Dba(config) => process_dba_with_callback(
+        SpeakerConfig::Topology(topology) => {
+            process_speaker_topology_with_callback_and_frequency_samples(
+                channel_name,
+                topology,
+                room_config,
+                sample_rate,
+                output_dir,
+                callback,
+                frequency_samples,
+            )
+        }
+        SpeakerConfig::MultiSub(group) => {
+            process_multisub_group_with_callback_and_frequency_samples(
+                channel_name,
+                group,
+                room_config,
+                sample_rate,
+                output_dir,
+                callback,
+                frequency_samples,
+            )
+        }
+        SpeakerConfig::Dba(config) => process_dba_with_callback_and_frequency_samples(
             channel_name,
             config,
             room_config,
             sample_rate,
             output_dir,
             callback,
+            frequency_samples,
         ),
-        SpeakerConfig::Cardioid(config) => process_cardioid_with_callback(
+        SpeakerConfig::Cardioid(config) => process_cardioid_with_callback_and_frequency_samples(
             channel_name,
             config,
             room_config,
             sample_rate,
             output_dir,
             callback,
+            frequency_samples,
         ),
         SpeakerConfig::SupportingSource(_group) => {
             Err(roomeq_model::AutoeqError::InvalidConfiguration {

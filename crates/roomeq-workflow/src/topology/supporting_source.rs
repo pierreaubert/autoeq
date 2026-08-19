@@ -1,7 +1,9 @@
 //! Supporting-source workflow helpers.
 
-use crate::supporting_source::{merge_supporting_source_report, process_supporting_source_channel};
-use autoeq_measurements::read::load_source;
+use crate::measurement::load_source_with_frequency_samples;
+use crate::supporting_source::{
+    merge_supporting_source_report, process_supporting_source_channel_with_frequency_samples,
+};
 use log::info;
 use roomeq_engine::Curve;
 use roomeq_engine::error::{AutoeqError, Result};
@@ -54,25 +56,27 @@ pub(super) fn partition_roles(
     Ok((single_roles, supporting))
 }
 
-/// Load single-source curves for alignment, skipping supporting-source channels.
-pub(super) fn load_single_source_curves(
+pub(super) fn load_single_source_curves_with_frequency_samples(
     config: &RoomConfig,
     sys: &SystemConfig,
     single_roles: &[String],
+    frequency_samples: usize,
 ) -> Result<std::collections::HashMap<String, Curve>> {
     let mut curves = std::collections::HashMap::new();
     for role in single_roles {
         let source = super::bass_management::resolve_single_source(role, config, sys)?;
-        let curve = load_source(source).map_err(|e| AutoeqError::InvalidMeasurement {
-            message: e.to_string(),
+        let curve = load_source_with_frequency_samples(source, frequency_samples).map_err(|e| {
+            AutoeqError::InvalidMeasurement {
+                message: e.to_string(),
+            }
         })?;
         curves.insert(role.clone(), curve);
     }
     Ok(curves)
 }
 
-/// Process all supporting-source groups and attach their outputs to the result.
-pub(super) fn process_supporting_source_channels(
+#[allow(clippy::too_many_arguments)]
+pub(super) fn process_supporting_source_channels_with_frequency_samples(
     config: &RoomConfig,
     sys: &SystemConfig,
     sample_rate: f64,
@@ -80,6 +84,7 @@ pub(super) fn process_supporting_source_channels(
     channel_chains: &mut std::collections::HashMap<String, ChannelDspChain>,
     channel_results: &mut std::collections::HashMap<String, ChannelOptimizationResult>,
     metadata: &mut OptimizationMetadata,
+    frequency_samples: usize,
 ) -> Result<()> {
     let naming = sys.supporting_source_outputs.as_ref();
     for (role, group) in &sys
@@ -99,13 +104,14 @@ pub(super) fn process_supporting_source_channels(
         );
 
         let ((primary_chain, support_chain), (primary_result, support_result), report) =
-            process_supporting_source_channel(
+            process_supporting_source_channel_with_frequency_samples(
                 role,
                 group,
                 config,
                 sample_rate,
                 output_dir,
                 naming,
+                frequency_samples,
             )?;
 
         channel_chains.insert(role.clone(), primary_chain);
@@ -241,7 +247,13 @@ mod tests {
             speakers: std::collections::HashMap::from([("L".to_string(), "left".to_string())]),
             ..Default::default()
         };
-        let curves = load_single_source_curves(&config, &sys, &["L".to_string()]).unwrap();
+        let curves = load_single_source_curves_with_frequency_samples(
+            &config,
+            &sys,
+            &["L".to_string()],
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+        )
+        .unwrap();
         assert!(curves.contains_key("L"));
     }
 
@@ -289,7 +301,7 @@ mod tests {
             stage_outcomes: Vec::new(),
         };
 
-        process_supporting_source_channels(
+        process_supporting_source_channels_with_frequency_samples(
             &config,
             &sys,
             48000.0,
@@ -297,6 +309,7 @@ mod tests {
             &mut chains,
             &mut results,
             &mut metadata,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
         )
         .unwrap();
 
@@ -352,7 +365,7 @@ mod tests {
             stage_outcomes: Vec::new(),
         };
 
-        process_supporting_source_channels(
+        process_supporting_source_channels_with_frequency_samples(
             &config,
             &sys,
             48000.0,
@@ -360,6 +373,7 @@ mod tests {
             &mut chains,
             &mut results,
             &mut metadata,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
         )
         .unwrap();
 

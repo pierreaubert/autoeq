@@ -1,3 +1,13 @@
+# 0.5.56
+
+## RoomEQ
+
+- Add the `--freq-samples` CLI option, defaulting to 200 log-spaced points
+  between 20 Hz and 20 kHz for reducing dense measurements before optimization.
+- Expose configurable RoomEQ frequency-sample loading through the workflow
+  library and thread it through validation, topology, supporting-source, and
+  group-delay processing paths.
+
 # 0.5.54
 
 Major stable version 0.5

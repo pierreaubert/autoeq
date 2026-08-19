@@ -27,6 +27,8 @@ cargo run --features cli --bin roomeq -- --config <config.json> --output <output
 - `--config <CONFIG>`: Path to room configuration JSON file (required)
 - `--output <OUTPUT>`: Path to output DSP chain JSON file (required)
 - `--sample-rate <RATE>`: Sample rate for filter design (default: 48000 Hz)
+- `--freq-samples <N>`: Number of log-frequency points used when reducing dense
+  measurements for interpolation (default: 200)
 - `--export-format <FORMAT>`: Also export `camilladsp`, `apo`, `easyeffects`,
   `wavelet`, `pipewire`, `roon`, `rew`, or `coefficients`
 - `--export-path <PATH>`: Override the derived external-export path

@@ -611,7 +611,7 @@ def export_recordings_json(measurements, csv_paths, output_dir):
         }
 
     config = {
-        "version": "1.3.0",
+        "version": "2.1.0",
         "speakers": speakers,
     }
 

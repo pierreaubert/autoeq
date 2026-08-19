@@ -96,6 +96,7 @@ class Mdat2CsvTests(unittest.TestCase):
             )
             payload = json.loads(Path(output).read_text(encoding='utf-8'))
 
+        self.assertEqual(payload['version'], '2.1.0')
         self.assertEqual(payload['speakers']['Front_Left']['name'], 'Front Left')
 
     def test_identifier_collapses_punctuation_and_whitespace(self):

@@ -1,29 +1,33 @@
 {
   "version": "2.1.0",
   "speakers": {
-    "L": {
-      "path": "260706a_1800_cdsp_straightthru_baseline_csv/measurement_1_Jul_6_2026_6_46_02_PM.csv",
-      "name": "L"
+    "L_r3m_ported_48k_FL_260706a_direct": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/L_r3m_ported_48k_FL_260706a_direct.csv",
+      "name": "L r3m_ported_48k_FL_260706a_direct"
     },
-    "R": {
-      "path": "260706a_1800_cdsp_straightthru_baseline_csv/measurement_2_Jul_6_2026_6_46_49_PM.csv",
-      "name": "R"
+    "R_r3m_ported_48k_FR_260706a_direct": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/R_r3m_ported_48k_FR_260706a_direct.csv",
+      "name": "R r3m_ported_48k_FR_260706a_direct"
     },
-    "C": {
-      "path": "260706a_1800_cdsp_straightthru_baseline_csv/measurement_3_Jul_6_2026_6_47_45_PM.csv",
-      "name": "C"
+    "C_r3m_ported_48k_FC_260706a_direct": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/C_r3m_ported_48k_FC_260706a_direct.csv",
+      "name": "C r3m_ported_48k_FC_260706a_direct"
     },
-    "LFE": {
-      "path": "260706a_1800_cdsp_straightthru_baseline_csv/measurement_4_Jul_6_2026_6_52_03_PM.csv",
-      "name": "LFE"
+    "LFE_r3m_ported_48k_LFE_260706a_direct": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/LFE_r3m_ported_48k_LFE_260706a_direct.csv",
+      "name": "LFE r3m_ported_48k_LFE_260706a_direct"
     },
-    "SL": {
-      "path": "260706a_1800_cdsp_straightthru_baseline_csv/measurement_5_Jul_6_2026_6_53_50_PM.csv",
-      "name": "SL"
+    "BL_r3m_ported_48k_RL_260706a_direct": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/BL_r3m_ported_48k_RL_260706a_direct.csv",
+      "name": "BL r3m_ported_48k_RL_260706a_direct"
     },
-    "SR": {
-      "path": "260706a_1800_cdsp_straightthru_baseline_csv/measurement_6_Jul_6_2026_6_54_52_PM.csv",
-      "name": "SR"
+    "BR_r3m_ported_48k_RR_260706a_direct": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/BR_r3m_ported_48k_RR_260706a_direct.csv",
+      "name": "BR r3m_ported_48k_RR_260706a_direct"
+    },
+    "L_R_r3m_ported_48k_FL_R_260706a_direct": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/L_R_r3m_ported_48k_FL_R_260706a_direct.csv",
+      "name": "L+R r3m_ported_48k_FL&R_260706a_direct"
     }
   }
 }

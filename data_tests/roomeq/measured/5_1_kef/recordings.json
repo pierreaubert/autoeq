@@ -1,0 +1,29 @@
+{
+  "version": "2.1.0",
+  "speakers": {
+    "L": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/measurement_1_Jul_6_2026_6_46_02_PM.csv",
+      "name": "L"
+    },
+    "R": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/measurement_2_Jul_6_2026_6_46_49_PM.csv",
+      "name": "R"
+    },
+    "C": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/measurement_3_Jul_6_2026_6_47_45_PM.csv",
+      "name": "C"
+    },
+    "LFE": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/measurement_4_Jul_6_2026_6_52_03_PM.csv",
+      "name": "LFE"
+    },
+    "SL": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/measurement_5_Jul_6_2026_6_53_50_PM.csv",
+      "name": "SL"
+    },
+    "SR": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/measurement_6_Jul_6_2026_6_54_52_PM.csv",
+      "name": "SR"
+    }
+  }
+}

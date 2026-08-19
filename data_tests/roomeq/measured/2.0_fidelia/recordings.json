@@ -1,0 +1,13 @@
+{
+  "version": "2.1.0",
+  "speakers": {
+    "left": {
+      "path": "left.csv",
+      "name": "left"
+    },
+    "right": {
+      "path": "right.csv",
+      "name": "right"
+    }
+  }
+}

@@ -15,7 +15,7 @@ pub struct MinGainConstraintData {
 pub fn constraint_min_gain(
     x: &[f64],
     _grad: Option<&mut [f64]>,
-    data: &mut MinGainConstraintData,
+    data: &MinGainConstraintData,
 ) -> f64 {
     viol_min_gain_from_xs(x, data.peq_model, data.min_db)
 }

@@ -1,0 +1,20 @@
+{
+  "optimizer": {
+    "algorithm": "autoeq:de",
+    "processing_mode": "low_latency",
+    "loss_type": "flat",
+    "num_filters": 7,
+    "min_freq": 20.0,
+    "max_freq": 500.0,
+    "min_db": -12.0,
+    "max_db": 12.0,
+    "min_q": 0.5,
+    "max_q": 6.0,
+    "max_iter": 3000,
+    "population": 30,
+    "seed": 424242,
+    "refine": true,
+    "psychoacoustic": true,
+    "asymmetric_loss": true
+  }
+}

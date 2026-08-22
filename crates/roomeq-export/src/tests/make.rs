@@ -123,6 +123,7 @@ pub(super) fn make_test_output() -> DspGraph {
             correction_acceptance: None,
             optimizer_evidence: None,
             stage_outcomes: Vec::new(),
+            effective_config: None,
         }),
     }
 }
@@ -326,6 +327,7 @@ pub(super) fn make_routed_bass_output() -> DspGraph {
             ],
             route_count: 3,
         }),
+        input_trim_db: Default::default(),
         advisories: vec!["ok".to_string()],
     };
 
@@ -385,6 +387,7 @@ pub(super) fn make_routed_bass_output() -> DspGraph {
             correction_acceptance: None,
             optimizer_evidence: None,
             stage_outcomes: Vec::new(),
+            effective_config: None,
         }),
     }
 }

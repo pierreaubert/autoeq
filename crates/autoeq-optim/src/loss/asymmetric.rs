@@ -18,7 +18,7 @@
 //! [`combined_weighted_loss`], so the asymmetric loss inherits the same
 //! ERB + bass/mid/treble band blend used by [`flat_loss`](super::flat::flat_loss).
 
-use super::enhanced_weights::{FrequencyBandWeights, combined_weighted_loss};
+use super::enhanced_weights::{FrequencyBandWeights, PreparedWeightedLoss, combined_weighted_loss};
 use ndarray::Array1;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -90,6 +90,77 @@ fn asymmetric_weight(
         peak_w
     } else {
         dip_w * null_mask
+    }
+}
+
+/// Fixed-grid asymmetric loss kernel used by optimizer workers.
+#[derive(Debug, Clone)]
+pub struct PreparedAsymmetricLoss {
+    weighted: PreparedWeightedLoss,
+    peak_weights: Vec<f64>,
+    dip_weights: Vec<f64>,
+    valid: bool,
+}
+
+impl PreparedAsymmetricLoss {
+    /// Prepare range, quadrature, ERB, band and sign-dependent weights once.
+    pub fn new(
+        freqs: &Array1<f64>,
+        min_freq: f64,
+        max_freq: f64,
+        config: &AsymmetricLossConfig,
+        null_suppression: Option<&Array1<f64>>,
+    ) -> Self {
+        let weighted =
+            PreparedWeightedLoss::new(freqs, min_freq, max_freq, FrequencyBandWeights::default());
+        let valid = null_suppression.is_none_or(|mask| mask.len() == freqs.len());
+        let valid_mask = null_suppression.filter(|mask| mask.len() == freqs.len());
+        let log_transition = config.transition_freq.ln();
+        let sigmoid_k = 2.0 * 9.0_f64.ln() / 2.0_f64.ln();
+        let mut peak_weights = Vec::with_capacity(weighted.indices().len());
+        let mut dip_weights = Vec::with_capacity(weighted.indices().len());
+        for &source_index in weighted.indices() {
+            let freq = freqs[source_index];
+            peak_weights.push(asymmetric_weight(
+                freq,
+                1.0,
+                config,
+                log_transition,
+                sigmoid_k,
+                1.0,
+            ));
+            let null_mask = valid_mask
+                .map(|mask| mask[source_index].clamp(0.0, 1.0))
+                .unwrap_or(1.0);
+            dip_weights.push(asymmetric_weight(
+                freq,
+                -1.0,
+                config,
+                log_transition,
+                sigmoid_k,
+                null_mask,
+            ));
+        }
+        Self {
+            weighted,
+            peak_weights,
+            dip_weights,
+            valid,
+        }
+    }
+
+    /// Evaluate a residual curve with no temporary buffers.
+    pub fn evaluate(&self, error: &Array1<f64>) -> f64 {
+        if !self.valid {
+            return f64::INFINITY;
+        }
+        self.weighted.evaluate_asymmetric(
+            error,
+            &self.peak_weights,
+            &self.dip_weights,
+            ASYMMETRIC_ERB_WEIGHT,
+            ASYMMETRIC_BAND_WEIGHT,
+        )
     }
 }
 
@@ -252,6 +323,19 @@ mod tests {
             (asym - expected).abs() < 1e-9,
             "asymmetric with unit weights must equal combined_weighted_loss ({asym} vs {expected})"
         );
+    }
+
+    #[test]
+    fn prepared_asymmetric_loss_matches_allocating_reference() {
+        let freqs = linspace_log(20.0, 20_000.0, 200);
+        let error = freqs.mapv(|frequency| (frequency.log10() * 5.7).sin() * 4.0);
+        let mask = freqs.mapv(|frequency| if frequency < 180.0 { 0.35 } else { 1.0 });
+        let config = AsymmetricLossConfig::default();
+        let expected =
+            weighted_mse_asymmetric(&freqs, &error, 35.0, 16_000.0, &config, Some(&mask));
+        let actual = PreparedAsymmetricLoss::new(&freqs, 35.0, 16_000.0, &config, Some(&mask))
+            .evaluate(&error);
+        assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
     }
 
     #[test]

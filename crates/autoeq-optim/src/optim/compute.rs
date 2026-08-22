@@ -2,15 +2,72 @@ use super::super::constraints::{
     viol_ceiling_from_spl, viol_min_gain_from_xs, viol_spacing_from_xs,
 };
 use super::super::loss::LossType;
-use super::super::x2peq::x2spl;
-use super::clamp::clamp_cuts_to_envelope;
-use super::clamp::clamp_gains_to_envelope;
+use super::super::x2peq::x2spl_into;
+use super::clamp::{clamp_cuts_to_envelope, clamp_envelopes_into, clamp_gains_to_envelope};
 use super::loss::ObjectiveContext;
 use super::objective_data::ObjectiveData;
 use super::smoothness_penalty_config::SmoothnessPenaltyConfig;
 use super::types::MultiObjectiveData;
 use crate::PeqModel;
 use ndarray::Array1;
+use std::cell::RefCell;
+use std::sync::Arc;
+
+#[cfg(test)]
+thread_local! {
+    static RESPONSE_COMPUTATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[inline]
+fn record_response_computation() {
+    #[cfg(test)]
+    RESPONSE_COMPUTATIONS.with(|count| count.set(count.get() + 1));
+}
+
+struct EvaluationScratch {
+    parameters: Vec<f64>,
+    response_parameters: Vec<f64>,
+    response_freqs: Option<Arc<Array1<f64>>>,
+    response_srate: f64,
+    response_peq_model: Option<PeqModel>,
+    peq: crate::iir::Peq,
+    response: Array1<f64>,
+    filter_response: Array1<f64>,
+    error: Array1<f64>,
+    smoothed_error: Array1<f64>,
+    multi_losses: Vec<f64>,
+}
+
+impl EvaluationScratch {
+    fn new() -> Self {
+        Self {
+            parameters: Vec::new(),
+            response_parameters: Vec::new(),
+            response_freqs: None,
+            response_srate: f64::NAN,
+            response_peq_model: None,
+            peq: crate::iir::Peq::new(),
+            response: Array1::zeros(0),
+            filter_response: Array1::zeros(0),
+            error: Array1::zeros(0),
+            smoothed_error: Array1::zeros(0),
+            multi_losses: Vec::new(),
+        }
+    }
+
+    fn ensure_frequency_len(&mut self, len: usize) {
+        if self.response.len() != len {
+            self.response = Array1::zeros(len);
+            self.filter_response = Array1::zeros(len);
+            self.error = Array1::zeros(len);
+            self.smoothed_error = Array1::zeros(len);
+        }
+    }
+}
+
+thread_local! {
+    static EVALUATION_SCRATCH: RefCell<EvaluationScratch> = RefCell::new(EvaluationScratch::new());
+}
 
 /// Compute multi-objective fitness across multiple measurement curves.
 ///
@@ -20,29 +77,38 @@ use ndarray::Array1;
 fn compute_multi_objective_fitness(x: &[f64], mo: &MultiObjectiveData) -> f64 {
     use crate::roomeq::MultiMeasurementStrategy;
 
-    let losses: Vec<f64> = mo
-        .objectives
-        .iter()
-        .map(|obj| compute_base_fitness_single(x, obj))
-        .collect();
-
     match mo.strategy {
         MultiMeasurementStrategy::Average => {
-            // Should not reach here (average mode uses pre-averaged curves),
-            // but handle gracefully: simple mean of losses
-            let sum: f64 = losses.iter().sum();
-            sum / losses.len() as f64
+            let sum: f64 = mo
+                .objectives
+                .iter()
+                .map(|objective| compute_base_fitness_single(x, objective))
+                .sum();
+            sum / mo.objectives.len() as f64
         }
-        MultiMeasurementStrategy::WeightedSum => {
-            losses.iter().zip(&mo.weights).map(|(l, w)| l * w).sum()
-        }
-        MultiMeasurementStrategy::Minimax => {
-            losses.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
-        }
+        MultiMeasurementStrategy::WeightedSum => mo
+            .objectives
+            .iter()
+            .zip(&mo.weights)
+            .map(|(objective, weight)| compute_base_fitness_single(x, objective) * weight)
+            .sum(),
+        MultiMeasurementStrategy::Minimax => mo
+            .objectives
+            .iter()
+            .map(|objective| compute_base_fitness_single(x, objective))
+            .fold(f64::NEG_INFINITY, f64::max),
         MultiMeasurementStrategy::VariancePenalized => {
-            let n = losses.len() as f64;
-            let mean = losses.iter().sum::<f64>() / n;
-            let variance = losses.iter().map(|l| (l - mean).powi(2)).sum::<f64>() / n;
+            let mut count = 0usize;
+            let mut mean = 0.0;
+            let mut sum_squared_deviation = 0.0;
+            for objective in &mo.objectives {
+                let loss = compute_base_fitness_single(x, objective);
+                count += 1;
+                let delta = loss - mean;
+                mean += delta / count as f64;
+                sum_squared_deviation += delta * (loss - mean);
+            }
+            let variance = sum_squared_deviation / count as f64;
             mean + mo.variance_lambda * variance
         }
         MultiMeasurementStrategy::SpatialRobustness => {
@@ -55,15 +121,28 @@ fn compute_multi_objective_fitness(x: &[f64], mo: &MultiObjectiveData) -> f64 {
             // into `mo.objectives` at setup time. Either take the max (pure
             // worst-case) or the mean of the worst α-tail (CVaR).
             match mo.uncertainty_cvar_alpha {
-                None => losses.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+                None => mo
+                    .objectives
+                    .iter()
+                    .map(|objective| compute_base_fitness_single(x, objective))
+                    .fold(f64::NEG_INFINITY, f64::max),
                 Some(alpha) => {
                     let alpha = alpha.clamp(f64::MIN_POSITIVE, 1.0);
-                    let mut sorted = losses.clone();
+                    let mut sorted = EVALUATION_SCRATCH
+                        .with(|slot| std::mem::take(&mut slot.borrow_mut().multi_losses));
+                    sorted.clear();
+                    for objective in &mo.objectives {
+                        sorted.push(compute_base_fitness_single(x, objective));
+                    }
                     // Worst losses first.
                     sorted.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
                     let n = (alpha * sorted.len() as f64).ceil() as usize;
                     let n = n.clamp(1, sorted.len());
-                    sorted.iter().take(n).sum::<f64>() / n as f64
+                    let result = sorted.iter().take(n).sum::<f64>() / n as f64;
+                    EVALUATION_SCRATCH.with(|slot| {
+                        slot.borrow_mut().multi_losses = sorted;
+                    });
+                    result
                 }
             }
         }
@@ -148,7 +227,13 @@ pub fn compute_smoothness_penalty(
 /// Compute the base fitness for a single ObjectiveData (no multi-objective delegation).
 /// This is the inner implementation that does not check `multi_objective`.
 fn compute_base_fitness_single(x: &[f64], data: &ObjectiveData) -> f64 {
-    // Clamp gains to envelopes before evaluation (boost limits + CDT cut limits).
+    if matches!(
+        data.loss_type,
+        LossType::SpeakerFlat | LossType::HeadphoneFlat | LossType::SpeakerFlatAsymmetric
+    ) {
+        return compute_prepared_flat_fitness(x, data);
+    }
+
     let clamped_boost;
     let clamped_cut;
     let x = {
@@ -156,14 +241,14 @@ fn compute_base_fitness_single(x: &[f64], data: &ObjectiveData) -> f64 {
             data.loss_type,
             LossType::DriversFlat | LossType::MultiSubFlat
         );
-        let x = if !skip && let Some(ref env) = data.max_boost_envelope {
-            clamped_boost = clamp_gains_to_envelope(x, env, data.peq_model);
+        let x = if !skip && let Some(ref envelope) = data.max_boost_envelope {
+            clamped_boost = clamp_gains_to_envelope(x, envelope, data.peq_model);
             &clamped_boost
         } else {
             x
         };
-        if !skip && let Some(ref env) = data.min_cut_envelope {
-            clamped_cut = clamp_cuts_to_envelope(x, env, data.peq_model);
+        if !skip && let Some(ref envelope) = data.min_cut_envelope {
+            clamped_cut = clamp_cuts_to_envelope(x, envelope, data.peq_model);
             &clamped_cut
         } else {
             x
@@ -190,6 +275,137 @@ fn compute_base_fitness_single(x: &[f64], data: &ObjectiveData) -> f64 {
     };
 
     objective.compute(x, &ctx)
+}
+
+fn compute_prepared_flat_fitness(x: &[f64], data: &ObjectiveData) -> f64 {
+    let prepared = data.prepared();
+    EVALUATION_SCRATCH.with(|slot| {
+        let mut scratch = slot.borrow_mut();
+        scratch.ensure_frequency_len(data.freqs.len());
+        let EvaluationScratch {
+            parameters,
+            response_parameters,
+            response_freqs,
+            response_srate,
+            response_peq_model,
+            peq,
+            response,
+            filter_response,
+            error,
+            smoothed_error,
+            ..
+        } = &mut *scratch;
+        let x = clamp_envelopes_into(
+            x,
+            parameters,
+            data.max_boost_envelope.as_deref(),
+            data.min_cut_envelope.as_deref(),
+            data.peq_model,
+        );
+        let response_is_cached = response_parameters.as_slice() == x
+            && response_freqs
+                .as_ref()
+                .is_some_and(|freqs| Arc::ptr_eq(freqs, &data.freqs))
+            && *response_srate == data.srate
+            && *response_peq_model == Some(data.peq_model);
+        if !response_is_cached {
+            x2spl_into(
+                &data.freqs,
+                x,
+                data.srate,
+                data.peq_model,
+                peq,
+                response,
+                filter_response,
+            );
+            record_response_computation();
+            response_parameters.clear();
+            response_parameters.extend_from_slice(x);
+            *response_freqs = Some(data.freqs.clone());
+            *response_srate = data.srate;
+            *response_peq_model = Some(data.peq_model);
+        }
+        for ((value, &correction), &deviation) in error
+            .iter_mut()
+            .zip(response.iter())
+            .zip(data.deviation.iter())
+        {
+            *value = correction - deviation;
+        }
+        let error = if prepared.smooth_into(
+            error.as_slice().expect("contiguous error scratch"),
+            smoothed_error
+                .as_slice_mut()
+                .expect("contiguous smoothed-error scratch"),
+        ) {
+            smoothed_error
+        } else {
+            error
+        };
+        prepared.apply_deadband(error.as_slice_mut().expect("contiguous error scratch"));
+        let base = match data.loss_type {
+            LossType::SpeakerFlat | LossType::HeadphoneFlat => prepared
+                .flat
+                .as_ref()
+                .expect("prepared flat loss")
+                .evaluate(error),
+            LossType::SpeakerFlatAsymmetric => prepared
+                .asymmetric
+                .as_ref()
+                .expect("prepared asymmetric loss")
+                .evaluate(error),
+            _ => unreachable!("prepared flat path only handles flat objectives"),
+        };
+        base + prepared
+            .smoothness
+            .as_ref()
+            .map(|penalty| {
+                penalty.evaluate(response.as_slice().expect("contiguous response scratch"))
+            })
+            .unwrap_or(0.0)
+    })
+}
+
+/// Evaluate a PEQ ceiling constraint using the response left by the objective
+/// on this worker, or the same reusable buffers on a cache miss.
+pub(crate) fn compute_ceiling_violation_into(
+    freqs: &Arc<Array1<f64>>,
+    x: &[f64],
+    srate: f64,
+    peq_model: PeqModel,
+    max_db: f64,
+) -> f64 {
+    EVALUATION_SCRATCH.with(|slot| {
+        let mut scratch = slot.borrow_mut();
+        scratch.ensure_frequency_len(freqs.len());
+        let response_is_cached = scratch.response_parameters.as_slice() == x
+            && scratch
+                .response_freqs
+                .as_ref()
+                .is_some_and(|cached| Arc::ptr_eq(cached, freqs))
+            && scratch.response_srate == srate
+            && scratch.response_peq_model == Some(peq_model);
+        if !response_is_cached {
+            let EvaluationScratch {
+                peq,
+                response,
+                filter_response,
+                response_parameters,
+                response_freqs,
+                response_srate,
+                response_peq_model,
+                ..
+            } = &mut *scratch;
+            x2spl_into(freqs, x, srate, peq_model, peq, response, filter_response);
+            record_response_computation();
+            response_parameters.clear();
+            response_parameters.extend_from_slice(x);
+            *response_freqs = Some(freqs.clone());
+            *response_srate = srate;
+            *response_peq_model = Some(peq_model);
+        }
+        viol_ceiling_from_spl(&scratch.response, max_db, peq_model)
+    })
 }
 
 /// Compute the base fitness value (without penalties) for given parameters
@@ -225,8 +441,8 @@ pub fn compute_fitness_penalties_ref(x: &[f64], data: &ObjectiveData) -> f64 {
     let mut penalized = fit;
 
     if data.penalty_w_ceiling > 0.0 && is_peq_loss {
-        let peq_spl = x2spl(&data.freqs, x, data.srate, data.peq_model);
-        let viol = viol_ceiling_from_spl(&peq_spl, data.max_db, data.peq_model);
+        let viol =
+            compute_ceiling_violation_into(&data.freqs, x, data.srate, data.peq_model, data.max_db);
         penalized += data.penalty_w_ceiling * viol * viol;
     }
 
@@ -445,9 +661,10 @@ mod smoothness_penalty_edge_tests {
 #[cfg(test)]
 mod multi_objective_and_base_fitness_tests {
     use super::{
-        ObjectiveData, compute_base_fitness, compute_base_fitness_single,
-        compute_fitness_penalties, compute_fitness_penalties_ref, compute_multi_objective_fitness,
-        compute_pareto_objectives, compute_sorted_freqs_and_adjacent_octave_spacings,
+        EVALUATION_SCRATCH, ObjectiveData, RESPONSE_COMPUTATIONS, compute_base_fitness,
+        compute_base_fitness_single, compute_fitness_penalties, compute_fitness_penalties_ref,
+        compute_multi_objective_fitness, compute_pareto_objectives,
+        compute_sorted_freqs_and_adjacent_octave_spacings,
     };
     use crate::MultiObjectiveData;
     use crate::ObjectiveDataBuilder;
@@ -518,6 +735,36 @@ mod multi_objective_and_base_fitness_tests {
         let mo = multi_objective(MultiMeasurementStrategy::MinimaxUncertainty);
         let mmu = compute_multi_objective_fitness(&x(), &mo);
         assert!(mmu.is_finite());
+    }
+
+    #[test]
+    fn multi_objective_reuses_response_for_shared_frequency_grid() {
+        let objective = base_objective(LossType::SpeakerFlat);
+        let mo = MultiObjectiveData {
+            objectives: vec![objective.clone(), objective.clone(), objective],
+            weights: vec![1.0 / 3.0; 3],
+            strategy: MultiMeasurementStrategy::WeightedSum,
+            variance_lambda: 0.5,
+            uncertainty_cvar_alpha: Some(0.5),
+        };
+
+        EVALUATION_SCRATCH.with(|slot| {
+            let mut scratch = slot.borrow_mut();
+            scratch.response_parameters.clear();
+            scratch.response_freqs = None;
+        });
+        RESPONSE_COMPUTATIONS.with(|count| count.set(0));
+
+        let loss = compute_multi_objective_fitness(&x(), &mo);
+
+        assert!(loss.is_finite());
+        RESPONSE_COMPUTATIONS.with(|count| {
+            assert_eq!(
+                count.get(),
+                1,
+                "one candidate response should serve every aligned measurement"
+            );
+        });
     }
 
     #[test]

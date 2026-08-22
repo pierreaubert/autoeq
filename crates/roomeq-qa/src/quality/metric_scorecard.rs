@@ -16,6 +16,7 @@ use super::misc::convergence_epsilon;
 use super::mutation::Mutation;
 use super::peak::peak_deviation_db;
 use roomeq_engine::room_result::RoomOptimizationResult;
+use roomeq_model::CorrectionDecision;
 
 /// All metrics for one optimization run, used for multi-dimensional QA.
 #[derive(Debug, Clone)]
@@ -24,6 +25,10 @@ pub(super) struct MetricScorecard {
     pub(super) flat_loss: f64,
     /// Maximum positive deviation (peak) across channels in passband (dB).
     pub(super) peak_residual_db: f64,
+    /// Largest positive gain requested by any deployed PEQ section (dB).
+    pub(super) max_boost_db: f64,
+    /// Runtime safety replaced some or all of the requested correction.
+    pub(super) correction_reverted: bool,
     /// Average EPA preference score across channels (higher = better).
     pub(super) epa_preference: Option<f64>,
     /// Average Zwicker sharpness across channels (acum).
@@ -38,8 +43,8 @@ impl std::fmt::Display for MetricScorecard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "flat={:.4} peak={:.2}dB",
-            self.flat_loss, self.peak_residual_db
+            "flat={:.4} peak={:.2}dB boost={:.2}dB",
+            self.flat_loss, self.peak_residual_db, self.max_boost_db
         )?;
         if let Some(v) = self.epa_preference {
             write!(f, " epa={:.2}", v)?;
@@ -53,6 +58,9 @@ impl std::fmt::Display for MetricScorecard {
         if let Some(v) = self.group_delay_std_ms {
             write!(f, " gd={:.1}ms", v)?;
         }
+        if self.correction_reverted {
+            write!(f, " REVERTED")?;
+        }
         Ok(())
     }
 }
@@ -60,6 +68,23 @@ impl std::fmt::Display for MetricScorecard {
 /// Compute the full scorecard from a single optimization result.
 pub(super) fn compute_scorecard(result: &RoomOptimizationResult) -> MetricScorecard {
     let flat_loss = result.combined_post_score;
+    let max_boost_db = result
+        .channel_results
+        .values()
+        .flat_map(|channel| channel.biquads.iter())
+        .map(|biquad| biquad.db_gain)
+        .fold(0.0_f64, f64::max);
+    let correction_reverted =
+        result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .is_some_and(|report| {
+                matches!(
+                    report.decision,
+                    CorrectionDecision::RevertedStage | CorrectionDecision::IdentityFallback
+                )
+            });
 
     // Peak residual: max peak deviation of the corrected response from its
     // passband mean, across all channels. Measures flatness of the result.
@@ -94,6 +119,8 @@ pub(super) fn compute_scorecard(result: &RoomOptimizationResult) -> MetricScorec
     MetricScorecard {
         flat_loss,
         peak_residual_db,
+        max_boost_db,
+        correction_reverted,
         epa_preference,
         epa_sharpness,
         epa_roughness,
@@ -310,6 +337,8 @@ pub(super) fn placeholder_scorecard(flat_loss: f64) -> MetricScorecard {
     MetricScorecard {
         flat_loss,
         peak_residual_db: 0.0,
+        max_boost_db: 0.0,
+        correction_reverted: false,
         epa_preference: None,
         epa_sharpness: None,
         epa_roughness: None,

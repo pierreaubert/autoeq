@@ -1,0 +1,17 @@
+{
+  "optimizer": {
+    "processing_mode": "mixed_phase",
+    "fir": {
+      "taps": 512,
+      "phase": "kirkeby",
+      "correct_excess_phase": true,
+      "max_boost_db": 10.0
+    },
+    "mixed_phase": {
+      "max_fir_length_ms": 10.0,
+      "pre_ringing_threshold_db": -30.0,
+      "min_spatial_depth": 0.5,
+      "phase_smoothing_octaves": 0.1666666667
+    }
+  }
+}

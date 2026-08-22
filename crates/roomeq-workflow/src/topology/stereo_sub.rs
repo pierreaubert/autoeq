@@ -9,6 +9,7 @@ use super::workflow::workflow_stage_event;
 use crate::measurement::load_source_with_frequency_samples;
 use log::info;
 use math_audio_dsp::analysis::compute_average_response;
+use rayon::prelude::*;
 use roomeq_engine::Curve;
 use roomeq_engine::crossover;
 use roomeq_engine::error::{AutoeqError, Result};
@@ -167,7 +168,13 @@ impl WorkflowExecutor for Stereo21Executor {
 
         let total_channels = 3;
         let max_iterations = config.optimizer.max_iter;
-        for (channel_index, role) in ["L", "R"].into_iter().enumerate() {
+        let progress_factory = assembly.progress_factory;
+        let probe_arrival_overrides = assembly.probe_arrival_overrides;
+        let frequency_samples = assembly.frequency_samples;
+        let main_outputs: Result<Vec<_>> = ["L", "R"]
+            .into_par_iter()
+            .enumerate()
+            .map(|(channel_index, role)| {
             let source = resolve_single_source(role, config, sys)?;
             let mut per_config = config.clone();
             if min_xo < per_config.optimizer.max_freq {
@@ -193,13 +200,17 @@ impl WorkflowExecutor for Stereo21Executor {
                     0.0,
                     sample_rate,
                     output_dir,
-                    &mut assembly.progress_factory,
+                    &progress_factory,
                     channel_index,
                     total_channels,
                     max_iterations,
-                    assembly.probe_arrival_overrides,
-                    assembly.frequency_samples,
+                    probe_arrival_overrides,
+                    frequency_samples,
                 )?;
+                Ok((role.to_string(), chain, ch_result))
+            })
+            .collect();
+        for (role, chain, ch_result) in main_outputs? {
             pre_eq_targets.insert(role.to_string(), chain.target_curve.clone());
             pre_eq_plugins.insert(role.to_string(), chain.plugins);
             pre_eq_filters.insert(role.to_string(), ch_result.biquads);
@@ -233,7 +244,7 @@ impl WorkflowExecutor for Stereo21Executor {
                     0.0,
                     sample_rate,
                     output_dir,
-                    &mut assembly.progress_factory,
+                    &assembly.progress_factory,
                     2,
                     total_channels,
                     max_iterations,
@@ -556,7 +567,7 @@ impl WorkflowExecutor for Stereo21Executor {
 
             let post_curve = if role == "L" { &l_post } else { &r_post };
             let post_eq_callback = workflow_progress_callback(
-                &mut assembly.progress_factory,
+                &assembly.progress_factory,
                 &format!("Post-EQ {role}"),
                 role_index,
                 3,
@@ -613,7 +624,7 @@ impl WorkflowExecutor for Stereo21Executor {
             opt_config.max_freq = final_xo_freq - 20.0;
             let sub_min_score = config.optimizer.min_freq.max(20.0);
             let sub_callback = workflow_progress_callback(
-                &mut assembly.progress_factory,
+                &assembly.progress_factory,
                 &format!("Post-EQ {sub_role}"),
                 2,
                 3,
@@ -935,7 +946,8 @@ impl WorkflowExecutor for Stereo21Executor {
                 supporting_source: None,
             correction_acceptance: None,
             optimizer_evidence: None,
-                stage_outcomes: Vec::new(),
+            stage_outcomes: Vec::new(),
+            effective_config: None,
             },
         })
     }

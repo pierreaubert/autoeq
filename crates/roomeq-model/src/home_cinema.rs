@@ -488,6 +488,9 @@ pub struct BassManagementRoutingGraph {
     pub routes: Vec<BassManagementRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub matrix: Option<BassManagementMatrix>,
+    /// Final down-only calibration trims per logical input channel.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub input_trim_db: HashMap<String, f64>,
     pub advisories: Vec<String>,
 }
 

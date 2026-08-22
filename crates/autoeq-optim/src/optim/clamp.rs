@@ -54,6 +54,45 @@ pub fn clamp_cuts_to_envelope(x: &[f64], envelope: &[(f64, f64)], peq_model: Peq
     clamped
 }
 
+/// Copy parameters once and apply both optional gain envelopes in place.
+///
+/// The caller owns `output`, so repeated candidate evaluations reuse its
+/// allocation. Returns the slice that should be evaluated.
+pub fn clamp_envelopes_into<'a>(
+    x: &'a [f64],
+    output: &'a mut Vec<f64>,
+    max_boost: Option<&[(f64, f64)]>,
+    min_cut: Option<&[(f64, f64)]>,
+    peq_model: PeqModel,
+) -> &'a [f64] {
+    if max_boost.is_none() && min_cut.is_none() {
+        return x;
+    }
+    output.clear();
+    output.extend_from_slice(x);
+    let num_filters = crate::param_utils::num_filters(x, peq_model);
+    let parameters_per_filter = crate::param_utils::params_per_filter(peq_model);
+    for index in 0..num_filters {
+        let params = crate::param_utils::get_filter_params(x, index, peq_model);
+        let frequency = 10f64.powf(params.freq);
+        let gain_index = index * parameters_per_filter + parameters_per_filter - 1;
+        if params.gain > 0.0
+            && let Some(envelope) = max_boost
+        {
+            output[gain_index] = params
+                .gain
+                .min(interpolate_boost_envelope(envelope, frequency));
+        } else if params.gain < 0.0
+            && let Some(envelope) = min_cut
+        {
+            output[gain_index] = params
+                .gain
+                .max(interpolate_boost_envelope(envelope, frequency));
+        }
+    }
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

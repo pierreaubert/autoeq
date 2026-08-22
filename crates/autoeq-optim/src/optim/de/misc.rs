@@ -1,5 +1,4 @@
-use crate::de::{DEConfig, DEReport, NonlinearConstraintHelper};
-use ndarray::Array1;
+use crate::de::{DEConfig, DEReport};
 use std::sync::Arc;
 
 pub(super) fn count_free_dimensions(lower_bounds: &[f64], upper_bounds: &[f64]) -> usize {
@@ -75,22 +74,19 @@ pub(super) fn derive_de_budget(
 /// * `F` - Constraint function type
 pub(super) fn register_de_constraint<T, F>(config: &mut DEConfig, constraint_fn: F, data: T)
 where
-    T: Clone + Send + Sync + 'static,
-    F: Fn(&[f64], Option<&mut [f64]>, &mut T) -> f64 + Send + Sync + 'static,
+    T: Send + Sync + 'static,
+    F: Fn(&[f64], Option<&mut [f64]>, &T) -> f64 + Send + Sync + 'static,
 {
-    let constraint = NonlinearConstraintHelper {
-        fun: Arc::new(move |x: &Array1<f64>| {
-            let mut result = Array1::zeros(1);
-            let mut data = data.clone();
-            result[0] = constraint_fn(x.as_slice().unwrap(), None, &mut data);
-            result
+    config.penalty_ineq.push((
+        Arc::new(move |x| {
+            constraint_fn(
+                x.as_slice().expect("DE candidates are contiguous"),
+                None,
+                &data,
+            )
         }),
-        // Use large finite value instead of -inf to avoid bug in apply_to()
-        // where inf tolerance causes incorrect equality constraint handling
-        lb: Array1::from(vec![-1e30]),
-        ub: Array1::from(vec![0.0]),
-    };
-    constraint.apply_to(config, 1e3, 1e3);
+        1e3,
+    ));
 }
 
 /// Process DE optimization results

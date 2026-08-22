@@ -513,6 +513,7 @@ fn camilladsp_routing_graph(output: &DspGraph) -> Option<BassManagementRoutingGr
                     output_channels,
                     routes,
                     matrix,
+                    input_trim_db: Default::default(),
                     advisories: serde_json::from_value(
                         metadata
                             .get("advisories")

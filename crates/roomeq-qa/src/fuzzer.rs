@@ -31,6 +31,114 @@ use types::Args;
 use validate::validate_config;
 use validate::validate_roomeq_output;
 
+fn read_fuzz_post_score(output_path: &std::path::Path) -> Result<f64, String> {
+    let json = fs::read_to_string(output_path).map_err(|error| error.to_string())?;
+    let output: serde_json::Value =
+        serde_json::from_str(&json).map_err(|error| error.to_string())?;
+    let post = output
+        .pointer("/metadata/post_score")
+        .and_then(serde_json::Value::as_f64)
+        .ok_or_else(|| "output metadata.post_score missing or non-numeric".to_string())?;
+    if !post.is_finite() {
+        return Err("output metadata.post_score is not finite".to_string());
+    }
+    Ok(post)
+}
+
+fn validate_fuzz_seed_distribution(
+    config: &roomeq_model::RoomConfig,
+    test_dir: &std::path::Path,
+    canonical_output_path: &std::path::Path,
+    sample_rate: f64,
+    verbose: bool,
+) -> Result<(), String> {
+    let base_seed = config.optimizer.seed.unwrap_or(42);
+    let base_score = read_fuzz_post_score(canonical_output_path)?;
+    let mut scores = vec![(base_seed, base_score, canonical_output_path.to_path_buf())];
+    let sample_rate_arg = sample_rate.to_string();
+
+    for offset in crate::QA_SEED_OFFSETS.into_iter().skip(1) {
+        let seed = base_seed.wrapping_add(offset);
+        let mut seeded_config = config.clone();
+        seeded_config.optimizer.seed = Some(seed);
+        let config_path = test_dir.join(format!("config-seed-{seed}.json"));
+        fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&seeded_config).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+        let output_path = test_dir.join(format!("output-seed-{seed}.json"));
+
+        let mut command = Command::new("cargo");
+        command.args([
+            "run",
+            "--quiet",
+            "--release",
+            "--bin",
+            "roomeq",
+            "--features",
+            "cli",
+            "--",
+            "--config",
+            config_path
+                .to_str()
+                .ok_or_else(|| "non-UTF-8 fuzz config path".to_string())?,
+            "--output",
+            output_path
+                .to_str()
+                .ok_or_else(|| "non-UTF-8 fuzz output path".to_string())?,
+            "--sample-rate",
+            sample_rate_arg.as_str(),
+        ]);
+        let status = if verbose {
+            command.status().map_err(|error| error.to_string())?
+        } else {
+            command.env("RUST_LOG", "error");
+            let output = command.output().map_err(|error| error.to_string())?;
+            if !output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if !stdout.trim().is_empty() {
+                    println!("  seed {seed} stdout:\n{}", stdout.trim_end());
+                }
+                if !stderr.trim().is_empty() {
+                    eprintln!("  seed {seed} stderr:\n{}", stderr.trim_end());
+                }
+            }
+            output.status
+        };
+        if !status.success() {
+            return Err(format!(
+                "seed {seed} failed with exit code {:?}",
+                status.code()
+            ));
+        }
+        scores.push((seed, read_fuzz_post_score(&output_path)?, output_path));
+    }
+
+    scores.sort_by(|left, right| left.1.total_cmp(&right.1));
+    let selected = &scores[scores.len() / 2];
+    let min_score = scores.first().map(|entry| entry.1).unwrap_or_default();
+    let max_score = scores.last().map(|entry| entry.1).unwrap_or_default();
+    let details = scores
+        .iter()
+        .map(|(seed, score, _)| format!("{seed}:{score:.6}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    println!(
+        "  Seed distribution: selected={}, min={:.6}, max={:.6}, spread={:.6}, scores=[{}]",
+        selected.0,
+        min_score,
+        max_score,
+        max_score - min_score,
+        details
+    );
+    if selected.2 != canonical_output_path {
+        fs::copy(&selected.2, canonical_output_path).map_err(|error| error.to_string())?;
+    }
+    validate_roomeq_output(canonical_output_path).map(|_| ())
+}
+
 /// Rendering boundary supplied by the feature-gated root launcher.
 pub trait DriverPlotter {
     #[allow(clippy::too_many_arguments)]
@@ -47,6 +155,23 @@ pub trait DriverPlotter {
 /// Run the fuzzer and report whether failed scenarios or missing coverage
 /// should produce a non-zero process exit.
 pub fn run(plotter: &dyn DriverPlotter) -> Result<bool, Box<dyn Error>> {
+    let registry = crate::registry::load_registry()?;
+    let suite = registry
+        .suite_for_runner("fuzzer")
+        .ok_or_else(|| anyhow::anyhow!("RoomEQ QA registry has no fuzzer suite"))?;
+    for required_claim in [
+        "finite_scores",
+        "strict_improvement",
+        "corrective_filter",
+        "multi_seed",
+    ] {
+        if !suite.claims.iter().any(|claim| claim == required_claim) {
+            return Err(anyhow::anyhow!(
+                "fuzzer registry suite is missing claim '{required_claim}'"
+            )
+            .into());
+        }
+    }
     let args = Args::parse();
 
     // Create output directory
@@ -142,8 +267,18 @@ pub fn run(plotter: &dyn DriverPlotter) -> Result<bool, Box<dyn Error>> {
         };
 
         if status.success() {
-            if let Err(e) = validate_roomeq_output(&output_json_path) {
-                println!("  Test {} failed output validation: {}", i + 1, e);
+            if let Err(error) = validate_fuzz_seed_distribution(
+                &config,
+                &test_dir,
+                &output_json_path,
+                args.sample_rate,
+                args.verbose,
+            ) {
+                println!(
+                    "  Test {} failed optimizer-seed distribution: {}",
+                    i + 1,
+                    error
+                );
                 failed_tests += 1;
                 continue;
             }

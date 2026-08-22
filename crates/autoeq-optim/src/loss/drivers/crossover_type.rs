@@ -82,19 +82,6 @@ impl std::fmt::Display for CrossoverType {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::CrossoverType;
-    use std::str::FromStr;
-
-    #[test]
-    fn butterworth24_alias_parses_and_preserves_order() {
-        let crossover = CrossoverType::from_str("BW24").expect("BW24 must be supported");
-        assert_eq!(crossover, CrossoverType::Butterworth4);
-        assert_eq!(crossover.to_plugin_string(), "Butterworth24");
-    }
-}
-
 /// Interpolate and prepare driver curves on a common frequency grid
 pub(super) fn prepare_driver_curves(data: &DriversLossData, crossover_freqs: &[f64]) -> Vec<Curve> {
     let n_drivers = data.drivers.len();
@@ -143,5 +130,18 @@ pub(super) fn validate_driver_args(
     }
     if let Some(d) = delays {
         assert_eq!(d.len(), n_drivers);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CrossoverType;
+    use std::str::FromStr;
+
+    #[test]
+    fn butterworth24_alias_parses_and_preserves_order() {
+        let crossover = CrossoverType::from_str("BW24").expect("BW24 must be supported");
+        assert_eq!(crossover, CrossoverType::Butterworth4);
+        assert_eq!(crossover.to_plugin_string(), "Butterworth24");
     }
 }

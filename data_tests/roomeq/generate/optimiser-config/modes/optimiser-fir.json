@@ -1,0 +1,10 @@
+{
+  "optimizer": {
+    "processing_mode": "phase_linear",
+    "fir": {
+      "taps": 1024,
+      "phase": "kirkeby",
+      "max_boost_db": 10.0
+    }
+  }
+}

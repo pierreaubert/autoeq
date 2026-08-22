@@ -42,7 +42,7 @@ fn compute_min_octave_spacing(xs: &[f64], peq_model: PeqModel, min_freq_hz: f64)
 pub fn constraint_spacing(
     x: &[f64],
     _grad: Option<&mut [f64]>,
-    data: &mut SpacingConstraintData,
+    data: &SpacingConstraintData,
 ) -> f64 {
     if data.min_spacing_oct <= 0.0 {
         return 0.0;

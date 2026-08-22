@@ -91,75 +91,6 @@ fn default_qa_mixed_phase_config() -> MixedPhaseSerdeConfig {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::synthetic::consts::{EASY, LAYOUT_2_0, LAYOUT_7_1_6, SUB_MSO_8};
-    use roomeq_synthetic::generate_flat_curve;
-
-    #[test]
-    fn processing_modes_install_required_qa_configuration() {
-        for mode in [ProcessingMode::PhaseLinear, ProcessingMode::Hybrid] {
-            let mut optimizer = OptimizerConfig::default();
-            configure_processing_mode(&mut optimizer, mode.clone());
-            assert_eq!(optimizer.processing_mode, mode);
-            assert!(optimizer.fir.is_some());
-            assert_eq!(optimizer.max_freq, 1500.0);
-        }
-
-        let mut optimizer = OptimizerConfig::default();
-        configure_processing_mode(&mut optimizer, ProcessingMode::MixedPhase);
-        assert!(optimizer.fir.is_some());
-        assert!(optimizer.mixed_phase.is_some());
-    }
-
-    #[test]
-    fn extended_cinema_layout_builds_eight_physical_subs() {
-        let base = generate_flat_curve(20.0, 20_000.0, 100);
-        let config = build_multichannel_config(
-            &LAYOUT_7_1_6,
-            Some(&SUB_MSO_8),
-            &EASY,
-            &base,
-            ProcessingMode::LowLatency,
-            48_000.0,
-        );
-
-        assert_eq!(config.system.as_ref().unwrap().speakers.len(), 14);
-        match config.speakers.get("lfe").unwrap() {
-            SpeakerConfig::MultiSub(group) => assert_eq!(group.subwoofers.len(), 8),
-            other => panic!("expected eight-sub MSO group, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn easy_fixture_contains_a_detectable_kautz_mode() {
-        let base = generate_flat_curve(20.0, 20_000.0, 200);
-        let config = build_multichannel_config(
-            &LAYOUT_2_0,
-            None,
-            &EASY,
-            &base,
-            ProcessingMode::KautzModal,
-            48_000.0,
-        );
-        let SpeakerConfig::Single(MeasurementSource::InMemory(curve)) =
-            config.speakers.get("l").unwrap()
-        else {
-            panic!("expected an in-memory left-channel fixture");
-        };
-        let modes = roomeq_analysis::impulse_analysis::detect_room_modes(
-            &curve.freq,
-            &curve.spl,
-            &roomeq_analysis::impulse_analysis::DecomposedCorrectionConfig::default(),
-        );
-        assert!(
-            modes.iter().any(|mode| (mode.frequency - 28.0).abs() < 5.0),
-            "expected the easy fixture's 28 Hz reference resonance to be detected: {modes:?}"
-        );
-    }
-}
-
 pub(super) fn build_multisub_config(sub_curves: &[Curve], allpass: bool) -> RoomConfig {
     let mut speakers = HashMap::new();
     let subwoofers: Vec<MeasurementSource> = sub_curves
@@ -485,4 +416,73 @@ pub(super) fn build_multichannel_config(
     config.optimizer.max_freq = 20000.0;
 
     config
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::synthetic::consts::{EASY, LAYOUT_2_0, LAYOUT_7_1_6, SUB_MSO_8};
+    use roomeq_synthetic::generate_flat_curve;
+
+    #[test]
+    fn processing_modes_install_required_qa_configuration() {
+        for mode in [ProcessingMode::PhaseLinear, ProcessingMode::Hybrid] {
+            let mut optimizer = OptimizerConfig::default();
+            configure_processing_mode(&mut optimizer, mode.clone());
+            assert_eq!(optimizer.processing_mode, mode);
+            assert!(optimizer.fir.is_some());
+            assert_eq!(optimizer.max_freq, 1500.0);
+        }
+
+        let mut optimizer = OptimizerConfig::default();
+        configure_processing_mode(&mut optimizer, ProcessingMode::MixedPhase);
+        assert!(optimizer.fir.is_some());
+        assert!(optimizer.mixed_phase.is_some());
+    }
+
+    #[test]
+    fn extended_cinema_layout_builds_eight_physical_subs() {
+        let base = generate_flat_curve(20.0, 20_000.0, 100);
+        let config = build_multichannel_config(
+            &LAYOUT_7_1_6,
+            Some(&SUB_MSO_8),
+            &EASY,
+            &base,
+            ProcessingMode::LowLatency,
+            48_000.0,
+        );
+
+        assert_eq!(config.system.as_ref().unwrap().speakers.len(), 14);
+        match config.speakers.get("lfe").unwrap() {
+            SpeakerConfig::MultiSub(group) => assert_eq!(group.subwoofers.len(), 8),
+            other => panic!("expected eight-sub MSO group, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn easy_fixture_contains_a_detectable_kautz_mode() {
+        let base = generate_flat_curve(20.0, 20_000.0, 200);
+        let config = build_multichannel_config(
+            &LAYOUT_2_0,
+            None,
+            &EASY,
+            &base,
+            ProcessingMode::KautzModal,
+            48_000.0,
+        );
+        let SpeakerConfig::Single(MeasurementSource::InMemory(curve)) =
+            config.speakers.get("l").unwrap()
+        else {
+            panic!("expected an in-memory left-channel fixture");
+        };
+        let modes = roomeq_analysis::impulse_analysis::detect_room_modes(
+            &curve.freq,
+            &curve.spl,
+            &roomeq_analysis::impulse_analysis::DecomposedCorrectionConfig::default(),
+        );
+        assert!(
+            modes.iter().any(|mode| (mode.frequency - 28.0).abs() < 5.0),
+            "expected the easy fixture's 28 Hz reference resonance to be detected: {modes:?}"
+        );
+    }
 }

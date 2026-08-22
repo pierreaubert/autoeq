@@ -1,0 +1,35 @@
+{
+  "optimizer": {
+    "algorithm": "autoeq:cmaes",
+    "processing_mode": "low_latency",
+    "loss_type": "flat",
+    "population": 16,
+    "max_iter": 1000,
+    "num_filters": 4,
+    "min_freq": 60.0,
+    "max_freq": 500.0,
+    "min_q": 0.5,
+    "max_q": 3.0,
+    "min_db": -6.0,
+    "max_db": 3.0,
+    "asymmetric_loss": true,
+    "psychoacoustic": true,
+    "refine": false,
+    "seed": 424242,
+    "multi_measurement": {
+      "strategy": "spatial_robustness",
+      "spatial_robustness": {
+        "variance_threshold_db": 2.0,
+        "transition_width_db": 2.0,
+        "min_correction_depth": 0.1,
+        "mask_smoothing_octaves": 0.16666666666666666
+      }
+    },
+    "smoothness_penalty": {
+      "tv2_weight": 0.002,
+      "schroeder_hz": 200.0,
+      "modal_weight_scale": 0.1,
+      "exponent": 1.0
+    }
+  }
+}

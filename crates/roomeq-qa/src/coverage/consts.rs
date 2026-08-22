@@ -6,8 +6,9 @@ pub(super) const SAMPLE_RATE: f64 = 48000.0;
 pub(super) const SEED: u64 = 42;
 
 pub(super) const QA_MAXEVAL: usize = 15000; // Fast mode for QA
-
-pub(super) const BASS_MANAGED_CHANNEL_REGRESSION_EPSILON: f64 = 0.25;
+pub(super) const QA_ALGORITHM: &str = "autoeq:cmaes";
+pub(super) const CMAES_QA_POPULATION: usize = 16;
+pub(super) const CMAES_QA_NUM_FILTERS: usize = 9;
 
 pub(super) const FEM_DIR: &str = "data_tests/roomeq/generate/fem";
 
@@ -19,11 +20,25 @@ pub(super) fn apply_qa_overrides(config: &mut RoomConfig, maxeval: usize) {
     // multi-measurement scenarios physically unable to improve, which the
     // final safety gate then reports as "no improvement". QA only pins
     // determinism and caps the evaluation budget.
-    config.optimizer.max_iter = config.optimizer.max_iter.min(maxeval);
+    // Replace AutoDE with CMA-ES while preserving the scenario's other
+    // optimizer settings.
+    let replaced_auto_de = config.optimizer.algorithm.eq_ignore_ascii_case("autoeq:de");
+    if replaced_auto_de {
+        config.optimizer.algorithm = QA_ALGORITHM.to_string();
+        config.optimizer.population = CMAES_QA_POPULATION;
+        config.optimizer.asymmetric_loss = false;
+        config.optimizer.refine = true;
+        config.optimizer.num_filters = CMAES_QA_NUM_FILTERS;
+    }
+    config.optimizer.max_iter = if replaced_auto_de {
+        maxeval
+    } else {
+        config.optimizer.max_iter.min(maxeval)
+    };
     config.optimizer.seed = Some(SEED);
-    // Pin evaluation to a single thread: parallel DE evaluation order depends
-    // on machine load, which makes seeded runs non-reproducible when many QA
-    // cases run concurrently. The harness's own case-level parallelism
+    // Pin evaluation to a single thread: parallel optimizer evaluation order
+    // depends on machine load, which makes seeded runs non-reproducible
+    // when many QA cases run concurrently. The harness's own case-level parallelism
     // provides the throughput.
     config.optimizer.parallel_threads = Some(1);
 
@@ -83,7 +98,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn qa_overrides_keep_scenario_optimizer_and_pin_determinism() {
+    fn qa_overrides_replace_auto_de_and_pin_determinism() {
         let mut config = RoomConfig::default();
         config.optimizer.algorithm = "autoeq:de".to_string();
         config.optimizer.num_filters = 7;
@@ -94,10 +109,10 @@ mod tests {
 
         apply_qa_overrides(&mut config, QA_MAXEVAL);
 
-        assert_eq!(config.optimizer.algorithm, "autoeq:de");
-        assert_eq!(config.optimizer.num_filters, 7);
+        assert_eq!(config.optimizer.algorithm, QA_ALGORITHM);
+        assert_eq!(config.optimizer.num_filters, CMAES_QA_NUM_FILTERS);
         assert!(config.optimizer.refine);
-        assert_eq!(config.optimizer.population, 60);
+        assert_eq!(config.optimizer.population, CMAES_QA_POPULATION);
         assert_eq!(config.optimizer.max_iter, QA_MAXEVAL);
         assert_eq!(config.optimizer.seed, Some(SEED));
         assert_eq!(config.optimizer.parallel_threads, Some(1));

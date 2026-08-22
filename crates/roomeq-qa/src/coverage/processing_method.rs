@@ -1,18 +1,13 @@
-use super::consts::BASS_MANAGED_CHANNEL_REGRESSION_EPSILON;
-use super::is::has_subwoofer_channel;
 use super::is::is_subwoofer_channel;
 use super::is::qa_primary_score_pair;
-use super::misc::all_scenarios;
 use super::misc::scenario_description;
-use super::room_size::RoomSize;
 use super::solver::Solver;
 use super::test_case::TestCase;
+use crate::registry::{QaTier, ScenarioExpect, load_registry};
 use autoeq_optim::loss::calculate_standard_deviation_in_range;
 use autoeq_optim::loss::phase_aware::{compute_group_delay, unwrap_phase_degrees};
 use roomeq_engine::room_result::RoomOptimizationResult;
-use roomeq_model::{
-    ChannelDspChain, CorrectionDecision, ProcessingMode, RoomConfig, SubwooferStrategy,
-};
+use roomeq_model::{ChannelDspChain, ProcessingMode, RoomConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ProcessingMethod {
@@ -23,6 +18,15 @@ pub enum ProcessingMethod {
 }
 
 impl ProcessingMethod {
+    pub(super) fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "iir" => Some(Self::Iir),
+            "fir" => Some(Self::Fir),
+            "mixed" => Some(Self::Mixed),
+            "mixed_phase" => Some(Self::MixedPhase),
+            _ => None,
+        }
+    }
     pub fn name(&self) -> &'static str {
         match self {
             ProcessingMethod::Iir => "iir",
@@ -46,71 +50,51 @@ impl ProcessingMethod {
             ProcessingMethod::Iir => "optimiser-iir.json",
             ProcessingMethod::Fir => "optimiser-fir.json",
             ProcessingMethod::Mixed => "optimiser-mixed.json",
-            // MixedPhase uses IIR config as base (it generates its own FIR internally)
-            ProcessingMethod::MixedPhase => "optimiser-iir.json",
+            ProcessingMethod::MixedPhase => "optimiser-mixed-phase.json",
         }
     }
 }
 
-pub(super) fn build_test_matrix(
-    quick: bool,
+pub(super) fn build_test_matrix_for_tier(
+    tier: QaTier,
+    iir_only: bool,
     solver_filter: Option<&str>,
     mode_filter: Option<&str>,
 ) -> Vec<TestCase> {
-    let solvers: Vec<Solver> = vec![Solver::Fem];
-    let _ = quick; // quick previously also restricted solvers; FEM is the only solver now
-
-    let methods: Vec<ProcessingMethod> = if quick {
-        vec![ProcessingMethod::Iir]
-    } else {
-        vec![
-            ProcessingMethod::Iir,
-            ProcessingMethod::Fir,
-            ProcessingMethod::Mixed,
-            ProcessingMethod::MixedPhase,
-        ]
-    };
-
-    let scenarios: Vec<&str> = if quick {
-        vec!["small_stereo_2_0", "small_stereo_2_1", "medium_stereo_2_0"]
-    } else {
-        all_scenarios()
-    };
-
+    let registry = load_registry().expect("RoomEQ QA registry must be valid");
     let mut test_cases = Vec::new();
-
-    for scenario in scenarios {
-        for solver in &solvers {
-            // Apply solver filter
-            if let Some(f) = solver_filter
-                && solver.name() != f
-                && f != "both"
-            {
+    for family in registry.families_for(tier) {
+        if solver_filter.is_some_and(|filter| filter != "both" && family.solver != filter) {
+            continue;
+        }
+        let solver = match family.solver.as_str() {
+            "fem" => Solver::Fem,
+            "fast-hybrid" => Solver::FastHybrid,
+            other => panic!("unsupported registry solver '{other}' for {}", family.id),
+        };
+        for mode_name in &family.modes {
+            let method = ProcessingMethod::from_name(mode_name)
+                .unwrap_or_else(|| panic!("unsupported registry mode '{mode_name}'"));
+            if iir_only && method != ProcessingMethod::Iir {
                 continue;
             }
-
-            for method in &methods {
-                // Apply mode filter
-                if let Some(f) = mode_filter
-                    && method.name() != f
-                    && f != "all"
-                {
-                    continue;
-                }
-
-                test_cases.push(TestCase {
-                    scenario: scenario.to_string(),
-                    description: scenario_description(scenario),
-                    solver: *solver,
-                    method: *method,
-                    case_name: None,
-                    override_file: None,
-                    home_cinema_expectations: None,
-                });
+            if mode_filter.is_some_and(|filter| filter != "all" && method.name() != filter) {
+                continue;
             }
+            test_cases.push(TestCase {
+                registry_id: format!("{}/{}", family.id, mode_name),
+                scenario: family.scenario.clone(),
+                description: scenario_description(&family.scenario),
+                solver,
+                method,
+                case_name: None,
+                override_file: None,
+                home_cinema_expectations: None,
+                claims: family.claims.clone(),
+                expect: family.expect,
+            });
         }
     }
-
     test_cases
 }
 
@@ -148,61 +132,11 @@ fn correction_stage_was_reverted(
         })
 }
 
-fn has_safe_correction_fallback(result: &RoomOptimizationResult) -> bool {
-    result
-        .metadata
-        .correction_acceptance
-        .as_ref()
-        .is_some_and(|report| {
-            matches!(
-                report.decision,
-                CorrectionDecision::RevertedStage | CorrectionDecision::IdentityFallback
-            )
-        })
-}
-
-fn has_meaningful_mso_realization(result: &RoomOptimizationResult, config: &RoomConfig) -> bool {
-    let is_mso = config
-        .system
-        .as_ref()
-        .and_then(|system| system.subwoofers.as_ref())
-        .is_some_and(|subwoofers| subwoofers.config == SubwooferStrategy::Mso);
-    if !is_mso {
-        return false;
-    }
-
-    result.channels.iter().any(|(name, chain)| {
-        if !is_subwoofer_channel(config, name) {
-            return false;
-        }
-        let Some(drivers) = chain.drivers.as_ref().filter(|drivers| drivers.len() >= 2) else {
-            return false;
-        };
-
-        drivers
-            .iter()
-            .flat_map(|driver| &driver.plugins)
-            .any(|plugin| {
-                matches!(plugin.plugin_type.as_str(), "gain" | "delay")
-                    || (plugin.plugin_type == "eq"
-                        && plugin
-                            .parameters
-                            .get("label")
-                            .and_then(serde_json::Value::as_str)
-                            .is_some_and(|label| {
-                                label.contains("mso")
-                                    || label.contains("multisub")
-                                    || label.contains("group_delay")
-                            }))
-            })
-    })
-}
-
 /// Validate the optimization result beyond just "post < pre".
 /// Returns a list of failure reasons (empty = all checks passed).
 pub(super) fn validate_result(
     result: &RoomOptimizationResult,
-    room_size: RoomSize,
+    expect: ScenarioExpect,
     method: ProcessingMethod,
     config: &RoomConfig,
 ) -> Vec<String> {
@@ -216,57 +150,29 @@ pub(super) fn validate_result(
     // Check 1: post must not regress. Exact flatness identity is useful only
     // for MSO when the canonical per-sub chain contains a material alignment
     // realization (gain, delay, polarity, or MSO/all-pass EQ).
-    if post > pre {
+    if post >= pre {
         failures.push(format!(
             "no improvement: post {:.4} >= pre {:.4}",
             post, pre
         ));
         return failures; // remaining checks meaningless if no improvement at all
     }
-    if post == pre
-        && !has_meaningful_mso_realization(result, config)
-        && !has_safe_correction_fallback(result)
-    {
-        failures.push(format!(
-            "no improvement: post {:.4} >= pre {:.4}",
-            post, pre
-        ));
-        return failures;
-    }
-
     // Check 2: minimum improvement threshold
     let improvement_pct = (1.0 - post / pre) * 100.0;
-    let has_sub = has_subwoofer_channel(result, config);
-    let min_improvement = if has_sub {
-        // Bass-managed layouts can legitimately trade small main-bed flatness
-        // gains for crossover, delay, and LFE routing constraints. Coverage
-        // should catch no-op/regression and absolute blow-ups, while targeted
-        // quality QA owns the stricter scorecard behavior for these workflows.
-        0.0
-    } else {
-        room_size.min_improvement_pct()
-    };
+    let min_improvement = expect.improvement_min_pct;
     if improvement_pct < min_improvement {
         failures.push(format!(
-            "insufficient improvement: {:.1}% < {:.1}% minimum for {:?} room",
-            improvement_pct, min_improvement, room_size
+            "insufficient improvement: {:.1}% < {:.1}% registry minimum",
+            improvement_pct, min_improvement
         ));
     }
 
     // Check 3: absolute score ceiling
-    let max_post = if has_sub {
-        // Bass-managed surround cases can carry a high flat-loss number on
-        // the LFE/crossover objective while still improving the main-bed score.
-        // Keep this as a broad sanity ceiling; stricter quality thresholds live
-        // in roomeq-qa-quality where the scorecard has bass-aware checks.
-        room_size.max_post_score() + 12.0
-    } else {
-        room_size.max_post_score()
-    };
+    let max_post = expect.max_post_score;
     if post > max_post {
         failures.push(format!(
-            "post_score {:.4} exceeds maximum {:.1} for {:?} room",
-            post, max_post, room_size
+            "post_score {:.4} exceeds registry maximum {:.1}",
+            post, max_post
         ));
     }
 
@@ -275,20 +181,7 @@ pub(super) fn validate_result(
         if is_subwoofer_channel(config, name) {
             continue;
         }
-        let regression_epsilon = if method == ProcessingMethod::MixedPhase {
-            // The mixed-phase excess-phase FIR is unity-magnitude by design,
-            // but its short finite taps carry inherent comb ripple (~hundreds
-            // of Hz period) that adds raw roughness the smoothed runtime
-            // acceptance metric does not see. The acceptance gate's smoothed
-            // quality verdict (and the identity-fallback checks) remain the
-            // authoritative regression guards for this mode.
-            0.5
-        } else if has_sub {
-            BASS_MANAGED_CHANNEL_REGRESSION_EPSILON
-        } else {
-            0.0
-        };
-        if ch_result.post_score > ch_result.pre_score + regression_epsilon {
+        if ch_result.post_score > ch_result.pre_score {
             failures.push(format!(
                 "channel '{}' regressed: {:.4} -> {:.4}",
                 name, ch_result.pre_score, ch_result.post_score
@@ -358,6 +251,12 @@ pub(super) fn validate_result(
                 failures.push(format!(
                     "channel '{}' filter {}: near-zero gain {:.3} dB (useless filter)",
                     name, i, bq.db_gain
+                ));
+            }
+            if bq.db_gain > expect.max_boost_db {
+                failures.push(format!(
+                    "channel '{}' filter {}: boost {:.3} dB exceeds registry maximum {:.3} dB",
+                    name, i, bq.db_gain, expect.max_boost_db
                 ));
             }
         }

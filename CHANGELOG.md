@@ -1,3 +1,32 @@
+# 0.5.57
+
+## QA
+
+- Make RoomEQ config loading recursively strict, close fixed-shape input-schema
+  objects, repair ineffective QA overrides, and record the merged effective
+  configuration in output metadata.
+- Replace RoomEQ QA scenario inventories with a declarative registry and
+  cumulative PR/nightly/weekly tiers; add claim verification, five-seed median
+  selection, pairwise option coverage, metamorphic budget checks, held-out
+  acoustic data, and explicit PASS/REVERTED/FAIL reporting.
+- Turn previously permissive or warning-only quality checks into blocking
+  gates, require strict improvement and finite corrective output, and run the
+  FEM generated-data matrix in scheduled weekly QA plus native macOS acoustic
+  CI.
+
+## Fixes
+
+- Aligned SPL of subwoofer in passband and all channels between
+  100-400hz (with minimum being above crossover and maximum is usually
+  specificied in the configuration): this has reduced the
+  inter-channel average a from multiple dB to <0.5dB.
+- Keep enabled group-delay alignment within its configured `max_delay_ms`
+  budget: the runtime acceptance gate's induced-group-delay limit (5 ms for
+  low-latency IIR output) guards against unintentional correction side
+  effects, but it was also reverting the explicitly enabled GD-Opt delay /
+  all-pass stage, silently stripping the exported plugins and reconciling the
+  group-delay summary to `applied=false`.
+
 # 0.5.56
 
 ## RoomEQ

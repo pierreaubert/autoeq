@@ -43,6 +43,16 @@ struct Args {
 }
 
 pub fn run() -> Result<()> {
+    let registry = crate::registry::load_registry()?;
+    let suite = registry
+        .suite_for_runner("features")
+        .ok_or_else(|| anyhow::anyhow!("RoomEQ QA registry has no features suite"))?;
+    for required_claim in ["mandatory_epa", "feature_progression"] {
+        anyhow::ensure!(
+            suite.claims.iter().any(|claim| claim == required_claim),
+            "features registry suite is missing claim '{required_claim}'"
+        );
+    }
     let args = Args::parse();
     let project_root = find_project_root()?;
     let recordings = discover_recordings(&project_root, args.scenario.as_deref())?;

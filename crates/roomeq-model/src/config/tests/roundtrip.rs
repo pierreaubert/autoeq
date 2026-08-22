@@ -55,7 +55,8 @@ fn documented_legacy_mode_and_target_csv_are_not_silently_ignored() {
     assert_eq!(config.optimizer.processing_mode, ProcessingMode::PhaseLinear);
     assert!(matches!(
         config.target_curve,
-        Some(TargetCurveConfig::Path(path)) if path == PathBuf::from("targets/custom.csv")
+        Some(TargetCurveConfig::Path(path))
+            if path == std::path::Path::new("targets/custom.csv")
     ));
 }
 

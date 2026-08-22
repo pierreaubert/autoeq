@@ -41,6 +41,7 @@ pub(super) fn apply_final_correction_safety_gate(
     evaluation_band: (f64, f64),
     sidecar_dir: &Path,
     processing_mode: roomeq_model::ProcessingMode,
+    group_delay_budget_ms: Option<f64>,
 ) {
     use roomeq_engine::quality::CorrectionDecision;
 
@@ -385,6 +386,7 @@ pub(super) fn apply_final_correction_safety_gate(
             evaluation_band,
             sidecar_dir,
             processing_mode.clone(),
+            group_delay_budget_ms,
         ) {
             log::debug!(
                 "Runtime acceptance: pre/post RMS {:.4}/{:.4} dB, pre p95 {:.4} dB, p95 {:.4} dB, worst {:.4} dB, worst-position improvement {:.4} dB, max boost {:.4} dB, induced GD {:?} ms, pre-ringing {:?} dB, latency {:?} ms, realization max {:?} dB, failed {:?}",
@@ -452,6 +454,7 @@ pub(super) fn apply_final_correction_safety_gate(
                         evaluation_band,
                         sidecar_dir,
                         processing_mode,
+                        group_delay_budget_ms,
                     ) {
                         report.acoustic_quality = Some(quality);
                         report.realization_quality = Some(realization);
@@ -635,6 +638,7 @@ fn runtime_acceptance_evidence(
     evaluation_band: (f64, f64),
     sidecar_dir: &Path,
     processing_mode: roomeq_model::ProcessingMode,
+    group_delay_budget_ms: Option<f64>,
 ) -> Option<(
     roomeq_engine::quality::AcousticQualityScorecard,
     roomeq_engine::quality::RealizationQualityEvidence,
@@ -797,7 +801,17 @@ fn runtime_acceptance_evidence(
         // partial-band hybrid contract.
         roomeq_engine::quality::RuntimeOutputClass::Fir
     };
-    let policy = roomeq_engine::quality::RuntimeAcceptancePolicy::for_output_class(output_class);
+    let mut policy =
+        roomeq_engine::quality::RuntimeAcceptancePolicy::for_output_class(output_class);
+    if let Some(budget_ms) = group_delay_budget_ms {
+        // GD-Opt deliberately adds inter-channel alignment delay and all-pass
+        // phase within its configured `max_delay_ms` budget. The default
+        // induced-GD limit guards against *unintentional* correction side
+        // effects; it must not veto an explicitly enabled alignment stage
+        // below its own user-sanctioned budget.
+        policy.max_induced_group_delay_rms_ms =
+            policy.max_induced_group_delay_rms_ms.max(budget_ms);
+    }
     Some((quality, realization, policy))
 }
 
@@ -1654,6 +1668,84 @@ mod tests {
         assert_eq!(summary.per_channel_ap_count, [0]);
     }
 
+    /// A GD-Opt alignment stage adds group delay on purpose, within its
+    /// configured `max_delay_ms` budget. The runtime acceptance gate's default
+    /// induced-GD limit guards against *unintentional* correction side
+    /// effects and must not revert an enabled alignment stage that stays
+    /// inside its own budget (previously the fixed-all-pass QA profile saw its
+    /// AP/delay plugins stripped and its summary reconciled to applied=false).
+    #[test]
+    fn final_safety_gate_keeps_group_delay_stage_within_configured_budget() {
+        fn delayed_result(channel_name: &str, delay_ms: f64) -> RoomOptimizationResult {
+            let mut result = single_channel_room_result(channel_name);
+            let tau_s = delay_ms * 1e-3;
+            let channel = result.channel_results.get_mut(channel_name).unwrap();
+            channel.pre_score = 0.0002;
+            channel.post_score = 0.0002;
+            let n_freq = channel.initial_curve.freq.len();
+            channel.initial_curve.phase = Some(ndarray::Array1::zeros(n_freq));
+            channel.final_curve.phase =
+                Some(channel.initial_curve.freq.mapv(|f| -360.0 * f * tau_s));
+            let chain = result.channels.get_mut(channel_name).unwrap();
+            let mut plugin = roomeq_engine::output::create_delay_plugin(delay_ms);
+            plugin
+                .parameters
+                .as_object_mut()
+                .unwrap()
+                .insert("label".to_string(), serde_json::json!("group_delay_delay"));
+            chain.plugins = vec![plugin];
+            chain.final_curve = Some((&channel.final_curve).into());
+            result
+        }
+
+        // Without a GD-Opt budget the default 5 ms LowLatencyIir side-effect
+        // limit still reverts the stage (existing behavior preserved).
+        // Note: the gate evaluates 1/3-octave-smoothed curves, which
+        // attenuate the measured phase slope; 12 ms of true delay shows up
+        // as ~8 ms of induced GD.
+        let mut reverted = delayed_result("left", 12.0);
+        apply_final_correction_safety_gate(
+            &mut reverted,
+            48_000.0,
+            3,
+            (20.0, 20_000.0),
+            Path::new("."),
+            roomeq_model::ProcessingMode::LowLatency,
+            None,
+        );
+        let report = reverted.metadata.correction_acceptance.as_ref().unwrap();
+        assert!(
+            report
+                .violations
+                .contains(&"induced_group_delay_limit_exceeded".to_string()),
+            "12 ms delay without a GD budget must trip the default limit: {report:?}"
+        );
+        assert!(reverted.channels["left"].plugins.is_empty());
+
+        // With GD-Opt enabled (max_delay_ms = 25), the same stage is inside
+        // its explicit budget and must be kept.
+        let mut kept = delayed_result("left", 12.0);
+        apply_final_correction_safety_gate(
+            &mut kept,
+            48_000.0,
+            3,
+            (20.0, 20_000.0),
+            Path::new("."),
+            roomeq_model::ProcessingMode::LowLatency,
+            Some(25.0),
+        );
+        let report = kept.metadata.correction_acceptance.as_ref().unwrap();
+        assert!(
+            !report
+                .violations
+                .contains(&"induced_group_delay_limit_exceeded".to_string()),
+            "12 ms delay within a 25 ms GD budget must not trip the limit: {report:?}"
+        );
+        assert_eq!(kept.channels["left"].plugins.len(), 1);
+        let policy = report.runtime_policy.as_ref().unwrap();
+        assert_eq!(policy.max_induced_group_delay_rms_ms, 25.0);
+    }
+
     #[test]
     fn final_safety_gate_reports_selected_best_effort_optimizer_evidence() {
         let mut result = single_channel_room_result("left");
@@ -1682,6 +1774,7 @@ mod tests {
             (20.0, 20_000.0),
             Path::new("."),
             roomeq_model::ProcessingMode::LowLatency,
+            None,
         );
 
         let report = result
@@ -1724,6 +1817,7 @@ mod tests {
             (20.0, 20_000.0),
             Path::new("."),
             roomeq_model::ProcessingMode::LowLatency,
+            None,
         );
 
         let report = result.metadata.correction_acceptance.as_ref().unwrap();
@@ -1918,6 +2012,7 @@ mod tests {
             (20.0, 20_000.0),
             Path::new("."),
             roomeq_model::ProcessingMode::LowLatency,
+            None,
         );
         assert_eq!(result.channel_results["left"].post_score, 1.0);
         assert!(result.channels["left"].plugins.is_empty());
@@ -1959,6 +2054,7 @@ mod tests {
             (20.0, 20_000.0),
             Path::new("."),
             roomeq_model::ProcessingMode::LowLatency,
+            None,
         );
 
         assert!(
@@ -1996,6 +2092,7 @@ mod tests {
             (20.0, 20_000.0),
             Path::new("."),
             roomeq_model::ProcessingMode::LowLatency,
+            None,
         );
 
         let report = result
@@ -2053,6 +2150,7 @@ mod tests {
             (20.0, 20_000.0),
             Path::new("."),
             roomeq_model::ProcessingMode::LowLatency,
+            None,
         );
 
         assert_eq!(result.channel_results["lfe"].post_score, 1.0);
@@ -2090,6 +2188,7 @@ mod tests {
             (20.0, 20_000.0),
             Path::new("."),
             roomeq_model::ProcessingMode::LowLatency,
+            None,
         );
 
         assert_eq!(result.channel_results["lfe"].post_score, 1.0);
@@ -2124,6 +2223,7 @@ mod tests {
             (20.0, 20_000.0),
             Path::new("."),
             roomeq_model::ProcessingMode::LowLatency,
+            None,
         );
 
         assert!(result.metadata.correction_acceptance.is_none());
@@ -2161,6 +2261,7 @@ mod tests {
             (20.0, 20_000.0),
             Path::new("."),
             roomeq_model::ProcessingMode::LowLatency,
+            None,
         );
 
         assert_eq!(result.channels["left"].plugins.len(), 1);
@@ -2201,6 +2302,7 @@ mod tests {
             (20.0, 20_000.0),
             Path::new("."),
             roomeq_model::ProcessingMode::LowLatency,
+            None,
         );
 
         assert!(result.channels["left"].plugins.is_empty());
@@ -2232,6 +2334,7 @@ mod tests {
             (20.0, 20_000.0),
             Path::new("."),
             roomeq_model::ProcessingMode::LowLatency,
+            None,
         )
         .expect("missing graph assembly must not suppress runtime evidence");
 
@@ -2307,6 +2410,7 @@ mod tests {
             (20.0, 20_000.0),
             Path::new("."),
             roomeq_model::ProcessingMode::LowLatency,
+            None,
         );
 
         let plugins = &result.channels["WideLeft_support"].plugins;
@@ -2397,6 +2501,7 @@ mod tests {
             (20.0, 20_000.0),
             Path::new("."),
             roomeq_model::ProcessingMode::LowLatency,
+            None,
         );
 
         let plugins = &result.channels["WideLeft_support"].plugins;

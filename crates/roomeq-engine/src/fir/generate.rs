@@ -134,11 +134,20 @@ pub fn generate_fir_correction_prepared(
                     max_time_s: pr.max_time_s,
                 });
 
+        // A causal minimum-phase impulse begins at tap zero. Symmetric windows
+        // (the default Blackman) are zero at tap zero and would erase the
+        // leading energy, destroying the minimum-phase result. Truncation is
+        // sufficient for that phase type.
         let fir_design_config = math_audio_iir_fir::FirDesignConfig {
             n_taps,
             sample_rate,
             phase: phase_type,
             pre_ringing,
+            window: if phase_type == FirPhase::Minimum {
+                math_audio_iir_fir::WindowType::Rectangular
+            } else {
+                math_audio_iir_fir::FirDesignConfig::default().window
+            },
             ..Default::default()
         };
 

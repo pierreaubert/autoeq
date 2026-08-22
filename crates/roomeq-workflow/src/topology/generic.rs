@@ -9,6 +9,7 @@ use super::run::run_channel_via_generic_path_with_frequency_samples;
 use super::types::{WorkflowAssembly, WorkflowExecutor};
 use super::workflow::workflow_stage_event;
 use log::info;
+use rayon::prelude::*;
 use roomeq_engine::error::{AutoeqError, Result};
 use roomeq_engine::room_result::RoomOptimizationResult;
 use roomeq_engine::{PipelineStepId, PipelineStepStatus};
@@ -55,44 +56,54 @@ impl WorkflowExecutor for GenericExecutor {
 
         let total_channels = roles.len();
         let max_iterations = config.optimizer.max_iter;
-        for (channel_index, role) in roles.iter().enumerate() {
-            let speaker_key = sys.speakers.get(role).unwrap_or(role);
-            let source = match config.speakers.get(speaker_key) {
-                Some(SpeakerConfig::Single(s)) => s,
-                _ => {
-                    return Err(AutoeqError::InvalidConfiguration {
-                        message: format!(
-                            "'{}' must be a Single speaker config in generic workflow",
-                            role
-                        ),
-                    });
-                }
-            };
+        let progress_factory = assembly.progress_factory;
+        let probe_arrival_overrides = assembly.probe_arrival_overrides;
+        let frequency_samples = assembly.frequency_samples;
+        let channel_outputs: Result<Vec<_>> = roles
+            .par_iter()
+            .enumerate()
+            .map(|(channel_index, role)| {
+                let speaker_key = sys.speakers.get(role).unwrap_or(role);
+                let source = match config.speakers.get(speaker_key) {
+                    Some(SpeakerConfig::Single(s)) => s,
+                    _ => {
+                        return Err(AutoeqError::InvalidConfiguration {
+                            message: format!(
+                                "'{}' must be a Single speaker config in generic workflow",
+                                role
+                            ),
+                        });
+                    }
+                };
 
-            info!("  Optimizing '{}' via generic path", role);
-            let (chain, ch_result, pre_score, post_score, _fir, _multiseat_rejection) =
-                run_channel_via_generic_path_with_frequency_samples(
-                    role,
-                    source,
-                    config,
-                    0.0,
-                    sample_rate,
-                    output_dir,
-                    &mut assembly.progress_factory,
-                    channel_index,
-                    total_channels,
-                    max_iterations,
-                    assembly.probe_arrival_overrides,
-                    assembly.frequency_samples,
-                )?;
+                info!("  Optimizing '{}' via generic path", role);
+                let (chain, ch_result, pre_score, post_score, _fir, _multiseat_rejection) =
+                    run_channel_via_generic_path_with_frequency_samples(
+                        role,
+                        source,
+                        config,
+                        0.0,
+                        sample_rate,
+                        output_dir,
+                        &progress_factory,
+                        channel_index,
+                        total_channels,
+                        max_iterations,
+                        probe_arrival_overrides,
+                        frequency_samples,
+                    )?;
 
-            info!(
-                "  '{}' pre_score={:.4} post_score={:.4}",
-                role, pre_score, post_score
-            );
+                info!(
+                    "  '{}' pre_score={:.4} post_score={:.4}",
+                    role, pre_score, post_score
+                );
 
+                Ok((role.clone(), chain, ch_result, pre_score, post_score))
+            })
+            .collect();
+        for (role, chain, ch_result, pre_score, post_score) in channel_outputs? {
             channel_chains.insert(role.clone(), chain);
-            channel_results.insert(role.clone(), ch_result);
+            channel_results.insert(role, ch_result);
             pre_scores.push(pre_score);
             post_scores.push(post_score);
         }
@@ -150,6 +161,7 @@ impl WorkflowExecutor for GenericExecutor {
                 correction_acceptance: None,
                 optimizer_evidence: None,
                 stage_outcomes: Vec::new(),
+                effective_config: None,
             },
         })
     }

@@ -3,7 +3,8 @@ use super::enable::enable_gd_trusted_measurements;
 use super::enable::enable_multi_measurement_paths;
 use super::enable::enable_multisub_multi_seat_paths;
 use super::option_override::OptionOverride;
-use super::test_case::TestCase;
+use super::test_case::{RegisteredTestCase, TestCase};
+use crate::registry::{QaTier, QualityCaseKind, load_registry};
 use anyhow::Result;
 use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy, ProcessingMode, RoomConfig};
 use std::path::Path;
@@ -67,7 +68,7 @@ pub(super) fn disable_option(config: &mut RoomConfig, option: &OptionOverride) {
             config.optimizer.allow_delay = Some(false);
         }
         OptionOverride::MultiMeasurementMinimax
-        | OptionOverride::MultiMeasurementVariancePenalized => {
+        | OptionOverride::MultiMeasurementVariancePenalized { .. } => {
             config.optimizer.multi_measurement = Some(MultiMeasurementConfig {
                 strategy: MultiMeasurementStrategy::Average,
                 ..Default::default()
@@ -142,520 +143,84 @@ pub(super) fn prepare_option_measurement_paths(
     Ok(())
 }
 
-pub(super) fn all_test_cases() -> Vec<TestCase> {
-    vec![
-        // Part A: Stereo workflows
-        TestCase::Workflow {
-            name: "Stereo 2.0",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-        },
-        TestCase::Workflow {
-            name: "Stereo 2.1",
-            fem_subdir: "small_stereo_2_1",
-            optim_subdir: "small_stereo_2_1",
-        },
-        TestCase::Workflow {
-            name: "Stereo 2.2 MSO",
-            fem_subdir: "small_stereo_2_2_mso",
-            optim_subdir: "small_stereo_2_2_mso",
-        },
-        TestCase::Workflow {
-            name: "Stereo 2.2 Cardioid",
-            fem_subdir: "small_stereo_2_2_cardioid",
-            optim_subdir: "small_stereo_2_2_cardioid",
-        },
-        TestCase::Workflow {
-            name: "Stereo 2.2 Group",
-            fem_subdir: "small_stereo_2_2_group",
-            optim_subdir: "small_stereo_2_2_group",
-        },
-        TestCase::Workflow {
-            name: "Stereo 2.2 Independent",
-            fem_subdir: "small_stereo_2_2_mso", // same FEM data, different optimizer config
-            optim_subdir: "small_stereo_2_2_independent",
-        },
-        // Part A.2: Home Cinema workflows
-        TestCase::Workflow {
-            name: "Home Cinema 5.1",
-            fem_subdir: "medium_surround_5_1",
-            optim_subdir: "medium_surround_5_1",
-        },
-        TestCase::Workflow {
-            name: "Home Cinema 5.1.4",
-            fem_subdir: "medium_surround_5_1_4",
-            optim_subdir: "medium_surround_5_1_4",
-        },
-        // Part B: Generic path (all 3 modes)
-        TestCase::Generic {
-            name: "Generic small_stereo_2_0",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-        },
-        // Part C: Cross-mode convergence
-        TestCase::CrossModeConvergence {
-            name: "Cross-Mode small_stereo_2_0",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-        },
-        // Part D: Per-option effect tests (single option)
-        TestCase::OptionEffect {
-            name: "OE target_tilt",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![OptionOverride::TargetTilt {
-                slope_db_per_octave: -0.8,
-            }],
-        },
-        TestCase::OptionEffect {
-            name: "OE excursion_protection",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![OptionOverride::ExcursionProtection],
-        },
-        TestCase::OptionEffect {
-            name: "OE schroeder_split",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![OptionOverride::SchroederSplit {
-                schroeder_freq: 300.0,
-                low_max_q: 10.0,
-                high_max_q: 1.0,
-            }],
-        },
-        TestCase::OptionEffect {
-            name: "OE asymmetric_loss",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![OptionOverride::AsymmetricLoss],
-        },
-        TestCase::OptionEffect {
-            name: "OE psychoacoustic",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![OptionOverride::Psychoacoustic],
-        },
-        TestCase::OptionEffect {
-            name: "OE broadband_target_matching",
-            fem_subdir: "medium_surround_5_1",
-            optim_subdir: "medium_surround_5_1",
-            options: vec![OptionOverride::BroadbandTargetMatching],
-        },
-        TestCase::OptionEffect {
-            name: "OE phase_alignment",
-            fem_subdir: "medium_surround_5_1",
-            optim_subdir: "medium_surround_5_1",
-            options: vec![OptionOverride::PhaseAlignment],
-        },
-        TestCase::OptionEffect {
-            name: "OE inter_channel_timbre_matching",
-            fem_subdir: "medium_surround_5_1",
-            optim_subdir: "medium_surround_5_1",
-            options: vec![OptionOverride::InterChannelTimbreMatching {
-                reference_channel: "C".to_string(),
-            }],
-        },
-        TestCase::OptionEffect {
-            name: "OE multi_measurement_minimax",
-            fem_subdir: "medium_multi_seat",
-            optim_subdir: "medium_multi_seat",
-            options: vec![OptionOverride::MultiMeasurementMinimax],
-        },
-        TestCase::OptionEffect {
-            name: "OE multi_measurement_variance",
-            fem_subdir: "medium_multi_seat",
-            optim_subdir: "medium_multi_seat",
-            options: vec![OptionOverride::MultiMeasurementVariancePenalized],
-        },
-        TestCase::OptionEffect {
-            name: "OE production_multi_sub_multi_seat",
-            fem_subdir: "medium_multi_sub_multi_seat",
-            optim_subdir: "medium_multi_sub_multi_seat",
-            options: vec![OptionOverride::ProductionMultiSubMultiSeat],
-        },
-        // --- D.8: Spatial robustness (multi-position correction depth) ---
-        TestCase::OptionEffect {
-            name: "OE spatial_robustness",
-            fem_subdir: "medium_multi_seat",
-            optim_subdir: "medium_multi_seat",
-            options: vec![OptionOverride::SpatialRobustness],
-        },
-        // --- D.9: Pre-ringing control (FIR with bounded pre-ringing) ---
-        TestCase::OptionEffect {
-            name: "OE pre_ringing",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![OptionOverride::PreRinging],
-        },
-        // --- D.10: Mixed-phase mode (IIR + short excess phase FIR) ---
-        TestCase::OptionEffect {
-            name: "OE mixed_phase",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![OptionOverride::MixedPhaseMode],
-        },
-        // --- D.11: Decomposed correction (mode/steady-state weighting) ---
-        TestCase::OptionEffect {
-            name: "OE decomposed_correction",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![OptionOverride::DecomposedCorrection],
-        },
-        // --- D.12: Group-delay optimisation paths ---
-        TestCase::OptionEffect {
-            name: "OE group_delay_missing_coherence_delay_only",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![OptionOverride::GroupDelay {
-                profile: GroupDelayQaProfile::MissingCoherenceDelayOnly,
-            }],
-        },
-        TestCase::OptionEffect {
-            name: "OE group_delay_trusted_delay_only",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![OptionOverride::GroupDelay {
-                profile: GroupDelayQaProfile::TrustedDelayOnly,
-            }],
-        },
-        TestCase::OptionEffect {
-            name: "OE group_delay_fixed_allpass",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![OptionOverride::GroupDelay {
-                profile: GroupDelayQaProfile::FixedAllPass,
-            }],
-        },
-        TestCase::OptionEffect {
-            name: "OE group_delay_adaptive_allpass",
-            fem_subdir: "medium_multi_seat",
-            optim_subdir: "medium_multi_seat",
-            options: vec![OptionOverride::GroupDelay {
-                profile: GroupDelayQaProfile::AdaptiveAllPass,
-            }],
-        },
-        TestCase::OptionEffect {
-            name: "OE group_delay_phase_linear_fir",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![OptionOverride::GroupDelay {
-                profile: GroupDelayQaProfile::PhaseLinearFir,
-            }],
-        },
-        TestCase::OptionEffect {
-            name: "OE group_delay_mixed_phase",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![OptionOverride::GroupDelay {
-                profile: GroupDelayQaProfile::MixedPhase,
-            }],
-        },
-        // ================================================================
-        // Part E: Combination tests — multi-option interaction coverage
-        // ================================================================
+pub(super) fn all_test_cases() -> Vec<RegisteredTestCase> {
+    let registry = load_registry().expect("RoomEQ QA registry must be valid");
+    registry
+        .quality_cases_for(QaTier::Nightly)
+        .map(|spec| {
+            let options = spec
+                .options
+                .iter()
+                .map(|name| {
+                    OptionOverride::from_registry_name(name).unwrap_or_else(|| {
+                        panic!(
+                            "unknown quality option '{name}' in registry case {}",
+                            spec.id
+                        )
+                    })
+                })
+                .collect();
+            let case = match &spec.kind {
+                QualityCaseKind::Workflow => TestCase::Workflow {
+                    name: spec.name.clone(),
+                    fem_subdir: spec.fem_subdir.clone(),
+                    optim_subdir: spec.optim_subdir.clone(),
+                },
+                QualityCaseKind::Generic => TestCase::Generic {
+                    name: spec.name.clone(),
+                    fem_subdir: spec.fem_subdir.clone(),
+                    optim_subdir: spec.optim_subdir.clone(),
+                },
+                QualityCaseKind::CrossModeConvergence => TestCase::CrossModeConvergence {
+                    name: spec.name.clone(),
+                    fem_subdir: spec.fem_subdir.clone(),
+                    optim_subdir: spec.optim_subdir.clone(),
+                },
+                QualityCaseKind::OptionEffect => TestCase::OptionEffect {
+                    name: spec.name.clone(),
+                    fem_subdir: spec.fem_subdir.clone(),
+                    optim_subdir: spec.optim_subdir.clone(),
+                    options,
+                },
+            };
+            RegisteredTestCase {
+                id: spec.id.clone(),
+                claims: spec.claims.clone(),
+                expect: spec.expect,
+                case,
+            }
+        })
+        .collect()
+}
 
-        // --- E.1: Loss shaping pairs (both modify the objective function) ---
-        TestCase::OptionEffect {
-            name: "COMBO asymmetric+psycho",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![
-                OptionOverride::AsymmetricLoss,
-                OptionOverride::Psychoacoustic,
-            ],
-        },
-        // --- E.2: Frequency partitioning (both constrain low freq behaviour) ---
-        TestCase::OptionEffect {
-            name: "COMBO schroeder+excursion",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![
-                OptionOverride::SchroederSplit {
-                    schroeder_freq: 300.0,
-                    low_max_q: 10.0,
-                    high_max_q: 1.0,
-                },
-                OptionOverride::ExcursionProtection,
-            ],
-        },
-        TestCase::OptionEffect {
-            name: "COMBO schroeder+asymmetric",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![
-                OptionOverride::SchroederSplit {
-                    schroeder_freq: 300.0,
-                    low_max_q: 10.0,
-                    high_max_q: 1.0,
-                },
-                OptionOverride::AsymmetricLoss,
-            ],
-        },
-        // --- E.3: Target shaping (tilt defines the target, broadband pre-corrects) ---
-        TestCase::OptionEffect {
-            name: "COMBO tilt+psycho",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![
-                OptionOverride::TargetTilt {
-                    slope_db_per_octave: -0.8,
-                },
-                OptionOverride::Psychoacoustic,
-            ],
-        },
-        TestCase::OptionEffect {
-            name: "COMBO tilt+excursion",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![
-                OptionOverride::TargetTilt {
-                    slope_db_per_octave: -0.8,
-                },
-                OptionOverride::ExcursionProtection,
-            ],
-        },
-        TestCase::OptionEffect {
-            name: "COMBO tilt+broadband 5.1",
-            fem_subdir: "medium_surround_5_1",
-            optim_subdir: "medium_surround_5_1",
-            options: vec![
-                OptionOverride::TargetTilt {
-                    slope_db_per_octave: -0.8,
-                },
-                OptionOverride::BroadbandTargetMatching,
-            ],
-        },
-        // --- E.4: Sub integration combos (phase + other options on 5.1) ---
-        TestCase::OptionEffect {
-            name: "COMBO phase+psycho 5.1",
-            fem_subdir: "medium_surround_5_1",
-            optim_subdir: "medium_surround_5_1",
-            options: vec![
-                OptionOverride::PhaseAlignment,
-                OptionOverride::Psychoacoustic,
-            ],
-        },
-        TestCase::OptionEffect {
-            name: "COMBO phase+asymmetric 5.1",
-            fem_subdir: "medium_surround_5_1",
-            optim_subdir: "medium_surround_5_1",
-            options: vec![
-                OptionOverride::PhaseAlignment,
-                OptionOverride::AsymmetricLoss,
-            ],
-        },
-        TestCase::OptionEffect {
-            name: "COMBO phase+broadband+tilt 5.1",
-            fem_subdir: "medium_surround_5_1",
-            optim_subdir: "medium_surround_5_1",
-            options: vec![
-                OptionOverride::PhaseAlignment,
-                OptionOverride::BroadbandTargetMatching,
-                OptionOverride::TargetTilt {
-                    slope_db_per_octave: -0.8,
-                },
-            ],
-        },
-        // --- E.5: Multi-measurement combos ---
-        TestCase::OptionEffect {
-            name: "COMBO minimax+psycho+asymmetric",
-            fem_subdir: "medium_multi_seat",
-            optim_subdir: "medium_multi_seat",
-            options: vec![
-                OptionOverride::MultiMeasurementMinimax,
-                OptionOverride::Psychoacoustic,
-                OptionOverride::AsymmetricLoss,
-            ],
-        },
-        TestCase::OptionEffect {
-            name: "COMBO variance+tilt+psycho",
-            fem_subdir: "medium_multi_seat",
-            optim_subdir: "medium_multi_seat",
-            options: vec![
-                OptionOverride::MultiMeasurementVariancePenalized,
-                OptionOverride::TargetTilt {
-                    slope_db_per_octave: -0.8,
-                },
-                OptionOverride::Psychoacoustic,
-            ],
-        },
-        TestCase::OptionEffect {
-            name: "COMBO minimax+schroeder+excursion",
-            fem_subdir: "medium_multi_seat",
-            optim_subdir: "medium_multi_seat",
-            options: vec![
-                OptionOverride::MultiMeasurementMinimax,
-                OptionOverride::SchroederSplit {
-                    schroeder_freq: 300.0,
-                    low_max_q: 10.0,
-                    high_max_q: 1.0,
-                },
-                OptionOverride::ExcursionProtection,
-            ],
-        },
-        TestCase::OptionEffect {
-            name: "COMBO gd_adaptive+variance+psycho",
-            fem_subdir: "medium_multi_seat",
-            optim_subdir: "medium_multi_seat",
-            options: vec![
-                OptionOverride::GroupDelay {
-                    profile: GroupDelayQaProfile::AdaptiveAllPass,
-                },
-                OptionOverride::MultiMeasurementVariancePenalized,
-                OptionOverride::Psychoacoustic,
-            ],
-        },
-        TestCase::OptionEffect {
-            name: "COMBO gd_fixed+psycho",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![
-                OptionOverride::GroupDelay {
-                    profile: GroupDelayQaProfile::FixedAllPass,
-                },
-                OptionOverride::Psychoacoustic,
-            ],
-        },
-        // --- E.6: Triple+ combos on stereo (interaction stress tests) ---
-        TestCase::OptionEffect {
-            name: "COMBO tilt+schroeder+asymmetric+psycho",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![
-                OptionOverride::TargetTilt {
-                    slope_db_per_octave: -0.8,
-                },
-                OptionOverride::SchroederSplit {
-                    schroeder_freq: 300.0,
-                    low_max_q: 10.0,
-                    high_max_q: 1.0,
-                },
-                OptionOverride::AsymmetricLoss,
-                OptionOverride::Psychoacoustic,
-            ],
-        },
-        TestCase::OptionEffect {
-            name: "COMBO tilt+excursion+schroeder+psycho",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![
-                OptionOverride::TargetTilt {
-                    slope_db_per_octave: -0.8,
-                },
-                OptionOverride::ExcursionProtection,
-                OptionOverride::SchroederSplit {
-                    schroeder_freq: 300.0,
-                    low_max_q: 10.0,
-                    high_max_q: 1.0,
-                },
-                OptionOverride::Psychoacoustic,
-            ],
-        },
-        TestCase::OptionEffect {
-            name: "COMBO excursion+asymmetric+psycho",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![
-                OptionOverride::ExcursionProtection,
-                OptionOverride::AsymmetricLoss,
-                OptionOverride::Psychoacoustic,
-            ],
-        },
-        // --- E.7: Kitchen sink (all compatible options per scenario) ---
-        TestCase::OptionEffect {
-            name: "COMBO all stereo options",
-            fem_subdir: "small_stereo_2_0",
-            optim_subdir: "small_stereo_2_0",
-            options: vec![
-                OptionOverride::TargetTilt {
-                    slope_db_per_octave: -0.8,
-                },
-                OptionOverride::ExcursionProtection,
-                OptionOverride::SchroederSplit {
-                    schroeder_freq: 300.0,
-                    low_max_q: 10.0,
-                    high_max_q: 1.0,
-                },
-                OptionOverride::AsymmetricLoss,
-                OptionOverride::Psychoacoustic,
-                OptionOverride::BroadbandTargetMatching,
-            ],
-        },
-        TestCase::OptionEffect {
-            name: "COMBO all 5.1 options",
-            fem_subdir: "medium_surround_5_1",
-            optim_subdir: "medium_surround_5_1",
-            options: vec![
-                OptionOverride::TargetTilt {
-                    slope_db_per_octave: -0.8,
-                },
-                OptionOverride::ExcursionProtection,
-                OptionOverride::PhaseAlignment,
-                OptionOverride::AsymmetricLoss,
-                OptionOverride::Psychoacoustic,
-                OptionOverride::BroadbandTargetMatching,
-            ],
-        },
-        TestCase::OptionEffect {
-            name: "COMBO all multi-seat minimax options",
-            fem_subdir: "medium_multi_seat",
-            optim_subdir: "medium_multi_seat",
-            options: vec![
-                OptionOverride::TargetTilt {
-                    slope_db_per_octave: -0.8,
-                },
-                OptionOverride::ExcursionProtection,
-                OptionOverride::SchroederSplit {
-                    schroeder_freq: 300.0,
-                    low_max_q: 10.0,
-                    high_max_q: 1.0,
-                },
-                OptionOverride::AsymmetricLoss,
-                OptionOverride::Psychoacoustic,
-                OptionOverride::MultiMeasurementMinimax,
-            ],
-        },
-        TestCase::OptionEffect {
-            name: "COMBO all multi-seat variance options",
-            fem_subdir: "medium_multi_seat",
-            optim_subdir: "medium_multi_seat",
-            options: vec![
-                OptionOverride::TargetTilt {
-                    slope_db_per_octave: -0.8,
-                },
-                OptionOverride::ExcursionProtection,
-                OptionOverride::SchroederSplit {
-                    schroeder_freq: 300.0,
-                    low_max_q: 10.0,
-                    high_max_q: 1.0,
-                },
-                OptionOverride::AsymmetricLoss,
-                OptionOverride::Psychoacoustic,
-                OptionOverride::MultiMeasurementVariancePenalized,
-            ],
-        },
-        // --- E.8: Sub topology combos (2.1 scenario) ---
-        TestCase::OptionEffect {
-            name: "COMBO phase+excursion+tilt 2.1",
-            fem_subdir: "small_stereo_2_1",
-            optim_subdir: "small_stereo_2_1",
-            options: vec![
-                OptionOverride::PhaseAlignment,
-                OptionOverride::ExcursionProtection,
-                OptionOverride::TargetTilt {
-                    slope_db_per_octave: -0.8,
-                },
-            ],
-        },
-        TestCase::OptionEffect {
-            name: "COMBO phase+asymmetric+psycho 2.1",
-            fem_subdir: "small_stereo_2_1",
-            optim_subdir: "small_stereo_2_1",
-            options: vec![
-                OptionOverride::PhaseAlignment,
-                OptionOverride::AsymmetricLoss,
-                OptionOverride::Psychoacoustic,
-            ],
-        },
-    ]
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+
+    #[test]
+    fn quality_matrix_is_registry_driven_and_all_options_parse() {
+        let cases = all_test_cases();
+        assert_eq!(cases.len(), 35);
+        assert!(
+            cases
+                .iter()
+                .any(|case| matches!(&case.case, TestCase::CrossModeConvergence { .. }))
+        );
+        assert!(cases.iter().any(
+            |case| matches!(&case.case, TestCase::OptionEffect { options, .. } if options.len() >= 6)
+        ));
+        let variance_labels = cases
+            .iter()
+            .flat_map(|case| match &case.case {
+                TestCase::OptionEffect { options, .. } => options
+                    .iter()
+                    .map(ToString::to_string)
+                    .filter(|label| label.starts_with("multi_measurement_variance"))
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        assert!(variance_labels.iter().any(|label| label.contains("0.25")));
+        assert!(variance_labels.iter().any(|label| label.contains("0.10")));
+    }
 }

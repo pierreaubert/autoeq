@@ -619,7 +619,8 @@ mod tests {
                 failed_channels: Vec::new(),
             },
             RuntimeAcceptancePolicy::for_output_class(RuntimeOutputClass::Hybrid),
-        );
+        )
+        .expect("runtime evidence should validate");
         assert!(
             report
                 .violations

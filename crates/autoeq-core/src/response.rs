@@ -58,9 +58,10 @@ pub fn compute_peq_complex_response(
                 let num = b0 + b1 * z_inv + b2 * z_inv_2;
                 let den = 1.0 + a1 * z_inv + a2 * z_inv_2;
 
-                if den.norm_sqr() > 1e-12 {
-                    total_h *= num / den;
-                }
+                // Complex division stays finite even for very small
+                // denominators (numerator shrinks with them); skipping the
+                // factor would silently substitute unity gain.
+                total_h *= num / den;
             }
             total_h
         })
@@ -117,8 +118,11 @@ pub fn apply_complex_response_with_min_db(
     min_response_db: f64,
 ) -> Curve {
     if response.len() != curve.freq.len() {
-        log::warn!(
-            "Complex response length {} does not match curve length {}; unmatched bins are preserved",
+        // A half-applied response silently corrupts every downstream stage;
+        // fail fast instead of truncating. Checked callers should use
+        // `try_apply_complex_response`, which reports this as an error.
+        panic!(
+            "complex response length {} does not match curve length {}",
             response.len(),
             curve.freq.len()
         );
@@ -130,7 +134,7 @@ pub fn apply_complex_response_with_min_db(
         .cloned()
         .unwrap_or_else(|| Array1::zeros(curve.freq.len()));
 
-    for (i, &h) in response.iter().take(curve.freq.len()).enumerate() {
+    for (i, &h) in response.iter().enumerate() {
         let h_mag_db = (20.0 * h.norm().log10()).max(min_response_db);
         let h_phase_deg = h.arg().to_degrees();
 
@@ -330,7 +334,9 @@ mod tests {
     }
 
     #[test]
-    fn audit_mismatched_complex_response_preserves_unmatched_bins() {
+    fn mismatched_complex_response_length_fails_fast() {
+        // A half-filtered curve silently corrupts every downstream stage, so
+        // length mismatches must be loud instead of truncating the response.
         let curve = Curve {
             freq: Array1::from(vec![100.0, 1000.0]),
             spl: Array1::from(vec![1.0, 2.0]),
@@ -341,9 +347,35 @@ mod tests {
             apply_complex_response(&curve, &[Complex64::new(1.0, 0.0)])
         });
 
-        assert!(outcome.is_ok(), "mismatched response must not panic");
-        let out = outcome.unwrap();
-        assert_eq!(out.spl.to_vec(), vec![1.0, 2.0]);
+        assert!(outcome.is_err(), "mismatched response must fail fast");
+    }
+
+    #[test]
+    fn tiny_denominator_filters_contribute_not_skipped() {
+        // High-Q peaking filter: |den|² drops under 1e-12 near its center
+        // frequency while num/den stays finite (= the +12 dB boost). The
+        // filter must contribute its actual ratio instead of being silently
+        // replaced by unity gain.
+        let sample_rate = 48_000.0;
+        let biquad = Biquad::new(BiquadFilterType::Peak, 20.0, sample_rate, 500.0, 12.0);
+        let (a1, a2, _, _, _) = biquad.constants();
+        let w = 2.0 * PI * 20.0 / sample_rate;
+        let z_inv = Complex64::from_polar(1.0, -w);
+        let z_inv_2 = z_inv * z_inv;
+        let den = 1.0 + a1 * z_inv + a2 * z_inv_2;
+        assert!(
+            den.norm_sqr() <= 1e-12,
+            "test precondition: denominator should fall under the old skip threshold, got {}",
+            den.norm_sqr()
+        );
+
+        let frequencies = Array1::from(vec![20.0]);
+        let response = compute_peq_complex_response(&[biquad], &frequencies, sample_rate);
+        let gain_db = 20.0 * response[0].norm().log10();
+        assert!(
+            (gain_db - 12.0).abs() < 0.5,
+            "expected ≈ +12 dB at the boost center, got {gain_db:.3} dB"
+        );
     }
 
     #[test]

@@ -51,7 +51,7 @@ pub fn setup_de_common(
         derive_de_budget(lower_bounds, upper_bounds, population, maxeval);
 
     // Set up objective data for DE with zero penalties since we use native constraints
-    let mut penalty_data = objective_data.clone();
+    let mut penalty_data = objective_data;
     penalty_data.configure_penalties(PenaltyMode::Disabled);
 
     // Log setup configuration (unless in QA mode)

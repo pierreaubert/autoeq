@@ -1,0 +1,58 @@
+{
+  "version": "2.1.0",
+  "system": {
+    "model": "home_cinema",
+    "speakers": {
+      "L": "L_r3m_ported_48k_FL_260706a_direct",
+      "R": "R_r3m_ported_48k_FR_260706a_direct",
+      "C": "C_r3m_ported_48k_FC_260706a_direct",
+      "LFE": "LFE_r3m_ported_48k_LFE_260706a_direct",
+      "BL": "BL_r3m_ported_48k_RL_260706a_direct",
+      "BR": "BR_r3m_ported_48k_RR_260706a_direct"
+    },
+    "subwoofers": {
+      "config": "single",
+      "crossover": "bass_xover",
+      "LFE_r3m_ported_48k_LFE_260706a_direct": "L"
+    }
+  },
+  "crossovers": {
+    "bass_xover": {
+      "type": "LR24",
+      "frequency_range": [60.0, 120.0]
+    }
+  },
+  "optimizer": {
+    "max_freq": 400.0
+  },
+  "speakers": {
+    "L_r3m_ported_48k_FL_260706a_direct": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/L_r3m_ported_48k_FL_260706a_direct.csv",
+      "name": "L r3m_ported_48k_FL_260706a_direct"
+    },
+    "R_r3m_ported_48k_FR_260706a_direct": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/R_r3m_ported_48k_FR_260706a_direct.csv",
+      "name": "R r3m_ported_48k_FR_260706a_direct"
+    },
+    "C_r3m_ported_48k_FC_260706a_direct": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/C_r3m_ported_48k_FC_260706a_direct.csv",
+      "name": "C r3m_ported_48k_FC_260706a_direct"
+    },
+    "LFE_r3m_ported_48k_LFE_260706a_direct": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/LFE_r3m_ported_48k_LFE_260706a_direct.csv",
+      "name": "LFE r3m_ported_48k_LFE_260706a_direct"
+    },
+    "BL_r3m_ported_48k_RL_260706a_direct": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/BL_r3m_ported_48k_RL_260706a_direct.csv",
+      "name": "BL r3m_ported_48k_RL_260706a_direct"
+    },
+    "BR_r3m_ported_48k_RR_260706a_direct": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/BR_r3m_ported_48k_RR_260706a_direct.csv",
+      "name": "BR r3m_ported_48k_RR_260706a_direct"
+    },
+    "L_R_r3m_ported_48k_FL_R_260706a_direct": {
+      "path": "260706a_1800_cdsp_straightthru_baseline_csv/L_R_r3m_ported_48k_FL_R_260706a_direct.csv",
+      "name": "L+R r3m_ported_48k_FL&R_260706a_direct"
+    }
+  }
+}

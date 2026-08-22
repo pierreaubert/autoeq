@@ -10,35 +10,6 @@ pub(super) fn project_root() -> PathBuf {
         .to_path_buf()
 }
 
-pub(super) fn all_scenarios() -> Vec<&'static str> {
-    vec![
-        // Small room
-        "small_stereo_2_0",
-        "small_stereo_2_1",
-        "small_stereo_2_2_mso",
-        "small_stereo_2_2_cardioid",
-        "small_stereo_2_2_group",
-        // Medium room
-        "medium_stereo_2_0",
-        "medium_stereo_2_1",
-        "medium_multi_sub_4",
-        "medium_multi_seat",
-        // Large room
-        "large_stereo_2_0",
-        "large_stereo_2_1",
-        "large_multi_sub_4",
-        "large_multi_seat_2_1",
-        // Medium room surround
-        "medium_surround_5_0",
-        "medium_surround_5_1",
-        "medium_surround_5_1_4",
-        "medium_surround_5_2_4_multi_seat",
-        // Large room surround
-        "large_surround_5_1",
-        "large_surround_5_1_4",
-    ]
-}
-
 pub(super) fn scenario_description(name: &str) -> String {
     match name {
         "small_stereo_2_0" => "Small 3x3x2.4m, stereo 2.0, fullrange".to_string(),

@@ -22,14 +22,14 @@ pub(crate) fn workflow_stage_event(
 }
 
 pub(crate) fn workflow_progress_callback(
-    progress_factory: &mut Option<&mut WorkflowProgressCallbackFactory<'_>>,
+    progress_factory: &Option<&WorkflowProgressCallbackFactory<'_>>,
     role: &str,
     channel_index: usize,
     total_channels: usize,
     max_iterations: usize,
 ) -> Option<WorkflowProgressCallback> {
     progress_factory
-        .as_deref_mut()
+        .as_deref()
         .and_then(|factory| factory(role, channel_index, total_channels, max_iterations))
 }
 

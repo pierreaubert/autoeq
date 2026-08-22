@@ -2,7 +2,7 @@
   "optimizer": {
     "loss_type": "flat",
     "fir": {
-      "taps": 2048,
+      "taps": 1024,
       "phase": "kirkeby"
     },
     "algorithm": "autoeq:de",

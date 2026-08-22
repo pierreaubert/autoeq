@@ -114,10 +114,10 @@ pub(super) fn apply_option_override(config: &mut RoomConfig, option: &OptionOver
                 ..Default::default()
             });
         }
-        OptionOverride::MultiMeasurementVariancePenalized => {
+        OptionOverride::MultiMeasurementVariancePenalized { variance_lambda } => {
             config.optimizer.multi_measurement = Some(MultiMeasurementConfig {
                 strategy: MultiMeasurementStrategy::VariancePenalized,
-                variance_lambda: 1.0,
+                variance_lambda: *variance_lambda,
                 ..Default::default()
             });
         }

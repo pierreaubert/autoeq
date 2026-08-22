@@ -43,6 +43,46 @@ same canonical biquad implementation as runtime DSP. Both formats reject
 convolution, crossovers, routing, or unknown stages instead of silently
 dropping them.
 
+## Choosing a DSP Target
+
+RoomEQ has a canonical JSON output and several external exporters. The
+canonical JSON is the most complete description of the result; an external
+export is a translation into the target's DSP model, not a guarantee that every
+RoomEQ feature remains representable.
+
+| Target | Best use | Preserves | Important limitations |
+|--------|----------|-----------|-----------------------|
+| **RoomEQ JSON / AudioEngine** | Full-fidelity RoomEQ or an AudioEngine-compatible host | Per-channel gain/EQ/delay, multi-driver crossovers, FIR convolution, mixed phase, global matrices, routed bass management, and route metadata | The consumer must implement the RoomEQ output schema, plugin types, channel ordering, sidecar FIR files, and graph routing. |
+| **CamillaDSP (`camilladsp`)** | Multichannel playback with subwoofer/bass-management routing | Routed bass-management graphs, channel mixing, serial filters, and convolution sidecars when the generated paths are available | Requires correct channel numbering, sample rate, sidecar WAV paths, and CamillaDSP configuration. Unsupported RoomEQ plugin features or graph details cannot be carried over automatically. |
+| **Equalizer APO / Peace (`apo`)** | Windows playback with serial filters and representable channel routing | APO-compatible gain/EQ stages and routing that fits APO's channel model | It is not a general RoomEQ graph host. Complex fan-out, unsupported plugins, FIR packaging, or unusual channel layouts may be rejected or simplified; verify the generated channel mapping. |
+| **EasyEffects (`easyeffects`)** | Linux desktop stereo or simple per-channel correction | Serial single-channel-compatible gain and EQ | No full bass-management graph, channel matrix, crossover topology, arbitrary delay, or general FIR/mixed-phase realization. |
+| **Wavelet (`wavelet`)** | Textual magnitude EQ for supported Wavelet workflows | Serial GraphicEQ-style magnitude correction | No routing, delay, crossover, convolution, or phase correction. |
+| **PipeWire (`pipewire`)** | PipeWire filter-chain playback, including suitable FIR sidecars | Serial filter chains and supported convolution sidecars | The exporter is not a complete substitute for the canonical routed graph. Confirm channel routing, sidecar paths, and filter-chain support before using it for home-cinema bass management. |
+| **Roon (`roon`)** | Roon DSP Engine IIR/FIR playback | Serial Roon-supported IIR/FIR stages within Roon's limits | Roon's supported stage set, channel model, latency, and file-handling limits apply; arbitrary RoomEQ matrices, route graphs, or plugin types are not guaranteed. |
+| **REW (`rew`)** | Importing one channel of IIR EQ into REW or another compatible tool | One channel of gain plus supported biquad filters, with an explicit preamp | Exactly one channel. No delay, FIR, crossover, bass routing, matrix, or other graph stage. |
+| **Normalized coefficients (`coefficients`)** | Integrating RoomEQ filters into custom DSP | Any number of serial channels, gain, delay, and the 12 canonical RoomEQ biquad types | No FIR, crossover, matrix, bass routing, or plugin graph. The host must apply `preamp_gain_db`, `delay_ms`, section order, and the documented coefficient convention. |
+
+### Practical Target Selection
+
+- For a 5.1/7.1 system with redirected bass, separate main/sub delays, or
+  multiple crossover groups, use the canonical JSON or CamillaDSP. These are
+  the targets intended to preserve a graph with several source branches
+  feeding one physical sub output.
+- For ordinary stereo IIR room correction, APO, EasyEffects, PipeWire, Roon,
+  or normalized coefficients can be appropriate, depending on the playback
+  host.
+- For FIR or mixed-phase correction, use the canonical JSON or an exporter
+  that explicitly supports the generated convolution sidecars. Keep the WAV
+  files with the exported configuration and verify sample rate, channel order,
+  latency, and pre-ringing policy.
+- Use REW, Wavelet, and normalized coefficients only when you intentionally
+  want a reduced per-channel magnitude-EQ representation.
+
+Every external export validates the source graph against the target's known
+constraints. A successful export means the artifact is representable by that
+target; it does not mean that unsupported RoomEQ routing or temporal behavior
+was silently preserved.
+
 ## Configuration File Format
 
 ### Simple Stereo System
@@ -688,28 +728,28 @@ cargo test -p autoeq --bin roomeq
 
 ## Architecture
 
-The roomeq binary uses autoeq's proven optimization infrastructure:
+Production RoomEQ code is partitioned by responsibility:
 
-1. **Load measurements**: Read frequency response curves from CSV files
-2. **Crossover optimization** (for multi-driver speakers):
-   - Uses `autoeq::loss::DriversFlat` loss function
-   - Optimizes driver gains and crossover frequencies
-   - Computes combined frequency response
-3. **EQ optimization**:
-   - Uses `autoeq::workflow::setup_objective_data` for single measurements
-   - Uses `autoeq::optim::optimize_filters` for optimization
-   - Converts parameters to Biquad filters via `autoeq::x2peq::x2peq`
-4. **Output DSP chain**: Generate AudioEngine PluginConfig JSON
+- `roomeq-model`: configuration, validation, and output contracts.
+- `roomeq-analysis`: measurement, phase, spatial, and acoustic analysis.
+- `roomeq-quality`: perceptual metrics and acoustic-corpus acceptance.
+- `roomeq-engine`: DSP, filter design, optimization, routing, and safety gates.
+- `roomeq-workflow`: configuration loading and complete run orchestration.
+- `roomeq-export`: export-target conformance and artifact generation.
+- `roomeq-cli`: command-line parsing, schemas, and result serialization.
 
-## Implementation Details
+The historical root `src/roomeq/` tree is a compatibility facade, not the
+production implementation boundary.
 
-- **Modules**:
-  - `types.rs`: Configuration and output data structures
-  - `load.rs`: CSV measurement loading
-  - `eq_optim.rs`: EQ optimization using autoeq workflow
-  - `crossover_optim.rs`: Multi-driver crossover optimization
-  - `output.rs`: DSP chain JSON generation
+### QA tiers and scenario registry
 
-- **Dependencies**:
-  - `autoeq`: Core optimization algorithms (includes `cea2034` module for curve data structures)
-  - `math-iir-fir`: Biquad filter implementation
+The machine-readable QA inventory is `qa/registry/roomeq.json`. Registered
+scenarios declare their configuration, solver, processing modes, execution
+tier, claimed features, and quantitative expectations. The `pr`, `nightly`,
+and `weekly` recipes select cumulative cost tiers and do not maintain separate
+case inventories. Stochastic QA runs five deterministic seeds, selects the
+median post-score result, and reports the complete score spread. Runtime safety
+fallback is reported as the distinct `REVERTED` outcome and passes only when
+explicitly permitted by the registry. The full registry-driven FEM matrix and
+the retained generated-data integration matrix also run on the scheduled
+weekly workflow.

@@ -97,6 +97,62 @@ pub(super) fn run_stereo_workflow_tests(
     Ok((out, results))
 }
 
+/// Exercise a non-IIR override through the production config-loading path.
+///
+/// The generic-path matrix deliberately mutates processing modes in memory;
+/// this smoke gate is separate so a broken or misleading checked-in FIR or
+/// Hybrid override cannot remain hidden behind that mutation.
+pub(super) fn run_workflow_override_smoke(
+    name: &str,
+    mode_name: &str,
+    expected_mode: ProcessingMode,
+    base_config_path: &Path,
+    override_config_path: &Path,
+) -> Result<(String, Vec<TestResult>)> {
+    let mut out = String::new();
+    let (mut config, _, _validation) = load_config(base_config_path, Some(override_config_path))?;
+    anyhow::ensure!(
+        config.optimizer.processing_mode == expected_mode,
+        "{} workflow override {} claims {:?}, but its merged config selects {:?}",
+        name,
+        override_config_path.display(),
+        expected_mode,
+        config.optimizer.processing_mode
+    );
+
+    apply_qa_overrides(
+        &mut config,
+        &format!(
+            "{name}:workflow:{}:baseline",
+            mode_name.to_ascii_lowercase()
+        ),
+    );
+    let result = run_optimization(&config)
+        .with_context(|| format!("{name} {mode_name} workflow baseline"))?;
+    let pre = result.combined_pre_score;
+    let scorecard = compute_scorecard(&result);
+    let mut baseline_scorecard = None;
+    let (pass, reason) =
+        evaluate_scorecard(Mutation::Baseline, pre, &scorecard, &mut baseline_scorecard);
+    let status = if pass { "PASS" } else { "FAIL" };
+    writeln!(
+        out,
+        "  {mode_name:>10} workflow: {scorecard} {status} ({reason})"
+    )
+    .unwrap();
+
+    Ok((
+        out,
+        vec![TestResult {
+            label: format!("{name} {mode_name} workflow baseline"),
+            pre_score: pre,
+            scorecard,
+            pass,
+            reason,
+        }],
+    ))
+}
+
 pub(super) fn run_generic_path_tests(
     name: &str,
     base_config_path: &Path,
@@ -129,7 +185,7 @@ pub(super) fn run_generic_path_tests(
         (
             "MixedPhase",
             ProcessingMode::MixedPhase,
-            "optimiser-iir.json", // MixedPhase uses IIR config as base
+            "../modes/optimiser-mixed-phase.json",
             MIXED_PHASE_MUTATIONS,
         ),
     ];
@@ -137,7 +193,21 @@ pub(super) fn run_generic_path_tests(
     let mut mode_baselines: Vec<(&str, f64)> = Vec::new();
 
     for (mode_name, processing_mode, override_file, mutations) in modes {
-        let override_path = override_config_dir.join(override_file);
+        let scenario_override = override_config_dir.join(override_file);
+        let shared_override = override_config_dir
+            .parent()
+            .unwrap_or(override_config_dir)
+            .join("modes")
+            .join(
+                Path::new(override_file)
+                    .file_name()
+                    .unwrap_or_else(|| override_file.as_ref()),
+            );
+        let override_path = if scenario_override.exists() {
+            scenario_override
+        } else {
+            shared_override
+        };
         let mut baseline_scorecard: Option<MetricScorecard> = None;
 
         for mutation in *mutations {
@@ -150,6 +220,12 @@ pub(super) fn run_generic_path_tests(
                 &mut config,
                 &format!("{name}:generic:{mode_name}:{mutation}"),
             );
+            // Generic-path cases compare processing modes and budget/filter
+            // mutations. Keep their scalar objective aligned with the flat-loss
+            // scorecard and runtime acceptance metric; psychoacoustic and
+            // asymmetric objectives have dedicated option-effect cases.
+            config.optimizer.psychoacoustic = false;
+            config.optimizer.asymmetric_loss = false;
             apply_mutation(&mut config, *mutation);
 
             let result = run_optimization(&config)
@@ -264,6 +340,19 @@ pub(super) fn run_cross_mode_convergence_tests(
         )
         .unwrap();
 
+        let pre = result.combined_pre_score;
+        let scorecard = compute_scorecard(&result);
+        let mut baseline_scorecard = None;
+        let (pass, reason) =
+            evaluate_scorecard(Mutation::Baseline, pre, &scorecard, &mut baseline_scorecard);
+        results.push(TestResult {
+            label: format!("{name} {mode_name} correction"),
+            pre_score: pre,
+            scorecard,
+            pass,
+            reason,
+        });
+
         mode_results.push((mode_name, result));
     }
 
@@ -365,7 +454,7 @@ pub(super) fn run_cross_mode_convergence_tests(
 
             results.push(TestResult {
                 label: format!("{} CM-2 GD flatness", name),
-                pre_score: iir_gd_max,
+                pre_score: 0.0,
                 scorecard: placeholder_scorecard(fir_gd_max.max(mixed_gd_max)),
                 pass: cm2_pass,
                 reason: format!(
@@ -558,7 +647,7 @@ pub(super) fn run_option_effect_test(
             all_pass = false;
             results.push(TestResult {
                 label: format!("{} [{}]", name, option),
-                pre_score: baseline_result.combined_post_score,
+                pre_score: option_result.combined_pre_score,
                 scorecard: compute_scorecard(&option_result),
                 pass: false,
                 reason,
@@ -627,26 +716,29 @@ pub(super) fn run_option_effect_test(
         });
     }
 
-    // Surface scorecard warnings even when per-option validators pass
+    // Scorecard failures are blocking quality failures, not warnings.
     if !scorecard_failures.is_empty() {
-        writeln!(
-            out,
-            "  scorecard: {} [{}]",
-            if scorecard_failures.is_empty() {
-                "OK"
-            } else {
-                "WARN"
-            },
-            scorecard_failures.join("; ")
-        )
-        .unwrap();
+        all_pass = false;
+        let reason = scorecard_failures.join("; ");
+        writeln!(out, "  scorecard: FAIL [{}]", reason).unwrap();
+        results.push(TestResult {
+            label: format!("{} [scorecard]", name),
+            pre_score: option_result.combined_pre_score,
+            scorecard: option_scorecard.clone(),
+            pass: false,
+            reason,
+        });
     }
-
-    // If everything passed, push a single PASS result
+    // Registry improvement is correction quality (the option run's own
+    // uncorrected input -> corrected output). The per-option validators above
+    // independently compare the requested effect against the default baseline.
+    // Requiring every tuning value to outperform the default tuning would make
+    // parameter sweeps fail even when they are safe, effective, and distinct.
+    // If everything passed, push a single PASS result.
     if all_pass {
         results.push(TestResult {
             label: name.to_string(),
-            pre_score: baseline_result.combined_post_score,
+            pre_score: option_result.combined_pre_score,
             scorecard: option_scorecard,
             pass: true,
             reason: format!(

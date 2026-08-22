@@ -1,12 +1,13 @@
 use crate::loss::{AsymmetricLossConfig, weighted_mse_asymmetric};
 use crate::optim::loss::{Objective, ObjectiveContext};
 use ndarray::Array1;
+use std::sync::Arc;
 
 /// Asymmetric flat objective for [`LossType::SpeakerFlatAsymmetric`].
 #[derive(Debug, Clone)]
 pub struct AsymmetricStrategy {
     pub config: AsymmetricLossConfig,
-    pub null_suppression: Option<Array1<f64>>,
+    pub null_suppression: Option<Arc<Array1<f64>>>,
 }
 
 impl Objective for AsymmetricStrategy {
@@ -21,7 +22,7 @@ impl Objective for AsymmetricStrategy {
             ctx.min_freq,
             ctx.max_freq,
             &self.config,
-            self.null_suppression.as_ref(),
+            self.null_suppression.as_deref(),
         );
         base_loss + ctx.smoothness_penalty(&peq_spl)
     }

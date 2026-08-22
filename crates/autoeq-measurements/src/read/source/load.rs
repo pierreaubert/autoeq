@@ -165,6 +165,14 @@ fn average_curves_power_domain(curves: &[Curve]) -> Curve {
         .iter()
         .all(|curve| curve.coherence.is_some())
         .then(|| Array1::<f64>::zeros(freqs.len()));
+    let preserve_phase = curves.iter().all(|curve| {
+        curve
+            .phase
+            .as_ref()
+            .is_some_and(|phase| phase.len() == curve.freq.len())
+    });
+    let mut phase_real_sum = preserve_phase.then(|| Array1::<f64>::zeros(freqs.len()));
+    let mut phase_imag_sum = preserve_phase.then(|| Array1::<f64>::zeros(freqs.len()));
 
     for curve in curves {
         let interpolated = interpolate_log_space(&freqs, curve);
@@ -177,16 +185,40 @@ fn average_curves_power_domain(curves: &[Curve]) -> Curve {
         {
             *sum = sum.clone() + coherence;
         }
+        if let (Some(real_sum), Some(imag_sum), Some(phase)) = (
+            phase_real_sum.as_mut(),
+            phase_imag_sum.as_mut(),
+            interpolated.phase.as_ref(),
+        ) {
+            for (((real, imag), &spl), &phase_deg) in real_sum
+                .iter_mut()
+                .zip(imag_sum.iter_mut())
+                .zip(interpolated.spl.iter())
+                .zip(phase.iter())
+            {
+                let amplitude = 10.0_f64.powf(spl / 20.0);
+                let phase_rad = phase_deg.to_radians();
+                *real += amplitude * phase_rad.cos();
+                *imag += amplitude * phase_rad.sin();
+            }
+        }
     }
 
     let avg_power = power_sum / (curves.len() as f64);
     let avg_spl = avg_power.mapv(|p| 10.0 * p.log10());
     let coherence = coherence_sum.map(|sum| sum / curves.len() as f64);
+    let phase = phase_real_sum.zip(phase_imag_sum).map(|(real, imag)| {
+        Array1::from_iter(
+            real.iter()
+                .zip(imag.iter())
+                .map(|(&real, &imag)| imag.atan2(real).to_degrees()),
+        )
+    });
 
     Curve {
         freq: freqs,
         spl: avg_spl,
-        phase: None,
+        phase,
         coherence,
         ..Default::default()
     }
@@ -397,6 +429,24 @@ mod tests {
         assert!(average.min_phase.is_none());
         assert!(average.excess_phase.is_none());
         assert!(average.excess_delay_ms.is_none());
+    }
+
+    #[test]
+    fn load_source_power_average_preserves_circular_phase_when_all_positions_have_phase() {
+        let mut first = sample_curve(0.0);
+        first.phase = Some(Array1::from_vec(vec![170.0, 20.0, -45.0]));
+        let mut second = sample_curve(0.0);
+        second.phase = Some(Array1::from_vec(vec![-170.0, 40.0, -15.0]));
+
+        let source = MeasurementSource::InMemoryMultiple(vec![first, second]);
+        let average = load_source(&source).unwrap();
+        let phase = average
+            .phase
+            .expect("phase must survive all-phase averaging");
+
+        assert!((phase[0].abs() - 180.0).abs() < 1e-9);
+        assert!((phase[1] - 30.0).abs() < 1e-9);
+        assert!((phase[2] + 30.0).abs() < 1e-9);
     }
 
     #[test]

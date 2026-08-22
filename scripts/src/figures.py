@@ -11,6 +11,7 @@ from .dsp import (
     compute_eq_response,
     compute_group_delay,
     generate_freq_points,
+    build_post_dsp_source_curves,
 )
 from .data_extract import (
     compute_y_range,
@@ -725,7 +726,7 @@ def create_combined_figure(data: dict, json_path: "None | object" = None) -> go.
         subplot_titles=[
             "All Original Curves",
             "All EQ Responses",
-            "All Corrected Curves",
+            "All Corrected Curves (Post-DSP per Input)",
         ],
         vertical_spacing=0.1,
         specs=[[{}], [{}], [{}]],
@@ -758,6 +759,7 @@ def create_combined_figure(data: dict, json_path: "None | object" = None) -> go.
     # Per-driver data for channels that are speaker groups
     per_driver_initial: dict[str, list[tuple[str, dict]]] = {}
 
+    post_dsp_curves = build_post_dsp_source_curves(data)
     for channel_name, channel_data in channels:
         driver_curves = _get_driver_initial_curves(channel_data)
         if driver_curves:
@@ -767,7 +769,7 @@ def create_combined_figure(data: dict, json_path: "None | object" = None) -> go.
         else:
             all_initial_curves.append(channel_data.get("initial_curve"))
 
-        final_curve = channel_data.get("final_curve")
+        final_curve = post_dsp_curves.get(channel_name)
         if final_curve and "freq" in final_curve and "spl" in final_curve:
             all_corrected_curves.append(final_curve)
 
@@ -941,10 +943,10 @@ def create_combined_figure(data: dict, json_path: "None | object" = None) -> go.
     )
     trace_y_data.append([0, 0])
 
-    # --- Row 3: Corrected curves (final_curve from JSON) ---
+    # --- Row 3: one microphone-predicted post-DSP curve per input ---
     for i, (channel_name, channel_data) in enumerate(channels):
         color = channel_colors[i % len(channel_colors)]
-        final_curve = channel_data.get("final_curve")
+        final_curve = post_dsp_curves.get(channel_name)
 
         if final_curve and "freq" in final_curve and "spl" in final_curve:
             freq = final_curve["freq"]
@@ -970,25 +972,6 @@ def create_combined_figure(data: dict, json_path: "None | object" = None) -> go.
                 col=1,
             )
             trace_y_data.append(spl_smoothed)
-
-    # Target line on corrected curves
-    if all_corrected_curves:
-        first_corrected = all_corrected_curves[0]
-        if first_corrected:
-            freq = first_corrected["freq"]
-            fig.add_trace(
-                go.Scatter(
-                    x=[freq[0], freq[-1]],
-                    y=[0, 0],
-                    mode="lines",
-                    name="Target (0 dB)",
-                    line=dict(color="rgba(150, 150, 150, 0.5)", width=1, dash="dash"),
-                    showlegend=False,
-                ),
-                row=3,
-                col=1,
-            )
-            trace_y_data.append([0, 0])
 
     # --- Crossover vertical lines on all 3 rows ---
     crossover_freqs = get_all_crossover_frequencies(data)

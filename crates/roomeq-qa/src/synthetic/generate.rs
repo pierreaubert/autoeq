@@ -33,3 +33,25 @@ pub(super) fn generate_ms_option_combos() -> Vec<Vec<&'static str>> {
     }
     combos
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_speaker_matrix_covers_every_option_pair() {
+        let combos = generate_option_combos();
+        for (index, left) in OPTIONS.iter().enumerate() {
+            for right in &OPTIONS[index + 1..] {
+                assert!(
+                    combos
+                        .iter()
+                        .any(|combo| { combo.contains(&left.name) && combo.contains(&right.name) }),
+                    "missing pair {} + {}",
+                    left.name,
+                    right.name
+                );
+            }
+        }
+    }
+}

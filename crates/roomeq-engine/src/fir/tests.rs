@@ -335,6 +335,45 @@ fn test_invalid_phase_type_returns_error() {
 }
 
 #[test]
+fn minimum_phase_flat_correction_keeps_leading_impulse() {
+    // A causal minimum-phase impulse begins at tap zero. A symmetric window
+    // (e.g. default Blackman) is zero at tap zero and would erase the leading
+    // energy, so minimum-phase designs must not be windowed.
+    let freqs: Vec<f64> = (0..100)
+        .map(|i| 20.0 * (1000.0_f64).powf(i as f64 / 99.0))
+        .collect();
+    let measurement = create_test_curve(&freqs, &vec![80.0; 100]);
+    let target = flat_target_like(&measurement);
+
+    let mut config = OptimizerConfig::default();
+    config.fir = Some(FirConfig {
+        taps: 256,
+        phase: "minimum".to_string(),
+        correct_excess_phase: false,
+        phase_smoothing: 0.167,
+        pre_ringing: None,
+        max_boost_db: None,
+    });
+    config.min_freq = 20.0;
+    config.max_freq = 20_000.0;
+
+    let coeffs = generate_fir_correction_prepared(&measurement, &config, &target, 48_000.0)
+        .expect("minimum-phase FIR design should succeed");
+
+    assert_eq!(coeffs.len(), 256);
+    assert!(
+        (coeffs[0] - 1.0).abs() < 1e-6,
+        "minimum-phase flat correction should start with a unit impulse, got {}",
+        coeffs[0]
+    );
+    let tail_energy: f64 = coeffs[1..].iter().map(|value| value * value).sum();
+    assert!(
+        tail_energy < 1e-12,
+        "unexpected tail energy after tap zero: {tail_energy}"
+    );
+}
+
+#[test]
 fn fractional_delay_preserves_high_frequency_magnitude() {
     let mut coeffs = vec![0.0; 256];
     coeffs[64] = 1.0;

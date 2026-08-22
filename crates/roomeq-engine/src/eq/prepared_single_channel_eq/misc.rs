@@ -396,7 +396,7 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
     // Hand the narrow-null suppression mask over to the asymmetric loss
     // branch of `compute_base_fitness`. `None` when `asymmetric_loss` is
     // disabled, in which case the loss does not consume the mask anyway.
-    objective_data.null_suppression = null_suppression_mask;
+    objective_data.null_suppression = null_suppression_mask.map(std::sync::Arc::new);
 
     // Schroeder frequency — used downstream by `run_optimization_pass`
     // to forbid boost filters below the modal crossover. Pull it from

@@ -1,5 +1,6 @@
 {
   "optimizer": {
+    "processing_mode": "low_latency",
     "population": 300,
     "max_q": 10.0,
     "max_db": 12.0

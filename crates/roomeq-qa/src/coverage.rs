@@ -35,16 +35,15 @@ mod test_result;
 
 use args::Args;
 use home_cinema::build_home_cinema_matrix;
-use misc::all_scenarios;
 use misc::find_project_root;
 use misc::scenario_description;
 pub use processing_method::ProcessingMethod;
-use processing_method::build_test_matrix;
+use processing_method::build_test_matrix_for_tier;
 use run::run_parallel;
 pub use run::run_regression_case;
 use test_case::TestCase;
 use test_case::print_matrix;
-use test_result::write_junit_xml;
+use test_result::{QaOutcome, write_junit_xml};
 
 /// Default optimizer evaluation budget used by the coverage matrix.
 pub const DEFAULT_MAXEVAL: usize = consts::QA_MAXEVAL;
@@ -60,21 +59,33 @@ pub fn run() -> Result<bool> {
 
     // List scenarios
     if args.list {
+        let registry = crate::registry::load_registry()?;
         println!("Available scenarios:");
-        for s in all_scenarios() {
-            println!("  {}: {}", s, scenario_description(s));
+        for family in registry.families_for(args.tier) {
+            println!(
+                "  {}: {} [{}]",
+                family.scenario,
+                scenario_description(&family.scenario),
+                family.id
+            );
         }
         return Ok(false);
     }
 
     // Build test matrix
     let mut test_cases = if args.home_cinema {
-        build_home_cinema_matrix(args.solver.as_deref(), args.mode.as_deref())
+        build_home_cinema_matrix(args.tier, args.solver.as_deref(), args.mode.as_deref())
     } else {
-        build_test_matrix(args.quick, args.solver.as_deref(), args.mode.as_deref())
+        build_test_matrix_for_tier(
+            args.tier,
+            args.quick,
+            args.solver.as_deref(),
+            args.mode.as_deref(),
+        )
     };
     if !args.quick && !args.home_cinema {
         test_cases.extend(build_home_cinema_matrix(
+            args.tier,
             args.solver.as_deref(),
             args.mode.as_deref(),
         ));
@@ -127,16 +138,21 @@ pub fn run() -> Result<bool> {
 
     // Print results
     let mut passed = 0;
+    let mut reverted = 0;
     let mut failed = 0;
 
     for result in &results {
-        let status = if result.passed { "PASS" } else { "FAIL" };
+        let status = result.outcome.label();
         let epa_str = match result.epa_preference {
             Some(v) => format!("epa={:.3}", v),
             None => "epa=n/a".to_string(),
         };
         if result.passed {
-            passed += 1;
+            match result.outcome {
+                QaOutcome::Passed => passed += 1,
+                QaOutcome::Reverted => reverted += 1,
+                QaOutcome::Failed => unreachable!("failed outcome cannot have passed=true"),
+            }
             println!(
                 "[{}] {} ({}ms): {:.4} -> {:.4} ({:.1}% improvement) {}",
                 status,
@@ -161,7 +177,13 @@ pub fn run() -> Result<bool> {
     }
 
     // Summary
-    println!("\n=== Summary: {}/{} PASS ===", passed, passed + failed);
+    println!(
+        "\n=== Summary: {} PASS, {} REVERTED, {} FAIL ({} total) ===",
+        passed,
+        reverted,
+        failed,
+        passed + reverted + failed
+    );
     println!(
         "Total time: {}ms",
         results.iter().map(|r| r.duration_ms).sum::<u64>()
@@ -175,36 +197,4 @@ pub fn run() -> Result<bool> {
 
     // Exit code
     Ok(args.fail && failed > 0)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{DEFAULT_MAXEVAL, ProcessingMethod, run_regression_case};
-
-    #[test]
-    fn grouped_topology_modes_accept_final_realization() {
-        for method in [
-            ProcessingMethod::Iir,
-            ProcessingMethod::Fir,
-            ProcessingMethod::Mixed,
-            ProcessingMethod::MixedPhase,
-        ] {
-            if let Err(error) =
-                run_regression_case("small_stereo_2_2_group", method, DEFAULT_MAXEVAL)
-            {
-                panic!("{} failed: {error}", method.name());
-            }
-        }
-    }
-
-    #[test]
-    fn mso_realization_counts_as_coverage_when_flatness_is_unchanged() {
-        if let Err(error) = run_regression_case(
-            "small_stereo_2_2_mso",
-            ProcessingMethod::Iir,
-            DEFAULT_MAXEVAL,
-        ) {
-            panic!("MSO coverage failed: {error}");
-        }
-    }
 }

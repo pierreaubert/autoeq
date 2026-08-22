@@ -1,12 +1,12 @@
-use super::super::x2peq::x2spl;
 use crate::PeqModel;
 use ndarray::Array1;
+use std::sync::Arc;
 
 /// Data needed by the nonlinear ceiling constraint callback.
 #[derive(Clone)]
 pub struct CeilingConstraintData {
     /// Frequency points for evaluation (Hz)
-    pub freqs: Array1<f64>,
+    pub freqs: Arc<Array1<f64>>,
     /// Sample rate in Hz
     pub srate: f64,
     /// Maximum allowed SPL in dB
@@ -20,11 +20,15 @@ pub struct CeilingConstraintData {
 pub fn constraint_ceiling(
     x: &[f64],
     _grad: Option<&mut [f64]>,
-    data: &mut CeilingConstraintData,
+    data: &CeilingConstraintData,
 ) -> f64 {
-    let peq_spl = x2spl(&data.freqs, x, data.srate, data.peq_model);
-
-    viol_ceiling_from_spl(&peq_spl, data.max_db, data.peq_model)
+    crate::optim::compute_ceiling_violation_into(
+        &data.freqs,
+        x,
+        data.srate,
+        data.peq_model,
+        data.max_db,
+    )
 }
 
 /// Compute ceiling constraint violation from frequency response

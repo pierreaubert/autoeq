@@ -33,9 +33,9 @@ pub(super) fn base_optimizer_config(
     let needs_mixed_phase = matches!(processing_mode, ProcessingMode::MixedPhase);
 
     OptimizerConfig {
-        algorithm: "autoeq:de".to_string(),
+        algorithm: "autoeq:cmaes".to_string(),
         num_filters: 7,
-        max_iter: 100,
+        max_iter: 500,
         population: 30,
         min_freq: 20.0,
         max_freq: 20000.0,

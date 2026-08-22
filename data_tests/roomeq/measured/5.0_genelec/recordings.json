@@ -1,0 +1,38 @@
+{
+  "version": "2.1.0",
+  "system": {
+    "model": "home_cinema",
+    "speakers": {
+      "L": "l",
+      "R": "r",
+      "C": "c",
+      "SL": "sl",
+      "SR": "sr"
+    }
+  },
+  "optimizer": {
+    "max_freq": 400.0
+  },
+  "speakers": {
+    "l": {
+      "path": "l.csv",
+      "name": "L 8361A"
+    },
+    "r": {
+      "path": "l.csv",
+      "name": "R 8361A"
+    },
+    "c": {
+      "path": "c.csv",
+      "name": "L 8341A"
+    },
+    "sl": {
+      "path": "sl.csv",
+      "name": "SL 8341A"
+    },
+    "sr": {
+      "path": "sr.csv",
+      "name": "SL 8341A"
+    }
+  }
+}

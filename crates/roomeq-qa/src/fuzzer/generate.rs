@@ -398,7 +398,7 @@ pub(super) fn generate_stratified_config(
     if scenario_kind == ScenarioKind::GroupDelay {
         optimizer.group_delay = Some(GroupDelayOptimizationConfig {
             enabled: true,
-            max_iter: 80,
+            max_iter: 500,
             popsize: 8,
             ap_per_channel: 0,
             min_improvement_db: 0.0,
@@ -642,9 +642,9 @@ pub(super) fn generate_random_mixed_config(
         },
         target_curve,
         optimizer: OptimizerConfig {
-            algorithm: "autoeq:de".to_string(),
+            algorithm: "autoeq:cmaes".to_string(),
             num_filters: 7,
-            max_iter: 100, // Small for fuzzer
+            max_iter: 500,
             min_freq: 20.0,
             max_freq: 20000.0,
             min_q: 0.5,

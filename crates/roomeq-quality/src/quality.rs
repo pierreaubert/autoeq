@@ -795,8 +795,8 @@ mod tests {
                 main_time_ms: None,
                 fir_taps: Some(481),
             }],
-            &[curve.clone()],
-            &[curve],
+            std::slice::from_ref(&curve),
+            std::slice::from_ref(&curve),
             48_000.0,
         );
         assert_eq!(evidence.pre_ringing_energy_db, None);

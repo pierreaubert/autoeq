@@ -162,14 +162,8 @@ pub fn generate_kirkeby_correction_with_smoothing(
     let meas_db: Vec<f64> = measurement.spl.to_vec();
     let meas_phase: Option<Vec<f64>> = measurement.phase.as_ref().map(|p| p.to_vec());
 
-    // Interpolate target to measurement frequencies if needed
-    let target_db: Vec<f64> = if target.freq.len() == measurement.freq.len() {
-        target.spl.to_vec()
-    } else {
-        // Interpolate target to measurement frequency grid
-        let interpolated = autoeq_core::interpolate(&measurement.freq, target);
-        interpolated.spl.to_vec()
-    };
+    // Interpolate target onto the measurement grid when needed
+    let target_db = resolve_target_db_on_measurement_grid(measurement.freq.clone(), target);
 
     generate_kirkeby_correction_raw(
         &meas_freqs,
@@ -178,6 +172,31 @@ pub fn generate_kirkeby_correction_with_smoothing(
         &target_db,
         &config,
     )
+}
+
+/// Resolve target SPL values onto the measurement frequency grid.
+///
+/// Grids are compared element-wise (with tolerance): equal lengths alone do
+/// not imply the same grid, and index-aligned copying of a mismatched target
+/// would place corrections at the wrong frequencies.
+pub fn resolve_target_db_on_measurement_grid(
+    measurement_freq: ndarray::Array1<f64>,
+    target: &Curve,
+) -> Vec<f64> {
+    const GRID_TOLERANCE_HZ: f64 = 1e-6;
+    let same_grid = target.freq.len() == measurement_freq.len()
+        && target.freq.iter().zip(measurement_freq.iter()).all(
+            |(&target_frequency, &measurement_frequency)| {
+                (target_frequency - measurement_frequency).abs()
+                    <= GRID_TOLERANCE_HZ * measurement_frequency.max(1.0)
+            },
+        );
+    if same_grid {
+        return target.spl.to_vec();
+    }
+    autoeq_core::interpolate(&measurement_freq, target)
+        .spl
+        .to_vec()
 }
 
 /// Save FIR coefficients to a WAV file (32-bit float mono)
@@ -225,6 +244,46 @@ mod tests {
         let start = (n as f64 * start_fraction) as usize;
         let end = (n as f64 * end_fraction) as usize;
         coeffs[start..end].iter().map(|x| x * x).sum()
+    }
+
+    #[test]
+    fn equal_length_but_different_grids_are_interpolated_not_index_aligned() {
+        // Same point count, different frequency axes: index-aligned copying
+        // would place target values at the wrong frequencies.
+        let meas_freqs = [20.0, 100.0, 1000.0, 10_000.0, 20_000.0];
+        let meas_curve = create_test_curve(&meas_freqs, &[80.0; 5]);
+        let target_freqs = [25.0, 150.0, 1500.0, 15_000.0, 19_000.0];
+        let mut target = create_test_curve(&target_freqs, &[80.0; 5]);
+        target.spl[2] = 92.0; // +12 dB bump at its own 1500 Hz point
+
+        let resolved =
+            resolve_target_db_on_measurement_grid(Array1::from(meas_freqs.to_vec()), &target);
+
+        assert_eq!(resolved.len(), 5);
+        // At measurement 1000 Hz the bump must be interpolated from the
+        // target's surrounding points (150/1500 Hz), not copied verbatim.
+        assert!(
+            resolved[2] < 90.0,
+            "index-aligned copy would yield 92.0 at 1000 Hz, got {}",
+            resolved[2]
+        );
+        assert!(
+            resolved[2] > 82.0,
+            "interpolation should retain part of the nearby bump, got {}",
+            resolved[2]
+        );
+        // Away from the bump, values stay near the flat level.
+        assert!((resolved[0] - 80.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn identical_grids_copy_target_values_directly() {
+        let freqs = [20.0, 100.0, 1000.0];
+        let target = create_test_curve(&freqs, &[81.0, 82.0, 83.0]);
+
+        let resolved = resolve_target_db_on_measurement_grid(Array1::from(freqs.to_vec()), &target);
+
+        assert_eq!(resolved, vec![81.0, 82.0, 83.0]);
     }
 
     #[test]

@@ -1,13 +1,14 @@
 use super::processing_method::ProcessingMethod;
 use super::solver::Solver;
 use super::test_case::TestCase;
+use crate::registry::{QaTier, load_registry};
 use roomeq_engine::room_result::RoomOptimizationResult;
 use roomeq_model::{
     BassManagementReport, MultiSeatStrategy, RoomConfig, StageOutcome, StageStatus,
 };
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub(super) struct HomeCinemaExpectations {
     pub(super) bass_routing: Option<BassRoutingExpectation>,
     pub(super) adaptive_allpass: bool,
@@ -22,8 +23,8 @@ pub(super) struct HomeCinemaExpectations {
     pub(super) excursion_protection: bool,
     pub(super) schroeder_split: bool,
     pub(super) modal_basis: bool,
-    pub(super) fir_phase: Option<&'static str>,
-    pub(super) allow_safe_rejection: bool,
+    pub(super) fir_phase: Option<String>,
+    pub(super) allow_safe_revert: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -31,254 +32,69 @@ pub(super) struct BassRoutingExpectation {
     pub(super) redirected: bool,
 }
 
-fn case(
-    name: &str,
-    scenario: &str,
-    method: ProcessingMethod,
-    override_name: &str,
-    expectations: HomeCinemaExpectations,
-) -> TestCase {
-    case_with_solver(
-        name,
-        scenario,
-        Solver::Fem,
-        method,
-        override_name,
-        expectations,
-    )
-}
-
-fn case_with_solver(
-    name: &str,
-    scenario: &str,
-    solver: Solver,
-    method: ProcessingMethod,
-    override_name: &str,
-    expectations: HomeCinemaExpectations,
-) -> TestCase {
-    TestCase {
-        scenario: scenario.to_string(),
-        description: name.to_string(),
-        solver,
-        method,
-        case_name: Some(format!("home_cinema {name}")),
-        override_file: Some(PathBuf::from("home_cinema").join(override_name)),
-        home_cinema_expectations: Some(expectations),
-    }
-}
-
 pub(super) fn build_home_cinema_matrix(
+    tier: QaTier,
     solver_filter: Option<&str>,
     mode_filter: Option<&str>,
 ) -> Vec<TestCase> {
-    let lfe_only = HomeCinemaExpectations {
-        bass_routing: Some(BassRoutingExpectation { redirected: false }),
-        ..Default::default()
-    };
-    let redirected = HomeCinemaExpectations {
-        bass_routing: Some(BassRoutingExpectation { redirected: true }),
-        ..Default::default()
-    };
-    let mut cases = vec![
-        case(
-            "iir_lfe_only",
-            "medium_surround_5_1",
-            ProcessingMethod::Iir,
-            "iir_lfe_only.json",
-            lfe_only,
-        ),
-        case(
-            "iir_redirected_bass",
-            "medium_surround_5_1_4",
-            ProcessingMethod::Iir,
-            "iir_redirected_bass.json",
-            HomeCinemaExpectations {
-                allow_safe_rejection: true,
-                ..redirected
-            },
-        ),
-        case(
-            "phase_linear_fir_redirected_bass",
-            "large_surround_5_1_4",
-            ProcessingMethod::Fir,
-            "phase_linear_fir_redirected_bass.json",
-            HomeCinemaExpectations {
-                allow_safe_rejection: true,
-                ..redirected
-            },
-        ),
-        case(
-            "hybrid_redirected_bass",
-            "large_surround_5_1_4",
-            ProcessingMethod::Mixed,
-            "hybrid_redirected_bass.json",
-            redirected,
-        ),
-        case(
-            "mixed_phase_redirected_bass",
-            "medium_surround_5_1_4",
-            ProcessingMethod::MixedPhase,
-            "mixed_phase_redirected_bass.json",
-            HomeCinemaExpectations {
-                allow_safe_rejection: true,
-                ..redirected
-            },
-        ),
-        case(
-            "coherence_adaptive_allpass",
-            "medium_surround_5_2_4_multi_seat",
-            ProcessingMethod::Iir,
-            "coherence_adaptive_allpass.json",
-            HomeCinemaExpectations {
-                bass_routing: Some(BassRoutingExpectation { redirected: true }),
-                adaptive_allpass: true,
-                multi_sub: true,
-                ..Default::default()
-            },
-        ),
-        case(
-            "height_alignment",
-            "large_surround_5_1_4",
-            ProcessingMethod::Iir,
-            "height_alignment.json",
-            HomeCinemaExpectations {
-                height_alignment: true,
-                allow_safe_rejection: true,
-                ..Default::default()
-            },
-        ),
-        case(
-            "all_channel_multi_seat_mso",
-            "medium_surround_5_2_4_multi_seat",
-            ProcessingMethod::Iir,
-            "all_channel_multi_seat_mso.json",
-            HomeCinemaExpectations {
-                bass_routing: Some(BassRoutingExpectation { redirected: true }),
-                all_channel_multi_seat: true,
-                multi_sub: true,
-                ..Default::default()
-            },
-        ),
-        case_with_solver(
-            "sonium_5_1_2_iir_safety",
-            "medium_surround_5_1_2_multi_seat",
-            Solver::FastHybrid,
-            ProcessingMethod::Iir,
-            "sonium_5_1_2_iir_safety.json",
-            HomeCinemaExpectations {
-                channel_count: Some(8),
-                physical_sub_count: Some(1),
-                channel_matching: true,
-                timing_alignment: true,
-                excursion_protection: true,
-                schroeder_split: true,
-                multi_seat_attempted: true,
-                allow_safe_rejection: true,
-                ..Default::default()
-            },
-        ),
-        case_with_solver(
-            "sonium_7_1_2_linear_fir",
-            "large_surround_7_1_2_multi_seat",
-            Solver::FastHybrid,
-            ProcessingMethod::Fir,
-            "sonium_7_1_2_linear_fir.json",
-            HomeCinemaExpectations {
-                channel_count: Some(10),
-                physical_sub_count: Some(1),
-                timing_alignment: true,
-                multi_seat_attempted: true,
-                fir_phase: Some("linear"),
-                allow_safe_rejection: true,
-                ..Default::default()
-            },
-        ),
-        case_with_solver(
-            "sonium_7_4_4_modal_basis",
-            "large_surround_7_4_4_multi_seat",
-            Solver::FastHybrid,
-            ProcessingMethod::Iir,
-            "sonium_7_4_4_modal_basis.json",
-            HomeCinemaExpectations {
-                channel_count: Some(12),
-                physical_sub_count: Some(4),
-                multi_sub: true,
-                multi_seat_attempted: true,
-                modal_basis: true,
-                allow_safe_rejection: true,
-                ..Default::default()
-            },
-        ),
-        case_with_solver(
-            "sonium_7_1_6_kirkeby_fir",
-            "large_surround_7_1_6_multi_seat",
-            Solver::FastHybrid,
-            ProcessingMethod::Fir,
-            "sonium_7_1_6_kirkeby_fir.json",
-            HomeCinemaExpectations {
-                channel_count: Some(14),
-                physical_sub_count: Some(1),
-                height_alignment: true,
-                timing_alignment: true,
-                multi_seat_attempted: true,
-                fir_phase: Some("kirkeby"),
-                allow_safe_rejection: true,
-                ..Default::default()
-            },
-        ),
-        case_with_solver(
-            "sonium_9_1_6_hybrid",
-            "large_surround_9_1_6_multi_seat",
-            Solver::FastHybrid,
-            ProcessingMethod::Mixed,
-            "sonium_9_1_6_hybrid.json",
-            HomeCinemaExpectations {
-                channel_count: Some(16),
-                physical_sub_count: Some(1),
-                channel_matching: true,
-                timing_alignment: true,
-                multi_seat_attempted: true,
-                fir_phase: Some("minimum"),
-                allow_safe_rejection: true,
-                ..Default::default()
-            },
-        ),
-        case_with_solver(
-            "sonium_9_8_6_mixed_phase",
-            "large_surround_9_8_6_multi_seat",
-            Solver::FastHybrid,
-            ProcessingMethod::MixedPhase,
-            "sonium_9_8_6_mixed_phase.json",
-            HomeCinemaExpectations {
-                channel_count: Some(16),
-                physical_sub_count: Some(8),
-                multi_sub: true,
-                multi_seat_attempted: true,
-                modal_basis: true,
-                allow_safe_rejection: true,
-                ..Default::default()
-            },
-        ),
-    ];
-
-    if let Some(filter) = mode_filter
-        && filter != "all"
-    {
-        cases.retain(|test_case| test_case.method.name() == filter);
-    }
-    if let Some(filter) = solver_filter
-        && filter != "all"
-        && filter != "both"
-    {
-        cases.retain(|test_case| test_case.solver.name() == filter);
-    }
-    cases
+    let registry = load_registry().expect("RoomEQ QA registry must be valid");
+    registry
+        .home_cinema_for(tier)
+        .filter(|spec| {
+            mode_filter.is_none_or(|filter| filter == "all" || spec.mode == filter)
+                && solver_filter.is_none_or(|filter| {
+                    filter == "all" || filter == "both" || spec.solver == filter
+                })
+        })
+        .map(|spec| {
+            let solver = match spec.solver.as_str() {
+                "fem" => Solver::Fem,
+                "fast-hybrid" => Solver::FastHybrid,
+                other => panic!("unsupported registry solver '{other}' for {}", spec.id),
+            };
+            let method = ProcessingMethod::from_name(&spec.mode).unwrap_or_else(|| {
+                panic!("unsupported registry mode '{}' for {}", spec.mode, spec.id)
+            });
+            let runtime = &spec.runtime;
+            let expectations = HomeCinemaExpectations {
+                bass_routing: runtime
+                    .redirected_bass
+                    .map(|redirected| BassRoutingExpectation { redirected }),
+                adaptive_allpass: runtime.adaptive_allpass,
+                height_alignment: runtime.height_alignment,
+                all_channel_multi_seat: runtime.all_channel_multi_seat,
+                multi_seat_attempted: runtime.multi_seat_attempted,
+                multi_sub: runtime.multi_sub,
+                channel_count: runtime.channel_count,
+                physical_sub_count: runtime.physical_sub_count,
+                channel_matching: runtime.channel_matching,
+                timing_alignment: runtime.timing_alignment,
+                excursion_protection: runtime.excursion_protection,
+                schroeder_split: runtime.schroeder_split,
+                modal_basis: runtime.modal_basis,
+                fir_phase: runtime.fir_phase.clone(),
+                allow_safe_revert: spec.expect.allow_safe_revert,
+            };
+            TestCase {
+                registry_id: spec.id.clone(),
+                scenario: spec.scenario.clone(),
+                description: spec.id.rsplit('/').next().unwrap_or(&spec.id).to_string(),
+                solver,
+                method,
+                case_name: Some(spec.id.replace('_', " ")),
+                override_file: Some(PathBuf::from("home_cinema").join(&spec.override_config)),
+                home_cinema_expectations: Some(expectations),
+                claims: spec.claims.clone(),
+                expect: spec.expect,
+            }
+        })
+        .collect()
 }
 
 fn validate_stage_outcomes(
     outcomes: &[StageOutcome],
     expect_height_alignment: bool,
-    allow_safe_rejection: bool,
+    allow_safe_revert: bool,
 ) -> Vec<String> {
     let mut failures = Vec::new();
 
@@ -286,7 +102,7 @@ fn validate_stage_outcomes(
         let safe_reversion_stage = outcome.stage.starts_with("final_correction_safety_")
             || outcome.stage == "final_runtime_acceptance";
         if matches!(outcome.status, StageStatus::Degraded | StageStatus::Failed)
-            && !(allow_safe_rejection && safe_reversion_stage)
+            && !(allow_safe_revert && safe_reversion_stage)
         {
             failures.push(format!(
                 "stage '{}' ended {:?}: {}",
@@ -301,7 +117,19 @@ fn validate_stage_outcomes(
             outcome.stage == "height_channel_alignment" && outcome.status == StageStatus::Applied
         })
     {
-        failures.push("height-channel alignment was not applied successfully".to_string());
+        let detail = outcomes
+            .iter()
+            .filter(|outcome| outcome.stage == "height_channel_alignment")
+            .map(|outcome| format!("{:?} ({})", outcome.status, outcome.advisories.join(", ")))
+            .collect::<Vec<_>>();
+        failures.push(format!(
+            "height-channel alignment was not applied successfully: {}",
+            if detail.is_empty() {
+                "stage outcome missing".to_string()
+            } else {
+                detail.join("; ")
+            }
+        ));
     }
     failures
 }
@@ -348,6 +176,39 @@ fn validate_bass_management(
                     "bass routing graph redirected route mismatch: expected {}",
                     expectation.redirected
                 ));
+            }
+            if graph
+                .advisories
+                .iter()
+                .any(|advisory| advisory == "post_dsp_input_levels_aligned_down")
+            {
+                if graph.input_trim_db.is_empty() {
+                    failures
+                        .push("post-DSP input alignment has no recorded input trims".to_string());
+                }
+                for (channel, trim_db) in &graph.input_trim_db {
+                    if !trim_db.is_finite() || *trim_db > 1.0e-9 {
+                        failures.push(format!(
+                            "post-DSP input trim for '{channel}' is not finite/down-only: {trim_db}"
+                        ));
+                    }
+                }
+                for route in graph.routes.iter().filter(|route| {
+                    matches!(
+                        route.route_kind.as_str(),
+                        "redirected_bass_lowpass_to_sub" | "lfe_lowpass_to_sub"
+                    )
+                }) {
+                    let expected_gain = 10.0_f64.powf(route.gain_db / 20.0);
+                    if (route.gain_linear - expected_gain).abs() > 1.0e-9
+                        || (route.matrix_gain - expected_gain).abs() > 1.0e-9
+                    {
+                        failures.push(format!(
+                            "calibrated route gain mismatch for '{}' -> '{}'",
+                            route.source_channel, route.destination
+                        ));
+                    }
+                }
             }
         }
         None => failures.push("bass routing graph is missing".to_string()),
@@ -477,7 +338,7 @@ pub(super) fn validate_home_cinema_result(
     match result.metadata.correction_acceptance.as_ref() {
         Some(acceptance) => {
             if !acceptance.accepted {
-                if expectations.allow_safe_rejection {
+                if expectations.allow_safe_revert {
                     if acceptance.reverted_stages.is_empty() {
                         failures.push(format!(
                             "correction was rejected without reverting unsafe stages: {}",
@@ -491,7 +352,7 @@ pub(super) fn validate_home_cinema_result(
                     ));
                 }
             }
-            if !expectations.allow_safe_rejection && !acceptance.reverted_stages.is_empty() {
+            if !expectations.allow_safe_revert && !acceptance.reverted_stages.is_empty() {
                 failures.push(format!(
                     "correction stages were reverted: {}",
                     acceptance.reverted_stages.join(", ")
@@ -503,7 +364,7 @@ pub(super) fn validate_home_cinema_result(
     failures.extend(validate_stage_outcomes(
         &result.metadata.stage_outcomes,
         expectations.height_alignment,
-        expectations.allow_safe_rejection,
+        expectations.allow_safe_revert,
     ));
 
     if expectations.channel_matching
@@ -720,6 +581,7 @@ pub(super) fn validate_home_cinema_result(
 mod tests {
     use super::super::test_case::load_config_for_test;
     use super::{build_home_cinema_matrix, validate_stage_outcomes};
+    use crate::registry::QaTier;
     use roomeq_model::{SpeakerConfig, StageOutcome, StageStatus};
 
     #[test]
@@ -754,7 +616,7 @@ mod tests {
 
     #[test]
     fn sonium_cinema_matrix_configs_load_with_expected_topologies() {
-        let cases = build_home_cinema_matrix(Some("fast-hybrid"), Some("all"));
+        let cases = build_home_cinema_matrix(QaTier::Weekly, Some("fast-hybrid"), Some("all"));
         assert_eq!(cases.len(), 6);
         for test_case in cases {
             let (config, _) = load_config_for_test(&test_case)
@@ -769,7 +631,7 @@ mod tests {
 
     #[test]
     fn sonium_cinema_phase_supports_arrival_estimation() {
-        let test_case = build_home_cinema_matrix(Some("fast-hybrid"), Some("iir"))
+        let test_case = build_home_cinema_matrix(QaTier::Weekly, Some("fast-hybrid"), Some("iir"))
             .into_iter()
             .find(|case| case.scenario == "medium_surround_5_1_2_multi_seat")
             .unwrap();

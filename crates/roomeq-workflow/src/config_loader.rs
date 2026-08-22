@@ -5,7 +5,7 @@ use crate::measurement::{
 };
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use roomeq_model::validation_rules::{
     RoomValidationContext, collect_sources, validate_room_config_staged,
 };
@@ -68,6 +68,36 @@ fn migrate_legacy_optimizer_mode(config: &mut serde_json::Value) {
     }
 }
 
+/// Deserialize a merged RoomEQ configuration while rejecting every field
+/// that Serde would otherwise ignore.
+///
+/// This deliberately lives at the file-loading boundary instead of adding
+/// `deny_unknown_fields` to the public model types.  Several config enums are
+/// untagged and one system map uses `flatten`; a strict boundary gives JSON
+/// files the desired typo protection without changing programmatic model
+/// construction or the representation of those compatibility types.
+pub fn deserialize_room_config_strict(config: serde_json::Value) -> Result<RoomConfig> {
+    let encoded = serde_json::to_vec(&config).context("Failed to encode merged config JSON")?;
+    let mut deserializer = serde_json::Deserializer::from_slice(&encoded);
+    let mut unknown_fields = Vec::new();
+    let room_config: RoomConfig = serde_ignored::deserialize(&mut deserializer, |path| {
+        unknown_fields.push(path.to_string());
+    })
+    .context("Failed to deserialize merged config into RoomConfig")?;
+
+    unknown_fields.sort();
+    unknown_fields.dedup();
+    if !unknown_fields.is_empty() {
+        bail!(
+            "unknown RoomEQ config field{}: {}",
+            if unknown_fields.len() == 1 { "" } else { "s" },
+            unknown_fields.join(", ")
+        );
+    }
+
+    Ok(room_config)
+}
+
 /// Load, merge, deserialize, validate, and path-resolve a RoomEQ config.
 ///
 /// Returns the resolved configuration, the directory containing the base
@@ -90,6 +120,27 @@ pub fn load_config_with_frequency_samples(
     override_config_path: Option<&Path>,
     frequency_samples: usize,
 ) -> Result<(RoomConfig, PathBuf, ConfigValidationReport)> {
+    let (room_config, config_dir) =
+        load_merged_config_strict(base_config_path, override_config_path)?;
+
+    let validation = validate_room_config_for_workflow_with_frequency_samples(
+        &room_config,
+        RoomValidationContext::production(),
+        frequency_samples,
+    );
+    Ok((room_config, config_dir, validation))
+}
+
+/// Load, merge, strictly deserialize, version-check, and path-resolve a
+/// RoomEQ configuration without loading measurement data.
+///
+/// QA inventory and lint code uses this boundary so config correctness is
+/// cheap to check while production callers continue through [`load_config`]
+/// and its full staged acoustic validation.
+pub fn load_merged_config_strict(
+    base_config_path: &Path,
+    override_config_path: Option<&Path>,
+) -> Result<(RoomConfig, PathBuf)> {
     let config_json = std::fs::read_to_string(base_config_path)
         .with_context(|| format!("Failed to read config: {base_config_path:?}"))?;
     let mut config_value: serde_json::Value =
@@ -108,18 +159,11 @@ pub fn load_config_with_frequency_samples(
         .parent()
         .unwrap_or(Path::new("."))
         .to_path_buf();
-    let mut room_config: RoomConfig = serde_json::from_value(config_value)
-        .context("Failed to deserialize merged config into RoomConfig")?;
+    let mut room_config = deserialize_room_config_strict(config_value)?;
 
     room_config.validate_version().map_err(anyhow::Error::msg)?;
     room_config.resolve_paths(&config_dir);
-
-    let validation = validate_room_config_for_workflow_with_frequency_samples(
-        &room_config,
-        RoomValidationContext::production(),
-        frequency_samples,
-    );
-    Ok((room_config, config_dir, validation))
+    Ok((room_config, config_dir))
 }
 
 /// Run model-owned validation and resolve the acoustic stage through the
@@ -221,6 +265,26 @@ mod tests {
         migrate_legacy_optimizer_mode(&mut config);
         assert_eq!(config["optimizer"]["processing_mode"], "low_latency");
         assert!(config["optimizer"].get("mode").is_none());
+    }
+
+    #[test]
+    fn strict_deserializer_rejects_unknown_root_and_nested_fields() {
+        let root_error = deserialize_room_config_strict(serde_json::json!({
+            "version": "1.0.0",
+            "speakers": {},
+            "optimizer": {},
+            "optimiser": {}
+        }))
+        .expect_err("unknown root field must fail");
+        assert!(root_error.to_string().contains("optimiser"));
+
+        let nested_error = deserialize_room_config_strict(serde_json::json!({
+            "version": "1.0.0",
+            "speakers": {},
+            "optimizer": { "target_tilt": { "slope": -0.8 } }
+        }))
+        .expect_err("unknown nested field must fail");
+        assert!(nested_error.to_string().contains("optimizer.target_tilt"));
     }
 
     #[test]

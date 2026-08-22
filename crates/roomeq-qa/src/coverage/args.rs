@@ -1,5 +1,6 @@
 use super::consts::QA_MAXEVAL;
 use super::misc::num_cpus;
+use crate::registry::QaTier;
 use clap::Parser;
 use std::path::PathBuf;
 
@@ -7,6 +8,10 @@ use std::path::PathBuf;
 #[command(name = "roomeq-qa-coverage")]
 #[command(about = "Comprehensive RoomEQ QA with full scenario matrix")]
 pub(super) struct Args {
+    /// Declarative registry tier (pr, nightly, or weekly)
+    #[arg(long, value_enum, default_value = "weekly")]
+    pub(super) tier: QaTier,
+
     /// Run only fast subset (small rooms, FEM only, IIR only)
     #[arg(long)]
     pub(super) quick: bool,
@@ -68,6 +73,7 @@ impl Args {
 
 #[cfg(test)]
 mod tests {
+    use crate::registry::QaTier;
     use clap::Parser;
 
     use super::Args;
@@ -77,6 +83,7 @@ mod tests {
     fn defaults_are_expected() {
         let args = Args::try_parse_from(["roomeq-qa-coverage"]).unwrap();
         assert!(args.junit.is_none());
+        assert_eq!(args.tier, QaTier::Weekly);
         assert!(!args.home_cinema);
         assert!(args.scenario.is_none());
         assert!(args.case_name.is_none());

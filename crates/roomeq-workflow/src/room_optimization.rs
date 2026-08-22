@@ -292,6 +292,41 @@ fn execute_topology_workflow_with_probe_arrivals(
     route: TopologyRoute,
     frequency_samples: usize,
 ) -> Result<RoomOptimizationResult> {
+    let worker_count = config
+        .optimizer
+        .parallel_threads
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(std::num::NonZeroUsize::get)
+                .unwrap_or(1)
+        })
+        .max(1);
+    let executor = crate::executor::RoomEqExecutor::new(worker_count)?;
+    executor.install(|| {
+        execute_topology_workflow_on_pool(
+            config,
+            sys,
+            sample_rate,
+            output_dir,
+            probe_arrival_overrides,
+            observer_shared,
+            route,
+            frequency_samples,
+        )
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_topology_workflow_on_pool(
+    config: &RoomConfig,
+    sys: &SystemConfig,
+    sample_rate: f64,
+    output_dir: Option<&Path>,
+    probe_arrival_overrides: Option<&HashMap<String, f64>>,
+    observer_shared: &SharedPipelineObserver,
+    route: TopologyRoute,
+    frequency_samples: usize,
+) -> Result<RoomOptimizationResult> {
     let workflow_name = match sys.model {
         SystemModel::Stereo => {
             if sys.subwoofers.is_some() {
@@ -352,8 +387,10 @@ fn execute_topology_workflow_with_probe_arrivals(
     }
 
     let workflow_max_iterations = optimizer_progress_iterations(config);
-    let mut workflow_progress_factory = {
+    let workflow_cancelled = Arc::new(AtomicBool::new(false));
+    let workflow_progress_factory = {
         let observer = Arc::clone(observer_shared);
+        let workflow_cancelled = Arc::clone(&workflow_cancelled);
         move |channel_name: &str,
               speaker_idx: usize,
               total_speakers: usize,
@@ -365,8 +402,13 @@ fn execute_topology_workflow_with_probe_arrivals(
             let max_iterations = workflow_max_iterations;
             let stopped = Arc::new(AtomicBool::new(false));
             let stopped_for_callback = Arc::clone(&stopped);
+            let workflow_cancelled = Arc::clone(&workflow_cancelled);
             let callback: roomeq_engine::OptimProgressCallback =
                 Box::new(move |iter: usize, loss: f64, epa: Option<f64>| {
+                    if workflow_cancelled.load(Ordering::Relaxed) {
+                        stopped_for_callback.store(true, Ordering::Relaxed);
+                        return roomeq_engine::CallbackAction::Stop;
+                    }
                     let base_progress = speaker_idx as f64 / total as f64;
                     let speaker_progress = if max_iterations > 0 {
                         iter as f64 / max_iterations as f64
@@ -397,6 +439,7 @@ fn execute_topology_workflow_with_probe_arrivals(
                         Ok(()) => roomeq_engine::CallbackAction::Continue,
                         Err(_) => {
                             stopped_for_callback.store(true, Ordering::Relaxed);
+                            workflow_cancelled.store(true, Ordering::Relaxed);
                             roomeq_engine::CallbackAction::Stop
                         }
                     }
@@ -428,7 +471,7 @@ fn execute_topology_workflow_with_probe_arrivals(
                 sample_rate,
                 output_dir.unwrap_or(Path::new(".")),
                 probe_arrival_overrides,
-                Some(&mut workflow_progress_factory),
+                Some(&workflow_progress_factory),
                 Some(&mut workflow_stage_callback),
                 frequency_samples,
             )
@@ -440,7 +483,7 @@ fn execute_topology_workflow_with_probe_arrivals(
                 sample_rate,
                 output_dir.unwrap_or(Path::new(".")),
                 probe_arrival_overrides,
-                Some(&mut workflow_progress_factory),
+                Some(&workflow_progress_factory),
                 Some(&mut workflow_stage_callback),
                 frequency_samples,
             )
@@ -452,7 +495,7 @@ fn execute_topology_workflow_with_probe_arrivals(
                 sample_rate,
                 output_dir.unwrap_or(Path::new(".")),
                 probe_arrival_overrides,
-                Some(&mut workflow_progress_factory),
+                Some(&workflow_progress_factory),
                 Some(&mut workflow_stage_callback),
                 frequency_samples,
             )
@@ -1331,6 +1374,7 @@ fn assemble_workflow_result_with_frequency_samples(
         (config.optimizer.min_freq, config.optimizer.max_freq),
         output_dir.unwrap_or(Path::new(".")),
         config.optimizer.processing_mode.clone(),
+        group_delay_budget_ms(config),
     );
 
     emit_pipeline_event(
@@ -1355,6 +1399,19 @@ fn assemble_workflow_result_with_frequency_samples(
     )?;
 
     Ok(result)
+}
+
+/// The induced-group-delay budget an enabled GD-Opt stage is explicitly
+/// allowed to spend: its configured `max_delay_ms`. `None` when group-delay
+/// optimization is disabled, leaving the runtime acceptance policy's default
+/// side-effect limit in force.
+fn group_delay_budget_ms(config: &RoomConfig) -> Option<f64> {
+    config
+        .optimizer
+        .group_delay
+        .as_ref()
+        .filter(|gd| gd.enabled)
+        .map(|gd| gd.max_delay_ms)
 }
 
 fn phase_arrivals_for_channels_with_frequency_samples(
@@ -2647,6 +2704,7 @@ fn assemble_generic_result_with_frequency_samples(
         correction_acceptance: None,
         optimizer_evidence: None,
         stage_outcomes,
+        effective_config: None,
     };
 
     let mut result = RoomOptimizationResult {
@@ -2700,6 +2758,7 @@ fn assemble_generic_result_with_frequency_samples(
         (config.optimizer.min_freq, config.optimizer.max_freq),
         output_dir.unwrap_or(Path::new(".")),
         config.optimizer.processing_mode.clone(),
+        group_delay_budget_ms(config),
     );
 
     emit_pipeline_event(

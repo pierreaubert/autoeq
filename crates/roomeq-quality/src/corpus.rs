@@ -399,6 +399,31 @@ mod tests {
         }
     }
 
+    #[test]
+    fn repository_held_out_curves_are_not_training_measurements() {
+        let path = workspace_root().join("data_tests/roomeq/acoustic_corpus/manifest.json");
+        let manifest =
+            AcousticCorpusManifest::load(&path).expect("repository acoustic manifest should load");
+        for scenario in &manifest.scenarios {
+            let config = std::fs::read_to_string(&scenario.config).unwrap_or_else(|error| {
+                panic!("failed to read {}: {error}", scenario.config.display())
+            });
+            for held_out in &scenario.held_out {
+                let file_name = held_out
+                    .path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .expect("held-out path should have a UTF-8 file name");
+                assert!(
+                    !config.contains(file_name),
+                    "scenario '{}' reuses training measurement '{}' as held-out data",
+                    scenario.id,
+                    held_out.path.display()
+                );
+            }
+        }
+    }
+
     fn valid_scenario() -> AcousticCorpusScenario {
         AcousticCorpusScenario {
             id: "validation-contract".to_string(),
@@ -461,9 +486,14 @@ mod tests {
             promoted_mso
                 .override_config
                 .as_ref()
+                .is_some_and(|path| path.ends_with("qa_optimizer.json"))
+        );
+        assert!(
+            promoted_mso
+                .candidate_override_config
+                .as_ref()
                 .is_some_and(|path| path.ends_with("qa_optimizer_headroom_smooth.json"))
         );
-        assert!(promoted_mso.candidate_override_config.is_none());
         assert!(
             manifest
                 .scenarios

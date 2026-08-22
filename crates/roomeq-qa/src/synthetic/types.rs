@@ -51,3 +51,22 @@ pub(super) struct TestResult {
     pub(super) epa_preference: Option<f64>,
     pub(super) reason: String,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum QaOutcome {
+    Passed,
+    Reverted,
+    Failed,
+}
+
+impl TestResult {
+    pub(super) fn outcome(&self) -> QaOutcome {
+        if self.passed {
+            QaOutcome::Passed
+        } else if self.reason.starts_with("REVERTED:") {
+            QaOutcome::Reverted
+        } else {
+            QaOutcome::Failed
+        }
+    }
+}

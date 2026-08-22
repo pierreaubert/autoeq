@@ -50,6 +50,7 @@ use run::run_multisub_test;
 use run::run_single_test;
 use types::DifficultyLevel;
 use types::MultiSubDifficulty;
+use types::QaOutcome;
 use types::TestResult;
 
 fn multichannel_mode_supported(
@@ -66,6 +67,22 @@ fn multichannel_mode_supported(
 /// unsuccessfully because one or more scenarios failed.
 pub fn run() -> Result<bool> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    let registry = crate::registry::load_registry()?;
+    let suite = registry
+        .suite_for_runner("synthetic")
+        .ok_or_else(|| anyhow::anyhow!("RoomEQ QA registry has no synthetic suite"))?;
+    for required_claim in ["pairwise_options", "topology_mode_cartesian", "multi_seed"] {
+        anyhow::ensure!(
+            suite.claims.iter().any(|claim| claim == required_claim),
+            "synthetic registry suite is missing claim '{required_claim}'"
+        );
+    }
+    let registered_options = suite.cases.iter().map(String::as_str).collect::<Vec<_>>();
+    let implemented_options = OPTIONS.iter().map(|option| option.name).collect::<Vec<_>>();
+    anyhow::ensure!(
+        registered_options == implemented_options,
+        "synthetic option axes drifted from the RoomEQ QA registry: registry={registered_options:?}, implemented={implemented_options:?}"
+    );
 
     let args: Vec<String> = std::env::args().collect();
     let help = args.iter().any(|a| a == "--help" || a == "-h");
@@ -166,7 +183,7 @@ pub fn run() -> Result<bool> {
     let selected_multichannel_modes: &[ProcessingMode] = if full_matrix {
         &full_modes
     } else {
-        &full_modes[..1]
+        &default_modes
     };
     let mode_matches = |mode: &ProcessingMode, filter: &str| {
         let filter = filter.to_ascii_lowercase().replace(['-', '_'], "");
@@ -672,6 +689,22 @@ pub fn run() -> Result<bool> {
 
     println!("\nPer-difficulty summary:");
     print!("{}", summary);
+
+    let passed_outcomes = all_results
+        .iter()
+        .filter(|result| result.outcome() == QaOutcome::Passed)
+        .count();
+    let reverted_outcomes = all_results
+        .iter()
+        .filter(|result| result.outcome() == QaOutcome::Reverted)
+        .count();
+    let failed_outcomes = all_results
+        .iter()
+        .filter(|result| result.outcome() == QaOutcome::Failed)
+        .count();
+    println!(
+        "Outcome summary: PASS={passed_outcomes}, REVERTED={reverted_outcomes}, FAIL={failed_outcomes}"
+    );
 
     if failed > 0 {
         println!("\nFailed tests:");

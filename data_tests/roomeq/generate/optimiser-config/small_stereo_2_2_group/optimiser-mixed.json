@@ -1,5 +1,7 @@
 {
   "optimizer": {
+    "processing_mode": "hybrid",
+    "fir": { "taps": 256, "phase": "kirkeby", "max_boost_db": 10.0 },
     "population": 300,
     "max_q": 10.0,
     "max_db": 12.0

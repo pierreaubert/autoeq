@@ -299,6 +299,7 @@ mod tests {
             correction_acceptance: None,
             optimizer_evidence: None,
             stage_outcomes: Vec::new(),
+            effective_config: None,
         };
 
         process_supporting_source_channels_with_frequency_samples(
@@ -363,6 +364,7 @@ mod tests {
             correction_acceptance: None,
             optimizer_evidence: None,
             stage_outcomes: Vec::new(),
+            effective_config: None,
         };
 
         process_supporting_source_channels_with_frequency_samples(

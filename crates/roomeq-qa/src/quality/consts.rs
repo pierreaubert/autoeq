@@ -88,7 +88,7 @@ pub(super) const SCORECARD_PEAK_TOLERANCE: f64 = 2.00;
 pub(super) const SCORECARD_PEAK_ABSOLUTE_DB: f64 = 3.0;
 
 /// EPA preference must not drop below 85% of baseline.
-pub(super) const SCORECARD_EPA_PREF_MIN_RATIO: f64 = 0.75;
+pub(super) const SCORECARD_EPA_PREF_MIN_RATIO: f64 = 0.85;
 
 /// Acceptable sharpness range (acum). Outside = harsh or dull.
 pub(super) const SCORECARD_SHARPNESS_MIN: f64 = 0.8;

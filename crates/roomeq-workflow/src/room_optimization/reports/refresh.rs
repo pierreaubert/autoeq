@@ -102,13 +102,28 @@ pub(in super::super) fn refresh_final_reports(
     }
     let existing_bass_management = result.metadata.bass_management.clone();
     result.metadata.bass_management = if let Some(existing) = existing_bass_management {
-        roomeq_engine::home_cinema::bass_management_report_with_optimization_and_sample_rate(
-            config,
-            existing.applied_sub_gain_db,
-            existing.gain_limited,
-            existing.optimization,
-            sample_rate,
-        )
+        let mut refreshed =
+            roomeq_engine::home_cinema::bass_management_report_with_optimization_and_sample_rate(
+                config,
+                existing.applied_sub_gain_db,
+                existing.gain_limited,
+                existing.optimization.clone(),
+                sample_rate,
+            );
+        // Topology workflows may calibrate the finalized per-input routing
+        // graph after optimization. Rebuilding from the optimization summary
+        // loses those source-specific trims, so preserve authoritative graph
+        // and headroom evidence across report refresh.
+        if let Some(report) = refreshed.as_mut() {
+            if existing.routing_graph.is_some() {
+                report.routing_graph = existing.routing_graph;
+            }
+            if existing.headroom_simulation.is_some() {
+                report.headroom_simulation = existing.headroom_simulation;
+            }
+            report.advisory = existing.advisory;
+        }
+        refreshed
     } else {
         roomeq_engine::home_cinema::bass_management_report(config, None, false)
     };

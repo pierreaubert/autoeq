@@ -579,7 +579,7 @@ fn optimize_channel_eq_multi_inner(
     // Build one ObjectiveData per curve
     let mut objectives = Vec::with_capacity(curves.len());
     // We'll use the first curve to build Args and as the "primary"
-    let mut primary_objective = None;
+    let mut primary_objective: Option<autoeq_optim::optim::ObjectiveData> = None;
 
     for (i, curve) in curves.iter().enumerate() {
         // Normalize each curve independently
@@ -652,6 +652,18 @@ fn optimize_channel_eq_multi_inner(
         objective_data.smoothness_penalty = optim_params_multi.smoothness_penalty.clone();
         objective_data.max_boost_envelope = config.max_boost_envelope.clone();
         objective_data.min_cut_envelope = config.min_cut_envelope.clone();
+
+        // Aligned multi-position curves normally share an identical frequency
+        // grid and target. Canonicalize those immutable arrays once so objective
+        // evaluation can reuse the candidate PEQ response across positions.
+        if let Some(primary) = primary_objective.as_ref() {
+            if primary.freqs.as_ref() == objective_data.freqs.as_ref() {
+                objective_data.freqs = primary.freqs.clone();
+            }
+            if primary.target.as_ref() == objective_data.target.as_ref() {
+                objective_data.target = primary.target.clone();
+            }
+        }
 
         if i == 0 {
             primary_objective = Some(objective_data.clone());

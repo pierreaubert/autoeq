@@ -39,6 +39,39 @@ fn parse_frequency_samples(value: &str) -> std::result::Result<usize, String> {
     Ok(samples)
 }
 
+/// Mirror the strict file-loader contract in the generated input schema.
+/// Object schemas backed by maps already carry an `additionalProperties`
+/// schema and remain open to their typed values; fixed-shape objects are
+/// closed so misspelled keys fail in editors and external validators too.
+fn close_fixed_object_schemas(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Array(values) => {
+            for value in values {
+                close_fixed_object_schemas(value);
+            }
+        }
+        serde_json::Value::Object(object) => {
+            for value in object.values_mut() {
+                close_fixed_object_schemas(value);
+            }
+            if object.contains_key("properties") && !object.contains_key("additionalProperties") {
+                object.insert(
+                    "additionalProperties".to_string(),
+                    serde_json::Value::Bool(false),
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+fn strict_input_schema() -> serde_json::Value {
+    let mut schema = serde_json::to_value(schema_for!(RoomConfig))
+        .expect("RoomConfig schema must serialize to JSON");
+    close_fixed_object_schemas(&mut schema);
+    schema
+}
+
 /// Room EQ - Optimize multi-channel speaker systems
 #[derive(Parser, Debug)]
 #[command(
@@ -102,7 +135,7 @@ pub fn run_command() -> Result<()> {
     if let Some(schema_type) = &args.schema {
         let json = match schema_type.as_str() {
             "input" => {
-                let schema = schema_for!(RoomConfig);
+                let schema = strict_input_schema();
                 serde_json::to_string_pretty(&schema).unwrap()
             }
             "output" => {
@@ -218,6 +251,7 @@ fn execute_optimization(
     export_format: Option<ExportFormat>,
     export_path: Option<PathBuf>,
 ) -> Result<()> {
+    let has_override = override_config_path.is_some();
     // Load room configuration
     info!("Loading room configuration from {:?}", config_path);
 
@@ -252,7 +286,14 @@ fn execute_optimization(
     // Save output
     info!("Saving DSP chain to {:?}", output_path);
 
-    let dsp_output = result.to_dsp_chain_output();
+    let mut dsp_output = result.to_dsp_chain_output();
+    if has_override {
+        let metadata = dsp_output
+            .metadata
+            .as_mut()
+            .ok_or_else(|| anyhow!("RoomEQ output is missing optimization metadata"))?;
+        metadata.effective_config = Some(Box::new(room_config.clone()));
+    }
     save_dsp_chain(&dsp_output, &output_path)
         .map_err(|e| anyhow!("{}", e))
         .with_context(|| format!("Failed to save DSP chain to {:?}", output_path))?;
@@ -447,7 +488,7 @@ fn collect_measurement_paths(speaker_config: &SpeakerConfig) -> Vec<std::path::P
 mod tests {
     use clap::Parser;
 
-    use super::Args;
+    use super::{Args, strict_input_schema};
 
     #[test]
     fn schema_input_succeeds() {
@@ -488,5 +529,19 @@ mod tests {
     fn frequency_sample_option_rejects_zero() {
         let args = Args::try_parse_from(["roomeq", "--schema", "input", "--freq-samples", "0"]);
         assert!(args.is_err());
+    }
+
+    #[test]
+    fn input_schema_rejects_additional_fixed_object_properties() {
+        let schema = strict_input_schema();
+        assert_eq!(schema["additionalProperties"], serde_json::json!(false));
+        assert_eq!(
+            schema["$defs"]["OptimizerConfig"]["additionalProperties"],
+            serde_json::json!(false)
+        );
+        assert!(
+            schema["$defs"]["SubwooferSystemConfig"]["additionalProperties"].is_object(),
+            "flattened subwoofer-role map must retain its typed additional-properties schema"
+        );
     }
 }

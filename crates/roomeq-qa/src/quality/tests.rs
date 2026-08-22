@@ -2,6 +2,7 @@ use super::consts::qa_seed;
 use super::metric_scorecard::MetricScorecard;
 use super::metric_scorecard::compare_scorecards;
 use super::option_override::OptionOverride;
+use super::types::TestResult;
 use super::validate::{
     TargetTiltValidationOptions, validate_option_effect, validate_phase_alignment,
     validate_target_tilt,
@@ -99,6 +100,7 @@ fn result_with_channel_slopes(
             correction_acceptance: None,
             optimizer_evidence: None,
             stage_outcomes: Vec::new(),
+            effective_config: None,
         },
     }
 }
@@ -221,7 +223,7 @@ fn target_tilt_validator_rejects_wrong_target_curve_slope() {
 }
 
 #[test]
-fn target_tilt_validator_allows_excursion_protection_slope_tradeoff() {
+fn target_tilt_validator_does_not_exempt_excursion_regression() {
     let baseline = result_with_channel_slopes(0.0, 0.0, 0.0);
     let option = result_with_channel_slopes(1.6, 5.3, -0.8);
     let config = empty_room_config();
@@ -252,7 +254,10 @@ fn target_tilt_validator_allows_excursion_protection_slope_tradeoff() {
     );
 
     assert!(!without_excursion);
-    assert!(with_excursion, "{detail}");
+    assert!(
+        !with_excursion,
+        "excursion protection bypassed tilt gate: {detail}"
+    );
 }
 
 #[test]
@@ -328,6 +333,8 @@ fn scorecard_allows_small_roughness_regression_when_baseline_already_violates_li
     let baseline = MetricScorecard {
         flat_loss: 10.0,
         peak_residual_db: 1.0,
+        max_boost_db: 0.0,
+        correction_reverted: false,
         epa_preference: None,
         epa_sharpness: None,
         epa_roughness: Some(0.95),
@@ -336,6 +343,8 @@ fn scorecard_allows_small_roughness_regression_when_baseline_already_violates_li
     let candidate = MetricScorecard {
         flat_loss: 9.0,
         peak_residual_db: 1.0,
+        max_boost_db: 0.0,
+        correction_reverted: false,
         epa_preference: None,
         epa_sharpness: None,
         epa_roughness: Some(0.99),
@@ -356,6 +365,8 @@ fn scorecard_allows_absolute_slack_at_flat_loss_ratio_boundary() {
     let baseline = MetricScorecard {
         flat_loss: 9.0,
         peak_residual_db: 10.0,
+        max_boost_db: 0.0,
+        correction_reverted: false,
         epa_preference: None,
         epa_sharpness: None,
         epa_roughness: None,
@@ -364,6 +375,8 @@ fn scorecard_allows_absolute_slack_at_flat_loss_ratio_boundary() {
     let candidate = MetricScorecard {
         flat_loss: 14.30,
         peak_residual_db: 10.0,
+        max_boost_db: 0.0,
+        correction_reverted: false,
         epa_preference: None,
         epa_sharpness: None,
         epa_roughness: None,
@@ -386,6 +399,8 @@ fn scorecard_with_epa(
     MetricScorecard {
         flat_loss: 1.0,
         peak_residual_db: 1.0,
+        max_boost_db: 0.0,
+        correction_reverted: false,
         epa_preference: preference,
         epa_sharpness: sharpness,
         epa_roughness: roughness,
@@ -470,4 +485,90 @@ fn phase_alignment_validator_skips_flat_ratio_when_target_reshaped() {
     option.combined_post_score = f64::NAN;
     let (pass_nan, _) = validate_phase_alignment(&baseline, &option, 3, true);
     assert!(!pass_nan, "non-finite scores must fail even when reshaped");
+}
+
+#[test]
+fn registry_expectations_block_weak_or_overboosted_quality_results() {
+    let mut results = vec![TestResult {
+        label: "candidate".to_string(),
+        pre_score: 10.0,
+        scorecard: MetricScorecard {
+            flat_loss: 9.9995,
+            peak_residual_db: 1.0,
+            max_boost_db: 12.5,
+            correction_reverted: false,
+            epa_preference: None,
+            epa_sharpness: None,
+            epa_roughness: None,
+            group_delay_std_ms: None,
+        },
+        pass: true,
+        reason: "local checks passed".to_string(),
+    }];
+    super::enforce_registry_expectations(
+        "quality/example",
+        &["option_effect".to_string()],
+        crate::registry::ScenarioExpect {
+            improvement_min_pct: 0.01,
+            max_post_score: 20.0,
+            max_boost_db: 12.0,
+            allow_safe_revert: false,
+        },
+        &mut results,
+    );
+    assert!(!results[0].pass);
+    assert!(results[0].reason.contains("improvement"));
+    assert!(results[0].reason.contains("max boost"));
+    assert!(results[0].reason.contains("registry=quality/example"));
+
+    results[0].pass = true;
+    results[0].reason = "runtime safety fallback".to_string();
+    results[0].scorecard.flat_loss = 9.0;
+    results[0].scorecard.max_boost_db = 0.0;
+    results[0].scorecard.correction_reverted = true;
+    super::enforce_registry_expectations(
+        "quality/allowed-revert",
+        &["workflow".to_string()],
+        crate::registry::ScenarioExpect {
+            improvement_min_pct: 0.01,
+            max_post_score: 20.0,
+            max_boost_db: 12.0,
+            allow_safe_revert: true,
+        },
+        &mut results,
+    );
+    assert!(results[0].pass);
+    assert_eq!(results[0].outcome(), super::types::QaOutcome::Reverted);
+}
+
+#[test]
+fn registry_correction_thresholds_skip_relationship_only_rows() {
+    let mut results = vec![TestResult {
+        label: "cross-mode relationship".to_string(),
+        pre_score: 0.0,
+        scorecard: MetricScorecard {
+            flat_loss: 50.0,
+            peak_residual_db: 0.0,
+            max_boost_db: 50.0,
+            correction_reverted: false,
+            epa_preference: None,
+            epa_sharpness: None,
+            epa_roughness: None,
+            group_delay_std_ms: None,
+        },
+        pass: true,
+        reason: "relationship-specific bound passed".to_string(),
+    }];
+    super::enforce_registry_expectations(
+        "quality/cross-mode",
+        &["cross_mode".to_string()],
+        crate::registry::ScenarioExpect {
+            improvement_min_pct: 0.01,
+            max_post_score: 20.0,
+            max_boost_db: 12.0,
+            allow_safe_revert: false,
+        },
+        &mut results,
+    );
+    assert!(results[0].pass, "{}", results[0].reason);
 }

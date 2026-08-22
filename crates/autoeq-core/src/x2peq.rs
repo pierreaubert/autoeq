@@ -34,6 +34,21 @@ pub fn x2peq(x: &[f64], srate: f64, peq_model: PeqModel) -> Peq {
     let num_filters = param_utils::num_filters(x, peq_model);
     let mut peq = Vec::with_capacity(num_filters);
 
+    x2peq_into(x, srate, peq_model, &mut peq);
+    peq
+}
+
+/// Convert a parameter vector into caller-owned PEQ storage.
+///
+/// Once `peq` has enough capacity this function performs no heap allocation,
+/// which makes it suitable for population-optimizer worker scratch.
+pub fn x2peq_into(x: &[f64], srate: f64, peq_model: PeqModel, peq: &mut Peq) {
+    let num_filters = param_utils::num_filters(x, peq_model);
+    peq.clear();
+    if peq.capacity() < num_filters {
+        peq.reserve(num_filters - peq.capacity());
+    }
+
     for i in 0..num_filters {
         let params = param_utils::get_filter_params(x, i, peq_model);
         let freq = 10f64.powf(params.freq);
@@ -46,8 +61,6 @@ pub fn x2peq(x: &[f64], srate: f64, peq_model: PeqModel) -> Peq {
         let filter = Biquad::new(ftype, freq, srate, q, gain);
         peq.push((1.0, filter));
     }
-
-    peq
 }
 
 /// Convert Peq structure back to parameter vector
@@ -96,14 +109,46 @@ pub fn peq2x(peq: &Peq, peq_model: PeqModel) -> Vec<f64> {
 /// # Returns
 /// Frequency response in dB SPL at the specified frequency points
 pub fn x2spl(freqs: &Array1<f64>, x: &[f64], srate: f64, peq_model: PeqModel) -> Array1<f64> {
-    let peq = x2peq(x, srate, peq_model);
-    crate::iir::compute_peq_response(freqs, &peq, srate).mapv(|db| {
-        if db.is_nan() {
-            db
-        } else {
-            db.max(crate::response::MIN_FILTER_RESPONSE_DB)
+    let mut peq = Peq::new();
+    let mut response = Array1::zeros(freqs.len());
+    let mut filter_scratch = Array1::zeros(freqs.len());
+    x2spl_into(
+        freqs,
+        x,
+        srate,
+        peq_model,
+        &mut peq,
+        &mut response,
+        &mut filter_scratch,
+    );
+    response
+}
+
+/// Compute a parameter-vector PEQ response into reusable caller storage.
+pub fn x2spl_into(
+    freqs: &Array1<f64>,
+    x: &[f64],
+    srate: f64,
+    peq_model: PeqModel,
+    peq: &mut Peq,
+    response: &mut Array1<f64>,
+    filter_scratch: &mut Array1<f64>,
+) {
+    assert_eq!(response.len(), freqs.len());
+    assert_eq!(filter_scratch.len(), freqs.len());
+    x2peq_into(x, srate, peq_model, peq);
+    response.fill(0.0);
+    for (weight, filter) in peq.iter() {
+        filter.np_log_result_into(freqs, filter_scratch);
+        for (sum, value) in response.iter_mut().zip(filter_scratch.iter()) {
+            *sum += *value * *weight;
         }
-    })
+    }
+    for db in response.iter_mut() {
+        if !db.is_nan() {
+            *db = db.max(crate::response::MIN_FILTER_RESPONSE_DB);
+        }
+    }
 }
 
 /// Checked parameter-to-response entry point for untrusted public inputs.
@@ -238,6 +283,49 @@ mod tests {
         let x = vec![3.0, 1.0, 0.0]; // log10(1000)=3, Q=1, gain=0
         let spl = x2spl(&freqs, &x, 48000.0, PeqModel::Pk);
         assert!((spl[0] - 0.0).abs() < 1e-6, "got {}", spl[0]);
+    }
+
+    #[test]
+    fn x2spl_into_matches_and_overwrites_allocating_response() {
+        let freqs = Array1::from_vec(vec![100.0, 500.0, 1_000.0, 5_000.0]);
+        let x = vec![3.0, 1.5, 6.0, 2.7, 0.8, -3.0];
+        let expected = x2spl(&freqs, &x, 48_000.0, PeqModel::Pk);
+        let mut peq = Peq::new();
+        let mut response = Array1::from_elem(freqs.len(), 99.0);
+        let mut filter_scratch = Array1::from_elem(freqs.len(), -99.0);
+
+        x2spl_into(
+            &freqs,
+            &x,
+            48_000.0,
+            PeqModel::Pk,
+            &mut peq,
+            &mut response,
+            &mut filter_scratch,
+        );
+
+        assert!(
+            response
+                .iter()
+                .zip(expected.iter())
+                .all(|(actual, expected)| (actual - expected).abs() < 1e-12)
+        );
+        response.fill(42.0);
+        x2spl_into(
+            &freqs,
+            &x,
+            48_000.0,
+            PeqModel::Pk,
+            &mut peq,
+            &mut response,
+            &mut filter_scratch,
+        );
+        assert!(
+            response
+                .iter()
+                .zip(expected.iter())
+                .all(|(actual, expected)| (actual - expected).abs() < 1e-12)
+        );
     }
 
     #[test]

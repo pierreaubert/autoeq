@@ -2,67 +2,20 @@
   "version": "1.2.0",
   "system": {
     "model": "stereo",
-    "speakers": {
-      "L": "left",
-      "R": "right",
-      "LFE": "lfe"
-    },
-    "subwoofers": {
-      "config": "mso",
-      "crossover": "first",
-      "lfe": "L"
-    }
+    "speakers": { "L": "left", "R": "right", "LFE": "lfe" },
+    "subwoofers": { "config": "single", "crossover": "first", "lfe": "L" }
   },
   "speakers": {
-    "left": {
-      "measurements": [
-        "left_lp0.csv",
-        "left_lp1.csv",
-        "left_lp2.csv",
-        "left_lp3.csv",
-        "left_lp4.csv"
-      ]
-    },
+    "left": { "measurements": ["left_lp0.csv", "left_lp1.csv", "left_lp2.csv", "left_lp3.csv", "left_lp4.csv"] },
     "lfe": {
-      "name": "subs",
-      "subwoofers": [
-        {
-          "measurements": [
-            "sub_bottom_lp0.csv",
-            "sub_bottom_lp1.csv",
-            "sub_bottom_lp2.csv",
-            "sub_bottom_lp3.csv",
-            "sub_bottom_lp4.csv"
-          ]
-        },
-        {
-          "measurements": [
-            "sub_top_lp0.csv",
-            "sub_top_lp1.csv",
-            "sub_top_lp2.csv",
-            "sub_top_lp3.csv",
-            "sub_top_lp4.csv"
-          ]
-        }
-      ],
-      "allpass_optimization": false
+      "name": "cardioid_subs",
+      "front": { "measurements": ["sub_top_lp0.csv", "sub_top_lp1.csv", "sub_top_lp2.csv", "sub_top_lp3.csv", "sub_top_lp4.csv"] },
+      "rear": { "measurements": ["sub_bottom_lp0.csv", "sub_bottom_lp1.csv", "sub_bottom_lp2.csv", "sub_bottom_lp3.csv", "sub_bottom_lp4.csv"] },
+      "separation_meters": 0.5
     },
-    "right": {
-      "measurements": [
-        "right_lp0.csv",
-        "right_lp1.csv",
-        "right_lp2.csv",
-        "right_lp3.csv",
-        "right_lp4.csv"
-      ]
-    }
+    "right": { "measurements": ["right_lp0.csv", "right_lp1.csv", "right_lp2.csv", "right_lp3.csv", "right_lp4.csv"] }
   },
-  "crossovers": {
-    "first": {
-      "type": "LR24",
-      "frequency": 80.0
-    }
-  },
+  "crossovers": { "first": { "type": "LR24", "frequency": 80.0 } },
   "optimizer": {
     "processing_mode": "low_latency",
     "loss_type": "flat",
@@ -84,9 +37,6 @@
     "refine": true,
     "asymmetric_loss": true,
     "smooth_n": 3,
-    "multi_measurement": {
-      "strategy": "minimax",
-      "variance_lambda": 1.0
-    }
+    "multi_measurement": { "strategy": "minimax", "variance_lambda": 1.0 }
   }
 }

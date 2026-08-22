@@ -85,33 +85,6 @@ impl DriversLossData {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn measurement(offset: f64) -> DriverMeasurement {
-        DriverMeasurement {
-            freq: ndarray::Array1::from_vec(vec![20.0, 80.0, 200.0]),
-            spl: ndarray::Array1::from_vec(vec![70.0 + offset; 3]),
-            phase: None,
-        }
-    }
-
-    #[test]
-    fn no_crossover_supports_eight_subwoofers() {
-        let drivers = (0..8).map(|index| measurement(index as f64)).collect();
-        let data = DriversLossData::new(drivers, CrossoverType::None);
-        assert_eq!(data.drivers.len(), 8);
-    }
-
-    #[test]
-    #[should_panic(expected = "at most 4 when using crossovers")]
-    fn crossover_still_rejects_more_than_four_drivers() {
-        let drivers = (0..5).map(|index| measurement(index as f64)).collect();
-        let _ = DriversLossData::new(drivers, CrossoverType::LinkwitzRiley4);
-    }
-}
-
 /// Compute the loss for multi-driver crossover optimization
 ///
 /// # Arguments
@@ -152,4 +125,31 @@ pub fn drivers_flat_loss(
 
     // Compute flatness loss (RMS deviation from zero)
     flat_loss(&data.freq_grid, &normalized, min_freq, max_freq)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn measurement(offset: f64) -> DriverMeasurement {
+        DriverMeasurement {
+            freq: ndarray::Array1::from_vec(vec![20.0, 80.0, 200.0]),
+            spl: ndarray::Array1::from_vec(vec![70.0 + offset; 3]),
+            phase: None,
+        }
+    }
+
+    #[test]
+    fn no_crossover_supports_eight_subwoofers() {
+        let drivers = (0..8).map(|index| measurement(index as f64)).collect();
+        let data = DriversLossData::new(drivers, CrossoverType::None);
+        assert_eq!(data.drivers.len(), 8);
+    }
+
+    #[test]
+    #[should_panic(expected = "at most 4 when using crossovers")]
+    fn crossover_still_rejects_more_than_four_drivers() {
+        let drivers = (0..5).map(|index| measurement(index as f64)).collect();
+        let _ = DriversLossData::new(drivers, CrossoverType::LinkwitzRiley4);
+    }
 }

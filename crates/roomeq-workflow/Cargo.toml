@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+autoeq-core = { workspace = true }
 autoeq-artifacts = { workspace = true }
 autoeq-measurements = { workspace = true }
 chrono = { workspace = true }
@@ -22,11 +23,18 @@ num-complex = { workspace = true }
 roomeq-engine = { workspace = true }
 roomeq-export = { workspace = true }
 roomeq-model = { workspace = true }
+rayon = { workspace = true }
 rustfft = { workspace = true }
 serde = { workspace = true }
+serde_ignored = { workspace = true }
 serde_json = { workspace = true }
 sofa-reader = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+criterion = "0.8.2"
 tempfile = { workspace = true }
+
+[[bench]]
+name = "end_to_end_scaling"
+harness = false

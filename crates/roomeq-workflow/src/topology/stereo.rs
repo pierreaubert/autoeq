@@ -9,6 +9,7 @@ use super::supporting_source::{
 use super::types::{WorkflowAssembly, WorkflowExecutor};
 use super::workflow::workflow_stage_event;
 use log::info;
+use rayon::prelude::*;
 use roomeq_engine::error::Result;
 use roomeq_engine::room_result::RoomOptimizationResult;
 use roomeq_engine::topology::align_channels_to_lowest;
@@ -56,35 +57,45 @@ impl WorkflowExecutor for Stereo20Executor {
 
         let total_channels = single_roles.len();
         let max_iterations = config.optimizer.max_iter;
-        for (channel_index, role) in single_roles.iter().enumerate() {
-            let gain = *gains.get(role).unwrap_or(&0.0);
-            let source = resolve_single_source(role, config, sys)?;
+        let progress_factory = assembly.progress_factory;
+        let probe_arrival_overrides = assembly.probe_arrival_overrides;
+        let frequency_samples = assembly.frequency_samples;
+        let channel_outputs: Result<Vec<_>> = single_roles
+            .par_iter()
+            .enumerate()
+            .map(|(channel_index, role)| {
+                let gain = *gains.get(role).unwrap_or(&0.0);
+                let source = resolve_single_source(role, config, sys)?;
 
-            info!("  Optimizing '{}' with alignment gain {:.2} dB", role, gain);
+                info!("  Optimizing '{}' with alignment gain {:.2} dB", role, gain);
 
-            let (chain, ch_result, pre_score, post_score, _fir, _multiseat_rejection) =
-                run_channel_via_generic_path_with_frequency_samples(
-                    role,
-                    source,
-                    config,
-                    gain,
-                    sample_rate,
-                    output_dir,
-                    &mut assembly.progress_factory,
-                    channel_index,
-                    total_channels,
-                    max_iterations,
-                    assembly.probe_arrival_overrides,
-                    assembly.frequency_samples,
-                )?;
+                let (chain, ch_result, pre_score, post_score, _fir, _multiseat_rejection) =
+                    run_channel_via_generic_path_with_frequency_samples(
+                        role,
+                        source,
+                        config,
+                        gain,
+                        sample_rate,
+                        output_dir,
+                        &progress_factory,
+                        channel_index,
+                        total_channels,
+                        max_iterations,
+                        probe_arrival_overrides,
+                        frequency_samples,
+                    )?;
 
-            info!(
-                "  '{}' pre_score={:.4} post_score={:.4}",
-                role, pre_score, post_score
-            );
+                info!(
+                    "  '{}' pre_score={:.4} post_score={:.4}",
+                    role, pre_score, post_score
+                );
 
+                Ok((role.clone(), chain, ch_result, pre_score, post_score))
+            })
+            .collect();
+        for (role, chain, ch_result, pre_score, post_score) in channel_outputs? {
             channel_chains.insert(role.clone(), chain);
-            channel_results.insert(role.clone(), ch_result);
+            channel_results.insert(role, ch_result);
             pre_scores.push(pre_score);
             post_scores.push(post_score);
         }
@@ -145,6 +156,7 @@ impl WorkflowExecutor for Stereo20Executor {
             correction_acceptance: None,
             optimizer_evidence: None,
             stage_outcomes: Vec::new(),
+            effective_config: None,
         };
 
         // 5. Process supporting-source channels.

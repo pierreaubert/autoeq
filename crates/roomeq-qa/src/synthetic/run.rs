@@ -17,8 +17,23 @@ use super::types::TestResult;
 use anyhow::Result;
 use roomeq_engine::multiseat::{MultiSeatMeasurements, optimize_multiseat};
 use roomeq_engine::room_result::RoomOptimizationResult;
-use roomeq_model::{Curve, MultiSeatConfig, MultiSeatStrategy, ProcessingMode, RoomConfig};
+use roomeq_model::{
+    CorrectionDecision, Curve, MultiSeatConfig, MultiSeatStrategy, ProcessingMode, RoomConfig,
+};
 use std::sync::atomic::Ordering;
+
+fn correction_was_reverted(result: &RoomOptimizationResult) -> bool {
+    result
+        .metadata
+        .correction_acceptance
+        .as_ref()
+        .is_some_and(|report| {
+            matches!(
+                report.decision,
+                CorrectionDecision::RevertedStage | CorrectionDecision::IdentityFallback
+            )
+        })
+}
 
 pub(super) fn run_optimization(config: &RoomConfig) -> Result<RoomOptimizationResult> {
     let id = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -79,29 +94,24 @@ pub(super) fn run_single_test(
         }
     };
 
-    // Validation: optimization should not make things significantly worse.
-    // Strict improvement (post < pre) is ideal, but some option combos change
-    // the loss landscape (e.g., decomposed correction weights may reduce optimizer
-    // freedom). Allow up to 20% regression as acceptable.
+    // Every quality scenario must improve over its uncorrected baseline.
     let pre = result.combined_pre_score;
     let post = result.combined_post_score;
     let epa = avg_epa_preference(&result);
-    let regression_tolerance = 1.20; // 20% worse is acceptable
 
-    if post > pre * regression_tolerance {
+    if post >= pre {
+        let verdict = if correction_was_reverted(&result) {
+            "REVERTED"
+        } else {
+            "No improvement"
+        };
         return TestResult {
             name: test_name,
             passed: false,
             pre_score: pre,
             post_score: post,
             epa_preference: epa,
-            reason: format!(
-                "Severe regression: pre={:.3}, post={:.3} ({:.1}% worse, limit {:.0}%)",
-                pre,
-                post,
-                (post / pre - 1.0) * 100.0,
-                (regression_tolerance - 1.0) * 100.0,
-            ),
+            reason: format!("{verdict}: pre={:.3}, post={:.3}", pre, post),
         };
     }
 
@@ -169,6 +179,11 @@ pub(super) fn run_multisub_test(
     // refinement without mislabeling it as the full MSO audibility margin.
     let required_improvement = 0.05_f64.max(pre.abs() * 0.02);
     if post > pre - required_improvement {
+        let verdict = if correction_was_reverted(&result) {
+            "REVERTED"
+        } else {
+            "Meaningful audibility margin not reached"
+        };
         return TestResult {
             name: test_name,
             passed: false,
@@ -176,7 +191,7 @@ pub(super) fn run_multisub_test(
             post_score: post,
             epa_preference: epa,
             reason: format!(
-                "Meaningful audibility margin not reached: pre={:.3}, post={:.3}, required improvement={:.3}",
+                "{verdict}: pre={:.3}, post={:.3}, required improvement={:.3}",
                 pre, post, required_improvement,
             ),
         };
@@ -593,33 +608,12 @@ pub(super) fn run_multichannel_test(
         }
     }
 
-    let runtime_safely_reverted =
-        result
-            .metadata
-            .correction_acceptance
-            .as_ref()
-            .is_some_and(|report| {
-                !report.reverted_stages.is_empty()
-                    && report
-                        .violations
-                        .iter()
-                        .any(|violation| violation == "runtime_policy_violation_reverted")
-            });
-    if post > pre * 1.20 && runtime_safely_reverted {
-        return TestResult {
-            name: test_name,
-            passed: true,
-            pre_score: pre,
-            post_score: post,
-            epa_preference: epa,
-            reason: format!(
-                "Safe runtime-policy rejection: {:.3} -> {:.3}; correction stages reverted",
-                pre, post
-            ),
+    if post >= pre {
+        let verdict = if correction_was_reverted(&result) {
+            "REVERTED"
+        } else {
+            "No improvement"
         };
-    }
-
-    if post > pre * 1.20 {
         let mut channel_scores: Vec<_> = result
             .channel_results
             .iter()
@@ -649,7 +643,7 @@ pub(super) fn run_multichannel_test(
             post_score: post,
             epa_preference: epa,
             reason: format!(
-                "Severe regression: pre={:.3}, post={:.3} ({:.1}% worse); {}; stages=[{}]; acceptance=[{}]",
+                "{verdict}: pre={:.3}, post={:.3} ({:.1}% change); {}; stages=[{}]; acceptance=[{}]",
                 pre,
                 post,
                 (post / pre - 1.0) * 100.0,

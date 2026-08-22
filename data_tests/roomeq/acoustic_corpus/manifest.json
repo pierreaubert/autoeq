@@ -6,21 +6,45 @@
       "tier": "pr",
       "provenance": "fem",
       "topology": "stereo_2_0_multiseat",
-      "channels": ["L", "R"],
+      "channels": [
+        "L",
+        "R"
+      ],
       "sample_rate": 48000.0,
       "config": "../generate/fem/medium_multi_seat/config.json",
-      "override_config": "qa_optimizer.json",
+      "override_config": "qa_optimizer_de_multiseat.json",
       "candidate_override_config": "qa_optimizer_headroom_smooth.json",
-      "evaluation_band_hz": [20.0, 500.0],
+      "evaluation_band_hz": [
+        20.0,
+        500.0
+      ],
       "schroeder_hz": 200.0,
       "held_out": [
-        { "channel": "L", "path": "../generate/fem/medium_multi_seat/left_lp1.csv" },
-        { "channel": "L", "path": "../generate/fem/medium_multi_seat/left_lp2.csv" },
-        { "channel": "R", "path": "../generate/fem/medium_multi_seat/right_lp1.csv" },
-        { "channel": "R", "path": "../generate/fem/medium_multi_seat/right_lp2.csv" }
+        {
+          "channel": "L",
+          "path": "../generate/fem/medium_multi_seat/left_heldout_1.csv"
+        },
+        {
+          "channel": "L",
+          "path": "../generate/fem/medium_multi_seat/left_heldout_2.csv"
+        },
+        {
+          "channel": "R",
+          "path": "../generate/fem/medium_multi_seat/right_heldout_1.csv"
+        },
+        {
+          "channel": "R",
+          "path": "../generate/fem/medium_multi_seat/right_heldout_2.csv"
+        }
       ],
       "robustness": {
-        "seeds": [1, 7, 42, 424242],
+        "seeds": [
+          1,
+          7,
+          42,
+          424242,
+          8675309
+        ],
         "noise_peak_db": 0.2,
         "coherence_floor": 0.8
       },
@@ -31,108 +55,370 @@
       "tier": "pr",
       "provenance": "real_measurement",
       "topology": "stereo_2_0",
-      "channels": ["L", "R"],
+      "channels": [
+        "L",
+        "R"
+      ],
       "sample_rate": 48000.0,
       "config": "../measured/2.0_8361a/recordings.json",
       "override_config": "qa_optimizer.json",
       "candidate_override_config": "qa_optimizer_headroom_smooth.json",
-      "evaluation_band_hz": [20.0, 500.0],
+      "evaluation_band_hz": [
+        20.0,
+        500.0
+      ],
       "schroeder_hz": 200.0,
       "robustness": {
-        "seeds": [1, 7, 42, 424242],
+        "seeds": [
+          1,
+          7,
+          42,
+          424242,
+          8675309
+        ],
         "noise_peak_db": 0.2,
         "coherence_floor": 0.8
       },
-      "gate_mode": "enforce"
+      "gate_mode": "enforce",
+      "held_out": [
+        {
+          "channel": "L",
+          "path": "../measured/2.0_8361a/L_heldout_1.csv"
+        },
+        {
+          "channel": "L",
+          "path": "../measured/2.0_8361a/L_heldout_2.csv"
+        },
+        {
+          "channel": "R",
+          "path": "../measured/2.0_8361a/R_heldout_1.csv"
+        },
+        {
+          "channel": "R",
+          "path": "../measured/2.0_8361a/R_heldout_2.csv"
+        }
+      ]
     },
     {
       "id": "fem_medium_stereo_21",
       "tier": "pr",
       "provenance": "fem",
       "topology": "stereo_2_1",
-      "channels": ["L", "R"],
+      "channels": [
+        "L",
+        "R"
+      ],
       "sample_rate": 48000.0,
       "config": "../generate/fem/medium_stereo_2_1/config.json",
       "override_config": "qa_optimizer.json",
       "candidate_override_config": "qa_optimizer_headroom_smooth.json",
-      "evaluation_band_hz": [100.0, 500.0],
+      "evaluation_band_hz": [
+        100.0,
+        500.0
+      ],
       "schroeder_hz": 200.0,
-      "gate_mode": "enforce"
+      "gate_mode": "enforce",
+      "held_out": [
+        {
+          "channel": "L",
+          "path": "../generate/fem/medium_stereo_2_1/left_heldout_1.csv"
+        },
+        {
+          "channel": "L",
+          "path": "../generate/fem/medium_stereo_2_1/left_heldout_2.csv"
+        },
+        {
+          "channel": "R",
+          "path": "../generate/fem/medium_stereo_2_1/right_heldout_1.csv"
+        },
+        {
+          "channel": "R",
+          "path": "../generate/fem/medium_stereo_2_1/right_heldout_2.csv"
+        }
+      ],
+      "robustness": {
+        "seeds": [
+          1,
+          7,
+          42,
+          424242,
+          8675309
+        ],
+        "noise_peak_db": 0.2,
+        "coherence_floor": 0.8
+      }
     },
     {
       "id": "fem_large_multiseat_21",
       "tier": "nightly",
       "provenance": "fem",
       "topology": "stereo_2_1_multiseat",
-      "channels": ["L", "R"],
+      "channels": [
+        "L",
+        "R"
+      ],
       "sample_rate": 48000.0,
       "config": "../generate/fem/large_multi_seat_2_1/config.json",
-      "override_config": "qa_optimizer.json",
+      "override_config": "qa_optimizer_robust_multiseat.json",
       "candidate_override_config": "qa_optimizer_headroom_smooth.json",
-      "evaluation_band_hz": [100.0, 500.0],
+      "evaluation_band_hz": [
+        100.0,
+        500.0
+      ],
       "schroeder_hz": 200.0,
       "held_out": [
-        { "channel": "L", "path": "../generate/fem/large_multi_seat_2_1/left_lp1.csv" },
-        { "channel": "L", "path": "../generate/fem/large_multi_seat_2_1/left_lp2.csv" },
-        { "channel": "R", "path": "../generate/fem/large_multi_seat_2_1/right_lp1.csv" },
-        { "channel": "R", "path": "../generate/fem/large_multi_seat_2_1/right_lp2.csv" }
+        {
+          "channel": "L",
+          "path": "../generate/fem/large_multi_seat_2_1/left_heldout_1.csv"
+        },
+        {
+          "channel": "L",
+          "path": "../generate/fem/large_multi_seat_2_1/left_heldout_2.csv"
+        },
+        {
+          "channel": "R",
+          "path": "../generate/fem/large_multi_seat_2_1/right_heldout_1.csv"
+        },
+        {
+          "channel": "R",
+          "path": "../generate/fem/large_multi_seat_2_1/right_heldout_2.csv"
+        }
       ],
-      "gate_mode": "enforce"
+      "gate_mode": "enforce",
+      "robustness": {
+        "seeds": [
+          1,
+          7,
+          42,
+          424242,
+          8675309
+        ],
+        "noise_peak_db": 0.2,
+        "coherence_floor": 0.8
+      }
     },
     {
       "id": "measured_stereo_d3v",
       "tier": "nightly",
       "provenance": "real_measurement",
       "topology": "stereo_2_0",
-      "channels": ["L", "R"],
+      "channels": [
+        "L",
+        "R"
+      ],
       "sample_rate": 48000.0,
       "config": "../measured/2.0_d3v/recordings.json",
-      "override_config": "qa_optimizer.json",
-      "candidate_override_config": "qa_optimizer_headroom_smooth.json",
-      "evaluation_band_hz": [20.0, 500.0],
+      "override_config": "qa_optimizer_headroom_smooth.json",
+      "candidate_override_config": "qa_optimizer.json",
+      "evaluation_band_hz": [
+        20.0,
+        500.0
+      ],
       "schroeder_hz": 200.0,
-      "gate_mode": "enforce"
+      "gate_mode": "enforce",
+      "held_out": [
+        {
+          "channel": "L",
+          "path": "../measured/2.0_d3v/L_heldout_1.csv"
+        },
+        {
+          "channel": "L",
+          "path": "../measured/2.0_d3v/L_heldout_2.csv"
+        },
+        {
+          "channel": "R",
+          "path": "../measured/2.0_d3v/R_heldout_1.csv"
+        },
+        {
+          "channel": "R",
+          "path": "../measured/2.0_d3v/R_heldout_2.csv"
+        }
+      ],
+      "robustness": {
+        "seeds": [
+          1,
+          7,
+          42,
+          424242,
+          8675309
+        ],
+        "noise_peak_db": 0.2,
+        "coherence_floor": 0.8
+      }
     },
     {
       "id": "measured_stereo_t7v",
       "tier": "nightly",
       "provenance": "real_measurement",
       "topology": "stereo_2_0",
-      "channels": ["L", "R"],
+      "channels": [
+        "L",
+        "R"
+      ],
       "sample_rate": 48000.0,
       "config": "../measured/2.0_t7v/recordings.json",
       "override_config": "qa_optimizer.json",
       "candidate_override_config": "qa_optimizer_alternate_de.json",
-      "evaluation_band_hz": [20.0, 500.0],
+      "evaluation_band_hz": [
+        20.0,
+        500.0
+      ],
       "schroeder_hz": 200.0,
-      "gate_mode": "enforce"
+      "gate_mode": "enforce",
+      "held_out": [
+        {
+          "channel": "L",
+          "path": "../measured/2.0_t7v/L_heldout_1.csv"
+        },
+        {
+          "channel": "L",
+          "path": "../measured/2.0_t7v/L_heldout_2.csv"
+        },
+        {
+          "channel": "R",
+          "path": "../measured/2.0_t7v/R_heldout_1.csv"
+        },
+        {
+          "channel": "R",
+          "path": "../measured/2.0_t7v/R_heldout_2.csv"
+        }
+      ],
+      "robustness": {
+        "seeds": [
+          1,
+          7,
+          42,
+          424242,
+          8675309
+        ],
+        "noise_peak_db": 0.2,
+        "coherence_floor": 0.8
+      }
     },
     {
       "id": "fem_small_stereo_22_mso",
       "tier": "nightly",
       "provenance": "fem",
       "topology": "stereo_2_2_mso",
-      "channels": ["L", "R"],
+      "channels": [
+        "L",
+        "R"
+      ],
       "sample_rate": 48000.0,
       "config": "../generate/fem/small_stereo_2_2_mso/config.json",
-      "override_config": "qa_optimizer_headroom_smooth.json",
-      "evaluation_band_hz": [100.0, 500.0],
+      "override_config": "qa_optimizer.json",
+      "candidate_override_config": "qa_optimizer_headroom_smooth.json",
+      "evaluation_band_hz": [
+        100.0,
+        500.0
+      ],
       "schroeder_hz": 200.0,
-      "gate_mode": "enforce"
+      "gate_mode": "enforce",
+      "held_out": [
+        {
+          "channel": "L",
+          "path": "../generate/fem/small_stereo_2_2_mso/left_heldout_1.csv"
+        },
+        {
+          "channel": "L",
+          "path": "../generate/fem/small_stereo_2_2_mso/left_heldout_2.csv"
+        },
+        {
+          "channel": "R",
+          "path": "../generate/fem/small_stereo_2_2_mso/right_heldout_1.csv"
+        },
+        {
+          "channel": "R",
+          "path": "../generate/fem/small_stereo_2_2_mso/right_heldout_2.csv"
+        }
+      ],
+      "robustness": {
+        "seeds": [
+          1,
+          7,
+          42,
+          424242,
+          8675309
+        ],
+        "noise_peak_db": 0.2,
+        "coherence_floor": 0.8
+      }
     },
     {
       "id": "fem_medium_home_cinema_51",
       "tier": "nightly",
       "provenance": "fem",
       "topology": "home_cinema_5_1",
-      "channels": ["L", "R", "C", "SL", "SR"],
+      "channels": [
+        "L",
+        "R",
+        "C",
+        "SL",
+        "SR"
+      ],
       "sample_rate": 48000.0,
       "config": "../generate/fem/medium_surround_5_1/config.json",
       "override_config": "qa_optimizer.json",
       "candidate_override_config": "qa_optimizer_headroom_smooth.json",
-      "evaluation_band_hz": [100.0, 500.0],
+      "evaluation_band_hz": [
+        100.0,
+        500.0
+      ],
       "schroeder_hz": 200.0,
-      "gate_mode": "enforce"
+      "gate_mode": "enforce",
+      "held_out": [
+        {
+          "channel": "L",
+          "path": "../generate/fem/medium_surround_5_1/left_heldout_1.csv"
+        },
+        {
+          "channel": "L",
+          "path": "../generate/fem/medium_surround_5_1/left_heldout_2.csv"
+        },
+        {
+          "channel": "R",
+          "path": "../generate/fem/medium_surround_5_1/right_heldout_1.csv"
+        },
+        {
+          "channel": "R",
+          "path": "../generate/fem/medium_surround_5_1/right_heldout_2.csv"
+        },
+        {
+          "channel": "C",
+          "path": "../generate/fem/medium_surround_5_1/center_heldout_1.csv"
+        },
+        {
+          "channel": "C",
+          "path": "../generate/fem/medium_surround_5_1/center_heldout_2.csv"
+        },
+        {
+          "channel": "SL",
+          "path": "../generate/fem/medium_surround_5_1/surround_left_heldout_1.csv"
+        },
+        {
+          "channel": "SL",
+          "path": "../generate/fem/medium_surround_5_1/surround_left_heldout_2.csv"
+        },
+        {
+          "channel": "SR",
+          "path": "../generate/fem/medium_surround_5_1/surround_right_heldout_1.csv"
+        },
+        {
+          "channel": "SR",
+          "path": "../generate/fem/medium_surround_5_1/surround_right_heldout_2.csv"
+        }
+      ],
+      "robustness": {
+        "seeds": [
+          1,
+          7,
+          42,
+          424242,
+          8675309
+        ],
+        "noise_peak_db": 0.2,
+        "coherence_floor": 0.8
+      }
     }
   ]
 }

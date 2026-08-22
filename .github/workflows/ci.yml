@@ -102,8 +102,33 @@ jobs:
       - name: Install Just
         uses: extractions/setup-just@v4
 
+      - name: Strict RoomEQ config and registry lint
+        run: cargo test -p roomeq-qa strictly_deserialize --lib
+
       - name: Run RoomEQ CI QA
         run: just qa-roomeq-ci
+
+  qa-roomeq-macos:
+    name: RoomEQ macOS Acoustic Baseline
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-roomeq-acoustic-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Validate native macOS acoustic baseline and held-out gates
+        run: cargo run --release --features qa --bin roomeq-qa-acoustic -- --tier pr --baseline data_tests/roomeq/acoustic_corpus/baseline.json
 
   coverage-gate:
     name: Library Unit-Test Coverage Gate (90 %)

@@ -13,7 +13,7 @@ use super::route::route_effective_gain_linear;
 pub use super::types::*;
 use num_complex::Complex64;
 use roomeq_model::{BassHeadroomModelConfig, RoomConfig, SubwooferStrategy, SystemConfig};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::f64::consts::PI;
 
 pub fn bass_output_role(_config: &RoomConfig, system: &SystemConfig) -> String {
@@ -302,6 +302,7 @@ pub fn bass_management_routing_graph(
         output_channels: channel_order,
         routes,
         matrix,
+        input_trim_db: HashMap::new(),
         advisories,
     })
 }

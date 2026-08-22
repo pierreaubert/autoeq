@@ -14,7 +14,7 @@ use super::types::OptimProgressCallback;
 use crate::Curve;
 use crate::PeqModel;
 use ndarray::Array1;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 /// Data structure for holding objective function parameters
 ///
@@ -22,12 +22,19 @@ use std::sync::Arc;
 /// for filter optimization.
 #[derive(Clone)]
 pub struct ObjectiveData {
+    /// Lazily prepared fixed-grid loss kernel shared by all clones.
+    ///
+    /// This is public only to preserve construction through historical struct
+    /// literals. Callers should initialize it with `Default::default()` and
+    /// otherwise treat it as an implementation detail.
+    #[doc(hidden)]
+    pub prepared: Arc<OnceLock<super::prepared_objective::PreparedObjective>>,
     /// Frequency points for evaluation
-    pub freqs: Array1<f64>,
+    pub freqs: Arc<Array1<f64>>,
     /// Target spl
-    pub target: Array1<f64>,
+    pub target: Arc<Array1<f64>>,
     /// Target error values
-    pub deviation: Array1<f64>,
+    pub deviation: Arc<Array1<f64>>,
     /// Sample rate in Hz
     pub srate: f64,
     #[allow(dead_code)]
@@ -124,7 +131,7 @@ pub struct ObjectiveData {
     /// `None` disables suppression — dips are weighted with the
     /// full `bass_dip_weight` / `dip_weight` of the asymmetric config.
     /// Must have the same length as `freqs` when provided.
-    pub null_suppression: Option<Array1<f64>>,
+    pub null_suppression: Option<Arc<Array1<f64>>>,
     /// Peak/dip weights for [`LossType::SpeakerFlatAsymmetric`].
     pub asymmetric_loss_config: AsymmetricLossConfig,
     /// Optional smoothness regularizer on the correction curve.
@@ -136,6 +143,11 @@ pub struct ObjectiveData {
 }
 
 impl ObjectiveData {
+    pub(crate) fn prepared(&self) -> &super::prepared_objective::PreparedObjective {
+        self.prepared
+            .get_or_init(|| super::prepared_objective::PreparedObjective::new(self))
+    }
+
     /// Build the [`Objective`] strategy that corresponds to the configured
     /// [`LossType`] and payload fields.
     pub fn build_objective(&self) -> Arc<dyn Objective> {

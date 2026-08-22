@@ -77,7 +77,6 @@ pub(super) fn run_pass(
             post_score: opt_result.combined_post_score,
             worst_slope,
             changes_loss: step.changes_loss,
-            allows_perceptual_tradeoff: step.allows_perceptual_tradeoff,
             epa_preference,
             correction_reverted,
         });

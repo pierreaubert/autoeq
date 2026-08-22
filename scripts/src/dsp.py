@@ -273,6 +273,223 @@ def compute_eq_response(
     return combined_db
 
 
+def _biquad_complex_response(
+    coefficients: tuple[float, float, float, float, float],
+    frequency: float,
+    sample_rate: float,
+) -> complex:
+    """Return the complex response of one normalized biquad."""
+    a1, a2, b0, b1, b2 = coefficients
+    omega = 2.0 * math.pi * frequency / sample_rate
+    z1 = complex(math.cos(omega), -math.sin(omega))
+    z2 = z1 * z1
+    denominator = 1.0 + a1 * z1 + a2 * z2
+    if abs(denominator) <= 1.0e-15:
+        return 0j
+    return (b0 + b1 * z1 + b2 * z2) / denominator
+
+
+def _crossover_response(
+    crossover_type: str,
+    output: str,
+    frequency_hz: float,
+    frequencies: list[float],
+    sample_rate: float,
+) -> list[complex]:
+    """Return a RoomEQ crossover transfer function on ``frequencies``."""
+    kind = "".join(ch for ch in crossover_type.lower() if ch.isalnum())
+    output_kind = "lowpass" if output.lower().startswith("low") else "highpass"
+
+    # Linkwitz-Riley filters are cascaded identical Butterworth sections.
+    if kind in {"lr24", "lr4"}:
+        section_qs = [1.0 / math.sqrt(2.0)] * 2
+    elif kind in {"lr48", "lr8"}:
+        section_qs = [0.541196100146197, 1.306562964876377] * 2
+    elif kind in {"butterworth12", "bw12"}:
+        section_qs = [1.0 / math.sqrt(2.0)]
+    elif kind in {"butterworth24", "bw24"}:
+        section_qs = [0.541196100146197, 1.306562964876377]
+    else:
+        raise ValueError(f"unsupported crossover type: {crossover_type!r}")
+
+    sections = [
+        biquad_coefficients(output_kind, frequency_hz, sample_rate, q, 0.0)
+        for q in section_qs
+    ]
+    response: list[complex] = []
+    for frequency in frequencies:
+        value = 1.0 + 0.0j
+        for section in sections:
+            value *= _biquad_complex_response(section, frequency, sample_rate)
+        response.append(value)
+    return response
+
+
+def apply_plugins_to_curve(
+    curve: dict | None,
+    plugins: list[dict],
+    sample_rate: float = 48_000.0,
+) -> dict | None:
+    """Apply gain/EQ/crossover/delay plugins to an acoustic response curve.
+
+    Magnitude and phase are both propagated. This is used by report generation
+    to predict what a microphone sees after the exported DSP chain.
+    """
+    if not curve:
+        return None
+    frequencies = curve.get("freq") or []
+    spl = curve.get("spl") or []
+    if not frequencies or len(frequencies) != len(spl):
+        return None
+
+    transfer = [1.0 + 0.0j for _ in frequencies]
+    for plugin in plugins:
+        plugin_type = str(plugin.get("plugin_type", "")).lower()
+        parameters = plugin.get("parameters", {}) or {}
+        if plugin_type == "gain":
+            gain = 10.0 ** (float(parameters.get("gain_db", 0.0)) / 20.0)
+            if parameters.get("invert", False):
+                gain = -gain
+            transfer = [value * gain for value in transfer]
+        elif plugin_type == "delay":
+            delay_seconds = float(parameters.get("delay_ms", 0.0)) / 1000.0
+            transfer = [
+                value
+                * complex(
+                    math.cos(-2.0 * math.pi * frequency * delay_seconds),
+                    math.sin(-2.0 * math.pi * frequency * delay_seconds),
+                )
+                for value, frequency in zip(transfer, frequencies)
+            ]
+        elif plugin_type == "eq":
+            for filt in parameters.get("filters", []):
+                coefficients = biquad_coefficients(
+                    filt.get("filter_type", "peak"),
+                    filt.get("freq", filt.get("frequency", 1_000.0)),
+                    sample_rate,
+                    filt.get("q", 1.0),
+                    filt.get("db_gain", filt.get("gain", 0.0)),
+                )
+                transfer = [
+                    value
+                    * _biquad_complex_response(coefficients, frequency, sample_rate)
+                    for value, frequency in zip(transfer, frequencies)
+                ]
+        elif plugin_type == "crossover":
+            crossover = _crossover_response(
+                str(parameters.get("type", "LR24")),
+                str(parameters.get("output", "low")),
+                float(parameters.get("frequency", 80.0)),
+                frequencies,
+                sample_rate,
+            )
+            transfer = [value * xover for value, xover in zip(transfer, crossover)]
+
+    phase = curve.get("phase")
+    has_phase = isinstance(phase, list) and len(phase) == len(frequencies)
+    result_spl: list[float] = []
+    result_phase: list[float] = []
+    for index, value in enumerate(transfer):
+        result_spl.append(spl[index] + 20.0 * math.log10(max(abs(value), 1.0e-10)))
+        if has_phase:
+            result_phase.append(float(phase[index]) + math.degrees(math.atan2(value.imag, value.real)))
+
+    result: dict = {"freq": list(frequencies), "spl": result_spl}
+    if has_phase:
+        result["phase"] = result_phase
+    return result
+
+
+def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
+    """Build one microphone-predicted post-DSP curve per input channel.
+
+    For a bass-managed main, the result is the coherent acoustic sum of its
+    emitted high-pass main branch and only that input's low-pass sub branch.
+    The LFE result contains only its own route. The aggregate emitted LFE
+    ``final_curve`` is deliberately not reused because it represents the whole
+    bass bus and would duplicate unrelated source channels.
+    """
+    channels = data.get("channels", {}) or {}
+    bass_management = (data.get("metadata", {}) or {}).get("bass_management", {}) or {}
+    graph = bass_management.get("routing_graph", {}) or {}
+    routes = graph.get("routes", []) or []
+    if not routes:
+        return {
+            name: channel["final_curve"]
+            for name, channel in channels.items()
+            if channel.get("final_curve")
+        }
+
+    sub_name = bass_management.get("physical_sub_output") or bass_management.get("lfe_channel") or "LFE"
+    sub_channel = channels.get(sub_name, {})
+    sub_initial = sub_channel.get("initial_curve")
+    if not sub_initial:
+        return {
+            name: channel["final_curve"]
+            for name, channel in channels.items()
+            if channel.get("final_curve")
+        }
+
+    # route_owned plugins encode one representative route on the shared sub
+    # chain. Route metadata below replaces them for each source independently.
+    common_sub_plugins = [
+        plugin
+        for plugin in sub_channel.get("plugins", [])
+        if (plugin.get("parameters", {}) or {}).get("room_eq_stage") != "route_owned"
+    ]
+    sample_rate = float(data.get("sample_rate", 48_000.0) or 48_000.0)
+    sub_common = apply_plugins_to_curve(sub_initial, common_sub_plugins, sample_rate)
+    if not sub_common:
+        return {}
+
+    routed_by_source: dict[str, dict] = {}
+    for route in routes:
+        route_kind = route.get("route_kind")
+        if route_kind not in {"redirected_bass_lowpass_to_sub", "lfe_lowpass_to_sub"}:
+            continue
+        low_pass_hz = route.get("low_pass_hz")
+        if low_pass_hz is None:
+            continue
+        route_plugins = [
+            {
+                "plugin_type": "crossover",
+                "parameters": {
+                    "type": route.get("crossover_type", "LR24"),
+                    "output": "low",
+                    "frequency": low_pass_hz,
+                },
+            },
+            {
+                "plugin_type": "gain",
+                "parameters": {
+                    "gain_db": route.get("gain_db", 0.0),
+                    "invert": bool(route.get("polarity_inverted", False)),
+                },
+            },
+            {
+                "plugin_type": "delay",
+                "parameters": {"delay_ms": route.get("delay_ms", 0.0)},
+            },
+        ]
+        routed = apply_plugins_to_curve(sub_common, route_plugins, sample_rate)
+        if routed:
+            routed_by_source[str(route.get("source_channel"))] = routed
+
+    results: dict[str, dict] = {}
+    for name, channel in channels.items():
+        routed = routed_by_source.get(name)
+        if name == sub_name:
+            if routed:
+                results[name] = routed
+        elif routed:
+            combined = complex_sum_curves(channel.get("final_curve"), routed)
+            if combined:
+                results[name] = combined
+        elif channel.get("final_curve"):
+            results[name] = channel["final_curve"]
+    return results
+
+
 def unwrap_phase(phase_deg: list[float]) -> list[float]:
     """Unwrap phase in degrees to remove discontinuities.
 

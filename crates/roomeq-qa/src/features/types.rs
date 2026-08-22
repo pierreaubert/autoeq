@@ -7,74 +7,68 @@ pub(super) struct FeatureStep {
     /// Step changes the loss function, making step-over-step score comparisons
     /// invalid at this boundary (optimizer targets a different objective).
     pub(super) changes_loss: bool,
-    /// Step can legitimately reduce EPA preference because it optimizes an
-    /// explicit constraint that the EPA score does not model.
-    pub(super) allows_perceptual_tradeoff: bool,
     pub(super) apply: fn(&mut RoomConfig),
 }
 
 pub(super) fn feature_steps() -> Vec<FeatureStep> {
-    vec![
-        FeatureStep {
-            name: "Baseline",
-            changes_loss: false,
-            allows_perceptual_tradeoff: false,
-            apply: |_| {},
-        },
-        FeatureStep {
-            name: "+ psychoacoustic",
-            changes_loss: true,
-            allows_perceptual_tradeoff: false,
-            apply: |c| {
-                c.optimizer.psychoacoustic = true;
+    let registry = crate::registry::load_registry().expect("RoomEQ QA registry must be valid");
+    let suite = registry
+        .suite_for_runner("features")
+        .expect("RoomEQ QA registry must define features suite");
+    suite
+        .cases
+        .iter()
+        .map(|name| match name.as_str() {
+            "baseline" => FeatureStep {
+                name: "Baseline",
+                changes_loss: false,
+                apply: |_| {},
             },
-        },
-        FeatureStep {
-            name: "+ asymmetric_loss",
-            changes_loss: true,
-            allows_perceptual_tradeoff: false,
-            apply: |c| {
-                c.optimizer.asymmetric_loss = true;
+            "psychoacoustic" => FeatureStep {
+                name: "+ psychoacoustic",
+                changes_loss: true,
+                apply: |config| config.optimizer.psychoacoustic = true,
             },
-        },
-        // Broadband changes the loss landscape: EQ is optimized against
-        // the broadband-adjusted curve, but post_score uses the original.
-        FeatureStep {
-            name: "+ broadband",
-            changes_loss: true,
-            allows_perceptual_tradeoff: false,
-            apply: |c| {
-                let tr = c
-                    .optimizer
-                    .target_response
-                    .get_or_insert_with(TargetResponseConfig::default);
-                tr.broadband_precorrection = true;
+            "asymmetric_loss" => FeatureStep {
+                name: "+ asymmetric_loss",
+                changes_loss: true,
+                apply: |config| config.optimizer.asymmetric_loss = true,
             },
-        },
-        FeatureStep {
-            name: "+ excursion_protection",
-            changes_loss: true,
-            allows_perceptual_tradeoff: true,
-            apply: |c| {
-                c.optimizer.excursion_protection = Some(ExcursionProtectionConfig {
-                    enabled: true,
-                    ..ExcursionProtectionConfig::default()
-                });
+            "broadband" => FeatureStep {
+                name: "+ broadband",
+                changes_loss: true,
+                apply: |config| {
+                    config
+                        .optimizer
+                        .target_response
+                        .get_or_insert_with(TargetResponseConfig::default)
+                        .broadband_precorrection = true;
+                },
             },
-        },
-        FeatureStep {
-            name: "+ schroeder_split",
-            changes_loss: true,
-            allows_perceptual_tradeoff: true,
-            apply: |c| {
-                c.optimizer.schroeder_split = Some(SchroederSplitConfig {
-                    enabled: true,
-                    schroeder_freq: 300.0,
-                    ..SchroederSplitConfig::default()
-                });
+            "excursion_protection" => FeatureStep {
+                name: "+ excursion_protection",
+                changes_loss: true,
+                apply: |config| {
+                    config.optimizer.excursion_protection = Some(ExcursionProtectionConfig {
+                        enabled: true,
+                        ..ExcursionProtectionConfig::default()
+                    });
+                },
             },
-        },
-    ]
+            "schroeder_split" => FeatureStep {
+                name: "+ schroeder_split",
+                changes_loss: true,
+                apply: |config| {
+                    config.optimizer.schroeder_split = Some(SchroederSplitConfig {
+                        enabled: true,
+                        schroeder_freq: 300.0,
+                        ..SchroederSplitConfig::default()
+                    });
+                },
+            },
+            other => panic!("unknown features registry case '{other}'"),
+        })
+        .collect()
 }
 
 pub(super) struct StepResult {
@@ -85,9 +79,6 @@ pub(super) struct StepResult {
     pub(super) worst_slope: f64,
     /// True if this step changed the loss function relative to the previous step.
     pub(super) changes_loss: bool,
-    /// True if this step is allowed to trade perceptual score for constraints
-    /// outside the EPA metric.
-    pub(super) allows_perceptual_tradeoff: bool,
     /// Average EPA preference across channels (higher = better).
     /// `None` if EPA metrics were not available.
     pub(super) epa_preference: Option<f64>,

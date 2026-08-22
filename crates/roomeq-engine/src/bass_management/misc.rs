@@ -279,6 +279,7 @@ mod tests {
                 bass_route("invalid", f64::NAN),
             ],
             matrix: None,
+            input_trim_db: Default::default(),
             advisories: vec![],
         };
 

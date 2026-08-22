@@ -37,10 +37,3 @@ pub(super) fn qa_primary_score_pair(
     let post = channels.iter().map(|ch| ch.post_score).sum::<f64>() / count;
     (pre, post)
 }
-
-pub(super) fn has_subwoofer_channel(result: &RoomOptimizationResult, config: &RoomConfig) -> bool {
-    result
-        .channel_results
-        .keys()
-        .any(|name| is_subwoofer_channel(config, name))
-}

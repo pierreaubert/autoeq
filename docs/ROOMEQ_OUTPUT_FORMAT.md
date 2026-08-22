@@ -33,7 +33,77 @@ check-jsonschema --schemafile output_schema.json dsp_chain.json
 | `channels` | object | Map of channel names to DSP chains |
 | `metadata` | object | Optimization metadata (optional) |
 
+### Effective merged configuration
+
+When the CLI is invoked with `--override-config`,
+`metadata.effective_config` contains the fully merged `RoomConfig` that was
+actually executed. It is absent for runs without an override. QA and plotting
+tools use this field to compare the effective configuration with the base file,
+making accidental top-level replacement or an ineffective mode override
+visible in the result artifact.
+
 ---
+
+## Graph-level Routing and Route Semantics
+
+`global_plugins` contains graph-level processing. A `matrix` plugin is used for
+home-cinema bass management to fan out bass-managed speaker channels, sum the
+low-frequency branches into a physical subwoofer output, and preserve the
+other channel outputs. The matrix values are linear gains; channel indices in
+`input_channel_map` and `output_channel_map` refer to the channel order used by
+the graph.
+
+Bass-management output can expose the same route graph in two places:
+
+- `global_plugins[*].parameters.metadata.routes`: route metadata attached to
+  the matrix plugin.
+- `metadata.bass_management.routing_graph.routes`: the room-level routing
+  report, alongside selected crossover, delay, trim, polarity, and headroom
+  decisions.
+
+Each route describes one logical branch of the graph. It is not an instruction
+to add another physical crossover plugin for every route object. The
+executable stages are the ordered `global_plugins` and `channels.*.plugins`;
+the route list explains how those stages fan out, sum, and align signals.
+Plugin parameters marked `room_eq_stage: "route_owned"` are the serialized
+crossover, delay, or gain stages inserted to realize that topology; the marker
+is an annotation, not an additional processing stage.
+
+| Field | Meaning |
+|-------|---------|
+| `group_id` | Optimization group that selected the route parameters, such as `lcr` or `surround`; it is not a new audio channel. |
+| `source_channel` / `source_index` | Logical input channel and its graph index. |
+| `destination` / `destination_index` | Logical output channel and its graph index. Bass-managed low-frequency branches normally target the physical `LFE`/sub output. |
+| `pre_chain_channel` / `post_chain_channel` | Channel identity on either side of the route-owned stage. These preserve chain ownership when a route crosses a matrix boundary. |
+| `route_kind` | `main_highpass_to_self` keeps the main band on the source channel; `redirected_bass_lowpass_to_sub` sends a bass-managed speaker’s low band to the sub output; `lfe_lowpass_to_sub` sends the LFE program band to the sub output. |
+| `high_pass_hz` / `low_pass_hz` | Band boundary for this logical branch. Only one is normally populated for a high-pass or low-pass branch. |
+| `crossover_type` | Slope/topology used by the route, for example `LR24`. |
+| `gain_db` / `gain_linear` / `matrix_gain` | Route-level gain. `gain_db` is the dB value; `gain_linear` and `matrix_gain` are the corresponding linear coefficients, typically equal for a pure route gain. |
+| `delay_ms` | Route-specific alignment delay. It is part of the route timing budget, not room-EQ filter gain. |
+| `polarity_inverted` | Whether the route is polarity-inverted for the optimized sum. |
+
+For example, a 5.1 bass-managed graph normally has this conceptual shape:
+
+```text
+L/R/C   -- high-pass --> their own outputs
+        \-- low-pass --> physical LFE/sub output
+
+BL/BR   -- high-pass --> their own outputs
+        \-- low-pass --> physical LFE/sub output
+
+LFE input -- low-pass --> physical LFE/sub output
+```
+
+The main-channel high-pass and sub-output low-pass branches are complementary
+logical paths. Several source branches may share one physical sub output, so
+the output can contain many route records but only one serialized low-pass
+stage on the LFE channel. Group-specific optimized crossover frequencies are
+reported in `metadata.bass_management.groups`; they can differ from the
+configured starting crossover.
+
+Consumers that cannot represent a graph-level matrix, channel fan-out, route
+delays, or bass summing must reject or explicitly simplify the graph. They must
+not silently treat each route record as an independent full-range channel.
 
 ## Channel DSP Chain
 

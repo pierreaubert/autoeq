@@ -6,8 +6,7 @@ use std::path::Path;
 pub(super) fn validate_config(config: &RoomConfig) -> Result<(), String> {
     // Validate optimizer config
     if config.optimizer.num_filters == 0 {
-        // Warning only - still valid
-        eprintln!("Warning: num_filters is 0, no EQ will be applied");
+        return Err("num_filters must be greater than 0 for quality fuzzing".to_string());
     }
 
     if config.optimizer.min_freq >= config.optimizer.max_freq {
@@ -43,7 +42,7 @@ pub(super) fn validate_config(config: &RoomConfig) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn validate_roomeq_output(output_json_path: &Path) -> Result<(), String> {
+pub(super) fn validate_roomeq_output(output_json_path: &Path) -> Result<f64, String> {
     let output_json = fs::read_to_string(output_json_path)
         .map_err(|e| format!("failed to read output JSON: {}", e))?;
     let output: serde_json::Value = serde_json::from_str(&output_json)
@@ -94,5 +93,61 @@ pub(super) fn validate_roomeq_output(output_json_path: &Path) -> Result<(), Stri
         }
     }
 
-    Ok(())
+    let metadata = output
+        .get("metadata")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| "output metadata is missing".to_string())?;
+    let score = |key: &str| -> Result<f64, String> {
+        let value = metadata
+            .get(key)
+            .and_then(serde_json::Value::as_f64)
+            .ok_or_else(|| format!("metadata.{key} is missing or non-numeric"))?;
+        if !value.is_finite() {
+            return Err(format!("metadata.{key} is not finite"));
+        }
+        Ok(value)
+    };
+    let pre = score("pre_score")?;
+    let post = score("post_score")?;
+    if post >= pre {
+        return Err(format!(
+            "randomized quality case did not improve: post {post:.4} >= pre {pre:.4}"
+        ));
+    }
+
+    let has_correction = channels.values().any(|channel| {
+        let direct = channel
+            .get("plugins")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten();
+        let drivers = channel
+            .get("drivers")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .flat_map(|driver| {
+                driver
+                    .get("plugins")
+                    .and_then(serde_json::Value::as_array)
+                    .into_iter()
+                    .flatten()
+            });
+        direct.chain(drivers).any(|plugin| {
+            plugin
+                .get("plugin_type")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|kind| {
+                    matches!(
+                        kind,
+                        "eq" | "convolution" | "warped_biquad" | "kautz_filter"
+                    )
+                })
+        })
+    });
+    if !has_correction {
+        return Err("randomized quality case emitted no corrective filters".to_string());
+    }
+
+    Ok(post)
 }

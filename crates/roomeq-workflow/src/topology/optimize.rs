@@ -24,7 +24,7 @@ pub(crate) fn optimize_stereo_2_0_with_progress_and_probe_arrivals<'a>(
     sample_rate: f64,
     output_dir: &Path,
     probe_arrival_overrides: Option<&'a HashMap<String, f64>>,
-    progress_factory: Option<&'a mut WorkflowProgressCallbackFactory<'a>>,
+    progress_factory: Option<&'a WorkflowProgressCallbackFactory<'a>>,
     stage_callback: Option<&'a mut WorkflowStageCallback<'a>>,
     frequency_samples: usize,
 ) -> Result<RoomOptimizationResult> {
@@ -49,7 +49,7 @@ pub(crate) fn optimize_stereo_2_1_with_progress_and_probe_arrivals<'a>(
     sample_rate: f64,
     output_dir: &Path,
     probe_arrival_overrides: Option<&'a HashMap<String, f64>>,
-    progress_factory: Option<&'a mut WorkflowProgressCallbackFactory<'a>>,
+    progress_factory: Option<&'a WorkflowProgressCallbackFactory<'a>>,
     stage_callback: Option<&'a mut WorkflowStageCallback<'a>>,
     frequency_samples: usize,
 ) -> Result<RoomOptimizationResult> {
@@ -74,7 +74,7 @@ pub(crate) fn optimize_home_cinema_with_progress_and_probe_arrivals<'a>(
     sample_rate: f64,
     output_dir: &Path,
     probe_arrival_overrides: Option<&'a HashMap<String, f64>>,
-    progress_factory: Option<&'a mut WorkflowProgressCallbackFactory<'a>>,
+    progress_factory: Option<&'a WorkflowProgressCallbackFactory<'a>>,
     stage_callback: Option<&'a mut WorkflowStageCallback<'a>>,
     frequency_samples: usize,
 ) -> Result<RoomOptimizationResult> {
@@ -114,7 +114,7 @@ pub fn optimize_stereo_2_0_with_progress<'a>(
     sys: &SystemConfig,
     sample_rate: f64,
     output_dir: &Path,
-    progress_factory: Option<&'a mut WorkflowProgressCallbackFactory<'a>>,
+    progress_factory: Option<&'a WorkflowProgressCallbackFactory<'a>>,
     stage_callback: Option<&'a mut WorkflowStageCallback<'a>>,
 ) -> Result<RoomOptimizationResult> {
     let executor = Stereo20Executor;
@@ -153,7 +153,7 @@ pub fn optimize_stereo_2_1_with_progress<'a>(
     sys: &SystemConfig,
     sample_rate: f64,
     output_dir: &Path,
-    progress_factory: Option<&'a mut WorkflowProgressCallbackFactory<'a>>,
+    progress_factory: Option<&'a WorkflowProgressCallbackFactory<'a>>,
     stage_callback: Option<&'a mut WorkflowStageCallback<'a>>,
 ) -> Result<RoomOptimizationResult> {
     let executor = Stereo21Executor;
@@ -189,7 +189,7 @@ pub fn optimize_home_cinema_with_progress<'a>(
     sys: &SystemConfig,
     sample_rate: f64,
     _output_dir: &Path,
-    progress_factory: Option<&'a mut WorkflowProgressCallbackFactory<'a>>,
+    progress_factory: Option<&'a WorkflowProgressCallbackFactory<'a>>,
     stage_callback: Option<&'a mut WorkflowStageCallback<'a>>,
 ) -> Result<RoomOptimizationResult> {
     let executor = HomeCinemaExecutor;

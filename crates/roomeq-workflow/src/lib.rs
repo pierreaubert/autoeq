@@ -9,6 +9,7 @@ pub mod ctc;
 pub mod dba;
 pub mod eq;
 pub mod eq_resources;
+pub mod executor;
 pub mod export;
 pub mod fir;
 pub mod group_measurements;
@@ -28,7 +29,8 @@ pub use arrival::{prepare_channel_arrival_time, prepare_channel_input};
 pub use channel::{ChannelWorkflowResult, process_single_channel};
 pub use channel_measurements::prepare_channel_measurements;
 pub use config_loader::{
-    SHALLOW_MERGE_KEYS, load_config, load_config_with_frequency_samples, merge_json_objects,
+    SHALLOW_MERGE_KEYS, deserialize_room_config_strict, load_config,
+    load_config_with_frequency_samples, load_merged_config_strict, merge_json_objects,
 };
 pub use eq_resources::{prepare_eq_resources, prepare_eq_target};
 pub use export::{

@@ -30,3 +30,12 @@ rand_chacha = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 metaheuristics-nature = { workspace = true }
+
+[dev-dependencies]
+criterion = "0.8.2"
+rayon = "1.11"
+stats_alloc = "0.1.10"
+
+[[bench]]
+name = "objective_hot_path"
+harness = false

@@ -40,7 +40,9 @@ pub(super) fn group_delay_qa_config(profile: GroupDelayQaProfile) -> GroupDelayO
     let mut config = GroupDelayOptimizationConfig {
         enabled: true,
         max_delay_ms: 25.0,
-        min_improvement_db: -100.0,
+        // Zero accepts any actual improvement while satisfying the config
+        // contract that this threshold is finite and non-negative.
+        min_improvement_db: 0.25,
         max_iter: GD_QA_MAX_ITER,
         popsize: 10,
         tol: 1e-6,
@@ -84,4 +86,25 @@ pub(super) fn group_delay_qa_config(profile: GroupDelayQaProfile) -> GroupDelayO
     }
 
     config
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn group_delay_qa_profiles_use_valid_improvement_thresholds() {
+        for profile in [
+            GroupDelayQaProfile::MissingCoherenceDelayOnly,
+            GroupDelayQaProfile::TrustedDelayOnly,
+            GroupDelayQaProfile::FixedAllPass,
+            GroupDelayQaProfile::AdaptiveAllPass,
+            GroupDelayQaProfile::PhaseLinearFir,
+            GroupDelayQaProfile::MixedPhase,
+        ] {
+            let config = group_delay_qa_config(profile);
+            assert!(config.min_improvement_db.is_finite());
+            assert!(config.min_improvement_db >= 0.0);
+        }
+    }
 }

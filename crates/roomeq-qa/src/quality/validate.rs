@@ -122,7 +122,7 @@ pub(super) fn validate_option_effect(
         OptionOverride::MultiMeasurementMinimax => {
             validate_multi_measurement_minimax(baseline_result, option_result, num_options)
         }
-        OptionOverride::MultiMeasurementVariancePenalized => {
+        OptionOverride::MultiMeasurementVariancePenalized { .. } => {
             validate_multi_measurement_variance(baseline_result, option_result, num_options)
         }
         OptionOverride::ProductionMultiSubMultiSeat => {
@@ -721,24 +721,24 @@ pub(super) fn validate_target_tilt(
     // correctly applied to scoring.
     // Widen tolerance for combos: other options (excursion HPF, schroeder split,
     // psychoacoustic) can distort the slope in the 100-500 Hz measurement band.
-    let mut combo_tolerance =
-        TILT_SLOPE_TOLERANCE * (1.0 + (options.num_options.saturating_sub(1) as f64));
+    let mut combo_tolerance = TILT_SLOPE_TOLERANCE * (options.num_options.max(1) as f64).sqrt();
     // Schroeder split at 300 Hz bisects the 100-500 Hz slope measurement range,
     // creating two independently-optimized zones with different tilt behavior.
     // This fundamentally limits slope accuracy across the crossover.
     if options.has_schroeder {
-        combo_tolerance += 3.0;
+        combo_tolerance += 1.0;
     }
     // Broadband shelves interact with tilt, adding global slope shifts.
     if options.has_broadband {
-        combo_tolerance += 2.0;
+        combo_tolerance += 0.75;
     }
     // Excursion protection intentionally reshapes the same low-frequency band
     // used for the residual-slope check. The target curve must still be exact,
     // but the protected response needs room to trade tilt accuracy for safety.
     if options.has_excursion {
-        combo_tolerance += 1.5;
+        combo_tolerance += 0.75;
     }
+    combo_tolerance = combo_tolerance.min(3.0);
     let target_matches = avg_target_err <= TARGET_CURVE_SLOPE_TOLERANCE;
     let safety_reverted = option_result
         .metadata
@@ -746,7 +746,7 @@ pub(super) fn validate_target_tilt(
         .as_ref()
         .is_some_and(|report| !report.accepted && !report.reverted_stages.is_empty());
     let residual_ok =
-        safety_reverted || avg_final_residual_err <= avg_initial_residual_err + combo_tolerance;
+        !safety_reverted && avg_final_residual_err <= avg_initial_residual_err + combo_tolerance;
     let pass = target_matches && residual_ok;
 
     (

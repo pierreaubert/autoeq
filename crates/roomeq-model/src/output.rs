@@ -457,6 +457,11 @@ pub struct OptimizationMetadata {
     /// Structured outcomes for optional/degradable processing stages.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stage_outcomes: Vec<StageOutcome>,
+    /// Fully merged configuration used for this run. The CLI records this
+    /// when `--override-config` is supplied so QA and display tooling can
+    /// verify that an override did not silently replace unrelated sections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_config: Option<Box<crate::RoomConfig>>,
 }
 
 #[cfg(test)]

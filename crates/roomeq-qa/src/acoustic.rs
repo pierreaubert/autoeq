@@ -53,6 +53,9 @@ struct Args {
     baseline: Option<PathBuf>,
     #[arg(long, value_enum, default_value = "pr")]
     tier: TierArg,
+    /// Run exactly one registered scenario from the selected tier.
+    #[arg(long)]
+    scenario: Option<String>,
     /// Override report-only scenarios and enforce their quality thresholds.
     #[arg(long)]
     enforce: bool,
@@ -153,6 +156,21 @@ pub fn run() -> Result<()> {
         .clone()
         .unwrap_or_else(|| default_baseline_path_for(&platform.os, &platform.arch));
     let manifest = AcousticCorpusManifest::load(&args.manifest).map_err(|error| anyhow!(error))?;
+    let registry = crate::registry::load_registry()?;
+    let suite = registry
+        .suite_for_runner("acoustic")
+        .ok_or_else(|| anyhow!("RoomEQ QA registry has no acoustic suite"))?;
+    let manifest_ids = manifest
+        .scenarios
+        .iter()
+        .map(|scenario| scenario.id.as_str())
+        .collect::<Vec<_>>();
+    let registry_ids = suite.cases.iter().map(String::as_str).collect::<Vec<_>>();
+    if manifest_ids != registry_ids {
+        return Err(anyhow!(
+            "acoustic corpus drifted from RoomEQ QA registry: registry={registry_ids:?}, manifest={manifest_ids:?}"
+        ));
+    }
     let baseline = AcousticCorpusBaseline::load(&baseline_path).map_err(|error| anyhow!(error))?;
     baseline
         .validate_for_platform(&platform)
@@ -165,9 +183,22 @@ pub fn run() -> Result<()> {
         ));
     }
     let tier: QaTier = args.tier.into();
-    let selected: Vec<_> = manifest.scenarios_for(tier).collect();
+    let selected: Vec<_> = manifest
+        .scenarios_for(tier)
+        .filter(|scenario| {
+            args.scenario
+                .as_deref()
+                .is_none_or(|requested| scenario.id == requested)
+        })
+        .collect();
     if selected.is_empty() {
-        return Err(anyhow!("no corpus scenarios selected for {:?}", args.tier));
+        return Err(match args.scenario.as_deref() {
+            Some(requested) => anyhow!(
+                "acoustic corpus scenario '{requested}' is not registered in the selected {:?} tier",
+                args.tier
+            ),
+            None => anyhow!("no corpus scenarios selected for {:?}", args.tier),
+        });
     }
 
     let mut scenarios = Vec::with_capacity(selected.len());
@@ -207,10 +238,17 @@ pub fn run() -> Result<()> {
             )
             .map_err(|error| anyhow!(error))?;
             if !comparison.violations.is_empty() {
-                gate.violations
-                    .extend(comparison.violations.iter().cloned());
-                if enforce {
-                    gate.passed = false;
+                if args.recalibrate_baseline {
+                    gate.advisories.push(format!(
+                        "baseline regression comparison ignored during explicit recalibration: {}",
+                        comparison.violations.join(",")
+                    ));
+                } else {
+                    gate.violations
+                        .extend(comparison.violations.iter().cloned());
+                    if enforce {
+                        gate.passed = false;
+                    }
                 }
             }
             Some(comparison)
@@ -784,40 +822,62 @@ fn peak_rss_kib() -> Option<u64> {
 }
 
 fn write_recalibrated_baseline(path: &Path, report: &CorpusReport) -> Result<()> {
+    let recalibrated = report
+        .scenarios
+        .iter()
+        .map(|scenario| {
+            let (partition, metrics) = scenario
+                .scorecard
+                .held_out
+                .as_ref()
+                .map(|metrics| (QualityBaselinePartition::HeldOut, metrics))
+                .unwrap_or((
+                    QualityBaselinePartition::Training,
+                    &scenario.scorecard.training,
+                ));
+            AcousticCorpusBaselineEntry {
+                id: scenario.id.clone(),
+                metrics: QualityBaselineMetrics {
+                    partition,
+                    post_weighted_rms_median_db: metrics.post_weighted_rms_median_db,
+                    post_p95_abs_residual_db: metrics.post_p95_abs_residual_db,
+                    improvement_median_db: metrics.improvement_median_db,
+                    max_boost_db: scenario.scorecard.max_boost_db,
+                    induced_group_delay_rms_ms: scenario.scorecard.induced_group_delay_rms_ms,
+                    bass_modal_roughness_db_per_octave2: metrics
+                        .bass_post_modal_roughness_db_per_octave2,
+                },
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut scenarios = if path.exists() {
+        AcousticCorpusBaseline::load(path)
+            .map_err(|error| anyhow!(error))?
+            .scenarios
+    } else {
+        Vec::new()
+    };
+    merge_baseline_entries(&mut scenarios, recalibrated);
     let baseline = AcousticCorpusBaseline {
         version: report.version.clone(),
         platform: report.platform.clone(),
         generated_with_rustc: report.rustc_version.clone(),
-        scenarios: report
-            .scenarios
-            .iter()
-            .map(|scenario| {
-                let (partition, metrics) = scenario
-                    .scorecard
-                    .held_out
-                    .as_ref()
-                    .map(|metrics| (QualityBaselinePartition::HeldOut, metrics))
-                    .unwrap_or((
-                        QualityBaselinePartition::Training,
-                        &scenario.scorecard.training,
-                    ));
-                AcousticCorpusBaselineEntry {
-                    id: scenario.id.clone(),
-                    metrics: QualityBaselineMetrics {
-                        partition,
-                        post_weighted_rms_median_db: metrics.post_weighted_rms_median_db,
-                        post_p95_abs_residual_db: metrics.post_p95_abs_residual_db,
-                        improvement_median_db: metrics.improvement_median_db,
-                        max_boost_db: scenario.scorecard.max_boost_db,
-                        induced_group_delay_rms_ms: scenario.scorecard.induced_group_delay_rms_ms,
-                        bass_modal_roughness_db_per_octave2: metrics
-                            .bass_post_modal_roughness_db_per_octave2,
-                    },
-                }
-            })
-            .collect(),
+        scenarios,
     };
     write_report(path, &serde_json::to_string_pretty(&baseline)?)
+}
+
+fn merge_baseline_entries(
+    scenarios: &mut Vec<AcousticCorpusBaselineEntry>,
+    recalibrated: Vec<AcousticCorpusBaselineEntry>,
+) {
+    for entry in recalibrated {
+        if let Some(existing) = scenarios.iter_mut().find(|item| item.id == entry.id) {
+            *existing = entry;
+        } else {
+            scenarios.push(entry);
+        }
+    }
 }
 
 fn write_report(path: &Path, json: &str) -> Result<()> {
@@ -835,6 +895,30 @@ mod tests {
     use super::*;
     use ndarray::Array1;
     use roomeq_engine::output::{build_channel_dsp_chain, create_gain_plugin};
+
+    fn baseline_entry(id: &str, post_rms: f64) -> AcousticCorpusBaselineEntry {
+        AcousticCorpusBaselineEntry {
+            id: id.to_string(),
+            metrics: QualityBaselineMetrics {
+                partition: QualityBaselinePartition::HeldOut,
+                post_weighted_rms_median_db: post_rms,
+                post_p95_abs_residual_db: 1.0,
+                improvement_median_db: 1.0,
+                max_boost_db: 1.0,
+                induced_group_delay_rms_ms: Some(0.0),
+                bass_modal_roughness_db_per_octave2: Some(0.0),
+            },
+        }
+    }
+
+    #[test]
+    fn partial_recalibration_preserves_unselected_baseline_entries() {
+        let mut scenarios = vec![baseline_entry("pr", 3.0), baseline_entry("nightly", 4.0)];
+        merge_baseline_entries(&mut scenarios, vec![baseline_entry("pr", 2.0)]);
+        assert_eq!(scenarios.len(), 2);
+        assert_eq!(scenarios[0].metrics.post_weighted_rms_median_db, 2.0);
+        assert_eq!(scenarios[1].id, "nightly");
+    }
 
     #[test]
     fn default_baseline_path_is_scoped_to_the_execution_platform() {

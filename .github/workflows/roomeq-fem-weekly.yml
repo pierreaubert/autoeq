@@ -1,0 +1,39 @@
+name: RoomEQ FEM weekly
+
+on:
+  schedule:
+    - cron: "41 3 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  fem-e2e:
+    name: Registry and retained FEM end-to-end matrices
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-roomeq-fem-weekly-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run registry-driven weekly FEM matrix
+        run: cargo run --release --features qa --bin roomeq-qa-coverage -- --tier weekly
+
+      - name: Run retained ignored FEM integration matrix
+        run: cargo test --release -p autoeq --features qa --test roomeq_generated_data_test -- --ignored --test-threads=1

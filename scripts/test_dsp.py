@@ -3,7 +3,11 @@
 import math
 import unittest
 
-from scripts.src.dsp import biquad_coefficients, compute_eq_response
+from scripts.src.dsp import (
+    biquad_coefficients,
+    build_post_dsp_source_curves,
+    compute_eq_response,
+)
 
 
 class BiquadParityTests(unittest.TestCase):
@@ -75,6 +79,77 @@ class BiquadParityTests(unittest.TestCase):
                     [2_000.0],
                 )
                 self.assertAlmostEqual(response[0], 7.0, places=8)
+
+
+class PostDspSourceCurveTests(unittest.TestCase):
+    def test_bass_management_is_reconstructed_per_source(self):
+        data = {
+            "metadata": {
+                "bass_management": {
+                    "physical_sub_output": "LFE",
+                    "routing_graph": {
+                        "routes": [
+                            {
+                                "source_channel": "L",
+                                "route_kind": "redirected_bass_lowpass_to_sub",
+                                "crossover_type": "LR24",
+                                "low_pass_hz": 80.0,
+                                "gain_db": 0.0,
+                                "delay_ms": 0.0,
+                                "polarity_inverted": False,
+                            },
+                            {
+                                "source_channel": "LFE",
+                                "route_kind": "lfe_lowpass_to_sub",
+                                "crossover_type": "LR24",
+                                "low_pass_hz": 80.0,
+                                "gain_db": -6.0,
+                                "delay_ms": 0.0,
+                                "polarity_inverted": False,
+                            },
+                        ]
+                    },
+                }
+            },
+            "channels": {
+                "L": {
+                    "final_curve": {
+                        "freq": [80.0],
+                        "spl": [50.979400086720375],
+                        "phase": [-180.0],
+                    }
+                },
+                "R": {
+                    "final_curve": {"freq": [80.0], "spl": [42.0], "phase": [0.0]}
+                },
+                "LFE": {
+                    "initial_curve": {"freq": [80.0], "spl": [60.0], "phase": [0.0]},
+                    # Deliberately an aggregate bus value: it must not be reused.
+                    "final_curve": {"freq": [80.0], "spl": [99.0], "phase": [0.0]},
+                    "plugins": [
+                        {
+                            "plugin_type": "gain",
+                            "parameters": {"gain_db": -3.0, "room_eq_stage": "pre_route"},
+                        },
+                        {
+                            "plugin_type": "gain",
+                            "parameters": {
+                                "gain_db": 40.0,
+                                "room_eq_stage": "route_owned",
+                            },
+                        },
+                    ],
+                },
+            },
+        }
+
+        curves = build_post_dsp_source_curves(data)
+
+        self.assertEqual(set(curves), {"L", "R", "LFE"})
+        self.assertAlmostEqual(curves["L"]["spl"][0], 57.0, places=6)
+        self.assertAlmostEqual(curves["LFE"]["spl"][0], 44.979400086720375, places=6)
+        self.assertEqual(curves["R"]["spl"], [42.0])
+        self.assertNotEqual(curves["LFE"]["spl"], [99.0])
 
 
 if __name__ == "__main__":

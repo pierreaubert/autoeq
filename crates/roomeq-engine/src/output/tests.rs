@@ -482,6 +482,7 @@ fn test_create_dsp_chain_output() {
         correction_acceptance: None,
         optimizer_evidence: None,
         stage_outcomes: Vec::new(),
+        effective_config: None,
     };
 
     let output = create_dsp_chain_output(channels, Some(metadata));
@@ -555,6 +556,7 @@ fn test_create_dsp_chain_output_adds_ctc_global_xtc_plugin() {
         correction_acceptance: None,
         optimizer_evidence: None,
         stage_outcomes: Vec::new(),
+        effective_config: None,
     };
 
     let output = create_dsp_chain_output(channels, Some(metadata));

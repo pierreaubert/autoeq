@@ -70,8 +70,18 @@ pub fn apply_channel_dsp_chain_to_curve(
     curve: &Curve,
     sample_rate: f64,
 ) -> Result<Curve> {
+    apply_channel_dsp_chain_to_curve_with_sidecar_dir(chain, curve, sample_rate, Path::new("."))
+}
+
+pub fn apply_channel_dsp_chain_to_curve_with_sidecar_dir(
+    chain: &ChannelDspChain,
+    curve: &Curve,
+    sample_rate: f64,
+    sidecar_dir: &Path,
+) -> Result<Curve> {
     curve.validate("channel DSP evaluation curve")?;
-    let mut cache = DspResponseCache::new(checked_sample_rate(sample_rate)?);
+    let mut cache =
+        DspResponseCache::with_sidecar_dir(checked_sample_rate(sample_rate)?, sidecar_dir);
     let response = curve
         .freq
         .iter()
@@ -86,32 +96,46 @@ pub fn apply_channel_dsp_chain_to_curve(
 
 pub(super) struct DspResponseCache {
     pub(super) sample_rate: u32,
+    pub(super) sidecar_dir: PathBuf,
     pub(super) convolution_ir: HashMap<PathBuf, Vec<f64>>,
 }
 
 impl DspResponseCache {
     pub(super) fn new(sample_rate: u32) -> Self {
+        Self::with_sidecar_dir(sample_rate, Path::new("."))
+    }
+
+    pub(super) fn with_sidecar_dir(sample_rate: u32, sidecar_dir: &Path) -> Self {
         Self {
             sample_rate,
+            sidecar_dir: sidecar_dir.to_path_buf(),
             convolution_ir: HashMap::new(),
         }
     }
 
     pub(super) fn convolution_taps(&mut self, path: &Path) -> Result<&[f64]> {
-        if !self.convolution_ir.contains_key(path) {
-            let channels =
-                read_wav_channels_f64(path, self.sample_rate, "RoomEQ convolution IR WAV")?;
+        let resolved_path = if path.is_relative() {
+            self.sidecar_dir.join(path)
+        } else {
+            path.to_path_buf()
+        };
+        if !self.convolution_ir.contains_key(&resolved_path) {
+            let channels = read_wav_channels_f64(
+                &resolved_path,
+                self.sample_rate,
+                "RoomEQ convolution IR WAV",
+            )?;
             let Some(first_channel) = channels.into_iter().next() else {
                 return Err(AutoeqError::InvalidMeasurement {
                     message: format!("convolution IR '{}' has no channels", path.display()),
                 });
             };
             self.convolution_ir
-                .insert(path.to_path_buf(), first_channel);
+                .insert(resolved_path.clone(), first_channel);
         }
         Ok(self
             .convolution_ir
-            .get(path)
+            .get(&resolved_path)
             .map(Vec::as_slice)
             .expect("cached convolution IR"))
     }

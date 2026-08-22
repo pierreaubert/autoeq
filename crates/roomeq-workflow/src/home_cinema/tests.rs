@@ -855,6 +855,7 @@ mod coverage_tests {
                 polarity_inverted: false,
             }],
             matrix: None,
+            input_trim_db: Default::default(),
             advisories: Vec::new(),
         };
         let peak = estimated_bass_bus_peak_gain_db(Some(&graph), 0.0);

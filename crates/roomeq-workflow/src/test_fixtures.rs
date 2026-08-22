@@ -37,6 +37,7 @@ pub fn empty_metadata() -> OptimizationMetadata {
         correction_acceptance: None,
         optimizer_evidence: None,
         stage_outcomes: Vec::new(),
+        effective_config: None,
     }
 }
 

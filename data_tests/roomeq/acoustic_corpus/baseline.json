@@ -9,81 +9,82 @@
     {
       "id": "fem_medium_multiseat_20",
       "partition": "held_out",
-      "post_weighted_rms_median_db": 7.281042006291825,
-      "post_p95_abs_residual_db": 13.947196341463403,
-      "improvement_median_db": 0.1790743384141118,
-      "max_boost_db": 0.9681372549233416,
-      "induced_group_delay_rms_ms": 2.8447191437935233,
-      "bass_modal_roughness_db_per_octave2": 2243.8618360712135
+      "post_weighted_rms_median_db": 4.4699755306276945,
+      "post_p95_abs_residual_db": 8.946440395084018,
+      "improvement_median_db": 1.493922740538446,
+      "max_boost_db": 3.3685268387112046,
+      "induced_group_delay_rms_ms": 5.084345227213113,
+      "bass_modal_roughness_db_per_octave2": 1698.9912458350386
     },
     {
       "id": "measured_stereo_8361a",
-      "partition": "training",
-      "post_weighted_rms_median_db": 5.718814542147522,
-      "post_p95_abs_residual_db": 9.47434939090435,
-      "improvement_median_db": 0.6406125478397282,
-      "max_boost_db": 3.0278568118365925,
-      "induced_group_delay_rms_ms": 2.4164557017969375,
-      "bass_modal_roughness_db_per_octave2": 4111.431501617457
+      "partition": "held_out",
+      "post_weighted_rms_median_db": 5.3301098004237,
+      "post_p95_abs_residual_db": 9.855018900943843,
+      "improvement_median_db": 0.5883864204519869,
+      "max_boost_db": 3.2808633781741037,
+      "induced_group_delay_rms_ms": 2.9634983866409437,
+      "bass_modal_roughness_db_per_octave2": 3719.8807664597666
     },
     {
       "id": "fem_medium_stereo_21",
-      "partition": "training",
-      "post_weighted_rms_median_db": 5.272253364020521,
-      "post_p95_abs_residual_db": 9.827803325073702,
-      "improvement_median_db": 2.0920429081671585,
-      "max_boost_db": 5.7536778266980235,
-      "induced_group_delay_rms_ms": 3.8960665831875416,
-      "bass_modal_roughness_db_per_octave2": 3738.589097821398
+      "partition": "held_out",
+      "post_weighted_rms_median_db": 6.055708971976162,
+      "post_p95_abs_residual_db": 12.151039925662545,
+      "improvement_median_db": 1.3117990301784443,
+      "max_boost_db": 4.859177076030669,
+      "induced_group_delay_rms_ms": 3.3062196939380604,
+      "bass_modal_roughness_db_per_octave2": 3757.693578690367
     },
     {
       "id": "fem_large_multiseat_21",
       "partition": "held_out",
-      "post_weighted_rms_median_db": 6.231218782742511,
-      "post_p95_abs_residual_db": 13.953908078356207,
-      "improvement_median_db": 0.453828829285289,
-      "max_boost_db": 0.35189141802534607,
-      "induced_group_delay_rms_ms": 2.4094904998073665,
-      "bass_modal_roughness_db_per_octave2": 4208.64999717573
+      "post_weighted_rms_median_db": 3.7782985812073187,
+      "post_p95_abs_residual_db": 6.9008489196165925,
+      "improvement_median_db": 0.1306672454431208,
+      "max_boost_db": -0.12005788508446358,
+      "induced_group_delay_rms_ms": 1.9330496448499257,
+      "bass_modal_roughness_db_per_octave2": 2783.0618487136817
     },
     {
       "id": "measured_stereo_d3v",
-      "partition": "training",
-      "post_weighted_rms_median_db": 5.327321550367431,
-      "post_p95_abs_residual_db": 10.445681028468666,
-      "improvement_median_db": -8.881784197001252e-16,
-      "max_boost_db": 1.6892596775751798,
-      "induced_group_delay_rms_ms": 0.0,
-      "bass_modal_roughness_db_per_octave2": 4542.535935333235
+      "partition": "held_out",
+      "post_weighted_rms_median_db": 4.405405339141417,
+      "post_p95_abs_residual_db": 9.246279060735088,
+      "improvement_median_db": 0.8273173444155244,
+      "max_boost_db": 5.205656521898007,
+      "induced_group_delay_rms_ms": 2.481730225310292,
+      "bass_modal_roughness_db_per_octave2": 3787.0711745699
     },
     {
       "id": "measured_stereo_t7v",
-      "partition": "training",
-      "post_weighted_rms_median_db": 4.985822177033876,
-      "post_p95_abs_residual_db": 9.641048935337976,
-      "improvement_median_db": 0.8653136152261736,
-      "max_boost_db": 1.683420323588022,
-      "induced_group_delay_rms_ms": 3.0166896988529377,
-      "bass_modal_roughness_db_per_octave2": 12752.47172680555
+      "partition": "held_out",
+      "post_weighted_rms_median_db": 2.109092640597201,
+      "post_p95_abs_residual_db": 3.212124959073325,
+      "improvement_median_db": 2.2727925066170047,
+      "max_boost_db": 1.9665280500587237,
+      "induced_group_delay_rms_ms": 2.0607870608723093,
+      "bass_modal_roughness_db_per_octave2": 167.63271075133713
     },
     {
       "id": "fem_small_stereo_22_mso",
-      "partition": "training",
-      "post_weighted_rms_median_db": 5.598881458432292,
-      "post_p95_abs_residual_db": 11.092143334641804,
-      "improvement_median_db": 0.7609113780124188,
-      "max_boost_db": 0.8924379638456941,
-      "bass_modal_roughness_db_per_octave2": 4004.738761523189
+      "partition": "held_out",
+      "post_weighted_rms_median_db": 6.176205938274033,
+      "post_p95_abs_residual_db": 11.999154523207693,
+      "improvement_median_db": 0.21670277120521764,
+      "max_boost_db": -4.797818888692788,
+      "induced_group_delay_rms_ms": 0.3730474137241915,
+      "bass_modal_roughness_db_per_octave2": 4044.15507299613
     },
     {
       "id": "fem_medium_home_cinema_51",
-      "partition": "training",
-      "post_weighted_rms_median_db": 5.36140573668668,
-      "post_p95_abs_residual_db": 10.910138175623885,
-      "improvement_median_db": 1.7381774022111829,
-      "max_boost_db": 5.387319764332091,
-      "induced_group_delay_rms_ms": 5.22134998915024,
-      "bass_modal_roughness_db_per_octave2": 3221.4695911796207
+      "partition": "held_out",
+      "post_weighted_rms_median_db": 6.090027193221303,
+      "post_p95_abs_residual_db": 12.969769000526874,
+      "improvement_median_db": 1.0357209661372684,
+      "max_boost_db": 3.5920613167784197,
+      "induced_group_delay_rms_ms": 4.367077636848266,
+      "bass_modal_roughness_db_per_octave2": 3217.0410364407458
     }
   ]
 }

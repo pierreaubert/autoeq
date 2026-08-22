@@ -1,29 +1,7 @@
 {
-  "speakers": {
-    "left0": "left_lp0.csv",
-    "right0": "right_lp0.csv",
-    "sub0": "subwoofer_lp0.csv"
-  },
-  "system": {
-    "model": "stereo",
-    "speakers": {
-      "L": "left0",
-      "R": "right0",
-      "LFE": "sub0"
-    },
-    "subwoofers": {
-      "config": "single",
-      "sub0": "L",
-      "crossover": "first"
-    }
-  },
   "optimizer": {
     "loss_type": "flat",
-    "fir": {
-      "taps": 1024,
-      "phase": "kirkeby",
-      "max_boost_db": 10.0
-    },
+    "fir": { "taps": 1024, "phase": "kirkeby", "max_boost_db": 10.0 },
     "algorithm": "autoeq:de",
     "num_filters": 9,
     "min_q": 0.5,
@@ -41,14 +19,5 @@
     "psychoacoustic": true,
     "asymmetric_loss": true,
     "processing_mode": "phase_linear"
-  },
-  "crossovers": {
-    "first": {
-      "type": "LR48",
-      "frequency_range": [
-        60,
-        150
-      ]
-    }
   }
 }

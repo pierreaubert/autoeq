@@ -4,7 +4,7 @@
 //! It now delegates to [`combined_weighted_loss`] for better perceptual
 //! relevance. See `loss/enhanced_weights.rs` for the underlying math.
 
-use super::enhanced_weights::{FrequencyBandWeights, combined_weighted_loss};
+use super::enhanced_weights::{FrequencyBandWeights, PreparedWeightedLoss, combined_weighted_loss};
 use ndarray::Array1;
 
 /// Default blend for `flat_loss`: 70% ERB-weighted, 30% band-weighted.
@@ -14,6 +14,32 @@ use ndarray::Array1;
 /// adds the bass/mid/treble bias defined by `FrequencyBandWeights::default`.
 const DEFAULT_FLAT_ERB_WEIGHT: f64 = 0.7;
 const DEFAULT_FLAT_BAND_WEIGHT: f64 = 0.3;
+
+/// Fixed-grid flat-loss kernel for allocation-free candidate evaluation.
+#[derive(Debug, Clone)]
+pub struct PreparedFlatLoss {
+    weighted: PreparedWeightedLoss,
+}
+
+impl PreparedFlatLoss {
+    /// Precompute the active range and all perceptual integration weights.
+    pub fn new(freqs: &Array1<f64>, min_freq: f64, max_freq: f64) -> Self {
+        Self {
+            weighted: PreparedWeightedLoss::new(
+                freqs,
+                min_freq,
+                max_freq,
+                FrequencyBandWeights::default(),
+            ),
+        }
+    }
+
+    /// Evaluate a full-grid residual without allocating.
+    pub fn evaluate(&self, error: &Array1<f64>) -> f64 {
+        self.weighted
+            .evaluate(error, DEFAULT_FLAT_ERB_WEIGHT, DEFAULT_FLAT_BAND_WEIGHT)
+    }
+}
 
 /// Compute the flat loss as an ERB + band weighted combination of `error`
 /// values inside `[min_freq, max_freq]`.
@@ -117,5 +143,30 @@ mod tests {
         let freqs = array![100.0, 200.0, 500.0];
         let err = array![1.0, 1.0, 1.0];
         assert!(flat_loss(&freqs, &err, 5000.0, 10000.0).is_infinite());
+    }
+
+    #[test]
+    fn equivalent_log_grids_have_the_same_uniform_error_loss() {
+        let sparse_freqs =
+            Array1::from_iter((0..=20).map(|index| 20.0 * 1000.0_f64.powf(index as f64 / 20.0)));
+        let dense_freqs =
+            Array1::from_iter((0..=400).map(|index| 20.0 * 1000.0_f64.powf(index as f64 / 400.0)));
+        let sparse_error = Array1::from_elem(sparse_freqs.len(), 1.0);
+        let dense_error = Array1::from_elem(dense_freqs.len(), 1.0);
+        let sparse_loss = flat_loss(&sparse_freqs, &sparse_error, 20.0, 20_000.0);
+        let dense_loss = flat_loss(&dense_freqs, &dense_error, 20.0, 20_000.0);
+        assert!(
+            (sparse_loss - dense_loss).abs() < 1e-12,
+            "grid density changed uniform loss: sparse={sparse_loss}, dense={dense_loss}"
+        );
+    }
+
+    #[test]
+    fn prepared_flat_loss_matches_allocating_reference() {
+        let freqs = Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), 200);
+        let error = freqs.mapv(|frequency| (frequency.log10() * 4.2).sin() * 3.0);
+        let expected = flat_loss(&freqs, &error, 35.0, 16_000.0);
+        let actual = PreparedFlatLoss::new(&freqs, 35.0, 16_000.0).evaluate(&error);
+        assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
     }
 }

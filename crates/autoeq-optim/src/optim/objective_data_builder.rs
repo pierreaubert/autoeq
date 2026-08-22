@@ -13,6 +13,7 @@ use crate::loss::{
 use crate::optim::{MultiObjectiveData, ObjectiveData, SmoothnessPenaltyConfig};
 use crate::roomeq::AudibilityDeadbandConfig;
 use ndarray::Array1;
+use std::sync::Arc;
 
 /// Builder for constructing an [`ObjectiveData`].
 ///
@@ -473,9 +474,10 @@ impl ObjectiveDataBuilder {
         }
 
         let mut data = ObjectiveData {
-            freqs: self.freqs,
-            target: self.target,
-            deviation: self.deviation,
+            prepared: Default::default(),
+            freqs: Arc::new(self.freqs),
+            target: Arc::new(self.target),
+            deviation: Arc::new(self.deviation),
             srate: self.srate,
             min_spacing_oct: self.min_spacing_oct,
             spacing_weight: self.spacing_weight,
@@ -503,7 +505,7 @@ impl ObjectiveDataBuilder {
             epa_config: self.epa_config,
             temporal_masking_modes: self.temporal_masking_modes,
             detected_problems: self.detected_problems,
-            null_suppression: self.null_suppression,
+            null_suppression: self.null_suppression.map(Arc::new),
             asymmetric_loss_config: self.asymmetric_loss_config,
             smoothness_penalty: self.smoothness_penalty,
             audibility_deadband: self.audibility_deadband,

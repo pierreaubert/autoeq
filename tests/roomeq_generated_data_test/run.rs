@@ -14,6 +14,80 @@ use autoeq::roomeq::{ProcessingMode, RoomConfig, optimize_room};
 use serial_test::serial;
 use std::path::Path;
 
+const QA_SEED_OFFSETS: [u64; 5] = [0, 17, 41, 73, 109];
+
+#[cfg(feature = "qa")]
+fn assert_integration_registry_contract() {
+    static CHECKED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    CHECKED.get_or_init(|| {
+        let registry = roomeq_qa::registry::load_registry().expect("load RoomEQ QA registry");
+        let suite = registry
+            .suite_for_runner("integration")
+            .expect("integration suite must be registered");
+        for claim in ["fem_end_to_end", "multi_seed"] {
+            assert!(
+                suite.claims.iter().any(|registered| registered == claim),
+                "integration registry suite missing claim '{claim}'"
+            );
+        }
+    });
+}
+
+fn optimize_median_seed(
+    config: &RoomConfig,
+    output_dir: Option<&Path>,
+    context: &str,
+) -> autoeq::roomeq::RoomOptimizationResult {
+    #[cfg(feature = "qa")]
+    assert_integration_registry_contract();
+
+    let base_seed = config.optimizer.seed.unwrap_or(42);
+    let mut results = Vec::with_capacity(QA_SEED_OFFSETS.len());
+    for offset in QA_SEED_OFFSETS {
+        let seed = base_seed.wrapping_add(offset);
+        let mut seeded_config = config.clone();
+        seeded_config.optimizer.seed = Some(seed);
+        let seed_output_dir = output_dir.map(|root| root.join(format!("seed-{seed}")));
+        if let Some(directory) = &seed_output_dir {
+            std::fs::create_dir_all(directory).unwrap_or_else(|error| {
+                panic!("Failed to create {context} seed output directory: {error}")
+            });
+        }
+        let result = optimize_room(&seeded_config, 48_000.0, None, seed_output_dir.as_deref())
+            .unwrap_or_else(|error| panic!("Optimization failed {context} seed={seed}: {error}"));
+        assert!(
+            result.combined_post_score.is_finite(),
+            "{context} seed={seed} produced a non-finite post score"
+        );
+        results.push((seed, result));
+    }
+    results.sort_by(|left, right| {
+        left.1
+            .combined_post_score
+            .total_cmp(&right.1.combined_post_score)
+    });
+    let min_score = results
+        .first()
+        .map(|entry| entry.1.combined_post_score)
+        .unwrap_or_default();
+    let max_score = results
+        .last()
+        .map(|entry| entry.1.combined_post_score)
+        .unwrap_or_default();
+    let details = results
+        .iter()
+        .map(|(seed, result)| format!("{seed}:{:.6}", result.combined_post_score))
+        .collect::<Vec<_>>()
+        .join(",");
+    let selected_index = results.len() / 2;
+    println!(
+        "{context}: selected median seed {}, min={min_score:.6}, max={max_score:.6}, spread={:.6}, scores=[{details}]",
+        results[selected_index].0,
+        max_score - min_score
+    );
+    results.swap_remove(selected_index).1
+}
+
 /// Run roomeq optimization on a generated FEM scenario and verify improvement
 fn run_roomeq_on_generated(scenario_name: &str) {
     let config_path = crate_root()
@@ -37,8 +111,7 @@ fn run_roomeq_on_generated(scenario_name: &str) {
     // Use fixed seed for reproducible results
     config.optimizer.seed = Some(42);
 
-    let result = optimize_room(&config, 48000.0, None, None)
-        .unwrap_or_else(|e| panic!("Optimization failed for {scenario_name}: {e}"));
+    let result = optimize_median_seed(&config, None, scenario_name);
 
     // Verify optimization improved the response
     assert!(
@@ -230,12 +303,11 @@ fn run_roomeq_with_mode(
         config.optimizer.max_freq = config.optimizer.max_freq.min(1500.0);
     }
 
-    optimize_room(&config, 48000.0, None, Some(output_dir)).unwrap_or_else(|e| {
-        panic!(
-            "Optimization failed for {scenario_name} mode={}: {e}",
-            mode_config.name
-        )
-    })
+    optimize_median_seed(
+        &config,
+        Some(output_dir),
+        &format!("{scenario_name} mode={}", mode_config.name),
+    )
 }
 
 /// Run all 4 modes on a scenario, assert per-mode quality and cross-mode consistency

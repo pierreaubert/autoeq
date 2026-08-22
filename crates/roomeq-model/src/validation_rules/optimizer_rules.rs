@@ -1581,15 +1581,17 @@ mod optimizer_rule_tests {
 
     #[test]
     fn rule_group_delay_rejects_every_invalid_numeric_contract() {
-        let mut group_delay = crate::GroupDelayOptimizationConfig::default();
-        group_delay.ap_min_q = 4.0;
-        group_delay.ap_max_q = 2.0;
-        group_delay.max_delay_ms = 0.0;
-        group_delay.coherence_threshold = 1.1;
-        group_delay.min_improvement_db = -0.1;
-        group_delay.tol = 0.0;
-        group_delay.max_iter = 0;
-        group_delay.popsize = 0;
+        let group_delay = crate::GroupDelayOptimizationConfig {
+            ap_min_q: 4.0,
+            ap_max_q: 2.0,
+            max_delay_ms: 0.0,
+            coherence_threshold: 1.1,
+            min_improvement_db: -0.1,
+            tol: 0.0,
+            max_iter: 0,
+            popsize: 0,
+            ..Default::default()
+        };
         let mut config = default_config();
         config.group_delay = Some(group_delay);
 

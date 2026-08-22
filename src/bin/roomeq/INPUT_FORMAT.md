@@ -107,6 +107,14 @@ the `2.0.x` through `2.1.x` lines. The current default is `2.1.0`. Malformed
 versions and unknown minor or major versions fail closed instead of being
 interpreted with current defaults.
 
+RoomEQ loads canonical configuration and override files with recursive strict
+deserialization. Unknown, misspelled, or misplaced fields are errors rather
+than ignored comments. This applies inside nested optimizer, FIR, group-delay,
+speaker, system, and bass-management objects as well as at the root. Typed map
+objects such as `speakers` still accept arbitrary map keys whose values conform
+to the declared schema. The generated `input_schema.json` mirrors this contract
+with `additionalProperties: false` on fixed-shape objects.
+
 ## Multi-measurement RIR prototype
 
 When a speaker has several measurements captured at different positions, you

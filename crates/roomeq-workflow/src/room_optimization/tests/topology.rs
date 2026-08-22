@@ -285,6 +285,290 @@ fn execute_topology_workflow_stereo_2_0_returns_result() {
     assert!(!result.channels.is_empty(), "result should have channels");
 }
 
+fn nonflat_parallel_stereo_config() -> RoomConfig {
+    let mut config = stereo_2_0_config();
+    config.optimizer.num_filters = 2;
+    config.optimizer.max_iter = 120;
+    config.optimizer.population = 12;
+    config.optimizer.max_freq = 2_000.0;
+    config.optimizer.seed = Some(42);
+    for speaker in config.speakers.values_mut() {
+        if let SpeakerConfig::Single(MeasurementSource::InMemory(curve)) = speaker {
+            for (frequency, spl) in curve.freq.iter().zip(curve.spl.iter_mut()) {
+                *spl +=
+                    (frequency.log10() * 5.7).sin() * 4.0 + (frequency.log10() * 13.0).cos() * 1.5;
+            }
+        }
+    }
+    config
+}
+
+fn assert_parallel_result_matches(
+    serial: &RoomOptimizationResult,
+    parallel: &RoomOptimizationResult,
+) {
+    assert_eq!(serial.channel_results.len(), parallel.channel_results.len());
+    for (name, serial_channel) in &serial.channel_results {
+        let parallel_channel = parallel
+            .channel_results
+            .get(name)
+            .unwrap_or_else(|| panic!("parallel result is missing channel {name}"));
+        assert_eq!(
+            serial_channel.biquads.len(),
+            parallel_channel.biquads.len(),
+            "filter count changed for {name}"
+        );
+        for (serial_filter, parallel_filter) in
+            serial_channel.biquads.iter().zip(&parallel_channel.biquads)
+        {
+            assert_eq!(serial_filter.filter_type, parallel_filter.filter_type);
+            for (field, serial_value, parallel_value) in [
+                ("frequency", serial_filter.freq, parallel_filter.freq),
+                ("q", serial_filter.q, parallel_filter.q),
+                ("gain", serial_filter.db_gain, parallel_filter.db_gain),
+            ] {
+                assert!(
+                    (serial_value - parallel_value).abs() <= 1e-10,
+                    "{name} {field} differs between 1 and N workers: {serial_value} vs {parallel_value}"
+                );
+            }
+        }
+        assert!(
+            (serial_channel.post_score - parallel_channel.post_score).abs() <= 1e-10,
+            "{name} post score differs: {} vs {}",
+            serial_channel.post_score,
+            parallel_channel.post_score
+        );
+        assert_eq!(
+            serial_channel.final_curve.freq, parallel_channel.final_curve.freq,
+            "{name} final frequency grid changed"
+        );
+        assert_eq!(
+            serial_channel.final_curve.spl.len(),
+            parallel_channel.final_curve.spl.len()
+        );
+        for (index, (&serial_spl, &parallel_spl)) in serial_channel
+            .final_curve
+            .spl
+            .iter()
+            .zip(parallel_channel.final_curve.spl.iter())
+            .enumerate()
+        {
+            assert!(
+                (serial_spl - parallel_spl).abs() <= 1e-10,
+                "{name} final SPL[{index}] differs: {serial_spl} vs {parallel_spl}"
+            );
+        }
+    }
+}
+
+#[test]
+fn optimize_room_fixed_seed_matches_between_one_and_four_workers() {
+    let mut serial_config = nonflat_parallel_stereo_config();
+    serial_config.optimizer.refine = true;
+    serial_config.optimizer.parallel_threads = Some(1);
+    let serial = optimize_room(&serial_config, 48_000.0, None, None)
+        .expect("single-worker RoomEQ run must succeed");
+
+    let mut parallel_config = serial_config.clone();
+    parallel_config.optimizer.parallel_threads = Some(4);
+    let parallel = optimize_room(&parallel_config, 48_000.0, None, None)
+        .expect("four-worker RoomEQ run must succeed");
+
+    assert_parallel_result_matches(&serial, &parallel);
+}
+
+#[test]
+fn optimize_room_cmaes_fixed_seed_matches_between_one_and_four_workers() {
+    let mut serial_config = nonflat_parallel_stereo_config();
+    serial_config.optimizer.algorithm = "autoeq:cmaes".to_string();
+    serial_config.optimizer.max_iter = 300;
+    serial_config.optimizer.parallel_threads = Some(1);
+    let serial = optimize_room(&serial_config, 48_000.0, None, None)
+        .expect("single-worker CMA-ES RoomEQ run must succeed");
+
+    let mut parallel_config = serial_config.clone();
+    parallel_config.optimizer.parallel_threads = Some(4);
+    let parallel = optimize_room(&parallel_config, 48_000.0, None, None)
+        .expect("four-worker CMA-ES RoomEQ run must succeed");
+
+    assert_parallel_result_matches(&serial, &parallel);
+}
+
+#[test]
+fn optimize_room_five_position_fixed_seed_matches_between_one_and_four_workers() {
+    let mut serial_config = nonflat_parallel_stereo_config();
+    for speaker in serial_config.speakers.values_mut() {
+        let SpeakerConfig::Single(MeasurementSource::InMemory(base)) = speaker else {
+            panic!("parallel stereo fixture must contain in-memory curves");
+        };
+        let positions = (0..5)
+            .map(|position| {
+                let mut curve = base.clone();
+                let offset = position as f64 * 0.11;
+                for (frequency, spl) in curve.freq.iter().zip(curve.spl.iter_mut()) {
+                    *spl += (frequency.log10() * 3.3 + offset).sin() * 0.75;
+                }
+                curve
+            })
+            .collect();
+        *speaker = SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(positions));
+    }
+    serial_config.optimizer.multi_measurement = Some(MultiMeasurementConfig {
+        strategy: MultiMeasurementStrategy::VariancePenalized,
+        variance_lambda: 0.5,
+        ..Default::default()
+    });
+    serial_config.optimizer.parallel_threads = Some(1);
+    let serial = optimize_room(&serial_config, 48_000.0, None, None)
+        .expect("single-worker five-position RoomEQ run must succeed");
+
+    let mut parallel_config = serial_config.clone();
+    parallel_config.optimizer.parallel_threads = Some(4);
+    let parallel = optimize_room(&parallel_config, 48_000.0, None, None)
+        .expect("four-worker five-position RoomEQ run must succeed");
+
+    assert_parallel_result_matches(&serial, &parallel);
+}
+
+fn home_cinema_5_1_4_config() -> RoomConfig {
+    let roles = [
+        ("L", "left"),
+        ("R", "right"),
+        ("C", "center"),
+        ("LFE", "lfe"),
+        ("SL", "surround_left"),
+        ("SR", "surround_right"),
+        ("TFL", "top_front_left"),
+        ("TFR", "top_front_right"),
+        ("TRL", "top_rear_left"),
+        ("TRR", "top_rear_right"),
+    ];
+    let speakers = roles
+        .iter()
+        .enumerate()
+        .map(|(channel_index, (_, channel))| {
+            let mut curve = flat_curve();
+            let phase = channel_index as f64 * 0.19;
+            for (frequency, spl) in curve.freq.iter().zip(curve.spl.iter_mut()) {
+                *spl += (frequency.log10() * 5.7 + phase).sin() * 4.0
+                    + (frequency.log10() * 13.0 - phase).cos() * 1.5;
+            }
+            (
+                (*channel).to_string(),
+                SpeakerConfig::Single(MeasurementSource::InMemory(curve)),
+            )
+        })
+        .collect();
+
+    RoomConfig {
+        version: roomeq_model::default_config_version(),
+        system: Some(SystemConfig {
+            model: SystemModel::HomeCinema,
+            speakers: roles
+                .iter()
+                .map(|(role, channel)| ((*role).to_string(), (*channel).to_string()))
+                .collect(),
+            subwoofers: Some(SubwooferSystemConfig {
+                config: SubwooferStrategy::Single,
+                crossover: Some("main".to_string()),
+                mapping: [("lfe".to_string(), "L".to_string())].into(),
+            }),
+            bass_management: None,
+            ..Default::default()
+        }),
+        speakers,
+        crossovers: Some(
+            [(
+                "main".to_string(),
+                CrossoverConfig {
+                    crossover_type: "LR24".to_string(),
+                    frequency: Some(80.0),
+                    frequencies: None,
+                    frequency_range: None,
+                },
+            )]
+            .into(),
+        ),
+        target_curve: None,
+        optimizer: OptimizerConfig {
+            processing_mode: ProcessingMode::LowLatency,
+            num_filters: 2,
+            max_iter: 120,
+            population: 12,
+            min_freq: 20.0,
+            max_freq: 2_000.0,
+            psychoacoustic: false,
+            refine: false,
+            seed: Some(42),
+            ..Default::default()
+        },
+        provenance: Default::default(),
+        recording_config: None,
+        ctc: None,
+        cea2034_cache: None,
+    }
+}
+
+#[test]
+fn optimize_home_cinema_5_1_4_fixed_seed_matches_one_and_four_workers() {
+    let mut serial_config = home_cinema_5_1_4_config();
+    serial_config.optimizer.parallel_threads = Some(1);
+    let serial = optimize_room(&serial_config, 48_000.0, None, None)
+        .expect("single-worker 5.1.4 RoomEQ run must succeed");
+
+    let mut parallel_config = serial_config.clone();
+    parallel_config.optimizer.parallel_threads = Some(4);
+    let parallel = optimize_room(&parallel_config, 48_000.0, None, None)
+        .expect("four-worker 5.1.4 RoomEQ run must succeed");
+
+    assert_parallel_result_matches(&serial, &parallel);
+}
+
+#[test]
+fn optimize_room_stop_after_parallel_channels_start_cancels_every_job() {
+    let mut config = nonflat_parallel_stereo_config();
+    config.optimizer.parallel_threads = Some(4);
+    config.optimizer.max_iter = 2_000;
+
+    let started_channels = Arc::new(Mutex::new(std::collections::HashSet::<String>::new()));
+    let callback_count = Arc::new(AtomicUsize::new(0));
+    let started_for_callback = Arc::clone(&started_channels);
+    let count_for_callback = Arc::clone(&callback_count);
+    let callback: RoomOptimizationCallback = Box::new(move |progress| {
+        count_for_callback.fetch_add(1, Ordering::SeqCst);
+        if progress.iteration > 0 && !progress.current_speaker.is_empty() {
+            let mut started = started_for_callback.lock().unwrap();
+            started.insert(progress.current_speaker.clone());
+            if started.len() >= 2 {
+                return CallbackAction::Stop;
+            }
+        }
+        CallbackAction::Continue
+    });
+
+    let output_dir = tempfile::tempdir().expect("cancellation output directory");
+    let result = optimize_room(&config, 48_000.0, Some(callback), Some(output_dir.path()));
+    assert!(
+        result.is_err(),
+        "stop request must abort the RoomEQ workflow"
+    );
+    assert_eq!(
+        started_channels.lock().unwrap().len(),
+        2,
+        "the stop must be requested only after both parallel channels started"
+    );
+    assert!(
+        callback_count.load(Ordering::SeqCst) < 100,
+        "active jobs did not observe cancellation promptly"
+    );
+    assert_eq!(
+        std::fs::read_dir(output_dir.path()).unwrap().count(),
+        0,
+        "a cancelled workflow must not publish partial output as complete"
+    );
+}
+
 #[test]
 fn execute_topology_workflow_home_cinema_without_sub() {
     let mut speakers = stereo_speakers();

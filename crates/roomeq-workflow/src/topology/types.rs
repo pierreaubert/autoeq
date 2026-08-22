@@ -12,7 +12,7 @@ pub struct WorkflowProgressCallback {
 }
 
 pub type WorkflowProgressCallbackFactory<'a> =
-    dyn FnMut(&str, usize, usize, usize) -> Option<WorkflowProgressCallback> + 'a;
+    dyn Fn(&str, usize, usize, usize) -> Option<WorkflowProgressCallback> + Send + Sync + 'a;
 
 pub type WorkflowStageCallback<'a> =
     dyn FnMut(PipelineStepId, PipelineStepStatus, &str, f64) -> Result<()> + 'a;
@@ -25,7 +25,7 @@ pub(crate) struct WorkflowAssembly<'cfg, 'p, 's> {
     pub frequency_samples: usize,
     pub output_dir: &'cfg Path,
     pub probe_arrival_overrides: Option<&'cfg HashMap<String, f64>>,
-    pub progress_factory: Option<&'p mut WorkflowProgressCallbackFactory<'p>>,
+    pub progress_factory: Option<&'p WorkflowProgressCallbackFactory<'p>>,
     pub stage_callback: Option<&'s mut WorkflowStageCallback<'s>>,
 }
 

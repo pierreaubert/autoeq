@@ -15,11 +15,28 @@ Usage:
 """
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from src.loaders import load_roomeq_json
 from src.report import create_html_report, create_comparison_html_report
+
+
+def config_diff_paths(base, effective, prefix=""):
+    """Return leaf paths changed by an effective override config."""
+    if isinstance(base, dict) and isinstance(effective, dict):
+        changed = []
+        for key in sorted(set(base) | set(effective)):
+            path = f"{prefix}.{key}" if prefix else key
+            if key not in base or key not in effective:
+                changed.append(path)
+            else:
+                changed.extend(config_diff_paths(base[key], effective[key], path))
+        return changed
+    if base != effective:
+        return [prefix]
+    return []
 
 
 def infer_mode_name(filepath: Path) -> str:
@@ -97,6 +114,11 @@ Examples:
         type=Path,
         help="Output HTML path (alternative to positional arg)",
     )
+    parser.add_argument(
+        "--base-config",
+        type=Path,
+        help="Base RoomEQ config; prints its diff against metadata.effective_config",
+    )
 
     args = parser.parse_args()
 
@@ -140,6 +162,20 @@ Examples:
 
     print(f"Loading output JSON: {output_json_path}")
     data = load_roomeq_json(output_json_path)
+    if args.base_config is not None:
+        if not args.base_config.exists():
+            print(f"Error: Base config not found: {args.base_config}")
+            sys.exit(1)
+        with args.base_config.open("r", encoding="utf-8") as handle:
+            base_config = json.load(handle)
+        effective_config = (data.get("metadata") or {}).get("effective_config")
+        if effective_config is None:
+            print("Error: output metadata has no effective_config; rerun with --override-config")
+            sys.exit(1)
+        changed = config_diff_paths(base_config, effective_config)
+        print(f"Effective config differs at {len(changed)} path(s):")
+        for path in changed:
+            print(f"  {path}")
 
     channels = data.get("channels", {})
     if not channels:

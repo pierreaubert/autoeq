@@ -97,7 +97,7 @@ pub(crate) fn run_channel_via_generic_path_with_frequency_samples(
     alignment_gain_db: f64,
     sample_rate: f64,
     output_dir: &Path,
-    progress_factory: &mut Option<&mut WorkflowProgressCallbackFactory<'_>>,
+    progress_factory: &Option<&WorkflowProgressCallbackFactory<'_>>,
     channel_index: usize,
     total_channels: usize,
     max_iterations: usize,
@@ -355,7 +355,7 @@ mod tests {
     fn run_channel_via_generic_path_runs() {
         let config = room_config(base_optimizer());
         let source = MeasurementSource::InMemory(flat_curve());
-        let mut factory: Option<&mut WorkflowProgressCallbackFactory<'_>> = None;
+        let factory: Option<&WorkflowProgressCallbackFactory<'_>> = None;
         let result = run_channel_via_generic_path_with_frequency_samples(
             "Left",
             &source,
@@ -363,7 +363,7 @@ mod tests {
             0.0,
             48_000.0,
             Path::new("."),
-            &mut factory,
+            &factory,
             0,
             1,
             config.optimizer.max_iter,
@@ -390,7 +390,7 @@ mod tests {
         optimizer.max_freq = 500.0;
         let config = room_config(optimizer);
         let source = MeasurementSource::InMemory(flat_curve());
-        let mut factory: Option<&mut WorkflowProgressCallbackFactory<'_>> = None;
+        let factory: Option<&WorkflowProgressCallbackFactory<'_>> = None;
         let result = run_channel_via_generic_path_with_frequency_samples(
             "Left",
             &source,
@@ -398,7 +398,7 @@ mod tests {
             2.5,
             48_000.0,
             Path::new("."),
-            &mut factory,
+            &factory,
             0,
             1,
             config.optimizer.max_iter,
@@ -468,7 +468,7 @@ mod tests {
         let mut seat1 = flat_curve();
         seat1.spl += 5.0;
         let source = MeasurementSource::InMemoryMultiple(vec![seat0, seat1]);
-        let mut factory: Option<&mut WorkflowProgressCallbackFactory<'_>> = None;
+        let factory: Option<&WorkflowProgressCallbackFactory<'_>> = None;
         let result = run_channel_via_generic_path_with_frequency_samples(
             "Left",
             &source,
@@ -476,7 +476,7 @@ mod tests {
             0.0,
             48_000.0,
             Path::new("."),
-            &mut factory,
+            &factory,
             0,
             1,
             config.optimizer.max_iter,

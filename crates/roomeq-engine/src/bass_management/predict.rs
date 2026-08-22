@@ -6,6 +6,70 @@ use crate::topology::{
 use autoeq_core::interpolate_log_space;
 use std::collections::HashMap;
 
+/// Predict the physical-sub contribution made by one logical input channel.
+///
+/// Unlike [`predict_bass_output_curve_from_routes`], this does not sum the
+/// shared bass bus. It is the response needed to evaluate the acoustic output
+/// a microphone records when only `source_channel` is driven.
+pub fn predict_bass_source_curve_from_routes(
+    sub_curve: &Curve,
+    graph: &BassManagementRoutingGraph,
+    source_channel: &str,
+    sample_rate: f64,
+) -> Option<Curve> {
+    use num_complex::Complex;
+
+    if !curve_has_usable_phase(sub_curve) {
+        return None;
+    }
+    let phase = sub_curve.phase.as_ref()?;
+    let mut complex_sum = vec![Complex::new(0.0, 0.0); sub_curve.freq.len()];
+    let mut any_route = false;
+
+    for route in graph.routes.iter().filter(|route| {
+        route.source_channel == source_channel
+            && (route.route_kind == "redirected_bass_lowpass_to_sub"
+                || route.route_kind == "lfe_lowpass_to_sub")
+    }) {
+        any_route = true;
+        let response = if let Some(freq) = route.low_pass_hz {
+            compute_crossover_complex_response(
+                &route.crossover_type,
+                freq,
+                sample_rate,
+                true,
+                &sub_curve.freq,
+            )
+        } else {
+            vec![Complex::new(1.0, 0.0); sub_curve.freq.len()]
+        };
+        let polarity_phase = if route.polarity_inverted { 180.0 } else { 0.0 };
+
+        for idx in 0..sub_curve.freq.len() {
+            let delay_phase = -360.0 * sub_curve.freq[idx] * route.delay_ms / 1000.0;
+            let magnitude = 10.0_f64.powf((sub_curve.spl[idx] + route.gain_db) / 20.0);
+            let phase_rad = (phase[idx] + delay_phase + polarity_phase).to_radians();
+            complex_sum[idx] += Complex::from_polar(magnitude, phase_rad) * response[idx];
+        }
+    }
+
+    if !any_route {
+        return None;
+    }
+    let mut spl = ndarray::Array1::<f64>::zeros(sub_curve.freq.len());
+    let mut output_phase = ndarray::Array1::<f64>::zeros(sub_curve.freq.len());
+    for (idx, value) in complex_sum.iter().enumerate() {
+        spl[idx] = 20.0 * value.norm().max(1e-12).log10();
+        output_phase[idx] = value.arg().to_degrees();
+    }
+    Some(Curve {
+        freq: sub_curve.freq.clone(),
+        spl,
+        phase: Some(output_phase),
+        ..sub_curve.clone()
+    })
+}
+
 pub fn predict_bass_output_curve_from_routes(
     sub_curve: &Curve,
     graph: &BassManagementRoutingGraph,

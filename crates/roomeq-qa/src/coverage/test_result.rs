@@ -1,6 +1,23 @@
 use anyhow::Result;
 use std::path::Path;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum QaOutcome {
+    Passed,
+    Reverted,
+    Failed,
+}
+
+impl QaOutcome {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::Passed => "PASS",
+            Self::Reverted => "REVERTED",
+            Self::Failed => "FAIL",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub(super) struct TestResult {
@@ -12,6 +29,7 @@ pub(super) struct TestResult {
     pub(super) post_score: f64,
     pub(super) epa_preference: Option<f64>,
     pub(super) passed: bool,
+    pub(super) outcome: QaOutcome,
     pub(super) error: Option<String>,
     pub(super) duration_ms: u64,
 }
@@ -27,9 +45,17 @@ impl TestResult {
         post: f64,
         epa_preference: Option<f64>,
         validation_failures: Vec<String>,
+        reverted: bool,
         dur: u64,
     ) -> Self {
         let passed = validation_failures.is_empty();
+        let outcome = if !passed {
+            QaOutcome::Failed
+        } else if reverted {
+            QaOutcome::Reverted
+        } else {
+            QaOutcome::Passed
+        };
         let error = if validation_failures.is_empty() {
             None
         } else {
@@ -44,6 +70,7 @@ impl TestResult {
             post_score: post,
             epa_preference,
             passed,
+            outcome,
             error,
             duration_ms: dur,
         }
@@ -66,6 +93,7 @@ impl TestResult {
             post_score: 0.0,
             epa_preference: None,
             passed: false,
+            outcome: QaOutcome::Failed,
             error: Some(err),
             duration_ms: dur,
         }
@@ -79,7 +107,9 @@ impl TestResult {
             self.duration_ms as f64 / 1000.0
         );
 
-        if !self.passed {
+        if self.outcome == QaOutcome::Reverted {
+            xml.push_str("\n      <skipped message=\"runtime correction reverted\"/>");
+        } else if !self.passed {
             let msg = if let Some(ref err) = self.error {
                 err.clone()
             } else {

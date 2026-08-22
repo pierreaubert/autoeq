@@ -3,6 +3,7 @@ use super::consts::TEMP_DIR_COUNTER;
 use super::consts::{apply_legacy_fast_overrides, apply_qa_overrides};
 use super::counting_semaphore::CountingSemaphore;
 use super::home_cinema::validate_home_cinema_result;
+use super::is::qa_primary_score_pair;
 use super::misc::avg_epa_preference;
 use super::processing_method::ProcessingMethod;
 use super::processing_method::validate_result;
@@ -11,19 +12,100 @@ use super::test_case::load_config_for_test;
 use super::test_result::TestResult;
 use anyhow::Result;
 use roomeq_engine::room_result::RoomOptimizationResult;
-use roomeq_model::RoomConfig;
+use roomeq_model::{ChannelDspChain, CorrectionDecision, PluginConfigWrapper, RoomConfig};
+use serde_json::Value;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::channel;
 use std::thread;
 
-pub(super) fn run_optimization(config: &RoomConfig) -> Result<RoomOptimizationResult> {
+pub(super) fn run_optimization(config: &RoomConfig) -> Result<(RoomOptimizationResult, PathBuf)> {
     let id = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!("roomeq_qa_{}_{}", std::process::id(), id));
     std::fs::create_dir_all(&temp_dir)?;
-    let result = crate::optimize_room(config, SAMPLE_RATE, Some(&temp_dir));
-    let _ = std::fs::remove_dir_all(&temp_dir);
-    result
+    match crate::optimize_room(config, SAMPLE_RATE, Some(&temp_dir)) {
+        Ok(result) => Ok((result, temp_dir)),
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+            Err(error)
+        }
+    }
+}
+
+fn resolve_convolution_paths(result: &mut RoomOptimizationResult, output_dir: &Path) {
+    for chain in result.channels.values_mut() {
+        resolve_chain_convolution_paths(chain, output_dir);
+    }
+}
+
+fn resolve_chain_convolution_paths(chain: &mut ChannelDspChain, output_dir: &Path) {
+    for plugin in &mut chain.plugins {
+        resolve_plugin_convolution_path(plugin, output_dir);
+    }
+    if let Some(drivers) = &mut chain.drivers {
+        for driver in drivers {
+            for plugin in &mut driver.plugins {
+                resolve_plugin_convolution_path(plugin, output_dir);
+            }
+        }
+    }
+}
+
+fn resolve_plugin_convolution_path(plugin: &mut PluginConfigWrapper, output_dir: &Path) {
+    if plugin.plugin_type != "convolution" {
+        return;
+    }
+    let Some(filename) = plugin.parameters.get("ir_file").and_then(Value::as_str) else {
+        return;
+    };
+    let path = output_dir.join(filename);
+    if path.is_file() {
+        plugin.parameters["ir_file"] = Value::String(path.to_string_lossy().into_owned());
+    }
+}
+
+fn validate_metamorphic_optimization(
+    config: &RoomConfig,
+    baseline: &RoomOptimizationResult,
+) -> Vec<String> {
+    let mut failures = Vec::new();
+    let (_, baseline_post) = qa_primary_score_pair(baseline, config);
+    let material_tolerance = (baseline_post.abs() * 0.01).max(1.0e-6);
+
+    let mut higher_budget = config.clone();
+    higher_budget.optimizer.max_iter = higher_budget.optimizer.max_iter.saturating_mul(2).max(2);
+    match crate::optimize_room(&higher_budget, SAMPLE_RATE, None) {
+        Ok(result) => {
+            let (_, post) = qa_primary_score_pair(&result, &higher_budget);
+            if post > baseline_post + material_tolerance {
+                failures.push(format!(
+                    "metamorphic max_iter regression: baseline {:.4}, doubled-budget {:.4}",
+                    baseline_post, post
+                ));
+            }
+        }
+        Err(error) => failures.push(format!("metamorphic max_iter run failed: {error:#}")),
+    }
+
+    let mut more_filters = higher_budget;
+    more_filters.optimizer.num_filters = more_filters.optimizer.num_filters.saturating_add(2);
+    match crate::optimize_room(&more_filters, SAMPLE_RATE, None) {
+        Ok(result) => {
+            let (_, post) = qa_primary_score_pair(&result, &more_filters);
+            if post > baseline_post + material_tolerance {
+                failures.push(format!(
+                    "metamorphic filter-count regression: {} filters {:.4}, {} filters {:.4}",
+                    config.optimizer.num_filters,
+                    baseline_post,
+                    more_filters.optimizer.num_filters,
+                    post
+                ));
+            }
+        }
+        Err(error) => failures.push(format!("metamorphic filter-count run failed: {error:#}")),
+    }
+    failures
 }
 
 pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
@@ -78,7 +160,7 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
     }
 
     // Run optimization
-    let result = match run_optimization(&config) {
+    let (mut result, temp_dir) = match run_optimization(&config) {
         Ok(r) => r,
         Err(e) => {
             return TestResult::failure(
@@ -91,6 +173,7 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
             );
         }
     };
+    resolve_convolution_paths(&mut result, &temp_dir);
 
     let (pre, post) = if tc.home_cinema_expectations.is_some() {
         result
@@ -110,6 +193,20 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
     };
     let epa_pref = avg_epa_preference(&result);
     let dur = start.elapsed().as_millis() as u64;
+    let reverted = result
+        .metadata
+        .correction_acceptance
+        .as_ref()
+        .is_some_and(|report| {
+            matches!(
+                report.decision,
+                CorrectionDecision::RevertedStage | CorrectionDecision::IdentityFallback
+            )
+        });
+    let allow_reverted = tc
+        .home_cinema_expectations
+        .as_ref()
+        .is_some_and(|expectations| expectations.allow_safe_revert);
 
     // Home-cinema cases use the canonical, passband-aware runtime acceptance
     // report below. The generic scalar scores mix unlike channel targets and
@@ -118,9 +215,9 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
     let mut validation_failures = if tc.home_cinema_expectations.is_some() {
         Vec::new()
     } else {
-        validate_result(&result, tc.room_size(), tc.method, &config)
+        validate_result(&result, tc.expect, tc.method, &config)
     };
-    if let Some(expectations) = tc.home_cinema_expectations {
+    if let Some(expectations) = tc.home_cinema_expectations.clone() {
         validation_failures.extend(validate_home_cinema_result(
             &result,
             &config,
@@ -128,6 +225,16 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
             expectations,
         ));
     }
+    validation_failures.extend(crate::registry::verify_result_claims(&result, &tc.claims));
+    validation_failures.extend(validate_metamorphic_optimization(&config, &result));
+    if reverted && !allow_reverted {
+        validation_failures.push(
+            "runtime acceptance reverted the proposed correction; this scenario does not declare expect.allow_safe_revert"
+                .to_string(),
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(temp_dir);
 
     TestResult::success(
         &name,
@@ -138,6 +245,7 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
         post,
         epa_pref,
         validation_failures,
+        reverted,
         dur,
     )
 }
@@ -186,6 +294,7 @@ pub fn run_regression_case(
     maxeval: usize,
 ) -> std::result::Result<(), String> {
     let test_case = TestCase {
+        registry_id: format!("adhoc/{scenario}/{}", method.name()),
         scenario: scenario.to_string(),
         description: scenario.to_string(),
         solver: super::solver::Solver::Fem,
@@ -193,6 +302,14 @@ pub fn run_regression_case(
         case_name: None,
         override_file: None,
         home_cinema_expectations: None,
+        claims: Vec::new(),
+        expect: crate::registry::ScenarioExpect {
+            improvement_min_pct: super::room_size::RoomSize::from_scenario(scenario)
+                .min_improvement_pct(),
+            max_post_score: super::room_size::RoomSize::from_scenario(scenario).max_post_score(),
+            max_boost_db: 12.0,
+            allow_safe_revert: false,
+        },
     };
     let result = run_test_case(&test_case, maxeval);
     if result.passed {

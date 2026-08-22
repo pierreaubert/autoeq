@@ -4,7 +4,7 @@ use super::option_override::OptionOverride;
 pub(super) fn option_needs_multi_measurement_paths(option: &OptionOverride) -> bool {
     match option {
         OptionOverride::MultiMeasurementMinimax
-        | OptionOverride::MultiMeasurementVariancePenalized
+        | OptionOverride::MultiMeasurementVariancePenalized { .. }
         | OptionOverride::SpatialRobustness => true,
         OptionOverride::GroupDelay { profile } => profile.needs_multi_measurement_paths(),
         _ => false,

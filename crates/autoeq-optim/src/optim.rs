@@ -45,6 +45,7 @@ pub mod optimizer_backend;
 pub mod params;
 /// Pareto front analysis
 pub mod pareto;
+pub mod prepared_objective;
 /// Algorithm registry — string name → backend.
 pub mod registry;
 /// Shared bounded scalar-objective optimizer dispatch.

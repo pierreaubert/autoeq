@@ -18,6 +18,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloca"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5a7d05ea6aea7e9e64d25b9156ba2fee3fdd659e34e41063cd2fc7cd020d7f4"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -25,6 +34,12 @@ checksum = "ae221649c9976a6f6c56ae1facf410f3ddb33cc661c4b7b61020a912d4237fbc"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "anes"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
 
 [[package]]
 name = "anstream"
@@ -184,7 +199,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "autoeq"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "anyhow",
  "assert_fs",
@@ -222,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-artifacts"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "autoeq-core",
  "tempfile",
@@ -230,7 +245,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-cli"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "anyhow",
  "autoeq-plot",
@@ -252,7 +267,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-core"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "clap",
  "log",
@@ -269,7 +284,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-fir"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "autoeq-core",
  "hound",
@@ -282,7 +297,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-measurements"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "async-trait",
  "autoeq-core",
@@ -304,11 +319,12 @@ dependencies = [
 
 [[package]]
 name = "autoeq-optim"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "autoeq-core",
  "autoeq-measurements",
  "clap",
+ "criterion",
  "log",
  "math-dsp",
  "math-iir-fir",
@@ -319,13 +335,15 @@ dependencies = [
  "num_cpus",
  "rand 0.10.2",
  "rand_chacha 0.10.0",
+ "rayon",
  "schemars 1.2.2",
  "serde",
+ "stats_alloc",
 ]
 
 [[package]]
 name = "autoeq-plot"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "anyhow",
  "autoeq-core",
@@ -341,7 +359,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-workflow"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "autoeq-core",
  "autoeq-measurements",
@@ -513,6 +531,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "cast"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
+
+[[package]]
 name = "cc"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -559,6 +583,33 @@ dependencies = [
  "serde",
  "wasm-bindgen",
  "windows-link",
+]
+
+[[package]]
+name = "ciborium"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42e69ffd6f0917f5c029256a24d0161db17cea3997d185db0d35926308770f0e"
+dependencies = [
+ "ciborium-io",
+ "ciborium-ll",
+ "serde",
+]
+
+[[package]]
+name = "ciborium-io"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05afea1e0a06c9be33d539b876f1ce3692f4afea2cb41f740e7743225ed1c757"
+
+[[package]]
+name = "ciborium-ll"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57663b653d948a338bfb3eeba9bb2fd5fcfaecb9e199e87e1eda4d9e8b240fd9"
+dependencies = [
+ "ciborium-io",
+ "half",
 ]
 
 [[package]]
@@ -692,6 +743,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "criterion"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "950046b2aa2492f9a536f5f4f9a3de7b9e2476e575e05bd6c333371add4d98f3"
+dependencies = [
+ "alloca",
+ "anes",
+ "cast",
+ "ciborium",
+ "clap",
+ "criterion-plot",
+ "itertools",
+ "num-traits",
+ "oorandom",
+ "page_size",
+ "plotters",
+ "rayon",
+ "regex",
+ "serde",
+ "serde_json",
+ "tinytemplate",
+ "walkdir",
+]
+
+[[package]]
+name = "criterion-plot"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8d80a2f4f5b554395e47b5d8305bc3d27813bacb73493eb1001e8f76dae29ea"
+dependencies = [
+ "cast",
+ "itertools",
+]
+
+[[package]]
 name = "crossbeam-deque"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -715,6 +801,12 @@ name = "crossbeam-utils"
 version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
+
+[[package]]
+name = "crunchy"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "crypto-common"
@@ -1262,6 +1354,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "half"
+version = "2.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ea2d84b969582b4b1864a92dc5d27cd2b77b622a8d79306834f1be5ba20d84b"
+dependencies = [
+ "cfg-if",
+ "crunchy",
+ "zerocopy",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1625,6 +1728,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
+name = "itertools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1814,8 +1926,8 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "math-dsp"
-version = "0.5.22"
-source = "git+https://github.com/pierreaubert/math-audio#5ebe1ab53ee7deb85b3e3795f1c930e02491a842"
+version = "0.5.27"
+source = "git+https://github.com/pierreaubert/math-audio#b81e016bd4799b9eeee5579205ad32793d243d73"
 dependencies = [
  "clap",
  "hound",
@@ -1834,8 +1946,8 @@ dependencies = [
 
 [[package]]
 name = "math-iir-fir"
-version = "0.5.17"
-source = "git+https://github.com/pierreaubert/math-audio#5ebe1ab53ee7deb85b3e3795f1c930e02491a842"
+version = "0.5.19"
+source = "git+https://github.com/pierreaubert/math-audio#b81e016bd4799b9eeee5579205ad32793d243d73"
 dependencies = [
  "base64 0.22.1",
  "byteorder",
@@ -1851,7 +1963,7 @@ dependencies = [
 [[package]]
 name = "math-optimisation"
 version = "0.5.11"
-source = "git+https://github.com/pierreaubert/math-audio#5ebe1ab53ee7deb85b3e3795f1c930e02491a842"
+source = "git+https://github.com/pierreaubert/math-audio#b81e016bd4799b9eeee5579205ad32793d243d73"
 dependencies = [
  "clap",
  "directories",
@@ -1866,8 +1978,8 @@ dependencies = [
 
 [[package]]
 name = "math-rir"
-version = "0.5.6"
-source = "git+https://github.com/pierreaubert/math-audio#5ebe1ab53ee7deb85b3e3795f1c930e02491a842"
+version = "0.5.8"
+source = "git+https://github.com/pierreaubert/math-audio#b81e016bd4799b9eeee5579205ad32793d243d73"
 dependencies = [
  "math-iir-fir",
  "rayon",
@@ -1876,7 +1988,7 @@ dependencies = [
 [[package]]
 name = "math-test-functions"
 version = "0.5.2"
-source = "git+https://github.com/pierreaubert/math-audio#5ebe1ab53ee7deb85b3e3795f1c930e02491a842"
+source = "git+https://github.com/pierreaubert/math-audio#b81e016bd4799b9eeee5579205ad32793d243d73"
 dependencies = [
  "clap",
  "directories",
@@ -2064,6 +2176,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "oorandom"
+version = "11.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
+
+[[package]]
 name = "openssl-probe"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2077,9 +2195,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "oxiblas-blas"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b20733edf8bd497233628af75afdb7c5f29157d8dc82e9fdc6c0e862e6e6957"
+checksum = "3b9e1346a6fb0c859ba99a0c46d54c3b6f620b132ce1be4aa7ef93634002009b"
 dependencies = [
  "bytemuck",
  "num-complex",
@@ -2090,9 +2208,9 @@ dependencies = [
 
 [[package]]
 name = "oxiblas-core"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2d36abb8c720acdb430c810434582b558f0dfdfcc34b73b64e7cd4f641b1ea1"
+checksum = "bb71a758e4b67699331dc2f01a20ddc05a5b952b66be9e46857f2aafe19db353"
 dependencies = [
  "bytemuck",
  "libc",
@@ -2102,9 +2220,9 @@ dependencies = [
 
 [[package]]
 name = "oxiblas-lapack"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d69ba187daaf0d0e38d331c6fba35f5584296160e78d832b8e39c8e6c93b46f"
+checksum = "a31dc82201c233fbadc57e7583644062c364f4eb8e77fa8c9fb830722ec8b7e8"
 dependencies = [
  "bytemuck",
  "num-complex",
@@ -2116,9 +2234,9 @@ dependencies = [
 
 [[package]]
 name = "oxiblas-matrix"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75bf5ed8ca26065e07b83f98009447302cd01926c88e829d7b5bc50e97d0ff19"
+checksum = "f3b5d0050e3dea737a5d9c7c30d0029a73f270c5edb59281cef991a4d13c9fb9"
 dependencies = [
  "bytemuck",
  "num-complex",
@@ -2128,17 +2246,28 @@ dependencies = [
 
 [[package]]
 name = "oxiblas-ndarray"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee20cc93be5eefffa6ee2ba283047cf0558ee1fdf5c73507859a9a6dc36df70f"
+checksum = "796fd699643634753a2314234ea1fab6f6fa9caa123f5797830894f0fa91ec86"
 dependencies = [
  "bytemuck",
  "ndarray",
  "num-complex",
+ "num-traits",
  "oxiblas-blas",
  "oxiblas-core",
  "oxiblas-lapack",
  "oxiblas-matrix",
+]
+
+[[package]]
+name = "page_size"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30d5b2194ed13191c1999ae0704b7839fb18384fa22e49b57eeaa97d79ce40da"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]
@@ -2220,6 +2349,34 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "plotters"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5aeb6f403d7a4911efb1e33402027fc44f29b5bf6def3effcc22d7bb75f2b747"
+dependencies = [
+ "num-traits",
+ "plotters-backend",
+ "plotters-svg",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "plotters-backend"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df42e13c12958a16b3f7f4386b9ab1f3e7933914ecea48da7139435263a4172a"
+
+[[package]]
+name = "plotters-svg"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51bae2ac328883f7acdfea3d66a7c35751187f870bc81f94563733a154d7a670"
+dependencies = [
+ "plotters-backend",
 ]
 
 [[package]]
@@ -2727,7 +2884,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-analysis"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "autoeq-core",
  "hound",
@@ -2749,7 +2906,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-cli"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "anyhow",
  "clap",
@@ -2765,7 +2922,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-engine"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "autoeq-core",
  "autoeq-fir",
@@ -2793,7 +2950,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-export"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "anyhow",
  "clap",
@@ -2808,7 +2965,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-model"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "autoeq-core",
  "clap",
@@ -2822,7 +2979,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-qa"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "anyhow",
  "autoeq-measurements",
@@ -2830,6 +2987,7 @@ dependencies = [
  "chrono",
  "clap",
  "env_logger",
+ "log",
  "math-iir-fir",
  "ndarray",
  "rand 0.10.2",
@@ -2847,7 +3005,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-quality"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "autoeq-core",
  "math-iir-fir",
@@ -2861,7 +3019,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-synthetic"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "autoeq-core",
  "log",
@@ -2871,23 +3029,27 @@ dependencies = [
 
 [[package]]
 name = "roomeq-workflow"
-version = "0.5.56"
+version = "0.5.57"
 dependencies = [
  "anyhow",
  "autoeq-artifacts",
+ "autoeq-core",
  "autoeq-measurements",
  "chrono",
+ "criterion",
  "hound",
  "log",
  "math-dsp",
  "math-iir-fir",
  "ndarray",
  "num-complex",
+ "rayon",
  "roomeq-engine",
  "roomeq-export",
  "roomeq-model",
  "rustfft",
  "serde",
+ "serde_ignored",
  "serde_json",
  "sofa-reader",
  "tempfile",
@@ -3233,6 +3395,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_ignored"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "115dffd5f3853e06e746965a20dcbae6ee747ae30b543d91b0e089668bb07798"
+dependencies = [
+ "serde",
+ "serde_core",
+]
+
+[[package]]
 name = "serde_json"
 version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3453,6 +3625,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
+name = "stats_alloc"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c0e04424e733e69714ca1bbb9204c1a57f09f5493439520f9f68c132ad25eec"
+
+[[package]]
 name = "strength_reduce"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3559,7 +3737,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.52.0",
@@ -3655,6 +3833,16 @@ checksum = "c8323304221c2a851516f22236c5722a72eaa19749016521d6dff0824447d96d"
 dependencies = [
  "displaydoc",
  "zerovec",
+]
+
+[[package]]
+name = "tinytemplate"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be4d6b5f19ff7664e8c98d03e2139cb510db9b0a60b55f8e8709b689d939b6bc"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4094,6 +4282,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "winapi"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c839a674fcd7a98952e593242ea400abe93992746761e38641405d28b00f419"
+dependencies = [
+ "winapi-i686-pc-windows-gnu",
+ "winapi-x86_64-pc-windows-gnu",
+]
+
+[[package]]
+name = "winapi-i686-pc-windows-gnu"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
+
+[[package]]
 name = "winapi-util"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4101,6 +4305,12 @@ checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
  "windows-sys 0.52.0",
 ]
+
+[[package]]
+name = "winapi-x86_64-pc-windows-gnu"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "windows-core"

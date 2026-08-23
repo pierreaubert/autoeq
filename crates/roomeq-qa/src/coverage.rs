@@ -22,7 +22,6 @@ use clap::Parser;
 
 mod args;
 mod consts;
-mod counting_semaphore;
 mod home_cinema;
 mod is;
 mod misc;
@@ -38,7 +37,7 @@ use home_cinema::build_home_cinema_matrix;
 use misc::find_project_root;
 use misc::scenario_description;
 pub use processing_method::ProcessingMethod;
-use processing_method::build_test_matrix_for_tier;
+use processing_method::{build_quick_test_matrix, build_test_matrix_for_tier};
 use run::run_parallel;
 pub use run::run_regression_case;
 use test_case::TestCase;
@@ -75,10 +74,12 @@ pub fn run() -> Result<bool> {
     // Build test matrix
     let mut test_cases = if args.home_cinema {
         build_home_cinema_matrix(args.tier, args.solver.as_deref(), args.mode.as_deref())
+    } else if args.quick {
+        build_quick_test_matrix(args.tier, args.solver.as_deref(), args.mode.as_deref())
     } else {
         build_test_matrix_for_tier(
             args.tier,
-            args.quick,
+            false,
             args.solver.as_deref(),
             args.mode.as_deref(),
         )
@@ -129,7 +130,7 @@ pub fn run() -> Result<bool> {
         args.jobs()
     );
     if args.quick {
-        println!("QUICK MODE: Small rooms, FEM only, IIR only");
+        println!("QUICK MODE: bounded FEM/IIR smoke matrix with safety-level acceptance");
     }
     println!();
 

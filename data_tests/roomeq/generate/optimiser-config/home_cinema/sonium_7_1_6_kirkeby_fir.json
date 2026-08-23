@@ -24,7 +24,7 @@
       "match_timbre": false,
       "match_level": true,
       "match_arrival_time": false,
-      "match_phase": true,
+      "match_phase": false,
       "min_timbre_improvement_db": 0.01,
       "max_delay_ms": 20.0,
       "reference_channels": { "top_front": "L", "top_middle": "L", "top_rear": "SL" }

@@ -35,19 +35,18 @@ pub fn build_target_tilt_curve(
     channel_name: &str,
     room_config: &RoomConfig,
     curve: &Curve,
-    cea2034_active: bool,
+    _cea2034_active: bool,
 ) -> Option<Curve> {
     let target_response = room_config.optimizer.target_response.as_ref()?;
 
-    // With three-pass correction, user preferences become output filters in
-    // pass 3 instead of being baked into the optimization target.
-    let mut effective_target = if cea2034_active {
-        let mut stripped = target_response.clone();
-        stripped.preference = UserPreference::default();
-        stripped
-    } else {
-        target_response.clone()
-    };
+    // User voicing is always a separately bypassable output-filter layer and
+    // must not contaminate the neutral correction objective or quality score.
+    let mut effective_target = target_response.clone();
+    effective_target.preference = UserPreference::default();
+    effective_target.role_targets = None;
+    if effective_target.shape == TargetShape::Harman {
+        effective_target.shape = TargetShape::Flat;
+    }
     effective_target =
         roomeq_model::home_cinema::role_adjusted_target_response(channel_name, &effective_target);
 
@@ -103,11 +102,7 @@ pub fn build_target_tilt_curve(
             },
             effective_target.preference.bass_shelf_db,
             effective_target.preference.treble_shelf_db,
-            if cea2034_active {
-                " (preferences extracted to Pass 3)"
-            } else {
-                ""
-            },
+            " (preferences extracted to output layer)",
         );
         let mut target_curve =
             roomeq_model::target_tilt::build_complete_target_curve(&curve.freq, &effective_target);
@@ -230,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn harman_and_custom_targets_have_expected_direction() {
+    fn harman_is_extracted_while_custom_neutral_target_keeps_expected_direction() {
         let response = curve();
         let harman = build_target_tilt_curve(
             "left",
@@ -240,9 +235,11 @@ mod tests {
             }),
             &response,
             false,
-        )
-        .unwrap();
-        assert!(harman.spl[0] > harman.spl[harman.spl.len() - 1]);
+        );
+        assert!(
+            harman.is_none(),
+            "Harman house curve must be extracted from the neutral optimizer target"
+        );
 
         let custom = build_target_tilt_curve(
             "left",
@@ -274,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn cea2034_extracts_user_preferences_from_target() {
+    fn house_curve_and_user_preferences_are_extracted_from_neutral_target() {
         let response = curve();
         let mut room_config = config(TargetResponseConfig {
             shape: TargetShape::Harman,
@@ -284,9 +281,8 @@ mod tests {
             },
             ..TargetResponseConfig::default()
         });
-        let normal = build_target_tilt_curve("left", &room_config, &response, false).unwrap();
-        let cea = build_target_tilt_curve("left", &room_config, &response, true).unwrap();
-        assert_ne!(normal.spl, cea.spl);
+        assert!(build_target_tilt_curve("left", &room_config, &response, false).is_none());
+        assert!(build_target_tilt_curve("left", &room_config, &response, true).is_none());
 
         room_config.optimizer.cea2034_correction = Some(Cea2034CorrectionConfig {
             enabled: true,

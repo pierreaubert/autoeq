@@ -69,7 +69,10 @@ pub(super) fn enable_multisub_multi_seat_paths(
         };
 
         for (sub_idx, source) in group.subwoofers.iter_mut().enumerate() {
-            if matches!(source, MeasurementSource::Multiple(_)) {
+            if matches!(
+                source,
+                MeasurementSource::Multiple(multiple) if multiple.measurements.len() > 1
+            ) {
                 continue;
             }
 

@@ -1,0 +1,5 @@
+{
+  "optimizer": {
+    "processing_mode": "low_latency"
+  }
+}

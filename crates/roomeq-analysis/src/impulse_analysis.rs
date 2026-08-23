@@ -21,6 +21,7 @@ mod decomposed_correction_config;
 mod detect;
 mod estimate;
 mod misc;
+mod mode_decay;
 mod null_detection_config;
 #[cfg(test)]
 mod tests;
@@ -29,6 +30,7 @@ mod types;
 pub use build::*;
 pub use decomposed_correction_config::*;
 pub use detect::*;
+pub use mode_decay::*;
 pub use null_detection_config::*;
 pub use types::*;
 

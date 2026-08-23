@@ -14,7 +14,6 @@ Foundational papers and standards behind the algorithms in `autoeq`. Citations a
 | `loss/phase_aware.rs` | [Phase-coherent EQ / phase audibility](#phase-coherent-eq--phase-audibility) |
 | `loss/enhanced_weights.rs` | [ERB scale](#erb--cochlear-bandwidth), [perceptual EQ weighting](#perceptual-eq-weighting) |
 | `loss/epa/bark.rs`, `loudness.rs`, `sharpness.rs`, `roughness.rs`, `score.rs` | [Zwicker / Fastl psychoacoustics](#zwicker--fastl-psychoacoustic-metrics-bark-loudness-sharpness-roughness), [ISO 226](#iso-226-equal-loudness-contours), [DIN 45692](#din-45692-sharpness), [Osgood semantic differentials (EPA)](#osgood-semantic-differential-evaluationpotencyactivity) |
-| `loss/epa/cdt.rs` | [Cubic distortion tones](#cubic-distortion-tones-cdt) |
 | `roomeq/spatial_robustness.rs`, `roomeq/mixed_phase.rs` | [Brännmark & Sternad — robust room correction + EP2104374B1](#brännmark--sternad--robust-room-correction) |
 | `roomeq/impulse_analysis.rs` | [Laborie, Bruno & Montoya — decomposed correction](#laborie-bruno--montoya--decomposed-room-correction) |
 | `roomeq/reflection_cancel.rs` | [Johnston — first-reflection cancellation](#johnston--first-reflection-cancellation) |
@@ -266,7 +265,10 @@ Foundational papers and standards behind the algorithms in `autoeq`. Citations a
 
 ## Cubic distortion tones (CDT)
 
-`loss/epa/cdt.rs::cdt_level` uses the `L_cdt ≈ 2·L1 - L2 - 63 dB` approximation.
+Historical note: the former `loss/epa/cdt.rs` approximation was removed from
+the optimizer because its level-sign causal story was not scientifically valid.
+The citations below are retained only as background and are not evidence for an
+active RoomEQ objective.
 
 ```bibtex
 @article{goldstein1967auditory,

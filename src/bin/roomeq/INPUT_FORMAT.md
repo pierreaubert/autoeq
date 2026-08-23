@@ -115,6 +115,38 @@ objects such as `speakers` still accept arbitrary map keys whose values conform
 to the declared schema. The generated `input_schema.json` mirrors this contract
 with `additionalProperties: false` on fixed-shape objects.
 
+## Neutral objective, spatial risk, and preference layers
+
+The neutral flat/asymmetric objective uses the versioned
+`glasberg-moore-erb-rate-1990-v1` integration measure. Discrete ERB-rate cell
+widths keep constant physical error invariant across linear, logarithmic,
+sparse, and dense grids, and signed residuals are not smoothed before loss.
+
+`optimizer.multi_measurement.weights` must be finite and nonnegative with at
+least one positive entry; `variance_lambda` must be finite and nonnegative.
+`spatial_robustness` evaluates every seat directly with a variance-penalized
+per-seat risk measure and applies its correction-depth mask to each seat. It no
+longer optimizes a power-averaged representative curve.
+
+Bootstrap results are labelled `spatial_seat_sampling`. By default they assume
+independent positions; when nearby seats are correlated, set
+`bootstrap_uncertainty.effective_spatial_sample_size` below the nominal seat
+count to draw fewer cases per resample and widen the confidence band. This is a
+conservative correlation adjustment, not a spatial covariance model. Separately
+measured `repeat_sweep_noise_std_db` and `calibration_uncertainty_std_db` are
+reported as distinct nuisance sources rather than estimated by the seat
+bootstrap.
+
+The fixed `harman` house curve, `target_response.preference`, and role/content voicing are emitted as a
+separately bypassable post-correction layer. They remain in the final DSP chain
+but are excluded from neutral quality scores. The output report records
+`neutral_target_response`, `preference_layer`, and
+`excluded_from_neutral_quality_score` explicitly.
+
+EPA optimization is experimental and uses spectral flatness only. Transfer-only
+loudness, roughness, sharpness, and temporal values are diagnostics rather than
+validated programme-audio or measured-decay objectives.
+
 ## Multi-measurement RIR prototype
 
 When a speaker has several measurements captured at different positions, you

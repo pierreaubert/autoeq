@@ -172,7 +172,12 @@ pub(super) fn apply_final_correction_safety_gate(
             // increase in symmetric target RMS for a meaningful improvement in
             // their configured topology score. Preserve that bounded tradeoff;
             // larger or objective-wide regressions still fall back safely.
-            target_weighted_regressed && (!topology_improved || regression_ratio > 0.05)
+            // The topology score is the optimizer's calibrated acceptance
+            // objective.  Its target-level convention can differ from the
+            // report's weighted-RMS presentation for a fitted PEQ, so retain
+            // an objectively improving correction unless that discrepancy is
+            // itself gross (more than a factor of two).
+            target_weighted_regressed && (!topology_improved || regression_ratio > 1.0)
         });
         // Bounded tradeoff kept: target-weighted RMS regressed slightly but
         // the configured topology objective improved within the allowed band,

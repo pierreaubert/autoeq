@@ -31,10 +31,9 @@ pub fn detect_room_modes(
             break;
         }
 
-        // Local maximum: higher than available neighbors within a 2-sample
-        // window. Near band edges this degrades gracefully to the available
-        // one-sided context instead of skipping the lowest two bins.
-        let is_peak = is_local_extremum(spl, i, 2, true);
+        // Local maximum in a physical one-third-octave neighborhood. Sparse
+        // edge fixtures fall back to their nearest available neighbours.
+        let is_peak = is_local_extremum(freq, spl, i, 1.0 / 6.0, true);
 
         if !is_peak {
             continue;
@@ -95,9 +94,8 @@ pub fn detect_narrow_nulls(
     }
 
     for i in 1..n - 1 {
-        // Local minimum: lower than both neighbours at distance 1 and 2
-        // (same available 2-sample window as detect_room_modes).
-        let is_min = is_local_extremum(spl, i, 2, false);
+        // Local minimum in the same grid-independent octave neighborhood.
+        let is_min = is_local_extremum(freq, spl, i, 1.0 / 6.0, false);
 
         if !is_min {
             continue;

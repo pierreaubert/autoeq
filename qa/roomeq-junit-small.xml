@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="roomeq-qa-full" tests="1" failures="1" errors="1" time="5.319" >
+    <testcase name="small_stereo_2_0 fem iir" classname="roomeq.small_stereo_2_0" time="5.319">
+      <failure message="insufficient improvement: 11.2% &lt; 15.0% registry minimum" type="AssertionError"/>
+    </testcase>
+</testsuite>

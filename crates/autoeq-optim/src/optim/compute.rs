@@ -74,6 +74,29 @@ thread_local! {
 /// Each objective shares the same filter parameters `x` but evaluates against
 /// a different measurement curve. The per-curve losses are combined according
 /// to the configured strategy.
+fn variance_penalized_loss(
+    weighted_losses: impl IntoIterator<Item = (f64, f64)>,
+    variance_lambda: f64,
+) -> f64 {
+    let mut total_weight = 0.0;
+    let mut mean = 0.0;
+    let mut sum_squared_deviation = 0.0;
+    for (loss, weight) in weighted_losses {
+        if weight <= 0.0 {
+            continue;
+        }
+        total_weight += weight;
+        let delta = loss - mean;
+        mean += (weight / total_weight) * delta;
+        sum_squared_deviation += weight * delta * (loss - mean);
+    }
+    if total_weight <= 0.0 {
+        return f64::INFINITY;
+    }
+    let variance = sum_squared_deviation / total_weight;
+    mean + variance_lambda * variance
+}
+
 fn compute_multi_objective_fitness(x: &[f64], mo: &MultiObjectiveData) -> f64 {
     use crate::roomeq::MultiMeasurementStrategy;
 
@@ -97,24 +120,17 @@ fn compute_multi_objective_fitness(x: &[f64], mo: &MultiObjectiveData) -> f64 {
             .iter()
             .map(|objective| compute_base_fitness_single(x, objective))
             .fold(f64::NEG_INFINITY, f64::max),
-        MultiMeasurementStrategy::VariancePenalized => {
-            let mut count = 0usize;
-            let mut mean = 0.0;
-            let mut sum_squared_deviation = 0.0;
-            for objective in &mo.objectives {
-                let loss = compute_base_fitness_single(x, objective);
-                count += 1;
-                let delta = loss - mean;
-                mean += delta / count as f64;
-                sum_squared_deviation += delta * (loss - mean);
-            }
-            let variance = sum_squared_deviation / count as f64;
-            mean + mo.variance_lambda * variance
-        }
+        MultiMeasurementStrategy::VariancePenalized => variance_penalized_loss(
+            mo.objectives
+                .iter()
+                .zip(&mo.weights)
+                .map(|(objective, weight)| (compute_base_fitness_single(x, objective), *weight)),
+            mo.variance_lambda,
+        ),
         MultiMeasurementStrategy::SpatialRobustness => {
-            // SpatialRobustness uses single-curve optimization on the RMS-averaged curve
-            // and should never reach the multi-objective loss computation.
-            unreachable!("SpatialRobustness strategy should not use multi-objective loss path")
+            // Engine adapters map SpatialRobustness to direct per-seat
+            // VariancePenalized risk before constructing this optimizer payload.
+            unreachable!("unadapted SpatialRobustness strategy reached optimizer")
         }
         MultiMeasurementStrategy::MinimaxUncertainty => {
             // The bootstrap-resampled objectives have already been materialised
@@ -292,7 +308,6 @@ fn compute_prepared_flat_fitness(x: &[f64], data: &ObjectiveData) -> f64 {
             response,
             filter_response,
             error,
-            smoothed_error,
             ..
         } = &mut *scratch;
         let x = clamp_envelopes_into(
@@ -332,16 +347,6 @@ fn compute_prepared_flat_fitness(x: &[f64], data: &ObjectiveData) -> f64 {
         {
             *value = correction - deviation;
         }
-        let error = if prepared.smooth_into(
-            error.as_slice().expect("contiguous error scratch"),
-            smoothed_error
-                .as_slice_mut()
-                .expect("contiguous smoothed-error scratch"),
-        ) {
-            smoothed_error
-        } else {
-            error
-        };
         prepared.apply_deadband(error.as_slice_mut().expect("contiguous error scratch"));
         let base = match data.loss_type {
             LossType::SpeakerFlat | LossType::HeadphoneFlat => prepared
@@ -664,7 +669,7 @@ mod multi_objective_and_base_fitness_tests {
         EVALUATION_SCRATCH, ObjectiveData, RESPONSE_COMPUTATIONS, compute_base_fitness,
         compute_base_fitness_single, compute_fitness_penalties, compute_fitness_penalties_ref,
         compute_multi_objective_fitness, compute_pareto_objectives,
-        compute_sorted_freqs_and_adjacent_octave_spacings,
+        compute_sorted_freqs_and_adjacent_octave_spacings, variance_penalized_loss,
     };
     use crate::MultiObjectiveData;
     use crate::ObjectiveDataBuilder;
@@ -673,9 +678,44 @@ mod multi_objective_and_base_fitness_tests {
     use crate::loss::{HeadphoneLossData, LossType, SpeakerLossData};
     use crate::roomeq::MultiMeasurementStrategy;
     use ndarray::Array1;
+    use std::sync::Arc;
 
     fn freqs() -> Array1<f64> {
         Array1::from_vec(vec![100.0, 200.0, 400.0, 800.0, 1600.0])
+    }
+
+    #[test]
+    fn two_seat_zero_ten_db_risk_prefers_documented_midpoint() {
+        let unbalanced = variance_penalized_loss([(0.0, 0.5), (10.0, 0.5)], 1.0);
+        let balanced = variance_penalized_loss([(5.0, 0.5), (5.0, 0.5)], 1.0);
+        assert!((unbalanced - 30.0).abs() < 1e-12);
+        assert!((balanced - 5.0).abs() < 1e-12);
+        assert!(balanced < unbalanced);
+    }
+
+    #[test]
+    fn variance_penalized_risk_honors_seat_weights() {
+        let equal = variance_penalized_loss([(0.0, 0.5), (10.0, 0.5)], 0.0);
+        let primary_weighted = variance_penalized_loss([(0.0, 0.9), (10.0, 0.1)], 0.0);
+        assert!((equal - 5.0).abs() < 1e-12);
+        assert!((primary_weighted - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn prepared_flat_hot_path_does_not_smooth_signed_error_before_loss() {
+        let mut alternating = base_objective(LossType::SpeakerFlat);
+        alternating.smooth = true;
+        alternating.smooth_n = 2;
+        alternating.deviation = Arc::new(Array1::from_vec(vec![6.0, -6.0, 6.0, -6.0, 6.0]));
+
+        let mut constant = base_objective(LossType::SpeakerFlat);
+        constant.smooth = true;
+        constant.smooth_n = 2;
+        constant.deviation = Arc::new(Array1::from_elem(5, 6.0));
+
+        let alternating_loss = compute_base_fitness_single(&x(), &alternating);
+        let constant_loss = compute_base_fitness_single(&x(), &constant);
+        assert!((alternating_loss - constant_loss).abs() < 1e-12);
     }
 
     fn x() -> Vec<f64> {

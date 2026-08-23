@@ -98,6 +98,63 @@ pub(super) fn build_test_matrix_for_tier(
     test_cases
 }
 
+/// Build the bounded smoke matrix used by `--quick`.
+///
+/// This deliberately covers only the two fast, deterministic FEM/IIR paths:
+/// conventional stereo and multi-sub optimization.  It is an execution and
+/// safety smoke test, not a substitute for the registry-backed quality gates
+/// exercised by the PR/nightly/weekly matrices.
+pub(super) fn build_quick_test_matrix(
+    tier: QaTier,
+    solver_filter: Option<&str>,
+    mode_filter: Option<&str>,
+) -> Vec<TestCase> {
+    const QUICK_SCENARIOS: [&str; 2] = ["small_stereo_2_0", "small_stereo_2_2_mso"];
+
+    build_test_matrix_for_tier(
+        tier,
+        true,
+        solver_filter.or(Some("fem")),
+        mode_filter.or(Some("iir")),
+    )
+    .into_iter()
+    .filter(|test_case| QUICK_SCENARIOS.contains(&test_case.scenario.as_str()))
+    .map(|mut test_case| {
+        // A 200-evaluation run establishes that the bounded optimizer can
+        // produce a safe correction; percentage quality targets belong to
+        // the adequately-budgeted registry matrices.
+        test_case.expect.improvement_min_pct = 0.01;
+        test_case.expect.max_post_score = 20.0;
+        test_case.expect.allow_safe_revert = true;
+        test_case
+    })
+    .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ProcessingMethod, build_quick_test_matrix};
+    use crate::registry::QaTier;
+
+    #[test]
+    fn quick_matrix_is_bounded_and_uses_smoke_expectations() {
+        let cases = build_quick_test_matrix(QaTier::Weekly, None, None);
+        let scenarios = cases
+            .iter()
+            .map(|case| case.scenario.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(scenarios, ["small_stereo_2_0", "small_stereo_2_2_mso"]);
+        assert!(cases.iter().all(|case| {
+            case.method == ProcessingMethod::Iir
+                && case.solver.name() == "fem"
+                && case.expect.improvement_min_pct == 0.01
+                && case.expect.max_post_score == 20.0
+                && case.expect.allow_safe_revert
+        }));
+    }
+}
+
 fn channel_has_plugin_type(chain: Option<&ChannelDspChain>, plugin_type: &str) -> bool {
     chain.is_some_and(|chain| {
         chain

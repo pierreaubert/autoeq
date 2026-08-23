@@ -199,6 +199,7 @@ fn test_bootstrap_band_identical_curves_zero_width() {
     let curve = make_curve(vec![100.0, 1000.0, 5000.0], vec![80.0, 85.0, 75.0]);
     let curves = vec![curve.clone(), curve.clone(), curve];
     let cfg = BootstrapConfig {
+        effective_sample_size: None,
         num_resamples: 64,
         alpha: 0.10,
         seed: 1,
@@ -222,6 +223,37 @@ fn test_bootstrap_band_identical_curves_zero_width() {
 }
 
 #[test]
+fn correlation_adjusted_effective_sample_size_widens_band() {
+    let curves = vec![
+        make_curve(vec![100.0], vec![70.0]),
+        make_curve(vec![100.0], vec![80.0]),
+        make_curve(vec![100.0], vec![90.0]),
+        make_curve(vec![100.0], vec![100.0]),
+    ];
+    let iid = BootstrapConfig {
+        effective_sample_size: None,
+        num_resamples: 2_000,
+        alpha: 0.10,
+        seed: 42,
+    };
+    let correlated = BootstrapConfig {
+        effective_sample_size: Some(1.0),
+        ..iid.clone()
+    };
+
+    let iid_band = bootstrap_band(&curves, &iid, None).expect("iid bootstrap succeeds");
+    let correlated_band = bootstrap_band(&curves, &correlated, None)
+        .expect("correlation-adjusted bootstrap succeeds");
+    let iid_width = iid_band.upper.spl[0] - iid_band.lower.spl[0];
+    let correlated_width = correlated_band.upper.spl[0] - correlated_band.lower.spl[0];
+
+    assert!(
+        correlated_width > iid_width,
+        "reduced effective sample size should widen the band: correlated={correlated_width}, iid={iid_width}"
+    );
+}
+
+#[test]
 fn test_bootstrap_band_determinism_under_fixed_seed() {
     // Same seed → identical bands; different seed → different bands.
     let c1 = make_curve(vec![100.0, 1000.0], vec![80.0, 85.0]);
@@ -230,6 +262,7 @@ fn test_bootstrap_band_determinism_under_fixed_seed() {
     let curves = vec![c1, c2, c3];
 
     let cfg_a = BootstrapConfig {
+        effective_sample_size: None,
         num_resamples: 100,
         alpha: 0.10,
         seed: 42,
@@ -261,6 +294,7 @@ fn test_bootstrap_band_brackets_input_range() {
     let c3 = make_curve(vec![100.0], vec![90.0]);
     let curves = vec![c1, c2, c3];
     let cfg = BootstrapConfig {
+        effective_sample_size: None,
         num_resamples: 200,
         alpha: 0.10,
         seed: 99,
@@ -287,6 +321,7 @@ fn test_bootstrap_band_alpha_widens_band() {
     let c2 = make_curve(vec![100.0], vec![90.0]);
     let curves = vec![c1, c2];
     let mk_cfg = |alpha| BootstrapConfig {
+        effective_sample_size: None,
         num_resamples: 400,
         alpha,
         seed: 1,
@@ -309,6 +344,7 @@ fn test_bootstrap_resampled_curves_count() {
     let c2 = make_curve(vec![100.0, 1000.0], vec![82.0, 88.0]);
     let curves = vec![c1, c2];
     let cfg = BootstrapConfig {
+        effective_sample_size: None,
         num_resamples: 13,
         alpha: 0.10,
         seed: 5,
@@ -325,6 +361,7 @@ fn test_bootstrap_resampled_curves_count() {
 fn test_bootstrap_rejects_zero_resamples() {
     let curve = make_curve(vec![100.0], vec![80.0]);
     let cfg = BootstrapConfig {
+        effective_sample_size: None,
         num_resamples: 0,
         alpha: 0.10,
         seed: 0,
@@ -337,6 +374,7 @@ fn test_bootstrap_rejects_zero_resamples() {
 fn test_bootstrap_rejects_alpha_out_of_range() {
     let curve = make_curve(vec![100.0], vec![80.0]);
     let cfg = BootstrapConfig {
+        effective_sample_size: None,
         num_resamples: 10,
         alpha: 1.5,
         seed: 0,
@@ -353,6 +391,7 @@ fn test_analyze_with_bootstrap_populates_field() {
         ..Default::default()
     };
     let bcfg = BootstrapConfig {
+        effective_sample_size: None,
         num_resamples: 32,
         alpha: 0.10,
         seed: 11,

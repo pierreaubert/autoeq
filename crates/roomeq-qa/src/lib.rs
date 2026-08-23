@@ -75,6 +75,14 @@ pub(crate) fn optimize_room(
     sample_rate: f64,
     output_dir: Option<&Path>,
 ) -> anyhow::Result<RoomOptimizationResult> {
+    optimize_room_with_selected_seed(config, sample_rate, output_dir).map(|(result, _)| result)
+}
+
+pub(crate) fn optimize_room_with_selected_seed(
+    config: &RoomConfig,
+    sample_rate: f64,
+    output_dir: Option<&Path>,
+) -> anyhow::Result<(RoomOptimizationResult, u64)> {
     let (selected_seed, scores) = select_median_seed(config, |seeded| {
         roomeq_workflow::optimize_room(seeded, sample_rate, None, None)
             .map_err(|error| anyhow::anyhow!(error.to_string()))
@@ -84,7 +92,15 @@ pub(crate) fn optimize_room(
     let mut result = roomeq_workflow::optimize_room(&selected, sample_rate, None, output_dir)
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     record_seed_distribution(&mut result, selected_seed, &scores);
-    Ok(result)
+    Ok((result, selected_seed))
+}
+
+pub(crate) fn optimize_room_single_seed(
+    config: &RoomConfig,
+    sample_rate: f64,
+) -> anyhow::Result<RoomOptimizationResult> {
+    roomeq_workflow::optimize_room(config, sample_rate, None, None)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
 }
 
 pub(crate) fn optimize_room_with_validation(

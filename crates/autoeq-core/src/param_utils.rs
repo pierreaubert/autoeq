@@ -69,6 +69,7 @@ pub trait PeqLayout {
     fn initial_guess_filter(
         &self,
         i: usize,
+        num_filters: usize,
         lower_bounds: &[f64],
         upper_bounds: &[f64],
         min_db: f64,
@@ -185,6 +186,7 @@ impl PeqLayout for PeqModel {
     fn initial_guess_filter(
         &self,
         i: usize,
+        num_filters: usize,
         lower_bounds: &[f64],
         upper_bounds: &[f64],
         min_db: f64,
@@ -198,8 +200,10 @@ impl PeqLayout for PeqModel {
             group.push(0.0_f64.clamp(lower_bounds[type_idx], upper_bounds[type_idx]));
         }
 
-        let freq = lower_bounds[l.freq_idx]
-            .min(max_freq.log10())
+        let upper_frequency = upper_bounds[l.freq_idx].min(max_freq.log10());
+        let fraction = (i + 1) as f64 / (num_filters + 1).max(2) as f64;
+        let freq = (lower_bounds[l.freq_idx]
+            + fraction * (upper_frequency - lower_bounds[l.freq_idx]))
             .clamp(lower_bounds[l.freq_idx], upper_bounds[l.freq_idx]);
         group.push(freq);
 
@@ -262,6 +266,10 @@ pub fn determine_filter_type(
 /// Decode filter type from parameter value
 /// Maps continuous parameter to discrete filter types for optimization
 pub fn decode_filter_type(type_value: f64) -> BiquadFilterType {
+    assert!(
+        type_value.is_finite() && (0.0..12.0).contains(&type_value),
+        "invalid free-filter topology value {type_value}; expected a finite value in [0, 12)"
+    );
     // Map [0, 1) -> Peak
     // Map [1, 2) -> Lowpass
     // Map [2, 3) -> Highpass
@@ -289,7 +297,7 @@ pub fn decode_filter_type(type_value: f64) -> BiquadFilterType {
         9 => BiquadFilterType::LowshelfOrf,
         10 => BiquadFilterType::HighshelfOrf,
         11 => BiquadFilterType::PeakMatched,
-        _ => BiquadFilterType::Peak, // Default
+        _ => unreachable!("validated free-filter topology index"),
     }
 }
 
@@ -449,5 +457,30 @@ mod tests {
     #[test]
     fn freq_from_log10_clamped_respects_min() {
         assert_eq!(freq_from_log10_clamped(-10.0, 20.0), 20.0);
+    }
+
+    #[test]
+    fn invalid_free_filter_topology_is_rejected() {
+        for invalid in [f64::NAN, f64::INFINITY, -0.1, 12.0, f64::MAX] {
+            assert!(std::panic::catch_unwind(|| decode_filter_type(invalid)).is_err());
+        }
+    }
+
+    #[test]
+    fn initial_filter_centers_are_distributed_in_log_frequency() {
+        let lower = [20.0_f64.log10(), 0.5, -12.0];
+        let upper = [20_000.0_f64.log10(), 10.0, 6.0];
+        let centers: Vec<f64> = (0..5)
+            .map(|index| {
+                PeqModel::Pk.initial_guess_filter(index, 5, &lower, &upper, -12.0, 20_000.0)[0]
+            })
+            .collect();
+        assert!(centers.windows(2).all(|pair| pair[0] < pair[1]));
+        let step = centers[1] - centers[0];
+        assert!(
+            centers
+                .windows(2)
+                .all(|pair| ((pair[1] - pair[0]) - step).abs() < 1e-12)
+        );
     }
 }

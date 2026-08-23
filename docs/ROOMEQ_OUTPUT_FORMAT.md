@@ -565,11 +565,11 @@ Information about the optimization process.
 | `pre_score` | number | Raw-measurement flatness score before optimization, evaluated over the channel's role/crossover-aware band |
 | `post_score` | number | Final deployed-response flatness score over that same role/crossover-aware band (lower is better) |
 | `algorithm` | string | Algorithm used for optimization |
-| `loss_type` | string or null | Loss function that the optimizer minimized (`"flat"`, `"score"`, or `"epa"`). Note that `pre_score` / `post_score` are *not* the value of this loss function — they are always computed by `compute_flat_loss` over the same role/crossover-aware band. To compare perceptual outcomes across loss types use `epa_per_channel.{pre,post}.preference`, which is computed identically for every run. |
+| `loss_type` | string or null | Loss function minimized (`"flat"`, `"score"`, or `"epa"`). `pre_score` / `post_score` are always neutral flatness metrics over the same role/crossover-aware band. EPA fields are experimental transfer-response diagnostics, not validated perceptual-outcome comparisons. |
 | `iterations` | integer | Maximum iterations configured |
 | `timestamp` | string | ISO 8601 timestamp of optimization |
 | `inter_channel_deviation` | object or null | Inter-channel SPL consistency metric (present when >1 channel) |
-| `epa_per_channel` | object or null | Per-channel EPA psychoacoustic metrics computed on the pre-EQ and post-EQ frequency responses. Emitted for every channel that has both `initial_curve` and `final_curve` populated, regardless of `loss_type`. See [EPA Per-Channel Metrics](#epa-per-channel-metrics). |
+| `epa_per_channel` | object or null | Experimental per-channel EPA transfer-response diagnostics computed pre/post EQ. They are emitted regardless of `loss_type` and do not imply calibrated programme loudness, roughness, or preference. See [EPA Per-Channel Metrics](#epa-per-channel-metrics). |
 | `epa_multichannel` | object or null | Whole-system EPA metrics after BS.1770-style channel-energy aggregation. Main/front channels use unit energy weight, surround channels use +1.5 dB, and LFE/subwoofer channels are excluded. |
 | `group_delay` | object or null | Group-delay optimization result, including a skip advisory when GD-Opt was attempted but not applied. |
 | `mixed_phase_per_channel` | object or null | Per-channel mixed-phase decomposition report from the exact excess-phase data used to generate each FIR. See [Mixed-Phase Correction Report](#mixed-phase-correction-report). |
@@ -580,8 +580,8 @@ Information about the optimization process.
 | `bass_management` | object or null | Applied bass-management routing, trim, headroom, and crossover optimization report. |
 | `timing_diagnostics` | object or null | Measured arrival and final-delay localization diagnostics. `arrival_spread_after_ms`, the alignment reference, and the per-channel offsets grade the time-alignment stage only: intentional `route_owned` and `phase_alignment` delays are excluded from the after-spread, while per-channel `applied_delay_ms` and `final_arrival_ms` still report the deployed totals. |
 | `ctc` | object or null | Cross-talk-cancellation artifact and conditioning summary. |
-| `perceptual_policy` | object or null | Resolved perceptual policy values. |
-| `bootstrap_uncertainty` | object or null | Bootstrap uncertainty summary, when robustness estimation ran. |
+| `perceptual_policy` | object or null | Resolved policy values, including `neutral_target_response` and the separately bypassable `preference_layer`; `excluded_from_neutral_quality_score` states the scoring boundary explicitly. |
+| `bootstrap_uncertainty` | object or null | Spatial seat-sampling bootstrap summary, including source, default independent-position assumption or configured effective-sample-size correlation adjustment, and separately supplied repeat-sweep/calibration uncertainty. |
 | `validation_bundle` | object or null | Descriptor for generated ABX/MUSHRA validation assets. |
 | `perceptual_metrics.fir_pre_ringing_audible_db` | number or null | Worst FIR pre-ringing audible energy across channels, dB relative to each FIR main impulse peak. |
 | `perceptual_metrics.fir_post_ringing_audible_db` | number or null | Worst FIR post-ringing audible energy across channels, dB relative to each FIR main impulse peak. |
@@ -599,21 +599,21 @@ parameters that were actually emitted.
 ### EPA Per-Channel Metrics
 
 Keyed by channel name. Each entry has `pre` (computed from `initial_curve`)
-and `post` (computed from `final_curve`). Both curves are denormalized against
-`epa_config.listening_level_phon` before the Zwicker loudness model runs so
-that `total_loudness_sone` and `loudness_balance` are meaningful absolute
-quantities rather than near-silent-floor artifacts of the measurement
-normalization.
+and `post` (computed from `final_curve`). Both curves are shifted to the
+configured `epa_config.listening_level_phon` reference before the diagnostic
+Zwicker calculation. Without calibrated programme audio and absolute SPL this
+does not make `total_loudness_sone` or `loudness_balance` validated playback
+loudness predictions.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `evaluation` | number | Evaluation dimension (general quality), 0–10 scale. Higher = better. |
-| `potency` | number | Potency dimension (perceived energy / strength), 0–10 scale. |
-| `activity` | number | Activity dimension (temporal complexity from roughness), 0–10 scale. Lower = calmer. |
-| `preference` | number | Composite preference = `evaluation_weight·E + potency_weight·P − activity_weight·A`. Higher = better. |
-| `sharpness_acum` | number | Zwicker sharpness in acum. `1.0` ≈ broadband noise character. The EPA loss penalizes deviation from `epa_config.target_sharpness`. |
-| `roughness` | number | Spectral-peak-interaction roughness metric. The EPA loss penalizes values above `epa_config.max_roughness`. |
-| `total_loudness_sone` | number | Total loudness integrated over all 24 Bark bands, in sone. Meaningful only because the input curve is denormalized against `listening_level_phon` first. |
+| `evaluation` | number | Experimental transfer-response Evaluation descriptor, 0–10 scale. |
+| `potency` | number | Experimental transfer-response Potency descriptor, 0–10 scale. |
+| `activity` | number | Experimental transfer-response Activity descriptor, 0–10 scale. |
+| `preference` | number | Diagnostic composite `evaluation_weight·E + potency_weight·P − activity_weight·A`; not a validated listener-preference prediction. |
+| `sharpness_acum` | number | Transfer-response sharpness diagnostic in acum. It does not steer EPA optimization. |
+| `roughness` | number | Spectral-peak-interaction diagnostic; it is not programme roughness and does not steer EPA optimization. |
+| `total_loudness_sone` | number | Transfer-response loudness-shape diagnostic integrated over 24 Bark bands after shifting to `listening_level_phon`; not a validated programme loudness prediction without calibrated audio and SPL. |
 | `loudness_balance` | number | Uniformity of specific loudness across Bark bands (0..=1, 1 = perfectly uniform). |
 
 EPA tuning knobs are described in [`INPUT_FORMAT.md`](./INPUT_FORMAT.md#epa-configuration).

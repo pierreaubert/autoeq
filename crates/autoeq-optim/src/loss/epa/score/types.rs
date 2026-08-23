@@ -34,7 +34,10 @@ pub struct TemporalIrMaskingMetrics {
     pub penalty: f64,
 }
 
-/// Optimizer-side modal data used by the EPA temporal masking penalty.
+/// Modal descriptor retained for experimental temporal diagnostics.
+///
+/// It does not steer the active EPA optimizer, which uses spectral flatness
+/// only.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TemporalMaskingMode {
     pub frequency: f64,
@@ -50,11 +53,11 @@ pub struct EpaScore {
     pub evaluation: f64,
     /// Potency: perceived energy/strength (0-10 scale)
     pub potency: f64,
-    /// Activity: temporal complexity (lower = calmer, 0-10 scale)
+    /// Diagnostic Activity descriptor (0-10 scale).
     pub activity: f64,
-    /// Composite preference (weighted combination, higher = better)
+    /// Diagnostic weighted composite; not a validated listener-preference prediction.
     pub preference: f64,
-    /// Individual metric values for diagnostics
+    /// Individual transfer-response shape diagnostics.
     pub sharpness_acum: f64,
     pub roughness: f64,
     pub total_loudness_sone: f64,

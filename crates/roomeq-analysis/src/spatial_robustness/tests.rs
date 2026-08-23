@@ -201,6 +201,7 @@ fn analyze_spatial_robustness_with_bootstrap() {
     ];
     let config = SpatialRobustnessConfig::default();
     let bootstrap = BootstrapConfig {
+        effective_sample_size: None,
         num_resamples: 50,
         alpha: 0.10,
         seed: 1,

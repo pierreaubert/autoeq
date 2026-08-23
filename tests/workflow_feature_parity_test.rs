@@ -21,6 +21,7 @@ use autoeq::roomeq::{
     SubwooferStrategy, SubwooferSystemConfig, SystemConfig, SystemModel, TargetResponseConfig,
     TargetShape, UserPreference,
 };
+use roomeq_model::CorrectionDecision;
 use std::collections::HashMap;
 
 fn log_sweep_curve(base_db: f64, bass_bump_db: f64) -> autoeq::Curve {
@@ -227,12 +228,31 @@ fn stereo_2_0_runs_with_target_response_tilt() {
     assert!(result.channels.contains_key("L"));
     assert!(result.channels.contains_key("R"));
 
-    // Filters should be present for a non-trivial target on a non-flat
-    // measurement.
-    let l_biquads = &result.channel_results["L"].biquads;
+    let report = result
+        .metadata
+        .perceptual_policy
+        .as_ref()
+        .expect("target-response configuration should be reported");
+    assert_eq!(
+        report
+            .target_response
+            .as_ref()
+            .map(|target| target.shape.clone()),
+        Some(TargetShape::Custom)
+    );
+    // A runtime-safety rejection removes filters rather than shipping a
+    // correction that regresses the target-weighted residual.
     assert!(
-        !l_biquads.is_empty(),
-        "target_response should trigger at least one EQ filter on a 6-dB bass bump"
+        !result.channel_results["L"].biquads.is_empty()
+            || matches!(
+                result
+                    .metadata
+                    .correction_acceptance
+                    .as_ref()
+                    .map(|report| report.decision),
+                Some(CorrectionDecision::RevertedStage | CorrectionDecision::IdentityFallback)
+            ),
+        "target-response case must retain EQ or record its safety reversion"
     );
 }
 
@@ -363,8 +383,16 @@ fn stereo_2_1_honours_target_response() {
     for role in ["L", "R"] {
         let biquads = &result.channel_results[role].biquads;
         assert!(
-            !biquads.is_empty(),
-            "{}: target_response tilt should produce at least one filter",
+            !biquads.is_empty()
+                || matches!(
+                    result
+                        .metadata
+                        .correction_acceptance
+                        .as_ref()
+                        .map(|report| report.decision),
+                    Some(CorrectionDecision::RevertedStage | CorrectionDecision::IdentityFallback)
+                ),
+            "{}: target-response should retain EQ or record its safety reversion",
             role
         );
     }

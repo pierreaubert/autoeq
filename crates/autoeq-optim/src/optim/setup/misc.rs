@@ -1,5 +1,11 @@
 use crate::param_utils::PeqLayout;
 
+/// Legacy blanket sub-Schroeder boost restriction.
+///
+/// This policy is retained only for source compatibility and is no longer
+/// called by RoomEQ. Boost safety is instead governed by null-risk,
+/// correction-depth, gain-envelope, and headroom controls.
+///
 /// Clamp the per-filter gain **upper** bound to 0 dB for any filter
 /// whose maximum allowed center frequency is at or below the Schroeder
 /// frequency.
@@ -16,14 +22,16 @@ use crate::param_utils::PeqLayout;
 ///
 /// Letting the DE optimizer place boost filters anywhere in the modal
 /// region therefore wastes filter slots on physically impossible
-/// corrections. This function enforces "below Schroeder is cuts-only"
-/// as a hard constraint on the optimizer's parameter bounds.
+/// corrections. The legacy function enforced "below Schroeder is cuts-only"
+/// as a hard constraint on optimizer bounds; RoomEQ no longer invokes it.
 ///
 /// Filters whose allowed frequency range *straddles* Schroeder (i.e.
 /// their upper frequency bound is above `schroeder_hz`) keep their
 /// original symmetric bounds — those filters can still be positioned
 /// in the above-Schroeder part of their range where boosts are
 /// physically meaningful.
+#[deprecated(note = "use null-risk, gain-envelope, and headroom constraints")]
+#[allow(dead_code)]
 pub fn restrict_boost_above_schroeder(
     upper_bounds: &mut [f64],
     params: &crate::OptimParams,
@@ -66,6 +74,7 @@ pub fn initial_guess(
     for i in 0..params.num_filters {
         let group = model.initial_guess_filter(
             i,
+            params.num_filters,
             &lower_bounds[i * ppf..(i + 1) * ppf],
             &upper_bounds[i * ppf..(i + 1) * ppf],
             params.min_db,

@@ -1,6 +1,4 @@
-use super::compute::compute_epa;
 use super::epa_config::EpaConfig;
-use super::misc::denormalize_spl;
 use super::types::EpaChannelRole;
 
 /// BS.1770-style channel energy weight for a coarse EPA role.
@@ -12,51 +10,29 @@ pub fn epa_channel_energy_weight(role: EpaChannelRole) -> f64 {
     }
 }
 
-/// EPA-based loss function for the optimizer.
-/// Lower = better (the optimizer minimizes this).
+/// EPA optimizer loss.
 ///
-/// If you are working with level-relative (mean-subtracted around 1 kHz)
-/// measurements such as those in `CurveData`, use [`epa_loss_normalized`] so
-/// level-dependent spectrum metrics are evaluated at `listening_level_phon`.
-pub fn epa_loss(freqs: &[f64], spl_db: &[f64], config: &EpaConfig, flatness_loss: f64) -> f64 {
-    let epa = compute_epa(freqs, spl_db, config);
-
-    let sharpness_penalty = (epa.sharpness_acum - config.target_sharpness).powi(2);
-    let roughness_penalty = (epa.roughness - config.max_roughness).max(0.0).powi(2);
-    let balance_penalty = (1.0 - epa.loudness_balance).powi(2);
-
-    // Weighted combination: flatness dominates, EPA refines
-    0.4 * flatness_loss + 0.3 * sharpness_penalty + 0.2 * roughness_penalty + 0.1 * balance_penalty
+/// Transfer magnitude alone cannot support programme loudness, roughness, or
+/// measured-decay claims. Those EPA descriptors remain available in reports,
+/// while filter optimization uses only the configured spectral flatness term.
+pub fn epa_loss(_freqs: &[f64], _spl_db: &[f64], _config: &EpaConfig, flatness_loss: f64) -> f64 {
+    flatness_loss
 }
 
-/// Like [`epa_loss`] but for level-relative (mean-subtracted) input curves.
-///
-/// The input is denormalized by adding `config.listening_level_phon` before
-/// evaluation so the loudness/balance components of the objective are
-/// correctly calibrated against the absolute threshold of hearing.
+/// Level-relative counterpart of [`epa_loss`].
 pub fn epa_loss_normalized(
     freqs: &[f64],
     spl_rel: &[f64],
     config: &EpaConfig,
     flatness_loss: f64,
 ) -> f64 {
-    let spl_abs = denormalize_spl(spl_rel, config.listening_level_phon);
-    epa_loss(freqs, &spl_abs, config, flatness_loss)
+    epa_loss(freqs, spl_rel, config, flatness_loss)
 }
 
-/// Compute the flatness component of the EPA loss using the blend and
-/// band weights specified in `config`.
+/// Compute the configured EPA spectral-flatness component.
 ///
-/// This is the EPA-tunable counterpart of [`crate::loss::flat::flat_loss`].
-/// Unlike the plain `flat_loss`, which uses a fixed 70/30 ERB-band blend,
-/// `epa_flatness` honors the `flatness_erb_weight`, `flatness_band_weight`,
-/// and `flatness_band_weights` fields on [`EpaConfig`] so that users
-/// tuning their EPA runs can fully control the perceptual weighting of
-/// the flatness term alongside the sharpness / roughness / balance
-/// penalties in [`epa_loss`].
-///
-/// Frequencies outside `[min_freq, max_freq]` are excluded before the loss
-/// is evaluated. Returns `f64::INFINITY` if no points remain in range.
+/// Frequencies outside `[min_freq, max_freq]` are excluded. Returns
+/// `f64::INFINITY` when the active range contains no samples.
 pub fn epa_flatness(
     freqs: &ndarray::Array1<f64>,
     error: &ndarray::Array1<f64>,
@@ -65,20 +41,22 @@ pub fn epa_flatness(
     config: &EpaConfig,
 ) -> f64 {
     use crate::loss::enhanced_weights::combined_weighted_loss;
-    let mut f_in = Vec::new();
-    let mut e_in = Vec::new();
-    for (&f, &e) in freqs.iter().zip(error.iter()) {
-        if f >= min_freq && f <= max_freq {
-            f_in.push(f);
-            e_in.push(e);
+
+    let mut active_frequencies = Vec::new();
+    let mut active_error = Vec::new();
+    for (&frequency, &value) in freqs.iter().zip(error.iter()) {
+        if frequency >= min_freq && frequency <= max_freq {
+            active_frequencies.push(frequency);
+            active_error.push(value);
         }
     }
-    if f_in.is_empty() {
+    if active_frequencies.is_empty() {
         return f64::INFINITY;
     }
+
     combined_weighted_loss(
-        &ndarray::Array1::from(f_in),
-        &ndarray::Array1::from(e_in),
+        &ndarray::Array1::from(active_frequencies),
+        &ndarray::Array1::from(active_error),
         &config.flatness_band_weights,
         config.flatness_erb_weight,
         config.flatness_band_weight,

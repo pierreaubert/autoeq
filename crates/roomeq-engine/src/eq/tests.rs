@@ -3,8 +3,8 @@ use super::consts::decide_schroeder_override;
 use super::misc::adaptive_budget_for_step;
 use super::misc::trim_ir_length_to_noise_floor;
 use super::prepared_single_channel_eq::prepare_single_channel_eq;
-use super::representative::representative_bass_rt60;
 use super::representative::representative_multi_measurement_curve;
+use super::representative::{measure_bass_rt60, representative_bass_rt60};
 use super::resources::{EqResources, PreparedEqTarget, PreparedImpulseResponse};
 use crate::Curve;
 use ndarray::Array1;
@@ -175,6 +175,25 @@ fn representative_bass_rt60_ignores_implausible_band() {
     assert!(
         (chosen - 0.60).abs() < 1e-6,
         "only plausible 250 Hz band should remain, got {chosen:.3}"
+    );
+}
+
+#[test]
+fn measured_bass_rt60_converts_public_milliseconds_to_seconds() {
+    let sample_rate = 48_000.0_f32;
+    let rt60_seconds = 0.5_f32;
+    let length = (sample_rate * 2.0) as usize;
+    let decay = 3.0 * std::f32::consts::LN_10 / rt60_seconds;
+    let impulse: Vec<f32> = (0..length)
+        .map(|index| {
+            let time = index as f32 / sample_rate;
+            (-decay * time).exp() * (2.0 * std::f32::consts::PI * 125.0 * time).sin()
+        })
+        .collect();
+    let measured = measure_bass_rt60(&impulse, sample_rate).expect("measurable bass decay");
+    assert!(
+        (measured - rt60_seconds as f64).abs() < 0.2,
+        "got {measured} s"
     );
 }
 

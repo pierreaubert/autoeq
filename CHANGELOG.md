@@ -14,6 +14,13 @@
   FEM generated-data matrix in scheduled weekly QA plus native macOS acoustic
   CI.
 
+## Scientific integrity
+
+- Replace the log-grid ERB approximation with versioned discrete ERB-rate integration shared by optimization and runtime acceptance; normalize band mixtures and prevent signed ripple cancellation before nonlinear loss.
+- Validate spatial weights and variance coefficients, make `spatial_robustness` optimize per-seat losses directly, label bootstrap output as spatial seat-sampling uncertainty, and derive confident temporal decisions from measured band-limited mode decay.
+- Quarantine transfer-only EPA descriptors as diagnostics, remove the blanket sub-Schroeder cuts-only policy, distribute initial filter centers logarithmically, pin dead shelf-Q dimensions, and reject invalid free-filter topology values.
+- Separate neutral physical correction from independently bypassable user/content preference filters in output chains, reports, and quality scoring.
+
 ## Fixes
 
 - Aligned SPL of subwoofer in passband and all channels between

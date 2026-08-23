@@ -19,8 +19,8 @@ pub(super) fn assemble_fir_result(
     let dsp = assemble_dsp_chain(request, &optimizer_output);
     let raw_curve = request.prepared.measurements().representative();
     let display_initial = output::extend_curve_to_full_range(raw_curve);
-    let (final_curve, display_final) =
-        corrected_curves(request, &optimizer_output, &display_initial);
+    let (final_curve, _) = corrected_curves(request, &optimizer_output, &display_initial, false);
+    let (_, display_final) = corrected_curves(request, &optimizer_output, &display_initial, true);
     let score_curve = if let Some(tilt_curve) = &request.target.target_tilt_curve {
         Curve {
             freq: final_curve.freq.clone(),
@@ -135,6 +135,7 @@ fn assemble_dsp_chain(
         }
     }
     let preference_filters = crate::channel_iir::preference_filters(
+        request.channel_name,
         request.room_config,
         request.target,
         request.sample_rate,
@@ -152,13 +153,19 @@ fn corrected_curves(
     request: &FirChannelRequest<'_>,
     optimizer_output: &FirOptimizerOutput,
     display_initial: &Curve,
+    include_preference: bool,
 ) -> (Curve, Curve) {
     let display_preprocessed = display_preprocessed_curve(request, display_initial);
-    let preference_filters = crate::channel_iir::preference_filters(
-        request.room_config,
-        request.target,
-        request.sample_rate,
-    );
+    let preference_filters = if include_preference {
+        crate::channel_iir::preference_filters(
+            request.channel_name,
+            request.room_config,
+            request.target,
+            request.sample_rate,
+        )
+    } else {
+        Vec::new()
+    };
     match optimizer_output {
         FirOptimizerOutput::PhaseLinear { coefficients, .. } => {
             let response = response::compute_fir_complex_response(

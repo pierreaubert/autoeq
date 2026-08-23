@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use crate::inter_channel_timbre_matching::{
     apply_alignment_to_curve, pairwise_normalized_timbre_spread_db,
 };
-use crate::spectral_align::{SpectralAlignmentResult, compute_target_alignment};
+use crate::spectral_align::{MAX_FLAT_GAIN_DB, SpectralAlignmentResult, compute_target_alignment};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HeightAlignmentStatus {
@@ -286,6 +286,13 @@ pub fn compute_height_channel_alignment(
                 if !config.match_timbre {
                     candidate.lowshelf_gain_db = 0.0;
                     candidate.highshelf_gain_db = 0.0;
+                    if config.match_level {
+                        candidate.flat_gain_db = level_before
+                            .map(|difference| {
+                                (-difference).clamp(-MAX_FLAT_GAIN_DB, MAX_FLAT_GAIN_DB)
+                            })
+                            .unwrap_or(0.0);
+                    }
                 }
                 if !config.match_level {
                     candidate.flat_gain_db = 0.0;
@@ -526,6 +533,12 @@ mod tests {
         assert_eq!(alignment.lowshelf_gain_db, 0.0);
         assert_eq!(alignment.highshelf_gain_db, 0.0);
         assert!(alignment.flat_gain_db.abs() > 0.0);
+        assert!(result["TFL"].level_difference_after_db.unwrap().abs() < 1.0e-9);
+        assert!(
+            !result["TFL"]
+                .advisories
+                .contains(&"height_objective_acceptance_failed".to_string())
+        );
     }
 
     #[test]

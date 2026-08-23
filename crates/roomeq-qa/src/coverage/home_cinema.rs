@@ -297,6 +297,14 @@ pub(super) fn validate_home_cinema_result(
     expectations: HomeCinemaExpectations,
 ) -> Vec<String> {
     let mut failures = Vec::new();
+    let safely_reverted = expectations.allow_safe_revert
+        && result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .is_some_and(|acceptance| {
+                !acceptance.accepted && !acceptance.reverted_stages.is_empty()
+            });
 
     if let Some(expected_phase) = expectations.fir_phase {
         match config.optimizer.fir.as_ref() {
@@ -546,33 +554,36 @@ pub(super) fn validate_home_cinema_result(
         }
     }
 
-    match method {
-        ProcessingMethod::Fir if !has_plugin(result, "convolution") => {
-            failures.push("phase-linear FIR case emitted no convolution plugin".to_string());
-        }
-        ProcessingMethod::Mixed => {
-            if !has_plugin(result, "eq") || !has_plugin(result, "convolution") {
-                failures
-                    .push("hybrid case did not emit both EQ and convolution plugins".to_string());
+    if !safely_reverted {
+        match method {
+            ProcessingMethod::Fir if !has_plugin(result, "convolution") => {
+                failures.push("phase-linear FIR case emitted no convolution plugin".to_string());
             }
-        }
-        ProcessingMethod::MixedPhase => {
-            if !has_plugin(result, "eq") || !has_plugin(result, "convolution") {
-                failures.push(
-                    "mixed-phase case did not emit both EQ and excess-phase convolution"
-                        .to_string(),
-                );
+            ProcessingMethod::Mixed => {
+                if !has_plugin(result, "eq") || !has_plugin(result, "convolution") {
+                    failures.push(
+                        "hybrid case did not emit both EQ and convolution plugins".to_string(),
+                    );
+                }
             }
-            if result
-                .metadata
-                .mixed_phase_per_channel
-                .as_ref()
-                .is_none_or(|reports| reports.is_empty())
-            {
-                failures.push("mixed-phase correction report is missing".to_string());
+            ProcessingMethod::MixedPhase => {
+                if !has_plugin(result, "eq") || !has_plugin(result, "convolution") {
+                    failures.push(
+                        "mixed-phase case did not emit both EQ and excess-phase convolution"
+                            .to_string(),
+                    );
+                }
+                if result
+                    .metadata
+                    .mixed_phase_per_channel
+                    .as_ref()
+                    .is_none_or(|reports| reports.is_empty())
+                {
+                    failures.push("mixed-phase correction report is missing".to_string());
+                }
             }
+            ProcessingMethod::Iir | ProcessingMethod::Fir => {}
         }
-        ProcessingMethod::Iir | ProcessingMethod::Fir => {}
     }
     failures
 }

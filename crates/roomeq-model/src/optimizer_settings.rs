@@ -178,16 +178,19 @@ fn default_ir_audibility_threshold_db() -> f64 {
     -45.0
 }
 
-/// Temporal masking penalty configuration for EPA optimization.
+/// Experimental EPA temporal-diagnostic configuration.
+///
+/// Modal controls are retained for report compatibility and offline analysis;
+/// they do not steer the active spectral-flatness-only EPA optimizer.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TemporalMaskingConfig {
-    /// Enable the temporal masking penalty when modal data is available.
+    /// Enable the legacy modal temporal diagnostic when modal data is available.
     #[serde(default = "default_temporal_masking_enabled")]
     pub enabled: bool,
-    /// Weight applied to the normalized temporal masking penalty.
+    /// Legacy diagnostic weight; it does not steer EPA optimizer fitness.
     #[serde(default = "default_temporal_masking_weight")]
     pub weight: f64,
-    /// Material profile used to scale modal-ringing audibility.
+    /// Diagnostic programme-profile label for modal-ringing reporting.
     #[serde(default)]
     pub profile: TemporalMaskingProfile,
     /// Enable true FIR impulse-response pre/post masking analysis when FIR
@@ -239,17 +242,17 @@ fn default_flatness_erb_weight() -> f64 {
     1.0
 }
 
-/// Configuration for EPA scoring.
+/// Experimental EPA diagnostics and optimizer flatness configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct EpaConfig {
-    /// Listening level in phon (affects loudness computation)
+    /// Listening level in phon for diagnostic loudness computation.
     pub listening_level_phon: f64,
-    /// Target sharpness in acum (1.0 = natural broadband noise character)
+    /// Diagnostic target sharpness in acum (1.0 = natural broadband noise character).
     pub target_sharpness: f64,
-    /// Maximum acceptable roughness (above this, penalty increases)
+    /// Diagnostic roughness threshold; transfer-only roughness does not steer optimization.
     pub max_roughness: f64,
-    /// Weights for the three EPA dimensions in the composite score
+    /// Diagnostic weights for the three reported EPA dimensions.
     pub evaluation_weight: f64,
     pub potency_weight: f64,
     pub activity_weight: f64,
@@ -257,21 +260,18 @@ pub struct EpaConfig {
     /// Only consulted when `flatness_band_weight > 0`.
     #[serde(default)]
     pub flatness_band_weights: FrequencyBandWeights,
-    /// ERB weight for the flatness component of the EPA loss.
-    /// Default 1.0 (pure ERB) because EPA already has band-sensitive
-    /// sharpness / roughness / loudness_balance terms — adding band
-    /// weighting on top of flatness would double-count frequency bias.
+    /// ERB-rate weight for the active optimizer flatness component.
+    /// The default is 1.0 (pure ERB-rate flatness).
     #[serde(default = "default_flatness_erb_weight")]
     pub flatness_erb_weight: f64,
     /// Band weight for the flatness component of the EPA loss.
     /// Default 0.0 (see `flatness_erb_weight`).
     #[serde(default)]
     pub flatness_band_weight: f64,
-    /// Temporal-masking penalties for modal ringing and FIR phase behavior.
-    ///
-    /// Modal data is used as an optimizer-cheap proxy for post-masked room
-    /// decay audibility. When FIR coefficients are exported, the FIR impulse
-    /// response is also analyzed directly for pre/post ringing audibility.
+    /// Experimental temporal diagnostics for modal decay and FIR phase behavior.
+    /// These settings do not steer EPA optimization. Confident measured
+    /// band-limited SSIR decay is preferred for modal reporting; magnitude Q is
+    /// only a fallback, and realized FIR pre/post ringing is analyzed separately.
     #[serde(default)]
     pub temporal_masking: TemporalMaskingConfig,
 }

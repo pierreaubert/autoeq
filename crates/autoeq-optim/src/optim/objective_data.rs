@@ -91,20 +91,18 @@ pub struct ObjectiveData {
     /// Each entry is (frequency_hz, max_boost_db). Interpolated in log-frequency.
     /// When Some, positive filter gains are clamped before loss evaluation.
     pub max_boost_envelope: Option<Vec<(f64, f64)>>,
-    /// CDT-aware minimum cut envelope: limits how deep the optimizer can cut
-    /// at frequencies where the ear generates Cubic Distortion Tones.
-    /// Each entry is (frequency_hz, max_cut_db) where max_cut_db is negative.
+    /// Optional minimum-cut safety envelope.
+    /// Each entry is (frequency_hz, max_cut_db), where max_cut_db is negative.
     /// When Some, negative filter gains are clamped before loss evaluation.
     pub min_cut_envelope: Option<Vec<(f64, f64)>>,
-    /// EPA psychoacoustic loss configuration.
+    /// Experimental EPA diagnostics and active spectral-flatness blend.
     ///
     /// Used only when `loss_type == LossType::Epa`. When `None`, the
     /// optimizer falls back to `EpaConfig::default()`.
     pub epa_config: Option<crate::loss::epa::score::EpaConfig>,
-    /// Detected modal ringing data used by the EPA temporal masking penalty.
+    /// Detected modal ringing data retained for EPA diagnostic compatibility.
     ///
-    /// Empty when decomposed room-mode analysis did not run or when no modes
-    /// exceed the temporal audibility threshold.
+    /// It does not steer optimizer fitness.
     pub temporal_masking_modes: Vec<crate::loss::epa::score::TemporalMaskingMode>,
     /// Pre-detected frequency problems (usually SSIR / decomposed-correction
     /// room modes) to seed the DE optimizer's smart initial-guess

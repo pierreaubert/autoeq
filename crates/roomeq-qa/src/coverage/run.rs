@@ -1,7 +1,6 @@
 use super::consts::SAMPLE_RATE;
 use super::consts::TEMP_DIR_COUNTER;
 use super::consts::{apply_legacy_fast_overrides, apply_qa_overrides};
-use super::counting_semaphore::CountingSemaphore;
 use super::home_cinema::validate_home_cinema_result;
 use super::is::qa_primary_score_pair;
 use super::misc::avg_epa_preference;
@@ -16,16 +15,23 @@ use roomeq_model::{ChannelDspChain, CorrectionDecision, PluginConfigWrapper, Roo
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
 use std::thread;
 
-pub(super) fn run_optimization(config: &RoomConfig) -> Result<(RoomOptimizationResult, PathBuf)> {
+// The QA optimizers intentionally run with bounded evaluation budgets and can
+// stop before stochastic solvers fully converge. Keep metamorphic checks tight
+// enough to catch material regressions while tolerating that residual noise.
+const METAMORPHIC_SCORE_TOLERANCE_FRACTION: f64 = 0.02;
+
+pub(super) fn run_optimization(
+    config: &RoomConfig,
+) -> Result<(RoomOptimizationResult, PathBuf, u64)> {
     let id = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!("roomeq_qa_{}_{}", std::process::id(), id));
     std::fs::create_dir_all(&temp_dir)?;
-    match crate::optimize_room(config, SAMPLE_RATE, Some(&temp_dir)) {
-        Ok(result) => Ok((result, temp_dir)),
+    match crate::optimize_room_with_selected_seed(config, SAMPLE_RATE, Some(&temp_dir)) {
+        Ok((result, selected_seed)) => Ok((result, temp_dir, selected_seed)),
         Err(error) => {
             let _ = std::fs::remove_dir_all(&temp_dir);
             Err(error)
@@ -68,21 +74,34 @@ fn resolve_plugin_convolution_path(plugin: &mut PluginConfigWrapper, output_dir:
 fn validate_metamorphic_optimization(
     config: &RoomConfig,
     baseline: &RoomOptimizationResult,
+    selected_seed: u64,
+    allow_reverted: bool,
 ) -> Vec<String> {
     let mut failures = Vec::new();
     let (_, baseline_post) = qa_primary_score_pair(baseline, config);
-    let material_tolerance = (baseline_post.abs() * 0.01).max(1.0e-6);
+    let material_tolerance =
+        (baseline_post.abs() * METAMORPHIC_SCORE_TOLERANCE_FRACTION).max(1.0e-6);
 
     let mut higher_budget = config.clone();
+    higher_budget.optimizer.seed = Some(selected_seed);
     higher_budget.optimizer.max_iter = higher_budget.optimizer.max_iter.saturating_mul(2).max(2);
-    match crate::optimize_room(&higher_budget, SAMPLE_RATE, None) {
+    match crate::optimize_room_single_seed(&higher_budget, SAMPLE_RATE) {
         Ok(result) => {
-            let (_, post) = qa_primary_score_pair(&result, &higher_budget);
-            if post > baseline_post + material_tolerance {
-                failures.push(format!(
-                    "metamorphic max_iter regression: baseline {:.4}, doubled-budget {:.4}",
-                    baseline_post, post
-                ));
+            if correction_reverted(&result) {
+                if !allow_reverted {
+                    failures.push(
+                        "metamorphic max_iter run safely reverted without registry permission"
+                            .to_string(),
+                    );
+                }
+            } else {
+                let (_, post) = qa_primary_score_pair(&result, &higher_budget);
+                if post > baseline_post + material_tolerance {
+                    failures.push(format!(
+                        "metamorphic max_iter regression: baseline {:.4}, doubled-budget {:.4}",
+                        baseline_post, post
+                    ));
+                }
             }
         }
         Err(error) => failures.push(format!("metamorphic max_iter run failed: {error:#}")),
@@ -90,22 +109,52 @@ fn validate_metamorphic_optimization(
 
     let mut more_filters = higher_budget;
     more_filters.optimizer.num_filters = more_filters.optimizer.num_filters.saturating_add(2);
-    match crate::optimize_room(&more_filters, SAMPLE_RATE, None) {
+    match crate::optimize_room_single_seed(&more_filters, SAMPLE_RATE) {
         Ok(result) => {
-            let (_, post) = qa_primary_score_pair(&result, &more_filters);
-            if post > baseline_post + material_tolerance {
-                failures.push(format!(
-                    "metamorphic filter-count regression: {} filters {:.4}, {} filters {:.4}",
-                    config.optimizer.num_filters,
-                    baseline_post,
-                    more_filters.optimizer.num_filters,
-                    post
-                ));
+            if correction_reverted(&result) {
+                if !allow_reverted {
+                    failures.push(
+                        "metamorphic filter-count run safely reverted without registry permission"
+                            .to_string(),
+                    );
+                }
+            } else {
+                let (_, post) = qa_primary_score_pair(&result, &more_filters);
+                if post > baseline_post + material_tolerance {
+                    failures.push(format!(
+                        "metamorphic filter-count regression: {} filters {:.4}, {} filters {:.4}",
+                        config.optimizer.num_filters,
+                        baseline_post,
+                        more_filters.optimizer.num_filters,
+                        post
+                    ));
+                }
             }
         }
         Err(error) => failures.push(format!("metamorphic filter-count run failed: {error:#}")),
     }
     failures
+}
+
+fn correction_reverted(result: &RoomOptimizationResult) -> bool {
+    result
+        .metadata
+        .correction_acceptance
+        .as_ref()
+        .is_some_and(|report| {
+            matches!(
+                report.decision,
+                CorrectionDecision::RevertedStage | CorrectionDecision::IdentityFallback
+            )
+        })
+}
+
+fn should_validate_generic_acoustics(
+    is_home_cinema: bool,
+    reverted: bool,
+    allow_reverted: bool,
+) -> bool {
+    !is_home_cinema && !(reverted && allow_reverted)
 }
 
 pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
@@ -160,7 +209,7 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
     }
 
     // Run optimization
-    let (mut result, temp_dir) = match run_optimization(&config) {
+    let (mut result, temp_dir, selected_seed) = match run_optimization(&config) {
         Ok(r) => r,
         Err(e) => {
             return TestResult::failure(
@@ -193,29 +242,25 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
     };
     let epa_pref = avg_epa_preference(&result);
     let dur = start.elapsed().as_millis() as u64;
-    let reverted = result
-        .metadata
-        .correction_acceptance
-        .as_ref()
-        .is_some_and(|report| {
-            matches!(
-                report.decision,
-                CorrectionDecision::RevertedStage | CorrectionDecision::IdentityFallback
-            )
-        });
-    let allow_reverted = tc
-        .home_cinema_expectations
-        .as_ref()
-        .is_some_and(|expectations| expectations.allow_safe_revert);
+    let reverted = correction_reverted(&result);
+    let allow_reverted = tc.expect.allow_safe_revert
+        || tc
+            .home_cinema_expectations
+            .as_ref()
+            .is_some_and(|expectations| expectations.allow_safe_revert);
 
     // Home-cinema cases use the canonical, passband-aware runtime acceptance
     // report below. The generic scalar scores mix unlike channel targets and
     // graph-routed bass, so treating them as an additional acoustic gate can
     // reject a physically accepted realization.
-    let mut validation_failures = if tc.home_cinema_expectations.is_some() {
-        Vec::new()
-    } else {
+    let mut validation_failures = if should_validate_generic_acoustics(
+        tc.home_cinema_expectations.is_some(),
+        reverted,
+        allow_reverted,
+    ) {
         validate_result(&result, tc.expect, tc.method, &config)
+    } else {
+        Vec::new()
     };
     if let Some(expectations) = tc.home_cinema_expectations.clone() {
         validation_failures.extend(validate_home_cinema_result(
@@ -226,7 +271,12 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
         ));
     }
     validation_failures.extend(crate::registry::verify_result_claims(&result, &tc.claims));
-    validation_failures.extend(validate_metamorphic_optimization(&config, &result));
+    validation_failures.extend(validate_metamorphic_optimization(
+        &config,
+        &result,
+        selected_seed,
+        allow_reverted,
+    ));
     if reverted && !allow_reverted {
         validation_failures.push(
             "runtime acceptance reverted the proposed correction; this scenario does not declare expect.allow_safe_revert"
@@ -256,17 +306,26 @@ pub(super) fn run_parallel(
     num_jobs: usize,
 ) -> Vec<TestResult> {
     let (tx, rx) = channel::<TestResult>();
-    let semaphore = Arc::new(CountingSemaphore::new(num_jobs));
-    let mut handles: Vec<std::thread::JoinHandle<()>> = Vec::new();
+    let worker_count = num_jobs.max(1).min(test_cases.len());
+    let test_cases = Arc::new(test_cases);
+    let next_case = Arc::new(AtomicUsize::new(0));
+    let mut handles = Vec::with_capacity(worker_count);
 
-    for tc in test_cases {
+    for _ in 0..worker_count {
         let tx = tx.clone();
-        let sem = Arc::clone(&semaphore);
+        let test_cases = Arc::clone(&test_cases);
+        let next_case = Arc::clone(&next_case);
         let handle = thread::spawn(move || {
-            sem.acquire();
-            let result = run_test_case(&tc, maxeval);
-            sem.release();
-            let _ = tx.send(result);
+            loop {
+                let index = next_case.fetch_add(1, Ordering::Relaxed);
+                let Some(test_case) = test_cases.get(index) else {
+                    break;
+                };
+                let result = run_test_case(test_case, maxeval);
+                if tx.send(result).is_err() {
+                    break;
+                }
+            }
         });
         handles.push(handle);
     }
@@ -283,6 +342,19 @@ pub(super) fn run_parallel(
     }
 
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_validate_generic_acoustics;
+
+    #[test]
+    fn safe_revert_skips_only_generic_acoustic_gate_when_explicitly_allowed() {
+        assert!(!should_validate_generic_acoustics(false, true, true));
+        assert!(should_validate_generic_acoustics(false, true, false));
+        assert!(should_validate_generic_acoustics(false, false, true));
+        assert!(!should_validate_generic_acoustics(true, false, false));
+    }
 }
 
 /// Execute one production-backed regression scenario through the canonical

@@ -191,7 +191,9 @@ pub fn to_optimizer_multi_measurement(
             autoeq_optim::roomeq::MultiMeasurementStrategy::VariancePenalized
         }
         MultiMeasurementStrategy::SpatialRobustness => {
-            autoeq_optim::roomeq::MultiMeasurementStrategy::SpatialRobustness
+            // Direct per-seat dB-domain loss with an explicit variance risk
+            // term replaces the former linear-power curve collapse.
+            autoeq_optim::roomeq::MultiMeasurementStrategy::VariancePenalized
         }
         MultiMeasurementStrategy::MinimaxUncertainty => {
             autoeq_optim::roomeq::MultiMeasurementStrategy::MinimaxUncertainty
@@ -203,6 +205,14 @@ pub fn to_optimizer_multi_measurement(
 mod tests {
     use super::*;
     use roomeq_model::{RoomDimensions, SchroederSplitConfig, SmoothnessPenaltyConfigSerde};
+
+    #[test]
+    fn spatial_robustness_maps_to_direct_per_seat_variance_risk() {
+        assert_eq!(
+            to_optimizer_multi_measurement(MultiMeasurementStrategy::SpatialRobustness),
+            autoeq_optim::roomeq::MultiMeasurementStrategy::VariancePenalized
+        );
+    }
 
     fn smoothness_config(schroeder_hz: Option<f64>) -> SmoothnessPenaltyConfigSerde {
         SmoothnessPenaltyConfigSerde {

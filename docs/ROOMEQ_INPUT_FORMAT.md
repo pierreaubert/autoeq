@@ -706,7 +706,7 @@ Controls the optimization algorithm, constraints, and advanced features.
 | `mixed_config` | object | - | Mixed mode configuration for frequency-based crossover |
 | `mixed_phase` | object | - | Mixed-phase correction config (when processing_mode is `"mixed_phase"`) |
 | `loss_type` | string | `"flat"` | Loss function: `"flat"`, `"score"`, or `"epa"` (see [Loss Types](#loss-types) and [EPA Configuration](#epa-configuration)) |
-| `epa_config` | object | - | Tuning knobs for the EPA psychoacoustic loss (consulted for any `loss_type`; required only when you want to override defaults). See [EPA Configuration](#epa-configuration) |
+| `epa_config` | object | - | Experimental EPA diagnostic settings plus the active spectral-flatness blend used only by `loss_type: "epa"`. Transfer-only loudness, roughness, sharpness, and temporal descriptor weights do not steer optimization. See [EPA Configuration](#epa-configuration). |
 | `algorithm` | string | `"autoeq:cmaes"` | Optimization algorithm |
 | `num_filters` | integer | `7` | Number of PEQ filters per channel |
 | `min_q` | number | `0.5` | Minimum Q factor |
@@ -733,7 +733,7 @@ Controls the optimization algorithm, constraints, and advanced features.
 | `tolerance` | number | `1e-5` | Optimization convergence tolerance (relative) |
 | `atolerance` | number | `1e-5` | Optimization convergence tolerance (absolute) |
 | `allow_delay` | boolean | - | Allow inter-speaker delay optimization. Default: false for IIR, true for FIR/mixed. |
-| `target_response` | object | - | Unified target response configuration (shape, preference shelves, broadband pre-correction) |
+| `target_response` | object | - | Neutral target shape, separately realized preference shelves/role voicing, and broadband pre-correction configuration |
 | `excursion_protection` | object | - | Excursion protection for bookshelf speakers |
 | `schroeder_split` | object | - | Different Q constraints above/below Schroeder frequency |
 | `auto_optimizer` | object | - | Opt-in automatic filter count, Q bound, and gain bound selection |
@@ -772,9 +772,9 @@ Controls the optimization algorithm, constraints, and advanced features.
 
 | Type | Description |
 |------|-------------|
-| `flat` | Optimize for flat frequency response. Internally uses an ERB-weighted + band-weighted MSE (70/30 blend) for better perceptual relevance than a plain MSE. |
+| `flat` | Optimize neutral target error with the versioned `glasberg-moore-erb-rate-1990-v1` measure plus normalized active-band RMS (70/30 blend). Discrete ERB-rate cell widths make equivalent curves insensitive to frequency-grid density. |
 | `score` | Optimize for Harman/Olive preference score (bass boost + flat PIR). |
-| `epa` | EPA (Evaluation / Potency / Activity) psychoacoustic loss. Combines an ERB-weighted flatness term with sharpness (vs. target), roughness (spectral beating), and loudness-balance penalties derived from Zwicker's models. Tuning knobs live in [`epa_config`](#epa-configuration). |
+| `epa` | **Experimental.** Optimizes ERB-rate spectral flatness only. Transfer-response loudness, roughness, sharpness, and temporal values remain diagnostic heuristics unless evaluated from calibrated programme audio and measured impulse decay; they do not steer the filter search and are not validated perceptual predictions. Tuning knobs live in [`epa_config`](#epa-configuration). |
 
 ### EPA Configuration
 
@@ -828,22 +828,22 @@ EPA tuning knobs. Every field is optional and serde-defaulted, so omitting
 |-------|------|---------|-------------|
 | `listening_level_phon` | number | `75.0` | Presentation level in phon. Also used to denormalize level-relative measurement curves (~0 dB mean) back to absolute dB SPL before running the Zwicker loudness model. |
 | `target_sharpness` | number | `1.2` | Target Zwicker sharpness in acum. `1.0` ≈ broadband noise character; higher = brighter. |
-| `max_roughness` | number | `0.5` | Roughness threshold above which the penalty kicks in (spectral beating between close modes). |
-| `evaluation_weight` | number | `0.6` | Weight of the Evaluation (quality) dimension in the composite score. |
-| `potency_weight` | number | `0.2` | Weight of the Potency (energy) dimension. |
-| `activity_weight` | number | `0.2` | Weight of the Activity (temporal complexity) dimension. |
-| `flatness_erb_weight` | number | `1.0` | ERB-weighted blend for the flatness term. Default pure ERB because EPA already has band-sensitive sharpness/roughness/loudness-balance terms. |
+| `max_roughness` | number | `0.5` | Legacy diagnostic threshold for the spectral-peak-interaction descriptor; it is not programme roughness and does not steer optimization. |
+| `evaluation_weight` | number | `0.6` | Diagnostic report weight for the Evaluation descriptor; does not steer optimization. |
+| `potency_weight` | number | `0.2` | Diagnostic report weight for the Potency descriptor; does not steer optimization. |
+| `activity_weight` | number | `0.2` | Diagnostic report weight for the Activity descriptor; does not steer optimization. |
+| `flatness_erb_weight` | number | `1.0` | ERB-rate share of the active spectral-flatness blend. The default uses pure ERB-rate flatness. |
 | `flatness_band_weight` | number | `0.0` | Band-weighted blend for the flatness term. Increase to add an explicit bass/mid/treble bias on top of the ERB flatness. |
 | `flatness_band_weights` | object | see `FrequencyBandWeights` defaults | Per-band frequency ranges and weights. Only consulted when `flatness_band_weight > 0`. |
-| `temporal_masking` | object | see below | Modal and FIR impulse-response temporal-masking controls. The modal path uses detected room-mode Q/prominence data inside the EPA optimizer loss; the FIR path analyzes generated FIR impulse responses for pre/post ringing under pre- and post-masking windows. |
+| `temporal_masking` | object | see below | Experimental diagnostic controls. Transfer-response temporal descriptors do not steer EPA optimization; measured, band-limited SSIR mode decay is used for reporting when its fit is confident, with magnitude Q only as a fallback. FIR pre/post-ringing remains a separate realized-filter diagnostic. |
 
 **TemporalMaskingConfig fields:**
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | boolean | `true` | Enable modal temporal masking when detected room-mode data is available. |
-| `weight` | number | `0.15` | Weight for the modal ringing penalty in the EPA optimizer loss. |
-| `profile` | string | `"mixed"` | Programme material profile: `"transient"`, `"mixed"`, or `"sustained"`. Transient material applies the strongest temporal penalty. |
+| `weight` | number | `0.15` | Legacy diagnostic weight; it does not steer EPA optimization. |
+| `profile` | string | `"mixed"` | Diagnostic programme-profile label: `"transient"`, `"mixed"`, or `"sustained"`; no programme-dependent optimizer claim is made without calibrated audio. |
 | `ir_enabled` | boolean | `true` | Enable true FIR impulse-response temporal masking analysis when FIR coefficients are available. |
 | `ir_weight` | number | `0.05` | Weight used for the scalar FIR temporal masking penalty reported in output metrics. |
 | `pre_mask_ms` | number | `3.0` | Pre-masking window before the main impulse. Pre-ringing inside this window is partially masked; earlier pre-ringing is fully audible. |
@@ -990,12 +990,16 @@ When `processing_mode` is `"mixed_phase"`, decomposes the measurement into minim
 
 ## Target Response Configuration
 
-`target_response` is the unified entry point for target shaping. It
-bundles the target curve shape, the user-preference shelves that layer
-on top of it, and the broadband pre-correction toggle (see the
+`target_response` is the unified entry point for target shaping. Flat, custom,
+file, and measurement-derived shapes define the neutral physical-correction
+target. The fixed `harman` house curve and user-preference shelves
+are realized afterward as a separately bypassable output layer and are excluded
+from neutral post-EQ quality scores. The object also carries the broadband
+pre-correction toggle (see the
 [Broadband Pre-correction](#broadband-pre-correction) section below).
-The Harman-style tilt (-0.8 dB/octave referenced at 1 kHz) is
-psychoacoustically preferred for in-room listening.
+The Harman-style tilt (-0.8 dB/octave referenced at 1 kHz) is provided as a
+house-curve preference. It is not a universal neutral room-correction target
+and is realized in the separately bypassable preference layer.
 
 ```json
 {
@@ -1494,10 +1498,10 @@ When a speaker has multiple measurements (different listening positions), contro
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `strategy` | string | `"average"` | Strategy: `"average"`, `"weighted_sum"`, `"minimax"`, `"variance_penalized"`, `"spatial_robustness"`, `"minimax_uncertainty"` |
-| `weights` | array | - | Weights for `weighted_sum` (normalized internally). Equal if omitted. |
-| `variance_lambda` | number | `1.0` | Lambda for `variance_penalized`. Higher = more consistent. |
+| `weights` | array | - | Finite, nonnegative per-measurement weights (normalized internally); at least one must be positive. Equal if omitted. |
+| `variance_lambda` | number | `1.0` | Finite, nonnegative coefficient for `variance_penalized`. Higher = more consistent. |
 | `spatial_robustness` | object | - | Configuration for `spatial_robustness` strategy |
-| `bootstrap_uncertainty` | object | - | Configuration for `minimax_uncertainty` strategy |
+| `bootstrap_uncertainty` | object | - | Spatial case-bootstrap configuration for `minimax_uncertainty` and `spatial_robustness` strategies |
 
 **Multi-Measurement Strategies:**
 
@@ -1507,8 +1511,8 @@ When a speaker has multiple measurements (different listening positions), contro
 | `weighted_sum` | loss = sum(w_i * loss_i) - weighted sum of per-measurement losses |
 | `minimax` | loss = max(loss_i) - optimize worst case across all measurements |
 | `variance_penalized` | loss = mean(loss_i) + lambda * var(loss_i) - balance quality + consistency |
-| `spatial_robustness` | RMS-average + correction depth mask based on spatial variance |
-| `minimax_uncertainty` | Case-bootstrap the input curves, then optimise worst-case (or CVaR) loss across the resampled bank — robust to measurement noise / mic jitter |
+| `spatial_robustness` | Evaluate every seat directly with variance-penalized per-seat loss; apply the spatial-variance correction-depth mask to every seat rather than collapsing seats to a power-average curve |
+| `minimax_uncertainty` | Case-bootstrap listening-position curves, then optimise worst-case (or CVaR) loss across the resampled bank. This estimates spatial seat-sampling variability under an independent-position assumption, not repeat-sweep noise, microphone calibration error, or mic jitter. |
 
 **SpatialRobustness Fields:**
 
@@ -1519,15 +1523,27 @@ When a speaker has multiple measurements (different listening positions), contro
 | `min_correction_depth` | number | `0.1` | Minimum correction depth (0.0-1.0) |
 | `mask_smoothing_octaves` | number | `0.167` | Smoothing width in octaves for the correction depth mask |
 
-**BootstrapUncertainty Fields** (used when `strategy == "minimax_uncertainty"`):
+**BootstrapUncertainty Fields** (used by `minimax_uncertainty` and `spatial_robustness`):
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `effective_spatial_sample_size` | number or null | null | Effective number of independent positions. Set below the nominal seat count for correlated nearby positions; fewer cases are drawn per resample, widening the spatial confidence band. |
+| `repeat_sweep_noise_std_db` | number or null | null | Separately measured repeat-sweep noise standard deviation in dB; reported as a distinct nuisance source rather than inferred by the seat bootstrap. |
+| `calibration_uncertainty_std_db` | number or null | null | Separately supplied calibration-uncertainty standard deviation in dB; reported separately from spatial seat sampling. |
 | `num_resamples` | integer | `400` | Number of case-bootstrap resamples B over the input curves |
 | `alpha` | number | `0.10` | Two-sided confidence level (only affects diagnostic plots; the optimizer uses all B resamples) |
 | `seed` | integer | `0xC0FFEE` | PRNG seed for reproducibility |
 | `scalarisation` | string | `"worst_case"` | How to combine the B losses: `"worst_case"` (max) or `"cvar"` (mean of worst α-tail) |
 | `cvar_alpha` | number | `0.20` | Tail fraction for CVaR (only when `scalarisation == "cvar"`) |
+
+Bootstrap reports label their source as `spatial_seat_sampling`, state the
+independent-position assumption, report the corresponding effective spatial
+sample size, and leave repeat-sweep and calibration uncertainty absent unless
+those sources are measured separately. Nearby seats are correlated: supply a
+reduced `effective_spatial_sample_size` to widen the resampling distribution as
+a conservative correlation adjustment. This is not a spatial block bootstrap
+or covariance model, so the resulting interval must not be interpreted as
+generic measurement certainty.
 
 ---
 

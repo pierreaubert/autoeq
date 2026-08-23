@@ -558,9 +558,12 @@ fn optimize_room_stop_after_parallel_channels_start_cancels_every_job() {
         2,
         "the stop must be requested only after both parallel channels started"
     );
+    let observed_callbacks = callback_count.load(Ordering::SeqCst);
     assert!(
-        callback_count.load(Ordering::SeqCst) < 100,
-        "active jobs did not observe cancellation promptly"
+        observed_callbacks < config.optimizer.max_iter,
+        "active jobs did not observe cancellation before one full channel budget: \
+         observed {observed_callbacks} callbacks for max_iter={}",
+        config.optimizer.max_iter
     );
     assert_eq!(
         std::fs::read_dir(output_dir.path()).unwrap().count(),

@@ -1,8 +1,8 @@
-//! EPA (Evaluation, Potency, Activity) composite score for room EQ optimization.
+//! Experimental EPA (Evaluation, Potency, Activity) transfer-response diagnostics.
 //!
-//! Maps psychoacoustic metrics (loudness, sharpness, roughness) onto the three
-//! semantic differential dimensions commonly used in sound quality research.
-//! The composite preference score provides a single optimization target.
+//! Maps transfer-response shape metrics onto semantic-differential dimensions
+//! for reporting. These descriptors are not programme-audio perceptual
+//! predictions and do not steer the active EPA spectral-flatness optimizer.
 
 mod compute;
 mod db;

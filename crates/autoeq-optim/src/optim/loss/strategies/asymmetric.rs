@@ -14,7 +14,6 @@ impl Objective for AsymmetricStrategy {
     fn compute(&self, x: &[f64], ctx: &ObjectiveContext) -> f64 {
         let peq_spl = ctx.peq_spl(x);
         let error = &peq_spl - ctx.deviation;
-        let error = ctx.smooth_error(error);
         let error = ctx.apply_deadband(&error);
         let base_loss = weighted_mse_asymmetric(
             ctx.freqs,

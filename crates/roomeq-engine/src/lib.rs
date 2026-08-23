@@ -45,6 +45,7 @@ pub mod channel_input;
 /// Prepared, path-free measurement inputs for channel processing.
 pub mod channel_measurements;
 mod channel_optimizer;
+mod channel_preference;
 /// Deterministic preprocessing for a prepared channel.
 pub mod channel_preprocessing;
 /// Shared results and logical sidecar references for channel processing.

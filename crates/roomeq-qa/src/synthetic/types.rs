@@ -61,10 +61,10 @@ pub(super) enum QaOutcome {
 
 impl TestResult {
     pub(super) fn outcome(&self) -> QaOutcome {
-        if self.passed {
-            QaOutcome::Passed
-        } else if self.reason.starts_with("REVERTED:") {
+        if self.reason.starts_with("REVERTED:") {
             QaOutcome::Reverted
+        } else if self.passed {
+            QaOutcome::Passed
         } else {
             QaOutcome::Failed
         }

@@ -11,8 +11,9 @@ use super::types::EpaScore;
 /// Inputs are normalized room-EQ SPL curves. Each channel is first lifted to
 /// `config.listening_level_phon`, then channel energies are summed with
 /// BS.1770-style role weights. The aggregate curve is evaluated at its own
-/// 1 kHz level so the EPA loudness model preserves the +3 dB effect of two
-/// equal programme channels instead of re-normalizing it away.
+/// 1 kHz level so the diagnostic preserves the +3 dB energy effect of two
+/// equal transfer-response channels instead of re-normalizing it away. This is
+/// not a programme loudness prediction without calibrated stimulus audio.
 pub fn compute_epa_multichannel_normalized(
     freqs: &[f64],
     channel_spl_rel: &[(&[f64], EpaChannelRole)],
@@ -59,10 +60,11 @@ pub fn compute_epa_multichannel_normalized(
 
 /// Compute EPA score from a frequency response.
 ///
-/// The loudness path calibrates the response so its interpolated 1 kHz level
-/// equals `config.listening_level_phon`. Level-relative curves should still use
-/// [`compute_epa_normalized`] so level-dependent spectrum metrics see the same
-/// listening-level offset.
+/// The diagnostic path shifts the response so its interpolated 1 kHz level
+/// equals `config.listening_level_phon`. Level-relative curves should use
+/// [`compute_epa_normalized`] for a consistent reference offset. This shift
+/// does not supply the calibrated programme spectrum needed for a validated
+/// loudness, roughness, or preference prediction.
 pub fn compute_epa(freqs: &[f64], spl_db: &[f64], config: &EpaConfig) -> EpaScore {
     // 1. Compute specific loudness across Bark bands
     let specific = loudness::specific_loudness(freqs, spl_db, config.listening_level_phon);
@@ -71,7 +73,7 @@ pub fn compute_epa(freqs: &[f64], spl_db: &[f64], config: &EpaConfig) -> EpaScor
     // 2. Compute sharpness (high-frequency emphasis metric)
     let sharp = sharpness::sharpness(&specific);
 
-    // 3. Compute roughness from spectral peak interactions
+    // 3. Compute the legacy spectral-peak-interaction diagnostic
     let rough = roughness::roughness_from_spectrum(freqs, spl_db);
 
     // 4. Compute loudness balance (uniformity of specific loudness)

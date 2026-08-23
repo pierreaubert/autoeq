@@ -481,29 +481,19 @@ The **loss function** is selected by `loss_type`:
   target.
 * **`score`** — Olive / Toole speaker-preference score
   (NBD + LFX + SM·PIR with bass-boost shaping).
-* **`epa`** — Zwicker/Fastl psychoacoustic composite of flatness +
-  sharpness + roughness + loudness-balance + cubic-distortion-tone
-  level + modal temporal masking. Tunable via
-  `OptimizerConfig.epa_config`. Pre/post EPA scores are always emitted
-  in the JSON metadata.
+* **`epa`** — experimental ERB-rate spectral-flatness optimizer.
+  Transfer-response sharpness, roughness, loudness, and temporal EPA values
+  remain diagnostic heuristics and do not steer the filter search. Pre/post EPA
+  diagnostics are emitted in JSON metadata.
 
-When EPA is selected, RoomEQ also passes detected modal peaks into the
-optimizer as temporal-masking data. Each mode carries frequency, Q,
-prominence, and a perceptual temporal-severity value from
-`temporal_targets.rs`. The EPA loss estimates how much audible ringing
-remains after the candidate PEQ curve: cuts at severe modal peaks reduce
-the penalty, while boosts at those modes increase it. The
-`epa_config.temporal_masking.profile` setting changes the material
-assumption: `transient` penalizes ringing most strongly, `mixed` is the
-default, and `sustained` assumes more post-masking from ongoing tonal
-content.
+EPA temporal settings are retained for diagnostic compatibility. They do not
+alter optimizer fitness. SSIR workflows instead prefer confident measured,
+band-limited mode-decay fits; magnitude-derived Q remains an explicit fallback.
 
-For FIR-bearing modes, the same temporal-masking configuration also drives a
-true impulse-response analysis after FIR generation. RoomEQ finds the FIR's
-main impulse peak, treats it as a transient masker, and separately measures
-pre-ringing and post-ringing energy after applying configurable pre- and
-post-masking windows. Those metrics are reported per channel as
-`fir_temporal_masking` and summarized in `metadata.perceptual_metrics`.
+For FIR-bearing modes, realized-filter impulse-response analysis remains a
+separate diagnostic. RoomEQ reports pre/post ringing in
+`fir_temporal_masking` and `metadata.perceptual_metrics`; it does not turn a
+transfer-only descriptor into a programme-audio perceptual claim.
 
 ### 3.8 FIR / mixed-phase post-generation
 
@@ -739,11 +729,11 @@ flowchart TB
 * **Decomposed correction** (Laborie/Bruno/Montoya, 2003) splits the
   IR into modal, early-reflection, and steady-state regions and
   applies different correction strategies to each.
-* **EPA temporal masking** reuses the detected modal peaks from
-  decomposed correction as optimizer-side perceptual data. This keeps
-  the loss cheap enough for every candidate evaluation while still
-  steering filters differently for transient-heavy versus sustained
-  programme material.
+* **EPA temporal diagnostics** retain detected modal peaks for offline and
+  report compatibility, but do not steer the active EPA optimizer. When an
+  SSIR is available, RoomEQ prefers a confident band-limited measured-decay
+  fit; magnitude-derived Q is an explicitly labelled fallback. No
+  programme-dependent masking claim is made from a transfer response alone.
 * **First-reflection cancellation** (Johnston, AES 2008) subtracts a
   delayed low-passed copy of the input below ~500 Hz to cancel the
   measured first floor/ceiling reflection.

@@ -11,11 +11,11 @@ use log::info;
 use math_audio_iir_fir::{Biquad, BiquadFilterType, KautzFilter};
 use roomeq_model::{OptimizerConfig, RoomConfig};
 
+use crate::PreparedChannelInput;
 use crate::channel_preprocessing::PreprocessedFeatures;
 pub use crate::channel_result::ChannelProcessingResult as IirChannelResult;
 use crate::channel_target::TargetContext;
 use crate::eq::EqResources;
-use crate::{PreparedChannelInput, cea2034};
 
 /// The artifact-free processing modes owned by this module.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -91,8 +91,12 @@ pub fn process_iir_channel(mut request: IirChannelRequest<'_>) -> Result<IirChan
             )?;
             info!("  Optimized {} EQ filters", eq_filters.len());
 
-            let preference_filters =
-                preference_filters(request.room_config, request.target, request.sample_rate);
+            let preference_filters = preference_filters(
+                request.channel_name,
+                request.room_config,
+                request.target,
+                request.sample_rate,
+            );
             let output = match request.mode {
                 IirChannelMode::LowLatency => IirOptimizerOutput::LowLatency {
                     eq_filters,
@@ -123,19 +127,12 @@ pub fn process_iir_channel(mut request: IirChannelRequest<'_>) -> Result<IirChan
 }
 
 pub(crate) fn preference_filters(
+    channel_name: &str,
     room_config: &RoomConfig,
-    target: &TargetContext,
+    _target: &TargetContext,
     sample_rate: f64,
 ) -> Vec<Biquad> {
-    if !target.cea2034_active {
-        return Vec::new();
-    }
-    room_config
-        .optimizer
-        .target_response
-        .as_ref()
-        .map(|response| cea2034::generate_preference_filters(&response.preference, sample_rate))
-        .unwrap_or_default()
+    crate::channel_preference::build_preference_filters(channel_name, room_config, sample_rate)
 }
 
 fn with_preprocessing_evidence(
@@ -217,6 +214,7 @@ fn optimize_kautz_modal(
         eq_filters,
         kautz_sections,
         preference_filters: preference_filters(
+            request.channel_name,
             request.room_config,
             request.target,
             request.sample_rate,

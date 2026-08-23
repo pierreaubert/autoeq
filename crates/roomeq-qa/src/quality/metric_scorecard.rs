@@ -134,6 +134,14 @@ pub(super) fn compare_scorecards(
     baseline: &MetricScorecard,
     candidate: &MetricScorecard,
 ) -> Vec<(&'static str, bool, String)> {
+    if candidate.correction_reverted {
+        return vec![(
+            "safe_revert",
+            true,
+            "runtime safety reverted correction; registry decides allowance".to_string(),
+        )];
+    }
+
     let mut checks = Vec::new();
 
     // 1. Flat loss: relaxed tolerance
@@ -343,5 +351,23 @@ pub(super) fn placeholder_scorecard(flat_loss: f64) -> MetricScorecard {
         epa_sharpness: None,
         epa_roughness: None,
         group_delay_std_ms: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compare_scorecards, placeholder_scorecard};
+
+    #[test]
+    fn safe_revert_defers_acoustic_policy_to_registry() {
+        let baseline = placeholder_scorecard(1.0);
+        let mut candidate = placeholder_scorecard(100.0);
+        candidate.peak_residual_db = 100.0;
+        candidate.correction_reverted = true;
+
+        let checks = compare_scorecards(&baseline, &candidate);
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].0, "safe_revert");
+        assert!(checks[0].1);
     }
 }

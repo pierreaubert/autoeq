@@ -62,7 +62,7 @@ test-autoeq threads="2":
 
 [group('test')]
 ntest:
-	cargo nextest run --release --no-fail-fast --lib --bins --examples
+	cargo nextest run --release --no-fail-fast --lib --bins --examples --tests
 
 # WP0 crate-partition gates. Keep the fast checker tests and graph/ownership
 # report independently runnable; the umbrella also regenerates both schemas.

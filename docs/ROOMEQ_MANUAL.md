@@ -207,7 +207,25 @@ freq,spl
 
 - `flat`: Optimize for flat frequency response
 - `score`: Optimize for Harman/Olive score (bass boost + flat PIR)
-- `epa`: Psychoacoustic EPA loss with configurable penalty weights
+- `epa`: experimental ERB-rate loss with diagnostic transfer-response EPA descriptors; not a validated programme loudness/roughness or measured-decay model
+
+The neutral flat/asymmetric objective and runtime acceptance use the same
+versioned auditory measure, `glasberg-moore-erb-rate-1990-v1`. It integrates
+residual energy with discrete ERB-rate cell widths, so changing between linear,
+logarithmic, sparse, or dense frequency grids does not silently change the
+meaning of the reported RMS. Residual signs are never smoothed before the
+nonlinear loss.
+
+For multiple measurements, `spatial_robustness` evaluates every seat directly
+with a variance-penalized risk measure. Its spatial-variance correction-depth
+mask is applied to each seat; seats are not collapsed to a power-average curve
+before optimization. Case-bootstrap uncertainty is explicitly labelled
+`spatial_seat_sampling` and assumes independent positions by default. For
+correlated nearby seats, configure a reduced `effective_spatial_sample_size`;
+the bootstrap then draws fewer cases per resample and produces a wider,
+conservative interval. This is not a spatial block bootstrap or covariance
+model. Repeat-sweep noise and microphone-calibration uncertainty remain
+separate, explicitly supplied nuisance sources.
 
 When `psychoacoustic` is enabled, `psychoacoustic_smoothing` can override the default variable smoothing curve (`1/48` octave below 100 Hz through `1/6` octave above 1 kHz). When `asymmetric_loss` is enabled, `asymmetric_loss_config` can override peak/dip and bass peak/dip weights without changing the default behavior for existing configs.
 
@@ -230,7 +248,12 @@ RoomEQ provides advanced audio correction features for optimizing room acoustics
 
 ### Target Response
 
-Instead of optimizing to a flat target, many listeners prefer a gently downward-sloping target curve. Research by Harman International shows that a **-0.8 dB/octave** tilt is psychoacoustically preferred for in-room listening. Target shaping is configured via the unified `target_response` object, which covers the base shape, optional user-preference shelves layered on top, and the broadband pre-correction toggle.
+Some listeners prefer a gently downward-sloping house curve. RoomEQ's
+**-0.8 dB/octave** Harman-style option is a user preference, not a universal
+neutral room-correction target. It is emitted in the separately bypassable
+preference layer and excluded from neutral correction quality scores. Target
+shaping is configured through the unified `target_response` object, together
+with optional user-preference shelves and the broadband pre-correction toggle.
 
 ```json
 {
@@ -253,24 +276,26 @@ Instead of optimizing to a flat target, many listeners prefer a gently downward-
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `shape` | string | `"flat"` | Target shape: `"flat"`, `"harman"`, `"custom"`, `"file"`, `"from_measurement"` |
+| `shape` | string | `"flat"` | Target shape: `"flat"`, `"harman"`, `"custom"`, `"file"`, `"from_measurement"`; `harman` is a house curve realized in the preference layer |
 | `slope_db_per_octave` | number | -0.8 | Slope in dB/octave (negative = downward tilt). Used when `shape == "custom"` |
 | `reference_freq` | number | 1000 | Frequency where the target slope passes through 0 dB (Hz) |
 | `curve_path` | string (path) | - | CSV target file path (used when `shape == "file"`) |
-| `preference.bass_shelf_db` | number | 0 | Bass shelf preference layered on top of the target shape (dB) |
+| `preference.bass_shelf_db` | number | 0 | Bass shelf in the separately bypassable post-correction preference layer (dB) |
 | `preference.bass_shelf_freq` | number | 200 | Bass shelf transition frequency (Hz) |
-| `preference.treble_shelf_db` | number | 0 | Treble shelf preference layered on top of the target shape (dB) |
+| `preference.treble_shelf_db` | number | 0 | Treble shelf in the separately bypassable post-correction preference layer (dB) |
 | `preference.treble_shelf_freq` | number | 8000 | Treble shelf transition frequency (Hz) |
 | `broadband_precorrection` | boolean | false | Run a preliminary broadband shelf + gain fit before the fine-grained PEQ pass |
 
-The target curve is computed as:
+The neutral optimizer target is computed without preference shelves:
 ```
 target_db(f) = slope * log2(f / reference_freq)
-             + preference_bass_shelf(f)
-             + preference_treble_shelf(f)
 ```
 
-Where the preference shelf terms apply smooth 2nd-order shelf transitions around `bass_shelf_freq` and `treble_shelf_freq`.
+Preference shelves are realized afterward as a separate output IIR layer. They
+remain visible in the final DSP/plugin chain, but are excluded from neutral
+post-EQ scores and `raw_post_eq_curve`. Output metadata records both
+`neutral_target_response` and `preference_layer`, including
+`excluded_from_neutral_quality_score: true`.
 
 **Example: Harman with Bass Boost**
 
@@ -615,13 +640,13 @@ When multiple features are enabled, the optimization follows this order:
 
 ```
 1. Load measurement(s)
-2. Build target curve from `target_response` (shape + preference shelves)
+2. Build the neutral target curve from `target_response.shape` (Harman house curve and other preferences stripped)
 3. [IF excursion_protection] Detect F3, generate protection HPF
 4. [IF has_subwoofer && phase_alignment] Optimize delay/polarity for energy max
 5. [IF multi_seat] Optimize sub gains/delays for variance minimization
 6. [IF schroeder_split] Two-pass EQ (low-Q high freq, high-Q low freq)
    [ELSE] Standard EQ optimization
-7. Combine all filters into DSP chain
+7. Append the separately bypassable preference/content layer and combine the DSP chain
 ```
 
 ### API Reference

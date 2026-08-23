@@ -11,6 +11,7 @@ use crate::{channel_target, output};
 struct DspAssembly {
     plugins: Vec<PluginConfigWrapper>,
     filters: Vec<Biquad>,
+    neutral_filters: Vec<Biquad>,
 }
 
 pub(super) fn assemble_iir_result(
@@ -23,7 +24,7 @@ pub(super) fn assemble_iir_result(
     let mut score_input = raw_curve.clone();
     score_input.spl += request.preprocessed.broadband_mean_shift;
     let response = response::compute_peq_complex_response(
-        &dsp.filters,
+        &dsp.neutral_filters,
         &score_input.freq,
         request.sample_rate,
     );
@@ -163,6 +164,7 @@ fn assemble_dsp_chain(
     filters.extend(request.preprocessed.cea2034_filters.iter().cloned());
     filters.extend(request.preprocessed.broadband_biquads.iter().cloned());
     filters.extend(optimizer_output.eq_filters().iter().cloned());
+    let neutral_filters = filters.clone();
     match optimizer_output {
         IirOptimizerOutput::LowLatency {
             preference_filters, ..
@@ -175,7 +177,11 @@ fn assemble_dsp_chain(
         } => filters.extend(preference_filters.iter().cloned()),
     }
 
-    DspAssembly { plugins, filters }
+    DspAssembly {
+        plugins,
+        filters,
+        neutral_filters,
+    }
 }
 
 fn append_preference_plugin(plugins: &mut Vec<PluginConfigWrapper>, preference_filters: &[Biquad]) {

@@ -67,15 +67,17 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
     }
 
     // Normalize the input curve by subtracting the mean SPL in the optimization range
-    let mut sum = 0.0;
-    let mut count = 0;
-    for i in 0..curve.freq.len() {
-        if curve.freq[i] >= effective_min_freq && curve.freq[i] <= effective_max_freq {
-            sum += curve.spl[i];
-            count += 1;
-        }
-    }
-    let mean_spl = if count > 0 { sum / count as f64 } else { 0.0 };
+    let (sum, count) = curve
+        .freq
+        .iter()
+        .zip(curve.spl.iter())
+        .filter(|(frequency, _)| {
+            **frequency >= effective_min_freq && **frequency <= effective_max_freq
+        })
+        .fold((0.0, 0usize), |(sum, count), (_, level)| {
+            (sum + *level, count + 1)
+        });
+    let mean_spl = (count > 0).then_some(sum / count as f64).unwrap_or(0.0);
     let normalized_curve_unsmoothed = Curve {
         freq: curve.freq.clone(),
         spl: &curve.spl - mean_spl,
@@ -143,14 +145,42 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
                         dc_analysis_config.schroeder_freq = measured;
                     }
 
-                    impulse_analysis::build_ssir_correction_weights(
-                        &normalized_curve_unsmoothed.freq,
-                        &normalized_curve_unsmoothed.spl,
-                        &ssir_result,
+            let mut result = impulse_analysis::build_ssir_correction_weights(
+                &normalized_curve_unsmoothed.freq,
+                &normalized_curve_unsmoothed.spl,
+                &ssir_result,
                         Some(mono_ir),
-                        ir_sr,
-                        &dc_analysis_config,
-                    )
+                ir_sr,
+                &dc_analysis_config,
+            );
+            let decay_estimates = impulse_analysis::estimate_mode_decays(
+                &result.room_modes,
+                mono_ir,
+                ir_sr,
+            );
+            for (mode, estimate) in result.room_modes.iter_mut().zip(decay_estimates) {
+        let Some(estimate) = estimate else {
+            continue;
+        };
+        let Some(severity_db) = impulse_analysis::measured_temporal_severity_db(
+            mode.frequency,
+            &estimate,
+            false,
+        ) else {
+            continue;
+        };
+        mode.temporal_severity_db = severity_db;
+                log::info!(
+                    "  Mode {:.1} Hz: measured RT60 {:.3} s ({:.3}..{:.3} s, confidence {:.2}), severity {:.2} dB",
+                    mode.frequency,
+                    estimate.rt60_seconds,
+                    estimate.rt60_lower_seconds,
+                    estimate.rt60_upper_seconds,
+                    estimate.confidence,
+                    mode.temporal_severity_db,
+                );
+            }
+            result
                 }
                 None => {
                     if resources
@@ -420,7 +450,6 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
         args_template,
         peq_model,
         sample_rate,
-        schroeder_hz,
     })
 }
 
@@ -456,7 +485,7 @@ pub(in super::super) fn run_optimization_pass(
         return Ok((Vec::new(), loss, Vec::new(), Vec::new()));
     }
 
-    let (lower_bounds, mut upper_bounds) = autoeq_optim::optim::setup::setup_bounds(&optim_params);
+    let (lower_bounds, upper_bounds) = autoeq_optim::optim::setup::setup_bounds(&optim_params);
 
     // Log per-filter frequency bounds for diagnostics
     {
@@ -484,14 +513,6 @@ pub(in super::super) fn run_optimization_pass(
     // any filter whose frequency range sits entirely below Schroeder
     // to 0 dB (cuts only). Skipped when decomposed-correction is
     // disabled (no trustworthy Schroeder value available).
-    if let Some(sf) = prep.schroeder_hz {
-        autoeq_optim::optim::setup::restrict_boost_above_schroeder(
-            &mut upper_bounds,
-            &optim_params,
-            sf,
-        );
-    }
-
     let mut x =
         autoeq_optim::optim::setup::initial_guess(&optim_params, &lower_bounds, &upper_bounds);
 

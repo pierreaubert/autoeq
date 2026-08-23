@@ -1,14 +1,16 @@
-//! Psychoacoustic roughness estimation for room frequency responses.
+//! Experimental spectral-peak-interaction diagnostics for room responses.
 //!
-//! The runtime EPA path delegates to `math-dsp`'s pairwise sensory roughness
-//! model so AutoEQ and reusable DSP helpers stay mathematically aligned.
+//! The runtime EPA report delegates to `math-dsp`'s pairwise sensory-roughness
+//! formula for numerical compatibility. Peaks in a transfer magnitude are not
+//! simultaneous programme partials, so this is not validated sensory roughness
+//! and it does not steer optimization.
 
-/// Pairwise sensory roughness from prominent spectrum components.
+/// Pairwise spectral-peak-interaction diagnostic.
 pub fn spectral_roughness(freqs: &[f64], spl_db: &[f64]) -> f64 {
     math_audio_dsp::psychoacoustics::spectral_roughness(freqs, spl_db)
 }
 
-/// Estimate roughness from a frequency response.
+/// Estimate the legacy roughness-labelled diagnostic from a transfer response.
 pub fn roughness_from_spectrum(freqs: &[f64], spl_db: &[f64]) -> f64 {
     math_audio_dsp::psychoacoustics::roughness_from_spectrum(freqs, spl_db)
 }

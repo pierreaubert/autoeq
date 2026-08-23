@@ -381,6 +381,11 @@ pub fn rule_loss_type(ctx: &mut ValidationContext<'_>) {
             "Unknown loss_type '{}', must be one of {:?}",
             ctx.opt.loss_type, valid_loss_types
         ));
+    } else if ctx.opt.loss_type == "epa" {
+        ctx.add_warning(
+            "loss_type 'epa' is experimental: transfer-response EPA descriptors are diagnostic heuristics, not validated programme loudness, roughness, or measured decay"
+                .to_string(),
+        );
     }
 }
 

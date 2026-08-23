@@ -29,12 +29,10 @@ pub fn clamp_gains_to_envelope(
     clamped
 }
 
-/// Clamp negative filter gains (cuts) to a frequency-dependent minimum.
+/// Clamp negative filter gains to a frequency-dependent minimum.
 ///
-/// Mirrors `clamp_gains_to_envelope` but for cuts: if a filter's gain is negative
-/// and exceeds the envelope's limit (more negative), it is clamped.
-/// Used for CDT protection — prevents over-cutting at frequencies where
-/// the ear generates distortion tones.
+/// Mirrors `clamp_gains_to_envelope` for cuts. This is a generic
+/// realization/safety constraint and carries no CDT causal interpretation.
 pub fn clamp_cuts_to_envelope(x: &[f64], envelope: &[(f64, f64)], peq_model: PeqModel) -> Vec<f64> {
     use crate::param_utils;
     let mut clamped = x.to_vec();

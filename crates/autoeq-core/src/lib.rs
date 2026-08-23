@@ -6,6 +6,7 @@
 
 pub use math_audio_iir_fir as iir;
 
+pub mod auditory_frequency;
 pub mod curve;
 pub mod curve_transforms;
 pub mod error;
@@ -26,6 +27,7 @@ mod curve_smoothing_tests;
 #[cfg(test)]
 mod measurement_quality_tests;
 
+pub use auditory_frequency::*;
 pub use curve::Curve;
 pub use curve_transforms::*;
 pub use error::{AutoeqError, Result};

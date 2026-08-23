@@ -7,11 +7,35 @@ use super::misc::surround_or_height_precedence_risk;
 pub(super) fn build_perceptual_policy_report(
     config: &RoomConfig,
 ) -> Option<roomeq_model::PerceptualPolicyReport> {
-    let policy = config.optimizer.perceptual_policy?;
+    let policy = config.optimizer.perceptual_policy;
+    let target_response = config.optimizer.target_response.clone();
+    if policy.is_none() && target_response.is_none() {
+        return None;
+    }
+    let neutral_target_response = target_response.clone().map(|mut target| {
+        target.preference = roomeq_model::UserPreference::default();
+        target.role_targets = None;
+        if target.shape == roomeq_model::TargetShape::Harman {
+            target.shape = roomeq_model::TargetShape::Flat;
+        }
+        target
+    });
+    let preference_layer =
+        target_response
+            .as_ref()
+            .map(|target| roomeq_model::PreferenceLayerReport {
+                house_curve: (target.shape == roomeq_model::TargetShape::Harman)
+                    .then(|| target.shape.clone()),
+                user_preference: target.preference.clone(),
+                role_targets: target.role_targets.clone(),
+                excluded_from_neutral_quality_score: true,
+            });
     Some(roomeq_model::PerceptualPolicyReport {
-        preset: policy.preset,
+        preset: policy.map(|policy| policy.preset),
         loss_type: config.optimizer.loss_type.clone(),
-        target_response: config.optimizer.target_response.clone(),
+        target_response,
+        neutral_target_response,
+        preference_layer,
         audibility_deadband: config.optimizer.audibility_deadband_config(),
         high_frequency_correction: config.optimizer.high_frequency_correction,
     })
@@ -22,7 +46,21 @@ pub(super) fn build_bootstrap_uncertainty_report(
 ) -> Option<roomeq_model::BootstrapUncertaintyReport> {
     let multi = config.optimizer.multi_measurement.as_ref()?;
     let bootstrap = multi.bootstrap_uncertainty.clone()?;
+    let nominal_spatial_sample_size = config
+        .speakers
+        .values()
+        .filter_map(roomeq_engine::home_cinema::speaker_measurement_count)
+        .max()
+        .map(|count| count as f64);
+    let effective_spatial_sample_size = bootstrap
+        .effective_spatial_sample_size
+        .or(nominal_spatial_sample_size);
     Some(roomeq_model::BootstrapUncertaintyReport {
+        source: roomeq_model::BootstrapUncertaintySource::SpatialSeatSampling,
+        assumes_independent_positions: bootstrap.effective_spatial_sample_size.is_none(),
+        effective_spatial_sample_size,
+        repeat_sweep_noise_std_db: bootstrap.repeat_sweep_noise_std_db,
+        calibration_uncertainty_std_db: bootstrap.calibration_uncertainty_std_db,
         num_resamples: bootstrap.num_resamples,
         alpha: bootstrap.alpha,
         scalarisation: bootstrap.scalarisation,
@@ -145,13 +183,39 @@ mod tests {
 
         assert_eq!(
             report.preset,
-            roomeq_model::PerceptualPolicyPreset::Reference
+            Some(roomeq_model::PerceptualPolicyPreset::Reference)
         );
         assert_eq!(report.loss_type, config.optimizer.loss_type);
         assert_eq!(
             report.high_frequency_correction,
             config.optimizer.high_frequency_correction
         );
+    }
+
+    #[test]
+    fn direct_house_curve_is_reported_as_preference_without_a_policy_preset() {
+        let mut config = RoomConfig::default();
+        config.optimizer.target_response = Some(roomeq_model::TargetResponseConfig {
+            shape: roomeq_model::TargetShape::Harman,
+            preference: roomeq_model::UserPreference {
+                bass_shelf_db: 2.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+        let report = build_perceptual_policy_report(&config).expect("preference report");
+        assert_eq!(report.preset, None);
+        assert_eq!(
+            report.neutral_target_response.unwrap().shape,
+            roomeq_model::TargetShape::Flat
+        );
+        let preference = report.preference_layer.unwrap();
+        assert_eq!(
+            preference.house_curve,
+            Some(roomeq_model::TargetShape::Harman)
+        );
+        assert!(preference.excluded_from_neutral_quality_score);
     }
 
     #[test]
@@ -164,13 +228,22 @@ mod tests {
         let mut config = RoomConfig::default();
         config.optimizer.multi_measurement = Some(roomeq_model::MultiMeasurementConfig {
             strategy: roomeq_model::MultiMeasurementStrategy::SpatialRobustness,
-            bootstrap_uncertainty: Some(roomeq_model::BootstrapUncertaintyConfig::default()),
+            bootstrap_uncertainty: Some(roomeq_model::BootstrapUncertaintyConfig {
+                effective_spatial_sample_size: Some(2.5),
+                repeat_sweep_noise_std_db: Some(0.2),
+                calibration_uncertainty_std_db: Some(0.1),
+                ..Default::default()
+            }),
             ..Default::default()
         });
 
         let report = build_bootstrap_uncertainty_report(&config).expect("bootstrap report");
 
         assert!(report.used_for_correction_depth_mask);
+        assert!(!report.assumes_independent_positions);
+        assert_eq!(report.effective_spatial_sample_size, Some(2.5));
+        assert_eq!(report.repeat_sweep_noise_std_db, Some(0.2));
+        assert_eq!(report.calibration_uncertainty_std_db, Some(0.1));
         assert_eq!(
             report.num_resamples,
             roomeq_model::BootstrapUncertaintyConfig::default().num_resamples

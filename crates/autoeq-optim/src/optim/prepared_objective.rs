@@ -7,6 +7,7 @@ pub struct PreparedObjective {
     pub(crate) flat: Option<PreparedFlatLoss>,
     pub(crate) asymmetric: Option<PreparedAsymmetricLoss>,
     pub(crate) deadband_thresholds: Option<Vec<f64>>,
+    #[allow(dead_code)]
     pub(crate) smoothing_rows: Option<Vec<Vec<(usize, f64)>>>,
     pub(crate) smoothness: Option<PreparedSmoothnessPenalty>,
 }
@@ -87,6 +88,7 @@ impl PreparedObjective {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn smooth_into(&self, input: &[f64], output: &mut [f64]) -> bool {
         let Some(rows) = self.smoothing_rows.as_ref() else {
             return false;

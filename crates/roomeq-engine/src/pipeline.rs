@@ -179,7 +179,7 @@ pub struct PipelineEvent {
     pub overall_progress: f64,
     /// Optional display/log message.
     pub message: Option<String>,
-    /// EPA preference score, computed periodically by the optimizer.
+    /// Experimental transfer-response EPA diagnostic, sampled during optimization.
     pub epa_preference: Option<f64>,
 }
 

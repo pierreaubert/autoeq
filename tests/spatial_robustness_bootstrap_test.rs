@@ -34,6 +34,7 @@ fn bootstrap_band_widens_with_more_input_variability() {
     ];
 
     let cfg = BootstrapConfig {
+        effective_sample_size: None,
         num_resamples: 500,
         alpha: 0.10,
         seed: 1,
@@ -64,6 +65,7 @@ fn bootstrap_band_per_bin_std_consistency() {
         make_curve(vec![100.0], vec![80.0]),
     ];
     let cfg = BootstrapConfig {
+        effective_sample_size: None,
         num_resamples: 200,
         alpha: 0.10,
         seed: 42,
@@ -92,6 +94,7 @@ fn bootstrap_band_median_brackets_input_mean_in_db_power() {
         make_curve(vec![100.0], vec![90.0]),
     ];
     let cfg = BootstrapConfig {
+        effective_sample_size: None,
         num_resamples: 500,
         alpha: 0.10,
         seed: 7,

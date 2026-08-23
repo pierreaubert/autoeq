@@ -40,8 +40,10 @@ pub fn evaluate_correction_acceptance(
         return Err("correction acceptance received non-finite curve data".to_string());
     }
 
-    let pre_rms = rms(&pre_residual);
-    let post_rms = rms(&post_residual);
+    let pre_rms = autoeq_core::erb_rate_weighted_rms(&pre.freq, &pre_residual)
+        .ok_or_else(|| "could not compute ERB-rate-weighted pre-correction RMS".to_string())?;
+    let post_rms = autoeq_core::erb_rate_weighted_rms(&post.freq, &post_residual)
+        .ok_or_else(|| "could not compute ERB-rate-weighted post-correction RMS".to_string())?;
     let improvement = pre_rms - post_rms;
     let improvement_ratio = if pre_rms > 1e-9 {
         improvement / pre_rms
@@ -52,6 +54,7 @@ pub fn evaluate_correction_acceptance(
     absolute_residual.sort_by(f64::total_cmp);
     let p95_index = ((absolute_residual.len() - 1) as f64 * 0.95).ceil() as usize;
     let metrics = CorrectionMetricSummary {
+        auditory_frequency_measure: autoeq_core::AUDITORY_FREQUENCY_MEASURE_VERSION.to_string(),
         pre_target_weighted_rms_db: pre_rms,
         post_target_weighted_rms_db: post_rms,
         improvement_db: improvement,
@@ -380,8 +383,10 @@ mod tests {
         )
         .expect("acceptance report");
 
-        let expected_pre_rms = 7.5_f64.sqrt();
-        let expected_post_rms = 1.25;
+        let expected_pre_rms =
+            autoeq_core::erb_rate_weighted_rms(&pre.freq, &[1.0, -2.0, 3.0, -4.0]).unwrap();
+        let expected_post_rms =
+            autoeq_core::erb_rate_weighted_rms(&post.freq, &[0.5, -1.0, 1.0, -2.0]).unwrap();
         assert!((report.metrics.pre_target_weighted_rms_db - expected_pre_rms).abs() < 1e-12);
         assert!((report.metrics.post_target_weighted_rms_db - expected_post_rms).abs() < 1e-12);
         assert!(

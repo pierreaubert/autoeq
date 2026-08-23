@@ -7,7 +7,10 @@ use super::types::TemporalIrMaskingMetrics;
 use super::types::TemporalMaskingMode;
 use super::types::TemporalMaskingProfile;
 
-/// Compute an optimizer-cheap temporal masking penalty from detected room modes.
+/// Compute a legacy experimental temporal diagnostic from detected room modes.
+///
+/// This helper remains available for offline/report analysis but is excluded
+/// from the active spectral-flatness-only EPA optimizer.
 ///
 /// The penalty estimates how much audible modal ringing remains after the
 /// candidate EQ correction. Cuts at severe, prominent modal peaks reduce the

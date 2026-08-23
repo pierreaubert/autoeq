@@ -8,6 +8,8 @@ use ndarray::Array1;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub use autoeq_core::{erb_rate, erb_rate_cell_widths};
+
 /// Frequency band configuration for weighted loss
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct FrequencyBandWeights {
@@ -120,6 +122,7 @@ impl PreparedWeightedLoss {
             .collect();
         let active_freqs = Array1::from_iter(indices.iter().map(|&index| freqs[index]));
         let quadrature = log_frequency_quadrature_weights(&active_freqs);
+        let erb_quadrature = erb_rate_cell_widths(&active_freqs);
         let mut erb_weights = Vec::with_capacity(indices.len());
         let mut quadrature_weights = Vec::with_capacity(indices.len());
         let mut band = Vec::with_capacity(indices.len());
@@ -129,7 +132,7 @@ impl PreparedWeightedLoss {
         for (active_index, &source_index) in indices.iter().enumerate() {
             let freq = freqs[source_index];
             let quadrature_weight = quadrature[active_index];
-            let erb_weight = quadrature_weight / erb(freq);
+            let erb_weight = erb_quadrature[active_index];
             let band_index = if freq >= bands.bass_min && freq <= bands.bass_max {
                 0
             } else if freq >= bands.mid_min && freq <= bands.mid_max {
@@ -222,6 +225,7 @@ impl PreparedWeightedLoss {
             0.0
         };
         let mut band_loss = 0.0;
+        let mut active_band_weight = 0.0;
         let output_weights = [
             self.bands.bass_weight,
             self.bands.mid_weight,
@@ -231,7 +235,11 @@ impl PreparedWeightedLoss {
             if self.band_totals[band_index] > 0.0 {
                 band_loss += output_weights[band_index]
                     * (band_sums[band_index] / self.band_totals[band_index]).sqrt();
+                active_band_weight += output_weights[band_index];
             }
+        }
+        if active_band_weight > 0.0 {
+            band_loss /= active_band_weight;
         }
         erb_mix * erb_loss + band_mix * band_loss
     }
@@ -245,16 +253,7 @@ impl PreparedWeightedLoss {
 pub fn erb_weighted_loss(freqs: &Array1<f64>, error: &Array1<f64>) -> f64 {
     assert_eq!(freqs.len(), error.len());
 
-    let erbs: Array1<f64> = freqs.mapv(erb);
-    let quadrature_weights = log_frequency_quadrature_weights(freqs);
-
-    // Weight inversely proportional to ERB (more weight at low frequencies)
-    // while integrating over log frequency rather than over point count.
-    let weights: Array1<f64> = erbs
-        .iter()
-        .zip(quadrature_weights.iter())
-        .map(|(erb, quadrature)| quadrature / erb)
-        .collect();
+    let weights = erb_rate_cell_widths(freqs);
 
     // Normalize weights
     let total_weight: f64 = weights.iter().sum();
@@ -321,7 +320,23 @@ pub fn band_weighted_loss(
         0.0
     };
 
-    bands.bass_weight * bass_rms + bands.mid_weight * mid_rms + bands.treble_weight * treble_rms
+    let mut weighted_sum = 0.0;
+    let mut active_weight = 0.0;
+    for (rms, sample_weight, output_weight) in [
+        (bass_rms, bass_weight, bands.bass_weight),
+        (mid_rms, mid_weight, bands.mid_weight),
+        (treble_rms, treble_weight, bands.treble_weight),
+    ] {
+        if sample_weight > 0.0 {
+            weighted_sum += output_weight * rms;
+            active_weight += output_weight;
+        }
+    }
+    if active_weight > 0.0 {
+        weighted_sum / active_weight
+    } else {
+        0.0
+    }
 }
 
 /// Combine ERB-weighted and band-weighted approaches
@@ -355,5 +370,35 @@ mod tests {
     fn erb_at_zero() {
         let expected = 24.7;
         assert!((erb(0.0) - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn constant_error_and_band_blend_are_grid_invariant() {
+        let bands = FrequencyBandWeights::default();
+        for frequencies in [
+            Array1::linspace(20.0, 20_000.0, 100),
+            Array1::from_iter((0..100).map(|i| 20.0 * 1000.0_f64.powf(i as f64 / 99.0))),
+            Array1::from(vec![20.0, 47.0, 130.0, 730.0, 5_200.0, 20_000.0]),
+            Array1::linspace(20.0, 20_000.0, 10_000),
+        ] {
+            let error = Array1::from_elem(frequencies.len(), 3.5);
+            let erb_loss = erb_weighted_loss(&frequencies, &error);
+            let band_loss = band_weighted_loss(&frequencies, &error, &bands);
+            let combined = combined_weighted_loss(&frequencies, &error, &bands, 0.7, 0.3);
+            assert!((erb_loss - 3.5).abs() < 1e-12);
+            assert!((band_loss - 3.5).abs() < 1e-12);
+            assert!((combined - 3.5).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn erb_rate_measure_does_not_have_inverted_bass_bias() {
+        let frequencies = Array1::from(vec![100.0, 10_000.0]);
+        let weights = erb_rate_cell_widths(&frequencies);
+        assert!((weights[0] - weights[1]).abs() < 1e-12);
+
+        let low_density = erb_rate(200.0) - erb_rate(100.0);
+        let high_density = erb_rate(20_000.0) - erb_rate(10_000.0);
+        assert!(low_density < high_density);
     }
 }

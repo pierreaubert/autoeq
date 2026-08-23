@@ -24,7 +24,7 @@
     "num_filters": 14,
     "fir": {
       "taps": 1248,
-      "phase": "kirkeby",
+      "phase": "linear",
       "correct_excess_phase": true,
       "phase_smoothing": 0.167
     },

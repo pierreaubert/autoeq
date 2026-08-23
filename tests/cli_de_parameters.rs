@@ -45,7 +45,9 @@ fn run_seeded_de(mut args: Args) -> DeRun {
     args.seed = Some(0x5eed);
     args.no_parallel = true;
     args.population = 12;
-    args.maxeval = 24;
+    // A population of 12 needs more than two generations for this seeded
+    // regression to exercise mutation/crossover reliably.
+    args.maxeval = 240;
     args.num_filters = 2;
 
     let params = OptimParams::from(&args);

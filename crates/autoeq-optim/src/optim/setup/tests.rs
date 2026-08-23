@@ -63,6 +63,29 @@ use crate::loss::CrossoverType;
 use crate::loss::DriverMeasurement;
 use crate::loss::DriversLossData;
 
+#[test]
+fn setup_bounds_pins_standard_shelf_q_dimensions() {
+    for peq_model in ["ls-pk", "ls-pk-hs"] {
+        let config = OptimizerConfig {
+            peq_model: peq_model.to_string(),
+            num_filters: 4,
+            min_q: 0.5,
+            max_q: 3.0,
+            ..OptimizerConfig::default()
+        };
+        let params = OptimParams::from(&config);
+        let (lower_bounds, upper_bounds) = setup_bounds(&params);
+
+        assert_eq!(lower_bounds[1], 1.0);
+        assert_eq!(upper_bounds[1], 1.0);
+        if peq_model == "ls-pk-hs" {
+            let last_q = (params.num_filters - 1) * 3 + 1;
+            assert_eq!(lower_bounds[last_q], 1.0);
+            assert_eq!(upper_bounds[last_q], 1.0);
+        }
+    }
+}
+
 fn make_test_driver(freqs: Vec<f64>, spls: Vec<f64>) -> DriverMeasurement {
     DriverMeasurement::new(
         ndarray::Array1::from_vec(freqs),

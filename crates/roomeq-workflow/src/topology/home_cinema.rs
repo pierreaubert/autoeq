@@ -2245,7 +2245,9 @@ mod tests {
         let mut speakers = HashMap::new();
         let seat0 = flat_curve();
         let mut seat1 = flat_curve();
-        seat1.spl += 5.0;
+        for (index, spl) in seat1.spl.iter_mut().enumerate() {
+            *spl += if index % 2 == 0 { 5.0 } else { -5.0 };
+        }
         speakers.insert(
             "left".to_string(),
             SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(vec![seat0, seat1])),
@@ -2760,7 +2762,9 @@ mod tests {
         let mut speakers = HashMap::new();
         let seat0 = flat_curve();
         let mut seat1 = flat_curve();
-        seat1.spl += 5.0;
+        for (index, spl) in seat1.spl.iter_mut().enumerate() {
+            *spl += if index % 2 == 0 { 5.0 } else { -5.0 };
+        }
         speakers.insert(
             "left".to_string(),
             SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(vec![seat0, seat1])),

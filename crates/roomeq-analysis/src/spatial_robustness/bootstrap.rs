@@ -9,6 +9,13 @@ use ndarray::Array1;
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
+fn resample_case_count(nominal_count: usize, effective_sample_size: Option<f64>) -> usize {
+    effective_sample_size
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .map(|value| value.round().clamp(1.0, nominal_count as f64) as usize)
+        .unwrap_or(nominal_count)
+}
+
 /// Generate B bootstrap-resampled RMS-averaged curves and return per-frequency
 /// confidence band statistics.
 ///
@@ -41,6 +48,7 @@ pub fn bootstrap_band(
     }
 
     let n = curves.len();
+    let resample_count = resample_case_count(n, config.effective_sample_size);
     let num_bins = curves[0].freq.len();
     let b = config.num_resamples;
 
@@ -48,7 +56,7 @@ pub fn bootstrap_band(
     let mut resampled_means: Vec<Vec<f64>> = vec![Vec::with_capacity(b); num_bins];
 
     let mut rng = ChaCha8Rng::seed_from_u64(config.seed);
-    let mut indices: Vec<usize> = vec![0; n];
+    let mut indices: Vec<usize> = vec![0; resample_count];
     let mut resampled: Vec<Curve> = Vec::with_capacity(n);
     let mut resampled_weights: Option<Vec<f64>> = weights.map(|_| Vec::with_capacity(n));
 
@@ -134,9 +142,10 @@ pub fn bootstrap_resampled_curves(
     }
 
     let n = curves.len();
+    let resample_count = resample_case_count(n, config.effective_sample_size);
     let b = config.num_resamples;
     let mut rng = ChaCha8Rng::seed_from_u64(config.seed);
-    let mut indices: Vec<usize> = vec![0; n];
+    let mut indices: Vec<usize> = vec![0; resample_count];
     let mut resampled: Vec<Curve> = Vec::with_capacity(n);
     let mut resampled_weights: Option<Vec<f64>> = weights.map(|_| Vec::with_capacity(n));
     let mut output: Vec<Curve> = Vec::with_capacity(b);

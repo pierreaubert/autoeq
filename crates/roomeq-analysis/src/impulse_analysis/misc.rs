@@ -1,16 +1,36 @@
 use ndarray::Array1;
 
 pub(super) fn is_local_extremum(
+    freq: &Array1<f64>,
     spl: &Array1<f64>,
     idx: usize,
-    radius: usize,
+    half_width_octaves: f64,
     maximum: bool,
 ) -> bool {
-    let lo = idx.saturating_sub(radius);
-    let hi = (idx + radius).min(spl.len().saturating_sub(1));
+    if freq.len() != spl.len() || idx >= spl.len() || freq[idx] <= 0.0 {
+        return false;
+    }
+    let ratio = 2.0_f64.powf(half_width_octaves.max(0.0));
+    let lower = freq[idx] / ratio;
+    let upper = freq[idx] * ratio;
     let center = spl[idx];
+    let mut neighbours: Vec<usize> = freq
+        .iter()
+        .enumerate()
+        .filter_map(|(index, frequency)| {
+            (index != idx && *frequency >= lower && *frequency <= upper).then_some(index)
+        })
+        .collect();
+    if neighbours.is_empty() {
+        if idx > 0 {
+            neighbours.push(idx - 1);
+        }
+        if idx + 1 < spl.len() {
+            neighbours.push(idx + 1);
+        }
+    }
 
-    (lo..=hi).filter(|&j| j != idx).all(|j| {
+    neighbours.into_iter().all(|j| {
         if maximum {
             center > spl[j]
         } else {

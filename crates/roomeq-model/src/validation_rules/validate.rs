@@ -632,7 +632,10 @@ fn validate_bootstrap_uncertainty(config: &RoomConfig, result: &mut ValidationRe
     let Some(mm) = config.optimizer.multi_measurement.as_ref() else {
         return;
     };
-    if mm.strategy != MultiMeasurementStrategy::MinimaxUncertainty {
+    if !matches!(
+        mm.strategy,
+        MultiMeasurementStrategy::MinimaxUncertainty | MultiMeasurementStrategy::SpatialRobustness
+    ) {
         // The block may still be set; we don't reject that — it just won't be
         // consulted unless the strategy switches. Keep validation focused on
         // the active path.
@@ -640,6 +643,28 @@ fn validate_bootstrap_uncertainty(config: &RoomConfig, result: &mut ValidationRe
     }
     // The block is optional (it has a Default); when absent, we use defaults.
     if let Some(b) = mm.bootstrap_uncertainty.as_ref() {
+        if let Some(value) = b.effective_spatial_sample_size
+            && (!value.is_finite() || value <= 0.0)
+        {
+            result.add_error(format!(
+                "multi_measurement.bootstrap_uncertainty.effective_spatial_sample_size must be finite and positive, got {value}"
+            ));
+        }
+        for (name, value) in [
+            ("repeat_sweep_noise_std_db", b.repeat_sweep_noise_std_db),
+            (
+                "calibration_uncertainty_std_db",
+                b.calibration_uncertainty_std_db,
+            ),
+        ] {
+            if let Some(value) = value
+                && (!value.is_finite() || value < 0.0)
+            {
+                result.add_error(format!(
+                    "multi_measurement.bootstrap_uncertainty.{name} must be finite and nonnegative, got {value}"
+                ));
+            }
+        }
         if b.num_resamples == 0 {
             result.add_error(
                 "multi_measurement.bootstrap_uncertainty.num_resamples must be > 0".to_string(),
@@ -804,9 +829,29 @@ fn validate_multi_measurement_weights(config: &RoomConfig, result: &mut Validati
     let Some(mm) = config.optimizer.multi_measurement.as_ref() else {
         return;
     };
+    if !mm.variance_lambda.is_finite() || mm.variance_lambda < 0.0 {
+        result.add_error(format!(
+            "multi_measurement.variance_lambda must be finite and nonnegative, got {}",
+            mm.variance_lambda
+        ));
+    }
     let Some(weights) = mm.weights.as_ref() else {
         return;
     };
+
+    for (index, weight) in weights.iter().enumerate() {
+        if !weight.is_finite() || *weight < 0.0 {
+            result.add_error(format!(
+                "multi_measurement.weights[{index}] must be finite and nonnegative, got {weight}"
+            ));
+        }
+    }
+    let weight_sum: f64 = weights.iter().sum();
+    if !weight_sum.is_finite() || weight_sum <= 0.0 {
+        result.add_error(format!(
+            "multi_measurement.weights must have a finite, strictly positive total, got {weight_sum}"
+        ));
+    }
 
     for (channel, speaker) in &config.speakers {
         for source in collect_sources(speaker) {
@@ -1838,6 +1883,47 @@ mod room_config_validation_tests {
     }
 
     #[test]
+    fn multi_measurement_numeric_contracts_are_rejected() {
+        for weights in [
+            vec![-1.0, 2.0],
+            vec![f64::NAN, 1.0],
+            vec![f64::INFINITY, 1.0],
+            vec![0.0, 0.0],
+            vec![f64::MAX, f64::MAX],
+        ] {
+            let mut config = default_room();
+            config.optimizer.multi_measurement =
+                Some(crate::roomeq::types::MultiMeasurementConfig {
+                    weights: Some(weights),
+                    ..Default::default()
+                });
+            let result = validate_room_config(&config);
+            assert!(
+                result
+                    .errors
+                    .iter()
+                    .any(|error| error.contains("multi_measurement.weights"))
+            );
+        }
+
+        for variance_lambda in [-1.0, f64::NAN, f64::INFINITY] {
+            let mut config = default_room();
+            config.optimizer.multi_measurement =
+                Some(crate::roomeq::types::MultiMeasurementConfig {
+                    variance_lambda,
+                    ..Default::default()
+                });
+            let result = validate_room_config(&config);
+            assert!(
+                result
+                    .errors
+                    .iter()
+                    .any(|error| { error.contains("multi_measurement.variance_lambda") })
+            );
+        }
+    }
+
+    #[test]
     fn bootstrap_uncertainty_validation_errors() {
         let mut config = default_room();
         config.speakers.insert(
@@ -1847,6 +1933,9 @@ mod room_config_validation_tests {
         config.optimizer.multi_measurement = Some(crate::roomeq::types::MultiMeasurementConfig {
             strategy: crate::roomeq::types::MultiMeasurementStrategy::MinimaxUncertainty,
             bootstrap_uncertainty: Some(BootstrapUncertaintyConfig {
+                effective_spatial_sample_size: Some(0.0),
+                repeat_sweep_noise_std_db: Some(f64::NAN),
+                calibration_uncertainty_std_db: Some(-0.1),
                 num_resamples: 0,
                 alpha: 0.0,
                 scalarisation: BootstrapScalarisation::Cvar,
@@ -1873,6 +1962,24 @@ mod room_config_validation_tests {
                 .errors
                 .iter()
                 .any(|e| e.contains("cvar_alpha must be in (0, 1]") && e.contains("got 0"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("effective_spatial_sample_size"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("repeat_sweep_noise_std_db"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("calibration_uncertainty_std_db"))
         );
     }
 

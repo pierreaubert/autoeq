@@ -415,6 +415,8 @@ pub struct RealizationQualityEvidence {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CorrectionMetricSummary {
+    /// Versioned frequency measure used by target-weighted RMS fields.
+    pub auditory_frequency_measure: String,
     pub pre_target_weighted_rms_db: f64,
     pub post_target_weighted_rms_db: f64,
     pub improvement_db: f64,

@@ -16,7 +16,7 @@ pub const HIGHSHELF_FREQ: f64 = 4000.0;
 pub(super) const MAX_SHELF_GAIN_DB: f64 = 6.0;
 
 /// Maximum allowed flat gain magnitude (dB) — prevents solver divergence on narrow-band data
-pub(super) const MAX_FLAT_GAIN_DB: f64 = 12.0;
+pub(crate) const MAX_FLAT_GAIN_DB: f64 = 12.0;
 
 /// Minimum correction magnitude to bother applying (dB)
 pub const MIN_CORRECTION_DB: f64 = 0.3;

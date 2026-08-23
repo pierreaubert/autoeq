@@ -11,16 +11,19 @@ use super::types::TemporalMaskingProfile;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Temporal masking penalty configuration for EPA optimization.
+/// Experimental EPA temporal-diagnostic configuration.
+///
+/// These controls are retained for report compatibility and offline analysis;
+/// they do not steer the active spectral-flatness-only EPA optimizer.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TemporalMaskingConfig {
-    /// Enable the temporal masking penalty when modal data is available.
+    /// Enable the legacy modal temporal diagnostic when modal data is available.
     #[serde(default = "default_temporal_masking_enabled")]
     pub enabled: bool,
-    /// Weight applied to the normalized temporal masking penalty.
+    /// Legacy diagnostic weight; it does not steer EPA optimizer fitness.
     #[serde(default = "default_temporal_masking_weight")]
     pub weight: f64,
-    /// Material profile used to scale modal-ringing audibility.
+    /// Diagnostic programme-profile label for modal-ringing reporting.
     #[serde(default)]
     pub profile: TemporalMaskingProfile,
     /// Enable true FIR impulse-response pre/post masking analysis when FIR

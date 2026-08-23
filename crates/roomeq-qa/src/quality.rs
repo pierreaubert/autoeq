@@ -64,6 +64,12 @@ fn enforce_registry_expectations(
 ) {
     for result in results {
         let original_outcome = result.outcome();
+        let allowed_safe_revert =
+            matches!(original_outcome, QaOutcome::Reverted) && expect.allow_safe_revert;
+        // `WiderDb` deliberately relaxes the configured gain bound to test
+        // optimizer monotonicity. Baselines and every other mutation still
+        // enforce the registry's deployment boost ceiling.
+        let deliberately_relaxed_max_db = result.label.ends_with(" +50% max_db");
         let mut failures = Vec::new();
         let flat_loss = result.scorecard.flat_loss;
         if !result.pre_score.is_finite()
@@ -71,20 +77,24 @@ fn enforce_registry_expectations(
             || !result.scorecard.max_boost_db.is_finite()
         {
             failures.push("non-finite registry metric".to_string());
-        } else {
+        } else if !allowed_safe_revert {
             if result.pre_score > 0.0 && flat_loss > expect.max_post_score {
                 failures.push(format!(
                     "post score {flat_loss:.4} exceeds registry limit {:.4}",
                     expect.max_post_score
                 ));
             }
-            if result.pre_score > 0.0 && result.scorecard.max_boost_db > expect.max_boost_db {
+            if result.pre_score > 0.0
+                && !deliberately_relaxed_max_db
+                && result.scorecard.max_boost_db > expect.max_boost_db
+            {
                 failures.push(format!(
                     "max boost {:.2} dB exceeds registry limit {:.2} dB",
                     result.scorecard.max_boost_db, expect.max_boost_db
                 ));
             }
-            if expect.improvement_min_pct > 0.0 {
+            let requires_flat_improvement = !claims.iter().any(|claim| claim == "option_effect");
+            if requires_flat_improvement && expect.improvement_min_pct > 0.0 {
                 // Relationship-only rows (for example the cross-mode ratio)
                 // deliberately use pre_score=0 and have no raw-response
                 // improvement claim of their own.

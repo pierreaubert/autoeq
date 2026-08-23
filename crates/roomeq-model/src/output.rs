@@ -184,16 +184,38 @@ pub struct DirectEarlyLateCorrectionMetrics {
     pub advisory: String,
 }
 
-/// Resolved perceptual policy metadata.
+/// Resolved preference-layer metadata.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PreferenceLayerReport {
+    /// Optional house curve extracted from the neutral optimizer target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub house_curve: Option<crate::TargetShape>,
+    /// User bass/treble voicing realized after neutral correction.
+    pub user_preference: crate::UserPreference,
+    /// Optional role/content voicing realized after neutral correction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_targets: Option<crate::RoleTargetConfig>,
+    /// Preference filters are excluded from correction quality scores.
+    pub excluded_from_neutral_quality_score: bool,
+}
+
+/// Resolved correction/preference policy metadata.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct PerceptualPolicyReport {
     /// Policy preset requested by the user or UI.
-    pub preset: crate::PerceptualPolicyPreset,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<crate::PerceptualPolicyPreset>,
     /// Effective loss type after policy resolution.
     pub loss_type: String,
     /// Effective target response after policy resolution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_response: Option<crate::TargetResponseConfig>,
+    /// Target used by the physical correction optimizer, with voicing stripped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub neutral_target_response: Option<crate::TargetResponseConfig>,
+    /// Separately bypassable post-correction listener/content voicing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preference_layer: Option<PreferenceLayerReport>,
     /// Effective audibility deadband.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audibility_deadband: Option<crate::AudibilityDeadbandConfig>,
@@ -202,9 +224,33 @@ pub struct PerceptualPolicyReport {
     pub high_frequency_correction: Option<crate::HighFrequencyCorrectionConfig>,
 }
 
+/// Bootstrap uncertainty population.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BootstrapUncertaintySource {
+    /// Case-bootstrap over listening positions, not measurement noise.
+    SpatialSeatSampling,
+}
+
 /// Bootstrap uncertainty reporting summary.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct BootstrapUncertaintyReport {
+    /// Population whose variability is estimated.
+    pub source: BootstrapUncertaintySource,
+    /// Whether the estimator treats listening positions as independent cases.
+    pub assumes_independent_positions: bool,
+    /// Effective spatial sample size under the stated independence model.
+    ///
+    /// This equals the nominal seat count by default. A configured correlation
+    /// adjustment may reduce it; this still is not a covariance/block model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_spatial_sample_size: Option<f64>,
+    /// Repeat-sweep noise, absent unless separately measured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat_sweep_noise_std_db: Option<f64>,
+    /// Calibration uncertainty, absent unless separately supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calibration_uncertainty_std_db: Option<f64>,
     /// Number of case-bootstrap resamples.
     pub num_resamples: usize,
     /// Two-sided alpha used for confidence bands.

@@ -7,12 +7,4 @@ pub(super) struct PreparedSingleChannelEq {
     pub(super) args_template: autoeq_optim::OptimParams,
     pub(super) peq_model: PeqModel,
     pub(super) sample_rate: f64,
-    /// Schroeder frequency in Hz above which the room stops being
-    /// modal. Used by `run_optimization_pass` to clamp the gain upper
-    /// bound of any filter whose entire frequency range lives below
-    /// Schroeder — so the DE optimizer can't waste filter slots
-    /// boosting modal nulls it physically cannot fill. `None` means
-    /// decomposed-correction is disabled and no modal-region
-    /// constraint is applied.
-    pub(super) schroeder_hz: Option<f64>,
 }

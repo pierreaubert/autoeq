@@ -12,7 +12,7 @@ pub(super) struct Args {
     #[arg(long, value_enum, default_value = "weekly")]
     pub(super) tier: QaTier,
 
-    /// Run only fast subset (small rooms, FEM only, IIR only)
+    /// Run the bounded FEM/IIR smoke suite with safety-level acceptance
     #[arg(long)]
     pub(super) quick: bool,
 

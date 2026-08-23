@@ -1,5 +1,6 @@
 use super::super::build::build_null_suppression_mask;
-use super::super::detect::detect_narrow_nulls;
+use super::super::decomposed_correction_config::DecomposedCorrectionConfig;
+use super::super::detect::{detect_narrow_nulls, detect_room_modes};
 use super::super::null_detection_config::NullDetectionConfig;
 use super::super::types::NarrowNull;
 use ndarray::Array1;
@@ -8,6 +9,55 @@ fn log_linspace(f_min: f64, f_max: f64, n: usize) -> Array1<f64> {
     let lo = f_min.ln();
     let hi = f_max.ln();
     Array1::from_iter((0..n).map(|i| (lo + (hi - lo) * i as f64 / (n - 1) as f64).exp()))
+}
+
+#[test]
+fn peak_and_null_extrema_are_stable_across_grid_density() {
+    let mut detected_nulls = Vec::new();
+    let mut detected_peaks = Vec::new();
+    for count in [100, 1_000, 10_000] {
+        let freq = log_linspace(20.0, 400.0, count);
+        let center = 80.0;
+        let bandwidth = center / 10.0;
+        let spl = freq.mapv(|frequency| {
+            let offset = (frequency - center) / (bandwidth / 2.0);
+            80.0 - 15.0 / (1.0 + offset * offset)
+        });
+        let nulls = detect_narrow_nulls(&freq, &spl, &NullDetectionConfig::default());
+        let nearest = nulls
+            .iter()
+            .min_by(|left, right| {
+                (left.frequency - center)
+                    .abs()
+                    .total_cmp(&(right.frequency - center).abs())
+            })
+            .expect("same physical null must be detected on every grid");
+        detected_nulls.push((nearest.frequency, nearest.depth_db, nearest.q));
+
+        let peak_spl = freq.mapv(|frequency| {
+            let offset = (frequency - center) / (bandwidth / 2.0);
+            80.0 + 15.0 / (1.0 + offset * offset)
+        });
+        let modes = detect_room_modes(&freq, &peak_spl, &DecomposedCorrectionConfig::default());
+        let nearest = modes
+            .iter()
+            .min_by(|left, right| {
+                (left.frequency - center)
+                    .abs()
+                    .total_cmp(&(right.frequency - center).abs())
+            })
+            .expect("same physical peak must be detected on every grid");
+        detected_peaks.push((nearest.frequency, nearest.prominence_db, nearest.q));
+    }
+
+    for detected in [detected_nulls, detected_peaks] {
+        let reference = detected[2];
+        for (frequency, prominence, q) in detected {
+            assert!((frequency - reference.0).abs() / reference.0 < 0.02);
+            assert!((prominence - reference.1).abs() < 0.5);
+            assert!((q - reference.2).abs() / reference.2 < 0.25);
+        }
+    }
 }
 
 #[test]

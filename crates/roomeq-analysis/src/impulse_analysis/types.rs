@@ -8,7 +8,10 @@ pub struct RoomMode {
     /// Estimated Q factor (narrowness)
     pub q: f64,
     /// Amount by which this mode exceeds the perceptual temporal-decay threshold.
-    /// `0.0` means the estimated Q is below the threshold from `temporal_targets`.
+    ///
+    /// SSIR analysis derives this from the measured band-limited decay when the
+    /// fit is confident; magnitude-derived Q is the explicitly labelled fallback.
+    /// `0.0` means the selected decay estimate is below its threshold.
     pub temporal_severity_db: f64,
     /// Prominence in dB (how much it stands above the surrounding response)
     pub prominence_db: f64,

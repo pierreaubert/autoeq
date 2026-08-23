@@ -180,11 +180,14 @@ qa-roomeq-coverage-gate:
 	cargo llvm-cov --no-clean --package autoeq --features cli --test roomeq_integration_test --summary-only --release
 	cargo llvm-cov --no-clean --package autoeq --features cli --test roomeq_pipeline_test --summary-only --release
 	cargo llvm-cov --no-clean --package autoeq --features cli --test system_config_test --summary-only --release
-	cargo llvm-cov --no-clean --package autoeq --features cli --test roomeq_generated_data_test --summary-only --release
+	# Enable `qa` so generated-data expectations come from the canonical
+	# registry instead of the non-QA fallback used by ordinary crate builds.
+	cargo llvm-cov --no-clean --package autoeq --features cli,qa --test roomeq_generated_data_test --summary-only --release
 	cargo llvm-cov report --package roomeq-model --package roomeq-analysis --package roomeq-quality --package roomeq-engine --package roomeq-export --package roomeq-workflow --summary-only --release --fail-under-lines 90
 
 [group('qa-roomeq')]
 qa-roomeq-quick: prod-autoeq
+	# Bounded smoke suite; strict registry quality gates run in qa-roomeq-pr/nightly.
 	cargo run --features qa --bin roomeq-qa-coverage --release -- --quick --maxeval 200
 
 [group('qa-roomeq')]

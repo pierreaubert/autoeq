@@ -197,6 +197,13 @@ fn test_q_bounds_consistency() {
                     upper[q_upper_idx], 1.5,
                     "HP/LP filter Q upper bound should be 1.5"
                 );
+            } else if matches!(model, PeqModel::LsPk | PeqModel::LsPkHs)
+                && (i == 0 || (model == PeqModel::LsPkHs && i == 2))
+            {
+                // Standard RBJ shelves do not expose Q as an independent DSP
+                // parameter, so setup_bounds pins the serialized slot.
+                assert_eq!(lower[q_lower_idx], 1.0);
+                assert_eq!(upper[q_upper_idx], 1.0);
             } else {
                 // Normal peak filters
                 assert!(

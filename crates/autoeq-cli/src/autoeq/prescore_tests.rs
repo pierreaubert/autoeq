@@ -30,8 +30,8 @@ mod tests {
         let objective_data = create_test_objective_data(LossType::HeadphoneFlat);
 
         let deviation = Curve {
-            freq: objective_data.freqs.clone(),
-            spl: objective_data.deviation.clone(),
+            freq: objective_data.freqs.as_ref().clone(),
+            spl: objective_data.deviation.as_ref().clone(),
             phase: None,
             ..Default::default()
         };
@@ -53,8 +53,8 @@ mod tests {
         let objective_data = create_test_objective_data(LossType::SpeakerFlat);
 
         let deviation = Curve {
-            freq: objective_data.freqs.clone(),
-            spl: objective_data.deviation.clone(),
+            freq: objective_data.freqs.as_ref().clone(),
+            spl: objective_data.deviation.as_ref().clone(),
             phase: None,
             ..Default::default()
         };

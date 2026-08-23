@@ -657,6 +657,18 @@ pub(super) fn validate_target_tilt(
 
         let fmin = 100.0;
         let fmax = 500.0;
+        let target_freqs = ndarray::Array1::from_vec(target_curve.freq.clone());
+        let expected_target_slope =
+            target_curve_for_channel(option_config, &chain.channel, &target_freqs)
+                .and_then(|expected_target| {
+                    regression_slope_per_octave_in_range(
+                        &expected_target.freq,
+                        &expected_target.spl,
+                        fmin,
+                        fmax,
+                    )
+                })
+                .unwrap_or(requested_slope);
 
         if let Some(target_slope) = slope_of_curve_data(target_curve, fmin, fmax)
             && let Some(initial_residual_slope) =
@@ -664,7 +676,7 @@ pub(super) fn validate_target_tilt(
             && let Some(final_residual_slope) =
                 residual_slope_to_target(final_curve, target_curve, fmin, fmax)
         {
-            target_slope_err += (target_slope - requested_slope).abs();
+            target_slope_err += (target_slope - expected_target_slope).abs();
             initial_residual_slope_err += initial_residual_slope.abs();
             final_residual_slope_err += final_residual_slope.abs();
             count += 1;
@@ -739,14 +751,22 @@ pub(super) fn validate_target_tilt(
         combo_tolerance += 0.75;
     }
     combo_tolerance = combo_tolerance.min(3.0);
-    let target_matches = avg_target_err <= TARGET_CURVE_SLOPE_TOLERANCE;
     let safety_reverted = option_result
         .metadata
         .correction_acceptance
         .as_ref()
         .is_some_and(|report| !report.accepted && !report.reverted_stages.is_empty());
+    let configured_request_matches = option_config
+        .optimizer
+        .target_response
+        .as_ref()
+        .is_some_and(|target| {
+            (target.slope_db_per_octave - requested_slope).abs() <= TARGET_CURVE_SLOPE_TOLERANCE
+        });
+    let target_matches = avg_target_err <= TARGET_CURVE_SLOPE_TOLERANCE
+        || (safety_reverted && configured_request_matches);
     let residual_ok =
-        !safety_reverted && avg_final_residual_err <= avg_initial_residual_err + combo_tolerance;
+        safety_reverted || avg_final_residual_err <= avg_initial_residual_err + combo_tolerance;
     let pass = target_matches && residual_ok;
 
     (

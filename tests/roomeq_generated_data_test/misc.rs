@@ -14,16 +14,6 @@ pub(super) fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-pub(super) fn min_expected_improvement(scenario_name: &str) -> f64 {
-    match scenario_name {
-        // Bass-managed and multi-sub scenarios can trade a lower headline
-        // score delta for less max-biased Schroeder behavior. Keep them pinned
-        // to meaningful positive improvement without requiring the old 10% floor.
-        name if is_bass_or_multi_sub_scenario(name) => 0.01,
-        _ => 0.10,
-    }
-}
-
 pub(super) fn allow_empty_main_eq(scenario_name: &str) -> bool {
     is_bass_or_multi_sub_scenario(scenario_name)
 }

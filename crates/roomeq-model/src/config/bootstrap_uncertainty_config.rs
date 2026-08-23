@@ -6,7 +6,8 @@ use super::types::BootstrapScalarisation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Serializable bootstrap uncertainty configuration for JSON config files.
+/// Serializable spatial case-bootstrap configuration for JSON config files.
+/// It estimates seat-sampling variability, not repeat-sweep or calibration uncertainty.
 ///
 /// Drives `MultiMeasurementStrategy::MinimaxUncertainty`. At optimizer-setup
 /// time, the input N measurement curves are case-bootstrap resampled B times;
@@ -14,6 +15,17 @@ use serde::{Deserialize, Serialize};
 /// optimizer then scalarises the B objectives per `scalarisation`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct BootstrapUncertaintyConfig {
+    /// Optional effective number of independent spatial positions.
+    /// Values below the nominal seat count widen the spatial bootstrap by
+    /// drawing fewer independent cases per resample.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_spatial_sample_size: Option<f64>,
+    /// Separately measured repeat-sweep noise (dB standard deviation).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat_sweep_noise_std_db: Option<f64>,
+    /// Separately supplied calibration uncertainty (dB standard deviation).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calibration_uncertainty_std_db: Option<f64>,
     /// Number of bootstrap resamples B. Typical: 200..1000. Default: 400.
     #[serde(default = "default_bootstrap_num_resamples")]
     pub num_resamples: usize,
@@ -34,6 +46,9 @@ pub struct BootstrapUncertaintyConfig {
 impl Default for BootstrapUncertaintyConfig {
     fn default() -> Self {
         Self {
+            effective_spatial_sample_size: None,
+            repeat_sweep_noise_std_db: None,
+            calibration_uncertainty_std_db: None,
             num_resamples: default_bootstrap_num_resamples(),
             alpha: default_bootstrap_alpha(),
             seed: default_bootstrap_seed(),

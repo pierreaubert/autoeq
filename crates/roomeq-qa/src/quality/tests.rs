@@ -517,13 +517,31 @@ fn registry_expectations_block_weak_or_overboosted_quality_results() {
         &mut results,
     );
     assert!(!results[0].pass);
-    assert!(results[0].reason.contains("improvement"));
+    assert!(!results[0].reason.contains("improvement"));
     assert!(results[0].reason.contains("max boost"));
     assert!(results[0].reason.contains("registry=quality/example"));
 
+    results[0].label = "candidate +50% max_db".to_string();
+    results[0].pass = true;
+    results[0].reason = "relationship checks passed".to_string();
+    results[0].scorecard.flat_loss = 9.0;
+    super::enforce_registry_expectations(
+        "quality/max-db-probe",
+        &["workflow".to_string()],
+        crate::registry::ScenarioExpect {
+            improvement_min_pct: 0.01,
+            max_post_score: 20.0,
+            max_boost_db: 12.0,
+            allow_safe_revert: false,
+        },
+        &mut results,
+    );
+    assert!(results[0].pass, "{}", results[0].reason);
+
     results[0].pass = true;
     results[0].reason = "runtime safety fallback".to_string();
-    results[0].scorecard.flat_loss = 9.0;
+    results[0].pre_score = 22.0;
+    results[0].scorecard.flat_loss = 22.0;
     results[0].scorecard.max_boost_db = 0.0;
     results[0].scorecard.correction_reverted = true;
     super::enforce_registry_expectations(

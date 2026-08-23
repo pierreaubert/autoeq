@@ -97,7 +97,8 @@ pub struct OptimizerConfig {
     ///   are used.
     #[serde(default = "default_loss_type")]
     pub loss_type: String,
-    /// EPA loss configuration. Only used when `loss_type == "epa"`.
+    /// EPA diagnostic settings and spectral-flatness blend; optimizer use is
+    /// limited to the active flatness term when `loss_type == "epa"`.
     /// When `None`, the optimizer falls back to
     /// [`EpaConfig::default`](crate::loss::epa::score::EpaConfig::default).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -281,10 +282,9 @@ pub struct OptimizerConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_boost_envelope: Option<Vec<(f64, f64)>>,
 
-    /// CDT-aware minimum cut envelope: limits how deep the optimizer can cut
-    /// at frequencies where the ear generates Cubic Distortion Tones.
-    /// Each entry is (frequency_hz, max_cut_db) where max_cut_db is negative.
-    /// Default: None (no CDT protection).
+    /// Optional frequency-dependent minimum-cut safety envelope.
+    /// Each entry is (frequency_hz, max_cut_db), where max_cut_db is negative.
+    /// Default: None (use the existing flat `min_db` limit).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_cut_envelope: Option<Vec<(f64, f64)>>,
 

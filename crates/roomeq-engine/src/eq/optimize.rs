@@ -18,6 +18,7 @@ use roomeq_analysis::spatial_robustness::{self, SpatialRobustnessConfig};
 use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy, OptimizerConfig};
 use std::collections::HashMap;
 use std::error::Error;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct EqOptimizationResult {
@@ -481,21 +482,9 @@ fn optimize_channel_eq_multi_inner(
     };
 
     // =========================================================================
-    // SpatialRobustness strategy: early return with single-curve optimization
-    // on the RMS-averaged curve, using correction depth mask to scale deviation.
+    // SpatialRobustness remains in the shared direct per-seat objective path;
+    // its spatial and optional bootstrap masks are prepared below.
     // =========================================================================
-    if multi_config.strategy == MultiMeasurementStrategy::SpatialRobustness {
-        return optimize_spatial_robustness(
-            curves,
-            config,
-            multi_config,
-            resources,
-            sample_rate,
-            callback,
-            backend,
-        );
-    }
-
     // =========================================================================
     // MinimaxUncertainty strategy: materialise B bootstrap-resampled curves at
     // setup time, then run the standard multi-objective machinery over the
@@ -518,6 +507,7 @@ fn optimize_channel_eq_multi_inner(
         let resampled = roomeq_analysis::spatial_robustness::bootstrap_resampled_curves(
             curves,
             &roomeq_analysis::spatial_robustness::BootstrapConfig {
+                effective_sample_size: boot_cfg.effective_spatial_sample_size,
                 num_resamples: boot_cfg.num_resamples,
                 alpha: boot_cfg.alpha,
                 seed: boot_cfg.seed,
@@ -576,6 +566,55 @@ fn optimize_channel_eq_multi_inner(
         _ => return Err(format!("Unknown loss type: {}", config.loss_type).into()),
     };
 
+    // Spatial robustness still uses the cross-seat variance mask to limit
+    // correction depth at inconsistent frequencies, but the objective below
+    // evaluates every seat directly instead of optimizing a power average.
+    let spatial_correction_depth =
+        if multi_config.strategy == MultiMeasurementStrategy::SpatialRobustness {
+            let spatial_config = multi_config
+                .spatial_robustness
+                .as_ref()
+                .map(|config| SpatialRobustnessConfig {
+                    variance_threshold_db: config.variance_threshold_db,
+                    transition_width_db: config.transition_width_db,
+                    min_correction_depth: config.min_correction_depth,
+                    mask_smoothing_octaves: config.mask_smoothing_octaves,
+                })
+                .unwrap_or_default();
+            let mut analysis = if let Some(boot_cfg) = multi_config.bootstrap_uncertainty.as_ref() {
+                let bootstrap = spatial_robustness::BootstrapConfig {
+                    effective_sample_size: boot_cfg.effective_spatial_sample_size,
+                    num_resamples: boot_cfg.num_resamples,
+                    alpha: boot_cfg.alpha,
+                    seed: boot_cfg.seed,
+                };
+                spatial_robustness::analyze_spatial_robustness_with_bootstrap(
+                    curves,
+                    &spatial_config,
+                    &bootstrap,
+                    multi_config.weights.as_deref(),
+                )?
+            } else {
+                spatial_robustness::try_analyze_spatial_robustness_weighted(
+                    curves,
+                    &spatial_config,
+                    multi_config.weights.as_deref(),
+                )?
+            };
+            if let Some(bootstrap) = analysis.bootstrap.as_ref() {
+                let confidence_width = &bootstrap.upper.spl - &bootstrap.lower.spl;
+                let uncertainty_depth = spatial_robustness::correction_depth_mask(
+                    &analysis.averaged_curve.freq,
+                    &confidence_width,
+                    &spatial_config,
+                );
+                analysis.correction_depth = &analysis.correction_depth * &uncertainty_depth;
+            }
+            Some(analysis.correction_depth)
+        } else {
+            None
+        };
+
     // Build one ObjectiveData per curve
     let mut objectives = Vec::with_capacity(curves.len());
     // We'll use the first curve to build Args and as the "primary"
@@ -583,15 +622,21 @@ fn optimize_channel_eq_multi_inner(
 
     for (i, curve) in curves.iter().enumerate() {
         // Normalize each curve independently
-        let mut sum = 0.0;
-        let mut count = 0;
-        for j in 0..curve.freq.len() {
-            if curve.freq[j] >= effective_min_freq && curve.freq[j] <= effective_max_freq {
-                sum += curve.spl[j];
-                count += 1;
-            }
-        }
-        let mean_spl = if count > 0 { sum / count as f64 } else { 0.0 };
+        // The optimization target is calibrated against the historical
+        // arithmetic-bin reference level. Keep it separate from reporting's
+        // log-frequency-weighted mean so the objective does not change when
+        // metric presentation is made grid-aware.
+        let (sum, count) = curve
+            .freq
+            .iter()
+            .zip(curve.spl.iter())
+            .filter(|(frequency, _)| {
+                **frequency >= effective_min_freq && **frequency <= effective_max_freq
+            })
+            .fold((0.0, 0usize), |(sum, count), (_, level)| {
+                (sum + *level, count + 1)
+            });
+        let mean_spl = (count > 0).then_some(sum / count as f64).unwrap_or(0.0);
         let mut normalized_curve = Curve {
             freq: curve.freq.clone(),
             spl: &curve.spl - mean_spl,
@@ -652,6 +697,12 @@ fn optimize_channel_eq_multi_inner(
         objective_data.smoothness_penalty = optim_params_multi.smoothness_penalty.clone();
         objective_data.max_boost_envelope = config.max_boost_envelope.clone();
         objective_data.min_cut_envelope = config.min_cut_envelope.clone();
+        if let Some(depth) = spatial_correction_depth.as_ref() {
+            if depth.len() != objective_data.deviation.len() {
+                return Err("spatial correction-depth grid does not match objective grid".into());
+            }
+            objective_data.deviation = Arc::new(objective_data.deviation.as_ref() * depth);
+        }
 
         // Aligned multi-position curves normally share an identical frequency
         // grid and target. Canonicalize those immutable arrays once so objective
@@ -673,16 +724,42 @@ fn optimize_channel_eq_multi_inner(
 
     // Normalize weights
     let n = objectives.len();
+    if !multi_config.variance_lambda.is_finite() || multi_config.variance_lambda < 0.0 {
+        return Err(format!(
+            "multi_measurement.variance_lambda must be finite and nonnegative, got {}",
+            multi_config.variance_lambda
+        )
+        .into());
+    }
     let weights = match &multi_config.weights {
-        Some(w) if w.len() == n => {
-            let sum: f64 = w.iter().sum();
-            if sum > 0.0 {
-                w.iter().map(|wi| wi / sum).collect()
-            } else {
-                vec![1.0 / n as f64; n]
+        Some(weights) => {
+            if weights.len() != n {
+                return Err(format!(
+                    "multi_measurement.weights has {} entries but there are {n} measurements",
+                    weights.len()
+                )
+                .into());
             }
+            if let Some((index, weight)) = weights
+                .iter()
+                .enumerate()
+                .find(|(_, weight)| !weight.is_finite() || **weight < 0.0)
+            {
+                return Err(format!(
+                    "multi_measurement.weights[{index}] must be finite and nonnegative, got {weight}"
+                )
+                .into());
+            }
+            let sum: f64 = weights.iter().sum();
+            if !sum.is_finite() || sum <= 0.0 {
+                return Err(format!(
+                    "multi_measurement.weights must have a finite, strictly positive total, got {sum}"
+                )
+                .into());
+            }
+            weights.iter().map(|weight| weight / sum).collect()
         }
-        _ => vec![1.0 / n as f64; n],
+        None => vec![1.0 / n as f64; n],
     };
 
     let multi_data = MultiObjectiveData {
@@ -903,6 +980,8 @@ fn uncertainty_scaled_optimizer_config(
 /// The mask ensures the optimizer focuses filter resources on spatially consistent
 /// features (room modes) and avoids wasting filters on position-dependent effects
 /// (comb filtering from reflections).
+#[deprecated(note = "SpatialRobustness now uses direct per-seat multi-objective optimization")]
+#[allow(dead_code)]
 fn optimize_spatial_robustness(
     curves: &[Curve],
     config: &OptimizerConfig,
@@ -926,6 +1005,7 @@ fn optimize_spatial_robustness(
     // Analyze spatial robustness, optionally with bootstrap confidence bands.
     let mut analysis = if let Some(boot_cfg) = multi_config.bootstrap_uncertainty.as_ref() {
         let bootstrap = spatial_robustness::BootstrapConfig {
+            effective_sample_size: boot_cfg.effective_spatial_sample_size,
             num_resamples: boot_cfg.num_resamples,
             alpha: boot_cfg.alpha,
             seed: boot_cfg.seed,
@@ -1035,17 +1115,11 @@ fn optimize_spatial_robustness(
     let effective_max_freq = config.max_freq.min(data_max_freq);
 
     // Normalize by subtracting mean SPL in optimization range
-    let mut sum = 0.0;
-    let mut count = 0;
-    for i in 0..averaged_curve.freq.len() {
-        if averaged_curve.freq[i] >= effective_min_freq
-            && averaged_curve.freq[i] <= effective_max_freq
-        {
-            sum += averaged_curve.spl[i];
-            count += 1;
-        }
-    }
-    let mean_spl = if count > 0 { sum / count as f64 } else { 0.0 };
+    let mean_spl = roomeq_analysis::response_metrics::mean_response_in_range(
+        averaged_curve,
+        effective_min_freq,
+        effective_max_freq,
+    );
     let mut normalized_curve = Curve {
         freq: averaged_curve.freq.clone(),
         spl: &averaged_curve.spl - mean_spl,
@@ -1342,6 +1416,108 @@ mod processing_mode_tests {
         let (filters, loss) = result.unwrap();
         assert!(!filters.is_empty(), "should produce IIR filters");
         assert!(loss.is_finite(), "loss should be finite, got {}", loss);
+    }
+
+    #[test]
+    fn fixed_seed_realized_filter_is_invariant_across_materially_different_grids() {
+        fn analytic_curve(freqs: Vec<f64>) -> Curve {
+            let spl = freqs
+                .iter()
+                .map(|&frequency| {
+                    let octaves = (frequency / 650.0).log2();
+                    7.0 * (-0.5 * (octaves / 0.48).powi(2)).exp()
+                })
+                .collect::<Vec<_>>();
+            Curve {
+                freq: Array1::from_vec(freqs),
+                spl: Array1::from_vec(spl),
+                phase: None,
+                ..Default::default()
+            }
+        }
+
+        fn log_grid(count: usize) -> Vec<f64> {
+            let lo = 20.0_f64.ln();
+            let span = 20_000.0_f64.ln() - lo;
+            (0..count)
+                .map(|index| (lo + span * index as f64 / (count - 1) as f64).exp())
+                .collect()
+        }
+
+        let linear_grid = (0..480)
+            .map(|index| 20.0 + (20_000.0 - 20.0) * index as f64 / 479.0)
+            .collect::<Vec<_>>();
+        let warped_log_grid = {
+            let lo = 20.0_f64.ln();
+            let span = 20_000.0_f64.ln() - lo;
+            (0..333)
+                .map(|index| {
+                    let unit = index as f64 / 332.0;
+                    (lo + span * unit.powi(2)).exp()
+                })
+                .collect::<Vec<_>>()
+        };
+        let curves = [
+            analytic_curve(linear_grid),
+            analytic_curve(log_grid(121)),
+            analytic_curve(log_grid(901)),
+            analytic_curve(warped_log_grid),
+        ];
+        let config = OptimizerConfig {
+            processing_mode: ProcessingMode::LowLatency,
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 1,
+            min_freq: 30.0,
+            max_freq: 10_000.0,
+            max_iter: 2_500,
+            population: 20,
+            seed: Some(20_260_822),
+            parallel_threads: Some(1),
+            refine: false,
+            ..OptimizerConfig::default()
+        };
+        let reference_grid = Array1::from_vec(log_grid(401));
+        let realized_responses = curves
+            .iter()
+            .map(|curve| {
+                let (filters, loss) = optimize_channel_eq(curve, &config, None, 48_000.0)
+                    .expect("fixed-seed optimization should succeed on every valid grid");
+                assert_eq!(filters.len(), 1, "the broad analytic peak needs one filter");
+                assert!(loss.is_finite());
+                autoeq_core::response::compute_peq_complex_response(
+                    &filters,
+                    &reference_grid,
+                    48_000.0,
+                )
+                .into_iter()
+                .map(|value| 20.0 * value.norm().log10())
+                .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        let reference = &realized_responses[0];
+        for (grid_index, response) in realized_responses.iter().enumerate().skip(1) {
+            let differences = reference
+                .iter()
+                .zip(response)
+                .map(|(left, right)| left - right)
+                .collect::<Vec<_>>();
+            let max_abs_db = differences
+                .iter()
+                .map(|difference| difference.abs())
+                .fold(0.0_f64, f64::max);
+            let rms_db = (differences
+                .iter()
+                .map(|difference| difference * difference)
+                .sum::<f64>()
+                / differences.len() as f64)
+                .sqrt();
+            assert!(
+                max_abs_db <= 0.25 && rms_db <= 0.05,
+                "grid {grid_index} changed the realized filter response: max={max_abs_db:.4} dB, rms={rms_db:.4} dB"
+            );
+        }
     }
 
     /// Test optimize_channel_eq_with_callback invokes callback
@@ -1981,6 +2157,7 @@ mod multi_eq_tests {
                 seed: 1,
                 scalarisation: roomeq_model::BootstrapScalarisation::WorstCase,
                 cvar_alpha: 0.25,
+                ..roomeq_model::BootstrapUncertaintyConfig::default()
             }),
             ..MultiMeasurementConfig::default()
         };
@@ -2144,6 +2321,7 @@ mod multi_eq_tests {
                 seed: 1,
                 scalarisation: roomeq_model::BootstrapScalarisation::Cvar,
                 cvar_alpha: 0.25,
+                ..roomeq_model::BootstrapUncertaintyConfig::default()
             }),
             ..MultiMeasurementConfig::default()
         };

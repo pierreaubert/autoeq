@@ -24,21 +24,18 @@ pub(super) fn interpolate_log_frequency(
     values.last().copied()
 }
 
-/// Denormalize a level-relative SPL curve to approximate absolute dB SPL.
+/// Shift a level-relative response to a configured diagnostic level reference.
 ///
 /// Measurement curves in the autoeq/roomeq pipeline are typically
-/// mean-subtracted around 1–2 kHz so they hover near 0 dB. The psychoacoustic
-/// loudness model in [`crate::loss::epa::loudness`] compares against the
-/// absolute threshold of hearing and therefore needs absolute dB SPL to
-/// produce meaningful sone / loudness-balance values.
+/// mean-subtracted around 1–2 kHz so they hover near 0 dB. The diagnostic
+/// loudness formula in [`crate::loss::epa::loudness`] expects an SPL-like
+/// reference, so this helper applies the configured presentation offset.
 ///
-/// Since the phon scale is defined as equal-loudness contours referenced to a
-/// 1 kHz sinusoid in dB SPL, adding `listening_level_phon` to a curve
-/// normalized at 1 kHz yields an absolute SPL curve where 1 kHz sits at the
-/// listener's chosen level. This is an approximation — it does not account
-/// for frequency-dependent phon → SPL conversion via ISO 226 contours — but
-/// it is the correct first-order calibration for comparative metrics and is
-/// good enough for the loudness/balance penalty in [`epa_loss`].
+/// Adding `listening_level_phon` to a curve normalized at 1 kHz yields a
+/// consistently shifted diagnostic curve. It does not provide microphone
+/// calibration, programme spectrum, or the frequency-dependent phon-to-SPL
+/// conversion required for a validated perceptual prediction, and these
+/// descriptors do not enter `epa_loss`.
 pub(super) fn denormalize_spl(spl_rel: &[f64], listening_level_phon: f64) -> Vec<f64> {
     spl_rel.iter().map(|v| v + listening_level_phon).collect()
 }

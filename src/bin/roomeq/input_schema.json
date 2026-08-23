@@ -549,7 +549,7 @@
     },
     "BootstrapUncertaintyConfig": {
       "additionalProperties": false,
-      "description": "Serializable bootstrap uncertainty configuration for JSON config files.\n\nDrives `MultiMeasurementStrategy::MinimaxUncertainty`. At optimizer-setup\ntime, the input N measurement curves are case-bootstrap resampled B times;\neach resampled mean becomes its own per-measurement objective. The outer\noptimizer then scalarises the B objectives per `scalarisation`.",
+      "description": "Serializable spatial case-bootstrap configuration for JSON config files.\nIt estimates seat-sampling variability, not repeat-sweep or calibration uncertainty.\n\nDrives `MultiMeasurementStrategy::MinimaxUncertainty`. At optimizer-setup\ntime, the input N measurement curves are case-bootstrap resampled B times;\neach resampled mean becomes its own per-measurement objective. The outer\noptimizer then scalarises the B objectives per `scalarisation`.",
       "properties": {
         "alpha": {
           "default": 0.1,
@@ -557,11 +557,27 @@
           "format": "double",
           "type": "number"
         },
+        "calibration_uncertainty_std_db": {
+          "description": "Separately supplied calibration uncertainty (dB standard deviation).",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "cvar_alpha": {
           "default": 0.2,
           "description": "Tail fraction for CVaR (only used when `scalarisation = Cvar`). Default 0.20.",
           "format": "double",
           "type": "number"
+        },
+        "effective_spatial_sample_size": {
+          "description": "Optional effective number of independent spatial positions.\nValues below the nominal seat count widen the spatial bootstrap by\ndrawing fewer independent cases per resample.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "num_resamples": {
           "default": 400,
@@ -569,6 +585,14 @@
           "format": "uint",
           "minimum": 0,
           "type": "integer"
+        },
+        "repeat_sweep_noise_std_db": {
+          "description": "Separately measured repeat-sweep noise (dB standard deviation).",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "scalarisation": {
           "$ref": "#/$defs/BootstrapScalarisation",
@@ -1464,7 +1488,7 @@
     },
     "EpaConfig": {
       "additionalProperties": false,
-      "description": "Configuration for EPA scoring.",
+      "description": "Experimental EPA diagnostics and optimizer flatness configuration.",
       "properties": {
         "activity_weight": {
           "default": 0.2,
@@ -1473,7 +1497,7 @@
         },
         "evaluation_weight": {
           "default": 0.6,
-          "description": "Weights for the three EPA dimensions in the composite score",
+          "description": "Diagnostic weights for the three reported EPA dimensions.",
           "format": "double",
           "type": "number"
         },
@@ -1500,19 +1524,19 @@
         },
         "flatness_erb_weight": {
           "default": 1.0,
-          "description": "ERB weight for the flatness component of the EPA loss.\nDefault 1.0 (pure ERB) because EPA already has band-sensitive\nsharpness / roughness / loudness_balance terms — adding band\nweighting on top of flatness would double-count frequency bias.",
+          "description": "ERB-rate weight for the active optimizer flatness component.\nThe default is 1.0 (pure ERB-rate flatness).",
           "format": "double",
           "type": "number"
         },
         "listening_level_phon": {
           "default": 75.0,
-          "description": "Listening level in phon (affects loudness computation)",
+          "description": "Listening level in phon for diagnostic loudness computation.",
           "format": "double",
           "type": "number"
         },
         "max_roughness": {
           "default": 0.5,
-          "description": "Maximum acceptable roughness (above this, penalty increases)",
+          "description": "Diagnostic roughness threshold; transfer-only roughness does not steer optimization.",
           "format": "double",
           "type": "number"
         },
@@ -1523,7 +1547,7 @@
         },
         "target_sharpness": {
           "default": 1.2,
-          "description": "Target sharpness in acum (1.0 = natural broadband noise character)",
+          "description": "Diagnostic target sharpness in acum (1.0 = natural broadband noise character).",
           "format": "double",
           "type": "number"
         },
@@ -1541,7 +1565,7 @@
             "profile": "mixed",
             "weight": 0.15
           },
-          "description": "Temporal-masking penalties for modal ringing and FIR phase behavior.\n\nModal data is used as an optimizer-cheap proxy for post-masked room\ndecay audibility. When FIR coefficients are exported, the FIR impulse\nresponse is also analyzed directly for pre/post ringing audibility."
+          "description": "Experimental temporal diagnostics for modal decay and FIR phase behavior.\nThese settings do not steer EPA optimization. Confident measured\nband-limited SSIR decay is preferred for modal reporting; magnitude Q is\nonly a fallback, and realized FIR pre/post ringing is analyzed separately."
         }
       },
       "type": "object"
@@ -2575,7 +2599,7 @@
               "type": "null"
             }
           ],
-          "description": "EPA loss configuration. Only used when `loss_type == \"epa\"`.\nWhen `None`, the optimizer falls back to\n[`EpaConfig::default`](crate::loss::epa::score::EpaConfig::default)."
+          "description": "EPA diagnostic settings and spectral-flatness blend; optimizer use is\nlimited to the active flatness term when `loss_type == \"epa\"`.\nWhen `None`, the optimizer falls back to\n[`EpaConfig::default`](crate::loss::epa::score::EpaConfig::default)."
         },
         "excursion_protection": {
           "anyOf": [
@@ -2701,7 +2725,7 @@
           "type": "number"
         },
         "min_cut_envelope": {
-          "description": "CDT-aware minimum cut envelope: limits how deep the optimizer can cut\nat frequencies where the ear generates Cubic Distortion Tones.\nEach entry is (frequency_hz, max_cut_db) where max_cut_db is negative.\nDefault: None (no CDT protection).",
+          "description": "Optional frequency-dependent minimum-cut safety envelope.\nEach entry is (frequency_hz, max_cut_db), where max_cut_db is negative.\nDefault: None (use the existing flat `min_db` limit).",
           "items": {
             "maxItems": 2,
             "minItems": 2,
@@ -4520,11 +4544,11 @@
     },
     "TemporalMaskingConfig": {
       "additionalProperties": false,
-      "description": "Temporal masking penalty configuration for EPA optimization.",
+      "description": "Experimental EPA temporal-diagnostic configuration.\n\nModal controls are retained for report compatibility and offline analysis;\nthey do not steer the active spectral-flatness-only EPA optimizer.",
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Enable the temporal masking penalty when modal data is available.",
+          "description": "Enable the legacy modal temporal diagnostic when modal data is available.",
           "type": "boolean"
         },
         "ir_audibility_threshold_db": {
@@ -4571,11 +4595,11 @@
         "profile": {
           "$ref": "#/$defs/TemporalMaskingProfile",
           "default": "mixed",
-          "description": "Material profile used to scale modal-ringing audibility."
+          "description": "Diagnostic programme-profile label for modal-ringing reporting."
         },
         "weight": {
           "default": 0.15,
-          "description": "Weight applied to the normalized temporal masking penalty.",
+          "description": "Legacy diagnostic weight; it does not steer EPA optimizer fitness.",
           "format": "double",
           "type": "number"
         }

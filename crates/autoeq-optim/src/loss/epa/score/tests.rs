@@ -108,7 +108,7 @@ fn test_epa_loss_flat_is_low() {
 }
 
 #[test]
-fn test_epa_loss_peaked_is_higher() {
+fn test_epa_transfer_descriptors_do_not_change_optimizer_loss() {
     let (freqs_flat, spl_flat) = make_flat_response(75.0);
     let (freqs_peaked, spl_peaked) = make_peaked_response();
     let config = EpaConfig::default();
@@ -116,10 +116,7 @@ fn test_epa_loss_peaked_is_higher() {
     let flat_loss = epa_loss(&freqs_flat, &spl_flat, &config, 0.0);
     let peaked_loss = epa_loss(&freqs_peaked, &spl_peaked, &config, 0.0);
 
-    assert!(
-        peaked_loss > flat_loss,
-        "Peaked response (loss={peaked_loss}) should have higher loss than flat (loss={flat_loss})"
-    );
+    assert_eq!(peaked_loss, flat_loss);
 }
 
 #[test]

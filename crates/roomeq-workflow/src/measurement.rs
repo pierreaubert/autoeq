@@ -5,18 +5,21 @@ use autoeq_core::phase_utils::{
     compute_excess_phase, estimate_delay_from_excess_phase, reconstruct_minimum_phase,
     unwrap_phase_degrees,
 };
-use autoeq_measurements::read::{
-    create_log_frequency_grid, interpolate_log_space, smooth_one_over_n_octave,
-};
+use autoeq_measurements::read::{interpolate_log_space, smooth_one_over_n_octave};
 use ndarray::Array1;
+use roomeq_engine::analysis::frequency_grid::{
+    DEFAULT_ROOM_EQ_FREQUENCY_SAMPLES, ROOM_EQ_RESAMPLE_LOW_FREQ_MAX_HZ,
+    clipped_room_eq_frequency_grid,
+};
+#[cfg(test)]
+use roomeq_engine::analysis::frequency_grid::{
+    ROOM_EQ_RESAMPLE_LOW_FREQ_STEP_HZ, ROOM_EQ_RESAMPLE_MAX_FREQ_HZ, ROOM_EQ_RESAMPLE_MIN_FREQ_HZ,
+    room_eq_hybrid_frequency_grid,
+};
 use roomeq_model::{Curve, MeasurementRef, MeasurementSource};
 use std::path::Path;
 
-pub const DEFAULT_FREQUENCY_SAMPLES: usize = 200;
-const ROOM_EQ_RESAMPLE_MIN_FREQ_HZ: f64 = 20.0;
-const ROOM_EQ_RESAMPLE_MAX_FREQ_HZ: f64 = 20_000.0;
-const ROOM_EQ_RESAMPLE_LOW_FREQ_MAX_HZ: f64 = 1_000.0;
-const ROOM_EQ_RESAMPLE_LOW_FREQ_STEP_HZ: f64 = 4.0;
+pub const DEFAULT_FREQUENCY_SAMPLES: usize = DEFAULT_ROOM_EQ_FREQUENCY_SAMPLES;
 const ROOM_EQ_RESAMPLE_SMOOTHING_BANDS_PER_OCTAVE: usize = 2;
 
 /// Reduce dense RoomEQ measurements to the grid used by the optimizer.
@@ -26,50 +29,8 @@ const ROOM_EQ_RESAMPLE_SMOOTHING_BANDS_PER_OCTAVE: usize = 2;
 /// response for every candidate filter. Resample first, then smooth the small
 /// hybrid grid so dense source files do not make that objective quadratic in
 /// the original sample count.
-fn hybrid_frequency_grid(frequency_samples: usize) -> Array1<f64> {
-    let high_frequency_samples = frequency_samples.max(2);
-    let log_step = (ROOM_EQ_RESAMPLE_MAX_FREQ_HZ / ROOM_EQ_RESAMPLE_MIN_FREQ_HZ).ln()
-        / (high_frequency_samples - 1) as f64;
-    let high_frequency_intervals =
-        ((ROOM_EQ_RESAMPLE_MAX_FREQ_HZ / ROOM_EQ_RESAMPLE_LOW_FREQ_MAX_HZ).ln() / log_step).ceil()
-            as usize;
-    let high_frequency_grid = create_log_frequency_grid(
-        high_frequency_intervals + 1,
-        ROOM_EQ_RESAMPLE_LOW_FREQ_MAX_HZ,
-        ROOM_EQ_RESAMPLE_MAX_FREQ_HZ,
-    );
-
-    let low_frequency_samples = ((ROOM_EQ_RESAMPLE_LOW_FREQ_MAX_HZ - ROOM_EQ_RESAMPLE_MIN_FREQ_HZ)
-        / ROOM_EQ_RESAMPLE_LOW_FREQ_STEP_HZ)
-        .round() as usize
-        + 1;
-    let mut frequencies = Vec::with_capacity(low_frequency_samples + high_frequency_intervals);
-    frequencies.extend((0..low_frequency_samples).map(|index| {
-        ROOM_EQ_RESAMPLE_MIN_FREQ_HZ + index as f64 * ROOM_EQ_RESAMPLE_LOW_FREQ_STEP_HZ
-    }));
-    frequencies.extend(high_frequency_grid.iter().skip(1).copied());
-    Array1::from_vec(frequencies)
-}
-
 fn clipped_hybrid_frequency_grid(curve: &Curve, frequency_samples: usize) -> Option<Array1<f64>> {
-    let source_min = curve.freq.first().copied()?;
-    let source_max = curve.freq.last().copied()?;
-    let mut frequencies: Vec<f64> = hybrid_frequency_grid(frequency_samples)
-        .iter()
-        .copied()
-        .filter(|frequency| *frequency >= source_min && *frequency <= source_max)
-        .collect();
-
-    if frequencies.is_empty() {
-        return None;
-    }
-    if frequencies[0] > source_min {
-        frequencies.insert(0, source_min);
-    }
-    if *frequencies.last().unwrap_or(&source_max) < source_max {
-        frequencies.push(source_max);
-    }
-    Some(Array1::from_vec(frequencies))
+    clipped_room_eq_frequency_grid(curve, frequency_samples)
 }
 
 fn interpolate_linear_values(
@@ -338,7 +299,7 @@ mod tests {
 
         let curve = load_curve_from_csv(&path).unwrap();
 
-        let expected_len = hybrid_frequency_grid(DEFAULT_FREQUENCY_SAMPLES).len();
+        let expected_len = room_eq_hybrid_frequency_grid(DEFAULT_FREQUENCY_SAMPLES).len();
         assert_eq!(curve.freq.len(), expected_len);
         assert_eq!(curve.spl.len(), expected_len);
         assert_eq!(curve.phase.as_ref().unwrap().len(), expected_len);
@@ -378,7 +339,7 @@ mod tests {
 
         let curve = load_curve_from_csv_with_frequency_samples(&path, 64).unwrap();
 
-        let expected_len = hybrid_frequency_grid(64).len();
+        let expected_len = room_eq_hybrid_frequency_grid(64).len();
         assert_eq!(curve.freq.len(), expected_len);
         assert_eq!(curve.spl.len(), expected_len);
         assert!((curve.freq[0] - ROOM_EQ_RESAMPLE_MIN_FREQ_HZ).abs() < 1e-12);

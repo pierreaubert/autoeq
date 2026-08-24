@@ -269,30 +269,17 @@ fn generate_highpass_filters(
     filter_type: &HighpassType,
     sample_rate: f64,
 ) -> Vec<Biquad> {
-    use math_audio_iir_fir::BiquadFilterType;
-
     match filter_type {
         HighpassType::Butterworth => {
-            // Butterworth: cascaded 2nd-order sections
-            let num_sections = order / 2;
-            (0..num_sections)
-                .map(|_| {
-                    Biquad::new(
-                        BiquadFilterType::Highpass,
-                        frequency,
-                        sample_rate,
-                        0.707,
-                        0.0,
-                    )
-                })
+            math_audio_iir_fir::peq_butterworth_highpass(order, frequency, sample_rate)
+                .into_iter()
+                .map(|(_, biquad)| biquad)
                 .collect()
         }
         HighpassType::LinkwitzRiley => {
-            // Linkwitz-Riley: cascaded Butterworth sections
-            // LR4 = 2 cascaded BW2, LR8 = 4 cascaded BW2
-            let num_sections = order / 2;
-            (0..num_sections)
-                .map(|_| Biquad::new(BiquadFilterType::Highpass, frequency, sample_rate, 0.5, 0.0))
+            math_audio_iir_fir::peq_linkwitzriley_highpass(order, frequency, sample_rate)
+                .into_iter()
+                .map(|(_, biquad)| biquad)
                 .collect()
         }
     }
@@ -476,6 +463,51 @@ mod tests {
     fn test_linkwitz_riley_filters() {
         let filters = generate_highpass_filters(80.0, 4, &HighpassType::LinkwitzRiley, 48000.0);
         assert_eq!(filters.len(), 2, "LR4 should have 2 sections");
+    }
+
+    #[test]
+    fn highpass_sections_have_reference_cutoff_response_across_orders() {
+        let frequency = 80.0;
+        let sample_rate = 48_000.0;
+        for order in [4, 6, 8] {
+            let filters = generate_highpass_filters(
+                frequency,
+                order,
+                &HighpassType::Butterworth,
+                sample_rate,
+            );
+            assert_eq!(filters.len(), order / 2);
+            let response = autoeq_core::response::compute_peq_complex_response(
+                &filters,
+                &ndarray::array![frequency],
+                sample_rate,
+            );
+            let cutoff_db = 20.0 * response[0].norm().log10();
+            assert!(
+                (cutoff_db + 3.010_299_956_64).abs() < 1e-6,
+                "BW{order} cutoff was {cutoff_db} dB"
+            );
+        }
+
+        for order in [4, 8] {
+            let filters = generate_highpass_filters(
+                frequency,
+                order,
+                &HighpassType::LinkwitzRiley,
+                sample_rate,
+            );
+            assert_eq!(filters.len(), order / 2);
+            let response = autoeq_core::response::compute_peq_complex_response(
+                &filters,
+                &ndarray::array![frequency],
+                sample_rate,
+            );
+            let cutoff_db = 20.0 * response[0].norm().log10();
+            assert!(
+                (cutoff_db + 6.020_599_913_28).abs() < 1e-6,
+                "LR{order} cutoff was {cutoff_db} dB"
+            );
+        }
     }
 
     #[test]

@@ -213,6 +213,22 @@ pub fn rule_excursion_protection(ctx: &mut ValidationContext<'_>) {
             excursion.filter_order
         ));
     }
+    if !excursion.auto_detect_f3
+        && excursion
+            .manual_f3_hz
+            .is_none_or(|frequency| !frequency.is_finite() || frequency <= 0.0)
+    {
+        ctx.add_error(format!(
+            "excursion_protection.manual_f3_hz must be finite and positive when auto_detect_f3 is false (got {:?})",
+            excursion.manual_f3_hz
+        ));
+    }
+    if !excursion.margin_octaves.is_finite() || excursion.margin_octaves < 0.0 {
+        ctx.add_error(format!(
+            "excursion_protection.margin_octaves must be finite and nonnegative (got {})",
+            excursion.margin_octaves
+        ));
+    }
 }
 
 pub fn rule_phase_alignment(ctx: &mut ValidationContext<'_>) {

@@ -21,7 +21,8 @@ pub fn build_complete_target_curve(freqs: &Array1<f64>, config: &TargetResponseC
         TargetShape::Harman => -0.8,
         TargetShape::Custom => config.slope_db_per_octave,
         TargetShape::File => {
-            // File loading is handled by the caller; if we get here, fall back to flat
+            // Workflow-prepared file curves bypass this procedural builder.
+            // Reaching this branch means the resource was not supplied.
             log::warn!(
                 "build_complete_target_curve called with File shape but no curve provided; falling back to flat"
             );

@@ -106,7 +106,7 @@ pub fn maybe_generate_recommended_xtc(
     }
     let room_eq_correction_channels = if config.include_room_eq_dsp {
         if let Some(channels) = channels {
-            apply_room_eq_dsp_to_spectrum(&mut spectrum, sys, channels, sample_rate)?;
+            apply_room_eq_dsp_to_spectrum(&mut spectrum, sys, channels, sample_rate, output_dir)?;
             spectrum
                 .speakers
                 .iter()

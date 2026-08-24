@@ -65,6 +65,11 @@ use room_optimization_result::apply_ctc_if_enabled;
 use room_optimization_result::sanity_check_result;
 use types::GenericChannelCollection;
 use types::SharedPipelineObserver;
+
+fn should_run_standalone_phase_correction(config: &RoomConfig) -> bool {
+    config.optimizer.processing_mode != ProcessingMode::MixedPhase
+        && config.optimizer.phase_correction.is_some()
+}
 use types::collect_generic_channel_results;
 use types::emit_pipeline_event;
 
@@ -661,6 +666,7 @@ fn apply_inter_channel_timbre_matching_stage(
         .filter(|config| config.enabled)?;
     let corrected_curves: HashMap<String, Curve> = channel_results
         .iter()
+        .filter(|(name, _)| !is_subwoofer_channel(config, name))
         .map(|(name, result)| (name.clone(), result.final_curve.clone()))
         .collect();
 
@@ -1047,7 +1053,7 @@ fn assemble_workflow_result_with_frequency_samples(
         )?;
     }
     // Standalone phase correction (rePhase-style)
-    if config.optimizer.phase_correction.is_some() {
+    if should_run_standalone_phase_correction(config) {
         send_progress(
             observer_shared,
             PipelineStepId::PhaseCorrection,
@@ -1067,7 +1073,9 @@ fn assemble_workflow_result_with_frequency_samples(
             },
         )?;
     }
-    if let Some(ref pc_config) = config.optimizer.phase_correction {
+    if should_run_standalone_phase_correction(config)
+        && let Some(ref pc_config) = config.optimizer.phase_correction
+    {
         let out_dir = output_dir.unwrap_or(Path::new("."));
         let names: Vec<String> = result.channel_results.keys().cloned().collect();
         for name in &names {
@@ -1161,6 +1169,7 @@ fn assemble_workflow_result_with_frequency_samples(
             &mut result,
             height_config,
             config,
+            probe_arrival_overrides,
             sample_rate,
             frequency_samples,
         );
@@ -1542,17 +1551,32 @@ fn apply_topology_phase_alignment(
     Ok(!results.is_empty())
 }
 
+fn insert_topology_height_residual_delay(
+    chain: &mut ChannelDspChain,
+    delay_ms: f64,
+    allow_delay: bool,
+) -> bool {
+    if !allow_delay || delay_ms <= 0.01 {
+        return false;
+    }
+    chain
+        .plugins
+        .insert(0, output::create_delay_plugin(delay_ms));
+    true
+}
+
 fn apply_topology_height_alignment_with_frequency_samples(
     result: &mut RoomOptimizationResult,
     height_config: &roomeq_model::HeightChannelAlignmentConfig,
     config: &RoomConfig,
+    probe_arrival_overrides: Option<&HashMap<String, f64>>,
     sample_rate: f64,
     frequency_samples: usize,
 ) -> StageOutcome {
     let mut channel_arrivals = phase_arrivals_for_channels_with_frequency_samples(
         config,
         &result.channel_results,
-        None,
+        probe_arrival_overrides,
         frequency_samples,
     );
     for (channel_name, arrival_ms) in &mut channel_arrivals {
@@ -1562,13 +1586,19 @@ fn apply_topology_height_alignment_with_frequency_samples(
     }
     let corrected_curves = collect_current_final_curves(&result.channel_results);
     let mut height_results =
-        match roomeq_engine::height_channel_alignment::compute_height_channel_alignment(
+        match roomeq_engine::height_channel_alignment::compute_height_channel_alignment_with_coherence_threshold(
             &corrected_curves,
             &channel_arrivals,
             height_config,
             sample_rate,
             config.optimizer.min_freq,
             config.optimizer.max_freq,
+            config
+                .recording_config
+                .as_ref()
+                .and_then(|recording| recording.coherence_threshold)
+                .map(f64::from)
+                .unwrap_or(roomeq_engine::bass_phase_confidence::DEFAULT_COHERENCE_THRESHOLD),
         ) {
             Ok(results) => results,
             Err(error) => {
@@ -1620,24 +1650,16 @@ fn apply_topology_height_alignment_with_frequency_samples(
             }
             applied = true;
         }
-        let delay_applied = height_result.delay_ms > 0.01
-            && result.channels.get_mut(channel_name).is_some_and(|chain| {
-                if chain
-                    .plugins
-                    .iter()
-                    .any(|plugin| plugin.plugin_type == "delay")
-                {
-                    height_result
-                        .advisories
-                        .push("height_arrival_already_aligned".to_string());
-                    false
-                } else {
-                    chain
-                        .plugins
-                        .insert(0, output::create_delay_plugin(height_result.delay_ms));
-                    true
-                }
-            });
+        // `channel_arrivals` already includes every delay currently present
+        // in the chain. A positive residual is therefore additional delay,
+        // even when an earlier alignment stage inserted another delay plugin.
+        let delay_applied = result.channels.get_mut(channel_name).is_some_and(|chain| {
+            insert_topology_height_residual_delay(
+                chain,
+                height_result.delay_ms,
+                config.optimizer.allow_delay(),
+            )
+        });
         if delay_applied {
             sync_reported_phase_adjustment(
                 channel_name,
@@ -2053,6 +2075,7 @@ fn assemble_generic_result_with_frequency_samples(
         // Build corrected curves from the current channel results
         let corrected_curves: HashMap<String, Curve> = channel_results
             .iter()
+            .filter(|(name, _)| !is_subwoofer_channel(config, name))
             .map(|(name, result)| (name.clone(), result.final_curve.clone()))
             .collect();
 
@@ -2194,14 +2217,20 @@ fn assemble_generic_result_with_frequency_samples(
         )?;
         let corrected_curves = collect_current_final_curves(&channel_results);
         let stage_outcome =
-            match roomeq_engine::height_channel_alignment::compute_height_channel_alignment(
+            match roomeq_engine::height_channel_alignment::compute_height_channel_alignment_with_coherence_threshold(
                 &corrected_curves,
                 &channel_arrivals,
-                height_config,
-                sample_rate,
-                config.optimizer.min_freq,
-                config.optimizer.max_freq,
-            ) {
+            height_config,
+            sample_rate,
+            config.optimizer.min_freq,
+            config.optimizer.max_freq,
+            config
+                .recording_config
+                .as_ref()
+                .and_then(|recording| recording.coherence_threshold)
+                .map(f64::from)
+                .unwrap_or(roomeq_engine::bass_phase_confidence::DEFAULT_COHERENCE_THRESHOLD),
+        ) {
                 Ok(mut height_results) => {
                     let mut applied_count = 0;
                     let failed_count = height_results
@@ -2252,7 +2281,8 @@ fn assemble_generic_result_with_frequency_samples(
                             }
                             applied = true;
                         }
-                        let delay_applied = height_result.delay_ms > 0.01
+        let delay_applied = config.optimizer.allow_delay()
+            && height_result.delay_ms > 0.01
                             && channel_chains.get_mut(channel_name).is_some_and(|chain| {
                                 if chain
                                     .plugins
@@ -2416,10 +2446,18 @@ fn assemble_generic_result_with_frequency_samples(
                                     result.invert_polarity,
                                     result.improvement_db
                                 );
-                                phase_alignment_results.insert(
-                                    main_name.clone(),
-                                    (result.delay_ms, result.invert_polarity, sub_name.clone()),
-                                );
+                                if phase_alignment_results
+                                    .insert(
+                                        main_name.clone(),
+                                        (result.delay_ms, result.invert_polarity, sub_name.clone()),
+                                    )
+                                    .is_some()
+                                {
+                                    warn!(
+                                        "Multiple subwoofers mapped to main '{}'; retaining the latest phase-alignment result",
+                                        main_name
+                                    );
+                                }
                             }
                             Err(e) => {
                                 warn!("  Phase alignment failed for '{}': {}", main_name, e);
@@ -2494,7 +2532,7 @@ fn assemble_generic_result_with_frequency_samples(
     // before IR/EPA/metadata generation.
 
     // Standalone phase correction (rePhase-style)
-    if config.optimizer.phase_correction.is_some() {
+    if should_run_standalone_phase_correction(config) {
         send_progress(
             observer_shared,
             PipelineStepId::PhaseCorrection,
@@ -2514,7 +2552,9 @@ fn assemble_generic_result_with_frequency_samples(
             },
         )?;
     }
-    if let Some(ref pc_config) = config.optimizer.phase_correction {
+    if should_run_standalone_phase_correction(config)
+        && let Some(ref pc_config) = config.optimizer.phase_correction
+    {
         let names: Vec<String> = channel_results.keys().cloned().collect();
         for name in &names {
             if let Some(ch) = channel_results.get_mut(name.as_str())

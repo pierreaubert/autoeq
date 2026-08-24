@@ -139,6 +139,20 @@ fn resolve_room_target(room_config: &RoomConfig) -> Result<Curve> {
     }
 }
 
+fn anchor_supporting_source_target_to_primary(
+    target: &mut Curve,
+    primary: &Curve,
+    min_freq: f64,
+    max_freq: f64,
+) {
+    let primary_level = roomeq_engine::analysis::response_metrics::mean_response_in_range(
+        primary, min_freq, max_freq,
+    );
+    if primary_level.is_finite() {
+        target.spl.mapv_inplace(|level| level + primary_level);
+    }
+}
+
 /// Compute the support output channel name from a logical role.
 pub fn support_channel_name(
     logical_role: &str,
@@ -211,7 +225,18 @@ pub fn process_supporting_source_channel_with_frequency_samples(
             }
         })?;
 
-    let target = resolve_supporting_source_target(group, room_config)?;
+    let mut target = resolve_supporting_source_target(group, room_config)?;
+    // Supporting-source gain is solved in an absolute pressure frame.  Room
+    // targets, however, are conventionally level-relative (flat = 0 dB),
+    // while loaded measurements retain their calibrated SPL (typically
+    // ~80 dB).  Anchor the target to the primary's measured mean so the
+    // subtraction does not interpret a valid target as silence.
+    anchor_supporting_source_target_to_primary(
+        &mut target,
+        &primary,
+        room_config.optimizer.min_freq,
+        room_config.optimizer.max_freq,
+    );
 
     let filter = compute_supporting_source_filter(
         &primary,
@@ -229,6 +254,20 @@ pub fn process_supporting_source_channel_with_frequency_samples(
 
     // Write FIR to WAV.
     let support_name = support_channel_name(logical_role, naming);
+    let collides_with_logical_channel = room_config.system.as_ref().is_some_and(|system| {
+        system.speakers.contains_key(&support_name)
+            || system
+                .subwoofers
+                .as_ref()
+                .is_some_and(|subwoofers| subwoofers.mapping.contains_key(&support_name))
+    });
+    if support_name == logical_role || collides_with_logical_channel {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "Supporting-source output suffix must produce a distinct, unused channel name for '{logical_role}', got '{support_name}'"
+            ),
+        });
+    }
     let wav_name = format!("{}_fir.wav", support_name);
     let wav_path = output_dir.join(&wav_name);
     math_audio_iir_fir::save_fir_to_wav(&filter.taps, sample_rate as u32, &wav_path).map_err(
@@ -524,6 +563,14 @@ mod tests {
             .unwrap();
         assert!(target.spl[index_1khz].abs() < 0.1);
         assert!(target.spl[0] > target.spl[target.spl.len() - 1]);
+    }
+
+    #[test]
+    fn supporting_source_target_is_anchored_to_primary_spl() {
+        let primary = flat_curve(82.0);
+        let mut target = flat_curve(0.0);
+        anchor_supporting_source_target_to_primary(&mut target, &primary, 20.0, 20_000.0);
+        assert!(target.spl.iter().all(|level| (*level - 82.0).abs() < 1e-4));
     }
 
     #[test]

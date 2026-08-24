@@ -5,6 +5,12 @@ use std::process;
 
 /// Validate CLI arguments and exit with error message if validation fails
 pub fn validate_args(args: &Args) -> Result<(), String> {
+    if !args.smoothness_weight.is_finite() || args.smoothness_weight < 0.0 {
+        return Err(format!(
+            "Invalid smoothness weight: {}. Must be finite and non-negative",
+            args.smoothness_weight
+        ));
+    }
     // Check if strategy is valid when using DE algorithm
     if args.algo == "autoeq:de" || args.algo.contains("de") {
         use std::str::FromStr;

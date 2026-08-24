@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add strict measured Genelec cross-mode and redirected-bass metadata coverage.
+- Validate post-DSP input calibration separately from optimizer-owned route gain metadata.
 ## 0.4.53
 
 - Corrected convergence validation for minimax and variance-penalized

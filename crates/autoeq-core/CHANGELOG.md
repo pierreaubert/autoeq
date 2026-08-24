@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Invalidate cached minimum/excess-phase decomposition after applying a complex response.
 - Inherited the workspace policy forbidding unsafe Rust code.
 - Documented crate ownership and verification expectations.
 

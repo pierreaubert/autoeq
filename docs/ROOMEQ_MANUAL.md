@@ -452,13 +452,13 @@ Phase alignment optimizes the delay and polarity to maximize energy sum in the c
 | `min_freq` | number | 60 | Minimum optimization frequency (Hz) |
 | `max_freq` | number | 100 | Maximum optimization frequency (Hz) |
 | `optimize_polarity` | boolean | true | Test both normal and inverted polarity |
-| `max_delay_ms` | number | 30 | Maximum delay search range (ms) |
+| `max_delay_ms` | number | 3 | Maximum delay search range (ms); the default is refined by the phase-alignment scan and golden-section search |
 
 **Algorithm:**
-1. **Grid search**: Test delays from -max_delay to +max_delay (0.5ms steps)
+1. **Global scan**: Test delays from -max_delay to +max_delay with frequency-adaptive sampling (the default range is ±3 ms)
 2. **For each candidate**: Compute combined response `|H_sub + H_speaker * e^(-jωτ) * polarity|`
 3. **Integrate energy** in [min_freq, max_freq] band
-4. **Fine search**: Refine around best result with 0.1ms steps
+4. **Fine search**: Refine the best scan interval with a golden-section search
 5. **Output**: Optimal delay and polarity for maximum energy sum
 
 **Note:** Both subwoofer and speaker measurements must include phase data (export from REW with phase, or measure with calibrated mic).

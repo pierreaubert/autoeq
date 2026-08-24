@@ -3,15 +3,18 @@
 use autoeq_core::{AutoeqError, Curve, Result, response};
 use autoeq_optim::optim::OptimProgressCallback;
 use log::info;
+use math_audio_iir_fir::Biquad;
 use num_complex::Complex64;
 use roomeq_analysis::crossover_utils::{
     compute_lr24_crossover_responses, split_curve_at_frequency,
 };
 use roomeq_model::{CurveData, MixedModeConfig, OptimizerConfig};
 
+use crate::channel_result::subtract_target_tilt;
 use crate::channel_result::{
     ChannelProcessingResult, ConvolutionSidecarReference, GeneratedConvolutionSidecar,
 };
+use crate::channel_target::TargetContext;
 use crate::eq::{self, EqResources};
 use crate::output;
 
@@ -19,6 +22,8 @@ use crate::output;
 pub struct MixedCrossoverRequest<'a> {
     pub channel_name: &'a str,
     pub curve: &'a Curve,
+    pub target: &'a TargetContext,
+    pub preference_filters: &'a [Biquad],
     pub mixed_config: &'a MixedModeConfig,
     pub optimizer: &'a OptimizerConfig,
     pub eq_resources: &'a EqResources,
@@ -45,7 +50,8 @@ pub fn process_mixed_crossover(
         if fir_uses_low { "high" } else { "low" }
     );
 
-    let (low_curve, high_curve) = split_curve_at_frequency(request.curve, crossover_freq);
+    let optimization_curve = subtract_target_tilt(request.curve, request.target);
+    let (low_curve, high_curve) = split_curve_at_frequency(&optimization_curve, crossover_freq);
     let (fir_curve, iir_curve) = if fir_uses_low {
         (&low_curve, &high_curve)
     } else {
@@ -112,27 +118,43 @@ pub fn process_mixed_crossover(
     })?;
     let fir_bulk_delay_ms = fir_bulk_delay_ms(&fir_coefficients, request.sample_rate);
 
-    let mut channel = output::build_mixed_mode_crossover_chain(
+    let eq_filters = eq_result.filters;
+    let mut reported_filters = eq_filters.clone();
+    reported_filters.extend_from_slice(request.preference_filters);
+    let mut channel = output::build_mixed_mode_crossover_chain_with_post_merge_eq(
         request.channel_name,
         request.mixed_config,
-        &eq_result.filters,
+        &eq_filters,
+        request.preference_filters,
         request.sidecar_reference.filename(),
         fir_uses_low,
         fir_bulk_delay_ms,
         None,
     );
-    let final_curve = apply_crossover_response(
+    let neutral_output_curve = apply_crossover_response(
         request.curve,
-        &eq_result.filters,
+        &eq_filters,
+        &[],
         &fir_coefficients,
         crossover_freq,
         fir_uses_low,
         fir_bulk_delay_ms,
         request.sample_rate,
     );
+    let final_curve = apply_crossover_response(
+        request.curve,
+        &eq_filters,
+        request.preference_filters,
+        &fir_coefficients,
+        crossover_freq,
+        fir_uses_low,
+        fir_bulk_delay_ms,
+        request.sample_rate,
+    );
+    let neutral_final = subtract_target_tilt(&neutral_output_curve, request.target);
     let (norm_range, mean_final) =
-        roomeq_analysis::response_metrics::detect_passband_and_mean(&final_curve);
-    let normalized_final_spl = &final_curve.spl - mean_final;
+        roomeq_analysis::response_metrics::detect_passband_and_mean(&neutral_final);
+    let normalized_final_spl = &neutral_final.spl - mean_final;
     let post_score = autoeq_optim::loss::flat_loss(
         &final_curve.freq,
         &normalized_final_spl,
@@ -147,7 +169,8 @@ pub fn process_mixed_crossover(
     let display_initial = output::extend_curve_to_full_range(request.curve);
     let display_final = apply_crossover_response(
         &display_initial,
-        &eq_result.filters,
+        &eq_filters,
+        request.preference_filters,
         &fir_coefficients,
         crossover_freq,
         fir_uses_low,
@@ -168,7 +191,7 @@ pub fn process_mixed_crossover(
         post_score,
         raw_pre_eq_curve: request.curve.clone(),
         raw_post_eq_curve: final_curve,
-        filters: eq_result.filters,
+        filters: reported_filters,
         mean_spl: request.mean_spl,
         arrival_time_ms: request.arrival_time_ms,
         fir_coeffs: Some(fir_coefficients),
@@ -180,9 +203,11 @@ pub fn process_mixed_crossover(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_crossover_response(
     curve: &Curve,
     eq_filters: &[math_audio_iir_fir::Biquad],
+    post_merge_filters: &[math_audio_iir_fir::Biquad],
     fir_coefficients: &[f64],
     crossover_freq: f64,
     fir_uses_low: bool,
@@ -190,6 +215,8 @@ fn apply_crossover_response(
     sample_rate: f64,
 ) -> Curve {
     let iir_response = response::compute_peq_complex_response(eq_filters, &curve.freq, sample_rate);
+    let post_merge_response =
+        response::compute_peq_complex_response(post_merge_filters, &curve.freq, sample_rate);
     let fir_response =
         response::compute_fir_complex_response(fir_coefficients, &curve.freq, sample_rate);
     let (lowpass, highpass) =
@@ -210,6 +237,11 @@ fn apply_crossover_response(
                 lowpass * iir * iir_delay + highpass * fir
             }
         })
+        .collect::<Vec<_>>();
+    let combined = combined
+        .into_iter()
+        .zip(post_merge_response)
+        .map(|(mixed, post_merge)| mixed * post_merge)
         .collect::<Vec<_>>();
     response::apply_complex_response(curve, &combined)
 }
@@ -264,9 +296,19 @@ mod tests {
             }),
             ..OptimizerConfig::default()
         };
+        let target = TargetContext {
+            target_tilt_curve: None,
+            min_freq: 100.0,
+            max_freq: 1_600.0,
+            pre_score: 1.0,
+            mean_spl: 80.0,
+            cea2034_active: false,
+        };
         let result = process_mixed_crossover(MixedCrossoverRequest {
             channel_name: "left",
             curve: &curve,
+            target: &target,
+            preference_filters: &[],
             mixed_config: &mixed_config,
             optimizer: &optimizer,
             eq_resources: &EqResources::default(),
@@ -308,6 +350,58 @@ mod tests {
             result.channel.plugins.last().unwrap().plugin_type,
             "band_merge"
         );
+    }
+
+    #[test]
+    fn mixed_crossover_applies_preference_eq_after_full_band_merge() {
+        let curve = curve();
+        let preference = [Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Lowshelf,
+            250.0,
+            48_000.0,
+            0.707,
+            4.0,
+        )];
+        let neutral =
+            apply_crossover_response(&curve, &[], &[], &[1.0], 500.0, true, 0.0, 48_000.0);
+        let voiced =
+            apply_crossover_response(&curve, &[], &preference, &[1.0], 500.0, true, 0.0, 48_000.0);
+        let preference_response =
+            response::compute_peq_complex_response(&preference, &curve.freq, 48_000.0);
+        for ((voiced_level, neutral_level), expected) in voiced
+            .spl
+            .iter()
+            .zip(neutral.spl.iter())
+            .zip(preference_response.iter())
+        {
+            let expected_db = 20.0 * expected.norm().max(1e-12).log10();
+            assert!((voiced_level - neutral_level - expected_db).abs() < 1e-9);
+        }
+
+        let chain = output::build_mixed_mode_crossover_chain_with_post_merge_eq(
+            "left",
+            &MixedModeConfig {
+                crossover_freq: 500.0,
+                ..MixedModeConfig::default()
+            },
+            &[],
+            &preference,
+            "left_fir.wav",
+            true,
+            0.0,
+            None,
+        );
+        let merge_index = chain
+            .plugins
+            .iter()
+            .position(|plugin| plugin.plugin_type == "band_merge")
+            .expect("band merge");
+        let preference_index = chain
+            .plugins
+            .iter()
+            .rposition(|plugin| plugin.plugin_type == "eq")
+            .expect("preference EQ");
+        assert!(preference_index > merge_index);
     }
 
     #[test]

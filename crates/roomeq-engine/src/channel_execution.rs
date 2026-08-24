@@ -10,7 +10,7 @@ use crate::channel_fir::{FirChannelMode, FirChannelRequest, process_fir_channel}
 use crate::channel_iir::{IirChannelMode, IirChannelRequest, process_iir_channel};
 use crate::channel_preprocessing::{PreprocessedFeatures, preprocess_channel};
 use crate::channel_result::{ChannelProcessingResult, ConvolutionSidecarReference};
-use crate::channel_target::{TargetContext, build_target_context};
+use crate::channel_target::{TargetContext, build_target_context_with_prepared_target};
 use crate::eq::EqResources;
 use crate::mixed_crossover::{MixedCrossoverRequest, process_mixed_crossover};
 
@@ -48,7 +48,13 @@ pub fn prepare_channel_execution(
     );
     warn_if_optimizer_bounds_exceed_data(channel_name, curve, &room_config.optimizer);
 
-    let mut target = build_target_context(channel_name, room_config, curve, shared_mean_spl);
+    let mut target = build_target_context_with_prepared_target(
+        channel_name,
+        room_config,
+        curve,
+        shared_mean_spl,
+        prepared.eq_resources().target.as_ref(),
+    )?;
     let preprocessed = preprocess_channel(
         channel_name,
         prepared,
@@ -62,7 +68,7 @@ pub fn prepare_channel_execution(
         room_config,
         curve,
         &preprocessed.curve_for_optim,
-        target.min_freq,
+        preprocessed.score_min_freq,
         target.max_freq,
         target.target_tilt_curve.as_ref(),
         preprocessed.broadband_enabled,
@@ -103,9 +109,16 @@ pub fn execute_prepared_channel(
         ProcessingMode::Hybrid => {
             let sidecar_reference = required_sidecar(sidecar_reference, channel_name)?;
             if let Some(mixed_config) = &room_config.optimizer.mixed_config {
+                let preference_filters = crate::channel_preference::build_preference_filters(
+                    channel_name,
+                    room_config,
+                    sample_rate,
+                );
                 process_mixed_crossover(MixedCrossoverRequest {
                     channel_name,
                     curve: &execution.preprocessed.curve_for_optim,
+                    target: &execution.target,
+                    preference_filters: &preference_filters,
                     mixed_config,
                     optimizer: &room_config.optimizer,
                     eq_resources,

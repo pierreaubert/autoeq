@@ -3,10 +3,19 @@
 use autoeq_core::{AutoeqError, Curve, Result};
 use autoeq_optim::optim::OptimProgressCallback;
 use log::info;
-use roomeq_model::{MultiMeasurementStrategy, OptimizerConfig};
+#[cfg(test)]
+use roomeq_model::MultiMeasurementStrategy;
+use roomeq_model::OptimizerConfig;
 
 use crate::PreparedChannelInput;
 use crate::eq::{self, EqOptimizationResult, EqResources};
+
+fn should_optimize_multiple_measurements(
+    is_multi_measurement_source: bool,
+    optimizer_config: &OptimizerConfig,
+) -> bool {
+    is_multi_measurement_source && optimizer_config.multi_measurement.is_some()
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn optimize_maybe_multi(
@@ -20,11 +29,10 @@ pub(crate) fn optimize_maybe_multi(
     target_tilt_curve: Option<&Curve>,
 ) -> Result<EqOptimizationResult> {
     let measurements = prepared.measurements();
-    let use_multi = measurements.is_multi_measurement_source()
-        && optimizer_config
-            .multi_measurement
-            .as_ref()
-            .is_some_and(|config| config.strategy != MultiMeasurementStrategy::Average);
+    let use_multi = should_optimize_multiple_measurements(
+        measurements.is_multi_measurement_source(),
+        optimizer_config,
+    );
 
     if use_multi {
         let multi_config = optimizer_config
@@ -166,6 +174,17 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    #[test]
+    fn average_strategy_uses_multi_measurement_dispatch() {
+        let mut optimizer = optimizer();
+        optimizer.multi_measurement = Some(MultiMeasurementConfig {
+            strategy: MultiMeasurementStrategy::Average,
+            ..MultiMeasurementConfig::default()
+        });
+        assert!(should_optimize_multiple_measurements(true, &optimizer));
+        assert!(!should_optimize_multiple_measurements(false, &optimizer));
     }
 
     #[test]

@@ -103,7 +103,7 @@ pub fn preprocess_channel(
         room_config,
         &curve,
         mean_spl,
-        target.min_freq,
+        score_min_freq,
         target.max_freq,
         sample_rate,
     );
@@ -173,13 +173,7 @@ fn apply_cea2034_speaker_correction(
         return unchanged_cea2034(curve);
     };
     let schroeder_freq = config.min_freq.unwrap_or_else(|| {
-        room_config
-            .optimizer
-            .schroeder_split
-            .as_ref()
-            .filter(|split| split.enabled)
-            .map(|split| split.schroeder_freq)
-            .unwrap_or(300.0)
+        roomeq_model::auto_tune::resolved_schroeder_hz(&room_config.optimizer).unwrap_or(300.0)
     });
 
     match cea2034::compute_speaker_correction_detailed(
@@ -270,6 +264,7 @@ pub fn apply_broadband_precorrection(
     };
     if let Some(f3) = detected_f3
         && f3 < spectral_align::LOWSHELF_FREQ
+        && alignment.lowshelf_gain_db > 0.0
     {
         info!(
             "  Broadband: suppressing low-shelf (F3={:.1}Hz < shelf={:.1}Hz)",
@@ -299,7 +294,7 @@ pub fn apply_broadband_precorrection(
     }
 
     let mut filters = Vec::new();
-    if alignment.lowshelf_gain_db.abs() > 1e-3 {
+    if alignment.lowshelf_gain_db.abs() >= spectral_align::MIN_CORRECTION_DB {
         filters.push(Biquad::new(
             BiquadFilterType::Lowshelf,
             spectral_align::LOWSHELF_FREQ,
@@ -308,7 +303,7 @@ pub fn apply_broadband_precorrection(
             alignment.lowshelf_gain_db,
         ));
     }
-    if alignment.highshelf_gain_db.abs() > 1e-3 {
+    if alignment.highshelf_gain_db.abs() >= spectral_align::MIN_CORRECTION_DB {
         filters.push(Biquad::new(
             BiquadFilterType::Highshelf,
             spectral_align::HIGHSHELF_FREQ,
@@ -326,20 +321,42 @@ pub fn apply_broadband_precorrection(
             response::compute_peq_complex_response(&filters, &curve.freq, sample_rate);
         response::apply_complex_response(&shifted, &filter_response)
     };
-    let pre_score =
+    let score_pre =
         autoeq_optim::loss::flat_loss(&curve.freq, &(&curve.spl - &target.spl), min_freq, max_freq);
-    let post_score = autoeq_optim::loss::flat_loss(
+    let score_post = autoeq_optim::loss::flat_loss(
         &corrected.freq,
         &(&corrected.spl - &target.spl),
         min_freq,
         max_freq,
     );
-    if broadband_correction_rejected(pre_score, post_score) {
+    let fit_max_freq = curve
+        .freq
+        .iter()
+        .copied()
+        .filter(|frequency| frequency.is_finite())
+        .reduce(f64::max)
+        .unwrap_or(20_000.0)
+        .min(20_000.0);
+    let fit_pre = autoeq_optim::loss::flat_loss(
+        &curve.freq,
+        &(&curve.spl - &target.spl),
+        broadband_min_freq,
+        fit_max_freq,
+    );
+    let fit_post = autoeq_optim::loss::flat_loss(
+        &corrected.freq,
+        &(&corrected.spl - &target.spl),
+        broadband_min_freq,
+        fit_max_freq,
+    );
+    if broadband_correction_rejected(score_pre, score_post)
+        || broadband_correction_rejected(fit_pre, fit_post)
+    {
         warn!(
             "  Broadband correction rejected: deviation from target {:.4} -> {:.4} (worse by {:.0}%). Shelf fit likely confused by room modes or HPF rolloff.",
-            pre_score,
-            post_score,
-            (post_score / pre_score - 1.0) * 100.0,
+            score_pre,
+            score_post,
+            (score_post / score_pre - 1.0) * 100.0,
         );
         unchanged_broadband(curve)
     } else {

@@ -1,6 +1,6 @@
 [package]
 name = "autoeq-cli"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2024"
 description = "AutoEQ command-line parsing and user-facing orchestration"
 license = "GPL-3.0-or-later"

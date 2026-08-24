@@ -99,7 +99,10 @@ pub fn optimize_dba_detailed(
         },
     ];
 
-    let drivers_data = DriversLossData::new(driver_measurements, CrossoverType::None);
+    // DBA's driver order is semantic (front first, rear second).  The
+    // sorting constructor reorders by frequency and can silently swap these
+    // two arrays when their measurement ranges differ.
+    let drivers_data = DriversLossData::new_ordered(driver_measurements, CrossoverType::None);
 
     // 4. Custom optimization
     // We can't use standard optimize_multisub because it optimizes ALL gains/delays.
@@ -126,7 +129,9 @@ pub fn optimize_dba_detailed(
     // Index 3: Rear Delay -> 0 to 100 ms (approx 34m room)
 
     // DBA rear array is for cancellation — clamp rear gain to 0 dB max
-    let min_gain = config.min_db.min(-30.0);
+    // Honour the configured attenuation floor.  Only the upper bound is
+    // constrained by the DBA polarity convention (rear gain must not boost).
+    let min_gain = config.min_db;
     let max_gain = 0.0;
 
     let lower_bounds = vec![-0.01, min_gain, 0.0, 0.0];

@@ -9,6 +9,9 @@ use autoeq_optim::loss::LossType;
 use autoeq_optim::optim::OptimizerBackend;
 use autoeq_optim::optim::setup::setup_objective_data;
 use math_audio_iir_fir::Biquad;
+use roomeq_analysis::frequency_grid::{
+    DEFAULT_ROOM_EQ_FREQUENCY_SAMPLES, clipped_room_eq_frequency_grid, same_frequency_grid,
+};
 use roomeq_analysis::impulse_analysis;
 use roomeq_model::OptimizerConfig;
 use std::collections::HashMap;
@@ -25,6 +28,16 @@ pub(in super::super) fn prepare_single_channel_eq(
     resources: Option<&EqResources>,
     sample_rate: f64,
 ) -> Result<PreparedSingleChannelEq, Box<dyn Error>> {
+    // Public optimizer callers may provide the same response on arbitrary
+    // linear, logarithmic, or warped grids. Evaluate every single-channel
+    // objective on RoomEQ's canonical hybrid grid so sample density does not
+    // change the fitted filter. The caller's original curve remains untouched
+    // for reporting and display.
+    let canonical_curve = clipped_room_eq_frequency_grid(curve, DEFAULT_ROOM_EQ_FREQUENCY_SAMPLES)
+        .filter(|frequency_grid| !same_frequency_grid(&curve.freq, frequency_grid))
+        .map(|frequency_grid| autoeq_core::interpolate_log_space(&frequency_grid, curve));
+    let curve = canonical_curve.as_ref().unwrap_or(curve);
+
     prepare_single_channel_eq_with_spin(curve, config, resources, sample_rate, None)
 }
 
@@ -77,7 +90,7 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
         .fold((0.0, 0usize), |(sum, count), (_, level)| {
             (sum + *level, count + 1)
         });
-    let mean_spl = (count > 0).then_some(sum / count as f64).unwrap_or(0.0);
+    let mean_spl = if count > 0 { sum / count as f64 } else { 0.0 };
     let normalized_curve_unsmoothed = Curve {
         freq: curve.freq.clone(),
         spl: &curve.spl - mean_spl,
@@ -444,6 +457,12 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
     {
         cfg.schroeder_hz = Some(schroeder_hz);
     }
+    if let Some(schroeder_hz) = schroeder_hz
+        && let Some(deadband) = objective_data.audibility_deadband.as_mut()
+    {
+        deadband.schroeder_hz = schroeder_hz;
+    }
+    objective_data.objective = Some(objective_data.build_objective());
 
     Ok(PreparedSingleChannelEq {
         objective_data,

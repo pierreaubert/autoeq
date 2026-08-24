@@ -37,8 +37,12 @@ pub(super) fn mso_objective_breakdown(
     let seat_variance = variance_from_responses(responses);
     let average_flatness = average_flatness_from_responses(responses);
     let primary_seat = config.primary_seat.min(responses.len().saturating_sub(1));
-    let (primary_flatness, primary_constraint) =
-        primary_flatness_and_constraint(responses, primary_seat, config.max_deviation_db);
+    let (primary_flatness, primary_constraint) = primary_flatness_and_constraint(
+        responses,
+        primary_seat,
+        config.max_deviation_db,
+        Some(&context.seat_weights),
+    );
     let modal_projection = complex_responses
         .zip(modal_basis)
         .map(|(complex, basis)| modal_projection_loss(complex, basis))

@@ -782,6 +782,11 @@ pub fn process_multisub_group_with_callback(
         &room_config.optimizer,
         eq::MultiEqAutoOptimizerContext::sub_channel(),
     );
+    let pre_score = flat_loss_score(
+        &combined_curve,
+        room_config.optimizer.min_freq,
+        room_config.optimizer.max_freq,
+    );
     let eq_result = match callback {
         Some(callback) => eq::optimize_channel_eq_with_callback_detailed(
             &combined_curve,
@@ -871,7 +876,7 @@ pub fn process_multisub_group_with_callback(
 
     Ok((
         chain,
-        result.pre_objective,
+        pre_score,
         post_score,
         primary_curve.unwrap_or_else(|| combined_curve.clone()),
         final_primary_curve.unwrap_or(final_curve),
@@ -961,15 +966,28 @@ fn process_multisub_group_multiseat(
     let corrected_measurements =
         apply_per_sub_filters(&seat_measurements, &per_sub_filters, sample_rate);
     let measurements = MultiSeatMeasurements::new(corrected_measurements)?;
-    let mso_result = multiseat::optimize_multiseat(
-        &measurements,
-        multi_seat_config,
-        (
-            room_config.optimizer.min_freq,
-            room_config.optimizer.max_freq,
-        ),
-        sample_rate,
-    )?;
+    let mso_result =
+        if multi_seat_config.strategy == roomeq_model::MultiSeatStrategy::ContinuousArea {
+            multiseat::optimize_multiseat_continuous_area(
+                &measurements,
+                multi_seat_config,
+                (
+                    room_config.optimizer.min_freq,
+                    room_config.optimizer.max_freq,
+                ),
+                sample_rate,
+            )?
+        } else {
+            multiseat::optimize_multiseat(
+                &measurements,
+                multi_seat_config,
+                (
+                    room_config.optimizer.min_freq,
+                    room_config.optimizer.max_freq,
+                ),
+                sample_rate,
+            )?
+        };
     info!(
         "  Multi-seat multi-sub optimization: gains={:?}, delays={:?} ms, polarities={:?}",
         mso_result.gains, mso_result.delays, mso_result.polarities
@@ -1187,8 +1205,21 @@ pub fn process_dba_with_callback(
     .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!("EQ optimization failed for DBA sum: {}", e),
     })?;
-    let eq_filters = eq_result.filters;
-    let post_score = eq_result.loss;
+    let pre_score = flat_loss_score(
+        &combined_curve,
+        room_config.optimizer.min_freq,
+        room_config.optimizer.max_freq,
+    );
+    let mut eq_filters = eq_result.filters;
+    let mut post_score = eq_result.loss;
+    if eq_score_regressed(pre_score, post_score) {
+        warn!(
+            " Global EQ rejected DBA channel {}: flat loss {:.6} -> {:.6}",
+            channel_name, pre_score, post_score
+        );
+        eq_filters.clear();
+        post_score = pre_score;
+    }
     optimizer_evidence.extend(eq_result.optimizer_evidence);
 
     info!(
@@ -1256,7 +1287,7 @@ pub fn process_dba_with_callback(
 
     Ok((
         chain,
-        result.pre_objective,
+        pre_score,
         post_score,
         combined_curve.clone(),
         final_curve,

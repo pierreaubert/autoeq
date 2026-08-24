@@ -104,6 +104,12 @@ fn apply_gain_to_main_chain(chain: &mut ChannelDspChain, gain_db: f64) {
     }
 }
 
+fn stage_main_correction_plugins(plugins: Vec<PluginConfigWrapper>) -> Vec<PluginConfigWrapper> {
+    // Redirected bass is tapped by the route matrix before this stage; only
+    // the main self-route receives the main-channel correction.
+    mark_plugins_stage(plugins, "post_route")
+}
+
 /// Align every logical input at the microphone after the complete routed DSP
 /// graph. Trims are down-only so calibration cannot consume headroom.
 #[allow(clippy::too_many_arguments)]
@@ -208,17 +214,6 @@ fn calibrate_post_dsp_input_levels(
             apply_gain_to_main_chain(chain, *trims.get(role).unwrap_or(&0.0));
         }
     }
-    for route in &mut graph.routes {
-        if matches!(
-            route.route_kind.as_str(),
-            "redirected_bass_lowpass_to_sub" | "lfe_lowpass_to_sub"
-        ) {
-            let trim = *trims.get(&route.source_channel).unwrap_or(&0.0);
-            route.gain_db += trim;
-            route.gain_linear = 10.0_f64.powf(route.gain_db / 20.0);
-            route.matrix_gain = route.gain_linear;
-        }
-    }
     // Only the configured correlated-bus headroom model may aggregate
     // independent logical inputs. Preserve all source relationships with one
     // common down-only safety trim if that model predicts overload.
@@ -239,16 +234,6 @@ fn calibrate_post_dsp_input_levels(
             }
             for trim_db in trims.values_mut() {
                 *trim_db -= safety_trim_db;
-            }
-            for route in &mut graph.routes {
-                if matches!(
-                    route.route_kind.as_str(),
-                    "redirected_bass_lowpass_to_sub" | "lfe_lowpass_to_sub"
-                ) {
-                    route.gain_db -= safety_trim_db;
-                    route.gain_linear = 10.0_f64.powf(route.gain_db / 20.0);
-                    route.matrix_gain = route.gain_linear;
-                }
             }
             graph.advisories.push(format!(
                 "common_input_headroom_safety_trim_db:{safety_trim_db:.3}"
@@ -808,7 +793,7 @@ fn optimize_home_cinema_with_sub(
         if let Some(advisories) = multiseat_rejection {
             multi_seat_rejections.insert(role.clone(), advisories);
         }
-        pre_eq_plugins.insert(role.clone(), mark_plugins_stage(chain.plugins, "pre_route"));
+        pre_eq_plugins.insert(role.clone(), stage_main_correction_plugins(chain.plugins));
         pre_eq_initial_curves.insert(role.clone(), ch_result.initial_curve);
         optimizer_evidence_by_channel.insert(role.clone(), ch_result.optimizer_evidence);
         linearized_curves.insert(role, ch_result.final_curve);
@@ -2020,7 +2005,7 @@ fn optimize_home_cinema_with_sub(
 
 #[cfg(test)]
 mod post_dsp_level_tests {
-    use super::{average_spl, calibrate_post_dsp_input_levels};
+    use super::{average_spl, calibrate_post_dsp_input_levels, stage_main_correction_plugins};
     use roomeq_engine::Curve;
     use roomeq_engine::bass_management::predict_bass_source_curve_from_routes;
     use roomeq_engine::topology::complex_sum_mains;
@@ -2079,6 +2064,14 @@ mod post_dsp_level_tests {
             delay_ms: 0.0,
             polarity_inverted: false,
         }
+    }
+
+    #[test]
+    fn main_correction_is_staged_after_route_matrix() {
+        let plugins =
+            stage_main_correction_plugins(vec![roomeq_engine::output::create_gain_plugin(1.0)]);
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].parameters["room_eq_stage"], "post_route");
     }
 
     #[test]

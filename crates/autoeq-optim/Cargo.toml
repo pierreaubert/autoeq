@@ -1,6 +1,6 @@
 [package]
 name = "autoeq-optim"
-version = "0.5.58"
+version = "0.5.59"
 edition = "2024"
 description = "AutoEQ objectives, constraints, and optimizer backends"
 license = "GPL-3.0-or-later"

@@ -12,7 +12,7 @@ pub fn prepared_fir_target_curve(
     config: &OptimizerConfig,
     resources: &EqResources,
 ) -> Curve {
-    match resources.target.as_ref() {
+    let mut target = match resources.target.as_ref() {
         Some(PreparedEqTarget::Curve(target)) => {
             autoeq_core::normalize_and_interpolate_response(&measurement.freq, target)
         }
@@ -38,7 +38,21 @@ pub fn prepared_fir_target_curve(
                 ..Curve::default()
             }
         }
+    };
+    let measurement_mean = roomeq_analysis::response_metrics::mean_response_in_range(
+        measurement,
+        config.min_freq,
+        config.max_freq,
+    );
+    let target_mean = roomeq_analysis::response_metrics::mean_response_in_range(
+        &target,
+        config.min_freq,
+        config.max_freq,
+    );
+    if measurement_mean.is_finite() && target_mean.is_finite() {
+        target.spl += measurement_mean - target_mean;
     }
+    target
 }
 
 /// Generate FIR coefficients using only workflow-prepared in-memory resources.

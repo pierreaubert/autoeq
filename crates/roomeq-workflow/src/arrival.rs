@@ -7,7 +7,7 @@ use log::debug;
 use math_audio_dsp::signals::{gen_dirac, gen_mls};
 use roomeq_engine::eq::{EqResources, PreparedImpulseResponse};
 use roomeq_engine::{PreparedCea2034, PreparedChannelInput};
-use roomeq_model::RoomConfig;
+use roomeq_model::{RoomConfig, TargetCurveConfig, TargetShape};
 
 use crate::wav::decode_first_channel;
 
@@ -220,6 +220,15 @@ pub fn prepare_channel_input_with_frequency_samples(
         samples: decoded.samples,
         sample_rate: f64::from(decoded.sample_rate),
     });
+    let target_response_resource = room_config
+        .optimizer
+        .target_response
+        .as_ref()
+        .filter(|target| target.shape == TargetShape::File)
+        .and_then(|target| target.curve_path.as_ref())
+        .cloned()
+        .map(TargetCurveConfig::Path);
+    let target = crate::prepare_eq_target(target_response_resource.as_ref())?;
 
     let speaker_name = room_config
         .optimizer
@@ -242,7 +251,7 @@ pub fn prepare_channel_input_with_frequency_samples(
         arrival_time_ms,
         PreparedCea2034::new(speaker_name, cea2034_data),
         EqResources {
-            target: None,
+            target,
             impulse_response,
         },
     ))
@@ -443,5 +452,64 @@ mod tests {
         let input = prepare_channel_input("left", &source, &config, 48_000.0, None).unwrap();
         assert_eq!(input.cea2034().speaker_name(), Some("Prepared speaker"));
         assert!(input.cea2034().data().is_none());
+    }
+
+    #[test]
+    fn prepares_file_target_response_as_channel_resource() {
+        let directory = tempfile::TempDir::new().expect("target directory");
+        let target_path = directory.path().join("target.csv");
+        std::fs::write(&target_path, "frequency,spl\n100,1.5\n1000,-2.0\n").expect("write target");
+        let config = RoomConfig {
+            optimizer: roomeq_model::OptimizerConfig {
+                target_response: Some(roomeq_model::TargetResponseConfig {
+                    shape: TargetShape::File,
+                    curve_path: Some(target_path),
+                    ..roomeq_model::TargetResponseConfig::default()
+                }),
+                ..roomeq_model::OptimizerConfig::default()
+            },
+            ..RoomConfig::default()
+        };
+
+        let input = prepare_channel_input(
+            "left",
+            &MeasurementSource::InMemory(curve()),
+            &config,
+            48_000.0,
+            None,
+        )
+        .expect("prepare file target");
+
+        let Some(roomeq_engine::eq::PreparedEqTarget::Curve(target)) =
+            input.eq_resources().target.as_ref()
+        else {
+            panic!("file target was not prepared as a curve");
+        };
+        assert_eq!(target.spl.to_vec(), vec![1.5, -2.0]);
+    }
+
+    #[test]
+    fn missing_file_target_response_is_an_error() {
+        let config = RoomConfig {
+            optimizer: roomeq_model::OptimizerConfig {
+                target_response: Some(roomeq_model::TargetResponseConfig {
+                    shape: TargetShape::File,
+                    curve_path: Some("/missing/roomeq-target.csv".into()),
+                    ..roomeq_model::TargetResponseConfig::default()
+                }),
+                ..roomeq_model::OptimizerConfig::default()
+            },
+            ..RoomConfig::default()
+        };
+
+        let result = prepare_channel_input(
+            "left",
+            &MeasurementSource::InMemory(curve()),
+            &config,
+            48_000.0,
+            None,
+        );
+
+        assert!(result.is_err());
     }
 }

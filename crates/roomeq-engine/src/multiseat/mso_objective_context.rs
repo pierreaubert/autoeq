@@ -16,6 +16,7 @@ pub(super) struct MsoObjectiveContext {
     pub(super) baseline_peak_spl: Vec<f64>,
     pub(super) baseline_mean_level_db: f64,
     pub(super) extension_indices: Vec<usize>,
+    pub(super) seat_weights: Vec<f64>,
 }
 
 impl MsoObjectiveContext {
@@ -37,6 +38,7 @@ impl MsoObjectiveContext {
             baseline_peak_spl,
             baseline_mean_level_db,
             extension_indices,
+            seat_weights: vec![1.0 / responses.len().max(1) as f64; responses.len()],
         }
     }
 }

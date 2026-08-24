@@ -115,10 +115,40 @@ pub fn read_curve_from_csv(path: &PathBuf) -> Result<Curve, Box<dyn Error>> {
             }
         }
     };
+    sort_curve_by_frequency(&mut curve)?;
     // GD-1d: populate min-phase / excess-phase cache at the disk-load boundary.
     // No-op when phase is absent or arrays disagree in length.
     curve.decompose_into_cache();
     Ok(curve)
+}
+
+fn sort_curve_by_frequency(curve: &mut crate::Curve) -> Result<(), Box<dyn Error>> {
+    if curve.freq.iter().any(|frequency| !frequency.is_finite()) {
+        return Err("CSV frequency values must be finite".into());
+    }
+    let mut order: Vec<usize> = (0..curve.freq.len()).collect();
+    order.sort_by(|&left, &right| curve.freq[left].total_cmp(&curve.freq[right]));
+    if order
+        .windows(2)
+        .any(|pair| curve.freq[pair[0]] == curve.freq[pair[1]])
+    {
+        return Err("CSV frequency values must be strictly monotonic".into());
+    }
+    let reorder = |values: &ndarray::Array1<f64>| {
+        ndarray::Array1::from_iter(order.iter().map(|&index| values[index]))
+    };
+    curve.freq = reorder(&curve.freq);
+    curve.spl = reorder(&curve.spl);
+    if let Some(values) = curve.phase.take() {
+        curve.phase = (values.len() == order.len()).then(|| reorder(&values));
+    }
+    if let Some(values) = curve.coherence.take() {
+        curve.coherence = (values.len() == order.len()).then(|| reorder(&values));
+    }
+    if let Some(values) = curve.noise_floor_db.take() {
+        curve.noise_floor_db = (values.len() == order.len()).then(|| reorder(&values));
+    }
+    Ok(())
 }
 
 /// Read a CSV into a tracked measurement record. The curve-only
@@ -445,6 +475,39 @@ frequency,spl,noise_floor_db
         assert_eq!(result.0.len(), 3);
         assert_eq!(result.1.len(), 3);
         assert!(result.2.is_none());
+    }
+
+    #[test]
+    fn descending_frequency_rows_are_sorted_with_metadata() {
+        let csv = "frequency,spl,phase,coherence,noise_floor_db\n\
+                   1000,3,30,0.9,-40\n\
+                   100,2,20,0.8,-50\n\
+                   10,1,10,0.7,-60\n";
+        let file = write_tmp(csv);
+        let curve = read_curve_from_csv(&file.path().to_path_buf()).expect("sorted CSV");
+
+        assert_eq!(curve.freq.to_vec(), vec![10.0, 100.0, 1_000.0]);
+        assert_eq!(curve.spl.to_vec(), vec![1.0, 2.0, 3.0]);
+        assert_eq!(
+            curve.phase.as_ref().unwrap().to_vec(),
+            vec![10.0, 20.0, 30.0]
+        );
+        assert_eq!(
+            curve.coherence.as_ref().unwrap().to_vec(),
+            vec![0.7, 0.8, 0.9]
+        );
+        assert_eq!(
+            curve.noise_floor_db.as_ref().unwrap().to_vec(),
+            vec![-60.0, -50.0, -40.0]
+        );
+    }
+
+    #[test]
+    fn duplicate_frequency_rows_are_rejected() {
+        let file = write_tmp("frequency,spl\n100,1\n100,2\n");
+        let error = read_curve_from_csv(&file.path().to_path_buf())
+            .expect_err("duplicate frequencies must fail");
+        assert!(error.to_string().contains("strictly monotonic"));
     }
 
     #[test]

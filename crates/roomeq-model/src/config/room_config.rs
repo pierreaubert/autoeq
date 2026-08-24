@@ -166,6 +166,12 @@ impl RoomConfig {
         {
             *path = base_dir.join(&*path);
         }
+        if let Some(target_response) = self.optimizer.target_response.as_mut()
+            && let Some(path) = target_response.curve_path.as_mut()
+            && path.is_relative()
+        {
+            *path = base_dir.join(&*path);
+        }
         if let Some(ctc) = &mut self.ctc {
             ctc.resolve_paths(&base_dir);
         }

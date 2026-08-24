@@ -10,6 +10,23 @@ pub(super) fn mean_response_curve(responses: &[Vec<f64>]) -> Vec<f64> {
         .collect()
 }
 
+pub(super) fn weighted_mean_response_curve(responses: &[Vec<f64>], weights: &[f64]) -> Vec<f64> {
+    let total_weight: f64 = weights.iter().copied().sum();
+    if total_weight <= f64::EPSILON {
+        return mean_response_curve(responses);
+    }
+    (0..responses[0].len())
+        .map(|frequency| {
+            responses
+                .iter()
+                .zip(weights.iter().copied())
+                .map(|(seat, weight)| weight * seat[frequency])
+                .sum::<f64>()
+                / total_weight
+        })
+        .collect()
+}
+
 pub(super) fn mean_level(spl: &[f64]) -> f64 {
     spl.iter().sum::<f64>() / spl.len().max(1) as f64
 }

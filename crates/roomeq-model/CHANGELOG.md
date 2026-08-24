@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Resolve file-backed target paths and validate required target files, excursion bounds, CTC robustness, continuous-area priors, height references, supporting-source names, and duplicate subwoofer mappings.
 - Leave filesystem-backed acoustic validation pending for the workflow adapter
   and include inline CSV fallbacks in resolved-resource validation.
 - Inherited the workspace policy forbidding unsafe Rust code.

@@ -178,7 +178,7 @@ pub fn compute_inter_channel_timbre_matching_with_threshold(
                 (None, after)
             }
         } else {
-            (None, timbre_spread_before_db)
+            (None, None)
         };
         let status = if alignment.is_some() {
             TimbreMatchingChannelStatus::Applied

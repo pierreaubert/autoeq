@@ -47,7 +47,13 @@ pub fn predict_bass_source_curve_from_routes(
 
         for idx in 0..sub_curve.freq.len() {
             let delay_phase = -360.0 * sub_curve.freq[idx] * route.delay_ms / 1000.0;
-            let magnitude = 10.0_f64.powf((sub_curve.spl[idx] + route.gain_db) / 20.0);
+            let input_trim_db = graph
+                .input_trim_db
+                .get(&route.source_channel)
+                .copied()
+                .unwrap_or(0.0);
+            let magnitude =
+                10.0_f64.powf((sub_curve.spl[idx] + route.gain_db + input_trim_db) / 20.0);
             let phase_rad = (phase[idx] + delay_phase + polarity_phase).to_radians();
             complex_sum[idx] += Complex::from_polar(magnitude, phase_rad) * response[idx];
         }
@@ -105,7 +111,12 @@ pub fn predict_bass_output_curve_from_routes(
         for idx in 0..sub_curve.freq.len() {
             let freq_hz = sub_curve.freq[idx];
             let delay_phase = -360.0 * freq_hz * route.delay_ms / 1000.0;
-            let mag = 10.0_f64.powf((sub_curve.spl[idx] + route.gain_db) / 20.0);
+            let input_trim_db = graph
+                .input_trim_db
+                .get(&route.source_channel)
+                .copied()
+                .unwrap_or(0.0);
+            let mag = 10.0_f64.powf((sub_curve.spl[idx] + route.gain_db + input_trim_db) / 20.0);
             let phase_rad = (phase[idx] + delay_phase + polarity_phase).to_radians();
             complex_sum[idx] += Complex::from_polar(mag, phase_rad) * response[idx];
         }
@@ -177,7 +188,12 @@ pub fn predict_bass_bus_curve_from_routes(
         for idx in 0..reference_curve.freq.len() {
             let freq_hz = reference_curve.freq[idx];
             let delay_phase = -360.0 * freq_hz * route.delay_ms / 1000.0;
-            let mag = 10.0_f64.powf((curve.spl[idx] + route.gain_db) / 20.0);
+            let input_trim_db = graph
+                .input_trim_db
+                .get(&route.source_channel)
+                .copied()
+                .unwrap_or(0.0);
+            let mag = 10.0_f64.powf((curve.spl[idx] + route.gain_db + input_trim_db) / 20.0);
             let phase_rad = (phase[idx] + delay_phase + polarity_phase).to_radians();
             complex_sum[idx] += Complex::from_polar(mag, phase_rad) * response[idx];
         }

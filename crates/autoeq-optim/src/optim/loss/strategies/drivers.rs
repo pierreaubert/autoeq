@@ -1,4 +1,6 @@
-use crate::loss::{DriversLossData, drivers_flat_loss, multisub_flat_loss};
+use crate::loss::{
+    DriversLossData, compute_drivers_combined_response, drivers_flat_loss, multisub_flat_loss,
+};
 use crate::optim::loss::{Objective, ObjectiveContext};
 
 /// Mode selector for the driver/subwoofer objective.
@@ -36,7 +38,7 @@ impl Objective for DriversStrategy {
                         .map(|f| 10.0_f64.powf(*f))
                         .collect()
                 };
-                drivers_flat_loss(
+                let base = drivers_flat_loss(
                     &self.data,
                     gains,
                     &xover_freqs,
@@ -44,16 +46,32 @@ impl Objective for DriversStrategy {
                     ctx.srate,
                     ctx.min_freq,
                     ctx.max_freq,
-                )
+                );
+                base + ctx.smoothness_penalty(&compute_drivers_combined_response(
+                    &self.data,
+                    gains,
+                    &xover_freqs,
+                    Some(delays),
+                    ctx.srate,
+                ))
             }
-            DriversMode::MultiSub => multisub_flat_loss(
-                &self.data,
-                gains,
-                delays,
-                ctx.srate,
-                ctx.min_freq,
-                ctx.max_freq,
-            ),
+            DriversMode::MultiSub => {
+                let base = multisub_flat_loss(
+                    &self.data,
+                    gains,
+                    delays,
+                    ctx.srate,
+                    ctx.min_freq,
+                    ctx.max_freq,
+                );
+                base + ctx.smoothness_penalty(&compute_drivers_combined_response(
+                    &self.data,
+                    gains,
+                    &[],
+                    Some(delays),
+                    ctx.srate,
+                ))
+            }
         }
     }
 }

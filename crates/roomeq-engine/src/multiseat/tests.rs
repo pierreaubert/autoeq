@@ -169,6 +169,26 @@ fn test_primary_objective_penalizes_headroom_boost() {
 }
 
 #[test]
+fn primary_constraints_honor_non_primary_seat_weights() {
+    let responses = vec![
+        vec![90.0, 90.0, 90.0],
+        vec![100.0, 90.0, 90.0],
+        vec![92.0, 90.0, 90.0],
+    ];
+    let mut first_weighted = MsoObjectiveContext::from_baseline(&responses);
+    first_weighted.seat_weights = vec![0.1, 0.8, 0.1];
+    let mut second_weighted = MsoObjectiveContext::from_baseline(&responses);
+    second_weighted.seat_weights = vec![0.1, 0.1, 0.8];
+
+    let first = primary_constrained_from_responses(&responses, 0, 1.0, Some(&first_weighted));
+    let second = primary_constrained_from_responses(&responses, 0, 1.0, Some(&second_weighted));
+    assert!(
+        first > second,
+        "weighted constraint should prioritize seat 1"
+    );
+}
+
+#[test]
 fn test_primary_objective_penalizes_low_extension_deficit() {
     let baseline = vec![vec![90.0, 90.0, 90.0, 90.0], vec![90.0, 90.0, 90.0, 90.0]];
     let low_extension_loss = vec![vec![86.0, 86.0, 90.0, 90.0], vec![86.0, 86.0, 90.0, 90.0]];
@@ -407,7 +427,10 @@ fn test_continuous_mso_can_optimize_allpass_filter() {
     };
     let (_gains, _delays, polarities, allpass_filters) =
         optimize_continuous_mso(2, options, &|_, _, _, allpass_filters| {
-            let (freq, q) = allpass_filters[1][0];
+            let Some(&(freq, q)) = allpass_filters.get(1).and_then(|filters| filters.first())
+            else {
+                return 1.0e6;
+            };
             ((freq - 73.4) / 10.0).powi(2) + (q - 1.7).powi(2)
         });
 
@@ -425,6 +448,28 @@ fn test_continuous_mso_can_optimize_allpass_filter() {
         "all-pass Q should recover target, got {:.3}",
         q
     );
+}
+
+#[test]
+fn continuous_mso_identity_anchor_returns_no_allpass_filters() {
+    let options = MsoSearchOptions {
+        optimize_polarity: false,
+        allpass_filters_per_sub: 1,
+        allpass_min_freq: 20.0,
+        allpass_max_freq: 120.0,
+    };
+    let (gains, delays, polarities, allpass_filters) =
+        optimize_continuous_mso(2, options, &|gains, delays, polarities, allpass| {
+            gains.iter().map(|value| value * value).sum::<f64>()
+                + delays.iter().map(|value| value * value).sum::<f64>()
+                + polarities.iter().filter(|inverted| **inverted).count() as f64
+                + allpass.iter().map(Vec::len).sum::<usize>() as f64
+        });
+
+    assert!(gains.iter().all(|value| value.abs() < 1e-12));
+    assert!(delays.iter().all(|value| value.abs() < 1e-12));
+    assert!(polarities.iter().all(|inverted| !inverted));
+    assert!(allpass_filters.iter().all(Vec::is_empty));
 }
 
 #[test]
@@ -483,8 +528,11 @@ fn test_continuous_mso_three_subs_with_polarity_and_allpass() {
             if polarities[2] {
                 loss += 10.0;
             }
-            let (f1, _q1) = allpass[1][0];
-            loss += ((f1 - 60.0) / 10.0).powi(2);
+            if let Some(&(f1, _q1)) = allpass.get(1).and_then(|filters| filters.first()) {
+                loss += ((f1 - 60.0) / 10.0).powi(2);
+            } else {
+                loss += 1.0e6;
+            }
             loss
         });
 

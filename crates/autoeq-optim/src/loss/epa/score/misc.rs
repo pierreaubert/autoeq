@@ -13,6 +13,9 @@ pub(super) fn interpolate_log_frequency(
         let f0 = freqs[i];
         let f1 = freqs[i + 1];
         if target_hz <= f1 {
+            if f0 <= 0.0 || f1 <= 0.0 {
+                return Some(values[i]);
+            }
             let denom = f1.ln() - f0.ln();
             if denom.abs() < 1e-12 {
                 return Some(values[i]);

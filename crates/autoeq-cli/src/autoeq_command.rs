@@ -345,7 +345,8 @@ async fn run_multi_driver_optimization(args: &autoeq::cli::Args) -> Result<()> {
 
     // Optimize using shared function
     info!("🚀 Starting optimization...");
-    let result = autoeq::workflow::optimize_drivers_crossover(
+    let smoothness_penalty = autoeq::OptimParams::from(args).smoothness_penalty;
+    let result = autoeq::workflow::optimize_drivers_crossover_with_smoothness(
         drivers_data.clone(),
         args.min_freq,
         args.max_freq,
@@ -357,6 +358,7 @@ async fn run_multi_driver_optimization(args: &autoeq::cli::Args) -> Result<()> {
         args.max_db,
         None, // No fixed crossover frequencies - optimize them
         args.seed,
+        smoothness_penalty,
     )
     .map_err(|e| anyhow!("{}", e))
     .context("Driver optimization failed")?;

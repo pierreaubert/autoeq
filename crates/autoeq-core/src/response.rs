@@ -147,6 +147,12 @@ pub fn apply_complex_response_with_min_db(
         freq: curve.freq.clone(),
         spl: new_spl,
         phase: Some(new_phase),
+        // The decomposition cache belongs to the pre-filter response. A
+        // complex filter changes both magnitude and phase, so retaining it
+        // would expose stale minimum/excess phase data downstream.
+        min_phase: None,
+        excess_phase: None,
+        excess_delay_ms: None,
         // Filtering changes magnitude/phase, not measurement provenance or
         // confidence. Preserve coherence, noise floor, quality metadata and
         // any other side-channel data needed by later phase-aware stages.
@@ -418,6 +424,30 @@ mod tests {
                 Err(AutoeqError::InvalidConfiguration { .. })
             ));
         }
+    }
+
+    #[test]
+    fn applying_complex_response_invalidates_phase_decomposition_cache() {
+        let curve = Curve {
+            freq: Array1::from_vec(vec![100.0, 1_000.0]),
+            spl: Array1::from_vec(vec![80.0, 81.0]),
+            phase: Some(Array1::from_vec(vec![0.0, 10.0])),
+            min_phase: Some(Array1::from_vec(vec![0.0, 1.0])),
+            excess_phase: Some(Array1::from_vec(vec![0.0, 9.0])),
+            excess_delay_ms: Some(0.25),
+            ..Curve::default()
+        };
+        let filtered = apply_complex_response(
+            &curve,
+            &[
+                Complex64::from_polar(1.0, 0.1),
+                Complex64::from_polar(1.0, 0.2),
+            ],
+        );
+
+        assert!(filtered.min_phase.is_none());
+        assert!(filtered.excess_phase.is_none());
+        assert!(filtered.excess_delay_ms.is_none());
     }
 
     #[test]

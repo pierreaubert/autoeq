@@ -406,19 +406,23 @@ fn validate_bass_management(
                         ));
                         continue;
                     };
-                    let expected_gain = source.trim_db
-                        + output.gain_db
-                        + graph
-                            .input_trim_db
-                            .get(&source.source_channel)
-                            .copied()
-                            .unwrap_or(0.0);
-                    let expected_delay = source.bass_route_delay_ms + output.delay_ms;
-                    let expected_inversion = source.polarity_inverted ^ output.polarity_inverted;
-                    if (route.gain_db - expected_gain).abs() > 1.0e-6
-                        || (route.delay_ms - expected_delay).abs() > 1.0e-6
-                        || route.polarity_inverted != expected_inversion
-                    {
+                    let input_trim_db = graph
+                        .input_trim_db
+                        .get(&source.source_channel)
+                        .copied()
+                        .unwrap_or(0.0);
+                    if !route_reconstructs_optimizer_metadata(
+                        route.gain_db,
+                        route.delay_ms,
+                        route.polarity_inverted,
+                        source.trim_db,
+                        source.bass_route_delay_ms,
+                        source.polarity_inverted,
+                        output.gain_db,
+                        output.delay_ms,
+                        output.polarity_inverted,
+                        input_trim_db,
+                    ) {
                         failures.push(format!(
                             "bass route '{}' -> '{}' does not reconstruct optimizer metadata",
                             source.source_channel, route.destination
@@ -430,6 +434,29 @@ fn validate_bass_management(
     }
 
     failures
+}
+
+#[allow(clippy::too_many_arguments)]
+fn route_reconstructs_optimizer_metadata(
+    route_gain_db: f64,
+    route_delay_ms: f64,
+    route_polarity_inverted: bool,
+    source_trim_db: f64,
+    source_delay_ms: f64,
+    source_polarity_inverted: bool,
+    output_gain_db: f64,
+    output_delay_ms: f64,
+    output_polarity_inverted: bool,
+    input_trim_db: f64,
+) -> bool {
+    // Post-DSP input calibration is stored separately on the routing graph and
+    // applied by the predictor. Compare effective gains so it is included once,
+    // without requiring route.gain_db to duplicate that final calibration trim.
+    let actual_effective_gain_db = route_gain_db + input_trim_db;
+    let expected_effective_gain_db = source_trim_db + output_gain_db + input_trim_db;
+    (actual_effective_gain_db - expected_effective_gain_db).abs() <= 1.0e-6
+        && (route_delay_ms - (source_delay_ms + output_delay_ms)).abs() <= 1.0e-6
+        && route_polarity_inverted == (source_polarity_inverted ^ output_polarity_inverted)
 }
 
 fn has_plugin(result: &RoomOptimizationResult, plugin_type: &str) -> bool {
@@ -940,8 +967,8 @@ pub(super) fn validate_home_cinema_result(
 mod tests {
     use super::super::test_case::load_config_for_test;
     use super::{
-        build_home_cinema_matrix, build_quick_home_cinema_matrix, validate_bass_management,
-        validate_stage_outcomes,
+        build_home_cinema_matrix, build_quick_home_cinema_matrix,
+        route_reconstructs_optimizer_metadata, validate_bass_management, validate_stage_outcomes,
     };
     use crate::registry::QaTier;
     use roomeq_model::{SpeakerConfig, StageOutcome, StageStatus};
@@ -995,6 +1022,16 @@ mod tests {
                 .iter()
                 .all(|case| case.home_cinema_expectations.is_some())
         );
+    }
+
+    #[test]
+    fn optimizer_route_metadata_keeps_post_dsp_input_trim_separate() {
+        assert!(route_reconstructs_optimizer_metadata(
+            3.0, 5.0, true, 1.0, 2.0, false, 2.0, 3.0, true, -4.5,
+        ));
+        assert!(!route_reconstructs_optimizer_metadata(
+            -1.5, 5.0, true, 1.0, 2.0, false, 2.0, 3.0, true, -4.5,
+        ));
     }
 
     #[test]

@@ -395,6 +395,14 @@ fn validate_workflow_sample_rate(sample_rate: f64) -> Result<(), Box<dyn std::er
     Ok(())
 }
 
+fn with_driver_smoothness(
+    mut params: crate::OptimParams,
+    smoothness_penalty: Option<autoeq_optim::SmoothnessPenaltyConfig>,
+) -> crate::OptimParams {
+    params.smoothness_penalty = smoothness_penalty;
+    params
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn optimize_drivers_crossover(
     drivers_data: crate::loss::DriversLossData,
@@ -409,11 +417,8 @@ pub fn optimize_drivers_crossover(
     fixed_freqs: Option<Vec<f64>>,
     seed: Option<u64>,
 ) -> Result<DriverOptimizationResult, Box<dyn std::error::Error>> {
-    validate_workflow_sample_rate(sample_rate)?;
-    let n_drivers = drivers_data.drivers.len();
-
-    // Create optimization parameters for driver optimization
-    let params = create_driver_optimization_args(
+    optimize_drivers_crossover_with_smoothness(
+        drivers_data,
         min_freq,
         max_freq,
         sample_rate,
@@ -422,7 +427,46 @@ pub fn optimize_drivers_crossover(
         population,
         min_db,
         max_db,
+        fixed_freqs,
         seed,
+        None,
+    )
+}
+
+/// Optimize a multi-driver crossover with an optional correction-curve
+/// smoothness penalty.
+#[allow(clippy::too_many_arguments)]
+pub fn optimize_drivers_crossover_with_smoothness(
+    drivers_data: crate::loss::DriversLossData,
+    min_freq: f64,
+    max_freq: f64,
+    sample_rate: f64,
+    algorithm: &str,
+    max_iter: usize,
+    population: usize,
+    min_db: f64,
+    max_db: f64,
+    fixed_freqs: Option<Vec<f64>>,
+    seed: Option<u64>,
+    smoothness_penalty: Option<autoeq_optim::SmoothnessPenaltyConfig>,
+) -> Result<DriverOptimizationResult, Box<dyn std::error::Error>> {
+    validate_workflow_sample_rate(sample_rate)?;
+    let n_drivers = drivers_data.drivers.len();
+
+    // Create optimization parameters for driver optimization
+    let params = with_driver_smoothness(
+        create_driver_optimization_args(
+            min_freq,
+            max_freq,
+            sample_rate,
+            algorithm,
+            max_iter,
+            population,
+            min_db,
+            max_db,
+            seed,
+        ),
+        smoothness_penalty,
     );
 
     // Setup objective data with optional fixed frequencies.
@@ -574,4 +618,38 @@ pub fn optimize_multisub(
         post_objective,
         converged,
     })
+}
+
+#[cfg(test)]
+mod driver_smoothness_tests {
+    use super::*;
+
+    #[test]
+    fn driver_workflow_preserves_smoothness_configuration() {
+        let penalty = autoeq_optim::SmoothnessPenaltyConfig {
+            tv2_weight: 0.25,
+            schroeder_hz: Some(180.0),
+            modal_weight_scale: 0.2,
+            exponent: 1.5,
+        };
+        let params = with_driver_smoothness(
+            create_driver_optimization_args(
+                20.0,
+                20_000.0,
+                48_000.0,
+                "autoeq:de",
+                100,
+                20,
+                -12.0,
+                12.0,
+                Some(7),
+            ),
+            Some(penalty.clone()),
+        );
+        let actual = params.smoothness_penalty.expect("smoothness penalty");
+        assert_eq!(actual.tv2_weight, penalty.tv2_weight);
+        assert_eq!(actual.schroeder_hz, penalty.schroeder_hz);
+        assert_eq!(actual.modal_weight_scale, penalty.modal_weight_scale);
+        assert_eq!(actual.exponent, penalty.exponent);
+    }
 }

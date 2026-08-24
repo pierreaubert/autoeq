@@ -431,6 +431,22 @@ fn optimize_channel_eq_multi_inner(
     if curves.is_empty() {
         return Err("no_measurements".into());
     }
+    // Validate user weights against the physical measurement set before any
+    // RIR-prototype collapse or bootstrap resampling changes the objective
+    // count.  Those transforms either own their weighting or deliberately
+    // create a new sample population.
+    if let Some(weights) = multi_config.weights.as_ref()
+        && weights.len() != curves.len()
+    {
+        return Err(format!(
+            "multi_measurement.weights has {} entries, expected {} measurements",
+            weights.len(),
+            curves.len()
+        )
+        .into());
+    }
+    let ignore_configured_weights = multi_config.rir_prototype.is_some()
+        || multi_config.strategy == MultiMeasurementStrategy::MinimaxUncertainty;
 
     let measurement_quality =
         autoeq_optim::measurements::assess_multiple_measurement_quality(curves);
@@ -512,7 +528,9 @@ fn optimize_channel_eq_multi_inner(
                 alpha: boot_cfg.alpha,
                 seed: boot_cfg.seed,
             },
-            multi_config.weights.as_deref(),
+            (!ignore_configured_weights)
+                .then_some(multi_config.weights.as_deref())
+                .flatten(),
         )
         .map_err(|e| -> Box<dyn Error> { Box::new(e) })?;
         uncertainty_cvar_alpha = match boot_cfg.scalarisation {
@@ -592,13 +610,17 @@ fn optimize_channel_eq_multi_inner(
                     curves,
                     &spatial_config,
                     &bootstrap,
-                    multi_config.weights.as_deref(),
+                    (!ignore_configured_weights)
+                        .then_some(multi_config.weights.as_deref())
+                        .flatten(),
                 )?
             } else {
                 spatial_robustness::try_analyze_spatial_robustness_weighted(
                     curves,
                     &spatial_config,
-                    multi_config.weights.as_deref(),
+                    (!ignore_configured_weights)
+                        .then_some(multi_config.weights.as_deref())
+                        .flatten(),
                 )?
             };
             if let Some(bootstrap) = analysis.bootstrap.as_ref() {
@@ -636,7 +658,7 @@ fn optimize_channel_eq_multi_inner(
             .fold((0.0, 0usize), |(sum, count), (_, level)| {
                 (sum + *level, count + 1)
             });
-        let mean_spl = (count > 0).then_some(sum / count as f64).unwrap_or(0.0);
+        let mean_spl = if count > 0 { sum / count as f64 } else { 0.0 };
         let mut normalized_curve = Curve {
             freq: curve.freq.clone(),
             spl: &curve.spl - mean_spl,
@@ -703,6 +725,7 @@ fn optimize_channel_eq_multi_inner(
             }
             objective_data.deviation = Arc::new(objective_data.deviation.as_ref() * depth);
         }
+        objective_data.objective = Some(objective_data.build_objective());
 
         // Aligned multi-position curves normally share an identical frequency
         // grid and target. Canonicalize those immutable arrays once so objective
@@ -731,7 +754,10 @@ fn optimize_channel_eq_multi_inner(
         )
         .into());
     }
-    let weights = match &multi_config.weights {
+    let weights = match (!ignore_configured_weights)
+        .then_some(multi_config.weights.as_ref())
+        .flatten()
+    {
         Some(weights) => {
             if weights.len() != n {
                 return Err(format!(
@@ -1214,6 +1240,7 @@ fn optimize_spatial_robustness(
     objective_data.smoothness_penalty = optim_params.smoothness_penalty.clone();
     objective_data.max_boost_envelope = config.max_boost_envelope.clone();
     objective_data.min_cut_envelope = config.min_cut_envelope.clone();
+    objective_data.objective = Some(objective_data.build_objective());
     let final_objective = objective_data.clone();
 
     let (lower_bounds, upper_bounds) = autoeq_optim::optim::setup::setup_bounds(&optim_params);

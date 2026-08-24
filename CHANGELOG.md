@@ -1,3 +1,17 @@
+# 0.5.60
+
+## Fixes
+
+- Preserve calibrated target levels across IIR, phase-linear FIR, and hybrid RoomEQ paths; keep preference voicing full-band after hybrid merge while scoring neutral correction independently.
+- Make single-channel optimization invariant to input frequency sampling on the shared RoomEQ hybrid grid, rebuild cached objectives after every configuration mutation, and preserve the unmasked curve for EPA progress reporting.
+- Correct excursion-protection section Q values, all-pass identity handling, mixed-phase stage ownership, height residual delays, CSV metadata alignment, response phase-cache invalidation, and supporting-source/channel mapping validation.
+- Preserve and retune multi-seat and continuous-area objectives with strict weight validation, seeded Sobol quadrature, real inner worst-case search, average-strategy dispatch, and pinned identity candidates.
+- Stage main correction after redirected-bass taps, retain route-owned crossovers in every processing mode, and keep post-DSP input trims separate from optimizer route metadata.
+
+## QA
+
+- Add deterministic grid, target-level, crossover, routing, all-pass, multi-seat, metadata, and phase-cache regressions plus strict measured Genelec 5.1.4 IIR/FIR/hybrid comparison coverage.
+
 # 0.5.59
 
 ## Fixes

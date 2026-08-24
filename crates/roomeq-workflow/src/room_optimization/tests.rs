@@ -1,5 +1,48 @@
 use super::types::{CallbackAction, ChannelOptimizationResult, GenericChannelCollection};
 use super::*;
+
+#[test]
+fn mixed_phase_owns_phase_correction_stage() {
+    let mut config = minimal_room_config(ProcessingMode::MixedPhase);
+    config.optimizer.phase_correction = Some(roomeq_model::MixedPhaseSerdeConfig {
+        max_fir_length_ms: 10.0,
+        pre_ringing_threshold_db: -30.0,
+        min_spatial_depth: 0.5,
+        phase_smoothing_octaves: 1.0 / 6.0,
+    });
+    assert!(!should_run_standalone_phase_correction(&config));
+
+    config.optimizer.processing_mode = ProcessingMode::LowLatency;
+    assert!(should_run_standalone_phase_correction(&config));
+}
+
+#[test]
+fn topology_height_residual_is_added_after_existing_delay() {
+    let mut chain = ChannelDspChain {
+        channel: "TFL".to_string(),
+        plugins: vec![output::create_delay_plugin(1.25)],
+        drivers: None,
+        initial_curve: None,
+        final_curve: None,
+        eq_response: None,
+        pre_ir: None,
+        post_ir: None,
+        fir_temporal_masking: None,
+        direct_early_late_correction: None,
+        target_curve: None,
+    };
+
+    assert!(insert_topology_height_residual_delay(
+        &mut chain, 0.75, true
+    ));
+    let delays: Vec<f64> = chain
+        .plugins
+        .iter()
+        .filter(|plugin| plugin.plugin_type == "delay")
+        .filter_map(|plugin| plugin.parameters["delay_ms"].as_f64())
+        .collect();
+    assert_eq!(delays, vec![0.75, 1.25]);
+}
 use crate::test_fixtures::{empty_metadata, single_channel_room_result};
 use ndarray::Array1;
 use roomeq_engine::pipeline::{
@@ -131,6 +174,7 @@ fn height_arrival_delay_updates_exported_chain_and_reported_phase() {
         match_arrival_time: true,
         ..Default::default()
     });
+    config.optimizer.allow_delay = Some(true);
     let arrivals = HashMap::from([("left".to_string(), 5.0), ("TFL".to_string(), 3.0)]);
 
     let result =

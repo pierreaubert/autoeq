@@ -6,8 +6,8 @@ use super::consts::spl_from_complex_responses;
 use super::interpolate::interpolate_all_measurements;
 use super::interpolate::interpolate_curve_to_grid;
 use super::misc::single_seat_flatness;
-use super::misc::sobol_probe;
-use super::misc::variance_from_responses;
+use super::misc::sobol_quadrature_points;
+use super::misc::{variance_from_responses, weighted_variance_from_responses};
 use super::modal::modal_basis_objective_from_responses;
 use super::modal_basis::build_modal_basis;
 use super::mso::mso_bounds;
@@ -56,6 +56,17 @@ pub fn optimize_multiseat(
     freq_range: (f64, f64),
     sample_rate: f64,
 ) -> Result<MultiSeatOptimizationResult> {
+    if let Some(weights) = config.seat_weights.as_ref()
+        && weights.len() != measurements.num_seats
+    {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "multi_seat.seat_weights has {} entries, expected {} seats",
+                weights.len(),
+                measurements.num_seats
+            ),
+        });
+    }
     let (min_freq, max_freq) = freq_range;
     let Some((common_min, common_max)) = roomeq_analysis::frequency_grid::common_frequency_range(
         measurements.measurements.iter().flat_map(|sub| sub.iter()),
@@ -121,8 +132,31 @@ pub fn optimize_multiseat(
     );
     let initial_responses = spl_from_complex_responses(&initial_complex_responses);
     let variance_before = variance_from_responses(&initial_responses);
-    let objective_context =
+    let mut objective_context =
         MsoObjectiveContext::from_baseline_with_freqs(&initial_responses, Some(&freqs));
+    let mut seat_weights = config
+        .seat_weights
+        .as_ref()
+        .filter(|weights| weights.len() == measurements.num_seats)
+        .cloned()
+        .unwrap_or_else(|| vec![1.0; measurements.num_seats]);
+    if config.strategy == MultiSeatStrategy::PrimaryWithConstraints
+        && config.primary_seat < seat_weights.len()
+    {
+        seat_weights[config.primary_seat] *= config.primary_seat_weight.max(1.0);
+    }
+    for weight in &mut seat_weights {
+        if !weight.is_finite() || *weight < 0.0 {
+            *weight = 0.0;
+        }
+    }
+    let weight_sum: f64 = seat_weights.iter().sum();
+    if weight_sum > f64::EPSILON {
+        for weight in &mut seat_weights {
+            *weight /= weight_sum;
+        }
+        objective_context.seat_weights = seat_weights;
+    }
     let modal_basis = if config.strategy == MultiSeatStrategy::ModalBasis {
         let basis = build_modal_basis(&interpolated, &freqs, eval_min, eval_max);
         if basis.modes.is_empty() {
@@ -359,10 +393,19 @@ pub(super) fn optimize_continuous_mso(
 
     let mut scores: Vec<f64> = population
         .iter()
-        .map(|params| {
+        .enumerate()
+        .map(|(index, params)| {
             let (gains, delays, polarities, allpass_filters) =
                 decode_mso_params(params, num_subs, options);
-            let score = eval(&gains, &delays, &polarities, &allpass_filters);
+            // The seeded all-zero vector is the identity anchor.  Its
+            // clamped all-pass coordinates are only bounds artefacts; score
+            // that candidate with no all-pass filters so regression guards
+            // compare against the true unprocessed response.
+            let score = if index == 0 && options.allpass_filters_per_sub > 0 {
+                eval(&gains, &delays, &polarities, &vec![Vec::new(); num_subs])
+            } else {
+                eval(&gains, &delays, &polarities, &allpass_filters)
+            };
             if score.is_finite() {
                 score
             } else {
@@ -372,7 +415,11 @@ pub(super) fn optimize_continuous_mso(
         .collect();
 
     for _ in 0..generations {
-        for target_idx in 0..population_size {
+        // Keep candidate zero pinned as the exact no-processing anchor. Its
+        // all-pass coordinates are bounds artefacts decoded as identity only
+        // for scoring/reporting, so mutating this slot would lose that
+        // correspondence and could discard a valid optimized all-pass result.
+        for target_idx in 1..population_size {
             let mut a;
             let mut b;
             let mut c;
@@ -427,8 +474,11 @@ pub(super) fn optimize_continuous_mso(
         .map(|(idx, score)| (idx, *score))
         .unwrap_or((0, f64::INFINITY));
 
-    let (best_gains, best_delays, best_polarities, best_allpass_filters) =
+    let (best_gains, best_delays, best_polarities, mut best_allpass_filters) =
         decode_mso_params(&population[best_idx], num_subs, options);
+    if best_idx == 0 && options.allpass_filters_per_sub > 0 {
+        best_allpass_filters = vec![Vec::new(); num_subs];
+    }
     debug!(
         "  Continuous MSO result: gains={:?}, delays={:?}, polarities={:?}, allpass={:?}, loss={:.4}",
         best_gains, best_delays, best_polarities, best_allpass_filters, best_loss
@@ -477,7 +527,8 @@ pub(super) fn optimize_minimize_variance(
                 min_freq,
                 max_freq,
             );
-            variance_from_responses(&r) + mso_resource_penalty(&r, objective_context)
+            weighted_variance_from_responses(&r, &objective_context.seat_weights)
+                + mso_resource_penalty(&r, objective_context)
         },
     )
 }
@@ -795,11 +846,19 @@ fn optimize_continuous_area_dispatch<const D: usize>(
     // have static points; we'll fall through to a bespoke evaluator below.
     let static_points: Option<(Vec<[f64; D]>, Vec<f64>)> = match &scalarisation {
         AreaScalarisation::WorstCase { .. } => None,
-        _ => Some(build_quadrature_points(&prior, &quadrature).map_err(|e| {
-            AutoeqError::InvalidConfiguration {
-                message: format!("continuous_area quadrature error: {e}"),
+        _ => {
+            let points = match &quadrature {
+                Quadrature::Sobol { num_points, seed } => {
+                    sobol_quadrature_points(&prior, *num_points, *seed)
+                        .map_or_else(|| build_quadrature_points(&prior, &quadrature), Ok)
+                }
+                _ => build_quadrature_points(&prior, &quadrature),
             }
-        })?),
+            .map_err(|error| AutoeqError::InvalidConfiguration {
+                message: format!("continuous_area quadrature error: {error}"),
+            })?;
+            Some(points)
+        }
     };
 
     // Pre-build per-quadrature interpolated complex measurements on a shared
@@ -938,16 +997,19 @@ fn optimize_continuous_area_dispatch<const D: usize>(
                         f64::INFINITY
                     }
                 }
-                (AreaScalarisation::WorstCase { .. }, _, _) => {
-                    // For WorstCase we'd ideally do an inner search over p; for the
-                    // first iteration we evaluate over a small Sobol scan on the
-                    // bounding box and return the max. This avoids spawning a
-                    // nested DE per outer fitness call (which would be a huge cost
-                    // hit) and is good enough for typical D ≤ 3.
-                    let probe_pts = sobol_probe::<D>(64, &bounds_arr);
-                    let mut worst = f64::NEG_INFINITY;
-                    for p in &probe_pts {
-                        let per_sub = match interpolate_at_p(*p) {
+                (
+                    AreaScalarisation::WorstCase {
+                        inner_maxiter,
+                        inner_seed,
+                    },
+                    _,
+                    _,
+                ) => {
+                    // Delegate the adversarial position search to the continuous-
+                    // area optimizer so the configured iteration budget and seed
+                    // control a genuine inner differential-evolution search.
+                    let loss_at_position = |_: &[f64], position: [f64; D]| -> f64 {
+                        let per_sub = match interpolate_at_p(position) {
                             Ok(v) => v,
                             Err(_) => return f64::INFINITY,
                         };
@@ -967,12 +1029,19 @@ fn optimize_continuous_area_dispatch<const D: usize>(
                             eval_min,
                             eval_max,
                         );
-                        let l = single_seat_flatness(&combined);
-                        if l > worst {
-                            worst = l;
-                        }
-                    }
-                    worst
+                        single_seat_flatness(&combined)
+                    };
+                    math_audio_optimisation::continuous_area::try_evaluate_area_loss(
+                        &loss_at_position,
+                        &[],
+                        &prior,
+                        &quadrature,
+                        AreaScalarisation::WorstCase {
+                            inner_maxiter: *inner_maxiter,
+                            inner_seed: *inner_seed,
+                        },
+                    )
+                    .unwrap_or(f64::INFINITY)
                 }
                 // Static points missing means we hit a WorstCase / unreachable branch
                 // outside the WorstCase arm above — defensive.
@@ -1093,6 +1162,21 @@ mod tests {
             err.to_string().contains("ContinuousArea"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn optimize_multiseat_rejects_mismatched_seat_weights() {
+        let measurements = two_sub_two_seat_measurements();
+        let config = MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::Average,
+            seat_weights: Some(vec![1.0]),
+            ..MultiSeatConfig::default()
+        };
+
+        let error = optimize_multiseat(&measurements, &config, (20.0, 120.0), 48_000.0)
+            .expect_err("mismatched seat weights must fail");
+        assert!(error.to_string().contains("expected 2 seats"));
     }
 
     #[test]

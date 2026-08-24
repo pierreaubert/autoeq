@@ -150,10 +150,31 @@ fn optimize_kautz_modal(
 ) -> Result<IirOptimizerOutput> {
     info!("  KautzModal mode: starting optimization...");
 
+    let detection_config = request
+        .optimizer
+        .decomposed_correction
+        .as_ref()
+        .map(
+            |config| roomeq_analysis::impulse_analysis::DecomposedCorrectionConfig {
+                schroeder_freq: config.schroeder_freq,
+                min_mode_q: config.min_mode_q,
+                min_mode_prominence_db: config.min_mode_prominence_db,
+                mode_correction_weight: config.mode_correction_weight,
+                early_reflection_weight: config.early_reflection_weight,
+                steady_state_weight: config.steady_state_weight,
+                fdw_enabled: config.fdw_enabled,
+                fdw_cycles: config.fdw_cycles,
+                fdw_min_window_ms: config.fdw_min_window_ms,
+                fdw_max_window_ms: config.fdw_max_window_ms,
+                fdw_smoothing_octaves: config.fdw_smoothing_octaves,
+                ..Default::default()
+            },
+        )
+        .unwrap_or_default();
     let room_modes = roomeq_analysis::impulse_analysis::detect_room_modes(
         &optimization_curve.freq,
         &optimization_curve.spl,
-        &roomeq_analysis::impulse_analysis::DecomposedCorrectionConfig::default(),
+        &detection_config,
     );
     if room_modes.is_empty() {
         return Err(AutoeqError::OptimizationFailed {
@@ -174,7 +195,16 @@ fn optimize_kautz_modal(
         .collect();
     let mut kautz = KautzFilter::from_room_modes(&mode_tuples, request.sample_rate);
     let frequencies: Vec<f64> = optimization_curve.freq.iter().copied().collect();
-    let measured: Vec<f64> = optimization_curve.spl.iter().copied().collect();
+    let measured_mean = roomeq_analysis::response_metrics::mean_response_in_range(
+        optimization_curve,
+        request.optimizer.min_freq,
+        request.optimizer.max_freq,
+    );
+    let measured: Vec<f64> = optimization_curve
+        .spl
+        .iter()
+        .map(|spl| *spl - measured_mean)
+        .collect();
     let target = vec![0.0; frequencies.len()];
     kautz.optimize_gains(&frequencies, &measured, &target);
 

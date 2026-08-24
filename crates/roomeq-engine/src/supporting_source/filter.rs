@@ -84,7 +84,17 @@ pub fn compute_supporting_source_filter(
         // The generator samples uniformly from [1, 1/density], so its mean
         // spacing is approximately (1 + 1/density) / 2.
         let density = 1.0 / (2.0 * target_spacing_samples - 1.0);
-        let velvet = generate_velvet_noise(config.velvet_noise_taps, density, 0xdeadbeef);
+        let mut velvet = generate_velvet_noise(config.velvet_noise_taps, density, 0xdeadbeef);
+        // The raw velvet sequence contains one unit-amplitude impulse per
+        // event.  Convolution would otherwise add roughly 10*log10(N) dB of
+        // broadband energy, defeating the support-gain limit.  Preserve unit
+        // energy before folding it into the designed FIR.
+        let energy = velvet.iter().map(|tap| tap * tap).sum::<f64>().sqrt();
+        if energy > 0.0 {
+            for tap in &mut velvet {
+                *tap /= energy;
+            }
+        }
         taps = convolve_fir(&taps, &velvet);
         // Truncate back to requested length (the tail is mostly velvet tail).
         taps.truncate(config.fir_taps);

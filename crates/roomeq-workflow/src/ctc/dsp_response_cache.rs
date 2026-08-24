@@ -18,10 +18,12 @@ pub(super) fn apply_room_eq_dsp_to_spectrum(
     sys: &SystemConfig,
     channels: &HashMap<String, ChannelDspChain>,
     sample_rate: f64,
+    sidecar_dir: &Path,
 ) -> Result<()> {
     let speakers = spectrum.speakers.len();
     let fft_size = (spectrum.bins.len() - 1) * 2;
-    let mut cache = DspResponseCache::new(checked_sample_rate(sample_rate)?);
+    let mut cache =
+        DspResponseCache::with_sidecar_dir(checked_sample_rate(sample_rate)?, sidecar_dir);
     let mut responses_by_speaker = Vec::with_capacity(speakers);
     for speaker in &spectrum.speakers {
         let Some(channel_name) = sys.speakers.get(speaker) else {
@@ -101,6 +103,7 @@ pub(super) struct DspResponseCache {
 }
 
 impl DspResponseCache {
+    #[cfg(test)]
     pub(super) fn new(sample_rate: u32) -> Self {
         Self::with_sidecar_dir(sample_rate, Path::new("."))
     }
@@ -189,6 +192,28 @@ pub(super) fn mixed_band_response(
             }
         })?;
 
+    let crossover_type = split
+        .parameters
+        .get("type")
+        .and_then(|value| value.as_str())
+        .unwrap_or("LR24");
+    if !crossover_type.eq_ignore_ascii_case("LR24") {
+        let freq_grid = ndarray::array![freq];
+        low = roomeq_engine::topology::compute_crossover_complex_response(
+            crossover_type,
+            frequency,
+            sample_rate,
+            true,
+            &freq_grid,
+        )[0];
+        high = roomeq_engine::topology::compute_crossover_complex_response(
+            crossover_type,
+            frequency,
+            sample_rate,
+            false,
+            &freq_grid,
+        )[0];
+    }
     for plugin in plugins {
         let plugin_response = plugin_response(plugin, freq, sample_rate, cache)?;
         if plugin_affects_mixed_band(plugin, true) {

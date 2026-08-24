@@ -156,7 +156,7 @@ pub fn optimize_with_schroeder_split_detailed(
     .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!("Low-frequency EQ optimization failed: {}", e),
     })?;
-    let low_eq_filters = low_result.filters;
+    let low_eq_filters = clamp_filter_q(low_result.filters, low_config.min_q, low_config.max_q);
 
     // High frequency optimization (above Schroeder)
     let high_optimizer = OptimizerConfig {
@@ -197,7 +197,6 @@ pub fn optimize_with_schroeder_split_detailed(
     // slightly (or significantly with low maxeval). Enforce the configured Q
     // constraints on the returned filters to guarantee the Schroeder split
     // invariant.
-    let low_eq_filters = clamp_filter_q(low_eq_filters, low_config.min_q, low_config.max_q);
     let high_eq_filters = clamp_filter_q(high_eq_filters, high_min_q, high_config.max_q);
 
     let mut optimizer_evidence = low_result.optimizer_evidence;

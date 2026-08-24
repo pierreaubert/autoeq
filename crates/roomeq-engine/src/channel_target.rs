@@ -1,8 +1,10 @@
 //! Target-context preparation for one RoomEQ channel.
 
-use autoeq_core::Curve;
+use autoeq_core::{AutoeqError, Curve, Result};
 use log::{debug, info, warn};
 use roomeq_model::{RoomConfig, TargetCurveConfig, TargetShape, UserPreference};
+
+use crate::eq::PreparedEqTarget;
 
 /// Prepared target state shared by channel preprocessing and optimization.
 #[derive(Clone, Debug)]
@@ -124,13 +126,48 @@ pub fn build_target_context(
     curve: &Curve,
     shared_mean_spl: Option<f64>,
 ) -> TargetContext {
+    build_target_context_with_prepared_target(
+        channel_name,
+        room_config,
+        curve,
+        shared_mean_spl,
+        None,
+    )
+    .expect("non-file target context must be constructible without a prepared resource")
+}
+
+/// Build a target context with a workflow-resolved file target.
+pub fn build_target_context_with_prepared_target(
+    channel_name: &str,
+    room_config: &RoomConfig,
+    curve: &Curve,
+    shared_mean_spl: Option<f64>,
+    prepared_target: Option<&PreparedEqTarget>,
+) -> Result<TargetContext> {
     let cea2034_active = room_config
         .optimizer
         .cea2034_correction
         .as_ref()
         .is_some_and(|config| config.enabled);
-    let target_tilt_curve =
-        build_target_tilt_curve(channel_name, room_config, curve, cea2034_active);
+    let target_tilt_curve = if room_config
+        .optimizer
+        .target_response
+        .as_ref()
+        .is_some_and(|target| target.shape == TargetShape::File)
+    {
+        let Some(PreparedEqTarget::Curve(target)) = prepared_target else {
+            return Err(AutoeqError::InvalidConfiguration {
+                message: format!(
+                    "channel '{channel_name}' uses target_response.shape='file' but its target curve was not prepared"
+                ),
+            });
+        };
+        let mut aligned = autoeq_core::interpolate_log_space(&curve.freq, target);
+        aligned.phase = None;
+        Some(aligned)
+    } else {
+        build_target_tilt_curve(channel_name, room_config, curve, cea2034_active)
+    };
 
     if target_tilt_curve.is_some() && room_config.target_curve.is_some() {
         warn!(
@@ -141,18 +178,29 @@ pub fn build_target_context(
 
     let min_freq = room_config.optimizer.min_freq;
     let max_freq = room_config.optimizer.max_freq;
-    let pre_score = flatness_score_in_range(curve, min_freq, max_freq);
+    let pre_score = target_tilt_curve
+        .as_ref()
+        .map(|tilt| {
+            let neutral = Curve {
+                freq: curve.freq.clone(),
+                spl: &curve.spl - &tilt.spl,
+                phase: curve.phase.clone(),
+                ..Curve::default()
+            };
+            flatness_score_in_range(&neutral, min_freq, max_freq)
+        })
+        .unwrap_or_else(|| flatness_score_in_range(curve, min_freq, max_freq));
     let channel_mean_spl =
         roomeq_analysis::response_metrics::mean_response_in_range(curve, min_freq, max_freq);
 
-    TargetContext {
+    Ok(TargetContext {
         target_tilt_curve,
         min_freq,
         max_freq,
         pre_score,
         mean_spl: target_mean_spl(channel_name, channel_mean_spl, shared_mean_spl),
         cea2034_active,
-    }
+    })
 }
 
 pub fn flatness_score_in_range(curve: &Curve, min_freq: f64, max_freq: f64) -> f64 {
@@ -268,6 +316,38 @@ mod tests {
         room_config.optimizer.from_measurement_slope_override = Some(-1.25);
         let overridden = build_target_tilt_curve("left", &room_config, &response, false).unwrap();
         assert!(overridden.spl[0] > overridden.spl[overridden.spl.len() - 1]);
+    }
+
+    #[test]
+    fn file_target_context_uses_prepared_curve_and_requires_resource() {
+        let response = curve();
+        let room_config = config(TargetResponseConfig {
+            shape: TargetShape::File,
+            curve_path: Some("target.csv".into()),
+            ..TargetResponseConfig::default()
+        });
+        let prepared = PreparedEqTarget::Curve(Box::new(Curve {
+            freq: Array1::from_vec(vec![20.0, 20_000.0]),
+            spl: Array1::from_vec(vec![3.0, -3.0]),
+            ..Curve::default()
+        }));
+
+        let context = build_target_context_with_prepared_target(
+            "left",
+            &room_config,
+            &response,
+            None,
+            Some(&prepared),
+        )
+        .expect("prepared file target");
+        let tilt = context.target_tilt_curve.expect("file tilt");
+        assert!((tilt.spl[0] - 3.0).abs() < 1e-9);
+        assert!((tilt.spl[tilt.spl.len() - 1] + 3.0).abs() < 1e-9);
+
+        let error =
+            build_target_context_with_prepared_target("left", &room_config, &response, None, None)
+                .expect_err("missing file target must fail");
+        assert!(error.to_string().contains("was not prepared"));
     }
 
     #[test]

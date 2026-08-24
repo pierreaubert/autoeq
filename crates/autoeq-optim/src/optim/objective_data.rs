@@ -273,6 +273,34 @@ impl std::fmt::Debug for ObjectiveData {
     }
 }
 
+fn epa_progress_input_spl(objective_data: &ObjectiveData, epa_freqs: &Array1<f64>) -> Vec<f64> {
+    objective_data
+        .input_curve
+        .as_ref()
+        .map(|curve| {
+            let aligned = if curve.freq.len() == epa_freqs.len()
+                && curve
+                    .freq
+                    .iter()
+                    .zip(epa_freqs.iter())
+                    .all(|(left, right)| (left - right).abs() <= 1.0e-9 * left.abs().max(1.0))
+            {
+                curve.clone()
+            } else {
+                autoeq_core::interpolate_log_space(epa_freqs, curve)
+            };
+            aligned.spl.to_vec()
+        })
+        .unwrap_or_else(|| {
+            objective_data
+                .target
+                .iter()
+                .zip(objective_data.deviation.iter())
+                .map(|(&target, &deviation)| target - deviation)
+                .collect()
+        })
+}
+
 /// Run the AutoEQ DE backend with an EPA-aware per-iteration callback.
 ///
 /// EPA preference is recomputed every [`EPA_INTERVAL`] generations from the
@@ -292,13 +320,7 @@ pub(super) fn run_autoeq_de_with_epa_callback(
     let epa_config = objective_data.epa_config.clone();
     let epa_freqs =
         ndarray::Array1::from(objective_data.freqs.iter().copied().collect::<Vec<f64>>());
-    // Reconstruct the normalised measurement: target − deviation.
-    let epa_normalized: Vec<f64> = objective_data
-        .target
-        .iter()
-        .zip(objective_data.deviation.iter())
-        .map(|(&t, &d)| t - d)
-        .collect();
+    let epa_normalized = epa_progress_input_spl(&objective_data, &epa_freqs);
     let epa_srate = objective_data.srate;
     let epa_model = objective_data.peq_model;
     let mut epa_gen_counter: usize = 0;
@@ -339,4 +361,40 @@ pub(super) fn run_autoeq_de_with_epa_callback(
         params,
         de_cb,
     )
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use ndarray::array;
+
+    use super::*;
+    use crate::optim::ObjectiveDataBuilder;
+
+    #[test]
+    fn epa_progress_uses_unmasked_input_curve() {
+        let frequencies = array![100.0, 1_000.0];
+        let input = Curve {
+            freq: frequencies.clone(),
+            spl: array![81.0, 73.0],
+            ..Curve::default()
+        };
+        let objective = ObjectiveDataBuilder::speaker_flat(
+            frequencies.clone(),
+            array![0.0, 0.0],
+            array![0.0, 0.0],
+            48_000.0,
+            PeqModel::Pk,
+        )
+        .input_curve(input)
+        .min_db(-12.0)
+        .max_db(12.0)
+        .freq_range(20.0, 20_000.0)
+        .build()
+        .expect("objective");
+
+        assert_eq!(
+            epa_progress_input_spl(&objective, &frequencies),
+            vec![81.0, 73.0]
+        );
+    }
 }

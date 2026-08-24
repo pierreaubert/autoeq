@@ -135,6 +135,62 @@ fn validate_room_config_rules(config: &RoomConfig) -> ValidationResult {
     // Cross-validate option interactions that depend on the speaker map
     // (multi-measurement weights, CEA2034 source detection).
     validate_cross_option_interactions(config, &mut result);
+    if let Some(ctc) = config.ctc.as_ref()
+        && !matches!(ctc.robustness.as_str(), "average" | "minimax")
+    {
+        result.add_error(format!(
+            "ctc.robustness must be one of 'average' or 'minimax', got '{}'",
+            ctc.robustness
+        ));
+    }
+    if let Some(target) = config.optimizer.target_response.as_ref()
+        && target.shape == TargetShape::File
+        && target.curve_path.is_none()
+    {
+        result.add_error(
+            "optimizer.target_response.curve_path is required when shape is 'file'".to_string(),
+        );
+    }
+    if let Some(system) = config.system.as_ref() {
+        if let Some(naming) = system.supporting_source_outputs.as_ref()
+            && naming.suffix.trim().is_empty()
+        {
+            result
+                .add_error("system.supporting_source_outputs.suffix must not be empty".to_string());
+        }
+        let support_suffix = system
+            .supporting_source_outputs
+            .as_ref()
+            .map(|naming| naming.suffix.as_str())
+            .unwrap_or("_support");
+        for (role, speaker_key) in &system.speakers {
+            if matches!(
+                config.speakers.get(speaker_key),
+                Some(SpeakerConfig::SupportingSource(_))
+            ) {
+                let support_name = format!("{role}{support_suffix}");
+                let collides_with_subwoofer = system
+                    .subwoofers
+                    .as_ref()
+                    .is_some_and(|subwoofers| subwoofers.mapping.contains_key(&support_name));
+                if system.speakers.contains_key(&support_name) || collides_with_subwoofer {
+                    result.add_error(format!(
+                        "supporting-source output '{support_name}' collides with an existing logical channel"
+                    ));
+                }
+            }
+        }
+        if let Some(subwoofers) = system.subwoofers.as_ref() {
+            let mut main_to_sub = HashMap::<&str, &str>::new();
+            for (sub, main) in &subwoofers.mapping {
+                if let Some(previous_sub) = main_to_sub.insert(main.as_str(), sub.as_str()) {
+                    result.add_error(format!(
+                        "subwoofers '{previous_sub}' and '{sub}' both map to main '{main}'; multiple phase-alignment constraints per main are not supported"
+                    ));
+                }
+            }
+        }
+    }
 
     result
 }
@@ -345,6 +401,15 @@ fn validate_channel_alignment_config(opt: &OptimizerConfig, result: &mut Validat
                 "{path}.reference_channel must not be empty when enabled"
             ));
         }
+        if config.enabled
+            && !config.reference_channel.trim().is_empty()
+            && !crate::home_cinema::role_for_channel(&config.reference_channel).is_bed_channel()
+        {
+            result.add_error(format!(
+                "{path}.reference_channel must be a bed channel, got '{}'",
+                config.reference_channel
+            ));
+        }
         if !config.min_improvement_db.is_finite() || config.min_improvement_db < 0.0 {
             result.add_error(format!(
                 "{path}.min_improvement_db must be finite and non-negative"
@@ -380,6 +445,11 @@ fn validate_channel_alignment_config(opt: &OptimizerConfig, result: &mut Validat
                         .to_string(),
                 );
                 break;
+            }
+            if !crate::home_cinema::role_for_channel(reference).is_bed_channel() {
+                result.add_error(format!(
+                    "optimizer.height_channel_alignment.reference_channels['{role}'] must target a bed channel, got '{reference}'"
+                ));
             }
         }
     }
@@ -800,6 +870,50 @@ fn validate_continuous_listening_area(config: &RoomConfig, result: &mut Validati
                 result.add_error(
                     "multi_seat.continuous_area.quadrature.points_per_axis must be > 0".to_string(),
                 );
+            }
+        }
+    }
+
+    if matches!(area.prior, AreaPriorKind::Gaussian { .. })
+        && matches!(area.quadrature, AreaQuadratureKind::GaussLegendre { .. })
+    {
+        result.add_error(
+            "multi_seat.continuous_area.quadrature.gauss_legendre is incompatible with a Gaussian prior; use Sobol or LatinHypercube"
+                .to_string(),
+        );
+    }
+
+    if let AreaPriorKind::Gaussian {
+        mean,
+        cov_diag,
+        truncation_sigmas,
+    } = &area.prior
+        && mean.len() == area.dimensions
+        && cov_diag.len() == area.dimensions
+        && area.bounds.len() == area.dimensions
+        && cov_diag
+            .iter()
+            .all(|value| value.is_finite() && *value > 0.0)
+        && truncation_sigmas.is_finite()
+        && *truncation_sigmas > 0.0
+    {
+        for (axis, ((lo, hi), (mean, variance))) in area
+            .bounds
+            .iter()
+            .zip(mean.iter().zip(cov_diag.iter()))
+            .enumerate()
+        {
+            let sigma = variance.sqrt();
+            let expected = (
+                *mean - *truncation_sigmas * sigma,
+                *mean + *truncation_sigmas * sigma,
+            );
+            let tolerance = 1.0e-6 * expected.0.abs().max(expected.1.abs()).max(1.0);
+            if (lo - expected.0).abs() > tolerance || (hi - expected.1).abs() > tolerance {
+                result.add_error(format!(
+                    "multi_seat.continuous_area.bounds[{}] must match Gaussian truncation box ({}, {}), got ({}, {})",
+                    axis, expected.0, expected.1, lo, hi
+                ));
             }
         }
     }
@@ -2477,6 +2591,84 @@ mod room_config_validation_tests {
                 .iter()
                 .any(|e| e.contains("system.speakers") && e.contains("Typo"))
         );
+    }
+
+    #[test]
+    fn supporting_source_default_suffix_collision_is_rejected() {
+        let mut config = default_room();
+        config.speakers.insert(
+            "Support".to_string(),
+            SpeakerConfig::SupportingSource(SupportingSourceGroup {
+                name: "Support".to_string(),
+                speaker_name: None,
+                primary: single_source("primary.csv", None),
+                support: single_source("support.csv", None),
+                supporting_source: Default::default(),
+            }),
+        );
+        config.speakers.insert(
+            "Other".to_string(),
+            SpeakerConfig::Single(single_source("other.csv", None)),
+        );
+        config.system = Some(SystemConfig {
+            model: SystemModel::Stereo,
+            speakers: HashMap::from([
+                ("L".to_string(), "Support".to_string()),
+                ("L_support".to_string(), "Other".to_string()),
+            ]),
+            subwoofers: None,
+            bass_management: None,
+            supporting_source_outputs: None,
+        });
+
+        let result = validate_room_config(&config);
+        assert!(result.errors.iter().any(|error| {
+            error.contains("supporting-source output 'L_support'") && error.contains("collides")
+        }));
+
+        let system = config.system.as_mut().expect("system");
+        system.speakers.remove("L_support");
+        system
+            .speakers
+            .insert("L_aux".to_string(), "Other".to_string());
+        system.supporting_source_outputs =
+            Some(crate::roomeq::types::SupportingSourceOutputNaming {
+                suffix: "_aux".to_string(),
+            });
+        let result = validate_room_config(&config);
+        assert!(result.errors.iter().any(|error| {
+            error.contains("supporting-source output 'L_aux'") && error.contains("collides")
+        }));
+    }
+
+    #[test]
+    fn duplicate_subwoofer_phase_alignment_mapping_is_rejected() {
+        let mut config = default_room();
+        config.speakers.insert(
+            "Left".to_string(),
+            SpeakerConfig::Single(single_source("left.csv", None)),
+        );
+        config.system = Some(SystemConfig {
+            model: SystemModel::HomeCinema,
+            speakers: HashMap::from([("L".to_string(), "Left".to_string())]),
+            subwoofers: Some(crate::roomeq::types::SubwooferSystemConfig {
+                config: Default::default(),
+                crossover: None,
+                mapping: HashMap::from([
+                    ("Sub1".to_string(), "L".to_string()),
+                    ("Sub2".to_string(), "L".to_string()),
+                ]),
+            }),
+            bass_management: None,
+            supporting_source_outputs: None,
+        });
+
+        let result = validate_room_config(&config);
+        assert!(result.errors.iter().any(|error| {
+            error.contains("Sub1")
+                && error.contains("Sub2")
+                && error.contains("both map to main 'L'")
+        }));
     }
 
     #[test]

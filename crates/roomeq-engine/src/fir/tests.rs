@@ -1,6 +1,7 @@
 #![allow(clippy::field_reassign_with_default)]
-use super::generate::generate_fir_correction_prepared;
+use super::generate::{generate_fir_correction_prepared, prepared_fir_target_curve};
 use crate::Curve;
+use crate::eq::{EqResources, PreparedEqTarget};
 #[cfg(test)]
 pub use math_audio_iir_fir::{WindowType, generate_window};
 use ndarray::Array1;
@@ -45,6 +46,37 @@ fn flat_target_like(measurement: &Curve) -> Curve {
         phase: None,
         ..Default::default()
     }
+}
+
+#[test]
+fn predefined_fir_target_uses_measurement_absolute_level() {
+    let measurement = create_test_curve(
+        &[20.0, 100.0, 1_000.0, 10_000.0, 20_000.0],
+        &[76.0, 80.0, 84.0, 82.0, 78.0],
+    );
+    let config = OptimizerConfig {
+        min_freq: 20.0,
+        max_freq: 20_000.0,
+        ..OptimizerConfig::default()
+    };
+    let resources = EqResources {
+        target: Some(PreparedEqTarget::Predefined("flat".to_string())),
+        impulse_response: None,
+    };
+
+    let target = prepared_fir_target_curve(&measurement, &config, &resources);
+    let measurement_mean = roomeq_analysis::response_metrics::mean_response_in_range(
+        &measurement,
+        config.min_freq,
+        config.max_freq,
+    );
+    let target_mean = roomeq_analysis::response_metrics::mean_response_in_range(
+        &target,
+        config.min_freq,
+        config.max_freq,
+    );
+    assert!((measurement_mean - target_mean).abs() < 1e-12);
+    assert!(target.spl.iter().all(|level| *level > 70.0));
 }
 
 fn kirkeby_config(max_boost_db: Option<f64>) -> OptimizerConfig {

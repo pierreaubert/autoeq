@@ -17,6 +17,18 @@ pub(super) fn assemble_fir_result(
     optimizer_evidence: Vec<OptimizerRunEvidence>,
 ) -> Result<ChannelProcessingResult> {
     let dsp = assemble_dsp_chain(request, &optimizer_output);
+    let target_curve = request.target.target_tilt_curve.as_ref().map(|tilt| {
+        let display_tilt = autoeq_core::interpolate_log_space(
+            &request.prepared.measurements().representative().freq,
+            tilt,
+        );
+        CurveData {
+            freq: display_tilt.freq.to_vec(),
+            spl: (&display_tilt.spl + request.target.mean_spl).to_vec(),
+            phase: None,
+            norm_range: request.preprocessed.norm_range,
+        }
+    });
     let raw_curve = request.prepared.measurements().representative();
     let display_initial = output::extend_curve_to_full_range(raw_curve);
     let (final_curve, _) = corrected_curves(request, &optimizer_output, &display_initial, false);
@@ -58,7 +70,7 @@ pub(super) fn assemble_fir_result(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
-        target_curve: None,
+        target_curve,
     };
     let (fir_coeffs, convolution_sidecar) = sidecar_output(optimizer_output);
 

@@ -11,7 +11,9 @@ pub use autoeq_optim::optim::{OptimProgressCallback, OptimizerConfidence, Optimi
 /// Acoustic analysis used by engine and workflow orchestration without adding
 /// parallel ownership of the underlying implementations.
 pub mod analysis {
-    pub use roomeq_analysis::{crossover_utils, frequency_grid, ir_waveform, slope, time_align};
+    pub use roomeq_analysis::{
+        crossover_utils, frequency_grid, ir_waveform, response_metrics, slope, time_align,
+    };
 }
 pub mod error {
     pub use autoeq_core::error::*;

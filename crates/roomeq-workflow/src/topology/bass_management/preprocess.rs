@@ -226,12 +226,17 @@ pub(in super::super) fn preprocess_cardioid_with_frequency_samples(
                 .to_string(),
         });
     }
-    if !same_frequency_grid(&front_curve.freq, &rear_curve.freq) {
+    if front_curve.phase.is_none() || rear_curve.phase.is_none() {
         return Err(AutoeqError::InvalidMeasurement {
-            message: "Cardioid preprocessing requires front and rear curves to share the same frequency grid".to_string(),
+            message: "Cardioid preprocessing requires measured phase front rear drivers"
+                .to_string(),
         });
     }
-
+    let rear_curve = if same_frequency_grid(&front_curve.freq, &rear_curve.freq) {
+        rear_curve
+    } else {
+        interpolate_log_space(&front_curve.freq, &rear_curve)
+    };
     let delay_ms = c.separation_meters / 343.0 * 1000.0;
     info!(
         "  Cardioid: separation={:.2}m, delay={:.2}ms",
@@ -242,11 +247,10 @@ pub(in super::super) fn preprocess_cardioid_with_frequency_samples(
     use num_complex::Complex;
     let n_points = front_curve.freq.len();
     let mut combined_spl = ndarray::Array1::zeros(n_points);
+    let mut combined_phase = Vec::with_capacity(n_points);
 
-    let front_phase_zeros = ndarray::Array1::zeros(n_points);
-    let rear_phase_zeros = ndarray::Array1::zeros(n_points);
-    let front_phase = front_curve.phase.as_ref().unwrap_or(&front_phase_zeros);
-    let rear_phase = rear_curve.phase.as_ref().unwrap_or(&rear_phase_zeros);
+    let front_phase = front_curve.phase.as_ref().expect("validated above");
+    let rear_phase = rear_curve.phase.as_ref().expect("validated above");
 
     for i in 0..n_points {
         let f = front_curve.freq[i];
@@ -267,13 +271,14 @@ pub(in super::super) fn preprocess_cardioid_with_frequency_samples(
         let r_c = Complex::from_polar(r_mag, r_phi_total);
 
         let sum = f_c + r_c;
-        combined_spl[i] = 20.0 * sum.norm().log10();
+        combined_spl[i] = 20.0 * sum.norm().max(1e-12).log10();
+        combined_phase.push(sum.arg().to_degrees());
     }
 
     let combined = Curve {
         freq: front_curve.freq.clone(),
         spl: combined_spl,
-        phase: None,
+        phase: Some(ndarray::Array1::from_iter(combined_phase)),
         ..Default::default()
     };
 
@@ -501,7 +506,7 @@ mod tests {
     }
 
     #[test]
-    fn preprocess_cardioid_errors_on_mismatched_frequency_grids() {
+    fn preprocess_cardioid_interpolates_mismatched_frequency_grids() {
         let mut front = make_curve(16, 80.0, Some(0.0));
         let rear = make_curve(16, 80.0, Some(0.0));
         front.freq = ndarray::Array1::logspace(10.0, f64::log10(25.0), f64::log10(205.0), 16);
@@ -514,7 +519,18 @@ mod tests {
         };
         let result =
             preprocess_cardioid_with_frequency_samples(&config, crate::DEFAULT_FREQUENCY_SAMPLES);
-        assert!(result.is_err(), "expected Err for mismatched grids");
+        assert!(
+            result.is_ok(),
+            "expected interpolation to accept mismatched grids"
+        );
+        assert!(
+            result
+                .unwrap()
+                .combined_curve
+                .spl
+                .iter()
+                .all(|value| value.is_finite())
+        );
     }
 
     #[test]

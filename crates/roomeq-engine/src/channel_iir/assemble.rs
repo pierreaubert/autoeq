@@ -1,4 +1,4 @@
-use autoeq_core::{Curve, Result, normalize_and_interpolate_response, response};
+use autoeq_core::{Curve, Result, interpolate_log_space, response};
 use autoeq_optim::optim::OptimizerRunEvidence;
 use log::info;
 use math_audio_iir_fir::Biquad;
@@ -199,7 +199,7 @@ fn display_target_curve(
     norm_range: Option<(f64, f64)>,
 ) -> CurveData {
     let spl = if let Some(tilt_curve) = &request.target.target_tilt_curve {
-        let display_tilt = normalize_and_interpolate_response(&display_initial.freq, tilt_curve);
+        let display_tilt = interpolate_log_space(&display_initial.freq, tilt_curve);
         &display_tilt.spl + request.target.mean_spl
     } else {
         Array1::from_elem(display_initial.freq.len(), request.target.mean_spl)

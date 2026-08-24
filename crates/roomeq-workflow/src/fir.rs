@@ -73,6 +73,16 @@ mod tests {
             ..Default::default()
         };
         let target = resolve_fir_target_curve(&measurement, &config, None).unwrap();
-        assert_eq!(target.spl.to_vec(), vec![80.0; 3]);
+        let expected_level = roomeq_engine::analysis::response_metrics::mean_response_in_range(
+            &measurement,
+            config.min_freq,
+            config.max_freq,
+        );
+        assert!(
+            target
+                .spl
+                .iter()
+                .all(|level| (*level - expected_level).abs() < 1e-6)
+        );
     }
 }

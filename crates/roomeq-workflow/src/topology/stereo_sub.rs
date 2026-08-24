@@ -509,7 +509,13 @@ impl WorkflowExecutor for Stereo21Executor {
                 objective_after,
                 group_results: Vec::new(),
                 source_results: Vec::new(),
-                sub_output_results: Vec::new(),
+                sub_output_results:
+                    roomeq_engine::bass_management::bass_management_sub_output_results(
+                        &sub_role,
+                        sub_preprocess.drivers.as_deref(),
+                        sub_gain_post,
+                        &sub_sys.config,
+                    ),
                 advisories: optimization_advisories,
             };
         let bass_routing_graph = roomeq_engine::home_cinema::bass_management_routing_graph(

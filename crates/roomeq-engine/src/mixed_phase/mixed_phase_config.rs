@@ -58,6 +58,19 @@ pub fn decompose_phase(
         .phase
         .as_ref()
         .ok_or("Mixed-phase correction requires phase data in measurements")?;
+    if measurement.freq.is_empty()
+        || measurement.freq.len() != measurement.spl.len()
+        || measured_phase.len() != measurement.freq.len()
+        || measurement
+            .freq
+            .iter()
+            .any(|frequency| !frequency.is_finite() || *frequency <= 0.0)
+    {
+        return Err(
+            "Mixed-phase correction requires non-empty, aligned positive frequency, SPL, and phase arrays"
+                .to_string(),
+        );
+    }
 
     // Unwrap measured phase to remove discontinuities
     let unwrapped_phase = phase_utils::unwrap_phase_degrees(measured_phase);

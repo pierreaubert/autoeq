@@ -661,6 +661,31 @@ pub fn build_mixed_mode_crossover_chain(
     fir_bulk_delay_ms: f64,
     initial_curve: Option<&crate::Curve>,
 ) -> ChannelDspChain {
+    build_mixed_mode_crossover_chain_with_post_merge_eq(
+        channel_name,
+        mixed_config,
+        eq_filters,
+        &[],
+        fir_wav_path,
+        fir_uses_low,
+        fir_bulk_delay_ms,
+        initial_curve,
+    )
+}
+
+/// Build a mixed-mode crossover and apply a separate full-band EQ stage after
+/// the FIR/IIR branches have been recombined.
+#[allow(clippy::too_many_arguments)]
+pub fn build_mixed_mode_crossover_chain_with_post_merge_eq(
+    channel_name: &str,
+    mixed_config: &MixedModeConfig,
+    eq_filters: &[Biquad],
+    post_merge_filters: &[Biquad],
+    fir_wav_path: &str,
+    fir_uses_low: bool,
+    fir_bulk_delay_ms: f64,
+    initial_curve: Option<&crate::Curve>,
+) -> ChannelDspChain {
     use crate::topology::{HYBRID_CROSSOVER_CORRECTION_STAGE, mark_plugin_correction_stage};
 
     let mark_hybrid =
@@ -725,6 +750,12 @@ pub fn build_mixed_mode_crossover_chain(
 
     // 5. Merge bands back together
     plugins.push(mark_hybrid(create_band_merge_plugin(2)));
+
+    // User voicing is deliberately outside the neutral hybrid correction
+    // stage and must affect the recombined full-band signal.
+    if !post_merge_filters.is_empty() {
+        plugins.push(create_eq_plugin(post_merge_filters));
+    }
 
     ChannelDspChain {
         channel: channel_name.to_string(),

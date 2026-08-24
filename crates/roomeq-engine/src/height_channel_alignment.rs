@@ -124,7 +124,12 @@ fn mean_level_difference_db(
     (!differences.is_empty()).then(|| differences.iter().sum::<f64>() / differences.len() as f64)
 }
 
-fn has_trustworthy_phase(curve: &Curve, min_freq: f64, max_freq: f64) -> bool {
+fn has_trustworthy_phase(
+    curve: &Curve,
+    min_freq: f64,
+    max_freq: f64,
+    coherence_threshold: f64,
+) -> bool {
     let (Some(phase), Some(coherence)) = (&curve.phase, &curve.coherence) else {
         return false;
     };
@@ -142,9 +147,7 @@ fn has_trustworthy_phase(curve: &Curve, min_freq: f64, max_freq: f64) -> bool {
         .filter(|(frequency, _)| **frequency >= min_freq && **frequency <= max_freq)
         .map(|(_, coherence)| *coherence)
         .collect::<Vec<_>>();
-    !values.is_empty()
-        && values.iter().sum::<f64>() / values.len() as f64
-            >= crate::bass_phase_confidence::DEFAULT_COHERENCE_THRESHOLD
+    !values.is_empty() && values.iter().sum::<f64>() / values.len() as f64 >= coherence_threshold
 }
 
 fn mean_phase_difference_deg(
@@ -192,6 +195,27 @@ pub fn compute_height_channel_alignment(
     sample_rate: f64,
     min_freq: f64,
     max_freq: f64,
+) -> Result<HashMap<String, HeightChannelAlignmentResult>> {
+    compute_height_channel_alignment_with_coherence_threshold(
+        corrected_curves,
+        arrivals_ms,
+        config,
+        sample_rate,
+        min_freq,
+        max_freq,
+        crate::bass_phase_confidence::DEFAULT_COHERENCE_THRESHOLD,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn compute_height_channel_alignment_with_coherence_threshold(
+    corrected_curves: &HashMap<String, Curve>,
+    arrival_times_ms: &HashMap<String, f64>,
+    config: &HeightChannelAlignmentConfig,
+    sample_rate: f64,
+    min_freq: f64,
+    max_freq: f64,
+    coherence_threshold: f64,
 ) -> Result<HashMap<String, HeightChannelAlignmentResult>> {
     if !sample_rate.is_finite() || sample_rate <= 0.0 {
         return Err(AutoeqError::InvalidConfiguration {
@@ -266,8 +290,8 @@ pub fn compute_height_channel_alignment(
         let level_before =
             mean_level_difference_db(channel_curve, reference_curve, min_freq, max_freq);
         let phase_objective_evaluated = config.match_phase
-            && has_trustworthy_phase(channel_curve, min_freq, max_freq)
-            && has_trustworthy_phase(reference_curve, min_freq, max_freq);
+            && has_trustworthy_phase(channel_curve, min_freq, max_freq, coherence_threshold)
+            && has_trustworthy_phase(reference_curve, min_freq, max_freq, coherence_threshold);
         let phase_before = phase_objective_evaluated
             .then(|| mean_phase_difference_deg(channel_curve, reference_curve, min_freq, max_freq))
             .flatten();
@@ -295,7 +319,25 @@ pub fn compute_height_channel_alignment(
                     }
                 }
                 if !config.match_level {
-                    candidate.flat_gain_db = 0.0;
+                    candidate.flat_gain_db = if config.match_timbre {
+                        let mut shelf_only = candidate.clone();
+                        shelf_only.flat_gain_db = 0.0;
+                        let shelf_corrected =
+                            apply_alignment_to_curve(channel_curve, &shelf_only, sample_rate);
+                        let before = roomeq_analysis::response_metrics::mean_response_in_range(
+                            channel_curve,
+                            min_freq,
+                            max_freq,
+                        );
+                        let after = roomeq_analysis::response_metrics::mean_response_in_range(
+                            &shelf_corrected,
+                            min_freq,
+                            max_freq,
+                        );
+                        (before - after).clamp(-MAX_FLAT_GAIN_DB, MAX_FLAT_GAIN_DB)
+                    } else {
+                        0.0
+                    };
                 }
                 candidate
             });
@@ -344,8 +386,8 @@ pub fn compute_height_channel_alignment(
         }
         let delay_ms = if config.match_arrival_time {
             match (
-                arrivals_ms.get(channel_name),
-                arrivals_ms.get(&reference_channel),
+                arrival_times_ms.get(channel_name),
+                arrival_times_ms.get(&reference_channel),
             ) {
                 (Some(channel_arrival), Some(reference_arrival)) => {
                     let needed = reference_arrival - channel_arrival;

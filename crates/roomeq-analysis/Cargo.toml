@@ -1,6 +1,6 @@
 [package]
 name = "roomeq-analysis"
-version = "0.5.6"
+version = "0.5.7"
 edition = "2024"
 description = "Measurement-analysis primitives for RoomEQ"
 license = "GPL-3.0-or-later"

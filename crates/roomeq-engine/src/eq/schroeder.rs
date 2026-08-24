@@ -3,7 +3,7 @@ use crate::{AutoeqError, Curve};
 use autoeq_core::{Result, response};
 use log::debug;
 use math_audio_iir_fir::Biquad;
-use roomeq_model::{LowFreqFilterConfig, OptimizerConfig, SchroederSplitConfig, TargetShape};
+use roomeq_model::{LowFreqFilterConfig, OptimizerConfig, SchroederSplitConfig};
 
 /// Optimized low- and high-frequency filters for a Schroeder split.
 #[derive(Debug)]
@@ -59,16 +59,11 @@ pub fn optimize_with_schroeder_split_detailed(
         });
     }
 
-    let has_non_flat_target = optimizer
-        .target_response
-        .as_ref()
-        .is_some_and(|tr| tr.shape != TargetShape::Flat);
-
     // A split outside the configured optimization band has only one real
     // side. Do not manufacture an inverted second band (for example
     // [400, 80] Hz); optimize the available side with the full filter budget.
     if schroeder_freq >= optimizer.max_freq {
-        let (min_db, max_db) = low_freq_gain_bounds(optimizer, low_config, has_non_flat_target);
+        let (min_db, max_db) = low_freq_gain_bounds(optimizer, low_config);
         let low_optimizer = OptimizerConfig {
             min_q: low_config.min_q,
             max_q: low_config.max_q,
@@ -135,7 +130,7 @@ pub fn optimize_with_schroeder_split_detailed(
     // When target_tilt is active, the optimizer works on a tilt-adjusted curve
     // where following the tilt may require both boosts and cuts. Allow limited
     // boost (half the configured max) to give the optimizer enough freedom.
-    let (low_min_db, low_max_db) = low_freq_gain_bounds(optimizer, low_config, has_non_flat_target);
+    let (low_min_db, low_max_db) = low_freq_gain_bounds(optimizer, low_config);
     let low_optimizer = OptimizerConfig {
         num_filters: low_filters,
         min_freq: optimizer.min_freq,
@@ -211,7 +206,6 @@ pub fn optimize_with_schroeder_split_detailed(
 fn low_freq_gain_bounds(
     optimizer: &OptimizerConfig,
     low_config: &LowFreqFilterConfig,
-    has_non_flat_target: bool,
 ) -> (f64, f64) {
     if let Some(configured_max) = low_config.max_db {
         let configured_abs = configured_max.abs();
@@ -225,8 +219,6 @@ fn low_freq_gain_bounds(
 
     if low_config.allow_boost {
         (optimizer.min_db, optimizer.max_db)
-    } else if has_non_flat_target {
-        (optimizer.min_db, (optimizer.max_db / 2.0).min(3.0))
     } else {
         (optimizer.min_db, 0.0)
     }
@@ -289,10 +281,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(
-            low_freq_gain_bounds(&optimizer, &low_config, false),
-            (-14.0, 0.0)
-        );
+        assert_eq!(low_freq_gain_bounds(&optimizer, &low_config), (-14.0, 0.0));
     }
 
     #[test]
@@ -304,10 +293,23 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(
-            low_freq_gain_bounds(&optimizer, &low_config, false),
-            (-14.0, 14.0)
-        );
+        assert_eq!(low_freq_gain_bounds(&optimizer, &low_config), (-14.0, 14.0));
+    }
+
+    #[test]
+    fn implicit_low_freq_bounds_never_override_cuts_only_policy() {
+        let optimizer = OptimizerConfig {
+            min_db: -12.0,
+            max_db: 12.0,
+            ..OptimizerConfig::default()
+        };
+        let low_config = LowFreqFilterConfig {
+            allow_boost: false,
+            max_db: None,
+            ..LowFreqFilterConfig::default()
+        };
+
+        assert_eq!(low_freq_gain_bounds(&optimizer, &low_config), (-12.0, 0.0));
     }
 
     #[test]

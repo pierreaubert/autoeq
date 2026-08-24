@@ -220,8 +220,13 @@ pub fn build_ssir_correction_weights(
             // energy is mostly inside the FDW gate can be corrected strongly;
             // reflection-dominated frequencies are held near the early
             // reflection floor. Room modes are still boosted below.
-            reflection_weight
-                + (config.mode_correction_weight - reflection_weight) * fdw_depth[i].clamp(0.0, 1.0)
+            let fdw_weight = reflection_weight
+                + (config.mode_correction_weight - reflection_weight)
+                    * fdw_depth[i].clamp(0.0, 1.0);
+            // Preserve the diffuse-field ceiling above Schroeder even when
+            // the short FDW gate looks mostly direct.
+            let diffuse_weight = fdw_weight.min(config.steady_state_weight);
+            fdw_weight + (diffuse_weight - fdw_weight) * blend
         } else {
             // Below boundary: early_reflection_weight (modal region)
             // Above boundary: steady_state_weight (diffuse field)

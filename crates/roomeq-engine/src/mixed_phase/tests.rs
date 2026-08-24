@@ -32,6 +32,20 @@ fn test_decompose_phase_requires_phase_data() {
 }
 
 #[test]
+fn test_decompose_phase_rejects_misaligned_curve_without_panicking() {
+    let curve = Curve {
+        freq: Array1::from_vec(vec![100.0, 1_000.0]),
+        spl: Array1::from_vec(vec![80.0]),
+        phase: Some(Array1::from_vec(vec![0.0, 0.0])),
+        ..Curve::default()
+    };
+
+    let error = decompose_phase(&curve, &MixedPhaseConfig::default())
+        .expect_err("misaligned curves must return an error");
+    assert!(error.contains("aligned positive frequency"));
+}
+
+#[test]
 fn test_decompose_phase_flat_measurement() {
     // Flat magnitude + zero phase → min phase ≈ 0, excess ≈ 0
     let n = 64;

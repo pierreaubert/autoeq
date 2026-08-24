@@ -186,11 +186,14 @@ pub fn solve_prepared_ctc(
     if !max_electrical_sum_gain_db.is_finite() {
         max_electrical_sum_gain_db = 0.0;
     }
-    let mean_crosstalk_residual_db = reconstruction_error_to_db(mean_reconstruction_error);
     let driver_headroom_limited = headroom_was_limited
         || max_electrical_sum_gain_db >= config.regularization.max_gain_db - 0.25;
     let delivered_response =
         compute_delivered_response_metrics(spectrum, &filters, fft_size, latency_samples)?;
+    // Keep the legacy report field for schema compatibility, but source it
+    // from the actual off-diagonal delivered response. Full reconstruction
+    // error also contains target-channel error and is not a crosstalk metric.
+    let mean_crosstalk_residual_db = delivered_crosstalk_residual_db(&delivered_response);
     let binaural_diagnostics = compute_binaural_diagnostics(
         spectrum,
         &delivered_response,
@@ -438,6 +441,10 @@ pub fn reconstruction_error_to_db(error: f64) -> f64 {
     10.0 * error.max(1e-24).log10()
 }
 
+fn delivered_crosstalk_residual_db(metrics: &CtcDeliveredResponseMetrics) -> f64 {
+    metrics.mean_crosstalk_db
+}
+
 pub fn amplitude_to_db(value: f64) -> f64 {
     20.0 * value.max(1e-12).log10()
 }
@@ -458,4 +465,22 @@ pub fn fft_real_to_half_spectrum_f64(input: &[f64], fft_size: usize) -> Vec<Comp
         .process(&mut buffer);
     buffer.truncate(fft_size / 2 + 1);
     buffer
+}
+
+#[cfg(test)]
+mod crosstalk_metric_tests {
+    use super::*;
+
+    #[test]
+    fn headline_residual_uses_off_diagonal_delivered_metric() {
+        let metrics = CtcDeliveredResponseMetrics {
+            mean_target_error: 0.75,
+            worst_target_error: 0.9,
+            mean_crosstalk_db: -42.0,
+            worst_crosstalk_db: -31.0,
+            mean_channel_balance_db: 1.5,
+        };
+
+        assert_eq!(delivered_crosstalk_residual_db(&metrics), -42.0);
+    }
 }

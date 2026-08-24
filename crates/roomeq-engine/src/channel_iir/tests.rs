@@ -336,6 +336,13 @@ fn kautz_processing_detects_modes_and_returns_path_free_chain() {
     .unwrap();
 
     assert!(!result.filters.is_empty());
+    assert!(
+        result
+            .filters
+            .iter()
+            .all(|filter| filter.db_gain.abs() <= room_config.optimizer.max_db + 1e-9),
+        "Kautz gains must be referenced to response shape, not absolute SPL"
+    );
     assert_eq!(
         plugin_label(
             result

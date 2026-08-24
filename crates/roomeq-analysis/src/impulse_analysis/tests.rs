@@ -489,6 +489,11 @@ fn test_ssir_weights_use_fdw_direct_energy_ratio() {
         result.correction_weights[0] > result.correction_weights[1],
         "FDW directness should drive correction depth"
     );
+    assert!(
+        result.correction_weights[1] <= config.steady_state_weight + 1e-3,
+        "FDW must preserve the diffuse-field steady-state ceiling; got {}",
+        result.correction_weights[1]
+    );
 }
 
 #[test]

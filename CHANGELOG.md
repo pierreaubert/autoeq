@@ -1,3 +1,10 @@
+# 0.5.61
+
+## Fixes
+
+- Make the CTC headline residual report actual delivered off-diagonal crosstalk, preserve FDW steady-state correction limits, and keep smoothness tied to its resolved Schroeder boundary.
+- Score tilted targets against the same reference before and after correction, enforce cuts-only Schroeder policy for every target shape, and add malformed mixed-phase/Kautz regressions.
+
 # 0.5.60
 
 ## Fixes

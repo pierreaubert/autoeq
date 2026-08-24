@@ -441,18 +441,12 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
     // disabled, in which case the loss does not consume the mask anyway.
     objective_data.null_suppression = null_suppression_mask.map(std::sync::Arc::new);
 
-    // Schroeder frequency — used downstream by `run_optimization_pass`
-    // to forbid boost filters below the modal crossover. Pull it from
-    // the decomposition result (which after the recent SSIR-path fix
-    // just mirrors `config.decomposed_correction.schroeder_freq`).
-    // When decomposition is disabled, leave as `None` and the
-    // asymmetric bounds are not applied.
+    // A measured decomposition may refine consumers whose contract calls for
+    // it. Smoothness keeps its already-resolved split/explicit boundary and
+    // only falls back to the decomposition when neither supplied one.
     let schroeder_hz = decomposed_result.as_ref().map(|r| r.schroeder_freq);
     if let Some(cfg) = objective_data.smoothness_penalty.as_mut()
-        && config
-            .smoothness_penalty
-            .as_ref()
-            .is_some_and(|smoothness| smoothness.schroeder_hz.is_none())
+        && cfg.schroeder_hz.is_none()
         && let Some(schroeder_hz) = schroeder_hz
     {
         cfg.schroeder_hz = Some(schroeder_hz);
@@ -525,13 +519,9 @@ pub(in super::super) fn run_optimization_pass(
         }
     }
 
-    // Physics constraint: below the Schroeder frequency the room is
-    // modal — mode peaks can be cut with EQ but mode nulls can't be
-    // filled with boost, so letting the optimizer place boost filters
-    // there wastes slots and headroom. Clamp the gain upper bound of
-    // any filter whose frequency range sits entirely below Schroeder
-    // to 0 dB (cuts only). Skipped when decomposed-correction is
-    // disabled (no trustworthy Schroeder value available).
+    // Bounds already encode the configured gain policy. Modal-region boost
+    // safety is handled by asymmetric/null-suppression and headroom terms; no
+    // additional hard sub-Schroeder clamp is applied here.
     let mut x =
         autoeq_optim::optim::setup::initial_guess(&optim_params, &lower_bounds, &upper_bounds);
 

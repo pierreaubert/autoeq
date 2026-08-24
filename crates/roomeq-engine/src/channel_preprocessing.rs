@@ -87,7 +87,8 @@ pub fn preprocess_channel(
     let score_min_freq = excursion_hpf_hz.map_or(target.min_freq, |hz| {
         target.min_freq.max(hz).min(target.max_freq)
     });
-    let pre_score = flatness_score_in_range(&curve, score_min_freq, target.max_freq);
+    let score_curve = crate::channel_result::subtract_target_tilt(&curve, target);
+    let pre_score = flatness_score_in_range(&score_curve, score_min_freq, target.max_freq);
     let channel_mean_spl = roomeq_analysis::response_metrics::mean_response_in_range(
         &curve,
         target.min_freq,
@@ -626,6 +627,43 @@ mod tests {
         assert!(
             maybe_clamp_min_freq_for_target_tilt("left", &config, &curve, Some(&tilt), 20.0, 500.0,)
                 > 20.0
+        );
+    }
+
+    #[test]
+    fn pre_score_uses_the_same_tilt_reference_as_post_score() {
+        let mut curve = flat_curve();
+        let tilt_spl = curve
+            .freq
+            .mapv(|frequency| -3.0 * (frequency / 1_000.0).log2());
+        curve.spl += &tilt_spl;
+        let prepared = prepared(curve.clone());
+        let config = RoomConfig {
+            optimizer: OptimizerConfig {
+                min_freq: 20.0,
+                max_freq: 20_000.0,
+                ..OptimizerConfig::default()
+            },
+            ..RoomConfig::default()
+        };
+        let mut target = crate::channel_target::TargetContext {
+            target_tilt_curve: Some(Curve {
+                freq: curve.freq.clone(),
+                spl: tilt_spl,
+                ..Curve::default()
+            }),
+            min_freq: 20.0,
+            max_freq: 20_000.0,
+            pre_score: f64::NAN,
+            mean_spl: 80.0,
+            cea2034_active: false,
+        };
+
+        preprocess_channel("left", &prepared, &config, 48_000.0, None, &mut target);
+        assert!(
+            target.pre_score < 1e-4,
+            "tilt-referenced pre-score was {}",
+            target.pre_score
         );
     }
 

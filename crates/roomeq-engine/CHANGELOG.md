@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Report delivered CTC isolation in the headline residual, preserve resolved smoothness/Schroeder precedence, use target-referenced pre-scores, and never override cuts-only low-frequency policy for target shapes.
 - Canonicalize direct single-channel objectives to the RoomEQ hybrid grid so fixed-seed filters are sampling-invariant.
 - Preserve absolute FIR target levels, full-band hybrid preference EQ, route-before-main-EQ bass taps, and single ownership of mixed-phase correction.
 - Correct EPA objective refresh, excursion filter sections, all-pass identity candidates, height residual delays, and supporting-source anchoring.

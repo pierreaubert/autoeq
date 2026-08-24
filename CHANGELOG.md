@@ -1,4 +1,4 @@
-# 0.5.57
+# 0.5.58
 
 ## Fixes
 
@@ -7,6 +7,21 @@
   polarity are source-owned. Independent programme channels no longer enter a
   coherent tonal sum, physical-sub preprocessing remains authoritative, and a
   common down-only input trim enforces configured correlated-bus headroom.
+- Keep IIR, FIR, and hybrid bass routing magnitude-equivalent, export a
+  crossover for every redirected main, and apply the hybrid split, FIR,
+  latency alignment, IIR, and merge stages as one atomic correction block.
+
+## QA
+
+- Add strict measured Genelec 5.1.4 cross-mode gates for deployed magnitude
+  parity and FIR/hybrid timing improvement, plus route reconstruction,
+  crossover presence, per-source objective evidence, atomic hybrid-chain, and
+  correlated-bus headroom checks.
+
+# 0.5.57
+
+## Fixes
+
 - Keep the cinema LFE programme low-pass (120 Hz by default) independent from
   optimized speaker crossovers, preserve configured crossover bounds during
   joint bass-route optimization, reject per-group objective regressions, and

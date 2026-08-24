@@ -32,6 +32,11 @@ pub fn build_gd_alignment_target(
 
     GdAlignmentTarget {
         per_channel_delay_ms,
+        per_channel_polarity_inverted: result
+            .per_channel
+            .iter()
+            .map(|channel| channel.polarity_inverted)
+            .collect(),
         sum_gd_reference_ms: sum_gd,
         freq,
     }

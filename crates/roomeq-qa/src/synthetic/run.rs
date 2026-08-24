@@ -404,12 +404,13 @@ pub(super) fn run_multiseat_strategy_metric_guard(strategy: MultiSeatStrategy) -
 pub(super) fn run_multiseat_phase_control_guard() -> TestResult {
     let test_name = "multiseat/api/polarity_allpass_controls".to_string();
     let flat = |_: f64| 90.0;
-    let dipped = |f: f64| if f < 70.0 { 86.0 } else { 90.0 };
     let peaked = |f: f64| if f < 70.0 { 94.0 } else { 90.0 };
+    // Keep the seats non-proportional across subs. If every sub has the same
+    // seat-to-seat level ratio, shared per-sub controls cannot reduce variance.
     let measurements = vec![
         vec![
             make_multiseat_qa_curve(flat, 0.0, true),
-            make_multiseat_qa_curve(dipped, 15.0, true),
+            make_multiseat_qa_curve(flat, 15.0, true),
         ],
         vec![
             make_multiseat_qa_curve(peaked, 170.0, true),

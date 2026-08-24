@@ -120,7 +120,7 @@ pub fn execute_prepared_channel(
                     target: &execution.target,
                     preference_filters: &preference_filters,
                     mixed_config,
-                    optimizer: &room_config.optimizer,
+                    optimizer: &execution.optimizer,
                     eq_resources,
                     sample_rate,
                     min_freq: execution.target.min_freq,

@@ -256,6 +256,16 @@ fn create_crossover_filters_lr24_returns_biquads() {
 }
 
 #[test]
+fn create_crossover_filters_realizes_second_order_aliases() {
+    let lr12 = super::create_crossover_filters("LR12", 100.0, 48000.0, true);
+    let bw2 = super::create_crossover_filters("BW2", 100.0, 48000.0, true);
+    let lr24 = super::create_crossover_filters("LR24", 100.0, 48000.0, true);
+    assert_eq!(lr12.len(), 1);
+    assert_eq!(bw2.len(), 1);
+    assert_eq!(lr24.len(), 2);
+}
+
+#[test]
 fn create_crossover_filters_unknown_defaults_to_lr24() {
     let filters = super::create_crossover_filters("unknown", 100.0, 48000.0, false);
     assert!(!filters.is_empty());

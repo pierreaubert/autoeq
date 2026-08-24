@@ -5,9 +5,7 @@ use autoeq_optim::optim::OptimProgressCallback;
 use log::info;
 use math_audio_iir_fir::Biquad;
 use num_complex::Complex64;
-use roomeq_analysis::crossover_utils::{
-    compute_lr24_crossover_responses, split_curve_at_frequency,
-};
+use roomeq_analysis::crossover_utils::split_curve_at_frequency;
 use roomeq_model::{CurveData, MixedModeConfig, OptimizerConfig};
 
 use crate::channel_result::subtract_target_tilt;
@@ -136,6 +134,7 @@ pub fn process_mixed_crossover(
         &eq_filters,
         &[],
         &fir_coefficients,
+        &request.mixed_config.crossover_type,
         crossover_freq,
         fir_uses_low,
         fir_bulk_delay_ms,
@@ -146,6 +145,7 @@ pub fn process_mixed_crossover(
         &eq_filters,
         request.preference_filters,
         &fir_coefficients,
+        &request.mixed_config.crossover_type,
         crossover_freq,
         fir_uses_low,
         fir_bulk_delay_ms,
@@ -172,6 +172,7 @@ pub fn process_mixed_crossover(
         &eq_filters,
         request.preference_filters,
         &fir_coefficients,
+        &request.mixed_config.crossover_type,
         crossover_freq,
         fir_uses_low,
         fir_bulk_delay_ms,
@@ -209,6 +210,7 @@ fn apply_crossover_response(
     eq_filters: &[math_audio_iir_fir::Biquad],
     post_merge_filters: &[math_audio_iir_fir::Biquad],
     fir_coefficients: &[f64],
+    crossover_type: &str,
     crossover_freq: f64,
     fir_uses_low: bool,
     fir_bulk_delay_ms: f64,
@@ -219,8 +221,20 @@ fn apply_crossover_response(
         response::compute_peq_complex_response(post_merge_filters, &curve.freq, sample_rate);
     let fir_response =
         response::compute_fir_complex_response(fir_coefficients, &curve.freq, sample_rate);
-    let (lowpass, highpass) =
-        compute_lr24_crossover_responses(&curve.freq, crossover_freq, sample_rate);
+    let lowpass = crate::topology::compute_crossover_complex_response(
+        crossover_type,
+        crossover_freq,
+        sample_rate,
+        true,
+        &curve.freq,
+    );
+    let highpass = crate::topology::compute_crossover_complex_response(
+        crossover_type,
+        crossover_freq,
+        sample_rate,
+        false,
+        &curve.freq,
+    );
     let combined = lowpass
         .iter()
         .zip(highpass.iter())
@@ -363,9 +377,18 @@ mod tests {
             4.0,
         )];
         let neutral =
-            apply_crossover_response(&curve, &[], &[], &[1.0], 500.0, true, 0.0, 48_000.0);
-        let voiced =
-            apply_crossover_response(&curve, &[], &preference, &[1.0], 500.0, true, 0.0, 48_000.0);
+            apply_crossover_response(&curve, &[], &[], &[1.0], "LR24", 500.0, true, 0.0, 48_000.0);
+        let voiced = apply_crossover_response(
+            &curve,
+            &[],
+            &preference,
+            &[1.0],
+            "LR24",
+            500.0,
+            true,
+            0.0,
+            48_000.0,
+        );
         let preference_response =
             response::compute_peq_complex_response(&preference, &curve.freq, 48_000.0);
         for ((voiced_level, neutral_level), expected) in voiced
@@ -409,5 +432,24 @@ mod tests {
         assert_eq!(fir_bulk_delay_ms(&[0.1, -0.2, 1.0, 0.4], 1_000.0), 2.0);
         assert_eq!(fir_bulk_delay_ms(&[], 48_000.0), 0.0);
         assert_eq!(fir_bulk_delay_ms(&[1.0], 0.0), 0.0);
+    }
+
+    #[test]
+    fn mixed_crossover_models_configured_slope() {
+        let curve = curve();
+        let lr24 =
+            apply_crossover_response(&curve, &[], &[], &[0.5], "LR24", 500.0, true, 0.0, 48_000.0);
+        let lr48 =
+            apply_crossover_response(&curve, &[], &[], &[0.5], "LR48", 500.0, true, 0.0, 48_000.0);
+        let difference = lr24
+            .spl
+            .iter()
+            .zip(lr48.spl.iter())
+            .map(|(left, right)| (left - right).abs())
+            .fold(0.0, f64::max);
+        assert!(
+            difference > 0.1,
+            "configured crossover slope was ignored by modeled output"
+        );
     }
 }

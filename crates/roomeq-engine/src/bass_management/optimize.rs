@@ -106,12 +106,19 @@ pub fn optimize_home_cinema_group_crossovers(
         }
 
         // Independent logical inputs do not form one coherent tonal source.
-        // This magnitude average is used only for compatibility metadata; the
-        // active route optimizer below scores each source independently.
+        // Keep the compatibility magnitude average and defer phase-sensitive
+        // route optimization until it can score each source independently.
         let virtual_main = average_mains_magnitude(&main_refs);
         let phase_available = false;
         if source_phase_available {
             advisories.push("per_source_route_optimizer_deferred".to_string());
+        }
+        if matches!(
+            plan.crossover_type.trim().to_ascii_lowercase().as_str(),
+            "auto" | "optimize"
+        ) {
+            advisories
+                .push("auto_crossover_type_fallback_lr24_without_phase_evaluation".to_string());
         }
         joint_inputs.push(BassManagementJointGroupInput {
             group_id: group_id.clone(),
@@ -1586,6 +1593,31 @@ mod tests {
                 || a == "group_optimizer_no_improvement"
                 || a == "per_source_route_optimizer_deferred"
         }));
+    }
+
+    #[test]
+    fn group_crossover_auto_reports_unevaluated_lr24_fallback() {
+        let config = base_room_config(tiny_optimizer());
+        let aligned_curves = make_curves(true);
+        let aligned_pre_eq_curves = make_curves(true);
+        let mut crossover = fallback_crossover();
+        crossover.crossover_type = "auto".to_string();
+        let reports = optimize_home_cinema_group_crossovers(
+            &config,
+            &main_roles(),
+            &aligned_curves,
+            &aligned_pre_eq_curves,
+            "LFE",
+            &crossover,
+            48_000.0,
+            None,
+        )
+        .unwrap();
+        let report = &reports["lcr"];
+        assert_eq!(report.crossover_type, "LR24");
+        assert!(report.advisories.iter().any(
+            |advisory| advisory == "auto_crossover_type_fallback_lr24_without_phase_evaluation"
+        ));
     }
 
     #[test]

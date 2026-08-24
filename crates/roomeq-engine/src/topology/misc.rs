@@ -148,37 +148,47 @@ pub fn create_crossover_filters(
     if is_linear_phase_crossover_type(type_str) {
         return Vec::new();
     }
-    let type_lower = type_str.to_lowercase();
-    let peq = match type_lower.as_str() {
-        "lr24" | "lr4" => {
+    let crossover_type = type_str.parse::<roomeq_model::CrossoverType>();
+    let peq = match crossover_type {
+        Ok(roomeq_model::CrossoverType::LinkwitzRiley2) => {
+            if is_lowpass {
+                peq_linkwitzriley_lowpass(2, freq, sample_rate)
+            } else {
+                peq_linkwitzriley_highpass(2, freq, sample_rate)
+            }
+        }
+        Ok(roomeq_model::CrossoverType::LinkwitzRiley4) => {
             if is_lowpass {
                 peq_linkwitzriley_lowpass(4, freq, sample_rate)
             } else {
                 peq_linkwitzriley_highpass(4, freq, sample_rate)
             }
         }
-        "lr48" | "lr8" => {
+        Ok(roomeq_model::CrossoverType::LinkwitzRiley8) => {
             if is_lowpass {
                 peq_linkwitzriley_lowpass(8, freq, sample_rate)
             } else {
                 peq_linkwitzriley_highpass(8, freq, sample_rate)
             }
         }
-        "bw12" | "butterworth12" => {
+        Ok(roomeq_model::CrossoverType::Butterworth2) => {
             if is_lowpass {
                 peq_butterworth_lowpass(2, freq, sample_rate)
             } else {
                 peq_butterworth_highpass(2, freq, sample_rate)
             }
         }
-        "bw24" | "butterworth24" => {
+        Ok(roomeq_model::CrossoverType::Butterworth4) => {
             if is_lowpass {
                 peq_butterworth_lowpass(4, freq, sample_rate)
             } else {
                 peq_butterworth_highpass(4, freq, sample_rate)
             }
         }
-        _ => {
+        Ok(roomeq_model::CrossoverType::LinearPhase | roomeq_model::CrossoverType::None) => {
+            Vec::new()
+        }
+        Err(_) => {
             log::warn!("Unknown crossover type '{}', defaulting to LR24", type_str);
             if is_lowpass {
                 peq_linkwitzriley_lowpass(4, freq, sample_rate)

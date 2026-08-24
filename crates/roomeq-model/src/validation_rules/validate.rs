@@ -646,6 +646,17 @@ fn validate_crossovers(
         let has_single = crossover.frequency.is_some();
         let has_multiple = crossover.frequencies.is_some();
         let has_range = crossover.frequency_range.is_some();
+        if let Some((minimum, maximum)) = crossover.frequency_range
+            && (!minimum.is_finite()
+                || !maximum.is_finite()
+                || minimum <= 0.0
+                || minimum >= maximum)
+        {
+            result.add_error(format!(
+                "Crossover '{}' frequency_range must be finite, positive, and increasing; got [{minimum}, {maximum}] Hz",
+                crossover_ref
+            ));
+        }
 
         if has_single && num_drivers != 2 {
             result.add_warning(format!(

@@ -263,6 +263,51 @@ fn test_validate_crossover_reference() {
 }
 
 #[test]
+fn test_validate_crossover_frequency_range_rejects_reversed_bounds() {
+    let mut speakers = HashMap::new();
+    speakers.insert(
+        "left".to_string(),
+        SpeakerConfig::Group(SpeakerGroup {
+            name: "Test".to_string(),
+            speaker_name: None,
+            measurements: vec![
+                MeasurementSource::Single(MeasurementSingle {
+                    measurement: MeasurementRef::Path(PathBuf::from("woofer.csv")),
+                    speaker_name: None,
+                }),
+                MeasurementSource::Single(MeasurementSingle {
+                    measurement: MeasurementRef::Path(PathBuf::from("tweeter.csv")),
+                    speaker_name: None,
+                }),
+            ],
+            crossover: Some("xo".to_string()),
+        }),
+    );
+    let config = RoomConfig {
+        version: default_config_version(),
+        speakers,
+        crossovers: Some(HashMap::from([(
+            "xo".to_string(),
+            CrossoverConfig {
+                crossover_type: "LR24".to_string(),
+                frequency: None,
+                frequencies: None,
+                frequency_range: Some((300.0, 100.0)),
+            },
+        )])),
+        ..RoomConfig::default()
+    };
+
+    let result = validate_room_config(&config);
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|error| error.contains("frequency_range"))
+    );
+}
+
+#[test]
 fn test_validate_speaker_name() {
     let mut speakers = HashMap::new();
     speakers.insert(

@@ -41,6 +41,34 @@ pub struct PreparedSpeakerTopology {
     pub drivers: Vec<Curve>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{expand_acoustic_optimization_bands, initial_crossover_frequencies};
+
+    #[test]
+    fn parallel_drivers_share_their_acoustic_band_limits() {
+        let ranges = vec![(20.0, 240.0), (120.0, 20_000.0)];
+        let expanded = expand_acoustic_optimization_bands(
+            &[vec![0, 1], vec![2]],
+            &ranges,
+            3,
+            (20.0, 20_000.0),
+        );
+        assert_eq!(
+            expanded,
+            vec![(20.0, 240.0), (20.0, 240.0), (120.0, 20_000.0)]
+        );
+    }
+
+    #[test]
+    fn fixed_crossover_frequencies_seed_the_pre_score_model() {
+        assert_eq!(
+            initial_crossover_frequencies(2, Some(&[120.0]), None),
+            vec![120.0]
+        );
+    }
+}
+
 /// In-memory measurements for a multi-sub group and its optional seat matrix.
 pub struct PreparedMultiSubGroup {
     pub subwoofers: Vec<Curve>,
@@ -71,6 +99,41 @@ struct AggregatedTopologyBands {
     relative_gains: Vec<f64>,
     relative_delays: Vec<f64>,
     relative_inversions: Vec<bool>,
+}
+
+/// Expand one optimization band per acoustic band to the physical drivers
+/// that comprise each band. Parallel drivers share the same linearization
+/// limits; physical driver count is not the crossover-band count.
+fn expand_acoustic_optimization_bands(
+    acoustic_bands: &[Vec<usize>],
+    acoustic_ranges: &[(f64, f64)],
+    driver_count: usize,
+    fallback: (f64, f64),
+) -> Vec<(f64, f64)> {
+    let mut expanded = vec![fallback; driver_count];
+    for (band_index, members) in acoustic_bands.iter().enumerate() {
+        let range = acoustic_ranges.get(band_index).copied().unwrap_or(fallback);
+        for &driver_index in members {
+            if let Some(driver_range) = expanded.get_mut(driver_index) {
+                *driver_range = range;
+            }
+        }
+    }
+    expanded
+}
+
+fn initial_crossover_frequencies(
+    n_drivers: usize,
+    fixed_frequencies: Option<&[f64]>,
+    frequency_range: Option<(f64, f64)>,
+) -> Vec<f64> {
+    if let Some(frequencies) = fixed_frequencies {
+        return frequencies.to_vec();
+    }
+    let (minimum, maximum) = frequency_range.unwrap_or((80.0, 3_000.0));
+    (0..n_drivers.saturating_sub(1))
+        .map(|_| (minimum * maximum).sqrt())
+        .collect()
 }
 
 fn aggregate_topology_bands(
@@ -319,10 +382,10 @@ fn process_speaker_topology_impl(
         .map(|curve| curve.phase.is_some())
         .collect::<Vec<_>>();
 
-    let acoustic_band_count = group
+    let acoustic_bands = group
         .acoustic_bands()
-        .map_err(|message| AutoeqError::InvalidConfiguration { message })?
-        .len();
+        .map_err(|message| AutoeqError::InvalidConfiguration { message })?;
+    let acoustic_band_count = acoustic_bands.len();
 
     // 3. Get crossover config. A topology containing one acoustic band (for
     // example a parallel woofer array) does not need a crossover.
@@ -350,7 +413,20 @@ fn process_speaker_topology_impl(
     info!("  Linearizing {} drivers...", driver_curves.len());
     let mut optimization_bands = crossover_config
         .map(|crossover| {
-            crossover::determine_optimization_bands(driver_curves.len(), room_config, crossover)
+            let acoustic_ranges = crossover::determine_optimization_bands(
+                acoustic_bands.len(),
+                room_config,
+                crossover,
+            );
+            expand_acoustic_optimization_bands(
+                &acoustic_bands,
+                &acoustic_ranges,
+                driver_curves.len(),
+                (
+                    room_config.optimizer.min_freq,
+                    room_config.optimizer.max_freq,
+                ),
+            )
         })
         .unwrap_or_else(|| {
             vec![
@@ -444,15 +520,11 @@ fn process_speaker_topology_impl(
     // 6. Compute pre-score (using linearized drivers)
     let n_drivers = acoustic_drivers.len();
     let initial_gains = vec![0.0; n_drivers];
-    let mut initial_xover_freqs = Vec::new();
-    // Simple geometric mean estimate for initial guess
-    for _ in 0..(n_drivers - 1) {
-        let (min, max) = match crossover_config.and_then(|crossover| crossover.frequency_range) {
-            Some((a, b)) => (a, b),
-            None => (80.0, 3000.0),
-        };
-        initial_xover_freqs.push((min * max).sqrt());
-    }
+    let initial_xover_freqs = initial_crossover_frequencies(
+        n_drivers,
+        fixed_freqs.as_deref(),
+        crossover_config.and_then(|crossover| crossover.frequency_range),
+    );
 
     let driver_measurements: Vec<DriverMeasurement> = acoustic_drivers
         .iter()

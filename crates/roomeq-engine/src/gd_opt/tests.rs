@@ -805,6 +805,11 @@ fn test_qa_build_gd_alignment_target() {
 
     let result = optimize_group_delay(&channels, band, &config).unwrap();
     let target = build_gd_alignment_target(&channels, &result, &config);
+    assert_eq!(target.per_channel_polarity_inverted.len(), channels.len());
+    let mut polarity_result = result.clone();
+    polarity_result.per_channel[1].polarity_inverted = true;
+    let polarity_target = build_gd_alignment_target(&channels, &polarity_result, &config);
+    assert_eq!(polarity_target.per_channel_polarity_inverted, [false, true]);
 
     // per_channel_delay_ms must have one entry per channel
     assert_eq!(

@@ -195,5 +195,14 @@ pub fn generate_fir_correction_with_gd_target_prepared(
     {
         coeffs = apply_fractional_sample_shift(&coeffs, delay_ms * 1e-3 * sample_rate);
     }
+    if gd_target
+        .and_then(|target| target.per_channel_polarity_inverted.get(channel_index))
+        .copied()
+        .unwrap_or(false)
+    {
+        for coefficient in &mut coeffs {
+            *coefficient = -*coefficient;
+        }
+    }
     Ok(coeffs)
 }

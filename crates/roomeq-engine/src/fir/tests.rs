@@ -1,7 +1,11 @@
 #![allow(clippy::field_reassign_with_default)]
-use super::generate::{generate_fir_correction_prepared, prepared_fir_target_curve};
+use super::generate::{
+    generate_fir_correction_prepared, generate_fir_correction_with_gd_target_prepared,
+    prepared_fir_target_curve,
+};
 use crate::Curve;
 use crate::eq::{EqResources, PreparedEqTarget};
+use crate::gd_opt::GdAlignmentTarget;
 #[cfg(test)]
 pub use math_audio_iir_fir::{WindowType, generate_window};
 use ndarray::Array1;
@@ -45,6 +49,45 @@ fn flat_target_like(measurement: &Curve) -> Curve {
         spl: Array1::from_elem(measurement.freq.len(), 80.0),
         phase: None,
         ..Default::default()
+    }
+}
+
+#[test]
+fn phase_linear_gd_target_applies_polarity_without_delay() {
+    let measurement = create_test_curve(
+        &[20.0, 100.0, 1_000.0, 10_000.0, 20_000.0],
+        &[80.0, 80.0, 80.0, 80.0, 80.0],
+    );
+    let target = flat_target_like(&measurement);
+    let config = OptimizerConfig {
+        min_freq: 20.0,
+        max_freq: 20_000.0,
+        fir: Some(FirConfig {
+            taps: 255,
+            ..FirConfig::default()
+        }),
+        ..OptimizerConfig::default()
+    };
+    let ordinary = generate_fir_correction_prepared(&measurement, &config, &target, 48_000.0)
+        .expect("ordinary FIR design should succeed");
+    let gd_target = GdAlignmentTarget {
+        per_channel_delay_ms: vec![0.0],
+        per_channel_polarity_inverted: vec![true],
+        sum_gd_reference_ms: vec![0.0; measurement.freq.len()],
+        freq: measurement.freq.clone(),
+    };
+    let inverted = generate_fir_correction_with_gd_target_prepared(
+        &measurement,
+        &config,
+        &target,
+        48_000.0,
+        Some(&gd_target),
+        0,
+    )
+    .expect("GD-targeted FIR design should succeed");
+    assert_eq!(ordinary.len(), inverted.len());
+    for (expected, actual) in ordinary.iter().zip(inverted.iter()) {
+        assert!((actual + expected).abs() < 1e-10);
     }
 }
 

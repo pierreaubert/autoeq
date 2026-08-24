@@ -50,24 +50,26 @@ pub fn generate_excess_phase_fir_with_depth(
     // The correction phase is the negation of the residual excess phase,
     // scaled by spatial correction depth where available.
     let correction_phase_deg: Vec<f64> = if let Some(depth) = correction_depth {
-        assert_eq!(
-            residual_phase_deg.len(),
-            depth.len(),
-            "correction_depth length ({}) must match residual_phase_deg length ({})",
-            depth.len(),
-            residual_phase_deg.len(),
-        );
-        residual_phase_deg
-            .iter()
-            .zip(depth.iter())
-            .map(|(&p, &d)| {
-                if d >= config.min_spatial_depth {
-                    -p
-                } else {
-                    0.0 // Don't correct position-dependent phase
-                }
-            })
-            .collect()
+        if depth.len() != residual_phase_deg.len() {
+            log::warn!(
+                "Ignoring spatial phase-correction depth with length {} for residual phase length {}",
+                depth.len(),
+                residual_phase_deg.len()
+            );
+            residual_phase_deg.iter().map(|&p| -p).collect()
+        } else {
+            residual_phase_deg
+                .iter()
+                .zip(depth.iter())
+                .map(|(&p, &d)| {
+                    if d >= config.min_spatial_depth {
+                        -p
+                    } else {
+                        0.0 // Don't correct position-dependent phase
+                    }
+                })
+                .collect()
+        }
     } else {
         residual_phase_deg.iter().map(|&p| -p).collect()
     };

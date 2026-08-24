@@ -49,6 +49,8 @@ pub struct ChannelMeasurementInput {
 pub struct GdAlignmentTarget {
     /// Per-channel delay in ms (channel index → delay).
     pub per_channel_delay_ms: Vec<f64>,
+    /// Per-channel polarity selected by the GD optimizer.
+    pub per_channel_polarity_inverted: Vec<bool>,
     /// Reference sum GD curve (the target flat GD the FIR should approach).
     pub sum_gd_reference_ms: Vec<f64>,
     /// Frequency grid for `sum_gd_reference_ms`.

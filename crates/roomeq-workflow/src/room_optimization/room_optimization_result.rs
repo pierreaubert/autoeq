@@ -518,6 +518,18 @@ fn reconcile_group_delay_summary(result: &mut RoomOptimizationResult) {
                         .and_then(serde_json::Value::as_f64)
                         .unwrap_or(0.0);
                 }
+                "group_delay_phase_linear" => {
+                    delay_ms = plugin
+                        .parameters
+                        .get("delay_ms")
+                        .and_then(serde_json::Value::as_f64)
+                        .unwrap_or(0.0);
+                    polarity_inverted = plugin
+                        .parameters
+                        .get("polarity_inverted")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false);
+                }
                 "group_delay_polarity" => {
                     polarity_inverted = plugin
                         .parameters
@@ -1779,6 +1791,36 @@ mod tests {
         assert_eq!(summary.per_channel_delay_ms, [0.0]);
         assert_eq!(summary.per_channel_polarity_inverted, [false]);
         assert_eq!(summary.per_channel_ap_count, [0]);
+    }
+
+    #[test]
+    fn group_delay_summary_reads_phase_linear_fir_metadata() {
+        let mut result = single_channel_room_result("left");
+        result.metadata.group_delay = Some(roomeq_model::GroupDelayOptSummary {
+            band: (20.0, 300.0),
+            channel_names: vec!["left".to_string()],
+            per_channel_delay_ms: vec![0.0],
+            per_channel_polarity_inverted: vec![false],
+            per_channel_ap_count: vec![0],
+            sum_gd_pre_rms_ms: 2.0,
+            sum_gd_post_rms_ms: 1.0,
+            mean_coherence: 0.9,
+            improvement_db: 6.0,
+            advisory: "success".to_string(),
+            applied: false,
+        });
+        let mut plugin = roomeq_engine::output::create_convolution_plugin("left_fir.wav");
+        plugin.parameters["label"] = serde_json::json!("group_delay_phase_linear");
+        plugin.parameters["delay_ms"] = serde_json::json!(4.25);
+        plugin.parameters["polarity_inverted"] = serde_json::json!(true);
+        result.channels.get_mut("left").unwrap().plugins = vec![plugin];
+
+        reconcile_group_delay_summary(&mut result);
+
+        let summary = result.metadata.group_delay.unwrap();
+        assert!(summary.applied);
+        assert_eq!(summary.per_channel_delay_ms, [4.25]);
+        assert_eq!(summary.per_channel_polarity_inverted, [true]);
     }
 
     /// A GD-Opt alignment stage adds group delay on purpose, within its

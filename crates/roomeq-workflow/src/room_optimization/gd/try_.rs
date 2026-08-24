@@ -445,7 +445,7 @@ pub(in super::super) fn try_run_phase_linear_fir_gd(
 
     let target = build_gd_alignment_target(&gd_channels, &gd_result, &gd_config);
     let mut applied = false;
-    let mut phase_updates: Vec<(String, f64)> = Vec::new();
+    let mut phase_updates: Vec<(String, f64, bool)> = Vec::new();
     let out_dir = output_dir.unwrap_or(Path::new("."));
 
     for (channel_index, name) in gd_channel_names.iter().enumerate() {
@@ -454,7 +454,12 @@ pub(in super::super) fn try_run_phase_linear_fir_gd(
             .get(channel_index)
             .copied()
             .unwrap_or(0.0);
-        if delay_ms.abs() <= 0.01 {
+        let polarity_inverted = target
+            .per_channel_polarity_inverted
+            .get(channel_index)
+            .copied()
+            .unwrap_or(false);
+        if delay_ms.abs() <= 0.01 && !polarity_inverted {
             continue;
         }
 
@@ -463,7 +468,14 @@ pub(in super::super) fn try_run_phase_linear_fir_gd(
         };
 
         let updated_coeffs = if let Some(existing) = ch.fir_coeffs.as_deref() {
-            fir::apply_gd_delay_to_fir_coefficients(existing, delay_ms, sample_rate)
+            let mut coefficients =
+                fir::apply_gd_delay_to_fir_coefficients(existing, delay_ms, sample_rate);
+            if polarity_inverted {
+                coefficients
+                    .iter_mut()
+                    .for_each(|coefficient| *coefficient = -*coefficient);
+            }
+            coefficients
         } else {
             match fir::generate_fir_correction_with_gd_target(
                 &ch.initial_curve,
@@ -523,20 +535,31 @@ pub(in super::super) fn try_run_phase_linear_fir_gd(
             if let Some(plugin) = existing_convolution {
                 plugin.parameters["label"] =
                     serde_json::Value::String("group_delay_phase_linear".to_string());
+                plugin.parameters["delay_ms"] = serde_json::json!(delay_ms);
+                plugin.parameters["polarity_inverted"] = serde_json::json!(polarity_inverted);
             } else {
-                chain.plugins.push(tag_group_delay_plugin(
+                let mut plugin = tag_group_delay_plugin(
                     roomeq_engine::output::create_convolution_plugin(&filename),
                     "group_delay_phase_linear",
-                ));
+                );
+                plugin.parameters["delay_ms"] = serde_json::json!(delay_ms);
+                plugin.parameters["polarity_inverted"] = serde_json::json!(polarity_inverted);
+                chain.plugins.push(plugin);
             }
         }
 
-        phase_updates.push((name.clone(), delay_ms));
+        phase_updates.push((name.clone(), delay_ms, polarity_inverted));
         applied = true;
     }
 
-    for (name, delay_ms) in phase_updates {
-        sync_reported_phase_adjustment(&name, channel_results, channel_chains, delay_ms, false);
+    for (name, delay_ms, polarity_inverted) in phase_updates {
+        sync_reported_phase_adjustment(
+            &name,
+            channel_results,
+            channel_chains,
+            delay_ms,
+            polarity_inverted,
+        );
     }
 
     let mut summary = GroupDelayOptSummary::from_result_with_names(&gd_result, gd_channel_names)

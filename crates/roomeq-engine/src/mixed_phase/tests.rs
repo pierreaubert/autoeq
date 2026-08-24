@@ -46,6 +46,22 @@ fn test_decompose_phase_rejects_misaligned_curve_without_panicking() {
 }
 
 #[test]
+fn excess_phase_depth_mismatch_falls_back_without_panicking() {
+    let freq = Array1::linspace(20.0, 20_000.0, 16);
+    let residual = Array1::from_elem(freq.len(), 25.0);
+    let config = MixedPhaseConfig::default();
+    let unmasked = generate_excess_phase_fir(&freq, &residual, &config, 48_000.0);
+    let mismatched = generate_excess_phase_fir_with_depth(
+        &freq,
+        &residual,
+        &config,
+        48_000.0,
+        Some(&Array1::from_elem(freq.len() - 1, 1.0)),
+    );
+    assert_eq!(mismatched, unmasked);
+}
+
+#[test]
 fn test_decompose_phase_flat_measurement() {
     // Flat magnitude + zero phase → min phase ≈ 0, excess ≈ 0
     let n = 64;
@@ -346,9 +362,8 @@ fn test_decompose_phase_with_delay() {
 }
 
 #[test]
-#[should_panic(expected = "correction_depth length")]
-fn test_depth_mask_length_mismatch_panics() {
-    // Bug fix: mismatched depth mask length must panic, not silently truncate
+fn test_depth_mask_length_mismatch_uses_unmasked_fallback() {
+    // Mismatched depth masks are ignored instead of truncating or panicking.
     let n = 32;
     let freq = Array1::linspace(20.0, 20000.0, n);
     let residual_phase = Array1::from_elem(n, 5.0);
@@ -356,13 +371,14 @@ fn test_depth_mask_length_mismatch_panics() {
     let config = MixedPhaseConfig::default();
 
     // This should panic due to length mismatch assertion
-    generate_excess_phase_fir_with_depth(
+    let result = generate_excess_phase_fir_with_depth(
         &freq,
         &residual_phase,
         &config,
         48000.0,
         Some(&bad_depth),
     );
+    assert!(!result.is_empty());
 }
 
 #[test]

@@ -465,6 +465,10 @@ pub struct BassManagementOptimizationReport {
     pub objective_after: Option<f64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub group_results: Vec<BassManagementGroupReport>,
+    /// Per-logical-input route alignment. Crossover frequency and type remain
+    /// shared by the referenced speaker group.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_results: Vec<BassManagementSourceReport>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sub_output_results: Vec<BassManagementSubOutputReport>,
     pub advisories: Vec<String>,
@@ -587,6 +591,30 @@ pub struct BassManagementGroupReport {
     pub objective_before: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub objective_after: Option<f64>,
+    pub advisories: Vec<String>,
+}
+
+/// Bass-management alignment for one logical input source.
+///
+/// Independent programme channels are intentionally not coherently summed
+/// when these values are optimized. The source references a group for the
+/// shared crossover type and frequency, but owns its route delay, polarity,
+/// and trim.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct BassManagementSourceReport {
+    pub source_channel: String,
+    pub group_id: String,
+    pub main_delay_ms: f64,
+    pub bass_route_delay_ms: f64,
+    pub polarity_inverted: bool,
+    pub trim_db: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub objective_before: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub objective_after: Option<f64>,
+    #[serde(default)]
+    pub accepted: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub advisories: Vec<String>,
 }
 

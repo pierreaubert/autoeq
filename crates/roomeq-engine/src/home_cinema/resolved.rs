@@ -91,6 +91,30 @@ pub fn resolved_group_route_settings(
     }
 }
 
+/// Resolve route-owned alignment for one logical input. New optimizer output
+/// stores these values per source; older reports continue to fall back to the
+/// group-level compatibility fields.
+pub fn resolved_source_route_settings(
+    source_channel: &str,
+    group_id: &str,
+    optimization: Option<&BassManagementOptimizationReport>,
+) -> ResolvedGroupRouteSettings {
+    if let Some(source) = optimization.and_then(|report| {
+        report
+            .source_results
+            .iter()
+            .find(|source| source.source_channel == source_channel && source.group_id == group_id)
+    }) {
+        return ResolvedGroupRouteSettings {
+            main_delay_ms: source.main_delay_ms,
+            bass_route_delay_ms: source.bass_route_delay_ms,
+            polarity_inverted: source.polarity_inverted,
+            trim_db: source.trim_db,
+        };
+    }
+    resolved_group_route_settings(group_id, optimization)
+}
+
 pub fn resolved_bass_sub_outputs(
     fallback_role: &str,
     optimization: Option<&BassManagementOptimizationReport>,

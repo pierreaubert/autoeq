@@ -1198,6 +1198,7 @@ mod tests {
             objective_before: None,
             objective_after: None,
             group_results: Vec::new(),
+            source_results: Vec::new(),
             sub_output_results: Vec::new(),
             advisories: Vec::new(),
         }

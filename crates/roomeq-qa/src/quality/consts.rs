@@ -25,6 +25,14 @@ pub(super) const OPTIM_CONFIG_DIR: &str = "data_tests/roomeq/generate/optimiser-
 /// Generous limit: IIR/FIR/Mixed use fundamentally different correction
 /// mechanisms so some divergence is expected.
 pub(super) const CROSS_MODE_FR_MAX_DIFF_DB: f64 = 18.0;
+/// Strict deployed-response parity gates for the measured 5.1.4 system.
+pub(super) const CROSS_MODE_BASS_MEDIAN_RMS_DB: f64 = 3.0;
+pub(super) const CROSS_MODE_BASS_MAX_RMS_DB: f64 = 4.0;
+pub(super) const CROSS_MODE_MAIN_MEDIAN_RMS_DB: f64 = 1.5;
+pub(super) const CROSS_MODE_UPPER_MEDIAN_RMS_DB: f64 = 0.75;
+/// FIR and Hybrid must reduce median 100-1000 Hz group-delay dispersion by
+/// at least ten percent relative to IIR in strict mode-parity cases.
+pub(super) const CROSS_MODE_TIMING_RATIO_LIMIT: f64 = 0.90;
 
 /// Score ratio limit for cross-mode convergence (reuse existing)
 pub(super) const CROSS_MODE_SCORE_RATIO_LIMIT: f64 = 3.0;

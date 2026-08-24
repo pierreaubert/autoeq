@@ -2,6 +2,11 @@
 
 ## Fixes
 
+- Tune home-cinema bass management per logical input: crossover type/frequency
+  remains shared by a speaker group, while route trim, relative delay, and
+  polarity are source-owned. Independent programme channels no longer enter a
+  coherent tonal sum, physical-sub preprocessing remains authoritative, and a
+  common down-only input trim enforces configured correlated-bus headroom.
 - Keep the cinema LFE programme low-pass (120 Hz by default) independent from
   optimized speaker crossovers, preserve configured crossover bounds during
   joint bass-route optimization, reject per-group objective regressions, and

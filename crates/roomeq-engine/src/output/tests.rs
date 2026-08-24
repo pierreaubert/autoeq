@@ -1133,6 +1133,10 @@ fn test_build_mixed_mode_crossover_chain_fir_low() {
         serde_json::json!([2, 3])
     );
     assert_eq!(chain.plugins[4].plugin_type, "band_merge");
+    assert!(chain.plugins.iter().all(|plugin| {
+        plugin.parameters[crate::topology::CORRECTION_STAGE_PARAMETER].as_str()
+            == Some(crate::topology::HYBRID_CROSSOVER_CORRECTION_STAGE)
+    }));
     assert!(chain.initial_curve.is_some());
 }
 
@@ -1181,6 +1185,10 @@ fn test_build_mixed_mode_crossover_chain_fir_high() {
         serde_json::json!([0, 1])
     );
     assert_eq!(chain.plugins[4].plugin_type, "band_merge");
+    assert!(chain.plugins.iter().all(|plugin| {
+        plugin.parameters[crate::topology::CORRECTION_STAGE_PARAMETER].as_str()
+            == Some(crate::topology::HYBRID_CROSSOVER_CORRECTION_STAGE)
+    }));
 }
 
 #[test]

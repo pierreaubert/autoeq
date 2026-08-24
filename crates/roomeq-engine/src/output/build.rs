@@ -661,13 +661,17 @@ pub fn build_mixed_mode_crossover_chain(
     fir_bulk_delay_ms: f64,
     initial_curve: Option<&crate::Curve>,
 ) -> ChannelDspChain {
+    use crate::topology::{HYBRID_CROSSOVER_CORRECTION_STAGE, mark_plugin_correction_stage};
+
+    let mark_hybrid =
+        |plugin| mark_plugin_correction_stage(plugin, HYBRID_CROSSOVER_CORRECTION_STAGE);
     let mut plugins = Vec::new();
 
     // 1. Split into low and high bands
-    plugins.push(create_band_split_plugin(
+    plugins.push(mark_hybrid(create_band_split_plugin(
         mixed_config.crossover_freq,
         &mixed_config.crossover_type,
-    ));
+    )));
 
     // 2. Apply FIR to designated band (via convolution)
     // After band_split, channels are: [low_L, low_R, high_L, high_R]
@@ -679,20 +683,20 @@ pub fn build_mixed_mode_crossover_chain(
             "channels": if fir_uses_low { [0, 1] } else { [2, 3] }
         }),
     };
-    plugins.push(fir_plugin);
+    plugins.push(mark_hybrid(fir_plugin));
 
     // 3. Match the non-FIR branch to the FIR impulse's bulk latency before
     // recombination. Without this delay, the two bands arrive at different
     // times and create a phase/group-delay discontinuity at the crossover.
     if fir_bulk_delay_ms > 0.0 {
-        plugins.push(PluginConfigWrapper {
+        plugins.push(mark_hybrid(PluginConfigWrapper {
             plugin_type: "delay".to_string(),
             parameters: json!({
                 "delay_ms": fir_bulk_delay_ms,
                 "channels": if fir_uses_low { [2, 3] } else { [0, 1] },
                 "label": "hybrid_fir_latency_alignment",
             }),
-        });
+        }));
     }
 
     // 4. Apply IIR EQ to the other band
@@ -716,11 +720,11 @@ pub fn build_mixed_mode_crossover_chain(
                 "channels": if fir_uses_low { [2, 3] } else { [0, 1] }
             }),
         };
-        plugins.push(eq_plugin);
+        plugins.push(mark_hybrid(eq_plugin));
     }
 
     // 5. Merge bands back together
-    plugins.push(create_band_merge_plugin(2));
+    plugins.push(mark_hybrid(create_band_merge_plugin(2)));
 
     ChannelDspChain {
         channel: channel_name.to_string(),

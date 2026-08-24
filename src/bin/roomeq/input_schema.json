@@ -1812,7 +1812,7 @@
           "type": "integer"
         },
         "tol": {
-          "default": 1e-8,
+          "default": 1e-08,
           "description": "DE convergence tolerance.",
           "format": "double",
           "type": "number"
@@ -2479,7 +2479,7 @@
           "description": "Asymmetric loss weights. `None` preserves the built-in default."
         },
         "atolerance": {
-          "default": 0.00001,
+          "default": 1e-05,
           "description": "Optimization convergence tolerance (absolute)",
           "format": "double",
           "type": "number"
@@ -2973,7 +2973,7 @@
           "description": "Unified target response configuration (shape + preference shelves + broadband pre-correction)"
         },
         "tolerance": {
-          "default": 0.00001,
+          "default": 1e-05,
           "description": "Optimization convergence tolerance (relative)",
           "format": "double",
           "type": "number"
@@ -4727,7 +4727,7 @@
       "default": {
         "algorithm": "autoeq:cmaes",
         "asymmetric_loss": true,
-        "atolerance": 0.00001,
+        "atolerance": 1e-05,
         "elimination_threshold": 0.005,
         "local_algo": "cobyla",
         "loss_type": "flat",
@@ -4747,7 +4747,7 @@
         "refine": true,
         "smooth_n": 2,
         "strategy": "lshade",
-        "tolerance": 0.00001
+        "tolerance": 1e-05
       },
       "description": "Optimizer configuration"
     },

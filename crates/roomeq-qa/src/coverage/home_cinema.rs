@@ -96,20 +96,21 @@ pub(super) fn build_quick_home_cinema_matrix(
     solver_filter: Option<&str>,
     mode_filter: Option<&str>,
 ) -> Vec<TestCase> {
-    build_home_cinema_matrix(
-        tier,
-        solver_filter.or(Some("fem")),
-        mode_filter.or(Some("iir")),
-    )
-    .into_iter()
-    .filter(|test_case| test_case.registry_id == "home_cinema/iir_redirected_bass")
-    .map(|mut test_case| {
-        test_case.expect.improvement_min_pct = 0.01;
-        test_case.expect.max_post_score = 20.0;
-        test_case.expect.allow_safe_revert = true;
-        test_case
-    })
-    .collect()
+    build_home_cinema_matrix(tier, solver_filter.or(Some("fem")), mode_filter)
+        .into_iter()
+        .filter(|test_case| {
+            matches!(
+                test_case.registry_id.as_str(),
+                "home_cinema/iir_redirected_bass" | "home_cinema/hybrid_redirected_bass_quick"
+            )
+        })
+        .map(|mut test_case| {
+            test_case.expect.improvement_min_pct = 0.01;
+            test_case.expect.max_post_score = 20.0;
+            test_case.expect.allow_safe_revert = true;
+            test_case
+        })
+        .collect()
 }
 
 fn validate_stage_outcomes(
@@ -340,6 +341,94 @@ fn validate_bass_management(
             }
         }
     }
+    if let Some(optimization) = report.optimization.as_ref()
+        && expectation.redirected
+    {
+        let redirected_sources: std::collections::BTreeSet<&str> = report
+            .routing_graph
+            .as_ref()
+            .into_iter()
+            .flat_map(|graph| graph.routes.iter())
+            .filter(|route| route.route_kind == "redirected_bass_lowpass_to_sub")
+            .map(|route| route.source_channel.as_str())
+            .collect();
+        for source_channel in redirected_sources {
+            let Some(source) = optimization
+                .source_results
+                .iter()
+                .find(|source| source.source_channel == source_channel)
+            else {
+                failures.push(format!(
+                    "bass source '{source_channel}' has no per-source optimization result"
+                ));
+                continue;
+            };
+            match (source.objective_before, source.objective_after) {
+                    (Some(before), Some(after))
+                        if before.is_finite()
+                            && after.is_finite()
+                            && after <= before + (before.abs() * 0.01).max(1.0e-9) => {}
+                    (Some(before), Some(after)) => failures.push(format!(
+                        "bass source '{source_channel}' regressed objective beyond tolerance: {before:.4} -> {after:.4}"
+                    )),
+                    _ => failures.push(format!(
+                        "bass source '{source_channel}' is missing objective evidence"
+                    )),
+                }
+        }
+
+        if let Some(graph) = report.routing_graph.as_ref() {
+            for source in &optimization.source_results {
+                let main_route = graph.routes.iter().find(|route| {
+                    route.source_channel == source.source_channel
+                        && route.route_kind == "main_highpass_to_self"
+                });
+                if main_route
+                    .is_none_or(|route| (route.delay_ms - source.main_delay_ms).abs() > 1.0e-9)
+                {
+                    failures.push(format!(
+                        "bass source '{}' main-route delay does not match optimizer metadata",
+                        source.source_channel
+                    ));
+                }
+                for route in graph.routes.iter().filter(|route| {
+                    route.source_channel == source.source_channel
+                        && route.route_kind == "redirected_bass_lowpass_to_sub"
+                }) {
+                    let Some(output) = optimization
+                        .sub_output_results
+                        .iter()
+                        .find(|output| output.output_role == route.destination)
+                    else {
+                        failures.push(format!(
+                            "bass route '{}' -> '{}' has no physical-sub metadata",
+                            source.source_channel, route.destination
+                        ));
+                        continue;
+                    };
+                    let expected_gain = source.trim_db
+                        + output.gain_db
+                        + graph
+                            .input_trim_db
+                            .get(&source.source_channel)
+                            .copied()
+                            .unwrap_or(0.0);
+                    let expected_delay = source.bass_route_delay_ms + output.delay_ms;
+                    let expected_inversion = source.polarity_inverted ^ output.polarity_inverted;
+                    if (route.gain_db - expected_gain).abs() > 1.0e-6
+                        || (route.delay_ms - expected_delay).abs() > 1.0e-6
+                        || route.polarity_inverted != expected_inversion
+                    {
+                        failures.push(format!(
+                            "bass route '{}' -> '{}' does not reconstruct optimizer metadata",
+                            source.source_channel, route.destination
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     failures
 }
 
@@ -357,6 +446,164 @@ fn has_plugin(result: &RoomOptimizationResult, plugin_type: &str) -> bool {
             )
             .any(|plugin| plugin.plugin_type == plugin_type)
     })
+}
+
+fn hybrid_stage_was_atomically_reverted(result: &RoomOptimizationResult, channel: &str) -> bool {
+    let suffix = format!("{channel}:hybrid_crossover");
+    result.metadata.stage_outcomes.iter().any(|outcome| {
+        outcome.stage == format!("final_correction_safety_{channel}")
+            && outcome
+                .advisories
+                .iter()
+                .any(|advisory| advisory.ends_with(&suffix))
+    })
+}
+
+fn validate_hybrid_realization(result: &RoomOptimizationResult) -> Vec<String> {
+    use roomeq_engine::topology::{CORRECTION_STAGE_PARAMETER, HYBRID_CROSSOVER_CORRECTION_STAGE};
+
+    let mut failures = Vec::new();
+    let mut complete_blocks = 0;
+    let supporting_source_outputs: std::collections::BTreeSet<_> = result
+        .metadata
+        .supporting_source
+        .iter()
+        .flat_map(|reports| reports.values())
+        .flat_map(|report| {
+            [
+                report.primary_output.as_str(),
+                report.support_output.as_str(),
+            ]
+        })
+        .collect();
+    for (name, chain) in &result.channels {
+        if supporting_source_outputs.contains(name.as_str()) {
+            continue;
+        }
+        let hybrid_plugins: Vec<_> = chain
+            .plugins
+            .iter()
+            .filter(|plugin| {
+                plugin
+                    .parameters
+                    .get(CORRECTION_STAGE_PARAMETER)
+                    .and_then(serde_json::Value::as_str)
+                    == Some(HYBRID_CROSSOVER_CORRECTION_STAGE)
+            })
+            .collect();
+        let has_split_or_merge = chain
+            .plugins
+            .iter()
+            .any(|plugin| matches!(plugin.plugin_type.as_str(), "band_split" | "band_merge"));
+
+        if hybrid_plugins.is_empty() {
+            if has_split_or_merge {
+                failures.push(format!(
+                    "hybrid channel '{name}' contains a partial or unowned split/merge block"
+                ));
+            } else if !hybrid_stage_was_atomically_reverted(result, name) {
+                failures.push(format!(
+                    "hybrid channel '{name}' has neither a complete correction block nor an atomic safety revert"
+                ));
+            }
+            continue;
+        }
+
+        let count = |plugin_type: &str| {
+            hybrid_plugins
+                .iter()
+                .filter(|plugin| plugin.plugin_type == plugin_type)
+                .count()
+        };
+        let has_alignment_delay = hybrid_plugins.iter().any(|plugin| {
+            plugin.plugin_type == "delay"
+                && plugin
+                    .parameters
+                    .get("label")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("hybrid_fir_latency_alignment")
+        });
+        let complete = hybrid_plugins
+            .first()
+            .is_some_and(|plugin| plugin.plugin_type == "band_split")
+            && hybrid_plugins
+                .last()
+                .is_some_and(|plugin| plugin.plugin_type == "band_merge")
+            && count("band_split") == 1
+            && count("convolution") == 1
+            && has_alignment_delay
+            && count("eq") == 1
+            && count("band_merge") == 1;
+        if complete {
+            complete_blocks += 1;
+        } else {
+            failures.push(format!(
+                "hybrid channel '{name}' has an incomplete correction block: [{}]",
+                hybrid_plugins
+                    .iter()
+                    .map(|plugin| plugin.plugin_type.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+    }
+    if complete_blocks == 0 {
+        failures.push("hybrid result contains no complete FIR/IIR correction block".to_string());
+    }
+    failures
+}
+
+fn validate_realized_main_crossovers(
+    result: &RoomOptimizationResult,
+    report: &BassManagementReport,
+) -> Vec<String> {
+    let mut failures = Vec::new();
+    let Some(graph) = report.routing_graph.as_ref() else {
+        return failures;
+    };
+    for route in graph
+        .routes
+        .iter()
+        .filter(|route| route.route_kind == "main_highpass_to_self")
+    {
+        let Some(expected_hz) = route.high_pass_hz else {
+            failures.push(format!(
+                "main route '{}' has no high-pass frequency",
+                route.source_channel
+            ));
+            continue;
+        };
+        let realized = result
+            .channels
+            .get(&route.source_channel)
+            .is_some_and(|chain| {
+                chain.plugins.iter().any(|plugin| {
+                    plugin.plugin_type == "crossover"
+                        && plugin
+                            .parameters
+                            .get("output")
+                            .and_then(serde_json::Value::as_str)
+                            == Some("high")
+                        && plugin
+                            .parameters
+                            .get("room_eq_stage")
+                            .and_then(serde_json::Value::as_str)
+                            == Some("route_owned")
+                        && plugin
+                            .parameters
+                            .get("frequency")
+                            .and_then(serde_json::Value::as_f64)
+                            .is_some_and(|actual_hz| (actual_hz - expected_hz).abs() <= 1.0e-6)
+                })
+            });
+        if !realized {
+            failures.push(format!(
+                "main channel '{}' does not realize its {:.3} Hz route-owned crossover",
+                route.source_channel, expected_hz
+            ));
+        }
+    }
+    failures
 }
 
 fn has_eq_filter_type(result: &RoomOptimizationResult, filter_type: &str) -> bool {
@@ -543,6 +790,9 @@ pub(super) fn validate_home_cinema_result(
             config,
             bass,
         ));
+        if let Some(report) = result.metadata.bass_management.as_ref() {
+            failures.extend(validate_realized_main_crossovers(result, report));
+        }
     }
 
     if expectations.adaptive_allpass {
@@ -648,6 +898,10 @@ pub(super) fn validate_home_cinema_result(
         }
     }
 
+    if method == ProcessingMethod::Mixed {
+        failures.extend(validate_hybrid_realization(result));
+    }
+
     if !safely_reverted {
         match method {
             ProcessingMethod::Fir if !has_plugin(result, "convolution") => {
@@ -730,9 +984,17 @@ mod tests {
     #[test]
     fn quick_home_cinema_matrix_exercises_redirected_bass_export() {
         let cases = build_quick_home_cinema_matrix(QaTier::Weekly, None, None);
-        assert_eq!(cases.len(), 1);
+        assert_eq!(cases.len(), 2);
         assert_eq!(cases[0].registry_id, "home_cinema/iir_redirected_bass");
-        assert!(cases[0].home_cinema_expectations.is_some());
+        assert_eq!(
+            cases[1].registry_id,
+            "home_cinema/hybrid_redirected_bass_quick"
+        );
+        assert!(
+            cases
+                .iter()
+                .all(|case| case.home_cinema_expectations.is_some())
+        );
     }
 
     #[test]

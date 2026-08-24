@@ -145,6 +145,7 @@ pub fn limit_bass_management_sub_output_gains(
 
 pub fn joint_bass_management_report_from_parts(
     groups: &[home_cinema::BassManagementGroupReport],
+    sources: &[home_cinema::BassManagementSourceReport],
     outputs: &[home_cinema::BassManagementSubOutputReport],
 ) -> home_cinema::BassManagementOptimizationReport {
     let first_group = groups.first();
@@ -194,6 +195,7 @@ pub fn joint_bass_management_report_from_parts(
             .filter_map(|group| group.objective_after)
             .reduce(|a, b| a + b),
         group_results: groups.to_vec(),
+        source_results: sources.to_vec(),
         sub_output_results: outputs.to_vec(),
         advisories: vec!["joint_route_solution".to_string()],
     }
@@ -306,7 +308,7 @@ mod tests {
             advisories: vec!["trim_limited_for_headroom".to_string()],
         };
 
-        let report = joint_bass_management_report_from_parts(&[group], &[]);
+        let report = joint_bass_management_report_from_parts(&[group], &[], &[]);
         assert!(report.gain_limited);
     }
 }

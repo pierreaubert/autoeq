@@ -27,6 +27,10 @@ pub(super) enum TestCase {
         name: String,
         fem_subdir: String,
         optim_subdir: String,
+        config_path: Option<String>,
+        override_dir: Option<String>,
+        preserve_system: bool,
+        strict: bool,
     },
     /// Per-option A/B test: baseline vs with-option(s)
     /// Supports single options and combinations.

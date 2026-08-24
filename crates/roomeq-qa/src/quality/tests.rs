@@ -1,6 +1,7 @@
 use super::consts::qa_seed;
 use super::metric_scorecard::MetricScorecard;
 use super::metric_scorecard::compare_scorecards;
+use super::misc::level_matched_rms_curve_difference_db;
 use super::option_override::OptionOverride;
 use super::types::TestResult;
 use super::validate::{
@@ -13,6 +14,36 @@ use roomeq_model::{
 use std::collections::HashMap;
 
 use roomeq_engine::room_result::{ChannelOptimizationResult, RoomOptimizationResult};
+
+#[test]
+fn level_matched_cross_mode_rms_ignores_offset_but_detects_shape() {
+    let freq = ndarray::arr1(&[100.0, 200.0, 400.0, 800.0]);
+    let reference = Curve {
+        freq: freq.clone(),
+        spl: ndarray::arr1(&[0.0, 1.0, 2.0, 3.0]),
+        phase: None,
+        ..Default::default()
+    };
+    let level_shifted = Curve {
+        freq: freq.clone(),
+        spl: ndarray::arr1(&[6.0, 7.0, 8.0, 9.0]),
+        phase: None,
+        ..Default::default()
+    };
+    let reshaped = Curve {
+        freq,
+        spl: ndarray::arr1(&[0.0, 2.0, 4.0, 6.0]),
+        phase: None,
+        ..Default::default()
+    };
+
+    let shifted_rms =
+        level_matched_rms_curve_difference_db(&reference, &level_shifted, 100.0, 800.0).unwrap();
+    let shape_rms =
+        level_matched_rms_curve_difference_db(&reference, &reshaped, 100.0, 800.0).unwrap();
+    assert!(shifted_rms < 1.0e-12);
+    assert!(shape_rms > 1.0);
+}
 
 fn curve_with_slope(slope_db_per_octave: f64) -> Curve {
     let freq = ndarray::arr1(&[100.0, 200.0, 400.0, 500.0]);

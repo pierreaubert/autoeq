@@ -175,6 +175,10 @@ pub(super) fn all_test_cases() -> Vec<RegisteredTestCase> {
                     name: spec.name.clone(),
                     fem_subdir: spec.fem_subdir.clone(),
                     optim_subdir: spec.optim_subdir.clone(),
+                    config_path: spec.config_path.clone(),
+                    override_dir: spec.override_dir.clone(),
+                    preserve_system: spec.preserve_system,
+                    strict: spec.strict_cross_mode,
                 },
                 QualityCaseKind::OptionEffect => TestCase::OptionEffect {
                     name: spec.name.clone(),
@@ -200,7 +204,7 @@ mod registry_tests {
     #[test]
     fn quality_matrix_is_registry_driven_and_all_options_parse() {
         let cases = all_test_cases();
-        assert_eq!(cases.len(), 35);
+        assert_eq!(cases.len(), 36);
         assert!(
             cases
                 .iter()

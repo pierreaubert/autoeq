@@ -68,10 +68,16 @@ pub(super) fn apply_final_correction_safety_gate(
         if supporting_source_outputs.contains(name) {
             continue;
         }
+        // Physical multi-sub driver stages cannot be reconstructed by the
+        // logical-channel evaluator because that curve already represents the
+        // combined sub output.  Keep their topology-score fallback.  A plain
+        // route-owned low-pass, however, is reconstructible and must use the
+        // route-removed acceptance path below; otherwise the intentional
+        // low-pass rolloff is mistaken for correction regression.
         if result
             .channels
             .get(name)
-            .is_some_and(is_graph_routed_bass_output)
+            .is_some_and(|chain| chain.drivers.is_some())
         {
             let topology_epsilon = (channel.pre_score.abs() * 1e-4).max(1e-6);
             let topology_regressed = !channel.post_score.is_finite()
@@ -1141,6 +1147,7 @@ enum CorrectionStage {
     Mso,
     GroupDelay,
     Fir,
+    Hybrid,
 }
 
 impl CorrectionStage {
@@ -1150,6 +1157,7 @@ impl CorrectionStage {
             Self::Mso => "mso",
             Self::GroupDelay => "group_delay_allpass",
             Self::Fir => "fir",
+            Self::Hybrid => "hybrid_crossover",
         }
     }
 }
@@ -1499,6 +1507,14 @@ fn correction_stages(chain: &ChannelDspChain) -> BTreeSet<CorrectionStage> {
 }
 
 fn correction_stage(plugin: &roomeq_model::PluginConfigWrapper) -> Option<CorrectionStage> {
+    if plugin
+        .parameters
+        .get(roomeq_engine::topology::CORRECTION_STAGE_PARAMETER)
+        .and_then(serde_json::Value::as_str)
+        == Some(roomeq_engine::topology::HYBRID_CROSSOVER_CORRECTION_STAGE)
+    {
+        return Some(CorrectionStage::Hybrid);
+    }
     let label = plugin
         .parameters
         .get("label")
@@ -1637,6 +1653,87 @@ pub(super) fn sanity_check_result(result: &RoomOptimizationResult) -> Result<()>
             return Err(AutoeqError::OptimizationFailed { message: msg });
         }
     }
+
+    validate_hybrid_correction_blocks(result)?;
+    Ok(())
+}
+
+fn validate_hybrid_correction_blocks(result: &RoomOptimizationResult) -> Result<()> {
+    use roomeq_engine::topology::{CORRECTION_STAGE_PARAMETER, HYBRID_CROSSOVER_CORRECTION_STAGE};
+
+    for (name, chain) in &result.channels {
+        let hybrid_indices: Vec<_> = chain
+            .plugins
+            .iter()
+            .enumerate()
+            .filter_map(|(index, plugin)| {
+                (plugin
+                    .parameters
+                    .get(CORRECTION_STAGE_PARAMETER)
+                    .and_then(serde_json::Value::as_str)
+                    == Some(HYBRID_CROSSOVER_CORRECTION_STAGE))
+                .then_some(index)
+            })
+            .collect();
+        let has_split_or_merge = chain
+            .plugins
+            .iter()
+            .any(|plugin| matches!(plugin.plugin_type.as_str(), "band_split" | "band_merge"));
+
+        if hybrid_indices.is_empty() {
+            if has_split_or_merge {
+                return Err(AutoeqError::OptimizationFailed {
+                    message: format!(
+                        "channel '{name}' contains an unowned or partial Hybrid crossover block"
+                    ),
+                });
+            }
+            continue;
+        }
+
+        let contiguous = hybrid_indices
+            .windows(2)
+            .all(|indices| indices[1] == indices[0] + 1);
+        let plugins: Vec<_> = hybrid_indices
+            .iter()
+            .map(|index| &chain.plugins[*index])
+            .collect();
+        let valid = contiguous
+            && plugins
+                .first()
+                .is_some_and(|plugin| plugin.plugin_type == "band_split")
+            && plugins
+                .last()
+                .is_some_and(|plugin| plugin.plugin_type == "band_merge")
+            && plugins
+                .iter()
+                .filter(|plugin| plugin.plugin_type == "band_split")
+                .count()
+                == 1
+            && plugins
+                .iter()
+                .filter(|plugin| plugin.plugin_type == "band_merge")
+                .count()
+                == 1
+            && plugins
+                .iter()
+                .filter(|plugin| plugin.plugin_type == "convolution")
+                .count()
+                == 1;
+        if !valid {
+            let plugin_types = plugins
+                .iter()
+                .map(|plugin| plugin.plugin_type.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(AutoeqError::OptimizationFailed {
+                message: format!(
+                    "channel '{name}' has an incomplete Hybrid crossover block: [{plugin_types}]"
+                ),
+            });
+        }
+    }
+
     Ok(())
 }
 
@@ -1971,6 +2068,49 @@ mod tests {
     }
 
     #[test]
+    fn hybrid_crossover_processors_are_one_atomic_correction_stage() {
+        let mixed_config = roomeq_model::MixedModeConfig {
+            crossover_freq: 300.0,
+            crossover_type: "LR24".to_string(),
+            fir_band: "low".to_string(),
+        };
+        let filter = math_audio_iir_fir::Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Peak,
+            1_000.0,
+            48_000.0,
+            0.7,
+            -2.0,
+        );
+        let mut chain = roomeq_engine::output::build_mixed_mode_crossover_chain(
+            "left",
+            &mixed_config,
+            &[filter],
+            "left_band_fir.wav",
+            true,
+            42.0,
+            None,
+        );
+        chain.plugins.push(roomeq_model::PluginConfigWrapper {
+            plugin_type: "eq".to_string(),
+            parameters: serde_json::json!({
+                "label": "post_eq",
+                "filters": [],
+                "room_eq_stage": "post_route",
+            }),
+        });
+
+        let stages = correction_stages(&chain);
+        assert!(stages.contains(&CorrectionStage::Hybrid));
+        assert!(stages.contains(&CorrectionStage::Peq));
+        assert!(!stages.contains(&CorrectionStage::Fir));
+
+        remove_correction_stage(&mut chain, CorrectionStage::Hybrid);
+
+        assert_eq!(chain.plugins.len(), 1);
+        assert_eq!(chain.plugins[0].parameters["label"], "post_eq");
+    }
+
+    #[test]
     fn apply_ctc_if_enabled_disabled_leaves_none() {
         let mut result = single_channel_room_result("left");
         let config = RoomConfig {
@@ -2074,6 +2214,57 @@ mod tests {
             metadata: empty_metadata(),
         };
         assert!(sanity_check_result(&result).is_err());
+    }
+
+    #[test]
+    fn sanity_check_result_rejects_partial_hybrid_crossover_block() {
+        let mut result = single_channel_room_result("left");
+        let mark_hybrid = |plugin| {
+            roomeq_engine::topology::mark_plugin_correction_stage(
+                plugin,
+                roomeq_engine::topology::HYBRID_CROSSOVER_CORRECTION_STAGE,
+            )
+        };
+        result.channels.get_mut("left").unwrap().plugins = vec![
+            mark_hybrid(roomeq_engine::output::create_band_split_plugin(
+                300.0, "LR24",
+            )),
+            mark_hybrid(roomeq_engine::output::create_band_merge_plugin(2)),
+        ];
+
+        let error = sanity_check_result(&result).unwrap_err().to_string();
+
+        assert!(error.contains("incomplete Hybrid crossover block"));
+    }
+
+    #[test]
+    fn sanity_check_result_accepts_complete_hybrid_crossover_block() {
+        let mut result = single_channel_room_result("left");
+        let mixed_config = roomeq_model::MixedModeConfig {
+            crossover_freq: 300.0,
+            crossover_type: "LR24".to_string(),
+            fir_band: "low".to_string(),
+        };
+        let filter = math_audio_iir_fir::Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Peak,
+            1_000.0,
+            48_000.0,
+            0.7,
+            -2.0,
+        );
+        result.channels.get_mut("left").unwrap().plugins =
+            roomeq_engine::output::build_mixed_mode_crossover_chain(
+                "left",
+                &mixed_config,
+                &[filter],
+                "left_band_fir.wav",
+                true,
+                42.0,
+                None,
+            )
+            .plugins;
+
+        assert!(sanity_check_result(&result).is_ok());
     }
 
     #[test]
@@ -2247,6 +2438,56 @@ mod tests {
                 && outcome
                     .advisories
                     .contains(&"topology_regression_reverted_lfe:peq".to_string())
+        }));
+    }
+
+    #[test]
+    fn final_safety_gate_does_not_score_route_lowpass_as_correction_regression() {
+        let mut result = single_channel_room_result("lfe");
+        let initial = result.channel_results["lfe"].initial_curve.clone();
+        let chain = result.channels.get_mut("lfe").unwrap();
+        chain.plugins = vec![
+            roomeq_model::PluginConfigWrapper {
+                plugin_type: "eq".to_string(),
+                parameters: serde_json::json!({
+                    "label": "room_eq_correction",
+                    "filters": [],
+                }),
+            },
+            roomeq_engine::topology::mark_route_owned_plugin(
+                roomeq_engine::output::create_crossover_plugin("LR24", 120.0, "low"),
+            ),
+        ];
+        let final_curve = apply_logical_channel_chain(chain, &initial, 48_000.0, Path::new("."))
+            .expect("route-owned low-pass must be reconstructible");
+        chain.final_curve = Some((&final_curve).into());
+        let channel = result.channel_results.get_mut("lfe").unwrap();
+        channel.pre_score = 1.0;
+        channel.post_score = 2.0;
+        channel.final_curve = final_curve;
+
+        apply_final_correction_safety_gate(
+            &mut result,
+            48_000.0,
+            3,
+            (20.0, 20_000.0),
+            Path::new("."),
+            roomeq_model::ProcessingMode::LowLatency,
+            None,
+        );
+
+        assert!(
+            result.channels["lfe"]
+                .plugins
+                .iter()
+                .any(|plugin| plugin.plugin_type == "eq")
+        );
+        assert!(result.metadata.stage_outcomes.iter().all(|outcome| {
+            outcome.stage != "final_correction_safety_lfe"
+                || outcome
+                    .advisories
+                    .iter()
+                    .all(|advisory| !advisory.starts_with("topology_regression_reverted_lfe"))
         }));
     }
 

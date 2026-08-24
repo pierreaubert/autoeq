@@ -2,9 +2,14 @@ use super::apply::apply_group_delay_qa_passthrough_eq;
 use super::apply::apply_mutation;
 use super::apply::apply_option_override;
 use super::apply::apply_qa_overrides;
+use super::consts::CROSS_MODE_BASS_MAX_RMS_DB;
+use super::consts::CROSS_MODE_BASS_MEDIAN_RMS_DB;
 use super::consts::CROSS_MODE_FR_MAX_DIFF_DB;
+use super::consts::CROSS_MODE_MAIN_MEDIAN_RMS_DB;
 use super::consts::CROSS_MODE_RATIO_LIMIT;
 use super::consts::CROSS_MODE_SCORE_RATIO_LIMIT;
+use super::consts::CROSS_MODE_TIMING_RATIO_LIMIT;
+use super::consts::CROSS_MODE_UPPER_MEDIAN_RMS_DB;
 use super::consts::FIR_MUTATIONS;
 use super::consts::IIR_MUTATIONS;
 use super::consts::MIXED_MUTATIONS;
@@ -20,7 +25,9 @@ use super::metric_scorecard::compute_scorecard;
 use super::metric_scorecard::evaluate_scorecard;
 use super::metric_scorecard::placeholder_scorecard;
 use super::misc::convergence_epsilon;
+use super::misc::level_matched_rms_curve_difference_db;
 use super::misc::load_config_for_generic_path;
+use super::misc::load_config_for_path;
 use super::misc::max_curve_difference_db;
 use super::mutation::Mutation;
 use super::option::option_gd_profile;
@@ -302,10 +309,65 @@ pub(super) fn run_generic_path_tests(
     Ok((out, results))
 }
 
+fn median(mut values: Vec<f64>) -> Option<f64> {
+    values.retain(|value| value.is_finite());
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by(f64::total_cmp);
+    let middle = values.len() / 2;
+    Some(if values.len().is_multiple_of(2) {
+        (values[middle - 1] + values[middle]) * 0.5
+    } else {
+        values[middle]
+    })
+}
+
+fn deployed_final_curve(result: &RoomOptimizationResult, channel: &str) -> Option<Curve> {
+    result
+        .channels
+        .get(channel)
+        .and_then(|chain| chain.final_curve.clone())
+        .map(Curve::from)
+        .or_else(|| {
+            result
+                .channel_results
+                .get(channel)
+                .map(|channel| channel.final_curve.clone())
+        })
+}
+
+fn redirected_main_channels(result: &RoomOptimizationResult) -> Vec<String> {
+    let routed: std::collections::BTreeSet<String> = result
+        .metadata
+        .bass_management
+        .as_ref()
+        .and_then(|report| report.routing_graph.as_ref())
+        .into_iter()
+        .flat_map(|graph| graph.routes.iter())
+        .filter(|route| route.route_kind == "main_highpass_to_self")
+        .map(|route| route.source_channel.clone())
+        .collect();
+    if !routed.is_empty() {
+        return routed.into_iter().collect();
+    }
+    result
+        .channel_results
+        .keys()
+        .filter(|name| {
+            let lower = name.to_ascii_lowercase();
+            !lower.contains("lfe") && !lower.contains("sub")
+        })
+        .cloned()
+        .collect()
+}
+
 pub(super) fn run_cross_mode_convergence_tests(
     name: &str,
     base_config_path: &Path,
     override_config_dir: &Path,
+    preserve_system: bool,
+    strict: bool,
 ) -> Result<(String, Vec<TestResult>)> {
     let mut out = String::new();
     let mut results = Vec::new();
@@ -323,12 +385,21 @@ pub(super) fn run_cross_mode_convergence_tests(
 
     for (mode_name, processing_mode, override_file) in modes {
         let override_path = override_config_dir.join(override_file);
-        let (mut config, _) = load_config_for_generic_path(
+        let (mut config, _) = load_config_for_path(
             base_config_path,
             Some(&override_path),
             processing_mode.clone(),
+            preserve_system,
         )?;
         apply_qa_overrides(&mut config, &format!("{name}:cross-mode:{mode_name}"));
+        if strict {
+            // The measured 5.1.4 comparison is a deterministic realization
+            // gate, not a convergence stress test. Keep it bounded so nightly
+            // QA catches topology/mode drift without tripling the full 15k
+            // quality-search budget across ten channels.
+            config.optimizer.max_iter = config.optimizer.max_iter.min(5_000);
+            config.optimizer.population = config.optimizer.population.min(32);
+        }
 
         let result = run_optimization(&config)
             .with_context(|| format!("{} {} cross-mode", name, mode_name))?;
@@ -356,70 +427,149 @@ pub(super) fn run_cross_mode_convergence_tests(
         mode_results.push((mode_name, result));
     }
 
-    // CM-1: Frequency response convergence
-    // Compare final curves across modes for each channel
-    {
+    // CM-1: Frequency-response convergence from the final deployed channel
+    // curves. Strict cases use level-matched RMS bands; legacy generic cases
+    // retain their historical broad maximum-difference smoke gate.
+    if strict {
+        let channel_names = redirected_main_channels(&mode_results[0].1);
+        let mode_pairs = [(0_usize, 1_usize), (0, 2), (1, 2)];
+        let bands = [
+            (
+                "bass",
+                25.0,
+                250.0,
+                CROSS_MODE_BASS_MEDIAN_RMS_DB,
+                Some(CROSS_MODE_BASS_MAX_RMS_DB),
+            ),
+            ("main", 100.0, 10_000.0, CROSS_MODE_MAIN_MEDIAN_RMS_DB, None),
+            (
+                "upper",
+                300.0,
+                10_000.0,
+                CROSS_MODE_UPPER_MEDIAN_RMS_DB,
+                None,
+            ),
+        ];
+        for (band_name, fmin, fmax, median_limit, max_limit) in bands {
+            let mut differences = Vec::new();
+            for channel in &channel_names {
+                let curves: Vec<Option<Curve>> = mode_results
+                    .iter()
+                    .map(|(_, result)| deployed_final_curve(result, channel))
+                    .collect();
+                for (first, second) in mode_pairs {
+                    if let (Some(first), Some(second)) = (&curves[first], &curves[second])
+                        && let Some(rms) =
+                            level_matched_rms_curve_difference_db(first, second, fmin, fmax)
+                    {
+                        differences.push(rms);
+                    }
+                }
+            }
+            let median_rms = median(differences.clone()).unwrap_or(f64::INFINITY);
+            let max_rms = differences.into_iter().fold(f64::NEG_INFINITY, f64::max);
+            let max_rms = if max_rms.is_finite() {
+                max_rms
+            } else {
+                f64::INFINITY
+            };
+            let pass = median_rms <= median_limit && max_limit.is_none_or(|limit| max_rms <= limit);
+            let status = if pass { "PASS" } else { "FAIL" };
+            writeln!(
+                out,
+                "  CM-1 {band_name} parity: median_rms={median_rms:.2}dB max_rms={max_rms:.2}dB  {status}"
+            )
+            .unwrap();
+            results.push(TestResult {
+                label: format!("{name} CM-1 {band_name} parity"),
+                pre_score: 0.0,
+                scorecard: placeholder_scorecard(max_rms),
+                pass,
+                reason: format!(
+                    "median_rms={median_rms:.2}dB (limit={median_limit:.2}dB), max_rms={max_rms:.2}dB{}",
+                    max_limit.map_or_else(String::new, |limit| format!(" (limit={limit:.2}dB)"))
+                ),
+            });
+        }
+    } else {
         let channel_names: Vec<String> =
             mode_results[0].1.channel_results.keys().cloned().collect();
-
         let mut cm1_max_diff = 0.0_f64;
-
         for ch_name in &channel_names {
             let curves: Vec<&Curve> = mode_results
                 .iter()
-                .filter_map(|(_, r)| r.channel_results.get(ch_name).map(|c| &c.final_curve))
+                .filter_map(|(_, result)| {
+                    result
+                        .channel_results
+                        .get(ch_name)
+                        .map(|channel| &channel.final_curve)
+                })
                 .collect();
-
             if curves.len() >= 2 {
-                let fmin = curves[0]
-                    .freq
-                    .iter()
-                    .cloned()
-                    .find(|&f| f >= 20.0)
-                    .unwrap_or(20.0);
-                let fmax = curves[0]
-                    .freq
-                    .iter()
-                    .cloned()
-                    .rev()
-                    .find(|&f| f <= 500.0)
-                    .unwrap_or(500.0);
-                let diff = max_curve_difference_db(&curves, fmin, fmax);
+                let diff = max_curve_difference_db(&curves, 20.0, 500.0);
                 cm1_max_diff = cm1_max_diff.max(diff);
             }
         }
-
-        let cm1_pass = cm1_max_diff <= CROSS_MODE_FR_MAX_DIFF_DB;
-        let status = if cm1_pass { "PASS" } else { "FAIL" };
+        let pass = cm1_max_diff <= CROSS_MODE_FR_MAX_DIFF_DB;
+        let status = if pass { "PASS" } else { "FAIL" };
         writeln!(
             out,
-            "  CM-1 FR convergence: max_diff={:.2}dB (limit={:.1}dB)  {}",
-            cm1_max_diff, CROSS_MODE_FR_MAX_DIFF_DB, status
+            "  CM-1 FR convergence: max_diff={cm1_max_diff:.2}dB (limit={CROSS_MODE_FR_MAX_DIFF_DB:.1}dB)  {status}"
         )
         .unwrap();
-
         results.push(TestResult {
-            label: format!("{} CM-1 FR convergence", name),
+            label: format!("{name} CM-1 FR convergence"),
             pre_score: 0.0,
             scorecard: placeholder_scorecard(cm1_max_diff),
-            pass: cm1_pass,
+            pass,
             reason: format!(
-                "max_diff={:.2}dB (limit={:.1}dB)",
-                cm1_max_diff, CROSS_MODE_FR_MAX_DIFF_DB
+                "max_diff={cm1_max_diff:.2}dB (limit={CROSS_MODE_FR_MAX_DIFF_DB:.1}dB)"
             ),
         });
     }
 
-    // CM-2: Group delay flatness (FIR/Mixed should have <= IIR GD std dev)
-    {
+    // CM-2: strict home-cinema cases must demonstrate the timing benefit
+    // promised by FIR and Hybrid. Generic cases retain the broad sanity gate.
+    if strict {
+        let channel_names = redirected_main_channels(&mode_results[0].1);
+        let mut by_mode = [Vec::new(), Vec::new(), Vec::new()];
+        for channel in &channel_names {
+            for (mode_index, (_, result)) in mode_results.iter().enumerate() {
+                if let Some(curve) = deployed_final_curve(result, channel)
+                    && let Some(gd_std) = group_delay_std_dev(&curve, 100.0, 1_000.0)
+                {
+                    by_mode[mode_index].push(gd_std);
+                }
+            }
+        }
+        let iir = median(by_mode[0].clone()).unwrap_or(f64::INFINITY);
+        let fir = median(by_mode[1].clone()).unwrap_or(f64::INFINITY);
+        let mixed = median(by_mode[2].clone()).unwrap_or(f64::INFINITY);
+        let limit = iir * CROSS_MODE_TIMING_RATIO_LIMIT;
+        let pass = iir.is_finite() && fir <= limit && mixed <= limit;
+        let status = if pass { "PASS" } else { "FAIL" };
+        writeln!(
+            out,
+            "  CM-2 timing improvement: IIR={iir:.2}ms FIR={fir:.2}ms Mixed={mixed:.2}ms limit={limit:.2}ms  {status}"
+        )
+        .unwrap();
+        results.push(TestResult {
+            label: format!("{name} CM-2 timing improvement"),
+            pre_score: 0.0,
+            scorecard: placeholder_scorecard(fir.max(mixed)),
+            pass,
+            reason: format!(
+                "IIR={iir:.2}ms FIR={fir:.2}ms Mixed={mixed:.2}ms; FIR/Mixed must be <= {:.0}% of IIR",
+                CROSS_MODE_TIMING_RATIO_LIMIT * 100.0
+            ),
+        });
+    } else {
         let channel_names: Vec<String> =
             mode_results[0].1.channel_results.keys().cloned().collect();
-
         let mut iir_gd_max = 0.0_f64;
         let mut fir_gd_max = 0.0_f64;
         let mut mixed_gd_max = 0.0_f64;
         let mut has_phase = false;
-
         for ch_name in &channel_names {
             for (mode_name, result) in &mode_results {
                 if let Some(ch) = result.channel_results.get(ch_name)
@@ -435,31 +585,22 @@ pub(super) fn run_cross_mode_convergence_tests(
                 }
             }
         }
-
         if has_phase {
-            // Verify all modes produce reasonable GD (< 50ms std dev).
-            // Note: FIR/Mixed don't necessarily have flatter GD on the *final curve*
-            // since the room's own phase dominates. FIR's phase advantage is in the
-            // correction filter, not the combined room+correction result.
             let max_gd = iir_gd_max.max(fir_gd_max).max(mixed_gd_max);
-            let cm2_pass = max_gd < 50.0;
-            let status = if cm2_pass { "PASS" } else { "FAIL" };
-
+            let pass = max_gd < 50.0;
+            let status = if pass { "PASS" } else { "FAIL" };
             writeln!(
                 out,
-                "  CM-2 GD flatness: IIR={:.2}ms FIR={:.2}ms Mixed={:.2}ms  {}",
-                iir_gd_max, fir_gd_max, mixed_gd_max, status
+                "  CM-2 GD flatness: IIR={iir_gd_max:.2}ms FIR={fir_gd_max:.2}ms Mixed={mixed_gd_max:.2}ms  {status}"
             )
             .unwrap();
-
             results.push(TestResult {
-                label: format!("{} CM-2 GD flatness", name),
+                label: format!("{name} CM-2 GD flatness"),
                 pre_score: 0.0,
                 scorecard: placeholder_scorecard(fir_gd_max.max(mixed_gd_max)),
-                pass: cm2_pass,
+                pass,
                 reason: format!(
-                    "IIR={:.2}ms FIR={:.2}ms Mixed={:.2}ms",
-                    iir_gd_max, fir_gd_max, mixed_gd_max
+                    "IIR={iir_gd_max:.2}ms FIR={fir_gd_max:.2}ms Mixed={mixed_gd_max:.2}ms"
                 ),
             });
         } else {

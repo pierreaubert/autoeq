@@ -20,6 +20,20 @@ pub(super) fn load_config_for_generic_path(
     override_config_path: Option<&Path>,
     processing_mode: ProcessingMode,
 ) -> Result<(RoomConfig, PathBuf)> {
+    load_config_for_path(
+        base_config_path,
+        override_config_path,
+        processing_mode,
+        false,
+    )
+}
+
+pub(super) fn load_config_for_path(
+    base_config_path: &Path,
+    override_config_path: Option<&Path>,
+    processing_mode: ProcessingMode,
+    preserve_system: bool,
+) -> Result<(RoomConfig, PathBuf)> {
     let config_json = std::fs::read_to_string(base_config_path)
         .with_context(|| format!("Failed to read config: {:?}", base_config_path))?;
 
@@ -34,8 +48,10 @@ pub(super) fn load_config_for_generic_path(
         merge_json_objects(&mut config_value, &override_value);
     }
 
-    // Remove "system" key to force generic path
-    if let Some(obj) = config_value.as_object_mut() {
+    // Generic quality cases deliberately bypass topology workflows. Strict
+    // home-cinema mode-parity cases keep the system so final route-owned
+    // crossovers and bass routing remain part of the deployed result.
+    if !preserve_system && let Some(obj) = config_value.as_object_mut() {
         obj.remove("system");
     }
 
@@ -82,6 +98,42 @@ pub(super) fn max_curve_difference_db(curves: &[&Curve], fmin: f64, fmax: f64) -
         }
     }
     max_diff
+}
+
+/// Level-matched RMS difference between two response curves over a band.
+///
+/// The mean offset is removed before the RMS is calculated so this measures
+/// tonal shape rather than harmless mode-dependent broadband latency/level
+/// normalization.
+pub(super) fn level_matched_rms_curve_difference_db(
+    first: &Curve,
+    second: &Curve,
+    fmin: f64,
+    fmax: f64,
+) -> Option<f64> {
+    let differences: Vec<f64> = first
+        .freq
+        .iter()
+        .copied()
+        .filter(|frequency| *frequency >= fmin && *frequency <= fmax)
+        .filter_map(|frequency| {
+            let first_spl = interpolate_spl_at(first, frequency)?;
+            let second_spl = interpolate_spl_at(second, frequency)?;
+            (first_spl.is_finite() && second_spl.is_finite()).then_some(first_spl - second_spl)
+        })
+        .collect();
+    if differences.len() < 3 {
+        return None;
+    }
+    let mean = differences.iter().sum::<f64>() / differences.len() as f64;
+    Some(
+        (differences
+            .iter()
+            .map(|difference| (difference - mean).powi(2))
+            .sum::<f64>()
+            / differences.len() as f64)
+            .sqrt(),
+    )
 }
 
 /// Linear interpolation of SPL at a given frequency

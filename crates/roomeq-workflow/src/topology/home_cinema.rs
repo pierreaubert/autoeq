@@ -106,7 +106,9 @@ fn apply_gain_to_main_chain(chain: &mut ChannelDspChain, gain_db: f64) {
 
 /// Align every logical input at the microphone after the complete routed DSP
 /// graph. Trims are down-only so calibration cannot consume headroom.
+#[allow(clippy::too_many_arguments)]
 fn calibrate_post_dsp_input_levels(
+    config: &RoomConfig,
     main_roles: &[String],
     lfe_role: &str,
     main_band: (f64, f64),
@@ -196,7 +198,7 @@ fn calibrate_post_dsp_input_levels(
     if !target.is_finite() || means.len() != main_roles.len() + 1 {
         return Ok(HashMap::new());
     }
-    let trims: HashMap<String, f64> = means
+    let mut trims: HashMap<String, f64> = means
         .into_iter()
         .map(|(role, mean)| (role, (target - mean).min(0.0)))
         .collect();
@@ -215,6 +217,42 @@ fn calibrate_post_dsp_input_levels(
             route.gain_db += trim;
             route.gain_linear = 10.0_f64.powf(route.gain_db / 20.0);
             route.matrix_gain = route.gain_linear;
+        }
+    }
+    // Only the configured correlated-bus headroom model may aggregate
+    // independent logical inputs. Preserve all source relationships with one
+    // common down-only safety trim if that model predicts overload.
+    if let Some(effective) = engine_home_cinema::effective_bass_management(config)
+        && let Some(headroom) = engine_home_cinema::simulate_bass_bus_headroom(
+            Some(graph),
+            &effective.config.headroom_model,
+            effective.config.headroom_margin_db,
+            sample_rate,
+        )
+    {
+        let safety_trim_db = (-headroom.margin_db + 0.1).max(0.0);
+        if safety_trim_db > 0.0 {
+            for role in main_roles {
+                if let Some(chain) = channels.get_mut(role) {
+                    apply_gain_to_main_chain(chain, -safety_trim_db);
+                }
+            }
+            for trim_db in trims.values_mut() {
+                *trim_db -= safety_trim_db;
+            }
+            for route in &mut graph.routes {
+                if matches!(
+                    route.route_kind.as_str(),
+                    "redirected_bass_lowpass_to_sub" | "lfe_lowpass_to_sub"
+                ) {
+                    route.gain_db -= safety_trim_db;
+                    route.gain_linear = 10.0_f64.powf(route.gain_db / 20.0);
+                    route.matrix_gain = route.gain_linear;
+                }
+            }
+            graph.advisories.push(format!(
+                "common_input_headroom_safety_trim_db:{safety_trim_db:.3}"
+            ));
         }
     }
     if let Some(matrix) = graph.matrix.as_mut() {
@@ -913,11 +951,9 @@ fn optimize_home_cinema_with_sub(
             "crossover_grid_status:measured={measured_grid_available},processed={processed_grid_available}"
         ));
     }
-    let virtual_main = if phase_available {
-        complex_sum_mains(&main_refs)
-    } else {
-        average_mains_magnitude(&main_refs)
-    };
+    // Programme channels are independent inputs. Their phases must not enter
+    // a shared tonal target; source-paired crossover sums are optimized below.
+    let virtual_main = average_mains_magnitude(&main_refs);
 
     // 4. Crossover optimization between virtual main and physical bass output
     let final_xover_type = select_bass_management_crossover_type(
@@ -957,7 +993,7 @@ fn optimize_home_cinema_with_sub(
     let objective_before = bass_management_objective(objective_before_curve.as_ref(), est_xo);
 
     let (main_gain_post, main_delay_raw, sub_gain_raw, sub_delay_raw, sub_inverted, final_xo_freq) =
-        if phase_available {
+        if phase_available && roomeq_engine::topology::curve_has_usable_phase(&virtual_main) {
             let (xo_gains, xo_delays, xo_freqs, _, inversions) = crossover::optimize_crossover(
                 vec![virtual_main.clone(), sub_curve.clone()],
                 crossover_type_enum,
@@ -1098,6 +1134,7 @@ fn optimize_home_cinema_with_sub(
         .unwrap_or_default();
     let preliminary_bass_management_optimization = joint_bass_management_report_from_parts(
         &group_results_by_id.values().cloned().collect::<Vec<_>>(),
+        &[],
         &preliminary_sub_output_results,
     );
     let preliminary_bass_routing_graph = engine_home_cinema::bass_management_routing_graph(
@@ -1149,9 +1186,9 @@ fn optimize_home_cinema_with_sub(
         )),
     ) as f64;
 
-    let sub_correction = main_mean - sub_mean;
+    let sub_correction = 0.0;
     info!(
-        "  Re-aligning Subwoofer: Main={:.2} dB, Sub={:.2} dB, Correction={:+.2} dB",
+        "  Physical sub level retained: Main={:.2} dB, Sub={:.2} dB, Common tonal correction={:+.2} dB",
         main_mean, sub_mean, sub_correction
     );
 
@@ -1204,24 +1241,43 @@ fn optimize_home_cinema_with_sub(
             optimization_advisories.push("sub_gain_limited_for_headroom".to_string());
         }
     }
-    let sub_output_advisories = if phase_available
+    let optimize_source_routes = phase_available
         && bass_management
             .as_ref()
             .map(|bm| bm.config.optimize_groups)
-            .unwrap_or(true)
-    {
+            .unwrap_or(true);
+    let baseline_reason = if !phase_available {
+        "source_route_optimizer_skipped_missing_phase"
+    } else if !optimize_source_routes {
+        "source_route_optimization_disabled"
+    } else {
+        "source_route_optimizer_baseline"
+    };
+    let mut source_results = engine_bass_management::baseline_bass_management_source_reports(
+        main_roles,
+        &aligned_pre_eq_curves,
+        &group_results_by_id,
+        &sub_output_results,
+        sub_preprocess.drivers.as_deref(),
+        &sub_role,
+        sample_rate,
+        baseline_reason,
+    );
+    let sub_output_advisories = if optimize_source_routes {
         optimize_bass_management_joint_solution(
             config,
             main_roles,
+            &aligned_curves,
             &aligned_pre_eq_curves,
             &mut group_results_by_id,
+            &mut source_results,
             &mut sub_output_results,
             sub_preprocess.drivers.as_deref(),
             &sub_role,
             sample_rate,
         )
     } else {
-        Vec::new()
+        vec![baseline_reason.to_string()]
     };
     for advisory in sub_output_advisories {
         optimization_advisories.retain(|existing| existing != "ok");
@@ -1251,9 +1307,16 @@ fn optimize_home_cinema_with_sub(
         let role_xover_freq = group
             .and_then(|group| group.selected_crossover_hz)
             .unwrap_or(final_xo_freq);
-        let role_main_delay = group
-            .map(|group| group.main_delay_ms)
-            .unwrap_or(main_delay_post);
+        let role_main_delay = engine_home_cinema::resolved_source_route_settings(
+            role,
+            group_id,
+            Some(&joint_bass_management_report_from_parts(
+                &group_results_by_id.values().cloned().collect::<Vec<_>>(),
+                &source_results,
+                &sub_output_results,
+            )),
+        )
+        .main_delay_ms;
         main_post_curves.insert(
             role.clone(),
             apply_chain(
@@ -1324,6 +1387,7 @@ fn optimize_home_cinema_with_sub(
         objective_before: aggregate_objective_before,
         objective_after: aggregate_objective_after,
         group_results: group_results_by_id.values().cloned().collect(),
+        source_results,
         sub_output_results,
         advisories: optimization_advisories,
     };
@@ -1529,7 +1593,12 @@ fn optimize_home_cinema_with_sub(
         let role_xover_freq = group
             .and_then(|g| g.selected_crossover_hz)
             .unwrap_or(final_xo_freq);
-        let role_main_delay = group.map(|g| g.main_delay_ms).unwrap_or(main_delay_post);
+        let role_main_delay = engine_home_cinema::resolved_source_route_settings(
+            role,
+            group_id,
+            Some(&bass_management_optimization),
+        )
+        .main_delay_ms;
 
         plugins.push(mark_route_owned_plugin(output::create_crossover_plugin(
             role_xover_type,
@@ -1728,6 +1797,7 @@ fn optimize_home_cinema_with_sub(
 
     let post_dsp_input_trims = if let Some(graph) = bass_routing_graph.as_mut() {
         calibrate_post_dsp_input_levels(
+            config,
             main_roles,
             &sub_role,
             main_alignment_band,
@@ -2034,6 +2104,7 @@ mod post_dsp_level_tests {
         };
 
         let trims = calibrate_post_dsp_input_levels(
+            &roomeq_model::RoomConfig::default(),
             &["L".to_string(), "R".to_string()],
             "LFE",
             (100.0, 400.0),
@@ -2322,6 +2393,23 @@ mod tests {
         );
         let result = result.unwrap();
         assert_eq!(result.channels.len(), 3);
+        let optimization = result
+            .metadata
+            .bass_management
+            .expect("bass-management report")
+            .optimization
+            .expect("bass-management optimization report");
+        assert_eq!(optimization.source_results.len(), 2);
+        for source in optimization.source_results {
+            assert!(!source.accepted);
+            assert_eq!(source.objective_before, source.objective_after);
+            assert!(source.objective_before.is_some_and(f64::is_finite));
+            assert!(
+                source
+                    .advisories
+                    .contains(&"source_route_optimization_disabled".to_string())
+            );
+        }
     }
 
     #[test]

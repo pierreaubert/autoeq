@@ -507,6 +507,7 @@ impl WorkflowExecutor for Stereo21Executor {
                 objective_before,
                 objective_after,
                 group_results: Vec::new(),
+                source_results: Vec::new(),
                 sub_output_results: Vec::new(),
                 advisories: optimization_advisories,
             };

@@ -762,6 +762,7 @@ mod coverage_tests {
                 objective_after: None,
                 advisories: Vec::new(),
             }],
+            source_results: Vec::new(),
             sub_output_results: Vec::new(),
             advisories: Vec::new(),
         };

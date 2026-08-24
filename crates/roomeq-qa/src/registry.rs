@@ -115,6 +115,14 @@ pub struct QualityCaseSpec {
     pub fem_subdir: String,
     pub optim_subdir: String,
     #[serde(default)]
+    pub config_path: Option<String>,
+    #[serde(default)]
+    pub override_dir: Option<String>,
+    #[serde(default)]
+    pub preserve_system: bool,
+    #[serde(default)]
+    pub strict_cross_mode: bool,
+    #[serde(default)]
     pub options: Vec<String>,
     pub tier: QaTier,
     pub claims: Vec<String>,
@@ -232,6 +240,20 @@ impl ScenarioRegistry {
             }
             if !matches!(case.kind, QualityCaseKind::OptionEffect) && !case.options.is_empty() {
                 bail!("non-option quality case '{}' declares options", case.id);
+            }
+            if case.config_path.is_some() != case.override_dir.is_some() {
+                bail!(
+                    "quality case '{}' must specify config_path and override_dir together",
+                    case.id
+                );
+            }
+            if (case.preserve_system || case.strict_cross_mode)
+                && !matches!(case.kind, QualityCaseKind::CrossModeConvergence)
+            {
+                bail!(
+                    "quality case '{}' enables cross-mode-only controls for a non-cross-mode kind",
+                    case.id
+                );
             }
             for claim in &case.claims {
                 let active = match claim.as_str() {
@@ -459,7 +481,7 @@ mod tests {
     fn registry_is_valid_and_has_all_execution_tiers() {
         let registry = load_registry().unwrap();
         assert_eq!(registry.families.len(), 19);
-        assert_eq!(registry.home_cinema.len(), 14);
+        assert_eq!(registry.home_cinema.len(), 15);
         assert!(
             registry
                 .families
@@ -529,6 +551,7 @@ mod tests {
                 "fem/large_surround_5_1_4",
                 "home_cinema/iir_lfe_only",
                 "home_cinema/iir_redirected_bass",
+                "home_cinema/hybrid_redirected_bass_quick",
                 "home_cinema/phase_linear_fir_redirected_bass",
                 "home_cinema/mixed_phase_redirected_bass",
                 "home_cinema/coherence_adaptive_allpass",
@@ -548,6 +571,7 @@ mod tests {
                 "quality/workflow/home_cinema_514",
                 "quality/generic/stereo_20",
                 "quality/cross_mode/stereo_20",
+                "quality/cross_mode/genelec_514",
                 "quality/option/excursion_protection",
                 "quality/option/asymmetric_loss",
                 "quality/option/psychoacoustic",

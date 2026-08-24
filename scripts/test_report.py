@@ -2,7 +2,11 @@
 
 import unittest
 
-from scripts.src.report import _mixed_phase_summary_html
+from scripts.src.report import (
+    _comparison_source_label,
+    _has_redirected_bass_route,
+    _mixed_phase_summary_html,
+)
 
 
 class MixedPhaseReportTests(unittest.TestCase):
@@ -54,6 +58,32 @@ class MixedPhaseReportTests(unittest.TestCase):
 
     def test_absent_mixed_phase_and_fir_metrics_emit_no_section(self):
         self.assertEqual(_mixed_phase_summary_html({}, {}), "")
+
+
+class ComparisonSourceLabelTests(unittest.TestCase):
+    def test_redirected_bass_source_is_not_labelled_as_physical_channel(self):
+        data = {
+            "metadata": {
+                "bass_management": {
+                    "routing_graph": {
+                        "routes": [
+                            {
+                                "source_channel": "L",
+                                "route_kind": "redirected_bass_lowpass_to_sub",
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+
+        self.assertTrue(_has_redirected_bass_route(data, "L"))
+        self.assertFalse(_has_redirected_bass_route(data, "R"))
+        self.assertEqual(
+            _comparison_source_label("L", True),
+            "Logical source L (physical L + redirected bass)",
+        )
+        self.assertEqual(_comparison_source_label("LFE", False), "Logical source LFE")
 
 
 if __name__ == "__main__":

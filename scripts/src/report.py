@@ -32,6 +32,25 @@ from .dsp import build_post_dsp_source_curves, synthesize_lr_channel
 LR_SUM_CHANNEL = "L+R"
 
 
+def _has_redirected_bass_route(data: dict, source_name: str) -> bool:
+    """Return whether ``source_name`` feeds the physical subwoofer output."""
+    bass_management = (data.get("metadata", {}) or {}).get("bass_management", {}) or {}
+    graph = bass_management.get("routing_graph", {}) or {}
+    return any(
+        route.get("source_channel") == source_name
+        and route.get("route_kind") == "redirected_bass_lowpass_to_sub"
+        for route in (graph.get("routes", []) or [])
+    )
+
+
+def _comparison_source_label(channel_name: str, includes_redirected_bass: bool) -> str:
+    """Describe comparison curves as logical sources, not physical outputs."""
+    label = f"Logical source {channel_name}"
+    if includes_redirected_bass:
+        label += f" (physical {channel_name} + redirected bass)"
+    return label
+
+
 # Ordered EPA fields with their display labels and formatting rules.
 # Used by the pre/post tables in both single-mode and comparison reports.
 _EPA_FIELDS: list[tuple[str, str, str]] = [
@@ -1274,9 +1293,13 @@ def create_comparison_html_report(
         active = " active" if i == 0 else ""
         html_parts.append(f'<div id="ch_{i}" class="tab-content{active}">\n')
         is_lr = (ch_name == LR_SUM_CHANNEL)
+        includes_redirected_bass = not is_lr and any(
+            _has_redirected_bass_route(data, ch_name) for _, data in mode_datasets
+        )
+        source_label = _comparison_source_label(ch_name, includes_redirected_bass)
         if is_lr:
             html_parts.append(
-                "<h2>Channel: L+R (complex sum)</h2>\n"
+                "<h2>Logical source L+R (complex sum)</h2>\n"
                 '<p style="color:#666;font-size:0.9em;margin:-10px 0 15px 0;">'
                 "Coherent (phase-aware) sum of the L and R frequency "
                 "responses, computed per mode from the channel curves "
@@ -1286,7 +1309,16 @@ def create_comparison_html_report(
                 "</p>\n"
             )
         else:
-            html_parts.append(f"<h2>Channel: {ch_name}</h2>\n")
+            html_parts.append(f"<h2>{source_label}</h2>\n")
+            if includes_redirected_bass:
+                html_parts.append(
+                    '<p style="color:#666;font-size:0.9em;margin:-10px 0 15px 0;">'
+                    "The response traces are the coherent microphone prediction for this "
+                    "input source: its high-passed physical speaker output plus its "
+                    "low-passed route through the physical subwoofer. They are not the "
+                    f"isolated {ch_name} loudspeaker output."
+                    "</p>\n"
+                )
 
         # Build mode_data for this channel. The synthetic L+R channel
         # is computed on the fly from each mode's L and R curves; all
@@ -1308,8 +1340,8 @@ def create_comparison_html_report(
             continue
 
         # 1. Overlay plot (full range) + Zoomed (bass)
-        fig_overlay = create_comparison_overlay_figure(ch_name, mode_data)
-        fig_zoom = create_comparison_zoomed_figure(ch_name, mode_data)
+        fig_overlay = create_comparison_overlay_figure(source_label, mode_data)
+        fig_zoom = create_comparison_zoomed_figure(source_label, mode_data)
         html_parts.append('<div class="plot-row">\n')
         html_parts.append(f'<div class="plot-container">{fig_overlay.to_html(full_html=False, include_plotlyjs=False)}</div>\n')
         html_parts.append(f'<div class="plot-container">{fig_zoom.to_html(full_html=False, include_plotlyjs=False)}</div>\n')

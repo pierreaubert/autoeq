@@ -7,6 +7,7 @@ use super::resolve::effective_bass_management;
 use super::resolved::resolved_bass_sub_outputs;
 use super::resolved::resolved_group_crossover;
 use super::resolved::resolved_group_route_settings;
+use super::resolved::resolved_source_route_settings;
 use super::role::role_for_channel;
 use super::route::route_crossover_response;
 use super::route::route_effective_gain_linear;
@@ -178,7 +179,7 @@ pub fn bass_management_routing_graph(
         let is_lfe = role == HomeCinemaRole::Lfe || source_channel == &effective.config.lfe_channel;
         let group_id = group_id_for_role(role);
         let crossover = resolved_group_crossover(config, group_id, &effective, optimization);
-        let route_settings = resolved_group_route_settings(group_id, optimization);
+        let route_settings = resolved_source_route_settings(source_channel, group_id, optimization);
 
         if role.is_bass_managed_candidate() {
             routes.push(BassManagementRoute {
@@ -708,6 +709,67 @@ mod tests {
             )])),
             ..RoomConfig::default()
         }
+    }
+
+    #[test]
+    fn routing_graph_uses_per_source_route_alignment() {
+        let config = routed_home_cinema_config();
+        let groups = vec![BassManagementGroupReport {
+            group_id: "lcr".to_string(),
+            roles: vec!["L".to_string()],
+            crossover_type: "LR24".to_string(),
+            selected_crossover_hz: Some(80.0),
+            configured_crossover_hz: Some(80.0),
+            main_delay_ms: 1.0,
+            bass_route_delay_ms: 2.0,
+            polarity_inverted: false,
+            trim_db: -1.0,
+            objective_before: None,
+            objective_after: None,
+            advisories: Vec::new(),
+        }];
+        let sources = vec![BassManagementSourceReport {
+            source_channel: "L".to_string(),
+            group_id: "lcr".to_string(),
+            main_delay_ms: 3.0,
+            bass_route_delay_ms: 4.0,
+            polarity_inverted: true,
+            trim_db: -5.0,
+            objective_before: Some(2.0),
+            objective_after: Some(1.0),
+            accepted: true,
+            advisories: Vec::new(),
+        }];
+        let outputs = vec![BassManagementSubOutputReport {
+            output_role: "LFE".to_string(),
+            gain_db: -2.0,
+            delay_ms: 0.5,
+            polarity_inverted: false,
+            strategy_source: "single".to_string(),
+            headroom_contribution_db: -2.0,
+        }];
+        let optimization = crate::bass_management::joint_bass_management_report_from_parts(
+            &groups, &sources, &outputs,
+        );
+        let graph = bass_management_routing_graph(&config, Some(&optimization)).unwrap();
+        let main = graph
+            .routes
+            .iter()
+            .find(|route| {
+                route.source_channel == "L" && route.route_kind == "main_highpass_to_self"
+            })
+            .unwrap();
+        let bass = graph
+            .routes
+            .iter()
+            .find(|route| {
+                route.source_channel == "L" && route.route_kind == "redirected_bass_lowpass_to_sub"
+            })
+            .unwrap();
+        assert_eq!(main.delay_ms, 3.0);
+        assert_eq!(bass.delay_ms, 4.5);
+        assert_eq!(bass.gain_db, -7.0);
+        assert!(bass.polarity_inverted);
     }
 
     #[test]

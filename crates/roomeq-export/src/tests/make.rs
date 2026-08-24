@@ -355,6 +355,7 @@ pub(super) fn make_routed_bass_output() -> DspGraph {
                 enabled: true,
                 crossover_type: "LR24".to_string(),
                 crossover_frequency_hz: Some(80.0),
+                lfe_low_pass_hz: 120.0,
                 redirected_bass_enabled: true,
                 lfe_channel: "LFE".to_string(),
                 lfe_playback_gain_db: 10.0,

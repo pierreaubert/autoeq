@@ -150,6 +150,14 @@ The LFE programme cutoff is a separate bass-management control: changing or
 optimizing `bass_xo` redirects main-channel bass without narrowing the LFE
 programme band. The cinema default is 120 Hz.
 
+For routed home-cinema output, RoomEQ optimizes each logical input against its
+own high-passed main plus redirected low-passed sub branch. Crossover type and
+frequency are shared within the speaker group; route trim, relative delay, and
+polarity are reported per source in `bass_management.optimization.source_results`.
+The optimizer never uses a coherent sum of independent programme channels for
+tonal calibration. Whole-bus aggregation is reserved for the configured
+headroom model, which may add one common down-only input safety trim.
+
 ### Multi-driver Speaker (2-way)
 
 ```json

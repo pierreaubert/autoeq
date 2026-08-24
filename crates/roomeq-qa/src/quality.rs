@@ -219,6 +219,7 @@ pub fn run() -> Result<bool> {
     let handles: Vec<_> = cases_to_run
         .into_iter()
         .map(|tc| {
+            let project_root = project_root.clone();
             let fem_dir = fem_dir.clone();
             let optim_dir = optim_dir.clone();
             let sem = Arc::clone(&semaphore);
@@ -281,10 +282,26 @@ pub fn run() -> Result<bool> {
                         name,
                         fem_subdir,
                         optim_subdir,
+                        config_path,
+                        override_dir,
+                        preserve_system,
+                        strict,
                     } => {
-                        let base_path = fem_dir.join(format!("{}/config.json", fem_subdir));
-                        let override_dir = optim_dir.join(optim_subdir);
-                        run_cross_mode_convergence_tests(&name, &base_path, &override_dir)
+                        let base_path = config_path.map_or_else(
+                            || fem_dir.join(format!("{fem_subdir}/config.json")),
+                            |path| project_root.join(path),
+                        );
+                        let override_dir = override_dir.map_or_else(
+                            || optim_dir.join(optim_subdir),
+                            |path| project_root.join(path),
+                        );
+                        run_cross_mode_convergence_tests(
+                            &name,
+                            &base_path,
+                            &override_dir,
+                            preserve_system,
+                            strict,
+                        )
                     }
                     TestCase::OptionEffect {
                         name,

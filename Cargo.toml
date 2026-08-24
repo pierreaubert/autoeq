@@ -129,28 +129,28 @@ resvg = "0.46"
 rayon = "1.11"
 
 [dependencies]
-autoeq-core = { workspace = true, version = "0.5" }
-autoeq-artifacts = { workspace = true, version = "0.5" }
-autoeq-fir = { workspace = true, version = "0.5" }
-autoeq-plot = { workspace = true, optional = true, version = "0.5" }
-autoeq-measurements = { workspace = true, version = "0.5" }
-autoeq-optim = { workspace = true, version = "0.5" }
-autoeq-workflow = { workspace = true, version = "0.5" }
-autoeq-cli = { workspace = true, optional = true, version = "0.5" }
-roomeq-model = { workspace = true, version = "0.5" }
-roomeq-engine = { workspace = true, version = "0.5" }
-roomeq-export = { workspace = true, version = "0.5" }
-roomeq-quality = { workspace = true, version = "0.5" }
-roomeq-qa = { workspace = true, optional = true, version = "0.5" }
-roomeq-cli = { workspace = true, optional = true, version = "0.5" }
-roomeq-analysis = { workspace = true, version = "0.5" }
-roomeq-synthetic = { workspace = true, version = "0.5" }
-roomeq-workflow = { workspace = true, version = "0.5" }
-anyhow = { workspace = true, version = "0.5" }
-plotly = { workspace = true, optional = true, version = "0.5" }
-serde_json = { workspace = true, version = "0.5" }
-math-iir-fir = { workspace = true, version = "0.5" }
-math-optimisation = { workspace = true, version = "0.5" }
+autoeq-core = { workspace = true }
+autoeq-artifacts = { workspace = true }
+autoeq-fir = { workspace = true }
+autoeq-plot = { workspace = true, optional = true }
+autoeq-measurements = { workspace = true }
+autoeq-optim = { workspace = true }
+autoeq-workflow = { workspace = true }
+autoeq-cli = { workspace = true, optional = true }
+roomeq-model = { workspace = true }
+roomeq-engine = { workspace = true }
+roomeq-export = { workspace = true }
+roomeq-quality = { workspace = true }
+roomeq-qa = { workspace = true, optional = true }
+roomeq-cli = { workspace = true, optional = true }
+roomeq-analysis = { workspace = true }
+roomeq-synthetic = { workspace = true }
+roomeq-workflow = { workspace = true }
+anyhow = { workspace = true }
+plotly = { workspace = true, optional = true }
+serde_json = { workspace = true }
+math-iir-fir = { workspace = true }
+math-optimisation = { workspace = true }
 
 [features]
 default = []

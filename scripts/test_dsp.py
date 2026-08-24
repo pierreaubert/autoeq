@@ -98,11 +98,13 @@ class PostDspSourceCurveTests(unittest.TestCase):
                                 "delay_ms": 0.0,
                                 "polarity_inverted": False,
                             },
-                            {
-                                "source_channel": "LFE",
-                                "route_kind": "lfe_lowpass_to_sub",
-                                "crossover_type": "LR24",
-                                "low_pass_hz": 80.0,
+                        {
+                            "source_channel": "LFE",
+                            "route_kind": "lfe_lowpass_to_sub",
+                            "crossover_type": "LR24",
+                            # The LFE programme cutoff is independent of the
+                            # 80 Hz redirected-bass speaker crossover above.
+                            "low_pass_hz": 120.0,
                                 "gain_db": -6.0,
                                 "delay_ms": 0.0,
                                 "polarity_inverted": False,
@@ -147,7 +149,7 @@ class PostDspSourceCurveTests(unittest.TestCase):
 
         self.assertEqual(set(curves), {"L", "R", "LFE"})
         self.assertAlmostEqual(curves["L"]["spl"][0], 57.0, places=6)
-        self.assertAlmostEqual(curves["LFE"]["spl"][0], 44.979400086720375, places=6)
+        self.assertAlmostEqual(curves["LFE"]["spl"][0], 49.43433115727133, places=6)
         self.assertEqual(curves["R"]["spl"], [42.0])
         self.assertNotEqual(curves["LFE"]["spl"], [99.0])
 

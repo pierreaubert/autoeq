@@ -3,6 +3,7 @@
 use autoeq_core::{AutoeqError, Curve, Result, response};
 use autoeq_optim::optim::OptimProgressCallback;
 use log::info;
+use num_complex::Complex64;
 use roomeq_analysis::crossover_utils::{
     compute_lr24_crossover_responses, split_curve_at_frequency,
 };
@@ -109,6 +110,7 @@ pub fn process_mixed_crossover(
             if fir_uses_low { "low" } else { "high" }
         ),
     })?;
+    let fir_bulk_delay_ms = fir_bulk_delay_ms(&fir_coefficients, request.sample_rate);
 
     let mut channel = output::build_mixed_mode_crossover_chain(
         request.channel_name,
@@ -116,6 +118,7 @@ pub fn process_mixed_crossover(
         &eq_result.filters,
         request.sidecar_reference.filename(),
         fir_uses_low,
+        fir_bulk_delay_ms,
         None,
     );
     let final_curve = apply_crossover_response(
@@ -124,6 +127,7 @@ pub fn process_mixed_crossover(
         &fir_coefficients,
         crossover_freq,
         fir_uses_low,
+        fir_bulk_delay_ms,
         request.sample_rate,
     );
     let (norm_range, mean_final) =
@@ -147,6 +151,7 @@ pub fn process_mixed_crossover(
         &fir_coefficients,
         crossover_freq,
         fir_uses_low,
+        fir_bulk_delay_ms,
         request.sample_rate,
     );
     let mut initial_data: CurveData = (&display_initial).into();
@@ -181,6 +186,7 @@ fn apply_crossover_response(
     fir_coefficients: &[f64],
     crossover_freq: f64,
     fir_uses_low: bool,
+    fir_bulk_delay_ms: f64,
     sample_rate: f64,
 ) -> Curve {
     let iir_response = response::compute_peq_complex_response(eq_filters, &curve.freq, sample_rate);
@@ -192,15 +198,32 @@ fn apply_crossover_response(
         .iter()
         .zip(highpass.iter())
         .zip(fir_response.iter().zip(iir_response.iter()))
-        .map(|((lowpass, highpass), (fir, iir))| {
+        .zip(curve.freq.iter())
+        .map(|(((lowpass, highpass), (fir, iir)), frequency)| {
+            let iir_delay = Complex64::from_polar(
+                1.0,
+                -2.0 * std::f64::consts::PI * frequency * fir_bulk_delay_ms / 1000.0,
+            );
             if fir_uses_low {
-                lowpass * fir + highpass * iir
+                lowpass * fir + highpass * iir * iir_delay
             } else {
-                lowpass * iir + highpass * fir
+                lowpass * iir * iir_delay + highpass * fir
             }
         })
         .collect::<Vec<_>>();
     response::apply_complex_response(curve, &combined)
+}
+
+fn fir_bulk_delay_ms(coefficients: &[f64], sample_rate: f64) -> f64 {
+    if sample_rate <= 0.0 {
+        return 0.0;
+    }
+    coefficients
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| left.abs().total_cmp(&right.abs()))
+        .map(|(index, _)| index as f64 * 1000.0 / sample_rate)
+        .unwrap_or(0.0)
 }
 
 #[cfg(test)]
@@ -269,9 +292,28 @@ mod tests {
             plugin.plugin_type == "convolution"
                 && plugin.parameters["ir_file"] == "left_band_fir_48000hz.wav"
         }));
+        let alignment = result
+            .channel
+            .plugins
+            .iter()
+            .find(|plugin| plugin.parameters["label"] == "hybrid_fir_latency_alignment")
+            .expect("hybrid branch alignment delay");
+        assert_eq!(alignment.plugin_type, "delay");
+        assert_eq!(alignment.parameters["channels"], serde_json::json!([2, 3]));
+        assert_eq!(
+            alignment.parameters["delay_ms"].as_f64().unwrap(),
+            fir_bulk_delay_ms(result.fir_coeffs.as_ref().unwrap(), 48_000.0)
+        );
         assert_eq!(
             result.channel.plugins.last().unwrap().plugin_type,
             "band_merge"
         );
+    }
+
+    #[test]
+    fn fir_bulk_delay_tracks_the_impulse_peak() {
+        assert_eq!(fir_bulk_delay_ms(&[0.1, -0.2, 1.0, 0.4], 1_000.0), 2.0);
+        assert_eq!(fir_bulk_delay_ms(&[], 48_000.0), 0.0);
+        assert_eq!(fir_bulk_delay_ms(&[1.0], 0.0), 0.0);
     }
 }

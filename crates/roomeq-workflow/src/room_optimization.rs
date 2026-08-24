@@ -893,11 +893,18 @@ fn assemble_workflow_result_with_frequency_samples(
                     .iter()
                     .any(|plugin| matches!(plugin.plugin_type.as_str(), "eq" | "convolution"))
             });
+            let chain_has_fir = result.channels.get(&name).is_some_and(|chain| {
+                chain
+                    .plugins
+                    .iter()
+                    .any(|plugin| plugin.plugin_type == "convolution")
+            });
             let generated = if let Some(ch) = result.channel_results.get_mut(&name) {
                 if !should_post_generate_fir(
                     config.optimizer.processing_mode.clone(),
                     ch.fir_coeffs.is_some(),
                     chain_has_correction,
+                    chain_has_fir,
                 ) {
                     None
                 } else {
@@ -1366,13 +1373,14 @@ fn assemble_workflow_result_with_frequency_samples(
     // The runtime acceptance gate reads FIR temporal-masking evidence; stages
     // that add FIR taps late (e.g. redirected bass) must have that evidence
     // computed before the gate runs, not only in the post-gate refresh.
-    refresh_temporal_ir_evidence(&mut result, config, sample_rate);
+    let sidecar_dir = output_dir.unwrap_or(Path::new("."));
+    refresh_temporal_ir_evidence(&mut result, config, sample_rate, sidecar_dir);
     room_optimization_result::apply_final_correction_safety_gate(
         &mut result,
         sample_rate,
         config.optimizer.smooth_n,
         (config.optimizer.min_freq, config.optimizer.max_freq),
-        output_dir.unwrap_or(Path::new(".")),
+        sidecar_dir,
         config.optimizer.processing_mode.clone(),
         group_delay_budget_ms(config),
     );
@@ -1384,7 +1392,7 @@ fn assemble_workflow_result_with_frequency_samples(
     )?;
     if workflow_refresh_needed {
         log::debug!("Refreshing reports after workflow DSP mutations");
-        refresh_final_reports(&mut result, config, sample_rate);
+        refresh_final_reports(&mut result, config, sample_rate, sidecar_dir);
     } else {
         refresh_direct_early_late_reports(&mut result, config);
         refresh_perceptual_policy_reports(&mut result, config);
@@ -2750,13 +2758,14 @@ fn assemble_generic_result_with_frequency_samples(
         )?;
     }
 
-    refresh_temporal_ir_evidence(&mut result, config, sample_rate);
+    let sidecar_dir = output_dir.unwrap_or(Path::new("."));
+    refresh_temporal_ir_evidence(&mut result, config, sample_rate, sidecar_dir);
     room_optimization_result::apply_final_correction_safety_gate(
         &mut result,
         sample_rate,
         config.optimizer.smooth_n,
         (config.optimizer.min_freq, config.optimizer.max_freq),
-        output_dir.unwrap_or(Path::new(".")),
+        sidecar_dir,
         config.optimizer.processing_mode.clone(),
         group_delay_budget_ms(config),
     );
@@ -2765,7 +2774,7 @@ fn assemble_generic_result_with_frequency_samples(
         observer_shared,
         PipelineEvent::started(PipelineStepId::MetadataRefresh, "Refreshing reports"),
     )?;
-    refresh_final_reports(&mut result, config, sample_rate);
+    refresh_final_reports(&mut result, config, sample_rate, sidecar_dir);
     apply_ctc_if_enabled(&mut result, config, sample_rate, output_dir)?;
     generate_validation_bundle_report(&mut result, config, output_dir, store)?;
     emit_pipeline_event(

@@ -115,6 +115,10 @@ objects such as `speakers` still accept arbitrary map keys whose values conform
 to the declared schema. The generated `input_schema.json` mirrors this contract
 with `additionalProperties: false` on fixed-shape objects.
 
+For home-cinema bass management, `system.bass_management.lfe_low_pass_hz`
+controls the LFE programme path independently of the redirected-bass speaker
+crossover and defaults to 120 Hz.
+
 ## Neutral objective, spatial risk, and preference layers
 
 The neutral flat/asymmetric objective uses the versioned

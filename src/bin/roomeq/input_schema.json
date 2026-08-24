@@ -501,6 +501,12 @@
           "description": "Logical LFE programme channel name.",
           "type": "string"
         },
+        "lfe_low_pass_hz": {
+          "default": 120.0,
+          "description": "LFE programme-channel low-pass cutoff. This is independent of the\nspeaker crossover used to redirect bass from the main channels.",
+          "format": "double",
+          "type": "number"
+        },
         "lfe_playback_gain_db": {
           "default": 10.0,
           "description": "Cinema LFE playback calibration gain. Reported in metadata; not applied\nto the sub correction chain unless `apply_lfe_gain_to_chain` is set.",

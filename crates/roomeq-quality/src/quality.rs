@@ -204,7 +204,9 @@ pub fn evaluate_acoustic_quality(
     for (pre, post) in all_pairs {
         let samples = aligned_samples(pre, post, target, config)?;
         corrections.extend(samples.iter().map(|sample| sample.post - sample.pre));
-        if let Some(value) = induced_group_delay_rms_ms(pre, post, config)? {
+        if let Some(value) =
+            induced_group_delay_rms_ms(pre, post, config, temporal.latency_ms.unwrap_or(0.0))?
+        {
             group_delays.push(value);
         }
         overlap_low = overlap_low.max(pre.freq[0]).max(post.freq[0]);
@@ -590,6 +592,7 @@ fn induced_group_delay_rms_ms(
     pre: &Curve,
     post: &Curve,
     config: QualityEvaluationConfig,
+    bulk_latency_ms: f64,
 ) -> Result<Option<f64>, String> {
     let (Some(pre_phase), Some(post_phase)) = (&pre.phase, &post.phase) else {
         return Ok(None);
@@ -608,11 +611,33 @@ fn induced_group_delay_rms_ms(
     if frequencies.len() < 3 {
         return Ok(None);
     }
+    let pre_ripple_ms = group_delay_ripple_rms_ms(pre, pre_phase, &frequencies, 0.0);
+    let post_ripple_ms = group_delay_ripple_rms_ms(post, post_phase, &frequencies, bulk_latency_ms);
+
+    // "Induced" group delay is the dispersion added by the correction, not
+    // the group-delay shape of the correction filter in isolation. An
+    // excess-phase FIR intentionally carries the inverse of the room's delay
+    // ripple; scoring that inverse alone rejects the very timing improvement
+    // the filter is designed to make. Keep the safety metric one-sided: a
+    // correction that reduces existing dispersion induces no regression.
+    Ok(Some((post_ripple_ms - pre_ripple_ms).max(0.0)))
+}
+
+fn group_delay_ripple_rms_ms(
+    curve: &Curve,
+    phase_deg: &ndarray::Array1<f64>,
+    frequencies: &[f64],
+    bulk_latency_ms: f64,
+) -> f64 {
     let mut phase: Vec<f64> = frequencies
         .iter()
         .map(|frequency| {
-            (sample_log(post, *frequency, post_phase) - sample_log(pre, *frequency, pre_phase))
-                .to_radians()
+            let phase = sample_log(curve, *frequency, phase_deg).to_radians();
+            // Remove known FIR latency before unwrapping. On a sparse
+            // logarithmic grid, a long linear-phase FIR can rotate through
+            // several cycles between adjacent bins; ordinary +/-pi
+            // unwrapping cannot recover that bulk delay without this prior.
+            phase + 2.0 * std::f64::consts::PI * frequency * bulk_latency_ms / 1000.0
         })
         .collect();
     for index in 1..phase.len() {
@@ -631,7 +656,15 @@ fn induced_group_delay_rms_ms(
             (delta_omega > 0.0).then_some(-(phase[1] - phase[0]) / delta_omega * 1000.0)
         })
         .collect();
-    Ok((!delay_ms.is_empty()).then(|| rms(&delay_ms)))
+    // A constant group delay is bulk latency, which is reported and limited
+    // separately by TemporalQualityEvidence. Remove the best-fit constant
+    // delay before taking the dispersion RMS.
+    let bulk_delay_ms = delay_ms.iter().sum::<f64>() / delay_ms.len() as f64;
+    let delay_ripple_ms: Vec<f64> = delay_ms
+        .iter()
+        .map(|delay_ms| delay_ms - bulk_delay_ms)
+        .collect();
+    rms(&delay_ripple_ms)
 }
 
 fn sample_log(curve: &Curve, frequency: f64, values: &ndarray::Array1<f64>) -> f64 {
@@ -1008,10 +1041,10 @@ mod tests {
         let mut post = pre.clone();
         pre.phase = Some(Array1::zeros(3));
         post.phase = Some(Array1::from(vec![-170.0, 170.0, 150.0]));
-        let observed = induced_group_delay_rms_ms(&pre, &post, config())
+        let observed = induced_group_delay_rms_ms(&pre, &post, config(), 0.0)
             .expect("group delay calculation")
             .expect("phase evidence");
-        assert!((observed - 5.0 / 9.0).abs() < 1e-12);
+        assert!(observed.abs() < 1e-12);
     }
 
     #[test]
@@ -1020,10 +1053,64 @@ mod tests {
         let mut post = pre.clone();
         pre.phase = Some(Array1::zeros(3));
         post.phase = Some(Array1::from(vec![170.0, -170.0, -150.0]));
-        let observed = induced_group_delay_rms_ms(&pre, &post, config())
+        let observed = induced_group_delay_rms_ms(&pre, &post, config(), 0.0)
             .expect("group delay calculation")
             .expect("phase evidence");
 
-        assert!((observed - 5.0 / 9.0).abs() < 1e-12);
+        assert!(observed.abs() < 1e-12);
+    }
+
+    #[test]
+    fn induced_group_delay_measures_dispersion_after_removing_bulk_latency() {
+        let mut pre = curve(&[100.0, 200.0, 300.0], &[0.0, 0.0, 0.0]);
+        let mut post = pre.clone();
+        pre.phase = Some(Array1::zeros(3));
+        // Successive phase slopes represent 1 ms and 2 ms of group delay.
+        // Removing their 1.5 ms bulk component leaves +/-0.5 ms ripple.
+        post.phase = Some(Array1::from(vec![0.0, -36.0, -108.0]));
+
+        let observed = induced_group_delay_rms_ms(&pre, &post, config(), 0.0)
+            .expect("group delay calculation")
+            .expect("phase evidence");
+
+        assert!((observed - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn induced_group_delay_does_not_penalize_corrected_dispersion() {
+        let mut pre = curve(&[100.0, 200.0, 300.0], &[0.0, 0.0, 0.0]);
+        let mut post = pre.clone();
+        // The input has 1/2 ms adjacent-bin group delays (0.5 ms ripple),
+        // while the corrected output has constant delay (zero ripple).
+        pre.phase = Some(Array1::from(vec![0.0, -36.0, -108.0]));
+        post.phase = Some(Array1::from(vec![0.0, -36.0, -72.0]));
+
+        let observed = induced_group_delay_rms_ms(&pre, &post, config(), 0.0)
+            .expect("group delay calculation")
+            .expect("phase evidence");
+
+        assert!(observed.abs() < 1e-12);
+    }
+
+    #[test]
+    fn induced_group_delay_uses_bulk_latency_to_dealias_sparse_phase() {
+        let frequencies = [100.0, 1_000.0, 10_000.0];
+        let latency_ms = 42.0;
+        let mut pre = curve(&frequencies, &[0.0, 0.0, 0.0]);
+        let mut post = pre.clone();
+        pre.phase = Some(Array1::zeros(3));
+        post.phase = Some(Array1::from_iter(frequencies.iter().map(|frequency| {
+            let phase_deg = -360.0 * frequency * latency_ms / 1000.0;
+            (phase_deg + 180.0).rem_euclid(360.0) - 180.0
+        })));
+
+        let observed = induced_group_delay_rms_ms(&pre, &post, config(), latency_ms)
+            .expect("group delay calculation")
+            .expect("phase evidence");
+
+        assert!(
+            observed < 1e-9,
+            "pure FIR latency must not appear as ripple"
+        );
     }
 }

@@ -123,6 +123,9 @@ was silently preserved.
       "config": "single",
       "crossover": "bass_xo",
       "sub_meas": "L"
+    },
+    "bass_management": {
+      "lfe_low_pass_hz": 120.0
     }
   },
   "crossovers": {
@@ -142,6 +145,10 @@ was silently preserved.
   }
 }
 ```
+
+The LFE programme cutoff is a separate bass-management control: changing or
+optimizing `bass_xo` redirects main-channel bass without narrowing the LFE
+programme band. The cinema default is 120 Hz.
 
 ### Multi-driver Speaker (2-way)
 

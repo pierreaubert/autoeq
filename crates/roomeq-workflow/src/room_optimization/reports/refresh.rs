@@ -13,6 +13,7 @@ pub(in super::super) fn refresh_final_reports(
     result: &mut RoomOptimizationResult,
     config: &RoomConfig,
     sample_rate: f64,
+    sidecar_dir: &Path,
 ) {
     let applied_crossover_hz = applied_bass_crossover_hz(result);
     let excursion_floors: HashMap<String, f64> = result
@@ -134,7 +135,7 @@ pub(in super::super) fn refresh_final_reports(
     result.metadata.epa_multichannel =
         roomeq_engine::output::compute_epa_multichannel(&result.channels, &epa_cfg);
 
-    refresh_temporal_ir_evidence(result, config, sample_rate);
+    refresh_temporal_ir_evidence(result, config, sample_rate, sidecar_dir);
 
     refresh_direct_early_late_reports(result, config);
     refresh_perceptual_policy_reports(result, config);
@@ -154,9 +155,19 @@ pub(in super::super) fn refresh_temporal_ir_evidence(
     result: &mut RoomOptimizationResult,
     config: &RoomConfig,
     sample_rate: f64,
+    sidecar_dir: &Path,
 ) {
     let epa_cfg = config.optimizer.epa_config.clone().unwrap_or_default();
     let runtime_epa_cfg = roomeq_engine::config_adapter::to_optimizer_epa(&epa_cfg);
+
+    // Evidence describes the currently deployed chain. Clear values left by
+    // an earlier pre-gate refresh before rebuilding them; otherwise a safety
+    // revert can leave a channel claiming FIR latency/pre-ringing even after
+    // its convolution stage has been removed.
+    for chain in result.channels.values_mut() {
+        chain.fir_temporal_masking = None;
+    }
+
     let ir_inputs: Vec<_> = result
         .channel_results
         .iter()
@@ -166,11 +177,14 @@ pub(in super::super) fn refresh_temporal_ir_evidence(
                 .get(name)
                 .map(total_chain_delay_ms)
                 .unwrap_or(0.0);
+            let fir_coeffs = ch.fir_coeffs.clone().or_else(|| {
+                deployed_fir_coefficients(result.channels.get(name), sidecar_dir, sample_rate)
+            });
             (
                 name.clone(),
                 ch.initial_curve.clone(),
                 ch.biquads.clone(),
-                ch.fir_coeffs.clone(),
+                fir_coeffs,
                 delay_ms,
             )
         })
@@ -204,6 +218,49 @@ pub(in super::super) fn refresh_temporal_ir_evidence(
             );
         }
     }
+}
+
+/// Load a deployed convolution sidecar when the optimization result did not
+/// retain its in-memory coefficients. This occurs for FIRs introduced while
+/// assembling topology/workflow output, and must not make runtime evidence
+/// classify the channel as IIR-only.
+fn deployed_fir_coefficients(
+    chain: Option<&roomeq_model::ChannelDspChain>,
+    sidecar_dir: &Path,
+    sample_rate: f64,
+) -> Option<Vec<f64>> {
+    chain?
+        .plugins
+        .iter()
+        .filter(|plugin| plugin.plugin_type == "convolution")
+        .filter_map(|plugin| {
+            let ir_file = plugin.parameters.get("ir_file")?.as_str()?;
+            let path = Path::new(ir_file);
+            let path = if path.is_relative() {
+                sidecar_dir.join(path)
+            } else {
+                path.to_path_buf()
+            };
+            let decoded = crate::wav::decode_first_channel(&path).ok()?;
+            let expected_rate = sample_rate.round() as u32;
+            if decoded.sample_rate != expected_rate {
+                log::warn!(
+                    "Ignoring FIR temporal sidecar '{}' at {} Hz; expected {} Hz",
+                    path.display(),
+                    decoded.sample_rate,
+                    expected_rate,
+                );
+                return None;
+            }
+            Some(
+                decoded
+                    .samples
+                    .into_iter()
+                    .map(f64::from)
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .max_by_key(Vec::len)
 }
 
 pub(in super::super) fn refresh_direct_early_late_reports(
@@ -250,19 +307,90 @@ mod tests {
         ch_result.fir_coeffs = Some(vec![0.0, 1.0, 0.0]);
         assert!(result.channels["L"].fir_temporal_masking.is_none());
 
-        refresh_temporal_ir_evidence(&mut result, &RoomConfig::default(), 48_000.0);
+        refresh_temporal_ir_evidence(
+            &mut result,
+            &RoomConfig::default(),
+            48_000.0,
+            Path::new("."),
+        );
 
         let chain = &result.channels["L"];
         assert!(chain.fir_temporal_masking.is_some());
         assert!(chain.pre_ir.is_some());
         assert!(chain.post_ir.is_some());
+
+        result.channel_results.get_mut("L").unwrap().fir_coeffs = None;
+        refresh_temporal_ir_evidence(
+            &mut result,
+            &RoomConfig::default(),
+            48_000.0,
+            Path::new("."),
+        );
+        assert!(
+            result.channels["L"].fir_temporal_masking.is_none(),
+            "evidence from a removed FIR stage must not survive refresh"
+        );
+    }
+
+    #[test]
+    fn temporal_ir_evidence_loads_deployed_convolution_sidecar() {
+        let directory = tempfile::tempdir().unwrap();
+        let filename = "L_fir_48000hz.wav";
+        let path = directory.path().join(filename);
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+        for index in 0..4096 {
+            writer
+                .write_sample::<f32>(if index == 2048 { 1.0 } else { 0.0 })
+                .unwrap();
+        }
+        writer.finalize().unwrap();
+
+        let mut result = single_channel_room_result("L");
+        let ch_result = result.channel_results.get_mut("L").unwrap();
+        let n = ch_result.initial_curve.freq.len();
+        ch_result.initial_curve.phase = Some(ndarray::Array1::zeros(n));
+        assert!(ch_result.fir_coeffs.is_none());
+        result
+            .channels
+            .get_mut("L")
+            .unwrap()
+            .plugins
+            .push(roomeq_model::PluginConfigWrapper {
+                plugin_type: "convolution".to_string(),
+                parameters: serde_json::json!({"ir_file": filename}),
+            });
+
+        refresh_temporal_ir_evidence(
+            &mut result,
+            &RoomConfig::default(),
+            48_000.0,
+            directory.path(),
+        );
+
+        let masking = result.channels["L"]
+            .fir_temporal_masking
+            .as_ref()
+            .expect("deployed FIR temporal evidence");
+        assert_eq!(masking.main_index, 2048);
+        assert!((masking.main_time_ms - 2048.0 / 48.0).abs() < 1e-12);
     }
 
     #[test]
     fn temporal_ir_evidence_absent_without_fir() {
         let mut result = single_channel_room_result("L");
 
-        refresh_temporal_ir_evidence(&mut result, &RoomConfig::default(), 48_000.0);
+        refresh_temporal_ir_evidence(
+            &mut result,
+            &RoomConfig::default(),
+            48_000.0,
+            Path::new("."),
+        );
 
         assert!(result.channels["L"].fir_temporal_masking.is_none());
     }
@@ -354,7 +482,12 @@ mod routing_basis_tests {
         // input, so pre and post must agree after the refresh.
         result.channel_results.get_mut("L").unwrap().final_curve = routed;
 
-        refresh_final_reports(&mut result, &RoomConfig::default(), 48_000.0);
+        refresh_final_reports(
+            &mut result,
+            &RoomConfig::default(),
+            48_000.0,
+            Path::new("."),
+        );
 
         let ch = &result.channel_results["L"];
         assert!(

@@ -20,6 +20,42 @@ use std::collections::{BTreeMap, HashMap};
 
 const JOINT_HEADROOM_SAFETY_DB: f64 = 0.1;
 
+fn configured_group_frequency_bounds(config: &RoomConfig, group_id: &str) -> Option<(f64, f64)> {
+    let crossover_key = config
+        .system
+        .as_ref()?
+        .subwoofers
+        .as_ref()?
+        .crossover
+        .as_deref()?;
+    let fallback = config.crossovers.as_ref()?.get(crossover_key)?;
+    let plan = group_crossover_plan(config, fallback, group_id).ok()?;
+    let (minimum, maximum) = plan
+        .frequency_range
+        .unwrap_or((plan.frequency_hz, plan.frequency_hz));
+    Some((minimum.min(maximum), minimum.max(maximum)))
+}
+
+fn joint_group_frequency_bounds(
+    config: &RoomConfig,
+    group_id: &str,
+    current_frequency_hz: f64,
+) -> (f64, f64) {
+    if let Some(bounds) = configured_group_frequency_bounds(config, group_id) {
+        return bounds;
+    }
+
+    let octave = 2.0_f64.sqrt();
+    let role_bounds = if group_id == "height" {
+        (60.0, 200.0)
+    } else {
+        (40.0, 160.0)
+    };
+    let minimum = (current_frequency_hz / octave).clamp(role_bounds.0, role_bounds.1);
+    let maximum = (current_frequency_hz * octave).clamp(minimum, role_bounds.1);
+    (minimum, maximum)
+}
+
 fn joint_headroom_gain_reduction_db(margin_db: f64) -> f64 {
     if margin_db.is_finite() {
         (JOINT_HEADROOM_SAFETY_DB - margin_db).max(0.0)
@@ -610,14 +646,8 @@ pub fn optimize_bass_management_joint_solution(
             .selected_crossover_hz
             .or(group.configured_crossover_hz)
             .unwrap_or(80.0);
-        let octave = 2.0_f64.sqrt();
-        let role_bounds = if group_id == "height" {
-            (60.0, 200.0)
-        } else {
-            (40.0, 160.0)
-        };
-        let min_freq = (current_freq / octave).clamp(role_bounds.0, role_bounds.1);
-        let max_freq = (current_freq * octave).clamp(min_freq, role_bounds.1);
+        let (min_freq, max_freq) = joint_group_frequency_bounds(config, group_id, current_freq);
+        let initial_freq = current_freq.clamp(min_freq, max_freq);
         type_candidates.push(candidates);
         lower_bounds.extend_from_slice(&[min_freq, 0.0, 0.0, 0.0, 0.0, config.optimizer.min_db]);
         upper_bounds.extend_from_slice(&[
@@ -634,7 +664,7 @@ pub fn optimize_bass_management_joint_solution(
                 .unwrap_or(config.optimizer.max_db.max(0.0)),
         ]);
         initial.extend_from_slice(&[
-            current_freq,
+            initial_freq,
             type_idx,
             group.main_delay_ms.max(0.0),
             group.bass_route_delay_ms.max(0.0),
@@ -863,6 +893,26 @@ pub fn optimize_bass_management_joint_solution(
                 .push("joint_route_headroom_limited".to_string());
         }
     }
+    let regressed_groups: Vec<String> = decoded_groups
+        .iter()
+        .filter_map(|group| {
+            let candidate = group.objective_after?;
+            let unoptimized = group.objective_before.unwrap_or(f64::INFINITY);
+            let previous = group_results
+                .get(&group.group_id)
+                .and_then(|previous| previous.objective_after.or(previous.objective_before))
+                .unwrap_or(f64::INFINITY);
+            (candidate > unoptimized + 1.0e-9 || candidate > previous + 1.0e-9)
+                .then(|| group.group_id.clone())
+        })
+        .collect();
+    if !regressed_groups.is_empty() {
+        return vec![format!(
+            "joint_route_optimizer_reverted_group_regression:{}",
+            regressed_groups.join(",")
+        )];
+    }
+
     for group in decoded_groups {
         group_results.insert(group.group_id.clone(), group);
     }
@@ -884,7 +934,7 @@ mod tests {
     use ndarray::Array1;
     use roomeq_model::{
         BassManagementConfig, CrossoverConfig, OptimizerConfig, ProcessingMode, RoomConfig,
-        SystemConfig, SystemModel,
+        SubwooferStrategy, SubwooferSystemConfig, SystemConfig, SystemModel,
     };
     use std::collections::{BTreeMap, HashMap};
 
@@ -895,6 +945,37 @@ mod tests {
         assert_eq!(joint_headroom_gain_reduction_db(0.1), 0.0);
         assert_eq!(joint_headroom_gain_reduction_db(1.0), 0.0);
         assert_eq!(joint_headroom_gain_reduction_db(f64::NAN), 0.0);
+    }
+
+    #[test]
+    fn joint_group_bounds_preserve_configured_crossover_range() {
+        let config = RoomConfig {
+            system: Some(SystemConfig {
+                model: SystemModel::HomeCinema,
+                subwoofers: Some(SubwooferSystemConfig {
+                    config: SubwooferStrategy::Single,
+                    crossover: Some("bass_xover".to_string()),
+                    mapping: HashMap::new(),
+                }),
+                bass_management: Some(BassManagementConfig::default()),
+                ..SystemConfig::default()
+            }),
+            crossovers: Some(HashMap::from([(
+                "bass_xover".to_string(),
+                CrossoverConfig {
+                    crossover_type: "LR24".to_string(),
+                    frequency: None,
+                    frequencies: None,
+                    frequency_range: Some((60.0, 120.0)),
+                },
+            )])),
+            ..RoomConfig::default()
+        };
+
+        assert_eq!(
+            joint_group_frequency_bounds(&config, "surround", 43.0),
+            (60.0, 120.0)
+        );
     }
 
     fn flat_curve_with_phase() -> crate::Curve {
@@ -1366,17 +1447,28 @@ mod tests {
                 .any(|a| a.starts_with("joint_route_optimizer_skipped"))
         );
         assert!(group_results.contains_key("lcr"));
-        // DBA front gain is locked and polarity stays false; DBA rear polarity
-        // is forced to true by the bounds encoded in the optimizer.
         assert!(
             sub_outputs
                 .iter()
                 .any(|o| o.strategy_source == "dba_front" && !o.polarity_inverted)
         );
-        assert!(
-            sub_outputs
-                .iter()
-                .any(|o| o.strategy_source == "dba_rear" && o.polarity_inverted)
-        );
+        let safely_reverted = advisories.iter().any(|advisory| {
+            advisory.starts_with("joint_route_optimizer_reverted_group_regression")
+        });
+        if safely_reverted {
+            assert!(
+                sub_outputs
+                    .iter()
+                    .any(|o| o.strategy_source == "dba_rear" && !o.polarity_inverted)
+            );
+        } else {
+            // When accepted, the DBA rear polarity is forced to true by the
+            // bounds encoded in the optimizer.
+            assert!(
+                sub_outputs
+                    .iter()
+                    .any(|o| o.strategy_source == "dba_rear" && o.polarity_inverted)
+            );
+        }
     }
 }

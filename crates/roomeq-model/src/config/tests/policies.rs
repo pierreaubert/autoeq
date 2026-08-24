@@ -237,6 +237,7 @@ fn all_default_functions_return_sane_values() {
     let _ = super::default::default_redirect_bass();
     let _ = super::default::default_lfe_channel();
     let _ = super::default::default_lfe_playback_gain_db();
+    let _ = super::default::default_lfe_low_pass_hz();
     let _ = super::default::default_sub_headroom_margin_db();
     let _ = super::default::default_max_sub_boost_db();
     let _ = super::default::default_optimize_bass_groups();

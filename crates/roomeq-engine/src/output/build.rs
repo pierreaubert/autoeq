@@ -658,6 +658,7 @@ pub fn build_mixed_mode_crossover_chain(
     eq_filters: &[Biquad],
     fir_wav_path: &str,
     fir_uses_low: bool,
+    fir_bulk_delay_ms: f64,
     initial_curve: Option<&crate::Curve>,
 ) -> ChannelDspChain {
     let mut plugins = Vec::new();
@@ -680,7 +681,21 @@ pub fn build_mixed_mode_crossover_chain(
     };
     plugins.push(fir_plugin);
 
-    // 3. Apply IIR EQ to the other band
+    // 3. Match the non-FIR branch to the FIR impulse's bulk latency before
+    // recombination. Without this delay, the two bands arrive at different
+    // times and create a phase/group-delay discontinuity at the crossover.
+    if fir_bulk_delay_ms > 0.0 {
+        plugins.push(PluginConfigWrapper {
+            plugin_type: "delay".to_string(),
+            parameters: json!({
+                "delay_ms": fir_bulk_delay_ms,
+                "channels": if fir_uses_low { [2, 3] } else { [0, 1] },
+                "label": "hybrid_fir_latency_alignment",
+            }),
+        });
+    }
+
+    // 4. Apply IIR EQ to the other band
     if !eq_filters.is_empty() {
         let filter_configs: Vec<serde_json::Value> = eq_filters
             .iter()
@@ -704,7 +719,7 @@ pub fn build_mixed_mode_crossover_chain(
         plugins.push(eq_plugin);
     }
 
-    // 4. Merge bands back together
+    // 5. Merge bands back together
     plugins.push(create_band_merge_plugin(2));
 
     ChannelDspChain {

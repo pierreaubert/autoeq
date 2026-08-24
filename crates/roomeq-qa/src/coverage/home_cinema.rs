@@ -91,6 +91,27 @@ pub(super) fn build_home_cinema_matrix(
         .collect()
 }
 
+pub(super) fn build_quick_home_cinema_matrix(
+    tier: QaTier,
+    solver_filter: Option<&str>,
+    mode_filter: Option<&str>,
+) -> Vec<TestCase> {
+    build_home_cinema_matrix(
+        tier,
+        solver_filter.or(Some("fem")),
+        mode_filter.or(Some("iir")),
+    )
+    .into_iter()
+    .filter(|test_case| test_case.registry_id == "home_cinema/iir_redirected_bass")
+    .map(|mut test_case| {
+        test_case.expect.improvement_min_pct = 0.01;
+        test_case.expect.max_post_score = 20.0;
+        test_case.expect.allow_safe_revert = true;
+        test_case
+    })
+    .collect()
+}
+
 fn validate_stage_outcomes(
     outcomes: &[StageOutcome],
     expect_height_alignment: bool,
@@ -134,8 +155,40 @@ fn validate_stage_outcomes(
     failures
 }
 
+fn configured_group_crossover_bounds(
+    config: &RoomConfig,
+    group_id: &str,
+    fallback: Option<(f64, f64)>,
+) -> Option<(f64, f64)> {
+    let system = config.system.as_ref()?;
+    let crossover_key = system
+        .bass_management
+        .as_ref()
+        .and_then(|bass_management| bass_management.group_crossovers.get(group_id))
+        .or_else(|| {
+            system
+                .subwoofers
+                .as_ref()
+                .and_then(|subwoofers| subwoofers.crossover.as_ref())
+        });
+    let crossover = crossover_key.and_then(|key| {
+        config
+            .crossovers
+            .as_ref()
+            .and_then(|crossovers| crossovers.get(key))
+    });
+    if let Some(frequency) = crossover.and_then(|crossover| crossover.frequency) {
+        return Some((frequency, frequency));
+    }
+    crossover
+        .and_then(|crossover| crossover.frequency_range)
+        .or(fallback)
+        .map(|(minimum, maximum)| (minimum.min(maximum), minimum.max(maximum)))
+}
+
 fn validate_bass_management(
     report: Option<&BassManagementReport>,
+    config: &RoomConfig,
     expectation: BassRoutingExpectation,
 ) -> Vec<String> {
     let mut failures = Vec::new();
@@ -170,6 +223,21 @@ fn validate_bass_management(
                 .any(|route| route.route_kind == "redirected_bass_lowpass_to_sub");
             if !has_lfe_route {
                 failures.push("bass routing graph has no LFE-to-sub route".to_string());
+            }
+            for route in graph
+                .routes
+                .iter()
+                .filter(|route| route.route_kind == "lfe_lowpass_to_sub")
+            {
+                if route
+                    .low_pass_hz
+                    .is_none_or(|frequency| (frequency - report.lfe_low_pass_hz).abs() > 1.0e-6)
+                {
+                    failures.push(format!(
+                        "LFE route '{}' uses {:?} Hz instead of the configured {:.3} Hz programme cutoff",
+                        route.source_channel, route.low_pass_hz, report.lfe_low_pass_hz
+                    ));
+                }
             }
             if has_redirect != expectation.redirected {
                 failures.push(format!(
@@ -246,6 +314,31 @@ fn validate_bass_management(
         failures.push(format!(
             "bass optimization required phase but phase was unavailable ({advisories})"
         ));
+    }
+    if let Some(optimization) = report.optimization.as_ref() {
+        for group in &report.groups {
+            if let Some(selected) = group.selected_crossover_hz
+                && let Some((minimum, maximum)) = configured_group_crossover_bounds(
+                    config,
+                    &group.group_id,
+                    optimization.crossover_range_hz,
+                )
+                && !(minimum - 1.0e-6..=maximum + 1.0e-6).contains(&selected)
+            {
+                failures.push(format!(
+                    "bass group '{}' selected {:.3} Hz outside configured [{:.3}, {:.3}] Hz",
+                    group.group_id, selected, minimum, maximum
+                ));
+            }
+            if let (Some(before), Some(after)) = (group.objective_before, group.objective_after)
+                && after > before + 1.0e-9
+            {
+                failures.push(format!(
+                    "bass group '{}' regressed its objective: {:.4} -> {:.4}",
+                    group.group_id, before, after
+                ));
+            }
+        }
     }
     failures
 }
@@ -447,6 +540,7 @@ pub(super) fn validate_home_cinema_result(
     if let Some(bass) = expectations.bass_routing {
         failures.extend(validate_bass_management(
             result.metadata.bass_management.as_ref(),
+            config,
             bass,
         ));
     }
@@ -591,9 +685,55 @@ pub(super) fn validate_home_cinema_result(
 #[cfg(test)]
 mod tests {
     use super::super::test_case::load_config_for_test;
-    use super::{build_home_cinema_matrix, validate_stage_outcomes};
+    use super::{
+        build_home_cinema_matrix, build_quick_home_cinema_matrix, validate_bass_management,
+        validate_stage_outcomes,
+    };
     use crate::registry::QaTier;
     use roomeq_model::{SpeakerConfig, StageOutcome, StageStatus};
+
+    #[test]
+    fn qa_rejects_lfe_route_using_the_speaker_crossover() {
+        let test_case = build_home_cinema_matrix(QaTier::Pr, Some("fem"), Some("iir"))
+            .into_iter()
+            .find(|case| case.registry_id == "home_cinema/iir_redirected_bass")
+            .unwrap();
+        let expectation = test_case
+            .home_cinema_expectations
+            .as_ref()
+            .unwrap()
+            .bass_routing
+            .unwrap();
+        let (config, _) = load_config_for_test(&test_case).unwrap();
+        let mut report =
+            roomeq_engine::home_cinema::bass_management_report(&config, None, false).unwrap();
+        for route in report
+            .routing_graph
+            .as_mut()
+            .unwrap()
+            .routes
+            .iter_mut()
+            .filter(|route| route.route_kind == "lfe_lowpass_to_sub")
+        {
+            route.low_pass_hz = report.crossover_frequency_hz;
+        }
+
+        let failures = validate_bass_management(Some(&report), &config, expectation);
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("instead of the configured")),
+            "expected an LFE programme-cutoff failure, got {failures:?}"
+        );
+    }
+
+    #[test]
+    fn quick_home_cinema_matrix_exercises_redirected_bass_export() {
+        let cases = build_quick_home_cinema_matrix(QaTier::Weekly, None, None);
+        assert_eq!(cases.len(), 1);
+        assert_eq!(cases[0].registry_id, "home_cinema/iir_redirected_bass");
+        assert!(cases[0].home_cinema_expectations.is_some());
+    }
 
     #[test]
     fn degraded_or_failed_stage_is_a_correctness_failure() {

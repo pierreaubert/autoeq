@@ -927,6 +927,12 @@ fn validate_bass_management(config: &RoomConfig, result: &mut ValidationResult) 
             bm.lfe_playback_gain_db
         ));
     }
+    if !bm.lfe_low_pass_hz.is_finite() || !(20.0..=250.0).contains(&bm.lfe_low_pass_hz) {
+        result.add_error(format!(
+            "bass_management.lfe_low_pass_hz ({}) must be finite and within 20..=250 Hz",
+            bm.lfe_low_pass_hz
+        ));
+    }
     if bm.max_sub_boost_db < 0.0 {
         result.add_error(format!(
             "bass_management.max_sub_boost_db ({}) must be non-negative",
@@ -2321,6 +2327,7 @@ mod room_config_validation_tests {
             bass_management: Some(crate::roomeq::types::BassManagementConfig {
                 enabled: true,
                 lfe_playback_gain_db: 30.0,
+                lfe_low_pass_hz: 10.0,
                 max_sub_boost_db: -1.0,
                 headroom_margin_db: -2.0,
                 apply_lfe_gain_to_chain: true,
@@ -2347,6 +2354,12 @@ mod room_config_validation_tests {
                 .errors
                 .iter()
                 .any(|e| e.contains("lfe_playback_gain_db") && e.contains("outside the safe"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("lfe_low_pass_hz") && e.contains("20..=250 Hz"))
         );
         assert!(
             result

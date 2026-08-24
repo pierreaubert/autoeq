@@ -1,5 +1,12 @@
 # 0.5.57
 
+## Fixes
+
+- Keep the cinema LFE programme low-pass (120 Hz by default) independent from
+  optimized speaker crossovers, preserve configured crossover bounds during
+  joint bass-route optimization, reject per-group objective regressions, and
+  gate these exported routing invariants in RoomEQ QA.
+
 ## QA
 
 - Make RoomEQ config loading recursively strict, close fixed-shape input-schema

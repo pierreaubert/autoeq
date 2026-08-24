@@ -33,7 +33,7 @@ mod test_case;
 mod test_result;
 
 use args::Args;
-use home_cinema::build_home_cinema_matrix;
+use home_cinema::{build_home_cinema_matrix, build_quick_home_cinema_matrix};
 use misc::find_project_root;
 use misc::scenario_description;
 pub use processing_method::ProcessingMethod;
@@ -84,7 +84,13 @@ pub fn run() -> Result<bool> {
             args.mode.as_deref(),
         )
     };
-    if !args.quick && !args.home_cinema {
+    if args.quick && !args.home_cinema {
+        test_cases.extend(build_quick_home_cinema_matrix(
+            args.tier,
+            args.solver.as_deref(),
+            args.mode.as_deref(),
+        ));
+    } else if !args.home_cinema {
         test_cases.extend(build_home_cinema_matrix(
             args.tier,
             args.solver.as_deref(),
@@ -130,7 +136,9 @@ pub fn run() -> Result<bool> {
         args.jobs()
     );
     if args.quick {
-        println!("QUICK MODE: bounded FEM/IIR smoke matrix with safety-level acceptance");
+        println!(
+            "QUICK MODE: bounded FEM/IIR plus routed home-cinema smoke matrix with safety-level acceptance"
+        );
     }
     println!();
 

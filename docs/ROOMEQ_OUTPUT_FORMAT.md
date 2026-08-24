@@ -75,7 +75,7 @@ is an annotation, not an additional processing stage.
 | `source_channel` / `source_index` | Logical input channel and its graph index. |
 | `destination` / `destination_index` | Logical output channel and its graph index. Bass-managed low-frequency branches normally target the physical `LFE`/sub output. |
 | `pre_chain_channel` / `post_chain_channel` | Channel identity on either side of the route-owned stage. These preserve chain ownership when a route crosses a matrix boundary. |
-| `route_kind` | `main_highpass_to_self` keeps the main band on the source channel; `redirected_bass_lowpass_to_sub` sends a bass-managed speaker’s low band to the sub output; `lfe_lowpass_to_sub` sends the LFE program band to the sub output. |
+| `route_kind` | `main_highpass_to_self` keeps the main band on the source channel; `redirected_bass_lowpass_to_sub` sends a bass-managed speaker’s low band to the sub output; `lfe_lowpass_to_sub` sends the LFE programme band using its independent `lfe_low_pass_hz` cutoff (120 Hz by default). |
 | `high_pass_hz` / `low_pass_hz` | Band boundary for this logical branch. Only one is normally populated for a high-pass or low-pass branch. |
 | `crossover_type` | Slope/topology used by the route, for example `LR24`. |
 | `gain_db` / `gain_linear` / `matrix_gain` | Route-level gain. `gain_db` is the dB value; `gain_linear` and `matrix_gain` are the corresponding linear coefficients, typically equal for a pure route gain. |

@@ -1213,6 +1213,7 @@ mod tests {
             redirected_bass_enabled: true,
             lfe_channel: "LFE".to_string(),
             lfe_playback_gain_db: 0.0,
+            lfe_low_pass_hz: 120.0,
             lfe_gain_applied_to_chain: false,
             sub_trim_db: 0.0,
             max_sub_boost_db: 0.0,

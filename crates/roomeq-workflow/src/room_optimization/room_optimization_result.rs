@@ -733,7 +733,7 @@ fn runtime_acceptance_evidence(
         &training_pre,
         &training_post,
         sample_rate,
-        processing_mode,
+        processing_mode.clone(),
     );
     let mut channel_quality = Vec::with_capacity(names.len());
     for (name, ((pre, post), target)) in names.iter().zip(
@@ -742,6 +742,14 @@ fn runtime_acceptance_evidence(
             .zip(&training_post)
             .zip(&training_targets),
     ) {
+        let channel_temporal = runtime_temporal_quality_evidence(
+            result,
+            std::slice::from_ref(name),
+            std::slice::from_ref(pre),
+            std::slice::from_ref(post),
+            sample_rate,
+            processing_mode.clone(),
+        );
         let scorecard = roomeq_engine::quality::evaluate_acoustic_quality(
             std::slice::from_ref(pre),
             std::slice::from_ref(post),
@@ -754,7 +762,7 @@ fn runtime_acceptance_evidence(
                 schroeder_hz: None,
                 normalize_level: true,
             },
-            Default::default(),
+            channel_temporal,
         )
         .ok()?;
         log::debug!(
@@ -1496,6 +1504,9 @@ fn correction_stage(plugin: &roomeq_model::PluginConfigWrapper) -> Option<Correc
         .get("label")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
+    if label == "hybrid_fir_latency_alignment" {
+        return Some(CorrectionStage::Fir);
+    }
     if label.contains("group_delay") {
         return Some(CorrectionStage::GroupDelay);
     }
@@ -1886,6 +1897,77 @@ mod tests {
             roomeq_model::ProcessingMode::PhaseLinear,
         );
         assert_eq!(phase_linear.pre_ringing_energy_db, Some(-8.7));
+    }
+
+    #[test]
+    fn runtime_acceptance_dealiases_each_channels_fir_latency() {
+        let mut result = single_channel_room_result("left");
+        let latency_ms = 2048.0 / 48.0;
+        let channel = result.channel_results.get_mut("left").unwrap();
+        let frequencies = channel.initial_curve.freq.clone();
+        channel.initial_curve.phase = Some(ndarray::Array1::zeros(frequencies.len()));
+        channel.final_curve.phase = Some(ndarray::Array1::from_iter(frequencies.iter().map(
+            |frequency| {
+                let phase_deg = -360.0 * frequency * latency_ms / 1000.0;
+                (phase_deg + 180.0).rem_euclid(360.0) - 180.0
+            },
+        )));
+        channel.fir_coeffs = Some(vec![0.0; 4096]);
+        result
+            .channels
+            .get_mut("left")
+            .unwrap()
+            .fir_temporal_masking = Some(roomeq_model::TemporalIrMaskingMetrics {
+            main_index: 2048,
+            main_time_ms: latency_ms,
+            pre_ringing_peak_db: -80.0,
+            post_ringing_peak_db: -80.0,
+            pre_ringing_audible_db: -80.0,
+            post_ringing_audible_db: -80.0,
+            penalty: 0.0,
+        });
+
+        let (acoustic, _, _) = runtime_acceptance_evidence(
+            &result,
+            48_000.0,
+            1,
+            (20.0, 20_000.0),
+            Path::new("."),
+            roomeq_model::ProcessingMode::PhaseLinear,
+            None,
+        )
+        .expect("runtime acoustic evidence");
+
+        assert_eq!(acoustic.temporal.latency_ms, Some(latency_ms));
+        assert!(
+            acoustic.induced_group_delay_rms_ms.unwrap() < 1e-6,
+            "pure FIR bulk latency must not be reported as dispersion: {:?}",
+            acoustic.induced_group_delay_rms_ms
+        );
+    }
+
+    #[test]
+    fn hybrid_alignment_delay_is_removed_with_fir_stage() {
+        let mut result = single_channel_room_result("left");
+        let chain = result.channels.get_mut("left").unwrap();
+        chain.plugins = vec![
+            roomeq_model::PluginConfigWrapper {
+                plugin_type: "convolution".to_string(),
+                parameters: serde_json::json!({"ir_file": "left_band_fir.wav"}),
+            },
+            roomeq_model::PluginConfigWrapper {
+                plugin_type: "delay".to_string(),
+                parameters: serde_json::json!({
+                    "delay_ms": 42.666666666666664,
+                    "channels": [2, 3],
+                    "label": "hybrid_fir_latency_alignment",
+                }),
+            },
+        ];
+
+        remove_correction_stage(chain, CorrectionStage::Fir);
+
+        assert!(chain.plugins.is_empty());
     }
 
     #[test]

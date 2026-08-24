@@ -146,6 +146,9 @@ The `system` section decouples logical channel roles (e.g., "L", "R", "LFE") fro
       "config": "single",
       "crossover": "bass_xover",
       "sub_meas": "L"
+    },
+    "bass_management": {
+      "lfe_low_pass_hz": 120.0
     }
   },
   "crossovers": {
@@ -164,6 +167,7 @@ The `system` section decouples logical channel roles (e.g., "L", "R", "LFE") fro
 | `model` | string | No | `"custom"` | Topology model: `"stereo"`, `"home_cinema"`, `"custom"` |
 | `speakers` | map | **Yes** | - | Map of Logical Role → Measurement Key. The key must exist in the root `speakers` object. |
 | `subwoofers` | object | No | - | Subwoofer configuration and alignment mapping |
+| `bass_management` | object | No | cinema defaults | Bass routing policy. `lfe_low_pass_hz` defaults to 120 Hz and is independent of the main-speaker crossover. |
 | `supporting_source_outputs` | object | No | `{"suffix": "_support"}` | Naming convention for supporting-source physical outputs |
 
 ### Subwoofers Configuration

@@ -13,8 +13,12 @@ pub(in super::super) fn should_post_generate_fir(
     mode: roomeq_model::ProcessingMode,
     has_fir_coeffs: bool,
     chain_has_correction: bool,
+    chain_has_fir: bool,
 ) -> bool {
     if has_fir_coeffs {
+        return false;
+    }
+    if mode == roomeq_model::ProcessingMode::Hybrid && chain_has_fir {
         return false;
     }
     if mode == roomeq_model::ProcessingMode::PhaseLinear && chain_has_correction {
@@ -394,11 +398,21 @@ mod tests {
             roomeq_model::ProcessingMode::PhaseLinear,
             false,
             true,
+            false,
         ));
         // Hybrid still completes its IIR correction with a residual FIR.
         assert!(super::should_post_generate_fir(
             roomeq_model::ProcessingMode::Hybrid,
             false,
+            true,
+            false,
+        ));
+        // A frequency-split Hybrid chain already owns its band FIR and must
+        // not receive a second full-band convolution.
+        assert!(!super::should_post_generate_fir(
+            roomeq_model::ProcessingMode::Hybrid,
+            false,
+            true,
             true,
         ));
         // PhaseLinear on an uncorrected channel still generates the full FIR.
@@ -406,11 +420,13 @@ mod tests {
             roomeq_model::ProcessingMode::PhaseLinear,
             false,
             false,
+            false,
         ));
         // Existing coefficients are never regenerated.
         assert!(!super::should_post_generate_fir(
             roomeq_model::ProcessingMode::Hybrid,
             true,
+            false,
             false,
         ));
     }

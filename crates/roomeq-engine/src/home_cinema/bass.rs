@@ -121,6 +121,7 @@ pub fn bass_management_report_with_optimization_and_sample_rate(
         redirected_bass_enabled: effective.config.redirect_bass,
         lfe_channel: effective.config.lfe_channel,
         lfe_playback_gain_db: effective.config.lfe_playback_gain_db,
+        lfe_low_pass_hz: effective.config.lfe_low_pass_hz,
         lfe_gain_applied_to_chain: effective.config.apply_lfe_gain_to_chain,
         sub_trim_db: effective.config.sub_trim_db,
         max_sub_boost_db: effective.config.max_sub_boost_db,
@@ -254,7 +255,7 @@ pub fn bass_management_routing_graph(
                     route_kind: "lfe_lowpass_to_sub".to_string(),
                     crossover_type: lfe_crossover.crossover_type.clone(),
                     high_pass_hz: None,
-                    low_pass_hz: lfe_crossover.frequency_hz,
+                    low_pass_hz: Some(effective.config.lfe_low_pass_hz),
                     gain_db: output_gain_db,
                     gain_linear: 10.0_f64.powf(output_gain_db / 20.0),
                     matrix_gain: 10.0_f64.powf(output_gain_db / 20.0),
@@ -631,9 +632,13 @@ fn bass_management_signal_flow(
                     .is_bass_managed_candidate()
                     .then_some(crossover.frequency_hz)
                     .flatten(),
-                low_pass_hz: (is_lfe || redirects_bass)
-                    .then_some(crossover.frequency_hz)
-                    .flatten(),
+                low_pass_hz: if is_lfe {
+                    Some(effective.config.lfe_low_pass_hz)
+                } else if redirects_bass {
+                    crossover.frequency_hz
+                } else {
+                    None
+                },
                 lfe_gain_db: if is_lfe {
                     effective.config.lfe_playback_gain_db
                 } else {
@@ -666,4 +671,73 @@ fn bass_management_signal_flow_advisories(
         advisories.push("ok".to_string());
     }
     advisories
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use roomeq_model::{
+        BassManagementConfig, CrossoverConfig, SubwooferStrategy, SubwooferSystemConfig,
+        SystemModel,
+    };
+
+    fn routed_home_cinema_config() -> RoomConfig {
+        RoomConfig {
+            system: Some(SystemConfig {
+                model: SystemModel::HomeCinema,
+                speakers: HashMap::from([
+                    ("L".to_string(), "left_measurement".to_string()),
+                    ("LFE".to_string(), "sub_measurement".to_string()),
+                ]),
+                subwoofers: Some(SubwooferSystemConfig {
+                    config: SubwooferStrategy::Single,
+                    crossover: Some("bass_xover".to_string()),
+                    mapping: HashMap::new(),
+                }),
+                bass_management: Some(BassManagementConfig::default()),
+                ..SystemConfig::default()
+            }),
+            crossovers: Some(HashMap::from([(
+                "bass_xover".to_string(),
+                CrossoverConfig {
+                    crossover_type: "LR24".to_string(),
+                    frequency: None,
+                    frequencies: None,
+                    frequency_range: Some((60.0, 120.0)),
+                },
+            )])),
+            ..RoomConfig::default()
+        }
+    }
+
+    #[test]
+    fn lfe_programme_cutoff_is_independent_from_speaker_crossover() {
+        let config = routed_home_cinema_config();
+        let graph = bass_management_routing_graph(&config, None).unwrap();
+        let lfe_route = graph
+            .routes
+            .iter()
+            .find(|route| route.route_kind == "lfe_lowpass_to_sub")
+            .unwrap();
+        let redirected_route = graph
+            .routes
+            .iter()
+            .find(|route| route.route_kind == "redirected_bass_lowpass_to_sub")
+            .unwrap();
+
+        assert_eq!(lfe_route.low_pass_hz, Some(120.0));
+        assert_ne!(lfe_route.low_pass_hz, redirected_route.low_pass_hz);
+
+        let report = bass_management_report(&config, None, false).unwrap();
+        assert_eq!(report.lfe_low_pass_hz, 120.0);
+        assert_eq!(
+            report
+                .signal_flow
+                .iter()
+                .find(|entry| entry.source_channel == "LFE")
+                .unwrap()
+                .low_pass_hz,
+            Some(120.0)
+        );
+    }
 }

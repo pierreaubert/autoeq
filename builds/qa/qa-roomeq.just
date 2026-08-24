@@ -11,6 +11,7 @@ qa-roomeq-pr:
 	cargo run --features qa --bin roomeq-qa-coverage --release -- --tier pr
 	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --pr
 	cargo run --features qa --bin roomeq-qa-acoustic --release -- --tier pr
+	python3 -m unittest scripts.test_dsp
 
 [group('qa-roomeq')]
 qa-roomeq-nightly:
@@ -189,6 +190,7 @@ qa-roomeq-coverage-gate:
 qa-roomeq-quick: prod-autoeq
 	# Bounded smoke suite; strict registry quality gates run in qa-roomeq-pr/nightly.
 	cargo run --features qa --bin roomeq-qa-coverage --release -- --quick --maxeval 200
+	python3 -m unittest scripts.test_dsp
 
 [group('qa-roomeq')]
 qa-roomeq-list:

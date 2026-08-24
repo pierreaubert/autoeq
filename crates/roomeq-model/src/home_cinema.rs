@@ -414,6 +414,7 @@ pub struct BassManagementReport {
     pub redirected_bass_enabled: bool,
     pub lfe_channel: String,
     pub lfe_playback_gain_db: f64,
+    pub lfe_low_pass_hz: f64,
     pub lfe_gain_applied_to_chain: bool,
     pub sub_trim_db: f64,
     pub max_sub_boost_db: f64,

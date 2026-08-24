@@ -1110,22 +1110,29 @@ fn test_build_mixed_mode_crossover_chain_fir_low() {
         &eq,
         "fir.wav",
         true,
+        42.0,
         Some(&initial),
     );
 
-    assert_eq!(chain.plugins.len(), 4);
+    assert_eq!(chain.plugins.len(), 5);
     assert_eq!(chain.plugins[0].plugin_type, "band_split");
     assert_eq!(chain.plugins[1].plugin_type, "convolution");
     assert_eq!(
         chain.plugins[1].parameters["channels"],
         serde_json::json!([0, 1])
     );
-    assert_eq!(chain.plugins[2].plugin_type, "eq");
+    assert_eq!(chain.plugins[2].plugin_type, "delay");
     assert_eq!(
         chain.plugins[2].parameters["channels"],
         serde_json::json!([2, 3])
     );
-    assert_eq!(chain.plugins[3].plugin_type, "band_merge");
+    assert_eq!(chain.plugins[2].parameters["delay_ms"], 42.0);
+    assert_eq!(chain.plugins[3].plugin_type, "eq");
+    assert_eq!(
+        chain.plugins[3].parameters["channels"],
+        serde_json::json!([2, 3])
+    );
+    assert_eq!(chain.plugins[4].plugin_type, "band_merge");
     assert!(chain.initial_curve.is_some());
 }
 
@@ -1145,22 +1152,35 @@ fn test_build_mixed_mode_crossover_chain_fir_high() {
         -2.0,
     )];
 
-    let chain =
-        build_mixed_mode_crossover_chain("right", &mixed_config, &eq, "hfir.wav", false, None);
+    let chain = build_mixed_mode_crossover_chain(
+        "right",
+        &mixed_config,
+        &eq,
+        "hfir.wav",
+        false,
+        21.0,
+        None,
+    );
 
-    assert_eq!(chain.plugins.len(), 4);
+    assert_eq!(chain.plugins.len(), 5);
     assert_eq!(chain.plugins[0].plugin_type, "band_split");
     assert_eq!(chain.plugins[1].plugin_type, "convolution");
     assert_eq!(
         chain.plugins[1].parameters["channels"],
         serde_json::json!([2, 3])
     );
-    assert_eq!(chain.plugins[2].plugin_type, "eq");
+    assert_eq!(chain.plugins[2].plugin_type, "delay");
     assert_eq!(
         chain.plugins[2].parameters["channels"],
         serde_json::json!([0, 1])
     );
-    assert_eq!(chain.plugins[3].plugin_type, "band_merge");
+    assert_eq!(chain.plugins[2].parameters["delay_ms"], 21.0);
+    assert_eq!(chain.plugins[3].plugin_type, "eq");
+    assert_eq!(
+        chain.plugins[3].parameters["channels"],
+        serde_json::json!([0, 1])
+    );
+    assert_eq!(chain.plugins[4].plugin_type, "band_merge");
 }
 
 #[test]

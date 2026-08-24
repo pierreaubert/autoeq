@@ -1,10 +1,11 @@
 {
   "optimizer": {
     "processing_mode": "phase_linear",
+    "seed": 42,
     "fir": {
       "taps": 4096,
       "phase": "kirkeby",
-      "correct_excess_phase": false,
+      "correct_excess_phase": true,
       "phase_smoothing": 0.167
     }
   }

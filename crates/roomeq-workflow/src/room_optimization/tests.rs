@@ -227,7 +227,7 @@ fn refreshed_topology_pre_score_uses_raw_curve_not_intermediate_score() {
     channel.pre_score = 0.0;
     channel.post_score = 0.0;
 
-    super::refresh_final_reports(&mut result, &config, 48_000.0);
+    super::refresh_final_reports(&mut result, &config, 48_000.0, Path::new("."));
     let expected = super::recompute_curve_flatness_score(
         &raw,
         config.optimizer.min_freq,
@@ -251,7 +251,7 @@ fn refresh_builds_multi_seat_correction_report_when_missing() {
     let mut result = single_channel_room_result("left");
     assert!(result.metadata.multi_seat_correction.is_none());
 
-    super::refresh_final_reports(&mut result, &config, 48_000.0);
+    super::refresh_final_reports(&mut result, &config, 48_000.0, Path::new("."));
 
     assert!(result.metadata.multi_seat_correction.is_some());
 }
@@ -261,7 +261,7 @@ fn refresh_leaves_multi_seat_correction_absent_without_config() {
     let config = minimal_room_config(ProcessingMode::LowLatency);
     let mut result = single_channel_room_result("left");
 
-    super::refresh_final_reports(&mut result, &config, 48_000.0);
+    super::refresh_final_reports(&mut result, &config, 48_000.0, Path::new("."));
 
     assert!(result.metadata.multi_seat_correction.is_none());
 }

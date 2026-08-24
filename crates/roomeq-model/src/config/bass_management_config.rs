@@ -1,6 +1,7 @@
 use super::bass_headroom_model_config::BassHeadroomModelConfig;
 use super::default::default_bass_management_enabled;
 use super::default::default_lfe_channel;
+use super::default::default_lfe_low_pass_hz;
 use super::default::default_lfe_playback_gain_db;
 use super::default::default_max_sub_boost_db;
 use super::default::default_optimize_bass_groups;
@@ -32,6 +33,10 @@ pub struct BassManagementConfig {
     /// to the sub correction chain unless `apply_lfe_gain_to_chain` is set.
     #[serde(default = "default_lfe_playback_gain_db")]
     pub lfe_playback_gain_db: f64,
+    /// LFE programme-channel low-pass cutoff. This is independent of the
+    /// speaker crossover used to redirect bass from the main channels.
+    #[serde(default = "default_lfe_low_pass_hz")]
+    pub lfe_low_pass_hz: f64,
     /// Explicitly insert LFE gain in the exported physical sub chain. This is
     /// normally false because redirected bass and LFE share the same sub output.
     #[serde(default)]
@@ -65,6 +70,7 @@ impl Default for BassManagementConfig {
             redirect_bass: true,
             lfe_channel: default_lfe_channel(),
             lfe_playback_gain_db: default_lfe_playback_gain_db(),
+            lfe_low_pass_hz: default_lfe_low_pass_hz(),
             apply_lfe_gain_to_chain: false,
             sub_trim_db: 0.0,
             max_sub_boost_db: default_max_sub_boost_db(),

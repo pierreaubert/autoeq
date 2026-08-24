@@ -56,6 +56,10 @@ pub(super) fn default_lfe_playback_gain_db() -> f64 {
     10.0
 }
 
+pub(super) fn default_lfe_low_pass_hz() -> f64 {
+    120.0
+}
+
 pub(super) fn default_sub_headroom_margin_db() -> f64 {
     6.0
 }

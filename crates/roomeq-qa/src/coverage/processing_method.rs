@@ -133,7 +133,7 @@ pub(super) fn build_quick_test_matrix(
 
 #[cfg(test)]
 mod tests {
-    use super::{ProcessingMethod, build_quick_test_matrix};
+    use super::{ProcessingMethod, build_quick_test_matrix, required_stage_missing};
     use crate::registry::QaTier;
 
     #[test]
@@ -152,6 +152,15 @@ mod tests {
                 && case.expect.max_post_score == 20.0
                 && case.expect.allow_safe_revert
         }));
+    }
+
+    #[test]
+    fn required_mode_stage_cannot_silently_revert() {
+        assert!(!required_stage_missing(true, true, false, false));
+        assert!(!required_stage_missing(false, false, false, false));
+        assert!(required_stage_missing(true, false, false, false));
+        assert!(required_stage_missing(true, false, true, false));
+        assert!(!required_stage_missing(true, false, true, true));
     }
 }
 
@@ -187,6 +196,15 @@ fn correction_stage_was_reverted(
                 .iter()
                 .any(|value| value == &expected)
         })
+}
+
+fn required_stage_missing(
+    improved: bool,
+    has_stage: bool,
+    stage_reverted: bool,
+    allow_safe_revert: bool,
+) -> bool {
+    improved && !has_stage && !(stage_reverted && allow_safe_revert)
 }
 
 /// Validate the optimization result beyond just "post < pre".
@@ -269,17 +287,30 @@ pub(super) fn validate_result(
                 }
             }
             ProcessingMethod::Fir => {
-                if improved && !has_fir && !fir_reverted {
+                if required_stage_missing(improved, has_fir, fir_reverted, expect.allow_safe_revert)
+                {
                     failures.push(format!(
-                        "channel '{}': FIR mode but no FIR coefficients",
+                        "channel '{}': FIR mode but no retained FIR stage",
                         name
                     ));
                 }
             }
             ProcessingMethod::Mixed => {
-                if improved && !has_biquads && !has_fir && !peq_reverted && !fir_reverted {
+                if required_stage_missing(
+                    improved,
+                    has_biquads,
+                    peq_reverted,
+                    expect.allow_safe_revert,
+                ) {
                     failures.push(format!(
-                        "channel '{}': Mixed mode but no filters at all",
+                        "channel '{}': Mixed mode but no retained IIR stage",
+                        name
+                    ));
+                }
+                if required_stage_missing(improved, has_fir, fir_reverted, expect.allow_safe_revert)
+                {
+                    failures.push(format!(
+                        "channel '{}': Mixed mode but no retained FIR stage",
                         name
                     ));
                 }

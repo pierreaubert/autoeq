@@ -24,7 +24,7 @@ from .figures import (
     _mode_color,
 )
 from .data_extract import extract_eq_passes, get_channel_sort_key
-from .dsp import synthesize_lr_channel
+from .dsp import build_post_dsp_source_curves, synthesize_lr_channel
 
 # Synthetic channel name used for the complex L+R sum tab in the
 # comparison report. Picked so it cannot collide with a real recording
@@ -1061,10 +1061,25 @@ def create_comparison_html_report(
         mode_datasets: List of (mode_name, roomeq_output_data) tuples.
         output_path: Path to write HTML report.
     """
+    # Compare what reaches the microphone, including each source channel's
+    # redirected-bass route. Plotting an isolated high-passed main below its
+    # crossover creates a false SPL collapse and makes different crossover
+    # choices look like different RoomEQ magnitude targets.
+    comparison_channels: dict[int, dict[str, dict]] = {}
+    for _, data in mode_datasets:
+        routed_curves = build_post_dsp_source_curves(data)
+        comparison_channels[id(data)] = {
+            name: {
+                **channel,
+                "final_curve": routed_curves.get(name, channel.get("final_curve")),
+            }
+            for name, channel in (data.get("channels", {}) or {}).items()
+        }
+
     # Collect all channel names across modes (union)
     all_channel_names: set[str] = set()
     for _, data in mode_datasets:
-        all_channel_names.update(data.get("channels", {}).keys())
+        all_channel_names.update(comparison_channels[id(data)].keys())
     sorted_channels = sorted(all_channel_names, key=get_channel_sort_key)
 
     # If both L and R are present in at least one mode, append a
@@ -1073,7 +1088,7 @@ def create_comparison_html_report(
     # least one mode actually has both channels — otherwise the sum
     # would be undefined and the tab would be empty.
     has_lr_pair = any(
-        "L" in data.get("channels", {}) and "R" in data.get("channels", {})
+        "L" in comparison_channels[id(data)] and "R" in comparison_channels[id(data)]
         for _, data in mode_datasets
     )
     if has_lr_pair:
@@ -1278,7 +1293,7 @@ def create_comparison_html_report(
         # other channels are read straight out of the JSON.
         mode_data: list[tuple[str, dict]] = []
         for mode_name, data in mode_datasets:
-            channels = data.get("channels", {})
+            channels = comparison_channels[id(data)]
             if is_lr:
                 lr = synthesize_lr_channel(channels.get("L"), channels.get("R"))
                 if lr:

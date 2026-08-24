@@ -705,6 +705,12 @@
           "type": "string",
           "default": "LFE"
         },
+        "lfe_low_pass_hz": {
+          "description": "LFE programme-channel low-pass cutoff. This is independent of the\nspeaker crossover used to redirect bass from the main channels.",
+          "type": "number",
+          "format": "double",
+          "default": 120.0
+        },
         "lfe_playback_gain_db": {
           "description": "Cinema LFE playback calibration gain. Reported in metadata; not applied\nto the sub correction chain unless `apply_lfe_gain_to_chain` is set.",
           "type": "number",
@@ -1037,6 +1043,10 @@
           "type": "number",
           "format": "double"
         },
+        "lfe_low_pass_hz": {
+          "type": "number",
+          "format": "double"
+        },
         "lfe_playback_gain_db": {
           "type": "number",
           "format": "double"
@@ -1119,6 +1129,7 @@
         "redirected_bass_enabled",
         "lfe_channel",
         "lfe_playback_gain_db",
+        "lfe_low_pass_hz",
         "lfe_gain_applied_to_chain",
         "sub_trim_db",
         "max_sub_boost_db",

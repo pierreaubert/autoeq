@@ -87,7 +87,9 @@ fn apply_polarity_inversion_to_driver(curve: &Curve, inverted: bool) -> DriverMe
 /// Optimize crossover for a group of driver measurements using autoeq's workflow
 ///
 /// # Arguments
-/// * `drivers` - Vector of driver measurements
+/// * `drivers` - Vector of driver measurements. This generic entry point sorts
+///   by measurement span; use [`optimize_main_sub_crossover`] when every curve
+///   shares the same RoomEQ grid and the acoustic roles are known.
 /// * `crossover_type` - Type of crossover to use
 /// * `sample_rate` - Sample rate for filter design
 /// * `config` - Optimizer configuration
@@ -119,10 +121,12 @@ pub fn optimize_crossover(
         fixed_freqs,
         crossover_freq_range,
         false,
+        0,
     )
 }
 
 /// Optimize a crossover while preserving an explicitly declared low-to-high order.
+/// Driver 0 receives the low-pass branch and the final driver the high-pass.
 #[allow(clippy::type_complexity)]
 pub fn optimize_crossover_ordered(
     drivers: Vec<Curve>,
@@ -140,7 +144,68 @@ pub fn optimize_crossover_ordered(
         fixed_freqs,
         crossover_freq_range,
         true,
+        0,
     )
+}
+
+/// Named result for a two-way main/sub crossover optimization.
+///
+/// The generic driver optimizer is ordered from the lowest acoustic band to
+/// the highest: driver 0 receives the low-pass and driver 1 the high-pass.
+/// This result maps that driver order back to the physical main/sub roles used
+/// by RoomEQ's bass-management realization.
+#[derive(Debug, Clone)]
+pub struct MainSubCrossoverOptimization {
+    pub main_gain_db: f64,
+    pub main_delay_ms: f64,
+    pub sub_gain_db: f64,
+    pub sub_delay_ms: f64,
+    pub sub_inverted: bool,
+    pub crossover_frequency_hz: f64,
+    pub combined_curve: Curve,
+}
+
+/// Optimize a physical two-way bass-management crossover.
+///
+/// The subwoofer is deliberately driver 0 (low-pass) and the main is driver 1
+/// (high-pass). The main is held as the polarity reference so any relative
+/// inversion is returned directly as `sub_inverted`, matching the exported
+/// RoomEQ signal path.
+#[allow(clippy::too_many_arguments)]
+pub fn optimize_main_sub_crossover(
+    main_curve: Curve,
+    sub_curve: Curve,
+    crossover_type: CrossoverType,
+    sample_rate: f64,
+    config: &OptimizerConfig,
+    fixed_freqs: Option<Vec<f64>>,
+    crossover_freq_range: Option<(f64, f64)>,
+) -> Result<MainSubCrossoverOptimization, Box<dyn Error>> {
+    let (gains, delays, crossover_freqs, combined_curve, inversions) = optimize_crossover_impl(
+        vec![sub_curve, main_curve],
+        crossover_type,
+        sample_rate,
+        config,
+        fixed_freqs,
+        crossover_freq_range,
+        true,
+        1,
+    )?;
+
+    debug_assert_eq!(gains.len(), 2);
+    debug_assert_eq!(delays.len(), 2);
+    debug_assert_eq!(inversions.len(), 2);
+    debug_assert_eq!(crossover_freqs.len(), 1);
+
+    Ok(MainSubCrossoverOptimization {
+        main_gain_db: gains[1],
+        main_delay_ms: delays[1],
+        sub_gain_db: gains[0],
+        sub_delay_ms: delays[0],
+        sub_inverted: inversions[0],
+        crossover_frequency_hz: crossover_freqs[0],
+        combined_curve,
+    })
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -152,6 +217,7 @@ fn optimize_crossover_impl(
     fixed_freqs: Option<Vec<f64>>,
     crossover_freq_range: Option<(f64, f64)>,
     preserve_order: bool,
+    polarity_reference_index: usize,
 ) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, Curve, Vec<bool>), Box<dyn Error>> {
     // Check for missing phase data and warn
     let missing_phase_count = drivers.iter().filter(|c| c.phase.is_none()).count();
@@ -168,6 +234,13 @@ fn optimize_crossover_impl(
     let n_drivers = drivers.len();
     if n_drivers == 0 {
         return Err("No drivers provided".into());
+    }
+    if polarity_reference_index >= n_drivers {
+        return Err(format!(
+            "Polarity reference driver {} is outside the {}-driver input",
+            polarity_reference_index, n_drivers
+        )
+        .into());
     }
 
     // 1. Determine sort order (Low to High freq)
@@ -192,7 +265,7 @@ fn optimize_crossover_impl(
     let sorted_drivers: Vec<Curve> = permutation.iter().map(|&i| drivers[i].clone()).collect();
 
     // 2. Try polarity combinations on SORTED drivers
-    // For N drivers, we have 2^(N-1) combinations (driver 0 fixed as reference)
+    // For N drivers, we have 2^(N-1) combinations (one driver fixed as reference).
     let num_combinations = 1 << (n_drivers - 1);
 
     struct OptimizationResult {
@@ -222,13 +295,14 @@ fn optimize_crossover_impl(
     }
 
     for i in 0..num_combinations {
-        // Driver 0 is always normal (false)
-        // Driver k (k>0) is inverted if bit (k-1) is set
         let mut inversions = vec![false; n_drivers];
-        for (k, inv) in inversions.iter_mut().enumerate().skip(1) {
-            if (i >> (k - 1)) & 1 == 1 {
-                *inv = true;
+        let mut combination_bit = 0;
+        for (driver_index, inverted) in inversions.iter_mut().enumerate() {
+            if driver_index == polarity_reference_index {
+                continue;
             }
+            *inverted = (i >> combination_bit) & 1 == 1;
+            combination_bit += 1;
         }
 
         // Create modified drivers with inverted phase where needed
@@ -510,6 +584,133 @@ mod tests {
         assert!(
             combined_curve.phase.is_some(),
             "combined curve should preserve phase"
+        );
+    }
+
+    #[test]
+    fn main_sub_optimizer_matches_realized_highpass_main_lowpass_sub() {
+        let sample_rate = 48_000.0;
+        let point_count = 100;
+        let freq = Array1::from_iter((0..point_count).map(|index| {
+            let ratio = index as f64 / (point_count - 1) as f64;
+            20.0 * 1_000.0_f64.powf(ratio)
+        }));
+        let main = Curve {
+            freq: freq.clone(),
+            spl: Array1::zeros(point_count),
+            phase: Some(Array1::zeros(point_count)),
+            ..Default::default()
+        };
+        let sub = Curve {
+            freq,
+            spl: Array1::zeros(point_count),
+            phase: Some(Array1::from_iter(
+                (0..point_count).map(|index| 35.0 + index as f64 * 0.7),
+            )),
+            ..Default::default()
+        };
+
+        let optimized = optimize_main_sub_crossover(
+            main.clone(),
+            sub.clone(),
+            CrossoverType::LinkwitzRiley4,
+            sample_rate,
+            &OptimizerConfig {
+                num_filters: 1,
+                max_iter: 10,
+                population: 4,
+                min_db: 0.0,
+                max_db: 0.0,
+                seed: Some(0x5ab),
+                ..Default::default()
+            },
+            Some(vec![120.0]),
+            None,
+        )
+        .expect("main/sub crossover optimization should succeed");
+
+        let realized = crate::topology::predict_bass_management_sum(
+            &main,
+            &sub,
+            CrossoverType::LinkwitzRiley4.to_plugin_string(),
+            optimized.crossover_frequency_hz,
+            sample_rate,
+            optimized.main_gain_db,
+            optimized.sub_gain_db,
+            optimized.main_delay_ms,
+            optimized.sub_delay_ms,
+            optimized.sub_inverted,
+        )
+        .expect("phase-aware realized crossover sum should be available");
+
+        let mut mirrored_highpass_sub = sub.clone();
+        if optimized.sub_inverted {
+            mirrored_highpass_sub
+                .phase
+                .as_mut()
+                .unwrap()
+                .mapv_inplace(|phase| phase + 180.0);
+        }
+        let mirrored = crate::topology::predict_bass_management_sum(
+            &mirrored_highpass_sub,
+            &main,
+            CrossoverType::LinkwitzRiley4.to_plugin_string(),
+            optimized.crossover_frequency_hz,
+            sample_rate,
+            optimized.sub_gain_db,
+            optimized.main_gain_db,
+            optimized.sub_delay_ms,
+            optimized.main_delay_ms,
+            false,
+        )
+        .expect("mirrored crossover sum should be available for regression comparison");
+
+        let max_magnitude_error = optimized
+            .combined_curve
+            .spl
+            .iter()
+            .zip(realized.spl.iter())
+            .map(|(modeled, realized)| (modeled - realized).abs())
+            .fold(0.0_f64, f64::max);
+        // The optimizer and deployed topology use independent interpolation and
+        // response-realization paths, so allow only sub-audible numerical drift.
+        assert!(
+            max_magnitude_error < 0.1,
+            "optimizer and realized crossover magnitude differ by up to {max_magnitude_error} dB"
+        );
+        let modeled_phase = optimized.combined_curve.phase.as_ref().unwrap();
+        let realized_phase = realized.phase.as_ref().unwrap();
+        let max_phase_error = modeled_phase
+            .iter()
+            .zip(realized_phase.iter())
+            .map(|(modeled, realized)| {
+                ((modeled - realized + 180.0).rem_euclid(360.0) - 180.0).abs()
+            })
+            .fold(0.0_f64, f64::max);
+        assert!(
+            max_phase_error < 1.0,
+            "optimizer and realized crossover phase differ by up to {max_phase_error} degrees"
+        );
+
+        let mirrored_magnitude_error = optimized
+            .combined_curve
+            .spl
+            .iter()
+            .zip(mirrored.spl.iter())
+            .map(|(modeled, mirrored)| (modeled - mirrored).abs())
+            .fold(0.0_f64, f64::max);
+        let mirrored_phase = mirrored.phase.as_ref().unwrap();
+        let mirrored_phase_error = modeled_phase
+            .iter()
+            .zip(mirrored_phase.iter())
+            .map(|(modeled, mirrored)| {
+                ((modeled - mirrored + 180.0).rem_euclid(360.0) - 180.0).abs()
+            })
+            .fold(0.0_f64, f64::max);
+        assert!(
+            mirrored_magnitude_error > max_magnitude_error + 1.0
+                || mirrored_phase_error > max_phase_error + 10.0,
+            "regression fixture does not distinguish physical and mirrored roles: physical={max_magnitude_error:.3} dB/{max_phase_error:.3} deg, mirrored={mirrored_magnitude_error:.3} dB/{mirrored_phase_error:.3} deg"
         );
     }
 

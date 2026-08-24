@@ -1,3 +1,11 @@
+# 0.5.59
+
+## Fixes
+
+- Correct phase-aware bass crossover optimization to model the physical
+  low-pass subwoofer and high-pass main roles, with main-referenced polarity
+  and named gain/delay results matching the exported signal path.
+
 # 0.5.58
 
 ## Fixes

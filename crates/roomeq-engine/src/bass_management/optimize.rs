@@ -163,8 +163,9 @@ pub fn optimize_home_cinema_group_crossovers(
             let mut xo_optimizer_config = config.optimizer.clone();
             xo_optimizer_config.min_db = 0.0;
             xo_optimizer_config.max_db = 0.0;
-            let (xo_gains, xo_delays, xo_freqs, _, inversions) = crossover::optimize_crossover(
-                vec![virtual_main.clone(), sub_curve.clone()],
+            let optimized = crossover::optimize_main_sub_crossover(
+                virtual_main.clone(),
+                sub_curve.clone(),
                 crossover_type_enum,
                 sample_rate,
                 &xo_optimizer_config,
@@ -175,14 +176,12 @@ pub fn optimize_home_cinema_group_crossovers(
                 message: e.to_string(),
             })?;
 
-            final_freq = xo_freqs.first().copied().unwrap_or(plan.frequency_hz);
-            let (main_delay, bass_delay) = normalize_crossover_delays(
-                xo_delays.first().copied().unwrap_or(0.0),
-                xo_delays.get(1).copied().unwrap_or(0.0),
-            );
+            final_freq = optimized.crossover_frequency_hz;
+            let (main_delay, bass_delay) =
+                normalize_crossover_delays(optimized.main_delay_ms, optimized.sub_delay_ms);
             main_delay_ms = main_delay;
             bass_delay_ms = bass_delay;
-            polarity_inverted = inversions.get(1).copied().unwrap_or(false);
+            polarity_inverted = optimized.sub_inverted;
 
             let apply = |curve: &Curve, is_lowpass: bool, gain: f64, delay: f64, invert: bool| {
                 let mut c = apply_crossover_response_to_curve(
@@ -200,14 +199,14 @@ pub fn optimize_home_cinema_group_crossovers(
             let main_post = apply(
                 &virtual_main,
                 false,
-                xo_gains.first().copied().unwrap_or(0.0),
+                optimized.main_gain_db,
                 main_delay_ms,
                 false,
             );
             let sub_post = apply(
                 sub_curve,
                 true,
-                xo_gains.get(1).copied().unwrap_or(0.0),
+                optimized.sub_gain_db,
                 bass_delay_ms,
                 polarity_inverted,
             );
@@ -221,7 +220,7 @@ pub fn optimize_home_cinema_group_crossovers(
             let sub_mean =
                 compute_average_response(&sub_freqs, &sub_spl, Some((20.0, final_freq as f32)))
                     as f64;
-            let requested_trim = xo_gains.get(1).copied().unwrap_or(0.0) + main_mean - sub_mean;
+            let requested_trim = optimized.sub_gain_db + main_mean - sub_mean;
             let (limited_trim, gain_limited) =
                 home_cinema::limited_sub_gain(requested_trim, bass_management);
             trim_db = limited_trim;
@@ -235,7 +234,7 @@ pub fn optimize_home_cinema_group_crossovers(
                 selected_type_str,
                 final_freq,
                 sample_rate,
-                xo_gains.first().copied().unwrap_or(0.0),
+                optimized.main_gain_db,
                 trim_db,
                 main_delay_ms,
                 bass_delay_ms,

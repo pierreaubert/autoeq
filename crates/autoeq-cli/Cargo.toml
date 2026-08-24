@@ -1,9 +1,11 @@
 [package]
 name = "autoeq-cli"
-version.workspace = true
+version = "0.5.1"
 edition = "2024"
 description = "AutoEQ command-line parsing and user-facing orchestration"
 license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/autoeq-cli"
+homepage = "https://github.com/pierreaubert/autoeq"
 
 [lints]
 workspace = true

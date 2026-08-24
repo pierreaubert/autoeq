@@ -1,9 +1,11 @@
 [package]
 name = "autoeq-fir"
-version.workspace = true
+version = "0.5.2"
 edition = "2024"
 description = "FIR filter design and serialization for AutoEQ"
 license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/autoeq-fir"
+homepage = "https://github.com/pierreaubert/autoeq"
 
 [lints]
 workspace = true

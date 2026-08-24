@@ -1,9 +1,11 @@
 [package]
 name = "autoeq-workflow"
-version.workspace = true
+version = "0.5.5"
 edition = "2024"
 description = "Speaker and headphone AutoEQ workflows"
 license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/autoeq-workflow"
+homepage = "https://github.com/pierreaubert/autoeq"
 
 [lints]
 workspace = true

@@ -1,5 +1,5 @@
 # rust
-/target
+target
 /coverage
 mutants.out
 fuzzer_output

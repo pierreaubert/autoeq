@@ -1,9 +1,11 @@
 [package]
 name = "roomeq-engine"
-version.workspace = true
+version = "0.5.58"
 edition = "2024"
 description = "RoomEQ analysis, optimization, and pipeline execution"
 license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/roomeq-engine"
+homepage = "https://github.com/pierreaubert/autoeq"
 
 [lints]
 workspace = true

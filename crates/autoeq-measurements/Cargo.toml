@@ -1,9 +1,11 @@
 [package]
 name = "autoeq-measurements"
-version.workspace = true
+version = "0.5.3"
 edition = "2024"
 description = "AutoEQ measurement loading and preprocessing"
 license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/autoeq-measurements"
+homepage = "https://github.com/pierreaubert/autoeq"
 
 [lints]
 workspace = true

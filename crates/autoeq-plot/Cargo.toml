@@ -1,9 +1,11 @@
 [package]
 name = "autoeq-plot"
-version.workspace = true
+version = "0.5.5"
 edition = "2024"
 description = "Plotly visualizations and report generation for AutoEQ"
 license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/autoeq-plot"
+homepage = "https://github.com/pierreaubert/autoeq"
 
 [lints]
 workspace = true

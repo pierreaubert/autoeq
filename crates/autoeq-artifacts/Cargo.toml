@@ -1,9 +1,11 @@
 [package]
 name = "autoeq-artifacts"
-version.workspace = true
+version = "0.5.1"
 edition = "2024"
 description = "Artifact storage contracts and implementations for AutoEQ workflows"
 license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/autoeq-artifacts"
+homepage = "https://github.com/pierreaubert/autoeq"
 
 [lints]
 workspace = true

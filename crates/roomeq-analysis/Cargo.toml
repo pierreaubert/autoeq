@@ -1,9 +1,11 @@
 [package]
 name = "roomeq-analysis"
-version.workspace = true
+version = "0.5.5"
 edition = "2024"
 description = "Measurement-analysis primitives for RoomEQ"
 license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/roomeq-analysis"
+homepage = "https://github.com/pierreaubert/autoeq"
 
 [lints]
 workspace = true

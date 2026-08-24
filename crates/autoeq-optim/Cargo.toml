@@ -1,9 +1,11 @@
 [package]
 name = "autoeq-optim"
-version.workspace = true
+version = "0.5.58"
 edition = "2024"
 description = "AutoEQ objectives, constraints, and optimizer backends"
 license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/autoeq-optim"
+homepage = "https://github.com/pierreaubert/autoeq"
 
 [lints]
 workspace = true

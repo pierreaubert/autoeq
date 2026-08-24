@@ -1,9 +1,11 @@
 [package]
 name = "roomeq-quality"
-version.workspace = true
+version = "0.5.58"
 edition = "2024"
 description = "Acoustic quality metrics, acceptance policies, and QA fixtures for RoomEQ"
 license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/roomeq-quality"
+homepage = "https://github.com/pierreaubert/autoeq"
 
 [lints]
 workspace = true

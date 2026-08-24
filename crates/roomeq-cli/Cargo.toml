@@ -1,9 +1,11 @@
 [package]
 name = "roomeq-cli"
-version.workspace = true
+version = "0.5.6"
 edition = "2024"
 description = "RoomEQ command-line parsing and user-facing orchestration"
 license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/roomeq-cli"
+homepage = "https://github.com/pierreaubert/autoeq"
 
 [lints]
 workspace = true

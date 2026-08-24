@@ -1,9 +1,11 @@
 [package]
 name = "roomeq-model"
-version.workspace = true
+version = "0.5.5"
 edition = "2024"
 description = "RoomEQ configuration, pipeline, and DSP-chain contracts"
 license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/roomeq-model"
+homepage = "https://github.com/pierreaubert/autoeq"
 
 [lints]
 workspace = true

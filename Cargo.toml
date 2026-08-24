@@ -54,29 +54,30 @@ unsafe_code = "forbid"
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
 
 [workspace.dependencies]
-autoeq-core = { path = "crates/autoeq-core" }
-autoeq-artifacts = { path = "crates/autoeq-artifacts" }
-autoeq-fir = { path = "crates/autoeq-fir" }
-autoeq-plot = { path = "crates/autoeq-plot" }
-autoeq-measurements = { path = "crates/autoeq-measurements" }
-autoeq-optim = { path = "crates/autoeq-optim" }
-autoeq-workflow = { path = "crates/autoeq-workflow" }
-autoeq-cli = { path = "crates/autoeq-cli" }
-roomeq-model = { path = "crates/roomeq-model" }
-roomeq-engine = { path = "crates/roomeq-engine" }
-roomeq-export = { path = "crates/roomeq-export" }
-roomeq-quality = { path = "crates/roomeq-quality" }
-roomeq-qa = { path = "crates/roomeq-qa" }
-roomeq-cli = { path = "crates/roomeq-cli" }
-roomeq-analysis = { path = "crates/roomeq-analysis" }
-roomeq-synthetic = { path = "crates/roomeq-synthetic" }
-roomeq-workflow = { path = "crates/roomeq-workflow" }
+autoeq-core = { path = "crates/autoeq-core", version = "0.5" }
+autoeq-artifacts = { path = "crates/autoeq-artifacts", version = "0.5" }
+autoeq-fir = { path = "crates/autoeq-fir", version = "0.5" }
+autoeq-plot = { path = "crates/autoeq-plot", version = "0.5" }
+autoeq-measurements = { path = "crates/autoeq-measurements", version = "0.5" }
+autoeq-optim = { path = "crates/autoeq-optim", version = "0.5" }
+autoeq-workflow = { path = "crates/autoeq-workflow", version = "0.5" }
+autoeq-cli = { path = "crates/autoeq-cli", version = "0.5" }
+roomeq-model = { path = "crates/roomeq-model", version = "0.5" }
+roomeq-engine = { path = "crates/roomeq-engine", version = "0.5" }
+roomeq-export = { path = "crates/roomeq-export", version = "0.5" }
+roomeq-quality = { path = "crates/roomeq-quality", version = "0.5" }
+roomeq-qa = { path = "crates/roomeq-qa", version = "0.5" }
+roomeq-cli = { path = "crates/roomeq-cli", version = "0.5" }
+roomeq-analysis = { path = "crates/roomeq-analysis", version = "0.5" }
+roomeq-synthetic = { path = "crates/roomeq-synthetic", version = "0.5" }
+roomeq-workflow = { path = "crates/roomeq-workflow", version = "0.5" }
 anyhow = "1.0"
 async-trait = "0.1"
 base64 = "0.23"
 build_html = "2.7"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }
+criterion = "0.8"
 csv = "1.4"
 directories = "6"
 env_logger = "0.11"
@@ -109,6 +110,7 @@ tempfile = "3.23"
 assert_fs = "1.0"
 proptest = { version = "1.8", default-features = false, features = ["std"] }
 serial_test = "4"
+wide = "0.6.1"
 
 # Math-Audio crates from GitHub
 math-iir-fir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
@@ -127,28 +129,28 @@ resvg = "0.46"
 rayon = "1.11"
 
 [dependencies]
-autoeq-core = { workspace = true }
-autoeq-artifacts = { workspace = true }
-autoeq-fir = { workspace = true }
-autoeq-plot = { workspace = true, optional = true }
-autoeq-measurements = { workspace = true }
-autoeq-optim = { workspace = true }
-autoeq-workflow = { workspace = true }
-autoeq-cli = { workspace = true, optional = true }
-roomeq-model = { workspace = true }
-roomeq-engine = { workspace = true }
-roomeq-export = { workspace = true }
-roomeq-quality = { workspace = true }
-roomeq-qa = { workspace = true, optional = true }
-roomeq-cli = { workspace = true, optional = true }
-roomeq-analysis = { workspace = true }
-roomeq-synthetic = { workspace = true }
-roomeq-workflow = { workspace = true }
-anyhow = { workspace = true }
-plotly = { workspace = true, optional = true }
-serde_json = { workspace = true }
-math-iir-fir = { workspace = true }
-math-optimisation = { workspace = true }
+autoeq-core = { workspace = true, version = "0.5" }
+autoeq-artifacts = { workspace = true, version = "0.5" }
+autoeq-fir = { workspace = true, version = "0.5" }
+autoeq-plot = { workspace = true, optional = true, version = "0.5" }
+autoeq-measurements = { workspace = true, version = "0.5" }
+autoeq-optim = { workspace = true, version = "0.5" }
+autoeq-workflow = { workspace = true, version = "0.5" }
+autoeq-cli = { workspace = true, optional = true, version = "0.5" }
+roomeq-model = { workspace = true, version = "0.5" }
+roomeq-engine = { workspace = true, version = "0.5" }
+roomeq-export = { workspace = true, version = "0.5" }
+roomeq-quality = { workspace = true, version = "0.5" }
+roomeq-qa = { workspace = true, optional = true, version = "0.5" }
+roomeq-cli = { workspace = true, optional = true, version = "0.5" }
+roomeq-analysis = { workspace = true, version = "0.5" }
+roomeq-synthetic = { workspace = true, version = "0.5" }
+roomeq-workflow = { workspace = true, version = "0.5" }
+anyhow = { workspace = true, version = "0.5" }
+plotly = { workspace = true, optional = true, version = "0.5" }
+serde_json = { workspace = true, version = "0.5" }
+math-iir-fir = { workspace = true, version = "0.5" }
+math-optimisation = { workspace = true, version = "0.5" }
 
 [features]
 default = []

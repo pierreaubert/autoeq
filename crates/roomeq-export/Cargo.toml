@@ -1,9 +1,11 @@
 [package]
 name = "roomeq-export"
-version.workspace = true
+version = "0.5.5"
 edition = "2024"
 description = "RoomEQ external DSP exporters and artifact packaging"
 license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/roomeq-export"
+homepage = "https://github.com/pierreaubert/autoeq"
 
 [lints]
 workspace = true

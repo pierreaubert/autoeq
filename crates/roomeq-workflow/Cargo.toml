@@ -1,9 +1,11 @@
 [package]
 name = "roomeq-workflow"
-version.workspace = true
+version = "0.5.20"
 edition = "2024"
 description = "RoomEQ resource loading and application workflow composition"
 license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/roomeq-workflow"
+homepage = "https://github.com/pierreaubert/autoeq"
 
 [lints]
 workspace = true
@@ -32,7 +34,7 @@ sofa-reader = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
-criterion = "0.8.2"
+criterion = { workspace = true }
 tempfile = { workspace = true }
 
 [[bench]]

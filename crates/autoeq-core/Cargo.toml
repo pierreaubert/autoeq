@@ -1,9 +1,11 @@
 [package]
 name = "autoeq-core"
-version.workspace = true
+version = "0.5.10"
 edition = "2024"
 description = "Core curves, filter models, response math, and PEQ parameter layouts for AutoEQ"
 license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/autoeq-core"
+homepage = "https://github.com/pierreaubert/autoeq"
 
 [lints]
 workspace = true

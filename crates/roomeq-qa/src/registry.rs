@@ -140,7 +140,7 @@ pub struct ScenarioRegistry {
 
 pub fn load_registry() -> Result<ScenarioRegistry> {
     let registry: ScenarioRegistry =
-        serde_json::from_str(include_str!("../../../qa/registry/roomeq.json"))?;
+        serde_json::from_str(include_str!("registry.json"))?;
     registry.validate()?;
     Ok(registry)
 }

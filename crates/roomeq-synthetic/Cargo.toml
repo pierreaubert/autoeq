@@ -1,9 +1,11 @@
 [package]
 name = "roomeq-synthetic"
-version.workspace = true
+version = "0.5.25"
 edition = "2024"
 description = "Deterministic synthetic measurement scenarios for RoomEQ QA"
 license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/roomeq-synthetic"
+homepage = "https://github.com/pierreaubert/autoeq"
 
 [lints]
 workspace = true

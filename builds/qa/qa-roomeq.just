@@ -260,13 +260,25 @@ qa-roomeq-supporting-source:
 	cargo test --release -p autoeq --test roomeq_supporting_source -- --nocapture
 	cargo test --release -p roomeq-workflow supporting_source --lib -- --nocapture
 
-# Compact CI-friendly QA run: bounded five-seed fuzzer + small coverage subset.
-# The coverage quick subset keeps each scenario's tuned optimizer (bare
-# local-optimizer runs cannot improve the FEM corpus and are rejected by the
-# final safety gate).
+# Deterministic PR contract plus small safety/functional coverage subsets.
+# The five-seed randomized quality fuzzer remains in nightly/weekly recipes:
+# its convergence distribution is intentionally too expensive and stochastic
+# for the blocking PR path. The coverage quick subset keeps each scenario's
+# tuned optimizer (bare local-optimizer runs cannot improve the FEM corpus and
+# are rejected by the final safety gate).
+[group('qa-roomeq')]
+qa-roomeq-contract-pr maxeval="2000":
+	cargo test --release -p roomeq-engine dsp_realization --lib
+	cargo test --release -p roomeq-engine main_sub_optimizer_matches --lib
+	cargo test --release -p roomeq-workflow ctc --lib
+	cargo test --release -p roomeq-qa registry --lib
+	cargo test --release -p roomeq-qa quality_maxeval --lib
+	cargo test --release -p roomeq-qa quality_seed_runs --lib
+	cargo run --features qa --bin roomeq-qa-quality --release -- --case "Cross-Mode measured Genelec 5.1.4" --jobs 1 --maxeval {{maxeval}} --seed-runs 1
+	python3 -m unittest scripts.test_check_roomeq_qa_reachability
+
 [group('qa-roomeq')]
 qa-roomeq-ci:
-	cargo run --bin roomeq-fuzzer --release --features="qa,plotly" -- -n 50 --seed 42 --skip-kautz-modal
 	cargo run --features qa --bin roomeq-qa-coverage --release --features="cli" -- --quick
 	cargo run --features qa --bin roomeq-qa-synthetic --features="cli" --release -- --multiseat-guards-only
 	# Leaf-crate unit coverage is enforced by the preceding CI matrix job.
@@ -321,16 +333,22 @@ qa-roomeq-subsystem-coverage:
 	cargo llvm-cov report --release --package roomeq-quality --package roomeq-engine --package roomeq-workflow --json --summary-only --skip-functions --output-path target/qa/roomeq-coverage.json
 	python3 scripts/check_roomeq_subsystem_coverage.py target/qa/roomeq-coverage.json
 
-# Fast, deterministic mutation shard for pull requests and local smoke checks.
+# Targeted mutation contracts for realization, crossover roles, and QA gate
+# purpose. The regular unit tests must kill loss of polarity, LR-family/order
+# hardcoding, main/sub role reversal, and accepting a safe revert for
+# functional or quality gates.
 [group('qa-roomeq')]
 qa-roomeq-mutation-smoke:
 	mkdir -p target/qa
-	cargo mutants --profile release --package autoeq --file 'src/roomeq/acoustic_qa/**/*.rs' --baseline skip --timeout 60 --shard 1/50 --sharding round-robin -j 4 -o target/qa/roomeq-mutants-smoke -- roomeq::acoustic_qa
+	cargo mutants --profile release --package roomeq-engine --file 'crates/roomeq-engine/src/dsp_realization.rs' --file 'crates/roomeq-engine/src/crossover.rs' --re 'plugin_response|plugin_chain_response|optimize_main_sub_crossover' --baseline skip --timeout 120 -j 4 -o target/qa/roomeq-mutants-engine
+	cargo mutants --profile release --package roomeq-qa --file 'crates/roomeq-qa/src/registry.rs' --re 'ScenarioExpect::accepts_safe_revert' --baseline skip --timeout 120 -j 2 -o target/qa/roomeq-mutants-gate-purpose
 
-# Exhaustive mutation testing for quality metrics, acceptance, and corpus contracts.
+# Exhaustive mutation testing for canonical realization, crossover roles, and
+# registry acceptance contracts.
 [group('qa-roomeq')]
 qa-roomeq-mutation:
-	cargo mutants --profile release --package autoeq --file 'src/roomeq/acoustic_qa/**/*.rs'
+	cargo mutants --profile release --package roomeq-engine --file 'crates/roomeq-engine/src/dsp_realization.rs' --file 'crates/roomeq-engine/src/crossover.rs'
+	cargo mutants --profile release --package roomeq-qa --file 'crates/roomeq-qa/src/registry.rs'
 
 # Unit contracts for privacy-safe REW MDAT conversion.
 [group('qa-roomeq')]

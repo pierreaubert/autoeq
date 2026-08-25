@@ -1,4 +1,3 @@
-use super::consts::QA_MAXEVAL;
 use super::consts::qa_seed;
 use super::group::group_delay_qa_config;
 use super::group_delay_qa_profile::GroupDelayQaProfile;
@@ -13,9 +12,9 @@ use roomeq_model::{
 };
 use std::collections::HashMap;
 
-pub(super) fn apply_qa_overrides(config: &mut RoomConfig, seed_label: &str) {
+pub(super) fn apply_qa_overrides(config: &mut RoomConfig, seed_label: &str, maxeval: usize) {
     config.optimizer.algorithm = "autoeq:cmaes".to_string();
-    config.optimizer.max_iter = QA_MAXEVAL;
+    config.optimizer.max_iter = maxeval;
     config.optimizer.population = 50;
     config.optimizer.num_filters = 5;
     config.optimizer.tolerance = 1e-3;

@@ -1,15 +1,10 @@
-use super::misc::checked_sample_rate;
-use super::misc::read_wav_channels_f64;
-use super::plugin::plugin_affects_mixed_band;
-use super::plugin::plugin_chain_response;
-use super::plugin::plugin_response;
+use super::misc::{checked_sample_rate, read_wav_channels_f64};
 use super::types::MatrixSpectrum;
-use math_audio_dsp::{fir_complex_response, lr4_crossover_response};
 use num_complex::Complex64;
 use roomeq_engine::Curve;
+use roomeq_engine::dsp_realization::{ConvolutionIrProvider, RealizedDsp};
 use roomeq_engine::error::{AutoeqError, Result};
-use roomeq_engine::response::{MIN_REALIZATION_RESPONSE_DB, apply_complex_response_with_min_db};
-use roomeq_model::{ChannelDspChain, PluginConfigWrapper, SystemConfig};
+use roomeq_model::{ChannelDspChain, SystemConfig};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -25,6 +20,7 @@ pub(super) fn apply_room_eq_dsp_to_spectrum(
     let mut cache =
         DspResponseCache::with_sidecar_dir(checked_sample_rate(sample_rate)?, sidecar_dir);
     let mut responses_by_speaker = Vec::with_capacity(speakers);
+
     for speaker in &spectrum.speakers {
         let Some(channel_name) = sys.speakers.get(speaker) else {
             responses_by_speaker.push(vec![Complex64::new(1.0, 0.0); spectrum.bins.len()]);
@@ -34,15 +30,11 @@ pub(super) fn apply_room_eq_dsp_to_spectrum(
             responses_by_speaker.push(vec![Complex64::new(1.0, 0.0); spectrum.bins.len()]);
             continue;
         };
+        let mut realized = RealizedDsp::new(chain, sample_rate, &mut cache)?;
         let mut responses = Vec::with_capacity(spectrum.bins.len());
         for bin in 0..spectrum.bins.len() {
-            let freq = bin as f64 * sample_rate / fft_size as f64;
-            responses.push(channel_chain_response(
-                chain,
-                freq,
-                sample_rate,
-                &mut cache,
-            )?);
+            let frequency_hz = bin as f64 * sample_rate / fft_size as f64;
+            responses.push(realized.response_at(frequency_hz)?);
         }
         responses_by_speaker.push(responses);
     }
@@ -50,10 +42,10 @@ pub(super) fn apply_room_eq_dsp_to_spectrum(
     #[allow(clippy::needless_range_loop)]
     for bin in 0..spectrum.bins.len() {
         for position in &mut spectrum.bins[bin] {
-            for speaker_idx in 0..speakers {
-                let correction = responses_by_speaker[speaker_idx][bin];
-                for ear_idx in 0..2 {
-                    position.values[ear_idx * speakers + speaker_idx] *= correction;
+            for speaker_index in 0..speakers {
+                let correction = responses_by_speaker[speaker_index][bin];
+                for ear_index in 0..2 {
+                    position.values[ear_index * speakers + speaker_index] *= correction;
                 }
             }
         }
@@ -62,11 +54,6 @@ pub(super) fn apply_room_eq_dsp_to_spectrum(
 }
 
 /// Apply the canonical serialized channel chain to an arbitrary measurement.
-///
-/// Held-out acoustic QA uses the same plugin evaluator as CTC so gain,
-/// crossovers, delay, EQ, convolution, and mixed-band processing are not
-/// approximated by a PEQ-only response. Graph-level routing remains outside
-/// this serial channel API.
 pub fn apply_channel_dsp_chain_to_curve(
     chain: &ChannelDspChain,
     curve: &Curve,
@@ -81,25 +68,15 @@ pub fn apply_channel_dsp_chain_to_curve_with_sidecar_dir(
     sample_rate: f64,
     sidecar_dir: &Path,
 ) -> Result<Curve> {
-    curve.validate("channel DSP evaluation curve")?;
     let mut cache =
         DspResponseCache::with_sidecar_dir(checked_sample_rate(sample_rate)?, sidecar_dir);
-    let response = curve
-        .freq
-        .iter()
-        .map(|frequency| channel_chain_response(chain, *frequency, sample_rate, &mut cache))
-        .collect::<Result<Vec<_>>>()?;
-    Ok(apply_complex_response_with_min_db(
-        curve,
-        &response,
-        MIN_REALIZATION_RESPONSE_DB,
-    ))
+    RealizedDsp::new(chain, sample_rate, &mut cache)?.apply_to_curve(curve)
 }
 
 pub(super) struct DspResponseCache {
-    pub(super) sample_rate: u32,
-    pub(super) sidecar_dir: PathBuf,
-    pub(super) convolution_ir: HashMap<PathBuf, Vec<f64>>,
+    sample_rate: u32,
+    sidecar_dir: PathBuf,
+    convolution_ir: HashMap<PathBuf, Vec<f64>>,
 }
 
 impl DspResponseCache {
@@ -116,7 +93,7 @@ impl DspResponseCache {
         }
     }
 
-    pub(super) fn convolution_taps(&mut self, path: &Path) -> Result<&[f64]> {
+    fn convolution_taps(&mut self, path: &Path) -> Result<&[f64]> {
         let resolved_path = if path.is_relative() {
             self.sidecar_dir.join(path)
         } else {
@@ -144,115 +121,26 @@ impl DspResponseCache {
     }
 }
 
+impl ConvolutionIrProvider for DspResponseCache {
+    fn taps(&mut self, ir_file: &str, sample_rate: u32) -> Result<&[f64]> {
+        if sample_rate != self.sample_rate {
+            return Err(AutoeqError::InvalidConfiguration {
+                message: format!(
+                    "DSP realization requested {sample_rate} Hz convolution from {} Hz cache",
+                    self.sample_rate
+                ),
+            });
+        }
+        self.convolution_taps(Path::new(ir_file))
+    }
+}
+
+#[cfg(test)]
 pub(super) fn channel_chain_response(
     chain: &ChannelDspChain,
-    freq: f64,
+    frequency_hz: f64,
     sample_rate: f64,
     cache: &mut DspResponseCache,
 ) -> Result<Complex64> {
-    let branch_response = if let Some(drivers) = chain.drivers.as_ref() {
-        if drivers.is_empty() {
-            Complex64::new(1.0, 0.0)
-        } else {
-            let mut sum = Complex64::new(0.0, 0.0);
-            for driver in drivers {
-                sum += plugin_chain_response(&driver.plugins, freq, sample_rate, cache)?;
-            }
-            sum
-        }
-    } else {
-        Complex64::new(1.0, 0.0)
-    };
-
-    Ok(branch_response * plugin_chain_response(&chain.plugins, freq, sample_rate, cache)?)
-}
-
-pub(super) fn mixed_band_response(
-    split: &PluginConfigWrapper,
-    plugins: &[PluginConfigWrapper],
-    freq: f64,
-    sample_rate: f64,
-    cache: &mut DspResponseCache,
-) -> Result<Complex64> {
-    let frequency = split
-        .parameters
-        .get("frequency")
-        .and_then(|value| value.as_f64())
-        .unwrap_or(1_000.0);
-    let mut low =
-        lr4_crossover_response("low", frequency, freq, sample_rate).map_err(|message| {
-            AutoeqError::InvalidConfiguration {
-                message: format!("unsupported RoomEQ band_split in CTC joint path: {message}"),
-            }
-        })?;
-    let mut high =
-        lr4_crossover_response("high", frequency, freq, sample_rate).map_err(|message| {
-            AutoeqError::InvalidConfiguration {
-                message: format!("unsupported RoomEQ band_split in CTC joint path: {message}"),
-            }
-        })?;
-
-    let crossover_type = split
-        .parameters
-        .get("type")
-        .and_then(|value| value.as_str())
-        .unwrap_or("LR24");
-    if !crossover_type.eq_ignore_ascii_case("LR24") {
-        let freq_grid = ndarray::array![freq];
-        low = roomeq_engine::topology::compute_crossover_complex_response(
-            crossover_type,
-            frequency,
-            sample_rate,
-            true,
-            &freq_grid,
-        )[0];
-        high = roomeq_engine::topology::compute_crossover_complex_response(
-            crossover_type,
-            frequency,
-            sample_rate,
-            false,
-            &freq_grid,
-        )[0];
-    }
-    for plugin in plugins {
-        let plugin_response = plugin_response(plugin, freq, sample_rate, cache)?;
-        if plugin_affects_mixed_band(plugin, true) {
-            low *= plugin_response;
-        }
-        if plugin_affects_mixed_band(plugin, false) {
-            high *= plugin_response;
-        }
-    }
-
-    Ok(low + high)
-}
-
-pub(super) fn convolution_response(
-    plugin: &PluginConfigWrapper,
-    freq: f64,
-    sample_rate: f64,
-    cache: &mut DspResponseCache,
-) -> Result<Complex64> {
-    let Some(ir_file) = plugin
-        .parameters
-        .get("ir_file")
-        .and_then(|value| value.as_str())
-    else {
-        return Ok(Complex64::new(1.0, 0.0));
-    };
-    let taps = cache.convolution_taps(Path::new(ir_file))?;
-    let wet = fir_complex_response(taps, freq, sample_rate);
-    let mix = plugin
-        .parameters
-        .get("mix")
-        .and_then(|value| value.as_f64())
-        .unwrap_or(1.0)
-        .clamp(0.0, 1.0);
-    let gain = plugin
-        .parameters
-        .get("gain_db")
-        .and_then(|value| value.as_f64())
-        .map(|gain_db| 10.0_f64.powf(gain_db / 20.0))
-        .unwrap_or(1.0);
-    Ok(Complex64::new(1.0 - mix, 0.0) + wet * (mix * gain))
+    RealizedDsp::new(chain, sample_rate, cache)?.response_at(frequency_hz)
 }

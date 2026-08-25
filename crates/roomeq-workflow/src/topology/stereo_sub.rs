@@ -355,8 +355,10 @@ impl WorkflowExecutor for Stereo21Executor {
             final_xo_freq,
         ) = if phase_available {
             let optimized = crossover::optimize_main_sub_crossover(
-                virtual_main.clone(),
-                sub_curve.clone(),
+                crossover::MainSubCrossoverInput {
+                    main_highpass: virtual_main.clone(),
+                    sub_lowpass: sub_curve.clone(),
+                },
                 crossover_type_enum,
                 sample_rate,
                 &xo_optimizer_config,

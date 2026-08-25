@@ -61,6 +61,8 @@ pub mod crossover;
 pub mod ctc;
 /// Double-bass-array optimization and phase-critical array summation.
 pub mod dba;
+/// Canonical complex-response evaluation of serialized DSP chains.
+pub mod dsp_realization;
 /// In-memory per-channel and multi-measurement EQ optimization.
 pub mod eq;
 /// Speaker-excursion protection analysis and high-pass realization.

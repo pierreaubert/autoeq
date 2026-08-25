@@ -35,5 +35,30 @@ jobs:
       - name: Run registry-driven weekly FEM matrix
         run: cargo run --release --features qa --bin roomeq-qa-coverage -- --tier weekly
 
+      - name: Run blocking scorecard and strict cross-mode quality matrix
+        run: cargo run --release --features qa --bin roomeq-qa-quality -- --jobs 2
+
+      - name: Run optimizer feature-progression matrix
+        run: cargo run --release --features qa --bin roomeq-qa-features --no-default-features
+
       - name: Run retained ignored FEM integration matrix
         run: cargo test --release -p autoeq --features qa --test roomeq_generated_data_test -- --ignored --test-threads=1
+
+  randomized-quality:
+    name: Randomized five-seed quality coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-roomeq-fuzzer-weekly-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run required randomized scenario buckets across five seeds
+        run: cargo run --bin roomeq-fuzzer --release --features="qa,plotly" -- -n 21 --seed 42 --skip-kautz-modal

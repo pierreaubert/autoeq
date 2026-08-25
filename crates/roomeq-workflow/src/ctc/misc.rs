@@ -1,8 +1,10 @@
 use hound::{SampleFormat, WavReader};
+#[cfg(test)]
+use math_audio_dsp::biquad_complex_response as dsp_biquad_complex_response;
 use math_audio_dsp::{
-    biquad_complex_response as dsp_biquad_complex_response, direct_peak_sample,
-    direct_peak_windowed_half_spectrum, fdw_complex_half_spectrum,
+    direct_peak_sample, direct_peak_windowed_half_spectrum, fdw_complex_half_spectrum,
 };
+#[cfg(test)]
 use math_audio_iir_fir::{Biquad, BiquadFilterType};
 use num_complex::Complex64;
 use roomeq_engine::error::{AutoeqError, Result};
@@ -22,6 +24,7 @@ pub(super) fn invalid_ctc_configuration(message: impl Into<String>) -> AutoeqErr
     AutoeqError::InvalidConfiguration { message }
 }
 
+#[cfg(test)]
 pub(super) fn biquad_filter_response(
     filter: &serde_json::Value,
     freq: f64,
@@ -55,6 +58,7 @@ pub(super) fn biquad_filter_response(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn parse_biquad_filter_type(value: &str) -> Option<BiquadFilterType> {
     match value {
         "lowpass" => Some(BiquadFilterType::Lowpass),

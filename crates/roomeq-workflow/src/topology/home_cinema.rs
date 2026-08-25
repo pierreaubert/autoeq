@@ -980,8 +980,10 @@ fn optimize_home_cinema_with_sub(
     let (main_gain_post, main_delay_raw, sub_gain_raw, sub_delay_raw, sub_inverted, final_xo_freq) =
         if phase_available && roomeq_engine::topology::curve_has_usable_phase(&virtual_main) {
             let optimized = crossover::optimize_main_sub_crossover(
-                virtual_main.clone(),
-                sub_curve.clone(),
+                crossover::MainSubCrossoverInput {
+                    main_highpass: virtual_main.clone(),
+                    sub_lowpass: sub_curve.clone(),
+                },
                 crossover_type_enum,
                 sample_rate,
                 &xo_optimizer_config,

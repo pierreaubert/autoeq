@@ -171,8 +171,10 @@ pub fn optimize_home_cinema_group_crossovers(
             xo_optimizer_config.min_db = 0.0;
             xo_optimizer_config.max_db = 0.0;
             let optimized = crossover::optimize_main_sub_crossover(
-                virtual_main.clone(),
-                sub_curve.clone(),
+                crossover::MainSubCrossoverInput {
+                    main_highpass: virtual_main.clone(),
+                    sub_lowpass: sub_curve.clone(),
+                },
                 crossover_type_enum,
                 sample_rate,
                 &xo_optimizer_config,

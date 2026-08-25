@@ -1,8 +1,10 @@
-use super::consts::qa_seed;
+use super::consts::{QA_MAXEVAL, qa_seed};
 use super::metric_scorecard::MetricScorecard;
 use super::metric_scorecard::compare_scorecards;
 use super::misc::level_matched_rms_curve_difference_db;
 use super::option_override::OptionOverride;
+use super::parse_maxeval;
+use super::parse_seed_runs;
 use super::types::TestResult;
 use super::validate::{
     TargetTiltValidationOptions, validate_option_effect, validate_phase_alignment,
@@ -544,6 +546,7 @@ fn registry_expectations_block_weak_or_overboosted_quality_results() {
             max_post_score: 20.0,
             max_boost_db: 12.0,
             allow_safe_revert: false,
+            gate_purpose: crate::registry::QaGatePurpose::Quality,
         },
         &mut results,
     );
@@ -564,6 +567,7 @@ fn registry_expectations_block_weak_or_overboosted_quality_results() {
             max_post_score: 20.0,
             max_boost_db: 12.0,
             allow_safe_revert: false,
+            gate_purpose: crate::registry::QaGatePurpose::Quality,
         },
         &mut results,
     );
@@ -583,6 +587,7 @@ fn registry_expectations_block_weak_or_overboosted_quality_results() {
             max_post_score: 20.0,
             max_boost_db: 12.0,
             allow_safe_revert: true,
+            gate_purpose: crate::registry::QaGatePurpose::Safety,
         },
         &mut results,
     );
@@ -616,8 +621,68 @@ fn registry_correction_thresholds_skip_relationship_only_rows() {
             max_post_score: 20.0,
             max_boost_db: 12.0,
             allow_safe_revert: false,
+            gate_purpose: crate::registry::QaGatePurpose::Functional,
         },
         &mut results,
     );
     assert!(results[0].pass, "{}", results[0].reason);
+}
+
+#[test]
+fn quality_maxeval_defaults_to_convergence_budget() {
+    assert_eq!(
+        parse_maxeval(&["roomeq-qa-quality".into()]).unwrap(),
+        QA_MAXEVAL
+    );
+}
+
+#[test]
+fn quality_maxeval_accepts_positive_contract_budget() {
+    let args = [
+        "roomeq-qa-quality".into(),
+        "--maxeval".into(),
+        "1234".into(),
+    ];
+    assert_eq!(parse_maxeval(&args).unwrap(), 1234);
+}
+
+#[test]
+fn quality_maxeval_rejects_missing_zero_and_invalid_values() {
+    for args in [
+        vec!["roomeq-qa-quality".into(), "--maxeval".into()],
+        vec!["roomeq-qa-quality".into(), "--maxeval".into(), "0".into()],
+        vec![
+            "roomeq-qa-quality".into(),
+            "--maxeval".into(),
+            "invalid".into(),
+        ],
+    ] {
+        assert!(parse_maxeval(&args).is_err(), "accepted {args:?}");
+    }
+}
+
+#[test]
+fn quality_seed_runs_defaults_to_convergence_distribution() {
+    assert_eq!(parse_seed_runs(&["roomeq-qa-quality".into()]).unwrap(), 5);
+}
+
+#[test]
+fn quality_seed_runs_accepts_single_contract_seed() {
+    let args = ["roomeq-qa-quality".into(), "--seed-runs".into(), "1".into()];
+    assert_eq!(parse_seed_runs(&args).unwrap(), 1);
+}
+
+#[test]
+fn quality_seed_runs_rejects_unsupported_values() {
+    for args in [
+        vec!["roomeq-qa-quality".into(), "--seed-runs".into()],
+        vec!["roomeq-qa-quality".into(), "--seed-runs".into(), "2".into()],
+        vec![
+            "roomeq-qa-quality".into(),
+            "--seed-runs".into(),
+            "invalid".into(),
+        ],
+    ] {
+        assert!(parse_seed_runs(&args).is_err(), "accepted {args:?}");
+    }
 }

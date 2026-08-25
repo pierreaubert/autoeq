@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Delegate CTC/replay transfer evaluation to the engine's canonical serialized
+  DSP realization while retaining workflow ownership of convolution sidecars,
+  removing the divergent private plugin evaluator.
+
 - Embed optimized group-delay polarity alongside existing phase-linear FIR delay and reconcile both realized controls into result metadata.
 - Prepare file-backed targets before engine execution and preserve calibrated SPL across IIR, FIR, and hybrid paths.
 - Stage main-channel correction after redirected-bass routing, preserve residual height delays, and reject duplicate phase mappings and supporting-source output collisions.

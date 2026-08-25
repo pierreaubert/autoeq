@@ -42,6 +42,7 @@ mod validate;
 
 use consts::FEM_DIR;
 use consts::OPTIM_CONFIG_DIR;
+use consts::QA_MAXEVAL;
 use consts::SEED;
 use counting_semaphore::CountingSemaphore;
 use group_delay_qa_profile::all_test_cases;
@@ -56,6 +57,8 @@ use test_case::{RegisteredTestCase, TestCase};
 use types::QaOutcome;
 use types::TestResult;
 
+const DEFAULT_SEED_RUNS: usize = 5;
+
 fn enforce_registry_expectations(
     id: &str,
     claims: &[String],
@@ -65,7 +68,7 @@ fn enforce_registry_expectations(
     for result in results {
         let original_outcome = result.outcome();
         let allowed_safe_revert =
-            matches!(original_outcome, QaOutcome::Reverted) && expect.allow_safe_revert;
+            matches!(original_outcome, QaOutcome::Reverted) && expect.accepts_safe_revert();
         // `WiderDb` deliberately relaxes the configured gain bound to test
         // optimizer monotonicity. Baselines and every other mutation still
         // enforce the registry's deployment boost ceiling.
@@ -109,8 +112,11 @@ fn enforce_registry_expectations(
                 }
             }
         }
-        if matches!(original_outcome, QaOutcome::Reverted) && !expect.allow_safe_revert {
-            failures.push("safe revert is not allowed by registry".to_string());
+        if matches!(original_outcome, QaOutcome::Reverted) && !expect.accepts_safe_revert() {
+            failures.push(format!(
+                "safe revert is not accepted by {:?} registry gate",
+                expect.gate_purpose
+            ));
         }
         if !failures.is_empty() {
             result.pass = false;
@@ -122,6 +128,37 @@ fn enforce_registry_expectations(
             result.reason
         );
     }
+}
+
+fn parse_maxeval(args: &[String]) -> Result<usize> {
+    let Some(index) = args.iter().position(|arg| arg == "--maxeval") else {
+        return Ok(QA_MAXEVAL);
+    };
+    let raw = args
+        .get(index + 1)
+        .ok_or_else(|| anyhow!("--maxeval requires a positive integer"))?;
+    let maxeval = raw
+        .parse::<usize>()
+        .map_err(|_| anyhow!("invalid --maxeval value '{raw}': expected a positive integer"))?;
+    anyhow::ensure!(maxeval > 0, "--maxeval must be greater than zero");
+    Ok(maxeval)
+}
+
+fn parse_seed_runs(args: &[String]) -> Result<usize> {
+    let Some(index) = args.iter().position(|arg| arg == "--seed-runs") else {
+        return Ok(DEFAULT_SEED_RUNS);
+    };
+    let raw = args
+        .get(index + 1)
+        .ok_or_else(|| anyhow!("--seed-runs requires either 1 or 5"))?;
+    let seed_runs = raw
+        .parse::<usize>()
+        .map_err(|_| anyhow!("invalid --seed-runs value '{raw}': expected 1 or 5"))?;
+    anyhow::ensure!(
+        matches!(seed_runs, 1 | DEFAULT_SEED_RUNS),
+        "--seed-runs must be 1 (deterministic contract) or 5 (convergence distribution)"
+    );
+    Ok(seed_runs)
 }
 
 /// Run the quality QA command and report whether failed cases should produce
@@ -150,9 +187,11 @@ pub fn run() -> Result<bool> {
         println!(
             "RoomEQ QA: Convergence, Monotonicity & Invariants\n\n\
              Usage:\n\
-               roomeq-qa-quality [--jobs N] [--list] [--case SUBSTRING]\n\n\
+                roomeq-qa-quality [--jobs N] [--maxeval N] [--seed-runs 1|5] [--list] [--case SUBSTRING]\n\n\
              Options:\n\
                --jobs N          Number of test cases to run concurrently\n\
+               --maxeval N       Optimizer evaluation budget per run (default: 15000)\n\
+               --seed-runs N     1 for contracts, 5 for convergence (default: 5)\n\
                --list            List available test cases and exit\n\
                --case TEXT       Run cases whose name contains TEXT, case-insensitive\n\
                --help, -h        Print this help"
@@ -170,6 +209,8 @@ pub fn run() -> Result<bool> {
         .and_then(|w| w[1].parse().ok())
         .unwrap_or_else(default_parallel_jobs)
         .max(1);
+    let maxeval = parse_maxeval(&args)?;
+    let seed_runs = parse_seed_runs(&args)?;
 
     let all_cases = all_test_cases();
 
@@ -210,7 +251,10 @@ pub fn run() -> Result<bool> {
         all_cases
     };
 
-    println!("Using {} parallel job(s) (override with --jobs N).", jobs);
+    println!(
+        "Using {} parallel job(s), maxeval={}, seed-runs={} (override with --jobs/--maxeval/--seed-runs).",
+        jobs, maxeval, seed_runs
+    );
 
     // Run all test cases with a bounded permit pool. The outer thread is
     // spawned immediately but `sem.acquire()` gates entry to the actual
@@ -240,8 +284,13 @@ pub fn run() -> Result<bool> {
                         let base_path = fem_dir.join(format!("{}/config.json", fem_subdir));
                         let scenario_override_dir = optim_dir.join(optim_subdir);
                         let override_path = scenario_override_dir.join("optimiser-iir.json");
-                        let (_, mut results) =
-                            run_stereo_workflow_tests(&name, &base_path, Some(&override_path))?;
+                        let (_, mut results) = run_stereo_workflow_tests(
+                            &name,
+                            &base_path,
+                            Some(&override_path),
+                            maxeval,
+                            seed_runs,
+                        )?;
 
                         for (mode_name, expected_mode, file_name) in [
                             ("FIR", ProcessingMode::PhaseLinear, "optimiser-fir.json"),
@@ -260,12 +309,19 @@ pub fn run() -> Result<bool> {
                                 expected_mode,
                                 &base_path,
                                 &override_path,
+                                maxeval,
+                                seed_runs,
                             )?;
                             results.extend(mode_results);
                         }
 
-                        let (_, generic_results) =
-                            run_generic_path_tests(&name, &base_path, &scenario_override_dir)?;
+                        let (_, generic_results) = run_generic_path_tests(
+                            &name,
+                            &base_path,
+                            &scenario_override_dir,
+                            maxeval,
+                            seed_runs,
+                        )?;
                         results.extend(generic_results);
                         Ok((name.to_string(), results))
                     }
@@ -276,7 +332,7 @@ pub fn run() -> Result<bool> {
                     } => {
                         let base_path = fem_dir.join(format!("{}/config.json", fem_subdir));
                         let override_dir = optim_dir.join(optim_subdir);
-                        run_generic_path_tests(&name, &base_path, &override_dir)
+                        run_generic_path_tests(&name, &base_path, &override_dir, maxeval, seed_runs)
                     }
                     TestCase::CrossModeConvergence {
                         name,
@@ -301,6 +357,8 @@ pub fn run() -> Result<bool> {
                             &override_dir,
                             preserve_system,
                             strict,
+                            maxeval,
+                            seed_runs,
                         )
                     }
                     TestCase::OptionEffect {
@@ -315,6 +373,8 @@ pub fn run() -> Result<bool> {
                         &optim_dir,
                         &optim_subdir,
                         &options,
+                        maxeval,
+                        seed_runs,
                     ),
                 };
                 if let Ok((_, results)) = &mut result {

@@ -165,6 +165,18 @@ pub struct MainSubCrossoverOptimization {
     pub combined_curve: Curve,
 }
 
+/// Physical roles for a two-way bass-management crossover.
+///
+/// Naming the branches here prevents positional `Vec<Curve>` call sites from
+/// accidentally optimizing the electrical mirror of the deployed system.
+#[derive(Debug, Clone)]
+pub struct MainSubCrossoverInput {
+    /// Main loudspeaker response that receives the high-pass branch.
+    pub main_highpass: Curve,
+    /// Subwoofer response that receives the low-pass branch.
+    pub sub_lowpass: Curve,
+}
+
 /// Optimize a physical two-way bass-management crossover.
 ///
 /// The subwoofer is deliberately driver 0 (low-pass) and the main is driver 1
@@ -173,8 +185,7 @@ pub struct MainSubCrossoverOptimization {
 /// RoomEQ signal path.
 #[allow(clippy::too_many_arguments)]
 pub fn optimize_main_sub_crossover(
-    main_curve: Curve,
-    sub_curve: Curve,
+    input: MainSubCrossoverInput,
     crossover_type: CrossoverType,
     sample_rate: f64,
     config: &OptimizerConfig,
@@ -182,7 +193,7 @@ pub fn optimize_main_sub_crossover(
     crossover_freq_range: Option<(f64, f64)>,
 ) -> Result<MainSubCrossoverOptimization, Box<dyn Error>> {
     let (gains, delays, crossover_freqs, combined_curve, inversions) = optimize_crossover_impl(
-        vec![sub_curve, main_curve],
+        vec![input.sub_lowpass, input.main_highpass],
         crossover_type,
         sample_rate,
         config,
@@ -611,8 +622,10 @@ mod tests {
         };
 
         let optimized = optimize_main_sub_crossover(
-            main.clone(),
-            sub.clone(),
+            MainSubCrossoverInput {
+                main_highpass: main.clone(),
+                sub_lowpass: sub.clone(),
+            },
             CrossoverType::LinkwitzRiley4,
             sample_rate,
             &OptimizerConfig {

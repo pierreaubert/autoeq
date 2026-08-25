@@ -1,3 +1,33 @@
+# 0.5.63
+
+## Fixes
+
+- Canonically realize serialized RoomEQ DSP chains for CTC/replay validation,
+  including gain, polarity, delay, configured crossover family/order, mixed
+  split/merge, warped biquads, Kautz sections, and convolution sidecars; reject
+  unknown plugins and malformed band chains instead of silently assuming unity.
+- Replace positional main/sub crossover optimizer inputs with typed
+  high-pass-main and low-pass-sub roles at every bass-management call site.
+
+## QA
+
+- Keep the five-seed randomized quality fuzzer in nightly/weekly QA instead of
+  the blocking PR recipe; PR CI retains deterministic measured-mode, quick
+  safety, multi-seat, and perceptual contracts.
+- Keep quick home-cinema safety-gate expectations synchronized with their
+  nested runtime-acceptance checks so a declared safe reversion is classified
+  consistently instead of reported as `FAIL`.
+- Separate safety, functional, and quality gate purposes so only explicit
+  safety cases may accept `REVERTED`; retained-feature and quality cases now
+  fail on safe fallback.
+- Add a bounded deterministic PR contract for DSP realization, CTC replay,
+  crossover roles, registry semantics, and measured Genelec 5.1.4
+  IIR/FIR/hybrid parity with one fixed seed, while retaining the five-seed,
+  larger-budget nightly convergence distribution.
+- Wire the blocking quality/feature suites into scheduled QA, validate registry
+  runner reachability from workflows, and retarget RoomEQ mutation testing to
+  the current engine and QA ownership boundaries.
+
 # 0.5.62
 
 ## Fixes

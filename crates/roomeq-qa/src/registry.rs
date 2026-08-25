@@ -15,6 +15,20 @@ pub enum QaTier {
     Weekly,
 }
 
+/// What a QA case is allowed to prove.
+///
+/// Safety smoke cases may accept a runtime revert. Functional and quality
+/// cases must retain the requested correction; otherwise a safe fallback can
+/// conceal a missing or incorrectly realized feature.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QaGatePurpose {
+    Safety,
+    Functional,
+    #[default]
+    Quality,
+}
+
 impl QaTier {
     pub fn includes(self, candidate: Self) -> bool {
         let rank = |tier| match tier {
@@ -33,6 +47,14 @@ pub struct ScenarioExpect {
     pub max_boost_db: f64,
     #[serde(default)]
     pub allow_safe_revert: bool,
+    #[serde(default)]
+    pub gate_purpose: QaGatePurpose,
+}
+
+impl ScenarioExpect {
+    pub fn accepts_safe_revert(self) -> bool {
+        self.gate_purpose == QaGatePurpose::Safety && self.allow_safe_revert
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -139,8 +161,7 @@ pub struct ScenarioRegistry {
 }
 
 pub fn load_registry() -> Result<ScenarioRegistry> {
-    let registry: ScenarioRegistry =
-        serde_json::from_str(include_str!("registry.json"))?;
+    let registry: ScenarioRegistry = serde_json::from_str(include_str!("registry.json"))?;
     registry.validate()?;
     Ok(registry)
 }
@@ -176,9 +197,17 @@ impl ScenarioRegistry {
             {
                 bail!("RoomEQ QA registry entry '{id}' has an invalid expect block");
             }
+            if expect.allow_safe_revert != (expect.gate_purpose == QaGatePurpose::Safety) {
+                bail!(
+                    "RoomEQ QA registry entry '{id}' must allow safe reversion exactly when gate_purpose is safety"
+                );
+            }
         }
 
         for family in &self.families {
+            if family.expect.gate_purpose != QaGatePurpose::Quality {
+                bail!("RoomEQ QA family '{}' must use a quality gate", family.id);
+            }
             if family.modes.is_empty() {
                 bail!("RoomEQ QA registry family '{}' has no modes", family.id);
             }
@@ -200,6 +229,12 @@ impl ScenarioRegistry {
             }
         }
         for case in &self.home_cinema {
+            if case.expect.gate_purpose != QaGatePurpose::Functional {
+                bail!(
+                    "RoomEQ QA home-cinema case '{}' must use a functional gate",
+                    case.id
+                );
+            }
             if !matches!(case.solver.as_str(), "fem" | "fast-hybrid") {
                 bail!(
                     "RoomEQ QA registry case '{}' has unsupported solver '{}'",
@@ -234,6 +269,20 @@ impl ScenarioRegistry {
                 || expect.max_boost_db <= 0.0
             {
                 bail!("quality case '{}' has an invalid expect block", case.id);
+            }
+            if expect.allow_safe_revert != (expect.gate_purpose == QaGatePurpose::Safety) {
+                bail!(
+                    "quality case '{}' must allow safe reversion exactly when gate_purpose is safety",
+                    case.id
+                );
+            }
+            if matches!(case.kind, QualityCaseKind::CrossModeConvergence)
+                && expect.gate_purpose != QaGatePurpose::Functional
+            {
+                bail!(
+                    "cross-mode quality case '{}' must use a functional gate",
+                    case.id
+                );
             }
             if matches!(case.kind, QualityCaseKind::OptionEffect) && case.options.is_empty() {
                 bail!("quality option-effect case '{}' has no options", case.id);
@@ -528,66 +577,9 @@ mod tests {
             .filter(|(_, expect)| expect.allow_safe_revert)
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
-        assert_eq!(
-            safe_reverts,
-            [
-                "fem/small_stereo_2_0",
-                "fem/small_stereo_2_1",
-                "fem/small_stereo_2_2_mso",
-                "fem/small_stereo_2_2_cardioid",
-                "fem/medium_stereo_2_0",
-                "fem/medium_stereo_2_1",
-                "fem/medium_multi_sub_4",
-                "fem/medium_multi_seat",
-                "fem/large_stereo_2_0",
-                "fem/large_stereo_2_1",
-                "fem/large_multi_sub_4",
-                "fem/large_multi_seat_2_1",
-                "fem/medium_surround_5_0",
-                "fem/medium_surround_5_1",
-                "fem/medium_surround_5_1_4",
-                "fem/medium_surround_5_2_4_multi_seat",
-                "fem/large_surround_5_1",
-                "fem/large_surround_5_1_4",
-                "home_cinema/iir_lfe_only",
-                "home_cinema/iir_redirected_bass",
-                "home_cinema/hybrid_redirected_bass_quick",
-                "home_cinema/phase_linear_fir_redirected_bass",
-                "home_cinema/mixed_phase_redirected_bass",
-                "home_cinema/coherence_adaptive_allpass",
-                "home_cinema/all_channel_multi_seat_mso",
-                "home_cinema/sonium_5_1_2_iir_safety",
-                "home_cinema/sonium_7_1_2_linear_fir",
-                "home_cinema/sonium_7_4_4_modal_basis",
-                "home_cinema/sonium_7_1_6_kirkeby_fir",
-                "home_cinema/sonium_9_1_6_hybrid",
-                "home_cinema/sonium_9_8_6_mixed_phase",
-                "quality/workflow/stereo_20",
-                "quality/workflow/stereo_21",
-                "quality/workflow/stereo_22_mso",
-                "quality/workflow/stereo_22_cardioid",
-                "quality/workflow/stereo_22_independent",
-                "quality/workflow/home_cinema_51",
-                "quality/workflow/home_cinema_514",
-                "quality/generic/stereo_20",
-                "quality/cross_mode/stereo_20",
-                "quality/cross_mode/genelec_514",
-                "quality/option/excursion_protection",
-                "quality/option/asymmetric_loss",
-                "quality/option/psychoacoustic",
-                "quality/option/phase_alignment",
-                "quality/option/timbre_matching",
-                "quality/option/minimax",
-                "quality/option/variance_low",
-                "quality/option/variance",
-                "quality/option/production_multisub",
-                "quality/option/mixed_phase",
-                "quality/option/decomposed",
-                "quality/option/gd_mixed_phase",
-                "quality/kitchen_sink/stereo",
-                "quality/kitchen_sink/multiseat",
-                "quality/kitchen_sink/home_cinema",
-            ]
+        assert!(
+            safe_reverts.is_empty(),
+            "functional and quality registry gates must not accept safe reversion"
         );
         for runner in [
             "synthetic",

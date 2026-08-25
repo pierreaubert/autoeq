@@ -46,11 +46,18 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
-pub(super) fn run_optimization(config: &RoomConfig) -> Result<RoomOptimizationResult> {
+pub(super) fn run_optimization(
+    config: &RoomConfig,
+    seed_runs: usize,
+) -> Result<RoomOptimizationResult> {
     let id = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!("roomeq_qa_{}_{}", std::process::id(), id));
     std::fs::create_dir_all(&temp_dir)?;
-    let result = crate::optimize_room(config, SAMPLE_RATE, Some(&temp_dir));
+    let result = if seed_runs == 1 {
+        crate::optimize_room_single_seed(config, SAMPLE_RATE)
+    } else {
+        crate::optimize_room(config, SAMPLE_RATE, Some(&temp_dir))
+    };
     let _ = std::fs::remove_dir_all(&temp_dir);
     result
 }
@@ -59,6 +66,8 @@ pub(super) fn run_stereo_workflow_tests(
     name: &str,
     base_config_path: &Path,
     override_config_path: Option<&Path>,
+    maxeval: usize,
+    seed_runs: usize,
 ) -> Result<(String, Vec<TestResult>)> {
     let mut out = String::new();
     let mut results = Vec::new();
@@ -69,11 +78,11 @@ pub(super) fn run_stereo_workflow_tests(
 
     for mutation in IIR_MUTATIONS {
         let (mut config, _, _validation) = load_config(base_config_path, override_config_path)?;
-        apply_qa_overrides(&mut config, &format!("{name}:iir:{mutation}"));
+        apply_qa_overrides(&mut config, &format!("{name}:iir:{mutation}"), maxeval);
         apply_mutation(&mut config, *mutation);
 
-        let result =
-            run_optimization(&config).with_context(|| format!("{} IIR {}", name, mutation))?;
+        let result = run_optimization(&config, seed_runs)
+            .with_context(|| format!("{} IIR {}", name, mutation))?;
 
         let pre = result.combined_pre_score;
         let scorecard = compute_scorecard(&result);
@@ -115,6 +124,8 @@ pub(super) fn run_workflow_override_smoke(
     expected_mode: ProcessingMode,
     base_config_path: &Path,
     override_config_path: &Path,
+    maxeval: usize,
+    seed_runs: usize,
 ) -> Result<(String, Vec<TestResult>)> {
     let mut out = String::new();
     let (mut config, _, _validation) = load_config(base_config_path, Some(override_config_path))?;
@@ -133,8 +144,9 @@ pub(super) fn run_workflow_override_smoke(
             "{name}:workflow:{}:baseline",
             mode_name.to_ascii_lowercase()
         ),
+        maxeval,
     );
-    let result = run_optimization(&config)
+    let result = run_optimization(&config, seed_runs)
         .with_context(|| format!("{name} {mode_name} workflow baseline"))?;
     let pre = result.combined_pre_score;
     let scorecard = compute_scorecard(&result);
@@ -164,6 +176,8 @@ pub(super) fn run_generic_path_tests(
     name: &str,
     base_config_path: &Path,
     override_config_dir: &Path,
+    maxeval: usize,
+    seed_runs: usize,
 ) -> Result<(String, Vec<TestResult>)> {
     let mut out = String::new();
     let mut results = Vec::new();
@@ -226,6 +240,7 @@ pub(super) fn run_generic_path_tests(
             apply_qa_overrides(
                 &mut config,
                 &format!("{name}:generic:{mode_name}:{mutation}"),
+                maxeval,
             );
             // Generic-path cases compare processing modes and budget/filter
             // mutations. Keep their scalar objective aligned with the flat-loss
@@ -235,7 +250,7 @@ pub(super) fn run_generic_path_tests(
             config.optimizer.asymmetric_loss = false;
             apply_mutation(&mut config, *mutation);
 
-            let result = run_optimization(&config)
+            let result = run_optimization(&config, seed_runs)
                 .with_context(|| format!("{} {} generic {}", name, mode_name, mutation))?;
 
             let pre = result.combined_pre_score;
@@ -368,6 +383,8 @@ pub(super) fn run_cross_mode_convergence_tests(
     override_config_dir: &Path,
     preserve_system: bool,
     strict: bool,
+    maxeval: usize,
+    seed_runs: usize,
 ) -> Result<(String, Vec<TestResult>)> {
     let mut out = String::new();
     let mut results = Vec::new();
@@ -391,7 +408,11 @@ pub(super) fn run_cross_mode_convergence_tests(
             processing_mode.clone(),
             preserve_system,
         )?;
-        apply_qa_overrides(&mut config, &format!("{name}:cross-mode:{mode_name}"));
+        apply_qa_overrides(
+            &mut config,
+            &format!("{name}:cross-mode:{mode_name}"),
+            maxeval,
+        );
         if strict {
             // The measured 5.1.4 comparison is a deterministic realization
             // gate, not a convergence stress test. Keep it bounded so nightly
@@ -401,7 +422,7 @@ pub(super) fn run_cross_mode_convergence_tests(
             config.optimizer.population = config.optimizer.population.min(32);
         }
 
-        let result = run_optimization(&config)
+        let result = run_optimization(&config, seed_runs)
             .with_context(|| format!("{} {} cross-mode", name, mode_name))?;
 
         writeln!(
@@ -659,6 +680,8 @@ pub(super) fn run_option_effect_test(
     optim_dir: &Path,
     optim_subdir: &str,
     options: &[OptionOverride],
+    maxeval: usize,
+    seed_runs: usize,
 ) -> Result<(String, Vec<TestResult>)> {
     let mut out = String::new();
     let mut results = Vec::new();
@@ -706,7 +729,11 @@ pub(super) fn run_option_effect_test(
     // Load and run baseline (all options disabled)
     let (mut baseline_config, _, _validation) =
         load_config(&base_config_path, override_path.as_deref())?;
-    apply_qa_overrides(&mut baseline_config, &format!("{name}:option-baseline"));
+    apply_qa_overrides(
+        &mut baseline_config,
+        &format!("{name}:option-baseline"),
+        maxeval,
+    );
     for option in options {
         disable_option(&mut baseline_config, option);
     }
@@ -726,8 +753,8 @@ pub(super) fn run_option_effect_test(
         gd_profile,
     )?;
 
-    let baseline_result =
-        run_optimization(&baseline_config).with_context(|| format!("{} baseline", name))?;
+    let baseline_result = run_optimization(&baseline_config, seed_runs)
+        .with_context(|| format!("{} baseline", name))?;
 
     writeln!(
         out,
@@ -739,7 +766,11 @@ pub(super) fn run_option_effect_test(
     // Load and run with all options enabled
     let (mut option_config, _, _validation) =
         load_config(&base_config_path, override_path.as_deref())?;
-    apply_qa_overrides(&mut option_config, &format!("{name}:option-enabled"));
+    apply_qa_overrides(
+        &mut option_config,
+        &format!("{name}:option-enabled"),
+        maxeval,
+    );
     for option in options {
         apply_option_override(&mut option_config, option);
     }
@@ -759,8 +790,8 @@ pub(super) fn run_option_effect_test(
         gd_profile,
     )?;
 
-    let option_result =
-        run_optimization(&option_config).with_context(|| format!("{} with-options", name))?;
+    let option_result = run_optimization(&option_config, seed_runs)
+        .with_context(|| format!("{} with-options", name))?;
 
     writeln!(
         out,

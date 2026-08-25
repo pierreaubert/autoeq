@@ -243,7 +243,7 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
     let epa_pref = avg_epa_preference(&result);
     let dur = start.elapsed().as_millis() as u64;
     let reverted = correction_reverted(&result);
-    let allow_reverted = tc.expect.allow_safe_revert
+    let allow_reverted = tc.expect.accepts_safe_revert()
         || tc
             .home_cinema_expectations
             .as_ref()
@@ -381,6 +381,7 @@ pub fn run_regression_case(
             max_post_score: super::room_size::RoomSize::from_scenario(scenario).max_post_score(),
             max_boost_db: 12.0,
             allow_safe_revert: false,
+            gate_purpose: crate::registry::QaGatePurpose::Quality,
         },
     };
     let result = run_test_case(&test_case, maxeval);

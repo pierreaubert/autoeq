@@ -783,7 +783,8 @@ production implementation boundary.
 
 ### QA tiers and scenario registry
 
-The machine-readable QA inventory is `qa/registry/roomeq.json`. Registered
+The machine-readable QA inventory is
+`crates/roomeq-qa/src/registry.json`. Registered
 scenarios declare their configuration, solver, processing modes, execution
 tier, claimed features, and quantitative expectations. The `pr`, `nightly`,
 and `weekly` recipes select cumulative cost tiers and do not maintain separate
@@ -793,3 +794,29 @@ fallback is reported as the distinct `REVERTED` outcome and passes only when
 explicitly permitted by the registry. The full registry-driven FEM matrix and
 the retained generated-data integration matrix also run on the scheduled
 weekly workflow.
+
+Gate purpose is part of the acceptance contract. A `safety` case may accept a
+runtime `REVERTED` result only when it explicitly enables safe reversion.
+`functional` and `quality` cases must retain the requested correction; a safe
+fallback is not evidence that the processing mode or quality objective works.
+Those tiers therefore require zero unexpected reversion.
+
+`just qa-roomeq-contract-pr` runs deterministic realization, CTC replay,
+main/sub role, registry-semantics, and measured Genelec 5.1.4 cross-mode
+contracts with an explicit optimizer budget. Nightly and weekly quality runs
+use the larger convergence budget, five-seed median, and broader matrices; the
+PR contract uses one fixed seed. A reachability test
+also fails if a runner declared by the registry disappears from CI and
+scheduled workflows.
+
+The blocking `qa-roomeq-ci` companion recipe runs quick safety coverage,
+multi-seat guards, and perceptual contracts. The randomized five-seed quality
+fuzzer remains scheduled nightly/weekly so its convergence runtime and random
+case difficulty cannot stall deterministic PR feedback.
+
+Optimizer, routing, crossover, and realization changes should observe a
+48-hour pre-release stabilization window with the deterministic contract on
+every change and completed scheduled quality runs. Release reports should
+classify escaped defects as optimizer/objective, role/routing, DSP realization,
+acceptance/reporting, or automation reachability, and record unexpected
+reverts, cross-mode drift, mutation survivors, and suite runtime.

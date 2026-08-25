@@ -1,7 +1,7 @@
 use super::processing_method::ProcessingMethod;
 use super::solver::Solver;
 use super::test_case::TestCase;
-use crate::registry::{QaTier, load_registry};
+use crate::registry::{QaGatePurpose, QaTier, load_registry};
 use roomeq_engine::room_result::RoomOptimizationResult;
 use roomeq_model::{
     BassManagementReport, MultiSeatStrategy, RoomConfig, StageOutcome, StageStatus,
@@ -73,7 +73,7 @@ pub(super) fn build_home_cinema_matrix(
                 schroeder_split: runtime.schroeder_split,
                 modal_basis: runtime.modal_basis,
                 fir_phase: runtime.fir_phase.clone(),
-                allow_safe_revert: spec.expect.allow_safe_revert,
+                allow_safe_revert: spec.expect.accepts_safe_revert(),
             };
             TestCase {
                 registry_id: spec.id.clone(),
@@ -108,6 +108,10 @@ pub(super) fn build_quick_home_cinema_matrix(
             test_case.expect.improvement_min_pct = 0.01;
             test_case.expect.max_post_score = 20.0;
             test_case.expect.allow_safe_revert = true;
+            test_case.expect.gate_purpose = QaGatePurpose::Safety;
+            if let Some(expectations) = test_case.home_cinema_expectations.as_mut() {
+                expectations.allow_safe_revert = true;
+            }
             test_case
         })
         .collect()
@@ -1022,6 +1026,12 @@ mod tests {
                 .iter()
                 .all(|case| case.home_cinema_expectations.is_some())
         );
+        assert!(cases.iter().all(|case| case.expect.accepts_safe_revert()));
+        assert!(cases.iter().all(|case| {
+            case.home_cinema_expectations
+                .as_ref()
+                .is_some_and(|expectations| expectations.allow_safe_revert)
+        }));
     }
 
     #[test]

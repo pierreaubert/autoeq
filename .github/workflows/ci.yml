@@ -105,6 +105,9 @@ jobs:
       - name: Strict RoomEQ config and registry lint
         run: cargo test -p roomeq-qa strictly_deserialize --lib
 
+      - name: Run deterministic RoomEQ correctness contracts
+        run: just qa-roomeq-contract-pr
+
       - name: Run RoomEQ CI QA
         run: just qa-roomeq-ci
 

@@ -3,7 +3,7 @@ use super::is::qa_primary_score_pair;
 use super::misc::scenario_description;
 use super::solver::Solver;
 use super::test_case::TestCase;
-use crate::registry::{QaTier, ScenarioExpect, load_registry};
+use crate::registry::{QaGatePurpose, QaTier, ScenarioExpect, load_registry};
 use autoeq_optim::loss::calculate_standard_deviation_in_range;
 use autoeq_optim::loss::phase_aware::{compute_group_delay, unwrap_phase_degrees};
 use roomeq_engine::room_result::RoomOptimizationResult;
@@ -126,6 +126,7 @@ pub(super) fn build_quick_test_matrix(
         test_case.expect.improvement_min_pct = 0.01;
         test_case.expect.max_post_score = 20.0;
         test_case.expect.allow_safe_revert = true;
+        test_case.expect.gate_purpose = QaGatePurpose::Safety;
         test_case
     })
     .collect()
@@ -151,6 +152,7 @@ mod tests {
                 && case.expect.improvement_min_pct == 0.01
                 && case.expect.max_post_score == 20.0
                 && case.expect.allow_safe_revert
+                && case.expect.accepts_safe_revert()
         }));
     }
 
@@ -287,8 +289,12 @@ pub(super) fn validate_result(
                 }
             }
             ProcessingMethod::Fir => {
-                if required_stage_missing(improved, has_fir, fir_reverted, expect.allow_safe_revert)
-                {
+                if required_stage_missing(
+                    improved,
+                    has_fir,
+                    fir_reverted,
+                    expect.accepts_safe_revert(),
+                ) {
                     failures.push(format!(
                         "channel '{}': FIR mode but no retained FIR stage",
                         name
@@ -300,15 +306,19 @@ pub(super) fn validate_result(
                     improved,
                     has_biquads,
                     peq_reverted,
-                    expect.allow_safe_revert,
+                    expect.accepts_safe_revert(),
                 ) {
                     failures.push(format!(
                         "channel '{}': Mixed mode but no retained IIR stage",
                         name
                     ));
                 }
-                if required_stage_missing(improved, has_fir, fir_reverted, expect.allow_safe_revert)
-                {
+                if required_stage_missing(
+                    improved,
+                    has_fir,
+                    fir_reverted,
+                    expect.accepts_safe_revert(),
+                ) {
                     failures.push(format!(
                         "channel '{}': Mixed mode but no retained FIR stage",
                         name

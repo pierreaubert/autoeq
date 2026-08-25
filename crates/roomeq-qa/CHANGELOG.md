@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Retune the multi-seat phase-control guard with non-proportional seat responses so it verifies a genuinely beneficial all-pass solution.
 - Add strict measured Genelec cross-mode and redirected-bass metadata coverage.
 - Validate post-DSP input calibration separately from optimizer-owned route gain metadata.
 ## 0.4.53

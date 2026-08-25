@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Apply optimized phase-linear FIR polarity, honor resolved hybrid optimizers, align modeled crossover responses with configured families, realize second-order aliases, preserve parallel-driver acoustic bands and fixed-frequency pre-scores, validate mixed-phase depth lengths safely, and report home-cinema auto-type fallbacks.
 - Report delivered CTC isolation in the headline residual, preserve resolved smoothness/Schroeder precedence, use target-referenced pre-scores, and never override cuts-only low-frequency policy for target shapes.
 - Canonicalize direct single-channel objectives to the RoomEQ hybrid grid so fixed-seed filters are sampling-invariant.
 - Preserve absolute FIR target levels, full-band hybrid preference EQ, route-before-main-EQ bass taps, and single ownership of mixed-phase correction.

@@ -1,6 +1,6 @@
 [package]
 name = "roomeq-qa"
-version = "0.5.59"
+version = "0.5.60"
 edition = "2024"
 description = "RoomEQ QA scenario matrices, runners, scorecards, and command implementations"
 license = "GPL-3.0-or-later"

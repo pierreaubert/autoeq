@@ -1,3 +1,15 @@
+# 0.5.62
+
+## Fixes
+
+- Apply optimized phase-linear group-delay polarity in FIR coefficients, preserve embedded delay and polarity controls in output metadata, and use each channel's resolved optimizer in hybrid crossover processing.
+- Align modeled responses with configured and exported crossover families, realize LR12/BW2 aliases, assign parallel drivers their acoustic-band limits, seed fixed-frequency pre-scores correctly, reject invalid crossover ranges, and report unevaluated home-cinema `auto` fallback explicitly.
+- Fall back safely when mixed-phase correction-depth grids do not match instead of panicking.
+
+## QA
+
+- Retune the multi-seat phase-control guard with non-proportional seats so it exercises a genuinely beneficial all-pass solution.
+
 # 0.5.61
 
 ## Fixes

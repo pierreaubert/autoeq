@@ -199,7 +199,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "autoeq"
-version = "0.5.61"
+version = "0.5.62"
 dependencies = [
  "anyhow",
  "assert_fs",
@@ -2940,7 +2940,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-engine"
-version = "0.5.61"
+version = "0.5.62"
 dependencies = [
  "autoeq-core",
  "autoeq-fir",
@@ -2983,7 +2983,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-model"
-version = "0.5.6"
+version = "0.5.7"
 dependencies = [
  "autoeq-core",
  "clap",
@@ -2997,7 +2997,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-qa"
-version = "0.5.59"
+version = "0.5.60"
 dependencies = [
  "anyhow",
  "autoeq-measurements",
@@ -3047,7 +3047,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-workflow"
-version = "0.5.22"
+version = "0.5.23"
 dependencies = [
  "anyhow",
  "autoeq-artifacts",

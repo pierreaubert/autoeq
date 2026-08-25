@@ -656,6 +656,12 @@ mod tests {
         )
         .expect("phase-aware realized crossover sum should be available");
 
+        assert_eq!(
+            optimized.combined_curve.freq.len(),
+            optimized.combined_curve.spl.len(),
+            "optimized crossover response must contain one SPL value per frequency",
+        );
+
         let mut mirrored_highpass_sub = sub.clone();
         if optimized.sub_inverted {
             mirrored_highpass_sub

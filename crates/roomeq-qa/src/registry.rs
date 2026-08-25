@@ -527,6 +527,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn safe_revert_acceptance_requires_both_safety_purpose_and_opt_in() {
+        let expect = |gate_purpose, allow_safe_revert| ScenarioExpect {
+            improvement_min_pct: 0.0,
+            max_post_score: 0.0,
+            max_boost_db: 0.0,
+            allow_safe_revert,
+            gate_purpose,
+        };
+
+        assert!(expect(QaGatePurpose::Safety, true).accepts_safe_revert());
+        assert!(!expect(QaGatePurpose::Safety, false).accepts_safe_revert());
+        assert!(!expect(QaGatePurpose::Functional, true).accepts_safe_revert());
+        assert!(!expect(QaGatePurpose::Quality, true).accepts_safe_revert());
+    }
+
+    #[test]
     fn registry_is_valid_and_has_all_execution_tiers() {
         let registry = load_registry().unwrap();
         assert_eq!(registry.families.len(), 19);

@@ -142,7 +142,13 @@ fn plugin_chain_response<P: ConvolutionIrProvider>(
 ) -> Result<Complex64> {
     let mut response = Complex64::new(1.0, 0.0);
     let mut index = 0usize;
-    while index < plugins.len() {
+    // A serialized chain can advance at most once per plugin. Keep traversal
+    // bounded so malformed control flow fails deterministically instead of
+    // hanging DSP validation.
+    for _ in 0..plugins.len() {
+        if index >= plugins.len() {
+            break;
+        }
         let plugin = &plugins[index];
         if plugin.plugin_type == "band_split" {
             let merge_offset = plugins[index + 1..]

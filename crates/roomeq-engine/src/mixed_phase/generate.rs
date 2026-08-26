@@ -56,7 +56,7 @@ pub fn generate_excess_phase_fir_with_depth(
                 depth.len(),
                 residual_phase_deg.len()
             );
-            residual_phase_deg.iter().map(|&p| -p).collect()
+            vec![0.0; residual_phase_deg.len()]
         } else {
             residual_phase_deg
                 .iter()
@@ -221,6 +221,16 @@ pub(super) fn generate_phase_only_fir(
     let mut renorm_ir = vec![0.0; n_taps];
     for (i, val) in renorm_ir.iter_mut().enumerate() {
         *val = renorm_spectrum[i].re * inv;
+    }
+
+    // The magnitude projection redistributes energy across the time axis and
+    // can reintroduce pre-ringing. Reapply the delivery window and constraint
+    // to the coefficients that are actually exported.
+    for (sample, weight) in renorm_ir.iter_mut().zip(window.iter()) {
+        *sample *= weight;
+    }
+    if let Some(pr_config) = &config.pre_ringing {
+        math_audio_iir_fir::suppress_pre_ringing(&mut renorm_ir, pr_config, sample_rate);
     }
 
     renorm_ir

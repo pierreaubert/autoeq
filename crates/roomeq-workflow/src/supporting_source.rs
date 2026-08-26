@@ -21,10 +21,11 @@ fn spatial_variance_db_with_frequency_samples(
     source: &MeasurementSource,
     band_hz: (f64, f64),
     frequency_samples: usize,
-) -> Option<f64> {
-    let curves = load_source_individual_with_frequency_samples(source, frequency_samples).ok()?;
+) -> std::result::Result<Option<f64>, String> {
+    let curves = load_source_individual_with_frequency_samples(source, frequency_samples)
+        .map_err(|error| error.to_string())?;
     if curves.len() < 2 {
-        return None;
+        return Ok(None);
     }
     let ref_freqs = curves[0].freq.clone();
     let interpolated: Vec<Curve> = curves
@@ -38,7 +39,7 @@ fn spatial_variance_db_with_frequency_samples(
         .map(|(i, _)| i)
         .collect();
     if in_band.is_empty() {
-        return None;
+        return Ok(None);
     }
     let per_freq_std: Vec<f64> = in_band
         .iter()
@@ -50,7 +51,7 @@ fn spatial_variance_db_with_frequency_samples(
         })
         .collect();
     let (mean_std, _) = db_summary(&per_freq_std);
-    Some(mean_std)
+    Ok(Some(mean_std))
 }
 
 /// Build spatial-robustness advisories for a supporting-source measurement.
@@ -60,10 +61,11 @@ fn spatial_robustness_advisories_with_frequency_samples(
     frequency_samples: usize,
 ) -> Vec<String> {
     match spatial_variance_db_with_frequency_samples(source, band_hz, frequency_samples) {
-        Some(var_db) if var_db > 6.0 => vec!["high_spatial_variance".to_string()],
-        Some(var_db) if var_db > 3.0 => vec!["moderate_spatial_variance".to_string()],
-        Some(_) => Vec::new(),
-        None => vec!["single_position_measurement".to_string()],
+        Ok(Some(var_db)) if var_db > 6.0 => vec!["high_spatial_variance".to_string()],
+        Ok(Some(var_db)) if var_db > 3.0 => vec!["moderate_spatial_variance".to_string()],
+        Ok(Some(_)) => Vec::new(),
+        Ok(None) => vec!["single_position_measurement".to_string()],
+        Err(_) => vec!["position_load_failed".to_string()],
     }
 }
 
@@ -148,9 +150,25 @@ fn anchor_supporting_source_target_to_primary(
     let primary_level = roomeq_engine::analysis::response_metrics::mean_response_in_range(
         primary, min_freq, max_freq,
     );
-    if primary_level.is_finite() {
+    let target_level = roomeq_engine::analysis::response_metrics::mean_response_in_range(
+        target, min_freq, max_freq,
+    );
+    if primary_level.is_finite() && target_level.is_finite() && target_level.abs() <= 20.0 {
         target.spl.mapv_inplace(|level| level + primary_level);
+    } else if target_level.is_finite() {
+        log::info!(
+            "  Supporting-source target mean {:.1} dB looks absolute; keeping its level anchor",
+            target_level
+        );
     }
+}
+
+fn deployed_fir_coefficients(normalized_taps: &[f64], gain_db: f64) -> Vec<f64> {
+    let linear_gain = 10.0_f64.powf(gain_db / 20.0);
+    normalized_taps
+        .iter()
+        .map(|tap| tap * linear_gain)
+        .collect()
 }
 
 /// Compute the support output channel name from a logical role.
@@ -283,16 +301,17 @@ pub fn process_supporting_source_channel_with_frequency_samples(
     } else {
         0.0
     };
-    let (primary_chain, support_chain) = roomeq_engine::output::build_supporting_source_dsp_chains(
-        logical_role,
-        &support_name,
-        applied_delay_ms,
-        filter.normalization_gain_db,
-        &wav_relative,
-        Some(&primary),
-        Some(&support),
-        Some(&filter.constrained_target),
-    );
+    let (primary_chain, mut support_chain) =
+        roomeq_engine::output::build_supporting_source_dsp_chains(
+            logical_role,
+            &support_name,
+            applied_delay_ms,
+            filter.normalization_gain_db,
+            &wav_relative,
+            Some(&primary),
+            Some(&support),
+            Some(&filter.constrained_target),
+        );
 
     let drr_before_db = filter.drr_before_db.as_deref().map(|values| {
         let (mean, std) = db_summary(values);
@@ -316,6 +335,8 @@ pub fn process_supporting_source_channel_with_frequency_samples(
         spl: support_final_spl,
         ..Default::default()
     };
+    support_chain.final_curve = Some((&support_final_curve).into());
+    let deployed_fir_coeffs = deployed_fir_coefficients(&filter.taps, filter.normalization_gain_db);
 
     let primary_result = ChannelOptimizationResult {
         name: logical_role.to_string(),
@@ -334,7 +355,7 @@ pub fn process_supporting_source_channel_with_frequency_samples(
         initial_curve: support.clone(),
         final_curve: support_final_curve,
         biquads: Vec::new(),
-        fir_coeffs: Some(filter.taps.clone()),
+        fir_coeffs: Some(deployed_fir_coeffs),
         optimizer_evidence: Vec::new(),
     };
 
@@ -428,6 +449,21 @@ mod tests {
                 })
             ),
             "L_room"
+        );
+    }
+
+    #[test]
+    fn spatial_advisory_distinguishes_measurement_load_failure() {
+        let source = MeasurementSource::Single(autoeq_core::MeasurementSingle {
+            measurement: autoeq_core::MeasurementRef::Path(
+                "/definitely/not/a/real/supporting-source.csv".into(),
+            ),
+            speaker_name: None,
+        });
+
+        assert_eq!(
+            spatial_robustness_advisories_with_frequency_samples(&source, (20.0, 200.0), 32),
+            vec!["position_load_failed".to_string()]
         );
     }
 
@@ -574,12 +610,34 @@ mod tests {
     }
 
     #[test]
+    fn absolute_supporting_source_target_keeps_its_level_anchor() {
+        let primary = flat_curve(82.0);
+        let mut target = flat_curve(75.0);
+
+        anchor_supporting_source_target_to_primary(&mut target, &primary, 20.0, 20_000.0);
+
+        assert!(target.spl.iter().all(|level| (*level - 75.0).abs() < 1e-12));
+    }
+
+    #[test]
+    fn deployed_fir_evidence_includes_the_normalization_gain_stage() {
+        let gain_db = 20.0 * 2.0_f64.log10();
+
+        assert_eq!(
+            deployed_fir_coefficients(&[0.5, -1.0, 0.25], gain_db),
+            vec![1.0, -2.0, 0.5]
+        );
+    }
+
+    #[test]
     fn process_channel_emits_chains_results_and_report() {
+        let primary_curve = flat_curve(80.0);
+        let support_curve = flat_curve(80.0);
         let group = SupportingSourceGroup {
             name: "test".to_string(),
             speaker_name: None,
-            primary: MeasurementSource::InMemory(flat_curve(80.0)),
-            support: MeasurementSource::InMemory(flat_curve(80.0)),
+            primary: MeasurementSource::InMemory(primary_curve.clone()),
+            support: MeasurementSource::InMemory(support_curve.clone()),
             supporting_source: SupportingSourceConfig {
                 delay_ms: 3.0,
                 fir_taps: 128,
@@ -623,7 +681,12 @@ mod tests {
         assert_eq!(primary_result.name, "L");
         assert_eq!(support_result.name, "L_support");
         assert_eq!(support_result.fir_coeffs.as_ref().unwrap().len(), 128);
-
+        assert!(
+            support_chain
+                .final_curve
+                .as_ref()
+                .is_some_and(|curve| !curve.spl.is_empty())
+        );
         assert_eq!(report.primary_output, "L");
         assert_eq!(report.support_output, "L_support");
         assert_eq!(report.fir_length, 128);

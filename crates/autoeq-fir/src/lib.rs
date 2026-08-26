@@ -147,6 +147,32 @@ pub fn generate_kirkeby_correction_with_smoothing(
     correct_excess_phase: bool,
     phase_smoothing_octaves: f64,
 ) -> Vec<f64> {
+    generate_kirkeby_correction_with_smoothing_and_pre_ringing(
+        measurement,
+        target,
+        sample_rate,
+        n_taps,
+        min_freq,
+        max_freq,
+        correct_excess_phase,
+        phase_smoothing_octaves,
+        None,
+    )
+}
+
+/// Kirkeby correction variant that preserves the caller's pre-ringing policy.
+#[allow(clippy::too_many_arguments)]
+pub fn generate_kirkeby_correction_with_smoothing_and_pre_ringing(
+    measurement: &Curve,
+    target: &Curve,
+    sample_rate: f64,
+    n_taps: usize,
+    min_freq: f64,
+    max_freq: f64,
+    correct_excess_phase: bool,
+    phase_smoothing_octaves: f64,
+    pre_ringing: Option<math_audio_iir_fir::PreRingingConfig>,
+) -> Vec<f64> {
     let config = FirDesignConfig {
         n_taps,
         sample_rate,
@@ -155,6 +181,7 @@ pub fn generate_kirkeby_correction_with_smoothing(
         max_freq,
         correct_excess_phase,
         phase_smoothing_octaves,
+        pre_ringing,
         ..Default::default()
     };
 

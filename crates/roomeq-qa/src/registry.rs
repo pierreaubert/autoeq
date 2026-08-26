@@ -290,6 +290,26 @@ impl ScenarioRegistry {
             if !matches!(case.kind, QualityCaseKind::OptionEffect) && !case.options.is_empty() {
                 bail!("non-option quality case '{}' declares options", case.id);
             }
+            let has_schroeder_split = case
+                .options
+                .iter()
+                .any(|option| option == "schroeder_split");
+            let has_multi_measurement = case.options.iter().any(|option| {
+                matches!(
+                    option.as_str(),
+                    "multi_measurement_minimax"
+                        | "multi_measurement_variance_low"
+                        | "multi_measurement_variance"
+                        | "spatial_robustness"
+                        | "gd_adaptive_allpass"
+                )
+            });
+            if has_schroeder_split && has_multi_measurement {
+                bail!(
+                    "quality option-effect case '{}' combines schroeder_split with multi-measurement optimization",
+                    case.id
+                );
+            }
             if case.config_path.is_some() != case.override_dir.is_some() {
                 bail!(
                     "quality case '{}' must specify config_path and override_dir together",
@@ -618,6 +638,25 @@ mod tests {
         registry.quality_cases[0].claims = vec!["spatial_robustness".to_string()];
         let error = registry.validate().unwrap_err().to_string();
         assert!(error.contains("not activated"), "{error}");
+    }
+
+    #[test]
+    fn quality_option_cases_reject_schroeder_split_with_multi_measurement() {
+        for incompatible_option in ["multi_measurement_variance", "gd_adaptive_allpass"] {
+            let mut registry = load_registry().unwrap();
+            let case = registry
+                .quality_cases
+                .iter_mut()
+                .find(|case| case.id == "quality/option/schroeder_split")
+                .unwrap();
+            case.options.push(incompatible_option.to_string());
+
+            let error = registry.validate().unwrap_err().to_string();
+            assert!(
+                error.contains("combines schroeder_split with multi-measurement optimization"),
+                "{incompatible_option}: {error}"
+            );
+        }
     }
 
     #[test]

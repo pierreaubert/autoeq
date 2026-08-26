@@ -2,6 +2,7 @@ use super::consts::{QA_MAXEVAL, qa_seed};
 use super::metric_scorecard::MetricScorecard;
 use super::metric_scorecard::compare_scorecards;
 use super::misc::level_matched_rms_curve_difference_db;
+use super::option::isolate_schroeder_split_from_multi_measurement;
 use super::option_override::OptionOverride;
 use super::parse_maxeval;
 use super::parse_seed_runs;
@@ -11,11 +12,37 @@ use super::validate::{
     validate_target_tilt,
 };
 use roomeq_model::{
-    ChannelDspChain, Curve, OptimizationMetadata, RoomConfig, StageOutcome, StageStatus,
+    ChannelDspChain, Curve, MultiMeasurementConfig, OptimizationMetadata, RoomConfig, StageOutcome,
+    StageStatus,
 };
 use std::collections::HashMap;
 
 use roomeq_engine::room_result::{ChannelOptimizationResult, RoomOptimizationResult};
+
+#[test]
+fn schroeder_split_option_clears_inherited_multi_measurement_mode() {
+    let mut config = RoomConfig::default();
+    config.optimizer.multi_measurement = Some(MultiMeasurementConfig::default());
+    let options = [OptionOverride::SchroederSplit {
+        schroeder_freq: 300.0,
+        low_max_q: 10.0,
+        high_max_q: 1.0,
+    }];
+
+    isolate_schroeder_split_from_multi_measurement(&mut config, &options);
+
+    assert!(config.optimizer.multi_measurement.is_none());
+}
+
+#[test]
+fn unrelated_option_preserves_inherited_multi_measurement_mode() {
+    let mut config = RoomConfig::default();
+    config.optimizer.multi_measurement = Some(MultiMeasurementConfig::default());
+
+    isolate_schroeder_split_from_multi_measurement(&mut config, &[OptionOverride::AsymmetricLoss]);
+
+    assert!(config.optimizer.multi_measurement.is_some());
+}
 
 #[test]
 fn level_matched_cross_mode_rms_ignores_offset_but_detects_shape() {

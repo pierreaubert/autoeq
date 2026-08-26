@@ -1,5 +1,18 @@
 use super::group_delay_qa_profile::GroupDelayQaProfile;
 use super::option_override::OptionOverride;
+use roomeq_model::RoomConfig;
+
+pub(super) fn isolate_schroeder_split_from_multi_measurement(
+    config: &mut RoomConfig,
+    options: &[OptionOverride],
+) {
+    if options
+        .iter()
+        .any(|option| matches!(option, OptionOverride::SchroederSplit { .. }))
+    {
+        config.optimizer.multi_measurement = None;
+    }
+}
 
 pub(super) fn option_needs_multi_measurement_paths(option: &OptionOverride) -> bool {
     match option {

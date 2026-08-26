@@ -1012,7 +1012,7 @@ fn try_run_gd_opt_hybrid_mode_band_exceeds_crossover_advisory() {
 }
 
 #[test]
-fn try_run_phase_linear_fir_gd_regenerates_fir_when_coeffs_missing() {
+fn try_run_phase_linear_fir_gd_skips_missing_fir_without_regeneration() {
     let mut speakers = HashMap::new();
     speakers.insert(
         "left".to_string(),
@@ -1044,6 +1044,9 @@ fn try_run_phase_linear_fir_gd_regenerates_fir_when_coeffs_missing() {
     )
     .unwrap();
     assert!(summary.advisory.contains("success") || summary.advisory.contains("minimal"));
+    assert!(channel_results["left"].fir_coeffs.is_none());
+    assert!(channel_results["right"].fir_coeffs.is_none());
+    assert!(channel_chains.is_empty());
 }
 
 #[test]

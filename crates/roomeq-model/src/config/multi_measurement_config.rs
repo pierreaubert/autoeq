@@ -11,7 +11,9 @@ pub struct MultiMeasurementConfig {
     /// Strategy for combining per-measurement losses
     #[serde(default)]
     pub strategy: MultiMeasurementStrategy,
-    /// Weights for WeightedSum (normalized internally). Equal if omitted.
+    /// Measurement weights for WeightedSum, VariancePenalized, and
+    /// SpatialRobustness (normalized internally). Average and Minimax use
+    /// their strategy-defined equal/worst-case aggregation and ignore weights.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weights: Option<Vec<f64>>,
     /// Lambda for VariancePenalized (default 1.0). Higher = more consistent across positions.

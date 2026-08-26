@@ -200,7 +200,7 @@ pub fn optimize_group_delay_adaptive(
     let mut best_result = optimize_group_delay(channels, band, &best_config)?;
 
     // Incrementally try adding APs
-    for k in 1..=MAX_AP_BUDGET {
+    for k in 1..=config.ap_per_channel.min(MAX_AP_BUDGET) {
         let trial_config = GdOptConfig {
             ap_per_channel: k,
             ..config.clone()

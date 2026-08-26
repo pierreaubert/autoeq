@@ -96,8 +96,7 @@ pub fn compute_supporting_source_filter(
             }
         }
         taps = convolve_fir(&taps, &velvet);
-        // Truncate back to requested length (the tail is mostly velvet tail).
-        taps.truncate(config.fir_taps);
+        truncate_preserving_energy(&mut taps, config.fir_taps);
     }
 
     // 12. Keep exported convolution IRs peak-bounded, while returning the
@@ -189,7 +188,11 @@ fn constrain_target(
 
         // Precedence ceiling.
         if let Some(limit_db) = limit_at_freq(freq[i], limits) {
-            let ceiling = primary[i] + limit_db;
+            // The configured limit applies to the lagging support source, while
+            // `d_mod` is the incoherent primary+support total. Convert the
+            // support-to-primary energy ratio into the corresponding total.
+            let total_limit_db = 10.0 * (1.0 + 10.0_f64.powf(limit_db / 10.0)).log10();
+            let ceiling = primary[i] + total_limit_db;
             if d_mod[i] > ceiling {
                 d_mod[i] = ceiling;
                 hits += 1;
@@ -357,6 +360,21 @@ fn convolve_fir(a: &[f64], b: &[f64]) -> Vec<f64> {
     out
 }
 
+fn truncate_preserving_energy(taps: &mut Vec<f64>, retained_len: usize) {
+    if taps.len() <= retained_len {
+        return;
+    }
+    let full_energy = taps.iter().map(|tap| tap * tap).sum::<f64>().sqrt();
+    taps.truncate(retained_len);
+    let retained_energy = taps.iter().map(|tap| tap * tap).sum::<f64>().sqrt();
+    if full_energy > 0.0 && retained_energy > 0.0 {
+        let compensation = full_energy / retained_energy;
+        for tap in taps {
+            *tap *= compensation;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -389,9 +407,10 @@ mod tests {
         ];
         let (d_mod, hits) = constrain_target(&target, &primary, &limits, &freq);
         assert_eq!(d_mod[0], 0.0, "floor should lift -5 dB to 0 dB");
-        assert_eq!(
-            d_mod[1], 6.0,
-            "ceiling should cap 20 dB to +6 dB in the 500-20k band"
+        let expected_total_for_support_plus_6_db = 10.0 * (1.0 + 10.0_f64.powf(6.0 / 10.0)).log10();
+        assert!(
+            (d_mod[1] - expected_total_for_support_plus_6_db).abs() < 1.0e-12,
+            "total should be capped so the support itself is +6 dB"
         );
         assert_eq!(d_mod[2], 5.0, "within limits");
         assert_eq!(hits, 1);
@@ -546,6 +565,22 @@ mod tests {
             "gain stage x normalized FIR must reproduce the designed support gain; \
              worst error {worst_err_db:.3} dB (normalization_gain_db={:.2} dB)",
             result.normalization_gain_db
+        );
+    }
+
+    #[test]
+    fn velvet_convolution_truncation_preserves_designed_energy() {
+        let mut taps = vec![1.0, 1.0, 1.0, 1.0];
+        let original_energy = taps.iter().map(|tap| tap * tap).sum::<f64>().sqrt();
+
+        truncate_preserving_energy(&mut taps, 2);
+
+        let retained_energy = taps.iter().map(|tap| tap * tap).sum::<f64>().sqrt();
+        assert_eq!(taps.len(), 2);
+        assert!((retained_energy - original_energy).abs() <= 1e-12);
+        assert!(
+            taps.iter()
+                .all(|tap| (*tap - 2.0_f64.sqrt()).abs() <= 1e-12)
         );
     }
 }

@@ -232,6 +232,14 @@ pub(in super::super) fn preprocess_cardioid_with_frequency_samples(
                 .to_string(),
         });
     }
+    if rear_curve.freq.first() > front_curve.freq.first()
+        || rear_curve.freq.last() < front_curve.freq.last()
+    {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: "Cardioid rear measurement must cover the full front frequency span"
+                .to_string(),
+        });
+    }
     let rear_curve = if same_frequency_grid(&front_curve.freq, &rear_curve.freq) {
         rear_curve
     } else {
@@ -509,7 +517,7 @@ mod tests {
     fn preprocess_cardioid_interpolates_mismatched_frequency_grids() {
         let mut front = make_curve(16, 80.0, Some(0.0));
         let rear = make_curve(16, 80.0, Some(0.0));
-        front.freq = ndarray::Array1::logspace(10.0, f64::log10(25.0), f64::log10(205.0), 16);
+        front.freq = ndarray::Array1::logspace(10.0, f64::log10(25.0), f64::log10(195.0), 16);
         let config = CardioidConfig {
             name: "cardioid".to_string(),
             speaker_name: None,
@@ -531,6 +539,26 @@ mod tests {
                 .iter()
                 .all(|value| value.is_finite())
         );
+    }
+
+    #[test]
+    fn preprocess_cardioid_rejects_rear_span_extrapolation() {
+        let front = make_curve(16, 80.0, Some(0.0));
+        let mut rear = make_curve(16, 80.0, Some(0.0));
+        rear.freq = ndarray::Array1::logspace(10.0, f64::log10(25.0), f64::log10(195.0), 16);
+        let config = CardioidConfig {
+            name: "cardioid".to_string(),
+            speaker_name: None,
+            front: MeasurementSource::InMemory(front),
+            rear: MeasurementSource::InMemory(rear),
+            separation_meters: 1.0,
+        };
+
+        let error =
+            preprocess_cardioid_with_frequency_samples(&config, crate::DEFAULT_FREQUENCY_SAMPLES)
+                .err()
+                .expect("rear span must be rejected");
+        assert!(error.to_string().contains("full front frequency span"));
     }
 
     #[test]

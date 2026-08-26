@@ -218,6 +218,12 @@ Foundational papers and standards behind the algorithms in `autoeq`. Citations a
 
 ## DIN 45692 (sharpness)
 
+The DIN weighting is `g(z) = 1` through `15.8 Bark` and
+`g(z) = 0.15·exp(0.42·(z - 15.8)) + 0.85` above that boundary. The EPA
+implementation samples this function at the 24 integer Bark-band centres;
+for example, `g(16) = 1.013144334071324`, `g(20) = 1.725360055831110`, and
+`g(24) = 5.546793374446277`. Exact numerical regressions cover these samples.
+
 `loss/epa/sharpness.rs::SHARPNESS_WEIGHT` and the `S = 0.11·∑ N'(z)·g(z)·z / N_total` formulation come from DIN 45692.
 
 ```bibtex

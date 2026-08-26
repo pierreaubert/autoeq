@@ -9,7 +9,7 @@ use super::consts::MSO_OBJECTIVE_REGRESSION_TOLERANCE;
 use super::consts::SFM_MODAL_LOSS_WEIGHT;
 use super::extension::extension_preservation_penalty;
 use super::mean::mean_output_loss_penalty;
-use super::misc::variance_from_responses;
+use super::misc::weighted_variance_from_responses;
 use super::modal::modal_projection_loss;
 use super::mso_objective_context::MsoObjectiveContext;
 use super::mso_objective_context::headroom_pressure_penalty;
@@ -34,7 +34,7 @@ pub(super) fn mso_objective_breakdown(
     context: &MsoObjectiveContext,
     config: &MultiSeatConfig,
 ) -> MsoObjectiveBreakdown {
-    let seat_variance = variance_from_responses(responses);
+    let seat_variance = weighted_variance_from_responses(responses, &context.seat_weights);
     let average_flatness = average_flatness_from_responses(responses);
     let primary_seat = config.primary_seat.min(responses.len().saturating_sub(1));
     let (primary_flatness, primary_constraint) = primary_flatness_and_constraint(

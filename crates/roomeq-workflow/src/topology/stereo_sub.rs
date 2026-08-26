@@ -632,6 +632,14 @@ impl WorkflowExecutor for Stereo21Executor {
             )?;
             let mut opt_config = config.optimizer.clone();
             opt_config.max_freq = final_xo_freq - 20.0;
+            let sub_post_eq_band_empty = opt_config.max_freq <= opt_config.min_freq;
+            if sub_post_eq_band_empty {
+                log::warn!(
+                    "  Sub Post-EQ skipped: crossover {:.1} Hz leaves no optimization band above min_freq {:.1} Hz after the 20 Hz guard band",
+                    final_xo_freq,
+                    opt_config.min_freq,
+                );
+            }
             let sub_min_score = config.optimizer.min_freq.max(20.0);
             let sub_callback = workflow_progress_callback(
                 &assembly.progress_factory,
@@ -654,7 +662,9 @@ impl WorkflowExecutor for Stereo21Executor {
                 response::compute_peq_complex_response(&filters, &sub_post.freq, sample_rate);
             let sub_after_eq = response::apply_complex_response(&sub_post, &eq_resp);
             let post = compute_flat_loss(&sub_after_eq, sub_min_score, final_xo_freq);
-            if post < pre {
+            if sub_post_eq_band_empty {
+                post_eq_filters.insert(sub_role.clone(), Vec::new());
+            } else if post < pre {
                 optimizer_evidence_by_channel
                     .entry(sub_role.clone())
                     .or_default()

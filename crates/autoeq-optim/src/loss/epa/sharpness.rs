@@ -1,11 +1,38 @@
 use super::loudness::total_loudness;
 
-/// Sharpness weighting function g(z) per Bark band (DIN 45692).
-/// Bands 1-15 have weight 1.0; bands 16-24 increase linearly to emphasize
-/// high-frequency content in the sharpness calculation.
+/// Sharpness weighting function `g(z)` sampled at the 24 integer Bark-band
+/// centres, following DIN 45692:
+///
+/// `g(z) = 1` for `z <= 15.8 Bark`, otherwise
+/// `g(z) = 0.15 * exp(0.42 * (z - 15.8)) + 0.85`.
+///
+/// The values are written out so this remains a public constant and so the
+/// standard's numerical samples can be regression-tested directly.
 pub const SHARPNESS_WEIGHT: [f64; 24] = [
-    1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.2, 1.5, 1.8, 2.2,
-    2.7, 3.3, 4.0, 5.0, 6.2,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.013_144_334_071_324,
+    1.098_299_404_473_558,
+    1.227_902_147_891_757,
+    1.425_152_540_876_961,
+    1.725_360_055_831_110,
+    2.182_264_352_299_130,
+    2.877_655_126_120_436,
+    3.936_013_150_008_355,
+    5.546_793_374_446_277,
 ];
 
 /// Compute Zwicker sharpness (in acum) from specific loudness values.
@@ -92,6 +119,39 @@ mod tests {
         assert!(
             (value - 1.0).abs() <= 0.05,
             "1 kHz narrowband reference should be 1 acum, got {value}"
+        );
+    }
+
+    #[test]
+    fn din_45692_integer_bark_weight_samples_match_reference_formula() {
+        for (index, &actual) in SHARPNESS_WEIGHT.iter().enumerate() {
+            let z_bark = (index + 1) as f64;
+            let expected = if z_bark <= 15.8 {
+                1.0
+            } else {
+                0.15 * f64::exp(0.42 * (z_bark - 15.8)) + 0.85
+            };
+            assert!(
+                (actual - expected).abs() <= 1e-14,
+                "DIN 45692 g({z_bark}) expected {expected}, got {actual}"
+            );
+        }
+
+        assert!((SHARPNESS_WEIGHT[15] - 1.013_144_334_071_324).abs() <= 1e-14);
+        assert!((SHARPNESS_WEIGHT[19] - 1.725_360_055_831_110).abs() <= 1e-14);
+        assert!((SHARPNESS_WEIGHT[23] - 5.546_793_374_446_277).abs() <= 1e-14);
+    }
+
+    #[test]
+    fn top_bark_band_uses_din_exponential_weight() {
+        let mut specific = [0.0; 24];
+        specific[23] = 1.0;
+
+        let value = sharpness(&specific);
+        let expected = 0.11 * 24.0 * 5.546_793_374_446_277;
+        assert!(
+            (value - expected).abs() <= 1e-12,
+            "expected {expected}, got {value}"
         );
     }
 }

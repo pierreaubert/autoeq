@@ -99,7 +99,7 @@ pub fn detect_f3_with_reference_band(
     let target_level = reference_level - 3.0;
 
     // Search downward from the reference band for the -3dB point
-    let mut f3_hz = 20.0; // Default to 20 Hz if not found
+    let mut f3_hz = None;
 
     // Find the highest frequency below the reference band where level drops below target
     for i in (0..smoothed.freq.len()).rev() {
@@ -119,18 +119,25 @@ pub fn detect_f3_with_reference_band(
                 // Linear interpolation in log-frequency space
                 let spl_delta = spl_high - spl_low;
                 if spl_delta.abs() <= f64::EPSILON {
-                    f3_hz = f_low;
+                    f3_hz = Some(f_low);
                 } else {
                     let t = ((target_level - spl_low) / spl_delta).clamp(0.0, 1.0);
                     let log_f = f_low.log10() + t * (f_high.log10() - f_low.log10());
-                    f3_hz = 10.0_f64.powf(log_f);
+                    f3_hz = Some(10.0_f64.powf(log_f));
                 }
             } else {
-                f3_hz = smoothed.freq[i];
+                f3_hz = Some(smoothed.freq[i]);
             }
             break;
         }
     }
+
+    let f3_hz = f3_hz.ok_or_else(|| AutoeqError::InvalidMeasurement {
+        message: format!(
+            "No -3 dB rolloff found below the {:.1}-{:.1} Hz F3 reference band",
+            reference_min_hz, reference_max_hz
+        ),
+    })?;
 
     Ok(F3DetectionResult {
         f3_hz,
@@ -290,14 +297,7 @@ pub fn excursion_result_to_plugin_params(result: &ExcursionProtectionResult) -> 
     let filters: Vec<serde_json::Value> = result
         .filters
         .iter()
-        .map(|biquad| {
-            serde_json::json!({
-                "filter_type": "highpass",
-                "frequency": biquad.freq,
-                "q": biquad.q,
-                "gain_db": 0.0
-            })
-        })
+        .map(crate::output::biquad_to_json)
         .collect();
 
     serde_json::json!({
@@ -336,6 +336,27 @@ mod tests {
     }
 
     #[test]
+    fn excursion_plugin_uses_the_canonical_biquad_json_schema() {
+        let filters = generate_highpass_filters(80.0, 2, &HighpassType::Butterworth, 48_000.0);
+        let result = ExcursionProtectionResult {
+            hpf_frequency: 80.0,
+            filters,
+            f3_hz: 70.0,
+            auto_detected: true,
+        };
+
+        let params = excursion_result_to_plugin_params(&result);
+        let filter = params["filters"][0].as_object().expect("filter object");
+        assert_eq!(filter.len(), 4);
+        assert_eq!(filter["filter_type"], "highpass");
+        assert_eq!(filter["freq"], 80.0);
+        assert_eq!(filter["db_gain"], 0.0);
+        assert!(filter["q"].as_f64().is_some_and(|q| q > 0.0));
+        assert!(!filter.contains_key("type"));
+        assert!(!filter.contains_key("frequency"));
+    }
+
+    #[test]
     fn test_f3_detection() {
         let curve = create_test_curve_with_rolloff();
         let result = detect_f3(&curve, None).expect("F3 detection should succeed");
@@ -346,6 +367,18 @@ mod tests {
             "F3 should be around 60 Hz, got {:.1} Hz",
             result.f3_hz
         );
+    }
+
+    #[test]
+    fn flat_curve_reports_missing_rolloff() {
+        let curve = Curve {
+            freq: Array1::from(vec![20.0, 40.0, 80.0, 100.0, 150.0, 200.0]),
+            spl: Array1::from(vec![80.0; 6]),
+            phase: None,
+            ..Default::default()
+        };
+
+        assert!(detect_f3(&curve, None).is_err());
     }
 
     #[test]

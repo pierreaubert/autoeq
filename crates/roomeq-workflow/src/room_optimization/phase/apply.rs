@@ -108,6 +108,7 @@ pub(in super::super) fn apply_phase_alignment_delay_schedule(
     phase_alignment_results: &HashMap<String, (f64, bool, String)>,
     channel_results: &mut HashMap<String, ChannelOptimizationResult>,
     channel_chains: &mut HashMap<String, ChannelDspChain>,
+    sample_rate: f64,
 ) -> HashMap<String, f64> {
     let schedule = compute_phase_alignment_delay_schedule(phase_alignment_results);
 
@@ -135,6 +136,7 @@ pub(in super::super) fn apply_phase_alignment_delay_schedule(
                 channel_chains,
                 *delay_ms,
                 false,
+                sample_rate,
             );
             info!(
                 "  Applied {:.3} ms phase alignment delay to '{}'",
@@ -244,8 +246,12 @@ mod tests {
             ("L".to_string(), (-2.0, false, "Sub".to_string())),
             ("R".to_string(), (1.0, false, "Sub".to_string())),
         ]);
-        let schedule =
-            apply_phase_alignment_delay_schedule(&phase_results, &mut results, &mut chains);
+        let schedule = apply_phase_alignment_delay_schedule(
+            &phase_results,
+            &mut results,
+            &mut chains,
+            48_000.0,
+        );
         assert!(schedule.contains_key("Sub"));
         assert!(schedule.contains_key("R"));
         assert!(!schedule.contains_key("L"));
@@ -263,8 +269,12 @@ mod tests {
     fn apply_phase_alignment_delay_schedule_empty_results_empty_schedule() {
         let mut results = HashMap::<String, ChannelOptimizationResult>::new();
         let mut chains = HashMap::<String, ChannelDspChain>::new();
-        let schedule =
-            apply_phase_alignment_delay_schedule(&HashMap::new(), &mut results, &mut chains);
+        let schedule = apply_phase_alignment_delay_schedule(
+            &HashMap::new(),
+            &mut results,
+            &mut chains,
+            48_000.0,
+        );
         assert!(schedule.is_empty());
     }
 

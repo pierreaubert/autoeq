@@ -76,6 +76,63 @@ fn select_topology_route_home_cinema_with_sub() {
 }
 
 #[test]
+fn select_topology_route_home_cinema_keeps_mso_bass_output_on_routed_path() {
+    let mut speakers = stereo_speakers();
+    speakers.insert(
+        "center".to_string(),
+        SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
+    );
+    speakers.insert(
+        "lfe".to_string(),
+        SpeakerConfig::MultiSub(roomeq_model::MultiSubGroup {
+            name: "lfe_mso".to_string(),
+            speaker_name: None,
+            subwoofers: vec![
+                MeasurementSource::InMemory(flat_curve()),
+                MeasurementSource::InMemory(flat_curve()),
+            ],
+            allpass_optimization: false,
+        }),
+    );
+    let system = SystemConfig {
+        model: SystemModel::HomeCinema,
+        speakers: HashMap::from([
+            ("Left".to_string(), "left".to_string()),
+            ("Right".to_string(), "right".to_string()),
+            ("Center".to_string(), "center".to_string()),
+            ("LFE".to_string(), "lfe".to_string()),
+        ]),
+        subwoofers: Some(SubwooferSystemConfig {
+            config: SubwooferStrategy::Mso,
+            crossover: None,
+            mapping: [("lfe".to_string(), "Center".to_string())].into(),
+        }),
+        bass_management: None,
+        ..Default::default()
+    };
+    let mut config = base_room_config(speakers, Some(system));
+
+    let route = select_topology_route(&config, &observer_none()).unwrap();
+
+    assert_eq!(route, TopologyRoute::HomeCinema);
+
+    config.speakers.insert(
+        "left".to_string(),
+        SpeakerConfig::MultiSub(roomeq_model::MultiSubGroup {
+            name: "invalid_multidriver_main".to_string(),
+            speaker_name: None,
+            subwoofers: vec![MeasurementSource::InMemory(flat_curve())],
+            allpass_optimization: false,
+        }),
+    );
+    assert_eq!(
+        select_topology_route(&config, &observer_none()).unwrap(),
+        TopologyRoute::Generic,
+        "only the designated home-cinema bass output may bypass the generic multi-driver route"
+    );
+}
+
+#[test]
 fn select_topology_route_home_cinema_without_sub() {
     let mut speakers = stereo_speakers();
     speakers.insert(

@@ -13,6 +13,10 @@ use super::room_dimensions::RoomDimensions;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+fn default_transition_width_oct() -> f64 {
+    0.5
+}
+
 /// Serializable decomposed correction configuration for JSON config files
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DecomposedCorrectionSerdeConfig {
@@ -30,6 +34,9 @@ pub struct DecomposedCorrectionSerdeConfig {
     /// fails.
     #[serde(default = "default_decomposed_schroeder")]
     pub schroeder_freq: f64,
+    /// Width of the modal-to-statistical transition in octaves. Default: 0.5.
+    #[serde(default = "default_transition_width_oct")]
+    pub transition_width_oct: f64,
     /// Room dimensions (L × W × H in metres). When present together with
     /// a measured impulse response, enables a measurement-driven
     /// Schroeder frequency via `RoomDimensions::schroeder_frequency_with_rt60`
@@ -74,6 +81,7 @@ impl Default for DecomposedCorrectionSerdeConfig {
         Self {
             enabled: true,
             schroeder_freq: default_decomposed_schroeder(),
+            transition_width_oct: default_transition_width_oct(),
             room_dimensions: None,
             min_mode_q: default_decomposed_min_q(),
             min_mode_prominence_db: default_decomposed_prominence(),
@@ -92,6 +100,7 @@ impl Default for DecomposedCorrectionSerdeConfig {
 pub(super) fn decomposed_correction_is_default(config: &DecomposedCorrectionSerdeConfig) -> bool {
     config.enabled
         && (config.schroeder_freq - default_decomposed_schroeder()).abs() < 1e-9
+        && (config.transition_width_oct - default_transition_width_oct()).abs() < 1e-9
         && config.room_dimensions.is_none()
         && (config.min_mode_q - default_decomposed_min_q()).abs() < 1e-9
         && (config.min_mode_prominence_db - default_decomposed_prominence()).abs() < 1e-9
@@ -103,4 +112,28 @@ pub(super) fn decomposed_correction_is_default(config: &DecomposedCorrectionSerd
         && (config.fdw_min_window_ms - default_fdw_min_window_ms()).abs() < 1e-9
         && (config.fdw_max_window_ms - default_fdw_max_window_ms()).abs() < 1e-9
         && (config.fdw_smoothing_octaves - default_fdw_smoothing_octaves()).abs() < 1e-12
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transition_width_json_roundtrip_and_default_are_stable() {
+        let config: DecomposedCorrectionSerdeConfig = serde_json::from_value(serde_json::json!({
+            "transition_width_oct": 0.75
+        }))
+        .unwrap();
+        assert_eq!(config.transition_width_oct, 0.75);
+
+        let encoded = serde_json::to_value(&config).unwrap();
+        assert_eq!(encoded["transition_width_oct"], 0.75);
+        let decoded: DecomposedCorrectionSerdeConfig = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded.transition_width_oct, 0.75);
+
+        let defaulted: DecomposedCorrectionSerdeConfig =
+            serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(defaulted.transition_width_oct, 0.5);
+        assert!(decomposed_correction_is_default(&defaulted));
+    }
 }

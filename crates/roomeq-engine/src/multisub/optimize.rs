@@ -14,6 +14,10 @@ use num_complex::Complex64;
 use roomeq_model::OptimizerConfig;
 use std::error::Error;
 
+fn ordered_drivers_data(driver_measurements: Vec<DriverMeasurement>) -> DriversLossData {
+    DriversLossData::new_ordered(driver_measurements, CrossoverType::None)
+}
+
 fn curve_from_complex_sum(
     freq: Array1<f64>,
     combined: Array1<Complex64>,
@@ -131,7 +135,10 @@ pub fn optimize_multisub_detailed(
     }
 
     // Create drivers data with NO crossover filtering
-    let drivers_data = DriversLossData::new(driver_measurements, CrossoverType::None);
+    // Results are consumed positionally in the original subwoofer order.
+    // The sorting constructor can silently swap controls when measurement
+    // spans differ, so preserve the caller's semantic order here.
+    let drivers_data = ordered_drivers_data(driver_measurements);
 
     let result = if missing_phase_count == 0 {
         autoeq_optim::optimize_multisub(
@@ -231,7 +238,7 @@ pub fn optimize_multisub_with_allpass(
         );
     }
 
-    let drivers_data = DriversLossData::new(driver_measurements, CrossoverType::None);
+    let drivers_data = ordered_drivers_data(driver_measurements);
     let n_drivers = drivers_data.drivers.len();
 
     if missing_phase_count > 0 {
@@ -408,10 +415,37 @@ pub fn optimize_multisub_with_allpass(
 
 #[cfg(test)]
 mod tests {
-    use super::{optimize_multisub, optimize_multisub_detailed, optimize_multisub_with_allpass};
+    use super::{
+        optimize_multisub, optimize_multisub_detailed, optimize_multisub_with_allpass,
+        ordered_drivers_data,
+    };
     use crate::Curve;
+    use autoeq_optim::loss::DriverMeasurement;
     use ndarray::Array1;
     use roomeq_model::OptimizerConfig;
+
+    #[test]
+    fn unequal_measurement_spans_preserve_positional_sub_identity() {
+        let first = DriverMeasurement {
+            freq: Array1::from_vec(vec![40.0, 80.0, 160.0]),
+            spl: Array1::from_elem(3, 70.0),
+            phase: Some(Array1::from_elem(3, 10.0)),
+        };
+        let second = DriverMeasurement {
+            freq: Array1::from_vec(vec![20.0, 40.0, 80.0, 160.0, 320.0]),
+            spl: Array1::from_elem(5, 80.0),
+            phase: Some(Array1::from_elem(5, 20.0)),
+        };
+
+        let data = ordered_drivers_data(vec![first, second]);
+        assert_eq!(
+            data.drivers[0].freq.as_slice().unwrap(),
+            &[40.0, 80.0, 160.0]
+        );
+        assert_eq!(data.drivers[0].spl[0], 70.0);
+        assert_eq!(data.drivers[1].freq[0], 20.0);
+        assert_eq!(data.drivers[1].spl[0], 80.0);
+    }
 
     fn log_freq_grid(n: usize, lo: f64, hi: f64) -> Array1<f64> {
         Array1::from_vec(

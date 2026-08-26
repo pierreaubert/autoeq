@@ -7,7 +7,7 @@ use super::interpolate::interpolate_all_measurements;
 use super::interpolate::interpolate_curve_to_grid;
 use super::misc::single_seat_flatness;
 use super::misc::sobol_quadrature_points;
-use super::misc::{variance_from_responses, weighted_variance_from_responses};
+use super::misc::weighted_variance_from_responses;
 use super::modal::modal_basis_objective_from_responses;
 use super::modal_basis::build_modal_basis;
 use super::mso::mso_bounds;
@@ -31,7 +31,7 @@ use crate::error::{AutoeqError, Result};
 use log::{debug, info, warn};
 use ndarray::Array1;
 use num_complex::Complex64;
-use roomeq_model::{MultiSeatConfig, MultiSeatStrategy};
+use roomeq_model::{AreaPriorKind, MultiSeatConfig, MultiSeatStrategy};
 
 /// Optimize subwoofer gains and delays for minimum variance across seats
 ///
@@ -131,7 +131,6 @@ pub fn optimize_multiseat(
         eval_max,
     );
     let initial_responses = spl_from_complex_responses(&initial_complex_responses);
-    let variance_before = variance_from_responses(&initial_responses);
     let mut objective_context =
         MsoObjectiveContext::from_baseline_with_freqs(&initial_responses, Some(&freqs));
     let mut seat_weights = config
@@ -143,7 +142,7 @@ pub fn optimize_multiseat(
     if config.strategy == MultiSeatStrategy::PrimaryWithConstraints
         && config.primary_seat < seat_weights.len()
     {
-        seat_weights[config.primary_seat] *= config.primary_seat_weight.max(1.0);
+        seat_weights[config.primary_seat] *= config.primary_seat_weight.max(0.0);
     }
     for weight in &mut seat_weights {
         if !weight.is_finite() || *weight < 0.0 {
@@ -157,6 +156,8 @@ pub fn optimize_multiseat(
         }
         objective_context.seat_weights = seat_weights;
     }
+    let variance_before =
+        weighted_variance_from_responses(&initial_responses, &objective_context.seat_weights);
     let modal_basis = if config.strategy == MultiSeatStrategy::ModalBasis {
         let basis = build_modal_basis(&interpolated, &freqs, eval_min, eval_max);
         if basis.modes.is_empty() {
@@ -271,7 +272,8 @@ pub fn optimize_multiseat(
         eval_max,
     );
     let final_responses = spl_from_complex_responses(&final_complex_responses);
-    let mut variance_after = variance_from_responses(&final_responses);
+    let mut variance_after =
+        weighted_variance_from_responses(&final_responses, &objective_context.seat_weights);
     let mut objective_after = if let Some(basis) = modal_basis.as_ref() {
         modal_basis_objective_from_responses(
             &final_complex_responses,
@@ -699,6 +701,20 @@ pub fn optimize_multiseat_continuous_area(
             ),
         });
     }
+    if area_cfg
+        .bounds
+        .iter()
+        .any(|&(lo, hi)| !lo.is_finite() || !hi.is_finite() || lo >= hi)
+    {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: "continuous_area bounds must be finite and strictly increasing".into(),
+        });
+    }
+    if !area_cfg.idw_power.is_finite() || area_cfg.idw_power <= 0.0 {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: "continuous_area idw_power must be finite and positive".into(),
+        });
+    }
     if area_cfg.seat_positions.len() != measurements.num_seats {
         return Err(AutoeqError::InvalidConfiguration {
             message: format!(
@@ -720,6 +736,29 @@ pub fn optimize_multiseat_continuous_area(
                 ),
             });
         }
+        if row.iter().any(|coordinate| !coordinate.is_finite()) {
+            return Err(AutoeqError::InvalidConfiguration {
+                message: format!("continuous_area: seat_positions[{i}] must be finite"),
+            });
+        }
+    }
+    if let AreaPriorKind::Gaussian {
+        mean,
+        cov_diag,
+        truncation_sigmas,
+    } = &area_cfg.prior
+        && (mean.len() != area_cfg.dimensions
+            || cov_diag.len() != area_cfg.dimensions
+            || mean.iter().any(|value| !value.is_finite())
+            || cov_diag
+                .iter()
+                .any(|value| !value.is_finite() || *value <= 0.0)
+            || !truncation_sigmas.is_finite()
+            || *truncation_sigmas <= 0.0)
+    {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: "continuous_area Gaussian prior must have finite means, positive finite variances, and positive finite truncation".into(),
+        });
     }
 
     if config.strategy != MultiSeatStrategy::ContinuousArea {
@@ -1237,6 +1276,68 @@ mod tests {
             err.to_string().contains("seat_positions"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn continuous_area_rejects_nonfinite_geometry_prior_and_idw_parameters() {
+        let measurements = two_sub_two_seat_measurements();
+        let base = ContinuousListeningAreaConfig {
+            dimensions: 1,
+            bounds: vec![(0.0, 1.0)],
+            seat_positions: vec![vec![0.0], vec![1.0]],
+            prior: AreaPriorKind::Uniform,
+            quadrature: AreaQuadratureKind::Sobol {
+                num_points: 8,
+                seed: 0,
+            },
+            scalarisation: AreaScalarisationKind::ExpectedValue,
+            idw_power: 2.0,
+        };
+        let reject = |area: ContinuousListeningAreaConfig| {
+            let config = MultiSeatConfig {
+                enabled: true,
+                strategy: MultiSeatStrategy::ContinuousArea,
+                continuous_area: Some(area),
+                ..Default::default()
+            };
+            optimize_multiseat_continuous_area(&measurements, &config, (20.0, 120.0), 48_000.0)
+                .unwrap_err()
+                .to_string()
+        };
+
+        let mut area = base.clone();
+        area.bounds[0].1 = f64::NAN;
+        assert!(reject(area).contains("bounds must be finite"));
+
+        let mut area = base.clone();
+        area.seat_positions[1][0] = f64::INFINITY;
+        assert!(reject(area).contains("seat_positions[1] must be finite"));
+
+        let mut area = base.clone();
+        area.idw_power = 0.0;
+        assert!(reject(area).contains("idw_power must be finite and positive"));
+
+        for prior in [
+            AreaPriorKind::Gaussian {
+                mean: vec![f64::NAN],
+                cov_diag: vec![1.0],
+                truncation_sigmas: 3.0,
+            },
+            AreaPriorKind::Gaussian {
+                mean: vec![0.5],
+                cov_diag: vec![0.0],
+                truncation_sigmas: 3.0,
+            },
+            AreaPriorKind::Gaussian {
+                mean: vec![0.5],
+                cov_diag: vec![1.0],
+                truncation_sigmas: f64::NAN,
+            },
+        ] {
+            let mut area = base.clone();
+            area.prior = prior;
+            assert!(reject(area).contains("Gaussian prior must have finite means"));
+        }
     }
 
     #[test]

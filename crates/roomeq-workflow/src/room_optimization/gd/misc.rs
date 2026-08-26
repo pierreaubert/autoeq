@@ -316,7 +316,9 @@ pub(in super::super) fn apply_gd_opt_result(
             ch.final_curve =
                 roomeq_engine::response::apply_complex_response(&ch.final_curve, &response);
             if let Some(chain) = channel_chains.get_mut(name.as_str()) {
-                chain.final_curve = Some((&ch.final_curve).into());
+                let reported =
+                    reported_curve_with_user_preferences(&ch.final_curve, chain, sample_rate);
+                chain.final_curve = Some((&reported).into());
             }
         }
 

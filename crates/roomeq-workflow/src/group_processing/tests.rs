@@ -48,6 +48,39 @@ fn cardioid_rejects_missing_phase() {
 }
 
 #[test]
+fn cardioid_rejects_rear_measurement_that_does_not_cover_front_span() {
+    let front = Curve {
+        freq: array![100.0, 200.0, 400.0, 800.0],
+        spl: array![80.0, 80.0, 80.0, 80.0],
+        phase: Some(array![0.0, 0.0, 0.0, 0.0]),
+        ..Default::default()
+    };
+    let rear = Curve {
+        freq: array![200.0, 400.0],
+        spl: array![80.0, 80.0],
+        phase: Some(array![0.0, 0.0]),
+        ..Default::default()
+    };
+    let cardioid = roomeq_model::CardioidConfig {
+        name: "card".to_string(),
+        speaker_name: None,
+        front: MeasurementSource::InMemory(front),
+        rear: MeasurementSource::InMemory(rear),
+        separation_meters: 0.5,
+    };
+
+    let error = process_cardioid(
+        "LFE",
+        &cardioid,
+        &RoomConfig::default(),
+        48_000.0,
+        Path::new("."),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("full front frequency span"));
+}
+
+#[test]
 fn cardioid_flat_response_does_not_regress() {
     // Front and rear are identical flat curves with measured phase.
     // The cardioid sum will be flat-ish; global EQ should not regress it.

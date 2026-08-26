@@ -9,7 +9,7 @@ use crate::gd_opt::GdAlignmentTarget;
 #[cfg(test)]
 pub use math_audio_iir_fir::{WindowType, generate_window};
 use ndarray::Array1;
-use roomeq_model::{FirConfig, OptimizerConfig};
+use roomeq_model::{FirConfig, OptimizerConfig, PreRingingSerdeConfig};
 
 /// Assert that two floats are approximately equal
 fn assert_approx_eq(a: f64, b: f64, epsilon: f64) {
@@ -326,6 +326,91 @@ fn test_generate_fir_correction_basic() {
     );
     let coeffs = result.unwrap();
     assert_eq!(coeffs.len(), 1024);
+}
+
+#[test]
+fn kirkeby_path_forwards_the_configured_pre_ringing_policy() {
+    let freq = Array1::from(vec![20.0, 100.0, 500.0, 1_000.0, 5_000.0, 20_000.0]);
+    let measurement = Curve {
+        spl: Array1::from(vec![75.0, 82.0, 80.0, 78.0, 72.0, 65.0]),
+        freq: freq.clone(),
+        ..Curve::default()
+    };
+    let target = Curve {
+        freq,
+        spl: Array1::from_elem(6, 80.0),
+        ..Curve::default()
+    };
+    let policy = PreRingingSerdeConfig {
+        threshold_db: -40.0,
+        max_time_s: 0.0,
+    };
+    let config = OptimizerConfig {
+        min_freq: 20.0,
+        max_freq: 1_000.0,
+        fir: Some(FirConfig {
+            taps: 2_048,
+            phase: "kirkeby".to_string(),
+            correct_excess_phase: false,
+            phase_smoothing: 0.0,
+            pre_ringing: Some(policy.clone()),
+            ..FirConfig::default()
+        }),
+        ..OptimizerConfig::default()
+    };
+
+    let actual = generate_fir_correction_prepared(&measurement, &config, &target, 48_000.0)
+        .expect("Kirkeby correction");
+    let expected = autoeq_fir::generate_kirkeby_correction_with_smoothing_and_pre_ringing(
+        &measurement,
+        &target,
+        48_000.0,
+        2_048,
+        20.0,
+        1_000.0,
+        false,
+        0.0,
+        Some(math_audio_iir_fir::PreRingingConfig {
+            threshold_db: policy.threshold_db,
+            max_time_s: policy.max_time_s,
+        }),
+    );
+    let without_policy = autoeq_fir::generate_kirkeby_correction_with_smoothing(
+        &measurement,
+        &target,
+        48_000.0,
+        2_048,
+        20.0,
+        1_000.0,
+        false,
+        0.0,
+    );
+
+    assert_eq!(actual, expected);
+    let policy_effect = actual
+        .iter()
+        .zip(without_policy.iter())
+        .map(|(left, right)| (left - right).abs())
+        .sum::<f64>();
+    let main_tap = without_policy
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| left.abs().total_cmp(&right.abs()))
+        .map(|(index, _)| index)
+        .unwrap();
+    assert!(
+        policy_effect > 1e-6,
+        "pre-ringing policy must affect the delivered FIR (main tap {main_tap}, pre-energy {}, post-energy {}, main {})",
+        without_policy[..main_tap]
+            .iter()
+            .map(|sample| sample * sample)
+            .sum::<f64>(),
+        without_policy[main_tap + 1..]
+            .iter()
+            .map(|sample| sample * sample)
+            .sum::<f64>(),
+        without_policy[main_tap]
+    );
 }
 
 #[test]

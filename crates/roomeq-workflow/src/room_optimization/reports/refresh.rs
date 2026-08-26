@@ -70,7 +70,12 @@ pub(in super::super) fn refresh_final_reports(
             ch_result.post_score,
         );
         if let Some(chain) = result.channels.get_mut(&ch_result.name) {
-            chain.final_curve = Some((&ch_result.final_curve).into());
+            let reported = super::super::reported_curve_with_user_preferences(
+                &ch_result.final_curve,
+                chain,
+                sample_rate,
+            );
+            chain.final_curve = Some((&reported).into());
         }
     }
 
@@ -468,8 +473,8 @@ mod routing_basis_tests {
         chain.plugins = vec![roomeq_model::PluginConfigWrapper {
             plugin_type: "eq".to_string(),
             parameters: serde_json::json!({
-                "label": "excursion_protection",
-                "filters": [{"filter_type": "highpass", "freq": 80.0, "q": 0.707}],
+            "label": "excursion_protection",
+                "filters": [{"filter_type": "highpass", "freq": 80.0, "q": 0.707, "db_gain": 0.0}],
             }),
         }];
         let routed = crate::ctc::apply_channel_dsp_chain_to_curve(

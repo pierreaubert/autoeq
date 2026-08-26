@@ -1410,6 +1410,14 @@ pub fn process_cardioid_with_callback(
                 .to_string(),
         });
     }
+    if rear_curve.freq.first() > front_curve.freq.first()
+        || rear_curve.freq.last() < front_curve.freq.last()
+    {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: "Cardioid rear measurement must cover the full front frequency span"
+                .to_string(),
+        });
+    }
     let rear_curve = if roomeq_analysis::frequency_grid::same_frequency_grid(
         &front_curve.freq,
         &rear_curve.freq,

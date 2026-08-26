@@ -157,6 +157,7 @@ fn optimize_kautz_modal(
         .map(
             |config| roomeq_analysis::impulse_analysis::DecomposedCorrectionConfig {
                 schroeder_freq: config.schroeder_freq,
+                transition_width_oct: config.transition_width_oct,
                 min_mode_q: config.min_mode_q,
                 min_mode_prominence_db: config.min_mode_prominence_db,
                 mode_correction_weight: config.mode_correction_weight,

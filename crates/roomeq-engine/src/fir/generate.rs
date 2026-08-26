@@ -111,7 +111,15 @@ pub fn generate_fir_correction_prepared(
 
     if fir_config.phase.to_lowercase() == "kirkeby" {
         // Use Kirkeby regularized inversion with optional excess phase correction
-        let coeffs = autoeq_fir::generate_kirkeby_correction_with_smoothing(
+        let pre_ringing =
+            fir_config
+                .pre_ringing
+                .as_ref()
+                .map(|pr| math_audio_iir_fir::PreRingingConfig {
+                    threshold_db: pr.threshold_db,
+                    max_time_s: pr.max_time_s,
+                });
+        let coeffs = autoeq_fir::generate_kirkeby_correction_with_smoothing_and_pre_ringing(
             measurement,
             target_curve,
             sample_rate,
@@ -120,6 +128,7 @@ pub fn generate_fir_correction_prepared(
             config.max_freq,
             fir_config.correct_excess_phase,
             fir_config.phase_smoothing,
+            pre_ringing,
         );
         Ok(coeffs)
     } else {

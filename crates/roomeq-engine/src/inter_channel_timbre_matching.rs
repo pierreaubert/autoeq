@@ -10,6 +10,7 @@
 use crate::Curve;
 use crate::error::{AutoeqError, Result};
 use log::info;
+use roomeq_model::home_cinema::role_for_channel;
 use std::collections::HashMap;
 
 use crate::spectral_align::{
@@ -100,6 +101,15 @@ pub fn compute_inter_channel_timbre_matching_with_threshold(
             ),
         });
     }
+    let reference_role = role_for_channel(reference_channel);
+    if reference_role.is_height() || reference_role.is_sub_or_lfe() {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "Timbre-matching reference channel '{reference_channel}' must be a bed-layer or full-range channel"
+            ),
+        });
+    }
+
     let reference_curve = corrected_curves.get(reference_channel).ok_or_else(|| {
         AutoeqError::InvalidConfiguration {
             message: format!(
@@ -402,6 +412,18 @@ mod tests {
             result.is_err(),
             "Should error when reference channel not found"
         );
+    }
+
+    #[test]
+    fn subwoofer_reference_is_rejected() {
+        let curves = HashMap::from([
+            ("L".to_string(), make_curve(|_| 0.0)),
+            ("Sub".to_string(), make_curve(|_| 0.0)),
+        ]);
+
+        let error =
+            compute_inter_channel_timbre_matching(&curves, "Sub", SR, 20.0, 20_000.0).unwrap_err();
+        assert!(error.to_string().contains("bed-layer or full-range"));
     }
 
     #[test]

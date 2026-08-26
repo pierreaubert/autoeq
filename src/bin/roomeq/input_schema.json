@@ -1364,6 +1364,12 @@
           "description": "Correction weight for steady-state above Schroeder (0.0-1.0). Default: 0.4",
           "format": "double",
           "type": "number"
+        },
+        "transition_width_oct": {
+          "default": 0.5,
+          "description": "Width of the modal-to-statistical transition in octaves. Default: 0.5.",
+          "format": "double",
+          "type": "number"
         }
       },
       "type": "object"
@@ -2268,7 +2274,7 @@
           "type": "number"
         },
         "weights": {
-          "description": "Weights for WeightedSum (normalized internally). Equal if omitted.",
+          "description": "Measurement weights for WeightedSum, VariancePenalized, and\nSpatialRobustness (normalized internally). Average and Minimax use\ntheir strategy-defined equal/worst-case aggregation and ignore weights.",
           "items": {
             "format": "double",
             "type": "number"

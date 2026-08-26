@@ -82,7 +82,7 @@ pub(super) fn compute_sum_gd(
         } else if bi > 0 {
             (band_indices[bi - 1], idx)
         } else {
-            gd_ms.push(0.0);
+            gd_ms.push(f64::NAN);
             continue;
         };
 
@@ -126,7 +126,10 @@ pub(super) fn compute_sum_gd(
             guarded_bins += 1;
             guarded_first_freq_hz.get_or_insert(f0);
             guarded_min_ratio = guarded_min_ratio.min(ratio0.min(ratio1));
-            gd_ms.push(0.0);
+            // The phase of a cancelled complex sum is undefined. Mark this
+            // bin invalid so downstream median/RMS statistics exclude it
+            // instead of treating the cancellation as a real zero-delay bin.
+            gd_ms.push(f64::NAN);
             continue;
         }
         let phase0 = sum0.arg();
@@ -178,13 +181,23 @@ pub(super) fn compute_sum_gd_rms(
         .collect();
 
     // Target: coherence-weighted median GD (flattest achievable reference per §3.1)
-    let target = weighted_median(&gd, &weights);
+    let valid: Vec<(f64, f64)> = gd
+        .iter()
+        .copied()
+        .zip(weights.iter().copied())
+        .filter(|(group_delay, weight)| group_delay.is_finite() && weight.is_finite())
+        .collect();
+    if valid.is_empty() {
+        return 0.0;
+    }
+    let valid_gd: Vec<f64> = valid.iter().map(|(group_delay, _)| *group_delay).collect();
+    let valid_weights: Vec<f64> = valid.iter().map(|(_, weight)| *weight).collect();
+    let target = weighted_median(&valid_gd, &valid_weights);
 
     // Weighted RMS deviation from target
     let mut weighted_sum = 0.0;
     let mut weight_total = 0.0;
-    for (i, &g) in gd.iter().enumerate() {
-        let w = weights[i];
+    for (&g, &w) in valid_gd.iter().zip(valid_weights.iter()) {
         let dev = g - target;
         weighted_sum += w * dev * dev;
         weight_total += w;

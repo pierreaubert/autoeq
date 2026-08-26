@@ -103,6 +103,25 @@ impl<const D: usize> ListeningArea<D> {
                 ),
             });
         }
+        if positions
+            .iter()
+            .flat_map(|position| position.iter())
+            .any(|coordinate| !coordinate.is_finite())
+        {
+            return Err(AutoeqError::InvalidConfiguration {
+                message: "ListeningArea calibration positions must be finite".into(),
+            });
+        }
+        if !config.idw_power.is_finite() || config.idw_power <= 0.0 {
+            return Err(AutoeqError::InvalidConfiguration {
+                message: "ListeningArea idw_power must be finite and positive".into(),
+            });
+        }
+        if !config.epsilon.is_finite() || config.epsilon < 0.0 {
+            return Err(AutoeqError::InvalidConfiguration {
+                message: "ListeningArea epsilon must be finite and non-negative".into(),
+            });
+        }
 
         // Validate all subs have the same number of positions and that all
         // curves carry phase data and share a frequency grid.
@@ -284,7 +303,7 @@ impl<const D: usize> ListeningArea<D> {
         }
 
         let total: f64 = weights.iter().sum();
-        if total <= 0.0 {
+        if !total.is_finite() || total <= 0.0 {
             // Defensive: fall back to uniform weights if something pathological.
             return vec![1.0 / self.num_positions as f64; self.num_positions];
         }
@@ -366,6 +385,41 @@ mod tests {
         assert!(mid[0].spl[0] > 70.0 && mid[0].spl[0] < 90.0);
         // With IDW power=2 and equal distance, midpoint is the arithmetic mean.
         assert!((mid[0].spl[0] - 80.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn rejects_nonfinite_positions_and_nonpositive_idw_power() {
+        let curve = make_curve(vec![100.0, 200.0], vec![80.0, 80.0], vec![0.0, 0.0]);
+
+        let nonfinite_position = ListeningArea::<1>::new(
+            vec![[f64::NAN]],
+            vec![vec![curve.clone()]],
+            ListeningAreaInterpolatorConfig::default(),
+        )
+        .unwrap_err();
+        assert!(
+            nonfinite_position
+                .to_string()
+                .contains("positions must be finite")
+        );
+
+        for idw_power in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let error = ListeningArea::<1>::new(
+                vec![[0.0]],
+                vec![vec![curve.clone()]],
+                ListeningAreaInterpolatorConfig {
+                    idw_power,
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("idw_power must be finite and positive"),
+                "unexpected error for idw_power={idw_power}: {error}"
+            );
+        }
     }
 
     #[test]

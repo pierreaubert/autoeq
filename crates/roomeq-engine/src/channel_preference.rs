@@ -90,11 +90,11 @@ pub(crate) fn build_preference_filters(
     }
     if !role.is_sub_or_lfe() && role_targets.cinema_x_curve_enabled {
         let start = role_targets.cinema_x_curve_start_hz.max(20.0);
-        push_shelf(
+        push_high_frequency_slope(
             &mut filters,
-            BiquadFilterType::Highshelf,
             start,
-            role_targets.cinema_x_curve_db_per_octave * (20_000.0 / start).log2(),
+            20_000.0,
+            role_targets.cinema_x_curve_db_per_octave,
             sample_rate,
         );
     }
@@ -103,10 +103,10 @@ pub(crate) fn build_preference_filters(
         && distance > role_targets.cinema_reference_distance_m
         && role_targets.cinema_reference_distance_m > 0.0
     {
-        push_shelf(
+        push_high_frequency_slope(
             &mut filters,
-            BiquadFilterType::Highshelf,
             role_targets.cinema_x_curve_start_hz,
+            20_000.0,
             -role_targets.distance_treble_rolloff_db_per_doubling.abs()
                 * (distance / role_targets.cinema_reference_distance_m).log2(),
             sample_rate,
@@ -133,6 +133,39 @@ fn push_tilt(filters: &mut Vec<Biquad>, slope_db_per_octave: f64, sample_rate: f
         edge_gain,
         sample_rate,
     );
+}
+
+fn push_high_frequency_slope(
+    filters: &mut Vec<Biquad>,
+    start_hz: f64,
+    end_hz: f64,
+    slope_db_per_octave: f64,
+    sample_rate: f64,
+) {
+    if !start_hz.is_finite()
+        || !end_hz.is_finite()
+        || !slope_db_per_octave.is_finite()
+        || start_hz <= 0.0
+        || end_hz <= start_hz
+        || slope_db_per_octave.abs() <= 1e-6
+    {
+        return;
+    }
+
+    let total_octaves = (end_hz / start_hz).log2();
+    let mut octave_offset = 0.0;
+    while octave_offset < total_octaves {
+        let width_oct = (total_octaves - octave_offset).min(1.0);
+        let center_hz = start_hz * 2.0_f64.powf(octave_offset + 0.5 * width_oct);
+        push_shelf(
+            filters,
+            BiquadFilterType::Highshelf,
+            center_hz,
+            slope_db_per_octave * width_oct,
+            sample_rate,
+        );
+        octave_offset += width_oct;
+    }
 }
 
 fn push_shelf(
@@ -219,13 +252,42 @@ mod tests {
         // Surround/height channels get tilt, their role shelf, X-curve, and
         // distance rolloff. Sub/LFE channels get tilt and their bass shelf but
         // intentionally exclude the two cinema treble contours.
-        assert_eq!(build_preference_filters("SL", &config, 48_000.0).len(), 5);
-        assert_eq!(build_preference_filters("TFL", &config, 48_000.0).len(), 5);
+        assert_eq!(build_preference_filters("SL", &config, 48_000.0).len(), 11);
+        assert_eq!(build_preference_filters("TFL", &config, 48_000.0).len(), 11);
         assert_eq!(build_preference_filters("Sub", &config, 48_000.0).len(), 3);
         assert_eq!(build_preference_filters("LFE", &config, 48_000.0).len(), 3);
 
         // Unknown non-bass roles have no role shelf but still receive the two
         // explicitly requested cinema treble contours.
-        assert_eq!(build_preference_filters("Aux", &config, 48_000.0).len(), 2);
+        assert_eq!(build_preference_filters("Aux", &config, 48_000.0).len(), 8);
+    }
+
+    #[test]
+    fn cinema_x_curve_tracks_the_requested_octave_slope() {
+        let mut config = RoomConfig::default();
+        config.optimizer.target_response = Some(TargetResponseConfig {
+            role_targets: Some(RoleTargetConfig {
+                cinema_x_curve_enabled: true,
+                cinema_x_curve_db_per_octave: -1.0,
+                cinema_x_curve_start_hz: 2_000.0,
+                ..RoleTargetConfig::default()
+            }),
+            ..TargetResponseConfig::default()
+        });
+
+        let filters = build_preference_filters("L", &config, 48_000.0);
+        let frequencies = ndarray::array![2_000.0, 4_000.0, 8_000.0, 16_000.0];
+        let response =
+            autoeq_core::response::compute_peq_complex_response(&filters, &frequencies, 48_000.0);
+        let response_db = response
+            .iter()
+            .map(|value| 20.0 * value.norm().max(1.0e-12).log10())
+            .collect::<Vec<_>>();
+        let three_octave_drop = response_db[3] - response_db[0];
+
+        assert!(
+            (-3.8..=-2.2).contains(&three_octave_drop),
+            "expected about -3 dB from 2 to 16 kHz, got {three_octave_drop:.2} dB"
+        );
     }
 }

@@ -11,10 +11,11 @@ pub(in super::super) fn apply_phase_only_adjustment_to_reported_curve(
         return;
     }
 
-    let base_phase = curve
-        .phase
-        .clone()
-        .unwrap_or_else(|| ndarray::Array1::zeros(curve.freq.len()));
+    let Some(base_phase) = curve.phase.clone() else {
+        // A reported delay must not manufacture phase provenance. Downstream
+        // phase-aware stages may only run on genuinely measured phase.
+        return;
+    };
     let inversion_phase = if invert_polarity { 180.0 } else { 0.0 };
     let delay_s = delay_ms / 1000.0;
 
@@ -106,10 +107,22 @@ pub(in super::super) fn compute_phase_alignment_delay_schedule(
             .push((sub_name.clone(), -*relative_delay_ms));
     }
 
+    // HashMap iteration order is intentionally unspecified. Canonicalize each
+    // adjacency list so conflicting constraint consensus is reproducible.
+    for neighbors in graph.values_mut() {
+        neighbors.sort_by(|(left_name, left_delta), (right_name, right_delta)| {
+            left_name
+                .cmp(right_name)
+                .then_with(|| left_delta.total_cmp(right_delta))
+        });
+    }
+
     let mut raw_offsets: HashMap<String, f64> = HashMap::new();
     let mut schedule: HashMap<String, f64> = HashMap::new();
 
-    for start in graph.keys() {
+    let mut starts: Vec<_> = graph.keys().cloned().collect();
+    starts.sort();
+    for start in &starts {
         if raw_offsets.contains_key(start) {
             continue;
         }
@@ -195,6 +208,25 @@ mod tests {
         );
     }
 
+    #[test]
+    fn phase_alignment_schedule_is_independent_of_hashmap_insertion_order() {
+        let state = std::collections::hash_map::RandomState::new();
+        let mut forward = HashMap::with_hasher(state.clone());
+        forward.insert("A".to_string(), (0.0, false, "B".to_string()));
+        forward.insert("B".to_string(), (0.0, false, "C".to_string()));
+        forward.insert("C".to_string(), (5.0, false, "A".to_string()));
+
+        let mut reverse = HashMap::with_hasher(state);
+        reverse.insert("C".to_string(), (5.0, false, "A".to_string()));
+        reverse.insert("B".to_string(), (0.0, false, "C".to_string()));
+        reverse.insert("A".to_string(), (0.0, false, "B".to_string()));
+
+        assert_eq!(
+            super::super::compute_phase_alignment_delay_schedule(&forward),
+            super::super::compute_phase_alignment_delay_schedule(&reverse)
+        );
+    }
+
     fn assert_close(a: f64, b: f64) {
         assert!(
             (a - b).abs() < 0.01,
@@ -226,6 +258,22 @@ mod tests {
         let phase = curve.phase.unwrap();
         // 1 ms at 100 Hz -> -36 deg, plus 180 inversion
         assert!((phase[0] - (180.0 - 36.0)).abs() < 1.0);
+    }
+
+    #[test]
+    fn phase_only_adjustment_does_not_manufacture_phase_provenance() {
+        use ndarray::Array1;
+        let mut curve = roomeq_model::Curve {
+            freq: Array1::from_vec(vec![100.0, 200.0]),
+            spl: Array1::from_vec(vec![80.0, 81.0]),
+            phase: None,
+            ..Default::default()
+        };
+
+        super::super::apply_phase_only_adjustment_to_reported_curve(&mut curve, 2.0, true);
+
+        assert!(curve.phase.is_none());
+        assert_eq!(curve.spl, Array1::from_vec(vec![80.0, 81.0]));
     }
 
     #[test]

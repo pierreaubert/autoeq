@@ -213,8 +213,20 @@ fn select_topology_route(
         return Ok(TopologyRoute::Generic);
     };
 
-    // Multi-driver groups use the generic topology-aware path.
-    let has_group = sys.speakers.values().any(|key| {
+    // Multi-driver main channels use the generic topology-aware path.  The
+    // home-cinema executor owns its designated bass output and explicitly
+    // supports MultiSub/MSO, cardioid, and DBA preprocessing; treating that
+    // output as an unsupported main group silently bypasses routed bass
+    // management and leaves the published routing graph unrealized.
+    let home_cinema_bass_output = (sys.model == SystemModel::HomeCinema)
+        .then(|| roomeq_engine::home_cinema::bass_output_role(config, sys));
+    let has_group = sys.speakers.iter().any(|(role, key)| {
+        if home_cinema_bass_output
+            .as_ref()
+            .is_some_and(|bass_output| role == bass_output)
+        {
+            return false;
+        }
         matches!(
             config.speakers.get(key),
             Some(
@@ -653,6 +665,74 @@ fn optimize_room_impl_with_frequency_samples(
     Ok(result)
 }
 
+fn shared_alignment_fit_band(
+    config: &RoomConfig,
+    corrected_curves: &HashMap<String, Curve>,
+) -> (f64, f64) {
+    // Height/timbre fitting compares full-range channels. Including the routed
+    // subwoofer band makes the intersection collapse at the crossover, which
+    // triggers the full-band fallback and reintroduces intentional rolloff.
+    let (min_freq, max_freq) = corrected_curves
+        .keys()
+        .filter(|channel_name| !is_subwoofer_channel(config, channel_name))
+        .fold(
+            (config.optimizer.min_freq, config.optimizer.max_freq),
+            |(shared_min, shared_max), channel_name| {
+                let (channel_min, channel_max) =
+                    final_score_band_for_channel(config, channel_name, None);
+                (shared_min.max(channel_min), shared_max.min(channel_max))
+            },
+        );
+
+    if max_freq > min_freq {
+        (min_freq, max_freq)
+    } else {
+        (config.optimizer.min_freq, config.optimizer.max_freq)
+    }
+}
+
+fn reported_curve_with_user_preferences(
+    base_curve: &Curve,
+    chain: &ChannelDspChain,
+    sample_rate: f64,
+) -> Curve {
+    let preference_plugins = chain
+        .plugins
+        .iter()
+        .filter(|plugin| {
+            plugin
+                .parameters
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                == Some("user_preference")
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if preference_plugins.is_empty() {
+        return base_curve.clone();
+    }
+
+    let mut preference_chain = chain.clone();
+    preference_chain.plugins = preference_plugins;
+    let mut no_convolution = roomeq_engine::dsp_realization::NoConvolutionIr;
+    match roomeq_engine::dsp_realization::RealizedDsp::new(
+        &preference_chain,
+        sample_rate,
+        &mut no_convolution,
+    )
+    .and_then(|mut realized| realized.apply_to_curve(base_curve))
+    {
+        Ok(curve) => curve,
+        Err(error) => {
+            warn!(
+                "Could not include user-preference filters in reported curve for '{}': {}",
+                chain.channel, error
+            );
+            base_curve.clone()
+        }
+    }
+}
+
 fn apply_inter_channel_timbre_matching_stage(
     config: &RoomConfig,
     sample_rate: f64,
@@ -669,14 +749,15 @@ fn apply_inter_channel_timbre_matching_stage(
         .filter(|(name, _)| !is_subwoofer_channel(config, name))
         .map(|(name, result)| (name.clone(), result.final_curve.clone()))
         .collect();
+    let (fit_min_freq, fit_max_freq) = shared_alignment_fit_band(config, &corrected_curves);
 
     Some(
         match roomeq_engine::inter_channel_timbre_matching::compute_inter_channel_timbre_matching_with_threshold(
             &corrected_curves,
             &timbre_config.reference_channel,
             sample_rate,
-            config.optimizer.min_freq,
-            config.optimizer.max_freq,
+            fit_min_freq,
+            fit_max_freq,
             timbre_config.min_improvement_db,
         ) {
             Ok(timbre_results) => {
@@ -723,9 +804,10 @@ fn apply_inter_channel_timbre_matching_stage(
                                 channel_name,
                                 channel_results,
                                 channel_chains,
-                                alignment.flat_gain_db,
-                                false,
-                            );
+                alignment.flat_gain_db,
+                false,
+                sample_rate,
+            );
                         }
                     }
                 }
@@ -820,6 +902,7 @@ fn assemble_workflow_result_with_frequency_samples(
                     &mut result.channels,
                     *delay_ms,
                     false,
+                    sample_rate,
                 );
                 workflow_refresh_needed = true;
             }
@@ -829,12 +912,15 @@ fn assemble_workflow_result_with_frequency_samples(
     // Topology executors own crossover/routing, but sub-main phase alignment
     // remains a final-channel operation. Run the same optimizer used by the
     // generic route after their chains have been assembled.
-    if apply_topology_phase_alignment(
-        config,
-        &mut result.channel_results,
-        &mut result.channels,
-        observer_shared,
-    )? {
+    if !should_run_standalone_phase_correction(config)
+        && apply_topology_phase_alignment(
+            config,
+            &mut result.channel_results,
+            &mut result.channels,
+            observer_shared,
+            sample_rate,
+        )?
+    {
         workflow_refresh_needed = true;
     }
 
@@ -1101,6 +1187,18 @@ fn assemble_workflow_result_with_frequency_samples(
             )
             .with_overall_progress(0.96),
         )?;
+    }
+
+    if should_run_standalone_phase_correction(config)
+        && apply_topology_phase_alignment(
+            config,
+            &mut result.channel_results,
+            &mut result.channels,
+            observer_shared,
+            sample_rate,
+        )?
+    {
+        workflow_refresh_needed = true;
     }
 
     if config
@@ -1477,6 +1575,7 @@ fn apply_topology_phase_alignment(
     channel_results: &mut HashMap<String, roomeq_engine::room_result::ChannelOptimizationResult>,
     channel_chains: &mut HashMap<String, ChannelDspChain>,
     observer_shared: &SharedPipelineObserver,
+    sample_rate: f64,
 ) -> Result<bool> {
     let Some(phase_config) = config
         .optimizer
@@ -1535,10 +1634,17 @@ fn apply_topology_phase_alignment(
             chain
                 .plugins
                 .insert(0, output::create_gain_plugin_with_invert(0.0, true));
-            sync_reported_phase_adjustment(main_name, channel_results, channel_chains, 0.0, true);
+            sync_reported_phase_adjustment(
+                main_name,
+                channel_results,
+                channel_chains,
+                0.0,
+                true,
+                sample_rate,
+            );
         }
     }
-    apply_phase_alignment_delay_schedule(&results, channel_results, channel_chains);
+    apply_phase_alignment_delay_schedule(&results, channel_results, channel_chains, sample_rate);
     if !results.is_empty() {
         emit_pipeline_event(
             observer_shared,
@@ -1585,14 +1691,15 @@ fn apply_topology_height_alignment_with_frequency_samples(
         }
     }
     let corrected_curves = collect_current_final_curves(&result.channel_results);
+    let (fit_min_freq, fit_max_freq) = shared_alignment_fit_band(config, &corrected_curves);
     let mut height_results =
         match roomeq_engine::height_channel_alignment::compute_height_channel_alignment_with_coherence_threshold(
             &corrected_curves,
             &channel_arrivals,
             height_config,
             sample_rate,
-            config.optimizer.min_freq,
-            config.optimizer.max_freq,
+            fit_min_freq,
+            fit_max_freq,
             config
                 .recording_config
                 .as_ref()
@@ -1646,6 +1753,7 @@ fn apply_topology_height_alignment_with_frequency_samples(
                     &mut result.channels,
                     alignment.flat_gain_db,
                     false,
+                    sample_rate,
                 );
             }
             applied = true;
@@ -1667,6 +1775,7 @@ fn apply_topology_height_alignment_with_frequency_samples(
                 &mut result.channels,
                 height_result.delay_ms,
                 false,
+                sample_rate,
             );
             applied = true;
         }
@@ -1854,6 +1963,7 @@ fn assemble_generic_result_with_frequency_samples(
                     &mut channel_chains,
                     *delay_ms,
                     false,
+                    sample_rate,
                 );
                 info!(
                     "  Channel '{}': added {:.3} ms delay for time alignment",
@@ -2018,6 +2128,7 @@ fn assemble_generic_result_with_frequency_samples(
                     &mut channel_chains,
                     result.flat_gain_db,
                     false,
+                    sample_rate,
                 );
             }
         }
@@ -2078,13 +2189,14 @@ fn assemble_generic_result_with_frequency_samples(
             .filter(|(name, _)| !is_subwoofer_channel(config, name))
             .map(|(name, result)| (name.clone(), result.final_curve.clone()))
             .collect();
+        let (fit_min_freq, fit_max_freq) = shared_alignment_fit_band(config, &corrected_curves);
 
         let stage_outcome = match roomeq_engine::inter_channel_timbre_matching::compute_inter_channel_timbre_matching_with_threshold(
             &corrected_curves,
             &timbre_config.reference_channel,
             sample_rate,
-            config.optimizer.min_freq,
-            config.optimizer.max_freq,
+            fit_min_freq,
+            fit_max_freq,
             timbre_config.min_improvement_db,
         ) {
             Ok(timbre_results) => {
@@ -2125,6 +2237,7 @@ fn assemble_generic_result_with_frequency_samples(
                                 &mut channel_chains,
                                 alignment.flat_gain_db,
                                 false,
+                                sample_rate,
                             );
                         }
                     }
@@ -2216,14 +2329,15 @@ fn assemble_generic_result_with_frequency_samples(
             },
         )?;
         let corrected_curves = collect_current_final_curves(&channel_results);
+        let (fit_min_freq, fit_max_freq) = shared_alignment_fit_band(config, &corrected_curves);
         let stage_outcome =
             match roomeq_engine::height_channel_alignment::compute_height_channel_alignment_with_coherence_threshold(
                 &corrected_curves,
                 &channel_arrivals,
             height_config,
             sample_rate,
-            config.optimizer.min_freq,
-            config.optimizer.max_freq,
+            fit_min_freq,
+            fit_max_freq,
             config
                 .recording_config
                 .as_ref()
@@ -2275,9 +2389,10 @@ fn assemble_generic_result_with_frequency_samples(
                                     channel_name,
                                     &mut channel_results,
                                     &mut channel_chains,
-                                    alignment.flat_gain_db,
-                                    false,
-                                );
+                                alignment.flat_gain_db,
+                                false,
+                                sample_rate,
+                            );
                             }
                             applied = true;
                         }
@@ -2308,6 +2423,7 @@ fn assemble_generic_result_with_frequency_samples(
                                 &mut channel_chains,
                                 height_result.delay_ms,
                                 false,
+                                sample_rate,
                             );
                             applied = true;
                         }
@@ -2388,7 +2504,8 @@ fn assemble_generic_result_with_frequency_samples(
     // (delay_ms, invert_polarity, sub_name) keyed by main speaker name
     let mut phase_alignment_results: HashMap<String, (f64, bool, String)> = HashMap::new();
 
-    if config.optimizer.allow_delay()
+    if !should_run_standalone_phase_correction(config)
+        && config.optimizer.allow_delay()
         && let Some(phase_config) = &config.optimizer.phase_alignment
         && phase_config.enabled
     {
@@ -2495,6 +2612,7 @@ fn assemble_generic_result_with_frequency_samples(
                     &mut channel_chains,
                     0.0,
                     true,
+                    sample_rate,
                 );
                 info!("  Applied polarity inversion to '{}'", speaker_name);
             }
@@ -2510,6 +2628,7 @@ fn assemble_generic_result_with_frequency_samples(
         &phase_alignment_results,
         &mut channel_results,
         &mut channel_chains,
+        sample_rate,
     );
     if !phase_alignment_results.is_empty() {
         curves = collect_current_final_curves(&channel_results);
@@ -2575,6 +2694,18 @@ fn assemble_generic_result_with_frequency_samples(
                 "Phase correction not enabled",
             ),
         )?;
+    }
+
+    if should_run_standalone_phase_correction(config)
+        && apply_topology_phase_alignment(
+            config,
+            &mut channel_results,
+            &mut channel_chains,
+            observer_shared,
+            sample_rate,
+        )?
+    {
+        curves = collect_current_final_curves(&channel_results);
     }
 
     // ─── GD-Opt v2 integration (Phase GD-5) ──────────────────────────────

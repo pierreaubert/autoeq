@@ -47,10 +47,7 @@ pub fn build_complete_target_curve(freqs: &Array1<f64>, config: &TargetResponseC
         let tilt_db = slope * (f / ref_freq).log2();
 
         // Bass shelf preference (smooth 2nd-order transition)
-        let bass_adj = if pref.bass_shelf_db.abs() > 0.001
-            && pref.bass_shelf_freq > 0.0
-            && f < pref.bass_shelf_freq * 2.0
-        {
+        let bass_adj = if pref.bass_shelf_db.abs() > 0.001 && pref.bass_shelf_freq > 0.0 {
             let ratio = f / pref.bass_shelf_freq;
             let transition = 1.0 / (1.0 + ratio.powi(2));
             pref.bass_shelf_db * transition
@@ -241,6 +238,26 @@ mod tests {
             "At 1kHz should be near 0, got {:.2}",
             curve.spl[idx_1k]
         );
+    }
+
+    #[test]
+    fn bass_shelf_is_continuous_across_twice_its_corner_frequency() {
+        let freqs = Array1::from_vec(vec![399.999, 400.001]);
+        let config = TargetResponseConfig {
+            shape: TargetShape::Flat,
+            preference: crate::UserPreference {
+                bass_shelf_db: 6.0,
+                bass_shelf_freq: 200.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let curve = build_complete_target_curve(&freqs, &config);
+
+        assert!((curve.spl[0] - curve.spl[1]).abs() < 1e-4);
+        assert!((curve.spl[0] - 1.2).abs() < 1e-4);
+        assert!((curve.spl[1] - 1.2).abs() < 1e-4);
     }
 
     #[test]

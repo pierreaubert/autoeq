@@ -45,7 +45,15 @@ pub(super) fn interpolate_fdw_to_grid(
     target_freq: &Array1<f64>,
     fallback: f64,
 ) -> Array1<f64> {
-    if src_freq.is_empty() || src_values.is_empty() || src_freq.len() != src_values.len() {
+    if src_freq.is_empty()
+        || src_values.is_empty()
+        || src_freq.len() != src_values.len()
+        || src_freq
+            .iter()
+            .any(|frequency| !frequency.is_finite() || *frequency <= 0.0)
+        || src_values.iter().any(|value| !value.is_finite())
+        || src_freq.windows(2).any(|pair| pair[1] <= pair[0])
+    {
         return Array1::from_elem(target_freq.len(), fallback);
     }
 
@@ -81,4 +89,22 @@ pub(super) fn interpolate_fdw_to_grid(
         .collect();
 
     Array1::from_vec(values)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fdw_interpolation_fails_closed_for_nan_or_unsorted_source_frequencies() {
+        let target = Array1::from_vec(vec![50.0, 100.0, 200.0]);
+        for source in [
+            vec![20.0, f32::NAN, 500.0],
+            vec![20.0, 200.0, 100.0],
+            vec![20.0, 20.0, 500.0],
+        ] {
+            let result = interpolate_fdw_to_grid(&source, &[0.2, 0.5, 0.8], &target, 0.4);
+            assert_eq!(result.as_slice().unwrap(), &[0.4, 0.4, 0.4]);
+        }
+    }
 }

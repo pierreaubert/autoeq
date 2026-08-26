@@ -44,7 +44,7 @@ pub fn resolve_all_channel_seat_weights(
     if policy.strategy == MultiSeatStrategy::PrimaryWithConstraints
         && policy.primary_seat < weights.len()
     {
-        weights[policy.primary_seat] *= policy.primary_seat_weight.max(1.0);
+        weights[policy.primary_seat] *= policy.primary_seat_weight.max(0.0);
     }
     let sum: f64 = weights.iter().sum();
     if sum <= f64::EPSILON {

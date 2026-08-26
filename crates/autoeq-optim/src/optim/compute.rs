@@ -200,6 +200,7 @@ pub fn compute_smoothness_penalty(
     }
 
     let mut acc = 0.0_f64;
+    let mut active_terms = 0usize;
     for i in 1..(y.len() - 1) {
         let f_c = freqs[i];
         if f_c < min_freq
@@ -235,9 +236,14 @@ pub fn compute_smoothness_penalty(
             curvature.abs().powf(cfg.exponent)
         };
         acc += w * term;
+        active_terms += 1;
     }
 
-    cfg.tv2_weight * acc
+    if active_terms == 0 {
+        0.0
+    } else {
+        cfg.tv2_weight * acc / active_terms as f64
+    }
 }
 
 /// Compute the base fitness for a single ObjectiveData (no multi-objective delegation).
@@ -577,6 +583,33 @@ mod smoothness_penalty_edge_tests {
         };
         let p = compute_smoothness_penalty(&y, &freqs, 20.0, 20000.0, &cfg);
         assert!(p.is_finite() && p >= 0.0);
+    }
+
+    #[test]
+    fn smoothness_penalty_is_invariant_to_log_grid_density() {
+        let evaluate = |count| {
+            let frequencies = Array1::<f64>::logspace(10.0, 1.0, 4.0, count);
+            let response = frequencies.mapv(|frequency| frequency.ln().powi(2));
+            compute_smoothness_penalty(
+                &response,
+                &frequencies,
+                10.0,
+                10_000.0,
+                &SmoothnessPenaltyConfig {
+                    tv2_weight: 1.0,
+                    exponent: 2.0,
+                    ..Default::default()
+                },
+            )
+        };
+
+        let coarse = evaluate(17);
+        let dense = evaluate(257);
+        assert!(coarse > 0.0 && dense > 0.0);
+        assert!(
+            (coarse - dense).abs() <= 1e-10 * coarse.max(dense),
+            "coarse={coarse}, dense={dense}"
+        );
     }
 
     #[test]

@@ -129,6 +129,11 @@ fn stereo_2_0_runs_with_excursion_protection_enabled() {
         num_filters: 3,
         excursion_protection: Some(ExcursionProtectionConfig {
             enabled: true,
+            // This fixture has a bass bump but no physical low-frequency
+            // rolloff, so automatic F3 detection must fail closed. Supply the
+            // explicit F3 that the feature-parity assertion is exercising.
+            auto_detect_f3: false,
+            manual_f3_hz: Some(40.0),
             ..ExcursionProtectionConfig::default()
         }),
         ..OptimizerConfig::default()
@@ -328,6 +333,8 @@ fn stereo_2_1_honours_excursion_protection() {
         num_filters: 3,
         excursion_protection: Some(ExcursionProtectionConfig {
             enabled: true,
+            auto_detect_f3: false,
+            manual_f3_hz: Some(40.0),
             ..ExcursionProtectionConfig::default()
         }),
         ..OptimizerConfig::default()

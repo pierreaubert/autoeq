@@ -2107,7 +2107,7 @@ mod tests {
     }
 
     #[test]
-    fn joint_solution_dba_bounds_reachable() {
+    fn joint_solution_preserves_existing_dba_output_settings() {
         let config = base_room_config(tiny_optimizer());
         let aligned_curves = make_curves(true);
         let aligned_pre_eq_curves = make_curves(true);
@@ -2182,23 +2182,12 @@ mod tests {
                 .iter()
                 .any(|o| o.strategy_source == "dba_front" && !o.polarity_inverted)
         );
-        let safely_reverted = advisories.iter().any(|advisory| {
-            advisory.starts_with("joint_route_optimizer_reverted_group_regression")
-        });
-        if safely_reverted {
-            assert!(
-                sub_outputs
-                    .iter()
-                    .any(|o| o.strategy_source == "dba_rear" && !o.polarity_inverted)
-            );
-        } else {
-            // When accepted, the DBA rear polarity is forced to true by the
-            // bounds encoded in the optimizer.
-            assert!(
-                sub_outputs
-                    .iter()
-                    .any(|o| o.strategy_source == "dba_rear" && !o.polarity_inverted)
-            );
-        }
+        // The live joint optimizer does not rewrite per-output DBA settings;
+        // those invariants are established by the DBA optimizer itself.
+        assert!(
+            sub_outputs
+                .iter()
+                .any(|o| o.strategy_source == "dba_rear" && !o.polarity_inverted)
+        );
     }
 }

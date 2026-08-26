@@ -72,7 +72,7 @@ fn beta_uses_lf_mid_hf_bands() {
 fn ctc_condition_warning_flags_excessive_condition_number() {
     assert!(ctc_condition_warning(CTC_CONDITION_WARNING_THRESHOLD * 10.0).is_some());
     assert!(ctc_condition_warning(CTC_CONDITION_WARNING_THRESHOLD * 0.5).is_none());
-    assert!(ctc_condition_warning(f64::INFINITY).is_none());
+    assert!(ctc_condition_warning(f64::INFINITY).is_some());
 }
 
 #[test]
@@ -97,10 +97,10 @@ fn electrical_sum_headroom_scales_complete_speaker_rows() {
 
     assert!(enforce_electrical_sum_headroom(&mut values, 2, 2, 0.0));
 
-    let first_row_norm = (values[0].norm_sqr() + values[1].norm_sqr()).sqrt();
-    let second_row_norm = (values[2].norm_sqr() + values[3].norm_sqr()).sqrt();
+    let first_row_norm = values[0].norm() + values[1].norm();
+    let second_row_norm = values[2].norm() + values[3].norm();
     assert!((first_row_norm - 1.0).abs() < 1e-12);
-    assert!((second_row_norm - 0.559016994).abs() < 1e-9);
+    assert!((second_row_norm - 0.75).abs() < 1e-12);
     assert!((values[0].re - values[1].re).abs() < 1e-12);
 }
 

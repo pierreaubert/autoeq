@@ -141,15 +141,17 @@ pub fn optimize_dba_detailed(
     // Rear delay guess: 10ms (~3.4m room)
     // Rear gain guess: -3dB
     let mut x = vec![0.0, -3.0, 0.0, 10.0];
+    let pre_objective = autoeq_optim::optim::compute_base_fitness(&x, &objective_data);
 
     // Optimize
     let opt_result = autoeq_optim::optim::optimize_filters(
         &mut x,
         &lower_bounds,
         &upper_bounds,
-        objective_data,
+        objective_data.clone(),
         &optim_params,
     );
+    let post_objective = autoeq_optim::optim::compute_base_fitness(&x, &objective_data);
 
     let optimizer_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
         &optim_params.algo,
@@ -192,8 +194,8 @@ pub fn optimize_dba_detailed(
             gains,
             delays,
             crossover_freqs,
-            pre_objective: 0.0, // Lazy
-            post_objective: 0.0,
+            pre_objective,
+            post_objective,
             converged: optimizer_evidence.converged,
         },
         combined_curve,
@@ -345,6 +347,75 @@ mod tests {
         let inv_phase = inverted.phase.unwrap();
         assert!((inv_phase[0] - 180.0).abs() < 1e-6);
         assert!((inv_phase[1] - 90.0).abs() < 1e-6); // -90 + 180 = 90
+    }
+
+    #[test]
+    fn dba_result_reports_the_actual_pre_and_post_objectives() {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(200.0), 24);
+        let front = Curve {
+            spl: freq.mapv(|frequency| 80.0 + 2.0 * (frequency / 45.0).ln().sin()),
+            freq: freq.clone(),
+            phase: Some(Array1::from_elem(freq.len(), 0.0)),
+            ..Curve::default()
+        };
+        let rear = Curve {
+            spl: freq.mapv(|frequency| 76.0 - 1.5 * (frequency / 70.0).ln().cos()),
+            freq: freq.clone(),
+            phase: Some(Array1::from_elem(freq.len(), 0.0)),
+            ..Curve::default()
+        };
+        let input = DbaPreparedInput {
+            front: vec![front.clone()],
+            rear: vec![rear.clone()],
+        };
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            max_iter: 12,
+            population: 8,
+            refine: false,
+            min_freq: 20.0,
+            max_freq: 200.0,
+            min_db: -12.0,
+            max_db: 6.0,
+            seed: Some(7),
+            parallel_threads: Some(1),
+            ..OptimizerConfig::default()
+        };
+
+        let result = optimize_dba_detailed(&input, &config, 48_000.0).unwrap();
+        let drivers = DriversLossData::new_ordered(
+            vec![
+                DriverMeasurement {
+                    freq: front.freq,
+                    spl: front.spl,
+                    phase: front.phase,
+                },
+                DriverMeasurement {
+                    freq: rear.freq.clone(),
+                    spl: rear.spl.clone(),
+                    phase: invert_polarity(&rear).phase,
+                },
+            ],
+            CrossoverType::None,
+        );
+        let mut params = config.to_optim_params(48_000.0);
+        params.loss = LossType::MultiSubFlat;
+        let objective = autoeq_optim::optim::setup::setup_multisub_objective_data(&params, drivers);
+        let expected_pre =
+            autoeq_optim::optim::compute_base_fitness(&[0.0, -3.0, 0.0, 10.0], &objective);
+        let expected_post = autoeq_optim::optim::compute_base_fitness(
+            &[
+                result.driver.gains[0],
+                result.driver.gains[1],
+                result.driver.delays[0],
+                result.driver.delays[1],
+            ],
+            &objective,
+        );
+
+        assert!(expected_pre > 0.0 && expected_pre.is_finite());
+        assert!((result.driver.pre_objective - expected_pre).abs() <= 1e-12);
+        assert!((result.driver.post_objective - expected_post).abs() <= 1e-12);
     }
 
     #[test]

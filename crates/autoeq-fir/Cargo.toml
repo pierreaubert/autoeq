@@ -1,6 +1,6 @@
 [package]
 name = "autoeq-fir"
-version = "0.5.2"
+version = "0.5.3"
 edition = "2024"
 description = "FIR filter design and serialization for AutoEQ"
 license = "GPL-3.0-or-later"

@@ -241,6 +241,16 @@ fn is_subwoofer_measurement_channel(channel_name: &str, room_config: &RoomConfig
 }
 
 #[allow(clippy::too_many_arguments)]
+fn sub_optimizer_upper_bound(measured_upper: Option<f64>, crossover_upper: Option<f64>) -> f64 {
+    const SUB_UPPER_FALLBACK_HZ: f64 = 160.0;
+    match (measured_upper, crossover_upper) {
+        (Some(measured), Some(crossover)) => measured.min(crossover),
+        (Some(measured), None) => measured,
+        (None, Some(crossover)) => crossover,
+        (None, None) => SUB_UPPER_FALLBACK_HZ,
+    }
+}
+
 fn build_clamped_optimizer(
     channel_name: &str,
     room_config: &RoomConfig,
@@ -264,13 +274,7 @@ fn build_clamped_optimizer(
         let crossover_upper =
             roomeq_model::home_cinema::bass_management_crossover_frequency_hz(room_config)
                 .map(|frequency| 2.0 * frequency);
-        const SUB_UPPER_FALLBACK_HZ: f64 = 160.0;
-        let upper = match (measured_upper, crossover_upper) {
-            (Some(measured), Some(crossover)) => measured.max(crossover),
-            (Some(measured), None) => measured,
-            (None, Some(crossover)) => crossover,
-            (None, None) => SUB_UPPER_FALLBACK_HZ,
-        };
+        let upper = sub_optimizer_upper_bound(measured_upper, crossover_upper);
         info!(
             "  Sub channel '{}': clamping optimizer upper bound to {:.1} Hz (measured -3dB high={}, 2*crossover={})",
             channel_name,
@@ -417,5 +421,13 @@ mod tests {
         assert_eq!(optimizer.num_filters, 7);
         assert_eq!(optimizer.max_db, 12.0);
         assert_eq!(optimizer.min_db, -15.0);
+    }
+
+    #[test]
+    fn sub_upper_bound_is_the_tighter_of_measurement_and_crossover() {
+        assert_eq!(sub_optimizer_upper_bound(Some(300.0), Some(160.0)), 160.0);
+        assert_eq!(sub_optimizer_upper_bound(Some(90.0), Some(200.0)), 90.0);
+        assert_eq!(sub_optimizer_upper_bound(Some(120.0), None), 120.0);
+        assert_eq!(sub_optimizer_upper_bound(None, Some(180.0)), 180.0);
     }
 }

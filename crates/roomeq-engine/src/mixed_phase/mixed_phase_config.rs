@@ -65,6 +65,11 @@ pub fn decompose_phase(
             .freq
             .iter()
             .any(|frequency| !frequency.is_finite() || *frequency <= 0.0)
+        || measurement
+            .freq
+            .iter()
+            .zip(measurement.freq.iter().skip(1))
+            .any(|(left, right)| right <= left)
     {
         return Err(
             "Mixed-phase correction requires non-empty, aligned positive frequency, SPL, and phase arrays"

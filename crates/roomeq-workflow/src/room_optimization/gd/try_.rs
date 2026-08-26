@@ -477,23 +477,47 @@ pub(in super::super) fn try_run_phase_linear_fir_gd(
             }
             coefficients
         } else {
-            match fir::generate_fir_correction_with_gd_target(
-                &ch.initial_curve,
-                &config.optimizer,
-                config.target_curve.as_ref(),
-                sample_rate,
-                Some(&target),
-                channel_index,
-            ) {
-                Ok(coeffs) => coeffs,
-                Err(e) => {
+            let Some(filename) = channel_chains
+                .get(name.as_str())
+                .and_then(existing_fir_convolution_filename)
+            else {
+                warn!(
+                    "GD-Opt FIR target: no in-memory or deployed FIR coefficients for '{}'; skipping adjustment",
+                    name
+                );
+                continue;
+            };
+            let deployed_path = out_dir.join(filename);
+            let decoded = match crate::wav::decode_first_channel(&deployed_path) {
+                Ok(decoded) if decoded.sample_rate == sample_rate.round() as u32 => decoded,
+                Ok(decoded) => {
                     warn!(
-                        "GD-Opt FIR target: failed to regenerate FIR for '{}': {}",
-                        name, e
+                        "GD-Opt FIR target: deployed FIR for '{}' uses {} Hz, expected {:.0} Hz; skipping adjustment",
+                        name, decoded.sample_rate, sample_rate
                     );
                     continue;
                 }
+                Err(error) => {
+                    warn!(
+                        "GD-Opt FIR target: failed to load deployed FIR for '{}': {}; skipping adjustment",
+                        name, error
+                    );
+                    continue;
+                }
+            };
+            let existing = decoded
+                .samples
+                .into_iter()
+                .map(f64::from)
+                .collect::<Vec<_>>();
+            let mut coefficients =
+                fir::apply_gd_delay_to_fir_coefficients(&existing, delay_ms, sample_rate);
+            if polarity_inverted {
+                coefficients
+                    .iter_mut()
+                    .for_each(|coefficient| *coefficient = -*coefficient);
             }
+            coefficients
         };
 
         ch.fir_coeffs = Some(updated_coeffs.clone());
@@ -559,6 +583,7 @@ pub(in super::super) fn try_run_phase_linear_fir_gd(
             channel_chains,
             delay_ms,
             polarity_inverted,
+            sample_rate,
         );
     }
 

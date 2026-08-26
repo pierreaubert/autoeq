@@ -49,8 +49,8 @@ pub fn build_target_tilt_curve(
     if effective_target.shape == TargetShape::Harman {
         effective_target.shape = TargetShape::Flat;
     }
-    effective_target =
-        roomeq_model::home_cinema::role_adjusted_target_response(channel_name, &effective_target);
+    // Role voicing is realized exclusively by channel_preference filters.
+    // Keep it out of the neutral optimization target to avoid double application.
 
     if effective_target.shape == TargetShape::FromMeasurement {
         let is_sub_or_lfe =
@@ -82,17 +82,18 @@ pub fn build_target_tilt_curve(
             );
             slope
         };
-        effective_target.shape = TargetShape::Custom;
-        effective_target.slope_db_per_octave = measured_slope;
+        if measured_slope.abs() <= 1e-9 {
+            effective_target.shape = TargetShape::Flat;
+            effective_target.slope_db_per_octave = 0.0;
+        } else {
+            effective_target.shape = TargetShape::Custom;
+            effective_target.slope_db_per_octave = measured_slope;
+        }
     }
 
     if effective_target.shape != TargetShape::Flat
         || effective_target.preference.bass_shelf_db.abs() > 1e-6
         || effective_target.preference.treble_shelf_db.abs() > 1e-6
-        || roomeq_model::home_cinema::role_target_curve_shape_active(
-            channel_name,
-            &effective_target,
-        )
     {
         info!(
             "  Building target curve: shape={:?}, slope={:.2} dB/oct, bass={:+.1}dB, treble={:+.1}dB{}",
@@ -106,14 +107,10 @@ pub fn build_target_tilt_curve(
             effective_target.preference.treble_shelf_db,
             " (preferences extracted to output layer)",
         );
-        let mut target_curve =
-            roomeq_model::target_tilt::build_complete_target_curve(&curve.freq, &effective_target);
-        roomeq_model::target_tilt::apply_role_target_curve_shape(
-            channel_name,
-            &mut target_curve,
+        Some(roomeq_model::target_tilt::build_complete_target_curve(
+            &curve.freq,
             &effective_target,
-        );
-        Some(target_curve)
+        ))
     } else {
         None
     }
@@ -162,7 +159,23 @@ pub fn build_target_context_with_prepared_target(
                 ),
             });
         };
+        if target.freq.is_empty() || target.spl.is_empty() {
+            return Err(AutoeqError::InvalidConfiguration {
+                message: format!("channel '{channel_name}' has an empty file target"),
+            });
+        }
         let mut aligned = autoeq_core::interpolate_log_space(&curve.freq, target);
+        let target_min = target.freq[0];
+        let target_max = target.freq[target.freq.len() - 1];
+        let low_value = target.spl[0];
+        let high_value = target.spl[target.spl.len() - 1];
+        for (&frequency, value) in curve.freq.iter().zip(aligned.spl.iter_mut()) {
+            if frequency < target_min {
+                *value = low_value;
+            } else if frequency > target_max {
+                *value = high_value;
+            }
+        }
         aligned.phase = None;
         Some(aligned)
     } else {
@@ -310,8 +323,7 @@ mod tests {
             shape: TargetShape::FromMeasurement,
             ..TargetResponseConfig::default()
         });
-        let sub = build_target_tilt_curve("LFE", &room_config, &response, false).unwrap();
-        assert!(sub.spl.iter().all(|value| value.abs() < 1e-9));
+        assert!(build_target_tilt_curve("LFE", &room_config, &response, false).is_none());
 
         room_config.optimizer.from_measurement_slope_override = Some(-1.25);
         let overridden = build_target_tilt_curve("left", &room_config, &response, false).unwrap();
@@ -348,6 +360,34 @@ mod tests {
             build_target_context_with_prepared_target("left", &room_config, &response, None, None)
                 .expect_err("missing file target must fail");
         assert!(error.to_string().contains("was not prepared"));
+    }
+
+    #[test]
+    fn file_target_context_clamps_outside_points_to_endpoint_levels() {
+        let response = curve();
+        let room_config = config(TargetResponseConfig {
+            shape: TargetShape::File,
+            curve_path: Some("target.csv".into()),
+            ..TargetResponseConfig::default()
+        });
+        let prepared = PreparedEqTarget::Curve(Box::new(Curve {
+            freq: Array1::from_vec(vec![100.0, 1_000.0]),
+            spl: Array1::from_vec(vec![10.0, 20.0]),
+            ..Curve::default()
+        }));
+
+        let context = build_target_context_with_prepared_target(
+            "left",
+            &room_config,
+            &response,
+            None,
+            Some(&prepared),
+        )
+        .expect("prepared file target");
+        let target = context.target_tilt_curve.expect("file target");
+
+        assert_eq!(target.spl[0], 10.0);
+        assert_eq!(target.spl[target.spl.len() - 1], 20.0);
     }
 
     #[test]

@@ -299,6 +299,50 @@ pub fn rule_smoothness_penalty(ctx: &mut ValidationContext<'_>) {
     }
 }
 
+pub fn rule_decomposed_correction(ctx: &mut ValidationContext<'_>) {
+    let Some(config) = &ctx.opt.decomposed_correction else {
+        return;
+    };
+    if !config.schroeder_freq.is_finite() || config.schroeder_freq <= 0.0 {
+        ctx.add_error("decomposed_correction.schroeder_freq must be finite and positive");
+    }
+    if !config.transition_width_oct.is_finite() || config.transition_width_oct <= 0.0 {
+        ctx.add_error("decomposed_correction.transition_width_oct must be finite and positive");
+    }
+    if !config.min_mode_q.is_finite() || config.min_mode_q <= 0.0 {
+        ctx.add_error("decomposed_correction.min_mode_q must be finite and positive");
+    }
+    if !config.min_mode_prominence_db.is_finite() || config.min_mode_prominence_db < 0.0 {
+        ctx.add_error(
+            "decomposed_correction.min_mode_prominence_db must be finite and non-negative",
+        );
+    }
+    for (name, value) in [
+        ("mode_correction_weight", config.mode_correction_weight),
+        ("early_reflection_weight", config.early_reflection_weight),
+        ("steady_state_weight", config.steady_state_weight),
+    ] {
+        if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+            ctx.add_error(format!(
+                "decomposed_correction.{name} must be finite and in [0, 1]"
+            ));
+        }
+    }
+    if !config.fdw_cycles.is_finite() || config.fdw_cycles <= 0.0 {
+        ctx.add_error("decomposed_correction.fdw_cycles must be finite and positive");
+    }
+    if !config.fdw_min_window_ms.is_finite()
+        || !config.fdw_max_window_ms.is_finite()
+        || config.fdw_min_window_ms <= 0.0
+        || config.fdw_max_window_ms < config.fdw_min_window_ms
+    {
+        ctx.add_error("decomposed_correction FDW windows must be finite, positive, and min <= max");
+    }
+    if !config.fdw_smoothing_octaves.is_finite() || config.fdw_smoothing_octaves <= 0.0 {
+        ctx.add_error("decomposed_correction.fdw_smoothing_octaves must be finite and positive");
+    }
+}
+
 pub fn rule_auto_optimizer(ctx: &mut ValidationContext<'_>) {
     let Some(auto) = &ctx.opt.auto_optimizer else {
         return;
@@ -494,6 +538,18 @@ pub fn rule_schroeder_split(ctx: &mut ValidationContext<'_>) {
         return;
     };
 
+    if ctx.opt.multi_measurement.is_some() {
+        ctx.add_error(
+            "schroeder_split cannot be combined with multi_measurement because split optimization does not preserve the multi-measurement objective",
+        );
+    }
+
+    if split.high_freq_config.shelving_only && ctx.opt.num_filters < 3 {
+        ctx.add_error(
+            "schroeder_split with high_freq_config.shelving_only requires at least 3 filters",
+        );
+    }
+
     if split.low_freq_config.min_q <= 0.0
         || split.low_freq_config.min_q > split.low_freq_config.max_q
     {
@@ -676,6 +732,7 @@ pub fn run_optimizer_validation_rules(ctx: &mut ValidationContext<'_>) {
     rule_phase_alignment(ctx);
     rule_group_delay(ctx);
     rule_smoothness_penalty(ctx);
+    rule_decomposed_correction(ctx);
     rule_auto_optimizer(ctx);
     rule_multi_seat(ctx);
     rule_max_iter(ctx);
@@ -949,6 +1006,64 @@ mod optimizer_rule_tests {
         let result = run_rule(rule_cea2034_correction, &default_config());
         assert!(result.is_valid);
         assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn decomposed_correction_rejects_out_of_range_and_nonfinite_weights() {
+        for (field, value) in [
+            ("mode_correction_weight", -0.1),
+            ("mode_correction_weight", 1.1),
+            ("early_reflection_weight", f64::NAN),
+            ("early_reflection_weight", f64::INFINITY),
+            ("steady_state_weight", -1.0),
+            ("steady_state_weight", 2.0),
+        ] {
+            let mut decomposed = crate::DecomposedCorrectionSerdeConfig::default();
+            match field {
+                "mode_correction_weight" => decomposed.mode_correction_weight = value,
+                "early_reflection_weight" => decomposed.early_reflection_weight = value,
+                "steady_state_weight" => decomposed.steady_state_weight = value,
+                _ => unreachable!(),
+            }
+            let mut config = default_config();
+            config.decomposed_correction = Some(decomposed);
+
+            let result = run_rule(rule_decomposed_correction, &config);
+            assert!(!result.is_valid, "{field}={value} should be rejected");
+            assert!(result.errors.iter().any(|error| error.contains(field)));
+        }
+    }
+
+    #[test]
+    fn schroeder_split_rejects_multi_measurement_and_undersized_shelving_layout() {
+        let mut split = crate::SchroederSplitConfig {
+            enabled: true,
+            ..crate::SchroederSplitConfig::default()
+        };
+        split.high_freq_config.shelving_only = true;
+
+        let mut config = default_config();
+        config.num_filters = 2;
+        config.schroeder_split = Some(split.clone());
+        let undersized = run_rule(rule_schroeder_split, &config);
+        assert!(!undersized.is_valid);
+        assert!(
+            undersized
+                .errors
+                .iter()
+                .any(|error| error.contains("requires at least 3 filters"))
+        );
+
+        config.num_filters = 4;
+        config.multi_measurement = Some(crate::MultiMeasurementConfig::default());
+        let multi = run_rule(rule_schroeder_split, &config);
+        assert!(!multi.is_valid);
+        assert!(
+            multi
+                .errors
+                .iter()
+                .any(|error| error.contains("cannot be combined with multi_measurement"))
+        );
     }
 
     #[test]

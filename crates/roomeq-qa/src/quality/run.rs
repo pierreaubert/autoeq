@@ -30,6 +30,7 @@ use super::misc::load_config_for_generic_path;
 use super::misc::load_config_for_path;
 use super::misc::max_curve_difference_db;
 use super::mutation::Mutation;
+use super::option::isolate_schroeder_split_from_multi_measurement;
 use super::option::option_gd_profile;
 use super::option::option_is_group_delay;
 use super::option::option_needs_gd_trusted_measurements;
@@ -737,6 +738,7 @@ pub(super) fn run_option_effect_test(
     for option in options {
         disable_option(&mut baseline_config, option);
     }
+    isolate_schroeder_split_from_multi_measurement(&mut baseline_config, options);
     if let Some(ref tr) = default_target_response {
         baseline_config.optimizer.target_response = Some(tr.clone());
     }
@@ -774,6 +776,7 @@ pub(super) fn run_option_effect_test(
     for option in options {
         apply_option_override(&mut option_config, option);
     }
+    isolate_schroeder_split_from_multi_measurement(&mut option_config, options);
     if let Some(ref tr) = default_target_response {
         option_config.optimizer.target_response = Some(tr.clone());
     }

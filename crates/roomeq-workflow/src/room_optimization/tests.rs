@@ -17,6 +17,47 @@ fn mixed_phase_owns_phase_correction_stage() {
 }
 
 #[test]
+fn shared_alignment_fit_band_excludes_subwoofer_and_crossover_rolloff() {
+    let mut config = minimal_room_config(ProcessingMode::LowLatency);
+    config.optimizer.min_freq = 20.0;
+    config.optimizer.max_freq = 20_000.0;
+    config.crossovers = Some(HashMap::from([(
+        "main_sub".to_string(),
+        CrossoverConfig {
+            crossover_type: "LR24".to_string(),
+            frequency: Some(100.0),
+            frequencies: None,
+            frequency_range: None,
+        },
+    )]));
+    config.system = Some(SystemConfig {
+        model: SystemModel::HomeCinema,
+        speakers: HashMap::from([
+            ("Left".to_string(), "left".to_string()),
+            ("TopFrontLeft".to_string(), "TFL".to_string()),
+            ("LFE".to_string(), "sub".to_string()),
+        ]),
+        subwoofers: Some(SubwooferSystemConfig {
+            config: SubwooferStrategy::Single,
+            crossover: Some("main_sub".to_string()),
+            mapping: HashMap::new(),
+        }),
+        bass_management: None,
+        ..SystemConfig::default()
+    });
+    let curves = HashMap::from([
+        ("left".to_string(), flat_curve()),
+        ("TFL".to_string(), flat_curve()),
+        ("sub".to_string(), flat_curve()),
+    ]);
+
+    assert_eq!(
+        shared_alignment_fit_band(&config, &curves),
+        (100.0, 20_000.0)
+    );
+}
+
+#[test]
 fn topology_height_residual_is_added_after_existing_delay() {
     let mut chain = ChannelDspChain {
         channel: "TFL".to_string(),
@@ -42,6 +83,42 @@ fn topology_height_residual_is_added_after_existing_delay() {
         .filter_map(|plugin| plugin.parameters["delay_ms"].as_f64())
         .collect();
     assert_eq!(delays, vec![0.75, 1.25]);
+}
+
+#[test]
+fn reported_curve_retains_user_preference_filters() {
+    let base_curve = Curve {
+        freq: ndarray::array![80.0, 1_000.0, 10_000.0],
+        spl: ndarray::array![0.0, 0.0, 0.0],
+        ..Curve::default()
+    };
+    let preference = math_audio_iir_fir::Biquad::new(
+        math_audio_iir_fir::BiquadFilterType::Lowshelf,
+        200.0,
+        48_000.0,
+        0.707,
+        6.0,
+    );
+    let chain = ChannelDspChain {
+        channel: "L".to_string(),
+        plugins: vec![roomeq_engine::output::create_labeled_eq_plugin(
+            &[preference],
+            "user_preference",
+        )],
+        drivers: None,
+        initial_curve: None,
+        final_curve: None,
+        eq_response: None,
+        pre_ir: None,
+        post_ir: None,
+        fir_temporal_masking: None,
+        direct_early_late_correction: None,
+        target_curve: None,
+    };
+
+    let reported = reported_curve_with_user_preferences(&base_curve, &chain, 48_000.0);
+    assert!(reported.spl[0] > 4.0);
+    assert!(reported.spl[0] > reported.spl[2] + 3.0);
 }
 use crate::test_fixtures::{empty_metadata, single_channel_room_result};
 use ndarray::Array1;
@@ -198,7 +275,7 @@ fn height_arrival_delay_updates_exported_chain_and_reported_phase() {
 }
 
 #[test]
-fn phase_complete_multisub_reaches_downstream_phase_alignment() {
+fn phase_correction_precedes_downstream_phase_alignment_for_multisub() {
     let mut config = minimal_room_config(ProcessingMode::LowLatency);
     let mut phased = flat_curve();
     phased.phase = Some(Array1::zeros(phased.freq.len()));
@@ -219,6 +296,12 @@ fn phase_complete_multisub_reaches_downstream_phase_alignment() {
         }),
     );
     config.optimizer.phase_alignment = Some(Default::default());
+    config.optimizer.phase_correction = Some(roomeq_model::MixedPhaseSerdeConfig {
+        max_fir_length_ms: 5.0,
+        pre_ringing_threshold_db: -30.0,
+        min_spatial_depth: 0.5,
+        phase_smoothing_octaves: 1.0 / 6.0,
+    });
     config.optimizer.allow_delay = Some(true);
 
     let events = Arc::new(Mutex::new(Vec::new()));
@@ -239,9 +322,20 @@ fn phase_complete_multisub_reaches_downstream_phase_alignment() {
         result.is_ok(),
         "phase-complete multi-sub run failed: {result:?}"
     );
-    assert!(events.lock().unwrap().iter().any(|(step, status)| {
-        *step == PipelineStepId::PhaseAlignment && *status == PipelineStepStatus::Started
-    }));
+    let events = events.lock().unwrap();
+    let phase_correction_index = events
+        .iter()
+        .position(|(step, status)| {
+            *step == PipelineStepId::PhaseCorrection && *status == PipelineStepStatus::Started
+        })
+        .expect("phase correction must start");
+    let phase_alignment_index = events
+        .iter()
+        .rposition(|(step, status)| {
+            *step == PipelineStepId::PhaseAlignment && *status == PipelineStepStatus::Started
+        })
+        .expect("phase alignment must start");
+    assert!(phase_correction_index < phase_alignment_index);
 }
 
 #[test]

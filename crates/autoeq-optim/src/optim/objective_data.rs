@@ -273,32 +273,24 @@ impl std::fmt::Debug for ObjectiveData {
     }
 }
 
-fn epa_progress_input_spl(objective_data: &ObjectiveData, epa_freqs: &Array1<f64>) -> Vec<f64> {
-    objective_data
-        .input_curve
-        .as_ref()
-        .map(|curve| {
-            let aligned = if curve.freq.len() == epa_freqs.len()
-                && curve
-                    .freq
-                    .iter()
-                    .zip(epa_freqs.iter())
-                    .all(|(left, right)| (left - right).abs() <= 1.0e-9 * left.abs().max(1.0))
-            {
-                curve.clone()
-            } else {
-                autoeq_core::interpolate_log_space(epa_freqs, curve)
-            };
-            aligned.spl.to_vec()
-        })
-        .unwrap_or_else(|| {
-            objective_data
-                .target
+fn epa_progress_input_spl(
+    objective_data: &ObjectiveData,
+    epa_freqs: &Array1<f64>,
+) -> Option<Vec<f64>> {
+    objective_data.input_curve.as_ref().map(|curve| {
+        let aligned = if curve.freq.len() == epa_freqs.len()
+            && curve
+                .freq
                 .iter()
-                .zip(objective_data.deviation.iter())
-                .map(|(&target, &deviation)| target - deviation)
-                .collect()
-        })
+                .zip(epa_freqs.iter())
+                .all(|(left, right)| (left - right).abs() <= 1.0e-9 * left.abs().max(1.0))
+        {
+            curve.clone()
+        } else {
+            autoeq_core::interpolate_log_space(epa_freqs, curve)
+        };
+        aligned.spl.to_vec()
+    })
 }
 
 /// Run the AutoEQ DE backend with an EPA-aware per-iteration callback.
@@ -329,24 +321,26 @@ pub(super) fn run_autoeq_de_with_epa_callback(
         Box::new(move |intermediate| {
             epa_gen_counter += 1;
             let epa = if epa_gen_counter.is_multiple_of(EPA_INTERVAL) {
-                let peq_spl = x2spl(
-                    &epa_freqs,
-                    intermediate.x.as_slice().unwrap(),
-                    epa_srate,
-                    epa_model,
-                );
-                let corrected: Vec<f64> = epa_normalized
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &n)| n + peq_spl[i])
-                    .collect();
-                let cfg = epa_config.clone().unwrap_or_default();
-                let score = crate::loss::epa::score::compute_epa_normalized(
-                    epa_freqs.as_slice().unwrap(),
-                    &corrected,
-                    &cfg,
-                );
-                Some(score.preference)
+                epa_normalized.as_ref().map(|epa_normalized| {
+                    let peq_spl = x2spl(
+                        &epa_freqs,
+                        intermediate.x.as_slice().unwrap(),
+                        epa_srate,
+                        epa_model,
+                    );
+                    let corrected: Vec<f64> = epa_normalized
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &n)| n + peq_spl[i])
+                        .collect();
+                    let cfg = epa_config.clone().unwrap_or_default();
+                    let score = crate::loss::epa::score::compute_epa_normalized(
+                        epa_freqs.as_slice().unwrap(),
+                        &corrected,
+                        &cfg,
+                    );
+                    score.preference
+                })
             } else {
                 None
             };
@@ -394,7 +388,26 @@ mod progress_tests {
 
         assert_eq!(
             epa_progress_input_spl(&objective, &frequencies),
-            vec![81.0, 73.0]
+            Some(vec![81.0, 73.0])
         );
+    }
+
+    #[test]
+    fn epa_progress_skips_when_only_weighted_deviation_is_available() {
+        let frequencies = array![100.0, 1_000.0];
+        let objective = ObjectiveDataBuilder::speaker_flat(
+            frequencies.clone(),
+            array![0.0, 0.0],
+            array![1.0, -1.0],
+            48_000.0,
+            PeqModel::Pk,
+        )
+        .min_db(-12.0)
+        .max_db(12.0)
+        .freq_range(20.0, 20_000.0)
+        .build()
+        .expect("objective");
+
+        assert_eq!(epa_progress_input_spl(&objective, &frequencies), None);
     }
 }

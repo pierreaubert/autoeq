@@ -3,7 +3,7 @@ use super::misc::adaptive_budget_for_step;
 use super::misc::build_optim_params;
 use super::multi_eq_auto_optimizer_context::MultiEqAutoOptimizerContext;
 use super::multi_eq_auto_optimizer_context::resolve_multi_measurement_auto_optimizer_config;
-use super::prepared_single_channel_eq::prepare_single_channel_eq;
+use super::prepared_single_channel_eq::prepare_single_channel_eq_with_normalization;
 use super::prepared_single_channel_eq::prepare_single_channel_eq_with_spin;
 use super::prepared_single_channel_eq::run_optimization_pass;
 use super::resources::{self, EqResources};
@@ -19,6 +19,14 @@ use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy, OptimizerCo
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
+
+fn bootstrap_uncertainty_depth(
+    frequencies: &ndarray::Array1<f64>,
+    bootstrap: &spatial_robustness::BootstrapBand,
+    config: &SpatialRobustnessConfig,
+) -> ndarray::Array1<f64> {
+    spatial_robustness::correction_depth_mask(frequencies, &bootstrap.per_bin_std, config)
+}
 
 #[derive(Debug, Clone)]
 pub struct EqOptimizationResult {
@@ -68,6 +76,26 @@ pub fn optimize_channel_eq_detailed(
         sample_rate,
         None,
         None,
+        None,
+        &RealOptimizerBackend::new(),
+    )
+}
+
+pub(super) fn optimize_channel_eq_detailed_with_normalization_mean(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    normalization_mean_spl: f64,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    optimize_channel_eq_inner(
+        curve,
+        config,
+        resources,
+        sample_rate,
+        Some(normalization_mean_spl),
+        None,
+        None,
         &RealOptimizerBackend::new(),
     )
 }
@@ -86,6 +114,7 @@ pub fn optimize_channel_eq_with_spin_detailed(
         config,
         resources,
         sample_rate,
+        None,
         Some(spin_data),
         None,
         &RealOptimizerBackend::new(),
@@ -119,6 +148,7 @@ pub fn optimize_channel_eq_with_callback_detailed(
         resources,
         sample_rate,
         None,
+        None,
         Some(callback),
         &RealOptimizerBackend::new(),
     )
@@ -130,13 +160,27 @@ fn optimize_channel_eq_adaptive(
     config: &OptimizerConfig,
     resources: Option<&EqResources>,
     sample_rate: f64,
+    normalization_mean_spl: Option<f64>,
     spin_data: Option<&HashMap<String, Curve>>,
     backend: &dyn OptimizerBackend,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
     let prep = if let Some(spin_data) = spin_data {
-        prepare_single_channel_eq_with_spin(curve, config, resources, sample_rate, Some(spin_data))?
+        prepare_single_channel_eq_with_spin(
+            curve,
+            config,
+            resources,
+            sample_rate,
+            Some(spin_data),
+            normalization_mean_spl,
+        )?
     } else {
-        prepare_single_channel_eq(curve, config, resources, sample_rate)?
+        prepare_single_channel_eq_with_normalization(
+            curve,
+            config,
+            resources,
+            sample_rate,
+            normalization_mean_spl,
+        )?
     };
     let max_filters = config.num_filters;
     let base_budget_per_step = adaptive_budget_for_step(config.max_iter, max_filters, 1);
@@ -218,6 +262,7 @@ fn optimize_channel_eq_inner(
     config: &OptimizerConfig,
     resources: Option<&EqResources>,
     sample_rate: f64,
+    normalization_mean_spl: Option<f64>,
     spin_data: Option<&HashMap<String, Curve>>,
     callback: Option<autoeq_optim::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
@@ -234,6 +279,7 @@ fn optimize_channel_eq_inner(
             config,
             resources,
             sample_rate,
+            normalization_mean_spl,
             spin_data,
             backend,
         );
@@ -241,9 +287,22 @@ fn optimize_channel_eq_inner(
 
     // Single-pass optimization (legacy path or callback path)
     let prep = if let Some(spin_data) = spin_data {
-        prepare_single_channel_eq_with_spin(curve, config, resources, sample_rate, Some(spin_data))?
+        prepare_single_channel_eq_with_spin(
+            curve,
+            config,
+            resources,
+            sample_rate,
+            Some(spin_data),
+            normalization_mean_spl,
+        )?
     } else {
-        prepare_single_channel_eq(curve, config, resources, sample_rate)?
+        prepare_single_channel_eq_with_normalization(
+            curve,
+            config,
+            resources,
+            sample_rate,
+            normalization_mean_spl,
+        )?
     };
     let (filters, loss, _x, optimizer_evidence) = run_optimization_pass(
         &prep,
@@ -624,10 +683,9 @@ fn optimize_channel_eq_multi_inner(
                 )?
             };
             if let Some(bootstrap) = analysis.bootstrap.as_ref() {
-                let confidence_width = &bootstrap.upper.spl - &bootstrap.lower.spl;
-                let uncertainty_depth = spatial_robustness::correction_depth_mask(
+                let uncertainty_depth = bootstrap_uncertainty_depth(
                     &analysis.averaged_curve.freq,
-                    &confidence_width,
+                    bootstrap,
                     &spatial_config,
                 );
                 analysis.correction_depth = &analysis.correction_depth * &uncertainty_depth;
@@ -754,6 +812,18 @@ fn optimize_channel_eq_multi_inner(
         )
         .into());
     }
+    if multi_config.weights.is_some()
+        && matches!(
+            multi_config.strategy,
+            MultiMeasurementStrategy::Average | MultiMeasurementStrategy::Minimax
+        )
+    {
+        log::warn!(
+            "multi_measurement.weights is ignored by {:?}; use weighted_sum or variance_penalized to apply measurement weights",
+            multi_config.strategy
+        );
+    }
+
     let weights = match (!ignore_configured_weights)
         .then_some(multi_config.weights.as_ref())
         .flatten()
@@ -1051,18 +1121,14 @@ fn optimize_spatial_robustness(
     };
 
     if let Some(bootstrap) = analysis.bootstrap.as_ref() {
-        let confidence_width = &bootstrap.upper.spl - &bootstrap.lower.spl;
-        let uncertainty_depth = spatial_robustness::correction_depth_mask(
-            &analysis.averaged_curve.freq,
-            &confidence_width,
-            &sr_config,
-        );
+        let uncertainty_depth =
+            bootstrap_uncertainty_depth(&analysis.averaged_curve.freq, bootstrap, &sr_config);
         analysis.correction_depth = &analysis.correction_depth * &uncertainty_depth;
-        let mean_width =
-            confidence_width.iter().sum::<f64>() / confidence_width.len().max(1) as f64;
+        let mean_std =
+            bootstrap.per_bin_std.iter().sum::<f64>() / bootstrap.per_bin_std.len().max(1) as f64;
         log::info!(
-            "  Bootstrap uncertainty mask: mean CI width={:.2} dB, depth multiplier mean={:.2}",
-            mean_width,
+            "  Bootstrap uncertainty mask: mean standard deviation={:.2} dB, depth multiplier mean={:.2}",
+            mean_std,
             uncertainty_depth.iter().sum::<f64>() / uncertainty_depth.len().max(1) as f64,
         );
     }
@@ -1378,6 +1444,36 @@ mod processing_mode_tests {
             phase: Some(Array1::from_vec(phase)),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn bootstrap_mask_uses_standard_deviation_not_confidence_interval_width() {
+        let freq = ndarray::array![100.0, 1_000.0];
+        let curve = |levels: ndarray::Array1<f64>| Curve {
+            freq: freq.clone(),
+            spl: levels,
+            ..Curve::default()
+        };
+        let bootstrap = spatial_robustness::BootstrapBand {
+            lower: curve(ndarray::array![-10.0, -10.0]),
+            median: curve(ndarray::array![0.0, 0.0]),
+            upper: curve(ndarray::array![10.0, 10.0]),
+            per_bin_std: ndarray::array![0.0, 0.0],
+        };
+        let config = SpatialRobustnessConfig {
+            transition_width_db: 0.0,
+            ..SpatialRobustnessConfig::default()
+        };
+
+        let actual = bootstrap_uncertainty_depth(&freq, &bootstrap, &config);
+        let expected =
+            spatial_robustness::correction_depth_mask(&freq, &bootstrap.per_bin_std, &config);
+        let obsolete_ci_width = &bootstrap.upper.spl - &bootstrap.lower.spl;
+        let wrong = spatial_robustness::correction_depth_mask(&freq, &obsolete_ci_width, &config);
+
+        assert_eq!(actual, expected);
+        assert_ne!(actual, wrong);
+        assert!(actual.iter().all(|depth| (*depth - 1.0).abs() <= 1e-12));
     }
 
     #[test]

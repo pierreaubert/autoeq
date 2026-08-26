@@ -28,7 +28,16 @@ pub fn build_gd_alignment_target(
     let per_channel_delay_ms = result.per_channel.iter().map(|ch| ch.delay_ms).collect();
 
     // Build frequency sub-grid for the band
-    let freq = Array1::from_iter(band_indices.iter().map(|&i| channels[0].freq[i]));
+    let valid_sum_gd: Vec<(f64, f64)> = band_indices
+        .iter()
+        .zip(sum_gd)
+        .filter_map(|(&index, group_delay)| {
+            group_delay
+                .is_finite()
+                .then_some((channels[0].freq[index], group_delay))
+        })
+        .collect();
+    let freq = Array1::from_iter(valid_sum_gd.iter().map(|(frequency, _)| *frequency));
 
     GdAlignmentTarget {
         per_channel_delay_ms,
@@ -37,7 +46,10 @@ pub fn build_gd_alignment_target(
             .iter()
             .map(|channel| channel.polarity_inverted)
             .collect(),
-        sum_gd_reference_ms: sum_gd,
+        sum_gd_reference_ms: valid_sum_gd
+            .into_iter()
+            .map(|(_, group_delay)| group_delay)
+            .collect(),
         freq,
     }
 }

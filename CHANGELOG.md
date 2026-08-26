@@ -1,3 +1,44 @@
+# 0.5.64
+
+## Package versions
+
+- `autoeq` 0.5.64
+- `autoeq-fir` 0.5.3
+- `autoeq-optim` 0.5.60
+- `roomeq-analysis` 0.5.8
+- `roomeq-engine` 0.5.64
+- `roomeq-model` 0.5.8
+- `roomeq-qa` 0.5.62
+- `roomeq-workflow` 0.5.25
+
+## Fixes
+
+- Keep designated home-cinema MultiSub/MSO, cardioid, and DBA bass outputs on
+  the routed home-cinema executor so route-owned crossover DSP is realized.
+- Use the DIN 45692 exponential Bark weighting for EPA sharpness and lock its
+  numerical band samples with reference regressions.
+- Harden RoomEQ review paths across target/preference shaping, FIR and
+  mixed-phase correction, phase/GD synchronization, crosstalk cancellation,
+  excursion protection, broadband preprocessing, and decomposed correction
+  validation.
+- Preserve physical and positional invariants in DBA/MSO, multi-seat,
+  multi-measurement, cardioid, crossover, Schroeder-split, height/timbre,
+  continuous-area, and bass-management workflows.
+- Correct supporting-source truncation level, target anchoring, precedence-limit
+  semantics, deployed FIR evidence, final-curve reporting, and load-failure
+  advisories.
+- Normalize smoothness penalties by evaluated term count, retain truthful EPA
+  progress/objective metadata, and expose Schroeder/decomposed-correction
+  configuration failures instead of silently changing objectives.
+
+## QA
+
+- Complete the 154-finding audit across both bug-review batches with focused
+  regressions for every confirmed runtime defect.
+- Isolate Schroeder-split quality fixtures from inherited multi-measurement
+  mode and reject unsupported Schroeder-split/multi-measurement combinations
+  during QA registry validation.
+
 # 0.5.63
 
 ## Fixes

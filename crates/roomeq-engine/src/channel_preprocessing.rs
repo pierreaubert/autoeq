@@ -100,9 +100,10 @@ pub fn preprocess_channel(
         .target_response
         .as_ref()
         .is_some_and(|response| response.broadband_precorrection);
-    let broadband = apply_broadband_precorrection(
+    let broadband = apply_broadband_precorrection_with_f3_curve(
         room_config,
         &curve,
+        measurement,
         mean_spl,
         score_min_freq,
         target.max_freq,
@@ -228,6 +229,26 @@ pub fn apply_broadband_precorrection(
     max_freq: f64,
     sample_rate: f64,
 ) -> BroadbandPreCorrection {
+    apply_broadband_precorrection_with_f3_curve(
+        room_config,
+        curve,
+        curve,
+        mean_spl,
+        min_freq,
+        max_freq,
+        sample_rate,
+    )
+}
+
+fn apply_broadband_precorrection_with_f3_curve(
+    room_config: &RoomConfig,
+    curve: &Curve,
+    f3_curve: &Curve,
+    mean_spl: f64,
+    min_freq: f64,
+    max_freq: f64,
+    sample_rate: f64,
+) -> BroadbandPreCorrection {
     if !room_config
         .optimizer
         .target_response
@@ -237,17 +258,10 @@ pub fn apply_broadband_precorrection(
         return unchanged_broadband(curve);
     }
     info!("  Broadband pre-correction enabled...");
-    let detected_f3 = match excursion::detect_f3_with_config(
-        curve,
-        None,
-        room_config.optimizer.excursion_protection.as_ref(),
-    ) {
-        Ok(result) if result.f3_hz > min_freq && result.f3_hz < max_freq * 0.5 => {
-            info!("  Broadband: detected speaker F3={:.1}Hz", result.f3_hz);
-            Some(result.f3_hz)
-        }
-        _ => None,
-    };
+    let detected_f3 = detect_broadband_f3(room_config, f3_curve, min_freq, max_freq);
+    if let Some(f3) = detected_f3 {
+        info!("  Broadband: detected speaker F3={:.1}Hz", f3);
+    }
     let broadband_min_freq = detected_f3.unwrap_or(min_freq);
     let target = Curve {
         freq: curve.freq.clone(),
@@ -264,16 +278,16 @@ pub fn apply_broadband_precorrection(
         return unchanged_broadband(curve);
     };
     if let Some(f3) = detected_f3
-        && f3 < spectral_align::LOWSHELF_FREQ
         && alignment.lowshelf_gain_db > 0.0
     {
         info!(
-            "  Broadband: suppressing low-shelf (F3={:.1}Hz < shelf={:.1}Hz)",
+            "  Broadband: suppressing positive low-shelf below measured F3={:.1}Hz (shelf={:.1}Hz)",
             f3,
             spectral_align::LOWSHELF_FREQ
         );
-        alignment.lowshelf_gain_db = 0.0;
     }
+    alignment.lowshelf_gain_db =
+        safe_broadband_lowshelf_gain(detected_f3, alignment.lowshelf_gain_db);
     info!(
         "  Broadband correction: LS={:+.2}dB, HS={:+.2}dB, Gain={:+.2}dB",
         alignment.lowshelf_gain_db, alignment.highshelf_gain_db, alignment.flat_gain_db
@@ -367,6 +381,30 @@ pub fn apply_broadband_precorrection(
             biquads: filters,
             mean_shift: exported_flat_gain,
         }
+    }
+}
+
+fn detect_broadband_f3(
+    room_config: &RoomConfig,
+    f3_curve: &Curve,
+    min_freq: f64,
+    max_freq: f64,
+) -> Option<f64> {
+    excursion::detect_f3_with_config(
+        f3_curve,
+        None,
+        room_config.optimizer.excursion_protection.as_ref(),
+    )
+    .ok()
+    .filter(|result| result.f3_hz > min_freq && result.f3_hz < max_freq * 0.5)
+    .map(|result| result.f3_hz)
+}
+
+fn safe_broadband_lowshelf_gain(detected_f3: Option<f64>, lowshelf_gain_db: f64) -> f64 {
+    if detected_f3.is_some() && lowshelf_gain_db > 0.0 {
+        0.0
+    } else {
+        lowshelf_gain_db
     }
 }
 
@@ -588,6 +626,35 @@ mod tests {
         let mut target = crate::channel_target::build_target_context("left", &config, &curve, None);
         let features = preprocess_channel("left", &prepared, &config, 48_000.0, None, &mut target);
         assert_eq!(features.score_min_freq, 20.0);
+    }
+
+    #[test]
+    fn broadband_f3_comes_from_raw_curve_and_positive_shelves_are_suppressed() {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(1_000.0), 100);
+        let raw = Curve {
+            spl: freq.mapv(|frequency| {
+                let ratio = frequency / 60.0;
+                80.0 + 20.0 * (ratio.powi(2) / (1.0 + ratio.powi(2))).max(1e-6).log10()
+            }),
+            freq: freq.clone(),
+            ..Curve::default()
+        };
+        let already_highpassed = Curve {
+            freq,
+            spl: Array1::from_elem(100, 80.0),
+            ..Curve::default()
+        };
+        let config = RoomConfig::default();
+
+        let raw_f3 = detect_broadband_f3(&config, &raw, 20.0, 1_000.0);
+        let processed_f3 = detect_broadband_f3(&config, &already_highpassed, 20.0, 1_000.0);
+        assert!(raw_f3.is_some_and(|f3| (40.0..80.0).contains(&f3)));
+        assert_eq!(processed_f3, None);
+
+        assert_eq!(safe_broadband_lowshelf_gain(Some(250.0), 6.0), 0.0);
+        assert_eq!(safe_broadband_lowshelf_gain(Some(60.0), 3.0), 0.0);
+        assert_eq!(safe_broadband_lowshelf_gain(Some(250.0), -3.0), -3.0);
+        assert_eq!(safe_broadband_lowshelf_gain(None, 6.0), 6.0);
     }
 
     #[test]

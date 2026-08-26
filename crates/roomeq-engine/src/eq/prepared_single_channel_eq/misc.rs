@@ -22,11 +22,22 @@ use std::error::Error;
 /// Handles normalization, psychoacoustic smoothing, target curve, deviation,
 /// and objective data setup. The result is independent of filter count so it
 /// can be reused across multiple optimization passes.
+#[cfg(test)]
 pub(in super::super) fn prepare_single_channel_eq(
     curve: &Curve,
     config: &OptimizerConfig,
     resources: Option<&EqResources>,
     sample_rate: f64,
+) -> Result<PreparedSingleChannelEq, Box<dyn Error>> {
+    prepare_single_channel_eq_with_normalization(curve, config, resources, sample_rate, None)
+}
+
+pub(in super::super) fn prepare_single_channel_eq_with_normalization(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    normalization_mean_spl: Option<f64>,
 ) -> Result<PreparedSingleChannelEq, Box<dyn Error>> {
     // Public optimizer callers may provide the same response on arbitrary
     // linear, logarithmic, or warped grids. Evaluate every single-channel
@@ -38,7 +49,14 @@ pub(in super::super) fn prepare_single_channel_eq(
         .map(|frequency_grid| autoeq_core::interpolate_log_space(&frequency_grid, curve));
     let curve = canonical_curve.as_ref().unwrap_or(curve);
 
-    prepare_single_channel_eq_with_spin(curve, config, resources, sample_rate, None)
+    prepare_single_channel_eq_with_spin(
+        curve,
+        config,
+        resources,
+        sample_rate,
+        None,
+        normalization_mean_spl,
+    )
 }
 
 pub(in super::super) fn prepare_single_channel_eq_with_spin(
@@ -47,7 +65,17 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
     resources: Option<&EqResources>,
     sample_rate: f64,
     spin_data: Option<&HashMap<String, Curve>>,
+    normalization_mean_spl: Option<f64>,
 ) -> Result<PreparedSingleChannelEq, Box<dyn Error>> {
+    if curve.freq.len() < 2
+        || curve.spl.len() != curve.freq.len()
+        || curve
+            .phase
+            .as_ref()
+            .is_some_and(|phase| phase.len() != curve.freq.len())
+    {
+        return Err("single-channel EQ requires at least two aligned frequency/SPL samples".into());
+    }
     // Clamp optimizer frequency range to measurement data range.
     let data_min_freq = curve.freq[0];
     let data_max_freq = curve.freq[curve.freq.len() - 1];
@@ -90,7 +118,8 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
         .fold((0.0, 0usize), |(sum, count), (_, level)| {
             (sum + *level, count + 1)
         });
-    let mean_spl = if count > 0 { sum / count as f64 } else { 0.0 };
+    let mean_spl =
+        normalization_mean_spl.unwrap_or_else(|| if count > 0 { sum / count as f64 } else { 0.0 });
     let normalized_curve_unsmoothed = Curve {
         freq: curve.freq.clone(),
         spl: &curve.spl - mean_spl,
@@ -114,6 +143,7 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
         .map(|dc_config| {
             let mut dc_analysis_config = impulse_analysis::DecomposedCorrectionConfig {
                 schroeder_freq: dc_config.schroeder_freq,
+                transition_width_oct: dc_config.transition_width_oct,
                 min_mode_q: dc_config.min_mode_q,
                 min_mode_prominence_db: dc_config.min_mode_prominence_db,
                 mode_correction_weight: dc_config.mode_correction_weight,

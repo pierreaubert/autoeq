@@ -134,8 +134,10 @@ pub(super) fn make_fdw_e2e_ir(sample_rate: u32) -> Vec<f32> {
 fn optimize_channel_eq_runs_refine_when_enabled() {
     let curve = make_synthetic_room_curve();
     let config_no_refine = OptimizerConfig {
-        algorithm: "autoeq:de".to_string(),
-        strategy: "lshade".to_string(),
+        // Use the deterministic pure-Rust local backend here. The contract is
+        // that the engine routes through perform_optimization's refine path;
+        // comparing two parallel DE runs makes that assertion scheduler-flaky.
+        algorithm: "autoeq:cobyla".to_string(),
         num_filters: 3,
         max_iter: 5000,
         population: 20,

@@ -171,7 +171,7 @@ pub fn solve_prepared_ctc(
             .iter()
             .map(|matrix| {
                 let row_start = speaker_idx * 2;
-                (matrix[row_start].norm_sqr() + matrix[row_start + 1].norm_sqr()).sqrt()
+                matrix[row_start].norm() + matrix[row_start + 1].norm()
             })
             .fold(0.0, f64::max);
         if max_sum_gain > 0.0 {
@@ -270,6 +270,14 @@ pub fn compute_delivered_response_metrics(
     latency_samples: usize,
 ) -> Result<CtcDeliveredResponseMetrics> {
     let num_bins = fft_size / 2 + 1;
+    if spectrum.bins.len() != num_bins {
+        return Err(AutoeqError::OptimizationFailed {
+            message: format!(
+                "ctc delivered-response scoring expected exactly {num_bins} matrix bins, got {}",
+                spectrum.bins.len()
+            ),
+        });
+    }
     let speakers = spectrum.speakers.len();
     let mut filter_spectra = Vec::with_capacity(speakers * 2);
     for speaker in &spectrum.speakers {
@@ -387,7 +395,7 @@ pub fn build_matrix_spectrum(
 }
 
 pub fn ctc_condition_warning(max_condition: f64) -> Option<String> {
-    (max_condition.is_finite() && max_condition > CTC_CONDITION_WARNING_THRESHOLD).then(|| {
+    (!max_condition.is_finite() || max_condition > CTC_CONDITION_WARNING_THRESHOLD).then(|| {
         format!(
             "CTC transfer matrix is ill-conditioned: max condition number {max_condition:.3e} exceeds {CTC_CONDITION_WARNING_THRESHOLD:.3e}; filters may amplify measurement noise or need stronger regularization"
         )
@@ -405,11 +413,12 @@ pub fn enforce_electrical_sum_headroom(
     for speaker_idx in 0..speakers {
         let row_start = speaker_idx * ears;
         let row_end = row_start + ears;
+        // Both target-ear filters feed the same physical driver. Bound the
+        // coherent worst case rather than the uncorrelated/RSS case.
         let row_norm = values[row_start..row_end]
             .iter()
-            .map(|value| value.norm_sqr())
-            .sum::<f64>()
-            .sqrt();
+            .map(|value| value.norm())
+            .sum::<f64>();
         if row_norm > max_gain && row_norm > 0.0 {
             let scale = max_gain / row_norm;
             for value in &mut values[row_start..row_end] {
@@ -482,5 +491,22 @@ mod crosstalk_metric_tests {
         };
 
         assert_eq!(delivered_crosstalk_residual_db(&metrics), -42.0);
+    }
+
+    #[test]
+    fn delivered_response_rejects_matrix_bins_from_a_different_fft_size() {
+        let spectrum = PreparedCtcMatrix {
+            source: "test".to_string(),
+            speakers: vec!["left".to_string(), "right".to_string()],
+            ears: vec!["left".to_string(), "right".to_string()],
+            positions: vec!["primary".to_string()],
+            // fft_size=8 requires exactly five half-spectrum bins. Six bins
+            // can only belong to a different transform and must not be indexed
+            // as if they shared the requested bin spacing.
+            bins: vec![Vec::new(); 6],
+        };
+
+        let error = compute_delivered_response_metrics(&spectrum, &[], 8, 0).unwrap_err();
+        assert!(error.to_string().contains("expected exactly 5 matrix bins"));
     }
 }

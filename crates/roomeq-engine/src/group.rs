@@ -12,10 +12,10 @@ use crate::multiseat::{self, MultiSeatMeasurements};
 pub const GLOBAL_EQ_REGRESSION_TOLERANCE: f64 = 1e-6;
 
 pub fn multiseat_peq_config(policy: &MultiSeatConfig, seat_count: usize) -> MultiMeasurementConfig {
-    let mut weights = match policy.seat_weights.as_ref() {
-        Some(weights) if weights.len() == seat_count => weights.clone(),
-        _ => vec![1.0; seat_count],
-    };
+    let mut weights = policy
+        .seat_weights
+        .clone()
+        .unwrap_or_else(|| vec![1.0; seat_count]);
     for weight in &mut weights {
         if !weight.is_finite() || *weight < 0.0 {
             *weight = 0.0;
@@ -24,7 +24,7 @@ pub fn multiseat_peq_config(policy: &MultiSeatConfig, seat_count: usize) -> Mult
     if policy.strategy == MultiSeatStrategy::PrimaryWithConstraints
         && policy.primary_seat < weights.len()
     {
-        weights[policy.primary_seat] *= policy.primary_seat_weight.max(1.0);
+        weights[policy.primary_seat] *= policy.primary_seat_weight.max(0.0);
     }
     let weight_sum: f64 = weights.iter().sum();
     if weight_sum <= f64::EPSILON {
@@ -226,6 +226,30 @@ mod tests {
             multiseat_peq_config(&invalid, 2).weights.unwrap(),
             vec![0.5, 0.5]
         );
+
+        let mismatched = MultiSeatConfig {
+            seat_weights: Some(vec![1.0]),
+            ..MultiSeatConfig::default()
+        };
+        assert_eq!(
+            multiseat_peq_config(&mismatched, 2).weights.unwrap(),
+            vec![1.0]
+        );
+    }
+
+    #[test]
+    fn multiseat_peq_honors_fractional_primary_seat_weight() {
+        let policy = MultiSeatConfig {
+            strategy: MultiSeatStrategy::PrimaryWithConstraints,
+            primary_seat: 0,
+            primary_seat_weight: 0.5,
+            seat_weights: Some(vec![1.0, 1.0]),
+            ..MultiSeatConfig::default()
+        };
+
+        let weights = multiseat_peq_config(&policy, 2).weights.unwrap();
+        assert!((weights[0] - 1.0 / 3.0).abs() <= 1e-12);
+        assert!((weights[1] - 2.0 / 3.0).abs() <= 1e-12);
     }
 
     #[test]

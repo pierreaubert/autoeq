@@ -1,4 +1,4 @@
-use autoeq_core::{Curve, Result};
+use autoeq_core::{AutoeqError, Curve, Result};
 use autoeq_optim::optim::{OptimProgressCallback, OptimizerRunEvidence};
 use log::info;
 use math_audio_iir_fir::Biquad;
@@ -21,6 +21,17 @@ pub(super) fn optimize_iir_eq(
     if optimizer_config.num_filters == 0 {
         info!("  Skipping PEQ optimization because num_filters is 0");
         return Ok((Vec::new(), Vec::new()));
+    }
+
+    if optimizer_config.multi_measurement.is_some()
+        && optimizer_config
+            .schroeder_split
+            .as_ref()
+            .is_some_and(|config| config.enabled)
+    {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: "schroeder_split cannot be combined with multi_measurement because split optimization does not preserve the multi-measurement objective".into(),
+        });
     }
 
     if let Some(schroeder_config) = optimizer_config

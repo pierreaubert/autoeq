@@ -171,7 +171,11 @@ impl PreparedSmoothnessPenalty {
             };
             sum += term.modal_weight * value;
         }
-        self.weight * sum
+        if self.terms.is_empty() {
+            0.0
+        } else {
+            self.weight * sum / self.terms.len() as f64
+        }
     }
 }
 
@@ -226,9 +230,10 @@ fn prepare_smoothing_rows(freqs: &[f64], bands_per_octave: usize) -> Vec<Vec<(us
 
 #[cfg(test)]
 mod tests {
+    use super::PreparedSmoothnessPenalty;
     use crate::PeqModel;
     use crate::loss::LossType;
-    use crate::optim::ObjectiveDataBuilder;
+    use crate::optim::{ObjectiveDataBuilder, SmoothnessPenaltyConfig};
     use ndarray::Array1;
 
     #[test]
@@ -256,6 +261,33 @@ mod tests {
                 .iter()
                 .zip(expected.iter())
                 .all(|(actual, expected)| (actual - expected).abs() < 1e-10)
+        );
+    }
+
+    #[test]
+    fn prepared_smoothness_is_invariant_to_log_grid_density() {
+        let evaluate = |count| {
+            let frequencies = Array1::<f64>::logspace(10.0, 1.0, 4.0, count);
+            let response = frequencies.mapv(|frequency| frequency.ln().powi(2));
+            let prepared = PreparedSmoothnessPenalty::new(
+                frequencies.as_slice().unwrap(),
+                10.0,
+                10_000.0,
+                &SmoothnessPenaltyConfig {
+                    tv2_weight: 1.0,
+                    exponent: 2.0,
+                    ..Default::default()
+                },
+            );
+            prepared.evaluate(response.as_slice().unwrap())
+        };
+
+        let coarse = evaluate(17);
+        let dense = evaluate(257);
+        assert!(coarse > 0.0 && dense > 0.0);
+        assert!(
+            (coarse - dense).abs() <= 1e-10 * coarse.max(dense),
+            "coarse={coarse}, dense={dense}"
         );
     }
 }

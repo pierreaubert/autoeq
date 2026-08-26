@@ -628,9 +628,29 @@ fn validate_realized_main_crossovers(
                 })
             });
         if !realized {
+            let actual = result
+                .channels
+                .get(&route.source_channel)
+                .map(|chain| {
+                    chain
+                        .plugins
+                        .iter()
+                        .map(|plugin| {
+                            format!(
+                                "type={}, output={:?}, stage={:?}, frequency={:?}",
+                                plugin.plugin_type,
+                                plugin.parameters.get("output"),
+                                plugin.parameters.get("room_eq_stage"),
+                                plugin.parameters.get("frequency")
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                })
+                .unwrap_or_else(|| "channel missing".to_string());
             failures.push(format!(
-                "main channel '{}' does not realize its {:.3} Hz route-owned crossover",
-                route.source_channel, expected_hz
+                "main channel '{}' does not realize its {:.3} Hz route-owned crossover (actual: {})",
+                route.source_channel, expected_hz, actual
             ));
         }
     }

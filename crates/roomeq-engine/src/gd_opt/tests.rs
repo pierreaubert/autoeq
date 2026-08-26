@@ -225,15 +225,46 @@ fn compute_sum_gd_is_stable_at_destructive_interference() {
 
     let gd = compute_sum_gd(&[ch1, ch2], &params, &band_indices, &config);
 
-    // Without a guard, the first bin would see a ~π rad phase jump across a tiny
-    // frequency step, producing a GD spike of ~5000 ms. With the fix it should
-    // be clamped to 0 when the summed magnitude is below threshold.
-    assert!(
-        gd[0].abs() < 100.0,
-        "GD at destructive-interference null should be clamped, got {} ms",
-        gd[0]
+    // Without the guard, the first bin would see a ~π rad phase jump across a tiny
+    // frequency step, producing a GD spike of ~5000 ms. Cancellation makes phase
+    // undefined, so the affected finite-difference bins must be excluded.
+    assert!(gd.iter().all(|value| value.is_nan()));
+}
+
+#[test]
+fn exact_cancellation_bins_are_excluded_from_group_delay_statistics() {
+    let freq = Array1::from_vec(vec![80.0, 100.0, 125.0]);
+    let first = ChannelMeasurementInput {
+        freq: freq.clone(),
+        spl: Array1::zeros(3),
+        phase: Array1::zeros(3),
+        coherence: Array1::from_elem(3, 1.0),
+    };
+    let second = ChannelMeasurementInput {
+        freq,
+        spl: Array1::zeros(3),
+        phase: Array1::from_elem(3, std::f64::consts::PI),
+        coherence: Array1::from_elem(3, 1.0),
+    };
+    let config = GdOptConfig {
+        ap_per_channel: 0,
+        optimize_polarity: false,
+        ..GdOptConfig::default()
+    };
+    let parameters = vec![0.0, 0.0];
+    let indices = vec![0, 1, 2];
+
+    let gd = compute_sum_gd(
+        &[first.clone(), second.clone()],
+        &parameters,
+        &indices,
+        &config,
     );
-    assert!(gd[0].is_finite());
+    assert!(gd.iter().all(|value| value.is_nan()));
+    assert_eq!(
+        compute_sum_gd_rms(&[first, second], &parameters, &indices, &config),
+        0.0
+    );
 }
 
 #[test]

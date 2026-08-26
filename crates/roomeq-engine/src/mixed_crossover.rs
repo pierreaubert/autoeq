@@ -114,7 +114,8 @@ pub fn process_mixed_crossover(
             if fir_uses_low { "low" } else { "high" }
         ),
     })?;
-    let fir_bulk_delay_ms = fir_bulk_delay_ms(&fir_coefficients, request.sample_rate);
+    let fir_bulk_delay_ms =
+        fir_bulk_delay_ms(&fir_coefficients, request.sample_rate, crossover_freq);
 
     let eq_filters = eq_result.filters;
     let mut reported_filters = eq_filters.clone();
@@ -260,16 +261,55 @@ fn apply_crossover_response(
     response::apply_complex_response(curve, &combined)
 }
 
-fn fir_bulk_delay_ms(coefficients: &[f64], sample_rate: f64) -> f64 {
-    if sample_rate <= 0.0 {
+fn fir_bulk_delay_ms(coefficients: &[f64], sample_rate: f64, frequency_hz: f64) -> f64 {
+    if coefficients.is_empty()
+        || !sample_rate.is_finite()
+        || sample_rate <= 0.0
+        || !frequency_hz.is_finite()
+        || frequency_hz <= 0.0
+        || frequency_hz >= sample_rate * 0.5
+    {
         return 0.0;
     }
-    coefficients
+
+    let omega = 2.0 * std::f64::consts::PI * frequency_hz / sample_rate;
+    let delta = (omega * 1e-3).clamp(1e-6, 1e-3);
+    let omega_low = (omega - delta).max(0.0);
+    let omega_high = (omega + delta).min(std::f64::consts::PI);
+    let response_at = |evaluation_omega: f64| {
+        coefficients
+            .iter()
+            .enumerate()
+            .map(|(index, coefficient)| {
+                Complex64::from_polar(*coefficient, -evaluation_omega * index as f64)
+            })
+            .sum::<Complex64>()
+    };
+    let low = response_at(omega_low);
+    let high = response_at(omega_high);
+    let phase_delta = (high * low.conj()).arg();
+    let delay_samples = -phase_delta / (omega_high - omega_low);
+    if delay_samples.is_finite() && delay_samples >= 0.0 {
+        return delay_samples * 1000.0 / sample_rate;
+    }
+
+    // Near a response null the phase derivative is ill-conditioned. The
+    // energy centroid is a stable broadband fallback and remains exact for a
+    // pure delayed impulse.
+    let energy = coefficients
+        .iter()
+        .map(|coefficient| coefficient * coefficient)
+        .sum::<f64>();
+    if energy <= f64::EPSILON {
+        return 0.0;
+    }
+    let centroid_samples = coefficients
         .iter()
         .enumerate()
-        .max_by(|(_, left), (_, right)| left.abs().total_cmp(&right.abs()))
-        .map(|(index, _)| index as f64 * 1000.0 / sample_rate)
-        .unwrap_or(0.0)
+        .map(|(index, coefficient)| index as f64 * coefficient * coefficient)
+        .sum::<f64>()
+        / energy;
+    centroid_samples * 1000.0 / sample_rate
 }
 
 #[cfg(test)]
@@ -358,7 +398,7 @@ mod tests {
         assert_eq!(alignment.parameters["channels"], serde_json::json!([2, 3]));
         assert_eq!(
             alignment.parameters["delay_ms"].as_f64().unwrap(),
-            fir_bulk_delay_ms(result.fir_coeffs.as_ref().unwrap(), 48_000.0)
+            fir_bulk_delay_ms(result.fir_coeffs.as_ref().unwrap(), 48_000.0, 500.0)
         );
         assert_eq!(
             result.channel.plugins.last().unwrap().plugin_type,
@@ -428,10 +468,10 @@ mod tests {
     }
 
     #[test]
-    fn fir_bulk_delay_tracks_the_impulse_peak() {
-        assert_eq!(fir_bulk_delay_ms(&[0.1, -0.2, 1.0, 0.4], 1_000.0), 2.0);
-        assert_eq!(fir_bulk_delay_ms(&[], 48_000.0), 0.0);
-        assert_eq!(fir_bulk_delay_ms(&[1.0], 0.0), 0.0);
+    fn fir_bulk_delay_tracks_group_delay_at_crossover() {
+        assert!((fir_bulk_delay_ms(&[0.0, 0.0, 1.0], 1_000.0, 100.0) - 2.0).abs() < 1e-9);
+        assert_eq!(fir_bulk_delay_ms(&[], 48_000.0, 500.0), 0.0);
+        assert_eq!(fir_bulk_delay_ms(&[1.0], 0.0, 500.0), 0.0);
     }
 
     #[test]

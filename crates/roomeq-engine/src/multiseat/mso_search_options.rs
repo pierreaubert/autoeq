@@ -13,10 +13,21 @@ pub(super) struct MsoSearchOptions {
 impl MsoSearchOptions {
     pub(super) fn from_config(config: &MultiSeatConfig, min_freq: f64, max_freq: f64) -> Self {
         let allpass_min_freq = min_freq.max(20.0);
-        let allpass_max_freq = max_freq.min(200.0).max(allpass_min_freq);
+        let usable_allpass_max = max_freq.min(200.0);
+        let allpass_filters_per_sub = if allpass_min_freq < usable_allpass_max {
+            config.allpass_filters_per_sub
+        } else {
+            if config.allpass_filters_per_sub > 0 {
+                log::warn!(
+                    "MSO all-pass filters disabled because [{min_freq:.1}, {max_freq:.1}] Hz has no overlap with the supported 20-200 Hz all-pass band"
+                );
+            }
+            0
+        };
+        let allpass_max_freq = usable_allpass_max.max(allpass_min_freq);
         Self {
             optimize_polarity: config.optimize_polarity,
-            allpass_filters_per_sub: config.allpass_filters_per_sub,
+            allpass_filters_per_sub,
             allpass_min_freq,
             allpass_max_freq,
         }
@@ -55,4 +66,26 @@ pub(super) fn decode_mso_params(
     }
 
     (gains, delays, polarities, allpass_filters)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn allpass_search_is_disabled_when_band_starts_above_200_hz() {
+        let config = MultiSeatConfig {
+            allpass_filters_per_sub: 3,
+            ..MultiSeatConfig::default()
+        };
+
+        let unsupported = MsoSearchOptions::from_config(&config, 250.0, 2_000.0);
+        assert_eq!(unsupported.allpass_filters_per_sub, 0);
+        assert_eq!(unsupported.allpass_min_freq, 250.0);
+        assert_eq!(unsupported.allpass_max_freq, 250.0);
+
+        let supported = MsoSearchOptions::from_config(&config, 20.0, 120.0);
+        assert_eq!(supported.allpass_filters_per_sub, 3);
+        assert_eq!(supported.allpass_max_freq, 120.0);
+    }
 }

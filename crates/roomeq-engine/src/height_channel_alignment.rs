@@ -70,7 +70,8 @@ fn resolve_reference(
         .get(channel_name)
         .or_else(|| config.reference_channels.get(role_group_key(role)))
     {
-        return curves.contains_key(reference).then(|| reference.clone());
+        return (curves.contains_key(reference) && role_for_channel(reference).is_bed_channel())
+            .then(|| reference.clone());
     }
     for &preferred in preferred_reference_roles(role) {
         if let Some(name) = curves
@@ -509,6 +510,29 @@ mod tests {
             &HashMap::new(),
             &HeightChannelAlignmentConfig {
                 reference_channels: HashMap::from([("TFL".to_string(), "missing".to_string())]),
+                ..Default::default()
+            },
+            48_000.0,
+            80.0,
+            16_000.0,
+        )
+        .unwrap();
+
+        assert_eq!(result["TFL"].status, HeightAlignmentStatus::Failed);
+        assert_eq!(result["TFL"].reference_channel, None);
+    }
+
+    #[test]
+    fn height_reference_override_rejects_subwoofer_roles() {
+        let curves = HashMap::from([
+            ("Sub".to_string(), curve(0.0, 0.0, false)),
+            ("TFL".to_string(), curve(0.0, 0.0, false)),
+        ]);
+        let result = compute_height_channel_alignment(
+            &curves,
+            &HashMap::new(),
+            &HeightChannelAlignmentConfig {
+                reference_channels: HashMap::from([("TFL".to_string(), "Sub".to_string())]),
                 ..Default::default()
             },
             48_000.0,

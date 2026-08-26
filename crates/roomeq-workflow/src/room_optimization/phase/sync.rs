@@ -8,6 +8,7 @@ pub(in super::super) fn sync_reported_phase_adjustment(
     channel_chains: &mut HashMap<String, ChannelDspChain>,
     delay_ms: f64,
     invert_polarity: bool,
+    sample_rate: f64,
 ) {
     if let Some(ch_result) = channel_results.get_mut(channel_name) {
         apply_phase_only_adjustment_to_reported_curve(
@@ -17,7 +18,9 @@ pub(in super::super) fn sync_reported_phase_adjustment(
         );
 
         if let Some(chain) = channel_chains.get_mut(channel_name) {
-            chain.final_curve = Some((&ch_result.final_curve).into());
+            let reported =
+                reported_curve_with_user_preferences(&ch_result.final_curve, chain, sample_rate);
+            chain.final_curve = Some((&reported).into());
         }
     } else if let Some(chain) = channel_chains.get_mut(channel_name)
         && let Some(final_curve) = chain.final_curve.clone()
@@ -34,6 +37,7 @@ pub(in super::super) fn sync_reported_gain_adjustment(
     channel_chains: &mut HashMap<String, ChannelDspChain>,
     gain_db: f64,
     invert_polarity: bool,
+    sample_rate: f64,
 ) {
     if let Some(ch_result) = channel_results.get_mut(channel_name) {
         ch_result.final_curve.spl = &ch_result.final_curve.spl + gain_db;
@@ -44,7 +48,9 @@ pub(in super::super) fn sync_reported_gain_adjustment(
         );
 
         if let Some(chain) = channel_chains.get_mut(channel_name) {
-            chain.final_curve = Some((&ch_result.final_curve).into());
+            let reported =
+                reported_curve_with_user_preferences(&ch_result.final_curve, chain, sample_rate);
+            chain.final_curve = Some((&reported).into());
         }
     } else if let Some(chain) = channel_chains.get_mut(channel_name)
         && let Some(final_curve) = chain.final_curve.clone()
@@ -77,7 +83,9 @@ pub(in super::super) fn sync_reported_biquad_adjustment(
             roomeq_engine::response::apply_complex_response(&ch_result.final_curve, &response);
 
         if let Some(chain) = channel_chains.get_mut(channel_name) {
-            chain.final_curve = Some((&ch_result.final_curve).into());
+            let reported =
+                reported_curve_with_user_preferences(&ch_result.final_curve, chain, sample_rate);
+            chain.final_curve = Some((&reported).into());
         }
     } else if let Some(chain) = channel_chains.get_mut(channel_name)
         && let Some(final_curve) = chain.final_curve.clone()
@@ -114,7 +122,9 @@ pub(in super::super) fn sync_reported_fir_adjustment(
             roomeq_engine::response::apply_complex_response(&ch_result.final_curve, &response);
 
         if let Some(chain) = channel_chains.get_mut(channel_name) {
-            chain.final_curve = Some((&ch_result.final_curve).into());
+            let reported =
+                reported_curve_with_user_preferences(&ch_result.final_curve, chain, sample_rate);
+            chain.final_curve = Some((&reported).into());
         }
     } else if let Some(chain) = channel_chains.get_mut(channel_name)
         && let Some(final_curve) = chain.final_curve.clone()
@@ -187,7 +197,7 @@ mod tests {
         let (ch, chain) = make_channel("left");
         let mut results = HashMap::from([("left".to_string(), ch)]);
         let mut chains = HashMap::from([("left".to_string(), chain)]);
-        sync_reported_phase_adjustment("left", &mut results, &mut chains, 1.0, true);
+        sync_reported_phase_adjustment("left", &mut results, &mut chains, 1.0, true, 48_000.0);
         let curve = &results["left"].final_curve;
         let freq = curve.freq[0];
         let phase = curve.phase.as_ref().unwrap()[0];
@@ -202,7 +212,7 @@ mod tests {
         let mut results = HashMap::from([("left".to_string(), ch)]);
         let mut chains = HashMap::from([("left".to_string(), chain)]);
         let before = results["left"].final_curve.spl[0];
-        sync_reported_gain_adjustment("left", &mut results, &mut chains, 3.0, true);
+        sync_reported_gain_adjustment("left", &mut results, &mut chains, 3.0, true, 48_000.0);
         let after = results["left"].final_curve.spl[0];
         assert!((after - before - 3.0).abs() < 1e-9);
         let phase = results["left"].final_curve.phase.as_ref().unwrap();
@@ -254,7 +264,7 @@ mod tests {
         let (_, chain) = make_channel("left");
         let mut results = HashMap::<String, ChannelOptimizationResult>::new();
         let mut chains = HashMap::from([("left".to_string(), chain)]);
-        sync_reported_phase_adjustment("left", &mut results, &mut chains, 0.5, false);
+        sync_reported_phase_adjustment("left", &mut results, &mut chains, 0.5, false, 48_000.0);
         let curve = chains["left"].final_curve.as_ref().unwrap();
         let freq = curve.freq[0];
         let chain_phase = curve.phase.as_ref().unwrap()[0];

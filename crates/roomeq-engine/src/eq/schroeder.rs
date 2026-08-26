@@ -1,9 +1,24 @@
-use super::optimize_channel_eq_detailed;
+use super::optimize::optimize_channel_eq_detailed_with_normalization_mean;
 use crate::{AutoeqError, Curve};
 use autoeq_core::{Result, response};
 use log::debug;
 use math_audio_iir_fir::Biquad;
 use roomeq_model::{LowFreqFilterConfig, OptimizerConfig, SchroederSplitConfig};
+
+fn schroeder_filter_allocation(
+    total_filters: usize,
+    proportional_low_filters: usize,
+    shelving_only: bool,
+) -> (usize, usize) {
+    if shelving_only {
+        (total_filters - 2, 2)
+    } else {
+        (
+            proportional_low_filters,
+            total_filters - proportional_low_filters,
+        )
+    }
+}
 
 /// Optimized low- and high-frequency filters for a Schroeder split.
 #[derive(Debug)]
@@ -41,6 +56,11 @@ pub fn optimize_with_schroeder_split_detailed(
 
     let low_config = &schroeder_config.low_freq_config;
     let high_config = &schroeder_config.high_freq_config;
+    if high_config.shelving_only && optimizer.num_filters < 3 {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: "Schroeder shelving_only requires at least 3 filters so the high band can contain a true high shelf".into(),
+        });
+    }
     let high_min_q = optimizer.min_q.max(0.3);
     if low_config.min_q > low_config.max_q {
         return Err(AutoeqError::InvalidConfiguration {
@@ -59,6 +79,24 @@ pub fn optimize_with_schroeder_split_detailed(
         });
     }
 
+    // Both sub-passes must use one full-band reference. Re-normalizing each
+    // side independently erases real level offsets across the split.
+    let (normalization_sum, normalization_count) = curve
+        .freq
+        .iter()
+        .zip(curve.spl.iter())
+        .filter(|(frequency, _)| {
+            **frequency >= optimizer.min_freq && **frequency <= optimizer.max_freq
+        })
+        .fold((0.0, 0usize), |(sum, count), (_, level)| {
+            (sum + *level, count + 1)
+        });
+    let normalization_mean_spl = if normalization_count > 0 {
+        normalization_sum / normalization_count as f64
+    } else {
+        0.0
+    };
+
     // A split outside the configured optimization band has only one real
     // side. Do not manufacture an inverted second band (for example
     // [400, 80] Hz); optimize the available side with the full filter budget.
@@ -71,10 +109,16 @@ pub fn optimize_with_schroeder_split_detailed(
             max_db,
             ..optimizer.clone()
         };
-        let result = optimize_channel_eq_detailed(curve, &low_optimizer, None, sample_rate)
-            .map_err(|e| AutoeqError::OptimizationFailed {
-                message: format!("Low-frequency EQ optimization failed: {e}"),
-            })?;
+        let result = optimize_channel_eq_detailed_with_normalization_mean(
+            curve,
+            &low_optimizer,
+            None,
+            sample_rate,
+            normalization_mean_spl,
+        )
+        .map_err(|e| AutoeqError::OptimizationFailed {
+            message: format!("Low-frequency EQ optimization failed: {e}"),
+        })?;
         return Ok(SchroederOptimizationResult {
             low_filters: clamp_filter_q(result.filters, low_config.min_q, low_config.max_q),
             high_filters: Vec::new(),
@@ -97,10 +141,16 @@ pub fn optimize_with_schroeder_split_detailed(
             },
             ..optimizer.clone()
         };
-        let result = optimize_channel_eq_detailed(curve, &high_optimizer, None, sample_rate)
-            .map_err(|e| AutoeqError::OptimizationFailed {
-                message: format!("High-frequency EQ optimization failed: {e}"),
-            })?;
+        let result = optimize_channel_eq_detailed_with_normalization_mean(
+            curve,
+            &high_optimizer,
+            None,
+            sample_rate,
+            normalization_mean_spl,
+        )
+        .map_err(|e| AutoeqError::OptimizationFailed {
+            message: format!("High-frequency EQ optimization failed: {e}"),
+        })?;
         return Ok(SchroederOptimizationResult {
             low_filters: Vec::new(),
             high_filters: clamp_filter_q(result.filters, high_min_q, high_config.max_q),
@@ -114,10 +164,16 @@ pub fn optimize_with_schroeder_split_detailed(
     let log_range_low = (schroeder_freq / optimizer.min_freq).max(1.0).log2();
     let low_ratio = log_range_low / log_range_total;
 
-    let low_filters = ((total_filters as f64 * low_ratio).round() as usize)
+    let proportional_low_filters = ((total_filters as f64 * low_ratio).round() as usize)
         .max(1)
         .min(total_filters - 1);
-    let high_filters = total_filters - low_filters;
+    // `ls-pk-hs` needs at least two high-band filters to include a real
+    // high shelf rather than producing only its leading low shelf.
+    let (low_filters, high_filters) = schroeder_filter_allocation(
+        total_filters,
+        proportional_low_filters,
+        high_config.shelving_only,
+    );
 
     debug!(
         "  Schroeder split: {} filters below {:.1}Hz, {} filters above",
@@ -142,11 +198,12 @@ pub fn optimize_with_schroeder_split_detailed(
         ..optimizer.clone()
     };
 
-    let low_result = optimize_channel_eq_detailed(
+    let low_result = optimize_channel_eq_detailed_with_normalization_mean(
         curve,
         &low_optimizer,
         None, // No additional target for split optimization
         sample_rate,
+        normalization_mean_spl,
     )
     .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!("Low-frequency EQ optimization failed: {}", e),
@@ -155,11 +212,7 @@ pub fn optimize_with_schroeder_split_detailed(
 
     // High frequency optimization (above Schroeder)
     let high_optimizer = OptimizerConfig {
-        num_filters: if high_config.shelving_only {
-            high_filters.min(2)
-        } else {
-            high_filters
-        },
+        num_filters: high_filters,
         min_freq: schroeder_freq,
         max_freq: optimizer.max_freq,
         min_q: high_min_q, // Ensure minimum Q for broad filters
@@ -177,11 +230,12 @@ pub fn optimize_with_schroeder_split_detailed(
         response::compute_peq_complex_response(&low_eq_filters, &curve.freq, sample_rate);
     let curve_with_low_correction = response::apply_complex_response(curve, &low_resp);
 
-    let high_result = optimize_channel_eq_detailed(
+    let high_result = optimize_channel_eq_detailed_with_normalization_mean(
         &curve_with_low_correction,
         &high_optimizer,
         None,
         sample_rate,
+        normalization_mean_spl,
     )
     .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!("High-frequency EQ optimization failed: {}", e),
@@ -411,5 +465,87 @@ mod tests {
             math_audio_iir_fir::BiquadFilterType::Lowshelf
                 | math_audio_iir_fir::BiquadFilterType::Highshelf
         )));
+    }
+
+    #[test]
+    fn shelving_only_reserves_two_high_band_filters_and_empty_curves_error() {
+        assert_eq!(schroeder_filter_allocation(3, 2, true), (1, 2));
+        assert_eq!(schroeder_filter_allocation(8, 3, true), (6, 2));
+        assert_eq!(schroeder_filter_allocation(8, 3, false), (3, 5));
+
+        let error = optimize_with_schroeder_split_detailed(
+            &Curve::default(),
+            &OptimizerConfig::default(),
+            &SchroederSplitConfig {
+                enabled: true,
+                ..SchroederSplitConfig::default()
+            },
+            48_000.0,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("at least two aligned frequency/SPL samples"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn schroeder_split_preserves_inter_band_level_information() {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(2_000.0), 96);
+        let curve = Curve {
+            spl: freq.mapv(|frequency| if frequency < 200.0 { 70.0 } else { 90.0 }),
+            freq,
+            phase: None,
+            ..Default::default()
+        };
+        let optimizer = OptimizerConfig {
+            num_filters: 4,
+            max_iter: 40,
+            population: 8,
+            refine: false,
+            min_freq: 20.0,
+            max_freq: 2_000.0,
+            min_db: -12.0,
+            max_db: 12.0,
+            psychoacoustic: false,
+            ..Default::default()
+        };
+        let mut split = SchroederSplitConfig {
+            enabled: true,
+            schroeder_freq: 200.0,
+            ..Default::default()
+        };
+        split.low_freq_config.allow_boost = true;
+
+        let result =
+            optimize_with_schroeder_split_detailed(&curve, &optimizer, &split, 48_000.0).unwrap();
+        let filters = result
+            .low_filters
+            .iter()
+            .chain(result.high_filters.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+        let filter_response =
+            autoeq_core::response::compute_peq_complex_response(&filters, &curve.freq, 48_000.0);
+        let corrected = autoeq_core::response::apply_complex_response(&curve, &filter_response);
+        let band_mean = |low: f64, high: f64| {
+            let values = corrected
+                .freq
+                .iter()
+                .zip(corrected.spl.iter())
+                .filter_map(|(&frequency, &level)| {
+                    (frequency >= low && frequency < high).then_some(level)
+                })
+                .collect::<Vec<_>>();
+            values.iter().sum::<f64>() / values.len() as f64
+        };
+
+        let corrected_step = band_mean(40.0, 160.0) - band_mean(250.0, 1_500.0);
+        assert!(
+            corrected_step.abs() < 15.0,
+            "shared normalization should reduce the original 20 dB step, got {corrected_step:.2} dB"
+        );
     }
 }

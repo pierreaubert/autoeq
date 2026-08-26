@@ -441,8 +441,7 @@ fn prepare_single_channel_eq_with_target_curve() {
 }
 
 #[test]
-#[should_panic(expected = "out of bounds")]
-fn prepare_single_channel_eq_empty_curve_panics() {
+fn prepare_single_channel_eq_empty_curve_returns_error() {
     let curve = Curve::default();
     let config = OptimizerConfig {
         num_filters: 3,
@@ -450,7 +449,10 @@ fn prepare_single_channel_eq_empty_curve_panics() {
         seed: Some(42),
         ..OptimizerConfig::default()
     };
-    let _ = prepare_single_channel_eq(&curve, &config, None, 48000.0);
+    let error = prepare_single_channel_eq(&curve, &config, None, 48000.0)
+        .err()
+        .expect("empty curve must be rejected");
+    assert!(error.to_string().contains("at least two aligned"));
 }
 
 #[test]

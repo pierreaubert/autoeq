@@ -1,6 +1,6 @@
 use super::average::average_flatness_from_responses;
 use super::average::average_perceptual_from_responses;
-use super::misc::variance_from_responses;
+use super::misc::{variance_from_responses, weighted_variance_from_responses};
 use super::mso_objective_context::MsoObjectiveContext;
 use super::primary::primary_constrained_from_responses;
 use super::types::mso_resource_penalty;
@@ -24,7 +24,12 @@ pub(super) fn objective_from_responses(
     context: Option<&MsoObjectiveContext>,
 ) -> f64 {
     match strategy {
-        MultiSeatStrategy::MinimizeVariance => variance_from_responses(responses),
+        MultiSeatStrategy::MinimizeVariance => context
+            .map(|ctx| {
+                weighted_variance_from_responses(responses, &ctx.seat_weights)
+                    + mso_resource_penalty(responses, ctx)
+            })
+            .unwrap_or_else(|| variance_from_responses(responses)),
         MultiSeatStrategy::Average => context
             .map(|ctx| average_perceptual_from_responses(responses, ctx))
             .unwrap_or_else(|| average_flatness_from_responses(responses)),
@@ -44,5 +49,32 @@ pub(super) fn objective_from_responses(
                  underlying base strategy here"
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn minimize_variance_uses_weighted_objective_and_same_resource_penalty() {
+        let baseline = vec![vec![0.0, 0.0, 0.0], vec![0.0, 0.0, 0.0]];
+        let responses = vec![vec![0.0, 2.0, 0.0], vec![0.0, 10.0, 0.0]];
+        let mut context = MsoObjectiveContext::from_baseline(&baseline);
+        context.seat_weights = vec![0.9, 0.1];
+
+        let actual = objective_from_responses(
+            &responses,
+            MultiSeatStrategy::MinimizeVariance,
+            0,
+            6.0,
+            Some(&context),
+        );
+        let expected = weighted_variance_from_responses(&responses, &context.seat_weights)
+            + mso_resource_penalty(&responses, &context);
+        let obsolete_unweighted = variance_from_responses(&responses);
+
+        assert!((actual - expected).abs() <= 1e-12);
+        assert!((actual - obsolete_unweighted).abs() > 1e-3);
     }
 }

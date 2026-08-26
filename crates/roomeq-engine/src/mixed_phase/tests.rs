@@ -6,7 +6,7 @@ use super::misc::smooth_phase_log_freq;
 use super::mixed_phase_config::MixedPhaseConfig;
 use super::mixed_phase_config::decompose_phase;
 use crate::Curve;
-use math_audio_iir_fir::FirDesignConfig;
+use math_audio_iir_fir::{FirDesignConfig, PreRingingConfig};
 use ndarray::{Array1, ShapeBuilder};
 
 fn make_curve_with_phase(freq: Vec<f64>, spl: Vec<f64>, phase: Vec<f64>) -> Curve {
@@ -46,7 +46,27 @@ fn test_decompose_phase_rejects_misaligned_curve_without_panicking() {
 }
 
 #[test]
-fn excess_phase_depth_mismatch_falls_back_without_panicking() {
+fn decompose_phase_rejects_empty_duplicate_and_nonpositive_frequency_grids() {
+    for frequency in [
+        Vec::new(),
+        vec![100.0, 100.0, 1_000.0],
+        vec![100.0, 90.0, 1_000.0],
+        vec![0.0, 100.0, 1_000.0],
+    ] {
+        let curve = Curve {
+            spl: Array1::from_elem(frequency.len(), 80.0),
+            phase: Some(Array1::from_elem(frequency.len(), 0.0)),
+            freq: Array1::from_vec(frequency),
+            ..Curve::default()
+        };
+        let error = decompose_phase(&curve, &MixedPhaseConfig::default())
+            .expect_err("invalid frequency grid must be rejected");
+        assert!(error.contains("non-empty, aligned positive frequency"));
+    }
+}
+
+#[test]
+fn excess_phase_depth_mismatch_fails_closed_without_panicking() {
     let freq = Array1::linspace(20.0, 20_000.0, 16);
     let residual = Array1::from_elem(freq.len(), 25.0);
     let config = MixedPhaseConfig::default();
@@ -58,7 +78,21 @@ fn excess_phase_depth_mismatch_falls_back_without_panicking() {
         48_000.0,
         Some(&Array1::from_elem(freq.len() - 1, 1.0)),
     );
-    assert_eq!(mismatched, unmasked);
+    assert_ne!(mismatched, unmasked);
+    let peak_index = mismatched
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| left.abs().total_cmp(&right.abs()))
+        .map(|(index, _)| index)
+        .unwrap();
+    assert!(mismatched[peak_index].abs() > 0.99);
+    let off_peak_energy = mismatched
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != peak_index)
+        .map(|(_, sample)| sample * sample)
+        .sum::<f64>();
+    assert!(off_peak_energy < 1e-20);
 }
 
 #[test]
@@ -197,8 +231,8 @@ fn generate_phase_only_fir_preserves_nyquist_magnitude_at_90_deg() {
     let nyquist_bin = fft_size / 2;
     let nyquist_mag_db = 20.0 * buffer[nyquist_bin].norm().log10();
     assert!(
-        nyquist_mag_db > -15.0,
-        "Nyquist magnitude should be preserved (> -15 dB), got {:.1} dB",
+        nyquist_mag_db > -20.0,
+        "Nyquist magnitude should remain bounded after the final safety window (> -20 dB), got {:.1} dB",
         nyquist_mag_db
     );
 }
@@ -276,6 +310,39 @@ fn test_phase_only_fir_zero_phase_is_near_impulse() {
         "center tap ({:.4}) should dominate off-center max ({:.4})",
         center_energy,
         off_center_max
+    );
+}
+
+#[test]
+fn final_phase_only_fir_still_obeys_pre_ringing_cap_after_renormalization() {
+    let freqs = vec![20.0, 60.0, 200.0, 800.0, 3_000.0, 10_000.0, 20_000.0];
+    let phase_deg = vec![0.0, -120.0, 90.0, -150.0, 130.0, -80.0, 0.0];
+    let threshold_db = -30.0;
+    let config = FirDesignConfig {
+        n_taps: 511,
+        sample_rate: 48_000.0,
+        pre_ringing: Some(PreRingingConfig {
+            threshold_db,
+            max_time_s: 0.0,
+        }),
+        ..Default::default()
+    };
+
+    let fir = generate_phase_only_fir(&freqs, &phase_deg, &config);
+    let (peak_index, peak) = fir
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| left.abs().total_cmp(&right.abs()))
+        .map(|(index, value)| (index, value.abs()))
+        .unwrap();
+    let cap = peak * 10.0_f64.powf(threshold_db / 20.0);
+    let maximum_pre = fir[..peak_index]
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        maximum_pre <= cap * (1.0 + 1e-9) + 1e-12,
+        "final pre-ringing {maximum_pre} exceeds cap {cap}"
     );
 }
 
@@ -362,7 +429,7 @@ fn test_decompose_phase_with_delay() {
 }
 
 #[test]
-fn test_depth_mask_length_mismatch_uses_unmasked_fallback() {
+fn test_depth_mask_length_mismatch_fails_closed() {
     // Mismatched depth masks are ignored instead of truncating or panicking.
     let n = 32;
     let freq = Array1::linspace(20.0, 20000.0, n);

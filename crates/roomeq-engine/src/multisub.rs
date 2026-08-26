@@ -107,7 +107,7 @@ mod multisub_regression_tests {
         let spl = vec![80.0; 7];
         // Subs with opposite phase at low frequencies (common room mode situation)
         let phase1 = vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        let phase2 = vec![180.0_f64.to_radians(); 7]; // 180 degrees opposite
+        let phase2 = vec![180.0; 7]; // Curve phase is stored in degrees.
 
         let d1 = make_sub_measurement(freqs.clone(), spl.clone(), Some(phase1));
         let d2 = make_sub_measurement(freqs.clone(), spl.clone(), Some(phase2));
@@ -187,6 +187,37 @@ mod multisub_regression_tests {
         let loss = multisub_allpass_loss(&data, &params, 48000.0, 20.0, 100.0);
         assert!(loss.is_finite(), "Loss should be finite for three subs");
         assert!(loss >= 0.0, "Loss should be non-negative");
+    }
+
+    #[test]
+    fn true_180_degree_offset_changes_the_multisub_objective() {
+        let freqs = vec![20.0, 40.0, 60.0, 80.0, 100.0, 150.0, 200.0];
+        let first_spl = vec![80.0; freqs.len()];
+        let second_spl = vec![70.0, 72.0, 74.0, 76.0, 78.0, 79.0, 79.5];
+        let params = vec![0.0, 0.0, 0.0, 0.0, 60.0, 60.0, 1.0, 1.0];
+
+        let in_phase = DriversLossData::new_ordered(
+            vec![
+                make_sub_measurement(freqs.clone(), first_spl.clone(), Some(vec![0.0; 7])),
+                make_sub_measurement(freqs.clone(), second_spl.clone(), Some(vec![0.0; 7])),
+            ],
+            CrossoverType::None,
+        );
+        let opposite = DriversLossData::new_ordered(
+            vec![
+                make_sub_measurement(freqs.clone(), first_spl, Some(vec![0.0; 7])),
+                make_sub_measurement(freqs, second_spl, Some(vec![180.0; 7])),
+            ],
+            CrossoverType::None,
+        );
+
+        let in_phase_loss = multisub_allpass_loss(&in_phase, &params, 48_000.0, 20.0, 200.0);
+        let opposite_loss = multisub_allpass_loss(&opposite, &params, 48_000.0, 20.0, 200.0);
+        assert!(in_phase_loss.is_finite() && opposite_loss.is_finite());
+        assert!(
+            opposite_loss > in_phase_loss * 2.0,
+            "180-degree cancellation should materially change the objective: in-phase={in_phase_loss}, opposite={opposite_loss}"
+        );
     }
 
     #[test]

@@ -932,6 +932,7 @@ impl WorkflowExecutor for Stereo21Executor {
         Ok(RoomOptimizationResult {
             channels: channel_chains,
             channel_results,
+            deployed_source_curves: HashMap::new(),
             combined_pre_score: avg_pre,
             combined_post_score: avg_post,
             metadata: OptimizationMetadata {

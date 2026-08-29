@@ -17,6 +17,57 @@ fn mixed_phase_owns_phase_correction_stage() {
 }
 
 #[test]
+fn route_owned_topology_owns_main_sub_phase_alignment() {
+    let mut route_plugin = output::create_gain_plugin(0.0);
+    route_plugin.parameters["room_eq_stage"] = serde_json::json!("route_owned");
+    let routed_chain = ChannelDspChain {
+        channel: "LFE".to_string(),
+        plugins: vec![route_plugin],
+        drivers: None,
+        initial_curve: None,
+        final_curve: None,
+        eq_response: None,
+        pre_ir: None,
+        post_ir: None,
+        fir_temporal_masking: None,
+        direct_early_late_correction: None,
+        target_curve: None,
+    };
+    let routed = HashMap::from([("LFE".to_string(), routed_chain)]);
+
+    assert!(routed_topology_owns_phase_alignment(&routed));
+    assert!(!routed_topology_owns_phase_alignment(&HashMap::new()));
+}
+
+#[test]
+fn home_cinema_input_alignment_delay_is_staged_before_routing() {
+    let mut config = minimal_room_config(ProcessingMode::LowLatency);
+    config.system = Some(SystemConfig {
+        model: SystemModel::HomeCinema,
+        subwoofers: Some(SubwooferSystemConfig {
+            config: SubwooferStrategy::Single,
+            crossover: None,
+            mapping: HashMap::new(),
+        }),
+        ..SystemConfig::default()
+    });
+
+    let plugin = create_time_alignment_plugin(&config, 2.5);
+
+    assert_eq!(
+        plugin.parameters["room_eq_stage"],
+        serde_json::json!("pre_route")
+    );
+
+    let matching_plugins =
+        stage_logical_input_plugins(&config, vec![output::create_gain_plugin(4.0)]);
+    assert_eq!(
+        matching_plugins[0].parameters["room_eq_stage"],
+        serde_json::json!("pre_route")
+    );
+}
+
+#[test]
 fn shared_alignment_fit_band_excludes_subwoofer_and_crossover_rolloff() {
     let mut config = minimal_room_config(ProcessingMode::LowLatency);
     config.optimizer.min_freq = 20.0;

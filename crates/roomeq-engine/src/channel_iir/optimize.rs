@@ -62,6 +62,7 @@ pub(super) fn optimize_iir_eq(
             optimization_curve,
             optimizer_config,
             schroeder_config,
+            Some(eq_resources),
             sample_rate,
         )?;
         let low_filter_count = result.low_filters.len();

@@ -339,17 +339,26 @@ fn median(mut values: Vec<f64>) -> Option<f64> {
     })
 }
 
-fn deployed_final_curve(result: &RoomOptimizationResult, channel: &str) -> Option<Curve> {
+pub(super) fn deployed_final_curve(
+    result: &RoomOptimizationResult,
+    channel: &str,
+) -> Option<Curve> {
     result
-        .channels
+        .deployed_source_curves
         .get(channel)
-        .and_then(|chain| chain.final_curve.clone())
-        .map(Curve::from)
+        .cloned()
         .or_else(|| {
             result
                 .channel_results
                 .get(channel)
                 .map(|channel| channel.final_curve.clone())
+        })
+        .or_else(|| {
+            result
+                .channels
+                .get(channel)
+                .and_then(|chain| chain.final_curve.clone())
+                .map(Curve::from)
         })
 }
 
@@ -414,14 +423,7 @@ pub(super) fn run_cross_mode_convergence_tests(
             &format!("{name}:cross-mode:{mode_name}"),
             maxeval,
         );
-        if strict {
-            // The measured 5.1.4 comparison is a deterministic realization
-            // gate, not a convergence stress test. Keep it bounded so nightly
-            // QA catches topology/mode drift without tripling the full 15k
-            // quality-search budget across ten channels.
-            config.optimizer.max_iter = config.optimizer.max_iter.min(5_000);
-            config.optimizer.population = config.optimizer.population.min(32);
-        }
+        // Strict mode runs the resolved production configuration unchanged.\n
 
         let result = run_optimization(&config, seed_runs)
             .with_context(|| format!("{} {} cross-mode", name, mode_name))?;
@@ -514,21 +516,16 @@ pub(super) fn run_cross_mode_convergence_tests(
             });
         }
     } else {
-        let channel_names: Vec<String> =
-            mode_results[0].1.channel_results.keys().cloned().collect();
+        let channel_names = redirected_main_channels(&mode_results[0].1);
         let mut cm1_max_diff = 0.0_f64;
         for ch_name in &channel_names {
-            let curves: Vec<&Curve> = mode_results
+            let curves: Vec<Curve> = mode_results
                 .iter()
-                .filter_map(|(_, result)| {
-                    result
-                        .channel_results
-                        .get(ch_name)
-                        .map(|channel| &channel.final_curve)
-                })
+                .filter_map(|(_, result)| deployed_final_curve(result, ch_name))
                 .collect();
             if curves.len() >= 2 {
-                let diff = max_curve_difference_db(&curves, 20.0, 500.0);
+                let curve_refs: Vec<&Curve> = curves.iter().collect();
+                let diff = max_curve_difference_db(&curve_refs, 20.0, 500.0);
                 cm1_max_diff = cm1_max_diff.max(diff);
             }
         }

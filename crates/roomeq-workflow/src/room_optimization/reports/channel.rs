@@ -270,6 +270,7 @@ mod tests {
         RoomOptimizationResult {
             channels: HashMap::new(),
             channel_results: HashMap::from([(name.to_string(), ch)]),
+            deployed_source_curves: HashMap::new(),
             combined_pre_score: 0.5,
             combined_post_score: 0.1,
             metadata: empty_metadata(),
@@ -399,6 +400,7 @@ mod tests {
                     },
                 ),
             ]),
+            deployed_source_curves: HashMap::new(),
             combined_pre_score: 0.5,
             combined_post_score: 0.1,
             metadata: empty_metadata(),

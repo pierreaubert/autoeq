@@ -642,6 +642,7 @@ mod tests {
         RoomOptimizationResult {
             channels: HashMap::from([(name.to_string(), chain)]),
             channel_results: HashMap::from([(name.to_string(), ch)]),
+            deployed_source_curves: HashMap::new(),
             combined_pre_score: 0.5,
             combined_post_score: 0.1,
             metadata: empty_metadata(),
@@ -1046,6 +1047,7 @@ mod tests {
         let mut result = RoomOptimizationResult {
             channels: HashMap::new(),
             channel_results: HashMap::new(),
+            deployed_source_curves: HashMap::new(),
             combined_pre_score: 0.4,
             combined_post_score: 0.2,
             metadata: OptimizationMetadata {
@@ -1097,6 +1099,7 @@ mod tests {
         let mut result = RoomOptimizationResult {
             channels: HashMap::new(),
             channel_results: HashMap::new(),
+            deployed_source_curves: HashMap::new(),
             combined_pre_score: 0.0,
             combined_post_score: 0.0,
             metadata: empty_metadata(),

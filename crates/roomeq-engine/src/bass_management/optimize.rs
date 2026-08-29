@@ -9,9 +9,9 @@ use crate::error::{AutoeqError, Result};
 use crate::topology::{
     all_curves_have_usable_phase, all_curves_share_frequency_grid,
     apply_crossover_response_to_curve, apply_delay_and_polarity_to_curve, average_mains_magnitude,
-    bass_management_crossover_type_candidates, bass_management_objective, complex_sum_mains,
-    curve_has_usable_phase, normalize_crossover_delays, predict_bass_management_sum,
-    select_bass_management_crossover_type,
+    bass_management_crossover_type_candidates, bass_management_objective,
+    bass_management_objective_with_target, complex_sum_mains, curve_has_usable_phase,
+    normalize_crossover_delays, predict_bass_management_sum, select_bass_management_crossover_type,
 };
 use crate::{Curve, crossover, home_cinema};
 use math_audio_dsp::analysis::compute_average_response;
@@ -949,6 +949,7 @@ pub fn optimize_bass_management_joint_solution_legacy(
 fn measured_source_route_trim_db(
     main_curve: &Curve,
     sub_curve: &Curve,
+    target_curve: Option<&Curve>,
     crossover_hz: f64,
     minimum_db: f64,
     maximum_db: f64,
@@ -968,8 +969,25 @@ fn measured_source_route_trim_db(
     let main_mean = compute_average_response(&main_freq, &main_spl, Some((300.0, 2_000.0))) as f64;
     let sub_upper_hz = (crossover_hz * 0.8).max(30.0) as f32;
     let sub_mean = compute_average_response(&sub_freq, &sub_spl, Some((25.0, sub_upper_hz))) as f64;
+    let target_bass_lift_db = target_curve
+        .map(|target| {
+            let target_freq: Vec<f32> = target
+                .freq
+                .iter()
+                .map(|frequency| *frequency as f32)
+                .collect();
+            let target_spl: Vec<f32> = target.spl.iter().map(|level| *level as f32).collect();
+            let target_main_mean =
+                compute_average_response(&target_freq, &target_spl, Some((300.0, 2_000.0))) as f64;
+            let target_bass_mean =
+                compute_average_response(&target_freq, &target_spl, Some((25.0, sub_upper_hz)))
+                    as f64;
+            target_bass_mean - target_main_mean
+        })
+        .filter(|lift| lift.is_finite())
+        .unwrap_or(0.0);
     if main_mean.is_finite() && sub_mean.is_finite() {
-        (main_mean - sub_mean).clamp(minimum_db, maximum_db)
+        (main_mean - sub_mean + target_bass_lift_db).clamp(minimum_db, maximum_db)
     } else {
         0.0
     }
@@ -1066,6 +1084,7 @@ pub fn optimize_bass_management_joint_solution(
     main_roles: &[String],
     aligned_measurement_curves: &HashMap<String, Curve>,
     aligned_pre_eq_curves: &HashMap<String, Curve>,
+    target_curves: Option<&HashMap<String, Curve>>,
     group_results: &mut BTreeMap<String, home_cinema::BassManagementGroupReport>,
     source_results: &mut Vec<home_cinema::BassManagementSourceReport>,
     sub_outputs: &mut [home_cinema::BassManagementSubOutputReport],
@@ -1208,6 +1227,7 @@ pub fn optimize_bass_management_joint_solution(
                         measured_source_route_trim_db(
                             main_curve,
                             measured_sub_curve,
+                            target_curves.and_then(|targets| targets.get(source_channel)),
                             current_frequency,
                             config.optimizer.min_db,
                             max_route_trim,
@@ -1230,7 +1250,7 @@ pub fn optimize_bass_management_joint_solution(
                 as usize;
             let crossover_type = &type_candidates[type_index];
             let mut losses = Vec::with_capacity(sources.len());
-            for (source_index, (_, source_curve)) in sources.iter().enumerate() {
+            for (source_index, (source_channel, source_curve)) in sources.iter().enumerate() {
                 let base = 2 + source_index * 4;
                 let (main_delay_ms, bass_delay_ms) = normalize_crossover_delays(
                     params[base].clamp(0.0, 20.0),
@@ -1250,7 +1270,11 @@ pub fn optimize_bass_management_joint_solution(
                     bass_delay_ms,
                     polarity_inverted,
                 );
-                losses.push(bass_management_objective(predicted.as_ref(), frequency)?);
+                losses.push(bass_management_objective_with_target(
+                    predicted.as_ref(),
+                    target_curves.and_then(|targets| targets.get(source_channel)),
+                    frequency,
+                )?);
             }
             let mean = losses.iter().sum::<f64>() / losses.len() as f64;
             let worst = losses.iter().copied().fold(f64::NEG_INFINITY, f64::max);
@@ -1304,6 +1328,7 @@ pub fn optimize_bass_management_joint_solution(
                     measured_source_route_trim_db(
                         main_curve,
                         measured_sub_curve,
+                        target_curves.and_then(|targets| targets.get(source_channel)),
                         refined[0],
                         config.optimizer.min_db,
                         max_route_trim,
@@ -1814,6 +1839,7 @@ mod tests {
             &main_roles(),
             &aligned_pre_eq_curves,
             &aligned_pre_eq_curves,
+            None,
             &mut group_results,
             &mut Vec::new(),
             &mut sub_outputs,
@@ -1963,6 +1989,7 @@ mod tests {
             &main_roles(),
             &aligned_pre_eq_curves,
             &aligned_pre_eq_curves,
+            None,
             &mut group_results,
             &mut Vec::new(),
             &mut sub_outputs,
@@ -2003,6 +2030,7 @@ mod tests {
             &main_roles(),
             &aligned_pre_eq_curves,
             &aligned_pre_eq_curves,
+            None,
             &mut group_results,
             &mut Vec::new(),
             &mut sub_outputs,
@@ -2068,6 +2096,7 @@ mod tests {
                 &main_roles(),
                 &curves,
                 &curves,
+                None,
                 &mut groups,
                 &mut sources,
                 &mut outputs,
@@ -2163,6 +2192,7 @@ mod tests {
             &main_roles(),
             &aligned_pre_eq_curves,
             &aligned_pre_eq_curves,
+            None,
             &mut group_results,
             &mut Vec::new(),
             &mut sub_outputs,
@@ -2189,5 +2219,21 @@ mod tests {
                 .iter()
                 .any(|o| o.strategy_source == "dba_rear" && !o.polarity_inverted)
         );
+    }
+
+    #[test]
+    fn measured_route_trim_includes_target_bass_lift() {
+        let main = flat_curve_with_phase();
+        let sub = flat_curve_with_phase();
+        let mut target = flat_curve_with_phase();
+        for (frequency, level) in target.freq.iter().zip(target.spl.iter_mut()) {
+            *level = -10.0 * (*frequency / 20.0).log10() / 3.0;
+        }
+
+        let flat_trim = measured_source_route_trim_db(&main, &sub, None, 100.0, -12.0, 6.0);
+        let tilted_trim =
+            measured_source_route_trim_db(&main, &sub, Some(&target), 100.0, -12.0, 6.0);
+
+        assert!(tilted_trim > flat_trim + 3.0);
     }
 }

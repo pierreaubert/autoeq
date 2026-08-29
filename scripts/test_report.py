@@ -3,6 +3,7 @@
 import unittest
 
 from scripts.src.report import (
+    _channel_display_final_curve,
     _comparison_source_label,
     _has_redirected_bass_route,
     _mixed_phase_summary_html,
@@ -84,6 +85,30 @@ class ComparisonSourceLabelTests(unittest.TestCase):
             "Logical source L (physical L + redirected bass)",
         )
         self.assertEqual(_comparison_source_label("LFE", False), "Logical source LFE")
+
+
+class ChannelDisplayCurveTests(unittest.TestCase):
+    def test_lfe_tab_uses_logical_input_curve_not_aggregate_bass_bus(self):
+        aggregate = {"freq": [20.0], "spl": [-60.0]}
+        logical_lfe = {"freq": [20.0], "spl": [-48.0]}
+        channel = {"final_curve": aggregate}
+
+        self.assertIs(
+            _channel_display_final_curve(
+                "LFE", "LFE", channel, {"LFE": logical_lfe}
+            ),
+            logical_lfe,
+        )
+
+    def test_main_tab_keeps_main_only_curve_for_separate_routed_overlay(self):
+        main_only = {"freq": [80.0], "spl": [-55.0]}
+        routed_sum = {"freq": [80.0], "spl": [-52.0]}
+        channel = {"final_curve": main_only}
+
+        self.assertIs(
+            _channel_display_final_curve("L", "LFE", channel, {"L": routed_sum}),
+            main_only,
+        )
 
 
 if __name__ == "__main__":

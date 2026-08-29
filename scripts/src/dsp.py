@@ -413,6 +413,7 @@ def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
     bass_management = (data.get("metadata", {}) or {}).get("bass_management", {}) or {}
     graph = bass_management.get("routing_graph", {}) or {}
     routes = graph.get("routes", []) or []
+    input_trim_db = graph.get("input_trim_db", {}) or {}
     if not routes:
         return {
             name: channel["final_curve"]
@@ -430,17 +431,15 @@ def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
             if channel.get("final_curve")
         }
 
-    # route_owned plugins encode one representative route on the shared sub
-    # chain. Route metadata below replaces them for each source independently.
-    common_sub_plugins = [
+    # Only destination post-route processing belongs to every signal emitted
+    # by the physical sub. The LFE chain's pre-route processing belongs to its
+    # logical input and must not leak into redirected L/R/etc. branches.
+    sub_post_route_plugins = [
         plugin
         for plugin in sub_channel.get("plugins", [])
-        if (plugin.get("parameters", {}) or {}).get("room_eq_stage") != "route_owned"
+        if (plugin.get("parameters", {}) or {}).get("room_eq_stage") == "post_route"
     ]
     sample_rate = float(data.get("sample_rate", 48_000.0) or 48_000.0)
-    sub_common = apply_plugins_to_curve(sub_initial, common_sub_plugins, sample_rate)
-    if not sub_common:
-        return {}
 
     routed_by_source: dict[str, dict] = {}
     for route in routes:
@@ -450,7 +449,27 @@ def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
         low_pass_hz = route.get("low_pass_hz")
         if low_pass_hz is None:
             continue
+        source_name = str(route.get("source_channel"))
+        source_plugins = (channels.get(source_name, {}) or {}).get("plugins", [])
+        source_pre_route_plugins = [
+            plugin
+            for plugin in source_plugins
+            if (plugin.get("parameters", {}) or {}).get("room_eq_stage")
+            == "pre_route"
+        ]
+        has_reported_input_trim = any(
+            plugin.get("plugin_type") == "gain"
+            and (plugin.get("parameters", {}) or {}).get("label")
+            == "post_dsp_input_level_alignment"
+            for plugin in source_pre_route_plugins
+        )
+        fallback_input_trim_db = (
+            0.0
+            if has_reported_input_trim
+            else float(input_trim_db.get(source_name, 0.0))
+        )
         route_plugins = [
+            *source_pre_route_plugins,
             {
                 "plugin_type": "crossover",
                 "parameters": {
@@ -462,7 +481,8 @@ def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
             {
                 "plugin_type": "gain",
                 "parameters": {
-                    "gain_db": route.get("gain_db", 0.0),
+                    "gain_db": float(route.get("gain_db", 0.0))
+                    + fallback_input_trim_db,
                     "invert": bool(route.get("polarity_inverted", False)),
                 },
             },
@@ -470,10 +490,11 @@ def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
                 "plugin_type": "delay",
                 "parameters": {"delay_ms": route.get("delay_ms", 0.0)},
             },
+            *sub_post_route_plugins,
         ]
-        routed = apply_plugins_to_curve(sub_common, route_plugins, sample_rate)
+        routed = apply_plugins_to_curve(sub_initial, route_plugins, sample_rate)
         if routed:
-            routed_by_source[str(route.get("source_channel"))] = routed
+            routed_by_source[source_name] = routed
 
     results: dict[str, dict] = {}
     for name, channel in channels.items():

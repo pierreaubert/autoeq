@@ -21,6 +21,27 @@ pub fn bass_management_objective(curve: Option<&Curve>, xover_freq: f64) -> Opti
     Some(compute_flat_loss(curve, min_freq, max_freq))
 }
 
+/// Score the routed response against the configured target shape around the
+/// crossover. A target-independent flatness score biases redirected bass low
+/// whenever the requested house curve rises toward low frequencies.
+pub fn bass_management_objective_with_target(
+    curve: Option<&Curve>,
+    target: Option<&Curve>,
+    xover_freq: f64,
+) -> Option<f64> {
+    let Some(target) = target else {
+        return bass_management_objective(curve, xover_freq);
+    };
+    let curve = curve?;
+    let target = autoeq_core::curve_transforms::interpolate_log_space(&curve.freq, target);
+    let mut error = curve.clone();
+    for (level, target_level) in error.spl.iter_mut().zip(target.spl.iter()) {
+        *level -= *target_level;
+    }
+    error.phase = None;
+    bass_management_objective(Some(&error), xover_freq)
+}
+
 pub fn bass_management_crossover_type_candidates(requested: &str) -> Vec<String> {
     let requested = requested.trim();
     if requested.eq_ignore_ascii_case("auto") || requested.eq_ignore_ascii_case("optimize") {

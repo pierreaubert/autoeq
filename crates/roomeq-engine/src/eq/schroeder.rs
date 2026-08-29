@@ -1,4 +1,5 @@
 use super::optimize::optimize_channel_eq_detailed_with_normalization_mean;
+use super::resources::EqResources;
 use crate::{AutoeqError, Curve};
 use autoeq_core::{Result, response};
 use log::debug;
@@ -37,6 +38,7 @@ pub fn optimize_with_schroeder_split_detailed(
     curve: &Curve,
     optimizer: &OptimizerConfig,
     schroeder_config: &SchroederSplitConfig,
+    resources: Option<&EqResources>,
     sample_rate: f64,
 ) -> Result<SchroederOptimizationResult> {
     if optimizer.num_filters < 2 {
@@ -112,7 +114,7 @@ pub fn optimize_with_schroeder_split_detailed(
         let result = optimize_channel_eq_detailed_with_normalization_mean(
             curve,
             &low_optimizer,
-            None,
+            resources,
             sample_rate,
             normalization_mean_spl,
         )
@@ -144,7 +146,7 @@ pub fn optimize_with_schroeder_split_detailed(
         let result = optimize_channel_eq_detailed_with_normalization_mean(
             curve,
             &high_optimizer,
-            None,
+            resources,
             sample_rate,
             normalization_mean_spl,
         )
@@ -201,7 +203,7 @@ pub fn optimize_with_schroeder_split_detailed(
     let low_result = optimize_channel_eq_detailed_with_normalization_mean(
         curve,
         &low_optimizer,
-        None, // No additional target for split optimization
+        resources,
         sample_rate,
         normalization_mean_spl,
     )
@@ -233,7 +235,7 @@ pub fn optimize_with_schroeder_split_detailed(
     let high_result = optimize_channel_eq_detailed_with_normalization_mean(
         &curve_with_low_correction,
         &high_optimizer,
-        None,
+        resources,
         sample_rate,
         normalization_mean_spl,
     )
@@ -300,6 +302,7 @@ fn clamp_filter_q(filters: Vec<Biquad>, min_q: f64, max_q: f64) -> Vec<Biquad> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::eq::PreparedEqTarget;
     use ndarray::Array1;
 
     fn curve_with_bass_peak_and_treble_tilt() -> Curve {
@@ -383,7 +386,7 @@ mod tests {
                 ..Default::default()
             };
             let error =
-                optimize_with_schroeder_split_detailed(&curve, &optimizer, &split, 48_000.0)
+                optimize_with_schroeder_split_detailed(&curve, &optimizer, &split, None, 48_000.0)
                     .expect_err("undersized split must be rejected");
             assert!(error.to_string().contains("at least 2 filters"));
         }
@@ -409,7 +412,8 @@ mod tests {
         };
 
         let result =
-            optimize_with_schroeder_split_detailed(&curve, &optimizer, &split, 48_000.0).unwrap();
+            optimize_with_schroeder_split_detailed(&curve, &optimizer, &split, None, 48_000.0)
+                .unwrap();
         assert!(!result.low_filters.is_empty());
         assert!(result.high_filters.is_empty());
         assert!(result.low_filters.iter().all(|filter| {
@@ -430,8 +434,9 @@ mod tests {
             ..Default::default()
         };
 
-        let error = optimize_with_schroeder_split_detailed(&curve, &optimizer, &split, 48_000.0)
-            .unwrap_err();
+        let error =
+            optimize_with_schroeder_split_detailed(&curve, &optimizer, &split, None, 48_000.0)
+                .unwrap_err();
         assert!(error.to_string().contains("min_q (2) exceeds max_q (1)"));
     }
 
@@ -456,7 +461,8 @@ mod tests {
         split.high_freq_config.shelving_only = true;
 
         let result =
-            optimize_with_schroeder_split_detailed(&curve, &optimizer, &split, 48_000.0).unwrap();
+            optimize_with_schroeder_split_detailed(&curve, &optimizer, &split, None, 48_000.0)
+                .unwrap();
         assert!(result.low_filters.is_empty());
         assert!(!result.high_filters.is_empty());
         assert!(result.high_filters.len() <= 2);
@@ -480,6 +486,7 @@ mod tests {
                 enabled: true,
                 ..SchroederSplitConfig::default()
             },
+            None,
             48_000.0,
         )
         .unwrap_err();
@@ -520,7 +527,8 @@ mod tests {
         split.low_freq_config.allow_boost = true;
 
         let result =
-            optimize_with_schroeder_split_detailed(&curve, &optimizer, &split, 48_000.0).unwrap();
+            optimize_with_schroeder_split_detailed(&curve, &optimizer, &split, None, 48_000.0)
+                .unwrap();
         let filters = result
             .low_filters
             .iter()
@@ -546,6 +554,82 @@ mod tests {
         assert!(
             corrected_step.abs() < 15.0,
             "shared normalization should reduce the original 20 dB step, got {corrected_step:.2} dB"
+        );
+    }
+
+    #[test]
+    fn schroeder_split_preserves_prepared_target_curve() {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(2_000.0), 96);
+        let curve = Curve {
+            freq: freq.clone(),
+            spl: Array1::from_elem(freq.len(), 80.0),
+            phase: None,
+            ..Default::default()
+        };
+        let target = Curve {
+            freq: freq.clone(),
+            spl: freq.mapv(|frequency| -12.0 * (frequency / 20.0).log10() / 2.0),
+            phase: None,
+            ..Default::default()
+        };
+        let resources = EqResources {
+            target: Some(PreparedEqTarget::Curve(Box::new(target))),
+            ..EqResources::default()
+        };
+        let optimizer = OptimizerConfig {
+            algorithm: "autoeq:cmaes".to_string(),
+            num_filters: 4,
+            max_iter: 400,
+            population: 12,
+            seed: Some(42),
+            refine: false,
+            min_freq: 20.0,
+            max_freq: 2_000.0,
+            min_db: -12.0,
+            max_db: 12.0,
+            psychoacoustic: false,
+            ..Default::default()
+        };
+        let mut split = SchroederSplitConfig {
+            enabled: true,
+            schroeder_freq: 200.0,
+            ..Default::default()
+        };
+        split.low_freq_config.allow_boost = true;
+
+        let result = optimize_with_schroeder_split_detailed(
+            &curve,
+            &optimizer,
+            &split,
+            Some(&resources),
+            48_000.0,
+        )
+        .unwrap();
+        let filters = result
+            .low_filters
+            .iter()
+            .chain(result.high_filters.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+        let filter_response =
+            autoeq_core::response::compute_peq_complex_response(&filters, &curve.freq, 48_000.0);
+        let corrected = autoeq_core::response::apply_complex_response(&curve, &filter_response);
+        let band_mean = |low: f64, high: f64| {
+            let values = corrected
+                .freq
+                .iter()
+                .zip(corrected.spl.iter())
+                .filter_map(|(&frequency, &level)| {
+                    (frequency >= low && frequency <= high).then_some(level)
+                })
+                .collect::<Vec<_>>();
+            values.iter().sum::<f64>() / values.len() as f64
+        };
+        let corrected_tilt = band_mean(30.0, 80.0) - band_mean(800.0, 1_800.0);
+
+        assert!(
+            corrected_tilt > 4.0,
+            "Schroeder split should retain the downward target tilt, got {corrected_tilt:.2} dB"
         );
     }
 }

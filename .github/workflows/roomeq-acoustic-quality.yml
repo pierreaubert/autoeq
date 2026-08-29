@@ -19,12 +19,16 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: roomeq-acoustic-quality-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   acoustic-quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: extractions/setup-just@v4
@@ -53,7 +57,7 @@ jobs:
         run: just qa-roomeq-mutation-smoke
       - name: Upload acoustic trend artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: roomeq-acoustic-quality
           path: target/qa/

@@ -38,6 +38,12 @@ pub struct SpeakerOptimizationResult {
 pub struct RoomOptimizationResult {
     pub channels: HashMap<String, ChannelDspChain>,
     pub channel_results: HashMap<String, ChannelOptimizationResult>,
+    /// Coherent, per-logical-input deployed responses after bass-management routing.
+    ///
+    /// These are distinct from `channel_results`: the latter remains the raw
+    /// serialized channel-chain response used for DSP realization and export
+    /// replay.
+    pub deployed_source_curves: HashMap<String, Curve>,
     pub combined_pre_score: f64,
     pub combined_post_score: f64,
     pub metadata: OptimizationMetadata,

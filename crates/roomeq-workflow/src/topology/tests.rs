@@ -323,6 +323,23 @@ fn bass_management_objective_computes_finite_loss() {
 }
 
 #[test]
+fn bass_management_objective_tracks_sloped_target() {
+    let curve = make_curve_with_phase(
+        vec![25.0, 50.0, 100.0, 200.0],
+        vec![6.0, 4.0, 2.0, 0.0],
+        vec![0.0, 0.0, 0.0, 0.0],
+    );
+    let target = curve.clone();
+
+    let flat_score = super::bass_management_objective(Some(&curve), 100.0).unwrap();
+    let target_score =
+        super::bass_management_objective_with_target(Some(&curve), Some(&target), 100.0).unwrap();
+
+    assert!(target_score < flat_score);
+    assert!(target_score < 1.0e-12);
+}
+
+#[test]
 fn select_bass_management_crossover_type_passthrough() {
     let main = make_curve_with_phase(
         vec![20.0, 50.0, 100.0, 200.0],

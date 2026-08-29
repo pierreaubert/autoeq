@@ -82,6 +82,168 @@ class BiquadParityTests(unittest.TestCase):
 
 
 class PostDspSourceCurveTests(unittest.TestCase):
+    def test_pre_route_time_alignment_delay_preserves_crossover_sum(self):
+        data = {
+            "metadata": {
+                "bass_management": {
+                    "physical_sub_output": "LFE",
+                    "routing_graph": {
+                        "routes": [
+                            {
+                                "source_channel": "L",
+                                "route_kind": "redirected_bass_lowpass_to_sub",
+                                "crossover_type": "LR24",
+                                "low_pass_hz": 80.0,
+                                "gain_db": 0.0,
+                                "delay_ms": 0.0,
+                                "polarity_inverted": False,
+                            }
+                        ]
+                    },
+                }
+            },
+            "channels": {
+                "L": {
+                    # LR24 high-pass at Fc. The reported final curve already
+                    # contains the leading input-alignment delay.
+                    "final_curve": {"freq": [80.0], "spl": [53.9794], "phase": [-180.0]},
+                    "plugins": [],
+                },
+                "LFE": {
+                    "initial_curve": {"freq": [80.0], "spl": [60.0], "phase": [0.0]},
+                    "plugins": [],
+                },
+            },
+        }
+
+        baseline = build_post_dsp_source_curves(data)["L"]["spl"][0]
+        delay_ms = 1.0
+        data["channels"]["L"]["final_curve"]["phase"][0] -= 360.0 * 80.0 * delay_ms / 1000.0
+        data["channels"]["L"]["plugins"] = [
+            {
+                "plugin_type": "delay",
+                "parameters": {"delay_ms": delay_ms, "room_eq_stage": "pre_route"},
+            }
+        ]
+        delayed = build_post_dsp_source_curves(data)["L"]["spl"][0]
+
+        self.assertAlmostEqual(delayed, baseline, places=5)
+
+    def test_redirected_bass_respects_pre_and_post_route_stage_ownership(self):
+        data = {
+            "metadata": {
+                "bass_management": {
+                    "physical_sub_output": "LFE",
+                    "routing_graph": {
+                        "input_trim_db": {"L": -6.0},
+                        "routes": [
+                            {
+                                "source_channel": "L",
+                                "route_kind": "redirected_bass_lowpass_to_sub",
+                                "crossover_type": "LR24",
+                                "low_pass_hz": 80.0,
+                                "gain_db": 0.0,
+                                "delay_ms": 0.0,
+                                "polarity_inverted": False,
+                            }
+                        ],
+                    },
+                }
+            },
+            "channels": {
+                "L": {
+                    "final_curve": {
+                        "freq": [80.0],
+                        "spl": [-200.0],
+                        "phase": [0.0],
+                    },
+                    "plugins": [
+                        {
+                            "plugin_type": "gain",
+                            "parameters": {
+                                "gain_db": -6.0,
+                                "label": "post_dsp_input_level_alignment",
+                                "room_eq_stage": "pre_route",
+                            },
+                        }
+                    ]
+                },
+                "LFE": {
+                    "initial_curve": {
+                        "freq": [80.0],
+                        "spl": [60.0],
+                        "phase": [0.0],
+                    },
+                    "plugins": [
+                        {
+                            "plugin_type": "gain",
+                            "parameters": {
+                                "gain_db": -20.0,
+                                "room_eq_stage": "pre_route",
+                            },
+                        },
+                        {
+                            "plugin_type": "gain",
+                            "parameters": {
+                                "gain_db": 3.0,
+                                "room_eq_stage": "post_route",
+                            },
+                        },
+                    ],
+                },
+            },
+        }
+
+        baseline = build_post_dsp_source_curves(data)["L"]["spl"][0]
+        data["channels"]["LFE"]["plugins"][0]["parameters"]["gain_db"] = -40.0
+        sub_pre_route_changed = build_post_dsp_source_curves(data)["L"]["spl"][0]
+        data["channels"]["LFE"]["plugins"][1]["parameters"]["gain_db"] = 5.0
+        sub_post_route_changed = build_post_dsp_source_curves(data)["L"]["spl"][0]
+
+        self.assertAlmostEqual(sub_pre_route_changed, baseline, places=6)
+        self.assertAlmostEqual(sub_post_route_changed - baseline, 2.0, places=6)
+
+    def test_bass_management_input_trim_is_applied_once(self):
+        data = {
+            "metadata": {
+                "bass_management": {
+                    "physical_sub_output": "LFE",
+                    "routing_graph": {
+                        "input_trim_db": {},
+                        "routes": [
+                            {
+                                "source_channel": "LFE",
+                                "route_kind": "lfe_lowpass_to_sub",
+                                "crossover_type": "LR24",
+                                "low_pass_hz": 80.0,
+                                "gain_db": 0.0,
+                                "delay_ms": 0.0,
+                                "polarity_inverted": False,
+                            }
+                        ],
+                    },
+                }
+            },
+            "channels": {
+                "LFE": {
+                    "initial_curve": {"freq": [80.0], "spl": [60.0], "phase": [0.0]},
+                    "final_curve": {"freq": [80.0], "spl": [99.0], "phase": [0.0]},
+                }
+            },
+        }
+
+        untrimmed = build_post_dsp_source_curves(data)
+        data["metadata"]["bass_management"]["routing_graph"]["input_trim_db"] = {
+            "LFE": -6.0
+        }
+        trimmed = build_post_dsp_source_curves(data)
+
+        self.assertAlmostEqual(
+            trimmed["LFE"]["spl"][0] - untrimmed["LFE"]["spl"][0],
+            -6.0,
+            places=6,
+        )
+
     def test_bass_management_is_reconstructed_per_source(self):
         data = {
             "metadata": {
@@ -148,7 +310,7 @@ class PostDspSourceCurveTests(unittest.TestCase):
         curves = build_post_dsp_source_curves(data)
 
         self.assertEqual(set(curves), {"L", "R", "LFE"})
-        self.assertAlmostEqual(curves["L"]["spl"][0], 57.0, places=6)
+        self.assertAlmostEqual(curves["L"]["spl"][0], 58.62888170047014, places=6)
         self.assertAlmostEqual(curves["LFE"]["spl"][0], 49.43433115727133, places=6)
         self.assertEqual(curves["R"]["spl"], [42.0])
         self.assertNotEqual(curves["LFE"]["spl"], [99.0])

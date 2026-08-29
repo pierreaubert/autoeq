@@ -1,3 +1,53 @@
+# 0.5.65
+
+## Package versions
+
+- `autoeq` 0.5.65
+- `roomeq-engine` 0.5.65
+- `roomeq-workflow` 0.5.26
+
+## Fixes
+
+- Optimize shared physical-sub post-route EQ against the physical subwoofer
+  transfer instead of a coherent sum of independent LFE and redirected-main
+  programme inputs, preventing route count, delay, or polarity from producing
+  spurious bass cuts and discarded LFE correction.
+- Keep the prepared target attached to home-cinema main and physical-sub DSP
+  chains so the final safety gate does not revert target-following bass PEQ as
+  a flat-response regression; anchor safety targets to the measured passband
+  instead of a routed subwoofer stopband.
+- Show the logical LFE input response on the LFE report tab instead of the
+  coherently summed physical bass bus, which could display cancellation from
+  unrelated redirected-main routes as an apparent LFE level loss.
+- Preserve configured prepared and file-backed target curves through
+  Schroeder-split IIR optimization instead of silently optimizing the split
+  band toward a flat response.
+- Preserve route-owned main/sub crossover alignment through final workflow
+  assembly, stage physical-sub correction after route summation, and apply the
+  common headroom safety trim to the LFE input chain.
+- Stage final arrival and inter-channel timbre matching on the logical input
+  before bass routing, so delay, shelf, and level corrections affect both the
+  high-passed speaker and its redirected-bass branch without creating false
+  crossover cancellation.
+- Score per-source bass routing against the configured target shape, include
+  the target bass rise in route-trim initialization, and apply the final routed
+  crossover residual correction before the split. Sloped house curves no
+  longer get flattened or left several decibels low below the crossover.
+- Reconstruct routed responses correctly in the Python report: apply LFE input
+  processing only to programme LFE, apply each redirected main's pre-route
+  chain before its crossover, and apply physical-sub processing post-route.
+
+## Reporting and QA
+
+- Overlay the actual configured target on every corrected overview and channel
+  plot, and add crossover-aware `LFE + channel` traces for redirected mains.
+- Apply the logical LFE programme low-pass to its target overlay, avoiding a
+  misleading comparison between a band-limited LFE response and a full-range
+  target.
+- Add regressions for sloped-target propagation, crossover-delay ownership,
+  routed DSP staging, report reconstruction, and target overlays; exercise the
+  Genelec 5.1.4 example with a 20 Hz to 20 kHz, -10 dB target tilt.
+
 # 0.5.64
 
 ## Package versions

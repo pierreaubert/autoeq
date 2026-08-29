@@ -1,7 +1,8 @@
 use crate::Curve;
 use crate::home_cinema::BassManagementRoutingGraph;
 use crate::topology::{
-    compute_crossover_complex_response, curve_has_usable_phase, same_frequency_grid,
+    complex_sum_mains, compute_crossover_complex_response, curve_has_usable_phase,
+    same_frequency_grid,
 };
 use autoeq_core::interpolate_log_space;
 use std::collections::HashMap;
@@ -74,6 +75,30 @@ pub fn predict_bass_source_curve_from_routes(
         phase: Some(output_phase),
         ..sub_curve.clone()
     })
+}
+
+/// Predict the complete acoustic response of one logical input after routing.
+///
+/// A main input is the coherent sum of its high-pass main branch and only its
+/// own low-pass physical-sub branch. LFE has no main branch and therefore
+/// returns its routed sub contribution alone. This intentionally never sums
+/// unrelated logical inputs from the shared physical bass bus.
+pub fn predict_deployed_source_curve_from_routes(
+    main_curve: Option<&Curve>,
+    sub_curve: &Curve,
+    graph: &BassManagementRoutingGraph,
+    source_channel: &str,
+    sample_rate: f64,
+) -> Option<Curve> {
+    match (
+        main_curve,
+        predict_bass_source_curve_from_routes(sub_curve, graph, source_channel, sample_rate),
+    ) {
+        (Some(main), Some(sub)) => Some(complex_sum_mains(&[main, &sub])),
+        (Some(main), None) => Some(main.clone()),
+        (None, Some(sub)) => Some(sub),
+        (None, None) => None,
+    }
 }
 
 pub fn predict_bass_output_curve_from_routes(

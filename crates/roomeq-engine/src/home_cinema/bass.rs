@@ -489,7 +489,15 @@ pub fn simulate_bass_bus_headroom(
             let freq = 20.0_f64 * (250.0_f64 / 20.0_f64).powf(t);
             let route_gains: Vec<Complex64> = routes
                 .iter()
-                .map(|route| bass_route_complex_gain(route, freq, sample_rate))
+                .map(|route| {
+                    let input_trim_db = graph
+                        .input_trim_db
+                        .get(&route.source_channel)
+                        .copied()
+                        .unwrap_or(0.0);
+                    bass_route_complex_gain(route, freq, sample_rate)
+                        * 10.0_f64.powf(input_trim_db / 20.0)
+                })
                 .collect();
             if route_gains
                 .iter()
@@ -801,5 +809,23 @@ mod tests {
                 .low_pass_hz,
             Some(120.0)
         );
+    }
+
+    #[test]
+    fn headroom_simulation_applies_logical_input_trims() {
+        let config = routed_home_cinema_config();
+        let mut graph = bass_management_routing_graph(&config, None).unwrap();
+        let model = BassHeadroomModelConfig::default();
+        let before = simulate_bass_bus_headroom(Some(&graph), &model, 6.0, 48_000.0).unwrap();
+
+        graph.input_trim_db = graph
+            .input_channels
+            .iter()
+            .map(|channel| (channel.clone(), -6.0))
+            .collect();
+        let after = simulate_bass_bus_headroom(Some(&graph), &model, 6.0, 48_000.0).unwrap();
+
+        assert!((before.coherent_peak_gain_db - after.coherent_peak_gain_db - 6.0).abs() < 1e-9);
+        assert!((before.rms_bus_gain_db - after.rms_bus_gain_db - 6.0).abs() < 1e-9);
     }
 }

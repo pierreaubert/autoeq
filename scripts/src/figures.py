@@ -20,6 +20,7 @@ from .data_extract import (
     get_all_crossover_frequencies,
     get_channel_sort_key,
 )
+from .target_overlay import build_target_overlay_curves
 
 
 def get_freq_axis_config() -> dict:
@@ -124,19 +125,6 @@ def create_channel_figure(
     else:
         spl_data_list.append(None)
 
-    # Add target (flat at 0 dB)
-    if initial_curve:
-        freq = initial_curve["freq"]
-        fig.add_trace(
-            go.Scatter(
-                x=[freq[0], freq[-1]],
-                y=[0, 0],
-                mode="lines",
-                name="Target (0 dB)",
-                line=dict(color="rgba(150, 150, 150, 0.5)", width=1, dash="dash"),
-            )
-        )
-
     # Compute dynamic y-range
     y_min, y_max = compute_y_range([initial_curve, final_curve])
 
@@ -173,6 +161,48 @@ def create_channel_figure(
         height=400,
         updatemenus=updatemenus,
     )
+
+    return fig
+
+
+def add_channel_response_overlays(
+    fig: go.Figure,
+    channel_name: str,
+    target_curve: dict | None,
+    lfe_plus_channel_curve: dict | None,
+) -> go.Figure:
+    """Add target and crossover-aware bass-managed response to a channel plot."""
+    if target_curve and target_curve.get("freq") and target_curve.get("spl"):
+        fig.add_trace(
+            go.Scatter(
+                x=target_curve["freq"],
+                y=target_curve["spl"],
+                mode="lines",
+                name="Target",
+                line=dict(color="rgba(40, 40, 40, 0.9)", width=2, dash="dot"),
+            )
+        )
+
+    if (
+        lfe_plus_channel_curve
+        and lfe_plus_channel_curve.get("freq")
+        and lfe_plus_channel_curve.get("spl")
+    ):
+        frequencies = lfe_plus_channel_curve["freq"]
+        spl = smooth_octave(
+            frequencies,
+            lfe_plus_channel_curve["spl"],
+            DEFAULT_SMOOTHING,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=frequencies,
+                y=spl,
+                mode="lines",
+                name=f"LFE + {channel_name}",
+                line=dict(color="rgba(148, 103, 189, 0.95)", width=2.5),
+            )
+        )
 
     return fig
 
@@ -707,7 +737,7 @@ def create_combined_figure(data: dict, json_path: "None | object" = None) -> go.
 
     Args:
         data: Output JSON data (roomeq result with correction filters)
-        json_path: Path to output JSON (unused, kept for API compatibility)
+        json_path: Path to output JSON (used to resolve relative target files)
     """
     channels_dict = data.get("channels", {})
 
@@ -760,6 +790,7 @@ def create_combined_figure(data: dict, json_path: "None | object" = None) -> go.
     per_driver_initial: dict[str, list[tuple[str, dict]]] = {}
 
     post_dsp_curves = build_post_dsp_source_curves(data)
+    target_curves = build_target_overlay_curves(data, post_dsp_curves, json_path)
     for channel_name, channel_data in channels:
         driver_curves = _get_driver_initial_curves(channel_data)
         if driver_curves:
@@ -772,6 +803,9 @@ def create_combined_figure(data: dict, json_path: "None | object" = None) -> go.
         final_curve = post_dsp_curves.get(channel_name)
         if final_curve and "freq" in final_curve and "spl" in final_curve:
             all_corrected_curves.append(final_curve)
+        target_curve = target_curves.get(channel_name)
+        if target_curve and "freq" in target_curve and "spl" in target_curve:
+            all_corrected_curves.append(target_curve)
 
     # Compute y-ranges
     initial_y_min, initial_y_max = compute_y_range(all_initial_curves)
@@ -868,26 +902,6 @@ def create_combined_figure(data: dict, json_path: "None | object" = None) -> go.
                 )
                 trace_y_data.append(spl_smoothed)
 
-    # Target line on original curves
-    if channels:
-        first_channel = channels[0][1]
-        ref_curve = first_channel.get("initial_curve")
-        if ref_curve:
-            freq = ref_curve["freq"]
-            fig.add_trace(
-                go.Scatter(
-                    x=[freq[0], freq[-1]],
-                    y=[0, 0],
-                    mode="lines",
-                    name="Target (0 dB)",
-                    line=dict(color="rgba(150, 150, 150, 0.5)", width=1, dash="dash"),
-                    showlegend=False,
-                ),
-                row=1,
-                col=1,
-            )
-            trace_y_data.append([0, 0])
-
     # --- Row 2: EQ responses ---
     for i, (channel_name, channel_data) in enumerate(channels):
         color = channel_colors[i % len(channel_colors)]
@@ -972,6 +986,28 @@ def create_combined_figure(data: dict, json_path: "None | object" = None) -> go.
                 col=1,
             )
             trace_y_data.append(spl_smoothed)
+
+    # Target overlays share each channel's color and level alignment. They are
+    # deliberately not smoothed by the interactive response smoothing control.
+    for i, (channel_name, _) in enumerate(channels):
+        target_curve = target_curves.get(channel_name)
+        if not target_curve:
+            continue
+        color = channel_colors[i % len(channel_colors)]
+        fig.add_trace(
+            go.Scatter(
+                x=target_curve["freq"],
+                y=target_curve["spl"],
+                mode="lines",
+                name=f"Target: {channel_name}",
+                line=dict(color=color, width=2, dash="dot"),
+                legendgroup=f"ch_{channel_name}",
+                showlegend=False,
+            ),
+            row=3,
+            col=1,
+        )
+        trace_y_data.append(target_curve["spl"])
 
     # --- Crossover vertical lines on all 3 rows ---
     crossover_freqs = get_all_crossover_frequencies(data)

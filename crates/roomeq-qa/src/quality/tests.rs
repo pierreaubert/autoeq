@@ -6,6 +6,7 @@ use super::option::isolate_schroeder_split_from_multi_measurement;
 use super::option_override::OptionOverride;
 use super::parse_maxeval;
 use super::parse_seed_runs;
+use super::run::deployed_final_curve;
 use super::types::TestResult;
 use super::validate::{
     TargetTiltValidationOptions, validate_option_effect, validate_phase_alignment,
@@ -74,6 +75,22 @@ fn level_matched_cross_mode_rms_ignores_offset_but_detects_shape() {
     assert!(shape_rms > 1.0);
 }
 
+#[test]
+fn deployed_curve_uses_routed_result_curve_before_raw_channel_curve() {
+    let mut result = result_with_channel_slopes(0.0, 0.0, 0.0);
+    let raw_channel_curve = curve_with_slope(0.0);
+    let deployed_routed_curve = curve_with_slope(12.0);
+    result.channels.get_mut("L").unwrap().final_curve = Some((&raw_channel_curve).into());
+    result.channel_results.get_mut("L").unwrap().final_curve = raw_channel_curve;
+    result
+        .deployed_source_curves
+        .insert("L".to_string(), deployed_routed_curve.clone());
+
+    let actual = deployed_final_curve(&result, "L").unwrap();
+
+    assert_eq!(actual.spl, deployed_routed_curve.spl);
+}
+
 fn curve_with_slope(slope_db_per_octave: f64) -> Curve {
     let freq = ndarray::arr1(&[100.0, 200.0, 400.0, 500.0]);
     let spl = freq.mapv(|f: f64| slope_db_per_octave * (f / 100.0).log2());
@@ -132,6 +149,7 @@ fn result_with_channel_slopes(
             ),
         )]),
         channel_results: HashMap::from([("L".to_string(), channel)]),
+        deployed_source_curves: HashMap::new(),
         combined_pre_score: 0.0,
         combined_post_score: 0.0,
         metadata: OptimizationMetadata {

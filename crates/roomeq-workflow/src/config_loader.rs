@@ -14,7 +14,7 @@ use roomeq_model::{ConfigValidationReport, RoomConfig, ValidationStage};
 /// Keys that are shallow-merged by the override file.
 ///
 /// All other top-level keys are replaced entirely by the override value.
-pub const SHALLOW_MERGE_KEYS: &[&str] = &["optimizer"];
+pub const SHALLOW_MERGE_KEYS: &[&str] = &["optimizer", "system"];
 
 /// Merge two JSON objects using the RoomEQ override policy.
 pub fn merge_json_objects(base: &mut serde_json::Value, overrides: &serde_json::Value) {
@@ -236,6 +236,30 @@ mod tests {
         assert_eq!(base["optimizer"]["max_freq"], 16000.0);
         assert!(base["speakers"].get("right").is_some());
         assert!(base["speakers"].get("left").is_none());
+    }
+
+    #[test]
+    fn merge_json_objects_shallow_merges_system_policy() {
+        let mut base = serde_json::json!({
+            "system": {
+                "model": "home_cinema",
+                "speakers": { "L": "left", "R": "right", "LFE": "sub" }
+            }
+        });
+        let overrides = serde_json::json!({
+            "system": {
+                "bass_management": { "headroom_margin_db": 17.0 }
+            }
+        });
+
+        merge_json_objects(&mut base, &overrides);
+
+        assert_eq!(base["system"]["model"], "home_cinema");
+        assert_eq!(base["system"]["speakers"]["L"], "left");
+        assert_eq!(
+            base["system"]["bass_management"]["headroom_margin_db"],
+            17.0
+        );
     }
 
     #[test]

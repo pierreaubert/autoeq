@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .figures import (
     create_channel_figure,
+    add_channel_response_overlays,
     create_zoomed_figure,
     create_eq_figure,
     create_multipass_eq_figure,
@@ -25,6 +26,7 @@ from .figures import (
 )
 from .data_extract import extract_eq_passes, get_channel_sort_key
 from .dsp import build_post_dsp_source_curves, synthesize_lr_channel
+from .target_overlay import build_target_overlay_curves
 
 # Synthetic channel name used for the complex L+R sum tab in the
 # comparison report. Picked so it cannot collide with a real recording
@@ -49,6 +51,23 @@ def _comparison_source_label(channel_name: str, includes_redirected_bass: bool) 
     if includes_redirected_bass:
         label += f" (physical {channel_name} + redirected bass)"
     return label
+
+
+def _channel_display_final_curve(
+    channel_name: str,
+    physical_sub: str,
+    channel_data: dict,
+    post_dsp_curves: dict[str, dict],
+) -> dict | None:
+    """Select the logical response rendered on an individual channel tab.
+
+    The physical-sub ``final_curve`` is the aggregate bass bus. It is not the
+    response produced when only the LFE logical input is driven and may contain
+    cancellations from unrelated redirected-main routes.
+    """
+    if channel_name == physical_sub:
+        return post_dsp_curves.get(channel_name) or channel_data.get("final_curve")
+    return channel_data.get("final_curve")
 
 
 # Ordered EPA fields with their display labels and formatting rules.
@@ -908,6 +927,21 @@ def create_html_report(
         html_parts.append(_bass_management_groups_table_html(bass_management))
         html_parts.append(_bass_management_sub_outputs_table_html(bass_management))
 
+    # Reconstruct each logical input after bass management once. For a main
+    # channel this is the crossover-aware complex sum of its high-passed main
+    # output and its own low-passed route through the physical subwoofer.
+    post_dsp_curves = build_post_dsp_source_curves(data)
+    bass_report = metadata.get("bass_management") or {}
+    physical_sub = (
+        bass_report.get("physical_sub_output")
+        or bass_report.get("lfe_channel")
+        or "LFE"
+    )
+    target_references = dict(post_dsp_curves)
+    target_curves = build_target_overlay_curves(
+        data, target_references, output_json_path
+    )
+
     # Individual channel sections in tabs
     html_parts.append('<div class="tabs-container">\n')
     html_parts.append('    <div class="tab-header">\n')
@@ -921,7 +955,9 @@ def create_html_report(
         active_class = " active" if i == 0 else ""
         safe_id = f"channel_{i}"
         initial_curve = channel_data.get("initial_curve")
-        final_curve = channel_data.get("final_curve")
+        final_curve = _channel_display_final_curve(
+            channel_name, physical_sub, channel_data, post_dsp_curves
+        )
 
         # Extract EQ filters (grouped by pass for 3-pass pipeline)
         passes = extract_eq_passes(channel_data)
@@ -938,11 +974,28 @@ def create_html_report(
         )
 
         # Full range plot
-        fig_full = create_channel_figure(channel_name, initial_curve, final_curve, " (Full Range)")
+        fig_full = create_channel_figure(
+            channel_name, initial_curve, final_curve, " (Full Range)"
+        )
+        lfe_plus_channel = None
+        if channel_name != physical_sub and _has_redirected_bass_route(data, channel_name):
+            lfe_plus_channel = post_dsp_curves.get(channel_name)
+        add_channel_response_overlays(
+            fig_full,
+            channel_name,
+            target_curves.get(channel_name),
+            lfe_plus_channel,
+        )
         full_html = fig_full.to_html(full_html=False, include_plotlyjs=False)
 
         # Zoomed plot (20-1200 Hz)
         fig_zoom = create_zoomed_figure(channel_name, initial_curve, final_curve)
+        add_channel_response_overlays(
+            fig_zoom,
+            channel_name,
+            target_curves.get(channel_name),
+            lfe_plus_channel,
+        )
         zoom_html = fig_zoom.to_html(full_html=False, include_plotlyjs=False)
 
         html_parts.append(

@@ -1348,13 +1348,31 @@ fn align_target_level(reference: &roomeq_model::Curve, target: &mut roomeq_model
     if reference.spl.len() != target.spl.len() || reference.spl.is_empty() {
         return;
     }
-    let offset = reference
+    // Routed sub/LFE responses are intentionally band-limited. Including the
+    // stopband here can move a full-range target by tens of decibels and make
+    // valid bass PEQ look like a correction regression.
+    let passband_floor = reference
+        .spl
+        .iter()
+        .copied()
+        .filter(|level| level.is_finite())
+        .fold(f64::NEG_INFINITY, f64::max)
+        - 30.0;
+    let (offset_sum, offset_count) = reference
         .spl
         .iter()
         .zip(&target.spl)
-        .map(|(reference, target)| reference - target)
-        .sum::<f64>()
-        / reference.spl.len() as f64;
+        .filter_map(|(reference, target)| {
+            (reference.is_finite() && target.is_finite() && *reference >= passband_floor)
+                .then_some(reference - target)
+        })
+        .fold((0.0, 0_usize), |(sum, count), offset| {
+            (sum + offset, count + 1)
+        });
+    if offset_count == 0 {
+        return;
+    }
+    let offset = offset_sum / offset_count as f64;
     if offset.is_finite() {
         target.spl.mapv_inplace(|spl| spl + offset);
     }
@@ -1757,6 +1775,24 @@ mod tests {
     use roomeq_engine::quality::CorrectionDecision;
     use roomeq_model::{CtcConfig, RoomConfig, SystemConfig, SystemModel};
     use std::collections::HashMap;
+
+    #[test]
+    fn target_level_alignment_ignores_a_band_limited_stopband() {
+        let mut reference = roomeq_model::Curve::default();
+        reference.freq = ndarray::array![20.0, 80.0, 120.0, 1_000.0];
+        reference.spl = ndarray::array![80.0, 79.0, 76.0, 20.0];
+        let mut target = roomeq_model::Curve::default();
+        target.freq = reference.freq.clone();
+        target.spl = ndarray::array![0.0, -1.0, -2.0, -3.0];
+
+        align_target_level(&reference, &mut target);
+
+        assert!(
+            target.spl[0] > 75.0,
+            "deep stopband must not pull the target down: {:?}",
+            target.spl
+        );
+    }
 
     #[test]
     fn to_dsp_chain_output_includes_channels_and_metadata() {
@@ -2251,6 +2287,7 @@ mod tests {
         let result = RoomOptimizationResult {
             channels: HashMap::new(),
             channel_results: HashMap::new(),
+            deployed_source_curves: HashMap::new(),
             combined_pre_score: 0.0,
             combined_post_score: 0.0,
             metadata: empty_metadata(),

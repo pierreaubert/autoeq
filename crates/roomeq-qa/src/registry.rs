@@ -664,6 +664,7 @@ mod tests {
         let result = RoomOptimizationResult {
             channels: Default::default(),
             channel_results: Default::default(),
+            deployed_source_curves: Default::default(),
             combined_pre_score: 0.0,
             combined_post_score: 0.0,
             metadata: roomeq_model::OptimizationMetadata {

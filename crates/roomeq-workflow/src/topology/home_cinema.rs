@@ -16,9 +16,8 @@ use roomeq_engine::error::{AutoeqError, Result};
 use roomeq_engine::room_result::{ChannelOptimizationResult, RoomOptimizationResult};
 use roomeq_engine::topology::{
     align_channels_to_lowest, all_curves_have_usable_phase, all_curves_share_frequency_grid,
-    apply_crossover_response_to_curve, apply_curve_delta_to_reference_curve,
-    apply_delay_and_polarity_to_curve, average_mains_magnitude, bass_management_objective,
-    complex_sum_mains, compute_flat_loss, mark_plugin_stage, mark_plugins_stage,
+    apply_crossover_response_to_curve, apply_delay_and_polarity_to_curve, average_mains_magnitude,
+    bass_management_objective, compute_flat_loss, mark_plugin_stage, mark_plugins_stage,
     mark_route_owned_plugin, normalize_crossover_delays, predict_bass_management_sum,
     select_bass_management_crossover_type,
 };
@@ -110,8 +109,32 @@ fn stage_main_correction_plugins(plugins: Vec<PluginConfigWrapper>) -> Vec<Plugi
     mark_plugins_stage(plugins, "post_route")
 }
 
-/// Align every logical input at the microphone after the complete routed DSP
-/// graph. Trims are down-only so calibration cannot consume headroom.
+fn stage_sub_correction_plugins(plugins: Vec<PluginConfigWrapper>) -> Vec<PluginConfigWrapper> {
+    // The sub chain describes processing at the physical bass output, after
+    // redirected main and native LFE routes have been summed.
+    mark_plugins_stage(plugins, "post_route")
+}
+
+/// Build the tonal objective for EQ shared by every routed bass source.
+///
+/// The physical-sub transfer and common output gain are the only terms shared
+/// by every route. Source crossover, delay, polarity, input trim, and source
+/// count are deliberately excluded: coherently summing those independent
+/// programme inputs would turn their accidental phase relationship into a
+/// permanent correction on the common physical output.
+fn physical_sub_tonal_objective_curve(curve: &Curve, common_gain_db: f64) -> Curve {
+    let mut objective = curve.clone();
+    for spl in objective.spl.iter_mut() {
+        *spl += common_gain_db;
+    }
+    objective
+}
+
+/// Align main inputs at the microphone after the complete routed DSP graph.
+///
+/// LFE keeps its separately configured cinema playback gain; treating its
+/// band-limited mean as another main-channel reference would cancel that gain.
+/// Trims are down-only so calibration cannot consume headroom.
 #[allow(clippy::too_many_arguments)]
 fn calibrate_post_dsp_input_levels(
     config: &RoomConfig,
@@ -122,7 +145,7 @@ fn calibrate_post_dsp_input_levels(
     sidecar_dir: &std::path::Path,
     channels: &mut HashMap<String, ChannelDspChain>,
     graph: &mut BassManagementRoutingGraph,
-) -> Result<HashMap<String, f64>> {
+) -> Result<(HashMap<String, f64>, HashMap<String, Curve>)> {
     let mut common_sub_chain =
         channels
             .get(lfe_role)
@@ -160,40 +183,15 @@ fn calibrate_post_dsp_input_levels(
                 message: format!("main channel '{role}' has no final curve"),
             })?
             .into();
-        let observed = if let Some(sub_branch) =
-            engine_bass_management::predict_bass_source_curve_from_routes(
-                &common_sub_curve,
-                graph,
-                role,
-                sample_rate,
-            ) {
-            complex_sum_mains(&[&main_curve, &sub_branch])
-        } else {
-            main_curve
-        };
-        means.insert(role.clone(), average_spl(&observed, main_band));
-    }
-
-    let lfe_upper_hz = graph
-        .routes
-        .iter()
-        .filter(|route| {
-            route.source_channel == lfe_role && route.route_kind == "lfe_lowpass_to_sub"
-        })
-        .filter_map(|route| route.low_pass_hz)
-        .fold(f64::NEG_INFINITY, f64::max);
-    if lfe_upper_hz.is_finite()
-        && let Some(lfe_curve) = engine_bass_management::predict_bass_source_curve_from_routes(
+        let observed = engine_bass_management::predict_deployed_source_curve_from_routes(
+            Some(&main_curve),
             &common_sub_curve,
             graph,
-            lfe_role,
+            role,
             sample_rate,
         )
-    {
-        means.insert(
-            lfe_role.to_string(),
-            average_spl(&lfe_curve, (20.0, lfe_upper_hz)),
-        );
+        .unwrap_or(main_curve);
+        means.insert(role.clone(), average_spl(&observed, main_band));
     }
 
     let target = means
@@ -201,13 +199,14 @@ fn calibrate_post_dsp_input_levels(
         .copied()
         .filter(|value| value.is_finite())
         .fold(f64::INFINITY, f64::min);
-    if !target.is_finite() || means.len() != main_roles.len() + 1 {
-        return Ok(HashMap::new());
+    if !target.is_finite() || means.len() != main_roles.len() {
+        return Ok((HashMap::new(), HashMap::new()));
     }
     let mut trims: HashMap<String, f64> = means
         .into_iter()
         .map(|(role, mean)| (role, (target - mean).min(0.0)))
         .collect();
+    trims.insert(lfe_role.to_string(), 0.0);
 
     for role in main_roles {
         if let Some(chain) = channels.get_mut(role) {
@@ -231,6 +230,9 @@ fn calibrate_post_dsp_input_levels(
                 if let Some(chain) = channels.get_mut(role) {
                     apply_gain_to_main_chain(chain, -safety_trim_db);
                 }
+            }
+            if let Some(chain) = channels.get_mut(lfe_role) {
+                apply_gain_to_main_chain(chain, -safety_trim_db);
             }
             for trim_db in trims.values_mut() {
                 *trim_db -= safety_trim_db;
@@ -274,7 +276,36 @@ fn calibrate_post_dsp_input_levels(
         sub_chain.final_curve = Some(final_data);
     }
 
-    Ok(trims)
+    let mut deployed_source_curves = HashMap::new();
+    for role in main_roles {
+        let main_curve: Curve = channels
+            .get(role)
+            .and_then(|chain| chain.final_curve.clone())
+            .ok_or_else(|| AutoeqError::InvalidMeasurement {
+                message: format!("main channel '{role}' has no final curve"),
+            })?
+            .into();
+        if let Some(deployed) = engine_bass_management::predict_deployed_source_curve_from_routes(
+            Some(&main_curve),
+            &common_sub_curve,
+            graph,
+            role,
+            sample_rate,
+        ) {
+            deployed_source_curves.insert(role.clone(), deployed);
+        }
+    }
+    if let Some(lfe) = engine_bass_management::predict_deployed_source_curve_from_routes(
+        None,
+        &common_sub_curve,
+        graph,
+        lfe_role,
+        sample_rate,
+    ) {
+        deployed_source_curves.insert(lfe_role.to_string(), lfe);
+    }
+
+    Ok((trims, deployed_source_curves))
 }
 
 impl WorkflowExecutor for HomeCinemaExecutor {
@@ -465,6 +496,7 @@ fn supporting_only_home_cinema_result(config: &RoomConfig) -> RoomOptimizationRe
     RoomOptimizationResult {
         channels: HashMap::new(),
         channel_results: HashMap::new(),
+        deployed_source_curves: HashMap::new(),
         combined_pre_score: 0.0,
         combined_post_score: 0.0,
         metadata: OptimizationMetadata {
@@ -605,6 +637,7 @@ fn optimize_home_cinema_no_sub(
     Ok(RoomOptimizationResult {
         channels: channel_chains,
         channel_results,
+        deployed_source_curves: HashMap::new(),
         combined_pre_score: avg_pre,
         combined_post_score: avg_post,
         metadata: OptimizationMetadata {
@@ -651,6 +684,12 @@ fn optimize_home_cinema_with_sub(
     total_channels: usize,
 ) -> Result<RoomOptimizationResult> {
     let sub_role = engine_home_cinema::bass_output_role(config, sys);
+    let post_eq_resources =
+        crate::prepare_eq_resources(&config.optimizer, config.target_curve.as_ref()).map_err(
+            |error| AutoeqError::InvalidConfiguration {
+                message: format!("failed to prepare home-cinema target curve: {error}"),
+            },
+        )?;
 
     // Resolve crossover config
     let sub_sys = sys.subwoofers.as_ref().unwrap();
@@ -808,7 +847,7 @@ fn optimize_home_cinema_with_sub(
         }
         pre_eq_plugins.insert(
             sub_role.clone(),
-            mark_plugins_stage(chain.plugins, "pre_route"),
+            stage_sub_correction_plugins(chain.plugins),
         );
         pre_eq_initial_curves.insert(sub_role.clone(), ch_result.initial_curve);
         optimizer_evidence_by_channel.insert(sub_role.clone(), ch_result.optimizer_evidence);
@@ -1087,39 +1126,6 @@ fn optimize_home_cinema_with_sub(
         sub_gain_post,
         &sub_sys.config,
     );
-    let sub_output_base_curves: HashMap<String, Curve> = sub_preprocess
-        .drivers
-        .as_ref()
-        .map(|drivers| {
-            let combined_initial = aligned_curves.get(&sub_role);
-            let combined_final = aligned_pre_eq_curves.get(&sub_role);
-            let sub_alignment_gain = *gains.get(&sub_role).unwrap_or(&0.0);
-            drivers
-                .iter()
-                .filter_map(|driver| {
-                    driver.initial_curve.as_ref().map(|curve| {
-                        let mut aligned_driver = curve.clone();
-                        if sub_alignment_gain.abs() > f64::EPSILON {
-                            for spl in aligned_driver.spl.iter_mut() {
-                                *spl += sub_alignment_gain;
-                            }
-                        }
-                        let corrected = match (combined_initial, combined_final) {
-                            (Some(initial_curve), Some(final_curve)) => {
-                                apply_curve_delta_to_reference_curve(
-                                    &aligned_driver,
-                                    initial_curve,
-                                    final_curve,
-                                )
-                            }
-                            _ => aligned_driver,
-                        };
-                        (driver.name.clone(), corrected)
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
     let preliminary_bass_management_optimization = joint_bass_management_report_from_parts(
         &group_results_by_id.values().cloned().collect::<Vec<_>>(),
         &[],
@@ -1129,26 +1135,8 @@ fn optimize_home_cinema_with_sub(
         config,
         Some(&preliminary_bass_management_optimization),
     );
-    let sub_post_initial = if let Some(graph) = preliminary_bass_routing_graph.as_ref()
-        && let Some(route_predicted_sub) = predict_bass_bus_curve_from_routes(
-            &aligned_pre_eq_curves[&sub_role],
-            graph,
-            &sub_output_base_curves,
-            &aligned_pre_eq_curves[&sub_role],
-            sample_rate,
-        ) {
-        route_predicted_sub
-    } else {
-        apply_chain(
-            &aligned_pre_eq_curves[&sub_role],
-            xover_type_str,
-            final_xo_freq,
-            true,
-            sub_gain_post,
-            sub_delay_post,
-            sub_inverted,
-        )
-    };
+    let sub_post_initial =
+        physical_sub_tonal_objective_curve(&aligned_pre_eq_curves[&sub_role], sub_gain_post);
 
     // Re-align sub level post-crossover (use first main as reference)
     let ref_main_post = &main_post_curves[&main_roles[0]];
@@ -1251,12 +1239,30 @@ fn optimize_home_cinema_with_sub(
         sample_rate,
         baseline_reason,
     );
+    let bass_management_target_curves = post_eq_resources.target.as_ref().map(|_| {
+        main_roles
+            .iter()
+            .filter_map(|role| {
+                aligned_pre_eq_curves.get(role).map(|curve| {
+                    (
+                        role.clone(),
+                        roomeq_engine::fir::prepared_fir_target_curve(
+                            curve,
+                            &config.optimizer,
+                            &post_eq_resources,
+                        ),
+                    )
+                })
+            })
+            .collect::<HashMap<_, _>>()
+    });
     let sub_output_advisories = if optimize_source_routes {
         optimize_bass_management_joint_solution(
             config,
             main_roles,
             &aligned_curves,
             &aligned_pre_eq_curves,
+            bass_management_target_curves.as_ref(),
             &mut group_results_by_id,
             &mut source_results,
             &mut sub_output_results,
@@ -1403,20 +1409,9 @@ fn optimize_home_cinema_with_sub(
             xover_type_str,
             final_xo_freq,
         );
-    if let Some(graph) = bass_routing_graph.as_ref()
-        && let Some(route_predicted_sub) = predict_bass_bus_curve_from_routes(
-            &aligned_pre_eq_curves[&sub_role],
-            graph,
-            &sub_output_base_curves,
-            &aligned_pre_eq_curves[&sub_role],
-            sample_rate,
-        )
-    {
-        sub_post = route_predicted_sub;
-    }
-
     // 6. Post-EQ
     let mut post_eq_filters = HashMap::new();
+    let mut post_eq_target_curves = HashMap::new();
     let main_post_max_freq = config.optimizer.max_freq;
     let total_post_eq_passes = main_roles.len() + 1;
 
@@ -1436,12 +1431,36 @@ fn optimize_home_cinema_with_sub(
             .get(group_id)
             .and_then(|g| g.selected_crossover_hz)
             .unwrap_or(final_xo_freq);
-        let requested_min_freq = role_xover_freq + 20.0;
-        opt_config.min_freq = opt_config.min_freq.max(requested_min_freq);
+        // The broadband main correction has already run. Reserve this pass
+        // for the routed crossover residual so its filters are not spent on
+        // unrelated high-frequency details.
+        opt_config.min_freq = opt_config.min_freq.max(role_xover_freq * 0.5);
+        opt_config.max_freq = opt_config.max_freq.min(role_xover_freq * 2.0);
+        let post_curve = bass_routing_graph
+            .as_ref()
+            .and_then(|graph| {
+                engine_bass_management::predict_deployed_source_curve_from_routes(
+                    Some(&main_post_curves[role]),
+                    &sub_post,
+                    graph,
+                    role,
+                    sample_rate,
+                )
+            })
+            .unwrap_or_else(|| main_post_curves[role].clone());
+        let prepared_target = post_eq_resources.target.as_ref().map(|_| {
+            roomeq_engine::fir::prepared_fir_target_curve(
+                &post_curve,
+                &opt_config,
+                &post_eq_resources,
+            )
+        });
+        if let Some(target) = prepared_target.as_ref() {
+            post_eq_target_curves.insert(role.clone(), CurveData::from(target));
+        }
         if opt_config.min_freq >= opt_config.max_freq {
             log::warn!(
-                "  Skipping {role} Post-EQ: crossover guard band starts at {:.1} Hz, outside configured optimization band [{:.1}, {:.1}] Hz",
-                requested_min_freq,
+                "  Skipping {role} routed Post-EQ: invalid optimization band [{:.1}, {:.1}] Hz",
                 config.optimizer.min_freq,
                 config.optimizer.max_freq
             );
@@ -1449,7 +1468,6 @@ fn optimize_home_cinema_with_sub(
             continue;
         }
 
-        let post_curve = &main_post_curves[role];
         let post_eq_callback = workflow_progress_callback(
             &assembly.progress_factory,
             &format!("Post-EQ {role}"),
@@ -1458,7 +1476,7 @@ fn optimize_home_cinema_with_sub(
             opt_config.max_iter,
         );
         let mut post_eq_result = run_post_eq(
-            post_curve,
+            &post_curve,
             &opt_config,
             config.target_curve.as_ref(),
             sample_rate,
@@ -1470,11 +1488,23 @@ fn optimize_home_cinema_with_sub(
         // score. The optimizer keeps its 20 Hz crossover guard band, but a
         // candidate must not damage that guard band enough to regress the
         // published response score.
-        let pre = compute_flat_loss(post_curve, role_xover_freq, main_post_max_freq);
+        let pre = roomeq_engine::topology::bass_management_objective_with_target(
+            Some(&post_curve),
+            prepared_target.as_ref(),
+            role_xover_freq,
+        )
+        .unwrap_or_else(|| compute_flat_loss(&post_curve, role_xover_freq, main_post_max_freq));
         let eq_resp =
             response::compute_peq_complex_response(&filters, &post_curve.freq, sample_rate);
-        let post_curve_after = response::apply_complex_response(post_curve, &eq_resp);
-        let post = compute_flat_loss(&post_curve_after, role_xover_freq, main_post_max_freq);
+        let post_curve_after = response::apply_complex_response(&post_curve, &eq_resp);
+        let post = roomeq_engine::topology::bass_management_objective_with_target(
+            Some(&post_curve_after),
+            prepared_target.as_ref(),
+            role_xover_freq,
+        )
+        .unwrap_or_else(|| {
+            compute_flat_loss(&post_curve_after, role_xover_freq, main_post_max_freq)
+        });
         if post < pre {
             optimizer_evidence_by_channel
                 .entry(role.clone())
@@ -1512,6 +1542,14 @@ fn optimize_home_cinema_with_sub(
         )?;
         let mut opt_config = config.optimizer.clone();
         opt_config.max_freq = bass_route_upper_hz - 20.0;
+        if post_eq_resources.target.is_some() {
+            let target = roomeq_engine::fir::prepared_fir_target_curve(
+                &sub_post,
+                &opt_config,
+                &post_eq_resources,
+            );
+            post_eq_target_curves.insert(sub_role.clone(), CurveData::from(&target));
+        }
         let sub_post_eq_band_empty = opt_config.max_freq <= opt_config.min_freq;
         if sub_post_eq_band_empty {
             log::warn!(
@@ -1622,7 +1660,7 @@ fn optimize_home_cinema_with_sub(
         {
             plugins.push(mark_plugin_stage(
                 output::create_labeled_eq_plugin(e, "post_eq"),
-                "post_route",
+                "pre_route",
             ));
         }
 
@@ -1657,7 +1695,7 @@ fn optimize_home_cinema_with_sub(
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
-            target_curve: None,
+            target_curve: post_eq_target_curves.get(role).cloned(),
         };
         channel_chains.insert(role.clone(), chain);
     }
@@ -1667,7 +1705,7 @@ fn optimize_home_cinema_with_sub(
     if sub_align_gain.abs() > 0.01 {
         sub_plugins.push(mark_plugin_stage(
             output::create_gain_plugin(sub_align_gain),
-            "pre_route",
+            "post_route",
         ));
     }
 
@@ -1789,24 +1827,25 @@ fn optimize_home_cinema_with_sub(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
-        target_curve: None,
+        target_curve: post_eq_target_curves.get(&sub_role).cloned(),
     };
     channel_chains.insert(sub_role.clone(), sub_chain);
 
-    let post_dsp_input_trims = if let Some(graph) = bass_routing_graph.as_mut() {
-        calibrate_post_dsp_input_levels(
-            config,
-            main_roles,
-            &sub_role,
-            main_alignment_band,
-            sample_rate,
-            output_dir,
-            &mut channel_chains,
-            graph,
-        )?
-    } else {
-        HashMap::new()
-    };
+    let (post_dsp_input_trims, deployed_source_curves) =
+        if let Some(graph) = bass_routing_graph.as_mut() {
+            calibrate_post_dsp_input_levels(
+                config,
+                main_roles,
+                &sub_role,
+                main_alignment_band,
+                sample_rate,
+                output_dir,
+                &mut channel_chains,
+                graph,
+            )?
+        } else {
+            (HashMap::new(), HashMap::new())
+        };
     for (role, trim_db) in &post_dsp_input_trims {
         info!(" Post-DSP input level trim '{}': {:+.2} dB", role, trim_db);
     }
@@ -1982,6 +2021,7 @@ fn optimize_home_cinema_with_sub(
     Ok(RoomOptimizationResult {
         channels: channel_chains,
         channel_results,
+        deployed_source_curves,
         combined_pre_score: avg_pre,
         combined_post_score: avg_post,
         metadata: OptimizationMetadata {
@@ -2017,10 +2057,11 @@ fn optimize_home_cinema_with_sub(
 
 #[cfg(test)]
 mod post_dsp_level_tests {
-    use super::{average_spl, calibrate_post_dsp_input_levels, stage_main_correction_plugins};
+    use super::{
+        average_spl, calibrate_post_dsp_input_levels, physical_sub_tonal_objective_curve,
+        stage_main_correction_plugins, stage_sub_correction_plugins,
+    };
     use roomeq_engine::Curve;
-    use roomeq_engine::bass_management::predict_bass_source_curve_from_routes;
-    use roomeq_engine::topology::complex_sum_mains;
     use roomeq_model::{
         BassManagementMatrix, BassManagementRoute, BassManagementRoutingGraph, ChannelDspChain,
         CurveData,
@@ -2087,7 +2128,30 @@ mod post_dsp_level_tests {
     }
 
     #[test]
-    fn final_input_calibration_aligns_mains_and_lfe_down_only() {
+    fn sub_correction_is_staged_after_route_sum() {
+        let plugins =
+            stage_sub_correction_plugins(vec![roomeq_engine::output::create_gain_plugin(1.0)]);
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].parameters["room_eq_stage"], "post_route");
+    }
+
+    #[test]
+    fn physical_sub_tonal_objective_uses_only_common_transfer_and_gain() {
+        let physical_sub = curve(60.0);
+        let objective = physical_sub_tonal_objective_curve(&physical_sub, 3.0);
+
+        assert!(
+            objective
+                .spl
+                .iter()
+                .all(|level| (*level - 63.0).abs() < 1.0e-12)
+        );
+        assert_eq!(objective.freq, physical_sub.freq);
+        assert_eq!(objective.phase, physical_sub.phase);
+    }
+
+    #[test]
+    fn final_input_calibration_aligns_mains_without_cancelling_lfe_gain() {
         let sub = curve(60.0);
         let mut channels = HashMap::from([
             ("L".to_string(), chain("L", curve(70.0), Some(curve(70.0)))),
@@ -2109,7 +2173,7 @@ mod post_dsp_level_tests {
             advisories: Vec::new(),
         };
 
-        let trims = calibrate_post_dsp_input_levels(
+        let (trims, deployed_source_curves) = calibrate_post_dsp_input_levels(
             &roomeq_model::RoomConfig::default(),
             &["L".to_string(), "R".to_string()],
             "LFE",
@@ -2122,26 +2186,20 @@ mod post_dsp_level_tests {
         .unwrap();
 
         assert!(trims.values().all(|trim| *trim <= 1.0e-12));
-        let common_sub = sub;
         let mut observed_means = Vec::new();
         for role in ["L", "R"] {
-            let main: Curve = channels[role].final_curve.clone().unwrap().into();
-            let bass =
-                predict_bass_source_curve_from_routes(&common_sub, &graph, role, 48_000.0).unwrap();
-            observed_means.push(average_spl(
-                &complex_sum_mains(&[&main, &bass]),
-                (100.0, 400.0),
-            ));
+            observed_means.push(average_spl(&deployed_source_curves[role], (100.0, 400.0)));
         }
-        let lfe =
-            predict_bass_source_curve_from_routes(&common_sub, &graph, "LFE", 48_000.0).unwrap();
-        observed_means.push(average_spl(&lfe, (20.0, 80.0)));
         let spread = observed_means
             .iter()
             .copied()
             .fold(f64::NEG_INFINITY, f64::max)
             - observed_means.iter().copied().fold(f64::INFINITY, f64::min);
-        assert!(spread < 1.0e-5, "post-DSP level spread was {spread} dB");
+        assert!(
+            spread < 1.0e-5,
+            "post-DSP main level spread was {spread} dB"
+        );
+        assert!((trims["LFE"] - trims["R"]).abs() < 1.0e-12);
         assert_eq!(graph.matrix.as_ref().unwrap().route_count, 3);
         assert!(
             graph
@@ -2839,6 +2897,42 @@ mod tests {
             "home-cinema with target curve should run: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn home_cinema_with_sub_keeps_prepared_target_on_output_chains() {
+        let sys = home_cinema_sys_with_sub();
+        let mut speakers = stereo_speakers_with_phase();
+        speakers.insert(
+            "sub".to_string(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve_with_phase())),
+        );
+        let mut optimizer = tiny_optimizer();
+        optimizer.max_freq = 2_000.0;
+        let config = RoomConfig {
+            version: default_config_version(),
+            system: Some(sys.clone()),
+            speakers,
+            crossovers: Some(crossovers_fixed()),
+            target_curve: Some(TargetCurveConfig::Predefined("harman".to_string())),
+            optimizer,
+            provenance: Default::default(),
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        };
+
+        let mut assembly = make_assembly(&config, &sys);
+        let result = HomeCinemaExecutor
+            .execute(&mut assembly)
+            .expect("home cinema with a sub and prepared target should run");
+
+        for channel_name in ["Left", "Right", "LFE"] {
+            assert!(
+                result.channels[channel_name].target_curve.is_some(),
+                "{channel_name} output chain must retain its prepared target"
+            );
+        }
     }
 
     #[test]

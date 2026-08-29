@@ -193,8 +193,15 @@ fn optimize_room_with_phase_alignment_enabled_succeeds() {
         "optimize_room with phase alignment should succeed: {:?}",
         result.err()
     );
-    assert!(events.lock().unwrap().iter().any(|(step, status)| {
+    let result = result.unwrap();
+    assert!(!events.lock().unwrap().iter().any(|(step, status)| {
         *step == PipelineStepId::PhaseAlignment && *status == PipelineStepStatus::Started
+    }));
+    assert!(result.channels.values().all(|chain| {
+        chain.plugins.iter().all(|plugin| {
+            plugin.parameters.get("label").and_then(|value| value.as_str())
+                != Some("room_eq_phase_alignment")
+        })
     }));
 }
 

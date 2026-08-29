@@ -88,6 +88,7 @@ pub fn single_channel_room_result(channel_name: &str) -> RoomOptimizationResult 
     RoomOptimizationResult {
         channels,
         channel_results,
+        deployed_source_curves: HashMap::new(),
         combined_pre_score: 0.5,
         combined_post_score: 0.9,
         metadata: empty_metadata(),

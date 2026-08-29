@@ -776,15 +776,16 @@ fn apply_inter_channel_timbre_matching_stage(
                     })
                     .count();
 
-                for (channel_name, timbre_result) in &timbre_results {
-                    let plugins =
-                        roomeq_engine::inter_channel_timbre_matching::create_timbre_matching_plugins(
-                            timbre_result,
-                            sample_rate,
-                        );
-                    if !plugins.is_empty()
-                        && let Some(chain) = channel_chains.get_mut(channel_name)
-                    {
+            for (channel_name, timbre_result) in &timbre_results {
+                let plugins =
+                    roomeq_engine::inter_channel_timbre_matching::create_timbre_matching_plugins(
+                        timbre_result,
+                        sample_rate,
+                    );
+                let plugins = stage_logical_input_plugins(config, plugins);
+                if !plugins.is_empty()
+                    && let Some(chain) = channel_chains.get_mut(channel_name)
+                {
                         chain.plugins.extend(plugins);
                     }
                     if let Some(alignment) = &timbre_result.alignment {
@@ -846,6 +847,42 @@ fn apply_inter_channel_timbre_matching_stage(
     )
 }
 
+fn uses_routed_home_cinema_inputs(config: &RoomConfig) -> bool {
+    config.system.as_ref().is_some_and(|system| {
+        system.model == SystemModel::HomeCinema && system.subwoofers.is_some()
+    })
+}
+
+fn stage_logical_input_plugins(
+    config: &RoomConfig,
+    plugins: Vec<roomeq_model::PluginConfigWrapper>,
+) -> Vec<roomeq_model::PluginConfigWrapper> {
+    if uses_routed_home_cinema_inputs(config) {
+        plugins
+            .into_iter()
+            .map(|plugin| roomeq_engine::topology::mark_plugin_stage(plugin, "pre_route"))
+            .collect()
+    } else {
+        plugins
+    }
+}
+
+fn create_time_alignment_plugin(
+    config: &RoomConfig,
+    delay_ms: f64,
+) -> roomeq_model::PluginConfigWrapper {
+    let plugin = output::create_delay_plugin(delay_ms);
+    if uses_routed_home_cinema_inputs(config) {
+        // Arrival alignment is inserted at the beginning of the logical input
+        // chain. Both its high-passed self route and redirected-bass route must
+        // see the same delay or their already-optimized crossover phase is
+        // destroyed during final workflow assembly.
+        roomeq_engine::topology::mark_plugin_stage(plugin, "pre_route")
+    } else {
+        plugin
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn assemble_workflow_result_with_frequency_samples(
     mut result: RoomOptimizationResult,
@@ -890,7 +927,7 @@ fn assemble_workflow_result_with_frequency_samples(
             {
                 chain
                     .plugins
-                    .insert(0, output::create_delay_plugin(*delay_ms));
+                    .insert(0, create_time_alignment_plugin(config, *delay_ms));
                 true
             } else {
                 false
@@ -1570,6 +1607,18 @@ fn phase_arrivals_for_channels_with_frequency_samples(
         .collect()
 }
 
+fn routed_topology_owns_phase_alignment(channel_chains: &HashMap<String, ChannelDspChain>) -> bool {
+    channel_chains.values().any(|chain| {
+        chain.plugins.iter().any(|plugin| {
+            plugin
+                .parameters
+                .get("room_eq_stage")
+                .and_then(|value| value.as_str())
+                == Some("route_owned")
+        })
+    })
+}
+
 fn apply_topology_phase_alignment(
     config: &RoomConfig,
     channel_results: &mut HashMap<String, roomeq_engine::room_result::ChannelOptimizationResult>,
@@ -1585,6 +1634,15 @@ fn apply_topology_phase_alignment(
     else {
         return Ok(false);
     };
+
+    // Routed topologies already optimize main/sub relative delay and polarity
+    // per logical source. Adding a physical-output delay here would shift every
+    // sub route after that optimization and recreate a crossover cancellation.
+    if routed_topology_owns_phase_alignment(channel_chains) {
+        debug!("Skipping standalone phase alignment for route-owned topology");
+        return Ok(false);
+    }
+
     let curves = collect_current_final_curves(channel_results);
     let pairings = find_sub_main_pairings(config, &curves);
     if pairings.is_empty() {
@@ -1950,7 +2008,7 @@ fn assemble_generic_result_with_frequency_samples(
             {
                 chain
                     .plugins
-                    .insert(0, output::create_delay_plugin(*delay_ms));
+                    .insert(0, create_time_alignment_plugin(config, *delay_ms));
                 true
             } else {
                 false
@@ -2889,6 +2947,7 @@ fn assemble_generic_result_with_frequency_samples(
     let mut result = RoomOptimizationResult {
         channels: channel_chains,
         channel_results,
+        deployed_source_curves: HashMap::new(),
         combined_pre_score: avg_pre_score,
         combined_post_score: avg_post_score,
         metadata,

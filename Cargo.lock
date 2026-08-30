@@ -1067,7 +1067,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1956,7 +1956,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 [[package]]
 name = "math-dsp"
 version = "0.5.27"
-source = "git+https://github.com/pierreaubert/math-audio#b81e016bd4799b9eeee5579205ad32793d243d73"
+source = "git+https://github.com/pierreaubert/math-audio#06085b866f7112c8b2214164a5d3bfb75026dff9"
 dependencies = [
  "clap",
  "hound",
@@ -1975,8 +1975,8 @@ dependencies = [
 
 [[package]]
 name = "math-iir-fir"
-version = "0.5.19"
-source = "git+https://github.com/pierreaubert/math-audio#b81e016bd4799b9eeee5579205ad32793d243d73"
+version = "0.5.20"
+source = "git+https://github.com/pierreaubert/math-audio#06085b866f7112c8b2214164a5d3bfb75026dff9"
 dependencies = [
  "base64 0.22.1",
  "byteorder",
@@ -1991,8 +1991,8 @@ dependencies = [
 
 [[package]]
 name = "math-optimisation"
-version = "0.5.11"
-source = "git+https://github.com/pierreaubert/math-audio#b81e016bd4799b9eeee5579205ad32793d243d73"
+version = "0.5.12"
+source = "git+https://github.com/pierreaubert/math-audio#06085b866f7112c8b2214164a5d3bfb75026dff9"
 dependencies = [
  "clap",
  "directories",
@@ -2008,7 +2008,7 @@ dependencies = [
 [[package]]
 name = "math-rir"
 version = "0.5.8"
-source = "git+https://github.com/pierreaubert/math-audio#b81e016bd4799b9eeee5579205ad32793d243d73"
+source = "git+https://github.com/pierreaubert/math-audio#06085b866f7112c8b2214164a5d3bfb75026dff9"
 dependencies = [
  "math-iir-fir",
  "rayon",
@@ -2017,7 +2017,7 @@ dependencies = [
 [[package]]
 name = "math-test-functions"
 version = "0.5.2"
-source = "git+https://github.com/pierreaubert/math-audio#b81e016bd4799b9eeee5579205ad32793d243d73"
+source = "git+https://github.com/pierreaubert/math-audio#06085b866f7112c8b2214164a5d3bfb75026dff9"
 dependencies = [
  "clap",
  "directories",
@@ -2589,7 +2589,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3176,7 +3176,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3233,7 +3233,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3771,10 +3771,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4311,7 +4311,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

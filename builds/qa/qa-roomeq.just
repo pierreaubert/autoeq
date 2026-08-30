@@ -24,13 +24,13 @@ qa-roomeq-nightly:
 
 [group('qa-roomeq')]
 qa-roomeq-weekly:
-	cargo run --features qa --bin roomeq-qa-coverage --release -- --tier weekly
-	cargo run --features qa --bin roomeq-qa-quality --release
-	cargo test --release -p autoeq --features qa --test roomeq_generated_data_test -- --ignored --test-threads=1
-	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --full-matrix
-	cargo run --features qa --bin roomeq-qa-features --no-default-features --release
-	cargo run --features qa --bin roomeq-qa-acoustic --release -- --tier nightly
-	cargo run --bin roomeq-fuzzer --release --features="qa,plotly" -- -n 1000 --seed 42 --skip-kautz-modal
+        cargo run --features qa --bin roomeq-qa-coverage --release -- --tier weekly --jobs 1
+        cargo run --features qa --bin roomeq-qa-quality --release -- --jobs 1
+        cargo test --release -p autoeq --features qa --test roomeq_generated_data_test -- --ignored --test-threads=1
+        cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --full-matrix
+        cargo run --features qa --bin roomeq-qa-features --no-default-features --release
+        cargo run --features qa --bin roomeq-qa-acoustic --release -- --tier nightly
+        cargo run --bin roomeq-fuzzer --release --features="qa,plotly" -- -n 1000 --seed 42 --skip-kautz-modal
 
 [group('qa-roomeq')]
 qa-roomeq-all: qa-roomeq-weekly
@@ -158,7 +158,7 @@ qa-roomeq-home-cinema-configs:
 # This is intentionally a scheduled/local gate rather than a PR gate; allow up
 # to 12 hours on a typical development workstation.
 [group('qa-roomeq')]
-qa-roomeq-cinema-full jobs="4" maxeval="5000":
+qa-roomeq-cinema-full jobs="4" maxeval="600000":
 	cargo run --features qa --bin roomeq-qa-coverage --release -- --home-cinema --jobs {{jobs}} --maxeval {{maxeval}}
 	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --full-matrix
 	cargo run --features qa --bin roomeq-qa-features --no-default-features --release

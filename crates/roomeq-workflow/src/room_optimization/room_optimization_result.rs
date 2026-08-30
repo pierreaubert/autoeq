@@ -143,7 +143,21 @@ pub(super) fn apply_final_correction_safety_gate(
             .get(name)
             .and_then(|chain| {
                 let baseline = routed_baseline_curve(chain, &channel.initial_curve, sample_rate)?;
-                remove_routing_transfer(&channel.initial_curve, &baseline, &channel.final_curve)
+                let realized = if is_graph_routed_bass_output(chain) {
+                    // Graph-routed bass outputs can report a composite curve
+                    // containing redirected programme energy. Judge their
+                    // correction against the canonical channel DSP instead.
+                    apply_logical_channel_chain(
+                        chain,
+                        &channel.initial_curve,
+                        sample_rate,
+                        sidecar_dir,
+                    )
+                    .ok()?
+                } else {
+                    channel.final_curve.clone()
+                };
+                remove_routing_transfer(&channel.initial_curve, &baseline, &realized)
             })
             .unwrap_or_else(|| channel.final_curve.clone());
         let mut report = result.channels.get(name).and_then(|chain| {
@@ -159,6 +173,9 @@ pub(super) fn apply_final_correction_safety_gate(
         let topology_epsilon = (channel.pre_score.abs() * 1e-4).max(1e-6);
         let topology_improved = channel.pre_score.is_finite()
             && channel.post_score < channel.pre_score - topology_epsilon;
+        let topology_regressed = channel.pre_score.is_finite()
+            && (!channel.post_score.is_finite()
+                || channel.post_score > channel.pre_score + topology_epsilon);
         let regressed = report.as_ref().is_none_or(|report| {
             // FIR windowing and response evaluation can leave sub-millidecibel
             // residuals on an otherwise exactly flat fixture. Do not classify
@@ -183,7 +200,15 @@ pub(super) fn apply_final_correction_safety_gate(
             // report's weighted-RMS presentation for a fitted PEQ, so retain
             // an objectively improving correction unless that discrepancy is
             // itself gross (more than a factor of two).
-            target_weighted_regressed && (!topology_improved || regression_ratio > 1.0)
+            // The configured topology score remains authoritative when a
+            // deployed correction actually changed the response.  Ignore an
+            // inconsistent legacy score only for an acoustically identity
+            // realization; older callers can carry stale pre/post scores.
+            let meaningful_topology_regression = topology_regressed
+                && report.metrics.max_abs_correction_db > topology_epsilon;
+
+            meaningful_topology_regression
+                || (target_weighted_regressed && (!topology_improved || regression_ratio > 1.0))
         });
         // Bounded tradeoff kept: target-weighted RMS regressed slightly but
         // the configured topology objective improved within the allowed band,
@@ -390,7 +415,7 @@ pub(super) fn apply_final_correction_safety_gate(
             });
             report.reverted_stages = reverted;
         }
-        if let Some((quality, realization, policy)) = runtime_acceptance_evidence(
+        if let Some((mut quality, mut realization, policy)) = runtime_acceptance_evidence(
             result,
             sample_rate,
             smoothing_n,
@@ -399,6 +424,31 @@ pub(super) fn apply_final_correction_safety_gate(
             processing_mode.clone(),
             group_delay_budget_ms,
         ) {
+            if limit_runtime_combined_boost(
+                result,
+                quality.max_boost_db,
+                policy.max_boost_db,
+                sample_rate,
+                smoothing_n,
+                evaluation_band,
+                sidecar_dir,
+            ) {
+                refresh_combined_scores(result);
+                if let Some((recomputed_quality, recomputed_realization, _)) =
+                    runtime_acceptance_evidence(
+                        result,
+                        sample_rate,
+                        smoothing_n,
+                        evaluation_band,
+                        sidecar_dir,
+                        processing_mode.clone(),
+                        group_delay_budget_ms,
+                    )
+                {
+                    quality = recomputed_quality;
+                    realization = recomputed_realization;
+                }
+            }
             log::debug!(
                 "Runtime acceptance: pre/post RMS {:.4}/{:.4} dB, pre p95 {:.4} dB, p95 {:.4} dB, worst {:.4} dB, worst-position improvement {:.4} dB, max boost {:.4} dB, induced GD {:?} ms, pre-ringing {:?} dB, latency {:?} ms, realization max {:?} dB, failed {:?}",
                 quality.training.pre_weighted_rms_median_db,
@@ -822,7 +872,14 @@ fn runtime_acceptance_evidence(
                 })
         })
     });
-    let output_class = if !has_fir {
+    let output_class = if matches!(
+        processing_mode,
+        roomeq_model::ProcessingMode::Hybrid | roomeq_model::ProcessingMode::MixedPhase
+    ) {
+        roomeq_engine::quality::RuntimeOutputClass::Hybrid
+    } else if processing_mode == roomeq_model::ProcessingMode::PhaseLinear {
+        roomeq_engine::quality::RuntimeOutputClass::Fir
+    } else if !has_fir {
         roomeq_engine::quality::RuntimeOutputClass::LowLatencyIir
     } else if has_partial_band_fir {
         roomeq_engine::quality::RuntimeOutputClass::Hybrid
@@ -1009,6 +1066,106 @@ fn runtime_realization_quality(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn limit_runtime_combined_boost(
+    result: &mut RoomOptimizationResult,
+    measured_boost_db: f64,
+    max_boost_db: f64,
+    sample_rate: f64,
+    _smoothing_n: usize,
+    _evaluation_band: (f64, f64),
+    sidecar_dir: &Path,
+) -> bool {
+    if !measured_boost_db.is_finite()
+        || measured_boost_db <= max_boost_db
+        || measured_boost_db <= 0.0
+    {
+        return false;
+    }
+    let scale = (max_boost_db / measured_boost_db).clamp(0.0, 1.0);
+    let names: Vec<_> = result
+        .channels
+        .keys()
+        .filter(|name| result.channel_results.contains_key(*name))
+        .cloned()
+        .collect();
+    let mut changed = false;
+
+    for name in names {
+        let channel_changed = {
+            let Some(chain) = result.channels.get_mut(&name) else {
+                continue;
+            };
+            scale_positive_eq_plugin_gains(chain, scale)
+        };
+        if !channel_changed {
+            continue;
+        }
+        let initial = result.channel_results[&name].initial_curve.clone();
+        let realized = match apply_logical_channel_chain(
+            &result.channels[&name],
+            &initial,
+            sample_rate,
+            sidecar_dir,
+        ) {
+            Ok(realized) => realized,
+            Err(error) => {
+                log::warn!(
+                    "Could not reconstruct '{}' after combined-boost limiting: {}",
+                    name,
+                    error
+                );
+                continue;
+            }
+        };
+        result.channel_results.get_mut(&name).unwrap().final_curve = realized.clone();
+        let final_data: roomeq_model::CurveData = (&realized).into();
+        let chain = result.channels.get_mut(&name).unwrap();
+        chain.eq_response = chain
+            .initial_curve
+            .as_ref()
+            .map(|initial| roomeq_engine::output::compute_eq_response(initial, &final_data));
+        chain.final_curve = Some(final_data);
+        changed = true;
+    }
+
+    if changed {
+        log::info!(
+            "Scaled positive final-chain EQ gains by {:.4} to limit combined boost from {:.2} dB to {:.2} dB",
+            scale,
+            measured_boost_db,
+            max_boost_db,
+        );
+    }
+    changed
+}
+
+fn scale_positive_eq_plugin_gains(chain: &mut roomeq_model::ChannelDspChain, scale: f64) -> bool {
+    let mut changed = false;
+    for plugin in &mut chain.plugins {
+        if plugin.plugin_type != "eq" {
+            continue;
+        }
+        let Some(filters) = plugin
+            .parameters
+            .get_mut("filters")
+            .and_then(serde_json::Value::as_array_mut)
+        else {
+            continue;
+        };
+        for filter in filters {
+            let Some(gain) = filter.get("db_gain").and_then(serde_json::Value::as_f64) else {
+                continue;
+            };
+            if gain > 0.0 {
+                filter["db_gain"] = serde_json::json!(gain * scale);
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
 fn is_runtime_quality_violation(violation: &str) -> bool {
     matches!(
         violation,
@@ -1150,7 +1307,15 @@ fn runtime_temporal_quality_evidence(
             }
         })
         .collect();
-    roomeq_engine::quality::derive_temporal_quality_evidence(&channels, pre, post, sample_rate)
+    let mut evidence =
+        roomeq_engine::quality::derive_temporal_quality_evidence(&channels, pre, post, sample_rate);
+    if phase_only_fir && evidence.pre_ringing_energy_db.is_none() {
+        // `None` means missing evidence to the runtime acceptance gate. For a
+        // phase-only FIR the compact magnitude-FIR pre-ringing metric is not
+        // applicable, so use the same inaudible sentinel as an IIR-only chain.
+        evidence.pre_ringing_energy_db = Some(-300.0);
+    }
+    evidence
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -1330,7 +1495,13 @@ fn evaluate_passband_correction_acceptance(
     smoothing_n: usize,
     evaluation_band: (f64, f64),
 ) -> Option<roomeq_engine::quality::CorrectionAcceptanceReport> {
-    let curves: Vec<_> = passband_curves(chain, &[initial, post, target], evaluation_band)?
+    let mut passband = passband_curves(chain, &[initial, post, target], evaluation_band)?;
+    // Bass-managed mains and LFE are evaluated only inside their routed
+    // passbands. Re-level the target after cropping so a sloped target is not
+    // anchored by out-of-band frequencies that the channel never reproduces.
+    let (reference, target) = passband.split_at_mut(2);
+    align_target_level(&reference[0], &mut target[0]);
+    let curves: Vec<_> = passband
         .iter()
         .map(|curve| roomeq_engine::smooth_one_over_n_octave(curve, smoothing_n))
         .collect();
@@ -1457,7 +1628,7 @@ fn revert_regressed_correction_stages(
     BTreeSet<CorrectionStage>,
     roomeq_engine::quality::CorrectionAcceptanceReport,
 )> {
-    let stages = correction_stages(chain);
+    let mut remaining_stages = correction_stages(chain);
     let routed_baseline = routed_baseline_curve(chain, initial, sample_rate)?;
     let mut active_chain = chain.clone();
     let mut active_curve =
@@ -1474,30 +1645,46 @@ fn revert_regressed_correction_stages(
     )?;
     let mut reverted = BTreeSet::new();
 
-    for stage in stages {
-        let mut candidate_chain = active_chain.clone();
-        remove_correction_stage(&mut candidate_chain, stage);
-        let candidate_curve =
-            apply_logical_channel_chain(&candidate_chain, initial, sample_rate, sidecar_dir)
-                .ok()?;
-        let candidate_acceptance_curve =
-            remove_routing_transfer(initial, &routed_baseline, &candidate_curve)?;
-        let candidate_report = evaluate_passband_correction_acceptance(
-            &candidate_chain,
-            initial,
-            &candidate_acceptance_curve,
-            target,
-            smoothing_n,
-            evaluation_band,
-        )?;
-        if candidate_report.metrics.post_target_weighted_rms_db
-            + (active_report.metrics.pre_target_weighted_rms_db.abs() * 1e-6).max(1e-9)
-            < active_report.metrics.post_target_weighted_rms_db
-        {
-            active_chain = candidate_chain;
-            active_curve = candidate_curve;
-            active_report = candidate_report;
-            reverted.insert(stage);
+    loop {
+        let mut removed_stage = false;
+        for stage in remaining_stages.iter().copied().collect::<Vec<_>>() {
+            let mut candidate_chain = active_chain.clone();
+            remove_correction_stage(&mut candidate_chain, stage);
+            let candidate_curve =
+                apply_logical_channel_chain(&candidate_chain, initial, sample_rate, sidecar_dir)
+                    .ok()?;
+            let candidate_acceptance_curve =
+                remove_routing_transfer(initial, &routed_baseline, &candidate_curve)?;
+            let candidate_report = evaluate_passband_correction_acceptance(
+                &candidate_chain,
+                initial,
+                &candidate_acceptance_curve,
+                target,
+                smoothing_n,
+                evaluation_band,
+            )?;
+            log::debug!(
+                "Correction-stage safety {:?}: pre target RMS {:.4} dB, active {:.4} dB, without stage {:.4} dB",
+                stage,
+                active_report.metrics.pre_target_weighted_rms_db,
+                active_report.metrics.post_target_weighted_rms_db,
+                candidate_report.metrics.post_target_weighted_rms_db,
+            );
+            if candidate_report.metrics.post_target_weighted_rms_db
+                + (active_report.metrics.pre_target_weighted_rms_db.abs() * 1e-6).max(1e-9)
+                < active_report.metrics.post_target_weighted_rms_db
+            {
+                active_chain = candidate_chain;
+                active_curve = candidate_curve;
+                active_report = candidate_report;
+                reverted.insert(stage);
+                remaining_stages.remove(&stage);
+                removed_stage = true;
+                break;
+            }
+        }
+        if !removed_stage {
+            break;
         }
     }
 
@@ -1775,6 +1962,26 @@ mod tests {
     use roomeq_engine::quality::CorrectionDecision;
     use roomeq_model::{CtcConfig, RoomConfig, SystemConfig, SystemModel};
     use std::collections::HashMap;
+
+    #[test]
+    fn final_chain_boost_limiter_scales_only_positive_eq_gains() {
+        let mut result = single_channel_room_result("L");
+        let chain = result.channels.get_mut("L").unwrap();
+        chain.plugins = vec![roomeq_model::PluginConfigWrapper {
+            plugin_type: "eq".to_string(),
+            parameters: serde_json::json!({
+                "filters": [
+                    {"filter_type": "peak", "freq": 1000.0, "q": 1.0, "db_gain": 8.0},
+                    {"filter_type": "peak", "freq": 2000.0, "q": 1.0, "db_gain": -4.0}
+                ]
+            }),
+        }];
+
+        assert!(scale_positive_eq_plugin_gains(chain, 0.5));
+        let filters = chain.plugins[0].parameters["filters"].as_array().unwrap();
+        assert_eq!(filters[0]["db_gain"].as_f64(), Some(4.0));
+        assert_eq!(filters[1]["db_gain"].as_f64(), Some(-4.0));
+    }
 
     #[test]
     fn target_level_alignment_ignores_a_band_limited_stopband() {
@@ -2059,7 +2266,7 @@ mod tests {
             48_000.0,
             roomeq_model::ProcessingMode::MixedPhase,
         );
-        assert_eq!(mixed.pre_ringing_energy_db, None);
+        assert_eq!(mixed.pre_ringing_energy_db, Some(-300.0));
 
         // Any other mode keeps the pre-ringing evidence so the acceptance
         // policy can enforce it.
@@ -2419,8 +2626,45 @@ mod tests {
                 .metadata
                 .stage_outcomes
                 .iter()
-                .all(|outcome| !outcome.stage.starts_with("final_correction_safety_"))
+            .all(|outcome| !outcome.stage.starts_with("final_correction_safety_"))
         );
+    }
+
+    #[test]
+    fn final_safety_gate_reverts_changed_curve_when_topology_score_regresses() {
+        let mut result = single_channel_room_result("left");
+        let channel = result.channel_results.get_mut("left").unwrap();
+        channel.pre_score = 1.0;
+        channel.post_score = 2.0;
+        channel.initial_curve.spl[0] += 1.0;
+        channel.final_curve = channel.initial_curve.clone();
+        // Improve the presentation-only target-weighted RMS while the
+        // configured topology objective reports a substantive regression.
+        channel.final_curve.spl[0] -= 0.5;
+
+        let chain = result.channels.get_mut("left").unwrap();
+        chain.plugins = vec![roomeq_model::PluginConfigWrapper {
+            plugin_type: "eq".to_string(),
+            parameters: serde_json::json!({"filters": []}),
+        }];
+        chain.final_curve = Some((&channel.final_curve).into());
+
+        apply_final_correction_safety_gate(
+            &mut result,
+            48_000.0,
+            3,
+            (20.0, 20_000.0),
+            Path::new("."),
+            roomeq_model::ProcessingMode::LowLatency,
+            None,
+        );
+
+        assert_eq!(result.channel_results["left"].post_score, 1.0);
+        assert!(result.channels["left"].plugins.is_empty());
+        assert!(result.metadata.stage_outcomes.iter().any(|outcome| {
+            outcome.stage == "final_correction_safety_left"
+                && outcome.status == roomeq_model::StageStatus::Degraded
+        }));
     }
 
     #[test]

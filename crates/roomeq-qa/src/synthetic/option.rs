@@ -4,6 +4,15 @@ use roomeq_model::{
     SchroederSplitConfig, SpatialRobustnessSerdeConfig, TargetResponseConfig,
 };
 
+pub(super) fn isolate_schroeder_split_from_multi_measurement(
+    config: &mut RoomConfig,
+    option_names: &[&str],
+) {
+    if option_names.contains(&"schroeder") {
+        config.optimizer.multi_measurement = None;
+    }
+}
+
 pub(super) fn option_psychoacoustic(config: &mut RoomConfig) {
     config.optimizer.psychoacoustic = true;
 }
@@ -82,4 +91,22 @@ pub(super) fn option_decomposed_correction(config: &mut RoomConfig) {
         steady_state_weight: 0.5,
         ..Default::default()
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn schroeder_option_clears_combined_multi_measurement_mode() {
+        let mut config = RoomConfig::default();
+        config.optimizer.multi_measurement = Some(MultiMeasurementConfig::default());
+
+        isolate_schroeder_split_from_multi_measurement(
+            &mut config,
+            &["schroeder", "spatial_robustness"],
+        );
+
+        assert!(config.optimizer.multi_measurement.is_none());
+    }
 }

@@ -742,6 +742,7 @@ fn optimize_home_cinema_with_sub(
 
     // 2. Pre-EQ
     let mut pre_eq_plugins: HashMap<String, Vec<PluginConfigWrapper>> = HashMap::new();
+    let mut pre_eq_target_curves: HashMap<String, CurveData> = HashMap::new();
     let mut pre_eq_initial_curves: HashMap<String, Curve> = HashMap::new();
     let mut linearized_curves: HashMap<String, Curve> = HashMap::new();
     let mut optimizer_evidence_by_channel: HashMap<String, Vec<OptimizerRunEvidence>> =
@@ -832,6 +833,9 @@ fn optimize_home_cinema_with_sub(
         if let Some(advisories) = multiseat_rejection {
             multi_seat_rejections.insert(role.clone(), advisories);
         }
+        if let Some(target) = chain.target_curve.clone() {
+            pre_eq_target_curves.insert(role.clone(), target);
+        }
         pre_eq_plugins.insert(role.clone(), stage_main_correction_plugins(chain.plugins));
         pre_eq_initial_curves.insert(role.clone(), ch_result.initial_curve);
         optimizer_evidence_by_channel.insert(role.clone(), ch_result.optimizer_evidence);
@@ -849,6 +853,9 @@ fn optimize_home_cinema_with_sub(
             sub_role.clone(),
             stage_sub_correction_plugins(chain.plugins),
         );
+        if let Some(target) = chain.target_curve {
+            pre_eq_target_curves.insert(sub_role.clone(), target);
+        }
         pre_eq_initial_curves.insert(sub_role.clone(), ch_result.initial_curve);
         optimizer_evidence_by_channel.insert(sub_role.clone(), ch_result.optimizer_evidence);
         linearized_curves.insert(sub_role.clone(), ch_result.final_curve);
@@ -1411,7 +1418,6 @@ fn optimize_home_cinema_with_sub(
         );
     // 6. Post-EQ
     let mut post_eq_filters = HashMap::new();
-    let mut post_eq_target_curves = HashMap::new();
     let main_post_max_freq = config.optimizer.max_freq;
     let total_post_eq_passes = main_roles.len() + 1;
 
@@ -1455,9 +1461,6 @@ fn optimize_home_cinema_with_sub(
                 &post_eq_resources,
             )
         });
-        if let Some(target) = prepared_target.as_ref() {
-            post_eq_target_curves.insert(role.clone(), CurveData::from(target));
-        }
         if opt_config.min_freq >= opt_config.max_freq {
             log::warn!(
                 "  Skipping {role} routed Post-EQ: invalid optimization band [{:.1}, {:.1}] Hz",
@@ -1542,14 +1545,6 @@ fn optimize_home_cinema_with_sub(
         )?;
         let mut opt_config = config.optimizer.clone();
         opt_config.max_freq = bass_route_upper_hz - 20.0;
-        if post_eq_resources.target.is_some() {
-            let target = roomeq_engine::fir::prepared_fir_target_curve(
-                &sub_post,
-                &opt_config,
-                &post_eq_resources,
-            );
-            post_eq_target_curves.insert(sub_role.clone(), CurveData::from(&target));
-        }
         let sub_post_eq_band_empty = opt_config.max_freq <= opt_config.min_freq;
         if sub_post_eq_band_empty {
             log::warn!(
@@ -1684,7 +1679,7 @@ fn optimize_home_cinema_with_sub(
         let initial_data: CurveData = (&pre_eq_initial_curves[role]).into();
         let final_data: CurveData = (&final_curve_obj).into();
         let eq_resp = output::compute_eq_response(&initial_data, &final_data);
-        let chain = ChannelDspChain {
+        let mut chain = ChannelDspChain {
             channel: role.clone(),
             plugins,
             drivers: None,
@@ -1695,8 +1690,27 @@ fn optimize_home_cinema_with_sub(
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
-            target_curve: post_eq_target_curves.get(role).cloned(),
+            target_curve: pre_eq_target_curves.get(role).cloned(),
         };
+        match crate::ctc::apply_channel_dsp_chain_to_curve(
+            &chain,
+            &pre_eq_initial_curves[role],
+            sample_rate,
+        ) {
+            Ok(realized) => {
+                let realized_data: CurveData = (&realized).into();
+                chain.eq_response = chain
+                    .initial_curve
+                    .as_ref()
+                    .map(|initial| output::compute_eq_response(initial, &realized_data));
+                chain.final_curve = Some(realized_data);
+            }
+            Err(error) => log::warn!(
+                "Could not reconstruct canonical home-cinema response for '{}': {}",
+                role,
+                error
+            ),
+        }
         channel_chains.insert(role.clone(), chain);
     }
 
@@ -1827,7 +1841,7 @@ fn optimize_home_cinema_with_sub(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
-        target_curve: post_eq_target_curves.get(&sub_role).cloned(),
+        target_curve: pre_eq_target_curves.get(&sub_role).cloned(),
     };
     channel_chains.insert(sub_role.clone(), sub_chain);
 

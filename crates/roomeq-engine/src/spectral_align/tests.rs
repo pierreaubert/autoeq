@@ -230,8 +230,8 @@ fn test_single_channel() {
 }
 
 #[test]
-fn test_spectral_alignment_rejects_mismatched_frequency_grids() {
-    let mut left = make_curve(|_| 0.0);
+fn test_spectral_alignment_interpolates_mismatched_frequency_grids() {
+    let left = make_curve(|_| 0.0);
     let mut right = make_curve(|_| 1.0);
     right.freq[10] *= 1.01;
 
@@ -240,14 +240,17 @@ fn test_spectral_alignment_rejects_mismatched_frequency_grids() {
         ("R".to_string(), right.clone()),
     ]);
 
-    assert!(compute_spectral_alignment(&curves, SAMPLE_RATE, 20.0, 20000.0).is_empty());
+    let alignment = compute_spectral_alignment(&curves, SAMPLE_RATE, 20.0, 20000.0);
+    assert_eq!(alignment.len(), 2);
     let icd = compute_inter_channel_deviation(&curves, 50.0);
-    assert!(icd.deviation_per_freq.is_empty());
-    assert!(correct_inter_channel_deviation(&curves, 50.0, 4, SAMPLE_RATE).is_empty());
-
-    left.freq[10] = right.freq[10];
-    let matched = HashMap::from([("L".to_string(), left), ("R".to_string(), right)]);
-    assert!(!compute_spectral_alignment(&matched, SAMPLE_RATE, 20.0, 20000.0).is_empty());
+    assert_eq!(icd.deviation_per_freq.len(), left.freq.len());
+    assert!(
+        icd.deviation_per_freq
+            .iter()
+            .all(|point| point.1.is_finite())
+    );
+    let corrections = correct_inter_channel_deviation(&curves, 50.0, 4, SAMPLE_RATE);
+    assert_eq!(corrections.len(), 2);
 }
 
 #[test]

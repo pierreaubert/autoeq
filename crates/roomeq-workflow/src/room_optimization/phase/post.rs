@@ -136,6 +136,42 @@ pub(in super::super) fn post_generate_mixed_phase_fir(
                 &mp_config,
                 sample_rate,
             );
+            let response = roomeq_engine::response::compute_fir_complex_response(
+                &coeffs,
+                &initial_curve.freq,
+                sample_rate,
+            );
+            let passband_floor = initial_curve
+                .spl
+                .iter()
+                .copied()
+                .filter(|level| level.is_finite())
+                .fold(f64::NEG_INFINITY, f64::max)
+                - 30.0;
+            let max_magnitude_deviation_db = response
+                .iter()
+                .zip(&initial_curve.spl)
+                .filter(|(_, level)| level.is_finite() && **level >= passband_floor)
+                .map(|(response, _)| {
+                    let magnitude = response.norm();
+                    if magnitude.is_finite() && magnitude > 0.0 {
+                        (20.0 * magnitude.log10()).abs()
+                    } else {
+                        f64::INFINITY
+                    }
+                })
+                .fold(0.0_f64, f64::max);
+            debug!(
+                "  Mixed-phase (post-workflow) '{}': max passband magnitude deviation {:.3} dB",
+                name, max_magnitude_deviation_db
+            );
+            if max_magnitude_deviation_db > 0.5 {
+                warn!(
+                    "  Mixed-phase post-workflow FIR skipped for '{}': phase-only magnitude deviation {:.2} dB exceeds 0.50 dB",
+                    name, max_magnitude_deviation_db
+                );
+                return None;
+            }
             let mixed_phase_report =
                 roomeq_engine::mixed_phase::MixedPhaseCorrectionReport::from_residual(
                     delay_ms,

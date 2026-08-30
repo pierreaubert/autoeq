@@ -90,6 +90,7 @@ pub fn run() -> Result<bool> {
     let multiseat_guards_only = args.iter().any(|a| a == "--multiseat-guards-only");
     let full_matrix = args.iter().any(|a| a == "--full-matrix");
     let pr_matrix = args.iter().any(|a| a == "--pr");
+    let fail_fast = args.iter().any(|a| a == "--fail-fast");
     let difficulty_filter = args
         .windows(2)
         .find(|w| w[0] == "--difficulty")
@@ -430,9 +431,19 @@ pub fn run() -> Result<bool> {
                 } else {
                     &scenario.degraded_curve
                 };
+                let mut baseline_post_score = None;
                 for combo in &option_combos {
-                    let result =
-                        run_single_test(degraded, mode.clone(), target_name, combo, difficulty);
+                    let result = run_single_test(
+                        degraded,
+                        mode.clone(),
+                        target_name,
+                        combo,
+                        difficulty,
+                        baseline_post_score,
+                    );
+                    if combo.is_empty() {
+                        baseline_post_score = Some(result.post_score);
+                    }
 
                     if result.passed {
                         passed += 1;
@@ -444,6 +455,9 @@ pub fn run() -> Result<bool> {
                             result.reason,
                             fmt_epa(result.epa_preference)
                         );
+                        if fail_fast {
+                            return Ok(true);
+                        }
                     }
 
                     all_results.push(result);
@@ -498,6 +512,9 @@ pub fn run() -> Result<bool> {
                         result.reason,
                         fmt_epa(result.epa_preference)
                     );
+                    if fail_fast {
+                        return Ok(true);
+                    }
                 }
 
                 all_results.push(result);
@@ -514,6 +531,9 @@ pub fn run() -> Result<bool> {
         } else {
             failed += 1;
             println!("  FAIL: {} -- {}", result.name, result.reason);
+            if fail_fast {
+                return Ok(true);
+            }
         }
         all_results.push(result);
     }
@@ -565,6 +585,9 @@ pub fn run() -> Result<bool> {
                             result.reason,
                             fmt_epa(result.epa_preference)
                         );
+                        if fail_fast {
+                            return Ok(true);
+                        }
                     }
                     all_results.push(result);
                 }
@@ -595,6 +618,9 @@ pub fn run() -> Result<bool> {
                                 result.reason,
                                 fmt_epa(result.epa_preference)
                             );
+                            if fail_fast {
+                                return Ok(true);
+                            }
                         }
                         all_results.push(result);
                     }

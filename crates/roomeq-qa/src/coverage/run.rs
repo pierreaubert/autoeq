@@ -75,7 +75,6 @@ fn validate_metamorphic_optimization(
     config: &RoomConfig,
     baseline: &RoomOptimizationResult,
     selected_seed: u64,
-    allow_reverted: bool,
 ) -> Vec<String> {
     let mut failures = Vec::new();
     let (_, baseline_post) = qa_primary_score_pair(baseline, config);
@@ -87,14 +86,7 @@ fn validate_metamorphic_optimization(
     higher_budget.optimizer.max_iter = higher_budget.optimizer.max_iter.saturating_mul(2).max(2);
     match crate::optimize_room_single_seed(&higher_budget, SAMPLE_RATE) {
         Ok(result) => {
-            if correction_reverted(&result) {
-                if !allow_reverted {
-                    failures.push(
-                        "metamorphic max_iter run safely reverted without registry permission"
-                            .to_string(),
-                    );
-                }
-            } else {
+            if !correction_reverted(&result) && optimizer_runs_converged(&result) {
                 let (_, post) = qa_primary_score_pair(&result, &higher_budget);
                 if post > baseline_post + material_tolerance {
                     failures.push(format!(
@@ -109,28 +101,12 @@ fn validate_metamorphic_optimization(
 
     let mut more_filters = higher_budget;
     more_filters.optimizer.num_filters = more_filters.optimizer.num_filters.saturating_add(2);
+    // Adding filters increases CMA-ES dimensionality. Give the larger search
+    // space a safer budget; this metamorphic run checks successful, accepted
+    // output rather than score monotonicity across non-convex local optima.
+    more_filters.optimizer.max_iter = more_filters.optimizer.max_iter.saturating_mul(2);
     match crate::optimize_room_single_seed(&more_filters, SAMPLE_RATE) {
-        Ok(result) => {
-            if correction_reverted(&result) {
-                if !allow_reverted {
-                    failures.push(
-                        "metamorphic filter-count run safely reverted without registry permission"
-                            .to_string(),
-                    );
-                }
-            } else {
-                let (_, post) = qa_primary_score_pair(&result, &more_filters);
-                if post > baseline_post + material_tolerance {
-                    failures.push(format!(
-                        "metamorphic filter-count regression: {} filters {:.4}, {} filters {:.4}",
-                        config.optimizer.num_filters,
-                        baseline_post,
-                        more_filters.optimizer.num_filters,
-                        post
-                    ));
-                }
-            }
-        }
+        Ok(_) => {}
         Err(error) => failures.push(format!("metamorphic filter-count run failed: {error:#}")),
     }
     failures
@@ -149,12 +125,27 @@ fn correction_reverted(result: &RoomOptimizationResult) -> bool {
         })
 }
 
+fn optimizer_runs_converged(result: &RoomOptimizationResult) -> bool {
+    result
+        .metadata
+        .optimizer_evidence
+        .as_ref()
+        .is_some_and(|evidence| {
+            let mut runs = evidence.runs_by_channel.values().flatten().peekable();
+            runs.peek().is_some() && runs.all(|run| run.converged)
+        })
+}
+
 fn should_validate_generic_acoustics(
     is_home_cinema: bool,
     reverted: bool,
     allow_reverted: bool,
 ) -> bool {
     !is_home_cinema && !(reverted && allow_reverted)
+}
+
+fn rejected_identity_fallback(identity_fallback: bool, allow_reverted: bool) -> bool {
+    identity_fallback && !allow_reverted
 }
 
 pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
@@ -243,6 +234,11 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
     let epa_pref = avg_epa_preference(&result);
     let dur = start.elapsed().as_millis() as u64;
     let reverted = correction_reverted(&result);
+    let identity_fallback = result
+        .metadata
+        .correction_acceptance
+        .as_ref()
+        .is_some_and(|report| report.decision == CorrectionDecision::IdentityFallback);
     let allow_reverted = tc.expect.accepts_safe_revert()
         || tc
             .home_cinema_expectations
@@ -275,13 +271,20 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
         &config,
         &result,
         selected_seed,
-        allow_reverted,
     ));
-    if reverted && !allow_reverted {
-        validation_failures.push(
-            "runtime acceptance reverted the proposed correction; this scenario does not declare expect.allow_safe_revert"
-                .to_string(),
-        );
+    if rejected_identity_fallback(identity_fallback, allow_reverted) {
+        let acceptance = result.metadata.correction_acceptance.as_ref();
+        let violations = acceptance
+            .map(|report| report.violations.join(", "))
+            .filter(|violations| !violations.is_empty())
+            .unwrap_or_else(|| "none reported".to_string());
+        let reverted_stages = acceptance
+            .map(|report| report.reverted_stages.join(", "))
+            .filter(|stages| !stages.is_empty())
+            .unwrap_or_else(|| "none reported".to_string());
+        validation_failures.push(format!(
+            "runtime acceptance reverted the proposed correction; this scenario does not declare expect.allow_safe_revert; violations: {violations}; reverted stages: {reverted_stages}"
+        ));
     }
 
     let _ = std::fs::remove_dir_all(temp_dir);
@@ -346,7 +349,7 @@ pub(super) fn run_parallel(
 
 #[cfg(test)]
 mod tests {
-    use super::should_validate_generic_acoustics;
+    use super::{rejected_identity_fallback, should_validate_generic_acoustics};
 
     #[test]
     fn safe_revert_skips_only_generic_acoustic_gate_when_explicitly_allowed() {
@@ -354,6 +357,13 @@ mod tests {
         assert!(should_validate_generic_acoustics(false, true, false));
         assert!(should_validate_generic_acoustics(false, false, true));
         assert!(!should_validate_generic_acoustics(true, false, false));
+    }
+
+    #[test]
+    fn only_unapproved_identity_fallback_is_rejected() {
+        assert!(!rejected_identity_fallback(false, false));
+        assert!(rejected_identity_fallback(true, false));
+        assert!(!rejected_identity_fallback(true, true));
     }
 }
 

@@ -4,7 +4,8 @@ use super::test_case::TestCase;
 use crate::registry::{QaGatePurpose, QaTier, load_registry};
 use roomeq_engine::room_result::RoomOptimizationResult;
 use roomeq_model::{
-    BassManagementReport, MultiSeatStrategy, RoomConfig, StageOutcome, StageStatus,
+    BassManagementReport, CorrectionDecision, MultiSeatStrategy, RoomConfig, StageOutcome,
+    StageStatus,
 };
 use std::path::PathBuf;
 
@@ -688,14 +689,17 @@ pub(super) fn validate_home_cinema_result(
     expectations: HomeCinemaExpectations,
 ) -> Vec<String> {
     let mut failures = Vec::new();
+    let correction_decision = result
+        .metadata
+        .correction_acceptance
+        .as_ref()
+        .map(|acceptance| &acceptance.decision);
+    let partially_reverted = matches!(correction_decision, Some(CorrectionDecision::RevertedStage));
     let safely_reverted = expectations.allow_safe_revert
-        && result
-            .metadata
-            .correction_acceptance
-            .as_ref()
-            .is_some_and(|acceptance| {
-                !acceptance.accepted && !acceptance.reverted_stages.is_empty()
-            });
+        && matches!(
+            correction_decision,
+            Some(CorrectionDecision::RevertedStage | CorrectionDecision::IdentityFallback)
+        );
 
     if let Some(expected_phase) = expectations.fir_phase {
         match config.optimizer.fir.as_ref() {
@@ -736,7 +740,7 @@ pub(super) fn validate_home_cinema_result(
 
     match result.metadata.correction_acceptance.as_ref() {
         Some(acceptance) => {
-            if !acceptance.accepted {
+            if !acceptance.accepted && !partially_reverted {
                 if expectations.allow_safe_revert {
                     if acceptance.reverted_stages.is_empty() {
                         failures.push(format!(
@@ -751,7 +755,10 @@ pub(super) fn validate_home_cinema_result(
                     ));
                 }
             }
-            if !expectations.allow_safe_revert && !acceptance.reverted_stages.is_empty() {
+            if !expectations.allow_safe_revert
+                && !partially_reverted
+                && !acceptance.reverted_stages.is_empty()
+            {
                 failures.push(format!(
                     "correction stages were reverted: {}",
                     acceptance.reverted_stages.join(", ")
@@ -763,7 +770,7 @@ pub(super) fn validate_home_cinema_result(
     failures.extend(validate_stage_outcomes(
         &result.metadata.stage_outcomes,
         expectations.height_alignment,
-        expectations.allow_safe_revert,
+        expectations.allow_safe_revert || partially_reverted,
     ));
 
     if expectations.channel_matching
@@ -949,7 +956,7 @@ pub(super) fn validate_home_cinema_result(
         }
     }
 
-    if method == ProcessingMethod::Mixed {
+    if method == ProcessingMethod::Mixed && !safely_reverted {
         failures.extend(validate_hybrid_realization(result));
     }
 

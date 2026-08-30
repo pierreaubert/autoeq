@@ -15,6 +15,7 @@ mod channel_matching_correction_profile;
 mod compute;
 mod consts;
 mod create;
+mod grid;
 mod misc;
 #[cfg(test)]
 mod tests;

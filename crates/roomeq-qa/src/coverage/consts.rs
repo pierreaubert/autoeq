@@ -9,6 +9,7 @@ pub(super) const QA_MAXEVAL: usize = 15000; // Fast mode for QA
 pub(super) const QA_ALGORITHM: &str = "autoeq:cmaes";
 pub(super) const CMAES_QA_POPULATION: usize = 16;
 pub(super) const CMAES_QA_NUM_FILTERS: usize = 9;
+pub(super) const QA_MAX_FILTER_BOOST_DB: f64 = 12.0;
 
 pub(super) const FEM_DIR: &str = "data_tests/roomeq/generate/fem";
 
@@ -29,6 +30,7 @@ pub(super) fn apply_qa_overrides(config: &mut RoomConfig, maxeval: usize) {
         config.optimizer.asymmetric_loss = false;
         config.optimizer.refine = true;
         config.optimizer.num_filters = CMAES_QA_NUM_FILTERS;
+        config.optimizer.max_db = config.optimizer.max_db.min(QA_MAX_FILTER_BOOST_DB);
     }
     config.optimizer.max_iter = if replaced_auto_de {
         maxeval
@@ -104,6 +106,7 @@ mod tests {
         config.optimizer.num_filters = 7;
         config.optimizer.refine = true;
         config.optimizer.population = 60;
+        config.optimizer.max_db = 12.0;
         config.optimizer.max_iter = 30000;
         config.optimizer.seed = None;
 
@@ -113,6 +116,7 @@ mod tests {
         assert_eq!(config.optimizer.num_filters, CMAES_QA_NUM_FILTERS);
         assert!(config.optimizer.refine);
         assert_eq!(config.optimizer.population, CMAES_QA_POPULATION);
+        assert_eq!(config.optimizer.max_db, QA_MAX_FILTER_BOOST_DB);
         assert_eq!(config.optimizer.max_iter, QA_MAXEVAL);
         assert_eq!(config.optimizer.seed, Some(SEED));
         assert_eq!(config.optimizer.parallel_threads, Some(1));

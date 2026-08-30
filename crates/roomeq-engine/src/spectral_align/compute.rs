@@ -2,6 +2,7 @@ use super::consts::MAX_FLAT_GAIN_DB;
 use super::consts::MAX_SHELF_GAIN_DB;
 use super::consts::MIN_CORRECTION_DB;
 use super::consts::fit_shelf_gain_iterative;
+use super::grid::align_curves_to_common_grid;
 use super::types::SpectralAlignmentResult;
 use crate::Curve;
 use log::warn;
@@ -28,17 +29,23 @@ pub fn compute_spectral_alignment(
         return HashMap::new();
     }
 
-    // All curves must share the same frequency grid (they come from the same
-    // optimization pipeline). Use the first curve's freq as the canonical grid.
+    // Coverage and mixed-source workflows can legitimately carry different
+    // measured spans or sampling grids. Reconcile them before pointwise math.
     let first_curve = curves.values().next().unwrap();
-    let freq = &first_curve.freq;
-    if curves
-        .values()
-        .any(|curve| !roomeq_analysis::frequency_grid::same_frequency_grid(freq, &curve.freq))
-    {
-        warn!("Spectral alignment skipped: channels do not share the same frequency grid");
-        return HashMap::new();
-    }
+    let aligned_curves;
+    let curves = if curves.values().any(|curve| {
+        !roomeq_analysis::frequency_grid::same_frequency_grid(&first_curve.freq, &curve.freq)
+    }) {
+        let Some(aligned) = align_curves_to_common_grid(curves) else {
+            warn!("Spectral alignment skipped: channels have no valid shared frequency span");
+            return HashMap::new();
+        };
+        aligned_curves = aligned;
+        &aligned_curves
+    } else {
+        curves
+    };
+    let freq = &curves.values().next().unwrap().freq;
 
     // Build mask: only consider frequencies within [min_freq, max_freq]
     let mask: Vec<bool> = freq
@@ -157,20 +164,27 @@ pub fn compute_inter_channel_deviation(
         return empty;
     }
 
-    // Use the first curve's frequency grid as reference
+    // Reconcile different measured spans or sampling grids before pointwise
+    // deviation math.
     let first_curve = match final_curves.values().next() {
         Some(c) => c,
         None => return empty,
     };
-    let freq = &first_curve.freq;
+    let aligned_curves;
+    let final_curves = if final_curves.values().any(|curve| {
+        !roomeq_analysis::frequency_grid::same_frequency_grid(&first_curve.freq, &curve.freq)
+    }) {
+        let Some(aligned) = align_curves_to_common_grid(final_curves) else {
+            warn!("Inter-channel deviation skipped: channels have no valid shared frequency span");
+            return empty;
+        };
+        aligned_curves = aligned;
+        &aligned_curves
+    } else {
+        final_curves
+    };
+    let freq = &final_curves.values().next().unwrap().freq;
     let n = freq.len();
-    if final_curves
-        .values()
-        .any(|curve| !roomeq_analysis::frequency_grid::same_frequency_grid(freq, &curve.freq))
-    {
-        warn!("Inter-channel deviation skipped: channels do not share the same frequency grid");
-        return empty;
-    }
 
     // Normalize each curve: subtract its mean in the analysis range (f3..10kHz)
     // so we compare spectral shape, not absolute level

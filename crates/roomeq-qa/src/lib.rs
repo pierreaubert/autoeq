@@ -1,7 +1,7 @@
 //! Reusable RoomEQ QA scenario matrices, runners, and reports.
 
 use roomeq_engine::room_result::RoomOptimizationResult;
-use roomeq_model::{RoomConfig, StageOutcome, StageStatus};
+use roomeq_model::{CorrectionDecision, RoomConfig, StageOutcome, StageStatus};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -20,6 +20,16 @@ fn qa_seed_values(config: &RoomConfig) -> [u64; 5] {
     QA_SEED_OFFSETS.map(|offset| base.wrapping_add(offset))
 }
 
+fn median_accepted_seed(scores: &[(u64, f64, bool)]) -> u64 {
+    let accepted: Vec<_> = scores.iter().filter(|(_, _, accepted)| *accepted).collect();
+    let pool: Vec<_> = if accepted.is_empty() {
+        scores.iter().collect()
+    } else {
+        accepted
+    };
+    pool[pool.len() / 2].0
+}
+
 fn select_median_seed<F>(config: &RoomConfig, mut run: F) -> anyhow::Result<(u64, Vec<(u64, f64)>)>
 where
     F: FnMut(&RoomConfig) -> anyhow::Result<RoomOptimizationResult>,
@@ -32,10 +42,51 @@ where
         if !result.combined_post_score.is_finite() {
             anyhow::bail!("QA seed {seed} produced a non-finite post score");
         }
-        scores.push((seed, result.combined_post_score));
+        let accepted = result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .is_none_or(|report| matches!(report.decision, CorrectionDecision::Accepted));
+        log::debug!(
+            "QA seed candidate {seed}: post {:.6}, decision {:?}, violations {:?}, reverted stages {:?}, max boost {:?} dB, available headroom {:?} dB, accepted candidate {accepted}",
+            result.combined_post_score,
+            result
+                .metadata
+                .correction_acceptance
+                .as_ref()
+                .map(|report| &report.decision),
+            result
+                .metadata
+                .correction_acceptance
+                .as_ref()
+                .map(|report| &report.violations),
+            result
+                .metadata
+                .correction_acceptance
+                .as_ref()
+                .map(|report| &report.reverted_stages),
+            result
+                .metadata
+                .correction_acceptance
+                .as_ref()
+                .and_then(|report| report.acoustic_quality.as_ref())
+                .map(|quality| quality.max_boost_db),
+            result
+                .metadata
+                .correction_acceptance
+                .as_ref()
+                .and_then(|report| report.acoustic_quality.as_ref())
+                .and_then(|quality| quality.temporal.available_headroom_db),
+        );
+        scores.push((seed, result.combined_post_score, accepted));
     }
     scores.sort_by(|left, right| left.1.total_cmp(&right.1));
-    Ok((scores[scores.len() / 2].0, scores))
+    let selected_seed = median_accepted_seed(&scores);
+    let scores = scores
+        .into_iter()
+        .map(|(seed, score, _)| (seed, score))
+        .collect();
+    Ok((selected_seed, scores))
 }
 
 fn record_seed_distribution(
@@ -133,4 +184,33 @@ pub(crate) fn optimize_room_with_validation(
     .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     record_seed_distribution(&mut result, selected_seed, &scores);
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::median_accepted_seed;
+
+    #[test]
+    fn median_seed_prefers_runtime_accepted_candidates() {
+        let scores = [
+            (1, 1.0, false),
+            (2, 2.0, true),
+            (3, 3.0, false),
+            (4, 4.0, true),
+            (5, 5.0, false),
+        ];
+        assert_eq!(median_accepted_seed(&scores), 4);
+    }
+
+    #[test]
+    fn median_seed_falls_back_to_all_candidates_when_every_run_reverts() {
+        let scores = [
+            (1, 1.0, false),
+            (2, 2.0, false),
+            (3, 3.0, false),
+            (4, 4.0, false),
+            (5, 5.0, false),
+        ];
+        assert_eq!(median_accepted_seed(&scores), 3);
+    }
 }

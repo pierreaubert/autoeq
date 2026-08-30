@@ -81,6 +81,11 @@ pub(super) fn build_test_matrix_for_tier(
             if mode_filter.is_some_and(|filter| filter != "all" && method.name() != filter) {
                 continue;
             }
+            let mut expect = family.expect;
+            if family.safety_modes.iter().any(|mode| mode == mode_name) {
+                expect.allow_safe_revert = true;
+                expect.gate_purpose = QaGatePurpose::Safety;
+            }
             test_cases.push(TestCase {
                 registry_id: format!("{}/{}", family.id, mode_name),
                 scenario: family.scenario.clone(),
@@ -91,7 +96,7 @@ pub(super) fn build_test_matrix_for_tier(
                 override_file: None,
                 home_cinema_expectations: None,
                 claims: family.claims.clone(),
-                expect: family.expect,
+                expect,
             });
         }
     }
@@ -134,7 +139,10 @@ pub(super) fn build_quick_test_matrix(
 
 #[cfg(test)]
 mod tests {
-    use super::{ProcessingMethod, build_quick_test_matrix, required_stage_missing};
+    use super::{
+        ProcessingMethod, build_quick_test_matrix, build_test_matrix_for_tier,
+        required_stage_missing,
+    };
     use crate::registry::QaTier;
 
     #[test]
@@ -154,6 +162,29 @@ mod tests {
                 && case.expect.allow_safe_revert
                 && case.expect.accepts_safe_revert()
         }));
+    }
+
+    #[test]
+    fn declared_family_safety_mode_preserves_other_quality_modes() {
+        let cases = build_test_matrix_for_tier(QaTier::Weekly, false, None, None);
+        let fir = cases
+            .iter()
+            .find(|case| {
+                case.scenario == "medium_surround_5_1" && case.method == ProcessingMethod::Fir
+            })
+            .unwrap();
+        let iir = cases
+            .iter()
+            .find(|case| {
+                case.scenario == "medium_surround_5_1" && case.method == ProcessingMethod::Iir
+            })
+            .unwrap();
+        assert!(fir.expect.accepts_safe_revert());
+        assert!(!iir.expect.accepts_safe_revert());
+        assert_eq!(
+            iir.expect.gate_purpose,
+            crate::registry::QaGatePurpose::Quality
+        );
     }
 
     #[test]

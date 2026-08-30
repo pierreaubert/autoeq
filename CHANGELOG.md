@@ -1,12 +1,27 @@
-# 0.5.65
+# 0.5.66
 
 ## Package versions
 
-- `autoeq` 0.5.65
-- `roomeq-engine` 0.5.65
-- `roomeq-workflow` 0.5.26
+- `autoeq` 0.5.66
+- `roomeq-engine` 0.5.66
+- `roomeq-quality` 0.5.59
+- `roomeq-workflow` 0.5.27
+- `roomeq-qa` 0.5.63
 
 ## Fixes
+
+- Reject materially changed channel corrections when the configured topology
+  objective regresses, even if the presentation-only target-weighted RMS metric
+  improves; acoustically identical realizations may still ignore stale legacy
+  scores.
+- Make synthetic QA option precedence and correction acceptance match the
+  production runtime contracts, including Schroeder-split isolation,
+  decomposed-correction tradeoffs, bounded numerical tolerance, and structured
+  final-safety reverts.
+- Align mismatched channel-response grids on the deterministic sparsest grid
+  inside their common measured overlap before spectral alignment,
+  inter-channel deviation reporting, and corrective PEQ, instead of skipping
+  RoomEQ coverage cases with repeated frequency-grid warnings.
 
 - Optimize shared physical-sub post-route EQ against the physical subwoofer
   transfer instead of a coherent sum of independent LFE and redirected-main

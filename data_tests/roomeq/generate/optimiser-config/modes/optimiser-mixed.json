@@ -2,9 +2,9 @@
   "optimizer": {
     "processing_mode": "hybrid",
     "fir": {
-      "taps": 256,
+      "taps": 2048,
       "phase": "kirkeby",
-      "max_boost_db": 10.0
+      "max_boost_db": 4.0
     }
   }
 }

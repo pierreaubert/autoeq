@@ -5,6 +5,7 @@ use super::super::resources::{self, EqResources};
 use super::super::types::PreparedSingleChannelEq;
 use crate::Curve;
 use crate::PeqModel;
+use autoeq_core::param_utils::PeqLayout;
 use autoeq_optim::loss::LossType;
 use autoeq_optim::optim::OptimizerBackend;
 use autoeq_optim::optim::setup::setup_objective_data;
@@ -670,11 +671,18 @@ pub(in super::super) fn run_optimization_pass(
     } else {
         x.to_vec()
     };
-    let x_final = if let Some(ref env) = prep.objective_data.min_cut_envelope {
+    let mut x_final = if let Some(ref env) = prep.objective_data.min_cut_envelope {
         autoeq_optim::optim::clamp_cuts_to_envelope(&x_after_boost, env, prep.peq_model)
     } else {
         x_after_boost
     };
+    clamp_combined_boost(
+        &mut x_final,
+        &prep.objective_data.freqs,
+        prep.sample_rate,
+        prep.peq_model,
+        prep.objective_data.max_db,
+    );
     let final_loss =
         autoeq_optim::optim::compute_fitness_penalties_ref(&x_final, &prep.objective_data);
     for evidence in &mut optimizer_evidence {
@@ -692,4 +700,87 @@ pub(in super::super) fn run_optimization_pass(
         .collect();
 
     Ok((filters, final_loss, x_final, optimizer_evidence))
+}
+
+fn clamp_combined_boost(
+    x: &mut [f64],
+    freqs: &ndarray::Array1<f64>,
+    sample_rate: f64,
+    peq_model: PeqModel,
+    max_boost_db: f64,
+) {
+    if x.is_empty() || freqs.is_empty() || !max_boost_db.is_finite() {
+        return;
+    }
+    let peak_boost = |candidate: &[f64]| {
+        autoeq_core::x2peq::x2spl(freqs, candidate, sample_rate, peq_model)
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max)
+    };
+    let original = x.to_vec();
+    let original_peak = peak_boost(&original);
+    if original_peak <= max_boost_db {
+        return;
+    }
+
+    let apply_scale = |candidate: &mut [f64], scale: f64| {
+        candidate.copy_from_slice(&original);
+        for index in 0..peq_model.num_filters(&original) {
+            let mut params = peq_model.get_filter_params(&original, index);
+            if params.gain > 0.0 {
+                params.gain *= scale;
+                peq_model.set_filter_params(candidate, index, &params);
+            }
+        }
+    };
+
+    let mut lower = 0.0;
+    let mut upper = 1.0;
+    for _ in 0..32 {
+        let middle = 0.5 * (lower + upper);
+        apply_scale(x, middle);
+        if peak_boost(x) <= max_boost_db {
+            lower = middle;
+        } else {
+            upper = middle;
+        }
+    }
+    apply_scale(x, lower);
+    log::info!(
+        "Scaled positive PEQ gains by {:.4} to cap combined boost at {:.2} dB (was {:.2} dB)",
+        lower,
+        max_boost_db,
+        original_peak,
+    );
+}
+
+#[cfg(test)]
+mod combined_boost_tests {
+    use super::*;
+
+    #[test]
+    fn overlapping_positive_filters_are_scaled_to_combined_limit() {
+        let freqs = ndarray::arr1(&[1_000.0]);
+        let center = 1_000.0_f64.log10();
+        let mut parameters = vec![center, 1.0, 8.0, center, 1.0, 8.0];
+
+        clamp_combined_boost(
+            &mut parameters,
+            &freqs,
+            48_000.0,
+            PeqModel::Pk,
+            12.0,
+        );
+
+        let response = autoeq_core::x2peq::x2spl(
+            &freqs,
+            &parameters,
+            48_000.0,
+            PeqModel::Pk,
+        );
+        assert!(response[0] <= 12.0 + 1e-6, "combined boost was {} dB", response[0]);
+        assert!((parameters[2] - 6.0).abs() < 1e-5);
+        assert!((parameters[5] - 6.0).abs() < 1e-5);
+    }
 }

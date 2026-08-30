@@ -17,9 +17,10 @@ pub enum QaTier {
 
 /// What a QA case is allowed to prove.
 ///
-/// Safety smoke cases may accept a runtime revert. Functional and quality
-/// cases must retain the requested correction; otherwise a safe fallback can
-/// conceal a missing or incorrectly realized feature.
+/// Safety smoke cases may accept a full runtime revert. Functional cases must
+/// retain the requested correction. Quality cases are judged from the final
+/// realized output, so they may partially revert harmful stages only when the
+/// remaining chain still passes acoustic and processing-method validation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QaGatePurpose {
@@ -64,6 +65,8 @@ pub struct ScenarioFamily {
     pub solver: String,
     pub tier: QaTier,
     pub modes: Vec<String>,
+    #[serde(default)]
+    pub safety_modes: Vec<String>,
     pub claims: Vec<String>,
     pub expect: ScenarioExpect,
 }
@@ -227,11 +230,23 @@ impl ScenarioRegistry {
                     );
                 }
             }
+            for mode in &family.safety_modes {
+                if !family.modes.contains(mode) {
+                    bail!(
+                        "RoomEQ QA registry family '{}' safety mode '{}' is not in its mode matrix",
+                        family.id,
+                        mode
+                    );
+                }
+            }
         }
         for case in &self.home_cinema {
-            if case.expect.gate_purpose != QaGatePurpose::Functional {
+            if !matches!(
+                case.expect.gate_purpose,
+                QaGatePurpose::Functional | QaGatePurpose::Safety
+            ) {
                 bail!(
-                    "RoomEQ QA home-cinema case '{}' must use a functional gate",
+                    "RoomEQ QA home-cinema case '{}' must use a functional or safety gate",
                     case.id
                 );
             }
@@ -611,11 +626,16 @@ mod tests {
         let safe_reverts = all_expectations
             .iter()
             .filter(|(_, expect)| expect.allow_safe_revert)
-            .map(|(id, _)| *id)
             .collect::<Vec<_>>();
         assert!(
-            safe_reverts.is_empty(),
-            "functional and quality registry gates must not accept safe reversion"
+            !safe_reverts.is_empty(),
+            "safety registry coverage must be present"
+        );
+        assert!(
+            safe_reverts
+                .iter()
+                .all(|(_, expect)| expect.gate_purpose == QaGatePurpose::Safety),
+            "only explicit safety gates may accept safe reversion"
         );
         for runner in [
             "synthetic",

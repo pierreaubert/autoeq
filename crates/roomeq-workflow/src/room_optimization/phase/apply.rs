@@ -57,6 +57,44 @@ pub(in super::super) fn apply_phase_correction(
             }
         };
 
+    let phase_response = roomeq_engine::response::compute_fir_complex_response(
+        &phase_fir,
+        &ch.final_curve.freq,
+        sample_rate,
+    );
+    let passband_floor = ch
+        .initial_curve
+        .spl
+        .iter()
+        .copied()
+        .filter(|level| level.is_finite())
+        .fold(f64::NEG_INFINITY, f64::max)
+        - 30.0;
+    let max_magnitude_deviation_db = phase_response
+        .iter()
+        .zip(&ch.initial_curve.spl)
+        .filter(|(_, level)| level.is_finite() && **level >= passband_floor)
+        .map(|(response, _)| {
+            let magnitude = response.norm();
+            if magnitude.is_finite() && magnitude > 0.0 {
+                (20.0 * magnitude.log10()).abs()
+            } else {
+                f64::INFINITY
+            }
+        })
+        .fold(0.0_f64, f64::max);
+    debug!(
+        " Phase correction '{}': max passband magnitude deviation {:.3} dB",
+        name, max_magnitude_deviation_db
+    );
+    if max_magnitude_deviation_db > 0.5 {
+        warn!(
+            " Phase correction skipped '{}': phase-only FIR magnitude deviation {:.2} dB exceeds 0.50 dB",
+            name, max_magnitude_deviation_db
+        );
+        return;
+    }
+
     // Save phase FIR WAV and add convolution plugin
     let mut filename = autoeq_artifacts::roomeq::convolution_artifact_filename(
         name,
@@ -87,11 +125,6 @@ pub(in super::super) fn apply_phase_correction(
         ),
     );
 
-    let phase_response = roomeq_engine::response::compute_fir_complex_response(
-        &phase_fir,
-        &ch.final_curve.freq,
-        sample_rate,
-    );
     ch.final_curve =
         roomeq_engine::response::apply_complex_response(&ch.final_curve, &phase_response);
     chain.final_curve = Some((&ch.final_curve).into());

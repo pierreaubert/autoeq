@@ -1,4 +1,5 @@
 use super::consts::MIN_CORRECTION_DB;
+use super::grid::align_curves_to_common_grid;
 use super::misc::estimate_correction_q;
 use super::misc::smooth_for_peak_finding;
 use super::types::ChannelMatchingResult;
@@ -75,15 +76,23 @@ pub fn correct_inter_channel_deviation_with_profile(
         Some(c) => c,
         None => return Vec::new(),
     };
-    let freq = &first_curve.freq;
+    let aligned_curves;
+    let final_curves = if final_curves.values().any(|curve| {
+        !roomeq_analysis::frequency_grid::same_frequency_grid(&first_curve.freq, &curve.freq)
+    }) {
+        let Some(aligned) = align_curves_to_common_grid(final_curves) else {
+            warn!(
+                "Channel matching correction skipped: channels have no valid shared frequency span"
+            );
+            return Vec::new();
+        };
+        aligned_curves = aligned;
+        &aligned_curves
+    } else {
+        final_curves
+    };
+    let freq = &final_curves.values().next().unwrap().freq;
     let n = freq.len();
-    if final_curves
-        .values()
-        .any(|curve| !roomeq_analysis::frequency_grid::same_frequency_grid(freq, &curve.freq))
-    {
-        warn!("Channel matching correction skipped: channels do not share the same frequency grid");
-        return Vec::new();
-    }
 
     let (matching_min_hz, matching_max_hz) = profile.matching_band(f3_hz);
 

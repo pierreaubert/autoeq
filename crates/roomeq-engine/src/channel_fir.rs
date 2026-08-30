@@ -6,7 +6,7 @@ mod tests;
 
 use autoeq_core::{AutoeqError, Result, response};
 use autoeq_optim::optim::{OptimProgressCallback, OptimizerRunEvidence};
-use log::{info, warn};
+use log::{debug, info, warn};
 use math_audio_iir_fir::Biquad;
 use ndarray::Array1;
 use roomeq_model::{OptimizerConfig, RoomConfig};
@@ -201,12 +201,51 @@ fn process_mixed_phase(mut request: FirChannelRequest<'_>) -> Result<ChannelProc
                     request.sample_rate,
                     spatial_depth.as_ref(),
                 );
-                let report = crate::mixed_phase::MixedPhaseCorrectionReport::from_residual(
-                    delay_ms,
-                    coefficients.len(),
-                    &residual,
+                let response = crate::response::compute_fir_complex_response(
+                    &coefficients,
+                    &request.preprocessed.curve_for_optim.freq,
+                    request.sample_rate,
                 );
-                Some((coefficients, report))
+                let passband_floor = request
+                    .preprocessed
+                    .curve_for_optim
+                    .spl
+                    .iter()
+                    .copied()
+                    .filter(|level| level.is_finite())
+                    .fold(f64::NEG_INFINITY, f64::max)
+                    - 30.0;
+                let max_magnitude_deviation_db = response
+                    .iter()
+                    .zip(&request.preprocessed.curve_for_optim.spl)
+                    .filter(|(_, level)| level.is_finite() && **level >= passband_floor)
+                    .map(|(response, _)| {
+                        let magnitude = response.norm();
+                        if magnitude.is_finite() && magnitude > 0.0 {
+                            (20.0 * magnitude.log10()).abs()
+                        } else {
+                            f64::INFINITY
+                        }
+                    })
+                    .fold(0.0_f64, f64::max);
+                debug!(
+                    "  Mixed-phase '{}': max passband magnitude deviation {:.3} dB",
+                    request.channel_name, max_magnitude_deviation_db
+                );
+                if max_magnitude_deviation_db > 0.5 {
+                    warn!(
+                        "  Mixed-phase FIR skipped for '{}': phase-only magnitude deviation {:.2} dB exceeds 0.50 dB",
+                        request.channel_name, max_magnitude_deviation_db
+                    );
+                    None
+                } else {
+                    let report = crate::mixed_phase::MixedPhaseCorrectionReport::from_residual(
+                        delay_ms,
+                        coefficients.len(),
+                        &residual,
+                    );
+                    Some((coefficients, report))
+                }
             }
             Err(error) => {
                 warn!(

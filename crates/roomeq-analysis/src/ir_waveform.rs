@@ -11,6 +11,24 @@ use std::f64::consts::PI;
 const FFT_SIZE: usize = 65536;
 const CROP_MS: f64 = 400.0;
 
+/// Return a phase sequence suitable for interpolation.
+///
+/// Measurement curves inside RoomEQ normally carry unwrapped phase.  Running
+/// the unwrap algorithm on those values again is destructive when adjacent
+/// points on a sparse log-frequency grid differ by more than 180 degrees (as
+/// they routinely do for room-scale propagation delays).  Wrapped input is
+/// still accepted for callers that construct curves at the API boundary.
+fn phase_for_interpolation(phase_deg: &ndarray::Array1<f64>) -> ndarray::Array1<f64> {
+    let already_unwrapped = phase_deg
+        .iter()
+        .any(|phase| phase.is_finite() && phase.abs() > 180.0);
+    if already_unwrapped {
+        phase_deg.clone()
+    } else {
+        autoeq_core::phase_utils::unwrap_phase_degrees(phase_deg)
+    }
+}
+
 /// Compute pre- and post-correction IR waveforms for one channel.
 ///
 /// Returns `None` if phase data is absent in `initial_curve`.
@@ -30,7 +48,7 @@ pub fn compute_channel_ir_waveforms(
         .collect();
 
     // Interpolate SPL and unwrapped phase from log-spaced measurement to linear grid
-    let unwrapped_phase = autoeq_core::phase_utils::unwrap_phase_degrees(phase_deg);
+    let unwrapped_phase = phase_for_interpolation(phase_deg);
     let freq_vec: Vec<f64> = initial_curve.freq.to_vec();
     let spl_grid =
         interpolate_to_linear_grid(&freq_vec, &initial_curve.spl.to_vec(), &linear_freqs);
@@ -236,6 +254,33 @@ mod tests {
             (pre_ir.amplitude[peak_idx] - 1.0).abs() < 0.05,
             "pre-IR peak amplitude should be ~1.0, got {}",
             pre_ir.amplitude[peak_idx]
+        );
+    }
+
+    #[test]
+    fn test_pre_ir_preserves_large_already_unwrapped_delay() {
+        // A room measurement commonly contains tens of milliseconds of bulk
+        // delay.  On a sparse logarithmic grid its already-unwrapped phase can
+        // advance by many turns between adjacent points and must not be
+        // unwrapped a second time.
+        let tau_ms = 90.0;
+        let freqs: Vec<f64> = (0..333)
+            .map(|i| 20.0 * (1000.0f64).powf(i as f64 / 332.0))
+            .collect();
+        let curve = make_delay_curve(tau_ms, &freqs);
+
+        let (pre_ir, _) = compute_channel_ir_waveforms(&curve, &[], None, 0.0, 48_000.0).unwrap();
+        let (peak_idx, _) = pre_ir
+            .amplitude
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.abs().partial_cmp(&b.abs()).unwrap())
+            .unwrap();
+        let peak_ms = pre_ir.time_ms[peak_idx];
+
+        assert!(
+            (peak_ms - tau_ms).abs() < 1.0,
+            "pre-IR peak expected near {tau_ms} ms, got {peak_ms:.2} ms"
         );
     }
 

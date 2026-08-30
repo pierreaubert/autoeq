@@ -7,6 +7,8 @@ from scripts.src.dsp import (
     biquad_coefficients,
     build_post_dsp_source_curves,
     compute_eq_response,
+    compute_group_delay_from_ir,
+    wrap_phase,
 )
 
 
@@ -33,7 +35,33 @@ class BiquadParityTests(unittest.TestCase):
                     filter_type, 1_000.0, 48_000.0, 0.8, 6.0
                 )
                 self.assertEqual(len(coefficients), 5)
-                self.assertTrue(all(math.isfinite(value) for value in coefficients))
+        self.assertTrue(all(math.isfinite(value) for value in coefficients))
+
+
+class TemporalResponseTests(unittest.TestCase):
+    def test_phase_wrap_uses_report_range(self):
+        self.assertEqual(
+            wrap_phase([-540.0, -181.0, 180.0, 181.0, 540.0]),
+            [-180.0, 179.0, -180.0, -179.0, -180.0],
+        )
+
+    def test_group_delay_from_ir_preserves_large_delay(self):
+        sample_rate = 48_000.0
+        sample_count = 19_200
+        delay_ms = 90.0
+        delay_sample = round(delay_ms * sample_rate / 1000.0)
+        amplitude = [0.0] * sample_count
+        amplitude[delay_sample] = 1.0
+        ir = {
+            "time_ms": [index * 1000.0 / sample_rate for index in range(sample_count)],
+            "amplitude": amplitude,
+        }
+
+        freq, group_delay_ms = compute_group_delay_from_ir(ir)
+
+        self.assertTrue(freq)
+        central = sorted(group_delay_ms)[len(group_delay_ms) // 2]
+        self.assertAlmostEqual(central, delay_ms, delta=0.05)
 
     def test_standard_shelves_match_rust_q_independent_convention(self):
         for filter_type in ("lowshelf", "highshelf"):
@@ -82,6 +110,21 @@ class BiquadParityTests(unittest.TestCase):
 
 
 class PostDspSourceCurveTests(unittest.TestCase):
+    def test_authoritative_deployed_curves_bypass_python_reconstruction(self):
+        deployed = {
+            "L": {
+                "freq": [80.0],
+                "spl": [72.0],
+                "phase": [45.0],
+            }
+        }
+        data = {
+            "deployed_source_curves": deployed,
+            "channels": {"L": {"final_curve": {"freq": [80.0], "spl": [-99.0]}}},
+        }
+
+        self.assertIs(build_post_dsp_source_curves(data), deployed)
+
     def test_pre_route_time_alignment_delay_preserves_crossover_sum(self):
         data = {
             "metadata": {

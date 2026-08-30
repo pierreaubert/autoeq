@@ -94,6 +94,7 @@ pub(super) fn make_test_output() -> DspGraph {
     );
 
     DspGraph {
+        deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels,
@@ -174,6 +175,7 @@ fn make_single_filter_output(filter_type: &str, gain_db: f64) -> DspGraph {
     );
 
     DspGraph {
+        deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels,
@@ -332,6 +334,7 @@ pub(super) fn make_routed_bass_output() -> DspGraph {
     };
 
     DspGraph {
+        deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels,

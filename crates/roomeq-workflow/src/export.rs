@@ -240,6 +240,7 @@ mod tests {
     fn graph_with_plugins(plugins: Vec<PluginConfigWrapper>) -> DspGraph {
         DspGraph {
             version: default_config_version(),
+            deployed_source_curves: Default::default(),
             global_plugins: Vec::new(),
             channels: HashMap::from([(
                 "left".to_string(),

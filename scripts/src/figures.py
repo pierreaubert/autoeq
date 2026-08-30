@@ -10,8 +10,10 @@ from .dsp import (
     smooth_octave,
     compute_eq_response,
     compute_group_delay,
+    compute_group_delay_from_ir,
     generate_freq_points,
     build_post_dsp_source_curves,
+    wrap_phase,
 )
 from .data_extract import (
     compute_y_range,
@@ -1738,7 +1740,7 @@ def create_comparison_phase_figure(
         color = _mode_color(mode_name)
 
         if initial_curve and initial_curve.get("phase"):
-            phase_sm = smooth_octave(initial_curve["freq"], initial_curve["phase"], 1.0 / 3.0)
+            phase_sm = wrap_phase(initial_curve["phase"])
             fig.add_trace(go.Scatter(
                 x=initial_curve["freq"], y=phase_sm, mode="lines",
                 name="Before EQ", line=dict(color="rgba(200, 200, 200, 0.6)", width=1.5),
@@ -1746,7 +1748,7 @@ def create_comparison_phase_figure(
             ), row=row, col=col)
 
         if final_curve and final_curve.get("phase"):
-            phase_sm = smooth_octave(final_curve["freq"], final_curve["phase"], 1.0 / 3.0)
+            phase_sm = wrap_phase(final_curve["phase"])
             fig.add_trace(go.Scatter(
                 x=final_curve["freq"], y=phase_sm, mode="lines",
                 name=_mode_label(mode_name), line=dict(color=color, width=2),
@@ -1784,6 +1786,9 @@ def create_comparison_group_delay_figure(
     """
     has_phase = False
     for _, ch_data in mode_data:
+        if ch_data.get("pre_ir") or ch_data.get("post_ir"):
+            has_phase = True
+            break
         for key in ("initial_curve", "final_curve"):
             curve = ch_data.get(key)
             if curve and curve.get("phase"):
@@ -1814,8 +1819,12 @@ def create_comparison_group_delay_figure(
         final_curve = ch_data.get("final_curve")
         color = _mode_color(mode_name)
 
-        if initial_curve and initial_curve.get("phase"):
-            gd_freq, gd_ms = compute_group_delay(initial_curve["freq"], initial_curve["phase"])
+        if ch_data.get("pre_ir") or (initial_curve and initial_curve.get("phase")):
+            gd_freq, gd_ms = compute_group_delay_from_ir(ch_data.get("pre_ir"))
+            if not gd_freq and initial_curve and initial_curve.get("phase"):
+                gd_freq, gd_ms = compute_group_delay(
+                    initial_curve["freq"], initial_curve["phase"]
+                )
             if gd_freq:
                 gd_sm = smooth_octave(gd_freq, gd_ms, 1.0 / 3.0)
                 all_gd.append(gd_sm)
@@ -1825,8 +1834,12 @@ def create_comparison_group_delay_figure(
                     showlegend=first_cell, legendgroup="gd_before",
                 ), row=row, col=col)
 
-        if final_curve and final_curve.get("phase"):
-            gd_freq, gd_ms = compute_group_delay(final_curve["freq"], final_curve["phase"])
+        if ch_data.get("post_ir") or (final_curve and final_curve.get("phase")):
+            gd_freq, gd_ms = compute_group_delay_from_ir(ch_data.get("post_ir"))
+            if not gd_freq and final_curve and final_curve.get("phase"):
+                gd_freq, gd_ms = compute_group_delay(
+                    final_curve["freq"], final_curve["phase"]
+                )
             if gd_freq:
                 gd_sm = smooth_octave(gd_freq, gd_ms, 1.0 / 3.0)
                 all_gd.append(gd_sm)

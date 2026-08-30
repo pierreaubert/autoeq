@@ -1,6 +1,6 @@
 //! Engine-neutral contracts shared by RoomEQ execution and exporters.
 
-use crate::{ChannelDspChain, OptimizationMetadata, PluginConfigWrapper};
+use crate::{ChannelDspChain, CurveData, OptimizationMetadata, PluginConfigWrapper};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -34,6 +34,9 @@ pub struct DspGraph {
     pub global_plugins: Vec<PluginConfigWrapper>,
     /// Per-channel DSP chains
     pub channels: HashMap<String, ChannelDspChain>,
+    /// Coherent deployed response for each logical input after routing.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub deployed_source_curves: HashMap<String, CurveData>,
     /// Metadata about the optimization
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<OptimizationMetadata>,
@@ -45,6 +48,7 @@ impl DspGraph {
             version: version.into(),
             global_plugins: Vec::new(),
             channels: HashMap::new(),
+            deployed_source_curves: HashMap::new(),
             metadata: None,
         }
     }

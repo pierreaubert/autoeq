@@ -26,6 +26,7 @@ mod tests {
             version: "1".to_string(),
             global_plugins: Vec::new(),
             channels: std::collections::HashMap::new(),
+            deployed_source_curves: Default::default(),
             metadata: None,
         };
 

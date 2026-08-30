@@ -3,7 +3,7 @@
 //! Types for returning optimization results and DSP chain outputs.
 
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use std::collections::{BTreeMap, HashMap};
 
 // Re-export Curve for reference in output docs
@@ -25,11 +25,39 @@ pub struct CurveData {
     /// Sound Pressure Level in dB (normalized)
     pub spl: Vec<f64>,
     /// Phase in degrees (optional)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_wrapped_phase"
+    )]
     pub phase: Option<Vec<f64>>,
     /// Optional frequency range used for normalization
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub norm_range: Option<(f64, f64)>,
+}
+
+fn wrap_phase_degrees(phase: f64) -> f64 {
+    if phase.is_finite() {
+        (phase + 180.0).rem_euclid(360.0) - 180.0
+    } else {
+        phase
+    }
+}
+
+fn serialize_wrapped_phase<S>(phase: &Option<Vec<f64>>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    phase
+        .as_ref()
+        .map(|values| {
+            values
+                .iter()
+                .copied()
+                .map(wrap_phase_degrees)
+                .collect::<Vec<_>>()
+        })
+        .serialize(serializer)
 }
 
 impl From<Curve> for CurveData {
@@ -541,6 +569,39 @@ mod tests {
         assert_eq!(data.freq, vec![100.0, 1000.0, 10000.0]);
         assert_eq!(data.spl, vec![80.0, 82.0, 81.0]);
         assert_eq!(data.phase, Some(vec![0.0, 45.0, 90.0]));
+    }
+
+    #[test]
+    fn curve_data_wraps_phase_at_serialization_boundary() {
+        let curve = Curve {
+            freq: Array1::from(vec![100.0, 1_000.0, 10_000.0]),
+            spl: Array1::from(vec![80.0, 82.0, 81.0]),
+            phase: Some(Array1::from(vec![-540.0, 181.0, 540.0])),
+            ..Default::default()
+        };
+
+        for data in [CurveData::from(curve.clone()), CurveData::from(&curve)] {
+            assert_eq!(data.freq, curve.freq.to_vec());
+            assert_eq!(data.spl, curve.spl.to_vec());
+            assert_eq!(data.phase, Some(vec![-540.0, 181.0, 540.0]));
+            let serialized = serde_json::to_value(&data).unwrap();
+            let serialized_phase = serialized["phase"].as_array().unwrap();
+            assert_eq!(serialized_phase[0].as_f64(), Some(-180.0));
+            assert_eq!(serialized_phase[1].as_f64(), Some(-179.0));
+            assert_eq!(serialized_phase[2].as_f64(), Some(-180.0));
+            assert!(
+                serialized_phase
+                    .iter()
+                    .all(|phase| (-180.0..180.0).contains(&phase.as_f64().unwrap()))
+            );
+        }
+
+        // Serialization must not mutate the internal unwrapped phase used by
+        // the DSP and impulse-response calculations.
+        assert_eq!(
+            curve.phase.as_ref().unwrap().to_vec(),
+            vec![-540.0, 181.0, 540.0]
+        );
     }
 
     #[test]

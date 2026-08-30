@@ -993,6 +993,34 @@ fn measured_source_route_trim_db(
     }
 }
 
+/// Apply the common physical-sub correction to a summed driver response.
+///
+/// Driver metadata contains the measured per-driver acoustic responses plus
+/// output alignment.  The deployed LFE chain subsequently applies the common
+/// correction designed from `measured_sub_curve` to
+/// `corrected_sub_curve`.  Route optimization must include the same transfer
+/// or it evaluates a different low branch than the exported DSP graph.
+fn apply_common_sub_correction(
+    driver_sum: &Curve,
+    measured_sub_curve: &Curve,
+    corrected_sub_curve: &Curve,
+) -> Option<Curve> {
+    let measured =
+        autoeq_core::curve_transforms::interpolate_log_space(&driver_sum.freq, measured_sub_curve);
+    let corrected =
+        autoeq_core::curve_transforms::interpolate_log_space(&driver_sum.freq, corrected_sub_curve);
+    let measured_phase = measured.phase.as_ref()?;
+    let corrected_phase = corrected.phase.as_ref()?;
+    let mut result = driver_sum.clone();
+    let result_phase = result.phase.as_mut()?;
+
+    for index in 0..result.freq.len() {
+        result.spl[index] += corrected.spl[index] - measured.spl[index];
+        result_phase[index] += corrected_phase[index] - measured_phase[index];
+    }
+    Some(result)
+}
+
 /// Describe the route settings currently used by every redirected logical
 /// source before optional per-source optimization.
 ///
@@ -1092,6 +1120,7 @@ pub fn optimize_bass_management_joint_solution(
     sub_role: &str,
     sample_rate: f64,
 ) -> Vec<String> {
+    let driver_responses_need_common_correction = drivers.is_some();
     let driver_inputs = if let Some(drivers) = drivers {
         drivers.to_vec()
     } else {
@@ -1158,7 +1187,7 @@ pub fn optimize_bass_management_joint_solution(
 
         let mut sub_curves = Vec::with_capacity(sources.len());
         for (_, source_curve) in &sources {
-            let Some(sub_curve) =
+            let Some(mut sub_curve) =
                 sum_sub_output_responses_on_grid(&source_curve.freq, &driver_inputs, sub_outputs)
             else {
                 overall_advisories.push(format!(
@@ -1167,6 +1196,27 @@ pub fn optimize_bass_management_joint_solution(
                 sub_curves.clear();
                 break;
             };
+            if driver_responses_need_common_correction {
+                let Some(corrected_sub_curve) = aligned_pre_eq_curves.get(sub_role) else {
+                    overall_advisories.push(format!(
+                        "source_route_optimizer_skipped_missing_corrected_sub:{group_id}"
+                    ));
+                    sub_curves.clear();
+                    break;
+                };
+                let Some(corrected_driver_sum) = apply_common_sub_correction(
+                    &sub_curve,
+                    measured_sub_curve,
+                    corrected_sub_curve,
+                ) else {
+                    overall_advisories.push(format!(
+                        "source_route_optimizer_skipped_invalid_sub_correction:{group_id}"
+                    ));
+                    sub_curves.clear();
+                    break;
+                };
+                sub_curve = corrected_driver_sum;
+            }
             sub_curves.push(sub_curve);
         }
         if sub_curves.len() != sources.len() {
@@ -1320,8 +1370,8 @@ pub fn optimize_bass_management_joint_solution(
         for (source_index, (source_channel, _)) in sources.iter().enumerate() {
             let base = 2 + source_index * 4;
             let mut route_initial = initial[base..base + 4].to_vec();
-            let mut route_lower_bounds = lower_bounds[base..base + 4].to_vec();
-            let mut route_upper_bounds = upper_bounds[base..base + 4].to_vec();
+            let route_lower_bounds = lower_bounds[base..base + 4].to_vec();
+            let route_upper_bounds = upper_bounds[base..base + 4].to_vec();
             let measured_trim = aligned_measurement_curves
                 .get(source_channel)
                 .map(|main_curve| {
@@ -1335,9 +1385,14 @@ pub fn optimize_bass_management_joint_solution(
                     )
                 })
                 .unwrap_or(route_initial[3]);
+            // The measured level difference is a useful deterministic seed,
+            // but it is not the deployed crossover optimum.  The objective
+            // below evaluates the corrected main, the physical sub-output
+            // response, crossover filters, phase, and target together.  Do
+            // not collapse the trim bounds to the measurement estimate or
+            // the optimizer can only repair delay/polarity while retaining a
+            // deep level-induced crossover notch.
             route_initial[3] = measured_trim;
-            route_lower_bounds[3] = measured_trim;
-            route_upper_bounds[3] = measured_trim;
             refined[base + 3] = measured_trim;
             let route_objective = |route: &[f64]| {
                 let mut params = refined.clone();
@@ -2235,5 +2290,37 @@ mod tests {
             measured_source_route_trim_db(&main, &sub, Some(&target), 100.0, -12.0, 6.0);
 
         assert!(tilted_trim > flat_trim + 3.0);
+    }
+
+    #[test]
+    fn common_sub_correction_is_applied_to_driver_sum() {
+        let mut driver_sum = flat_curve_with_phase();
+        driver_sum.spl.fill(70.0);
+        driver_sum.phase.as_mut().unwrap().fill(10.0);
+        let measured = flat_curve_with_phase();
+        let mut corrected = measured.clone();
+        corrected.spl.mapv_inplace(|level| level + 6.0);
+        corrected
+            .phase
+            .as_mut()
+            .unwrap()
+            .mapv_inplace(|phase| phase + 45.0);
+
+        let realized = apply_common_sub_correction(&driver_sum, &measured, &corrected).unwrap();
+
+        assert!(
+            realized
+                .spl
+                .iter()
+                .all(|level| (*level - 76.0).abs() < 1.0e-9)
+        );
+        assert!(
+            realized
+                .phase
+                .as_ref()
+                .unwrap()
+                .iter()
+                .all(|phase| (*phase - 55.0).abs() < 1.0e-9)
+        );
     }
 }

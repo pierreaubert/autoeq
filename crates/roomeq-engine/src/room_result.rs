@@ -52,6 +52,15 @@ pub struct RoomOptimizationResult {
 impl RoomOptimizationResult {
     /// Convert the result into the serializable DSP-chain contract.
     pub fn to_dsp_chain_output(&self) -> DspChainOutput {
-        crate::output::create_dsp_chain_output(self.channels.clone(), Some(self.metadata.clone()))
+        let mut output = crate::output::create_dsp_chain_output(
+            self.channels.clone(),
+            Some(self.metadata.clone()),
+        );
+        output.deployed_source_curves = self
+            .deployed_source_curves
+            .iter()
+            .map(|(channel, curve)| (channel.clone(), curve.into()))
+            .collect();
+        output
     }
 }

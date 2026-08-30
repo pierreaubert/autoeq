@@ -26,6 +26,7 @@ fn channel(name: &str, plugins: Vec<PluginConfigWrapper>) -> ChannelDspChain {
 
 fn output_with_plugins(plugins: Vec<PluginConfigWrapper>) -> DspGraph {
     DspGraph {
+        deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels: HashMap::from([("left".to_string(), channel("left", plugins))]),
@@ -644,6 +645,7 @@ fn camilladsp_rejects_fractional_sample_rates_before_truncation() {
 #[test]
 fn camilladsp_rejects_channel_identifier_collisions() {
     let output = DspGraph {
+        deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels: HashMap::from([

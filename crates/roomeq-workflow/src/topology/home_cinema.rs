@@ -71,6 +71,8 @@ fn apply_gain_to_main_chain(chain: &mut ChannelDspChain, gain_db: f64) {
     if gain_db.abs() <= 0.01 {
         return;
     }
+    // Per-source calibration belongs before the route split so the main and
+    // its redirected bass retain the same level relationship.
     let mut plugin = mark_plugin_stage(output::create_gain_plugin(gain_db), "pre_route");
     if let Some(parameters) = plugin.parameters.as_object_mut() {
         parameters.insert(
@@ -91,6 +93,30 @@ fn apply_gain_to_main_chain(chain: &mut ChannelDspChain, gain_db: f64) {
         .unwrap_or(chain.plugins.len());
     chain.plugins.insert(route_owned_index, plugin);
 
+    if let Some(final_curve) = chain.final_curve.take() {
+        let mut curve: Curve = final_curve.into();
+        shift_curve_level(&mut curve, gain_db);
+        let final_data: CurveData = (&curve).into();
+        chain.eq_response = chain
+            .initial_curve
+            .as_ref()
+            .map(|initial| output::compute_eq_response(initial, &final_data));
+        chain.final_curve = Some(final_data);
+    }
+}
+
+fn apply_output_safety_gain(chain: &mut ChannelDspChain, gain_db: f64) {
+    if gain_db.abs() <= 0.01 {
+        return;
+    }
+    let mut plugin = mark_plugin_stage(output::create_gain_plugin(gain_db), "post_route");
+    if let Some(parameters) = plugin.parameters.as_object_mut() {
+        parameters.insert(
+            "label".to_string(),
+            serde_json::Value::String("post_dsp_output_headroom_safety".to_string()),
+        );
+    }
+    chain.plugins.push(plugin);
     if let Some(final_curve) = chain.final_curve.take() {
         let mut curve: Curve = final_curve.into();
         shift_curve_level(&mut curve, gain_db);
@@ -154,11 +180,14 @@ fn calibrate_post_dsp_input_levels(
                 message: format!("missing physical sub chain '{lfe_role}' for level calibration"),
             })?;
     common_sub_chain.plugins.retain(|plugin| {
+        // Redirected mains enter the physical sub after the LFE logical
+        // input's pre-route chain.  Only destination post-route processing is
+        // common to every signal emitted by the subwoofer.
         plugin
             .parameters
             .get("room_eq_stage")
             .and_then(|value| value.as_str())
-            != Some("route_owned")
+            == Some("post_route")
     });
     let sub_initial: Curve = common_sub_chain
         .initial_curve
@@ -213,6 +242,8 @@ fn calibrate_post_dsp_input_levels(
             apply_gain_to_main_chain(chain, *trims.get(role).unwrap_or(&0.0));
         }
     }
+    let logical_input_trims = trims.clone();
+
     // Only the configured correlated-bus headroom model may aggregate
     // independent logical inputs. Preserve all source relationships with one
     // common down-only safety trim if that model predicts overload.
@@ -228,11 +259,11 @@ fn calibrate_post_dsp_input_levels(
         if safety_trim_db > 0.0 {
             for role in main_roles {
                 if let Some(chain) = channels.get_mut(role) {
-                    apply_gain_to_main_chain(chain, -safety_trim_db);
+                    apply_output_safety_gain(chain, -safety_trim_db);
                 }
             }
             if let Some(chain) = channels.get_mut(lfe_role) {
-                apply_gain_to_main_chain(chain, -safety_trim_db);
+                apply_output_safety_gain(chain, -safety_trim_db);
             }
             for trim_db in trims.values_mut() {
                 *trim_db -= safety_trim_db;
@@ -256,13 +287,18 @@ fn calibrate_post_dsp_input_levels(
             .collect();
         matrix.route_count = matrix.matrix.len();
     }
-    graph.input_trim_db = trims.clone();
+    graph.input_trim_db = logical_input_trims;
     graph
         .advisories
         .push("post_dsp_input_levels_aligned_down".to_string());
 
+    let mut calibrated_common_sub_curve = common_sub_curve.clone();
+    shift_curve_level(
+        &mut calibrated_common_sub_curve,
+        *trims.get(lfe_role).unwrap_or(&0.0),
+    );
     if let Some(final_bass_bus) = engine_bass_management::predict_bass_output_curve_from_routes(
-        &common_sub_curve,
+        &calibrated_common_sub_curve,
         graph,
         &graph.physical_sub_output,
         sample_rate,
@@ -287,7 +323,7 @@ fn calibrate_post_dsp_input_levels(
             .into();
         if let Some(deployed) = engine_bass_management::predict_deployed_source_curve_from_routes(
             Some(&main_curve),
-            &common_sub_curve,
+            &calibrated_common_sub_curve,
             graph,
             role,
             sample_rate,
@@ -297,7 +333,7 @@ fn calibrate_post_dsp_input_levels(
     }
     if let Some(lfe) = engine_bass_management::predict_deployed_source_curve_from_routes(
         None,
-        &common_sub_curve,
+        &calibrated_common_sub_curve,
         graph,
         lfe_role,
         sample_rate,
@@ -2072,7 +2108,8 @@ fn optimize_home_cinema_with_sub(
 #[cfg(test)]
 mod post_dsp_level_tests {
     use super::{
-        average_spl, calibrate_post_dsp_input_levels, physical_sub_tonal_objective_curve,
+        apply_gain_to_main_chain, apply_output_safety_gain, average_spl,
+        calibrate_post_dsp_input_levels, physical_sub_tonal_objective_curve,
         stage_main_correction_plugins, stage_sub_correction_plugins,
     };
     use roomeq_engine::Curve;
@@ -2150,6 +2187,54 @@ mod post_dsp_level_tests {
     }
 
     #[test]
+    fn logical_input_calibration_precedes_route_split() {
+        let initial = curve(70.0);
+        let mut channel = chain("L", initial.clone(), Some(initial));
+
+        apply_gain_to_main_chain(&mut channel, -6.0);
+
+        let calibration = channel.plugins.last().unwrap();
+        assert_eq!(calibration.parameters["room_eq_stage"], "pre_route");
+        assert_eq!(
+            calibration.parameters["label"],
+            "post_dsp_input_level_alignment"
+        );
+        assert!(
+            channel
+                .final_curve
+                .as_ref()
+                .unwrap()
+                .spl
+                .iter()
+                .all(|level| (*level - 64.0).abs() < 1.0e-12)
+        );
+    }
+
+    #[test]
+    fn common_headroom_safety_is_applied_after_route_sum() {
+        let initial = curve(70.0);
+        let mut channel = chain("L", initial.clone(), Some(initial));
+
+        apply_output_safety_gain(&mut channel, -6.0);
+
+        let safety = channel.plugins.last().unwrap();
+        assert_eq!(safety.parameters["room_eq_stage"], "post_route");
+        assert_eq!(
+            safety.parameters["label"],
+            "post_dsp_output_headroom_safety"
+        );
+        assert!(
+            channel
+                .final_curve
+                .as_ref()
+                .unwrap()
+                .spl
+                .iter()
+                .all(|level| (*level - 64.0).abs() < 1.0e-12)
+        );
+    }
+
+    #[test]
     fn physical_sub_tonal_objective_uses_only_common_transfer_and_gain() {
         let physical_sub = curve(60.0);
         let objective = physical_sub_tonal_objective_curve(&physical_sub, 3.0);
@@ -2214,6 +2299,7 @@ mod post_dsp_level_tests {
             "post-DSP main level spread was {spread} dB"
         );
         assert!((trims["LFE"] - trims["R"]).abs() < 1.0e-12);
+        assert_eq!(graph.input_trim_db, trims);
         assert_eq!(graph.matrix.as_ref().unwrap().route_count, 3);
         assert!(
             graph

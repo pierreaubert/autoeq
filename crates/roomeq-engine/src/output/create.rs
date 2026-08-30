@@ -274,6 +274,7 @@ pub fn create_dsp_chain_output(
         version: roomeq_model::default_config_version(),
         global_plugins,
         channels,
+        deployed_source_curves: HashMap::new(),
         metadata,
     }
 }

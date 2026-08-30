@@ -138,6 +138,7 @@ fn test_camilladsp_uses_second_order_filters() {
         },
     );
     let output = DspGraph {
+        deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels,
@@ -189,6 +190,7 @@ fn test_camilladsp_no_duplicate_yaml_keys() {
         },
     );
     let output = DspGraph {
+        deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels,
@@ -243,6 +245,7 @@ fn test_easyeffects_rejects_different_channel_gains() {
         },
     );
     let output = DspGraph {
+        deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels,
@@ -275,6 +278,7 @@ fn test_unknown_channels_sort_alphabetically() {
         );
     }
     let output = DspGraph {
+        deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels,
@@ -307,6 +311,7 @@ fn standard_channel_order_places_rears_before_surrounds() {
         );
     }
     let output = DspGraph {
+        deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels,
@@ -410,6 +415,7 @@ fn test_export_with_drivers() {
     );
 
     let output = DspGraph {
+        deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
         global_plugins: Vec::new(),
         channels,

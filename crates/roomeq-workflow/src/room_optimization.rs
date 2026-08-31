@@ -749,7 +749,7 @@ fn routed_target_underfill_db(curve: &Curve, chain: &ChannelDspChain) -> Option<
     )
 }
 
-fn routed_timbre_candidate_underfill_db(
+fn routed_correction_candidate_underfill_db(
     base_curve: &Curve,
     chain: &ChannelDspChain,
     plugins: &[roomeq_model::PluginConfigWrapper],
@@ -834,7 +834,7 @@ fn apply_inter_channel_timbre_matching_stage(
                     channel_chains.get(channel_name),
                 ) && let Some(baseline_underfill_db) =
                     routed_target_underfill_db(base_curve, chain)
-                    && let Some(underfill_db) = routed_timbre_candidate_underfill_db(
+                    && let Some(underfill_db) = routed_correction_candidate_underfill_db(
                     base_curve,
                     chain,
                     &plugins,
@@ -2034,6 +2034,23 @@ fn apply_topology_height_alignment_with_frequency_samples(
                 config,
                 eq_plugin.into_iter().chain(gain_plugin).collect(),
             );
+            if let (Some(base_curve), Some(chain)) = (
+                result.deployed_source_curves.get(channel_name),
+                result.channels.get(channel_name),
+            ) && let Some(baseline_underfill_db) = routed_target_underfill_db(base_curve, chain)
+                && let Some(candidate_underfill_db) = routed_correction_candidate_underfill_db(
+                    base_curve,
+                    chain,
+                    &plugins,
+                    sample_rate,
+                )
+                && candidate_underfill_db > baseline_underfill_db + 1.0e-6
+            {
+                height_result.advisories.push(format!(
+                    "{channel_name}: rejected height spectral alignment because routed target underfill would regress from {baseline_underfill_db:.3} to {candidate_underfill_db:.3} dB"
+                ));
+                continue;
+            }
             if let Some(chain) = result.channels.get_mut(channel_name) {
                 chain.plugins.extend(plugins);
             }
@@ -2098,6 +2115,7 @@ fn apply_topology_height_alignment_with_frequency_samples(
             || advisory == "height_objective_acceptance_failed"
             || advisory == "height_arrives_after_reference"
             || advisory == "height_delay_limit_exceeded"
+            || advisory.contains("rejected height spectral alignment")
     });
     let status = if applied_count > 0 && (failed_count > 0 || degraded) {
         StageStatus::Degraded

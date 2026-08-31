@@ -103,7 +103,21 @@ fn phase_linear_returns_required_sidecar_and_in_memory_coefficients() {
     })
     .unwrap();
 
-    assert_eq!(result.fir_coeffs.as_ref().unwrap().len(), 64);
+    let coefficients = result.fir_coeffs.as_ref().unwrap();
+    assert_eq!(coefficients.len(), 64);
+    let peak_index = coefficients
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| left.abs().total_cmp(&right.abs()))
+        .map(|(index, _)| index)
+        .unwrap();
+    assert!(
+        coefficients
+            .iter()
+            .enumerate()
+            .any(|(index, coefficient)| index != peak_index && coefficient.abs() > 1.0e-6),
+        "a non-flat measurement must not produce an identity FIR"
+    );
     let sidecar = result.convolution_sidecar.unwrap();
     assert!(sidecar.required);
     assert_eq!(sidecar.reference.filename(), "left_fir_48000hz.wav");

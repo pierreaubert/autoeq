@@ -4,6 +4,14 @@ use crate::Curve;
 /// Maximum target-relative underfill accepted from an optimized routed
 /// crossover after normalizing against the corrected main-only band.
 pub const MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB: f64 = 3.0;
+/// Tolerance for response-grid interpolation and optimizer boundary noise.
+/// The objective still penalizes every amount above the nominal 3 dB limit.
+pub const CROSSOVER_UNDERFILL_ACCEPTANCE_TOLERANCE_DB: f64 = 0.05;
+
+pub fn bass_management_underfill_is_acceptable(underfill_db: f64) -> bool {
+    underfill_db
+        <= MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB + CROSSOVER_UNDERFILL_ACCEPTANCE_TOLERANCE_DB
+}
 
 pub fn bass_management_objective(curve: Option<&Curve>, xover_freq: f64) -> Option<f64> {
     let curve = curve?;
@@ -325,6 +333,13 @@ mod tests {
             freq,
             ..Curve::default()
         }
+    }
+
+    #[test]
+    fn underfill_acceptance_has_small_shared_boundary_tolerance() {
+        assert!(bass_management_underfill_is_acceptable(3.0));
+        assert!(bass_management_underfill_is_acceptable(3.049));
+        assert!(!bass_management_underfill_is_acceptable(3.051));
     }
 
     #[test]

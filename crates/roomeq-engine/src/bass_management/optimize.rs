@@ -13,8 +13,9 @@ use crate::topology::{
     apply_delay_and_polarity_to_curve, average_mains_magnitude,
     bass_management_crossover_cancellation_underfill_db, bass_management_crossover_type_candidates,
     bass_management_max_underfill_db_with_target, bass_management_objective,
-    bass_management_objective_with_target, complex_sum_mains, curve_has_usable_phase,
-    normalize_crossover_delays, predict_bass_management_sum, select_bass_management_crossover_type,
+    bass_management_objective_with_target, bass_management_underfill_is_acceptable,
+    complex_sum_mains, curve_has_usable_phase, normalize_crossover_delays,
+    predict_bass_management_sum, select_bass_management_crossover_type,
 };
 use crate::{Curve, crossover, home_cinema};
 use math_audio_dsp::analysis::compute_average_response;
@@ -23,20 +24,27 @@ use std::collections::{BTreeMap, HashMap};
 
 fn worsens_excessive_underfill(candidate: &[f64], baseline: &[f64]) -> bool {
     candidate.iter().zip(baseline).any(|(after, before)| {
-        *after > MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB + 1.0e-9 && *after > *before + 1.0e-3
+        !bass_management_underfill_is_acceptable(*after) && *after > *before + 1.0e-3
     })
 }
 
 fn improves_but_remains_excessive(candidate: &[f64], baseline: &[f64]) -> bool {
     candidate.iter().zip(baseline).any(|(after, before)| {
-        *after > MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB + 1.0e-9 && *after + 1.0e-3 < *before
+        !bass_management_underfill_is_acceptable(*after) && *after + 1.0e-3 < *before
     })
 }
 
 fn has_excessive_underfill(underfills: &[f64]) -> bool {
     underfills
         .iter()
-        .any(|underfill| *underfill > MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB + 1.0e-9)
+        .any(|underfill| !bass_management_underfill_is_acceptable(*underfill))
+}
+
+/// Keep target tracking in the optimization constraint, but reserve the
+/// acceptance safety gate for phase cancellation. A later pre-route EQ can
+/// repair target underfill; it cannot repair destructive branch summation.
+fn crossover_underfill_metrics(cancellation_db: f64, target_db: f64) -> (f64, f64) {
+    (cancellation_db, cancellation_db.max(target_db))
 }
 
 const JOINT_HEADROOM_SAFETY_DB: f64 = 0.1;
@@ -1332,7 +1340,8 @@ pub fn optimize_bass_management_joint_solution(
                 as usize;
             let crossover_type = &type_candidates[type_index];
             let mut losses = Vec::with_capacity(sources.len());
-            let mut underfills = Vec::with_capacity(sources.len());
+            let mut cancellation_underfills = Vec::with_capacity(sources.len());
+            let mut constrained_underfills = Vec::with_capacity(sources.len());
             for (source_index, (source_channel, source_curve)) in sources.iter().enumerate() {
                 let base = 2 + source_index * 4;
                 let (main_delay_ms, bass_delay_ms) = normalize_crossover_delays(
@@ -1371,25 +1380,27 @@ pub fn optimize_bass_management_joint_solution(
                     target,
                     frequency,
                 )?);
-                let cancellation_underfill =
-                    bass_management_crossover_cancellation_underfill_db(
-                        &main_branch,
-                        &bass_branch,
-                        &predicted,
-                        frequency,
-                    )
-                    .unwrap_or(0.0);
+                let cancellation_underfill = bass_management_crossover_cancellation_underfill_db(
+                    &main_branch,
+                    &bass_branch,
+                    &predicted,
+                    frequency,
+                )
+                .unwrap_or(0.0);
                 let target_underfill = bass_management_max_underfill_db_with_target(
                     Some(&predicted),
                     target,
                     frequency,
                 )
                 .unwrap_or(0.0);
-                underfills.push(cancellation_underfill.max(target_underfill));
+                let (safety_underfill, constrained_underfill) =
+                    crossover_underfill_metrics(cancellation_underfill, target_underfill);
+                cancellation_underfills.push(safety_underfill);
+                constrained_underfills.push(constrained_underfill);
             }
             let constrained_losses = losses
                 .iter()
-                .zip(&underfills)
+                .zip(&constrained_underfills)
                 .map(|(loss, underfill)| {
                     let excess = (underfill - MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB).max(0.0);
                     loss + 1_000.0 * excess * excess
@@ -1400,7 +1411,7 @@ pub fn optimize_bass_management_joint_solution(
                 .iter()
                 .copied()
                 .fold(f64::NEG_INFINITY, f64::max);
-            Some((0.5 * mean + 0.5 * worst, losses, underfills))
+            Some((0.5 * mean + 0.5 * worst, losses, cancellation_underfills))
         };
         let objective =
             |params: &[f64]| evaluate(params).map(|(loss, _, _)| loss).unwrap_or(1.0e12);
@@ -1661,6 +1672,13 @@ mod tests {
         assert!(!improves_but_remains_excessive(&[2.5], &[5.0]));
         assert!(has_excessive_underfill(&[2.5, 3.1]));
         assert!(!has_excessive_underfill(&[2.5, 3.0]));
+        assert!(!has_excessive_underfill(&[2.5, 3.04]));
+    }
+
+    #[test]
+    fn target_underfill_penalizes_optimization_without_becoming_phase_rejection() {
+        assert_eq!(crossover_underfill_metrics(2.0, 7.0), (2.0, 7.0));
+        assert_eq!(crossover_underfill_metrics(5.0, 1.0), (5.0, 5.0));
     }
 
     #[test]

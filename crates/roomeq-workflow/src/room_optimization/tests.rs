@@ -56,7 +56,7 @@ fn routed_test_chain(target: &Curve) -> ChannelDspChain {
 }
 
 #[test]
-fn routed_timbre_candidate_detects_crossover_target_regression() {
+fn routed_correction_candidate_detects_crossover_target_regression() {
     let curve = Curve {
         freq: ndarray::array![50.0, 70.0, 100.0, 140.0, 200.0, 400.0, 800.0],
         spl: ndarray::Array1::zeros(7),
@@ -72,7 +72,7 @@ fn routed_timbre_candidate_detects_crossover_target_regression() {
         0.707,
         -6.0,
     );
-    let candidate = routed_timbre_candidate_underfill_db(
+    let candidate = routed_correction_candidate_underfill_db(
         &curve,
         &chain,
         &[output::create_eq_plugin(&[shelf])],
@@ -85,7 +85,7 @@ fn routed_timbre_candidate_detects_crossover_target_regression() {
 }
 
 #[test]
-fn routed_timbre_candidate_accepts_crossover_target_improvement() {
+fn routed_correction_candidate_accepts_crossover_target_improvement() {
     let curve = Curve {
         freq: ndarray::array![50.0, 70.0, 100.0, 140.0, 200.0, 400.0, 800.0],
         spl: ndarray::array![-4.0, -3.0, -2.0, -1.0, 0.0, 0.0, 0.0],
@@ -107,7 +107,7 @@ fn routed_timbre_candidate_accepts_crossover_target_improvement() {
         0.707,
         3.0,
     );
-    let candidate = routed_timbre_candidate_underfill_db(
+    let candidate = routed_correction_candidate_underfill_db(
         &curve,
         &chain,
         &[output::create_eq_plugin(&[shelf])],

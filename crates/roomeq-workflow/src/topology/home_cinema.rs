@@ -418,9 +418,7 @@ pub(crate) fn reconstruct_deployed_source_curves(
                     .ok_or_else(|| AutoeqError::InvalidMeasurement {
                         message: format!("mismatched crossover reconstruction grid for '{role}'"),
                     })?;
-            if underfill_db
-                > roomeq_engine::topology::MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB + 1.0e-9
-            {
+            if !roomeq_engine::topology::bass_management_underfill_is_acceptable(underfill_db) {
                     return Err(AutoeqError::OptimizationFailed {
                         message: format!(
                             "final routed crossover underfill for '{role}' is \
@@ -439,8 +437,9 @@ pub(crate) fn reconstruct_deployed_source_curves(
                         Some(&target),
                         crossover_hz,
                     )
-                && target_underfill_db
-                    > roomeq_engine::topology::MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB + 1.0e-9
+                && !roomeq_engine::topology::bass_management_underfill_is_acceptable(
+                    target_underfill_db,
+                )
             {
                 return Err(AutoeqError::OptimizationFailed {
                     message: format!(
@@ -1974,9 +1973,8 @@ fn optimize_home_cinema_with_sub(
         log::debug!(
             "  {role} Post-EQ underfill: cancellation={cancellation_underfill_db:?} dB, target={target_underfill_db:?} dB"
         );
-        let underfill_accepted = post_underfill_db.is_none_or(|underfill| {
-            underfill <= roomeq_engine::topology::MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB + 1.0e-9
-        });
+        let underfill_accepted = post_underfill_db
+            .is_none_or(roomeq_engine::topology::bass_management_underfill_is_acceptable);
         if post < pre && underfill_accepted {
             optimizer_evidence_by_channel
                 .entry(role.clone())

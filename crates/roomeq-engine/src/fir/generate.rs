@@ -5,6 +5,9 @@ pub use autoeq_fir::FirPhase;
 use ndarray::Array1;
 use roomeq_model::OptimizerConfig;
 use std::error::Error;
+use std::sync::Once;
+
+static EXCESS_PHASE_IDENTITY_WARNING: Once = Once::new();
 
 /// Resolve a workflow-prepared FIR target on the measurement grid.
 pub fn prepared_fir_target_curve(
@@ -66,6 +69,41 @@ pub fn generate_fir_correction_with_resources(
     generate_fir_correction_prepared(measurement, config, &target, sample_rate)
 }
 
+fn correction_rms_db(measurement: &Curve, target: &Curve, min_freq: f64, max_freq: f64) -> f64 {
+    let (sum_squares, count) = measurement
+        .freq
+        .iter()
+        .zip(measurement.spl.iter())
+        .zip(target.spl.iter())
+        .filter(|((frequency, _), _)| **frequency >= min_freq && **frequency <= max_freq)
+        .fold((0.0, 0_usize), |(sum, count), ((_, measured), desired)| {
+            (sum + (desired - measured).powi(2), count + 1)
+        });
+    if count == 0 {
+        0.0
+    } else {
+        (sum_squares / count as f64).sqrt()
+    }
+}
+
+fn is_effectively_identity_fir(coefficients: &[f64]) -> bool {
+    let Some((peak_index, peak)) = coefficients
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| left.abs().total_cmp(&right.abs()))
+    else {
+        return false;
+    };
+    let off_peak = coefficients
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != peak_index)
+        .map(|(_, coefficient)| coefficient.abs())
+        .reduce(f64::max)
+        .unwrap_or(0.0);
+    (peak.abs() - 1.0).abs() <= 1.0e-5 && off_peak <= 1.0e-8
+}
+
 /// Generate an FIR correction filter for a single channel
 ///
 /// This is the main entry point for FIR-based room correction. It handles:
@@ -119,7 +157,7 @@ pub fn generate_fir_correction_prepared(
                     threshold_db: pr.threshold_db,
                     max_time_s: pr.max_time_s,
                 });
-        let coeffs = autoeq_fir::generate_kirkeby_correction_with_smoothing_and_pre_ringing(
+        let mut coeffs = autoeq_fir::generate_kirkeby_correction_with_smoothing_and_pre_ringing(
             measurement,
             target_curve,
             sample_rate,
@@ -130,6 +168,35 @@ pub fn generate_fir_correction_prepared(
             fir_config.phase_smoothing,
             pre_ringing,
         );
+        let correction_rms =
+            correction_rms_db(measurement, target_curve, config.min_freq, config.max_freq);
+        if fir_config.correct_excess_phase
+            && correction_rms > 0.1
+            && is_effectively_identity_fir(&coeffs)
+        {
+            EXCESS_PHASE_IDENTITY_WARNING.call_once(|| {
+                log::warn!(
+                    "One or more excess-phase FIR designs collapsed to identity despite a non-trivial magnitude correction; retrying magnitude-only Kirkeby inversion"
+                );
+            });
+            coeffs = autoeq_fir::generate_kirkeby_correction_with_smoothing_and_pre_ringing(
+                measurement,
+                target_curve,
+                sample_rate,
+                n_taps,
+                config.min_freq,
+                config.max_freq,
+                false,
+                fir_config.phase_smoothing,
+                fir_config
+                    .pre_ringing
+                    .as_ref()
+                    .map(|pr| math_audio_iir_fir::PreRingingConfig {
+                        threshold_db: pr.threshold_db,
+                        max_time_s: pr.max_time_s,
+                    }),
+            );
+        }
         Ok(coeffs)
     } else {
         // Standard magnitude-based generation

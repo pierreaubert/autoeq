@@ -577,3 +577,82 @@ fn fractional_delay_handles_negative_shift() {
     assert!(shifted[31].abs() > 0.5);
     assert!((shifted.iter().sum::<f64>() - 1.0).abs() < 1e-12);
 }
+
+#[test]
+fn excess_phase_collapse_falls_back_to_magnitude_correction() {
+    let frequencies = Array1::logspace(10.0, f64::log10(20.0), f64::log10(20_000.0), 256);
+    let spl = frequencies
+        .iter()
+        .map(|frequency| 80.0 + 4.0 * (frequency / 1_000.0).log10().sin())
+        .collect::<Array1<_>>();
+    let phase = frequencies
+        .iter()
+        .map(|frequency| {
+            let unwrapped = -360.0 * frequency * 0.100;
+            (unwrapped + 180.0).rem_euclid(360.0) - 180.0
+        })
+        .collect::<Array1<_>>();
+    let measurement = Curve {
+        freq: frequencies.clone(),
+        spl,
+        phase: Some(phase),
+        ..Curve::default()
+    };
+    let target = Curve {
+        freq: frequencies,
+        spl: Array1::from_elem(256, 80.0),
+        phase: None,
+        ..Curve::default()
+    };
+    let mut config = kirkeby_config(None);
+    config.fir.as_mut().unwrap().taps = 4_096;
+    config.fir.as_mut().unwrap().correct_excess_phase = true;
+
+    let raw = autoeq_fir::generate_kirkeby_correction_with_smoothing_and_pre_ringing(
+        &measurement,
+        &target,
+        48_000.0,
+        4_096,
+        config.min_freq,
+        config.max_freq,
+        true,
+        0.167,
+        None,
+    );
+    let raw_peak_index = raw
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| left.abs().total_cmp(&right.abs()))
+        .map(|(index, _)| index)
+        .unwrap();
+    let raw_off_peak = raw
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != raw_peak_index)
+        .map(|(_, coefficient)| coefficient.abs())
+        .reduce(f64::max)
+        .unwrap_or(0.0);
+    assert!(
+        raw_off_peak <= 1.0e-8,
+        "fixture must reproduce the excess-phase identity collapse"
+    );
+
+    let coefficients = generate_fir_correction_prepared(&measurement, &config, &target, 48_000.0)
+        .expect("collapsed excess-phase design must retain magnitude correction");
+    let peak_index = coefficients
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| left.abs().total_cmp(&right.abs()))
+        .map(|(index, _)| index)
+        .unwrap();
+    let off_peak = coefficients
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != peak_index)
+        .map(|(_, coefficient)| coefficient.abs())
+        .reduce(f64::max)
+        .unwrap_or(0.0);
+
+    assert!(off_peak > 1.0e-4, "fallback FIR remained identity-like");
+    assert!(fir_response_db(&coefficients, 100.0, 48_000.0).abs() > 0.1);
+}

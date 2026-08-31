@@ -527,6 +527,7 @@ impl WorkflowExecutor for Stereo21Executor {
         if let Some(graph) = bass_routing_graph.as_ref()
             && let Some(route_predicted_sub) = predict_bass_output_curve_from_routes(
                 &aligned_pre_eq_curves[&sub_role],
+                None,
                 graph,
                 &sub_role,
                 sample_rate,

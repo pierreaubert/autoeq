@@ -403,6 +403,13 @@ fn apply_gd_opt_result_inserts_delay_polarity_and_ap_plugins() {
     assert!(chain.plugins.iter().any(|p| p.plugin_type == "gain"));
     assert!(chain.plugins.iter().any(|p| p.plugin_type == "delay"));
     assert!(chain.plugins.iter().any(|p| p.plugin_type == "eq"));
+    assert!(chain.plugins.iter().all(|plugin| {
+        plugin
+            .parameters
+            .get("room_eq_stage")
+            .and_then(serde_json::Value::as_str)
+            == Some("pre_route")
+    }));
     assert!(
         channel_results
             .get("left")

@@ -155,6 +155,40 @@ fn canonical_channel_chain_applies_to_held_out_curve() {
 }
 
 #[test]
+fn canonical_channel_chain_uses_embedded_ir_before_sidecar_export() {
+    use super::apply_channel_dsp_chain_to_curve_with_embedded_irs;
+    use ndarray::Array1;
+    use roomeq_engine::Curve;
+
+    let chain = test_channel_chain(
+        vec![PluginConfigWrapper {
+            plugin_type: "convolution".to_string(),
+            parameters: serde_json::json!({"ir_file": "not-exported-yet.wav"}),
+        }],
+        None,
+    );
+    let curve = Curve {
+        freq: Array1::from(vec![6_000.0, 12_000.0]),
+        spl: Array1::from(vec![0.0, 0.0]),
+        phase: Some(Array1::from(vec![0.0, 0.0])),
+        ..Curve::default()
+    };
+    let embedded_irs = HashMap::from([("not-exported-yet.wav".to_string(), vec![0.0, 1.0])]);
+
+    let corrected = apply_channel_dsp_chain_to_curve_with_embedded_irs(
+        &chain,
+        &curve,
+        48_000.0,
+        std::path::Path::new("."),
+        &embedded_irs,
+    )
+    .unwrap();
+
+    assert!(corrected.spl.iter().all(|spl| spl.abs() < 1.0e-9));
+    assert!((corrected.phase.as_ref().unwrap()[1] + 90.0).abs() < 1.0e-9);
+}
+
+#[test]
 fn measured_wav_requires_two_channels() {
     let dir = tempdir().unwrap();
     let wav = dir.path().join("mono.wav");

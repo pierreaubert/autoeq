@@ -733,9 +733,46 @@ fn reported_curve_with_user_preferences(
     }
 }
 
+fn routed_target_underfill_db(curve: &Curve, chain: &ChannelDspChain) -> Option<f64> {
+    let crossover_hz = chain
+        .plugins
+        .iter()
+        .find(|plugin| plugin.plugin_type == "crossover")?
+        .parameters
+        .get("frequency")?
+        .as_f64()?;
+    let target = chain.target_curve.clone().map(Curve::from)?;
+    roomeq_engine::topology::bass_management_max_underfill_db_with_target(
+        Some(curve),
+        Some(&target),
+        crossover_hz,
+    )
+}
+
+fn routed_timbre_candidate_underfill_db(
+    base_curve: &Curve,
+    chain: &ChannelDspChain,
+    plugins: &[roomeq_model::PluginConfigWrapper],
+    sample_rate: f64,
+) -> Option<f64> {
+    let mut candidate_chain = chain.clone();
+    candidate_chain.plugins = plugins.to_vec();
+    let mut no_convolution = roomeq_engine::dsp_realization::NoConvolutionIr;
+    let candidate_curve = roomeq_engine::dsp_realization::RealizedDsp::new(
+        &candidate_chain,
+        sample_rate,
+        &mut no_convolution,
+    )
+    .and_then(|mut realized| realized.apply_to_curve(base_curve))
+    .ok()?;
+
+    routed_target_underfill_db(&candidate_curve, chain)
+}
+
 fn apply_inter_channel_timbre_matching_stage(
     config: &RoomConfig,
     sample_rate: f64,
+    deployed_source_curves: &HashMap<String, Curve>,
     channel_results: &mut HashMap<String, ChannelOptimizationResult>,
     channel_chains: &mut HashMap<String, ChannelDspChain>,
 ) -> Option<StageOutcome> {
@@ -747,7 +784,15 @@ fn apply_inter_channel_timbre_matching_stage(
     let corrected_curves: HashMap<String, Curve> = channel_results
         .iter()
         .filter(|(name, _)| !is_subwoofer_channel(config, name))
-        .map(|(name, result)| (name.clone(), result.final_curve.clone()))
+        .map(|(name, result)| {
+            (
+                name.clone(),
+                deployed_source_curves
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| result.final_curve.clone()),
+            )
+        })
         .collect();
     let (fit_min_freq, fit_max_freq) = shared_alignment_fit_band(config, &corrected_curves);
 
@@ -760,7 +805,7 @@ fn apply_inter_channel_timbre_matching_stage(
             fit_max_freq,
             timbre_config.min_improvement_db,
         ) {
-            Ok(timbre_results) => {
+        Ok(timbre_results) => {
                 let applied_count = timbre_results
                     .values()
                     .filter(|result| {
@@ -776,6 +821,7 @@ fn apply_inter_channel_timbre_matching_stage(
                     })
                     .count();
 
+            let mut routed_rejections = Vec::new();
             for (channel_name, timbre_result) in &timbre_results {
                 let plugins =
                     roomeq_engine::inter_channel_timbre_matching::create_timbre_matching_plugins(
@@ -783,6 +829,23 @@ fn apply_inter_channel_timbre_matching_stage(
                         sample_rate,
                     );
                 let plugins = stage_logical_input_plugins(config, plugins);
+                if let (Some(base_curve), Some(chain)) = (
+                    deployed_source_curves.get(channel_name),
+                    channel_chains.get(channel_name),
+                ) && let Some(baseline_underfill_db) =
+                    routed_target_underfill_db(base_curve, chain)
+                    && let Some(underfill_db) = routed_timbre_candidate_underfill_db(
+                    base_curve,
+                    chain,
+                    &plugins,
+                    sample_rate,
+                ) && underfill_db > baseline_underfill_db + 1.0e-6
+                {
+                    routed_rejections.push(format!(
+                        "{channel_name}: rejected timbre correction because routed target underfill would regress from {baseline_underfill_db:.3} to {underfill_db:.3} dB"
+                    ));
+                    continue;
+                }
                 if !plugins.is_empty()
                     && let Some(chain) = channel_chains.get_mut(channel_name)
                 {
@@ -813,7 +876,9 @@ fn apply_inter_channel_timbre_matching_stage(
                     }
                 }
 
-                let status = if failed_count > 0 && applied_count > 0 {
+            let status = if !routed_rejections.is_empty() {
+                StageStatus::Degraded
+            } else if failed_count > 0 && applied_count > 0 {
                     StageStatus::Degraded
                 } else if failed_count > 0 {
                     StageStatus::Failed
@@ -822,11 +887,12 @@ fn apply_inter_channel_timbre_matching_stage(
                 } else {
                     StageStatus::Skipped
                 };
-                let mut advisories = timbre_results
+            let mut advisories = timbre_results
                     .values()
                     .flat_map(|result| result.advisories.iter().cloned())
                     .filter(|advisory| advisory != "reference_channel")
-                    .collect::<Vec<_>>();
+                .collect::<Vec<_>>();
+            advisories.extend(routed_rejections);
                 advisories.sort();
                 advisories.dedup();
                 StageOutcome {
@@ -1112,17 +1178,32 @@ fn assemble_workflow_result_with_frequency_samples(
         let out_dir = output_dir.unwrap_or(Path::new("."));
         let names: Vec<String> = result.channel_results.keys().cloned().collect();
         for name in names {
+            let chain_has_fir = result.channels.get(&name).is_some_and(|chain| {
+                chain
+                    .plugins
+                    .iter()
+                    .any(|plugin| plugin.plugin_type == "convolution")
+            });
             let generated = if let Some(ch) = result.channel_results.get_mut(&name) {
-                if ch.fir_coeffs.is_some() {
+                if ch.fir_coeffs.is_some() || chain_has_fir {
                     None
                 } else {
-                    let generated = post_generate_mixed_phase_fir(
+                    let generated = match post_generate_mixed_phase_fir(
                         &name,
                         &ch.initial_curve,
                         &config.optimizer,
                         sample_rate,
                         Some(out_dir),
-                    );
+                    ) {
+                        Ok(generated) => generated,
+                        Err(error) => {
+                            warn!(
+                                "Mixed-phase FIR candidate rejected for '{}': {}",
+                                name, error
+                            );
+                            None
+                        }
+                    };
                     if let Some(generated) = &generated {
                         ch.fir_coeffs = Some(generated.coeffs.clone());
                     }
@@ -1255,6 +1336,7 @@ fn assemble_workflow_result_with_frequency_samples(
         if let Some(stage_outcome) = apply_inter_channel_timbre_matching_stage(
             config,
             sample_rate,
+            &result.deployed_source_curves,
             &mut result.channel_results,
             &mut result.channels,
         ) {
@@ -1519,7 +1601,7 @@ fn assemble_workflow_result_with_frequency_samples(
     // computed before the gate runs, not only in the post-gate refresh.
     let sidecar_dir = output_dir.unwrap_or(Path::new("."));
     refresh_temporal_ir_evidence(&mut result, config, sample_rate, sidecar_dir);
-    room_optimization_result::apply_final_correction_safety_gate(
+    apply_final_correction_safety_gate_preserving_routed_crossover(
         &mut result,
         sample_rate,
         config.optimizer.smooth_n,
@@ -1527,6 +1609,10 @@ fn assemble_workflow_result_with_frequency_samples(
         sidecar_dir,
         config.optimizer.processing_mode.clone(),
         group_delay_budget_ms(config),
+    )?;
+    record_missing_mixed_phase_fir_reversions(
+        &mut result,
+        config.optimizer.processing_mode.clone(),
     );
 
     emit_pipeline_event(
@@ -1564,6 +1650,158 @@ fn group_delay_budget_ms(config: &RoomConfig) -> Option<f64> {
         .as_ref()
         .filter(|gd| gd.enabled)
         .map(|gd| gd.max_delay_ms)
+}
+
+fn retained_fir_coeffs_by_channel(result: &RoomOptimizationResult) -> HashMap<String, Vec<f64>> {
+    result
+        .channel_results
+        .iter()
+        .filter_map(|(name, channel)| {
+            channel
+                .fir_coeffs
+                .as_ref()
+                .map(|coeffs| (name.clone(), coeffs.clone()))
+        })
+        .collect()
+}
+
+fn commit_or_restore_routed_safety_replay(
+    result: &mut RoomOptimizationResult,
+    pre_safety_result: RoomOptimizationResult,
+    pre_safety_deployed: HashMap<String, Curve>,
+    post_safety_deployed: Result<HashMap<String, Curve>>,
+) {
+    match post_safety_deployed {
+        Ok(deployed) => result.deployed_source_curves = deployed,
+        Err(error) => {
+            *result = pre_safety_result;
+            result.deployed_source_curves = pre_safety_deployed;
+            result.metadata.stage_outcomes.push(StageOutcome {
+                stage: "final_correction_safety_routed_replay".to_string(),
+                status: StageStatus::Degraded,
+                advisories: vec![format!(
+                    "safety reversion rejected because it broke the routed crossover: {error}"
+                )],
+            });
+            warn!(
+                "Final correction safety reversion rejected; preserving the pre-gate routed DSP: {error}"
+            );
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_final_correction_safety_gate_preserving_routed_crossover(
+    result: &mut RoomOptimizationResult,
+    sample_rate: f64,
+    smoothing_n: usize,
+    evaluation_band: (f64, f64),
+    sidecar_dir: &Path,
+    processing_mode: ProcessingMode,
+    group_delay_budget_ms: Option<f64>,
+) -> Result<()> {
+    let routed_snapshot = if let Some(graph) = result
+        .metadata
+        .bass_management
+        .as_ref()
+        .and_then(|report| report.routing_graph.clone())
+    {
+        let fir_coeffs = retained_fir_coeffs_by_channel(result);
+        let deployed = crate::topology::reconstruct_deployed_source_curves(
+            &result.channels,
+            &fir_coeffs,
+            &graph,
+            sample_rate,
+            sidecar_dir,
+        )?;
+        Some((result.clone(), deployed, graph))
+    } else {
+        None
+    };
+
+    room_optimization_result::apply_final_correction_safety_gate(
+        result,
+        sample_rate,
+        smoothing_n,
+        evaluation_band,
+        sidecar_dir,
+        processing_mode,
+        group_delay_budget_ms,
+    );
+
+    if let Some((pre_safety_result, pre_safety_deployed, graph)) = routed_snapshot {
+        let fir_coeffs = retained_fir_coeffs_by_channel(result);
+        let post_safety_deployed = crate::topology::reconstruct_deployed_source_curves(
+            &result.channels,
+            &fir_coeffs,
+            &graph,
+            sample_rate,
+            sidecar_dir,
+        );
+        commit_or_restore_routed_safety_replay(
+            result,
+            pre_safety_result,
+            pre_safety_deployed,
+            post_safety_deployed,
+        );
+    }
+
+    Ok(())
+}
+
+fn record_missing_mixed_phase_fir_reversions(
+    result: &mut RoomOptimizationResult,
+    processing_mode: ProcessingMode,
+) {
+    if processing_mode != ProcessingMode::MixedPhase {
+        return;
+    }
+
+    let mut reverted_stages = result
+        .channel_results
+        .iter()
+        .filter(|(_, channel)| {
+            channel
+                .initial_curve
+                .phase
+                .as_ref()
+                .is_some_and(|phase| !phase.is_empty())
+                && channel.fir_coeffs.is_none()
+        })
+        .map(|(name, _)| format!("{name}:fir"))
+        .collect::<Vec<_>>();
+    reverted_stages.sort();
+    reverted_stages.dedup();
+    if reverted_stages.is_empty() {
+        return;
+    }
+
+    if let Some(report) = result.metadata.correction_acceptance.as_mut() {
+        report.accepted = false;
+        report.decision = roomeq_model::CorrectionDecision::RevertedStage;
+        report
+            .violations
+            .push("mixed_phase_fir_safety_reverted".to_string());
+        report
+            .reverted_stages
+            .extend(reverted_stages.iter().cloned());
+        report.reverted_stages.sort();
+        report.reverted_stages.dedup();
+        report.violations.sort();
+        report.violations.dedup();
+    }
+
+    result
+        .metadata
+        .stage_outcomes
+        .push(roomeq_model::StageOutcome {
+            stage: "mixed_phase_fir_generation".to_string(),
+            status: roomeq_model::StageStatus::Degraded,
+            advisories: reverted_stages
+                .into_iter()
+                .map(|stage| format!("{stage}: candidate rejected or unavailable"))
+                .collect(),
+        });
 }
 
 fn phase_arrivals_for_channels_with_frequency_samples(
@@ -1719,13 +1957,18 @@ fn insert_topology_height_residual_delay(
     chain: &mut ChannelDspChain,
     delay_ms: f64,
     allow_delay: bool,
+    routed_inputs: bool,
 ) -> bool {
     if !allow_delay || delay_ms <= 0.01 {
         return false;
     }
-    chain
-        .plugins
-        .insert(0, output::create_delay_plugin(delay_ms));
+    let plugin = output::create_delay_plugin(delay_ms);
+    let plugin = if routed_inputs {
+        roomeq_engine::topology::mark_plugin_stage(plugin, "pre_route")
+    } else {
+        plugin
+    };
+    chain.plugins.insert(0, plugin);
     true
 }
 
@@ -1787,13 +2030,12 @@ fn apply_topology_height_alignment_with_frequency_samples(
         if let Some(alignment) = &height_result.alignment {
             let (eq_plugin, gain_plugin) =
                 roomeq_engine::spectral_align::create_alignment_plugins(alignment, sample_rate);
+            let plugins = stage_logical_input_plugins(
+                config,
+                eq_plugin.into_iter().chain(gain_plugin).collect(),
+            );
             if let Some(chain) = result.channels.get_mut(channel_name) {
-                if let Some(eq) = eq_plugin {
-                    chain.plugins.push(eq);
-                }
-                if let Some(gain) = gain_plugin {
-                    chain.plugins.push(gain);
-                }
+                chain.plugins.extend(plugins);
             }
             let filters =
                 roomeq_engine::spectral_align::create_alignment_filters(alignment, sample_rate);
@@ -1824,6 +2066,7 @@ fn apply_topology_height_alignment_with_frequency_samples(
                 chain,
                 height_result.delay_ms,
                 config.optimizer.allow_delay(),
+                uses_routed_home_cinema_inputs(config),
             )
         });
         if delay_applied {
@@ -2990,7 +3233,7 @@ fn assemble_generic_result_with_frequency_samples(
 
     let sidecar_dir = output_dir.unwrap_or(Path::new("."));
     refresh_temporal_ir_evidence(&mut result, config, sample_rate, sidecar_dir);
-    room_optimization_result::apply_final_correction_safety_gate(
+    apply_final_correction_safety_gate_preserving_routed_crossover(
         &mut result,
         sample_rate,
         config.optimizer.smooth_n,
@@ -2998,6 +3241,10 @@ fn assemble_generic_result_with_frequency_samples(
         sidecar_dir,
         config.optimizer.processing_mode.clone(),
         group_delay_budget_ms(config),
+    )?;
+    record_missing_mixed_phase_fir_reversions(
+        &mut result,
+        config.optimizer.processing_mode.clone(),
     );
 
     emit_pipeline_event(

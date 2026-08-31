@@ -73,6 +73,33 @@ pub fn apply_channel_dsp_chain_to_curve_with_sidecar_dir(
     RealizedDsp::new(chain, sample_rate, &mut cache)?.apply_to_curve(curve)
 }
 
+/// Apply a serialized channel chain while resolving not-yet-exported
+/// convolution sidecars from their in-memory FIR taps.
+///
+/// RoomEQ builds convolution plugins before the output writer materializes the
+/// referenced WAV files. Final acceptance checks must therefore replay the
+/// exact chain from the retained taps instead of requiring the sidecar early.
+pub fn apply_channel_dsp_chain_to_curve_with_embedded_irs(
+    chain: &ChannelDspChain,
+    curve: &Curve,
+    sample_rate: f64,
+    sidecar_dir: &Path,
+    embedded_irs: &HashMap<String, Vec<f64>>,
+) -> Result<Curve> {
+    let mut cache =
+        DspResponseCache::with_sidecar_dir(checked_sample_rate(sample_rate)?, sidecar_dir);
+    for (ir_file, taps) in embedded_irs {
+        let path = Path::new(ir_file);
+        let resolved_path = if path.is_relative() {
+            sidecar_dir.join(path)
+        } else {
+            path.to_path_buf()
+        };
+        cache.convolution_ir.insert(resolved_path, taps.clone());
+    }
+    RealizedDsp::new(chain, sample_rate, &mut cache)?.apply_to_curve(curve)
+}
+
 pub(super) struct DspResponseCache {
     sample_rate: u32,
     sidecar_dir: PathBuf,

@@ -340,6 +340,54 @@ fn bass_management_objective_tracks_sloped_target() {
 }
 
 #[test]
+fn bass_management_target_objective_anchors_crossover_to_main_band() {
+    let frequencies = vec![50.0, 75.0, 100.0, 125.0, 150.0, 200.0, 300.0, 500.0, 800.0];
+    let target = make_curve_with_phase(
+        frequencies.clone(),
+        vec![80.0; frequencies.len()],
+        vec![0.0; frequencies.len()],
+    );
+    let underfilled = make_curve_with_phase(
+        frequencies.clone(),
+        frequencies
+            .iter()
+            .map(|frequency| if *frequency < 200.0 { 74.0 } else { 80.0 })
+            .collect(),
+        vec![0.0; frequencies.len()],
+    );
+
+    let score =
+        super::bass_management_objective_with_target(Some(&underfilled), Some(&target), 100.0)
+            .unwrap();
+
+    assert!(
+        score > 5.0,
+        "underfilled crossover was hidden by local centering (score={score})"
+    );
+}
+
+#[test]
+fn bass_management_target_objective_penalizes_narrow_cancellation() {
+    let frequencies = vec![50.0, 75.0, 100.0, 125.0, 150.0, 200.0, 300.0, 500.0, 800.0];
+    let target = make_curve_with_phase(
+        frequencies.clone(),
+        vec![80.0; frequencies.len()],
+        vec![0.0; frequencies.len()],
+    );
+    let mut cancellation = target.clone();
+    cancellation.spl[2] -= 12.0;
+
+    let score =
+        super::bass_management_objective_with_target(Some(&cancellation), Some(&target), 100.0)
+            .unwrap();
+
+    assert!(
+        score > 20.0,
+        "narrow crossover cancellation was diluted (score={score})"
+    );
+}
+
+#[test]
 fn select_bass_management_crossover_type_passthrough() {
     let main = make_curve_with_phase(
         vec![20.0, 50.0, 100.0, 200.0],

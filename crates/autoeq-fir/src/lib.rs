@@ -278,7 +278,6 @@ mod tests {
         // Same point count, different frequency axes: index-aligned copying
         // would place target values at the wrong frequencies.
         let meas_freqs = [20.0, 100.0, 1000.0, 10_000.0, 20_000.0];
-        let meas_curve = create_test_curve(&meas_freqs, &[80.0; 5]);
         let target_freqs = [25.0, 150.0, 1500.0, 15_000.0, 19_000.0];
         let mut target = create_test_curve(&target_freqs, &[80.0; 5]);
         target.spl[2] = 92.0; // +12 dB bump at its own 1500 Hz point

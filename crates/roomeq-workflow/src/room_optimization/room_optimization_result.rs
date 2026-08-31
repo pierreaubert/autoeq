@@ -204,8 +204,8 @@ pub(super) fn apply_final_correction_safety_gate(
             // deployed correction actually changed the response.  Ignore an
             // inconsistent legacy score only for an acoustically identity
             // realization; older callers can carry stale pre/post scores.
-            let meaningful_topology_regression = topology_regressed
-                && report.metrics.max_abs_correction_db > topology_epsilon;
+            let meaningful_topology_regression =
+                topology_regressed && report.metrics.max_abs_correction_db > topology_epsilon;
 
             meaningful_topology_regression
                 || (target_weighted_regressed && (!topology_improved || regression_ratio > 1.0))
@@ -2626,7 +2626,7 @@ mod tests {
                 .metadata
                 .stage_outcomes
                 .iter()
-            .all(|outcome| !outcome.stage.starts_with("final_correction_safety_"))
+                .all(|outcome| !outcome.stage.starts_with("final_correction_safety_"))
         );
     }
 

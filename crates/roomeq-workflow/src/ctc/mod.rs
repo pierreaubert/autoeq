@@ -9,6 +9,7 @@ mod tests;
 mod types;
 
 pub use dsp_response_cache::{
-    apply_channel_dsp_chain_to_curve, apply_channel_dsp_chain_to_curve_with_sidecar_dir,
+    apply_channel_dsp_chain_to_curve, apply_channel_dsp_chain_to_curve_with_embedded_irs,
+    apply_channel_dsp_chain_to_curve_with_sidecar_dir,
 };
 pub use types::*;

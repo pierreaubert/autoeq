@@ -14,6 +14,7 @@ mod supporting_source;
 mod tests;
 mod types;
 mod workflow;
+pub(crate) use home_cinema::reconstruct_deployed_source_curves;
 #[cfg(test)]
 pub(crate) use roomeq_engine::topology::*;
 

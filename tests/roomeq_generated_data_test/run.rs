@@ -48,7 +48,6 @@ fn integration_expectation(scenario_name: &str) -> (f64, bool) {
     (expect.improvement_min_pct, expect.allow_safe_revert)
 }
 
-#[cfg(feature = "qa")]
 fn integration_improvement_floor(scenario_name: &str, registry_min_pct: f64) -> f64 {
     let integration_floor = match scenario_name {
         "large_multi_sub_4" => 1.0,
@@ -61,7 +60,6 @@ fn integration_improvement_floor(scenario_name: &str, registry_min_pct: f64) -> 
     registry_min_pct.min(integration_floor)
 }
 
-#[cfg(feature = "qa")]
 fn multimode_safe_revert(scenario_name: &str, mode_name: &str) -> bool {
     matches!(
         (scenario_name, mode_name),

@@ -779,3 +779,236 @@ fn sanity_check_result_empty_channels_errors() {
         "sanity check should fail when no channels are produced"
     );
 }
+
+fn flat_crossover_reconstruction_curve() -> Curve {
+    let point_count = 241;
+    let mut frequencies = (0..point_count)
+        .map(|index| {
+            let ratio = index as f64 / (point_count - 1) as f64;
+            20.0 * 1_000.0_f64.powf(ratio)
+        })
+        .collect::<Vec<_>>();
+    frequencies.push(80.0);
+    frequencies.sort_by(f64::total_cmp);
+    frequencies.dedup_by(|left, right| (*left - *right).abs() < 1.0e-9);
+
+    Curve {
+        spl: Array1::from_elem(frequencies.len(), 80.0),
+        phase: Some(Array1::zeros(frequencies.len())),
+        freq: Array1::from_vec(frequencies),
+        ..Curve::default()
+    }
+}
+
+fn crossover_reconstruction_config(
+    crossover_type: &str,
+    processing_mode: ProcessingMode,
+) -> RoomConfig {
+    let curve = flat_crossover_reconstruction_curve();
+    let speakers = HashMap::from([
+        (
+            "left".to_string(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(curve.clone())),
+        ),
+        (
+            "right".to_string(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(curve.clone())),
+        ),
+        (
+            "sub".to_string(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(curve)),
+        ),
+    ]);
+    let system = SystemConfig {
+        model: SystemModel::HomeCinema,
+        speakers: HashMap::from([
+            ("Left".to_string(), "left".to_string()),
+            ("Right".to_string(), "right".to_string()),
+            ("LFE".to_string(), "sub".to_string()),
+        ]),
+        subwoofers: Some(SubwooferSystemConfig {
+            config: SubwooferStrategy::Single,
+            crossover: Some("bass_xo".to_string()),
+            mapping: HashMap::from([("sub".to_string(), "Left".to_string())]),
+        }),
+        bass_management: Some(roomeq_model::BassManagementConfig {
+            enabled: true,
+            redirect_bass: true,
+            optimize_groups: true,
+            ..Default::default()
+        }),
+        ..SystemConfig::default()
+    };
+
+    let mut optimizer = OptimizerConfig {
+        processing_mode: processing_mode.clone(),
+        num_filters: 1,
+        min_filter_improvement: 0.0,
+        min_db: 0.0,
+        max_db: 0.0,
+        min_freq: 20.0,
+        max_freq: 500.0,
+        max_iter: 10,
+        population: 4,
+        psychoacoustic: false,
+        refine: false,
+        seed: Some(0xc0_55_0a),
+        parallel_threads: Some(1),
+        ..OptimizerConfig::default()
+    };
+    if matches!(
+        processing_mode,
+        ProcessingMode::PhaseLinear | ProcessingMode::MixedPhase
+    ) {
+        optimizer.fir = Some(roomeq_model::FirConfig {
+            taps: 1024,
+            phase: "kirkeby".to_string(),
+            correct_excess_phase: false,
+            phase_smoothing: 1.0 / 6.0,
+            pre_ringing: None,
+            max_boost_db: Some(0.0),
+        });
+    }
+    if processing_mode == ProcessingMode::MixedPhase {
+        optimizer.mixed_phase = Some(roomeq_model::MixedPhaseSerdeConfig {
+            max_fir_length_ms: 10.0,
+            pre_ringing_threshold_db: -30.0,
+            min_spatial_depth: 0.5,
+            phase_smoothing_octaves: 1.0 / 6.0,
+        });
+    }
+
+    RoomConfig {
+        version: roomeq_model::default_config_version(),
+        system: Some(system),
+        speakers,
+        crossovers: Some(HashMap::from([(
+            "bass_xo".to_string(),
+            CrossoverConfig {
+                crossover_type: crossover_type.to_string(),
+                frequency: Some(80.0),
+                frequencies: None,
+                frequency_range: None,
+            },
+        )])),
+        target_curve: Some(roomeq_model::TargetCurveConfig::Predefined(
+            "flat".to_string(),
+        )),
+        optimizer,
+        provenance: Default::default(),
+        recording_config: None,
+        ctc: None,
+        cea2034_cache: None,
+    }
+}
+
+fn assert_crossover_reconstruction(result: &RoomOptimizationResult, case: &str, crossover_hz: f64) {
+    for channel in ["Left", "Right"] {
+        let curve = result
+            .deployed_source_curves
+            .get(channel)
+            .unwrap_or_else(|| {
+                panic!("{case}: missing deployed source reconstruction for {channel}")
+            });
+        let reference_levels = curve
+            .freq
+            .iter()
+            .zip(curve.spl.iter())
+            .filter(|(frequency, level)| {
+                **frequency >= crossover_hz * 4.0
+                    && **frequency <= crossover_hz * 8.0
+                    && level.is_finite()
+            })
+            .map(|(_, level)| *level)
+            .collect::<Vec<_>>();
+        assert!(
+            !reference_levels.is_empty(),
+            "{case}: no main-band reference samples for {channel}"
+        );
+        let reference = reference_levels.iter().sum::<f64>() / reference_levels.len() as f64;
+
+        let crossover_residuals = curve
+            .freq
+            .iter()
+            .zip(curve.spl.iter())
+            .filter(|(frequency, level)| {
+                **frequency >= crossover_hz / 2.0
+                    && **frequency <= crossover_hz * 2.0
+                    && level.is_finite()
+            })
+            .map(|(frequency, level)| (*frequency, *level - reference))
+            .collect::<Vec<_>>();
+        assert!(
+            !crossover_residuals.is_empty(),
+            "{case}: no crossover samples for {channel}"
+        );
+        let (frequency_at_worst_underfill, worst_underfill_db) = crossover_residuals
+            .iter()
+            .map(|(frequency, residual)| (*frequency, (-residual).max(0.0)))
+            .max_by(|left, right| left.1.total_cmp(&right.1))
+            .unwrap();
+        let worst_absolute_db = crossover_residuals
+            .iter()
+            .map(|(_, residual)| residual.abs())
+            .fold(0.0_f64, f64::max);
+
+        assert!(
+            worst_underfill_db <= 0.5,
+            "{case}: {channel} reconstruction is {worst_underfill_db:.3} dB below its main-band reference at {frequency_at_worst_underfill:.1} Hz"
+        );
+        assert!(
+            worst_absolute_db <= 0.75,
+            "{case}: {channel} reconstruction deviates by {worst_absolute_db:.3} dB around the crossover"
+        );
+    }
+}
+
+#[test]
+fn home_cinema_crossover_reconstructs_for_all_modes_and_sample_rates() {
+    use rayon::prelude::*;
+
+    let temp_dir = tempfile::tempdir().expect("crossover reconstruction output directory");
+    let modes = [
+        ("iir", ProcessingMode::LowLatency),
+        ("fir", ProcessingMode::PhaseLinear),
+        ("mixed", ProcessingMode::MixedPhase),
+    ];
+
+    let cases = ["LR24", "LR48"]
+        .into_iter()
+        .flat_map(|crossover_type| {
+            modes.iter().flat_map(move |(mode_name, processing_mode)| {
+                [48_000.0, 96_000.0].into_iter().map(move |sample_rate| {
+                    (
+                        crossover_type,
+                        *mode_name,
+                        processing_mode.clone(),
+                        sample_rate,
+                    )
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(cases.len(), 12);
+
+    let output_root = temp_dir.path().to_path_buf();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .expect("crossover reconstruction test pool");
+    pool.install(|| {
+        cases.into_par_iter().for_each(
+            |(crossover_type, mode_name, processing_mode, sample_rate)| {
+                let case = format!("{crossover_type}/{mode_name}/{sample_rate:.0}Hz");
+                let config = crossover_reconstruction_config(crossover_type, processing_mode);
+                let output_dir = output_root.join(&case);
+                std::fs::create_dir_all(&output_dir)
+                    .expect("create crossover reconstruction case directory");
+
+                let result = optimize_room(&config, sample_rate, None, Some(&output_dir))
+                    .unwrap_or_else(|error| panic!("{case}: RoomEQ failed: {error}"));
+                assert_crossover_reconstruction(&result, &case, 80.0);
+            },
+        );
+    });
+}

@@ -39,6 +39,85 @@ fn route_owned_topology_owns_main_sub_phase_alignment() {
     assert!(!routed_topology_owns_phase_alignment(&HashMap::new()));
 }
 
+fn routed_test_chain(target: &Curve) -> ChannelDspChain {
+    ChannelDspChain {
+        channel: "L".to_string(),
+        plugins: vec![output::create_crossover_plugin("LR24", 100.0, "high")],
+        drivers: None,
+        initial_curve: None,
+        final_curve: None,
+        eq_response: None,
+        target_curve: Some(target.into()),
+        pre_ir: None,
+        post_ir: None,
+        fir_temporal_masking: None,
+        direct_early_late_correction: None,
+    }
+}
+
+#[test]
+fn routed_timbre_candidate_detects_crossover_target_regression() {
+    let curve = Curve {
+        freq: ndarray::array![50.0, 70.0, 100.0, 140.0, 200.0, 400.0, 800.0],
+        spl: ndarray::Array1::zeros(7),
+        phase: Some(ndarray::Array1::zeros(7)),
+        ..Curve::default()
+    };
+    let chain = routed_test_chain(&curve);
+    let baseline = routed_target_underfill_db(&curve, &chain).unwrap();
+    let shelf = math_audio_iir_fir::Biquad::new(
+        math_audio_iir_fir::BiquadFilterType::Lowshelf,
+        200.0,
+        48_000.0,
+        0.707,
+        -6.0,
+    );
+    let candidate = routed_timbre_candidate_underfill_db(
+        &curve,
+        &chain,
+        &[output::create_eq_plugin(&[shelf])],
+        48_000.0,
+    )
+    .unwrap();
+
+    assert!(baseline < 1.0e-9);
+    assert!(candidate > baseline + 3.0);
+}
+
+#[test]
+fn routed_timbre_candidate_accepts_crossover_target_improvement() {
+    let curve = Curve {
+        freq: ndarray::array![50.0, 70.0, 100.0, 140.0, 200.0, 400.0, 800.0],
+        spl: ndarray::array![-4.0, -3.0, -2.0, -1.0, 0.0, 0.0, 0.0],
+        phase: Some(ndarray::Array1::zeros(7)),
+        ..Curve::default()
+    };
+    let target = Curve {
+        freq: curve.freq.clone(),
+        spl: ndarray::Array1::zeros(7),
+        phase: None,
+        ..Curve::default()
+    };
+    let chain = routed_test_chain(&target);
+    let baseline = routed_target_underfill_db(&curve, &chain).unwrap();
+    let shelf = math_audio_iir_fir::Biquad::new(
+        math_audio_iir_fir::BiquadFilterType::Lowshelf,
+        200.0,
+        48_000.0,
+        0.707,
+        3.0,
+    );
+    let candidate = routed_timbre_candidate_underfill_db(
+        &curve,
+        &chain,
+        &[output::create_eq_plugin(&[shelf])],
+        48_000.0,
+    )
+    .unwrap();
+
+    assert!(candidate < baseline);
+}
+
 #[test]
 fn home_cinema_input_alignment_delay_is_staged_before_routing() {
     let mut config = minimal_room_config(ProcessingMode::LowLatency);
@@ -125,7 +204,7 @@ fn topology_height_residual_is_added_after_existing_delay() {
     };
 
     assert!(insert_topology_height_residual_delay(
-        &mut chain, 0.75, true
+        &mut chain, 0.75, true, true
     ));
     let delays: Vec<f64> = chain
         .plugins
@@ -134,6 +213,10 @@ fn topology_height_residual_is_added_after_existing_delay() {
         .filter_map(|plugin| plugin.parameters["delay_ms"].as_f64())
         .collect();
     assert_eq!(delays, vec![0.75, 1.25]);
+    assert_eq!(
+        chain.plugins[0].parameters["room_eq_stage"].as_str(),
+        Some("pre_route")
+    );
 }
 
 #[test]
@@ -188,6 +271,54 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicUsize, Ordering},
 };
+
+#[test]
+fn routed_safety_replay_restores_the_last_known_safe_dsp_chain() {
+    let mut pre_safety = single_channel_room_result("L");
+    pre_safety
+        .channels
+        .get_mut("L")
+        .unwrap()
+        .plugins
+        .push(output::create_gain_plugin(-1.0));
+    pre_safety.channel_results.get_mut("L").unwrap().fir_coeffs = Some(vec![1.0, 0.5]);
+    let pre_safety_deployed = HashMap::from([(
+        "L".to_string(),
+        pre_safety.channel_results["L"].final_curve.clone(),
+    )]);
+    let expected_plugins = pre_safety.channels["L"].plugins.clone();
+    let expected_fir = pre_safety.channel_results["L"].fir_coeffs.clone();
+
+    let mut post_safety = pre_safety.clone();
+    post_safety.channels.get_mut("L").unwrap().plugins.clear();
+    post_safety.channel_results.get_mut("L").unwrap().fir_coeffs = None;
+
+    commit_or_restore_routed_safety_replay(
+        &mut post_safety,
+        pre_safety,
+        pre_safety_deployed.clone(),
+        Err(AutoeqError::OptimizationFailed {
+            message: "final routed crossover underfill exceeds 3 dB".to_string(),
+        }),
+    );
+
+    assert_eq!(
+        post_safety.channels["L"].plugins.len(),
+        expected_plugins.len()
+    );
+    assert_eq!(
+        post_safety.channels["L"].plugins[0].parameters,
+        expected_plugins[0].parameters
+    );
+    assert_eq!(post_safety.channel_results["L"].fir_coeffs, expected_fir);
+    assert_eq!(
+        post_safety.deployed_source_curves["L"].spl,
+        pre_safety_deployed["L"].spl
+    );
+    let outcome = post_safety.metadata.stage_outcomes.last().unwrap();
+    assert_eq!(outcome.stage, "final_correction_safety_routed_replay");
+    assert_eq!(outcome.status, StageStatus::Degraded);
+}
 
 fn flat_curve() -> roomeq_model::Curve {
     roomeq_model::Curve {

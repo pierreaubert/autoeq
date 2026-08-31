@@ -1,15 +1,18 @@
 use super::misc::differential_evolution_minimize;
 use super::misc::grouped_home_cinema_roles;
 use super::misc::joint_bass_management_report_from_parts;
+use super::predict::apply_source_pre_route_transfer;
 use super::sub_driver_info::sum_sub_output_responses_on_grid;
 use super::types::BassManagementJointGroupInput;
 use super::types::SubDriverInfo;
 use super::types::group_crossover_plan;
 use crate::error::{AutoeqError, Result};
 use crate::topology::{
-    all_curves_have_usable_phase, all_curves_share_frequency_grid,
-    apply_crossover_response_to_curve, apply_delay_and_polarity_to_curve, average_mains_magnitude,
-    bass_management_crossover_type_candidates, bass_management_objective,
+    MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB, all_curves_have_usable_phase,
+    all_curves_share_frequency_grid, apply_crossover_response_to_curve,
+    apply_delay_and_polarity_to_curve, average_mains_magnitude,
+    bass_management_crossover_cancellation_underfill_db, bass_management_crossover_type_candidates,
+    bass_management_max_underfill_db_with_target, bass_management_objective,
     bass_management_objective_with_target, complex_sum_mains, curve_has_usable_phase,
     normalize_crossover_delays, predict_bass_management_sum, select_bass_management_crossover_type,
 };
@@ -17,6 +20,24 @@ use crate::{Curve, crossover, home_cinema};
 use math_audio_dsp::analysis::compute_average_response;
 use roomeq_model::{CrossoverConfig, RoomConfig};
 use std::collections::{BTreeMap, HashMap};
+
+fn worsens_excessive_underfill(candidate: &[f64], baseline: &[f64]) -> bool {
+    candidate.iter().zip(baseline).any(|(after, before)| {
+        *after > MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB + 1.0e-9 && *after > *before + 1.0e-3
+    })
+}
+
+fn improves_but_remains_excessive(candidate: &[f64], baseline: &[f64]) -> bool {
+    candidate.iter().zip(baseline).any(|(after, before)| {
+        *after > MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB + 1.0e-9 && *after + 1.0e-3 < *before
+    })
+}
+
+fn has_excessive_underfill(underfills: &[f64]) -> bool {
+    underfills
+        .iter()
+        .any(|underfill| *underfill > MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB + 1.0e-9)
+}
 
 const JOINT_HEADROOM_SAFETY_DB: f64 = 0.1;
 
@@ -1112,6 +1133,7 @@ pub fn optimize_bass_management_joint_solution(
     main_roles: &[String],
     aligned_measurement_curves: &HashMap<String, Curve>,
     aligned_pre_eq_curves: &HashMap<String, Curve>,
+    source_pre_route_transfers: Option<&HashMap<String, Curve>>,
     target_curves: Option<&HashMap<String, Curve>>,
     group_results: &mut BTreeMap<String, home_cinema::BassManagementGroupReport>,
     source_results: &mut Vec<home_cinema::BassManagementSourceReport>,
@@ -1186,7 +1208,7 @@ pub fn optimize_bass_management_joint_solution(
         }
 
         let mut sub_curves = Vec::with_capacity(sources.len());
-        for (_, source_curve) in &sources {
+        for (source_channel, source_curve) in &sources {
             let Some(mut sub_curve) =
                 sum_sub_output_responses_on_grid(&source_curve.freq, &driver_inputs, sub_outputs)
             else {
@@ -1217,7 +1239,17 @@ pub fn optimize_bass_management_joint_solution(
                 };
                 sub_curve = corrected_driver_sum;
             }
-            sub_curves.push(sub_curve);
+            let Some(source_sub_curve) = apply_source_pre_route_transfer(
+                &sub_curve,
+                source_pre_route_transfers.and_then(|transfers| transfers.get(source_channel)),
+            ) else {
+                overall_advisories.push(format!(
+                    "source_route_optimizer_skipped_pre_route_grid:{group_id}:{source_channel}"
+                ));
+                sub_curves.clear();
+                break;
+            };
+            sub_curves.push(source_sub_curve);
         }
         if sub_curves.len() != sources.len() {
             continue;
@@ -1292,7 +1324,7 @@ pub fn optimize_bass_management_joint_solution(
             ]);
         }
 
-        let evaluate = |params: &[f64]| -> Option<(f64, Vec<f64>)> {
+        let evaluate = |params: &[f64]| -> Option<(f64, Vec<f64>, Vec<f64>)> {
             let frequency = params[0].clamp(minimum_frequency, maximum_frequency);
             let type_index = params[1]
                 .round()
@@ -1300,6 +1332,7 @@ pub fn optimize_bass_management_joint_solution(
                 as usize;
             let crossover_type = &type_candidates[type_index];
             let mut losses = Vec::with_capacity(sources.len());
+            let mut underfills = Vec::with_capacity(sources.len());
             for (source_index, (source_channel, source_curve)) in sources.iter().enumerate() {
                 let base = 2 + source_index * 4;
                 let (main_delay_ms, bass_delay_ms) = normalize_crossover_delays(
@@ -1308,30 +1341,71 @@ pub fn optimize_bass_management_joint_solution(
                 );
                 let polarity_inverted = params[base + 2].round().clamp(0.0, 1.0) >= 0.5;
                 let trim_db = params[base + 3].clamp(config.optimizer.min_db, max_route_trim);
-                let predicted = predict_bass_management_sum(
+                let mut main_branch = apply_crossover_response_to_curve(
                     source_curve,
+                    crossover_type,
+                    frequency,
+                    sample_rate,
+                    false,
+                );
+                main_branch = apply_delay_and_polarity_to_curve(&main_branch, main_delay_ms, false);
+                let mut bass_branch = apply_crossover_response_to_curve(
                     &sub_curves[source_index],
                     crossover_type,
                     frequency,
                     sample_rate,
-                    0.0,
-                    trim_db,
-                    main_delay_ms,
+                    true,
+                );
+                for spl in bass_branch.spl.iter_mut() {
+                    *spl += trim_db;
+                }
+                bass_branch = apply_delay_and_polarity_to_curve(
+                    &bass_branch,
                     bass_delay_ms,
                     polarity_inverted,
                 );
+                let predicted = complex_sum_mains(&[&main_branch, &bass_branch]);
+                let target = target_curves.and_then(|targets| targets.get(source_channel));
                 losses.push(bass_management_objective_with_target(
-                    predicted.as_ref(),
-                    target_curves.and_then(|targets| targets.get(source_channel)),
+                    Some(&predicted),
+                    target,
                     frequency,
                 )?);
+                let cancellation_underfill =
+                    bass_management_crossover_cancellation_underfill_db(
+                        &main_branch,
+                        &bass_branch,
+                        &predicted,
+                        frequency,
+                    )
+                    .unwrap_or(0.0);
+                let target_underfill = bass_management_max_underfill_db_with_target(
+                    Some(&predicted),
+                    target,
+                    frequency,
+                )
+                .unwrap_or(0.0);
+                underfills.push(cancellation_underfill.max(target_underfill));
             }
-            let mean = losses.iter().sum::<f64>() / losses.len() as f64;
-            let worst = losses.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-            Some((0.5 * mean + 0.5 * worst, losses))
+            let constrained_losses = losses
+                .iter()
+                .zip(&underfills)
+                .map(|(loss, underfill)| {
+                    let excess = (underfill - MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB).max(0.0);
+                    loss + 1_000.0 * excess * excess
+                })
+                .collect::<Vec<_>>();
+            let mean = constrained_losses.iter().sum::<f64>() / constrained_losses.len() as f64;
+            let worst = constrained_losses
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max);
+            Some((0.5 * mean + 0.5 * worst, losses, underfills))
         };
-        let objective = |params: &[f64]| evaluate(params).map(|(loss, _)| loss).unwrap_or(1.0e12);
-        let Some((baseline_score, baseline_losses)) = evaluate(&initial) else {
+        let objective =
+            |params: &[f64]| evaluate(params).map(|(loss, _, _)| loss).unwrap_or(1.0e12);
+        let Some((baseline_score, baseline_losses, baseline_underfills)) = evaluate(&initial)
+        else {
             overall_advisories.push(format!(
                 "source_route_optimizer_skipped_invalid_baseline:{group_id}"
             ));
@@ -1398,7 +1472,12 @@ pub fn optimize_bass_management_joint_solution(
                 let mut params = refined.clone();
                 params[base..base + 4].copy_from_slice(route);
                 evaluate(&params)
-                    .and_then(|(_, losses)| losses.get(source_index).copied())
+                    .and_then(|(_, losses, underfills)| {
+                        let loss = *losses.get(source_index)?;
+                        let underfill = *underfills.get(source_index)?;
+                        let excess = (underfill - MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB).max(0.0);
+                        Some(loss + 1_000.0 * excess * excess)
+                    })
                     .unwrap_or(1.0e12)
             };
             let route_seed = seed ^ (source_index as u64 + 1).wrapping_mul(0x85eb_ca6b);
@@ -1417,18 +1496,41 @@ pub fn optimize_bass_management_joint_solution(
         }
 
         let candidate = evaluate(&refined);
-        let regressed_source = candidate.as_ref().is_some_and(|(_, candidate_losses)| {
+        let regressed_source = candidate.as_ref().is_some_and(|(_, candidate_losses, _)| {
             candidate_losses
                 .iter()
                 .zip(&baseline_losses)
                 .any(|(after, before)| *after > *before + (before.abs() * 0.01).max(1.0e-9))
         });
+        let candidate_underfill_db = candidate
+            .as_ref()
+            .and_then(|(_, _, underfills)| underfills.iter().copied().reduce(f64::max));
+        // The route pass runs before the narrow-band corrective EQ pass.  A
+        // measured response can therefore already exceed the final absolute
+        // underfill limit.  Reject candidates that introduce or worsen an
+        // excessive dip, but allow a strictly improving candidate to reach
+        // the corrective pass instead of restoring a demonstrably worse
+        // baseline route.
+        let worsened_excessive_underfill =
+            candidate
+                .as_ref()
+                .is_some_and(|(_, _, candidate_underfills)| {
+                    worsens_excessive_underfill(candidate_underfills, &baseline_underfills)
+                });
+        let improving_but_still_excessive =
+            candidate
+                .as_ref()
+                .is_some_and(|(_, _, candidate_underfills)| {
+                    improves_but_remains_excessive(candidate_underfills, &baseline_underfills)
+                });
+        let baseline_has_excessive_underfill = has_excessive_underfill(&baseline_underfills);
         let accepted = candidate
             .as_ref()
-            .is_some_and(|(score, _)| *score < baseline_score - 1.0e-6)
-            && !regressed_source;
+            .is_some_and(|(score, _, _)| *score < baseline_score - 1.0e-6)
+            && (!regressed_source || baseline_has_excessive_underfill)
+            && !worsened_excessive_underfill;
         let chosen = if accepted { refined } else { initial.clone() };
-        let (_, chosen_losses) = evaluate(&chosen).expect("validated source route parameters");
+        let (_, chosen_losses, _) = evaluate(&chosen).expect("validated source route parameters");
         let chosen_frequency = chosen[0].clamp(minimum_frequency, maximum_frequency);
         let chosen_type_index = chosen[1]
             .round()
@@ -1453,7 +1555,19 @@ pub fn optimize_bass_management_joint_solution(
                 objective_after: Some(chosen_losses[source_index]),
                 accepted,
                 advisories: vec![if accepted {
-                    "source_route_de_optimized".to_string()
+                    if improving_but_still_excessive {
+                        format!(
+                            "source_route_de_optimized_pending_underfill_correction:{:.3}db",
+                            candidate_underfill_db.unwrap_or(f64::INFINITY)
+                        )
+                    } else {
+                        "source_route_de_optimized".to_string()
+                    }
+                } else if worsened_excessive_underfill {
+                    format!(
+                        "source_route_optimizer_rejected_crossover_underfill:{:.3}db",
+                        candidate_underfill_db.unwrap_or(f64::INFINITY)
+                    )
                 } else if regressed_source {
                     "source_route_optimizer_reverted_source_regression".to_string()
                 } else {
@@ -1474,7 +1588,9 @@ pub fn optimize_bass_management_joint_solution(
         }
         updated_group.objective_before = Some(baseline_score);
         updated_group.objective_after = Some(if accepted {
-            candidate.map(|(score, _)| score).unwrap_or(baseline_score)
+            candidate
+                .map(|(score, _, _)| score)
+                .unwrap_or(baseline_score)
         } else {
             baseline_score
         });
@@ -1482,7 +1598,19 @@ pub fn optimize_bass_management_joint_solution(
             .advisories
             .retain(|advisory| advisory != "ok" && !advisory.starts_with("joint_route_"));
         updated_group.advisories.push(if accepted {
-            "per_source_route_de_optimized".to_string()
+            if improving_but_still_excessive {
+                format!(
+                    "per_source_route_de_optimized_pending_underfill_correction:{:.3}db",
+                    candidate_underfill_db.unwrap_or(f64::INFINITY)
+                )
+            } else {
+                "per_source_route_de_optimized".to_string()
+            }
+        } else if worsened_excessive_underfill {
+            format!(
+                "per_source_route_optimizer_rejected_crossover_underfill:{:.3}db",
+                candidate_underfill_db.unwrap_or(f64::INFINITY)
+            )
         } else if regressed_source {
             "per_source_route_optimizer_reverted_source_regression".to_string()
         } else {
@@ -1523,6 +1651,17 @@ mod tests {
         SubwooferStrategy, SubwooferSystemConfig, SystemConfig, SystemModel,
     };
     use std::collections::{BTreeMap, HashMap};
+
+    #[test]
+    fn staged_underfill_gate_never_restores_a_worse_baseline() {
+        assert!(worsens_excessive_underfill(&[4.1], &[2.5]));
+        assert!(worsens_excessive_underfill(&[5.0], &[4.0]));
+        assert!(!worsens_excessive_underfill(&[4.0], &[5.0]));
+        assert!(improves_but_remains_excessive(&[4.0], &[5.0]));
+        assert!(!improves_but_remains_excessive(&[2.5], &[5.0]));
+        assert!(has_excessive_underfill(&[2.5, 3.1]));
+        assert!(!has_excessive_underfill(&[2.5, 3.0]));
+    }
 
     #[test]
     fn joint_headroom_reduction_preserves_safety_reserve() {
@@ -1895,6 +2034,7 @@ mod tests {
             &aligned_pre_eq_curves,
             &aligned_pre_eq_curves,
             None,
+            None,
             &mut group_results,
             &mut Vec::new(),
             &mut sub_outputs,
@@ -2045,6 +2185,7 @@ mod tests {
             &aligned_pre_eq_curves,
             &aligned_pre_eq_curves,
             None,
+            None,
             &mut group_results,
             &mut Vec::new(),
             &mut sub_outputs,
@@ -2085,6 +2226,7 @@ mod tests {
             &main_roles(),
             &aligned_pre_eq_curves,
             &aligned_pre_eq_curves,
+            None,
             None,
             &mut group_results,
             &mut Vec::new(),
@@ -2151,6 +2293,7 @@ mod tests {
                 &main_roles(),
                 &curves,
                 &curves,
+                None,
                 None,
                 &mut groups,
                 &mut sources,
@@ -2247,6 +2390,7 @@ mod tests {
             &main_roles(),
             &aligned_pre_eq_curves,
             &aligned_pre_eq_curves,
+            None,
             None,
             &mut group_results,
             &mut Vec::new(),

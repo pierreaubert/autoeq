@@ -178,6 +178,14 @@ pub(super) fn collect_generic_channel_results(
                         sample_rate,
                         output_dir,
                     )
+                    .unwrap_or_else(|error| {
+                        log::warn!(
+                            "Mixed-phase FIR candidate rejected for '{}': {}",
+                            channel_name,
+                            error
+                        );
+                        None
+                    })
                 } else {
                     post_generate_fir(
                         &channel_name,

@@ -108,10 +108,12 @@ pub(in super::super) fn post_generate_mixed_phase_fir(
     config: &roomeq_model::OptimizerConfig,
     sample_rate: f64,
     output_dir: Option<&Path>,
-) -> Option<GeneratedFir> {
-    let phase = initial_curve.phase.as_ref()?;
+) -> std::result::Result<Option<GeneratedFir>, String> {
+    let Some(phase) = initial_curve.phase.as_ref() else {
+        return Ok(None);
+    };
     if phase.is_empty() {
-        return None;
+        return Ok(None);
     }
 
     let mp_config = match &config.mixed_phase {
@@ -166,11 +168,9 @@ pub(in super::super) fn post_generate_mixed_phase_fir(
                 name, max_magnitude_deviation_db
             );
             if max_magnitude_deviation_db > 0.5 {
-                warn!(
-                    "  Mixed-phase post-workflow FIR skipped for '{}': phase-only magnitude deviation {:.2} dB exceeds 0.50 dB",
-                    name, max_magnitude_deviation_db
-                );
-                return None;
+                return Err(format!(
+                    "phase-only magnitude deviation {max_magnitude_deviation_db:.2} dB exceeds 0.50 dB"
+                ));
             }
             let mixed_phase_report =
                 roomeq_engine::mixed_phase::MixedPhaseCorrectionReport::from_residual(
@@ -202,19 +202,13 @@ pub(in super::super) fn post_generate_mixed_phase_fir(
                 }
             }
 
-            Some(GeneratedFir {
+            Ok(Some(GeneratedFir {
                 coeffs,
                 filename,
                 mixed_phase_report: Some(mixed_phase_report),
-            })
+            }))
         }
-        Err(e) => {
-            warn!(
-                "  Mixed-phase decomposition failed for '{}': {}. Using IIR only.",
-                name, e
-            );
-            None
-        }
+        Err(error) => Err(format!("phase decomposition failed: {error}")),
     }
 }
 
@@ -259,7 +253,7 @@ mod tests {
         let curve = small_curve_no_phase();
         let result =
             post_generate_mixed_phase_fir("left", &curve, &default_mp_config(), 48_000.0, None);
-        assert!(result.is_none());
+        assert!(result.unwrap().is_none());
     }
 
     #[test]
@@ -267,7 +261,7 @@ mod tests {
         let curve = small_curve_empty_phase();
         let result =
             post_generate_mixed_phase_fir("left", &curve, &default_mp_config(), 48_000.0, None);
-        assert!(result.is_none());
+        assert!(result.unwrap().is_none());
     }
 
     fn fir_config() -> roomeq_model::FirConfig {
@@ -476,11 +470,9 @@ mod tests {
             48_000.0,
             None,
         );
-        assert!(
-            result.is_some(),
-            "mixed-phase FIR generation should succeed for flat phase"
-        );
-        let generated = result.unwrap();
+        let generated = result
+            .expect("mixed-phase FIR generation should not be rejected for flat phase")
+            .expect("mixed-phase FIR generation should succeed for flat phase");
         assert!(!generated.coeffs.is_empty());
     }
 }

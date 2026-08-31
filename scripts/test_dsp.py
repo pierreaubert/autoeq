@@ -4,6 +4,7 @@ import math
 import unittest
 
 from scripts.src.dsp import (
+    apply_plugins_to_curve,
     biquad_coefficients,
     build_post_dsp_source_curves,
     compute_eq_response,
@@ -110,6 +111,14 @@ class TemporalResponseTests(unittest.TestCase):
 
 
 class PostDspSourceCurveTests(unittest.TestCase):
+    def test_plugin_realization_uses_rust_acoustic_floor(self):
+        realized = apply_plugins_to_curve(
+            {"freq": [20.0], "spl": [-100.0], "phase": [0.0]},
+            [{"plugin_type": "gain", "parameters": {"gain_db": -200.0}}],
+            48_000.0,
+        )
+        self.assertEqual(realized["spl"], [-240.0])
+
     def test_authoritative_deployed_curves_bypass_python_reconstruction(self):
         deployed = {
             "L": {
@@ -271,6 +280,16 @@ class PostDspSourceCurveTests(unittest.TestCase):
                 "LFE": {
                     "initial_curve": {"freq": [80.0], "spl": [60.0], "phase": [0.0]},
                     "final_curve": {"freq": [80.0], "spl": [99.0], "phase": [0.0]},
+                    "plugins": [
+                        {
+                            "plugin_type": "gain",
+                            "parameters": {
+                                "gain_db": -6.0,
+                                "label": "post_dsp_input_level_alignment",
+                                "room_eq_stage": "pre_route",
+                            },
+                        }
+                    ],
                 }
             },
         }

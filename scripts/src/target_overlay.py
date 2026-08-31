@@ -188,6 +188,35 @@ def _target_shape_for_channel(
     }
 
 
+def _target_alignment_band_for_channel(
+    data: dict,
+    channel_name: str,
+    min_freq: float,
+    max_freq: float,
+) -> tuple[float, float]:
+    """Match the routed optimizer's main-only target reference band."""
+    bass_management = ((data.get("metadata") or {}).get("bass_management") or {})
+    graph = bass_management.get("routing_graph") or {}
+    route = next(
+        (
+            candidate
+            for candidate in graph.get("routes", []) or []
+            if candidate.get("source_channel") == channel_name
+            and candidate.get("route_kind") == "redirected_bass_lowpass_to_sub"
+            and candidate.get("low_pass_hz") is not None
+        ),
+        None,
+    )
+    if route is None:
+        return min_freq, max_freq
+    crossover_hz = float(route["low_pass_hz"])
+    reference_min = max(min_freq, crossover_hz * 2.0)
+    reference_max = min(max_freq, crossover_hz * 8.0, 2_000.0)
+    if reference_min >= reference_max:
+        return min_freq, max_freq
+    return reference_min, reference_max
+
+
 def build_target_overlay_curves(
     data: dict,
     reference_curves: dict[str, dict],
@@ -208,7 +237,12 @@ def build_target_overlay_curves(
     result = {}
     for channel_name, reference in reference_curves.items():
         channel_target = _target_shape_for_channel(data, channel_name, target, reference)
-        aligned = align_target_to_curve(channel_target, reference, min_freq, max_freq)
+        alignment_min, alignment_max = _target_alignment_band_for_channel(
+            data, channel_name, min_freq, max_freq
+        )
+        aligned = align_target_to_curve(
+            channel_target, reference, alignment_min, alignment_max
+        )
         if aligned is not None:
             result[channel_name] = aligned
     return result

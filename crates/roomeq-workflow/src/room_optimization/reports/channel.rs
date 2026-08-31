@@ -85,7 +85,16 @@ pub(in super::super) fn compute_and_correct_icd(
         .channel_results
         .iter()
         .filter(|(name, _)| !is_subwoofer_channel(config, name))
-        .map(|(name, ch)| (name.clone(), ch.final_curve.clone()))
+        .map(|(name, ch)| {
+            (
+                name.clone(),
+                result
+                    .deployed_source_curves
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| ch.final_curve.clone()),
+            )
+        })
         .collect();
     if final_curves.len() <= 1 {
         result.metadata.inter_channel_deviation = None;
@@ -431,6 +440,34 @@ mod tests {
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].role_key, "front_lr");
         assert!(groups[0].curves.contains_key("left"));
+    }
+
+    #[test]
+    fn compute_and_correct_icd_prefers_authoritative_deployed_curves() {
+        let deployed = small_curve();
+        let mut left_final = small_curve();
+        let mut right_final = small_curve();
+        for (index, level) in left_final.spl.iter_mut().enumerate() {
+            *level += if index % 2 == 0 { 8.0 } else { -8.0 };
+        }
+        for (index, level) in right_final.spl.iter_mut().enumerate() {
+            *level += if index % 2 == 0 { -8.0 } else { 8.0 };
+        }
+
+        let mut result = result_with_channel("left", left_final);
+        let right = result_with_channel("right", right_final);
+        result.channel_results.extend(right.channel_results);
+        result.channels.extend(right.channels);
+        result.deployed_source_curves = HashMap::from([
+            ("left".to_string(), deployed.clone()),
+            ("right".to_string(), deployed),
+        ]);
+
+        compute_and_correct_icd(&mut result, &config_with_channel_matching(false), 48_000.0);
+
+        let icd = result.metadata.inter_channel_deviation.unwrap();
+        assert!(icd.midrange_rms_db < 1.0e-9);
+        assert!(icd.passband_rms_db < 1.0e-9);
     }
 
     #[test]

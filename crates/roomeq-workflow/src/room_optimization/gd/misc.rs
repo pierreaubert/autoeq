@@ -10,6 +10,10 @@ pub(super) fn tag_group_delay_plugin(
             "label".to_string(),
             serde_json::Value::String(label.to_string()),
         );
+        parameters.insert(
+            "room_eq_stage".to_string(),
+            serde_json::Value::String("pre_route".to_string()),
+        );
     }
     plugin
 }

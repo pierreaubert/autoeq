@@ -392,7 +392,11 @@ def apply_plugins_to_curve(
     result_spl: list[float] = []
     result_phase: list[float] = []
     for index, value in enumerate(transfer):
-        result_spl.append(spl[index] + 20.0 * math.log10(max(abs(value), 1.0e-10)))
+        # Match Rust's acoustic-domain floor after the complete transfer is
+        # applied. Flooring the dimensionless transfer first lets a deeply
+        # attenuated input fall below the canonical -240 dB output floor.
+        acoustic_magnitude = 10.0 ** (float(spl[index]) / 20.0) * abs(value)
+        result_spl.append(20.0 * math.log10(max(acoustic_magnitude, 1.0e-12)))
         if has_phase:
             result_phase.append(float(phase[index]) + math.degrees(math.atan2(value.imag, value.real)))
 
@@ -462,18 +466,17 @@ def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
             for plugin in source_plugins
             if (plugin.get("parameters", {}) or {}).get("room_eq_stage")
             == "pre_route"
+            and not (
+                plugin.get("plugin_type") == "gain"
+                and (plugin.get("parameters", {}) or {}).get("label")
+                == "post_dsp_input_level_alignment"
+            )
         ]
-        has_reported_input_trim = any(
-            plugin.get("plugin_type") == "gain"
-            and (plugin.get("parameters", {}) or {}).get("label")
-            == "post_dsp_input_level_alignment"
-            for plugin in source_pre_route_plugins
-        )
-        fallback_input_trim_db = (
-            0.0
-            if has_reported_input_trim
-            else float(input_trim_db.get(source_name, 0.0))
-        )
+        # The canonical routing graph owns this labeled calibration trim.
+        # Excluding its serialized plugin above keeps Rust and Python from
+        # applying it twice while every other pre-route transfer remains common
+        # to the main and redirected-sub branches.
+        route_input_trim_db = float(input_trim_db.get(source_name, 0.0))
         route_plugins = [
             *source_pre_route_plugins,
             {
@@ -488,7 +491,7 @@ def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
                 "plugin_type": "gain",
                 "parameters": {
                     "gain_db": float(route.get("gain_db", 0.0))
-                    + fallback_input_trim_db,
+                    + route_input_trim_db,
                     "invert": bool(route.get("polarity_inverted", False)),
                 },
             },

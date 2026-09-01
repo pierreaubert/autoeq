@@ -139,6 +139,7 @@ class RoomEqGuiApp(App):
                 title="Import RoomEQ configuration",
                 content=dialog_content,
                 footer=[ui.button("Cancel", id="cancel-import", action="cancel-import"), ui.button("Load configuration", id="load-import-config", action="load-import-config")],
+                close_on_backdrop=False,
                 close_action="close-import-dialog",
             ))
         return [

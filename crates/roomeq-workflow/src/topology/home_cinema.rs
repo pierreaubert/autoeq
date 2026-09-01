@@ -1732,6 +1732,14 @@ fn optimize_home_cinema_with_sub(
     } else {
         sub_gain_post
     };
+    // `sub_post` includes the physical-output gain so the serialized sub chain
+    // and its standalone response remain complete. Routed prediction applies
+    // that same gain from `BassManagementRoute`, therefore its common physical
+    // sub input must exclude the route-owned gain or post-EQ sees it twice.
+    let mut routed_common_sub_post = sub_post.clone();
+    routed_common_sub_post
+        .spl
+        .mapv_inplace(|level| level - route_applied_sub_gain_db);
     let primary_group = group_results_by_id
         .get("lcr")
         .or_else(|| group_results_by_id.values().next());
@@ -1839,7 +1847,7 @@ fn optimize_home_cinema_with_sub(
             .and_then(|graph| {
                 engine_bass_management::predict_deployed_source_curve_from_routes(
                     Some(&main_post_curves[role]),
-                    &sub_post,
+                    &routed_common_sub_post,
                     optimizer_source_pre_route_transfers.get(role),
                     graph,
                     role,
@@ -1932,7 +1940,7 @@ fn optimize_home_cinema_with_sub(
             .as_ref()
             .and_then(|graph| {
                 engine_bass_management::predict_bass_source_curve_from_routes(
-                    &sub_post,
+                    &routed_common_sub_post,
                     optimizer_source_pre_route_transfers.get(role),
                     graph,
                     role,

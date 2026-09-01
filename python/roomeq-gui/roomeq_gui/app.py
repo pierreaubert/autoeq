@@ -69,7 +69,12 @@ class RoomEqGuiApp(App):
             elif "path" in field.label.lower() or "file" in field.label.lower(): controls.append(ui.path_input(id=field.node_id, label=field.label, value=str(value or ""), action="edit-field", validation=validation))
             elif schema.get("type") == "object" or "properties" in schema:
                 children = [ui.text_input(id=child.node_id, label=child.label, value="" if child.value is None else str(child.value), action="edit-field") for child in self.document.editor.fields(field.pointer)]
-                controls.append(ui.accordion(id="accordion" + field.pointer.replace("/", "-"), items=[(field.node_id, field.label, children)], action="accordion"))
+                if not children and schema.get("additionalProperties"):
+                    children = [ui.empty_state("No entries", description=f"Add a named entry to {field.label} before configuring it.")]
+                # Accordion expansion is host-owned. Supplying an action makes
+                # it application-owned, but this app has no reason to patch
+                # expansion state, which left every section inert.
+                controls.append(ui.accordion(id="accordion" + field.pointer.replace("/", "-"), items=[(field.node_id, field.label, children)]))
             elif schema.get("type") == "array": controls.append(ui.list_editor(id=field.node_id, label=field.label, rows=[], add_action="array-add", remove_action="array-remove"))
             else: controls.append(ui.text_input(id=field.node_id, label=field.label, value="" if value is None else str(value), action="edit-field", validation=validation))
         review = self.review(); review_nodes = []

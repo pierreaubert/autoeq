@@ -6,9 +6,15 @@ from .app import RoomEqGuiApp
 from .commands import RoomEqCommand
 
 def bundled(kind: str) -> dict: return json.loads(files("roomeq_gui.resources").joinpath(f"{kind}_schema.json").read_text())
+def existing_config(value: str) -> Path:
+    path = Path(value).expanduser()
+    if not path.is_file(): raise argparse.ArgumentTypeError(f"RoomEQ configuration does not exist: {value}")
+    return path
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="roomeq-gui")
-    parser.add_argument("--roomeq"); parser.add_argument("--config", type=Path); parser.add_argument("--result", type=Path)
+    parser = argparse.ArgumentParser(prog="roomeq-gui", description="Configure and review RoomEQ in a native GPUI application.")
+    parser.add_argument("--roomeq", metavar="PATH", help="RoomEQ executable to use")
+    parser.add_argument("--config", metavar="FILE", type=existing_config, help="load an existing RoomEQ JSON configuration at startup")
+    parser.add_argument("--result", metavar="FILE", type=Path, help="open an existing RoomEQ result at startup")
     args = parser.parse_args(); root = Path(__file__).resolve().parents[3]
     command = RoomEqCommand(RoomEqCommand.discover(args.roomeq, root))
     warning = None

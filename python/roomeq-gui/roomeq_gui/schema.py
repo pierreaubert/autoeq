@@ -39,8 +39,24 @@ class SchemaResolver:
         return [self.resolve(choice) for choice in choices]
     def selected_variant(self, schema: dict[str, Json], value: Json) -> int:
         variants = self.variants(schema, value)
+        # Tagged variants are common in the RoomEQ schema.  Prefer their
+        # discriminator before invoking a standalone validator: a branch can
+        # contain local refs whose document root is the full input schema, not
+        # the branch itself.
+        if isinstance(value, dict):
+            for index, candidate in enumerate(variants):
+                for name, property_schema in candidate.get("properties", {}).items():
+                    property_schema = self.resolve(property_schema)
+                    if "const" in property_schema and value.get(name) == property_schema["const"]:
+                        return index
         for index, candidate in enumerate(variants):
-            if not self._errors(candidate, value): return index
+            try:
+                if not self._errors(candidate, value): return index
+            # ``jsonschema`` correctly rejects a branch with a root-relative
+            # ref when it is validated in isolation.  Declaration order is
+            # the documented fallback for imported untagged unions.
+            except Exception:
+                continue
         return 0
     def default(self, schema: dict[str, Json]) -> Json:
         schema = self.resolve(schema)

@@ -1,6 +1,8 @@
 """The thin GPUI presentation and coordination layer; no acoustics live here."""
 from __future__ import annotations
 import json
+import os
+import sys
 from pathlib import Path
 from typing import Any
 from .commands import RoomEqCommand
@@ -69,4 +71,8 @@ class RoomEqGuiApp:
         return declared.to_spec()
     def run(self) -> None:
         from gpui_toolkit import App, section, ui
+        # The native host otherwise prefers its own repository venv.  A
+        # console-script installation lives in this interpreter's site-packages,
+        # so ensure the supervised child uses the same interpreter.
+        os.environ.setdefault("GPUI_PYTHON", sys.executable)
         App(title="RoomEQ", sidebar_title="RoomEQ", sections=[section("room-eq", "RoomEQ", ui.vstack([ui.text("RoomEQ configuration and review"), ui.code(json.dumps(self.ir()))]))]).run()

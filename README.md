@@ -168,6 +168,10 @@ Start with the [input-format examples](src/bin/roomeq/INPUT_FORMAT.md), then use
 the [input schema](src/bin/roomeq/input_schema.json) and
 [output schema](src/bin/roomeq/output_schema.json) as the complete contracts.
 
+For a native configuration and result-review client, install the local
+[`autoeq-roomeq-gui`](python/roomeq-gui/README.md) package. It deliberately
+uses the `roomeq` binary as the sole validation and optimization authority.
+
 ---
 
 ## Installation

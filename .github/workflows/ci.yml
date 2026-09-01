@@ -50,6 +50,10 @@ jobs:
 
       - name: Check RoomEQ schema baselines
         run: python3 scripts/check_roomeq_schema_baselines.py
+      - name: Test RoomEQ GPUI client
+        run: |
+          python3 -m pip install 'jsonschema>=4.25,<5'
+          PYTHONPATH=python/roomeq-gui python3 -m unittest discover python/roomeq-gui/tests
 
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings

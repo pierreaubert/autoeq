@@ -81,6 +81,14 @@ check-crate-partition-fitness:
 check-roomeq-schema-baselines:
 	python3 scripts/check_roomeq_schema_baselines.py
 
+[group('test')]
+test-roomeq-gui:
+	PYTHONPATH=python/roomeq-gui python3 -m unittest discover python/roomeq-gui/tests
+
+[group('build')]
+roomeq-gui:
+	PYTHONPATH=python/roomeq-gui python3 -m roomeq_gui
+
 # ----------------------------------------------------------------------
 # LINT / FORMAT
 # ----------------------------------------------------------------------

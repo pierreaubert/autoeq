@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autoeq-roomeq-gui"
+version = "0.1.0"
+description = "Native GPUI configuration and review application for RoomEQ"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["gpui-toolkit>=0.9.25,<0.10", "jsonschema>=4.25,<5"]
+
+[project.scripts]
+roomeq-gui = "roomeq_gui.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["roomeq_gui*"]
+
+[tool.setuptools.package-data]
+roomeq_gui = ["resources/*.json"]

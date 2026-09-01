@@ -10,6 +10,7 @@ from .document import RoomEqDocument
 from .review import ResultReview
 from .schema import SchemaEditor
 from gpui_toolkit import App, section, ui, charts
+from gpui_toolkit.miniapp import MiniAppConfig
 
 class RoomEqGuiApp(App):
     def __init__(self, input_schema: dict[str, Any], output_schema: dict[str, Any], command: RoomEqCommand, config: Path | None = None, result: Path | None = None):
@@ -24,7 +25,19 @@ class RoomEqGuiApp(App):
             if isinstance(stored.state, dict): self.preferences.update(stored.state)
             self._state_store = StateStore("org.autoeq.roomeq-gui")
         except (ImportError, OSError, ValueError, TypeError): self._state_store = None
-        super().__init__(title="RoomEQ", sidebar_title="RoomEQ", sections=self._sections())
+        super().__init__(
+            title="RoomEQ",
+            sidebar_title="RoomEQ",
+            sections=self._sections(),
+            miniapp=MiniAppConfig(
+                title="RoomEQ",
+                app_name="RoomEQ",
+                width=1280,
+                height=820,
+                with_theme=True,
+                initial_theme="dark",
+            ),
+        )
     def save_preferences(self) -> None:
         """Only navigation/review preferences are persisted; document JSON is never stored here."""
         if self._state_store: self._state_store.save(self.preferences, version=1)

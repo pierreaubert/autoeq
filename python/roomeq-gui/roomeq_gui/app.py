@@ -9,8 +9,9 @@ from .commands import RoomEqCommand
 from .document import RoomEqDocument
 from .review import ResultReview
 from .schema import SchemaEditor
+from gpui_toolkit import App, section, ui, charts
 
-class RoomEqGuiApp:
+class RoomEqGuiApp(App):
     def __init__(self, input_schema: dict[str, Any], output_schema: dict[str, Any], command: RoomEqCommand, config: Path | None = None, result: Path | None = None):
         self.command, self.input_schema, self.output_schema = command, input_schema, output_schema
         self.document = RoomEqDocument.open(input_schema, config) if config else RoomEqDocument.create(input_schema)
@@ -23,6 +24,7 @@ class RoomEqGuiApp:
             if isinstance(stored.state, dict): self.preferences.update(stored.state)
             self._state_store = StateStore("org.autoeq.roomeq-gui")
         except (ImportError, OSError, ValueError, TypeError): self._state_store = None
+        super().__init__(title="RoomEQ", sidebar_title="RoomEQ", sections=self._sections())
     def save_preferences(self) -> None:
         """Only navigation/review preferences are persisted; document JSON is never stored here."""
         if self._state_store: self._state_store.save(self.preferences, version=1)
@@ -41,10 +43,8 @@ class RoomEqGuiApp:
         if run.returncode == 0 and output.exists():
             self.result = json.loads(output.read_text()); self.remember(output, "results"); self.step = 3
     def review(self) -> ResultReview | None: return ResultReview(self.result) if self.result else None
-    def ir(self) -> dict[str, Any]:
+    def _sections(self) -> list[Any]:
         """Stable native-GPUI IR. Kept small enough for the host session payload."""
-        try: from gpui_toolkit import App, section, ui, charts
-        except ImportError as error: raise RuntimeError("Install autoeq-roomeq-gui with its gpui-toolkit dependency.") from error
         errors = self.document.editor.errors()
         controls = []
         for field in self.document.editor.fields():
@@ -64,15 +64,14 @@ class RoomEqGuiApp:
             review_nodes.append(ui.table(id="review-metrics", headers=["Metric", "Value"], rows=[[key, value] for key, value in review.overview().items() if not isinstance(value, (dict, list))]))
             for series in review.curves()[:8]: review_nodes.append(charts.line("chart" + series.id.replace("/", "-"), series.x, series.y, title=series.label, x_label="Hz", y_label="dB"))
         else: review_nodes.append(ui.empty_state("No result loaded", description="Open a DspChainOutput or run optimization to review it."))
-        declared = App(title="RoomEQ", sidebar_title="RoomEQ", sections=[
+        return [
             section("workflow", "Configure", ui.vstack([ui.stepper(id="workflow-stepper", steps=["Configure", "Validate", "Optimize", "Review"], active=self.step, action="step"), ui.accordion(id="config-form", items=[("configuration", "Configuration", controls)], expanded=["configuration"]), ui.button("Save", id="save", action="save"), ui.button("Validate", id="validate", action="validate")])),
             section("review", "Review", ui.vstack(review_nodes)),
-        ])
-        return declared.to_spec()
+        ]
+    def ir(self) -> dict[str, Any]: return self.to_spec()
     def run(self) -> None:
-        from gpui_toolkit import App, section, ui
         # The native host otherwise prefers its own repository venv.  A
         # console-script installation lives in this interpreter's site-packages,
         # so ensure the supervised child uses the same interpreter.
         os.environ.setdefault("GPUI_PYTHON", sys.executable)
-        App(title="RoomEQ", sidebar_title="RoomEQ", sections=[section("room-eq", "RoomEQ", ui.vstack([ui.text("RoomEQ configuration and review"), ui.code(json.dumps(self.ir()))]))]).run()
+        super().run()

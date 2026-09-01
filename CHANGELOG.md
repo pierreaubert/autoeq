@@ -1,15 +1,20 @@
-# 0.5.66
+# 0.5.67
 
 ## Package versions
 
-- `autoeq` 0.5.66
-- `roomeq-engine` 0.5.66
+- `autoeq` 0.5.67
+- `roomeq-engine` 0.5.67
 - `roomeq-quality` 0.5.59
 - `roomeq-workflow` 0.5.27
 - `roomeq-qa` 0.5.63
 
 ## Fixes
 
+- Preserve mixed-phase correction on measured channels whose full excess-phase FIR would
+  exceed the 0.5 dB phase-only magnitude limit by adaptively selecting the deepest
+  magnitude-safe correction, instead of dropping the FIR and leaving the channel IIR-only.
+- Prevent the Genelec 5.1.4 mixed-phase workflow from aborting on final routed crossover
+  underfill by retaining a nonzero magnitude-safe excess-phase correction on every channel.
 - Refresh RoomEQ channel `final_curve` and `eq_response` after selective
   correction-stage safety reversion, preventing reports from plotting rejected
   Hybrid/FIR responses against the deployed fallback DSP chain.

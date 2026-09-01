@@ -11,6 +11,9 @@
     }
   },
   "optimizer": {
+    "algorithm": "autoeq:cmaes",
+    "population": 21,
+    "max_iter": 500000,
     "max_freq": 400.0
   },
   "speakers": {

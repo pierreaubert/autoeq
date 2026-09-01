@@ -1,0 +1,18 @@
+{
+  "target_curve": "target-10db-downward-tilt.csv",
+  "system": {
+    "bass_management": {
+      "headroom_margin_db": 17.0
+    }
+  },
+  "optimizer": {
+    "processing_mode": "phase_linear",
+    "seed": 42,
+    "fir": {
+      "taps": 4096,
+      "phase": "kirkeby",
+      "correct_excess_phase": true,
+      "phase_smoothing": 0.167
+    }
+  }
+}

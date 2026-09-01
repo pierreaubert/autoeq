@@ -374,3 +374,48 @@ fn mixed_phase_with_phase_data_returns_optional_sidecar() {
             .any(|plugin| plugin.plugin_type == "convolution")
     );
 }
+
+#[test]
+fn mixed_phase_adapts_depth_to_preserve_phase_only_magnitude() {
+    let curve = curve(true);
+    let residual_phase_deg = Array1::from_iter(
+        (0..curve.freq.len()).map(|index| 170.0 * ((index as f64) * 1.618_033_988_75).sin()),
+    );
+    let config = crate::mixed_phase::MixedPhaseConfig {
+        max_fir_length_ms: 10.0,
+        pre_ringing_threshold_db: -30.0,
+        min_spatial_depth: 0.5,
+        phase_smoothing_octaves: 1.0 / 6.0,
+    };
+
+    let full_coefficients = crate::mixed_phase::generate_excess_phase_fir_with_depth(
+        &curve.freq,
+        &residual_phase_deg,
+        &config,
+        48_000.0,
+        None,
+    );
+    let full_deviation = max_phase_only_magnitude_deviation_db(
+        &full_coefficients,
+        &curve.freq,
+        &curve.spl,
+        48_000.0,
+    );
+    assert!(
+        full_deviation > MAX_PHASE_ONLY_MAGNITUDE_DEVIATION_DB,
+        "synthetic full-depth correction must exercise adaptation, deviation={full_deviation}"
+    );
+
+    let (_coefficients, applied_depth, deviation) = generate_magnitude_safe_excess_phase_fir(
+        &curve.freq,
+        &curve.spl,
+        &residual_phase_deg,
+        &config,
+        48_000.0,
+        None,
+    )
+    .expect("a partial phase correction should satisfy the magnitude contract");
+
+    assert!(applied_depth > 0.0 && applied_depth < 1.0);
+    assert!(deviation <= MAX_PHASE_ONLY_MAGNITUDE_DEVIATION_DB);
+}

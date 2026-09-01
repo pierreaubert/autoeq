@@ -19,6 +19,10 @@ use crate::channel_result::{
 use crate::channel_target::TargetContext;
 use crate::eq::{self, EqResources};
 
+const MAX_PHASE_ONLY_MAGNITUDE_DEVIATION_DB: f64 = 0.5;
+const PHASE_DEPTH_SEARCH_ITERATIONS: usize = 12;
+const MIN_MEANINGFUL_PHASE_DEPTH: f64 = 1.0 / (1_u64 << PHASE_DEPTH_SEARCH_ITERATIONS) as f64;
+
 /// Artifact-producing generic channel modes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FirChannelMode {
@@ -194,57 +198,32 @@ fn process_mixed_phase(mut request: FirChannelRequest<'_>) -> Result<ChannelProc
                     "  Mixed-phase: delay={:.2} ms, generating excess phase FIR...",
                     delay_ms
                 );
-                let coefficients = crate::mixed_phase::generate_excess_phase_fir_with_depth(
-                    &request.preprocessed.curve_for_optim.freq,
-                    &residual,
-                    &mixed_config,
-                    request.sample_rate,
-                    spatial_depth.as_ref(),
-                );
-                let response = crate::response::compute_fir_complex_response(
-                    &coefficients,
-                    &request.preprocessed.curve_for_optim.freq,
-                    request.sample_rate,
-                );
-                let passband_floor = request
-                    .preprocessed
-                    .curve_for_optim
-                    .spl
-                    .iter()
-                    .copied()
-                    .filter(|level| level.is_finite())
-                    .fold(f64::NEG_INFINITY, f64::max)
-                    - 30.0;
-                let max_magnitude_deviation_db = response
-                    .iter()
-                    .zip(&request.preprocessed.curve_for_optim.spl)
-                    .filter(|(_, level)| level.is_finite() && **level >= passband_floor)
-                    .map(|(response, _)| {
-                        let magnitude = response.norm();
-                        if magnitude.is_finite() && magnitude > 0.0 {
-                            (20.0 * magnitude.log10()).abs()
-                        } else {
-                            f64::INFINITY
-                        }
-                    })
-                    .fold(0.0_f64, f64::max);
-                debug!(
-                    "  Mixed-phase '{}': max passband magnitude deviation {:.3} dB",
-                    request.channel_name, max_magnitude_deviation_db
-                );
-                if max_magnitude_deviation_db > 0.5 {
-                    warn!(
-                        "  Mixed-phase FIR skipped for '{}': phase-only magnitude deviation {:.2} dB exceeds 0.50 dB",
-                        request.channel_name, max_magnitude_deviation_db
+                if let Some((coefficients, applied_depth, max_magnitude_deviation_db)) =
+                    generate_magnitude_safe_excess_phase_fir(
+                        &request.preprocessed.curve_for_optim.freq,
+                        &request.preprocessed.curve_for_optim.spl,
+                        &residual,
+                        &mixed_config,
+                        request.sample_rate,
+                        spatial_depth.as_ref(),
+                    )
+                {
+                    info!(
+                        "  Mixed-phase '{}': correction depth {:.3}, max passband magnitude deviation {:.3} dB",
+                        request.channel_name, applied_depth, max_magnitude_deviation_db
                     );
-                    None
-                } else {
                     let report = crate::mixed_phase::MixedPhaseCorrectionReport::from_residual(
                         delay_ms,
                         coefficients.len(),
                         &residual,
                     );
                     Some((coefficients, report))
+                } else {
+                    warn!(
+                        "  Mixed-phase FIR skipped for '{}': no non-zero phase-correction depth satisfies the {:.2} dB phase-only magnitude limit",
+                        request.channel_name, MAX_PHASE_ONLY_MAGNITUDE_DEVIATION_DB
+                    );
+                    None
                 }
             }
             Err(error) => {
@@ -280,6 +259,93 @@ fn process_mixed_phase(mut request: FirChannelRequest<'_>) -> Result<ChannelProc
         result.pre_score, result.post_score
     );
     Ok(result)
+}
+
+fn generate_magnitude_safe_excess_phase_fir(
+    frequencies: &Array1<f64>,
+    measurement_levels_db: &Array1<f64>,
+    residual_phase_deg: &Array1<f64>,
+    config: &crate::mixed_phase::MixedPhaseConfig,
+    sample_rate: f64,
+    spatial_depth: Option<&Array1<f64>>,
+) -> Option<(Vec<f64>, f64, f64)> {
+    let candidate = |depth: f64| {
+        let scaled_residual = residual_phase_deg.mapv(|phase| phase * depth);
+        let coefficients = crate::mixed_phase::generate_excess_phase_fir_with_depth(
+            frequencies,
+            &scaled_residual,
+            config,
+            sample_rate,
+            spatial_depth,
+        );
+        let deviation = max_phase_only_magnitude_deviation_db(
+            &coefficients,
+            frequencies,
+            measurement_levels_db,
+            sample_rate,
+        );
+        (coefficients, deviation)
+    };
+
+    let (full_coefficients, full_deviation) = candidate(1.0);
+    if full_deviation <= MAX_PHASE_ONLY_MAGNITUDE_DEVIATION_DB {
+        return Some((full_coefficients, 1.0, full_deviation));
+    }
+
+    debug!(
+        "  Full excess-phase correction deviates {:.3} dB; searching for a magnitude-safe depth",
+        full_deviation
+    );
+    let (zero_coefficients, zero_deviation) = candidate(0.0);
+    if zero_deviation > MAX_PHASE_ONLY_MAGNITUDE_DEVIATION_DB {
+        return None;
+    }
+
+    let mut lower_depth = 0.0;
+    let mut upper_depth = 1.0;
+    let mut best = (zero_coefficients, zero_deviation);
+    for _ in 0..PHASE_DEPTH_SEARCH_ITERATIONS {
+        let depth = (lower_depth + upper_depth) * 0.5;
+        let trial = candidate(depth);
+        if trial.1 <= MAX_PHASE_ONLY_MAGNITUDE_DEVIATION_DB {
+            lower_depth = depth;
+            best = trial;
+        } else {
+            upper_depth = depth;
+        }
+    }
+
+    (lower_depth >= MIN_MEANINGFUL_PHASE_DEPTH).then_some((best.0, lower_depth, best.1))
+}
+
+fn max_phase_only_magnitude_deviation_db(
+    coefficients: &[f64],
+    frequencies: &Array1<f64>,
+    measurement_levels_db: &Array1<f64>,
+    sample_rate: f64,
+) -> f64 {
+    let response =
+        crate::response::compute_fir_complex_response(coefficients, frequencies, sample_rate);
+    let passband_floor = measurement_levels_db
+        .iter()
+        .copied()
+        .filter(|level| level.is_finite())
+        .fold(f64::NEG_INFINITY, f64::max)
+        - 30.0;
+
+    response
+        .iter()
+        .zip(measurement_levels_db)
+        .filter(|(_, level)| level.is_finite() && **level >= passband_floor)
+        .map(|(response, _)| {
+            let magnitude = response.norm();
+            if magnitude.is_finite() && magnitude > 0.0 {
+                (20.0 * magnitude.log10()).abs()
+            } else {
+                f64::INFINITY
+            }
+        })
+        .fold(0.0_f64, f64::max)
 }
 
 fn spatial_depth(request: &FirChannelRequest<'_>) -> Option<Array1<f64>> {

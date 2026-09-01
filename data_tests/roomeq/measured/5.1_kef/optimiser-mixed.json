@@ -1,0 +1,23 @@
+{
+  "target_curve": "target-10db-downward-tilt.csv",
+  "system": {
+    "bass_management": {
+      "headroom_margin_db": 17.0
+    }
+  },
+  "optimizer": {
+    "processing_mode": "hybrid",
+    "seed": 42,
+    "mixed_config": {
+      "crossover_freq": 300.0,
+      "crossover_type": "LR24",
+      "fir_band": "low"
+    },
+    "fir": {
+      "taps": 4096,
+      "phase": "kirkeby",
+      "correct_excess_phase": true,
+      "phase_smoothing": 0.167
+    }
+  }
+}

@@ -5,7 +5,7 @@ LOG=warn
 cargo build --release --features cli --bin roomeq
 
 
-for scenario in 2.0_8361a 2.0_d3v 2.0_fidelia 2.0_t7v; do
+for scenario in 2.0_8361a 2.0_d3v 2.0_fidelia 2.0_t7v 5_0.genelec 5.1_kef 5.1.4_genelec; do
   SIN=$IN/$scenario;
   SOUT=$OUT/$scenario;
   rm -fr ${SOUT} && mkdir -p ${SOUT};

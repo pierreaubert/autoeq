@@ -29,7 +29,7 @@
   "optimizer": {
     "algorithm": "autoeq:cmaes",
     "population": 21,
-    "max_iter": 100000,
+    "max_iter": 500000,
     "loss_type": "flat",
     "min_freq": 20.0,
     "max_freq": 16000.0,

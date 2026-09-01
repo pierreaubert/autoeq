@@ -9,7 +9,7 @@ from .commands import RoomEqCommand
 from .document import RoomEqDocument
 from .review import ResultReview
 from .schema import SchemaEditor
-from gpui_toolkit import App, section, ui, charts
+from gpui_toolkit import App, Event, SessionContext, section, ui, charts
 from gpui_toolkit.miniapp import MiniAppConfig
 
 class RoomEqGuiApp(App):
@@ -18,6 +18,9 @@ class RoomEqGuiApp(App):
         self.document = RoomEqDocument.open(input_schema, config) if config else RoomEqDocument.create(input_schema)
         self.result = json.loads(result.read_text()) if result else None
         self.schema_warning: str | None = None; self.logs: list[str] = []; self.step = 0
+        self.import_dialog_open = False
+        self.import_path = ""
+        self.import_error: str | None = None
         self.preferences: dict[str, Any] = {"recent_configs": [], "recent_results": [], "selected_binary": str(command.binary) if command.binary else None, "review": {"smoothing": "1/6 octave", "auto_scale": False, "trend": False}}
         try:
             from gpui_toolkit import StateStore
@@ -44,6 +47,34 @@ class RoomEqGuiApp(App):
     def remember(self, path: Path, kind: str) -> None:
         key = f"recent_{kind}"; values = [str(path), *[item for item in self.preferences.get(key, []) if item != str(path)]]
         self.preferences[key] = values[:10]
+    def _refresh(self, context: SessionContext) -> None:
+        self.sections = self._sections()
+        context.snapshot(self.to_spec())
+    def on_action(self, event: Event, context: SessionContext) -> None:
+        payload = event.payload or {}
+        if event.action == "open-import-dialog":
+            self.import_dialog_open = True
+            self.import_path = ""
+            self.import_error = None
+        elif event.action in {"cancel-import", "close-import-dialog"}:
+            self.import_dialog_open = False
+            self.import_error = None
+        elif event.action == "select-import-path":
+            self.import_path = str(payload.get("value", ""))
+        elif event.action == "load-import-config":
+            try:
+                path = Path(self.import_path).expanduser()
+                if not path.is_file(): raise ValueError("Choose an existing RoomEQ JSON configuration.")
+                self.document = RoomEqDocument.open(self.input_schema, path)
+                self.remember(path, "configs")
+                self.import_dialog_open = False
+                self.import_error = None
+            except (OSError, ValueError, json.JSONDecodeError) as error:
+                self.import_error = str(error)
+        else:
+            return
+        context.acknowledge(event)
+        self._refresh(context)
     def validate(self) -> dict[str, list[str]]:
         if self.document.dirty or not self.document.path: raise ValueError("Save the configuration before validation.")
         errors = self.document.editor.errors()
@@ -82,8 +113,36 @@ class RoomEqGuiApp(App):
             review_nodes.append(ui.table(id="review-metrics", headers=["Metric", "Value"], rows=[[key, value] for key, value in review.overview().items() if not isinstance(value, (dict, list))]))
             for series in review.curves()[:8]: review_nodes.append(charts.line("chart" + series.id.replace("/", "-"), series.x, series.y, title=series.label, x_label="Hz", y_label="dB"))
         else: review_nodes.append(ui.empty_state("No result loaded", description="Open a DspChainOutput or run optimization to review it."))
+        workflow_children = [
+            ui.stepper(id="workflow-stepper", steps=["Configure", "Validate", "Optimize", "Review"], active=self.step, action="step"),
+            ui.hstack([ui.button("Import…", id="import-config", action="open-import-dialog"), ui.button("Save", id="save", action="save"), ui.button("Validate", id="validate", action="validate")]),
+            ui.accordion(id="config-form", items=[("configuration", "Configuration", controls)], expanded=["configuration"]),
+        ]
+        if self.import_dialog_open:
+            dialog_content = [
+                ui.text("Choose an existing RoomEQ JSON configuration. Loading it replaces the current editor contents; the file itself is not modified."),
+                ui.path_input(
+                    id="import-config-path",
+                    label="Configuration file",
+                    value=self.import_path,
+                    mode="open_file",
+                    filters=[("RoomEQ JSON", ["json"])],
+                    must_exist=True,
+                    action="select-import-path",
+                    commit_action="select-import-path",
+                    recent_values=self.preferences.get("recent_configs", []),
+                    validation=None if self.import_error is None else {"severity": "error", "message": self.import_error},
+                ),
+            ]
+            workflow_children.append(ui.dialog(
+                id="import-config-dialog",
+                title="Import RoomEQ configuration",
+                content=dialog_content,
+                footer=[ui.button("Cancel", id="cancel-import", action="cancel-import"), ui.button("Load configuration", id="load-import-config", action="load-import-config")],
+                close_action="close-import-dialog",
+            ))
         return [
-            section("workflow", "Configure", ui.vstack([ui.stepper(id="workflow-stepper", steps=["Configure", "Validate", "Optimize", "Review"], active=self.step, action="step"), ui.accordion(id="config-form", items=[("configuration", "Configuration", controls)], expanded=["configuration"]), ui.button("Save", id="save", action="save"), ui.button("Validate", id="validate", action="validate")])),
+            section("workflow", "Configure", ui.vstack(workflow_children)),
             section("review", "Review", ui.vstack(review_nodes)),
         ]
     def ir(self) -> dict[str, Any]: return self.to_spec()

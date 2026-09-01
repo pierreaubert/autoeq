@@ -1225,23 +1225,73 @@
     }
   },
   "optimizer": {
-    "processing_mode": "low_latency",
+    "algorithm": "autoeq:cmaes",
+    "population": 21,
+    "max_iter": 100000,
     "loss_type": "flat",
-    "algorithm": "autoeq:de",
+    "min_freq": 20.0,
+    "max_freq": 16000.0,
     "num_filters": 7,
     "min_q": 0.5,
-    "max_q": 10.0,
+    "max_q": 3.0,
     "min_db": -12.0,
-    "max_db": 12.0,
-    "min_freq": 20.0,
-    "max_freq": 12000.0,
-    "max_iter": 1000000,
-    "population": 300,
-    "peq_model": "pk",
-    "refine": true,
-    "local_algo": "cobyla",
+    "max_db": 4.0,
     "psychoacoustic": true,
-    "asymmetric_loss": true
+    "psychoacoustic_smoothing": {
+      "low_freq_n": 48,
+      "high_freq_n": 6,
+      "low_freq": 100.0,
+      "high_freq": 1000.0
+    },
+    "asymmetric_loss": true,
+    "asymmetric_loss_config": {
+      "peak_weight": 2.0,
+      "dip_weight": 1.0,
+      "bass_peak_weight": 5.0,
+      "bass_dip_weight": 1.0,
+      "transition_freq": 300.0
+    },
+    "high_frequency_correction": {
+      "enabled": true,
+      "start_hz": 1600.0,
+      "extra_deadband_db": 0.75,
+      "smoothing_n": 3,
+      "max_q": 2.0
+    },
+    "excursion_protection": {
+      "enabled": true,
+      "auto_detect_f3": true,
+      "f3_reference_min_hz": 40.0,
+      "f3_reference_max_hz": 200.0,
+      "filter_type": "linkwitzriley",
+      "filter_order": 4,
+      "margin_octaves": 0.25
+    },
+    "schroeder_split": {
+      "enabled": true,
+      "schroeder_freq": 300.0,
+      "low_freq_config": {
+        "min_q": 0.5,
+        "max_q": 5.0,
+        "allow_boost": false
+      },
+      "high_freq_config": {
+        "max_q": 1.0,
+        "shelving_only": false
+      }
+    },
+    "phase_alignment": {
+      "enabled": true,
+      "min_freq": 30.0,
+      "max_freq": 120.0,
+      "optimize_polarity": true,
+      "max_delay_ms": 20.0
+    },
+    "inter_channel_timbre_matching": {
+      "enabled": true,
+      "reference_channel": "L",
+      "min_improvement_db": 0.05
+    }
   },
   "recording_config": {
     "playback_device_name": "Fireface UFX+ (24006088)",

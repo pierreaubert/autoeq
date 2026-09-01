@@ -296,7 +296,7 @@ pub(super) fn apply_final_correction_safety_gate(
                     sidecar_dir,
                 )
             });
-            if let Some((chain, curve, stages, report)) = stage_revert {
+            if let Some((mut chain, curve, stages, report)) = stage_revert {
                 channel.final_curve = curve;
                 // `pre_score`/`post_score` are topology-specific flat-loss
                 // values. Do not replace one side with the safety gate's
@@ -310,6 +310,7 @@ pub(super) fn apply_final_correction_safety_gate(
                 if stages.contains(&CorrectionStage::Fir) {
                     channel.fir_coeffs = None;
                 }
+                sync_chain_reported_curve(&mut chain, &channel.final_curve);
                 result.channels.insert(name.clone(), chain);
                 let stage_names: Vec<_> = stages
                     .iter()
@@ -1691,6 +1692,15 @@ fn revert_regressed_correction_stages(
     (!reverted.is_empty()).then_some((active_chain, active_curve, reverted, active_report))
 }
 
+fn sync_chain_reported_curve(chain: &mut ChannelDspChain, final_curve: &roomeq_model::Curve) {
+    let final_data: roomeq_model::CurveData = final_curve.into();
+    chain.eq_response = chain
+        .initial_curve
+        .as_ref()
+        .map(|initial| roomeq_engine::output::compute_eq_response(initial, &final_data));
+    chain.final_curve = Some(final_data);
+}
+
 fn correction_stages(chain: &ChannelDspChain) -> BTreeSet<CorrectionStage> {
     let mut stages: BTreeSet<_> = chain
         .plugins
@@ -1962,6 +1972,31 @@ mod tests {
     use roomeq_engine::quality::CorrectionDecision;
     use roomeq_model::{CtcConfig, RoomConfig, SystemConfig, SystemModel};
     use std::collections::HashMap;
+
+    #[test]
+    fn sync_chain_reported_curve_replaces_stale_eq_response() {
+        let mut result = single_channel_room_result("left");
+        let initial = result.channel_results["left"].initial_curve.clone();
+        let mut deployed = initial.clone();
+        deployed.spl.mapv_inplace(|spl| spl - 1.25);
+
+        let chain = result.channels.get_mut("left").unwrap();
+        chain.initial_curve = Some((&initial).into());
+        chain.eq_response = chain.initial_curve.clone();
+        sync_chain_reported_curve(chain, &deployed);
+
+        let final_curve = chain.final_curve.as_ref().unwrap();
+        assert_eq!(final_curve.spl, deployed.spl.to_vec());
+        assert!(
+            chain
+                .eq_response
+                .as_ref()
+                .unwrap()
+                .spl
+                .iter()
+                .all(|gain| (*gain + 1.25).abs() < 1.0e-12)
+        );
+    }
 
     #[test]
     fn final_chain_boost_limiter_scales_only_positive_eq_gains() {

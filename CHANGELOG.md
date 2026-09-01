@@ -10,6 +10,9 @@
 
 ## Fixes
 
+- Refresh RoomEQ channel `final_curve` and `eq_response` after selective
+  correction-stage safety reversion, preventing reports from plotting rejected
+  Hybrid/FIR responses against the deployed fallback DSP chain.
 - Reject materially changed channel corrections when the configured topology
   objective regresses, even if the presentation-only target-weighted RMS metric
   improves; acoustically identical realizations may still ignore stale legacy

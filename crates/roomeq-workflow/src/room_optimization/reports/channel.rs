@@ -143,7 +143,12 @@ pub(in super::super) fn compute_and_correct_icd(
             let mut group_names: Vec<_> = group.curves.keys().cloned().collect();
             group_names.sort();
             let profile = channel_matching_profile_for_role_key(group.role_key, threshold);
-            let matching_band = profile.correction.matching_band(f3);
+            let correction_profile =
+                roomeq_engine::spectral_align::constrain_channel_matching_profile_to_passbands(
+                    profile.correction,
+                    &group.curves,
+                );
+            let matching_band = correction_profile.matching_band(f3);
 
             let group_icd =
                 roomeq_engine::spectral_align::compute_inter_channel_deviation(&group.curves, f3);
@@ -169,8 +174,8 @@ pub(in super::super) fn compute_and_correct_icd(
                 matching_band.0,
                 matching_band.1,
                 profile.rms_threshold_db,
-                profile.correction.peak_tolerance_db,
-                profile.correction.correction_weight,
+                correction_profile.peak_tolerance_db,
+                correction_profile.correction_weight,
                 max_filters,
             );
 
@@ -180,7 +185,7 @@ pub(in super::super) fn compute_and_correct_icd(
                     f3,
                     max_filters,
                     sample_rate,
-                    profile.correction,
+                    correction_profile,
                 );
 
             for correction in &corrections {
@@ -313,6 +318,39 @@ mod tests {
         assert!((profile.rms_threshold_db - 2.0).abs() < 1e-9);
         assert_eq!(profile.correction.min_freq_hz, 80.0);
         assert_eq!(profile.correction.max_freq_hz, 16_000.0);
+    }
+
+    #[test]
+    fn channel_matching_group_stops_at_narrowest_measured_passband() {
+        let full_range = small_curve();
+        let mut rolled_off = small_curve();
+        for (frequency, level) in rolled_off.freq.iter().zip(rolled_off.spl.iter_mut()) {
+            if *frequency > 9_000.0 {
+                *level -= 35.0;
+            }
+        }
+        let profile = ChannelMatchingCorrectionProfile {
+            max_freq_hz: 12_000.0,
+            ..ChannelMatchingCorrectionProfile::default()
+        };
+
+        let constrained =
+            roomeq_engine::spectral_align::constrain_channel_matching_profile_to_passbands(
+            profile,
+            &HashMap::from([
+                ("BL".to_string(), rolled_off),
+                ("BR".to_string(), full_range.clone()),
+            ]),
+        );
+        assert!(constrained.max_freq_hz < 12_000.0);
+        assert!(constrained.max_freq_hz > 6_000.0);
+
+        let unchanged =
+            roomeq_engine::spectral_align::constrain_channel_matching_profile_to_passbands(
+            profile,
+            &HashMap::from([("L".to_string(), full_range)]),
+        );
+        assert_eq!(unchanged.max_freq_hz, 12_000.0);
     }
 
     #[test]

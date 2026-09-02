@@ -441,12 +441,18 @@ pub(crate) fn reconstruct_deployed_source_curves(
                     target_underfill_db,
                 )
             {
-                return Err(AutoeqError::OptimizationFailed {
-                    message: format!(
-                        "final routed target underfill for '{role}' is {target_underfill_db:.3} dB at {crossover_hz:.1} Hz (limit {:.1} dB)",
-                        roomeq_engine::topology::MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB
-                    ),
-                });
+                // Target mismatch is a correction-quality limitation, not a
+                // routing-safety failure. Deep measured room nulls can remain
+                // after bounded EQ even when the main/sub crossover sums
+                // safely. Keep the truthful deployed curve and surface the
+                // residual instead of suppressing the complete DSP artifact.
+                log::warn!(
+                    "  Final routed target underfill for '{}' is {:.3} dB at {:.1} Hz (quality target {:.1} dB)",
+                    role,
+                    target_underfill_db,
+                    crossover_hz,
+                    roomeq_engine::topology::MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB,
+                );
             }
         }
             Ok((role, deployed))
@@ -2058,9 +2064,57 @@ fn optimize_home_cinema_with_sub(
         let eq_resp = response::compute_peq_complex_response(&filters, &sub_post.freq, sample_rate);
         let sub_after_eq = response::apply_complex_response(&sub_post, &eq_resp);
         let post = compute_flat_loss(&sub_after_eq, sub_min_score, bass_route_upper_hz);
+        let routed_common_sub_after_eq =
+            response::apply_complex_response(&routed_common_sub_post, &eq_resp);
+        let routed_underfill = bass_routing_graph.as_ref().and_then(|graph| {
+            main_roles
+                .iter()
+                .filter_map(|role| {
+                    let group_id = engine_home_cinema::group_id_for_role(
+                        engine_home_cinema::role_for_channel(role),
+                    );
+                    let role_xover_freq = group_results_by_id
+                        .get(group_id)
+                        .and_then(|group| group.selected_crossover_hz)
+                        .unwrap_or(final_xo_freq);
+                    let mut main = main_post_curves[role].clone();
+                    let mut bass = engine_bass_management::predict_bass_source_curve_from_routes(
+                        &routed_common_sub_after_eq,
+                        optimizer_source_pre_route_transfers.get(role),
+                        graph,
+                        role,
+                        sample_rate,
+                    )?;
+                    if let Some(filters) = post_eq_filters
+                        .get(role)
+                        .filter(|filters| !filters.is_empty())
+                    {
+                        let response = response::compute_peq_complex_response(
+                            filters,
+                            &main.freq,
+                            sample_rate,
+                        );
+                        main = response::apply_complex_response(&main, &response);
+                        bass = response::apply_complex_response(&bass, &response);
+                    }
+                    let combined = complex_sum_mains(&[&main, &bass]);
+                    roomeq_engine::topology::bass_management_crossover_cancellation_underfill_db(
+                        &main,
+                        &bass,
+                        &combined,
+                        role_xover_freq,
+                    )
+                    .map(|underfill_db| (role.as_str(), underfill_db))
+                })
+                .max_by(|left, right| left.1.total_cmp(&right.1))
+        });
+        let routed_underfill_accepted =
+            routed_underfill.as_ref().is_none_or(|(_, underfill_db)| {
+                roomeq_engine::topology::bass_management_underfill_is_acceptable(*underfill_db)
+            });
         if sub_post_eq_band_empty {
             post_eq_filters.insert(sub_role.clone(), Vec::new());
-        } else if post < pre {
+        } else if post < pre && routed_underfill_accepted {
             optimizer_evidence_by_channel
                 .entry(sub_role.clone())
                 .or_default()
@@ -2074,11 +2128,22 @@ fn optimize_home_cinema_with_sub(
                 .entry(sub_role.clone())
                 .or_default()
                 .append(&mut post_eq_result.optimizer_evidence);
-            log::warn!(
-                "  Sub Post-EQ discarded: score regressed from {:.4} to {:.4}",
-                pre,
-                post
-            );
+            if let Some((role, underfill_db)) =
+                routed_underfill.filter(|_| !routed_underfill_accepted)
+            {
+                log::warn!(
+                    "  Sub Post-EQ discarded: routed crossover underfill for '{}' is {:.3} dB",
+                    role,
+                    underfill_db,
+                );
+            } else {
+                log::warn!(
+                    "  Sub Post-EQ discarded: score regressed from {:.4} to {:.4}",
+                    pre,
+                    post
+                );
+            }
+            post_eq_filters.insert(sub_role.clone(), Vec::new());
         }
     }
 
@@ -2871,6 +2936,39 @@ mod post_dsp_level_tests {
                 .to_string()
                 .contains("final routed crossover underfill")
         );
+    }
+
+    #[test]
+    fn deployed_source_refresh_keeps_safe_route_with_large_target_residual() {
+        let initial = curve(60.0);
+        let mut main = chain("L", initial.clone(), Some(initial.clone()));
+        main.target_curve = Some(CurveData::from(&curve(90.0)));
+        let graph = BassManagementRoutingGraph {
+            physical_sub_output: "LFE".to_string(),
+            input_channels: vec!["L".to_string(), "LFE".to_string()],
+            output_channels: vec!["L".to_string(), "LFE".to_string()],
+            routes: vec![low_route("L", 0)],
+            matrix: None,
+            input_trim_db: HashMap::new(),
+            advisories: Vec::new(),
+        };
+        let channels = HashMap::from([
+            ("L".to_string(), main),
+            (
+                "LFE".to_string(),
+                chain("LFE", curve(20.0), Some(curve(20.0))),
+            ),
+        ]);
+
+        let deployed = reconstruct_deployed_source_curves(
+            &channels,
+            &HashMap::new(),
+            &graph,
+            48_000.0,
+            std::path::Path::new("."),
+        )
+        .expect("target residual must not suppress a cancellation-safe routed artifact");
+        assert!(deployed.contains_key("L"));
     }
 
     #[test]

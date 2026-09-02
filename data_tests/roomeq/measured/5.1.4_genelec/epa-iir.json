@@ -1,0 +1,13 @@
+{
+  "target_curve": "target-10db-downward-tilt.csv",
+  "system": {
+    "bass_management": {
+      "headroom_margin_db": 17.0
+    }
+  },
+  "optimizer": {
+    "loss_type": "epa",
+    "processing_mode": "low_latency",
+    "seed": 42
+  }
+}

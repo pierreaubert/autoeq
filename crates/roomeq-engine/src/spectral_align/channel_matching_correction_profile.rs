@@ -60,6 +60,27 @@ impl ChannelMatchingCorrectionProfile {
     }
 }
 
+pub fn reliable_upper_passband_hz(curve: &autoeq_core::Curve) -> Option<f64> {
+    let upper_hz = roomeq_analysis::response_metrics::detect_passband_and_mean(curve)
+        .0?
+        .1;
+    (upper_hz.is_finite() && upper_hz > 0.0).then_some(upper_hz)
+}
+
+pub fn constrain_channel_matching_profile_to_passbands(
+    mut profile: ChannelMatchingCorrectionProfile,
+    curves: &HashMap<String, autoeq_core::Curve>,
+) -> ChannelMatchingCorrectionProfile {
+    if let Some(reliable_upper_hz) = curves
+        .values()
+        .filter_map(reliable_upper_passband_hz)
+        .reduce(f64::min)
+    {
+        profile.max_freq_hz = profile.max_freq_hz.min(reliable_upper_hz);
+    }
+    profile
+}
+
 pub fn correct_inter_channel_deviation_with_profile(
     final_curves: &HashMap<String, crate::Curve>,
     f3_hz: f64,
@@ -67,7 +88,7 @@ pub fn correct_inter_channel_deviation_with_profile(
     sample_rate: f64,
     profile: ChannelMatchingCorrectionProfile,
 ) -> Vec<ChannelMatchingResult> {
-    let profile = profile.sanitized();
+    let profile = constrain_channel_matching_profile_to_passbands(profile.sanitized(), final_curves);
     if final_curves.len() <= 1 || max_filters == 0 {
         return Vec::new();
     }

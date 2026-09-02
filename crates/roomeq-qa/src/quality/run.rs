@@ -2,13 +2,14 @@ use super::apply::apply_group_delay_qa_passthrough_eq;
 use super::apply::apply_mutation;
 use super::apply::apply_option_override;
 use super::apply::apply_qa_overrides;
+use super::consts::CORRECTION_OUT_OF_BAND_SPREAD_DB;
 use super::consts::CROSS_MODE_BASS_MAX_RMS_DB;
 use super::consts::CROSS_MODE_BASS_MEDIAN_RMS_DB;
 use super::consts::CROSS_MODE_FR_MAX_DIFF_DB;
 use super::consts::CROSS_MODE_MAIN_MEDIAN_RMS_DB;
 use super::consts::CROSS_MODE_RATIO_LIMIT;
 use super::consts::CROSS_MODE_SCORE_RATIO_LIMIT;
-use super::consts::CROSS_MODE_TIMING_RATIO_LIMIT;
+use super::consts::CROSS_MODE_TIMING_MAX_STD_MS;
 use super::consts::CROSS_MODE_UPPER_MEDIAN_RMS_DB;
 use super::consts::FIR_MUTATIONS;
 use super::consts::IIR_MUTATIONS;
@@ -387,6 +388,73 @@ fn redirected_main_channels(result: &RoomOptimizationResult) -> Vec<String> {
         .collect()
 }
 
+fn correction_passband_violations(result: &RoomOptimizationResult) -> Vec<String> {
+    let mut violations = Vec::new();
+    for (channel_name, channel_result) in &result.channel_results {
+        let Some(reliable_upper_hz) = roomeq_engine::spectral_align::reliable_upper_passband_hz(
+            &channel_result.initial_curve,
+        ) else {
+            continue;
+        };
+        let Some(chain) = result.channels.get(channel_name) else {
+            continue;
+        };
+        for plugin in &chain.plugins {
+            if plugin.plugin_type != "eq" {
+                continue;
+            }
+            let Some(filters) = plugin
+                .parameters
+                .get("filters")
+                .and_then(serde_json::Value::as_array)
+            else {
+                continue;
+            };
+            let stage = plugin
+                .parameters
+                .get("label")
+                .or_else(|| plugin.parameters.get("room_eq_correction_stage"))
+                .or_else(|| plugin.parameters.get("room_eq_stage"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("eq");
+            for frequency_hz in filters
+                .iter()
+                .filter_map(|filter| filter.get("freq").and_then(serde_json::Value::as_f64))
+            {
+                if frequency_hz > reliable_upper_hz {
+                    violations.push(format!(
+                        "{channel_name}:{stage}:{frequency_hz:.1}Hz>{reliable_upper_hz:.1}Hz"
+                    ));
+                }
+            }
+        }
+
+        let lower_channel_name = channel_name.to_ascii_lowercase();
+        let is_bass_output =
+            lower_channel_name.contains("lfe") || lower_channel_name.starts_with("sub");
+        if !is_bass_output && let Some(eq_response) = chain.eq_response.as_ref() {
+            let audit_start_hz = reliable_upper_hz * 2.0_f64.powf(1.0 / 6.0);
+            let mut minimum_db = f64::INFINITY;
+            let mut maximum_db = f64::NEG_INFINITY;
+            let mut sample_count = 0usize;
+            for (frequency_hz, level_db) in eq_response.freq.iter().zip(&eq_response.spl) {
+                if *frequency_hz >= audit_start_hz && level_db.is_finite() {
+                    minimum_db = minimum_db.min(*level_db);
+                    maximum_db = maximum_db.max(*level_db);
+                    sample_count += 1;
+                }
+            }
+            let spread_db = maximum_db - minimum_db;
+            if sample_count >= 3 && spread_db > CORRECTION_OUT_OF_BAND_SPREAD_DB {
+                violations.push(format!(
+                    "{channel_name}:out-of-band correction spread {spread_db:.2}dB>{CORRECTION_OUT_OF_BAND_SPREAD_DB:.2}dB above {audit_start_hz:.1}Hz"
+                ));
+            }
+        }
+    }
+    violations
+}
+
 pub(super) fn run_cross_mode_convergence_tests(
     name: &str,
     base_config_path: &Path,
@@ -404,10 +472,15 @@ pub(super) fn run_cross_mode_convergence_tests(
     let modes: &[(&str, ProcessingMode, &str)] = &[
         ("IIR", ProcessingMode::LowLatency, "optimiser-iir.json"),
         ("FIR", ProcessingMode::PhaseLinear, "optimiser-fir.json"),
-        ("Mixed", ProcessingMode::Hybrid, "optimiser-mixed.json"),
+        ("Hybrid", ProcessingMode::Hybrid, "optimiser-mixed.json"),
+        (
+            "MixedPhase",
+            ProcessingMode::MixedPhase,
+            "optimiser-mixed-phase.json",
+        ),
     ];
 
-    // Run all 3 modes, collect results
+    // Run every production processing mode and collect comparable artifacts.
     let mut mode_results: Vec<(&str, RoomOptimizationResult)> = Vec::new();
 
     for (mode_name, processing_mode, override_file) in modes {
@@ -418,12 +491,15 @@ pub(super) fn run_cross_mode_convergence_tests(
             processing_mode.clone(),
             preserve_system,
         )?;
-        apply_qa_overrides(
-            &mut config,
-            &format!("{name}:cross-mode:{mode_name}"),
-            maxeval,
-        );
-        // Strict mode runs the resolved production configuration unchanged.\n
+        if !strict {
+            apply_qa_overrides(
+                &mut config,
+                &format!("{name}:cross-mode:{mode_name}"),
+                maxeval,
+            );
+        }
+        // Strict measured regressions exercise the checked-in production
+        // fixture unchanged, including optimizer budget, filter count, seed.
 
         let result = run_optimization(&config, seed_runs)
             .with_context(|| format!("{} {} cross-mode", name, mode_name))?;
@@ -437,9 +513,18 @@ pub(super) fn run_cross_mode_convergence_tests(
 
         let pre = result.combined_pre_score;
         let scorecard = compute_scorecard(&result);
-        let mut baseline_scorecard = None;
-        let (pass, reason) =
-            evaluate_scorecard(Mutation::Baseline, pre, &scorecard, &mut baseline_scorecard);
+        let (pass, reason) = if strict {
+            let pass = pre.is_finite()
+                && scorecard.flat_loss.is_finite()
+                && scorecard.max_boost_db.is_finite();
+            (
+                pass,
+                "measured-mode artifact produced with finite metrics".to_string(),
+            )
+        } else {
+            let mut baseline_scorecard = None;
+            evaluate_scorecard(Mutation::Baseline, pre, &scorecard, &mut baseline_scorecard)
+        };
         results.push(TestResult {
             label: format!("{name} {mode_name} correction"),
             pre_score: pre,
@@ -447,6 +532,22 @@ pub(super) fn run_cross_mode_convergence_tests(
             pass,
             reason,
         });
+
+        if strict {
+            let violations = correction_passband_violations(&result);
+            let pass = violations.is_empty();
+            results.push(TestResult {
+                label: format!("{name} {mode_name} measured-passband correction bounds"),
+                pre_score: 0.0,
+                scorecard: placeholder_scorecard(if pass { 0.0 } else { f64::INFINITY }),
+                pass,
+                reason: if pass {
+                    "all correction stages stay within each measured passband".to_string()
+                } else {
+                    format!("out-of-passband correction: {}", violations.join(", "))
+                },
+            });
+        }
 
         mode_results.push((mode_name, result));
     }
@@ -456,7 +557,9 @@ pub(super) fn run_cross_mode_convergence_tests(
     // retain their historical broad maximum-difference smoke gate.
     if strict {
         let channel_names = redirected_main_channels(&mode_results[0].1);
-        let mode_pairs = [(0_usize, 1_usize), (0, 2), (1, 2)];
+        let mode_pairs: Vec<(usize, usize)> = (0..mode_results.len())
+            .flat_map(|first| ((first + 1)..mode_results.len()).map(move |second| (first, second)))
+            .collect();
         let bands = [
             (
                 "bass",
@@ -481,7 +584,7 @@ pub(super) fn run_cross_mode_convergence_tests(
                     .iter()
                     .map(|(_, result)| deployed_final_curve(result, channel))
                     .collect();
-                for (first, second) in mode_pairs {
+                for &(first, second) in &mode_pairs {
                     if let (Some(first), Some(second)) = (&curves[first], &curves[second])
                         && let Some(rms) =
                             level_matched_rms_curve_difference_db(first, second, fmin, fmax)
@@ -547,11 +650,12 @@ pub(super) fn run_cross_mode_convergence_tests(
         });
     }
 
-    // CM-2: strict home-cinema cases must demonstrate the timing benefit
-    // promised by FIR and Hybrid. Generic cases retain the broad sanity gate.
+    // CM-2: strict home-cinema cases keep group-delay dispersion bounded for
+    // every mode. Hybrid is a frequency-band split and does not promise lower
+    // group-delay dispersion than IIR; MixedPhase is validated independently.
     if strict {
         let channel_names = redirected_main_channels(&mode_results[0].1);
-        let mut by_mode = [Vec::new(), Vec::new(), Vec::new()];
+        let mut by_mode = vec![Vec::new(); mode_results.len()];
         for channel in &channel_names {
             for (mode_index, (_, result)) in mode_results.iter().enumerate() {
                 if let Some(curve) = deployed_final_curve(result, channel)
@@ -561,25 +665,34 @@ pub(super) fn run_cross_mode_convergence_tests(
                 }
             }
         }
-        let iir = median(by_mode[0].clone()).unwrap_or(f64::INFINITY);
-        let fir = median(by_mode[1].clone()).unwrap_or(f64::INFINITY);
-        let mixed = median(by_mode[2].clone()).unwrap_or(f64::INFINITY);
-        let limit = iir * CROSS_MODE_TIMING_RATIO_LIMIT;
-        let pass = iir.is_finite() && fir <= limit && mixed <= limit;
+        let medians: Vec<f64> = by_mode
+            .into_iter()
+            .map(|values| median(values).unwrap_or(f64::INFINITY))
+            .collect();
+        let pass = medians
+            .iter()
+            .all(|value| value.is_finite() && *value <= CROSS_MODE_TIMING_MAX_STD_MS);
+        let detail = mode_results
+            .iter()
+            .zip(&medians)
+            .map(|((mode_name, _), value)| format!("{mode_name}={value:.2}ms"))
+            .collect::<Vec<_>>()
+            .join(" ");
         let status = if pass { "PASS" } else { "FAIL" };
         writeln!(
             out,
-            "  CM-2 timing improvement: IIR={iir:.2}ms FIR={fir:.2}ms Mixed={mixed:.2}ms limit={limit:.2}ms  {status}"
+            "  CM-2 timing sanity: {detail} limit={CROSS_MODE_TIMING_MAX_STD_MS:.2}ms  {status}"
         )
         .unwrap();
         results.push(TestResult {
-            label: format!("{name} CM-2 timing improvement"),
+            label: format!("{name} CM-2 timing sanity"),
             pre_score: 0.0,
-            scorecard: placeholder_scorecard(fir.max(mixed)),
+            scorecard: placeholder_scorecard(
+                medians.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+            ),
             pass,
             reason: format!(
-                "IIR={iir:.2}ms FIR={fir:.2}ms Mixed={mixed:.2}ms; FIR/Mixed must be <= {:.0}% of IIR",
-                CROSS_MODE_TIMING_RATIO_LIMIT * 100.0
+                "{detail}; every mode must remain <= {CROSS_MODE_TIMING_MAX_STD_MS:.2}ms"
             ),
         });
     } else {

@@ -346,6 +346,10 @@ impl ScenarioRegistry {
                     "cross_mode" => {
                         matches!(case.kind, QualityCaseKind::CrossModeConvergence)
                     }
+                    "functional_artifact" => {
+                        matches!(case.kind, QualityCaseKind::CrossModeConvergence)
+                            && case.strict_cross_mode
+                    }
                     "option_effect" => matches!(case.kind, QualityCaseKind::OptionEffect),
                     option => {
                         matches!(case.kind, QualityCaseKind::OptionEffect)

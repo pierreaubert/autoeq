@@ -275,6 +275,7 @@ qa-roomeq-contract-pr maxeval="2000":
 	cargo test --release -p roomeq-qa quality_maxeval --lib
 	cargo test --release -p roomeq-qa quality_seed_runs --lib
 	cargo run --features qa --bin roomeq-qa-quality --release -- --case "Cross-Mode measured Genelec 5.1.4" --jobs 1 --maxeval {{maxeval}} --seed-runs 1
+	cargo run --features qa --bin roomeq-qa-quality --release -- --case "Cross-Mode measured KEF 5.1" --jobs 1 --maxeval {{maxeval}} --seed-runs 1
 	python3 -m unittest scripts.test_check_roomeq_qa_reachability
 
 [group('qa-roomeq')]

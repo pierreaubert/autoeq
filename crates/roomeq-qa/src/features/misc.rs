@@ -95,12 +95,12 @@ mod tests {
     fn recordings() -> Vec<(String, PathBuf)> {
         vec![
             (
-                "2_0_fidelia".to_string(),
-                PathBuf::from("2_0_fidelia/recordings.json"),
+                "2.0_fidelia".to_string(),
+                PathBuf::from("2.0_fidelia/recordings.json"),
             ),
             (
-                "5_1_kef".to_string(),
-                PathBuf::from("5_1_kef/recordings.json"),
+                "5.1_kef".to_string(),
+                PathBuf::from("5.1_kef/recordings.json"),
             ),
         ]
     }
@@ -108,9 +108,9 @@ mod tests {
     #[test]
     fn selecting_a_scenario_returns_only_that_recording() {
         let selected =
-            select_recordings(recordings(), Some("5_1_kef"), Path::new("measured")).unwrap();
+            select_recordings(recordings(), Some("5.1_kef"), Path::new("measured")).unwrap();
         assert_eq!(selected.len(), 1);
-        assert_eq!(selected[0].0, "5_1_kef");
+        assert_eq!(selected[0].0, "5.1_kef");
     }
 
     #[test]
@@ -119,6 +119,6 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("Recording 'missing' not found"));
-        assert!(error.contains("2_0_fidelia, 5_1_kef"));
+        assert!(error.contains("2.0_fidelia, 5.1_kef"));
     }
 }

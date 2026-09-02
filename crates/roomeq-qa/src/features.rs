@@ -13,7 +13,7 @@
 //! - The full feature stack improves over raw measurement
 //!
 //! Usage:
-//!   cargo run --bin roomeq-qa-features --no-default-features --release -- [--scenario 5_1_kef]
+//!   cargo run --bin roomeq-qa-features --no-default-features --release -- [--scenario 5.1_kef]
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -37,7 +37,7 @@ use step_result::validate_pass;
     about = "Run RoomEQ feature progression QA"
 )]
 struct Args {
-    /// Run only the named recording directory, for example `5_1_kef`.
+    /// Run only the named recording directory, for example `5.1_kef`.
     #[arg(long)]
     scenario: Option<String>,
 }
@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn scenario_flag_selects_a_named_recording() {
-        let args = Args::try_parse_from(["roomeq-qa-features", "--scenario", "5_1_kef"]).unwrap();
-        assert_eq!(args.scenario.as_deref(), Some("5_1_kef"));
+        let args = Args::try_parse_from(["roomeq-qa-features", "--scenario", "5.1_kef"]).unwrap();
+        assert_eq!(args.scenario.as_deref(), Some("5.1_kef"));
     }
 }

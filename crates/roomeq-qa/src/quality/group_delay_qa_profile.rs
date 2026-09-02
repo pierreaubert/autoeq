@@ -204,7 +204,7 @@ mod registry_tests {
     #[test]
     fn quality_matrix_is_registry_driven_and_all_options_parse() {
         let cases = all_test_cases();
-        assert_eq!(cases.len(), 36);
+        assert_eq!(cases.len(), 37);
         assert!(
             cases
                 .iter()

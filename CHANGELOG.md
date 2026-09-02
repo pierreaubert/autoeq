@@ -1,3 +1,24 @@
+# 0.5.68
+
+## Package versions
+
+- `autoeq` 0.5.68
+- `roomeq-cli` 0.5.7
+- `roomeq-engine` 0.5.68
+- `roomeq-quality` 0.5.59
+- `roomeq-workflow` 0.5.27
+- `roomeq-qa` 0.5.63
+
+## Fixes
+
+- Migrate every measured RoomEQ fixture to schema 2.1.0, including file-backed 2.0_8361a and 2.0_d3v measurements, and provide all four processing-mode overrides with 2.0_8361a using the Genelec CMA-ES parameters.
+- Make Hybrid FIR/IIR response curves use the canonical DSP realization floor instead of clipping deep attenuation at -40 dB, so reported sums match the serialized filters.
+- Intersect both Hybrid branches with the configured optimizer band and skip a non-overlapping branch, preventing low-frequency-only KEF correction from optimizing the full measurement span and collapsing bass output.
+- Cap every channel's IIR, FIR, Hybrid, and MixedPhase optimization range at its detected reliable upper passband, so bandwidth-limited rear and height speakers are not equalized into their acoustic rolloff.
+- Reject physical-sub post-EQ that would create excessive main/sub crossover cancellation; retain deep target residuals as quality warnings when the routed sum itself is safe.
+- Bound role-aware channel matching at the narrowest measured upper passband in each compatible group, preventing bandwidth-limited KEF rear speakers from receiving correction above their reliable response.
+- Exercise IIR, FIR, Hybrid, and MixedPhase independently in strict measured KEF 5.1 and Genelec 5.1.4 QA; audit every EQ section plus aggregate out-of-band correction shaping against measured passbands; repair the Genelec registry path; add the KEF mixed-phase fixture; and make the measured-mode script fail fast on missing configs.
+
 # 0.5.67
 
 ## Package versions

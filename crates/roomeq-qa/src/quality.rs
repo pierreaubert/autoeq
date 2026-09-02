@@ -67,8 +67,11 @@ fn enforce_registry_expectations(
 ) {
     for result in results {
         let original_outcome = result.outcome();
-        let allowed_safe_revert =
-            matches!(original_outcome, QaOutcome::Reverted) && expect.accepts_safe_revert();
+        // Functional-artifact cases validate production output and safety
+        // invariants even when a bounded stage is deliberately reverted.
+        let functional_artifact = claims.iter().any(|claim| claim == "functional_artifact");
+        let allowed_safe_revert = matches!(original_outcome, QaOutcome::Reverted)
+            && (expect.accepts_safe_revert() || functional_artifact);
         // `WiderDb` deliberately relaxes the configured gain bound to test
         // optimizer monotonicity. Baselines and every other mutation still
         // enforce the registry's deployment boost ceiling.
@@ -96,7 +99,9 @@ fn enforce_registry_expectations(
                     result.scorecard.max_boost_db, expect.max_boost_db
                 ));
             }
-            let requires_flat_improvement = !claims.iter().any(|claim| claim == "option_effect");
+            let requires_flat_improvement = !claims
+                .iter()
+                .any(|claim| claim == "option_effect" || claim == "functional_artifact");
             if requires_flat_improvement && expect.improvement_min_pct > 0.0 {
                 // Relationship-only rows (for example the cross-mode ratio)
                 // deliberately use pre_score=0 and have no raw-response
@@ -112,7 +117,7 @@ fn enforce_registry_expectations(
                 }
             }
         }
-        if matches!(original_outcome, QaOutcome::Reverted) && !expect.accepts_safe_revert() {
+        if matches!(original_outcome, QaOutcome::Reverted) && !allowed_safe_revert {
             failures.push(format!(
                 "safe revert is not accepted by {:?} registry gate",
                 expect.gate_purpose

@@ -65,6 +65,16 @@ pub fn preprocess_channel(
             "  Detected passband for '{}': {:.1} Hz - {:.1} Hz",
             channel_name, low, high
         );
+        if high.is_finite() && high > target.min_freq {
+            let bounded_max_freq = target.max_freq.min(high);
+            if bounded_max_freq < target.max_freq {
+                info!(
+                    "  Correction ceiling for '{}': {:.1} Hz (configured {:.1} Hz)",
+                    channel_name, bounded_max_freq, target.max_freq
+                );
+                target.max_freq = bounded_max_freq;
+            }
+        }
     }
 
     target.min_freq = maybe_clamp_min_freq_for_target_tilt(
@@ -555,6 +565,34 @@ mod tests {
         assert!(features.excursion_filters.is_empty());
         assert!(features.cea2034_plugins.is_empty());
         assert!(features.broadband_plugins.is_empty());
+    }
+
+    #[test]
+    fn preprocessing_caps_correction_at_detected_upper_passband() {
+        let mut curve = flat_curve();
+        for (frequency_hz, level_db) in curve.freq.iter().zip(curve.spl.iter_mut()) {
+            if *frequency_hz > 8_000.0 {
+                *level_db -= 30.0;
+            }
+        }
+        let prepared = prepared(curve.clone());
+        let config = RoomConfig {
+            optimizer: OptimizerConfig {
+                min_freq: 20.0,
+                max_freq: 20_000.0,
+                ..OptimizerConfig::default()
+            },
+            ..RoomConfig::default()
+        };
+        let mut target = crate::channel_target::build_target_context("rear", &config, &curve, None);
+
+        preprocess_channel("rear", &prepared, &config, 48_000.0, None, &mut target);
+
+        assert!(
+            (6_000.0..9_000.0).contains(&target.max_freq),
+            "unexpected correction ceiling: {:.1} Hz",
+            target.max_freq
+        );
     }
 
     #[test]

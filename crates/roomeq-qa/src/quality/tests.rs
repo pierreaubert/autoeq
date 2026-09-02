@@ -641,6 +641,42 @@ fn registry_expectations_block_weak_or_overboosted_quality_results() {
 }
 
 #[test]
+fn registry_functional_artifact_accepts_safe_revert() {
+    let mut results = vec![TestResult {
+        label: "measured artifact".to_string(),
+        pre_score: 10.0,
+        scorecard: MetricScorecard {
+            flat_loss: 11.0,
+            peak_residual_db: 1.0,
+            max_boost_db: 3.0,
+            correction_reverted: true,
+            epa_preference: None,
+            epa_sharpness: None,
+            epa_roughness: None,
+            group_delay_std_ms: None,
+        },
+        pass: true,
+        reason: "artifact and safety checks passed".to_string(),
+    }];
+
+    super::enforce_registry_expectations(
+        "quality/measured-artifact",
+        &["cross_mode".to_string(), "functional_artifact".to_string()],
+        crate::registry::ScenarioExpect {
+            improvement_min_pct: 0.01,
+            max_post_score: 20.0,
+            max_boost_db: 12.0,
+            allow_safe_revert: false,
+            gate_purpose: crate::registry::QaGatePurpose::Functional,
+        },
+        &mut results,
+    );
+
+    assert!(results[0].pass, "{}", results[0].reason);
+    assert_eq!(results[0].outcome(), super::types::QaOutcome::Reverted);
+}
+
+#[test]
 fn registry_correction_thresholds_skip_relationship_only_rows() {
     let mut results = vec![TestResult {
         label: "cross-mode relationship".to_string(),

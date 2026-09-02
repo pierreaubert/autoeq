@@ -55,48 +55,92 @@ pub fn process_mixed_crossover(
     } else {
         (&high_curve, &low_curve)
     };
-    let fir_min_freq = fir_curve.freq.first().copied().unwrap_or(request.min_freq);
-    let fir_max_freq = fir_curve.freq.last().copied().unwrap_or(crossover_freq);
-    let iir_min_freq = iir_curve.freq.first().copied().unwrap_or(crossover_freq);
-    let iir_max_freq = iir_curve.freq.last().copied().unwrap_or(request.max_freq);
+    let fir_min_freq = fir_curve
+        .freq
+        .first()
+        .copied()
+        .unwrap_or(request.min_freq)
+        .max(request.min_freq);
+    let fir_max_freq = fir_curve
+        .freq
+        .last()
+        .copied()
+        .unwrap_or(crossover_freq)
+        .min(request.max_freq);
+    let iir_min_freq = iir_curve
+        .freq
+        .first()
+        .copied()
+        .unwrap_or(crossover_freq)
+        .max(request.min_freq);
+    let iir_max_freq = iir_curve
+        .freq
+        .last()
+        .copied()
+        .unwrap_or(request.max_freq)
+        .min(request.max_freq);
     info!(
         "  FIR band: {:.1}-{:.1} Hz, IIR band: {:.1}-{:.1} Hz",
         fir_min_freq, fir_max_freq, iir_min_freq, iir_max_freq
     );
 
-    let iir_config = OptimizerConfig {
-        min_freq: iir_min_freq,
-        max_freq: iir_max_freq,
-        ..request.optimizer.clone()
-    };
-    let eq_result = if let Some(callback) = request.callback {
-        eq::optimize_channel_eq_with_callback_detailed(
-            iir_curve,
-            &iir_config,
-            Some(request.eq_resources),
-            request.sample_rate,
-            callback,
-        )
+    let eq_result = if iir_min_freq <= iir_max_freq {
+        let iir_config = OptimizerConfig {
+            min_freq: iir_min_freq,
+            max_freq: iir_max_freq,
+            ..request.optimizer.clone()
+        };
+        (if let Some(callback) = request.callback {
+            eq::optimize_channel_eq_with_callback_detailed(
+                iir_curve,
+                &iir_config,
+                Some(request.eq_resources),
+                request.sample_rate,
+                callback,
+            )
+        } else {
+            eq::optimize_channel_eq_detailed(
+                iir_curve,
+                &iir_config,
+                Some(request.eq_resources),
+                request.sample_rate,
+            )
+        })
+        .map_err(|error| AutoeqError::OptimizationFailed {
+            message: format!(
+                "IIR optimization failed for {} band: {error}",
+                if fir_uses_low { "high" } else { "low" }
+            ),
+        })?
     } else {
-        eq::optimize_channel_eq_detailed(
-            iir_curve,
-            &iir_config,
-            Some(request.eq_resources),
-            request.sample_rate,
-        )
-    }
-    .map_err(|error| AutoeqError::OptimizationFailed {
-        message: format!(
-            "IIR optimization failed for {} band: {error}",
-            if fir_uses_low { "high" } else { "low" }
-        ),
-    })?;
+        info!(
+            "  IIR stage skipped: {} band does not overlap configured optimization range {:.1}-{:.1} Hz",
+            if fir_uses_low { "high" } else { "low" },
+            request.min_freq,
+            request.max_freq,
+        );
+        eq::EqOptimizationResult {
+            filters: Vec::new(),
+            loss: request.pre_score,
+            optimizer_evidence: Vec::new(),
+        }
+    };
     info!(
         "  IIR stage: {} filters for {} band",
         eq_result.filters.len(),
         if fir_uses_low { "high" } else { "low" }
     );
 
+    if fir_min_freq > fir_max_freq {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "FIR {} band does not overlap configured optimization range {:.1}-{:.1} Hz",
+                if fir_uses_low { "low" } else { "high" },
+                request.min_freq,
+                request.max_freq,
+            ),
+        });
+    }
     let fir_config = OptimizerConfig {
         min_freq: fir_min_freq,
         max_freq: fir_max_freq,
@@ -258,7 +302,11 @@ fn apply_crossover_response(
         .zip(post_merge_response)
         .map(|(mixed, post_merge)| mixed * post_merge)
         .collect::<Vec<_>>();
-    response::apply_complex_response(curve, &combined)
+    response::apply_complex_response_with_min_db(
+        curve,
+        &combined,
+        response::MIN_REALIZATION_RESPONSE_DB,
+    )
 }
 
 fn fir_bulk_delay_ms(coefficients: &[f64], sample_rate: f64, frequency_hz: f64) -> f64 {
@@ -407,6 +455,67 @@ mod tests {
     }
 
     #[test]
+    fn mixed_crossover_skips_branch_outside_configured_optimizer_band() {
+        let curve = curve();
+        let mixed_config = MixedModeConfig {
+            crossover_freq: 500.0,
+            fir_band: "low".to_string(),
+            ..MixedModeConfig::default()
+        };
+        let optimizer = OptimizerConfig {
+            min_freq: 100.0,
+            max_freq: 400.0,
+            num_filters: 1,
+            max_iter: 3,
+            population: 4,
+            seed: Some(2),
+            refine: false,
+            fir: Some(FirConfig {
+                taps: 64,
+                ..FirConfig::default()
+            }),
+            ..OptimizerConfig::default()
+        };
+        let target = TargetContext {
+            target_tilt_curve: None,
+            min_freq: 100.0,
+            max_freq: 400.0,
+            pre_score: 1.0,
+            mean_spl: 80.0,
+            cea2034_active: false,
+        };
+
+        let result = process_mixed_crossover(MixedCrossoverRequest {
+            channel_name: "sub",
+            curve: &curve,
+            target: &target,
+            preference_filters: &[],
+            mixed_config: &mixed_config,
+            optimizer: &optimizer,
+            eq_resources: &EqResources::default(),
+            sample_rate: 48_000.0,
+            min_freq: 100.0,
+            max_freq: 400.0,
+            mean_spl: 80.0,
+            pre_score: 1.0,
+            arrival_time_ms: None,
+            sidecar_reference: ConvolutionSidecarReference::new("sub_band_fir_48000hz.wav")
+                .unwrap(),
+            callback: None,
+        })
+        .unwrap();
+
+        assert!(result.filters.is_empty());
+        assert!(
+            result
+                .channel
+                .plugins
+                .iter()
+                .all(|plugin| plugin.plugin_type != "eq")
+        );
+    }
+
+    #[test]
     fn mixed_crossover_applies_preference_eq_after_full_band_merge() {
         let curve = curve();
         let preference = [Biquad::new(
@@ -472,6 +581,27 @@ mod tests {
         assert!((fir_bulk_delay_ms(&[0.0, 0.0, 1.0], 1_000.0, 100.0) - 2.0).abs() < 1e-9);
         assert_eq!(fir_bulk_delay_ms(&[], 48_000.0, 500.0), 0.0);
         assert_eq!(fir_bulk_delay_ms(&[1.0], 0.0, 500.0), 0.0);
+    }
+
+    #[test]
+    fn mixed_crossover_model_preserves_deep_realized_attenuation() {
+        let curve = curve();
+        let corrected = apply_crossover_response(
+            &curve,
+            &[],
+            &[],
+            &[0.001],
+            "LR24",
+            1_000.0,
+            true,
+            0.0,
+            48_000.0,
+        );
+        let correction_db = corrected.spl[0] - curve.spl[0];
+        assert!(
+            correction_db < -45.0,
+            "mixed response was clipped to a display floor: {correction_db:.3} dB"
+        );
     }
 
     #[test]

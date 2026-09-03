@@ -5,11 +5,22 @@ pub(super) const SAMPLE_RATE: f64 = 48000.0;
 
 pub(super) const SEED: u64 = 42;
 
-pub(super) const QA_MAXEVAL: usize = 15000; // Fast mode for QA
+/// Default budget for the CMA-ES-backed coverage path.
+pub(super) const QA_MAXEVAL: usize = 600_000;
+/// Budget for QA runs that deliberately retain Differential Evolution.
+pub(super) const DE_QA_MAXEVAL: usize = 15_000;
 pub(super) const QA_ALGORITHM: &str = "autoeq:cmaes";
-pub(super) const CMAES_QA_POPULATION: usize = 16;
+pub(super) const CMAES_QA_POPULATION: usize = 20;
 pub(super) const CMAES_QA_NUM_FILTERS: usize = 9;
 pub(super) const QA_MAX_FILTER_BOOST_DB: f64 = 12.0;
+
+pub(super) fn qa_budget_for_algorithm(algorithm: &str, requested: usize) -> usize {
+    if algorithm.to_ascii_lowercase().contains("de") {
+        requested.min(DE_QA_MAXEVAL)
+    } else {
+        requested
+    }
+}
 
 pub(super) const FEM_DIR: &str = "data_tests/roomeq/generate/fem";
 
@@ -35,7 +46,7 @@ pub(super) fn apply_qa_overrides(config: &mut RoomConfig, maxeval: usize) {
     config.optimizer.max_iter = if replaced_auto_de {
         maxeval
     } else {
-        config.optimizer.max_iter.min(maxeval)
+        qa_budget_for_algorithm(&config.optimizer.algorithm, config.optimizer.max_iter.min(maxeval))
     };
     config.optimizer.seed = Some(SEED);
     // Pin evaluation to a single thread: parallel optimizer evaluation order
@@ -130,5 +141,11 @@ mod tests {
         apply_qa_overrides(&mut config, QA_MAXEVAL);
 
         assert_eq!(config.optimizer.max_iter, 5000);
+    }
+
+    #[test]
+    fn qa_budget_distinguishes_de_from_cmaes() {
+        assert_eq!(qa_budget_for_algorithm("autoeq:de", QA_MAXEVAL), DE_QA_MAXEVAL);
+        assert_eq!(qa_budget_for_algorithm("autoeq:cmaes", QA_MAXEVAL), QA_MAXEVAL);
     }
 }

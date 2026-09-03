@@ -1,3 +1,26 @@
+# 0.5.69
+
+## Package versions
+
+- `autoeq` 0.5.69
+- `roomeq-cli` 0.5.7
+- `roomeq-engine` 0.5.69
+- `roomeq-model` 0.5.9
+- `roomeq-quality` 0.5.59
+- `roomeq-workflow` 0.5.28
+- `roomeq-qa` 0.5.64
+
+## Fixes
+
+- Add explicit RoomEQ stage outcomes and classified checks for preprocessing, target construction, correction, bass routing, routed post-EQ, final DSP realization, and acceptance; regenerate the additive output schema and document the contract.
+- Make workflow validation sample-rate-aware, align mismatched response grids explicitly, constrain correction and channel matching to reliable measured passbands, and refresh reported curves after safety reversion.
+- Reconstruct routed home-cinema responses from serialized DSP ownership without double-applying physical-sub gains, and keep FIR, Hybrid, MixedPhase, multi-sub, and routed post-EQ branches on the canonical response grid.
+- Give hard crossover-summation safety priority over softer route-quality scores, so a candidate that repairs excessive underfill is retained instead of restoring an unsafe baseline.
+- Apply final down-only role-pair level alignment from 100 Hz to 1 kHz, preventing audible left/right level divergence while preserving headroom.
+- Add `test_roomeq_generated.sh`, repair generated RoomEQ fixture topology/passband/FIR settings, and run every generated configuration with Differential Evolution capped at 15,000 evaluations.
+- Add deterministic pairwise parameter coverage, stage-contract checks, escaped-defect registration, independent serialized-DSP replay, and measured KEF, Genelec, and Fidelia four-mode blocking canaries.
+- Raise the strict measured QA ceiling to 600,000 evaluations, pin the KEF IIR CMA-ES canary to a population of 20, and preserve every other checked-in production fixture setting.
+
 # 0.5.68
 
 ## Package versions

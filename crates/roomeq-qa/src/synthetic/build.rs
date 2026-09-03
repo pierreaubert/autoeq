@@ -42,7 +42,7 @@ pub(super) fn build_config(degraded: &Curve, mode: ProcessingMode) -> RoomConfig
 
     config.optimizer.algorithm = "autoeq:cmaes".to_string();
     config.optimizer.max_iter = QA_MAXEVAL;
-    config.optimizer.population = 50;
+    config.optimizer.population = 20;
     config.optimizer.refine = false;
     config.optimizer.seed = Some(SEED);
     config.optimizer.num_filters = 3;
@@ -123,7 +123,7 @@ pub(super) fn build_multisub_config(sub_curves: &[Curve], allpass: bool) -> Room
 
     config.optimizer.algorithm = "autoeq:cmaes".to_string();
     config.optimizer.max_iter = QA_MAXEVAL;
-    config.optimizer.population = 50;
+    config.optimizer.population = 20;
     config.optimizer.refine = false;
     config.optimizer.seed = Some(SEED);
     config.optimizer.processing_mode = ProcessingMode::LowLatency;
@@ -407,7 +407,7 @@ pub(super) fn build_multichannel_config(
 
     config.optimizer.algorithm = "autoeq:cmaes".to_string();
     config.optimizer.max_iter = QA_MAXEVAL;
-    config.optimizer.population = 50;
+    config.optimizer.population = 20;
     config.optimizer.refine = false;
     config.optimizer.seed = Some(SEED);
     config.optimizer.processing_mode = ProcessingMode::LowLatency;

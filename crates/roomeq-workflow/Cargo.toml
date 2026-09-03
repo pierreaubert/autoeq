@@ -1,6 +1,6 @@
 [package]
 name = "roomeq-workflow"
-version = "0.5.27"
+version = "0.5.28"
 edition = "2024"
 description = "RoomEQ resource loading and application workflow composition"
 license = "GPL-3.0-or-later"

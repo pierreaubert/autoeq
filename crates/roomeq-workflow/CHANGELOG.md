@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add explicit stage outcomes, serialized routed-response replay, stale-curve refresh after reversion, passband-safe correction, and final down-only role-pair level alignment.
 - Delegate CTC/replay transfer evaluation to the engine's canonical serialized
   DSP realization while retaining workflow ownership of convolution sidecars,
   removing the divergent private plugin evaluator.

@@ -43,6 +43,7 @@ use consts::SEED;
 use generate::generate_ms_option_combos;
 use generate::generate_option_combos;
 use misc::fmt_epa;
+use crate::parameter_matrix::generate_pr_matrix;
 use run::report_multiseat_api_guard_tests;
 use run::run_multichannel_test;
 use run::run_multiseat_api_guard_tests;
@@ -65,6 +66,49 @@ fn multichannel_mode_supported(
 
 /// Run the synthetic QA command and report whether the binary should exit
 /// unsuccessfully because one or more scenarios failed.
+/// Execute the bounded PR covering array against real synthetic optimizations.
+pub fn run_parameter_matrix() -> Result<bool> {
+    let rows = generate_pr_matrix();
+    let mut passed = 0usize;
+    let mut records = Vec::with_capacity(rows.len());
+    for (index, row) in rows.iter().enumerate() {
+        let sample_rate = [44_100.0, 48_000.0, 96_000.0][row.sample_rate as usize];
+        let point_count = [100, 200, 400][row.grid_size as usize];
+        let mode = match row.mode {
+            0 => ProcessingMode::LowLatency,
+            1 => ProcessingMode::PhaseLinear,
+            _ => ProcessingMode::Hybrid,
+        };
+        let mode_name = format!("{mode:?}");
+        let curve = generate_flat_curve(20.0, (sample_rate / 2.0 - 100.0_f64).max(1_000.0_f64), point_count);
+        let mut config = build::build_config(&curve, mode);
+        config.optimizer.num_filters = [3, 7, 11][row.filter_count as usize];
+        config.optimizer.max_freq = (sample_rate / 2.0 - 100.0_f64).min(config.optimizer.max_freq);
+        config.optimizer.max_iter = 120;
+        config.optimizer.seed = Some(SEED + index as u64);
+        let result = run::run_optimization(&config)?;
+        if !result.combined_post_score.is_finite() {
+            anyhow::bail!("pairwise row {index} produced a non-finite score");
+        }
+        records.push(serde_json::json!({
+            "row": index,
+            "sample_rate_hz": sample_rate,
+            "grid_points": point_count,
+            "mode": mode_name,
+            "filter_count": config.optimizer.num_filters,
+            "pre_score": result.combined_pre_score,
+            "post_score": result.combined_post_score,
+            "stage_outcomes": result.metadata.stage_outcomes,
+        }));
+        passed += 1;
+    }
+    let artifact = std::path::Path::new("target/qa/roomeq-parameter-matrix.json");
+    if let Some(parent) = artifact.parent() { std::fs::create_dir_all(parent)?; }
+    std::fs::write(artifact, serde_json::to_vec_pretty(&records)?)?;
+    println!("parameter matrix: {passed}/{} rows passed", rows.len());
+    Ok(passed == rows.len())
+}
+
 pub fn run() -> Result<bool> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let registry = crate::registry::load_registry()?;
@@ -90,6 +134,9 @@ pub fn run() -> Result<bool> {
     let multiseat_guards_only = args.iter().any(|a| a == "--multiseat-guards-only");
     let full_matrix = args.iter().any(|a| a == "--full-matrix");
     let pr_matrix = args.iter().any(|a| a == "--pr");
+    if args.iter().any(|a| a == "--parameter-matrix") {
+        return run_parameter_matrix();
+    }
     let fail_fast = args.iter().any(|a| a == "--fail-fast");
     let difficulty_filter = args
         .windows(2)
@@ -129,6 +176,7 @@ pub fn run() -> Result<bool> {
             "  --full-matrix            Include WarpedIir/KautzModal and every multichannel processing mode"
         );
         println!("  --pr                     Run the bounded pull-request audibility matrix");
+        println!("  --parameter-matrix       Run the 24-row pairwise configuration matrix");
         println!("  --help, -h               Print this help");
         return Ok(false);
     }

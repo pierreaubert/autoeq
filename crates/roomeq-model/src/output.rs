@@ -418,8 +418,66 @@ pub enum StageStatus {
     Failed,
 }
 
-/// Structured stage status and machine-readable advisories.
+/// Classification of a stage check.  Structural and safety checks are cheap
+/// enough for production; quality checks are intended for QA and diagnostics.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StageCheckKind {
+    Structural,
+    Safety,
+    Quality,
+}
+
+/// A machine-readable assertion made at a pipeline boundary.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct StageCheck {
+    /// Stable identifier used by QA and mutation tests.
+    pub id: String,
+    /// Enforcement/diagnostic category.
+    pub kind: StageCheckKind,
+    /// Whether the assertion passed.
+    pub passed: bool,
+    /// Optional scalar observed by the check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed: Option<f64>,
+    /// Optional scalar limit associated with the check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<f64>,
+    /// Human-readable diagnostic, including context on failure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
+}
+
+impl StageCheck {
+    pub fn pass(id: impl Into<String>, kind: StageCheckKind) -> Self {
+        Self {
+            id: id.into(),
+            kind,
+            passed: true,
+            observed: None,
+            limit: None,
+            diagnostic: None,
+        }
+    }
+
+    pub fn fail(
+        id: impl Into<String>,
+        kind: StageCheckKind,
+        diagnostic: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            kind,
+            passed: false,
+            observed: None,
+            limit: None,
+            diagnostic: Some(diagnostic.into()),
+        }
+    }
+}
+
+/// Structured stage status and machine-readable advisories.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct StageOutcome {
     /// Stable snake_case stage identifier.
     pub stage: String,
@@ -428,6 +486,9 @@ pub struct StageOutcome {
     /// Machine-readable reasons, warnings, or migration notices.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub advisories: Vec<String>,
+    /// Assertions evaluated at this stage boundary.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<StageCheck>,
 }
 
 /// Versioned optimizer-confidence evidence used by final production

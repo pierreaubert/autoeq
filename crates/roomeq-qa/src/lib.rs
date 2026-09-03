@@ -11,6 +11,8 @@ pub mod features;
 pub mod fuzzer;
 pub mod quality;
 pub mod registry;
+pub mod stage_contracts;
+pub mod parameter_matrix;
 pub mod synthetic;
 
 const QA_SEED_OFFSETS: [u64; 5] = [0, 17, 41, 73, 109];
@@ -114,6 +116,7 @@ fn record_seed_distribution(
     result.metadata.stage_outcomes.push(StageOutcome {
         stage: "qa_seed_distribution".to_string(),
         status: StageStatus::Applied,
+        checks: Vec::new(),
         advisories: vec![
             format!("selected_median_seed={selected_seed}"),
             format!("seed_post_scores={details}"),

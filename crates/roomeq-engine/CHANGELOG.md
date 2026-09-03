@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Align mismatched response grids at routing boundaries, keep route gain ownership singular, and prioritize candidates that restore hard crossover-underfill safety over softer quality scores.
 - Add the canonical serialized-DSP transfer evaluator with explicit convolution
   sidecar injection, complete crossover/mixed/warped/Kautz realization, and
   fail-closed plugin validation; type main/sub crossover optimizer roles to

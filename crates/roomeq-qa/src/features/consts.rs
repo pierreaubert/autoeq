@@ -5,9 +5,9 @@ pub(super) const SAMPLE_RATE: f64 = 48000.0;
 
 pub(super) const SEED: u64 = 42;
 
-pub(super) const QA_MAX_ITER: usize = 15000;
+pub(super) const QA_MAX_ITER: usize = 600_000;
 
-pub(super) const QA_POPULATION: usize = 50;
+pub(super) const QA_POPULATION: usize = 20;
 
 pub(super) const QA_NUM_FILTERS: usize = 3;
 

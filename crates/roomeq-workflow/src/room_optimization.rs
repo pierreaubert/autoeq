@@ -17,8 +17,8 @@ use roomeq_engine::{
 };
 use roomeq_model::{
     AutoeqError, ChannelDspChain, Curve, MeasurementSource, OptimizationMetadata, OptimizerConfig,
-    PerceptualMetrics, ProcessingMode, Result, RoomConfig, SpeakerConfig, StageOutcome,
-    StageStatus, SystemConfig, SystemModel, TargetCurveConfig,
+    PerceptualMetrics, ProcessingMode, Result, RoomConfig, SpeakerConfig, StageCheck,
+    StageCheckKind, StageOutcome, StageStatus, SystemConfig, SystemModel, TargetCurveConfig,
 };
 use std::collections::HashMap;
 use std::f64::consts::PI;
@@ -896,6 +896,7 @@ fn apply_inter_channel_timbre_matching_stage(
                 advisories.sort();
                 advisories.dedup();
                 StageOutcome {
+                    checks: Vec::new(),
                     stage: "inter_channel_timbre_matching".to_string(),
                     status,
                     advisories,
@@ -904,6 +905,7 @@ fn apply_inter_channel_timbre_matching_stage(
             Err(error) => {
                 warn!("Inter-channel timbre matching failed: {error}");
                 StageOutcome {
+                    checks: Vec::new(),
                     stage: "inter_channel_timbre_matching".to_string(),
                     status: StageStatus::Failed,
                     advisories: vec![format!("invalid_reference: {error}")],
@@ -931,6 +933,251 @@ fn stage_logical_input_plugins(
     } else {
         plugins
     }
+}
+
+const FINAL_CHANNEL_LEVEL_TOLERANCE_DB: f64 = 0.5;
+const FINAL_CHANNEL_LEVEL_MIN_HZ: f64 = 100.0;
+const FINAL_CHANNEL_LEVEL_MAX_HZ: f64 = 1_000.0;
+
+/// Compute down-only gains which restore equal broadband level within each
+/// role-compatible channel pair/group after all correction stages have run.
+fn final_role_level_alignment_gains(
+    config: &RoomConfig,
+    curves: &HashMap<String, Curve>,
+) -> (HashMap<String, f64>, f64) {
+    let matching_enabled = config
+        .optimizer
+        .channel_matching
+        .clone()
+        .unwrap_or_default()
+        .enabled;
+    if !matching_enabled {
+        return (HashMap::new(), 0.0);
+    }
+
+    let band_max = config.optimizer.max_freq.min(FINAL_CHANNEL_LEVEL_MAX_HZ);
+    let band_min = config
+        .optimizer
+        .min_freq
+        .max(FINAL_CHANNEL_LEVEL_MIN_HZ)
+        .min(band_max);
+    let mut gains = HashMap::new();
+    let mut max_spread_db = 0.0_f64;
+
+    for group in role_aware_channel_matching_groups_with_keys(curves) {
+        let ranges = group
+            .curves
+            .keys()
+            .map(|name| (name.clone(), (band_min, band_max)))
+            .collect::<HashMap<_, _>>();
+        let group_gains = roomeq_engine::topology::align_channels_to_lowest(&group.curves, &ranges);
+        let spread_db = group_gains
+            .values()
+            .map(|gain_db| (-gain_db).max(0.0))
+            .fold(0.0_f64, f64::max);
+        max_spread_db = max_spread_db.max(spread_db);
+
+        if spread_db > FINAL_CHANNEL_LEVEL_TOLERANCE_DB {
+            gains.extend(
+                group_gains
+                    .into_iter()
+                    .filter(|(_, gain_db)| *gain_db < -0.01),
+            );
+        }
+    }
+
+    (gains, max_spread_db)
+}
+
+fn insert_final_level_gain(chain: &mut ChannelDspChain, gain_db: f64, routed_logical_input: bool) {
+    let mut plugin = output::create_gain_plugin(gain_db);
+    if routed_logical_input {
+        plugin = roomeq_engine::topology::mark_plugin_stage(plugin, "pre_route");
+    }
+    if let Some(parameters) = plugin.parameters.as_object_mut() {
+        parameters.insert(
+            "label".to_string(),
+            serde_json::Value::String("final_channel_level_alignment".to_string()),
+        );
+    }
+
+    let insertion_index = if routed_logical_input {
+        chain
+            .plugins
+            .iter()
+            .position(|plugin| {
+                plugin
+                    .parameters
+                    .get("room_eq_stage")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("route_owned")
+            })
+            .unwrap_or(chain.plugins.len())
+    } else {
+        chain.plugins.len()
+    };
+    chain.plugins.insert(insertion_index, plugin);
+}
+
+fn refresh_deployed_inter_channel_deviation(
+    result: &mut RoomOptimizationResult,
+    config: &RoomConfig,
+) {
+    let curves = result
+        .deployed_source_curves
+        .iter()
+        .filter(|(name, _)| !is_subwoofer_channel(config, name))
+        .map(|(name, curve)| (name.clone(), curve.clone()))
+        .collect::<HashMap<_, _>>();
+    if curves.len() <= 1 {
+        result.metadata.inter_channel_deviation = None;
+        return;
+    }
+    let f3 = curves
+        .values()
+        .filter_map(|curve| {
+            roomeq_engine::excursion::detect_f3(curve, None)
+                .ok()
+                .map(|result| result.f3_hz)
+        })
+        .reduce(f64::min)
+        .unwrap_or(50.0);
+    result.metadata.inter_channel_deviation =
+        Some(roomeq_engine::spectral_align::compute_inter_channel_deviation(&curves, f3));
+}
+
+/// Re-establish role-pair levels after the channel-local final safety gate.
+/// The serialized pre-route gain scales both the main and redirected-bass
+/// branches exactly once, and replay verifies the deployed result.
+fn apply_final_channel_level_alignment(
+    result: &mut RoomOptimizationResult,
+    config: &RoomConfig,
+    sample_rate: f64,
+    sidecar_dir: &Path,
+) -> Result<StageOutcome> {
+    let curves = result
+        .deployed_source_curves
+        .iter()
+        .filter(|(name, _)| !is_subwoofer_channel(config, name))
+        .map(|(name, curve)| (name.clone(), curve.clone()))
+        .collect::<HashMap<_, _>>();
+    let (gains, spread_before_db) = final_role_level_alignment_gains(config, &curves);
+
+    if gains.is_empty() {
+        let mut check = StageCheck::pass("final_channel_level_spread_db", StageCheckKind::Safety);
+        check.observed = Some(spread_before_db);
+        check.limit = Some(FINAL_CHANNEL_LEVEL_TOLERANCE_DB);
+        return Ok(StageOutcome {
+            checks: vec![check],
+            stage: "final_channel_level_alignment".to_string(),
+            status: StageStatus::Skipped,
+            advisories: Vec::new(),
+        });
+    }
+
+    let snapshot = result.clone();
+    let routed_sources = result
+        .metadata
+        .bass_management
+        .as_ref()
+        .and_then(|report| report.routing_graph.as_ref())
+        .map(|graph| {
+            graph
+                .routes
+                .iter()
+                .map(|route| route.source_channel.clone())
+                .collect::<std::collections::HashSet<_>>()
+        })
+        .unwrap_or_default();
+
+    let mut applied = gains.iter().collect::<Vec<_>>();
+    applied.sort_by(|(left, _), (right, _)| left.cmp(right));
+    for (name, gain_db) in &applied {
+        let routed = routed_sources.contains(*name);
+        if let Some(chain) = result.channels.get_mut(*name) {
+            insert_final_level_gain(chain, **gain_db, routed);
+        }
+        sync_reported_gain_adjustment(
+            name,
+            &mut result.channel_results,
+            &mut result.channels,
+            **gain_db,
+            false,
+            sample_rate,
+        );
+    }
+
+    if let Some(graph) = result
+        .metadata
+        .bass_management
+        .as_mut()
+        .and_then(|report| report.routing_graph.as_mut())
+    {
+        for (name, gain_db) in &applied {
+            *graph.input_trim_db.entry((*name).clone()).or_insert(0.0) += **gain_db;
+        }
+        graph
+            .advisories
+            .push("final_channel_levels_realigned_after_safety".to_string());
+    }
+
+    let replay = if let Some(report) = result.metadata.bass_management.as_ref()
+        && let Some(graph) = report.routing_graph.as_ref()
+    {
+        let fir_coeffs = retained_fir_coeffs_by_channel(result);
+        crate::topology::reconstruct_deployed_source_curves(
+            &result.channels,
+            &fir_coeffs,
+            graph,
+            report.optimization.as_ref(),
+            sample_rate,
+            sidecar_dir,
+        )
+    } else {
+        Ok(result
+            .channel_results
+            .iter()
+            .map(|(name, channel)| (name.clone(), channel.final_curve.clone()))
+            .collect())
+    };
+    result.deployed_source_curves = match replay {
+        Ok(curves) => curves,
+        Err(error) => {
+            *result = snapshot;
+            return Err(error);
+        }
+    };
+
+    let verification_curves = result
+        .deployed_source_curves
+        .iter()
+        .filter(|(name, _)| !is_subwoofer_channel(config, name))
+        .map(|(name, curve)| (name.clone(), curve.clone()))
+        .collect::<HashMap<_, _>>();
+    let (_, spread_after_db) = final_role_level_alignment_gains(config, &verification_curves);
+    if !spread_after_db.is_finite() || spread_after_db > FINAL_CHANNEL_LEVEL_TOLERANCE_DB {
+        *result = snapshot;
+        return Err(AutoeqError::OptimizationFailed {
+            message: format!(
+                "final channel level spread {spread_after_db:.3} dB exceeds {:.3} dB",
+                FINAL_CHANNEL_LEVEL_TOLERANCE_DB
+            ),
+        });
+    }
+
+    refresh_deployed_inter_channel_deviation(result, config);
+    let mut check = StageCheck::pass("final_channel_level_spread_db", StageCheckKind::Safety);
+    check.observed = Some(spread_after_db);
+    check.limit = Some(FINAL_CHANNEL_LEVEL_TOLERANCE_DB);
+    Ok(StageOutcome {
+        checks: vec![check],
+        stage: "final_channel_level_alignment".to_string(),
+        status: StageStatus::Applied,
+        advisories: applied
+            .into_iter()
+            .map(|(name, gain_db)| format!("{name}:{gain_db:.3}dB"))
+            .collect(),
+    })
 }
 
 fn create_time_alignment_plugin(
@@ -1614,6 +1861,10 @@ fn assemble_workflow_result_with_frequency_samples(
         &mut result,
         config.optimizer.processing_mode.clone(),
     );
+    let level_alignment =
+        apply_final_channel_level_alignment(&mut result, config, sample_rate, sidecar_dir)?;
+    workflow_refresh_needed |= level_alignment.status == StageStatus::Applied;
+    result.metadata.stage_outcomes.push(level_alignment);
 
     emit_pipeline_event(
         observer_shared,
@@ -1677,6 +1928,7 @@ fn commit_or_restore_routed_safety_replay(
             *result = pre_safety_result;
             result.deployed_source_curves = pre_safety_deployed;
             result.metadata.stage_outcomes.push(StageOutcome {
+                checks: Vec::new(),
                 stage: "final_correction_safety_routed_replay".to_string(),
                 status: StageStatus::Degraded,
                 advisories: vec![format!(
@@ -1700,21 +1952,20 @@ fn apply_final_correction_safety_gate_preserving_routed_crossover(
     processing_mode: ProcessingMode,
     group_delay_budget_ms: Option<f64>,
 ) -> Result<()> {
-    let routed_snapshot = if let Some(graph) = result
-        .metadata
-        .bass_management
-        .as_ref()
-        .and_then(|report| report.routing_graph.clone())
+    let routed_snapshot = if let Some(report) = result.metadata.bass_management.as_ref()
+        && let Some(graph) = report.routing_graph.clone()
     {
+        let optimization = report.optimization.clone();
         let fir_coeffs = retained_fir_coeffs_by_channel(result);
         let deployed = crate::topology::reconstruct_deployed_source_curves(
             &result.channels,
             &fir_coeffs,
             &graph,
+            optimization.as_ref(),
             sample_rate,
             sidecar_dir,
         )?;
-        Some((result.clone(), deployed, graph))
+        Some((result.clone(), deployed, graph, optimization))
     } else {
         None
     };
@@ -1729,12 +1980,13 @@ fn apply_final_correction_safety_gate_preserving_routed_crossover(
         group_delay_budget_ms,
     );
 
-    if let Some((pre_safety_result, pre_safety_deployed, graph)) = routed_snapshot {
+    if let Some((pre_safety_result, pre_safety_deployed, graph, optimization)) = routed_snapshot {
         let fir_coeffs = retained_fir_coeffs_by_channel(result);
         let post_safety_deployed = crate::topology::reconstruct_deployed_source_curves(
             &result.channels,
             &fir_coeffs,
             &graph,
+            optimization.as_ref(),
             sample_rate,
             sidecar_dir,
         );
@@ -1795,6 +2047,7 @@ fn record_missing_mixed_phase_fir_reversions(
         .metadata
         .stage_outcomes
         .push(roomeq_model::StageOutcome {
+            checks: Vec::new(),
             stage: "mixed_phase_fir_generation".to_string(),
             status: roomeq_model::StageStatus::Degraded,
             advisories: reverted_stages
@@ -2011,6 +2264,7 @@ fn apply_topology_height_alignment_with_frequency_samples(
             Ok(results) => results,
             Err(error) => {
                 return StageOutcome {
+                    checks: Vec::new(),
                     stage: "height_channel_alignment".to_string(),
                     status: StageStatus::Failed,
                     advisories: vec![format!("height_alignment_failed: {error}")],
@@ -2127,6 +2381,7 @@ fn apply_topology_height_alignment_with_frequency_samples(
         StageStatus::Skipped
     };
     StageOutcome {
+        checks: Vec::new(),
         stage: "height_channel_alignment".to_string(),
         status,
         advisories,
@@ -2579,6 +2834,7 @@ fn assemble_generic_result_with_frequency_samples(
                 advisories.sort();
                 advisories.dedup();
                 StageOutcome {
+                    checks: Vec::new(),
                     stage: "inter_channel_timbre_matching".to_string(),
                     status,
                     advisories,
@@ -2587,6 +2843,7 @@ fn assemble_generic_result_with_frequency_samples(
             Err(e) => {
                 warn!("Inter-channel timbre matching failed: {}", e);
                 StageOutcome {
+                    checks: Vec::new(),
                     stage: "inter_channel_timbre_matching".to_string(),
                     status: StageStatus::Failed,
                     advisories: vec![format!("invalid_reference: {e}")],
@@ -2777,12 +3034,14 @@ fn assemble_generic_result_with_frequency_samples(
                         StageStatus::Skipped
                     };
                     StageOutcome {
+                        checks: Vec::new(),
                         stage: "height_channel_alignment".to_string(),
                         status,
                         advisories,
                     }
                 }
                 Err(error) => StageOutcome {
+                    checks: Vec::new(),
                     stage: "height_channel_alignment".to_string(),
                     status: StageStatus::Failed,
                     advisories: vec![format!("height_alignment_failed: {error}")],
@@ -3264,6 +3523,9 @@ fn assemble_generic_result_with_frequency_samples(
         &mut result,
         config.optimizer.processing_mode.clone(),
     );
+    let level_alignment =
+        apply_final_channel_level_alignment(&mut result, config, sample_rate, sidecar_dir)?;
+    result.metadata.stage_outcomes.push(level_alignment);
 
     emit_pipeline_event(
         observer_shared,

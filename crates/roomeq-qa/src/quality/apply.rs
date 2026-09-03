@@ -15,13 +15,19 @@ use std::collections::HashMap;
 pub(super) fn apply_qa_overrides(config: &mut RoomConfig, seed_label: &str, maxeval: usize) {
     config.optimizer.algorithm = "autoeq:cmaes".to_string();
     config.optimizer.max_iter = maxeval;
-    config.optimizer.population = 50;
+    config.optimizer.population = 20;
     config.optimizer.num_filters = 5;
     config.optimizer.tolerance = 1e-3;
     config.optimizer.atolerance = 1e-3;
     config.optimizer.refine = true;
     config.optimizer.seed = Some(qa_seed(seed_label));
     config.optimizer.min_filter_improvement = 0.0; // Disable adaptive filter selection to use full budget
+}
+
+/// Strict measured cases preserve every checked-in production setting except
+/// for the caller-provided evaluation ceiling.
+pub(super) fn clamp_strict_measured_maxeval(config: &mut RoomConfig, maxeval: usize) {
+    config.optimizer.max_iter = config.optimizer.max_iter.min(maxeval);
 }
 
 pub(super) fn apply_mutation(config: &mut RoomConfig, mutation: Mutation) {

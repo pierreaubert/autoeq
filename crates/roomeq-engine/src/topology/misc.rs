@@ -73,14 +73,18 @@ pub fn align_channels_to_lowest(
 pub fn complex_sum_mains(curves: &[&Curve]) -> Curve {
     use num_complex::Complex;
     assert!(!curves.is_empty(), "complex_sum_mains needs ≥ 1 curve");
-    let n = curves.iter().map(|c| c.spl.len()).min().unwrap();
-    let freq = ndarray::Array1::from_iter(curves[0].freq.iter().take(n).copied());
+    let freq = curves[0].freq.clone();
+    let n = freq.len();
+    let aligned = curves
+        .iter()
+        .map(|curve| autoeq_core::curve_transforms::interpolate_log_space(&freq, curve))
+        .collect::<Vec<_>>();
 
     let mut spl = ndarray::Array1::<f64>::zeros(n);
     let mut phase = ndarray::Array1::<f64>::zeros(n);
     for i in 0..n {
         let mut sum = Complex::new(0.0_f64, 0.0);
-        for c in curves {
+        for c in &aligned {
             let mag = 10.0_f64.powf(c.spl[i] / 20.0);
             let phi = c.phase.as_ref().expect("phase checked by caller")[i].to_radians();
             sum += Complex::from_polar(mag, phi);
@@ -97,6 +101,30 @@ pub fn complex_sum_mains(curves: &[&Curve]) -> Curve {
         spl,
         phase: Some(phase),
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod complex_sum_tests {
+    use super::*;
+    use ndarray::Array1;
+
+    #[test]
+    fn aligns_mismatched_frequency_grids_before_complex_sum() {
+        let make_curve = |count| Curve {
+            freq: Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), count),
+            spl: Array1::zeros(count),
+            phase: Some(Array1::zeros(count)),
+            ..Default::default()
+        };
+        let main = make_curve(100);
+        let bass = make_curve(333);
+
+        let sum = complex_sum_mains(&[&main, &bass]);
+
+        assert_eq!(sum.freq, main.freq);
+        assert_eq!(sum.spl.len(), 100);
+        assert!(sum.spl.iter().all(|value| (*value - 6.0206).abs() < 1e-3));
     }
 }
 

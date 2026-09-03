@@ -2,6 +2,7 @@ use super::apply::apply_group_delay_qa_passthrough_eq;
 use super::apply::apply_mutation;
 use super::apply::apply_option_override;
 use super::apply::apply_qa_overrides;
+use super::apply::clamp_strict_measured_maxeval;
 use super::consts::CORRECTION_OUT_OF_BAND_SPREAD_DB;
 use super::consts::CROSS_MODE_BASS_MAX_RMS_DB;
 use super::consts::CROSS_MODE_BASS_MEDIAN_RMS_DB;
@@ -497,9 +498,13 @@ pub(super) fn run_cross_mode_convergence_tests(
                 &format!("{name}:cross-mode:{mode_name}"),
                 maxeval,
             );
+        } else {
+            clamp_strict_measured_maxeval(&mut config, maxeval);
         }
         // Strict measured regressions exercise the checked-in production
-        // fixture unchanged, including optimizer budget, filter count, seed.
+        // fixture unchanged except for clamping optimizer.max_iter. Filter
+        // count, algorithm, population, seed, and every acoustic option remain
+        // the checked-in production values.
 
         let result = run_optimization(&config, seed_runs)
             .with_context(|| format!("{} {} cross-mode", name, mode_name))?;

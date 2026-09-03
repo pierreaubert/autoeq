@@ -19,17 +19,51 @@ use roomeq_engine::room_result::{ChannelOptimizationResult, RoomOptimizationResu
 use roomeq_engine::topology::{
     align_channels_to_lowest, all_curves_have_usable_phase, all_curves_share_frequency_grid,
     apply_crossover_response_to_curve, apply_delay_and_polarity_to_curve, average_mains_magnitude,
-    bass_management_objective, complex_sum_mains, compute_flat_loss, mark_route_owned_plugin,
-    normalize_crossover_delays, predict_bass_management_sum, select_bass_management_crossover_type,
+    bass_management_objective, complex_sum_mains, compute_flat_loss, mark_plugin_stage,
+    mark_plugins_stage, mark_route_owned_plugin, normalize_crossover_delays,
+    predict_bass_management_sum, select_bass_management_crossover_type,
 };
 use roomeq_engine::{PipelineStepId, PipelineStepStatus};
 use roomeq_model::{
     ChannelDspChain, CurveData, DriverDspChain, MeasurementSource, OptimizationMetadata,
     PluginConfigWrapper, SpeakerConfig,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 pub(in super::super) struct Stereo21Executor;
+
+fn is_post_eq_plugin(plugin: &PluginConfigWrapper) -> bool {
+    plugin
+        .parameters
+        .get("label")
+        .and_then(serde_json::Value::as_str)
+        == Some("post_eq")
+}
+
+fn refresh_serialized_chain(
+    chain: &mut ChannelDspChain,
+    sample_rate: f64,
+    sidecar_dir: &std::path::Path,
+) -> Result<()> {
+    let initial_data =
+        chain
+            .initial_curve
+            .clone()
+            .ok_or_else(|| AutoeqError::InvalidMeasurement {
+                message: format!("channel '{}' has no initial curve", chain.channel),
+            })?;
+    let initial_curve: Curve = initial_data.clone().into();
+    let realized = crate::ctc::apply_channel_dsp_chain_to_curve_with_sidecar_dir(
+        chain,
+        &initial_curve,
+        sample_rate,
+        sidecar_dir,
+    )?;
+    let realized_data: CurveData = (&realized).into();
+    chain.eq_response = Some(output::compute_eq_response(&initial_data, &realized_data));
+    chain.final_curve = Some(realized_data);
+    Ok(())
+}
 
 impl WorkflowExecutor for Stereo21Executor {
     fn execute<'cfg, 'p, 's>(
@@ -159,7 +193,6 @@ impl WorkflowExecutor for Stereo21Executor {
         // 3. Pre-EQ
         let mut pre_eq_plugins: HashMap<String, Vec<PluginConfigWrapper>> = HashMap::new();
         let mut pre_eq_targets: HashMap<String, Option<CurveData>> = HashMap::new();
-        let mut linearized_curves: HashMap<String, Curve> = HashMap::new();
         let mut optimizer_evidence_by_channel: HashMap<
             String,
             Vec<roomeq_engine::OptimizerRunEvidence>,
@@ -215,7 +248,6 @@ impl WorkflowExecutor for Stereo21Executor {
             pre_eq_plugins.insert(role.to_string(), chain.plugins);
             pre_eq_filters.insert(role.to_string(), ch_result.biquads);
             optimizer_evidence_by_channel.insert(role.to_string(), ch_result.optimizer_evidence);
-            linearized_curves.insert(role.to_string(), ch_result.final_curve);
         }
 
         // Sub Pre-EQ: inline source with no speaker_name -> CEA2034 skipped.
@@ -255,7 +287,6 @@ impl WorkflowExecutor for Stereo21Executor {
             pre_eq_plugins.insert(sub_role.clone(), chain.plugins);
             pre_eq_filters.insert(sub_role.clone(), ch_result.biquads);
             optimizer_evidence_by_channel.insert(sub_role.clone(), ch_result.optimizer_evidence);
-            linearized_curves.insert(sub_role.clone(), ch_result.final_curve);
         }
         workflow_stage_event(
             &mut assembly.stage_callback,
@@ -274,13 +305,37 @@ impl WorkflowExecutor for Stereo21Executor {
 
         let mut aligned_pre_eq_curves: HashMap<String, Curve> = HashMap::new();
         for role in ["L", "R", sub_role.as_str()] {
-            let mut c = linearized_curves[role].clone();
-            let g = *gains.get(role).unwrap_or(&0.0);
-            for s in c.spl.iter_mut() {
-                *s += g;
+            let mut plugins = pre_eq_plugins.get(role).cloned().unwrap_or_default();
+            let align_gain = *gains.get(role).unwrap_or(&0.0);
+            if align_gain.abs() > 0.01 {
+                plugins.insert(0, output::create_gain_plugin(align_gain));
             }
-            aligned_pre_eq_curves.insert(role.to_string(), c);
+            let realized = super::home_cinema::realize_plugins_on_curve(
+                role,
+                plugins,
+                &curves[role],
+                sample_rate,
+                output_dir,
+                &HashMap::new(),
+            )?;
+            aligned_pre_eq_curves.insert(role.to_string(), realized);
         }
+        let optimizer_source_pre_route_transfers = ["L", "R"]
+            .into_iter()
+            .map(|role| {
+                let reference = &aligned_pre_eq_curves[&sub_role];
+                let gain_db = *gains.get(role).unwrap_or(&0.0);
+                (
+                    role.to_string(),
+                    Curve {
+                        freq: reference.freq.clone(),
+                        spl: ndarray::Array1::from_elem(reference.freq.len(), gain_db),
+                        phase: Some(ndarray::Array1::zeros(reference.freq.len())),
+                        ..Curve::default()
+                    },
+                )
+            })
+            .collect::<HashMap<_, _>>();
 
         // 4. Bass-management crossover optimization
         let l_curve = &aligned_pre_eq_curves["L"];
@@ -447,7 +502,7 @@ impl WorkflowExecutor for Stereo21Executor {
 
         let sub_correction = main_mean - sub_mean;
         info!(
-            "  Re-aligning Subwoofer: Main={:.2} dB, Sub={:.2} dB, Correction={:+.2} dB",
+            "  Post-crossover level diagnostic: Main={:.2} dB, Sub={:.2} dB, delta={:+.2} dB (pre-crossover alignment retained)",
             main_mean, sub_mean, sub_correction
         );
 
@@ -456,7 +511,10 @@ impl WorkflowExecutor for Stereo21Executor {
             .filter(|bm| bm.config.apply_lfe_gain_to_chain)
             .map(|bm| bm.config.lfe_playback_gain_db)
             .unwrap_or(0.0);
-        let requested_sub_gain = sub_gain_post + sub_correction + lfe_physical_gain;
+        // Initial channel alignment already calibrated mains and sub over
+        // their reliable passbands. The post-crossover mean is diagnostic:
+        // applying it again would turn the LR24 skirt into an artificial cut.
+        let requested_sub_gain = sub_gain_post + lfe_physical_gain;
         let (sub_gain_post, sub_gain_limited) = roomeq_engine::home_cinema::limited_sub_gain(
             requested_sub_gain,
             bass_management.as_ref(),
@@ -520,6 +578,105 @@ impl WorkflowExecutor for Stereo21Executor {
                     ),
                 advisories: optimization_advisories,
             };
+
+        if phase_available {
+            let main_roles = vec!["L".to_string(), "R".to_string()];
+            let group_id = roomeq_engine::home_cinema::group_id_for_role(
+                roomeq_engine::home_cinema::role_for_channel("L"),
+            )
+            .to_string();
+            let mut group_results = BTreeMap::from([(
+                group_id.clone(),
+                roomeq_engine::home_cinema::BassManagementGroupReport {
+                    group_id: group_id.clone(),
+                    roles: main_roles.clone(),
+                    crossover_type: xover_type_str.to_string(),
+                    selected_crossover_hz: Some(final_xo_freq),
+                    configured_crossover_hz: Some(est_xo),
+                    main_delay_ms: main_delay_post,
+                    bass_route_delay_ms: sub_delay_post,
+                    polarity_inverted: sub_inverted,
+                    trim_db: 0.0,
+                    objective_before,
+                    objective_after,
+                    advisories: Vec::new(),
+                },
+            )]);
+            let mut source_results =
+                roomeq_engine::bass_management::baseline_bass_management_source_reports(
+                    &main_roles,
+                    &aligned_pre_eq_curves,
+                    &group_results,
+                    &bass_management_optimization.sub_output_results,
+                    sub_preprocess.drivers.as_deref(),
+                    &sub_role,
+                    sample_rate,
+                    "stereo_source_route_baseline",
+                );
+            let route_advisories =
+                roomeq_engine::bass_management::optimize_bass_management_joint_solution(
+                    config,
+                    &main_roles,
+                    &aligned_curves,
+                    &aligned_pre_eq_curves,
+                    Some(&optimizer_source_pre_route_transfers),
+                    None,
+                    &mut group_results,
+                    &mut source_results,
+                    &mut bass_management_optimization.sub_output_results,
+                    sub_preprocess.drivers.as_deref(),
+                    &sub_role,
+                    sample_rate,
+                );
+            for source in &mut source_results {
+                let relative_delay = source.bass_route_delay_ms - source.main_delay_ms;
+                source.main_delay_ms = main_delay_post;
+                source.bass_route_delay_ms = (main_delay_post + relative_delay).max(0.0);
+            }
+            bass_management_optimization.group_results = group_results.into_values().collect();
+            bass_management_optimization.source_results = source_results;
+            for advisory in route_advisories {
+                if !bass_management_optimization.advisories.contains(&advisory) {
+                    bass_management_optimization.advisories.push(advisory);
+                }
+            }
+        } else {
+            let main_roles = vec!["L".to_string(), "R".to_string()];
+            let group_id = roomeq_engine::home_cinema::group_id_for_role(
+                roomeq_engine::home_cinema::role_for_channel("L"),
+            )
+            .to_string();
+            let group_results = BTreeMap::from([(
+                group_id.clone(),
+                roomeq_engine::home_cinema::BassManagementGroupReport {
+                    group_id,
+                    roles: main_roles.clone(),
+                    crossover_type: xover_type_str.to_string(),
+                    selected_crossover_hz: Some(final_xo_freq),
+                    configured_crossover_hz: Some(est_xo),
+                    main_delay_ms: main_delay_post,
+                    bass_route_delay_ms: sub_delay_post,
+                    polarity_inverted: sub_inverted,
+                    trim_db: 0.0,
+                    objective_before,
+                    objective_after,
+                    advisories: vec!["source_route_phase_unavailable".to_string()],
+                },
+            )]);
+            bass_management_optimization.source_results =
+                roomeq_engine::bass_management::baseline_bass_management_source_reports(
+                    &main_roles,
+                    &aligned_pre_eq_curves,
+                    &group_results,
+                    &bass_management_optimization.sub_output_results,
+                    sub_preprocess.drivers.as_deref(),
+                    &sub_role,
+                    sample_rate,
+                    "source_route_phase_unavailable",
+                );
+            bass_management_optimization.group_results = group_results.into_values().collect();
+        }
+
         let bass_routing_graph = roomeq_engine::home_cinema::bass_management_routing_graph(
             config,
             Some(&bass_management_optimization),
@@ -694,11 +851,14 @@ impl WorkflowExecutor for Stereo21Executor {
             let mut plugins = Vec::new();
             let align_gain = *gains.get(role).unwrap_or(&0.0);
             if align_gain.abs() > 0.01 {
-                plugins.push(output::create_gain_plugin(align_gain));
+                plugins.push(mark_plugin_stage(
+                    output::create_gain_plugin(align_gain),
+                    "pre_route",
+                ));
             }
 
             if let Some(stack) = pre_eq_plugins.get(role) {
-                plugins.extend(stack.clone());
+                plugins.extend(mark_plugins_stage(stack.clone(), "post_route"));
             }
 
             plugins.push(mark_route_owned_plugin(output::create_crossover_plugin(
@@ -708,18 +868,25 @@ impl WorkflowExecutor for Stereo21Executor {
             )));
 
             if main_gain_post.abs() > 0.01 {
-                plugins.push(output::create_gain_plugin(main_gain_post));
+                plugins.push(mark_route_owned_plugin(output::create_gain_plugin(
+                    main_gain_post,
+                )));
             }
 
             if main_delay_post.abs() > 0.01 {
-                plugins.push(output::create_delay_plugin(main_delay_post));
+                plugins.push(mark_route_owned_plugin(output::create_delay_plugin(
+                    main_delay_post,
+                )));
             }
 
             let eqs = post_eq_filters.get(role);
             if let Some(e) = eqs
                 && !e.is_empty()
             {
-                plugins.push(output::create_labeled_eq_plugin(e, "post_eq"));
+                plugins.push(mark_plugin_stage(
+                    output::create_labeled_eq_plugin(e, "post_eq"),
+                    "post_route",
+                ));
             }
 
             let intermediate = if role == "L" { &l_post } else { &r_post };
@@ -755,11 +922,14 @@ impl WorkflowExecutor for Stereo21Executor {
         let mut sub_plugins = Vec::new();
         let sub_align_gain = *gains.get(&sub_role).unwrap_or(&0.0);
         if sub_align_gain.abs() > 0.01 {
-            sub_plugins.push(output::create_gain_plugin(sub_align_gain));
+            sub_plugins.push(mark_plugin_stage(
+                output::create_gain_plugin(sub_align_gain),
+                "pre_route",
+            ));
         }
 
         if let Some(stack) = pre_eq_plugins.get(&sub_role) {
-            sub_plugins.extend(stack.clone());
+            sub_plugins.extend(mark_plugins_stage(stack.clone(), "post_route"));
         }
 
         sub_plugins.push(mark_route_owned_plugin(output::create_crossover_plugin(
@@ -769,21 +939,25 @@ impl WorkflowExecutor for Stereo21Executor {
         )));
 
         if sub_inverted || sub_gain_post.abs() > 0.01 {
-            sub_plugins.push(output::create_gain_plugin_with_invert(
-                sub_gain_post,
-                sub_inverted,
+            sub_plugins.push(mark_route_owned_plugin(
+                output::create_gain_plugin_with_invert(sub_gain_post, sub_inverted),
             ));
         }
 
         if sub_delay_post.abs() > 0.01 {
-            sub_plugins.push(output::create_delay_plugin(sub_delay_post));
+            sub_plugins.push(mark_route_owned_plugin(output::create_delay_plugin(
+                sub_delay_post,
+            )));
         }
 
         let sub_eqs = post_eq_filters.get(&sub_role);
         if let Some(e) = sub_eqs
             && !e.is_empty()
         {
-            sub_plugins.push(output::create_labeled_eq_plugin(e, "post_eq"));
+            sub_plugins.push(mark_plugin_stage(
+                output::create_labeled_eq_plugin(e, "post_eq"),
+                "post_route",
+            ));
         }
 
         let final_sub_curve = if let Some(e) = sub_eqs
@@ -919,6 +1093,67 @@ impl WorkflowExecutor for Stereo21Executor {
             avg_pre, avg_post
         );
 
+        let deployed_source_curves = if let Some(graph) = bass_routing_graph.as_ref() {
+            let replay = super::home_cinema::reconstruct_deployed_source_curves(
+                &channel_chains,
+                &HashMap::new(),
+                graph,
+                Some(&bass_management_optimization),
+                sample_rate,
+                output_dir,
+            );
+            match replay {
+                Ok(deployed) => deployed,
+                Err(AutoeqError::OptimizationFailed { message })
+                    if message.contains("final routed crossover underfill") =>
+                {
+                    let mut reverted = false;
+                    for chain in channel_chains.values_mut() {
+                        let before = chain.plugins.len();
+                        chain.plugins.retain(|plugin| !is_post_eq_plugin(plugin));
+                        if chain.plugins.len() != before {
+                            refresh_serialized_chain(chain, sample_rate, output_dir)?;
+                            if let Some(final_data) = chain.final_curve.clone()
+                                && let Some(result) = channel_results.get_mut(&chain.channel)
+                            {
+                                let final_curve: Curve = final_data.into();
+                                let (score_min, score_max) = if chain.channel == sub_role {
+                                    (sub_min_score, final_xo_freq)
+                                } else {
+                                    (final_xo_freq, max_freq)
+                                };
+                                result.post_score =
+                                    compute_flat_loss(&final_curve, score_min, score_max);
+                                result.final_curve = final_curve;
+                            }
+                            reverted = true;
+                        }
+                    }
+                    if !reverted {
+                        return Err(AutoeqError::OptimizationFailed { message });
+                    }
+                    bass_management_optimization
+                        .advisories
+                        .push("stereo_post_eq_reverted_for_routed_crossover".to_string());
+                    super::home_cinema::reconstruct_deployed_source_curves(
+                        &channel_chains,
+                        &HashMap::new(),
+                        graph,
+                        Some(&bass_management_optimization),
+                        sample_rate,
+                        output_dir,
+                    )?
+                }
+                Err(error) => return Err(error),
+            }
+        } else {
+            HashMap::new()
+        };
+        let avg_post = channel_results
+            .values()
+            .map(|result| result.post_score)
+            .sum::<f64>()
+            / channel_results.len() as f64;
         let epa_cfg = config.optimizer.epa_config.clone().unwrap_or_default();
         let epa_per_channel = output::compute_epa_per_channel(&channel_chains, &epa_cfg);
         let epa_multichannel = output::compute_epa_multichannel(&channel_chains, &epa_cfg);
@@ -933,7 +1168,7 @@ impl WorkflowExecutor for Stereo21Executor {
         Ok(RoomOptimizationResult {
             channels: channel_chains,
             channel_results,
-            deployed_source_curves: HashMap::new(),
+            deployed_source_curves,
             combined_pre_score: avg_pre,
             combined_post_score: avg_post,
             metadata: OptimizationMetadata {

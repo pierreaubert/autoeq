@@ -1074,6 +1074,7 @@ mod tests {
     #[test]
     fn degraded_or_failed_stage_is_a_correctness_failure() {
         let outcomes = vec![StageOutcome {
+            checks: Vec::new(),
             stage: "height_channel_alignment".to_string(),
             status: StageStatus::Degraded,
             advisories: vec!["height_objective_acceptance_failed".to_string()],
@@ -1094,6 +1095,7 @@ mod tests {
     #[test]
     fn applied_height_alignment_passes_stage_gate() {
         let outcomes = vec![StageOutcome {
+            checks: Vec::new(),
             stage: "height_channel_alignment".to_string(),
             status: StageStatus::Applied,
             advisories: Vec::new(),

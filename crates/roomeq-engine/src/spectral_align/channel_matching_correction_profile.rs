@@ -88,7 +88,8 @@ pub fn correct_inter_channel_deviation_with_profile(
     sample_rate: f64,
     profile: ChannelMatchingCorrectionProfile,
 ) -> Vec<ChannelMatchingResult> {
-    let profile = constrain_channel_matching_profile_to_passbands(profile.sanitized(), final_curves);
+    let profile =
+        constrain_channel_matching_profile_to_passbands(profile.sanitized(), final_curves);
     if final_curves.len() <= 1 || max_filters == 0 {
         return Vec::new();
     }

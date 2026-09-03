@@ -8,9 +8,8 @@ use super::types::SubDriverInfo;
 use super::types::group_crossover_plan;
 use crate::error::{AutoeqError, Result};
 use crate::topology::{
-    MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB, all_curves_have_usable_phase,
-    all_curves_share_frequency_grid, apply_crossover_response_to_curve,
-    apply_delay_and_polarity_to_curve, average_mains_magnitude,
+    all_curves_have_usable_phase, all_curves_share_frequency_grid,
+    apply_crossover_response_to_curve, apply_delay_and_polarity_to_curve, average_mains_magnitude,
     bass_management_crossover_cancellation_underfill_db, bass_management_crossover_type_candidates,
     bass_management_max_underfill_db_with_target, bass_management_objective,
     bass_management_objective_with_target, bass_management_underfill_is_acceptable,
@@ -21,6 +20,10 @@ use crate::{Curve, crossover, home_cinema};
 use math_audio_dsp::analysis::compute_average_response;
 use roomeq_model::{CrossoverConfig, RoomConfig};
 use std::collections::{BTreeMap, HashMap};
+
+// Leave room for serialized-chain interpolation and final grid replay. The
+// production hard gate remains MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB.
+const ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB: f64 = 1.0;
 
 fn worsens_excessive_underfill(candidate: &[f64], baseline: &[f64]) -> bool {
     candidate.iter().zip(baseline).any(|(after, before)| {
@@ -38,6 +41,22 @@ fn has_excessive_underfill(underfills: &[f64]) -> bool {
     underfills
         .iter()
         .any(|underfill| !bass_management_underfill_is_acceptable(*underfill))
+}
+
+fn should_accept_route_candidate(
+    candidate_score: f64,
+    baseline_score: f64,
+    regressed_source: bool,
+    candidate_underfills: &[f64],
+    baseline_underfills: &[f64],
+) -> bool {
+    let baseline_is_unsafe = has_excessive_underfill(baseline_underfills);
+    let candidate_restores_safety =
+        baseline_is_unsafe && !has_excessive_underfill(candidate_underfills);
+    let improves_quality = candidate_score < baseline_score - 1.0e-6;
+
+    (candidate_restores_safety || (improves_quality && (!regressed_source || baseline_is_unsafe)))
+        && !worsens_excessive_underfill(candidate_underfills, baseline_underfills)
 }
 
 /// Keep target tracking in the optimization constraint, but reserve the
@@ -1402,7 +1421,7 @@ pub fn optimize_bass_management_joint_solution(
                 .iter()
                 .zip(&constrained_underfills)
                 .map(|(loss, underfill)| {
-                    let excess = (underfill - MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB).max(0.0);
+                    let excess = (underfill - ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB).max(0.0);
                     loss + 1_000.0 * excess * excess
                 })
                 .collect::<Vec<_>>();
@@ -1486,7 +1505,7 @@ pub fn optimize_bass_management_joint_solution(
                     .and_then(|(_, losses, underfills)| {
                         let loss = *losses.get(source_index)?;
                         let underfill = *underfills.get(source_index)?;
-                        let excess = (underfill - MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB).max(0.0);
+                        let excess = (underfill - ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB).max(0.0);
                         Some(loss + 1_000.0 * excess * excess)
                     })
                     .unwrap_or(1.0e12)
@@ -1516,6 +1535,10 @@ pub fn optimize_bass_management_joint_solution(
         let candidate_underfill_db = candidate
             .as_ref()
             .and_then(|(_, _, underfills)| underfills.iter().copied().reduce(f64::max));
+        log::debug!(
+            "source route group '{group_id}' crossover underfill: baseline={baseline_underfills:?}, candidate={:?}",
+            candidate.as_ref().map(|(_, _, underfills)| underfills)
+        );
         // The route pass runs before the narrow-band corrective EQ pass.  A
         // measured response can therefore already exceed the final absolute
         // underfill limit.  Reject candidates that introduce or worsen an
@@ -1534,12 +1557,15 @@ pub fn optimize_bass_management_joint_solution(
                 .is_some_and(|(_, _, candidate_underfills)| {
                     improves_but_remains_excessive(candidate_underfills, &baseline_underfills)
                 });
-        let baseline_has_excessive_underfill = has_excessive_underfill(&baseline_underfills);
-        let accepted = candidate
-            .as_ref()
-            .is_some_and(|(score, _, _)| *score < baseline_score - 1.0e-6)
-            && (!regressed_source || baseline_has_excessive_underfill)
-            && !worsened_excessive_underfill;
+        let accepted = candidate.as_ref().is_some_and(|(score, _, underfills)| {
+            should_accept_route_candidate(
+                *score,
+                baseline_score,
+                regressed_source,
+                underfills,
+                &baseline_underfills,
+            )
+        });
         let chosen = if accepted { refined } else { initial.clone() };
         let (_, chosen_losses, _) = evaluate(&chosen).expect("validated source route parameters");
         let chosen_frequency = chosen[0].clamp(minimum_frequency, maximum_frequency);
@@ -1673,6 +1699,24 @@ mod tests {
         assert!(has_excessive_underfill(&[2.5, 3.1]));
         assert!(!has_excessive_underfill(&[2.5, 3.0]));
         assert!(!has_excessive_underfill(&[2.5, 3.04]));
+    }
+
+    #[test]
+    fn route_candidate_that_restores_hard_underfill_safety_beats_quality_score() {
+        assert!(should_accept_route_candidate(
+            12.0,
+            10.0,
+            true,
+            &[1.1, 1.3, 1.0, 1.1],
+            &[1.8, 1.5, 7.7, 8.7],
+        ));
+        assert!(!should_accept_route_candidate(
+            9.0,
+            10.0,
+            false,
+            &[1.1, 1.3, 4.0, 1.1],
+            &[1.8, 1.5, 3.5, 8.7],
+        ));
     }
 
     #[test]

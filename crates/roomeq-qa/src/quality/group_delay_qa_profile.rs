@@ -204,12 +204,16 @@ mod registry_tests {
     #[test]
     fn quality_matrix_is_registry_driven_and_all_options_parse() {
         let cases = all_test_cases();
-        assert_eq!(cases.len(), 37);
+        assert_eq!(cases.len(), 38);
         assert!(
             cases
                 .iter()
                 .any(|case| matches!(&case.case, TestCase::CrossModeConvergence { .. }))
         );
+        assert!(cases.iter().any(|case| {
+            case.id == "quality/cross_mode/fidelia_20"
+                && matches!(&case.case, TestCase::CrossModeConvergence { .. })
+        }));
         assert!(cases.iter().any(
             |case| matches!(&case.case, TestCase::OptionEffect { options, .. } if options.len() >= 6)
         ));

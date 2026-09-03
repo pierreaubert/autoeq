@@ -18,7 +18,7 @@ pub(super) const SAMPLE_RATE: f64 = 48000.0;
 
 pub(super) const SEED: u64 = 42;
 
-pub(super) const QA_MAXEVAL: usize = 15000;
+pub(super) const QA_MAXEVAL: usize = 600_000;
 
 /// Global counter for unique temp dir names across threads
 pub(super) static TEMP_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);

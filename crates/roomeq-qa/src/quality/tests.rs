@@ -1,3 +1,4 @@
+use super::apply::clamp_strict_measured_maxeval;
 use super::consts::{QA_MAXEVAL, qa_seed};
 use super::metric_scorecard::MetricScorecard;
 use super::metric_scorecard::compare_scorecards;
@@ -385,6 +386,7 @@ fn timbre_matching_validator_allows_small_parallel_drift_for_applied_stage() {
     let baseline = result_with_inter_channel_slope(1.0);
     let mut option = result_with_inter_channel_slope(1.02);
     option.metadata.stage_outcomes.push(StageOutcome {
+        checks: Vec::new(),
         stage: "inter_channel_timbre_matching".to_string(),
         status: StageStatus::Applied,
         advisories: Vec::new(),
@@ -725,6 +727,25 @@ fn quality_maxeval_accepts_positive_contract_budget() {
         "1234".into(),
     ];
     assert_eq!(parse_maxeval(&args).unwrap(), 1234);
+}
+
+#[test]
+fn strict_measured_maxeval_clamps_only_optimizer_iterations() {
+    let mut config = RoomConfig::default();
+    config.optimizer.algorithm = "autoeq:cmaes".to_string();
+    config.optimizer.population = 20;
+    config.optimizer.num_filters = 7;
+    config.optimizer.max_iter = 600_000;
+    config.optimizer.seed = Some(42);
+    let mut expected = config.clone();
+    expected.optimizer.max_iter = 15_000;
+
+    clamp_strict_measured_maxeval(&mut config, 15_000);
+
+    assert_eq!(
+        serde_json::to_value(&config).unwrap(),
+        serde_json::to_value(&expected).unwrap()
+    );
 }
 
 #[test]

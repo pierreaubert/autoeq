@@ -12,6 +12,27 @@ qa-roomeq-pr:
 	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --pr
 	cargo run --features qa --bin roomeq-qa-acoustic --release -- --tier pr
 	python3 -m unittest scripts.test_dsp
+	just qa-roomeq-stage-contracts
+	just qa-roomeq-parameters-pr
+	just qa-roomeq-escaped-defects
+
+qa-roomeq-stage-contracts:
+	cargo test --release -p roomeq-qa stage_contracts --lib
+	cargo test --release -p roomeq-workflow dsp_realization --lib
+	cargo test --release -p roomeq-engine dsp_realization --lib
+	python3 -m unittest scripts.test_dsp
+
+qa-roomeq-parameters-pr:
+	python3 scripts/check_parameter_matrix.py
+	cargo test --release -p roomeq-qa parameter_matrix --lib
+	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --parameter-matrix
+
+qa-roomeq-escaped-defects:
+	python3 scripts/check_escaped_defects.py
+	cargo test --release -p roomeq-engine spectral_alignment_interpolates --lib
+	cargo test --release -p roomeq-engine serialized_biquad_response --lib
+	cargo test --release -p roomeq-workflow serialized_biquad_response --lib
+	cargo test --release -p roomeq-qa registry --lib
 
 [group('qa-roomeq')]
 qa-roomeq-nightly:
@@ -267,7 +288,7 @@ qa-roomeq-supporting-source:
 # tuned optimizer (bare local-optimizer runs cannot improve the FEM corpus and
 # are rejected by the final safety gate).
 [group('qa-roomeq')]
-qa-roomeq-contract-pr maxeval="2000":
+qa-roomeq-contract-pr maxeval="600000":
 	cargo test --release -p roomeq-engine dsp_realization --lib
 	cargo test --release -p roomeq-engine main_sub_optimizer_matches --lib
 	cargo test --release -p roomeq-workflow ctc --lib
@@ -276,6 +297,7 @@ qa-roomeq-contract-pr maxeval="2000":
 	cargo test --release -p roomeq-qa quality_seed_runs --lib
 	cargo run --features qa --bin roomeq-qa-quality --release -- --case "Cross-Mode measured Genelec 5.1.4" --jobs 1 --maxeval {{maxeval}} --seed-runs 1
 	cargo run --features qa --bin roomeq-qa-quality --release -- --case "Cross-Mode measured KEF 5.1" --jobs 1 --maxeval {{maxeval}} --seed-runs 1
+	cargo run --features qa --bin roomeq-qa-quality --release -- --case "Cross-Mode measured Fidelia 2.0" --jobs 1 --maxeval {{maxeval}} --seed-runs 1
 	python3 -m unittest scripts.test_check_roomeq_qa_reachability
 
 [group('qa-roomeq')]
@@ -343,6 +365,9 @@ qa-roomeq-mutation-smoke:
 	mkdir -p target/qa
 	cargo mutants --profile release --package roomeq-engine --file 'crates/roomeq-engine/src/dsp_realization.rs' --file 'crates/roomeq-engine/src/crossover.rs' --re 'plugin_response|plugin_chain_response|optimize_main_sub_crossover' --baseline skip --timeout 120 -j 4 -o target/qa/roomeq-mutants-engine
 	cargo mutants --profile release --package roomeq-qa --file 'crates/roomeq-qa/src/registry.rs' --re 'ScenarioExpect::accepts_safe_revert' --baseline skip --timeout 120 -j 2 -o target/qa/roomeq-mutants-gate-purpose
+	cargo mutants --profile release --package roomeq-engine --file 'crates/roomeq-engine/src/spectral_align' --file 'crates/roomeq-engine/src/bass_management' --re 'passband|grid|gain|route' --baseline skip --timeout 120 -j 4 -o target/qa/roomeq-mutants-escaped-defects
+	cargo mutants --profile release --package roomeq-workflow --file 'crates/roomeq-workflow/src/room_optimization' --re 'revert|refresh|mixed_phase|passband' --baseline skip --timeout 120 -j 4 -o target/qa/roomeq-mutants-workflow-boundaries
+	python3 scripts/check_mutation_results.py target/qa/roomeq-mutants-gate-purpose
 
 # Exhaustive mutation testing for canonical realization, crossover roles, and
 # registry acceptance contracts.

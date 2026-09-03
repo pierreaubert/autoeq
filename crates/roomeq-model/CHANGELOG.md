@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add backward-compatible classified stage checks to RoomEQ stage outcomes and output metadata.
 - Reject crossover frequency ranges that are non-finite, non-positive, or not strictly increasing.
 - Resolve file-backed target paths and validate required target files, excursion bounds, CTC robustness, continuous-area priors, height references, supporting-source names, and duplicate subwoofer mappings.
 - Leave filesystem-backed acoustic validation pending for the workflow adapter

@@ -206,6 +206,71 @@ pub fn validate_room_config_for_workflow_with_frequency_samples(
     report
 }
 
+/// Validate configuration against the actual DSP sample rate.
+///
+/// The legacy validators retain their 48 kHz compatibility behaviour.  New
+/// production callers should use this entry point so a configuration cannot
+/// request correction above the realizable Nyquist frequency.
+pub fn validate_room_config_for_workflow_at_sample_rate(
+    config: &RoomConfig,
+    context: RoomValidationContext,
+    frequency_samples: usize,
+    sample_rate: f64,
+) -> ConfigValidationReport {
+    let mut report = validate_room_config_for_workflow_with_frequency_samples(
+        config,
+        context,
+        frequency_samples,
+    );
+    let mut errors = Vec::new();
+    if !sample_rate.is_finite() || sample_rate <= 0.0 {
+        errors.push(format!(
+            "sample rate must be finite and positive, got {sample_rate}"
+        ));
+    } else if config.optimizer.max_freq > sample_rate / 2.0 {
+        errors.push(format!(
+            "max_freq ({}) exceeds Nyquist ({:.3} Hz) for sample rate {sample_rate} Hz",
+            config.optimizer.max_freq,
+            sample_rate / 2.0
+        ));
+    }
+    report.record(ValidationStage::Structural, errors, Vec::new());
+    report
+}
+
+#[cfg(test)]
+mod sample_rate_tests {
+    use super::*;
+
+    #[test]
+    fn sample_rate_validation_uses_actual_nyquist() {
+        let mut config = RoomConfig::default();
+        config.optimizer.max_freq = 20_000.0;
+        let report = validate_room_config_for_workflow_at_sample_rate(
+            &config,
+            RoomValidationContext::structural(),
+            DEFAULT_FREQUENCY_SAMPLES,
+            32_000.0,
+        );
+        assert!(report.errors().any(|error| error.contains("Nyquist")));
+    }
+
+    #[test]
+    fn sample_rate_validation_rejects_non_finite_rate() {
+        let report = validate_room_config_for_workflow_at_sample_rate(
+            &RoomConfig::default(),
+            RoomValidationContext::structural(),
+            DEFAULT_FREQUENCY_SAMPLES,
+            f64::NAN,
+        );
+        assert!(
+            report
+                .errors()
+                .any(|error| error.contains("finite and positive"))
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

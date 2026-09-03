@@ -765,21 +765,14 @@ mod combined_boost_tests {
         let center = 1_000.0_f64.log10();
         let mut parameters = vec![center, 1.0, 8.0, center, 1.0, 8.0];
 
-        clamp_combined_boost(
-            &mut parameters,
-            &freqs,
-            48_000.0,
-            PeqModel::Pk,
-            12.0,
-        );
+        clamp_combined_boost(&mut parameters, &freqs, 48_000.0, PeqModel::Pk, 12.0);
 
-        let response = autoeq_core::x2peq::x2spl(
-            &freqs,
-            &parameters,
-            48_000.0,
-            PeqModel::Pk,
+        let response = autoeq_core::x2peq::x2spl(&freqs, &parameters, 48_000.0, PeqModel::Pk);
+        assert!(
+            response[0] <= 12.0 + 1e-6,
+            "combined boost was {} dB",
+            response[0]
         );
-        assert!(response[0] <= 12.0 + 1e-6, "combined boost was {} dB", response[0]);
         assert!((parameters[2] - 6.0).abs() < 1e-5);
         assert!((parameters[5] - 6.0).abs() < 1e-5);
     }

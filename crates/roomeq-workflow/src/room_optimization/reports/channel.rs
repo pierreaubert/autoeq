@@ -336,20 +336,20 @@ mod tests {
 
         let constrained =
             roomeq_engine::spectral_align::constrain_channel_matching_profile_to_passbands(
-            profile,
-            &HashMap::from([
-                ("BL".to_string(), rolled_off),
-                ("BR".to_string(), full_range.clone()),
-            ]),
-        );
+                profile,
+                &HashMap::from([
+                    ("BL".to_string(), rolled_off),
+                    ("BR".to_string(), full_range.clone()),
+                ]),
+            );
         assert!(constrained.max_freq_hz < 12_000.0);
         assert!(constrained.max_freq_hz > 6_000.0);
 
         let unchanged =
             roomeq_engine::spectral_align::constrain_channel_matching_profile_to_passbands(
-            profile,
-            &HashMap::from([("L".to_string(), full_range)]),
-        );
+                profile,
+                &HashMap::from([("L".to_string(), full_range)]),
+            );
         assert_eq!(unchanged.max_freq_hz, 12_000.0);
     }
 

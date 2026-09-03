@@ -188,6 +188,44 @@ fn shared_alignment_fit_band_excludes_subwoofer_and_crossover_rolloff() {
 }
 
 #[test]
+fn final_role_level_alignment_corrects_broadband_lr_offset_down_only() {
+    let mut config = minimal_room_config(ProcessingMode::LowLatency);
+    config.optimizer.min_freq = 20.0;
+    config.optimizer.max_freq = 1_000.0;
+    let curve = |level| Curve {
+        freq: ndarray::array![100.0, 200.0, 500.0, 1_000.0],
+        spl: ndarray::Array1::from_elem(4, level),
+        phase: Some(ndarray::Array1::zeros(4)),
+        ..Curve::default()
+    };
+    let curves = HashMap::from([
+        ("L".to_string(), curve(70.0)),
+        ("R".to_string(), curve(66.5)),
+        ("LFE".to_string(), curve(80.0)),
+    ]);
+
+    let (gains, spread_db) = final_role_level_alignment_gains(&config, &curves);
+
+    assert!((spread_db - 3.5).abs() < 1.0e-9);
+    assert!((gains["L"] + 3.5).abs() < 1.0e-9);
+    assert!(!gains.contains_key("R"));
+    assert!(!gains.contains_key("LFE"));
+
+    let mut aligned = curves;
+    for (name, gain_db) in gains {
+        aligned
+            .get_mut(&name)
+            .unwrap()
+            .spl
+            .mapv_inplace(|value| value + gain_db);
+    }
+    let (remaining_gains, remaining_spread_db) =
+        final_role_level_alignment_gains(&config, &aligned);
+    assert!(remaining_gains.is_empty());
+    assert!(remaining_spread_db <= FINAL_CHANNEL_LEVEL_TOLERANCE_DB);
+}
+
+#[test]
 fn topology_height_residual_is_added_after_existing_delay() {
     let mut chain = ChannelDspChain {
         channel: "TFL".to_string(),

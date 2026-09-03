@@ -781,6 +781,69 @@ mod tests {
     }
 
     #[test]
+    fn routing_graph_uses_reverted_per_source_route_snapshot() {
+        let config = routed_home_cinema_config();
+        let groups = vec![BassManagementGroupReport {
+            group_id: "lcr".to_string(),
+            roles: vec!["L".to_string()],
+            crossover_type: "LR24".to_string(),
+            selected_crossover_hz: Some(80.0),
+            configured_crossover_hz: Some(80.0),
+            main_delay_ms: 1.0,
+            bass_route_delay_ms: 2.0,
+            polarity_inverted: false,
+            trim_db: -1.0,
+            objective_before: None,
+            objective_after: None,
+            advisories: Vec::new(),
+        }];
+        let sources = vec![BassManagementSourceReport {
+            source_channel: "L".to_string(),
+            group_id: "lcr".to_string(),
+            main_delay_ms: 3.0,
+            bass_route_delay_ms: 4.0,
+            polarity_inverted: true,
+            trim_db: -5.0,
+            objective_before: Some(1.0),
+            objective_after: Some(2.0),
+            accepted: false,
+            advisories: vec!["source_route_candidate_rejected".to_string()],
+        }];
+        let outputs = vec![BassManagementSubOutputReport {
+            output_role: "LFE".to_string(),
+            gain_db: -2.0,
+            delay_ms: 0.5,
+            polarity_inverted: false,
+            strategy_source: "single".to_string(),
+            headroom_contribution_db: -2.0,
+        }];
+        let optimization = crate::bass_management::joint_bass_management_report_from_parts(
+            &groups, &sources, &outputs,
+        );
+
+        let graph = bass_management_routing_graph(&config, Some(&optimization)).unwrap();
+        let main = graph
+            .routes
+            .iter()
+            .find(|route| {
+                route.source_channel == "L" && route.route_kind == "main_highpass_to_self"
+            })
+            .unwrap();
+        let bass = graph
+            .routes
+            .iter()
+            .find(|route| {
+                route.source_channel == "L" && route.route_kind == "redirected_bass_lowpass_to_sub"
+            })
+            .unwrap();
+
+        assert_eq!(main.delay_ms, 3.0);
+        assert_eq!(bass.delay_ms, 4.5);
+        assert_eq!(bass.gain_db, -7.0);
+        assert!(bass.polarity_inverted);
+    }
+
+    #[test]
     fn lfe_programme_cutoff_is_independent_from_speaker_crossover() {
         let config = routed_home_cinema_config();
         let graph = bass_management_routing_graph(&config, None).unwrap();

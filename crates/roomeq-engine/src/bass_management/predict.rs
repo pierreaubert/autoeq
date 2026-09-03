@@ -21,6 +21,7 @@ pub fn predict_bass_source_curve_from_routes(
 ) -> Option<Curve> {
     use num_complex::Complex;
 
+    let pre_route_transfer_realized = source_pre_route_transfer.is_some();
     let source_sub_curve = apply_source_pre_route_transfer(sub_curve, source_pre_route_transfer)?;
     if !curve_has_usable_phase(&source_sub_curve) {
         return None;
@@ -50,11 +51,15 @@ pub fn predict_bass_source_curve_from_routes(
 
         for idx in 0..source_sub_curve.freq.len() {
             let delay_phase = -360.0 * source_sub_curve.freq[idx] * route.delay_ms / 1000.0;
-            let input_trim_db = graph
-                .input_trim_db
-                .get(&route.source_channel)
-                .copied()
-                .unwrap_or(0.0);
+            let input_trim_db = if pre_route_transfer_realized {
+                0.0
+            } else {
+                graph
+                    .input_trim_db
+                    .get(&route.source_channel)
+                    .copied()
+                    .unwrap_or(0.0)
+            };
             let magnitude =
                 10.0_f64.powf((source_sub_curve.spl[idx] + route.gain_db + input_trim_db) / 20.0);
             let phase_rad = (phase[idx] + delay_phase + polarity_phase).to_radians();
@@ -91,9 +96,16 @@ pub fn apply_source_pre_route_transfer(
     let Some(transfer) = source_pre_route_transfer else {
         return Some(sub_curve.clone());
     };
-    if !same_frequency_grid(&sub_curve.freq, &transfer.freq)
-        || sub_curve.spl.len() != transfer.spl.len()
+    let aligned_transfer;
+    let transfer = if same_frequency_grid(&sub_curve.freq, &transfer.freq)
+        && sub_curve.spl.len() == transfer.spl.len()
     {
+        transfer
+    } else {
+        aligned_transfer = interpolate_log_space(&sub_curve.freq, transfer);
+        &aligned_transfer
+    };
+    if sub_curve.spl.len() != transfer.spl.len() {
         return None;
     }
 
@@ -161,9 +173,11 @@ pub fn predict_bass_output_curve_from_routes(
                 || route.route_kind == "lfe_lowpass_to_sub")
     }) {
         any_route = true;
+        let source_pre_route_transfer =
+            source_pre_route_transfers.and_then(|transfers| transfers.get(&route.source_channel));
         let route_curve = apply_source_pre_route_transfer(
             sub_curve,
-            source_pre_route_transfers.and_then(|transfers| transfers.get(&route.source_channel)),
+            source_pre_route_transfer,
         )?;
         let phase = route_curve.phase.as_ref()?;
         let response = if let Some(freq) = route.low_pass_hz {
@@ -181,11 +195,15 @@ pub fn predict_bass_output_curve_from_routes(
         for idx in 0..sub_curve.freq.len() {
             let freq_hz = sub_curve.freq[idx];
             let delay_phase = -360.0 * freq_hz * route.delay_ms / 1000.0;
-            let input_trim_db = graph
-                .input_trim_db
-                .get(&route.source_channel)
-                .copied()
-                .unwrap_or(0.0);
+            let input_trim_db = if source_pre_route_transfer.is_some() {
+                0.0
+            } else {
+                graph
+                    .input_trim_db
+                    .get(&route.source_channel)
+                    .copied()
+                    .unwrap_or(0.0)
+            };
             let mag = 10.0_f64.powf((route_curve.spl[idx] + route.gain_db + input_trim_db) / 20.0);
             let phase_rad = (phase[idx] + delay_phase + polarity_phase).to_radians();
             complex_sum[idx] += Complex::from_polar(mag, phase_rad) * response[idx];
@@ -350,7 +368,10 @@ mod tests {
         for sample_rate in [48_000.0, 96_000.0] {
             for crossover_type in ["LR24", "LR48"] {
                 let base = flat_curve();
-                let transfer = transfer_curve(&base, -2.5, 4.25);
+                // The canonical serialized transfer includes both correction
+                // and the logical-input trim. routing_graph.input_trim_db is
+                // metadata and must not apply that trim a second time.
+                let transfer = transfer_curve(&base, -5.5, 4.25);
                 let main_highpass = apply_crossover_response_to_curve(
                     &base,
                     crossover_type,
@@ -358,9 +379,8 @@ mod tests {
                     sample_rate,
                     false,
                 );
-                let mut main = apply_source_pre_route_transfer(&main_highpass, Some(&transfer))
+                let main = apply_source_pre_route_transfer(&main_highpass, Some(&transfer))
                     .expect("shared transfer grid");
-                main.spl.mapv_inplace(|level| level - 3.0);
 
                 let deployed = predict_deployed_source_curve_from_routes(
                     Some(&main),
@@ -385,10 +405,24 @@ mod tests {
     }
 
     #[test]
-    fn mismatched_source_transfer_grid_is_rejected() {
+    fn mismatched_source_transfer_grid_is_aligned() {
         let base = flat_curve();
-        let mut transfer = transfer_curve(&base, 0.0, 1.0);
-        transfer.freq[0] += 0.5;
-        assert!(apply_source_pre_route_transfer(&base, Some(&transfer)).is_none());
+        let transfer_freq = Array1::linspace(20.0, 500.0, 241);
+        let transfer = Curve {
+            spl: Array1::from_elem(transfer_freq.len(), 3.0),
+            phase: Some(Array1::zeros(transfer_freq.len())),
+            freq: transfer_freq,
+            ..Curve::default()
+        };
+        let conditioned = apply_source_pre_route_transfer(&base, Some(&transfer))
+            .expect("transfer should be aligned to the sub grid");
+
+        assert!(same_frequency_grid(&conditioned.freq, &base.freq));
+        assert_eq!(conditioned.spl.len(), base.spl.len());
+        assert!(conditioned.spl.iter().all(|level| (*level - 3.0).abs() < 1.0e-9));
+        assert!(conditioned
+            .phase
+            .as_ref()
+            .is_some_and(|phase| phase.iter().all(|value| value.abs() < 1.0e-9)));
     }
 }

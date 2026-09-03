@@ -222,6 +222,7 @@ mod tests {
     #[test]
     fn structured_final_safety_stage_counts_as_revert() {
         let outcomes = vec![StageOutcome {
+            checks: Vec::new(),
             stage: "final_correction_safety_LFE".to_string(),
             status: StageStatus::Degraded,
             advisories: vec!["topology_regression_reverted_LFE:mso".to_string()],

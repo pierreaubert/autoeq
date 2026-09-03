@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add stage-contract, pairwise-parameter, escaped-defect, generated-fixture, and independent serialized-replay gates, plus blocking four-mode KEF, Genelec, and Fidelia measured canaries.
 - Keep the randomized five-seed quality fuzzer in nightly/weekly schedules;
   blocking PR CI now uses deterministic measured-mode, quick safety,
   multi-seat, and perceptual contracts.

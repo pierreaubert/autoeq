@@ -113,6 +113,7 @@ pub(super) fn apply_final_correction_safety_gate(
                             .metadata
                             .stage_outcomes
                             .push(roomeq_model::StageOutcome {
+                                checks: Vec::new(),
                                 stage: format!("final_correction_safety_{name}"),
                                 status: roomeq_model::StageStatus::Degraded,
                                 advisories: stage_names
@@ -280,6 +281,7 @@ pub(super) fn apply_final_correction_safety_gate(
                 .metadata
                 .stage_outcomes
                 .push(roomeq_model::StageOutcome {
+                    checks: Vec::new(),
                     stage: format!("final_correction_safety_{name}"),
                     status: roomeq_model::StageStatus::Degraded,
                     advisories: vec!["audibility_regression_reverted".to_string()],
@@ -322,6 +324,7 @@ pub(super) fn apply_final_correction_safety_gate(
                     .metadata
                     .stage_outcomes
                     .push(roomeq_model::StageOutcome {
+                        checks: Vec::new(),
                         stage: format!("final_correction_safety_{name}"),
                         status: roomeq_model::StageStatus::Degraded,
                         advisories: stage_names
@@ -365,6 +368,7 @@ pub(super) fn apply_final_correction_safety_gate(
                         .metadata
                         .stage_outcomes
                         .push(roomeq_model::StageOutcome {
+                            checks: Vec::new(),
                             stage: format!("final_correction_safety_{name}"),
                             status: roomeq_model::StageStatus::Degraded,
                             advisories: stage_names
@@ -377,6 +381,7 @@ pub(super) fn apply_final_correction_safety_gate(
                         .metadata
                         .stage_outcomes
                         .push(roomeq_model::StageOutcome {
+                            checks: Vec::new(),
                             stage: format!("final_correction_safety_{name}"),
                             status: roomeq_model::StageStatus::Degraded,
                             advisories: vec![
@@ -501,6 +506,7 @@ pub(super) fn apply_final_correction_safety_gate(
                         .metadata
                         .stage_outcomes
                         .push(roomeq_model::StageOutcome {
+                            checks: Vec::new(),
                             stage: "final_runtime_acceptance".to_string(),
                             status: roomeq_model::StageStatus::Degraded,
                             advisories: runtime_reverted
@@ -682,6 +688,7 @@ fn refresh_optimizer_evidence(
     }
     if !advisories.is_empty() {
         result.metadata.stage_outcomes.push(StageOutcome {
+            checks: Vec::new(),
             stage: "optimizer_confidence".to_string(),
             status: StageStatus::Degraded,
             advisories,

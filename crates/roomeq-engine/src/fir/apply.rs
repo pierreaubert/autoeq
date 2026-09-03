@@ -66,10 +66,10 @@ pub(super) fn apply_fractional_sample_shift(coeffs: &[f64], shift: f64) -> Vec<f
         for offset in (-HALF_WIDTH + 1)..=HALF_WIDTH {
             let distance = frac - offset as f64;
             let weight = sinc(distance) * sinc(distance / HALF_WIDTH as f64);
-            normalization += weight;
             let index = base + offset;
             if (0..n as isize).contains(&index) {
                 value += weight * coeffs[index as usize];
+                normalization += weight;
             }
         }
         if normalization.abs() > 1e-12 {

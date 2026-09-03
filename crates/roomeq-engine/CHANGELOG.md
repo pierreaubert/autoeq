@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.5.71
+
+- Fix: fractional delay edge gain error.
+
+
+## 0.5.70
 
 - Align mismatched response grids at routing boundaries, keep route gain ownership singular, and prioritize candidates that restore hard crossover-underfill safety over softer quality scores.
 - Add the canonical serialized-DSP transfer evaluator with explicit convolution

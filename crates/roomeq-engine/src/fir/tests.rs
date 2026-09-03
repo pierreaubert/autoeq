@@ -556,6 +556,21 @@ fn fractional_delay_preserves_high_frequency_magnitude() {
 }
 
 #[test]
+fn fractional_delay_renormalizes_truncated_edge_taps() {
+    let coeffs = vec![1.0; 64];
+
+    for shift in [7.5, -7.5] {
+        let shifted = super::apply_fractional_sample_shift(&coeffs, shift);
+        for (index, value) in shifted.iter().enumerate() {
+            assert!(
+                (value - 1.0).abs() < 1e-12,
+                "shift {shift} attenuated unity response at sample {index}: {value}"
+            );
+        }
+    }
+}
+
+#[test]
 fn fractional_delay_is_zero_for_integer_shift() {
     let coeffs: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0, 5.0];
     let shifted = super::apply_fractional_sample_shift(&coeffs, 2.0);

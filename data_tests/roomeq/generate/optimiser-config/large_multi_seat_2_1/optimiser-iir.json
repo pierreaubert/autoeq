@@ -1,4 +1,9 @@
 {
+  "system": {
+    "bass_management": {
+      "enabled": true
+    }
+  },
   "optimizer": {
     "loss_type": "flat",
     "algorithm": "autoeq:de",

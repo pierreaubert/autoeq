@@ -1,6 +1,7 @@
 {
   "optimizer": {
     "processing_mode": "phase_linear",
+    "max_iter": 15000,
     "max_freq": 1200.0,
     "max_db": 8.0,
     "num_filters": 10,

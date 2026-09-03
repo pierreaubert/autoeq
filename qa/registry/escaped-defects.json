@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "defects": [
+    {"id":"mismatched_channel_grids","stage":"measurement_preprocessing","invariant":"channels are explicitly aligned before vector operations","regression_test":"mismatched_grids_are_resampled","pr_recipe":"qa-roomeq-escaped-defects","mutant_fixture":"qa/mutants/mismatched_channel_grids"},
+    {"id":"physical_sub_gain_double_applied","stage":"bass_routing_realization","invariant":"each route gain has exactly one owner","regression_test":"serialized_route_gain_is_applied_once","pr_recipe":"qa-roomeq-escaped-defects","mutant_fixture":"qa/mutants/double_sub_gain"},
+    {"id":"stale_reported_curve_after_reversion","stage":"metadata_refresh","invariant":"reported curves are refreshed after stage restore","regression_test":"reversion_refreshes_deployed_curves","pr_recipe":"qa-roomeq-escaped-defects","mutant_fixture":"qa/mutants/stale_report"},
+    {"id":"mixed_mode_crossover_reconstruction","stage":"bass_routing_realization","invariant":"serialized crossover branches replay coherently","regression_test":"mixed_phase_replay_matches_report","pr_recipe":"qa-roomeq-escaped-defects","mutant_fixture":"qa/mutants/mixed_crossover_branch"},
+    {"id":"missing_mixed_phase_fir","stage":"primary_correction","invariant":"requested mixed-phase FIR is produced or explicitly degraded","regression_test":"mixed_phase_missing_fir_is_scoped_degradation","pr_recipe":"qa-roomeq-escaped-defects","mutant_fixture":"qa/mutants/missing_mixed_phase_fir"},
+    {"id":"correction_above_reliable_passband","stage":"measurement_preprocessing","invariant":"correction stays within shared reliable passband","regression_test":"band_limited_channel_caps_correction","pr_recipe":"qa-roomeq-escaped-defects","mutant_fixture":"qa/mutants/out_of_band_correction"}
+  ]
+}

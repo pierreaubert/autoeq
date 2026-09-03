@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "max_rows": 24,
+  "generator": "roomeq-qa::parameter_matrix::generate_pr_matrix",
+  "dimensions": {
+    "topology": ["2.0", "redirected_2.1", "5.1"],
+    "mode": ["iir", "fir", "hybrid"],
+    "sample_rate": [44100, 48000, 96000],
+    "filter_count": [3, 7, 11],
+    "grid_size": [100, 200, 400],
+    "measurement_shape": ["common", "mismatched", "sparse_band_limited"],
+    "phase": ["absent", "coherent", "absent"],
+    "crossover": ["fixed", "automatic", "fixed"],
+    "fir_duration_ms": [5, 10, 20]
+  },
+  "applicability": ["automatic crossover requires redirected or sub topology"],
+  "rows": [
+    [2,2,2,2,2,2,2,2,2], [1,1,1,1,1,1,1,1,2], [0,0,0,0,0,0,0,0,2],
+    [0,0,1,1,1,2,2,2,1], [2,2,0,0,2,1,1,1,1], [1,1,0,0,0,2,2,2,0],
+    [2,2,1,1,2,0,0,0,0], [1,1,2,2,1,0,0,0,1], [0,0,2,2,0,1,1,2,0],
+    [2,0,1,2,0,0,2,1,1], [2,2,2,0,1,2,0,1,0], [0,1,0,2,2,1,2,0,2],
+    [1,0,2,1,2,2,1,0,2], [1,2,0,1,0,0,1,2,2], [0,2,1,0,2,1,0,2,2],
+    [2,1,0,2,1,2,2,2,2]
+  ]
+}

@@ -11,6 +11,9 @@
       "config": "single",
       "crossover": "first",
       "lfe": "L"
+    },
+    "bass_management": {
+      "enabled": false
     }
   },
   "speakers": {
@@ -50,7 +53,7 @@
     "max_db": 12.0,
     "min_freq": 20.0,
     "max_freq": 999.9999999999998,
-    "max_iter": 5000,
+    "max_iter": 15000,
     "population": 30,
     "peq_model": "pk",
     "seed": 42,

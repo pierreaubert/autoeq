@@ -17,6 +17,7 @@
   },
   "optimizer": {
     "processing_mode": "low_latency",
+    "max_iter": 15000,
     "max_db": 6.5,
     "max_q": 5.0,
     "multi_measurement": { "strategy": "weighted_sum" },

@@ -2,7 +2,7 @@
   "optimizer": {
     "loss_type": "flat",
     "fir": {
-      "taps": 256,
+      "taps": 1024,
       "phase": "kirkeby",
       "max_boost_db": 10.0
     },
@@ -11,7 +11,7 @@
     "min_q": 0.5,
     "max_q": 6.0,
     "min_db": -12.0,
-    "max_db": 2.0,
+    "max_db": 8.0,
     "min_freq": 20.0,
     "max_freq": 16000.0,
     "max_iter": 25000,

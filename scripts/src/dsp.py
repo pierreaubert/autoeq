@@ -406,6 +406,17 @@ def apply_plugins_to_curve(
     return result
 
 
+def replay_serialized_output(data: dict) -> dict[str, dict]:
+    """Replay serialized channel chains without consuming reported curves."""
+    sample_rate = float(data.get("sample_rate", 48_000.0) or 48_000.0)
+    replayed = {}
+    for name, channel in (data.get("channels", {}) or {}).items():
+        curve = channel.get("initial_curve") or channel.get("raw_curve")
+        if curve and channel.get("plugins") is not None:
+            replayed[name] = apply_plugins_to_curve(curve, channel["plugins"], sample_rate)
+    return replayed
+
+
 def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
     """Build one microphone-predicted post-DSP curve per input channel.
 

@@ -9,6 +9,7 @@ from scripts.src.dsp import (
     build_post_dsp_source_curves,
     compute_eq_response,
     compute_group_delay_from_ir,
+    replay_serialized_output,
     wrap_phase,
 )
 
@@ -111,6 +112,31 @@ class TemporalResponseTests(unittest.TestCase):
 
 
 class PostDspSourceCurveTests(unittest.TestCase):
+    def test_independent_serialized_chain_replay_matches_reported_curve(self):
+        # This fixture intentionally uses only the serialized chain contract;
+        # it does not call a Rust prediction helper or optimizer response.
+        curve = {"freq": [100.0, 1_000.0, 10_000.0], "spl": [70.0, 70.0, 70.0]}
+        chain = [{"plugin_type": "gain", "parameters": {"gain_db": 6.0}}]
+        replay = apply_plugins_to_curve(curve, chain, 48_000.0)
+        reported = {"freq": curve["freq"], "spl": [76.0, 76.0, 76.0]}
+        self.assertEqual(replay["freq"], reported["freq"])
+        for observed, expected in zip(replay["spl"], reported["spl"]):
+            self.assertAlmostEqual(observed, expected, places=8)
+
+    def test_serialized_output_replay_matches_deployed_curve(self):
+        data = {
+            "sample_rate": 48_000.0,
+            "deployed_source_curves": {"L": {"freq": [100.0, 1_000.0], "spl": [76.0, 76.0]}},
+            "channels": {
+                "L": {
+                    "initial_curve": {"freq": [100.0, 1_000.0], "spl": [70.0, 70.0]},
+                    "plugins": [{"plugin_type": "gain", "parameters": {"gain_db": 6.0}}],
+                }
+            },
+        }
+        replayed = replay_serialized_output(data)
+        self.assertEqual(replayed["L"], data["deployed_source_curves"]["L"])
+
     def test_plugin_realization_uses_rust_acoustic_floor(self):
         realized = apply_plugins_to_curve(
             {"freq": [20.0], "spl": [-100.0], "phase": [0.0]},

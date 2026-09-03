@@ -13,11 +13,12 @@
       "max_sub_boost_db": 3.0,
       "headroom_margin_db": 18.0,
       "group_crossovers": { "lcr": "first", "surround": "first", "height": "first" },
-        "optimize_groups": false
+        "optimize_groups": true
     }
   },
   "optimizer": {
     "processing_mode": "hybrid",
+    "max_iter": 15000,
     "max_db": 6.5,
     "max_q": 5.0,
     "fir": {

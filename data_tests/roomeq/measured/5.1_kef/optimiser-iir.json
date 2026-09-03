@@ -7,6 +7,16 @@
   },
   "optimizer": {
     "processing_mode": "low_latency",
+    "algorithm": "autoeq:cmaes",
+    "population": 20,
+    "max_iter": 600000,
+    "num_filters": 7,
+    "min_q": 0.5,
+    "max_q": 3.0,
+    "min_db": -12.0,
+    "max_db": 4.0,
+    "psychoacoustic": true,
+    "asymmetric_loss": true,
     "seed": 42
   }
 }

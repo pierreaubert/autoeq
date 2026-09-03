@@ -1,6 +1,7 @@
 {
   "optimizer": {
     "processing_mode": "low_latency",
+    "max_iter": 15000,
     "max_db": 5.0,
     "max_q": 3.0,
     "multi_measurement": {

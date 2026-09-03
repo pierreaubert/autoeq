@@ -1,3 +1,4 @@
+
 <!-- markdownlint-disable-file MD013 -->
 
 # AutoEQ: Automatic Equalization for Speakers, Headphones, and Rooms
@@ -193,6 +194,15 @@ shipping commands and `--features qa` for QA/fuzzer binaries. Default library
 builds retain the compatibility API without compiling terminal-only crates.
 
 ## Development
+
+### Use of AI
+
+AI changes are welcome in general. Be aware that fundamentally models
+do not understand acoustics or psycho-acoustics and make many
+mistakes. So far Sol and Fable did not help much, introduced subtle
+bugs and have been globally unhelpfull while giving you false
+confidence that QA improved for ex. Challenge every change and review
+them.
 
 ### Prerequisites
 

@@ -13,6 +13,7 @@ embedded location metadata.
 | measured_stereo_8361a | Contributor-supplied stereo room capture under ../measured/2.0_8361a/ | LicenseRef-SOTF-Project-Test-Data | Opaque room ID; CSV/WAV and channel names only |
 | measured_stereo_d3v | Contributor-supplied stereo room capture under ../measured/2.0_d3v/ | LicenseRef-SOTF-Project-Test-Data | Opaque device-family ID; CSV/WAV and channel names only |
 | measured_stereo_t7v | Contributor-supplied stereo room capture under ../measured/2.0_t7v/ | LicenseRef-SOTF-Project-Test-Data | Opaque device-family ID; CSV/WAV and channel names only |
+| measured_stereo_fidelia | Public third-party stereo room capture under ../measured/2.0_fidelia/ (see README.md) | LicenseRef-SOTF-Project-Test-Data | Opaque scenario ID; CSV and channel names only |
 
 LicenseRef-SOTF-Project-Test-Data means the files are retained and exercised
 as part of this repository's test suite. It is not a grant to extract and
@@ -28,6 +29,11 @@ Before committing a real measurement:
 3. Use opaque scenario and directory identifiers.
 4. Record the source family, rights classification, and privacy result here.
 5. Add at least one held-out position where the capture contains multiple seats.
+   A single-position capture may join as `report_only` (never `enforce`); the
+   manifest validator rejects enforced scenarios without two held-out
+   measurements covering every scored channel. `measured_stereo_fidelia` is
+   the current example: full-range measured timbre with level/dropout
+   robustness, awaiting a second seat before it can enforce.
 6. Run the PR corpus twice and confirm byte-identical JSON output.
 
 The unused ../measured/5_1_kef/*.mdat capture is not in the acoustic corpus.

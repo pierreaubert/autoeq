@@ -43,6 +43,20 @@ pub struct CorpusRobustnessConfig {
     pub seeds: Vec<u64>,
     pub noise_peak_db: f64,
     pub coherence_floor: f64,
+    /// Optional deterministic per-curve SPL calibration offset (± dB).
+    ///
+    /// Models the level mismatch between a training capture and a later
+    /// verification capture. Each curve gets `± level_calibration_error_db`
+    /// with a seed-derived sign.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level_calibration_error_db: Option<f64>,
+    /// Optional fraction of seats dropped per robustness seed (`0..1`).
+    ///
+    /// Models a missing listening position: the rescoring subset omits
+    /// `floor(curve_count * seat_dropout_fraction)` curves at a seed-derived
+    /// offset, keeping at least one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seat_dropout_fraction: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -143,12 +157,43 @@ impl AcousticCorpusScenario {
                 || !robustness.noise_peak_db.is_finite()
                 || robustness.noise_peak_db < 0.0
                 || !robustness.coherence_floor.is_finite()
-                || !(0.0..=1.0).contains(&robustness.coherence_floor))
+                || !(0.0..=1.0).contains(&robustness.coherence_floor)
+                || robustness
+                    .level_calibration_error_db
+                    .is_some_and(|value| !value.is_finite() || value < 0.0)
+                || robustness
+                    .seat_dropout_fraction
+                    .is_some_and(|value| !value.is_finite() || !(0.0..1.0).contains(&value)))
         {
             return Err(format!(
                 "scenario '{}' has an invalid robustness configuration",
                 self.id
             ));
+        }
+        // Intake rule: an enforced gate is a generalization claim, so it needs
+        // at least two held-out measurements covering every scored channel. A
+        // single-position capture stays report-only until a second seat exists.
+        if self.gate_mode == QualityGateMode::Enforce {
+            if self.held_out.len() < 2 {
+                return Err(format!(
+                    "scenario '{}' is enforced but provides fewer than two held-out measurements; add a second seat or downgrade to report-only",
+                    self.id
+                ));
+            }
+            if !self.channels.is_empty() {
+                for channel in &self.channels {
+                    if !self
+                        .held_out
+                        .iter()
+                        .any(|measurement| &measurement.channel == channel)
+                    {
+                        return Err(format!(
+                            "scenario '{}' is enforced but scored channel '{channel}' has no held-out measurement",
+                            self.id
+                        ));
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -510,12 +555,89 @@ mod tests {
         let baseline_path = path.with_file_name("baseline.json");
         let baseline = AcousticCorpusBaseline::load(&baseline_path).expect("repository baseline");
         assert_eq!(manifest.version, baseline.version);
+        // Enforced scenarios pin a baseline; report-only scenarios (e.g. a
+        // single-position measured capture awaiting a second seat) are covered
+        // by the missing-baseline advisory instead.
         assert!(
             manifest
                 .scenarios
                 .iter()
+                .filter(|scenario| scenario.gate_mode == QualityGateMode::Enforce)
                 .all(|scenario| baseline.get(&scenario.id).is_some())
         );
+    }
+
+    #[test]
+    fn enforced_scenarios_need_two_held_out_measurements_per_scored_channel() {
+        let mut scenario = valid_scenario();
+        scenario.gate_mode = QualityGateMode::Enforce;
+        let error = scenario
+            .validate()
+            .expect_err("enforced scenario without held-out data must be rejected");
+        assert!(error.contains("fewer than two held-out measurements"));
+
+        scenario.held_out = vec![
+            HeldOutMeasurement {
+                channel: "L".to_string(),
+                path: scenario.config.clone(),
+            },
+            HeldOutMeasurement {
+                channel: "L".to_string(),
+                path: scenario.config.clone(),
+            },
+        ];
+        scenario.channels = vec!["L".to_string(), "R".to_string()];
+        let error = scenario
+            .validate()
+            .expect_err("enforced scenario must cover every scored channel with held-out data");
+        assert!(error.contains("'R' has no held-out measurement"));
+
+        scenario.channels = vec!["L".to_string()];
+        scenario
+            .validate()
+            .expect("covered held-out channels must validate");
+    }
+
+    #[test]
+    fn report_only_scenarios_may_wait_for_a_second_seat() {
+        let scenario = valid_scenario();
+        assert_eq!(scenario.gate_mode, QualityGateMode::ReportOnly);
+        scenario.validate().expect(
+            "single-position measured captures stay report-only until a second seat exists",
+        );
+    }
+
+    #[test]
+    fn robustness_rejects_negative_level_error_and_full_dropout() {
+        let mut scenario = valid_scenario();
+        scenario.robustness = Some(CorpusRobustnessConfig {
+            seeds: vec![1],
+            noise_peak_db: 0.2,
+            coherence_floor: 0.8,
+            level_calibration_error_db: Some(-1.0),
+            seat_dropout_fraction: None,
+        });
+        assert!(scenario.validate().is_err());
+
+        scenario.robustness = Some(CorpusRobustnessConfig {
+            seeds: vec![1],
+            noise_peak_db: 0.2,
+            coherence_floor: 0.8,
+            level_calibration_error_db: Some(1.0),
+            seat_dropout_fraction: Some(1.0),
+        });
+        assert!(scenario.validate().is_err());
+
+        scenario.robustness = Some(CorpusRobustnessConfig {
+            seeds: vec![1],
+            noise_peak_db: 0.2,
+            coherence_floor: 0.8,
+            level_calibration_error_db: Some(1.0),
+            seat_dropout_fraction: Some(0.5),
+        });
+        scenario
+            .validate()
+            .expect("bounded degradation knobs must validate");
     }
 
     #[test]

@@ -123,6 +123,10 @@ struct RobustnessSummary {
     seeds: Vec<u64>,
     noise_peak_db: f64,
     coherence_floor: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    level_error_db: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dropout_fraction: Option<f64>,
     worst_weighted_rms_delta_db: f64,
     worst_p95_delta_db: f64,
     all_finite: bool,
@@ -535,9 +539,27 @@ fn evaluate_robustness(
     let mut worst_p95_delta_db = f64::NEG_INFINITY;
     let mut all_finite = true;
     for seed in &config.seeds {
-        let mut noisy_pre = Vec::with_capacity(base_pre.len());
-        let mut noisy_post = Vec::with_capacity(base_pre.len());
-        for (index, (curve, channel)) in base_pre.iter().zip(&channel_for_curve).enumerate() {
+        // Seat dropout: rescore a seed-derived subset so a missing listening
+        // position cannot silently pass. At least one curve is always kept.
+        let drop_count = config
+            .seat_dropout_fraction
+            .map(|fraction| (base_pre.len() as f64 * fraction).floor() as usize)
+            .unwrap_or(0)
+            .min(base_pre.len().saturating_sub(1));
+        let drop_start = if drop_count == 0 || base_pre.is_empty() {
+            usize::MAX
+        } else {
+            (*seed as usize) % base_pre.len()
+        };
+        let kept: Vec<usize> = (0..base_pre.len())
+            .filter(|index| {
+                drop_count == 0 || (index.wrapping_sub(drop_start) % base_pre.len()) >= drop_count
+            })
+            .collect();
+        let mut noisy_pre = Vec::with_capacity(kept.len());
+        let mut noisy_post = Vec::with_capacity(kept.len());
+        for index in kept {
+            let (curve, channel) = (&base_pre[index], channel_for_curve[index]);
             let mut noisy = curve.clone();
             apply_deterministic_measurement_noise(
                 &mut noisy,
@@ -545,8 +567,21 @@ fn evaluate_robustness(
                 config.noise_peak_db,
                 config.coherence_floor,
             );
+            // SPL calibration error: a deterministic per-curve level offset
+            // with a seed-derived sign, modelling a re-capture at a slightly
+            // different gain.
+            if let Some(level_error_db) = config.level_calibration_error_db {
+                let sign = if level_error_sign(*seed, index as u64) {
+                    1.0
+                } else {
+                    -1.0
+                };
+                for value in &mut noisy.spl {
+                    *value += sign * level_error_db;
+                }
+            }
             let corrected = apply_channel_dsp_chain_to_curve(
-                result.channels.get(*channel).ok_or_else(|| {
+                result.channels.get(channel).ok_or_else(|| {
                     anyhow!(
                         "robustness channel '{}' is absent from scenario '{}'",
                         channel,
@@ -589,10 +624,21 @@ fn evaluate_robustness(
         seeds: config.seeds.clone(),
         noise_peak_db: config.noise_peak_db,
         coherence_floor: config.coherence_floor,
+        level_error_db: config.level_calibration_error_db,
+        dropout_fraction: config.seat_dropout_fraction,
         worst_weighted_rms_delta_db,
         worst_p95_delta_db,
         all_finite,
     }))
+}
+
+/// Deterministic sign for the SPL calibration offset of one curve.
+fn level_error_sign(seed: u64, index: u64) -> bool {
+    let mut state = seed.wrapping_add(index).max(1);
+    state ^= state << 13;
+    state ^= state >> 7;
+    state ^= state << 17;
+    state & 1 == 1
 }
 
 fn apply_deterministic_measurement_noise(

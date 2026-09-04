@@ -52,3 +52,20 @@ pub struct DbaSyntheticScenario {
     pub front_curves: Vec<Curve>,
     pub rear_curves: Vec<Curve>,
 }
+
+/// Synthetic modal-room scenario with known correctable and non-correctable features.
+///
+/// The room has fixed modal-peak frequencies (minimum-phase resonances an
+/// optimizer should correct) and a fixed SBIR cancellation-notch frequency
+/// (a position-dependent null no optimizer should boost into). Seat curves
+/// share those frequencies but differ in depth, modelling seat-to-seat
+/// variance of a real in-room capture. `seats[0]` is the training (main)
+/// position; the rest are held-out seats.
+#[derive(Debug, Clone)]
+pub struct ModalRoomScenario {
+    pub name: String,
+    pub perfect_curve: Curve,
+    pub seats: Vec<Curve>,
+    pub correctable_peak_hz: Vec<f64>,
+    pub non_correctable_notch_hz: Vec<f64>,
+}

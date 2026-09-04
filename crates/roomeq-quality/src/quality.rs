@@ -88,6 +88,10 @@ pub struct QualityGatePolicy {
     pub min_held_out_improvement_db: f64,
     pub max_p95_regression_db: f64,
     pub max_boost_db: f64,
+    /// Largest tolerated increase of the residual above Schroeder frequency.
+    ///
+    /// Modal correction must not buy bass flatness with worse timbre.
+    pub max_upper_band_regression_db: f64,
 }
 
 impl Default for QualityGatePolicy {
@@ -96,6 +100,7 @@ impl Default for QualityGatePolicy {
             min_held_out_improvement_db: 0.1,
             max_p95_regression_db: 0.25,
             max_boost_db: 12.0,
+            max_upper_band_regression_db: 0.5,
         }
     }
 }
@@ -271,6 +276,17 @@ pub fn evaluate_quality_gate(
     } else {
         advisories.push("held_out_measurements_unavailable".to_string());
     }
+    // Timbre guard: score held-out when it exists, otherwise training. Either
+    // partition regressing above Schroeder while the modal band improves means
+    // the correction traded bass flatness for audible harm elsewhere.
+    let timbre = scorecard.held_out.as_ref().unwrap_or(&scorecard.training);
+    if let (Some(pre), Some(post)) = (
+        timbre.upper_pre_weighted_rms_db,
+        timbre.upper_post_weighted_rms_db,
+    ) && post > pre + policy.max_upper_band_regression_db
+    {
+        violations.push("upper_band_timbre_regressed".to_string());
+    }
     QualityGateReport {
         passed: !enforce || violations.is_empty(),
         enforced: enforce,
@@ -378,6 +394,7 @@ fn evaluate_partition(
     let mut pre_abs = Vec::new();
     let mut post_abs = Vec::new();
     let mut bass_post = Vec::new();
+    let mut upper_pre = Vec::new();
     let mut upper_post = Vec::new();
     let mut bass_pre_modal_roughness = Vec::new();
     let mut bass_post_modal_roughness = Vec::new();
@@ -397,6 +414,9 @@ fn evaluate_partition(
         if let Some(split) = config.schroeder_hz {
             if let Some(value) = band_rms(&frequencies, &post_residual, config.min_freq_hz, split) {
                 bass_post.push(value);
+            }
+            if let Some(value) = band_rms(&frequencies, &pre_residual, split, config.max_freq_hz) {
+                upper_pre.push(value);
             }
             if let Some(value) = band_rms(&frequencies, &post_residual, split, config.max_freq_hz) {
                 upper_post.push(value);
@@ -440,6 +460,7 @@ fn evaluate_partition(
         mean_normalized_seat_spread_db: mean_spread,
         max_normalized_seat_spread_db: max_spread,
         bass_post_weighted_rms_db: (!bass_post.is_empty()).then(|| median(bass_post)),
+        upper_pre_weighted_rms_db: (!upper_pre.is_empty()).then(|| median(upper_pre)),
         upper_post_weighted_rms_db: (!upper_post.is_empty()).then(|| median(upper_post)),
         bass_pre_modal_roughness_db_per_octave2,
         bass_post_modal_roughness_db_per_octave2,
@@ -964,6 +985,61 @@ mod tests {
         let report = evaluate_quality_gate(&scorecard, QualityGatePolicy::default(), false);
         assert!(report.passed);
         assert!(!report.violations.is_empty());
+    }
+
+    #[test]
+    fn schroeder_split_populates_upper_pre_residual() {
+        let frequencies = [20.0, 100.0, 1000.0, 10_000.0];
+        let pre = curve(&frequencies, &[6.0, -4.0, 1.0, -1.0]);
+        let post = curve(&frequencies, &[2.0, -1.0, 0.5, -0.5]);
+        let partition = evaluate_partition(&[pre], &[post], None, config()).expect("partition");
+        let (Some(upper_pre), Some(upper_post)) = (
+            partition.upper_pre_weighted_rms_db,
+            partition.upper_post_weighted_rms_db,
+        ) else {
+            panic!("schroeder split must populate both upper-band residuals");
+        };
+        assert!(upper_pre > upper_post);
+    }
+
+    #[test]
+    fn timbre_gate_rejects_bass_win_paid_with_upper_band_harm() {
+        let unfair = QualityEvaluationConfig {
+            normalize_level: false,
+            ..config()
+        };
+        let frequencies = [20.0, 100.0, 1000.0, 10_000.0];
+        let pre = curve(&frequencies, &[6.0, 6.0, 0.0, 0.0]);
+        let post = curve(&frequencies, &[0.0, 0.0, 3.0, 3.0]);
+        let scorecard = evaluate_acoustic_quality(
+            &[pre],
+            &[post],
+            &[],
+            &[],
+            None,
+            unfair,
+            TemporalQualityEvidence::default(),
+        )
+        .expect("scorecard");
+        assert_eq!(
+            scorecard.training.upper_pre_weighted_rms_db,
+            Some(0.0),
+            "flat upper band must score zero pre residual"
+        );
+        let enforced = evaluate_quality_gate(&scorecard, QualityGatePolicy::default(), true);
+        assert!(!enforced.passed);
+        assert!(
+            enforced
+                .violations
+                .contains(&"upper_band_timbre_regressed".to_string())
+        );
+        let reported = evaluate_quality_gate(&scorecard, QualityGatePolicy::default(), false);
+        assert!(reported.passed);
+        assert!(
+            reported
+                .violations
+                .contains(&"upper_band_timbre_regressed".to_string())
+        );
     }
 
     #[test]

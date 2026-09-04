@@ -2963,7 +2963,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-engine"
-version = "0.5.69"
+version = "0.5.79"
 dependencies = [
  "autoeq-core",
  "autoeq-fir",

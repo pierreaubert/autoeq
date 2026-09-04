@@ -81,7 +81,7 @@
   "suites": [
     { "id": "synthetic/pairwise", "runner": "synthetic", "tier": "pr", "claims": ["pairwise_options", "topology_mode_cartesian", "multi_seed"], "cases": ["psychoacoustic", "asymmetric_loss", "broadband", "excursion", "schroeder", "spatial_robustness", "pre_ringing", "decomposed_correction"] },
 { "id": "features/progression", "runner": "features", "tier": "nightly", "claims": ["mandatory_epa", "feature_progression"], "cases": ["baseline", "psychoacoustic", "asymmetric_loss", "broadband", "excursion_protection", "schroeder_split"] },
-{ "id": "acoustic/held_out", "runner": "acoustic", "tier": "pr", "claims": ["held_out_generalization"], "cases": ["fem_medium_multiseat_20", "measured_stereo_8361a", "fem_medium_stereo_21", "fem_large_multiseat_21", "measured_stereo_d3v", "measured_stereo_t7v", "fem_small_stereo_22_mso", "fem_medium_home_cinema_51"] },
+{ "id": "acoustic/held_out", "runner": "acoustic", "tier": "pr", "claims": ["held_out_generalization", "measured_timbre"], "cases": ["fem_medium_multiseat_20", "measured_stereo_8361a", "fem_medium_stereo_21", "fem_large_multiseat_21", "measured_stereo_d3v", "measured_stereo_t7v", "fem_small_stereo_22_mso", "fem_medium_home_cinema_51", "measured_stereo_fidelia"] },
 { "id": "fem/e2e", "runner": "integration", "tier": "weekly", "claims": ["fem_end_to_end", "multi_seed"] },
 { "id": "quality/scorecard", "runner": "quality", "tier": "nightly", "claims": ["blocking_scorecard", "option_effects", "cross_mode", "workflow_overrides"] },
 { "id": "fuzzer/randomized_quality", "runner": "fuzzer", "tier": "nightly", "claims": ["finite_scores", "strict_improvement", "corrective_filter", "multi_seed"] }

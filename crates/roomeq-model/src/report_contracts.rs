@@ -271,6 +271,12 @@ pub struct QualityPartitionMetrics {
     pub max_normalized_seat_spread_db: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bass_post_weighted_rms_db: Option<f64>,
+    /// Median band RMS of the pre-correction residual above Schroeder frequency.
+    ///
+    /// Paired with `upper_post_weighted_rms_db`, this lets the quality gate
+    /// enforce "do no harm" on timbre while the modal band is corrected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upper_pre_weighted_rms_db: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upper_post_weighted_rms_db: Option<f64>,
     /// Median RMS curvature of the residual below Schroeder frequency.

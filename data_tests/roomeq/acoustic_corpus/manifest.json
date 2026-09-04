@@ -419,6 +419,38 @@
         "noise_peak_db": 0.2,
         "coherence_floor": 0.8
       }
+    },
+    {
+      "id": "measured_stereo_fidelia",
+      "tier": "nightly",
+      "provenance": "real_measurement",
+      "topology": "stereo_2_0",
+      "channels": [
+        "left",
+        "right"
+      ],
+      "sample_rate": 48000.0,
+      "config": "../measured/2.0_fidelia/recordings.json",
+      "override_config": "qa_optimizer.json",
+      "candidate_override_config": "qa_optimizer_headroom_smooth.json",
+      "evaluation_band_hz": [
+        20.0,
+        2000.0
+      ],
+      "schroeder_hz": 200.0,
+      "robustness": {
+        "seeds": [
+          1,
+          7,
+          42,
+          424242,
+          8675309
+        ],
+        "noise_peak_db": 0.2,
+        "coherence_floor": 0.8,
+        "level_calibration_error_db": 1.0,
+        "seat_dropout_fraction": 0.5
+      }
     }
   ]
 }

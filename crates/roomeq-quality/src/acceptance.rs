@@ -413,6 +413,7 @@ mod tests {
             mean_normalized_seat_spread_db: 1.0,
             max_normalized_seat_spread_db: 2.0,
             bass_post_weighted_rms_db: None,
+            upper_pre_weighted_rms_db: None,
             upper_post_weighted_rms_db: None,
             bass_pre_modal_roughness_db_per_octave2: None,
             bass_post_modal_roughness_db_per_octave2: None,

@@ -6351,6 +6351,14 @@
           "type": "number",
           "format": "double"
         },
+        "upper_pre_weighted_rms_db": {
+          "description": "Median band RMS of the pre-correction residual above Schroeder frequency.\n\nPaired with `upper_post_weighted_rms_db`, this lets the quality gate\nenforce \"do no harm\" on timbre while the modal band is corrected.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
         "upper_post_weighted_rms_db": {
           "type": [
             "number",

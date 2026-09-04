@@ -1,3 +1,13 @@
+# Unreleased
+
+## RoomEQ QA audibility
+
+- Enforce a held-out intake rule: `enforce` corpus scenarios need at least two held-out measurements covering every scored channel; single-position captures stay `report_only` until a second seat exists.
+- Add an upper-band timbre guard (`upper_band_timbre_regressed`, 0.5 dB) so modal-bass wins cannot regress the residual above Schroeder frequency; scorecards now carry `upper_pre_weighted_rms_db` alongside `upper_post_weighted_rms_db`.
+- Extend corpus robustness with deterministic SPL calibration offsets (`level_calibration_error_db`) and missing-seat rescoring (`seat_dropout_fraction`).
+- Add a modal-room synthetic family (`generate_modal_room_scenario`) with shared correctable peaks and a seat-dependent SBIR null.
+- Add nightly report-only `measured_stereo_fidelia` (20–2000 Hz measured timbre with level/dropout robustness) to the acoustic corpus and registry.
+
 # 0.5.69
 
 ## Package versions

@@ -2,11 +2,13 @@ use super::misc::apply_known_eq;
 use super::misc::xorshift64;
 use super::types::CardioidSyntheticScenario;
 use super::types::DbaSyntheticScenario;
+use super::types::ModalRoomScenario;
 use super::types::MultiSubSyntheticScenario;
 use super::types::SyntheticScenario;
 use crate::Curve;
 use crate::error::{AutoeqError, Result};
 use math_audio_iir_fir::Biquad;
+use math_audio_iir_fir::BiquadFilterType;
 use ndarray::Array1;
 
 /// Generate a flat curve at 0 dB SPL with log-spaced frequency points.
@@ -622,4 +624,73 @@ fn generate_gaussian_noise(n: usize, rms: f64, seed: u64) -> Vec<f64> {
 
     samples.truncate(n);
     samples
+}
+
+/// Fixed modal-room acoustics: (frequency_hz, peak_gain_db, q) resonances an
+/// optimizer should correct, plus one SBIR cancellation notch it must not
+/// boost into.
+const MODAL_ROOM_PEAKS: [(f64, f64, f64); 3] =
+    [(45.0, 9.0, 6.0), (78.0, 7.0, 8.0), (129.0, 5.0, 5.0)];
+const MODAL_ROOM_NOTCH: (f64, f64, f64) = (167.0, -12.0, 9.0);
+const MODAL_ROOM_SAMPLE_RATE: f64 = 48_000.0;
+
+/// Generate a modal-room scenario modelling a measured in-room speaker.
+///
+/// The perfect curve is a smooth downward tilt. Each seat adds the same modal
+/// peaks and SBIR notch frequencies with seat-dependent depths (peaks scale
+/// 0.7..1.3, notch depth 0.5..1.2 of nominal) plus deterministic measurement
+/// noise, so a test can assert that correction targets shared peaks while
+/// leaving the position-dependent null alone.
+pub fn generate_modal_room_scenario(
+    name: &str,
+    min_freq: f64,
+    max_freq: f64,
+    n_points: usize,
+    seed: u64,
+    seat_count: usize,
+) -> Result<ModalRoomScenario> {
+    validate_synthetic_grid(min_freq, max_freq, n_points, "modal room scenario")?;
+    if seat_count < 2 {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "modal room scenario requires at least two seats (training + held-out), got {seat_count}"
+            ),
+        });
+    }
+    let tilt = generate_harman_tilt_curve(min_freq, max_freq, n_points);
+    let mut seats = Vec::with_capacity(seat_count);
+    for seat in 0..seat_count {
+        let mut state = seed
+            .wrapping_add((seat as u64).wrapping_mul(0x9E37_79B9))
+            .max(1);
+        let mut unit = || xorshift64(&mut state) as f64 / u64::MAX as f64;
+        let mut filters = Vec::with_capacity(MODAL_ROOM_PEAKS.len() + 1);
+        for (frequency, gain_db, q) in MODAL_ROOM_PEAKS {
+            let scale = 0.7 + 0.6 * unit();
+            filters.push(Biquad::new(
+                BiquadFilterType::Peak,
+                frequency,
+                MODAL_ROOM_SAMPLE_RATE,
+                q,
+                gain_db * scale,
+            ));
+        }
+        let notch_scale = 0.5 + 0.7 * unit();
+        filters.push(Biquad::new(
+            BiquadFilterType::Peak,
+            MODAL_ROOM_NOTCH.0,
+            MODAL_ROOM_SAMPLE_RATE,
+            MODAL_ROOM_NOTCH.2,
+            MODAL_ROOM_NOTCH.1 * notch_scale,
+        ));
+        let roomy = apply_known_eq(&tilt, &filters, MODAL_ROOM_SAMPLE_RATE);
+        seats.push(add_noise(&roomy, 0.3, seed.wrapping_add(seat as u64)));
+    }
+    Ok(ModalRoomScenario {
+        name: name.to_string(),
+        perfect_curve: tilt,
+        seats,
+        correctable_peak_hz: MODAL_ROOM_PEAKS.map(|peak| peak.0).to_vec(),
+        non_correctable_notch_hz: vec![MODAL_ROOM_NOTCH.0],
+    })
 }

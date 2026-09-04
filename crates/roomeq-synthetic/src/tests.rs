@@ -441,3 +441,72 @@ fn test_generate_channel_curve() {
         result.spl[idx_1k]
     );
 }
+
+fn nearest_spl(curve: &crate::Curve, target_hz: f64) -> f64 {
+    let index = curve
+        .freq
+        .iter()
+        .enumerate()
+        .min_by(|left, right| {
+            (*left.1 - target_hz)
+                .abs()
+                .total_cmp(&(*right.1 - target_hz).abs())
+        })
+        .map(|(index, _)| index)
+        .unwrap();
+    curve.spl[index]
+}
+
+#[test]
+fn test_modal_room_scenario_shares_peaks_with_seat_dependent_null() {
+    use super::generate::generate_modal_room_scenario;
+    let scenario = generate_modal_room_scenario("modal", 20.0, 500.0, 200, 42, 4)
+        .expect("modal room scenario");
+    assert_eq!(scenario.seats.len(), 4);
+    assert_eq!(scenario.correctable_peak_hz, vec![45.0, 78.0, 129.0]);
+    assert_eq!(scenario.non_correctable_notch_hz, vec![167.0]);
+
+    // Every seat shows the shared modal peaks above the smooth tilt.
+    for seat in &scenario.seats {
+        for peak_hz in &scenario.correctable_peak_hz {
+            let excess =
+                nearest_spl(seat, *peak_hz) - nearest_spl(&scenario.perfect_curve, *peak_hz);
+            assert!(
+                excess > 3.0,
+                "seat should show modal peak at {peak_hz} Hz, got {excess:.1} dB above tilt"
+            );
+        }
+    }
+
+    // The SBIR null is present on every seat but at seat-dependent depth, so
+    // boosting into it from the main seat cannot generalize.
+    let depths: Vec<f64> = scenario
+        .seats
+        .iter()
+        .map(|seat| nearest_spl(&scenario.perfect_curve, 167.0) - nearest_spl(seat, 167.0))
+        .collect();
+    assert!(
+        depths.iter().all(|depth| *depth > 3.0),
+        "null should read on every seat, got {depths:.1?}"
+    );
+    let spread = depths.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+        - depths.iter().cloned().fold(f64::INFINITY, f64::min);
+    assert!(
+        spread > 1.0,
+        "null depth must vary across seats, got spread {spread:.2} dB in {depths:.1?}"
+    );
+}
+
+#[test]
+fn test_modal_room_scenario_is_deterministic_and_validated() {
+    use super::generate::generate_modal_room_scenario;
+    let first =
+        generate_modal_room_scenario("modal", 20.0, 500.0, 200, 7, 2).expect("modal room scenario");
+    let second =
+        generate_modal_room_scenario("modal", 20.0, 500.0, 200, 7, 2).expect("modal room scenario");
+    for (left, right) in first.seats.iter().zip(&second.seats) {
+        assert_eq!(left.spl, right.spl);
+    }
+    assert!(generate_modal_room_scenario("modal", 20.0, 500.0, 200, 7, 1).is_err());
+    assert!(generate_modal_room_scenario("modal", 500.0, 20.0, 200, 7, 2).is_err());
+}

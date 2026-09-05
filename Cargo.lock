@@ -338,6 +338,7 @@ dependencies = [
  "rayon",
  "schemars 1.2.2",
  "serde",
+ "serde_json",
  "stats_alloc",
 ]
 

@@ -6,7 +6,7 @@
 
 use super::misc::PHASE_LINEAR_RECOMMENDED_MAX_FREQ_HZ;
 use super::validation_result::ValidationContext;
-use crate::config::{Cea2034CorrectionMode, ProcessingMode};
+use crate::config::{Cea2034CorrectionMode, MultiSeatStrategy, ProcessingMode};
 
 pub fn rule_num_filters(ctx: &mut ValidationContext<'_>) {
     if ctx.opt.num_filters == 0 {
@@ -385,7 +385,37 @@ pub fn rule_multi_seat(ctx: &mut ValidationContext<'_>) {
         return;
     };
     if !multi_seat.enabled {
+        if multi_seat.optimize_polarity
+            || multi_seat.allpass_filters_per_sub > 0
+            || multi_seat.continuous_area.is_some()
+            || multi_seat.seat_identity.is_some()
+            || multi_seat.search.is_some()
+        {
+            ctx.add_warning(
+                "multi_seat is disabled; optimize_polarity, allpass_filters_per_sub, \
+                 continuous_area, seat_identity, and search are set but inactive",
+            );
+        }
         return;
+    }
+    if multi_seat.strategy != MultiSeatStrategy::ContinuousArea
+        && multi_seat.continuous_area.is_some()
+    {
+        ctx.add_warning(
+            "multi_seat.continuous_area is set but strategy is not continuous_area; \
+             the prior is not consulted",
+        );
+    }
+    let search = multi_seat.effective_search();
+    for error in search.validate() {
+        ctx.add_error(error);
+    }
+    if multi_seat.allpass_filters_per_sub > search.max_allpass_per_sub {
+        ctx.add_error(format!(
+            "multi_seat.allpass_filters_per_sub ({}) exceeds \
+             multi_seat.search.max_allpass_per_sub ({})",
+            multi_seat.allpass_filters_per_sub, search.max_allpass_per_sub
+        ));
     }
 
     if multi_seat.max_deviation_db < 0.0 {

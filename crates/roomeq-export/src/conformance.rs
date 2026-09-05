@@ -96,11 +96,15 @@ impl ExportArtifactManifest {
     }
 
     pub(super) fn validate(&self) -> anyhow::Result<()> {
+        // Index both sides once so validation stays linear in node count
+        // instead of scanning references per definition.
+        let defined: BTreeSet<(ExportNodeKind, &str)> = self
+            .definitions
+            .iter()
+            .map(|(kind, name)| (*kind, name.as_str()))
+            .collect();
         for reference in &self.references {
-            if !self
-                .definitions
-                .contains(&(reference.kind, reference.name.clone()))
-            {
+            if !defined.contains(&(reference.kind, reference.name.as_str())) {
                 anyhow::bail!(
                     "{:?} export {} references missing {} '{}'",
                     self.format,
@@ -110,12 +114,13 @@ impl ExportArtifactManifest {
                 );
             }
         }
+        let referenced: BTreeSet<(ExportNodeKind, &str)> = self
+            .references
+            .iter()
+            .map(|reference| (reference.kind, reference.name.as_str()))
+            .collect();
         for (kind, name) in &self.definitions {
-            if !self
-                .references
-                .iter()
-                .any(|reference| reference.kind == *kind && reference.name == *name)
-            {
+            if !referenced.contains(&(*kind, name.as_str())) {
                 anyhow::bail!(
                     "{:?} export emitted unreferenced {} '{name}'",
                     self.format,

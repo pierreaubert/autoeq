@@ -281,12 +281,29 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
         );
     }
 
+    // The shipped preset serializes frequencies to integer Hz; surface
+    // any drift between the optimizer response and the serialized one.
+    if let Some(gap) = opt_result.apo_roundtrip_gap {
+        if gap > save::APO_ROUNDTRIP_WARN_THRESHOLD {
+            log::warn!(
+                "APO serialization drifted the objective by {:.6} (> {:.0e}); \
+                 reported evidence reflects the optimizer response, the preset \
+                 the integer-Hz response",
+                gap,
+                save::APO_ROUNDTRIP_WARN_THRESHOLD
+            );
+        } else {
+            log::debug!("APO round-trip objective gap: {:.3e}", gap);
+        }
+    }
+
     // Save PEQ settings to APO format file
     save::save_peq_to_file(
         &args,
         &opt_result.params,
         &output_path,
         &objective_data.loss_type,
+        None,
     )
     .await
     .map_err(|e| anyhow!("{}", e))

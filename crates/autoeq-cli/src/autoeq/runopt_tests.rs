@@ -210,6 +210,24 @@ mod tests {
     }
 
     #[test]
+    fn optimization_result_carries_apo_roundtrip_gap() {
+        let params = test_params(false);
+        let objective = test_objective_data();
+        let backend = MockOptimizerBackend::ok(GLOBAL_STATUS, 1.0);
+
+        let result = perform_optimization_with_backend(&params, &objective, None, &backend)
+            .expect("optimization should succeed");
+
+        let gap = result
+            .apo_roundtrip_gap
+            .expect("PEQ runs must report the APO round-trip gap");
+        assert!(
+            gap.is_finite() && gap >= 0.0,
+            "round-trip gap must be a finite non-negative drift, got {gap:?}"
+        );
+    }
+
+    #[test]
     fn improving_refinement_is_accepted() {
         let params = test_params(true);
         let objective = test_objective_data();

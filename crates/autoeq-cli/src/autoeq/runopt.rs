@@ -19,6 +19,11 @@ pub(super) struct OptimizationResult {
     /// `params`/`post_objective`. Superseded passes remain for diagnosis
     /// but must not be treated as production-acceptance inputs.
     pub(super) optimizer_evidence: Vec<OptimizerRunEvidence>,
+    /// Absolute objective gap between the optimizer parameters and their
+    /// integer-Hz APO serialization (`None` for non-PEQ layouts).
+    /// Keeps the reported evidence aligned with the shipped preset; see
+    /// [`super::save::apo_roundtrip_objective_gap`].
+    pub(super) apo_roundtrip_gap: Option<f64>,
 }
 
 pub(super) fn perform_optimization(
@@ -210,11 +215,29 @@ pub(super) fn perform_optimization_with_backend(
         optimizer_evidence.push(local_evidence);
     }
 
+    // Measure how far the integer-Hz APO serialization drifts from the
+    // optimizer response. Non-PEQ layouts (driver gains/delays) have no
+    // frequency serialization, so no gap applies.
+    let apo_roundtrip_gap =
+        if objective_data.loss_type == autoeq::LossType::DriversFlat
+            || objective_data.loss_type == autoeq::LossType::MultiSubFlat
+        {
+            None
+        } else {
+            super::save::apo_roundtrip_objective_gap(
+                &x,
+                params.sample_rate,
+                params.peq_model,
+                objective_data,
+            )
+        };
+
     Ok(OptimizationResult {
         params: x,
         converged,
         pre_objective,
         post_objective,
         optimizer_evidence,
+        apo_roundtrip_gap,
     })
 }

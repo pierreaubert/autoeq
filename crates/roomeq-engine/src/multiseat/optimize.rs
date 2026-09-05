@@ -14,6 +14,9 @@ use super::mso::mso_bounds;
 use super::mso::mso_objective_breakdown;
 use super::mso::mso_objective_regressed;
 use super::mso_objective_context::MsoObjectiveContext;
+use super::mso_search_budget::{
+    MSO_STALL_IMPROVEMENT_TOLERANCE, MsoSearchBudget, MsoSearchReport, is_cancelled, search_started,
+};
 use super::mso_search_options::MsoSearchOptions;
 use super::mso_search_options::decode_mso_params;
 use super::multi_seat_measurements::MultiSeatMeasurements;
@@ -366,12 +369,53 @@ pub(super) fn optimize_continuous_mso(
     options: MsoSearchOptions,
     eval: &dyn Fn(&[f64], &[f64], &[bool], &[Vec<(f64, f64)>]) -> f64,
 ) -> MsoSolution {
+    optimize_continuous_mso_with_budget(
+        num_subs,
+        options,
+        &MsoSearchBudget::default(),
+        eval,
+    )
+    .0
+}
+
+/// Budget-aware continuous MSO differential-evolution search.
+///
+/// With `MsoSearchBudget::default()` this reproduces the historical hardcoded
+/// schedule exactly (population `(dims*24).max(48)`, generations
+/// `(120+dims*30).max(200)`, mutation 0.7, crossover 0.9, seed
+/// `MSO_DE_SEED ^ num_subs`). Set budget fields to cap area-loss evaluations,
+/// wall-clock time, or nested worst-case cost; override the seed; stop on
+/// convergence stall; or cancel cooperatively. Consumed work is reported in
+/// the returned [`MsoSearchReport`].
+pub(super) fn optimize_continuous_mso_with_budget(
+    num_subs: usize,
+    options: MsoSearchOptions,
+    budget: &MsoSearchBudget,
+    eval: &dyn Fn(&[f64], &[f64], &[bool], &[Vec<(f64, f64)>]) -> f64,
+) -> (MsoSolution, MsoSearchReport) {
+    let started = search_started();
+    let report = |evaluations: usize,
+                      generations_run: usize,
+                      best_loss: f64,
+                      stop_reason: &'static str| {
+        MsoSearchReport {
+            evaluations,
+            generations_run,
+            best_loss,
+            stopped_early: stop_reason != "completed",
+            stop_reason,
+            elapsed: started.elapsed(),
+        }
+    };
     if num_subs <= 1 {
         return (
-            vec![0.0; num_subs],
-            vec![0.0; num_subs],
-            vec![false; num_subs],
-            vec![Vec::new(); num_subs],
+            (
+                vec![0.0; num_subs],
+                vec![0.0; num_subs],
+                vec![false; num_subs],
+                vec![Vec::new(); num_subs],
+            ),
+            report(0, 0, f64::INFINITY, "completed"),
         );
     }
 
@@ -381,7 +425,30 @@ pub(super) fn optimize_continuous_mso(
     let generations = (120 + dims * 30).max(200);
     let mutation = 0.7;
     let crossover = 0.9;
-    let mut rng = SimpleRng::new(MSO_DE_SEED ^ (num_subs as u64));
+    let seed = budget.seed.unwrap_or(MSO_DE_SEED ^ (num_subs as u64));
+    let mut rng = SimpleRng::new(seed);
+
+    let evaluations = std::cell::Cell::new(0_usize);
+    let eval_limit = budget.max_evaluations.unwrap_or(usize::MAX);
+    // Score one candidate, counting the evaluation. Exhausted budgets score
+    // +infinity without calling the (potentially very expensive, worst-case
+    // nesting) area evaluator.
+    let score_candidate = |gains: &[f64],
+                           delays: &[f64],
+                           polarities: &[bool],
+                           allpass_filters: &[Vec<(f64, f64)>]|
+     -> f64 {
+        if evaluations.get() >= eval_limit {
+            return f64::INFINITY;
+        }
+        evaluations.set(evaluations.get() + 1);
+        let score = eval(gains, delays, polarities, allpass_filters);
+        if score.is_finite() {
+            score
+        } else {
+            f64::INFINITY
+        }
+    };
 
     let mut population = vec![vec![0.0; dims]; population_size];
     for dim in 0..dims {
@@ -393,30 +460,44 @@ pub(super) fn optimize_continuous_mso(
         }
     }
 
-    let mut scores: Vec<f64> = population
+    let mut scores = Vec::with_capacity(population_size);
+    for (index, params) in population.iter().enumerate() {
+        let (gains, delays, polarities, allpass_filters) =
+            decode_mso_params(params, num_subs, options);
+        // The seeded all-zero vector is the identity anchor.  Its
+        // clamped all-pass coordinates are only bounds artefacts; score
+        // that candidate with no all-pass filters so regression guards
+        // compare against the true unprocessed response.
+        let score = if index == 0 && options.allpass_filters_per_sub > 0 {
+            score_candidate(&gains, &delays, &polarities, &vec![Vec::new(); num_subs])
+        } else {
+            score_candidate(&gains, &delays, &polarities, &allpass_filters)
+        };
+        scores.push(score);
+    }
+    let mut best_loss = scores
         .iter()
-        .enumerate()
-        .map(|(index, params)| {
-            let (gains, delays, polarities, allpass_filters) =
-                decode_mso_params(params, num_subs, options);
-            // The seeded all-zero vector is the identity anchor.  Its
-            // clamped all-pass coordinates are only bounds artefacts; score
-            // that candidate with no all-pass filters so regression guards
-            // compare against the true unprocessed response.
-            let score = if index == 0 && options.allpass_filters_per_sub > 0 {
-                eval(&gains, &delays, &polarities, &vec![Vec::new(); num_subs])
-            } else {
-                eval(&gains, &delays, &polarities, &allpass_filters)
-            };
-            if score.is_finite() {
-                score
-            } else {
-                f64::INFINITY
-            }
-        })
-        .collect();
+        .fold(f64::INFINITY, |best, score| best.min(*score));
+    let mut stall_count = 0_usize;
+    let mut stop_reason = "completed";
+    let mut generations_run = 0_usize;
 
-    for _ in 0..generations {
+    'generations: for _ in 0..generations {
+        if is_cancelled(budget) {
+            stop_reason = "cancelled";
+            break;
+        }
+        if budget
+            .max_duration
+            .is_some_and(|limit| started.elapsed() > limit)
+        {
+            stop_reason = "time_budget";
+            break;
+        }
+        if evaluations.get() >= eval_limit {
+            stop_reason = "evaluation_budget";
+            break;
+        }
         // Keep candidate zero pinned as the exact no-processing anchor. Its
         // all-pass coordinates are bounds artefacts decoded as identity only
         // for scoring/reporting, so mutating this slot would lose that
@@ -456,20 +537,36 @@ pub(super) fn optimize_continuous_mso(
 
             let (gains, delays, polarities, allpass_filters) =
                 decode_mso_params(&trial, num_subs, options);
-            let trial_score = eval(&gains, &delays, &polarities, &allpass_filters);
-            let trial_score = if trial_score.is_finite() {
-                trial_score
-            } else {
-                f64::INFINITY
-            };
+            let trial_score = score_candidate(&gains, &delays, &polarities, &allpass_filters);
             if trial_score < scores[target_idx] {
                 population[target_idx] = trial;
                 scores[target_idx] = trial_score;
             }
+            if evaluations.get() >= eval_limit {
+                stop_reason = "evaluation_budget";
+                break 'generations;
+            }
+        }
+        generations_run += 1;
+        let generation_best = scores
+            .iter()
+            .fold(f64::INFINITY, |best, score| best.min(*score));
+        if generation_best + MSO_STALL_IMPROVEMENT_TOLERANCE < best_loss {
+            best_loss = generation_best;
+            stall_count = 0;
+        } else {
+            stall_count += 1;
+            if budget
+                .stall_generations
+                .is_some_and(|stall| stall_count >= stall)
+            {
+                stop_reason = "converged";
+                break;
+            }
         }
     }
 
-    let (best_idx, best_loss) = scores
+    let (best_idx, final_best) = scores
         .iter()
         .enumerate()
         .min_by(|(_, a), (_, b)| a.total_cmp(b))
@@ -483,14 +580,22 @@ pub(super) fn optimize_continuous_mso(
     }
     debug!(
         "  Continuous MSO result: gains={:?}, delays={:?}, polarities={:?}, allpass={:?}, loss={:.4}",
-        best_gains, best_delays, best_polarities, best_allpass_filters, best_loss
+        best_gains, best_delays, best_polarities, best_allpass_filters, final_best
     );
 
     (
-        best_gains,
-        best_delays,
-        best_polarities,
-        best_allpass_filters,
+        (
+            best_gains,
+            best_delays,
+            best_polarities,
+            best_allpass_filters,
+        ),
+        report(
+            evaluations.get(),
+            generations_run,
+            final_best,
+            stop_reason,
+        ),
     )
 }
 
@@ -671,11 +776,44 @@ fn optimize_modal_basis(
 /// * `freq_range` - `(min_hz, max_hz)` for optimization.
 /// * `sample_rate` - Sample rate for filter design.
 ///
+/// Reuse the canonical model validator at the direct-algorithm boundary.
+///
+/// The CLI/workflow path validates the full `RoomConfig` before dispatch; the
+/// direct `optimize_multiseat_continuous_area` entry point must enforce the
+/// same `multi_seat.continuous_area` rules (Gaussian support == bounds, CVaR
+/// alpha in (0, 1], quadrature counts, prior/quadrature compatibility,
+/// worst-case budgets, ...). This imports the model validator instead of
+/// duplicating its rules: only errors scoped to `multi_seat` are surfaced so
+/// unrelated defaults in the synthesized wrapper cannot fail the call.
+fn enforce_continuous_area_model_validation(config: &MultiSeatConfig) -> Result<()> {
+    let mut room = roomeq_model::RoomConfig::default();
+    room.optimizer.multi_seat = Some(config.clone());
+    let report = roomeq_model::validation_rules::validate_room_config(&room);
+    let scoped: Vec<&str> = report
+        .errors
+        .iter()
+        .map(String::as_str)
+        .filter(|message| message.contains("multi_seat"))
+        .collect();
+    if scoped.is_empty() {
+        return Ok(());
+    }
+    Err(AutoeqError::InvalidConfiguration {
+        message: format!(
+            "continuous_area model validation failed: {}",
+            scoped.join("; ")
+        ),
+    })
+}
+
 /// # Errors
 ///
 /// Returns `InvalidConfiguration` if the strategy/area config don't match,
 /// if dimensions ∉ {1, 2, 3}, or if the seat-position array length doesn't
-/// match the calibration seats.
+/// match the calibration seats. The full model validator
+/// (`multi_seat.continuous_area` rules: Gaussian support, CVaR range,
+/// quadrature compatibility) is also enforced so the direct API agrees with
+/// the CLI path.
 pub fn optimize_multiseat_continuous_area(
     measurements: &MultiSeatMeasurements,
     config: &MultiSeatConfig,
@@ -760,6 +898,11 @@ pub fn optimize_multiseat_continuous_area(
             message: "continuous_area Gaussian prior must have finite means, positive finite variances, and positive finite truncation".into(),
         });
     }
+
+    // Full model policy (Gaussian support == bounds, CVaR range, quadrature
+    // compatibility, budgets) runs after the local shape checks so the direct
+    // API reports the same rejections as the CLI-validated path.
+    enforce_continuous_area_model_validation(config)?;
 
     if config.strategy != MultiSeatStrategy::ContinuousArea {
         return Err(AutoeqError::InvalidConfiguration {
@@ -868,16 +1011,37 @@ fn optimize_continuous_area_dispatch<const D: usize>(
         },
     };
 
+    // No stage-specific budget fields exist on `MultiSeatConfig` (model
+    // contract unchanged), so the dispatch runs the legacy schedule via a
+    // default budget. A future model field can construct the budget here
+    // without changing the call shape below.
+    let budget = MsoSearchBudget::default();
     let scalarisation: AreaScalarisation = match &area_cfg.scalarisation {
         AreaScalarisationKind::ExpectedValue => AreaScalarisation::ExpectedValue,
         AreaScalarisationKind::WorstCase {
             inner_maxiter,
             inner_seed,
         } => AreaScalarisation::WorstCase {
-            inner_maxiter: *inner_maxiter,
+            // Bound the nested inner search per outer evaluation: the outer
+            // DE multiplies this cost by every area evaluation it runs.
+            inner_maxiter: budget
+                .max_inner_iterations
+                .map_or(*inner_maxiter, |cap| (*inner_maxiter).min(cap).max(1)),
             inner_seed: *inner_seed,
         },
-        AreaScalarisationKind::Cvar { alpha } => AreaScalarisation::Cvar { alpha: *alpha },
+        AreaScalarisationKind::Cvar { alpha } => {
+            // The public boundary enforces the model rule (alpha in (0, 1]);
+            // reject here as well so the dispatch can never silently clamp
+            // an out-of-range tail fraction into a "successful" result.
+            if !alpha.is_finite() || *alpha <= 0.0 || *alpha > 1.0 {
+                return Err(AutoeqError::InvalidConfiguration {
+                    message: format!(
+                        "continuous_area CVaR alpha must be in (0, 1], got {alpha}"
+                    ),
+                });
+            }
+            AreaScalarisation::Cvar { alpha: *alpha }
+        }
     };
 
     // Pre-compute the Q quadrature points + weights once. WorstCase is the
@@ -984,7 +1148,10 @@ fn optimize_continuous_area_dispatch<const D: usize>(
                     acc
                 }
                 (AreaScalarisation::Cvar { alpha }, Some(complex), Some((_, weights))) => {
-                    let alpha = alpha.clamp(f64::MIN_POSITIVE, 1.0);
+                    // Validated at the boundary/dispatch: alpha is already in
+                    // (0, 1]. Never clamp here; clamping would silently
+                    // reinterpret an invalid tail fraction as valid evidence.
+                    let alpha = *alpha;
                     let mut wl: Vec<(f64, f64)> = complex
                         .iter()
                         .zip(weights.iter())
@@ -1094,10 +1261,42 @@ fn optimize_continuous_area_dispatch<const D: usize>(
         &initial_polarities,
         &initial_allpass,
     );
+    // A non-finite identity evaluation means the area cannot be assessed at
+    // all (degenerate interpolation, empty grid, failed quadrature). Report
+    // that failure instead of a "successful" identity result with non-finite
+    // evidence.
+    if !initial_objective.is_finite() {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: format!(
+                "continuous_area MSO identity evaluation is non-finite ({initial_objective}); \
+                 refusing to report successful identity output with non-finite evidence"
+            ),
+        });
+    }
 
     let options = MsoSearchOptions::from_config(config, eval_min, eval_max);
-    let (gains, delays, polarities, allpass_filters) =
-        optimize_continuous_mso(measurements.num_subs, options, &evaluate_area);
+    let ((gains, delays, polarities, allpass_filters), search_report) =
+        optimize_continuous_mso_with_budget(
+            measurements.num_subs,
+            options,
+            &budget,
+            &evaluate_area,
+        );
+    info!(
+        "  continuous_area MSO search consumed {} area evaluations over {} generations \
+         in {:.2}s (stop: {}, best loss {:.6})",
+        search_report.evaluations,
+        search_report.generations_run,
+        search_report.elapsed.as_secs_f64(),
+        search_report.stop_reason,
+        search_report.best_loss,
+    );
+    if search_report.stopped_early {
+        warn!(
+            "  continuous_area MSO search stopped early ({}) after {} evaluations",
+            search_report.stop_reason, search_report.evaluations
+        );
+    }
     let final_objective = evaluate_area(&gains, &delays, &polarities, &allpass_filters);
 
     let (final_gains, final_delays, final_polarities, final_allpass, accepted_obj) =
@@ -1118,6 +1317,17 @@ fn optimize_continuous_area_dispatch<const D: usize>(
             (gains, delays, polarities, allpass_filters, final_objective)
         };
 
+    // The regression gate above falls back to the identity state, which was
+    // verified finite on entry; a non-finite accepted objective here would
+    // otherwise be reported as a successful optimization.
+    if !accepted_obj.is_finite() {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: format!(
+                "continuous_area MSO evaluation is non-finite ({accepted_obj}); \
+                 refusing to report successful output with non-finite evidence"
+            ),
+        });
+    }
     let improvement = initial_objective - accepted_obj;
     Ok(MultiSeatOptimizationResult {
         gains: final_gains,
@@ -1562,9 +1772,11 @@ mod tests {
                 dimensions: 1,
                 bounds: vec![(0.0, 1.0)],
                 seat_positions: vec![vec![0.0], vec![1.0]],
+                // Model policy requires bounds == Gaussian truncation support:
+                // mean=0.5, var=0.0625 (σ=0.25), k=2 → support exactly (0, 1).
                 prior: AreaPriorKind::Gaussian {
                     mean: vec![0.5],
-                    cov_diag: vec![0.1],
+                    cov_diag: vec![0.0625],
                     truncation_sigmas: 2.0,
                 },
                 quadrature: AreaQuadratureKind::Sobol {
@@ -1580,6 +1792,282 @@ mod tests {
             .expect("should optimize continuous area");
         assert_eq!(result.strategy, MultiSeatStrategy::ContinuousArea);
         assert_eq!(result.gains.len(), 2);
+    }
+
+    fn continuous_area_config(area: ContinuousListeningAreaConfig) -> MultiSeatConfig {
+        MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::ContinuousArea,
+            continuous_area: Some(area),
+            ..Default::default()
+        }
+    }
+
+    fn unit_area_base() -> ContinuousListeningAreaConfig {
+        ContinuousListeningAreaConfig {
+            dimensions: 1,
+            bounds: vec![(0.0, 1.0)],
+            seat_positions: vec![vec![0.0], vec![1.0]],
+            prior: AreaPriorKind::Uniform,
+            quadrature: AreaQuadratureKind::Sobol {
+                num_points: 8,
+                seed: 0,
+            },
+            scalarisation: AreaScalarisationKind::ExpectedValue,
+            idw_power: 2.0,
+        }
+    }
+
+    /// Direct API must agree with the model validator used by the CLI path.
+    fn model_errors_for(area: &ContinuousListeningAreaConfig) -> Vec<String> {
+        let config = continuous_area_config(area.clone());
+        let mut room = roomeq_model::RoomConfig::default();
+        room.optimizer.multi_seat = Some(config);
+        roomeq_model::validation_rules::validate_room_config(&room)
+            .errors
+            .into_iter()
+            .filter(|message| message.contains("multi_seat"))
+            .collect()
+    }
+
+    #[test]
+    fn continuous_area_rejects_gaussian_bounds_mismatch_like_cli() {
+        let ms = two_sub_two_seat_measurements();
+        // Gaussian mean=0.5, var=0.1 (σ≈0.316), k=2 → support ≈ (-0.13, 1.13),
+        // which does not equal bounds (0, 1).
+        let mut area = unit_area_base();
+        area.prior = AreaPriorKind::Gaussian {
+            mean: vec![0.5],
+            cov_diag: vec![0.1],
+            truncation_sigmas: 2.0,
+        };
+        let config = continuous_area_config(area.clone());
+
+        let model_errors = model_errors_for(&area);
+        assert!(
+            model_errors.iter().any(|e| e.contains("truncation box")),
+            "model validator should flag support mismatch: {model_errors:?}"
+        );
+        let err =
+            optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48_000.0).unwrap_err();
+        assert!(
+            err.to_string().contains("truncation box"),
+            "direct API must reject mismatched Gaussian support like the CLI: {err}"
+        );
+    }
+
+    #[test]
+    fn continuous_area_accepts_matching_gaussian_support() {
+        let ms = two_sub_two_seat_measurements();
+        // mean=0.5, var=0.0625 (σ=0.25), k=2 → support exactly (0, 1).
+        let mut area = unit_area_base();
+        area.prior = AreaPriorKind::Gaussian {
+            mean: vec![0.5],
+            cov_diag: vec![0.0625],
+            truncation_sigmas: 2.0,
+        };
+        assert!(
+            model_errors_for(&area).is_empty(),
+            "matching support must pass model validation"
+        );
+        let config = continuous_area_config(area);
+        let result = optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48_000.0)
+            .expect("matching Gaussian support must optimize");
+        assert!(result.objective_before.is_finite());
+        assert!(result.objective_after.is_finite());
+    }
+
+    #[test]
+    fn continuous_area_rejects_nonpositive_and_out_of_range_cvar_alpha() {
+        let ms = two_sub_two_seat_measurements();
+        for alpha in [0.0, -0.25, 1.5, f64::NAN, f64::INFINITY] {
+            let mut area = unit_area_base();
+            area.scalarisation = AreaScalarisationKind::Cvar { alpha };
+            let model_errors = model_errors_for(&area);
+            assert!(
+                model_errors.iter().any(|e| e.contains("cvar")),
+                "model validator should flag alpha={alpha}: {model_errors:?}"
+            );
+            let config = continuous_area_config(area);
+            let err =
+                optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48_000.0)
+                    .unwrap_err();
+            assert!(
+                err.to_string().contains("alpha"),
+                "alpha={alpha} must be rejected, not clamped: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn continuous_area_accepts_fractional_cvar_alpha() {
+        let ms = two_sub_two_seat_measurements();
+        for alpha in [0.05, 0.25, 1.0] {
+            let mut area = unit_area_base();
+            area.scalarisation = AreaScalarisationKind::Cvar { alpha };
+            assert!(
+                model_errors_for(&area).is_empty(),
+                "alpha={alpha} must pass model validation"
+            );
+            let config = continuous_area_config(area);
+            let result = optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48_000.0)
+                .unwrap_or_else(|e| panic!("alpha={alpha} must optimize: {e}"));
+            assert!(result.objective_after.is_finite());
+        }
+    }
+
+    #[test]
+    fn continuous_area_rejects_degenerate_quadrature_like_cli() {
+        let ms = two_sub_two_seat_measurements();
+        let mut area = unit_area_base();
+        area.quadrature = AreaQuadratureKind::Sobol {
+            num_points: 0,
+            seed: 0,
+        };
+        assert!(
+            !model_errors_for(&area).is_empty(),
+            "model validator should flag empty quadrature"
+        );
+        let config = continuous_area_config(area);
+        let err =
+            optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48_000.0).unwrap_err();
+        assert!(
+            err.to_string().contains("num_points"),
+            "degenerate quadrature must be rejected: {err}"
+        );
+    }
+
+    #[test]
+    fn continuous_area_rejects_gauss_legendre_with_gaussian_prior() {
+        let ms = two_sub_two_seat_measurements();
+        let mut area = unit_area_base();
+        area.prior = AreaPriorKind::Gaussian {
+            mean: vec![0.5],
+            cov_diag: vec![0.0625],
+            truncation_sigmas: 2.0,
+        };
+        area.quadrature = AreaQuadratureKind::GaussLegendre {
+            points_per_axis: 4,
+        };
+        assert!(
+            model_errors_for(&area)
+                .iter()
+                .any(|e| e.contains("gauss_legendre")),
+            "model validator should flag prior/quadrature incompatibility"
+        );
+        let config = continuous_area_config(area);
+        let err =
+            optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48_000.0).unwrap_err();
+        assert!(
+            err.to_string().contains("gauss_legendre"),
+            "incompatible quadrature must be rejected: {err}"
+        );
+    }
+
+    #[test]
+    fn mso_default_budget_reproduces_legacy_schedule() {
+        // 2 subs, gain/delay only → dims=2, pop=(2*24).max(48)=48,
+        // gens=(120+2*30).max(200)=200 → 48 initial + 200*47 trials (slot 0
+        // stays pinned as the identity anchor).
+        let options = MsoSearchOptions::from_config(
+            &MultiSeatConfig::default(),
+            20.0,
+            120.0,
+        );
+        let ((gains, _, _, _), report) =
+            super::optimize_continuous_mso_with_budget(2, options, &MsoSearchBudget::default(), &|gains, _, _, _| {
+                gains[1].powi(2)
+            });
+        assert_eq!(report.stop_reason, "completed");
+        assert!(!report.stopped_early);
+        assert_eq!(report.generations_run, 200);
+        assert_eq!(report.evaluations, 48 + 200 * 47);
+        assert!(report.best_loss.is_finite());
+        assert!(gains[1].abs() < 0.05, "legacy schedule must converge, got {}", gains[1]);
+    }
+
+    #[test]
+    fn mso_budget_caps_area_evaluations() {
+        let options = MsoSearchOptions::from_config(
+            &MultiSeatConfig::default(),
+            20.0,
+            120.0,
+        );
+        let budget = MsoSearchBudget {
+            max_evaluations: Some(100),
+            ..MsoSearchBudget::default()
+        };
+        let ((gains, delays, _, _), report) =
+            super::optimize_continuous_mso_with_budget(2, options, &budget, &|gains, _, _, _| {
+                gains[1].powi(2)
+            });
+        assert_eq!(report.stop_reason, "evaluation_budget");
+        assert!(report.stopped_early);
+        assert!(report.evaluations <= 100, "consumed {}", report.evaluations);
+        assert_eq!(gains.len(), 2);
+        assert_eq!(delays.len(), 2);
+    }
+
+    #[test]
+    fn mso_budget_seed_override_is_deterministic() {
+        let run = || {
+            let options = MsoSearchOptions::from_config(
+                &MultiSeatConfig::default(),
+                20.0,
+                120.0,
+            );
+            let budget = MsoSearchBudget {
+                seed: Some(0x1234_5678),
+                max_evaluations: Some(500),
+                ..MsoSearchBudget::default()
+            };
+            super::optimize_continuous_mso_with_budget(2, options, &budget, &|gains, delays, _, _| {
+                (gains[1] - 1.0).powi(2) + delays[1].powi(2)
+            })
+            .0
+        };
+        let (gains_a, delays_a, _, _) = run();
+        let (gains_b, delays_b, _, _) = run();
+        assert_eq!(gains_a, gains_b);
+        assert_eq!(delays_a, delays_b);
+    }
+
+    #[test]
+    fn mso_budget_convergence_stall_stops_early() {
+        let options = MsoSearchOptions::from_config(
+            &MultiSeatConfig::default(),
+            20.0,
+            120.0,
+        );
+        let budget = MsoSearchBudget {
+            stall_generations: Some(3),
+            ..MsoSearchBudget::default()
+        };
+        let (_, report) =
+            super::optimize_continuous_mso_with_budget(2, options, &budget, &|_, _, _, _| 1.0);
+        assert_eq!(report.stop_reason, "converged");
+        assert!(report.stopped_early);
+        assert!(report.generations_run < 200, "ran {}", report.generations_run);
+    }
+
+    #[test]
+    fn mso_budget_cancellation_stops_search() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        let options = MsoSearchOptions::from_config(
+            &MultiSeatConfig::default(),
+            20.0,
+            120.0,
+        );
+        let cancelled = Arc::new(AtomicBool::new(true));
+        let budget = MsoSearchBudget {
+            cancelled: Some(cancelled),
+            ..MsoSearchBudget::default()
+        };
+        let (_, report) =
+            super::optimize_continuous_mso_with_budget(2, options, &budget, &|_, _, _, _| 1.0);
+        assert_eq!(report.stop_reason, "cancelled");
+        assert_eq!(report.generations_run, 0);
     }
 
     #[test]

@@ -55,6 +55,9 @@ mod prescore_tests;
 #[path = "autoeq/qa_tests.rs"]
 mod qa_tests;
 #[cfg(test)]
+#[path = "autoeq/runopt_tests.rs"]
+mod runopt_tests;
+#[cfg(test)]
 #[path = "autoeq/save_tests.rs"]
 mod save_tests;
 #[cfg(test)]
@@ -141,6 +144,16 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
     let opt_result = runopt::perform_optimization(&optim_params, &objective_data)
         .map_err(|e| anyhow!("{}", e))
         .context("Optimization failed")?;
+    for evidence in &opt_result.optimizer_evidence {
+        log::debug!(
+            "Optimizer evidence: {} termination={:?} confidence={:?} selected={} status={}",
+            evidence.algorithm,
+            evidence.termination,
+            evidence.confidence,
+            evidence.selected_for_output,
+            evidence.status
+        );
+    }
 
     // Compute post-optimization metrics
     let post_metrics = postscore::compute_post_optimization_metrics(
@@ -268,12 +281,29 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
         );
     }
 
+    // The shipped preset serializes frequencies to integer Hz; surface
+    // any drift between the optimizer response and the serialized one.
+    if let Some(gap) = opt_result.apo_roundtrip_gap {
+        if gap > save::APO_ROUNDTRIP_WARN_THRESHOLD {
+            log::warn!(
+                "APO serialization drifted the objective by {:.6} (> {:.0e}); \
+                 reported evidence reflects the optimizer response, the preset \
+                 the integer-Hz response",
+                gap,
+                save::APO_ROUNDTRIP_WARN_THRESHOLD
+            );
+        } else {
+            log::debug!("APO round-trip objective gap: {:.3e}", gap);
+        }
+    }
+
     // Save PEQ settings to APO format file
     save::save_peq_to_file(
         &args,
         &opt_result.params,
         &output_path,
         &objective_data.loss_type,
+        None,
     )
     .await
     .map_err(|e| anyhow!("{}", e))

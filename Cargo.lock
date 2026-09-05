@@ -2951,15 +2951,18 @@ name = "roomeq-cli"
 version = "0.5.7"
 dependencies = [
  "anyhow",
+ "autoeq-optim",
  "clap",
  "env_logger",
  "log",
  "roomeq-engine",
+ "roomeq-export",
  "roomeq-model",
  "roomeq-workflow",
  "schemars 1.2.2",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

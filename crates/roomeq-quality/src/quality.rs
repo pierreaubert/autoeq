@@ -95,6 +95,8 @@ pub struct QualityGatePolicy {
 }
 
 impl Default for QualityGatePolicy {
+    /// Engineering-policy defaults, NOT listening-calibrated limits. They pin
+    /// currently useful QA behavior; changing them changes what QA accepts.
     fn default() -> Self {
         Self {
             min_held_out_improvement_db: 0.1,
@@ -146,6 +148,8 @@ pub struct QualityRegressionPolicy {
 }
 
 impl Default for QualityRegressionPolicy {
+    /// Engineering-policy defaults, NOT listening-calibrated limits. They pin
+    /// currently useful QA behavior; changing them changes what QA accepts.
     fn default() -> Self {
         Self {
             max_weighted_rms_regression_db: 0.1,
@@ -173,6 +177,14 @@ pub struct QualityBaselineComparison {
     pub violations: Vec<String>,
 }
 
+/// Score per-seat pre/post residuals against an optional target.
+///
+/// Measure contract: partition `pre/post_p95_abs_residual_db` and
+/// `post_worst_abs_residual_db` are pooled unweighted-bin statistics across
+/// the partition's seats, while per-seat `weighted_rms` values use the
+/// ERB-rate measure. Neither p95 is the same metric as the ERB-rate-weighted
+/// correction-acceptance p95 or the log-frequency oracle p95: never compare
+/// them across paths as if they were.
 pub fn evaluate_acoustic_quality(
     training_pre: &[Curve],
     training_post: &[Curve],

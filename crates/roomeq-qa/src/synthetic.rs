@@ -23,6 +23,7 @@ use std::time::Instant;
 mod build;
 mod channel_layout;
 mod consts;
+mod decision;
 mod generate;
 mod misc;
 mod option;
@@ -44,6 +45,7 @@ use generate::generate_ms_option_combos;
 use generate::generate_option_combos;
 use misc::fmt_epa;
 use crate::parameter_matrix::generate_pr_matrix;
+use run::multiseat_api_guard_test_count;
 use run::report_multiseat_api_guard_tests;
 use run::run_multichannel_test;
 use run::run_multiseat_api_guard_tests;
@@ -290,7 +292,7 @@ pub fn run() -> Result<bool> {
     // Count total tests
     let single_total = difficulties.len() * modes.len() * targets.len() * option_combos.len();
     let ms_total = ms_difficulties.len() * MS_TOPOLOGIES.len() * ms_option_combos.len();
-    let multiseat_guard_total = 4;
+    let multiseat_guard_total = multiseat_api_guard_test_count();
     let mc_total: usize = layouts
         .iter()
         .map(|layout| {
@@ -373,7 +375,7 @@ pub fn run() -> Result<bool> {
         println!();
         println!("  Multi-seat API guards:");
         println!(
-            "    Checks: missing phase rejection, Average metrics, PrimaryWithConstraints metrics, polarity/all-pass controls"
+            "    Checks: missing phase rejection, MinimizeVariance/Average/PrimaryWithConstraints/ModalBasis metrics, polarity/all-pass controls, registry release-decision matrix"
         );
         println!("    Subtotal: {}", multiseat_guard_total);
         println!();

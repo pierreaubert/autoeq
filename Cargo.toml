@@ -8,6 +8,22 @@ categories = ["multimedia::audio"]
 repository = "https://github.com/pierreaubert/autoeq"
 authors = ["Pierre F. Aubert pierre@spinorama.org"]
 license = "GPL-3.0-or-later"
+# Keep the published crate under crates.io's size cap. The excluded paths are
+# QA recordings, generated test fixtures, helper shell scripts, and editor
+# backups — none are needed to compile the library or the user-facing
+# binaries. The QA-only `roomeq-qa-features` binary and the
+# `roomeq_generated_data_test` integration test will fail at runtime against
+# a published copy because their fixtures are absent; they are meant to run
+# from a workspace checkout.
+exclude = [
+    "data_tests/**",
+    "data_generated/**",
+    "scripts/**",
+    "*.mdat",
+    "**/*.mdat",
+    "*~",
+    "**/*~",
+]
 
 [workspace]
 resolver = "3"
@@ -31,21 +47,6 @@ members = [
     "crates/roomeq-synthetic",
     "crates/roomeq-workflow",
 ]
-# Keep the published crate under crates.io's size cap. The excluded paths are
-# QA recordings, generated test fixtures, helper shell scripts, and editor
-# backups — none are needed to compile the library or the user-facing
-# binaries. The QA-only `roomeq-qa-features` binary and the
-# `roomeq_generated_data_test` integration test will fail at runtime against
-# a published copy because their fixtures are absent; they are meant to run
-# from a workspace checkout.
-exclude = [
-    "data_tests/**",
-    "data_generated/**",
-    "scripts/**",
-    "*~",
-    "**/*~",
-]
-
 [workspace.package]
 version = "0.5.69"
 

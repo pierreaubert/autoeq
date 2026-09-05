@@ -373,7 +373,12 @@ pub fn run_command() -> Result<()> {
 
     // Dry-run mode: validate config and check files exist
     if args.dry_run {
-        return run_dry_run(config_path, args.override_config, args.freq_samples);
+        return run_dry_run(
+            config_path,
+            args.override_config,
+            args.freq_samples,
+            args.export_format,
+        );
     }
 
     execute_optimization(
@@ -565,15 +570,347 @@ fn execute_optimization(
     Ok(())
 }
 
+/// One resolved measurement slot: which source feeds which seat.
+#[derive(Debug, Clone)]
+struct SeatSource {
+    speaker: String,
+    seat: String,
+    kind: &'static str,
+    reference: Option<MeasurementRef>,
+    path: Option<PathBuf>,
+}
+
+/// Physical frequency support observed for one measurement.
+#[derive(Debug, Clone, Copy)]
+struct SpanInfo {
+    fmin_hz: f64,
+    fmax_hz: f64,
+    has_phase: bool,
+}
+
+/// Resolve every source x seat slot of one speaker without touching disk.
+fn resolve_seat_sources(speaker_name: &str, config: &SpeakerConfig) -> Vec<SeatSource> {
+    fn describe_source(
+        speaker: &str,
+        seat_base: String,
+        source: &MeasurementSource,
+        out: &mut Vec<SeatSource>,
+    ) {
+        match source {
+            MeasurementSource::Single(single) => {
+                let seat = single
+                    .measurement
+                    .name()
+                    .unwrap_or(&seat_base)
+                    .to_string();
+                out.push(SeatSource {
+                    speaker: speaker.to_string(),
+                    seat,
+                    kind: source_kind(&single.measurement),
+                    path: single.measurement.path().cloned(),
+                    reference: Some(single.measurement.clone()),
+                });
+            }
+            MeasurementSource::Multiple(multiple) => {
+                for (index, measurement) in multiple.measurements.iter().enumerate() {
+                    let seat = measurement.name().map(str::to_string).unwrap_or_else(|| {
+                        format!("{seat_base} {}", index + 1)
+                    });
+                    out.push(SeatSource {
+                        speaker: speaker.to_string(),
+                        seat,
+                        kind: source_kind(measurement),
+                        path: measurement.path().cloned(),
+                        reference: Some(measurement.clone()),
+                    });
+                }
+            }
+            MeasurementSource::InMemory(_) => out.push(SeatSource {
+                speaker: speaker.to_string(),
+                seat: seat_base,
+                kind: "in-memory",
+                path: None,
+                reference: None,
+            }),
+            MeasurementSource::InMemoryMultiple(curves) => {
+                for (index, _) in curves.iter().enumerate() {
+                    out.push(SeatSource {
+                        speaker: speaker.to_string(),
+                        seat: format!("{seat_base} {}", index + 1),
+                        kind: "in-memory",
+                        path: None,
+                        reference: None,
+                    });
+                }
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    match config {
+        SpeakerConfig::Single(source) => {
+            describe_source(speaker_name, "main".to_string(), source, &mut out);
+        }
+        SpeakerConfig::Group(group) => {
+            for (index, source) in group.measurements.iter().enumerate() {
+                describe_source(
+                    speaker_name,
+                    format!("member {}", index + 1),
+                    source,
+                    &mut out,
+                );
+            }
+        }
+        SpeakerConfig::Topology(topology) => {
+            for (index, driver) in topology.drivers.iter().enumerate() {
+                describe_source(
+                    speaker_name,
+                    format!("driver {}", index + 1),
+                    &driver.measurement,
+                    &mut out,
+                );
+            }
+        }
+        SpeakerConfig::MultiSub(multisub) => {
+            for (index, source) in multisub.subwoofers.iter().enumerate() {
+                describe_source(speaker_name, format!("sub {}", index + 1), source, &mut out);
+            }
+        }
+        SpeakerConfig::Dba(dba) => {
+            for (index, source) in dba.front.iter().enumerate() {
+                describe_source(
+                    speaker_name,
+                    format!("front {}", index + 1),
+                    source,
+                    &mut out,
+                );
+            }
+            for (index, source) in dba.rear.iter().enumerate() {
+                describe_source(speaker_name, format!("rear {}", index + 1), source, &mut out);
+            }
+        }
+        SpeakerConfig::Cardioid(cardioid) => {
+            describe_source(speaker_name, "front".to_string(), &cardioid.front, &mut out);
+            describe_source(speaker_name, "rear".to_string(), &cardioid.rear, &mut out);
+        }
+        SpeakerConfig::SupportingSource(group) => {
+            describe_source(speaker_name, "primary".to_string(), &group.primary, &mut out);
+            describe_source(speaker_name, "support".to_string(), &group.support, &mut out);
+        }
+    }
+    out
+}
+
+fn source_kind(measurement: &MeasurementRef) -> &'static str {
+    match measurement {
+        MeasurementRef::Inline(inline)
+            if inline.frequencies.is_empty() && inline.csv_path.is_some() =>
+        {
+            "file"
+        }
+        MeasurementRef::Inline(_) => "inline",
+        MeasurementRef::Path(_) | MeasurementRef::Named { .. } => "file",
+    }
+}
+
+/// Seat labels assigned more than once within one speaker (a swapped or
+/// duplicated seat assignment is visible here, not silently averaged).
+fn duplicate_seats(entries: &[SeatSource]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut duplicates = Vec::new();
+    for entry in entries {
+        if !seen.insert(entry.seat.clone()) && !duplicates.contains(&entry.seat) {
+            duplicates.push(entry.seat.clone());
+        }
+    }
+    duplicates
+}
+
+/// Resolve a file-backed reference against the config directory when the raw
+/// path does not exist (configs usually store paths relative to the config).
+fn resolve_reference_path(
+    reference: &MeasurementRef,
+    config_dir: &std::path::Path,
+) -> Option<PathBuf> {
+    let raw = reference.path()?;
+    if raw.exists() {
+        return Some(raw.clone());
+    }
+    let joined = config_dir.join(raw);
+    if joined.exists() {
+        return Some(joined);
+    }
+    None
+}
+
+/// Observed post-alignment support of one measurement: inline spans come
+/// straight from the embedded grid, file spans from the loaded (and grid
+/// capped) curve, so support already lost in measurement alignment shows up
+/// here instead of being silently inherited by the exporter.
+fn probe_span(
+    reference: &MeasurementRef,
+    config_dir: &std::path::Path,
+    freq_samples: usize,
+) -> Option<SpanInfo> {
+    if let MeasurementRef::Inline(inline) = reference
+        && !inline.frequencies.is_empty()
+    {
+        let (fmin_hz, fmax_hz) = intersect_span_of(inline.frequencies.iter().copied())?;
+        return Some(SpanInfo {
+            fmin_hz,
+            fmax_hz,
+            has_phase: inline.phase_deg.as_ref().is_some_and(|p| !p.is_empty()),
+        });
+    }
+    let resolved = match reference {
+        MeasurementRef::Path(_) | MeasurementRef::Named { .. } => {
+            let path = resolve_reference_path(reference, config_dir)?;
+            match reference {
+                MeasurementRef::Path(_) => MeasurementRef::Path(path),
+                MeasurementRef::Named { path: _, name } => MeasurementRef::Named {
+                    path,
+                    name: name.clone(),
+                },
+                _ => return None,
+            }
+        }
+        inline => inline.clone(),
+    };
+    let curve =
+        roomeq_workflow::load_measurement_with_frequency_samples(&resolved, freq_samples).ok()?;
+    let (fmin_hz, fmax_hz) = intersect_span_of(curve.freq.iter().copied())?;
+    Some(SpanInfo {
+        fmin_hz,
+        fmax_hz,
+        has_phase: curve.phase.as_ref().is_some_and(|p| !p.is_empty()),
+    })
+}
+
+fn intersect_span_of(frequencies: impl IntoIterator<Item = f64>) -> Option<(f64, f64)> {
+    let mut fmin = f64::INFINITY;
+    let mut fmax = f64::NEG_INFINITY;
+    for frequency in frequencies {
+        if frequency.is_finite() {
+            fmin = fmin.min(frequency);
+            fmax = fmax.max(frequency);
+        }
+    }
+    (fmin <= fmax).then_some((fmin, fmax))
+}
+
+/// Physical frequency intersection across all probed measurements.
+fn intersect_spans(spans: &[(f64, f64)]) -> Option<(f64, f64)> {
+    let mut intersection = (-f64::INFINITY, f64::INFINITY);
+    for (fmin, fmax) in spans {
+        intersection.0 = intersection.0.max(*fmin);
+        intersection.1 = intersection.1.min(*fmax);
+    }
+    (intersection.0 <= intersection.1).then_some(intersection)
+}
+
+/// Hard resource misconfigurations that make optimization impossible.
+fn validate_optimizer_resources(opt: &roomeq_model::OptimizerConfig) -> Vec<String> {
+    let mut errors = Vec::new();
+    if opt.max_iter == 0 {
+        errors.push("optimizer.max_iter is 0: no optimization pass can run".to_string());
+    }
+    if opt.population == 0 {
+        errors.push("optimizer.population is 0: population-based optimizers cannot run".to_string());
+    }
+    if opt.num_filters == 0 {
+        errors.push("optimizer.num_filters is 0: no correction filter can be allocated".to_string());
+    }
+    if opt.min_freq >= opt.max_freq {
+        errors.push(format!(
+            "optimizer band is empty (min_freq {} >= max_freq {})",
+            opt.min_freq, opt.max_freq
+        ));
+    }
+    if opt.min_q > opt.max_q {
+        errors.push(format!(
+            "optimizer Q range is empty (min_q {} > max_q {})",
+            opt.min_q, opt.max_q
+        ));
+    }
+    if opt.min_db > opt.max_db {
+        errors.push(format!(
+            "optimizer gain range is empty (min_db {} > max_db {})",
+            opt.min_db, opt.max_db
+        ));
+    }
+    errors
+}
+
+/// Whether the configured algorithm resolves in the optimizer registry.
+/// Suffix matching mirrors the registry: canonical `autoeq:*` names plus the
+/// documented `mh:*` / `nlopt:*` aliases resolve, anything else is unknown.
+fn is_known_algorithm(name: &str) -> bool {
+    autoeq_optim::optim::registry::resolve(name).is_some()
+}
+
+/// Phase-control stages enabled by configuration (independent of whether the
+/// measurements actually carry phase).
+fn enabled_phase_controls(opt: &roomeq_model::OptimizerConfig) -> Vec<&'static str> {
+    let mut controls = Vec::new();
+    if opt.phase_alignment.is_some() {
+        controls.push("phase_alignment");
+    }
+    if opt.mixed_phase.is_some() {
+        controls.push("mixed_phase");
+    }
+    if opt.phase_correction.is_some() {
+        controls.push("phase_correction");
+    }
+    if opt.group_delay.is_some() {
+        controls.push("group_delay");
+    }
+    controls
+}
+
+/// Speaker topologies whose routing restricts external exporters.
+fn speaker_uses_routing(config: &SpeakerConfig) -> bool {
+    matches!(
+        config,
+        SpeakerConfig::MultiSub(_)
+            | SpeakerConfig::Dba(_)
+            | SpeakerConfig::Cardioid(_)
+            | SpeakerConfig::Topology(_)
+    )
+}
+
+/// Dry-run export pre-flight. Full support is decided from the realized DSP
+/// graph after optimization (including support lost in measurement
+/// alignment, which the exporter cannot recover), so this only surfaces what
+/// is already knowable from configuration.
+fn export_preflight_warnings(config: &RoomConfig, format: ExportFormat) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if config.speakers.values().any(speaker_uses_routing) {
+        warnings.push(format!(
+            "configuration uses channel routing (multi-sub/DBA/cardioid/topology); \
+external export support is decided from the realized DSP graph after optimization, \
+and {format:?} exports cannot represent every routed graph"
+        ));
+    }
+    if matches!(format, ExportFormat::CamillaDsp) {
+        warnings.push(
+            "CamillaDSP exports require a serial graph: routed bass management or \
+global plugins in the realized graph are rejected at export time"
+                .to_string(),
+        );
+    }
+    warnings
+}
+
 /// Validate configuration and check measurement files exist without running optimization
 fn run_dry_run(
     config_path: PathBuf,
     override_config_path: Option<PathBuf>,
     freq_samples: usize,
+    export_format: Option<ExportFormat>,
 ) -> Result<()> {
     info!("Loading room configuration from {:?}", config_path);
 
-    let (room_config, _config_dir, validation) = load_config_with_frequency_samples(
+    let (room_config, config_dir, validation) = load_config_with_frequency_samples(
         &config_path,
         override_config_path.as_deref(),
         freq_samples,
@@ -588,49 +925,200 @@ fn run_dry_run(
         println!("Configuration: INVALID");
     }
 
-    let warnings = validation.warnings().collect::<Vec<_>>();
+    let mut warnings: Vec<String> = validation.warnings().map(|w| w.to_string()).collect();
+    let mut fatal: Vec<String> = validation.errors().map(|e| e.to_string()).collect();
+
+    println!("\n=== Source x Seat Mapping ===\n");
+    println!("Found {} speakers:", room_config.speakers.len());
+
+    let mut file_errors = Vec::new();
+    let mut probed_spans: Vec<(String, f64, f64)> = Vec::new();
+    let mut with_phase = 0usize;
+    let mut without_phase = 0usize;
+
+    for (name, speaker_config) in &room_config.speakers {
+        println!("\n  Speaker: {}", name);
+        let entries = resolve_seat_sources(name, speaker_config);
+        for duplicate in duplicate_seats(&entries) {
+            warnings.push(format!(
+                "Speaker '{name}': seat '{duplicate}' is assigned more than once; \
+check for swapped or duplicated seat names"
+            ));
+        }
+        for entry in &entries {
+            match entry.reference.as_ref() {
+                Some(reference) => {
+                    let span = probe_span(reference, &config_dir, freq_samples);
+                    let phase_tag = match span {
+                        Some(span) => {
+                            probed_spans.push((
+                                format!("{} / {}", entry.speaker, entry.seat),
+                                span.fmin_hz,
+                                span.fmax_hz,
+                            ));
+                            if span.has_phase {
+                                with_phase += 1;
+                                "PHASE"
+                            } else {
+                                without_phase += 1;
+                                "NO-PHASE"
+                            }
+                        }
+                        None => "SPAN-UNKNOWN",
+                    };
+                    let location = entry
+                        .path
+                        .as_ref()
+                        .map(|path| format!("{path:?}"))
+                        .unwrap_or_else(|| "(inline)".to_string());
+                    println!(
+                        "    seat '{}' [{}] [{}] {}",
+                        entry.seat, entry.kind, phase_tag, location
+                    );
+                }
+                None => println!(
+                    "    seat '{}' [{}] [SPAN-UNKNOWN] (in-memory)",
+                    entry.seat, entry.kind
+                ),
+            }
+        }
+
+        // File existence, resolving relative paths against the config dir.
+        let paths = collect_measurement_paths(speaker_config);
+        for path in &paths {
+            let effective = if path.exists() {
+                Some(path.clone())
+            } else {
+                let joined = config_dir.join(path);
+                joined.exists().then_some(joined)
+            };
+            match effective {
+                Some(found) => println!("    [OK] {:?} (as {:?})", path, found),
+                None => {
+                    println!("    [MISSING] {:?}", path);
+                    file_errors.push(format!("Speaker '{}': file not found: {:?}", name, path));
+                }
+            }
+        }
+    }
+
+    println!("\n=== Frequency Support ===\n");
+    if probed_spans.is_empty() {
+        println!("No measurable frequency spans (in-memory sources only).");
+    } else {
+        for (slot, fmin, fmax) in &probed_spans {
+            println!("  {slot}: {fmin:.1}..{fmax:.1} Hz");
+        }
+        let spans: Vec<(f64, f64)> =
+            probed_spans.iter().map(|(_, fmin, fmax)| (*fmin, *fmax)).collect();
+        match intersect_spans(&spans) {
+            Some((fmin, fmax)) => {
+                println!("  Intersection: {fmin:.1}..{fmax:.1} Hz");
+                let band = (room_config.optimizer.min_freq, room_config.optimizer.max_freq);
+                if fmin > band.0 || fmax < band.1 {
+                    warnings.push(format!(
+                        "measurement support {fmin:.1}..{fmax:.1} Hz does not cover the \
+optimizer band {:.1}..{:.1} Hz; support lost in measurement alignment \
+cannot be recovered by the exporter",
+                        band.0, band.1
+                    ));
+                }
+            }
+            None => fatal.push(
+                "measurements have disjoint frequency spans: no common intersection to optimize"
+                    .to_string(),
+            ),
+        }
+    }
+
+    println!("\n=== Strategy & Budgets ===\n");
+    let opt = &room_config.optimizer;
+    println!("  Algorithm: {}", opt.algorithm);
+    if !is_known_algorithm(&opt.algorithm) {
+        fatal.push(format!(
+            "unknown optimizer algorithm '{}'; check --schema input and the optimizer registry",
+            opt.algorithm
+        ));
+    }
+    println!("  Strategy: {}", opt.strategy);
+    println!("  Loss: {}", opt.loss_type);
+    println!("  Processing mode: {:?}", opt.processing_mode);
+    if let Some(multi_seat) = opt.multi_seat.as_ref() {
+        println!(
+            "  Multi-seat: enabled={} strategy={:?} primary_seat={}",
+            multi_seat.enabled, multi_seat.strategy, multi_seat.primary_seat
+        );
+    }
+    let auto_note = opt
+        .auto_optimizer
+        .as_ref()
+        .map(|_| " (auto selection may override these)")
+        .unwrap_or("");
+    println!(
+        "  Effective budgets: outer max_iter={} x inner population={}{}",
+        opt.max_iter, opt.population, auto_note
+    );
+    println!(
+        "  Refinement: {} ({})",
+        if opt.refine { "enabled" } else { "disabled" },
+        opt.local_algo
+    );
+    fatal.extend(validate_optimizer_resources(opt));
+
+    println!("\n=== Phase Control ===\n");
+    let controls = enabled_phase_controls(opt);
+    if controls.is_empty() {
+        println!("  No phase-control stage enabled in configuration.");
+    } else {
+        println!("  Enabled: {}", controls.join(", "));
+    }
+    println!(
+        "  Measurements carrying phase: {with_phase}; without phase: {without_phase}"
+    );
+    if !controls.is_empty() && with_phase == 0 && (without_phase > 0 || !probed_spans.is_empty())
+    {
+        warnings.push(
+            "phase control is enabled but no measurement carries phase data; \
+phase stages will have nothing to align (missing phase)"
+                .to_string(),
+        );
+    }
+
+    if let Some(format) = export_format {
+        println!("\n=== Export Pre-flight ({format:?}) ===\n");
+        let preflight = export_preflight_warnings(&room_config, format);
+        if preflight.is_empty() {
+            println!("  No configuration-level export limitations detected.");
+            println!("  Full support is still decided from the realized DSP graph");
+            println!("  after optimization.");
+        } else {
+            for warning in &preflight {
+                println!("  - {warning}");
+            }
+            warnings.extend(preflight);
+        }
+    }
+
     if !warnings.is_empty() {
         println!("\nWarnings:");
-        for warning in warnings {
+        for warning in &warnings {
             println!("  - {}", warning);
         }
     }
 
-    let errors = validation.errors().collect::<Vec<_>>();
-    let error_count = errors.len();
-    if !errors.is_empty() {
+    if !fatal.is_empty() {
         println!("\nErrors:");
-        for error in &errors {
+        for error in &fatal {
             println!("  - {}", error);
-        }
-    }
-
-    println!("\n=== Speaker Configuration ===\n");
-    println!("Found {} speakers:", room_config.speakers.len());
-
-    let mut file_errors = Vec::new();
-
-    for (name, speaker_config) in &room_config.speakers {
-        println!("\n  Speaker: {}", name);
-
-        // Get measurement paths for this speaker
-        let paths = collect_measurement_paths(speaker_config);
-        for path in &paths {
-            if path.exists() {
-                println!("    [OK] {:?}", path);
-            } else {
-                println!("    [MISSING] {:?}", path);
-                file_errors.push(format!("Speaker '{}': file not found: {:?}", name, path));
-            }
         }
     }
 
     println!("\n=== Result ===\n");
 
-    if error_count > 0 || !file_errors.is_empty() {
+    if !fatal.is_empty() || !file_errors.is_empty() {
         println!("VALIDATION FAILED");
-        if error_count > 0 {
-            println!("  {} configuration error(s)", error_count);
+        if !fatal.is_empty() {
+            println!("  {} configuration error(s)", fatal.len());
         }
         if !file_errors.is_empty() {
             println!("  {} file(s) missing", file_errors.len());
@@ -638,7 +1126,9 @@ fn run_dry_run(
                 println!("    - {}", error);
             }
         }
-        anyhow::bail!("Configuration validation failed");
+        let mut detail: Vec<String> = fatal;
+        detail.extend(file_errors);
+        anyhow::bail!("Configuration validation failed: {}", detail.join("; "));
     }
 
     println!("All checks passed! Configuration is valid and all files exist.");
@@ -734,8 +1224,10 @@ mod tests {
     use clap::Parser;
 
     use super::{
-        Args, RunManifest, manifest_path_for, partial_export_diagnostic, strict_input_schema,
-        write_run_manifest,
+        Args, RunManifest, duplicate_seats, enabled_phase_controls, export_preflight_warnings,
+        intersect_spans, is_known_algorithm, manifest_path_for, partial_export_diagnostic,
+        probe_span, resolve_seat_sources, run_dry_run, strict_input_schema,
+        validate_optimizer_resources, write_run_manifest,
     };
 
     #[test]
@@ -861,6 +1353,250 @@ mod tests {
         assert!(text.contains("dsp.json"), "{text}");
         assert!(text.contains("room_eq_cdsp.yaml"), "{text}");
         assert!(text.contains("disk full"), "{text}");
+    }
+
+    fn log_spaced_frequencies(fmin: f64, fmax: f64, count: usize) -> Vec<f64> {
+        (0..count)
+            .map(|index| fmin * (fmax / fmin).powf(index as f64 / (count - 1) as f64))
+            .collect()
+    }
+
+    fn inline_speaker(
+        frequencies: Vec<f64>,
+        with_phase: bool,
+        name: Option<&str>,
+    ) -> roomeq_model::SpeakerConfig {
+        use roomeq_model::{
+            InlineMeasurement, MeasurementRef, MeasurementSingle, MeasurementSource,
+        };
+        roomeq_model::SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Inline(InlineMeasurement {
+                frequencies: frequencies.clone(),
+                magnitude_db: vec![80.0; frequencies.len()],
+                phase_deg: with_phase.then(|| vec![0.0; frequencies.len()]),
+                name: name.map(str::to_string),
+                wav_path: None,
+                csv_path: None,
+            }),
+            speaker_name: None,
+        }))
+    }
+
+    fn write_dry_run_config(dir: &tempfile::TempDir, config: &roomeq_model::RoomConfig) -> std::path::PathBuf {
+        let path = dir.path().join("room.json");
+        std::fs::write(
+            &path,
+            serde_json::to_string_pretty(config).expect("serialize config"),
+        )
+        .expect("write config");
+        path
+    }
+
+    fn two_speaker_config(
+        a_span: (f64, f64),
+        b_span: (f64, f64),
+    ) -> roomeq_model::RoomConfig {
+        let mut config = roomeq_model::RoomConfig::default();
+        config.speakers.insert(
+            "A".to_string(),
+            inline_speaker(log_spaced_frequencies(a_span.0, a_span.1, 32), false, None),
+        );
+        config.speakers.insert(
+            "B".to_string(),
+            inline_speaker(log_spaced_frequencies(b_span.0, b_span.1, 32), false, None),
+        );
+        config
+    }
+
+    #[test]
+    fn dry_run_rejects_disjoint_measurement_spans() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let config = two_speaker_config((20.0, 200.0), (1000.0, 8000.0));
+        let path = write_dry_run_config(&dir, &config);
+        let error = run_dry_run(path, None, 64, None).expect_err("disjoint spans must fail");
+        assert!(format!("{error:#}").contains("disjoint"), "{error:#}");
+    }
+
+    #[test]
+    fn dry_run_accepts_overlapping_measurement_spans() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let config = two_speaker_config((20.0, 20000.0), (30.0, 18000.0));
+        let path = write_dry_run_config(&dir, &config);
+        run_dry_run(path, None, 64, None).expect("overlapping spans must pass");
+    }
+
+    #[test]
+    fn dry_run_rejects_unknown_algorithm() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let mut config = two_speaker_config((20.0, 20000.0), (30.0, 18000.0));
+        config.optimizer.algorithm = "bogus-algorithm".to_string();
+        let path = write_dry_run_config(&dir, &config);
+        let error = run_dry_run(path, None, 64, None).expect_err("unknown algorithm must fail");
+        assert!(format!("{error:#}").contains("unknown"), "{error:#}");
+    }
+
+    #[test]
+    fn dry_run_rejects_impossible_resource_settings() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let mut config = two_speaker_config((20.0, 20000.0), (30.0, 18000.0));
+        config.optimizer.max_iter = 0;
+        let path = write_dry_run_config(&dir, &config);
+        let error = run_dry_run(path, None, 64, None).expect_err("zero budget must fail");
+        assert!(format!("{error:#}").contains("max_iter"), "{error:#}");
+    }
+
+    #[test]
+    fn seat_mapping_exposes_named_seats_in_order() {
+        use roomeq_model::{
+            MeasurementMultiple, MeasurementRef, MeasurementSource, SpeakerConfig,
+        };
+        let source = MeasurementSource::Multiple(MeasurementMultiple {
+            measurements: vec![
+                MeasurementRef::Named {
+                    path: "left.csv".into(),
+                    name: Some("Left".to_string()),
+                },
+                MeasurementRef::Named {
+                    path: "right.csv".into(),
+                    name: Some("Right".to_string()),
+                },
+            ],
+            speaker_name: None,
+        });
+        let entries = resolve_seat_sources("R", &SpeakerConfig::Group(group_of(source)));
+        let seats: Vec<&str> = entries.iter().map(|entry| entry.seat.as_str()).collect();
+        assert_eq!(seats, vec!["Left", "Right"]);
+        assert!(duplicate_seats(&entries).is_empty());
+    }
+
+    fn group_of(source: roomeq_model::MeasurementSource) -> roomeq_model::config::SpeakerGroup {
+        roomeq_model::config::SpeakerGroup {
+            name: "test".to_string(),
+            speaker_name: None,
+            measurements: vec![source],
+            crossover: None,
+        }
+    }
+
+    #[test]
+    fn duplicate_seat_names_are_flagged() {
+        use roomeq_model::{MeasurementRef, MeasurementSingle, MeasurementSource, SpeakerConfig};
+        let named = |seat: &str| {
+            MeasurementSource::Single(MeasurementSingle {
+                measurement: MeasurementRef::Named {
+                    path: format!("{seat}.csv").into(),
+                    name: Some(seat.to_string()),
+                },
+                speaker_name: None,
+            })
+        };
+        let config = SpeakerConfig::Group(group_of_multi(vec![named("Left"), named("Left")]));
+        let entries = resolve_seat_sources("L", &config);
+        assert_eq!(duplicate_seats(&entries), vec!["Left".to_string()]);
+    }
+
+    fn group_of_multi(
+        sources: Vec<roomeq_model::MeasurementSource>,
+    ) -> roomeq_model::config::SpeakerGroup {
+        roomeq_model::config::SpeakerGroup {
+            name: "test".to_string(),
+            speaker_name: None,
+            measurements: sources,
+            crossover: None,
+        }
+    }
+
+    #[test]
+    fn phase_presence_probe_follows_inline_phase_data() {
+        use roomeq_model::{InlineMeasurement, MeasurementRef};
+        let without = MeasurementRef::Inline(InlineMeasurement {
+            frequencies: vec![20.0, 100.0],
+            magnitude_db: vec![80.0, 81.0],
+            phase_deg: None,
+            name: None,
+            wav_path: None,
+            csv_path: None,
+        });
+        let with = MeasurementRef::Inline(InlineMeasurement {
+            frequencies: vec![20.0, 100.0],
+            magnitude_db: vec![80.0, 81.0],
+            phase_deg: Some(vec![0.0, 1.0]),
+            name: None,
+            wav_path: None,
+            csv_path: None,
+        });
+        let dir = std::path::Path::new(".");
+        assert!(
+            !probe_span(&without, dir, 64)
+                .expect("inline span")
+                .has_phase
+        );
+        assert!(probe_span(&with, dir, 64).expect("inline span").has_phase);
+    }
+
+    #[test]
+    fn multisub_export_preflight_flags_routing_limitation() {
+        use roomeq_model::{config::MultiSubGroup, MeasurementSource, SpeakerConfig};
+        let sub = || {
+            MeasurementSource::Single(roomeq_model::MeasurementSingle {
+                measurement: roomeq_model::MeasurementRef::Inline(
+                    roomeq_model::InlineMeasurement {
+                        frequencies: vec![20.0, 200.0],
+                        magnitude_db: vec![80.0, 81.0],
+                        phase_deg: None,
+                        name: None,
+                        wav_path: None,
+                        csv_path: None,
+                    },
+                ),
+                speaker_name: None,
+            })
+        };
+        let mut config = roomeq_model::RoomConfig::default();
+        config.speakers.insert(
+            "subs".to_string(),
+            SpeakerConfig::MultiSub(MultiSubGroup {
+                name: "subs".to_string(),
+                speaker_name: None,
+                subwoofers: vec![sub(), sub()],
+                allpass_optimization: false,
+            }),
+        );
+        let warnings =
+            export_preflight_warnings(&config, roomeq_workflow::ExportFormat::CamillaDsp);
+        assert!(!warnings.is_empty(), "routed exports must warn");
+        assert!(warnings.iter().any(|warning| warning.contains("routing")));
+    }
+
+    #[test]
+    fn known_algorithms_resolve_and_unknown_ones_do_not() {
+        assert!(is_known_algorithm("autoeq:cmaes"));
+        assert!(is_known_algorithm("autoeq:de"));
+        assert!(!is_known_algorithm("bogus-algorithm"));
+    }
+
+    #[test]
+    fn span_intersection_detects_disjoint_supports() {
+        assert!(intersect_spans(&[(20.0, 200.0), (30.0, 180.0)]).is_some());
+        assert!(intersect_spans(&[(20.0, 200.0), (1000.0, 8000.0)]).is_none());
+    }
+
+    #[test]
+    fn default_optimizer_resources_are_possible() {
+        let config = roomeq_model::RoomConfig::default();
+        assert!(validate_optimizer_resources(&config.optimizer).is_empty());
+        assert!(enabled_phase_controls(&config.optimizer).is_empty());
+    }
+
+    #[test]
+    fn schema_and_defaults_cover_continuous_area_and_bootstrap() {
+        let schema = strict_input_schema();
+        let text = serde_json::to_string(&schema).expect("serialize schema");
+        assert!(text.contains("continuous_area"), "multi-seat continuous area in schema");
+        assert!(text.contains("num_resamples"), "bootstrap resamples in schema");
+        let defaults = roomeq_model::RoomConfig::default();
+        assert_eq!(defaults.optimizer.strategy, "lshade");
+        assert_eq!(defaults.optimizer.algorithm, "autoeq:cmaes");
     }
 
     #[test]

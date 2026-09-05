@@ -23,6 +23,7 @@ Foundational papers and standards behind the algorithms in `autoeq`. Citations a
 | `optim/de.rs`, `optim/init_sobol.rs` | [Sobol quasi-random sequences](#sobol-quasi-random-sequences) |
 | `optim/cobyla.rs`, `optim/isres.rs`, `optim/de.rs` | See [`math-optimisation/REFERENCES.md`](../math-audio/math-optimisation/REFERENCES.md) for COBYLA, ISRES, DE/JADE, Levenberg-Marquardt |
 | `optim/pareto.rs` | [Multi-objective EQ — NSGA-II](#multi-objective-genetic-algorithms-for-eq) |
+| `reviews/next-20260905.md` (plan reference; no `src/` invocation yet) | [ISO 532-1 / 532-2](#iso-532-1--iso-532-2--standardized-loudness-methods), [precedence effect](#precedence-effect--lead-dominant-fusion), [Blauert & Laws](#blauert--laws--group-delay-audibility) |
 | `fir.rs`, `roomeq/fir.rs` | See [`math-iir-fir/REFERENCES.md`](../math-audio/math-iir-fir/REFERENCES.md) for Kirkeby + pre-ringing |
 
 ## CEA/CTA-2034 spinorama standard
@@ -137,6 +138,43 @@ Foundational papers and standards behind the algorithms in `autoeq`. Citations a
 }
 ```
 
+## Blauert & Laws — group-delay audibility
+
+Cited by `reviews/next-20260905.md` (Phase E: GD audibility gate for `gd_opt`
+acceptance). No `src/` invocation yet — move the mapping here when implemented.
+
+```bibtex
+@article{blauert1978group,
+  author  = {Blauert, Jens and Laws, Peter},
+  title   = {Group delay distortions in electroacoustical systems},
+  journal = {Journal of the Acoustical Society of America},
+  volume  = {63},
+  number  = {5},
+  pages   = {1478--1483},
+  year    = {1978},
+  doi     = {10.1121/1.381841},
+  url     = {https://pubs.aip.org/jasa/article/63/5/1478/643251/Group-delay-distortions-in-electroacoustical}
+}
+```
+
+## Precedence effect — lead-dominant fusion
+
+Cited by `reviews/next-20260905.md` (Phase C: direct-sound window exclusion for
+IIR gain). No `src/` invocation yet — move the mapping here when implemented.
+
+```bibtex
+@article{litovsky1999precedence,
+  author  = {Litovsky, R. Y. and Colburn, H. S. and Yost, W. A. and Guzman, S. J.},
+  title   = {The precedence effect},
+  journal = {Journal of the Acoustical Society of America},
+  volume  = {106},
+  pages   = {1633--1654},
+  year    = {1999},
+  doi     = {10.1121/1.427914},
+  note    = {Review and tutorial paper: lead/lag pairs fuse into a single auditory object dominated by the lead.}
+}
+```
+
 ## ERB / cochlear bandwidth
 
 `loss/enhanced_weights.rs::erb_for_freq` uses Glasberg & Moore's ERB formula `24.7·(1 + 4.37·f/1000)`.
@@ -242,6 +280,32 @@ for example, `g(16) = 1.013144334071324`, `g(20) = 1.725360055831110`, and
   pages   = {130--141},
   year    = {1985},
   note    = {Sensory pleasantness model that includes sharpness, roughness, tonality and loudness.}
+}
+```
+
+## ISO 532-1 / ISO 532-2 — standardized loudness methods
+
+Cited by `reviews/next-20260905.md` (Phase D: `partial-loudness` objective).
+ISO 532-1 standardizes the Zwicker method (stationary and time-varying
+loudness); ISO 532-2 standardizes the Moore-Glasberg method (stationary
+monaural/binaural loudness). No `src/` invocation yet — move the mapping here
+when implemented.
+
+```bibtex
+@techreport{iso532-1,
+  author      = {{International Organization for Standardization}},
+  title       = {{ISO 532-1:2017 — Acoustics — Methods for calculating loudness — Part 1: Zwicker method}},
+  institution = {ISO},
+  year        = {2017},
+  url         = {https://www.nen.nl/en/nen-iso-532-1-2017-cor-2017-11-en-241373}
+}
+
+@techreport{iso532-2,
+  author      = {{International Organization for Standardization}},
+  title       = {{ISO 532-2:2017 — Acoustics — Methods for calculating loudness — Part 2: Moore-Glasberg method}},
+  institution = {ISO},
+  year        = {2017},
+  url         = {http://committee.iso.org/standard/63078.html?browse=tc}
 }
 ```
 

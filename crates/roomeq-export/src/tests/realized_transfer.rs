@@ -1020,22 +1020,39 @@ fn multisub_routed_transfer_matches_canonical() {
     }
 }
 
+/// Closed-form Linkwitz-Riley low-pass magnitude, independent of the exporter.
+///
+/// An LR branch is a cascade of Butterworth 2nd-order sections (2 for LR24,
+/// 4 for LR48), each contributing `1/sqrt(1 + x^4)` with `x = f/fc`, so the
+/// branch magnitude is `(1 + x^4)^(-sections/2)`: LR24 sits at exactly 0.5
+/// (-6.02 dB) on fc with ~0.9412 at fc/2 and ~0.0588 at 2fc; LR48 sits at
+/// exactly 0.25 (-12.04 dB) on fc with ~0.8858 at fc/2 and ~0.0035 at 2fc.
+/// A bilinear-transformed biquad matches this closed form up to frequency
+/// warping (~2e-6 off-center here), so the anchor tolerance is 1e-5: still
+/// orders of magnitude below any transcription defect (wrong order, type,
+/// or a 1% fc shift moves these anchors by >1e-2).
+fn analytic_lr_lowpass(crossover_type: &str, frequency: f64, fc: f64) -> f64 {
+    let sections = match crossover_type {
+        "LR24" => 2.0,
+        "LR48" => 4.0,
+        other => panic!("anchor covers LR24/LR48, not '{other}'"),
+    };
+    let x = frequency / fc;
+    (1.0 + x.powi(4)).powf(-sections / 2.0)
+}
+
 #[test]
-#[ignore = "anchor ignores the -6.02 dB redirected leg gain and LR droop below fc breaks the below-fc thresholds; re-derive from true LR magnitudes"]
 fn multisub_crossover_anchor_holds_across_sample_rates() {
-    // Bass-crossover SRC angle: the LR branches must sit at -6.02 dB on their
-    // design frequency at every export rate, pass bass below, and stop above,
-    // proving frequency, order, and low/high transcription (not just shape).
+    // Bass-crossover SRC angle: each LR branch must reproduce its analytic
+    // magnitude at fc/2, fc, and 2fc at every export rate, proving frequency,
+    // order, and low/high transcription (not just shape). SUB1 hangs off the
+    // LR24 80 Hz branch, SUB2 off the LR48 60 Hz one.
     for sample_rate in [44_100.0, 48_000.0] {
         let (graph, registry, yaml, inputs, outputs) = render_routed(4, sample_rate);
-        // SUB1 hangs off the LR24 80 Hz branch, SUB2 off the LR48 60 Hz one.
-        let probes = [
-            ("SUB1", "L", 80.0, 0.5, 0.99, 0.1),
-            ("SUB2", "L", 60.0, 0.5, 0.999, 0.01),
-        ];
+        let probes = [("SUB1", "L", "LR24", 80.0), ("SUB2", "L", "LR48", 60.0)];
         let frequencies: Vec<f64> = probes
             .iter()
-            .flat_map(|(_, _, fc, _, _, _)| [*fc / 2.0, *fc, *fc * 2.0])
+            .flat_map(|(_, _, _, fc)| [*fc / 2.0, *fc, *fc * 2.0])
             .collect();
         let realized = realized_transfer(
             &yaml,
@@ -1046,35 +1063,32 @@ fn multisub_crossover_anchor_holds_across_sample_rates() {
             &registry,
         );
         let _ = (graph, registry);
-        for (destination, source, fc, at_fc, below, above) in probes {
+        // Redirected-leg gain from the fixture, recomputed from its dB
+        // value so the anchor does not depend on how the route stores it.
+        let redirected_gain = 10.0_f64.powf(-6.0206 / 20.0);
+        for (destination, source, crossover_type, fc) in probes {
             let dest_index = outputs.iter().position(|name| name == destination).unwrap();
             let source_index = inputs.iter().position(|name| name == source).unwrap();
             let response = &realized.transfer[destination][source];
-            let anchor = |frequency: f64| {
+            for frequency in [fc / 2.0, fc, fc * 2.0] {
                 let index = frequencies
                     .iter()
                     .position(|candidate| candidate == &frequency)
                     .unwrap();
-                // Divide out the pre/post chains; route legs contribute only
-                // the crossover (|delay| == 1), so this isolates |LP(fc)|.
-                response[index].norm()
+                // Divide out the pre/post chains, the redirected-leg gain,
+                // and the route delay (|delay| == 1): what remains is the
+                // crossover branch magnitude alone.
+                let measured = response[index].norm()
                     / (realized.pre[source_index][index].norm()
-                        * realized.post[dest_index][index].norm())
-                    / 10.0_f64.powf(-6.0206 / 20.0)
-            };
-            let measured = anchor(fc) * 10.0_f64.powf(-6.0206 / 20.0);
-            assert!(
-                (measured - at_fc).abs() < 1e-9,
-                "{destination} LP at {fc} Hz @{sample_rate}Hz: {measured}"
-            );
-            assert!(
-                anchor(fc / 2.0) * 10.0_f64.powf(-6.0206 / 20.0) > below,
-                "{destination} LP must pass bass below {fc} Hz"
-            );
-            assert!(
-                anchor(fc * 2.0) * 10.0_f64.powf(-6.0206 / 20.0) < above,
-                "{destination} LP must stop above {fc} Hz"
-            );
+                        * realized.post[dest_index][index].norm()
+                        * redirected_gain);
+                let expected = analytic_lr_lowpass(crossover_type, frequency, fc);
+                assert!(
+                    (measured - expected).abs() < 1e-5,
+                    "{destination} {crossover_type} LP at {frequency} Hz @{sample_rate}Hz: \
+                     {measured} vs analytic {expected}"
+                );
+            }
         }
     }
 }
@@ -1134,50 +1148,84 @@ fn multisub_allpass_is_phase_only() {
 }
 
 #[test]
-#[ignore = "bus divides out pre-chain polarity (the R invert making SUB1 coherent) and pre delay skew breaks >0.99 coherence above ~20 Hz; fixture/expectation co-design needed"]
 fn multisub_relative_phase_and_headroom_through_routing() {
-    // SUB1 sums L+R coherently (headroom case), SUB2 opposes them
-    // (relative-phase case). Drive-normalized bus sums isolate the routing
-    // matrix: coherent legs must add linearly (not RMS), opposed legs must
-    // cancel in the bass band.
+    // Route-matrix transcription: dividing out the pre AND post chains
+    // isolates the pure route-bus legs (gain, signed polarity, crossover,
+    // delay) per input. At route level SUB1's legs oppose (its R route
+    // inverts) while SUB2's legs agree; end to end, SUB1 still sums
+    // constructively because its R pre-chain inverts too (double inversion).
+    // Dividing out only the pre chains cannot work: it removes the R invert
+    // that makes SUB1 coherent, while keeping the pre chains keeps their
+    // 1.224 ms delay skew, which alone destroys >0.99 coherence above ~20 Hz.
     let sample_rate = 48_000.0;
     let (_graph, _registry, yaml, inputs, outputs) = render_routed(2, sample_rate);
-    let frequencies: Vec<f64> = (0..24).map(|index| 10.0 * 20.0_f64.powf(index as f64 / 23.0)).collect();
+    let frequencies: Vec<f64> = (0..24)
+        .map(|index| 10.0 * 20.0_f64.powf(index as f64 / 23.0))
+        .collect();
     let registry = HashMap::from([(SUB_IR_FILE.to_string(), SUB_IR_TAPS.to_vec())]);
-    let realized = realized_transfer(&yaml, sample_rate, &frequencies, &inputs, &outputs, &registry);
+    let realized = realized_transfer(
+        &yaml,
+        sample_rate,
+        &frequencies,
+        &inputs,
+        &outputs,
+        &registry,
+    );
+    // Pure route-bus legs per destination: transfer with both chain stages
+    // divided out. Both legs of one sub share the crossover branch and the
+    // redirected gain; only signed polarity and the 12 us route-delay skew
+    // distinguish them.
     let bus = |destination: &str| {
+        let dest_index = outputs.iter().position(|name| name == destination).unwrap();
         frequencies
             .iter()
             .enumerate()
             .map(|(index, _)| {
-                let l = realized.transfer[destination]["L"][index] / realized.pre[0][index];
-                let r = realized.transfer[destination]["R"][index] / realized.pre[1][index];
-                (l, r)
+                let legs = ["L", "R"].map(|source| {
+                    let source_index = inputs.iter().position(|name| name == source).unwrap();
+                    realized.transfer[destination][source][index]
+                        / (realized.pre[source_index][index] * realized.post[dest_index][index])
+                });
+                (legs[0], legs[1])
             })
             .collect::<Vec<_>>()
     };
-    for (index, _frequency) in frequencies.iter().enumerate() {
+    for (index, frequency) in frequencies.iter().enumerate() {
+        // SUB1 route legs oppose through signed polarity: the residual is
+        // bounded by the 12 us route-delay skew (~0.0075 at 200 Hz).
         let (l, r) = bus("SUB1")[index];
-        let coherent = (l + r).norm() / (l.norm() + r.norm());
-        assert!(
-            coherent > 0.99,
-            "SUB1 legs must sum coherently (headroom), ratio {coherent}"
-        );
-        let (l, r) = bus("SUB2")[index];
         let residual = (l + r).norm() / (l.norm() + r.norm());
         assert!(
             residual < 0.02,
-            "SUB2 legs must cancel through signed polarity, residual {residual}"
+            "SUB1 route legs must cancel through signed polarity at {frequency} Hz, residual {residual}"
+        );
+        // SUB2 route legs agree: same bound, constructive.
+        let (l, r) = bus("SUB2")[index];
+        let coherent = (l + r).norm() / (l.norm() + r.norm());
+        assert!(
+            coherent > 0.999,
+            "SUB2 route legs must sum coherently at {frequency} Hz, ratio {coherent}"
         );
     }
-    // Headroom basis at 10 Hz (delays contribute no phase yet): the coherent
-    // peak gain equals the algebraic sum of the legs, ~+6 dB over one leg.
-    let (l, r) = bus("SUB1")[0];
+    // Headroom basis on the agreeing SUB2 route legs at 10 Hz: the coherent
+    // peak gain equals the algebraic sum of the legs, +6.02 dB over one leg.
+    let (l, r) = bus("SUB2")[0];
     let peak = (l + r).norm();
     let leg = l.norm();
     assert!(
-        (peak / leg - 2.0).abs() < 1e-3,
+        (peak / leg - 2.0).abs() < 1e-6,
         "coherent peak {peak} must equal twice one leg {leg}"
+    );
+    // End-to-end composition at 10 Hz: SUB1's full-chain legs (pre chains
+    // included) sum constructively — the R pre-chain invert composes with
+    // the R route invert. Analytic ratio is ~1.9986 (1.212 ms residual
+    // skew); anything below ~1.9 would mean a dropped inversion.
+    let full_l = realized.transfer["SUB1"]["L"][0];
+    let full_r = realized.transfer["SUB1"]["R"][0];
+    let ratio = (full_l + full_r).norm() / full_l.norm();
+    assert!(
+        ratio > 1.9,
+        "SUB1 full-chain legs must compose to coherence at 10 Hz, ratio {ratio}"
     );
 }
 
@@ -1250,7 +1298,6 @@ fn impulse(spectrum: &[Complex64], points: usize) -> Vec<Complex64> {
 }
 
 #[test]
-#[ignore = "L legs share polarity across subs so the cross-sub coherent sum is not far below the spatial mean (measured ratio ~1.05 vs >1.5); polarity premise misread"]
 fn multisub_spatial_magnitude_semantics() {
     // Spatial checks average magnitudes across sub seats (phase varies by
     // seat), while the primary seat keeps the complex comparison from
@@ -1280,15 +1327,21 @@ fn multisub_spatial_magnitude_semantics() {
     }
     // Mixed polarities make the coherent sum far smaller than the spatial
     // mean; the harness records that distinction instead of conflating it.
+    // The L legs share polarity across subs (they sum to ~1.05x the mean),
+    // so this probes the R column instead: the R route inverts on
+    // even-index subs while the R pre-chain inverts everywhere, leaving
+    // full-chain R legs that alternate +, -, +, ... across the eight subs
+    // and nearly cancel in the coherent sum (up to the alternating 80/60 Hz
+    // crossover branches).
     let coherent: f64 = subs
         .iter()
-        .map(|sub| realized[sub]["L"][0])
+        .map(|sub| realized[sub]["R"][0])
         .sum::<Complex64>()
         .norm()
         / subs.len() as f64;
     let mean: f64 = subs
         .iter()
-        .map(|sub| realized[sub]["L"][0].norm())
+        .map(|sub| realized[sub]["R"][0].norm())
         .sum::<f64>()
         / subs.len() as f64;
     assert!(
@@ -1338,23 +1391,57 @@ fn multisub_delay_precision_contract() {
 }
 
 #[test]
-#[ignore = "routed-graph rejection fires before global-plugin validation on this fixture; needs a non-routed fixture to reach the global-plugin gate"]
 fn camilladsp_rejects_shared_global_eq() {
     // Shared/global EQ has no preset stage: it must error, never silently
-    // drop, so a partial preset cannot read as complete.
-    let (mut graph, _registry) = multisub_fixture(2);
-    graph.global_plugins.push(PluginConfigWrapper {
-        plugin_type: "eq".to_string(),
-        parameters: json!({"filters": [{
-            "filter_type": "peak", "freq": 1000.0, "q": 1.0, "db_gain": -1.0,
-        }]}),
-    });
+    // drop, so a partial preset cannot read as complete. The fixture is
+    // deliberately non-routed (no bass-management graph): a routed graph
+    // reaches the routed-graph gate first, which is a different rejection.
+    // Two layers are asserted: the public render entry (generic preserved-
+    // DSP error) and the specific global-plugin conformance gate.
+    use super::super::conformance::validate_camilladsp_input;
+    let graph = DspGraph {
+        deployed_source_curves: Default::default(),
+        version: "1.3.0".to_string(),
+        global_plugins: vec![PluginConfigWrapper {
+            plugin_type: "eq".to_string(),
+            parameters: json!({"filters": [{
+                "filter_type": "peak", "freq": 1000.0, "q": 1.0, "db_gain": -1.0,
+            }]}),
+        }],
+        channels: HashMap::from([(
+            "left".to_string(),
+            ChannelDspChain {
+                channel: "left".to_string(),
+                plugins: vec![PluginConfigWrapper {
+                    plugin_type: "gain".to_string(),
+                    parameters: json!({"gain_db": 0.0}),
+                }],
+                drivers: None,
+                initial_curve: None,
+                final_curve: None,
+                eq_response: None,
+                target_curve: None,
+                pre_ir: None,
+                post_ir: None,
+                fir_temporal_masking: None,
+                direct_early_late_correction: None,
+            },
+        )]),
+        metadata: None,
+    };
     let error = render_dsp_chain(&graph, ExportFormat::CamillaDsp, 48_000.0)
         .unwrap_err()
         .to_string();
     assert!(
-        error.contains("does not support global plugin"),
-        "unexpected error: {error}"
+        error.contains("global_plugins"),
+        "shared global EQ must fail loudly at the render entry, got: {error}"
+    );
+    let gate_error = validate_camilladsp_input(&graph, Some(48_000.0))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        gate_error.contains("does not support global plugin #0 ('eq')"),
+        "unexpected gate error: {gate_error}"
     );
 }
 

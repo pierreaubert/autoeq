@@ -578,6 +578,11 @@ struct SeatSource {
     kind: &'static str,
     reference: Option<MeasurementRef>,
     path: Option<PathBuf>,
+    /// Whether `seat` came from an explicit measurement name (as opposed to
+    /// a positional fallback). Multi-sub dry-run output qualifies named
+    /// seats with their subwoofer so repeats across subs do not
+    /// false-positive the duplicate check.
+    named: bool,
 }
 
 /// Physical frequency support observed for one measurement.
@@ -598,30 +603,30 @@ fn resolve_seat_sources(speaker_name: &str, config: &SpeakerConfig) -> Vec<SeatS
     ) {
         match source {
             MeasurementSource::Single(single) => {
-                let seat = single
-                    .measurement
-                    .name()
-                    .unwrap_or(&seat_base)
-                    .to_string();
+                let named = single.measurement.name();
+                let seat = named.unwrap_or(&seat_base).to_string();
                 out.push(SeatSource {
                     speaker: speaker.to_string(),
                     seat,
                     kind: source_kind(&single.measurement),
                     path: single.measurement.path().cloned(),
                     reference: Some(single.measurement.clone()),
+                    named: named.is_some(),
                 });
             }
             MeasurementSource::Multiple(multiple) => {
                 for (index, measurement) in multiple.measurements.iter().enumerate() {
-                    let seat = measurement.name().map(str::to_string).unwrap_or_else(|| {
-                        format!("{seat_base} {}", index + 1)
-                    });
+                    let name = measurement.name();
+                    let seat = name
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("{seat_base} {}", index + 1));
                     out.push(SeatSource {
                         speaker: speaker.to_string(),
                         seat,
                         kind: source_kind(measurement),
                         path: measurement.path().cloned(),
                         reference: Some(measurement.clone()),
+                        named: name.is_some(),
                     });
                 }
             }
@@ -631,6 +636,7 @@ fn resolve_seat_sources(speaker_name: &str, config: &SpeakerConfig) -> Vec<SeatS
                 kind: "in-memory",
                 path: None,
                 reference: None,
+                named: false,
             }),
             MeasurementSource::InMemoryMultiple(curves) => {
                 for (index, _) in curves.iter().enumerate() {
@@ -640,6 +646,7 @@ fn resolve_seat_sources(speaker_name: &str, config: &SpeakerConfig) -> Vec<SeatS
                         kind: "in-memory",
                         path: None,
                         reference: None,
+                        named: false,
                     });
                 }
             }
@@ -672,8 +679,20 @@ fn resolve_seat_sources(speaker_name: &str, config: &SpeakerConfig) -> Vec<SeatS
             }
         }
         SpeakerConfig::MultiSub(multisub) => {
+            // Qualify named seats with their subwoofer: bare seat names
+            // repeat across subs by design (each sub measures the same
+            // seats), so unqualified names would false-positive the
+            // duplicate check on correct configs and hide a swapped order.
+            // Cross-sub order itself is checked by
+            // `multisub_seat_order_mismatch`.
             for (index, source) in multisub.subwoofers.iter().enumerate() {
+                let before = out.len();
                 describe_source(speaker_name, format!("sub {}", index + 1), source, &mut out);
+                for entry in &mut out[before..] {
+                    if entry.named {
+                        entry.seat = format!("sub {} / {}", index + 1, entry.seat);
+                    }
+                }
             }
         }
         SpeakerConfig::Dba(dba) => {
@@ -724,6 +743,56 @@ fn duplicate_seats(entries: &[SeatSource]) -> Vec<String> {
         }
     }
     duplicates
+}
+
+/// Seat-name sequences per subwoofer, when every seat of every sub is named.
+///
+/// Returns `None` for non-multi-sub speakers and when any seat is unnamed
+/// (plain paths, in-memory curves): without complete label vectors there is
+/// no order to compare, and the positional contract applies instead.
+fn multisub_seat_orders(config: &SpeakerConfig) -> Option<Vec<Vec<String>>> {
+    let SpeakerConfig::MultiSub(multisub) = config else {
+        return None;
+    };
+    multisub
+        .subwoofers
+        .iter()
+        .map(|source| match source {
+            MeasurementSource::Single(single) => {
+                single.measurement.name().map(|name| vec![name.to_string()])
+            }
+            MeasurementSource::Multiple(multiple) => multiple
+                .measurements
+                .iter()
+                .map(|measurement| measurement.name().map(str::to_string))
+                .collect(),
+            MeasurementSource::InMemory(_) | MeasurementSource::InMemoryMultiple(_) => None,
+        })
+        .collect()
+}
+
+/// Warn when named multi-sub seat orders disagree across subwoofers.
+///
+/// The optimizer sums equal indices as one physical seat, so sub A=[MLP,
+/// left] with sub B=[left, MLP] would silently combine different positions.
+/// Mirrors the execution-path rejection in
+/// `roomeq_workflow::group_measurements`; dry-run surfaces it as a warning
+/// because it never touches the optimization path.
+fn multisub_seat_order_mismatch(config: &SpeakerConfig) -> Option<String> {
+    let orders = multisub_seat_orders(config)?;
+    let first = orders.first()?;
+    for (index, order) in orders.iter().enumerate().skip(1) {
+        if order != first {
+            return Some(format!(
+                "subwoofer seat order differs across subs (sub 1 is [{}], sub {} is [{}]); \
+                 the optimizer sums equal indices as one seat, so reorder to match",
+                first.join(", "),
+                index + 1,
+                order.join(", ")
+            ));
+        }
+    }
+    None
 }
 
 /// Resolve a file-backed reference against the config directory when the raw
@@ -944,6 +1013,9 @@ fn run_dry_run(
                 "Speaker '{name}': seat '{duplicate}' is assigned more than once; \
 check for swapped or duplicated seat names"
             ));
+        }
+        if let Some(mismatch) = multisub_seat_order_mismatch(speaker_config) {
+            warnings.push(format!("Speaker '{name}': {mismatch}"));
         }
         for entry in &entries {
             match entry.reference.as_ref() {
@@ -1226,7 +1298,8 @@ mod tests {
     use super::{
         Args, RunManifest, duplicate_seats, enabled_phase_controls, export_preflight_warnings,
         intersect_spans, is_known_algorithm, manifest_path_for, partial_export_diagnostic,
-        probe_span, resolve_seat_sources, run_dry_run, strict_input_schema,
+        multisub_seat_order_mismatch, probe_span, resolve_seat_sources, run_dry_run,
+        strict_input_schema,
         validate_optimizer_resources, write_run_manifest,
     };
 
@@ -1504,6 +1577,64 @@ mod tests {
             measurements: sources,
             crossover: None,
         }
+    }
+
+    fn multisub_config(orders: &[&[&str]]) -> roomeq_model::SpeakerConfig {
+        use roomeq_model::{MeasurementMultiple, MeasurementRef, MeasurementSource};
+        let source = |names: &[&str]| {
+            MeasurementSource::Multiple(MeasurementMultiple {
+                measurements: names
+                    .iter()
+                    .map(|seat| MeasurementRef::Named {
+                        path: format!("{seat}.csv").into(),
+                        name: Some((*seat).to_string()),
+                    })
+                    .collect(),
+                speaker_name: None,
+            })
+        };
+        roomeq_model::SpeakerConfig::MultiSub(roomeq_model::config::MultiSubGroup {
+            name: "subs".to_string(),
+            speaker_name: None,
+            subwoofers: orders.iter().map(|names| source(names)).collect(),
+            allpass_optimization: false,
+        })
+    }
+
+    #[test]
+    fn multisub_matching_named_orders_resolve_without_duplicates() {
+        let config = multisub_config(&[&["MLP", "left"], &["MLP", "left"]]);
+        let entries = resolve_seat_sources("SW", &config);
+        let seats: Vec<&str> = entries.iter().map(|entry| entry.seat.as_str()).collect();
+        assert_eq!(
+            seats,
+            vec!["sub 1 / MLP", "sub 1 / left", "sub 2 / MLP", "sub 2 / left"]
+        );
+        assert!(duplicate_seats(&entries).is_empty());
+        assert!(multisub_seat_order_mismatch(&config).is_none());
+    }
+
+    #[test]
+    fn multisub_swapped_named_order_warns() {
+        let config = multisub_config(&[&["MLP", "left"], &["left", "MLP"]]);
+        let warning = multisub_seat_order_mismatch(&config).expect("swapped order must warn");
+        assert!(warning.contains("sub 1 is [MLP, left]"), "{warning}");
+        assert!(warning.contains("sub 2 is [left, MLP]"), "{warning}");
+    }
+
+    #[test]
+    fn multisub_unnamed_orders_are_positional() {
+        use roomeq_model::MeasurementSource;
+        let config = roomeq_model::SpeakerConfig::MultiSub(roomeq_model::config::MultiSubGroup {
+            name: "subs".to_string(),
+            speaker_name: None,
+            subwoofers: vec![
+                MeasurementSource::InMemoryMultiple(vec![]),
+                MeasurementSource::InMemoryMultiple(vec![]),
+            ],
+            allpass_optimization: false,
+        });
+        assert!(multisub_seat_order_mismatch(&config).is_none());
     }
 
     #[test]

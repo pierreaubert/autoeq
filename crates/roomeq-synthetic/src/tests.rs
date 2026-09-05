@@ -117,6 +117,102 @@ fn test_apply_known_eq() {
         "Low freq should be near 0dB, got {:.2}",
         result.spl[0]
     );
+
+    // A magnitude-only curve stays magnitude-only: no phase is invented.
+    assert!(
+        result.phase.is_none(),
+        "magnitude-only input must not gain a fabricated phase"
+    );
+}
+
+#[test]
+fn test_apply_known_eq_applies_modal_phase() {
+    // The release probe: +9 dB Q=2 peak at 75 Hz on a phase-bearing curve.
+    // Magnitude must move AND phase must move off-center (a causal peaking
+    // filter has nonzero phase on either side of its center).
+    let base = generate_sub_curve_with_phase(20.0, 200.0, 100, 0.0);
+    let peak = Biquad::new(BiquadFilterType::Peak, 75.0, 48000.0, 2.0, 9.0);
+    let result = apply_known_eq(&base, &[peak], 48000.0);
+
+    let nearest = |freq: f64| {
+        result
+            .freq
+            .iter()
+            .enumerate()
+            .min_by(|a, b| (a.1 - freq).abs().partial_cmp(&(b.1 - freq).abs()).unwrap())
+            .map(|(i, _)| i)
+            .unwrap()
+    };
+    let (i50, i75, i100) = (nearest(50.0), nearest(75.0), nearest(100.0));
+
+    let mag_gain = result.spl[i75] - base.spl[i75];
+    assert!(
+        (mag_gain - 9.0).abs() < 0.5,
+        "peak should add ~9 dB at center, got {mag_gain:.2}"
+    );
+
+    let before = base.phase.as_ref().unwrap();
+    let after = result.phase.as_ref().unwrap();
+    let delta = |i: usize| (after[i] - before[i]).abs();
+    assert!(
+        delta(i50) > 1.0,
+        "causal peak must shift phase below center, got {:.3} deg at 50 Hz",
+        delta(i50)
+    );
+    assert!(
+        delta(i100) > 1.0,
+        "causal peak must shift phase above center, got {:.3} deg at 100 Hz",
+        delta(i100)
+    );
+    assert!(
+        delta(i75) < delta(i50).max(delta(i100)),
+        "phase excursion should be smaller at the magnitude center than off-center"
+    );
+}
+
+#[test]
+fn test_apply_known_eq_allpass_moves_phase_not_magnitude() {
+    let base = generate_sub_curve_with_phase(20.0, 200.0, 100, 0.0);
+    let allpass = Biquad::new(BiquadFilterType::AllPass, 80.0, 48000.0, 1.0, 0.0);
+    let result = apply_known_eq(&base, &[allpass], 48000.0);
+
+    let max_mag_change = result
+        .spl
+        .iter()
+        .zip(base.spl.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        max_mag_change < 0.5,
+        "all-pass must not change magnitude, got {max_mag_change:.3} dB"
+    );
+
+    let before = base.phase.as_ref().unwrap();
+    let after = result.phase.as_ref().unwrap();
+    let max_phase_change = after
+        .iter()
+        .zip(before.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        max_phase_change > 30.0,
+        "all-pass must move phase substantially, got {max_phase_change:.2} deg"
+    );
+    // Unwrapped: no single-bin jump may exceed 180 deg.
+    for pair in after.as_slice().unwrap().windows(2) {
+        assert!(
+            (pair[1] - pair[0]).abs() <= 180.0 + 1e-6,
+            "filter phase must stay unwrapped along the grid"
+        );
+    }
+}
+
+#[test]
+fn test_apply_known_eq_empty_filters_is_identity() {
+    let base = generate_sub_curve_with_phase(20.0, 200.0, 50, 2.0);
+    let result = apply_known_eq(&base, &[], 48000.0);
+    assert_eq!(result.spl, base.spl);
+    assert_eq!(result.phase, base.phase);
 }
 
 #[test]

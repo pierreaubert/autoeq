@@ -21,6 +21,7 @@ use serde_json::json;
 
 mod conformance;
 mod make;
+mod realized_transfer;
 
 #[test]
 fn test_extract_eq_filters() {

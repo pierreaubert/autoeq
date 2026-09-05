@@ -16,14 +16,29 @@
 //!
 //! # Method
 //!
-//! Inverse-distance weighting (IDW) on log-magnitude (dB) and on unwrapped
-//! phase (with shortest-arc deltas across calibration points). IDW is
-//! parameter-light, basis-free, and well-conditioned for K=4..16 scattered
-//! calibration points — the realistic regime for room measurements. For
-//! tighter fits with smooth response fields, swap in RBF / kriging here.
+//! Inverse-distance weighting (IDW) on log-magnitude (dB SPL is already
+//! log-magnitude) and permutation-invariant complex (phasor) averaging of
+//! per-bin phase. IDW is parameter-light, basis-free, and well-conditioned
+//! for K=4..16 scattered calibration points — the realistic regime for room
+//! measurements. For tighter fits with smooth response fields, swap in
+//! RBF / kriging here.
 //!
-//! Phase interpolation uses unwrapped per-bin shortest-arc deltas so that
-//! sharp ±180° wraps don't smear into nonsense averages.
+//! Phase interpolation computes the weighted circular mean per bin: each
+//! calibration phase θₖ contributes its unit phasor `wₖ·e^(iθₖ)` and the
+//! interpolated phase is the argument of the weighted resultant. This is
+//! invariant to calibration-point ordering (no arbitrary reference point)
+//! and degrades gracefully for broad spreads: the resultant magnitude
+//! `R ∈ [0, 1]` is reported as per-bin confidence (see
+//! [`ListeningArea::interpolate_with_evidence`]). Bins with
+//! `R < ambiguity_threshold` are flagged ambiguous — near-total phasor
+//! cancellation means the mean angle is arbitrary under perturbation —
+//! while SPL interpolation is unaffected.
+//!
+//! Queries outside the calibration bounding box are *out of support*.
+//! [`ListeningArea::interpolate_at`] extrapolates there for backward
+//! compatibility; new code should use [`ListeningArea::try_interpolate_at`]
+//! or [`ListeningArea::interpolate_with_evidence`], which reject
+//! non-finite and out-of-support queries.
 
 use crate::Curve;
 use crate::error::{AutoeqError, Result};
@@ -39,13 +54,26 @@ pub struct ListeningAreaInterpolatorConfig {
     /// when a query point lands exactly on a calibration point. Has units of
     /// position. Default `1e-9`.
     pub epsilon: f64,
+    /// Resultant-magnitude threshold below which an interpolated phase is
+    /// flagged ambiguous (see [`InterpolatedResponse::phase_ambiguous`]).
+    /// Default [`PHASE_AMBIGUITY_THRESHOLD`].
+    pub ambiguity_threshold: f64,
 }
+
+/// Resultant-magnitude threshold below which an interpolated phase is
+/// reported as ambiguous.
+///
+/// Weighted phasor sums carry ~1e-15 relative floating-point noise, so
+/// `1e-6` is far above numerical noise yet far below any physically
+/// meaningful inter-position agreement.
+pub const PHASE_AMBIGUITY_THRESHOLD: f64 = 1e-6;
 
 impl Default for ListeningAreaInterpolatorConfig {
     fn default() -> Self {
         Self {
             idw_power: 2.0,
             epsilon: 1e-9,
+            ambiguity_threshold: PHASE_AMBIGUITY_THRESHOLD,
         }
     }
 }
@@ -220,20 +248,98 @@ impl<const D: usize> ListeningArea<D> {
         bounds
     }
 
-    /// Interpolate per-sub curves at an arbitrary query position `p`.
+    /// Returns true when `p` is a supported query: all coordinates finite
+    /// and inside the calibration bounding box (inclusive).
+    pub fn contains(&self, p: [f64; D]) -> bool {
+        if p.iter().any(|coordinate| !coordinate.is_finite()) {
+            return false;
+        }
+        self.bounding_box()
+            .iter()
+            .zip(p.iter())
+            .all(|((lo, hi), x)| *x >= *lo && *x <= *hi)
+    }
+
+    /// Interpolate per-sub curves at a query position `p`.
     ///
     /// Uses inverse-distance weighting on log-magnitude (dB SPL is already
-    /// log-magnitude) and on unwrapped phase. Returns one [`Curve`] per sub.
+    /// log-magnitude) and permutation-invariant complex averaging of
+    /// per-bin phase. Returns one [`Curve`] per sub.
+    ///
+    /// # Legacy support contract
+    ///
+    /// This method never fails: it panics on a non-finite query and
+    /// *extrapolates* with IDW for out-of-support queries. New code should
+    /// prefer [`Self::try_interpolate_at`] or
+    /// [`Self::interpolate_with_evidence`], which reject non-finite and
+    /// out-of-support queries and additionally report per-bin confidence.
+    /// Kept infallible so existing downstream quadrature consumers
+    /// (which may sample outside the calibration box) keep compiling and
+    /// behaving as before.
     pub fn interpolate_at(&self, p: [f64; D]) -> Vec<Curve> {
-        let weights = self.idw_weights(p);
+        if p.iter().any(|coordinate| !coordinate.is_finite()) {
+            panic!(
+                "ListeningArea::interpolate_at query position must be finite; \
+                 use try_interpolate_at for a fallible query"
+            );
+        }
+        // For finite queries the fallible weight computation fails only on
+        // numerically degenerate weight totals; collapse to the nearest
+        // neighbour then. Out-of-support queries extrapolate with IDW
+        // (legacy behavior).
+        let weights = match self.idw_weights(p) {
+            Ok(weights) => weights,
+            Err(_) => self.nearest_weights(p),
+        };
+        self.interpolate_core(&weights).curves
+    }
 
+    /// Fallible interpolation: like [`Self::interpolate_at`] but rejects
+    /// non-finite queries and queries outside the calibration bounding box.
+    pub fn try_interpolate_at(&self, p: [f64; D]) -> Result<Vec<Curve>> {
+        self.interpolate_with_evidence(p).map(|response| response.curves)
+    }
+
+    /// Fallible interpolation with support/confidence evidence.
+    ///
+    /// Returns the interpolated curves plus the IDW weights, the per-bin
+    /// phasor resultant magnitude (`confidence`, in `[0, 1]`) and the
+    /// per-bin ambiguity flags for every sub. Errors on non-finite or
+    /// out-of-support queries.
+    pub fn interpolate_with_evidence(&self, p: [f64; D]) -> Result<InterpolatedResponse> {
+        if p.iter().any(|coordinate| !coordinate.is_finite()) {
+            return Err(AutoeqError::InvalidMeasurement {
+                message: "ListeningArea query position must be finite".into(),
+            });
+        }
+        if !self.contains(p) {
+            let bounds = self.bounding_box();
+            return Err(AutoeqError::InvalidMeasurement {
+                message: format!(
+                    "ListeningArea query position {p:?} is outside the calibration \
+                     support {bounds:?}; use interpolate_at to extrapolate instead"
+                ),
+            });
+        }
+        let weights = self.idw_weights(p)?;
+        Ok(self.interpolate_core(&weights))
+    }
+
+    /// Shared interpolation core: weighted dB mean for SPL and weighted
+    /// circular (complex) mean for phase, plus confidence evidence.
+    fn interpolate_core(&self, weights: &[f64]) -> InterpolatedResponse {
         let reference_freq = self.measurements[0][0].freq.clone();
         let num_bins = reference_freq.len();
+        let threshold = self.config.ambiguity_threshold;
 
-        let mut out: Vec<Curve> = Vec::with_capacity(self.num_subs);
+        let mut curves: Vec<Curve> = Vec::with_capacity(self.num_subs);
+        let mut confidence: Vec<Array1<f64>> = Vec::with_capacity(self.num_subs);
+        let mut phase_ambiguous: Vec<Array1<bool>> = Vec::with_capacity(self.num_subs);
         for sub_idx in 0..self.num_subs {
             let mut spl = Array1::<f64>::zeros(num_bins);
             let mut phase = Array1::<f64>::zeros(num_bins);
+            let mut conf = Array1::<f64>::zeros(num_bins);
+            let mut ambiguous = Vec::with_capacity(num_bins);
 
             for bin in 0..num_bins {
                 // SPL: weighted mean in dB.
@@ -243,39 +349,62 @@ impl<const D: usize> ListeningArea<D> {
                 }
                 spl[bin] = spl_acc;
 
-                // Phase: unwrap each calibration sample relative to position 0
-                // for this bin, weighted-average, then re-wrap to (-180, 180].
-                let phase_ref = self.measurements[sub_idx][0]
-                    .phase
-                    .as_ref()
-                    .expect("phase presence validated in ::new")[bin];
-                let mut phase_acc = 0.0_f64;
+                // Phase: weighted circular mean via unit phasors. The
+                // sum is order-independent, so no calibration point is
+                // privileged as an unwrap reference.
+                let mut re = 0.0_f64;
+                let mut im = 0.0_f64;
                 for (k, &w) in weights.iter().enumerate() {
                     let phase_k = self.measurements[sub_idx][k]
                         .phase
                         .as_ref()
                         .expect("phase presence validated in ::new")[bin];
-                    let mut delta = phase_k - phase_ref;
-                    delta -= 360.0 * (delta / 360.0).round();
-                    phase_acc += w * delta;
+                    let radians = phase_k.to_radians();
+                    re += w * radians.cos();
+                    im += w * radians.sin();
                 }
-                let mut phase_out = phase_ref + phase_acc;
-                phase_out -= 360.0 * (phase_out / 360.0).round();
-                phase[bin] = phase_out;
+                let resultant = re.hypot(im);
+                // atan2(0, 0) is defined as 0: deterministic under total
+                // cancellation; the bin is flagged ambiguous below.
+                phase[bin] = wrap_degrees(im.atan2(re).to_degrees());
+                conf[bin] = resultant;
+                ambiguous.push(resultant < threshold);
             }
 
-            out.push(Curve {
+            curves.push(Curve {
                 freq: reference_freq.clone(),
                 spl,
                 phase: Some(phase),
                 ..Default::default()
             });
+            confidence.push(conf);
+            phase_ambiguous.push(Array1::from_vec(ambiguous));
         }
 
-        out
+        InterpolatedResponse {
+            curves,
+            weights: weights.to_vec(),
+            confidence,
+            phase_ambiguous,
+        }
     }
 
-    fn idw_weights(&self, p: [f64; D]) -> Vec<f64> {
+    /// Fallible IDW weights: errors on non-finite queries and on
+    /// numerically degenerate weight totals. Never falls back to uniform
+    /// weights: every calibration point keeps its distance-derived share.
+    fn idw_weights(&self, p: [f64; D]) -> Result<Vec<f64>> {
+        if p.iter().any(|coordinate| !coordinate.is_finite()) {
+            return Err(AutoeqError::InvalidMeasurement {
+                message: "ListeningArea query position must be finite".into(),
+            });
+        }
+        let weights = self.idw_weights_unchecked(p)?;
+        Ok(weights)
+    }
+
+    /// Raw IDW weights for a finite query; errors only on a degenerate
+    /// (non-finite or non-positive) weight total.
+    fn idw_weights_unchecked(&self, p: [f64; D]) -> Result<Vec<f64>> {
         let eps = self.config.epsilon.max(0.0);
         let power = self.config.idw_power;
         let mut weights: Vec<f64> = Vec::with_capacity(self.num_positions);
@@ -297,21 +426,73 @@ impl<const D: usize> ListeningArea<D> {
                     .position(|q| q == pk)
                     .expect("pk is one of self.positions");
                 w[idx] = 1.0;
-                return w;
+                return Ok(w);
             }
             weights.push(1.0 / (d + eps).powf(power));
         }
 
         let total: f64 = weights.iter().sum();
         if !total.is_finite() || total <= 0.0 {
-            // Defensive: fall back to uniform weights if something pathological.
-            return vec![1.0 / self.num_positions as f64; self.num_positions];
+            return Err(AutoeqError::InvalidMeasurement {
+                message: "ListeningArea IDW weights are degenerate \
+                          (non-finite or non-positive total)"
+                    .into(),
+            });
         }
         for w in weights.iter_mut() {
             *w /= total;
         }
-        weights
+        Ok(weights)
     }
+
+    /// Deterministic last-resort weights: all mass on the nearest
+    /// calibration point. Used only by the legacy infallible path when the
+    /// weight total is numerically degenerate.
+    fn nearest_weights(&self, p: [f64; D]) -> Vec<f64> {
+        let mut best_idx = 0_usize;
+        let mut best_d2 = f64::INFINITY;
+        for (idx, pk) in self.positions.iter().enumerate() {
+            let mut d2 = 0.0_f64;
+            for i in 0..D {
+                let dx = pk[i] - p[i];
+                d2 += dx * dx;
+            }
+            if d2 < best_d2 {
+                best_d2 = d2;
+                best_idx = idx;
+            }
+        }
+        let mut w = vec![0.0_f64; self.num_positions];
+        w[best_idx] = 1.0;
+        w
+    }
+}
+
+/// Interpolated response with support/confidence evidence.
+///
+/// Returned by [`ListeningArea::interpolate_with_evidence`].
+#[derive(Debug, Clone)]
+pub struct InterpolatedResponse {
+    /// One interpolated [`Curve`] per subwoofer / driver.
+    pub curves: Vec<Curve>,
+    /// IDW weights over the K calibration positions (sum to 1).
+    pub weights: Vec<f64>,
+    /// Per-sub per-bin phasor resultant magnitude `R ∈ [0, 1]`.
+    ///
+    /// `R = 1` at a calibration point (full agreement); `R ≈ 0` under
+    /// total inter-position cancellation. Treat low values as low
+    /// confidence in the reported phase; SPL is unaffected.
+    pub confidence: Vec<Array1<f64>>,
+    /// Per-sub per-bin ambiguity flags: true where `confidence` falls
+    /// below the configured `ambiguity_threshold`. Flagged phases are the
+    /// circular mean but are arbitrary under perturbation — down-weight
+    /// or exclude them downstream instead of trusting the angle.
+    pub phase_ambiguous: Vec<Array1<bool>>,
+}
+
+/// Wrap a phase in degrees to `[-180, 180]`.
+fn wrap_degrees(phase: f64) -> f64 {
+    phase - 360.0 * (phase / 360.0).round()
 }
 
 #[cfg(test)]
@@ -372,8 +553,8 @@ mod tests {
         // midpoint should give a value strictly between them under IDW.
         let positions = vec![[0.0], [1.0]];
         let curves = vec![
-            make_curve(vec![100.0], vec![70.0], vec![0.0]),
-            make_curve(vec![100.0], vec![90.0], vec![0.0]),
+            make_curve(vec![100.0, 200.0], vec![70.0, 71.0], vec![0.0, 0.0]),
+            make_curve(vec![100.0, 200.0], vec![90.0, 91.0], vec![0.0, 0.0]),
         ];
         let area: ListeningArea<1> = ListeningArea::new(
             positions,
@@ -477,7 +658,7 @@ mod tests {
     fn bounding_box_matches_extremes() {
         let positions = vec![[-1.0, 2.0], [3.0, -4.0], [0.0, 0.0]];
         let curves: Vec<Curve> = (0..3)
-            .map(|_| make_curve(vec![100.0], vec![80.0], vec![0.0]))
+            .map(|_| make_curve(vec![100.0, 200.0], vec![80.0, 81.0], vec![0.0, 5.0]))
             .collect();
         let area: ListeningArea<2> = ListeningArea::new(
             positions,
@@ -496,8 +677,8 @@ mod tests {
         // The shortest arc midpoint should be 180° (or -180°), not 0°.
         let positions = vec![[0.0], [1.0]];
         let curves = vec![
-            make_curve(vec![100.0], vec![80.0], vec![170.0]),
-            make_curve(vec![100.0], vec![80.0], vec![-170.0]),
+            make_curve(vec![100.0, 200.0], vec![80.0, 81.0], vec![170.0, 170.0]),
+            make_curve(vec![100.0, 200.0], vec![80.0, 81.0], vec![-170.0, -170.0]),
         ];
         let area: ListeningArea<1> = ListeningArea::new(
             positions,
@@ -509,5 +690,304 @@ mod tests {
         let p = mid[0].phase.as_ref().unwrap()[0];
         // Should be near ±180°, definitely not near 0°.
         assert!(p.abs() > 170.0, "expected near ±180°, got {}", p);
+    }
+
+    /// Build the P1 probe area under a calibration-point permutation.
+    ///
+    /// Equal-SPL curves at equal distances from the query `[0, 0]`:
+    /// positions `[-1,0],[0,1],[1,0]`, phases `0/100/-160` deg (spread
+    /// >180° in both bins, so the old position-0-referenced unwrap picked
+    /// its branch from an arbitrary reference).
+    fn probe_area(order: &[usize]) -> ListeningArea<2> {
+        let positions_all = [[-1.0, 0.0], [0.0, 1.0], [1.0, 0.0]];
+        let phases_all = [0.0_f64, 100.0, -160.0];
+        let positions: Vec<[f64; 2]> = order.iter().map(|&k| positions_all[k]).collect();
+        let curves: Vec<Curve> = order
+            .iter()
+            .map(|&k| {
+                make_curve(
+                    vec![100.0, 1000.0],
+                    vec![80.0, 82.0],
+                    vec![phases_all[k], phases_all[k] + 20.0],
+                )
+            })
+            .collect();
+        ListeningArea::new(
+            positions,
+            vec![curves],
+            ListeningAreaInterpolatorConfig::default(),
+        )
+        .expect("probe area must construct")
+    }
+
+    fn probe_phase(area: &ListeningArea<2>) -> [f64; 2] {
+        let out = area
+            .try_interpolate_at([0.0, 0.0])
+            .expect("query [0,0] is in support");
+        let phase = out[0].phase.as_ref().expect("phase present");
+        [phase[0], phase[1]]
+    }
+
+    #[test]
+    fn broad_spread_phase_is_permutation_invariant() {
+        // Reproduces P1: the old reference-0 unwrap returned -20° in one
+        // order and 100° with the first two pairs swapped (120° shift on
+        // identical physics). The complex mean must agree for every order.
+        let reference = probe_phase(&probe_area(&[0, 1, 2]));
+        for order in [&[1, 0, 2][..], &[2, 1, 0][..], &[0, 2, 1][..], &[2, 0, 1][..]] {
+            let got = probe_phase(&probe_area(order));
+            for bin in 0..2 {
+                assert!(
+                    (got[bin] - reference[bin]).abs() < 1e-9,
+                    "order {order:?} bin {bin}: {} vs {}",
+                    got[bin],
+                    reference[bin]
+                );
+                assert!(got[bin].is_finite(), "non-finite phase for {order:?}");
+            }
+        }
+        // Both bins carry a >180° spread; confidence must still be
+        // meaningful (partial agreement, not total cancellation).
+        let evidence = probe_area(&[0, 1, 2])
+            .interpolate_with_evidence([0.0, 0.0])
+            .expect("in support");
+        for bin in 0..2 {
+            let conf = evidence.confidence[0][bin];
+            assert!(
+                (0.0..=1.0).contains(&conf) && conf > 1e-6,
+                "bin {bin}: unexpected confidence {conf}"
+            );
+            assert!(
+                !evidence.phase_ambiguous[0][bin],
+                "bin {bin}: partial agreement must not be flagged ambiguous"
+            );
+        }
+    }
+
+    #[test]
+    fn broad_spread_invariance_holds_for_five_point_field() {
+        // Five phases spanning the full circle at five 1D positions.
+        let positions = vec![[-2.0], [-1.0], [0.0], [1.0], [2.0]];
+        let phases = [0.0_f64, 120.0, -120.0, 45.0, -90.0];
+        let build = |order: &[usize]| {
+            let ordered_positions: Vec<[f64; 1]> =
+                order.iter().map(|&k| positions[k]).collect();
+            let curves: Vec<Curve> = order
+                .iter()
+                .map(|&k| {
+                    make_curve(
+                        vec![100.0, 200.0],
+                        vec![80.0, 81.0],
+                        vec![phases[k], phases[k]],
+                    )
+                })
+                .collect();
+            ListeningArea::new(
+                ordered_positions,
+                vec![curves],
+                ListeningAreaInterpolatorConfig::default(),
+            )
+            .expect("constructible")
+        };
+        let reference = build(&[0, 1, 2, 3, 4]).interpolate_at([0.3]);
+        let ref_phase = reference[0].phase.as_ref().unwrap().to_vec();
+        for order in [&[4, 3, 2, 1, 0][..], &[2, 0, 4, 1, 3][..]] {
+            let got = build(order).interpolate_at([0.3]);
+            let got_phase = got[0].phase.as_ref().unwrap();
+            for (bin, (&g, &r)) in got_phase.iter().zip(ref_phase.iter()).enumerate() {
+                assert!(
+                    (g - r).abs() < 1e-9,
+                    "order {order:?} bin {bin}: {g} vs {r}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn total_cancellation_flags_phase_ambiguous() {
+        // Equal and opposite phasors cancel: the mean angle is arbitrary
+        // and must be flagged, while SPL still interpolates.
+        let positions = vec![[0.0], [1.0]];
+        let curves = vec![
+            make_curve(vec![100.0, 200.0], vec![80.0, 81.0], vec![0.0, 0.0]),
+            make_curve(vec![100.0, 200.0], vec![80.0, 81.0], vec![180.0, 180.0]),
+        ];
+        let area: ListeningArea<1> = ListeningArea::new(
+            positions,
+            vec![curves],
+            ListeningAreaInterpolatorConfig::default(),
+        )
+        .expect("ok");
+        let evidence = area
+            .interpolate_with_evidence([0.5])
+            .expect("midpoint is in support");
+        for bin in 0..2 {
+            assert!(
+                evidence.confidence[0][bin] < PHASE_AMBIGUITY_THRESHOLD,
+                "bin {bin}: opposing phasors must (near-)cancel, got R={}",
+                evidence.confidence[0][bin]
+            );
+            assert!(
+                evidence.phase_ambiguous[0][bin],
+                "bin {bin}: cancelled phase must be flagged ambiguous"
+            );
+        }
+        assert!((evidence.curves[0].spl[0] - 80.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn identical_calibration_positions_interpolate_cleanly() {
+        // Duplicate positions: exact-hit collapse picks one copy, and
+        // off-point queries stay finite with weights summing to 1.
+        let positions = vec![[0.0], [0.0], [1.0]];
+        let curves = vec![
+            make_curve(vec![100.0, 200.0], vec![80.0, 81.0], vec![10.0, 10.0]),
+            make_curve(vec![100.0, 200.0], vec![80.0, 81.0], vec![10.0, 10.0]),
+            make_curve(vec![100.0, 200.0], vec![90.0, 91.0], vec![20.0, 20.0]),
+        ];
+        let area: ListeningArea<1> = ListeningArea::new(
+            positions,
+            vec![curves.clone()],
+            ListeningAreaInterpolatorConfig::default(),
+        )
+        .expect("ok");
+        let at_origin = area.interpolate_at([0.0]);
+        assert!((at_origin[0].spl[0] - 80.0).abs() < 1e-9);
+        let evidence = area
+            .interpolate_with_evidence([0.5])
+            .expect("in support");
+        assert!((evidence.weights.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+        assert!(
+            evidence.curves[0]
+                .spl
+                .iter()
+                .chain(evidence.curves[0].phase.as_ref().unwrap().iter())
+                .all(|v| v.is_finite())
+        );
+    }
+
+    #[test]
+    fn fallible_query_rejects_nonfinite_and_out_of_support() {
+        let positions = vec![[0.0], [1.0]];
+        let curves = vec![
+            make_curve(vec![100.0, 200.0], vec![80.0, 81.0], vec![0.0, 5.0]),
+            make_curve(vec![100.0, 200.0], vec![90.0, 91.0], vec![10.0, 15.0]),
+        ];
+        let area: ListeningArea<1> = ListeningArea::new(
+            positions,
+            vec![curves],
+            ListeningAreaInterpolatorConfig::default(),
+        )
+        .expect("ok");
+
+        assert!(!area.contains([f64::NAN]));
+        assert!(!area.contains([2.0]));
+        assert!(area.contains([0.5]));
+        // Boundary queries are in support (inclusive box).
+        assert!(area.contains([0.0]));
+        assert!(area.contains([1.0]));
+
+        let nonfinite = area.try_interpolate_at([f64::NAN]).unwrap_err();
+        assert!(format!("{nonfinite}").contains("finite"));
+
+        let outside = area.try_interpolate_at([2.0]).unwrap_err();
+        assert!(format!("{outside}").contains("support"));
+
+        // In-support evidence: weights sum to 1, confidence in [0, 1].
+        let evidence = area
+            .interpolate_with_evidence([0.5])
+            .expect("in support");
+        assert!((evidence.weights.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+        for conf in &evidence.confidence[0] {
+            assert!((0.0..=1.0).contains(conf), "confidence out of range: {conf}");
+        }
+
+        // At a calibration point the evidence collapses exactly with full
+        // confidence.
+        let at_cal = area
+            .interpolate_with_evidence([0.0])
+            .expect("calibration point is in support");
+        assert_eq!(at_cal.weights, vec![1.0, 0.0]);
+        assert!((at_cal.confidence[0][0] - 1.0).abs() < 1e-12);
+        assert!(!at_cal.phase_ambiguous[0][0]);
+
+        // Legacy path still extrapolates finitely outside support.
+        let extrapolated = area.interpolate_at([2.0]);
+        assert!(
+            extrapolated[0]
+                .spl
+                .iter()
+                .chain(extrapolated[0].phase.as_ref().unwrap().iter())
+                .all(|v| v.is_finite())
+        );
+    }
+
+    /// Hold-out on a smooth spatial field with room-like physics: SPL varies
+    /// linearly with position and phase advances linearly (pure delay).
+    /// Symmetric IDW weights recover odd-symmetric fields exactly, so the
+    /// held-out centre must match to numerical precision with ~1 confidence.
+    #[test]
+    fn holdout_recovers_smooth_spatial_field() {
+        let freq = vec![100.0, 200.0];
+        // Hold out x = 0; train on ±0.5 and ±1.
+        let train = [-1.0_f64, -0.5, 0.5, 1.0];
+        let positions: Vec<[f64; 1]> = train.map(|x| [x]).to_vec();
+        let curves: Vec<Curve> = train
+            .iter()
+            .map(|&x| make_curve(freq.clone(), vec![80.0 + 3.0 * x, 82.0], vec![20.0 * x, 0.0]))
+            .collect();
+        let area: ListeningArea<1> = ListeningArea::new(
+            positions,
+            vec![curves],
+            ListeningAreaInterpolatorConfig::default(),
+        )
+        .expect("ok");
+        let evidence = area
+            .interpolate_with_evidence([0.0])
+            .expect("held-out centre is in support");
+        assert!((evidence.curves[0].spl[0] - 80.0).abs() < 1e-9);
+        let phase = evidence.curves[0].phase.as_ref().unwrap()[0];
+        assert!(phase.abs() < 1e-9, "expected ~0°, got {phase}");
+        // ±20° calibration spread at bin 0 gives R ≈ 0.976: high but
+        // honestly below 1.
+        assert!(evidence.confidence[0][0] > 0.95);
+        assert!(!evidence.phase_ambiguous[0][0]);
+    }
+
+    /// Hold-out on a gently curved field (standing-wave-like SPL ripple
+    /// plus delay-like phase slope) from an asymmetric stencil: error must
+    /// stay bounded and confidence high.
+    #[test]
+    fn holdout_bounds_error_on_curved_spatial_field() {
+        let freq = vec![100.0, 200.0];
+        let field = |x: f64| (80.0 + 0.5 * (std::f64::consts::PI * x).sin(), 10.0 * x);
+        // Asymmetric stencil around the held-out x = 0.5.
+        let train = [-1.0_f64, -0.5, 0.0, 1.0];
+        let positions: Vec<[f64; 1]> = train.map(|x| [x]).to_vec();
+        let curves: Vec<Curve> = train
+            .iter()
+            .map(|&x| {
+                let (spl, phase) = field(x);
+                make_curve(freq.clone(), vec![spl, 82.0], vec![phase, 0.0])
+            })
+            .collect();
+        let area: ListeningArea<1> = ListeningArea::new(
+            positions,
+            vec![curves],
+            ListeningAreaInterpolatorConfig::default(),
+        )
+        .expect("ok");
+        let evidence = area
+            .interpolate_with_evidence([0.5])
+            .expect("held-out point is in support");
+        let (true_spl, true_phase) = field(0.5);
+        let spl_err = (evidence.curves[0].spl[0] - true_spl).abs();
+        assert!(spl_err < 1.0, "SPL hold-out error too large: {spl_err}");
+        let got_phase = evidence.curves[0].phase.as_ref().unwrap()[0];
+        let mut phase_err = (got_phase - true_phase).abs();
+        phase_err -= 360.0 * (phase_err / 360.0).round();
+        assert!(phase_err.abs() < 3.0, "phase hold-out error too large: {phase_err}");
+        assert!(evidence.confidence[0][0] > 0.9);
+        assert!(!evidence.phase_ambiguous[0][0]);
     }
 }

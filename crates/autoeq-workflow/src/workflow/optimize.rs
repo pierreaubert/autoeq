@@ -542,6 +542,147 @@ pub fn optimize_drivers_crossover_with_smoothness(
     })
 }
 
+/// Timing breakdown for a multi-sub optimization run.
+///
+/// `setup_secs` covers building the prepared objective, bounds, and initial
+/// guess (measurement-derived state). `eval_secs` covers candidate evaluation
+/// only: the pre/post fitness probes and `optimize_filters_detailed`, excluding
+/// setup and result extraction. Use it to attribute wall-clock cost when
+/// profiling repeated parameter sweeps.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DriverOptimizationTiming {
+    /// Seconds spent preparing objective data, bounds, and initial guess.
+    pub setup_secs: f64,
+    /// Seconds spent evaluating candidates (pre/post probes + optimizer).
+    pub eval_secs: f64,
+}
+
+/// Multi-sub objective prepared once and reused across related searches.
+///
+/// Bundles the built objective data, parameter bounds, optimizer parameters,
+/// driver count, and the setup cost, so repeated sweeps (different seeds, warm
+/// starts) do not reload or rebuild measurement-derived state. Build with
+/// [`prepare_multisub_objective`] and run with [`optimize_multisub_prepared`].
+#[derive(Debug, Clone)]
+pub struct PreparedMultisubObjective {
+    /// Optimizer parameters (loss is forced to multi-sub-flat).
+    pub params: crate::OptimParams,
+    /// Built objective data shared by every search on this problem.
+    pub objective_data: crate::optim::ObjectiveData,
+    /// Number of subwoofers (parameter layout is `[gains(N), delays(N)]`).
+    pub n_drivers: usize,
+    /// Gain/delay lower bounds.
+    pub lower_bounds: Vec<f64>,
+    /// Gain/delay upper bounds.
+    pub upper_bounds: Vec<f64>,
+    /// Seconds spent building this prepared state.
+    pub setup_secs: f64,
+}
+
+/// Prepare multi-sub objective data once for reuse across related searches.
+///
+/// Builds the optimizer parameters, objective data, and parameter bounds a
+/// single time so repeated sweeps (different seeds, warm starts) share the
+/// measurement-derived state instead of rebuilding it per run.
+#[allow(clippy::too_many_arguments)]
+pub fn prepare_multisub_objective(
+    drivers_data: crate::loss::DriversLossData,
+    min_freq: f64,
+    max_freq: f64,
+    sample_rate: f64,
+    algorithm: &str,
+    max_iter: usize,
+    population: usize,
+    min_db: f64,
+    max_db: f64,
+) -> Result<PreparedMultisubObjective, Box<dyn std::error::Error>> {
+    validate_workflow_sample_rate(sample_rate)?;
+    let setup_start = std::time::Instant::now();
+    let mut params = create_driver_optimization_args(
+        min_freq,
+        max_freq,
+        sample_rate,
+        algorithm,
+        max_iter,
+        population,
+        min_db,
+        max_db,
+        None,
+    );
+    params.loss = crate::LossType::MultiSubFlat;
+    let n_drivers = drivers_data.drivers.len();
+    let objective_data = setup_multisub_objective_data(&params, drivers_data);
+    let (lower_bounds, upper_bounds) = setup_multisub_bounds(&params, n_drivers);
+    let setup_secs = setup_start.elapsed().as_secs_f64();
+    Ok(PreparedMultisubObjective {
+        params,
+        objective_data,
+        n_drivers,
+        lower_bounds,
+        upper_bounds,
+        setup_secs,
+    })
+}
+
+/// Run a multi-sub search on a prepared objective with a chosen seed.
+///
+/// Reuses the prepared objective data and bounds; only the seed varies per
+/// call. Returns the optimization result alongside a timing breakdown that
+/// separates the (amortized) setup cost from candidate-evaluation time.
+pub fn optimize_multisub_prepared(
+    prepared: &PreparedMultisubObjective,
+    seed: Option<u64>,
+) -> Result<(DriverOptimizationResult, DriverOptimizationTiming), Box<dyn std::error::Error>> {
+    let mut params = prepared.params.clone();
+    params.seed = seed;
+    let n_drivers = prepared.n_drivers;
+
+    // Initial guess
+    let mut x = multisub_initial_guess(n_drivers);
+    let initial_x = x.clone();
+
+    // Candidate evaluation only: pre/post probes plus the optimizer itself.
+    let eval_start = std::time::Instant::now();
+    let pre_objective = crate::optim::compute_base_fitness(&x, &prepared.objective_data);
+
+    // Optimize; convergence comes from structured evidence so a usable
+    // best-effort `Ok` after budget exhaustion does not report converged.
+    let evidence = crate::optim::optimize_filters_detailed(
+        &mut x,
+        &prepared.lower_bounds,
+        &prepared.upper_bounds,
+        prepared.objective_data.clone(),
+        &params,
+    );
+    let converged = evidence.converged;
+
+    let mut post_objective = crate::optim::compute_base_fitness(&x, &prepared.objective_data);
+    if !post_objective.is_finite() || post_objective > pre_objective {
+        x = initial_x;
+        post_objective = pre_objective;
+    }
+    let eval_secs = eval_start.elapsed().as_secs_f64();
+
+    // Extract results: [gains(N), delays(N)]
+    let gains = x[0..n_drivers].to_vec();
+    let delays = x[n_drivers..2 * n_drivers].to_vec();
+
+    Ok((
+        DriverOptimizationResult {
+            gains,
+            delays,
+            crossover_freqs: vec![],
+            pre_objective,
+            post_objective,
+            converged,
+        },
+        DriverOptimizationTiming {
+            setup_secs: prepared.setup_secs,
+            eval_secs,
+        },
+    ))
+}
+
 /// Optimize multi-subwoofer configuration (gain, delay) to achieve flat summed response
 #[allow(clippy::too_many_arguments)]
 pub fn optimize_multisub(

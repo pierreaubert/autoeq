@@ -14,6 +14,7 @@ mod modal;
 mod modal_basis;
 mod mso;
 mod mso_objective_context;
+mod mso_search_budget;
 mod mso_search_options;
 mod multi_seat_measurements;
 mod objective;

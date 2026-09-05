@@ -94,6 +94,13 @@ pub struct ListeningArea<const D: usize> {
     num_positions: usize,
     /// Interpolator configuration.
     config: ListeningAreaInterpolatorConfig,
+    /// Precomputed unit-phasor real parts, indexed `[sub][k]` per bin:
+    /// `phasor_re[sub][k][bin] = cos(phase)`. Built once in `::new` so
+    /// repeated queries (e.g. fixed quadrature points) do not redo the
+    /// degree-to-radian plus cos/sin work per query.
+    phasor_re: Vec<Vec<Array1<f64>>>,
+    /// Precomputed unit-phasor imaginary parts (`sin(phase)`), same layout.
+    phasor_im: Vec<Vec<Array1<f64>>>,
 }
 
 impl<const D: usize> ListeningArea<D> {
@@ -218,12 +225,31 @@ impl<const D: usize> ListeningArea<D> {
             }
         }
 
+        // Precompute the unit-phasor representation once: phase presence and
+        // numeric validity were established above, so the unwraps here are
+        // safe. Per-query interpolation then only forms the weighted sum.
+        let mut phasor_re = Vec::with_capacity(num_subs);
+        let mut phasor_im = Vec::with_capacity(num_subs);
+        for sub in &measurements {
+            let mut sub_re = Vec::with_capacity(num_positions);
+            let mut sub_im = Vec::with_capacity(num_positions);
+            for curve in sub {
+                let phase = curve.phase.as_ref().expect("validated above");
+                sub_re.push(phase.mapv(|deg| deg.to_radians().cos()));
+                sub_im.push(phase.mapv(|deg| deg.to_radians().sin()));
+            }
+            phasor_re.push(sub_re);
+            phasor_im.push(sub_im);
+        }
+
         Ok(Self {
             positions,
             measurements,
             num_subs,
             num_positions,
             config,
+            phasor_re,
+            phasor_im,
         })
     }
 
@@ -360,19 +386,14 @@ impl<const D: usize> ListeningArea<D> {
                 }
                 spl[bin] = spl_acc;
 
-                // Phase: weighted circular mean via unit phasors. The
-                // sum is order-independent, so no calibration point is
-                // privileged as an unwrap reference.
+                // Phase: weighted circular mean via the precomputed unit
+                // phasors. The sum is order-independent, so no
+                // calibration point is privileged as an unwrap reference.
                 let mut re = 0.0_f64;
                 let mut im = 0.0_f64;
                 for (k, &w) in weights.iter().enumerate() {
-                    let phase_k = self.measurements[sub_idx][k]
-                        .phase
-                        .as_ref()
-                        .expect("phase presence validated in ::new")[bin];
-                    let radians = phase_k.to_radians();
-                    re += w * radians.cos();
-                    im += w * radians.sin();
+                    re += w * self.phasor_re[sub_idx][k][bin];
+                    im += w * self.phasor_im[sub_idx][k][bin];
                 }
                 let resultant = re.hypot(im);
                 // atan2(0, 0) is defined as 0: deterministic under total

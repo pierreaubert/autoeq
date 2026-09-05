@@ -671,11 +671,44 @@ fn optimize_modal_basis(
 /// * `freq_range` - `(min_hz, max_hz)` for optimization.
 /// * `sample_rate` - Sample rate for filter design.
 ///
+/// Reuse the canonical model validator at the direct-algorithm boundary.
+///
+/// The CLI/workflow path validates the full `RoomConfig` before dispatch; the
+/// direct `optimize_multiseat_continuous_area` entry point must enforce the
+/// same `multi_seat.continuous_area` rules (Gaussian support == bounds, CVaR
+/// alpha in (0, 1], quadrature counts, prior/quadrature compatibility,
+/// worst-case budgets, ...). This imports the model validator instead of
+/// duplicating its rules: only errors scoped to `multi_seat` are surfaced so
+/// unrelated defaults in the synthesized wrapper cannot fail the call.
+fn enforce_continuous_area_model_validation(config: &MultiSeatConfig) -> Result<()> {
+    let mut room = roomeq_model::RoomConfig::default();
+    room.optimizer.multi_seat = Some(config.clone());
+    let report = roomeq_model::validation_rules::validate_room_config(&room);
+    let scoped: Vec<&str> = report
+        .errors
+        .iter()
+        .map(String::as_str)
+        .filter(|message| message.contains("multi_seat"))
+        .collect();
+    if scoped.is_empty() {
+        return Ok(());
+    }
+    Err(AutoeqError::InvalidConfiguration {
+        message: format!(
+            "continuous_area model validation failed: {}",
+            scoped.join("; ")
+        ),
+    })
+}
+
 /// # Errors
 ///
 /// Returns `InvalidConfiguration` if the strategy/area config don't match,
 /// if dimensions ∉ {1, 2, 3}, or if the seat-position array length doesn't
-/// match the calibration seats.
+/// match the calibration seats. The full model validator
+/// (`multi_seat.continuous_area` rules: Gaussian support, CVaR range,
+/// quadrature compatibility) is also enforced so the direct API agrees with
+/// the CLI path.
 pub fn optimize_multiseat_continuous_area(
     measurements: &MultiSeatMeasurements,
     config: &MultiSeatConfig,
@@ -760,6 +793,11 @@ pub fn optimize_multiseat_continuous_area(
             message: "continuous_area Gaussian prior must have finite means, positive finite variances, and positive finite truncation".into(),
         });
     }
+
+    // Full model policy (Gaussian support == bounds, CVaR range, quadrature
+    // compatibility, budgets) runs after the local shape checks so the direct
+    // API reports the same rejections as the CLI-validated path.
+    enforce_continuous_area_model_validation(config)?;
 
     if config.strategy != MultiSeatStrategy::ContinuousArea {
         return Err(AutoeqError::InvalidConfiguration {
@@ -877,7 +915,19 @@ fn optimize_continuous_area_dispatch<const D: usize>(
             inner_maxiter: *inner_maxiter,
             inner_seed: *inner_seed,
         },
-        AreaScalarisationKind::Cvar { alpha } => AreaScalarisation::Cvar { alpha: *alpha },
+        AreaScalarisationKind::Cvar { alpha } => {
+            // The public boundary enforces the model rule (alpha in (0, 1]);
+            // reject here as well so the dispatch can never silently clamp
+            // an out-of-range tail fraction into a "successful" result.
+            if !alpha.is_finite() || *alpha <= 0.0 || *alpha > 1.0 {
+                return Err(AutoeqError::InvalidConfiguration {
+                    message: format!(
+                        "continuous_area CVaR alpha must be in (0, 1], got {alpha}"
+                    ),
+                });
+            }
+            AreaScalarisation::Cvar { alpha: *alpha }
+        }
     };
 
     // Pre-compute the Q quadrature points + weights once. WorstCase is the
@@ -984,7 +1034,10 @@ fn optimize_continuous_area_dispatch<const D: usize>(
                     acc
                 }
                 (AreaScalarisation::Cvar { alpha }, Some(complex), Some((_, weights))) => {
-                    let alpha = alpha.clamp(f64::MIN_POSITIVE, 1.0);
+                    // Validated at the boundary/dispatch: alpha is already in
+                    // (0, 1]. Never clamp here; clamping would silently
+                    // reinterpret an invalid tail fraction as valid evidence.
+                    let alpha = *alpha;
                     let mut wl: Vec<(f64, f64)> = complex
                         .iter()
                         .zip(weights.iter())
@@ -1094,6 +1147,18 @@ fn optimize_continuous_area_dispatch<const D: usize>(
         &initial_polarities,
         &initial_allpass,
     );
+    // A non-finite identity evaluation means the area cannot be assessed at
+    // all (degenerate interpolation, empty grid, failed quadrature). Report
+    // that failure instead of a "successful" identity result with non-finite
+    // evidence.
+    if !initial_objective.is_finite() {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: format!(
+                "continuous_area MSO identity evaluation is non-finite ({initial_objective}); \
+                 refusing to report successful identity output with non-finite evidence"
+            ),
+        });
+    }
 
     let options = MsoSearchOptions::from_config(config, eval_min, eval_max);
     let (gains, delays, polarities, allpass_filters) =
@@ -1118,6 +1183,17 @@ fn optimize_continuous_area_dispatch<const D: usize>(
             (gains, delays, polarities, allpass_filters, final_objective)
         };
 
+    // The regression gate above falls back to the identity state, which was
+    // verified finite on entry; a non-finite accepted objective here would
+    // otherwise be reported as a successful optimization.
+    if !accepted_obj.is_finite() {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: format!(
+                "continuous_area MSO evaluation is non-finite ({accepted_obj}); \
+                 refusing to report successful output with non-finite evidence"
+            ),
+        });
+    }
     let improvement = initial_objective - accepted_obj;
     Ok(MultiSeatOptimizationResult {
         gains: final_gains,
@@ -1562,9 +1638,11 @@ mod tests {
                 dimensions: 1,
                 bounds: vec![(0.0, 1.0)],
                 seat_positions: vec![vec![0.0], vec![1.0]],
+                // Model policy requires bounds == Gaussian truncation support:
+                // mean=0.5, var=0.0625 (σ=0.25), k=2 → support exactly (0, 1).
                 prior: AreaPriorKind::Gaussian {
                     mean: vec![0.5],
-                    cov_diag: vec![0.1],
+                    cov_diag: vec![0.0625],
                     truncation_sigmas: 2.0,
                 },
                 quadrature: AreaQuadratureKind::Sobol {
@@ -1580,6 +1658,176 @@ mod tests {
             .expect("should optimize continuous area");
         assert_eq!(result.strategy, MultiSeatStrategy::ContinuousArea);
         assert_eq!(result.gains.len(), 2);
+    }
+
+    fn continuous_area_config(area: ContinuousListeningAreaConfig) -> MultiSeatConfig {
+        MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::ContinuousArea,
+            continuous_area: Some(area),
+            ..Default::default()
+        }
+    }
+
+    fn unit_area_base() -> ContinuousListeningAreaConfig {
+        ContinuousListeningAreaConfig {
+            dimensions: 1,
+            bounds: vec![(0.0, 1.0)],
+            seat_positions: vec![vec![0.0], vec![1.0]],
+            prior: AreaPriorKind::Uniform,
+            quadrature: AreaQuadratureKind::Sobol {
+                num_points: 8,
+                seed: 0,
+            },
+            scalarisation: AreaScalarisationKind::ExpectedValue,
+            idw_power: 2.0,
+        }
+    }
+
+    /// Direct API must agree with the model validator used by the CLI path.
+    fn model_errors_for(area: &ContinuousListeningAreaConfig) -> Vec<String> {
+        let config = continuous_area_config(area.clone());
+        let mut room = roomeq_model::RoomConfig::default();
+        room.optimizer.multi_seat = Some(config);
+        roomeq_model::validation_rules::validate_room_config(&room)
+            .errors
+            .into_iter()
+            .filter(|message| message.contains("multi_seat"))
+            .collect()
+    }
+
+    #[test]
+    fn continuous_area_rejects_gaussian_bounds_mismatch_like_cli() {
+        let ms = two_sub_two_seat_measurements();
+        // Gaussian mean=0.5, var=0.1 (σ≈0.316), k=2 → support ≈ (-0.13, 1.13),
+        // which does not equal bounds (0, 1).
+        let mut area = unit_area_base();
+        area.prior = AreaPriorKind::Gaussian {
+            mean: vec![0.5],
+            cov_diag: vec![0.1],
+            truncation_sigmas: 2.0,
+        };
+        let config = continuous_area_config(area.clone());
+
+        let model_errors = model_errors_for(&area);
+        assert!(
+            model_errors.iter().any(|e| e.contains("truncation box")),
+            "model validator should flag support mismatch: {model_errors:?}"
+        );
+        let err =
+            optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48_000.0).unwrap_err();
+        assert!(
+            err.to_string().contains("truncation box"),
+            "direct API must reject mismatched Gaussian support like the CLI: {err}"
+        );
+    }
+
+    #[test]
+    fn continuous_area_accepts_matching_gaussian_support() {
+        let ms = two_sub_two_seat_measurements();
+        // mean=0.5, var=0.0625 (σ=0.25), k=2 → support exactly (0, 1).
+        let mut area = unit_area_base();
+        area.prior = AreaPriorKind::Gaussian {
+            mean: vec![0.5],
+            cov_diag: vec![0.0625],
+            truncation_sigmas: 2.0,
+        };
+        assert!(
+            model_errors_for(&area).is_empty(),
+            "matching support must pass model validation"
+        );
+        let config = continuous_area_config(area);
+        let result = optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48_000.0)
+            .expect("matching Gaussian support must optimize");
+        assert!(result.objective_before.is_finite());
+        assert!(result.objective_after.is_finite());
+    }
+
+    #[test]
+    fn continuous_area_rejects_nonpositive_and_out_of_range_cvar_alpha() {
+        let ms = two_sub_two_seat_measurements();
+        for alpha in [0.0, -0.25, 1.5, f64::NAN, f64::INFINITY] {
+            let mut area = unit_area_base();
+            area.scalarisation = AreaScalarisationKind::Cvar { alpha };
+            let model_errors = model_errors_for(&area);
+            assert!(
+                model_errors.iter().any(|e| e.contains("cvar")),
+                "model validator should flag alpha={alpha}: {model_errors:?}"
+            );
+            let config = continuous_area_config(area);
+            let err =
+                optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48_000.0)
+                    .unwrap_err();
+            assert!(
+                err.to_string().contains("alpha"),
+                "alpha={alpha} must be rejected, not clamped: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn continuous_area_accepts_fractional_cvar_alpha() {
+        let ms = two_sub_two_seat_measurements();
+        for alpha in [0.05, 0.25, 1.0] {
+            let mut area = unit_area_base();
+            area.scalarisation = AreaScalarisationKind::Cvar { alpha };
+            assert!(
+                model_errors_for(&area).is_empty(),
+                "alpha={alpha} must pass model validation"
+            );
+            let config = continuous_area_config(area);
+            let result = optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48_000.0)
+                .unwrap_or_else(|e| panic!("alpha={alpha} must optimize: {e}"));
+            assert!(result.objective_after.is_finite());
+        }
+    }
+
+    #[test]
+    fn continuous_area_rejects_degenerate_quadrature_like_cli() {
+        let ms = two_sub_two_seat_measurements();
+        let mut area = unit_area_base();
+        area.quadrature = AreaQuadratureKind::Sobol {
+            num_points: 0,
+            seed: 0,
+        };
+        assert!(
+            !model_errors_for(&area).is_empty(),
+            "model validator should flag empty quadrature"
+        );
+        let config = continuous_area_config(area);
+        let err =
+            optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48_000.0).unwrap_err();
+        assert!(
+            err.to_string().contains("num_points"),
+            "degenerate quadrature must be rejected: {err}"
+        );
+    }
+
+    #[test]
+    fn continuous_area_rejects_gauss_legendre_with_gaussian_prior() {
+        let ms = two_sub_two_seat_measurements();
+        let mut area = unit_area_base();
+        area.prior = AreaPriorKind::Gaussian {
+            mean: vec![0.5],
+            cov_diag: vec![0.0625],
+            truncation_sigmas: 2.0,
+        };
+        area.quadrature = AreaQuadratureKind::GaussLegendre {
+            points_per_axis: 4,
+        };
+        assert!(
+            model_errors_for(&area)
+                .iter()
+                .any(|e| e.contains("gauss_legendre")),
+            "model validator should flag prior/quadrature incompatibility"
+        );
+        let config = continuous_area_config(area);
+        let err =
+            optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48_000.0).unwrap_err();
+        assert!(
+            err.to_string().contains("gauss_legendre"),
+            "incompatible quadrature must be rejected: {err}"
+        );
     }
 
     #[test]

@@ -3,6 +3,7 @@
 //! Optimizes subwoofer delays and gains to minimize response variance
 //! across multiple listening positions (MSO - Multi-Subwoofer Optimizer logic).
 
+mod area_evaluator;
 mod average;
 mod compute;
 mod consts;

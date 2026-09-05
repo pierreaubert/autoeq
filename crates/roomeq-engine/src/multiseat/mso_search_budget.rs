@@ -34,6 +34,11 @@ pub(super) struct MsoSearchBudget {
     /// configured `inner_maxiter`. Applied as `min(configured, cap)` at the
     /// dispatch site; the outer DE always honors `max_evaluations`.
     pub(super) max_inner_iterations: Option<usize>,
+    /// Explicit shared worker budget for fanning one area evaluation over
+    /// quadrature points. `Some(n)` caps threads at `n`; `None` stays
+    /// sequential for small point counts and otherwise uses the available
+    /// parallelism under a hard cap.
+    pub(super) parallel_workers: Option<usize>,
 }
 
 /// Consumed-work report for one `optimize_continuous_mso_with_budget` run.

@@ -1,3 +1,4 @@
+use super::area_evaluator::AreaEvaluator;
 use super::average::average_perceptual_from_responses;
 use super::compute::compute_combined_complex_responses;
 use super::compute::compute_combined_responses;
@@ -5,7 +6,6 @@ use super::consts::MSO_DE_SEED;
 use super::consts::spl_from_complex_responses;
 use super::interpolate::interpolate_all_measurements;
 use super::interpolate::interpolate_curve_to_grid;
-use super::misc::single_seat_flatness;
 use super::misc::sobol_quadrature_points;
 use super::misc::weighted_variance_from_responses;
 use super::modal::modal_basis_objective_from_responses;
@@ -1107,124 +1107,67 @@ fn optimize_continuous_area_dispatch<const D: usize>(
     let initial_polarities = vec![false; measurements.num_subs];
     let initial_allpass: Vec<Vec<(f64, f64)>> = vec![Vec::new(); measurements.num_subs];
 
+    // Buffered area evaluator over the pre-baked static points. Per-sub
+    // channel factors are rebuilt once per candidate and the static complex
+    // responses are dotted by slice: no per-sub clones into nested one-seat
+    // allocations, no per-point all-pass rebuilds. The point loop fans out
+    // over the explicit worker budget from `MsoSearchBudget`.
+    let (quad_weights, quad_complex) = match (static_points, static_complex) {
+        (Some((_, weights)), Some(complex)) => (weights, complex),
+        _ => (Vec::new(), Vec::new()),
+    };
+    let workers = AreaEvaluator::resolve_workers(budget.parallel_workers, quad_complex.len());
+    // `Mutex` (not `RefCell`): the worst-case inner search evaluates
+    // positions off-thread, so the shared evaluator must be `Sync`. The
+    // scratch buffers stay shared under the lock — still zero per-point
+    // allocation — and every lock scope is a single call (never nested).
+    let evaluator = std::sync::Mutex::new(AreaEvaluator::new(
+        quad_complex,
+        quad_weights,
+        freqs.clone(),
+        sample_rate,
+        eval_min,
+        eval_max,
+        workers,
+    ));
+
     // Loss closure: returns scalarised flatness loss across the area.
     let evaluate_area =
         |gains: &[f64], delays: &[f64], polarities: &[bool], allpass: &[Vec<(f64, f64)>]| -> f64 {
-            match (&scalarisation, &static_complex, &static_points) {
-                (AreaScalarisation::ExpectedValue, Some(complex), Some((_, weights))) => {
-                    let mut acc = 0.0;
-                    for (per_sub, w) in complex.iter().zip(weights.iter()) {
-                        // Wrap as a single-seat dataset: per_sub[sub] is `Vec<Complex64>`
-                        // already on `freqs`. We need shape `[sub][seat=1][freq]`.
-                        let mut seat_form: Vec<Vec<Vec<Complex64>>> =
-                            Vec::with_capacity(per_sub.len());
-                        for sub_data in per_sub {
-                            seat_form.push(vec![sub_data.clone()]);
-                        }
-                        let combined = compute_combined_responses(
-                            &seat_form,
-                            &freqs,
-                            gains,
-                            delays,
-                            polarities,
-                            allpass,
-                            sample_rate,
-                            eval_min,
-                            eval_max,
-                        );
-                        acc += w * single_seat_flatness(&combined);
-                    }
-                    acc
-                }
-                (AreaScalarisation::Cvar { alpha }, Some(complex), Some((_, weights))) => {
+            match &scalarisation {
+                AreaScalarisation::ExpectedValue => evaluator
+                    .lock()
+                    .expect("area evaluator lock")
+                    .evaluate_expected(gains, delays, polarities, allpass),
+                AreaScalarisation::Cvar { alpha } => {
                     // Validated at the boundary/dispatch: alpha is already in
                     // (0, 1]. Never clamp here; clamping would silently
                     // reinterpret an invalid tail fraction as valid evidence.
-                    let alpha = *alpha;
-                    let mut wl: Vec<(f64, f64)> = complex
-                        .iter()
-                        .zip(weights.iter())
-                        .map(|(per_sub, &w)| {
-                            let mut seat_form: Vec<Vec<Vec<Complex64>>> =
-                                Vec::with_capacity(per_sub.len());
-                            for sub_data in per_sub {
-                                seat_form.push(vec![sub_data.clone()]);
-                            }
-                            let combined = compute_combined_responses(
-                                &seat_form,
-                                &freqs,
-                                gains,
-                                delays,
-                                polarities,
-                                allpass,
-                                sample_rate,
-                                eval_min,
-                                eval_max,
-                            );
-                            let loss = single_seat_flatness(&combined);
-                            (
-                                if loss.is_finite() {
-                                    loss
-                                } else {
-                                    f64::INFINITY
-                                },
-                                if w.is_finite() && w > 0.0 { w } else { 0.0 },
-                            )
-                        })
-                        .collect();
-                    wl.sort_by(|a, b| b.0.total_cmp(&a.0));
-                    let mut acc_loss = 0.0;
-                    let mut acc_mass = 0.0;
-                    for (l, w) in &wl {
-                        let take = (alpha - acc_mass).min(*w);
-                        if take <= 0.0 {
-                            break;
-                        }
-                        acc_loss += take * l;
-                        acc_mass += take;
-                        if acc_mass >= alpha {
-                            break;
-                        }
-                    }
-                    if acc_mass > 0.0 {
-                        acc_loss / acc_mass
-                    } else {
-                        f64::INFINITY
-                    }
+                    evaluator.lock().expect("area evaluator lock").evaluate_cvar(
+                        *alpha, gains, delays, polarities, allpass,
+                    )
                 }
-                (
-                    AreaScalarisation::WorstCase {
-                        inner_maxiter,
-                        inner_seed,
-                    },
-                    _,
-                    _,
-                ) => {
+                AreaScalarisation::WorstCase {
+                    inner_maxiter,
+                    inner_seed,
+                } => {
                     // Delegate the adversarial position search to the continuous-
                     // area optimizer so the configured iteration budget and seed
                     // control a genuine inner differential-evolution search.
+                    // Channel factors are prepared once per outer candidate;
+                    // the inner positions only dot slices through them.
+                    evaluator
+                        .lock()
+                        .expect("area evaluator lock")
+                        .prepare_candidate(gains, delays, polarities, allpass);
                     let loss_at_position = |_: &[f64], position: [f64; D]| -> f64 {
-                        let per_sub = match interpolate_at_p(position) {
-                            Ok(v) => v,
-                            Err(_) => return f64::INFINITY,
-                        };
-                        let mut seat_form: Vec<Vec<Vec<Complex64>>> =
-                            Vec::with_capacity(per_sub.len());
-                        for sub_data in &per_sub {
-                            seat_form.push(vec![sub_data.clone()]);
+                        match interpolate_at_p(position) {
+                            Ok(per_sub) => evaluator
+                                .lock()
+                                .expect("area evaluator lock")
+                                .point_flatness_from_per_sub(&per_sub),
+                            Err(_) => f64::INFINITY,
                         }
-                        let combined = compute_combined_responses(
-                            &seat_form,
-                            &freqs,
-                            gains,
-                            delays,
-                            polarities,
-                            allpass,
-                            sample_rate,
-                            eval_min,
-                            eval_max,
-                        );
-                        single_seat_flatness(&combined)
                     };
                     math_audio_optimisation::continuous_area::try_evaluate_area_loss(
                         &loss_at_position,
@@ -1238,9 +1181,6 @@ fn optimize_continuous_area_dispatch<const D: usize>(
                     )
                     .unwrap_or(f64::INFINITY)
                 }
-                // Static points missing means we hit a WorstCase / unreachable branch
-                // outside the WorstCase arm above — defensive.
-                _ => f64::INFINITY,
             }
         };
 

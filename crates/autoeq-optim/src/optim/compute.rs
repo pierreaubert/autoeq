@@ -36,6 +36,7 @@ struct EvaluationScratch {
     error: Array1<f64>,
     smoothed_error: Array1<f64>,
     multi_losses: Vec<f64>,
+    multi_losses_sorted: Vec<f64>,
 }
 
 impl EvaluationScratch {
@@ -52,6 +53,7 @@ impl EvaluationScratch {
             error: Array1::zeros(0),
             smoothed_error: Array1::zeros(0),
             multi_losses: Vec::new(),
+            multi_losses_sorted: Vec::new(),
         }
     }
 
@@ -176,13 +178,18 @@ fn scalarise_losses(losses: &[f64], mo: &MultiObjectiveData) -> f64 {
                 None => losses.iter().fold(f64::NEG_INFINITY, |a, &b| f64::max(a, b)),
                 Some(alpha) => {
                     let alpha = alpha.clamp(f64::MIN_POSITIVE, 1.0);
+                    // Dedicated sort buffer: the caller
+                    // (`compute_multi_objective_fitness`) already holds the
+                    // shared `multi_losses` scratch as `losses`, so reusing
+                    // it here would take an empty stand-in, allocate on
+                    // every call, and lose the retained capacity on restore.
                     let mut sorted = EVALUATION_SCRATCH
-                        .with(|slot| std::mem::take(&mut slot.borrow_mut().multi_losses));
+                        .with(|slot| std::mem::take(&mut slot.borrow_mut().multi_losses_sorted));
                     sorted.clear();
                     sorted.extend_from_slice(losses);
                     let result = fractional_tail_cvar_into(&mut sorted, alpha);
                     EVALUATION_SCRATCH.with(|slot| {
-                        slot.borrow_mut().multi_losses = sorted;
+                        slot.borrow_mut().multi_losses_sorted = sorted;
                     });
                     result
                 }

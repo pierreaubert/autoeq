@@ -33,6 +33,11 @@ pub struct EqOptimizationResult {
     pub filters: Vec<Biquad>,
     pub loss: f64,
     pub optimizer_evidence: Vec<autoeq_optim::optim::OptimizerRunEvidence>,
+    /// Reason-coded per-filter audibility verdicts (Phase A). Empty unless
+    /// `OptimizerConfig.filter_audibility` is set. In report-only mode the
+    /// verdicts are recorded without removing filters; `into_legacy`
+    /// drops them along with the other structured evidence.
+    pub audibility_veto: Vec<roomeq_model::FilterVetoVerdict>,
 }
 
 impl EqOptimizationResult {
@@ -232,17 +237,45 @@ fn optimize_channel_eq_adaptive(
         best_loss = loss;
     }
 
-    // Backward elimination
+    // Backward elimination: veto (loudness-delta) units when the Phase A
+    // audibility veto is active, raw loss units otherwise (or under the
+    // back-compat fallback flag).
+    let veto_config = config.filter_audibility.filter(|veto| veto.enabled);
     if config.elimination_threshold > 0.0 && best_filters.len() > 1 {
-        let (pruned, pruned_loss) = backward_eliminate(
-            best_filters,
-            &prep.objective_data,
-            prep.peq_model,
-            config.elimination_threshold,
-        );
-        best_filters = pruned;
-        best_loss = pruned_loss;
+        if let Some(veto) = veto_config
+            && !veto.elimination_raw_loss_fallback
+        {
+            let phon = veto.resolved_listening_phon(
+                config.epa_config.as_ref().map(|epa| epa.listening_level_phon),
+            );
+            let before = best_filters.len();
+            best_filters = super::audibility_veto::backward_eliminate_veto_units(
+                best_filters,
+                &prep.objective_data.freqs,
+                phon,
+                veto.elimination_loudness_delta_sones,
+            );
+            if best_filters.len() != before {
+                best_loss = recompiled_loss(&best_filters, &prep);
+            }
+        } else {
+            let (pruned, pruned_loss) = backward_eliminate(
+                best_filters,
+                &prep.objective_data,
+                prep.peq_model,
+                config.elimination_threshold,
+            );
+            best_filters = pruned;
+            best_loss = pruned_loss;
+        }
     }
+
+    // Per-filter audibility veto (Phase A). Report-only by default, so
+    // merely enabling the config records verdicts without changing output.
+    let (kept, veto_loss, audibility_veto) =
+        apply_veto_postpass(best_filters, best_loss, &prep, config);
+    best_filters = kept;
+    best_loss = veto_loss;
 
     log::info!(
         "  Adaptive EQ optimization: {} filters, final loss={:.6}",
@@ -254,7 +287,70 @@ fn optimize_channel_eq_adaptive(
         filters: best_filters,
         loss: best_loss,
         optimizer_evidence,
+        audibility_veto,
     })
+}
+
+/// Per-filter audibility veto post-pass shared by the adaptive and
+/// single-pass paths (Phase A).
+///
+/// The legacy single-pass path never ran backward elimination, so the veto
+/// is its only pruning — and the place where optimizer-emitted micro
+/// filters would otherwise ship unexamined. Returns the kept filters, the
+/// (possibly recompiled) loss, and verdicts for every evaluated filter.
+/// With no veto config, or a disabled one, the input passes through
+/// untouched with no verdicts.
+fn apply_veto_postpass(
+    filters: Vec<Biquad>,
+    loss: f64,
+    prep: &super::types::PreparedSingleChannelEq,
+    config: &OptimizerConfig,
+) -> (
+    Vec<Biquad>,
+    f64,
+    Vec<roomeq_model::FilterVetoVerdict>,
+) {
+    let Some(veto) = config.filter_audibility.filter(|veto| veto.enabled) else {
+        return (filters, loss, Vec::new());
+    };
+    let phon = veto
+        .resolved_listening_phon(config.epa_config.as_ref().map(|epa| epa.listening_level_phon));
+    let hf_start = veto.resolved_hf_guard_start_hz(
+        config
+            .high_frequency_correction
+            .as_ref()
+            .map(|hf| hf.start_hz),
+    );
+    let verdicts = {
+        let evaluation = super::audibility_veto::VetoEvaluation {
+            filters: &filters,
+            freqs: &prep.objective_data.freqs,
+            listening_phon: phon,
+            config: veto,
+            hf_guard_start_hz: hf_start,
+        };
+        super::audibility_veto::evaluate_audibility_veto(&evaluation)
+    };
+    let (kept, verdicts) =
+        super::audibility_veto::enforce_veto_verdicts(filters, verdicts, !veto.report_only);
+    let loss = if kept.len() != verdicts.len() {
+        recompiled_loss(&kept, prep)
+    } else {
+        loss
+    };
+    (kept, loss, verdicts)
+}
+
+/// Re-evaluate the scalar objective for a changed filter set so the reported
+/// loss stays honest after veto/elimination removals.
+fn recompiled_loss(
+    filters: &[Biquad],
+    prep: &super::types::PreparedSingleChannelEq,
+) -> f64 {
+    let peq: math_audio_iir_fir::Peq =
+        filters.iter().map(|biquad| (1.0, biquad.clone())).collect();
+    let x = autoeq_core::x2peq::peq2x(&peq, prep.peq_model);
+    autoeq_optim::optim::compute_base_fitness(&x, &prep.objective_data)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -314,6 +410,12 @@ fn optimize_channel_eq_inner(
         backend,
     )?;
 
+    // Same Phase A veto as the adaptive path: the legacy single-pass path
+    // never ran elimination, so without this its micro filters ship
+    // unexamined. Report-only by default.
+    let (filters, loss, audibility_veto) =
+        apply_veto_postpass(filters, loss, &prep, config);
+
     log::info!(
         "EQ optimization: {} filters, final loss={:.6}",
         filters.len(),
@@ -324,6 +426,7 @@ fn optimize_channel_eq_inner(
         filters,
         loss,
         optimizer_evidence,
+        audibility_veto,
     })
 }
 
@@ -1041,6 +1144,7 @@ fn optimize_channel_eq_multi_inner(
         filters,
         loss: final_loss,
         optimizer_evidence,
+        audibility_veto: Vec::new(),
     })
 }
 
@@ -1393,6 +1497,7 @@ fn optimize_spatial_robustness(
         filters,
         loss: final_loss,
         optimizer_evidence: vec![evidence],
+        audibility_veto: Vec::new(),
     })
 }
 
@@ -2296,6 +2401,120 @@ mod multi_eq_tests {
         let (filters, loss) = result.unwrap();
         assert!(!filters.is_empty());
         assert!(loss.is_finite());
+    }
+
+    /// Regression fixture for the Phase A audibility veto: gain bounds of
+    /// ±0.5 dB force every emitted filter below the 1 dB JND floor, so the
+    /// optimizer's emission is inaudible micro-filters by construction and
+    /// the veto must drop them with reason codes when enforced.
+    #[test]
+    fn veto_drops_previously_emitted_inaudible_filters() {
+        use roomeq_model::FilterAudibilityConfig;
+        use roomeq_model::{VetoDecision, VetoReason};
+        let curve = make_simple_room_curve();
+        let run = |report_only: Option<bool>| {
+            optimize_channel_eq_detailed(
+                &curve,
+                &OptimizerConfig {
+                    algorithm: "autoeq:de".to_string(),
+                    strategy: "lshade".to_string(),
+                    num_filters: 2,
+                    max_iter: 2000,
+                    population: 10,
+                    seed: Some(7),
+                    min_filter_improvement: 0.0,
+                    min_db: -0.5,
+                    max_db: 0.5,
+                    filter_audibility: report_only.map(|report_only| FilterAudibilityConfig {
+                        report_only,
+                        ..FilterAudibilityConfig::default()
+                    }),
+                    ..OptimizerConfig::default()
+                },
+                None,
+                48000.0,
+            )
+            .unwrap()
+        };
+
+        // Baseline ("previously"): without the veto the micro-filters ship.
+        let baseline = run(None);
+        assert!(
+            baseline.filters.len() >= 1,
+            "fixture must emit filters to veto, got none"
+        );
+        assert!(baseline.audibility_veto.is_empty());
+        for filter in &baseline.filters {
+            let peak = filter
+                .np_log_result(&curve.freq)
+                .iter()
+                .fold(0.0_f64, |max, value| max.max(value.abs()));
+            assert!(
+                peak < 1.0,
+                "fixture premise broken: emitted an audible filter (peak {peak:.2} dB)"
+            );
+        }
+
+        // Report-only: verdicts recorded, nothing removed.
+        let reported = run(Some(true));
+        assert_eq!(reported.filters.len(), baseline.filters.len());
+        assert_eq!(reported.audibility_veto.len(), baseline.filters.len());
+        for verdict in &reported.audibility_veto {
+            assert_eq!(verdict.decision, VetoDecision::Remove);
+            assert_eq!(verdict.reason, VetoReason::SubJnd);
+            assert!(!verdict.enforced);
+        }
+
+        // Enforced: the previously emitted filters drop with reason codes.
+        let enforced = run(Some(false));
+        assert!(
+            enforced.filters.is_empty(),
+            "inaudible emission must drop, kept {}",
+            enforced.filters.len()
+        );
+        assert_eq!(enforced.audibility_veto.len(), baseline.filters.len());
+        for verdict in &enforced.audibility_veto {
+            assert_eq!(verdict.decision, VetoDecision::Remove);
+            assert_eq!(verdict.reason, VetoReason::SubJnd);
+            assert!(verdict.enforced);
+        }
+        assert!(enforced.loss.is_finite());
+    }
+
+    /// The adaptive path records veto verdicts end to end (report-only).
+    #[test]
+    fn adaptive_path_records_veto_verdicts() {
+        use roomeq_model::FilterAudibilityConfig;
+        use roomeq_model::VetoDecision;
+        let curve = make_simple_room_curve();
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 3,
+            max_iter: 2000,
+            population: 10,
+            seed: Some(7),
+            min_filter_improvement: 1e-9,
+            filter_audibility: Some(FilterAudibilityConfig::default()),
+            ..OptimizerConfig::default()
+        };
+        let result = optimize_channel_eq_detailed(&curve, &config, None, 48000.0).unwrap();
+        assert!(!result.filters.is_empty());
+        // One verdict per evaluated (pre-removal) filter; report-only keeps all.
+        assert!(result.audibility_veto.len() >= result.filters.len());
+        let keeps = result
+            .audibility_veto
+            .iter()
+            .filter(|verdict| verdict.decision == VetoDecision::Keep)
+            .count();
+        assert_eq!(keeps, result.filters.len());
+        assert!(
+            result
+                .audibility_veto
+                .iter()
+                .all(|verdict| !verdict.enforced),
+            "report-only must not enforce"
+        );
     }
 
     #[test]

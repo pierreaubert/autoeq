@@ -1,5 +1,10 @@
 # Unreleased
 
+## RoomEQ audibility Phase A (per-filter veto)
+
+- Add opt-in `optimizer.filter_audibility`: per-biquad audibility veto pricing peak with/without level difference, affected ERB width, and an approximate masked-loudness delta at calibrated SPL, with reason-coded verdicts (`SubJnd`, `SubErbWidth`, `HighQAboveGuard`, `Audible`). Report-only by default (records verdicts, never removes); enforcement via `report_only: false` with a validation warning.
+- Re-express adaptive backward elimination in veto (loudness-delta) units when the veto is active, keeping the raw-loss interpretation under `elimination_raw_loss_fallback`. Threshold numerics are starting calibrations pending verification against primary publications.
+
 ## RoomEQ QA audibility
 
 - Enforce a held-out intake rule: `enforce` corpus scenarios need at least two held-out measurements covering every scored channel; single-position captures stay `report_only` until a second seat exists.

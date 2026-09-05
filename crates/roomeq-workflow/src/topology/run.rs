@@ -50,6 +50,7 @@ pub(crate) fn run_post_eq(
             filters: Vec::new(),
             loss: 0.0,
             optimizer_evidence: Vec::new(),
+            audibility_veto: Vec::new(),
         });
     }
 

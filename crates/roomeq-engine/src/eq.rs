@@ -2,6 +2,7 @@
 //!
 //! Provides per-channel PEQ optimization using autoeq's workflow.
 
+pub mod audibility_veto;
 mod consts;
 mod misc;
 mod multi_eq_auto_optimizer_context;

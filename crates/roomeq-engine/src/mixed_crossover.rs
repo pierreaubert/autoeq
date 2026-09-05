@@ -123,6 +123,7 @@ pub fn process_mixed_crossover(
             filters: Vec::new(),
             loss: request.pre_score,
             optimizer_evidence: Vec::new(),
+            audibility_veto: Vec::new(),
         }
     };
     info!(

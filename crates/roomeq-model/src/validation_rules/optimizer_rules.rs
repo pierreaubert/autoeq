@@ -131,6 +131,56 @@ pub fn rule_audibility_deadband(ctx: &mut ValidationContext<'_>) {
     }
 }
 
+pub fn rule_filter_audibility(ctx: &mut ValidationContext<'_>) {
+    let Some(veto) = ctx.opt.filter_audibility else {
+        return;
+    };
+    if veto.jnd_db <= 0.0 {
+        ctx.add_error(format!(
+            "filter_audibility.jnd_db ({}) must be positive",
+            veto.jnd_db
+        ));
+    }
+    if veto.min_audible_erb_width <= 0.0 {
+        ctx.add_error(format!(
+            "filter_audibility.min_audible_erb_width ({}) must be positive",
+            veto.min_audible_erb_width
+        ));
+    }
+    if veto.mode_proximity_ban_erbs < 0.0 {
+        ctx.add_error(format!(
+            "filter_audibility.mode_proximity_ban_erbs ({}) must be non-negative",
+            veto.mode_proximity_ban_erbs
+        ));
+    }
+    if veto.hf_guard_enabled {
+        if veto.hf_guard_start_hz.is_some_and(|hz| hz <= 0.0) {
+            ctx.add_error(format!(
+                "filter_audibility.hf_guard_start_hz ({:?}) must be positive",
+                veto.hf_guard_start_hz
+            ));
+        }
+        if veto.hf_guard_max_q <= 0.0 {
+            ctx.add_error(format!(
+                "filter_audibility.hf_guard_max_q ({}) must be positive",
+                veto.hf_guard_max_q
+            ));
+        }
+    }
+    if veto.elimination_loudness_delta_sones < 0.0 {
+        ctx.add_error(format!(
+            "filter_audibility.elimination_loudness_delta_sones ({}) must be non-negative",
+            veto.elimination_loudness_delta_sones
+        ));
+    }
+    if !veto.report_only {
+        ctx.add_warning(
+            "filter_audibility.report_only is false: inaudible filters will be removed \
+             (Phase A enforcement is opt-in; verify veto counts before relying on it)",
+        );
+    }
+}
+
 pub fn rule_high_frequency_correction(ctx: &mut ValidationContext<'_>) {
     let Some(hf) = ctx.opt.high_frequency_correction else {
         return;
@@ -753,6 +803,7 @@ pub fn run_optimizer_validation_rules(ctx: &mut ValidationContext<'_>) {
     rule_psychoacoustic_smoothing(ctx);
     rule_asymmetric_loss(ctx);
     rule_audibility_deadband(ctx);
+    rule_filter_audibility(ctx);
     rule_high_frequency_correction(ctx);
     rule_early_late_correction(ctx);
     rule_validation_bundle(ctx);
@@ -1193,6 +1244,66 @@ mod optimizer_rule_tests {
                 .errors
                 .iter()
                 .any(|e| e.contains("schroeder_hz") && e.contains("must be positive"))
+        );
+    }
+
+    #[test]
+    fn rule_filter_audibility_errors_and_enforcement_warning() {
+        let mut config = default_config();
+        config.filter_audibility = Some(crate::FilterAudibilityConfig {
+            jnd_db: 0.0,
+            min_audible_erb_width: -0.5,
+            hf_guard_max_q: 0.0,
+            elimination_loudness_delta_sones: -0.1,
+            ..Default::default()
+        });
+        let result = run_rule(rule_filter_audibility, &config);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("jnd_db") && e.contains("must be positive"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("min_audible_erb_width") && e.contains("must be positive"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("hf_guard_max_q") && e.contains("must be positive"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("elimination_loudness_delta_sones")
+                    && e.contains("must be non-negative"))
+        );
+
+        // Defaults are report-only: no enforcement warning.
+        let mut config = default_config();
+        config.filter_audibility = Some(crate::FilterAudibilityConfig::default());
+        let result = run_rule(rule_filter_audibility, &config);
+        assert!(result.errors.is_empty());
+        assert!(result.warnings.is_empty());
+
+        // Opt-in enforcement warns.
+        let mut config = default_config();
+        config.filter_audibility = Some(crate::FilterAudibilityConfig {
+            report_only: false,
+            ..Default::default()
+        });
+        let result = run_rule(rule_filter_audibility, &config);
+        assert!(result.errors.is_empty());
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("report_only is false"))
         );
     }
 

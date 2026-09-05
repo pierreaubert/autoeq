@@ -28,6 +28,7 @@ use super::default::default_strategy;
 use super::default::default_tolerance;
 use super::early_late_correction_config::EarlyLateCorrectionConfig;
 use super::excursion_protection_config::ExcursionProtectionConfig;
+use super::filter_audibility_config::FilterAudibilityConfig;
 use super::group_delay_optimization_config::GroupDelayOptimizationConfig;
 use super::high_frequency_correction_config::HighFrequencyCorrectionConfig;
 use super::mixed_mode_config::MixedModeConfig;
@@ -198,6 +199,12 @@ pub struct OptimizerConfig {
     /// optimizer tuning values rather than literal psychoacoustic JNDs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audibility_deadband: Option<AudibilityDeadbandConfig>,
+    /// Per-filter audibility veto (Phase A). `None` (default) disables the
+    /// veto entirely: no evaluation, no preset-output change. `Some` with
+    /// `report_only: true` (default) records reason-coded verdicts without
+    /// removing filters; enforcement is opt-in via `report_only: false`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter_audibility: Option<FilterAudibilityConfig>,
     /// Safeguards for high-frequency correction above the conservative range.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub high_frequency_correction: Option<HighFrequencyCorrectionConfig>,
@@ -336,6 +343,7 @@ impl Default for OptimizerConfig {
             asymmetric_loss_config: None,
             perceptual_policy: None,
             audibility_deadband: None,
+            filter_audibility: None,
             high_frequency_correction: None,
             early_late_correction: None,
             validation_bundle: None,

@@ -783,7 +783,7 @@
     },
     "ContinuousListeningAreaConfig": {
       "additionalProperties": false,
-      "description": "Serializable continuous listening-area configuration for JSON config files.\n\nDrives `MultiSeatStrategy::ContinuousArea`. The optimizer integrates the\nper-position objective over a continuous prior π(p) defined over a\n`dimensions`-dimensional axis-aligned box, replacing the discrete seats\narray with a continuous probability density.\n\n`bounds.len()` must equal `dimensions`. For Gaussian priors,\n`mean.len()` and `cov_diag.len()` must also equal `dimensions`.\n`seat_positions.len()` must equal the number of discrete seats in the\ncalibration `MultiSeatMeasurements` and each row's length must equal\n`dimensions`.",
+      "description": "Serializable continuous listening-area configuration for JSON config files.\n\nDrives `MultiSeatStrategy::ContinuousArea`. The optimizer integrates the\nper-position objective over a continuous prior π(p) defined over a\n`dimensions`-dimensional axis-aligned box, replacing the discrete seats\narray with a continuous probability density.\n\n`bounds.len()` must equal `dimensions`. For Gaussian priors,\n`mean.len()` and `cov_diag.len()` must also equal `dimensions`.\n`seat_positions.len()` must equal the number of discrete seats in the\ncalibration `MultiSeatMeasurements` and each row's length must equal\n`dimensions`.\n\n# Seat-identity / ordering contract\n\n`primary_seat` (on [`MultiSeatConfig`](super::multi_seat_config::MultiSeatConfig))\nis a positional index while `seat_positions` is a parallel array: the\nloader only checks equal counts, not semantic correspondence, so a swapped\norder in one sub/source silently combines different physical positions.\nTwo mechanisms close this gap:\n\n- **Stable seat IDs (recommended).** Set\n  [`SeatIdentityMap`](super::multi_seat_config::SeatIdentityMap) on the\n  sibling [`MultiSeatConfig`](super::multi_seat_config::MultiSeatConfig)\n  to one unique, non-empty ID per seat. Consumers (`roomeq-workflow`,\n  `roomeq-engine`) must join every source's per-seat measurements to\n  these IDs via\n  [`ContinuousListeningAreaConfig::check_source_seat_coverage`] instead of\n  relying on index order, and must echo the IDs in output reports\n  ([`ContinuousAreaMetrics`](crate::output::ContinuousAreaMetrics)) so the\n  correspondence is auditable.\n- **Strict positional ordering (legacy).** When no seat IDs are provided,\n  `seat_positions[i]` corresponds to measurement seat index `i`, and every\n  sub/source must present seats in exactly the same order. Any reordering\n  on one source silently mixes positions; prefer stable IDs.",
       "properties": {
         "bounds": {
           "description": "Per-axis bounding-box bounds `(lo, hi)`. Always required; even for\nGaussian priors the bounds determine the truncation rectangle.",
@@ -840,7 +840,7 @@
           "description": "How to scalarise the Q per-point losses."
         },
         "seat_positions": {
-          "description": "Spatial coordinates of each calibration seat in\n`MultiSeatMeasurements`. Outer length = number of seats, inner length =\n`dimensions`. Order must match the seat index in the measurements.",
+          "description": "Spatial coordinates of each calibration seat in\n`MultiSeatMeasurements`. Outer length = number of seats, inner length =\n`dimensions`. Order must match the seat index in the measurements\n(see the strict-ordering contract above when no explicit seat IDs\nare provided via\n[`SeatIdentityMap`](super::multi_seat_config::SeatIdentityMap)).",
           "items": {
             "items": {
               "format": "double",
@@ -1637,6 +1637,79 @@
       },
       "type": "object"
     },
+    "FilterAudibilityConfig": {
+      "additionalProperties": false,
+      "description": "Per-filter audibility veto for emitted PEQ filters (Phase A of the\naudibility plan).\n\nEvery threshold here is an implementation-time starting calibration,\nshipped first in report-only mode: with `report_only: true` (the default)\nthe veto evaluates every filter and records reason-coded verdicts but\nnever removes anything, so default behavior is unchanged. Enforcement\n(`report_only: false`) is opt-in. `None` on the owning optimizer config\ndisables the veto entirely (no evaluation, no output change).\n\nThe veto prices each biquad in perceptual units on the ERB-rate axis\n(see `roomeq_engine::eq::audibility_veto`): peak with/without level\ndifference, affected ERB width, and an approximate masked-loudness delta\nat calibrated SPL. None of these is a reference-grade ISO 532\nimplementation; that arrives with the Phase D objective. Threshold\nnumerics must be re-verified against primary psychoacoustic publications\nbefore any default flip.",
+      "properties": {
+        "elimination_loudness_delta_sones": {
+          "default": 0.05,
+          "description": "Backward-elimination threshold in approximate masked-loudness delta\n(sones): filters whose removal changes total loudness by less than\nthis are eliminated. Provisional calibration; report-only first.",
+          "format": "double",
+          "type": "number"
+        },
+        "elimination_raw_loss_fallback": {
+          "default": false,
+          "description": "Back-compat fallback: interpret `elimination_threshold` in raw loss\nunits as before instead of veto (loudness-delta) units.",
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Master switch for the veto evaluation. `false` skips evaluation.",
+          "type": "boolean"
+        },
+        "hf_guard_enabled": {
+          "default": true,
+          "description": "Apply the narrow high-Q HF veto above the guard start.",
+          "type": "boolean"
+        },
+        "hf_guard_max_q": {
+          "default": 2.0,
+          "description": "Filters centered above the guard start with Q above this are pruned\nas narrow high-frequency corrections.",
+          "format": "double",
+          "type": "number"
+        },
+        "hf_guard_start_hz": {
+          "description": "HF guard start in Hz. `None` reuses the active\n`high_frequency_correction.start_hz` (or its default).",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "jnd_db": {
+          "default": 1.0,
+          "description": "ERB-mapped level-difference audibility floor in dB. Filters whose\npeak with/without difference falls below this are inaudible ripple.",
+          "format": "double",
+          "type": "number"
+        },
+        "listening_level_phon": {
+          "description": "Calibrated evaluation SPL in phons. `None` reuses the EPA\n`listening_level_phon` (or its 75 default).",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "min_audible_erb_width": {
+          "default": 0.5,
+          "description": "Minimum affected ERB width for an audible filter. Corrections\nnarrower than this change too little loudness to matter.",
+          "format": "double",
+          "type": "number"
+        },
+        "mode_proximity_ban_erbs": {
+          "default": 1.0,
+          "description": "Half-width in ERBs of the Phase B mode-proximity boost ban.\nReserved: recorded but not enforced until Phase B wires the\nminimum-phase/variance gate.",
+          "format": "double",
+          "type": "number"
+        },
+        "report_only": {
+          "default": true,
+          "description": "Report-only mode: record verdicts but never remove filters.\nEnforcement requires explicitly setting this to `false`.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "FirConfig": {
       "additionalProperties": false,
       "description": "FIR filter configuration",
@@ -2369,6 +2442,28 @@
           "format": "double",
           "type": "number"
         },
+        "search": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MultiSeatSearchConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Stage-specific search contract (seed, evaluation/time budgets, and\nresource caps). `None` preserves the historical engine behavior\n(fixed internal seed and budgets); see [`MultiSeatSearchConfig`]."
+        },
+        "seat_identity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SeatIdentityMap"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Stable per-seat identifiers, parallel to\n`continuous_area.seat_positions` (and to the discrete measurement\nseat order for the other strategies). See [`SeatIdentityMap`].\n`None` keeps the legacy positional (index-order) correspondence under\nthe documented strict-ordering contract."
+        },
         "seat_weights": {
           "description": "Optional seat weights for all-channel multi-seat correction.",
           "items": {
@@ -2384,6 +2479,61 @@
           "$ref": "#/$defs/MultiSeatStrategy",
           "default": "minimize_variance",
           "description": "Optimization strategy"
+        }
+      },
+      "type": "object"
+    },
+    "MultiSeatSearchConfig": {
+      "additionalProperties": false,
+      "description": "Stage-specific search contract for multi-seat optimization.\n\n`MultiSeatConfig` exposes the polarity/all-pass toggles and the\ncontinuous-area prior but historically carried no outer evaluation/time\nbudget or seed: the engine used fixed internal values. This block lets\ncallers pin those down per run. Every field is optional or capped with a\ndefault that preserves the historical behavior:\n\n- `seed`, `evaluation_budget`, `time_budget_ms` are `None` by default,\n  meaning \"engine legacy behavior\" (fixed internal seed/budgets).\n  Consumers (`roomeq-workflow`, `roomeq-engine`) must treat an explicit\n  value as authoritative and `None` as \"keep doing what you do today\".\n- The `max_*` caps bound resource use. Validation rejects quadrature and\n  all-pass configurations above the effective caps; the defaults are\n  generous so previously valid configs keep passing.",
+      "properties": {
+        "evaluation_budget": {
+          "description": "Outer evaluation budget (objective evaluations). `None` = engine\nlegacy budget.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_allpass_per_sub": {
+          "default": 4,
+          "description": "Maximum per-sub all-pass filters (`allpass_filters_per_sub` must not\nexceed this).",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_points_per_axis": {
+          "default": 32,
+          "description": "Maximum Gauss-Legendre nodes per axis.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_quadrature_points": {
+          "default": 4096,
+          "description": "Maximum Sobol / Latin-hypercube quadrature points, and maximum total\nGauss-Legendre points (`points_per_axis^dimensions`).",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "seed": {
+          "description": "PRNG seed for the multi-seat search (quadrature sampling, stochastic\nstages). `None` = engine legacy fixed seed.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "time_budget_ms": {
+          "description": "Wall-clock budget in milliseconds. `None` = no model-level limit\n(engine legacy behavior).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -2623,6 +2773,17 @@
             }
           ],
           "description": "Excursion protection configuration"
+        },
+        "filter_audibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FilterAudibilityConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-filter audibility veto (Phase A). `None` (default) disables the\nveto entirely: no evaluation, no preset-output change. `Some` with\n`report_only: true` (default) records reason-coded verdicts without\nremoving filters; enforcement is opt-in via `report_only: false`."
         },
         "fir": {
           "anyOf": [
@@ -3906,6 +4067,23 @@
           "type": "number"
         }
       },
+      "type": "object"
+    },
+    "SeatIdentityMap": {
+      "additionalProperties": false,
+      "description": "Stable seat identifiers closing the index/parallel-array correspondence gap.\n\n`primary_seat` is a positional index while seat positions form a parallel\narray: loaders only check equal counts, not semantic correspondence, so a\nswapped order on one sub/source silently combines different physical\npositions. One unique, non-empty ID per seat lets consumers\n(`roomeq-workflow`, `roomeq-engine`) join every source's per-seat\nmeasurements to IDs instead of relying on index order, and echo the IDs in\noutput reports so the correspondence is auditable.",
+      "properties": {
+        "ids": {
+          "description": "One ID per seat, parallel to the seat order. Length must equal the\nseat count; every entry must be non-empty and unique.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ids"
+      ],
       "type": "object"
     },
     "SmoothnessPenaltyConfigSerde": {

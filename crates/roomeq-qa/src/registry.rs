@@ -154,12 +154,165 @@ pub struct QualityCaseSpec {
     pub expect: ScenarioExpect,
 }
 
+/// Release-matrix decision case kind. Each kind names the exact test that
+/// invokes it; a registry entry may only claim what that test exercises.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DecisionCaseKind {
+    Nsga2Decision,
+    Nsga3Decision,
+    ParetoFront,
+    ContinuousExpected,
+    ContinuousCvar,
+    ContinuousWorstCase,
+    PhasePermutation,
+    MeasuredSupport,
+    InvalidFront,
+    ModalPhase,
+}
+
+impl DecisionCaseKind {
+    /// Claims the invoked test for this kind actually exercises. Anything
+    /// else is a coverage lie, so validation rejects it.
+    pub fn allowed_claims(self) -> &'static [&'static str] {
+        match self {
+            Self::Nsga2Decision => &[
+                "nsga2",
+                "conflicting_objectives",
+                "pareto_decision",
+                "deterministic_seed",
+            ],
+            Self::Nsga3Decision => &[
+                "nsga3",
+                "conflicting_objectives",
+                "pareto_decision",
+                "deterministic_seed",
+            ],
+            Self::ParetoFront => &["pareto_front", "knee_decision", "deterministic_seed"],
+            Self::ContinuousExpected => &[
+                "continuous_area",
+                "expected_objective",
+                "deterministic_seed",
+                "final_realization",
+            ],
+            Self::ContinuousCvar => &[
+                "continuous_area",
+                "cvar_objective",
+                "deterministic_seed",
+                "final_realization",
+            ],
+            Self::ContinuousWorstCase => &[
+                "continuous_area",
+                "worst_case_objective",
+                "bounded_runtime",
+                "deterministic_seed",
+                "final_realization",
+            ],
+            Self::PhasePermutation => &[
+                "phase_permutation",
+                "seat_invariance",
+                "deterministic_seed",
+            ],
+            Self::MeasuredSupport => &["measured_support", "missing_phase_rejection"],
+            Self::InvalidFront => &["invalid_front", "front_validation"],
+            Self::ModalPhase => &[
+                "modal_basis",
+                "synthetic_modal_phase",
+                "deterministic_seed",
+                "final_realization",
+            ],
+        }
+    }
+
+    /// Whether this kind invokes the MSO engine (vs pure decision logic).
+    pub fn invokes_engine(self) -> bool {
+        matches!(
+            self,
+            Self::ContinuousExpected
+                | Self::ContinuousCvar
+                | Self::ContinuousWorstCase
+                | Self::PhasePermutation
+                | Self::ModalPhase
+        )
+    }
+}
+
+fn default_decision_seed() -> u64 {
+    0xC0FFEE
+}
+
+fn default_decision_population() -> usize {
+    32
+}
+
+fn default_decision_maxeval() -> usize {
+    256
+}
+
+fn default_decision_outer_points() -> usize {
+    16
+}
+
+fn default_decision_inner_maxiter() -> usize {
+    8
+}
+
+fn default_decision_seats() -> usize {
+    2
+}
+
+fn default_decision_subs() -> usize {
+    2
+}
+
+/// One registry-backed release-matrix decision scenario: deterministic seed,
+/// resource budget, independent quality thresholds, and final-realization
+/// expectation. Safety-fallback entries (gate_purpose = safety) are accepted
+/// on a clean revert; quality entries must meet their thresholds.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DecisionCaseSpec {
+    pub id: String,
+    pub kind: DecisionCaseKind,
+    pub tier: QaTier,
+    #[serde(default = "default_decision_seed")]
+    pub seed: u64,
+    /// NSGA population size (nsga/pareto kinds).
+    #[serde(default = "default_decision_population")]
+    pub population: usize,
+    /// NSGA evaluation budget (nsga/pareto kinds).
+    #[serde(default = "default_decision_maxeval")]
+    pub maxeval: usize,
+    /// Continuous-area quadrature points (continuous kinds).
+    #[serde(default = "default_decision_outer_points")]
+    pub outer_points: usize,
+    /// Continuous worst-case inner-search budget.
+    #[serde(default = "default_decision_inner_maxiter")]
+    pub inner_maxiter: usize,
+    /// Continuous worst-case inner-search seed.
+    #[serde(default)]
+    pub inner_seed: u64,
+    /// Wall-clock budget for the worst-case inner/outer search.
+    #[serde(default)]
+    pub timeout_ms: u64,
+    #[serde(default = "default_decision_seats")]
+    pub seats: usize,
+    #[serde(default = "default_decision_subs")]
+    pub subs: usize,
+    /// Tail fraction for the CVaR scalarisation.
+    #[serde(default)]
+    pub cvar_alpha: Option<f64>,
+    pub claims: Vec<String>,
+    pub expect: ScenarioExpect,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ScenarioRegistry {
     pub version: u32,
     pub families: Vec<ScenarioFamily>,
     pub home_cinema: Vec<HomeCinemaSpec>,
     pub quality_cases: Vec<QualityCaseSpec>,
+    #[serde(default)]
+    pub decision_cases: Vec<DecisionCaseSpec>,
     pub suites: Vec<SuiteSpec>,
 }
 
@@ -365,6 +518,104 @@ impl ScenarioRegistry {
                 }
             }
         }
+        for case in &self.decision_cases {
+            if !ids.insert(&case.id) {
+                bail!("duplicate RoomEQ QA registry id '{}'", case.id);
+            }
+            if case.claims.is_empty() {
+                bail!("decision case '{}' has no claims", case.id);
+            }
+            let expect = case.expect;
+            if !expect.improvement_min_pct.is_finite()
+                || expect.improvement_min_pct <= 0.0
+                || !expect.max_post_score.is_finite()
+                || expect.max_post_score <= 0.0
+                || !expect.max_boost_db.is_finite()
+                || expect.max_boost_db <= 0.0
+            {
+                bail!("decision case '{}' has an invalid expect block", case.id);
+            }
+            if expect.allow_safe_revert != (expect.gate_purpose == QaGatePurpose::Safety) {
+                bail!(
+                    "decision case '{}' must allow safe reversion exactly when gate_purpose is safety",
+                    case.id
+                );
+            }
+            let allowed = case.kind.allowed_claims();
+            for claim in &case.claims {
+                if !allowed.contains(&claim.as_str()) {
+                    bail!(
+                        "decision case '{}' claim '{}' is not exercised by its {:?} test",
+                        case.id,
+                        claim,
+                        case.kind
+                    );
+                }
+            }
+            match case.kind {
+                DecisionCaseKind::Nsga2Decision
+                | DecisionCaseKind::Nsga3Decision
+                | DecisionCaseKind::ParetoFront => {
+                    if case.population < 4 || case.maxeval < case.population {
+                        bail!(
+                            "decision case '{}' needs population >= 4 and maxeval >= population",
+                            case.id
+                        );
+                    }
+                }
+                DecisionCaseKind::ContinuousExpected
+                | DecisionCaseKind::ContinuousCvar
+                | DecisionCaseKind::ContinuousWorstCase => {
+                    if case.outer_points < 4 {
+                        bail!(
+                            "decision case '{}' needs at least 4 quadrature points",
+                            case.id
+                        );
+                    }
+                    if case.seats < 1 || case.subs < 1 {
+                        bail!(
+                            "decision case '{}' needs at least 1 seat and 1 sub",
+                            case.id
+                        );
+                    }
+                }
+                DecisionCaseKind::PhasePermutation | DecisionCaseKind::ModalPhase => {
+                    if case.seats < 2 || case.subs < 2 {
+                        bail!(
+                            "decision case '{}' needs at least 2 seats and 2 subs",
+                            case.id
+                        );
+                    }
+                }
+                DecisionCaseKind::MeasuredSupport | DecisionCaseKind::InvalidFront => {}
+            }
+            if case.kind == DecisionCaseKind::ContinuousCvar {
+                match case.cvar_alpha {
+                    Some(alpha) if alpha.is_finite() && alpha > 0.0 && alpha <= 1.0 => {}
+                    _ => bail!(
+                        "decision case '{}' needs a cvar_alpha in (0, 1]",
+                        case.id
+                    ),
+                }
+            }
+            if case.kind == DecisionCaseKind::ContinuousWorstCase
+                && (case.timeout_ms == 0 || case.inner_maxiter == 0)
+            {
+                bail!(
+                    "decision case '{}' needs a timeout_ms and inner_maxiter budget",
+                    case.id
+                );
+            }
+        }
+        // Reject empty or filtered-away decision matrices: every release tier
+        // must select at least one decision case.
+        for tier in [QaTier::Pr, QaTier::Nightly] {
+            if self.decision_cases_for(tier).next().is_none() {
+                bail!(
+                    "RoomEQ QA registry selects no decision cases for tier '{tier:?}'"
+                );
+            }
+        }
         let mut runners = HashSet::new();
         for suite in &self.suites {
             if !ids.insert(&suite.id) {
@@ -398,6 +649,12 @@ impl ScenarioRegistry {
 
     pub fn quality_cases_for(&self, tier: QaTier) -> impl Iterator<Item = &QualityCaseSpec> {
         self.quality_cases
+            .iter()
+            .filter(move |entry| tier.includes(entry.tier))
+    }
+
+    pub fn decision_cases_for(&self, tier: QaTier) -> impl Iterator<Item = &DecisionCaseSpec> {
+        self.decision_cases
             .iter()
             .filter(move |entry| tier.includes(entry.tier))
     }

@@ -97,34 +97,70 @@ fn variance_penalized_loss(
     mean + variance_lambda * variance
 }
 
-fn compute_multi_objective_fitness(x: &[f64], mo: &MultiObjectiveData) -> f64 {
+/// Equal-mass empirical upper-tail CVaR over per-sample losses.
+///
+/// Sorts `losses` worst-first in place, then averages the worst `alpha`
+/// fraction of the empirical mass, splitting one sample fractionally when
+/// `alpha * N` is not an integer (e.g. losses `[10, 0, 0]` with
+/// `alpha = 0.5` cover mass `1.5`, giving `10 / 1.5 ≈ 6.6667`). This matches
+/// the fractional-weight definition used by the continuous-area CVaR
+/// scalarisation. Ties need no special handling: any fractional split of
+/// equal values yields the same mean. Endpoints fall out naturally:
+/// `alpha >= 1` is the mean, and `alpha -> 0` approaches the max.
+/// An empty input yields `+inf`; a `NaN` sample inside the tail surfaces as
+/// `+inf` worst-case instead of propagating `NaN` through the optimiser.
+fn fractional_tail_cvar_into(losses: &mut [f64], alpha: f64) -> f64 {
+    if losses.is_empty() {
+        return f64::INFINITY;
+    }
+    // Worst losses first. `total_cmp` pins NaN at the head (worst) so a
+    // corrupted sample poisons the tail instead of hiding inside it.
+    losses.sort_by(|a, b| b.total_cmp(a));
+    if alpha.is_nan() || alpha <= 0.0 {
+        return losses[0];
+    }
+    if alpha >= 1.0 {
+        return losses.iter().sum::<f64>() / losses.len() as f64;
+    }
+    let mass = alpha * losses.len() as f64;
+    let mut acc = 0.0;
+    let mut taken = 0.0;
+    for &loss in losses.iter() {
+        if taken >= mass {
+            break;
+        }
+        let take = (mass - taken).min(1.0);
+        acc += take * if loss.is_nan() { f64::INFINITY } else { loss };
+        taken += take;
+    }
+    acc / mass
+}
+
+/// Scalarise already-evaluated per-objective losses without re-evaluating.
+///
+/// Centralises every [`MultiMeasurementStrategy`] reduction so the fitness
+/// and Pareto paths share one definition (in particular the fractional-tail
+/// bootstrap CVaR).
+fn scalarise_losses(losses: &[f64], mo: &MultiObjectiveData) -> f64 {
     use crate::roomeq::MultiMeasurementStrategy;
 
     match mo.strategy {
         MultiMeasurementStrategy::Average => {
-            let sum: f64 = mo
-                .objectives
-                .iter()
-                .map(|objective| compute_base_fitness_single(x, objective))
-                .sum();
-            sum / mo.objectives.len() as f64
+            losses.iter().sum::<f64>() / losses.len() as f64
         }
-        MultiMeasurementStrategy::WeightedSum => mo
-            .objectives
+        MultiMeasurementStrategy::WeightedSum => losses
             .iter()
             .zip(&mo.weights)
-            .map(|(objective, weight)| compute_base_fitness_single(x, objective) * weight)
+            .map(|(loss, weight)| loss * weight)
             .sum(),
-        MultiMeasurementStrategy::Minimax => mo
-            .objectives
-            .iter()
-            .map(|objective| compute_base_fitness_single(x, objective))
-            .fold(f64::NEG_INFINITY, f64::max),
+        MultiMeasurementStrategy::Minimax => {
+            losses.iter().fold(f64::NEG_INFINITY, |a, &b| f64::max(a, b))
+        }
         MultiMeasurementStrategy::VariancePenalized => variance_penalized_loss(
-            mo.objectives
+            losses
                 .iter()
                 .zip(&mo.weights)
-                .map(|(objective, weight)| (compute_base_fitness_single(x, objective), *weight)),
+                .map(|(loss, weight)| (*loss, *weight)),
             mo.variance_lambda,
         ),
         MultiMeasurementStrategy::SpatialRobustness => {
@@ -135,26 +171,16 @@ fn compute_multi_objective_fitness(x: &[f64], mo: &MultiObjectiveData) -> f64 {
         MultiMeasurementStrategy::MinimaxUncertainty => {
             // The bootstrap-resampled objectives have already been materialised
             // into `mo.objectives` at setup time. Either take the max (pure
-            // worst-case) or the mean of the worst α-tail (CVaR).
+            // worst-case) or the fractional-tail mean (CVaR).
             match mo.uncertainty_cvar_alpha {
-                None => mo
-                    .objectives
-                    .iter()
-                    .map(|objective| compute_base_fitness_single(x, objective))
-                    .fold(f64::NEG_INFINITY, f64::max),
+                None => losses.iter().fold(f64::NEG_INFINITY, |a, &b| f64::max(a, b)),
                 Some(alpha) => {
                     let alpha = alpha.clamp(f64::MIN_POSITIVE, 1.0);
                     let mut sorted = EVALUATION_SCRATCH
                         .with(|slot| std::mem::take(&mut slot.borrow_mut().multi_losses));
                     sorted.clear();
-                    for objective in &mo.objectives {
-                        sorted.push(compute_base_fitness_single(x, objective));
-                    }
-                    // Worst losses first.
-                    sorted.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-                    let n = (alpha * sorted.len() as f64).ceil() as usize;
-                    let n = n.clamp(1, sorted.len());
-                    let result = sorted.iter().take(n).sum::<f64>() / n as f64;
+                    sorted.extend_from_slice(losses);
+                    let result = fractional_tail_cvar_into(&mut sorted, alpha);
                     EVALUATION_SCRATCH.with(|slot| {
                         slot.borrow_mut().multi_losses = sorted;
                     });
@@ -165,6 +191,18 @@ fn compute_multi_objective_fitness(x: &[f64], mo: &MultiObjectiveData) -> f64 {
     }
 }
 
+fn compute_multi_objective_fitness(x: &[f64], mo: &MultiObjectiveData) -> f64 {
+    let mut losses = EVALUATION_SCRATCH
+        .with(|slot| std::mem::take(&mut slot.borrow_mut().multi_losses));
+    losses.clear();
+    losses.extend(mo.objectives.iter().map(|objective| compute_base_fitness_single(x, objective)));
+    let result = scalarise_losses(&losses, mo);
+    EVALUATION_SCRATCH.with(|slot| {
+        slot.borrow_mut().multi_losses = losses;
+    });
+    result
+}
+
 /// Compute the objective vector used by Pareto optimizers.
 ///
 /// For multi-measurement data this returns the per-measurement losses before
@@ -173,14 +211,21 @@ fn compute_multi_objective_fitness(x: &[f64], mo: &MultiObjectiveData) -> f64 {
 /// penalised scalar loss.
 pub fn compute_pareto_objectives(x: &[f64], data: &ObjectiveData) -> Vec<f64> {
     if let Some(ref mo) = data.multi_objective {
-        let base_scalar = compute_multi_objective_fitness(x, mo);
-        let penalized_scalar = compute_fitness_penalties_ref(x, data);
-        let shared_penalty = (penalized_scalar - base_scalar).max(0.0);
-        return mo
+        // Evaluate each per-measurement loss once; the scalarisation and the
+        // shared penalty are pure reductions over those values, so no
+        // objective is ever evaluated twice for the same `x`.
+        let losses: Vec<f64> = mo
             .objectives
             .iter()
-            .map(|obj| compute_base_fitness_single(x, obj) + shared_penalty)
+            .map(|obj| compute_base_fitness_single(x, obj))
             .collect();
+        let base_scalar = scalarise_losses(&losses, mo);
+        let mut penalized_scalar = base_scalar;
+        for term in penalty_terms(x, data) {
+            penalized_scalar += term;
+        }
+        let shared_penalty = (penalized_scalar - base_scalar).max(0.0);
+        return losses.into_iter().map(|loss| loss + shared_penalty).collect();
     }
 
     vec![compute_fitness_penalties_ref(x, data)]
@@ -436,9 +481,13 @@ pub fn compute_base_fitness(x: &[f64], data: &ObjectiveData) -> f64 {
 ///
 /// Non-mutating version used by optimizers that don't require `&mut` data
 /// (e.g., metaheuristics). Avoids cloning ObjectiveData on every evaluation.
-pub fn compute_fitness_penalties_ref(x: &[f64], data: &ObjectiveData) -> f64 {
-    let fit = compute_base_fitness(x, data);
-
+/// Constraint penalty terms for `x`, in application order.
+///
+/// Returns `[ceiling, spacing, min_gain]`; each entry is `0.0` when its
+/// penalty is disabled or inapplicable. Split out so the Pareto path can add
+/// the shared penalty to precomputed per-objective losses without
+/// re-evaluating any objective.
+fn penalty_terms(x: &[f64], data: &ObjectiveData) -> [f64; 3] {
     // PEQ-specific penalties only apply when the parameter vector has PEQ layout
     // (freq/Q/gain triplets). DriversFlat and MultiSubFlat use a different layout
     // (gains/delays/crossovers) and these penalty functions would misinterpret the values.
@@ -447,24 +496,34 @@ pub fn compute_fitness_penalties_ref(x: &[f64], data: &ObjectiveData) -> f64 {
         LossType::DriversFlat | LossType::MultiSubFlat
     );
 
-    // When penalties are enabled (weights > 0), add them to the base fit so that
-    // optimizers without nonlinear constraints can still respect our limits.
-    let mut penalized = fit;
-
+    let mut terms = [0.0; 3];
     if data.penalty_w_ceiling > 0.0 && is_peq_loss {
         let viol =
             compute_ceiling_violation_into(&data.freqs, x, data.srate, data.peq_model, data.max_db);
-        penalized += data.penalty_w_ceiling * viol * viol;
+        terms[0] = data.penalty_w_ceiling * viol * viol;
     }
 
     if data.penalty_w_spacing > 0.0 && is_peq_loss {
         let viol = viol_spacing_from_xs(x, data.peq_model, data.min_spacing_oct);
-        penalized += data.penalty_w_spacing * viol * viol;
+        terms[1] = data.penalty_w_spacing * viol * viol;
     }
 
     if data.penalty_w_mingain > 0.0 && data.min_db > 0.0 && is_peq_loss {
         let viol = viol_min_gain_from_xs(x, data.peq_model, data.min_db);
-        penalized += data.penalty_w_mingain * viol * viol;
+        terms[2] = data.penalty_w_mingain * viol * viol;
+    }
+
+    terms
+}
+
+pub fn compute_fitness_penalties_ref(x: &[f64], data: &ObjectiveData) -> f64 {
+    let fit = compute_base_fitness(x, data);
+
+    // When penalties are enabled (weights > 0), add them to the base fit so that
+    // optimizers without nonlinear constraints can still respect our limits.
+    let mut penalized = fit;
+    for term in penalty_terms(x, data) {
+        penalized += term;
     }
 
     penalized
@@ -1008,5 +1067,75 @@ mod multi_objective_and_base_fitness_tests {
         assert_eq!(freqs.len(), 2);
         assert_eq!(spacings.len(), 1);
         assert!((spacings[0] - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn pareto_objectives_match_scalarised_plus_shared_penalty() {
+        // compute_pareto_objectives must agree with the scalarised base plus
+        // the shared penalty, while evaluating each objective only once.
+        let mut multi = base_objective(LossType::SpeakerFlat);
+        multi.penalty_w_spacing = 1.0;
+        multi.multi_objective = Some(multi_objective(MultiMeasurementStrategy::VariancePenalized));
+        let objectives = compute_pareto_objectives(&x(), &multi);
+        assert_eq!(objectives.len(), 2);
+        let mo = multi.multi_objective.as_ref().expect("multi objective");
+        let expected_base = compute_multi_objective_fitness(&x(), mo);
+        let expected_penalized = compute_fitness_penalties_ref(&x(), &multi);
+        let shared = (expected_penalized - expected_base).max(0.0);
+        for (i, obj) in mo.objectives.iter().enumerate() {
+            let base = compute_base_fitness_single(&x(), obj);
+            assert!((objectives[i] - (base + shared)).abs() < 1e-12);
+        }
+    }
+}
+
+#[cfg(test)]
+mod fractional_tail_cvar_tests {
+    use super::fractional_tail_cvar_into;
+
+    fn cvar(losses: &[f64], alpha: f64) -> f64 {
+        fractional_tail_cvar_into(losses.to_vec().as_mut_slice(), alpha)
+    }
+
+    #[test]
+    fn noninteger_mass_splits_one_sample_fractionally() {
+        // Descending [10, 0, 0], alpha=0.5 covers mass 1.5: one full sample
+        // plus half of the next, normalised by 1.5.
+        let got = cvar(&[10.0, 0.0, 0.0], 0.5);
+        assert!((got - 20.0 / 3.0).abs() < 1e-12, "got {got}");
+    }
+
+    #[test]
+    fn input_order_does_not_matter() {
+        assert!((cvar(&[0.0, 10.0, 0.0], 0.5) - 20.0 / 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn ties_are_split_invariant() {
+        // Any fractional split of equal values yields the same mean.
+        assert!((cvar(&[5.0, 5.0, 5.0, 1.0], 0.5) - 5.0).abs() < 1e-12);
+        assert!((cvar(&[7.0, 7.0, 7.0], 1.0 / 3.0) - 7.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn alpha_endpoints_are_mean_and_max() {
+        assert!((cvar(&[10.0, 0.0, 0.0], 1.0) - 10.0 / 3.0).abs() < 1e-12);
+        assert!((cvar(&[10.0, 4.0, 0.0], f64::MIN_POSITIVE) - 10.0).abs() < 1e-12);
+        assert!((cvar(&[10.0, 4.0, 0.0], 0.0) - 10.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn integer_mass_matches_whole_sample_mean() {
+        // alpha*N = 2 exactly: mean of the two worst.
+        assert!((cvar(&[9.0, 7.0, 1.0, 0.0], 0.5) - 8.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn degenerate_inputs_stay_worst_case() {
+        assert_eq!(cvar(&[], 0.5), f64::INFINITY);
+        assert_eq!(cvar(&[f64::INFINITY, 1.0], 0.5), f64::INFINITY);
+        // NaN in the tail surfaces as worst-case, never as NaN.
+        let got = cvar(&[f64::NAN, 1.0, 0.0], 0.5);
+        assert!(got.is_infinite() && got > 0.0, "got {got}");
     }
 }

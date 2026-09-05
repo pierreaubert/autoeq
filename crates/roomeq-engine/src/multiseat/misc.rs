@@ -113,19 +113,6 @@ pub(super) fn violation_rms_db<I: IntoIterator<Item = f64>>(violations: I) -> f6
     }
 }
 
-pub(super) fn single_seat_flatness(combined: &[Vec<f64>]) -> f64 {
-    // `combined` from `compute_combined_responses` is `[seat][freq]`; we
-    // built it with seat-count = 1, so take seat 0 and compute the std of SPL.
-    if combined.is_empty() || combined[0].is_empty() {
-        return f64::INFINITY;
-    }
-    let row = &combined[0];
-    let n = row.len() as f64;
-    let mean: f64 = row.iter().sum::<f64>() / n;
-    let variance: f64 = row.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
-    variance.sqrt()
-}
-
 /// Seeded Sobol points in `[0, 1)^D` for the dimensions supported by the
 /// continuous-listening-area dispatcher.
 pub(super) fn sobol_unit<const D: usize>(num_points: usize, seed: u64) -> Vec<[f64; D]> {

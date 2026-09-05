@@ -1,5 +1,8 @@
 use super::spacing::print_freq_spacing;
-use autoeq::optim::{self, ObjectiveData};
+use autoeq::optim::{
+    self, ObjectiveData, OptimizerBackend, OptimizerConfidence, OptimizerRunEvidence,
+    RealOptimizerBackend,
+};
 use std::error::Error;
 
 /// Struct to hold optimization results including convergence status
@@ -8,6 +11,14 @@ pub(super) struct OptimizationResult {
     pub(super) converged: bool,
     pub(super) pre_objective: Option<f64>,
     pub(super) post_objective: Option<f64>,
+    /// Structured per-invocation evidence, global first and local
+    /// refinement second when `refine` is enabled.
+    ///
+    /// Additive contract for QA tooling in other crates:
+    /// `selected_for_output` marks the invocation that supplied
+    /// `params`/`post_objective`. Superseded passes remain for diagnosis
+    /// but must not be treated as production-acceptance inputs.
+    pub(super) optimizer_evidence: Vec<OptimizerRunEvidence>,
 }
 
 pub(super) fn perform_optimization(
@@ -22,6 +33,21 @@ pub(super) fn perform_optimization_with_bounds(
     objective_data: &ObjectiveData,
     bounds: Option<(Vec<f64>, Vec<f64>)>,
 ) -> Result<OptimizationResult, Box<dyn Error>> {
+    perform_optimization_with_backend(params, objective_data, bounds, &RealOptimizerBackend::new())
+}
+
+/// Backend-injectable optimization driver.
+///
+/// Production callers pass [`RealOptimizerBackend`]; tests inject
+/// [`autoeq::optim::MockOptimizerBackend`] (or a local fake) for
+/// deterministic coverage of the refinement-acceptance policy without
+/// running a stochastic search.
+pub(super) fn perform_optimization_with_backend(
+    params: &autoeq::OptimParams,
+    objective_data: &ObjectiveData,
+    bounds: Option<(Vec<f64>, Vec<f64>)>,
+    backend: &dyn OptimizerBackend,
+) -> Result<OptimizationResult, Box<dyn Error>> {
     let (lower_bounds, upper_bounds) =
         bounds.unwrap_or_else(|| autoeq::workflow::setup_bounds(params));
 
@@ -34,23 +60,26 @@ pub(super) fn perform_optimization_with_bounds(
     };
 
     // Calculate pre-optimization objective value
-    let pre_objective = Some(autoeq::optim::compute_fitness_penalties_ref(
-        &x,
-        objective_data,
-    ));
+    let pre_objective = Some(optim::compute_fitness_penalties_ref(&x, objective_data));
 
-    let result = optim::optimize_filters(
+    let global_result = backend.optimize_filters(
         &mut x,
         &lower_bounds,
         &upper_bounds,
         objective_data.clone(),
         params,
     );
+    let global_evidence = OptimizerRunEvidence::from_backend_result(
+        &params.algo,
+        global_result.clone(),
+        &x,
+        &lower_bounds,
+        &upper_bounds,
+        params.maxeval,
+        params.seed,
+    );
 
-    let mut converged: bool;
-    let mut post_objective: Option<f64>;
-
-    match result {
+    match &global_result {
         Ok((status, val)) => {
             if !params.quiet {
                 log::debug!(
@@ -59,21 +88,39 @@ pub(super) fn perform_optimization_with_bounds(
                     val
                 );
             }
-            converged = true;
-            post_objective = Some(val);
-            if !params.quiet && objective_data.loss_type != autoeq::LossType::DriversFlat {
-                print_freq_spacing(&x, params, "global");
-            }
         }
         Err((e, final_value)) => {
             eprintln!("❌ Optimization failed: {:?}", e);
             eprintln!("   - Final Mean Squared Error: {:.6}", final_value);
-            return Err(std::io::Error::other(e).into());
+            return Err(std::io::Error::other(e.clone()).into());
+        }
+    };
+    let global_loss = match global_evidence.objective {
+        Some(val) => val,
+        None => {
+            return Err(std::io::Error::other(format!(
+                "global optimizer returned a non-finite objective ({})",
+                global_evidence.status
+            ))
+            .into());
         }
     };
 
+    let mut converged = true;
+    let mut post_objective = Some(global_loss);
+    let mut optimizer_evidence = vec![global_evidence];
+
+    if !params.quiet && objective_data.loss_type != autoeq::LossType::DriversFlat {
+        print_freq_spacing(&x, params, "global");
+    }
+
     if params.refine {
-        let result = optim::optimize_filters_with_algo_override(
+        // Snapshot the global result before handing the vector to the
+        // local optimizer: local methods are not guaranteed to improve
+        // their input, so a regressing (or failing) refinement must roll
+        // back instead of overwriting the usable global result.
+        let x_before_refine = x.clone();
+        let local_result = backend.optimize_filters_with_algo_override(
             &mut x,
             &lower_bounds,
             &upper_bounds,
@@ -81,7 +128,16 @@ pub(super) fn perform_optimization_with_bounds(
             params,
             Some(&params.local_algo),
         );
-        match result {
+        let mut local_evidence = OptimizerRunEvidence::from_backend_result(
+            &params.local_algo,
+            local_result.clone(),
+            &x,
+            &lower_bounds,
+            &upper_bounds,
+            params.maxeval,
+            params.seed,
+        );
+        match &local_result {
             Ok((local_status, local_val)) => {
                 if !params.quiet {
                     log::debug!(
@@ -91,26 +147,56 @@ pub(super) fn perform_optimization_with_bounds(
                         local_val
                     );
                 }
-                // Update convergence status based on local refinement
-                converged = true;
-                post_objective = Some(local_val);
-                if !params.quiet && objective_data.loss_type != autoeq::LossType::DriversFlat {
-                    print_freq_spacing(&x, params, "local");
-                    autoeq::x2peq::peq_print_from_x(&x, params.sample_rate, params.peq_model);
-                }
             }
             Err((e, final_value)) => {
+                // Transport-level failure keeps the usable global result
+                // instead of discarding it (previous behavior returned Err).
                 eprintln!("⚠️  Local refinement failed: {:?}", e);
                 eprintln!("   - Final Mean Squared Error: {:.6}", final_value);
-                return Err(std::io::Error::other(e).into());
             }
         }
-    };
+        let local_loss = local_evidence.objective.unwrap_or(f64::INFINITY);
+        // Selection policy (mirrors the guarded RoomEQ refinement in
+        // roomeq-engine `eq::optimize`): accept only a usable (finite and
+        // in-bounds, i.e. confidence better than `Unusable`) refinement
+        // that strictly improves the chosen scalar objective.
+        let use_local = local_evidence.confidence != OptimizerConfidence::Unusable
+            && local_loss < global_loss;
+        local_evidence.selected_for_output = use_local;
+        if use_local {
+            if !params.quiet {
+                log::debug!(
+                    "✅ Local refinement improved objective {:.6} -> {:.6}",
+                    global_loss,
+                    local_loss
+                );
+            }
+            // Update convergence status based on local refinement
+            converged = true;
+            post_objective = Some(local_loss);
+            if !params.quiet && objective_data.loss_type != autoeq::LossType::DriversFlat {
+                print_freq_spacing(&x, params, "local");
+                autoeq::x2peq::peq_print_from_x(&x, params.sample_rate, params.peq_model);
+            }
+        } else {
+            if !params.quiet {
+                log::debug!(
+                    "Local refinement did not improve ({:.6} -> {:.6}), keeping global result",
+                    global_loss,
+                    local_loss
+                );
+            }
+            x.clone_from(&x_before_refine);
+        }
+        optimizer_evidence[0].selected_for_output = !use_local;
+        optimizer_evidence.push(local_evidence);
+    }
 
     Ok(OptimizationResult {
         params: x,
         converged,
         pre_objective,
         post_objective,
+        optimizer_evidence,
     })
 }

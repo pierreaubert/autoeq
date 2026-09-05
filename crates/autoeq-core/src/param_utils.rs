@@ -467,6 +467,122 @@ mod tests {
     }
 
     #[test]
+    fn peq_layout_round_trip_holds_for_all_models() {
+        let models = [
+            PeqModel::Pk,
+            PeqModel::HpPk,
+            PeqModel::HpPkLp,
+            PeqModel::LsPk,
+            PeqModel::LsPkHs,
+            PeqModel::FreePkFree,
+            PeqModel::Free,
+        ];
+        for model in models {
+            let ppf = model.params_per_filter();
+            let layout = model.layout();
+            let max_idx = layout.freq_idx.max(layout.q_idx).max(layout.gain_idx).max(
+                layout.type_idx.unwrap_or(0),
+            );
+            assert_eq!(max_idx + 1, ppf, "{model:?}");
+            let filters = 3;
+            let mut x = vec![0.0; ppf * filters];
+            for i in 0..filters {
+                let params = FilterParams {
+                    filter_type: model
+                        .layout()
+                        .type_idx
+                        .map(|_| (i as f64) % 12.0),
+                    freq: 2.0 + i as f64 * 0.25,
+                    q: 1.0 + i as f64 * 0.5,
+                    gain: -2.0 + i as f64,
+                };
+                model.set_filter_params(&mut x, i, &params);
+                let back = model.get_filter_params(&x, i);
+                assert_eq!(back.freq, params.freq, "{model:?} filter {i}");
+                assert_eq!(back.q, params.q, "{model:?} filter {i}");
+                assert_eq!(back.gain, params.gain, "{model:?} filter {i}");
+                assert_eq!(back.filter_type, params.filter_type, "{model:?} filter {i}");
+            }
+            assert_eq!(model.num_filters(&x), filters);
+            // Appending the same groups rebuilds an identical vector.
+            let mut rebuilt = Vec::new();
+            for i in 0..filters {
+                model.append_filter_params(&mut rebuilt, &model.get_filter_params(&x, i));
+            }
+            assert_eq!(rebuilt, x, "{model:?}");
+        }
+    }
+
+    #[test]
+    fn peq_layout_vector_lengths_follow_params_per_filter() {
+        for model in [PeqModel::Pk, PeqModel::Free] {
+            let ppf = model.params_per_filter();
+            for filters in [1_usize, 2, 5, 16] {
+                let x = vec![0.0; ppf * filters];
+                assert_eq!(model.num_filters(&x), filters, "{model:?}");
+                // Trailing partial group is truncated by integer division.
+                let partial = vec![0.0; ppf * filters + (ppf - 1)];
+                assert_eq!(model.num_filters(&partial), filters, "{model:?}");
+            }
+            assert_eq!(model.num_filters(&[]), 0, "{model:?}");
+        }
+    }
+
+    #[test]
+    fn peq_layout_nyquist_adjacent_frequencies_round_trip() {
+        // Nyquist-adjacent log10 frequencies must survive get/set exactly.
+        for nyquist in [20_000.0_f64, 22_050.0, 24_000.0] {
+            let log_freq = nyquist.log10();
+            assert!((freq_from_log10(log_freq) - nyquist).abs() < 1e-9);
+            for model in [PeqModel::Pk, PeqModel::Free] {
+                let ppf = model.params_per_filter();
+                let mut x = vec![0.0; ppf];
+                model.set_filter_params(
+                    &mut x,
+                    0,
+                    &FilterParams {
+                        filter_type: model.layout().type_idx.map(|_| 0.0),
+                        freq: log_freq,
+                        q: 0.7,
+                        gain: 3.0,
+                    },
+                );
+                let back = model.get_filter_params(&x, 0);
+                assert!((freq_from_log10(back.freq) - nyquist).abs() < 1e-9);
+            }
+        }
+    }
+
+    #[test]
+    fn peq_layout_encode_decode_round_trip_for_all_types() {
+        let filter_types = [
+            BiquadFilterType::Peak,
+            BiquadFilterType::Lowpass,
+            BiquadFilterType::Highpass,
+            BiquadFilterType::Lowshelf,
+            BiquadFilterType::Highshelf,
+            BiquadFilterType::HighpassVariableQ,
+            BiquadFilterType::Bandpass,
+            BiquadFilterType::Notch,
+            BiquadFilterType::AllPass,
+            BiquadFilterType::LowshelfOrf,
+            BiquadFilterType::HighshelfOrf,
+            BiquadFilterType::PeakMatched,
+        ];
+        for filter_type in filter_types {
+            let encoded = encode_filter_type(filter_type);
+            assert_eq!(decode_filter_type(encoded), filter_type);
+            // Mid-bin values decode to the same type (fractional part < 1).
+            assert_eq!(decode_filter_type(encoded + 0.5), filter_type);
+        }
+        let (lower, upper) = filter_type_bounds();
+        for filter_type in filter_types {
+            let encoded = encode_filter_type(filter_type);
+            assert!(encoded >= lower && encoded <= upper);
+        }
+    }
+
+    #[test]
     fn initial_filter_centers_are_distributed_in_log_frequency() {
         let lower = [20.0_f64.log10(), 0.5, -12.0];
         let upper = [20_000.0_f64.log10(), 10.0, 6.0];

@@ -601,13 +601,31 @@ pub(super) fn run_multiseat_phase_control_guard() -> TestResult {
     }
 }
 
+/// Number of engine-backed guards before the registry decision matrix. The
+/// strategy match names every variant, so the guard list invokes every
+/// discrete variant here; `ContinuousArea` is invoked through the
+/// registry-backed continuous decision cases instead (the discrete entry
+/// point rejects it by design).
+pub(super) const BASE_MULTISEAT_GUARDS: usize = 6;
+
 pub(super) fn run_multiseat_api_guard_tests() -> Vec<TestResult> {
-    vec![
+    let mut guards = vec![
         run_multiseat_missing_phase_guard(),
+        run_multiseat_strategy_metric_guard(MultiSeatStrategy::MinimizeVariance),
         run_multiseat_strategy_metric_guard(MultiSeatStrategy::Average),
         run_multiseat_strategy_metric_guard(MultiSeatStrategy::PrimaryWithConstraints),
+        run_multiseat_strategy_metric_guard(MultiSeatStrategy::ModalBasis),
         run_multiseat_phase_control_guard(),
-    ]
+    ];
+    guards.extend(super::decision::run_release_decision_matrix());
+    guards
+}
+
+/// Guard total without running anything, for the matrix printout. Must stay
+/// equal to `run_multiseat_api_guard_tests().len()` (covered by unit test).
+pub(super) fn multiseat_api_guard_test_count() -> usize {
+    BASE_MULTISEAT_GUARDS
+        + super::decision::release_decision_case_count(crate::registry::QaTier::Pr)
 }
 
 pub(super) fn report_multiseat_api_guard_tests() -> Result<bool> {

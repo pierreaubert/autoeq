@@ -23,11 +23,189 @@ use std::path::PathBuf;
 
 // Use the library types
 use roomeq_engine::{PipelineControl, PipelineEvent, PipelineObserver};
+use roomeq_export::external_export_supported;
 use roomeq_model::{DspChainOutput, MeasurementRef, MeasurementSource, RoomConfig, SpeakerConfig};
 use roomeq_workflow::{
-    DEFAULT_FREQUENCY_SAMPLES, ExportFormat, RoomPipeline, RoomPipelineRequest,
-    export_dsp_chain_with_convolution_sidecars, load_config_with_frequency_samples, save_dsp_chain,
+    ChannelOptimizationResult, DEFAULT_FREQUENCY_SAMPLES, ExportFormat, RoomOptimizationResult,
+    RoomPipeline, RoomPipelineRequest, export_dsp_chain_with_convolution_sidecars,
+    load_config_with_frequency_samples, save_dsp_chain,
 };
+
+/// Version of the [`RunManifest`] schema written next to every pipeline output.
+const RUN_MANIFEST_VERSION: u32 = 1;
+
+/// Completion status recorded in [`RunManifest::status`].
+const RUN_STATUS_COMPLETE: &str = "complete";
+/// Completion status when the native graph is valid but a secondary step failed.
+const RUN_STATUS_PARTIAL: &str = "partial";
+
+/// Transactional completion marker for one CLI pipeline run.
+///
+/// The native DSP graph is always written first and is never deleted when a
+/// secondary external export fails. This manifest records which assets are
+/// valid and who owns them, so a stale or partial export file can never be
+/// mistaken for a complete run.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct RunManifest {
+    /// Schema version ([`RUN_MANIFEST_VERSION`]).
+    version: u32,
+    /// `"complete"` or `"partial"` (see [`RUN_STATUS_COMPLETE`]).
+    status: String,
+    /// Sample rate the filters were designed for.
+    sample_rate: f64,
+    /// Native DSP graph asset; always valid once this manifest exists.
+    native_graph: PathBuf,
+    /// Requested external export format, if any.
+    export_format: Option<String>,
+    /// Requested external export path, if any.
+    export_path: Option<PathBuf>,
+    /// Export outcome: `"saved"`, `"failed"`, `"unsupported"`, or `None`
+    /// when no export was requested.
+    export_status: Option<String>,
+    /// Export failure detail, if any.
+    export_error: Option<String>,
+    /// Exact asset ownership: every file this run claims as its output.
+    /// A failed export path is deliberately absent here.
+    assets_owned: Vec<PathBuf>,
+}
+
+/// Manifest sidecar path for a pipeline output (e.g. `dsp.json` -> `dsp.manifest.json`).
+fn manifest_path_for(output_path: &std::path::Path) -> PathBuf {
+    output_path.with_extension("manifest.json")
+}
+
+/// Persist a run manifest; returns the path written.
+fn write_run_manifest(
+    output_path: &std::path::Path,
+    manifest: &RunManifest,
+) -> Result<PathBuf> {
+    let path = manifest_path_for(output_path);
+    let json = serde_json::to_string_pretty(manifest)?;
+    std::fs::write(&path, json)
+        .with_context(|| format!("Failed to write run manifest to {:?}", path))?;
+    Ok(path)
+}
+
+/// Persist a run manifest without failing an otherwise good run.
+fn persist_run_manifest_best_effort(output_path: &std::path::Path, manifest: &RunManifest) {
+    if let Err(error) = write_run_manifest(output_path, manifest) {
+        warn!("Failed to write run manifest: {:#}", error);
+    }
+}
+
+/// Explicit partial-success diagnostic: the native graph is valid, the
+/// secondary export is not, and the export path must not be trusted.
+fn partial_export_diagnostic(
+    native_path: &std::path::Path,
+    format: ExportFormat,
+    export_path: &std::path::Path,
+    error: &anyhow::Error,
+) -> String {
+    format!(
+        "PARTIAL SUCCESS: native DSP graph saved to {:?} and remains valid; \
+external export ({:?}) to {:?} FAILED: {:#}. \
+Do not mistake the export output for a complete export; see the run manifest next to the native graph.",
+        native_path, format, export_path, error
+    )
+}
+
+/// Human-readable run summary lines: average scores plus worst-channel,
+/// primary-seat, and objective/confidence evidence.
+fn summarize_run(
+    result: &RoomOptimizationResult,
+    config: &RoomConfig,
+    sample_rate: f64,
+) -> Vec<String> {
+    let mut lines = vec![format!(
+        "Average pre-score: {:.4}, post-score: {:.4}",
+        result.combined_pre_score, result.combined_post_score
+    )];
+    if let Some((name, channel)) = worst_channel(&result.channel_results) {
+        lines.push(format!(
+            "Worst channel '{}': pre-score {:.4}, post-score {:.4}",
+            name, channel.pre_score, channel.post_score
+        ));
+        lines.push(format!(
+            "Worst-channel evidence: algorithm {}, objective {}, confidence {:?}, converged {}",
+            channel_evidence_algorithm(channel),
+            channel_evidence_objective(channel),
+            channel_evidence_confidence(channel),
+            channel_evidence_converged(channel),
+        ));
+    }
+    if let Some(multi_seat) = config.optimizer.multi_seat.as_ref()
+        && multi_seat.enabled
+    {
+        lines.push(format!(
+            "Primary seat: index {} (multi-seat strategy {:?})",
+            multi_seat.primary_seat, multi_seat.strategy
+        ));
+    }
+    let (converged, total) = evidence_convergence(&result.channel_results);
+    lines.push(format!(
+        "Optimizer evidence: {converged}/{total} channels converged"
+    ));
+    lines.push(format!(
+        "Run contract: sample_rate {sample_rate} Hz; calibration, latency and headroom \
+carried in the DSP output metadata unchanged"
+    ));
+    lines
+}
+
+/// Channel with the highest (worst) post-score, if any.
+fn worst_channel(
+    channels: &std::collections::HashMap<String, ChannelOptimizationResult>,
+) -> Option<(&String, &ChannelOptimizationResult)> {
+    channels
+        .iter()
+        .max_by(|a, b| a.1.post_score.total_cmp(&b.1.post_score))
+}
+
+/// Most representative optimizer evidence for a channel: the pass selected
+/// for output, falling back to the latest recorded pass.
+fn selected_evidence(
+    channel: &ChannelOptimizationResult,
+) -> Option<&roomeq_engine::OptimizerRunEvidence> {
+    channel
+        .optimizer_evidence
+        .iter()
+        .rfind(|evidence| evidence.selected_for_output)
+        .or(channel.optimizer_evidence.last())
+}
+
+fn channel_evidence_algorithm(channel: &ChannelOptimizationResult) -> String {
+    selected_evidence(channel)
+        .map(|evidence| evidence.algorithm.clone())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn channel_evidence_objective(channel: &ChannelOptimizationResult) -> String {
+    selected_evidence(channel)
+        .and_then(|evidence| evidence.objective)
+        .map(|objective| format!("{objective:.6}"))
+        .unwrap_or_else(|| "n/a".to_string())
+}
+
+fn channel_evidence_confidence(channel: &ChannelOptimizationResult) -> String {
+    selected_evidence(channel)
+        .map(|evidence| format!("{:?}", evidence.confidence))
+        .unwrap_or_else(|| "n/a".to_string())
+}
+
+fn channel_evidence_converged(channel: &ChannelOptimizationResult) -> bool {
+    selected_evidence(channel).is_some_and(|evidence| evidence.converged)
+}
+
+fn evidence_convergence(
+    channels: &std::collections::HashMap<String, ChannelOptimizationResult>,
+) -> (usize, usize) {
+    let total = channels.len();
+    let converged = channels
+        .values()
+        .filter(|channel| channel_evidence_converged(channel))
+        .count();
+    (converged, total)
+}
 
 fn parse_frequency_samples(value: &str) -> std::result::Result<usize, String> {
     let samples = value
@@ -277,11 +455,11 @@ fn execute_optimization(
     .map_err(|e| anyhow!("{}", e))
     .with_context(|| "Room optimization failed")?;
 
-    // Log summary
-    info!(
-        "Average pre-score: {:.4}, post-score: {:.4}",
-        result.combined_pre_score, result.combined_post_score
-    );
+    // Log summary: averages plus worst-channel, primary-seat and
+    // objective/confidence evidence.
+    for line in summarize_run(&result, &room_config, sample_rate) {
+        info!("{}", line);
+    }
 
     // Save output
     info!("Saving DSP chain to {:?}", output_path);
@@ -298,21 +476,88 @@ fn execute_optimization(
         .map_err(|e| anyhow!("{}", e))
         .with_context(|| format!("Failed to save DSP chain to {:?}", output_path))?;
 
-    // Export to external format if requested
+    // Export to external format if requested. The native graph above stays
+    // valid whatever happens below: it is never deleted on export failure.
     if let Some(format) = export_format {
         let path = export_path.unwrap_or_else(|| format.default_export_path(&output_path));
         let source_dir = output_path
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."));
         info!("Exporting DSP chain to {:?} ({:?})", path, format);
-        export_dsp_chain_with_convolution_sidecars(
-            &dsp_output,
-            format,
-            &path,
-            sample_rate,
-            source_dir,
-        )?;
-        info!("Exported to {:?}", path);
+        // Pre-check support against the realized graph first: the exporter
+        // cannot recover support already lost in measurement alignment, so a
+        // limitation surfaces here instead of as a mid-write failure.
+        let export_outcome = match external_export_supported(&dsp_output, format) {
+            Ok(()) => export_dsp_chain_with_convolution_sidecars(
+                &dsp_output,
+                format,
+                &path,
+                sample_rate,
+                source_dir,
+            ),
+            Err(error) => Err(error.context(format!(
+                "external export format {format:?} is not supported by the realized DSP graph"
+            ))),
+        };
+        match export_outcome {
+            Ok(()) => {
+                info!("Exported to {:?}", path);
+                persist_run_manifest_best_effort(
+                    &output_path,
+                    &RunManifest {
+                        version: RUN_MANIFEST_VERSION,
+                        status: RUN_STATUS_COMPLETE.to_string(),
+                        sample_rate,
+                        native_graph: output_path.clone(),
+                        export_format: Some(format!("{format:?}")),
+                        export_path: Some(path.clone()),
+                        export_status: Some("saved".to_string()),
+                        export_error: None,
+                        assets_owned: vec![output_path.clone(), manifest_path_for(&output_path), path],
+                    },
+                );
+            }
+            Err(error) => {
+                let diagnostic =
+                    partial_export_diagnostic(&output_path, format, &path, &error);
+                // Record the partial run: the native graph is owned and valid,
+                // the export path is deliberately absent from asset ownership.
+                persist_run_manifest_best_effort(
+                    &output_path,
+                    &RunManifest {
+                        version: RUN_MANIFEST_VERSION,
+                        status: RUN_STATUS_PARTIAL.to_string(),
+                        sample_rate,
+                        native_graph: output_path.clone(),
+                        export_format: Some(format!("{format:?}")),
+                        export_path: Some(path),
+                        export_status: Some("failed".to_string()),
+                        export_error: Some(format!("{error:#}")),
+                        assets_owned: vec![
+                            output_path.clone(),
+                            manifest_path_for(&output_path),
+                        ],
+                    },
+                );
+                warn!("{}", diagnostic);
+                return Err(error).with_context(|| diagnostic);
+            }
+        }
+    } else {
+        persist_run_manifest_best_effort(
+            &output_path,
+            &RunManifest {
+                version: RUN_MANIFEST_VERSION,
+                status: RUN_STATUS_COMPLETE.to_string(),
+                sample_rate,
+                native_graph: output_path.clone(),
+                export_format: None,
+                export_path: None,
+                export_status: None,
+                export_error: None,
+                assets_owned: vec![output_path.clone(), manifest_path_for(&output_path)],
+            },
+        );
     }
 
     info!("Done!");
@@ -488,7 +733,10 @@ fn collect_measurement_paths(speaker_config: &SpeakerConfig) -> Vec<std::path::P
 mod tests {
     use clap::Parser;
 
-    use super::{Args, strict_input_schema};
+    use super::{
+        Args, RunManifest, manifest_path_for, partial_export_diagnostic, strict_input_schema,
+        write_run_manifest,
+    };
 
     #[test]
     fn schema_input_succeeds() {
@@ -529,6 +777,90 @@ mod tests {
     fn frequency_sample_option_rejects_zero() {
         let args = Args::try_parse_from(["roomeq", "--schema", "input", "--freq-samples", "0"]);
         assert!(args.is_err());
+    }
+
+    #[test]
+    fn manifest_path_sits_next_to_native_graph() {
+        let path = manifest_path_for(std::path::Path::new("/tmp/run/dsp.json"));
+        assert_eq!(path, std::path::PathBuf::from("/tmp/run/dsp.manifest.json"));
+    }
+
+    #[test]
+    fn complete_manifest_owns_native_graph_manifest_and_export() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let output = dir.path().join("dsp.json");
+        std::fs::write(&output, "{}").expect("write native graph");
+        let manifest = RunManifest {
+            version: super::RUN_MANIFEST_VERSION,
+            status: super::RUN_STATUS_COMPLETE.to_string(),
+            sample_rate: 48000.0,
+            native_graph: output.clone(),
+            export_format: Some("CamillaDsp".to_string()),
+            export_path: Some(dir.path().join("room_eq_cdsp.yaml")),
+            export_status: Some("saved".to_string()),
+            export_error: None,
+            assets_owned: vec![
+                output.clone(),
+                manifest_path_for(&output),
+                dir.path().join("room_eq_cdsp.yaml"),
+            ],
+        };
+        let written = write_run_manifest(&output, &manifest).expect("write manifest");
+        assert!(written.is_file(), "manifest output file must exist");
+        let roundtrip: RunManifest =
+            serde_json::from_str(&std::fs::read_to_string(&written).expect("read manifest"))
+                .expect("parse manifest");
+        assert_eq!(roundtrip.status, "complete");
+        assert_eq!(roundtrip.assets_owned.len(), 3);
+        assert!(roundtrip.export_error.is_none());
+    }
+
+    #[test]
+    fn partial_manifest_excludes_failed_export_from_ownership() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let output = dir.path().join("dsp.json");
+        std::fs::write(&output, "{}").expect("write native graph");
+        let manifest = RunManifest {
+            version: super::RUN_MANIFEST_VERSION,
+            status: super::RUN_STATUS_PARTIAL.to_string(),
+            sample_rate: 48000.0,
+            native_graph: output.clone(),
+            export_format: Some("CamillaDsp".to_string()),
+            export_path: Some(dir.path().join("room_eq_cdsp.yaml")),
+            export_status: Some("failed".to_string()),
+            export_error: Some("boom".to_string()),
+            assets_owned: vec![output.clone(), manifest_path_for(&output)],
+        };
+        let written = write_run_manifest(&output, &manifest).expect("write manifest");
+        // The good native graph is still on disk; only ownership is narrowed.
+        assert!(output.is_file(), "native graph must survive a failed export");
+        let roundtrip: RunManifest =
+            serde_json::from_str(&std::fs::read_to_string(&written).expect("read manifest"))
+                .expect("parse manifest");
+        assert_eq!(roundtrip.status, "partial");
+        assert!(
+            !roundtrip.assets_owned.iter().any(|asset| {
+                asset
+                    .extension()
+                    .is_some_and(|extension| extension == "yaml")
+            }),
+            "failed export must not be owned"
+        );
+    }
+
+    #[test]
+    fn partial_diagnostic_names_valid_graph_and_untrusted_export() {
+        let error = anyhow::anyhow!("disk full");
+        let text = partial_export_diagnostic(
+            std::path::Path::new("dsp.json"),
+            roomeq_workflow::ExportFormat::CamillaDsp,
+            std::path::Path::new("room_eq_cdsp.yaml"),
+            &error,
+        );
+        assert!(text.contains("PARTIAL SUCCESS"), "{text}");
+        assert!(text.contains("dsp.json"), "{text}");
+        assert!(text.contains("room_eq_cdsp.yaml"), "{text}");
+        assert!(text.contains("disk full"), "{text}");
     }
 
     #[test]

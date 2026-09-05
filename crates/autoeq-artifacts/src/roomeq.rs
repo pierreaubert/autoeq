@@ -176,6 +176,128 @@ pub fn reserve_convolution_artifact(
     }
 }
 
+/// Identity of a persisted convolution artifact.
+///
+/// Binds the logical source (channel name, artifact kind, rounded sample
+/// rate) to the exact bytes written, so a consumer can detect a
+/// wrong-channel or overwritten asset instead of trusting a sanitized
+/// filename alone. `content_hash` is a non-cryptographic FNV-1a fingerprint
+/// used for change detection within a run, not a security digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConvolutionArtifactIdentity {
+    channel_name: String,
+    kind: ConvolutionArtifactKind,
+    sample_rate_hz: u32,
+    content_len: u64,
+    content_hash: u64,
+    filename: String,
+}
+
+impl ConvolutionArtifactIdentity {
+    /// Logical channel name the artifact was generated for.
+    pub fn channel_name(&self) -> &str {
+        &self.channel_name
+    }
+
+    /// Artifact kind the bytes were generated as.
+    pub fn kind(&self) -> ConvolutionArtifactKind {
+        self.kind
+    }
+
+    /// Rounded sample rate the bytes were rendered at.
+    pub fn sample_rate_hz(&self) -> u32 {
+        self.sample_rate_hz
+    }
+
+    /// Byte length of the content this identity was taken over.
+    pub fn content_len(&self) -> u64 {
+        self.content_len
+    }
+
+    /// FNV-1a fingerprint of the content this identity was taken over.
+    pub fn content_hash(&self) -> u64 {
+        self.content_hash
+    }
+
+    /// File name this identity belongs to (owned reservation filename).
+    pub fn filename(&self) -> &str {
+        &self.filename
+    }
+
+    /// Relative path of the artifact: exactly `filename`, never an absolute
+    /// path and never containing a parent separator. Relative-path rule:
+    /// sidecar references must store this relative form; absolute paths are
+    /// a caller-local resolution and must not be persisted.
+    pub fn relative_path(&self) -> PathBuf {
+        PathBuf::from(&self.filename)
+    }
+
+    /// Resolve the relative path inside `output_dir`.
+    ///
+    /// Ownership rule: a reservation token owns its placeholder path until it
+    /// is persisted or abandoned. Callers must only read or publish the
+    /// resolved path while holding the matching [`ReservedConvolutionArtifact`]
+    /// or after it reports persisted; otherwise the file may belong to a
+    /// newer reservation that reused the name.
+    pub fn resolve(&self, output_dir: &Path) -> PathBuf {
+        output_dir.join(&self.filename)
+    }
+
+    /// Check `contents` against this identity without touching the filesystem.
+    pub fn matches_bytes(&self, contents: &[u8]) -> bool {
+        self.content_len == contents.len() as u64
+            && self.content_hash == fingerprint_bytes(contents)
+    }
+
+    /// Check the file at `path` against this identity.
+    ///
+    /// Returns `Ok(false)` when the file is missing or differs, so a stale or
+    /// replaced asset reads as a mismatch rather than an error at the call
+    /// site; other I/O failures are returned.
+    pub fn verify_file(&self, path: &Path) -> io::Result<bool> {
+        match std::fs::read(path) {
+            Ok(bytes) => Ok(self.matches_bytes(&bytes)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+/// Describe the exact bytes intended for `reservation`.
+///
+/// The returned identity binds `channel_name`, `kind` and `sample_rate` to
+/// `contents` and to the reservation's claimed filename, closing the gap
+/// where a sanitized filename alone could alias two distinct sources (e.g.
+/// colliding channel names or a re-render at a different rate reusing a
+/// `_NNN` slot after an abandon).
+pub fn identify_reservation_contents(
+    reservation: &ReservedConvolutionArtifact,
+    channel_name: &str,
+    kind: ConvolutionArtifactKind,
+    sample_rate: f64,
+    contents: &[u8],
+) -> ConvolutionArtifactIdentity {
+    ConvolutionArtifactIdentity {
+        channel_name: channel_name.to_string(),
+        kind,
+        sample_rate_hz: sample_rate.round().max(1.0) as u32,
+        content_len: contents.len() as u64,
+        content_hash: fingerprint_bytes(contents),
+        filename: reservation.filename().to_string(),
+    }
+}
+
+fn fingerprint_bytes(contents: &[u8]) -> u64 {
+    const OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const PRIME: u64 = 0x100000001b3;
+    let mut hash = OFFSET_BASIS;
+    for byte in contents {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    hash
+}
+
 static RESERVATION_TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn persist_atomically(dest: &Path, contents: &[u8]) -> io::Result<()> {
@@ -387,5 +509,73 @@ mod tests {
             std::fs::read(dir.path().join("L_fir_48000hz.wav")).unwrap(),
             b"old"
         );
+    }
+
+    #[test]
+    fn identity_binds_source_and_exact_contents() {
+        let dir = tempfile::tempdir().unwrap();
+        let reservation =
+            reserve_convolution_artifact(dir.path(), "L", ConvolutionArtifactKind::Fir, 48_000.0)
+                .unwrap();
+        let identity = identify_reservation_contents(
+            &reservation,
+            "L",
+            ConvolutionArtifactKind::Fir,
+            48_000.0,
+            b"rendered-fir",
+        );
+        assert_eq!(identity.channel_name(), "L");
+        assert_eq!(identity.kind(), ConvolutionArtifactKind::Fir);
+        assert_eq!(identity.sample_rate_hz(), 48_000);
+        assert_eq!(identity.filename(), reservation.filename());
+        assert!(identity.matches_bytes(b"rendered-fir"));
+        // Same filename inputs but different bytes must not match.
+        assert!(!identity.matches_bytes(b"rendered-fir!"));
+        assert!(!identity.matches_bytes(b""));
+    }
+
+    #[test]
+    fn identity_verifies_persisted_file_and_rejects_replacement() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut reservation =
+            reserve_convolution_artifact(dir.path(), "L", ConvolutionArtifactKind::Fir, 48_000.0)
+                .unwrap();
+        reservation.persist_bytes(b"v1").unwrap();
+        let path = reservation.path().to_path_buf();
+        let identity = identify_reservation_contents(
+            &reservation,
+            "L",
+            ConvolutionArtifactKind::Fir,
+            48_000.0,
+            b"v1",
+        );
+        assert!(identity.verify_file(&path).unwrap());
+        // A wrong-channel overwrite at the same path reads as a mismatch.
+        std::fs::write(&path, b"other-channel-bytes").unwrap();
+        assert!(!identity.verify_file(&path).unwrap());
+        // A missing file reads as a mismatch, not an error.
+        assert!(!identity.verify_file(&dir.path().join("nope.wav")).unwrap());
+    }
+
+    #[test]
+    fn identity_relative_path_stays_relative_and_owned() {
+        let dir = tempfile::tempdir().unwrap();
+        let reservation =
+            reserve_convolution_artifact(dir.path(), "L/R", ConvolutionArtifactKind::Fir, 48_000.0)
+                .unwrap();
+        let identity = identify_reservation_contents(
+            &reservation,
+            "L/R",
+            ConvolutionArtifactKind::Fir,
+            48_000.0,
+            b"bytes",
+        );
+        let relative = identity.relative_path();
+        assert!(relative.is_relative());
+        assert_eq!(relative, Path::new(identity.filename()));
+        assert_eq!(identity.resolve(dir.path()), reservation.path());
+        // Sanitized filenames never carry a parent separator.
+        assert!(!identity.filename().contains('/'));
+        assert!(!identity.filename().contains(".."));
     }
 }

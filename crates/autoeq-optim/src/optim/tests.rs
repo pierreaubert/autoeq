@@ -465,6 +465,104 @@ mod backend_tests {
     }
 
     #[test]
+    fn nsga_front_report_seed_reproducibility_feasibility_and_baseline() {
+        use super::super::compute_pareto_objectives;
+        use super::super::nsga::{build_nsga_front_report, nsga_front_report_json};
+        use math_audio_optimisation::{NsgaConfig, NsgaVariant, ParetoSolution, nsga};
+        use std::sync::Arc;
+
+        fn run_front(seed: u64) -> Vec<ParetoSolution> {
+            let (obj, _params, lower, upper, x0) = multi_objective();
+            let objective = Arc::new(obj);
+            let obj_for_call = objective.clone();
+            let f = move |x: &Array1<f64>| -> Vec<f64> {
+                compute_pareto_objectives(x.as_slice().unwrap(), &obj_for_call)
+            };
+            let bounds: Vec<(f64, f64)> = lower
+                .iter()
+                .zip(upper.iter())
+                .map(|(&lo, &hi)| (lo, hi))
+                .collect();
+            let cfg = NsgaConfig {
+                bounds,
+                x0: Some(Array1::from(x0)),
+                population_size: 8,
+                maxeval: 32,
+                variant: NsgaVariant::Nsga2,
+                seed: Some(seed),
+                ..Default::default()
+            };
+            let mut front = nsga(&f, cfg).expect("nsga runs").pareto_front;
+            front.sort_by(|a, b| {
+                a.objectives
+                    .iter()
+                    .zip(b.objectives.iter())
+                    .map(|(x, y)| x.total_cmp(y))
+                    .find(|o| *o != std::cmp::Ordering::Equal)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            front
+        }
+
+        // Same seed reproduces the same front through the real optimizer.
+        let front_a = run_front(7);
+        let front_b = run_front(7);
+        assert!(!front_a.is_empty(), "nsga should return a front");
+        assert_eq!(front_a.len(), front_b.len());
+        for (a, b) in front_a.iter().zip(front_b.iter()) {
+            assert_eq!(a.objectives.len(), b.objectives.len());
+            for (x, y) in a.objectives.iter().zip(b.objectives.iter()) {
+                assert!(
+                    (x - y).abs() < 1e-12,
+                    "same seed must reproduce the front: {x} vs {y}"
+                );
+            }
+        }
+
+        // Report over a real front: feasibility flags consistent, scalar-best
+        // is the argmin baseline, compromise quality reported against it.
+        let (obj, _params, lower, upper, _x) = multi_objective();
+        let cfg = NsgaConfig {
+            bounds: lower
+                .iter()
+                .zip(upper.iter())
+                .map(|(&lo, &hi)| (lo, hi))
+                .collect(),
+            x0: None,
+            population_size: 8,
+            maxeval: 32,
+            variant: NsgaVariant::Nsga2,
+            seed: Some(7),
+            ..Default::default()
+        };
+        let report =
+            build_nsga_front_report("autoeq:nsga2", &cfg, &front_a, &obj, 32, 1).expect("report");
+        assert_eq!(report.points.len(), front_a.len());
+        assert_eq!(report.objectives.len(), front_a[0].objectives.len());
+        let selected = &report.points[report.selection.selected_index];
+        let scalar_best = &report.points[report.selection.scalar_best_index];
+        assert!(selected.constraint.scalar_loss.is_finite());
+        assert!(scalar_best.constraint.scalar_loss.is_finite());
+        assert!(
+            scalar_best.constraint.scalar_loss <= selected.constraint.scalar_loss + 1e-12,
+            "scalar-best must be the scalar argmin baseline"
+        );
+        for point in &report.points {
+            let ev = &point.constraint;
+            assert!(
+                ev.feasible
+                    == (ev.ceiling_violation == 0.0
+                        && ev.spacing_violation == 0.0
+                        && ev.min_gain_violation == 0.0),
+                "feasibility must match the reported violations"
+            );
+        }
+        let json = nsga_front_report_json(&report);
+        assert!(json.contains("autoeq.nsga_front/v1"));
+        assert!(json.contains("normalized_compromise"));
+    }
+
+    #[test]
     fn pareto_helpers_and_integration() {
         let filters = vec![
             ParetoFilter {

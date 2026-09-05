@@ -15,6 +15,7 @@ struct StaticTrace {
     name: String,
     color: u32,
     axis_index: usize,
+    connect_gaps: bool,
 }
 
 /// Render Plotly's serializable line-trace model as deterministic SVG, then
@@ -162,11 +163,20 @@ fn render_axis_panel(
 
     for trace in traces {
         let mut path = String::new();
+        let mut pen_down = false;
         for (&x, &y) in trace.x.iter().zip(&trace.y) {
             if !x.is_finite() || !y.is_finite() || (axis.log_x && x <= 0.0) {
+                // Plotly leaves a gap at missing/non-finite points unless the
+                // trace opts into `connectgaps`. Lift the pen so the next
+                // valid point starts a new subpath instead of connecting
+                // across the break.
+                if !trace.connect_gaps {
+                    pen_down = false;
+                }
                 continue;
             }
-            let command = if path.is_empty() { 'M' } else { 'L' };
+            let command = if pen_down { 'L' } else { 'M' };
+            pen_down = true;
             path.push_str(&format!("{command}{:.3},{:.3}", map_x(x), map_y(y)));
         }
         if !path.is_empty() {
@@ -267,7 +277,7 @@ fn parse_traces(document: &Value) -> Vec<StaticTrace> {
         .flatten()
         .enumerate()
         .filter_map(|(index, trace)| {
-            if trace.get("visible").and_then(Value::as_bool) == Some(false) {
+            if is_hidden(trace) {
                 return None;
             }
             let (x, y) = numeric_pairs(trace.get("x")?, trace.get("y")?)?;
@@ -285,26 +295,52 @@ fn parse_traces(document: &Value) -> Vec<StaticTrace> {
                     .and_then(Value::as_str)
                     .map(axis_index)
                     .unwrap_or(0),
+                connect_gaps: trace
+                    .get("connectgaps")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             })
         })
         .collect()
 }
 
+/// Traces hidden from the interactive chart must stay out of static output.
+/// Plotly serializes `Visible::False` as boolean `false` and
+/// `Visible::LegendOnly` as the string `"legendonly"` (legend entry only,
+/// no line drawn), so both forms are filtered here.
+fn is_hidden(trace: &Value) -> bool {
+    match trace.get("visible") {
+        Some(Value::Bool(false)) => true,
+        Some(Value::String(visibility)) => visibility.eq_ignore_ascii_case("legendonly"),
+        _ => false,
+    }
+}
+
 fn numeric_pairs(x: &Value, y: &Value) -> Option<(Vec<f64>, Vec<f64>)> {
     let x_values = x.as_array()?;
     let y_values = y.as_array()?;
-    let mut paired_x = Vec::with_capacity(x_values.len().min(y_values.len()));
-    let mut paired_y = Vec::with_capacity(paired_x.capacity());
-    for (x, y) in x_values.iter().zip(y_values) {
+    let len = x_values.len().min(y_values.len());
+    let mut paired_x = Vec::with_capacity(len);
+    let mut paired_y = Vec::with_capacity(len);
+    let mut has_finite_pair = false;
+    for (x, y) in x_values.iter().zip(y_values).take(len) {
+        // Preserve alignment with a NaN break so the renderer can leave the
+        // same gap Plotly shows interactively instead of connecting across it.
         let (Some(x), Some(y)) = (x.as_f64(), y.as_f64()) else {
+            paired_x.push(f64::NAN);
+            paired_y.push(f64::NAN);
             continue;
         };
         if x.is_finite() && y.is_finite() {
+            has_finite_pair = true;
             paired_x.push(x);
             paired_y.push(y);
+        } else {
+            paired_x.push(f64::NAN);
+            paired_y.push(f64::NAN);
         }
     }
-    (!paired_x.is_empty()).then_some((paired_x, paired_y))
+    has_finite_pair.then_some((paired_x, paired_y))
 }
 
 fn axis_index(name: &str) -> usize {
@@ -391,11 +427,11 @@ fn axis_title(axis: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{grid_dimensions, parse_traces};
+    use super::{grid_dimensions, parse_traces, render_axis_panel, AxisConfig, StaticTrace};
     use serde_json::json;
 
     #[test]
-    fn trace_parser_keeps_x_and_y_values_paired_across_gaps() {
+    fn trace_parser_preserves_gaps_as_segment_breaks() {
         let traces = parse_traces(&json!({
             "data": [{
                 "x": [20.0, null, 80.0, 160.0],
@@ -404,8 +440,90 @@ mod tests {
         }));
 
         assert_eq!(traces.len(), 1);
-        assert_eq!(traces[0].x, vec![20.0, 160.0]);
-        assert_eq!(traces[0].y, vec![1.0, 4.0]);
+        assert_eq!(traces[0].x.len(), 4);
+        assert_eq!(traces[0].x[0], 20.0);
+        assert_eq!(traces[0].y[0], 1.0);
+        assert_eq!(traces[0].x[3], 160.0);
+        assert_eq!(traces[0].y[3], 4.0);
+        assert!(traces[0].x[1].is_nan());
+        assert!(traces[0].y[2].is_nan());
+    }
+
+    #[test]
+    fn issue_example_keeps_gap_between_segments() {
+        let traces = parse_traces(&json!({
+            "data": [{
+                "x": [100.0, 200.0, 300.0],
+                "y": [0.0, null, 10.0],
+            }]
+        }));
+
+        assert_eq!(traces.len(), 1);
+        assert_eq!(traces[0].x.len(), 3);
+        assert!(traces[0].y[1].is_nan());
+        assert!(!traces[0].connect_gaps);
+    }
+
+    #[test]
+    fn trace_parser_respects_connectgaps_policy() {
+        let connected = parse_traces(&json!({
+            "data": [{
+                "x": [100.0, 200.0, 300.0],
+                "y": [0.0, null, 10.0],
+                "connectgaps": true,
+            }]
+        }));
+        assert!(connected[0].connect_gaps);
+
+        let default = parse_traces(&json!({
+            "data": [{
+                "x": [100.0, 200.0, 300.0],
+                "y": [0.0, null, 10.0],
+            }]
+        }));
+        assert!(!default[0].connect_gaps);
+    }
+
+    #[test]
+    fn trace_parser_hides_legendonly_traces() {
+        let traces = parse_traces(&json!({
+            "data": [
+                {"x": [1.0], "y": [1.0], "name": "shown"},
+                {"x": [1.0], "y": [1.0], "name": "hidden", "visible": false},
+                {"x": [1.0], "y": [1.0], "name": "legend-only", "visible": "legendonly"},
+            ]
+        }));
+
+        assert_eq!(traces.len(), 1);
+        assert_eq!(traces[0].name, "shown");
+    }
+
+    #[test]
+    fn renderer_breaks_path_at_gaps_unless_connected() {
+        let axis = AxisConfig::default();
+        let gapped = StaticTrace {
+            x: vec![100.0, f64::NAN, 300.0],
+            y: vec![0.0, f64::NAN, 10.0],
+            name: "gapped".to_string(),
+            color: 0x1f77b4,
+            axis_index: 0,
+            connect_gaps: false,
+        };
+        let panel =
+            render_axis_panel(&[&gapped], &axis, 0.0, 0.0, 400.0, 300.0, 0).unwrap();
+        let path = panel.split("<path d=\"").nth(1).unwrap();
+        let path = &path[..path.find('"').unwrap()];
+        assert_eq!(path.matches('M').count(), 2, "gap must start a new subpath: {path}");
+
+        let connected = StaticTrace {
+            connect_gaps: true,
+            ..gapped
+        };
+        let panel =
+            render_axis_panel(&[&connected], &axis, 0.0, 0.0, 400.0, 300.0, 0).unwrap();
+        let path = panel.split("<path d=\"").nth(1).unwrap();
+        let path = &path[..path.find('"').unwrap()];
+        assert_eq!(path.matches('M').count(), 1, "connectgaps must join segments: {path}");
     }
 
     #[test]

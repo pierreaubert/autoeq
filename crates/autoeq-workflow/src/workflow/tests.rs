@@ -832,6 +832,13 @@ fn optimizer_state_save_load_roundtrip() {
         converged: false,
         seed: Some(7),
         timestamp: chrono::Utc::now(),
+        state_version: super::resume::WARM_START_STATE_VERSION,
+        measurement_identity: Some("meas-abc".to_string()),
+        normalization_hash: Some("norm-1".to_string()),
+        sample_rate: Some(48_000.0),
+        lower_bounds: Some(vec![0.0, 0.0, 0.0]),
+        upper_bounds: Some(vec![1.0, 1.0, 1.0]),
+        algorithm: Some("autoeq:de".to_string()),
     };
 
     super::resume::save_optimizer_state(&state, &path).unwrap();
@@ -847,6 +854,53 @@ fn optimizer_state_save_load_roundtrip() {
     assert_eq!(loaded.total_iterations, state.total_iterations);
     assert_eq!(loaded.converged, state.converged);
     assert_eq!(loaded.seed, state.seed);
+    assert_eq!(loaded.state_version, state.state_version);
+    assert_eq!(loaded.measurement_identity, state.measurement_identity);
+    assert_eq!(loaded.normalization_hash, state.normalization_hash);
+    assert_eq!(loaded.sample_rate, state.sample_rate);
+    assert_eq!(loaded.lower_bounds, state.lower_bounds);
+    assert_eq!(loaded.upper_bounds, state.upper_bounds);
+    assert_eq!(loaded.algorithm, state.algorithm);
+
+    // Matching identity is accepted as a warm-start seed.
+    let identity = super::resume::WarmStartIdentity {
+        measurement_identity: "meas-abc",
+        normalization_hash: Some("norm-1"),
+        sample_rate: 48_000.0,
+        lower_bounds: &[0.0, 0.0, 0.0],
+        upper_bounds: &[1.0, 1.0, 1.0],
+    };
+    assert!(loaded.check_warm_start_compatible(&identity).is_ok());
+
+    // Any identity mismatch rejects the record.
+    for bad in [
+        super::resume::WarmStartIdentity {
+            measurement_identity: "meas-other",
+            ..identity.clone()
+        },
+        super::resume::WarmStartIdentity {
+            normalization_hash: Some("norm-2"),
+            ..identity.clone()
+        },
+        super::resume::WarmStartIdentity {
+            sample_rate: 44_100.0,
+            ..identity.clone()
+        },
+        super::resume::WarmStartIdentity {
+            upper_bounds: &[2.0, 1.0, 1.0],
+            ..identity.clone()
+        },
+    ] {
+        assert!(
+            loaded.check_warm_start_compatible(&bad).is_err(),
+            "mismatched identity should be rejected"
+        );
+    }
+
+    // Legacy records without identity are rejected when identity is required.
+    let mut legacy = loaded.clone();
+    legacy.measurement_identity = None;
+    assert!(legacy.check_warm_start_compatible(&identity).is_err());
 
     let missing = super::resume::load_optimizer_state(&dir.join("missing.json")).unwrap();
     assert!(missing.is_none());

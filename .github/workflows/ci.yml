@@ -58,6 +58,12 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+      - name: Packaged file-list gate (root crate)
+        run: |
+          cargo test -p autoeq --test packaging_excludes
+          leaked=$(cargo package -p autoeq --list --allow-dirty | grep -E '^(data_tests/|data_generated/|scripts/)|\.mdat$|~$' || true)
+          if [ -n "$leaked" ]; then echo "leaked files in published package:"; echo "$leaked"; exit 1; fi
+
       - name: Prepare crate test matrix
         id: crate-test-matrix
         run: echo "packages=$(python3 scripts/run_crate_test_matrix.py --list-json)" >> "$GITHUB_OUTPUT"

@@ -2612,7 +2612,7 @@ mod room_config_validation_tests {
         // Positional fallback enforces the strict-ordering contract
         let positional = vec!["seat-0".to_string(), "seat-1".to_string()];
         assert!(
-            area.check_source_seat_coverage(None, &[positional.clone()])
+            area.check_source_seat_coverage(None, std::slice::from_ref(&positional))
                 .is_empty()
         );
         let errors = area.check_source_seat_coverage(

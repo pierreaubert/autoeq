@@ -84,12 +84,11 @@ impl AreaEvaluator {
                 if num_points < PARALLEL_MIN_POINTS {
                     1
                 } else {
+                    let upper = num_points.clamp(1, PARALLEL_MAX_WORKERS);
                     std::thread::available_parallelism()
                         .map(|parallelism| parallelism.get())
                         .unwrap_or(1)
-                        .min(num_points)
-                        .min(PARALLEL_MAX_WORKERS)
-                        .max(1)
+                        .min(upper)
                 }
             }
         }
@@ -319,8 +318,8 @@ fn flatness_of(
     freqs: &Array1<f64>,
     eval_min: f64,
     eval_max: f64,
-    sum: &mut Vec<Complex64>,
-    spl: &mut Vec<f64>,
+    sum: &mut [Complex64],
+    spl: &mut [f64],
 ) -> f64 {
     let mut count = 0_usize;
     for (freq_idx, &freq) in freqs.iter().enumerate() {

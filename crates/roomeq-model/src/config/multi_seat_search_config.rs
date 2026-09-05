@@ -81,6 +81,6 @@ impl MultiSeatSearchConfig {
         if self.max_points_per_axis == 0 {
             errors.push("multi_seat.search.max_points_per_axis must be > 0".to_string());
         }
-        return errors;
+        errors
     }
 }

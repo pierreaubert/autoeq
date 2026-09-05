@@ -685,7 +685,9 @@ fn optimize_drivers_crossover_runs() {
     assert_eq!(opt.gains.len(), 2);
     assert_eq!(opt.delays.len(), 2);
     assert_eq!(opt.crossover_freqs.len(), 1);
-    assert!(opt.converged);
+    // Seeded tiny-budget DE exhausts its evaluation budget, so structured
+    // evidence reports best-effort (usable) rather than converged.
+    assert!(!opt.converged);
     assert!(opt.pre_objective.is_finite() && opt.post_objective.is_finite());
     assert!(opt.post_objective <= opt.pre_objective);
     assert!(
@@ -720,7 +722,9 @@ fn optimize_drivers_crossover_fixed_freqs_runs() {
     );
     let opt = result.unwrap();
     assert_eq!(opt.crossover_freqs, vec![1000.0]);
-    assert!(opt.converged);
+    // Seeded tiny-budget DE exhausts its evaluation budget, so structured
+    // evidence reports best-effort (usable) rather than converged.
+    assert!(!opt.converged);
     assert!(opt.pre_objective.is_finite() && opt.post_objective.is_finite());
     assert!(opt.post_objective <= opt.pre_objective);
     assert!(
@@ -768,7 +772,9 @@ fn optimize_multisub_runs() {
     assert_eq!(opt.gains.len(), 2);
     assert_eq!(opt.delays.len(), 2);
     assert!(opt.crossover_freqs.is_empty());
-    assert!(opt.converged);
+    // Seeded tiny-budget DE exhausts its evaluation budget, so structured
+    // evidence reports best-effort (usable) rather than converged.
+    assert!(!opt.converged);
     assert!(opt.pre_objective.is_finite() && opt.post_objective.is_finite());
     assert!(opt.post_objective <= opt.pre_objective);
     assert!(

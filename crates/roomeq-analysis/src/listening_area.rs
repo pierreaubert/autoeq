@@ -150,6 +150,12 @@ impl<const D: usize> ListeningArea<D> {
                 message: "ListeningArea epsilon must be finite and non-negative".into(),
             });
         }
+        if !config.ambiguity_threshold.is_finite() || config.ambiguity_threshold < 0.0 {
+            return Err(AutoeqError::InvalidConfiguration {
+                message: "ListeningArea ambiguity_threshold must be finite and non-negative"
+                    .into(),
+            });
+        }
 
         // Validate all subs have the same number of positions and that all
         // curves carry phase data and share a frequency grid.
@@ -204,6 +210,11 @@ impl<const D: usize> ListeningArea<D> {
                         ),
                     });
                 }
+                // Validate numeric content (finite SPL/phase/frequency values
+                // and well-formed grids) via the shared curve contract.
+                // Structural checks above run first so their specific error
+                // messages are preserved.
+                curve.validate(&format!("ListeningArea: sub {sub_idx} pos {pos_idx}"))?;
             }
         }
 
@@ -920,6 +931,51 @@ mod tests {
                 .chain(extrapolated[0].phase.as_ref().unwrap().iter())
                 .all(|v| v.is_finite())
         );
+    }
+
+    #[test]
+    fn new_rejects_nonfinite_curve_values() {
+        // Curve::validate contract: non-finite SPL / phase rejected.
+        for (spl, phase) in [
+            (vec![80.0, f64::NAN], vec![0.0, 0.0]),
+            (vec![80.0, 81.0], vec![0.0, f64::INFINITY]),
+        ] {
+            let bad = make_curve(vec![100.0, 200.0], spl, phase);
+            let err = ListeningArea::<1>::new(
+                vec![[0.0]],
+                vec![vec![bad]],
+                ListeningAreaInterpolatorConfig::default(),
+            )
+            .expect_err("non-finite curve values must be rejected");
+            assert!(
+                format!("{err}").contains("finite"),
+                "unexpected error: {err}"
+            );
+        }
+        // Single-bin curves violate the shared curve contract (≥2 points).
+        let single = make_curve(vec![100.0], vec![80.0], vec![0.0]);
+        assert!(
+            ListeningArea::<1>::new(
+                vec![[0.0]],
+                vec![vec![single]],
+                ListeningAreaInterpolatorConfig::default(),
+            )
+            .is_err()
+        );
+        // Invalid ambiguity thresholds rejected like the other config knobs.
+        let good = make_curve(vec![100.0, 200.0], vec![80.0, 81.0], vec![0.0, 0.0]);
+        for threshold in [f64::NAN, -1.0] {
+            let err = ListeningArea::<1>::new(
+                vec![[0.0]],
+                vec![vec![good.clone()]],
+                ListeningAreaInterpolatorConfig {
+                    ambiguity_threshold: threshold,
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+            assert!(format!("{err}").contains("ambiguity_threshold"));
+        }
     }
 
     /// Hold-out on a smooth spatial field with room-like physics: SPL varies

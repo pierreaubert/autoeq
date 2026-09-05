@@ -95,21 +95,33 @@ pub fn package_convolution_sidecars(
     let mut assigned = occupied_names.clone();
     let mut members = BTreeMap::<String, ExportPackageMember>::new();
 
-    let mut content_groups = Vec::<(Arc<[u8]>, Vec<String>)>::new();
+    // Group references by content hash so each unique asset is streamed,
+    // hashed, and copied once no matter how many plugins reference it. The
+    // byte comparison inside a hash bucket only guards against collisions.
+    let mut content_groups = Vec::<(String, Arc<[u8]>, Vec<String>)>::new();
+    let mut group_by_hash = HashMap::<String, usize>::new();
     for reference in convolution_resource_references(graph) {
         let bytes = resources.get(reference.as_str()).copied().ok_or_else(|| {
             anyhow::anyhow!("missing explicit convolution resource '{reference}'")
         })?;
-        if let Some((_, references)) = content_groups
-            .iter_mut()
-            .find(|(packaged, _)| packaged.as_ref() == bytes.as_ref())
-        {
-            references.push(reference);
-        } else {
-            content_groups.push((Arc::clone(bytes), vec![reference]));
-        }
+        let hash = sha256_hex(bytes);
+        let group = group_by_hash.get(&hash).copied().filter(|index| {
+            content_groups
+                .get(*index)
+                .is_some_and(|(_, packaged, _)| packaged.as_ref() == bytes.as_ref())
+        });
+        let group = match group {
+            Some(index) => index,
+            None => {
+                let index = content_groups.len();
+                group_by_hash.insert(hash.clone(), index);
+                content_groups.push((hash, Arc::clone(bytes), Vec::new()));
+                index
+            }
+        };
+        content_groups[group].2.push(reference);
     }
-    for (bytes, references) in content_groups {
+    for (hash, bytes, references) in content_groups {
         let reusable = references
             .iter()
             .filter_map(|reference| reusable_names.get(reference))
@@ -130,9 +142,16 @@ pub fn package_convolution_sidecars(
                 .unwrap_or("room_eq_ir.wav");
             let packaged_name = unique_member_name(preferred, &assigned);
             assigned.insert(packaged_name.clone());
+            // Reuse the grouping hash: the sidecar bytes are hashed once per
+            // unique asset instead of once per reference plus once per member.
+            validate_member_path(Path::new(&packaged_name))?;
             members.insert(
                 packaged_name.clone(),
-                ExportPackageMember::new(&packaged_name, Arc::clone(&bytes))?,
+                ExportPackageMember {
+                    relative_path: packaged_name.clone().into(),
+                    bytes: Arc::clone(&bytes),
+                    sha256: hash,
+                },
             );
             packaged_name
         };
@@ -241,6 +260,86 @@ fn unique_member_name(preferred: &str, assigned: &BTreeSet<String>) -> String {
         }
     }
     unreachable!("u64 package-member namespace exhausted")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use roomeq_model::ChannelDspChain;
+
+    fn convolution_chain(name: &str, ir_file: &str) -> (String, ChannelDspChain) {
+        (
+            name.to_string(),
+            ChannelDspChain {
+                channel: name.to_string(),
+                plugins: vec![PluginConfigWrapper {
+                    plugin_type: "convolution".to_string(),
+                    parameters: serde_json::json!({"ir_file": ir_file}),
+                }],
+                drivers: None,
+                initial_curve: None,
+                final_curve: None,
+                eq_response: None,
+                target_curve: None,
+                pre_ir: None,
+                post_ir: None,
+                fir_temporal_masking: None,
+                direct_early_late_correction: None,
+            },
+        )
+    }
+
+    #[test]
+    fn identical_sidecars_are_hashed_and_copied_once() {
+        let shared: Arc<[u8]> = Arc::from(b"shared-impulse".as_slice());
+        let other: Arc<[u8]> = Arc::from(b"other-impulse".as_slice());
+        let graph = DspGraph {
+            deployed_source_curves: Default::default(),
+            version: "1.3.0".to_string(),
+            global_plugins: Vec::new(),
+            channels: HashMap::from([
+                convolution_chain("left", "a.wav"),
+                convolution_chain("right", "b.wav"),
+                convolution_chain("center", "c.wav"),
+            ]),
+            metadata: None,
+        };
+        let resources = vec![
+            ConvolutionResource {
+                reference: "a.wav".to_string(),
+                bytes: Arc::clone(&shared),
+            },
+            ConvolutionResource {
+                reference: "b.wav".to_string(),
+                bytes: Arc::clone(&shared),
+            },
+            ConvolutionResource {
+                reference: "c.wav".to_string(),
+                bytes: Arc::clone(&other),
+            },
+        ];
+
+        let (packaged, members) =
+            package_convolution_sidecars(&graph, &resources, &BTreeSet::new(), &HashMap::new())
+                .unwrap();
+
+        assert_eq!(members.len(), 2, "identical assets must share one sidecar");
+        for member in &members {
+            assert_eq!(member.sha256, sha256_hex(&member.bytes));
+        }
+        let rewritten: Vec<&str> = ["left", "right", "center"]
+            .iter()
+            .map(|channel| {
+                packaged.channels[*channel].plugins[0]
+                    .parameters
+                    .get("ir_file")
+                    .and_then(|value| value.as_str())
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(rewritten[0], rewritten[1]);
+        assert_ne!(rewritten[0], rewritten[2]);
+    }
 }
 
 fn validate_member_path(path: &Path) -> anyhow::Result<()> {

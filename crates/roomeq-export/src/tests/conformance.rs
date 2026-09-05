@@ -673,6 +673,86 @@ fn camilladsp_routed_export_requires_every_plugin_to_have_a_stage() {
 }
 
 #[test]
+fn camilladsp_rejects_multiple_sub_outputs_before_rendering() {
+    let mut output = make_routed_bass_output();
+    output
+        .metadata
+        .as_mut()
+        .unwrap()
+        .bass_management
+        .as_mut()
+        .unwrap()
+        .sub_outputs = vec![
+        roomeq_model::BassManagementSubOutputReport {
+            output_role: "SUB1".to_string(),
+            gain_db: 1.0,
+            delay_ms: 0.5,
+            polarity_inverted: false,
+            strategy_source: "mso".to_string(),
+            headroom_contribution_db: 0.5,
+        },
+        roomeq_model::BassManagementSubOutputReport {
+            output_role: "SUB2".to_string(),
+            gain_db: -1.0,
+            delay_ms: 1.5,
+            polarity_inverted: true,
+            strategy_source: "mso".to_string(),
+            headroom_contribution_db: -0.5,
+        },
+    ];
+
+    let error = camilladsp_error(&output);
+    assert!(
+        error.contains("supports a single physical sub output"),
+        "unexpected error: {error}"
+    );
+    assert!(error.contains("SUB1") && error.contains("SUB2"));
+}
+
+#[test]
+fn camilladsp_accepts_single_sub_output_declaration() {
+    let mut output = make_routed_bass_output();
+    output
+        .metadata
+        .as_mut()
+        .unwrap()
+        .bass_management
+        .as_mut()
+        .unwrap()
+        .sub_outputs = vec![roomeq_model::BassManagementSubOutputReport {
+        output_role: "LFE".to_string(),
+        gain_db: 0.0,
+        delay_ms: 0.0,
+        polarity_inverted: false,
+        strategy_source: "single".to_string(),
+        headroom_contribution_db: 0.0,
+    }];
+
+    render_dsp_chain(&output, ExportFormat::CamillaDsp, 48_000.0)
+        .expect("single sub output declarations must still export");
+}
+
+#[test]
+fn camilladsp_routed_export_rejects_driver_branches() {
+    let mut output = make_routed_bass_output();
+    output.channels.get_mut("L").unwrap().drivers = Some(vec![roomeq_model::DriverDspChain {
+        name: "woofer".to_string(),
+        index: 0,
+        plugins: vec![PluginConfigWrapper {
+            plugin_type: "gain".to_string(),
+            parameters: json!({"gain_db": -3.0}),
+        }],
+        initial_curve: None,
+    }]);
+
+    let error = camilladsp_error(&output);
+    assert!(
+        error.contains("cannot represent active-crossover driver branches"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
 fn camilladsp_routed_export_validates_route_channel_indices() {
     let mut output = make_routed_bass_output();
     output

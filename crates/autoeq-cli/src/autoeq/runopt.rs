@@ -105,8 +105,24 @@ pub(super) fn perform_optimization_with_backend(
             .into());
         }
     };
+    // Transport-level success does not imply convergence: an `Ok` return
+    // carrying a best-effort status (e.g. "... (not converged, ...)") is
+    // usable but must not be reported as converged.
+    if !global_evidence.converged && !global_evidence.best_effort {
+        return Err(std::io::Error::other(format!(
+            "global optimizer produced an unusable result ({})",
+            global_evidence.status
+        ))
+        .into());
+    }
+    if !global_evidence.converged && !params.quiet {
+        log::warn!(
+            "Global optimization did not fully converge ({}); keeping best-effort result",
+            global_evidence.status
+        );
+    }
 
-    let mut converged = true;
+    let mut converged = global_evidence.converged;
     let mut post_objective = Some(global_loss);
     let mut optimizer_evidence = vec![global_evidence];
 
@@ -171,8 +187,10 @@ pub(super) fn perform_optimization_with_backend(
                     local_loss
                 );
             }
-            // Update convergence status based on local refinement
-            converged = true;
+            // Convergence follows the accepted pass: a best-effort
+            // refinement that improved the objective is usable but not
+            // reported as converged.
+            converged = local_evidence.converged;
             post_objective = Some(local_loss);
             if !params.quiet && objective_data.loss_type != autoeq::LossType::DriversFlat {
                 print_freq_spacing(&x, params, "local");

@@ -156,6 +156,60 @@ mod tests {
     }
 
     #[test]
+    fn best_effort_global_reports_not_converged() {
+        let params = test_params(false);
+        let objective = test_objective_data();
+        let backend = MockOptimizerBackend::ok(
+            "AutoEQ DE: maximum evaluations reached (not converged, nfev=42)",
+            1.0,
+        );
+
+        let result = perform_optimization_with_backend(&params, &objective, None, &backend)
+            .expect("a best-effort global result is usable");
+
+        assert_eq!(result.post_objective, Some(1.0));
+        assert!(
+            !result.converged,
+            "best-effort transport success must not report converged=true"
+        );
+        assert_eq!(result.optimizer_evidence.len(), 1);
+        assert!(result.optimizer_evidence[0].best_effort);
+    }
+
+    #[test]
+    fn converged_global_reports_converged() {
+        let params = test_params(false);
+        let objective = test_objective_data();
+        let backend = MockOptimizerBackend::ok(GLOBAL_STATUS, 1.0);
+
+        let result = perform_optimization_with_backend(&params, &objective, None, &backend)
+            .expect("converged global result should succeed");
+
+        assert!(result.converged);
+        assert_eq!(result.post_objective, Some(1.0));
+    }
+
+    #[test]
+    fn accepted_best_effort_refinement_reports_not_converged() {
+        let params = test_params(true);
+        let objective = test_objective_data();
+        let backend = MockOptimizerBackend::ok(GLOBAL_STATUS, 2.0).with_refine_result(Ok((
+            "AutoEQ COBYLA: maximum evaluations reached (not converged, nfev=30)".to_string(),
+            1.0,
+        )));
+
+        let result = perform_optimization_with_backend(&params, &objective, None, &backend)
+            .expect("improving best-effort refinement should be accepted");
+
+        assert_eq!(result.post_objective, Some(1.0));
+        assert!(
+            !result.converged,
+            "accepted best-effort refinement must not report converged=true"
+        );
+        assert!(result.optimizer_evidence[1].selected_for_output);
+    }
+
+    #[test]
     fn improving_refinement_is_accepted() {
         let params = test_params(true);
         let objective = test_objective_data();

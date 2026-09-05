@@ -169,6 +169,7 @@ pub(super) fn validate_camilladsp_input(
     output: &DspGraph,
     sample_rate: Option<f64>,
 ) -> anyhow::Result<()> {
+    validate_camilladsp_sub_output_scope(output)?;
     let graph = super::camilladsp_routing_graph(output);
     let routed_expected = routed_bass_management_declared(output);
     if routed_expected && graph.is_none() {
@@ -608,6 +609,41 @@ fn validate_export_input(
         }
     }
 
+    Ok(())
+}
+
+/// Reject multi-sub-output declarations before rendering.
+///
+/// The routed CamillaDSP preset realizes one physical sub bus: per-route gain
+/// and polarity plus per-output post-route chains. Per-output gain, delay, and
+/// polarity trims declared in `sub_outputs` for several physical sub outputs
+/// (MSO/DBA strategies) have no corresponding preset stage, so rendering them
+/// would produce a partial preset that reads as complete. Single-output
+/// declarations (including the standard identity trim) pass through.
+fn validate_camilladsp_sub_output_scope(output: &DspGraph) -> anyhow::Result<()> {
+    let Some(report) = output
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.bass_management.as_ref())
+    else {
+        return Ok(());
+    };
+    if report.sub_outputs.len() > 1 {
+        let roles = report
+            .sub_outputs
+            .iter()
+            .map(|sub_output| sub_output.output_role.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        anyhow::bail!(
+            "CamillaDsp export supports a single physical sub output ('{}') but the graph \
+             declares {} sub outputs ({}) with per-output alignment the preset cannot \
+             represent; downmix to one sub output or use Apply as Graph for this output",
+            report.physical_sub_output,
+            report.sub_outputs.len(),
+            roles
+        );
+    }
     Ok(())
 }
 

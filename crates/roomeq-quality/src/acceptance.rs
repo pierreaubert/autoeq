@@ -4,7 +4,21 @@ pub use roomeq_model::{
     CorrectionMetricSummary, RUNTIME_ACCEPTANCE_POLICY_VERSION, RealizationQualityEvidence,
     RuntimeAcceptancePolicy, RuntimeOutputClass,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
+use super::metrics::weighted_percentile;
+
+/// Evaluate a single pre/post/target triplet against a fixture policy.
+///
+/// Frequency-measure contract: `pre/post_target_weighted_rms_db`,
+/// `improvement_db`, `correction_rms_db`, and `post_p95_abs_residual_db` are
+/// all integrated with the ERB-rate measure identified by
+/// `auditory_frequency_measure` (`autoeq_core::AUDITORY_FREQUENCY_MEASURE_VERSION`).
+/// `post_worst_abs_residual_db` is a bin maximum, not measure-integrated.
+/// None of these values is comparable with the log-frequency oracle-path
+/// metrics (`ORACLE_FREQUENCY_MEASURE_VERSION` in `super::metrics`) as if it
+/// were the same metric, even where field names look alike.
 pub fn evaluate_correction_acceptance(
     pre: &Curve,
     post: &Curve,
@@ -50,18 +64,31 @@ pub fn evaluate_correction_acceptance(
     } else {
         0.0
     };
-    let mut absolute_residual: Vec<f64> = post_residual.iter().map(|value| value.abs()).collect();
-    absolute_residual.sort_by(f64::total_cmp);
-    let p95_index = ((absolute_residual.len() - 1) as f64 * 0.95).ceil() as usize;
+    // ERB-rate-weighted 0.95 quantile under the same auditory frequency
+    // measure as the RMS fields above. The previous unweighted bin percentile
+    // moved when a narrow band was duplicated/densified without any change to
+    // the physical response; the weighted quantile only sees the band's
+    // measure weight.
+    let erb_weights = autoeq_core::erb_rate_cell_widths(&post.freq);
+    let erb_weights = erb_weights.as_slice().unwrap_or(&[]);
+    let absolute_residual: Vec<f64> = post_residual.iter().map(|value| value.abs()).collect();
+    let post_p95 = weighted_percentile(&absolute_residual, erb_weights, 0.95);
+    // Correction energy under the same ERB-rate measure as pre/post RMS, so
+    // the "already good" overcorrection check compares like with like.
+    let correction_rms = autoeq_core::erb_rate_weighted_rms(&post.freq, &correction)
+        .unwrap_or_else(|| rms(&correction));
     let metrics = CorrectionMetricSummary {
         auditory_frequency_measure: autoeq_core::AUDITORY_FREQUENCY_MEASURE_VERSION.to_string(),
         pre_target_weighted_rms_db: pre_rms,
         post_target_weighted_rms_db: post_rms,
         improvement_db: improvement,
         improvement_ratio,
-        post_p95_abs_residual_db: absolute_residual[p95_index],
-        post_worst_abs_residual_db: absolute_residual.last().copied().unwrap_or(0.0),
-        correction_rms_db: rms(&correction),
+        post_p95_abs_residual_db: post_p95,
+        post_worst_abs_residual_db: absolute_residual
+            .iter()
+            .copied()
+            .fold(0.0, f64::max),
+        correction_rms_db: correction_rms,
         max_abs_correction_db: correction
             .iter()
             .map(|value| value.abs())
@@ -116,6 +143,252 @@ pub fn evaluate_correction_acceptance(
         acoustic_quality: None,
         realization_quality: None,
     })
+}
+
+/// Per-seat spectral outcome for runtime acceptance.
+///
+/// The runtime path receives a pre/post/target triplet per seat, but
+/// [`evaluate_correction_acceptance`] only reports the aggregate triplet it
+/// was given. These outcomes retain every seat next to the aggregate so a
+/// good average can no longer hide one damaged seat.
+///
+/// Metric fields are `Option`: a seat whose measure is zero-length or
+/// otherwise unavailable reports `None`, and [`SeatPartitionAcceptance::accepted`]
+/// treats `None` (like an empty seat list) as failure, never as success.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SeatSpectralOutcome {
+    pub seat_index: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_target_weighted_rms_db: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_target_weighted_rms_db: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub improvement_db: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_p95_abs_residual_db: Option<f64>,
+    pub accepted: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub violations: Vec<String>,
+}
+
+/// One measured partition (training or held-out) of per-seat outcomes.
+///
+/// `frequency_measure` carries `autoeq_core::AUDITORY_FREQUENCY_MEASURE_VERSION`;
+/// seat RMS/p95 values must only be compared with metrics under the same
+/// measure, never with oracle-path log-frequency metrics.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SeatPartitionAcceptance {
+    pub frequency_measure: String,
+    pub seats: Vec<SeatSpectralOutcome>,
+    /// Index of the primary seat. Engineering policy (not listening-
+    /// calibrated): the first listed position is the primary seat.
+    pub primary_seat_index: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worst_seat_index: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worst_position_improvement_db: Option<f64>,
+}
+
+impl SeatPartitionAcceptance {
+    /// True only when at least one seat was evaluated and every seat passed.
+    /// Empty or metric-unavailable partitions never imply success.
+    pub fn accepted(&self) -> bool {
+        !self.seats.is_empty() && self.seats.iter().all(|seat| seat.accepted)
+    }
+}
+
+/// Training plus optional held-out per-seat acceptance.
+///
+/// Additive companion to [`CorrectionAcceptanceReport`]: attaching this as an
+/// optional field on the report (or on a wrapper) is backward-compatible for
+/// other crates, since absence keeps the current wire shape. `held_out` is
+/// `None` when no held-out seats were measured; a missing held-out partition
+/// is unknown, not passing, and callers must not read acceptance from it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MultiSeatAcceptance {
+    pub frequency_measure: String,
+    pub training: SeatPartitionAcceptance,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held_out: Option<SeatPartitionAcceptance>,
+}
+
+impl MultiSeatAcceptance {
+    /// True only when training passed and the held-out partition, when
+    /// present, also passed.
+    pub fn accepted(&self) -> bool {
+        self.training.accepted()
+            && self
+                .held_out
+                .as_ref()
+                .is_none_or(SeatPartitionAcceptance::accepted)
+    }
+}
+
+/// Evaluate per-seat runtime acceptance for training seats and, when given,
+/// held-out seats against one shared target.
+///
+/// Unlike [`evaluate_correction_acceptance`], a structurally broken seat
+/// (misaligned grid) aborts with `Err`, while a seat with non-finite curve
+/// data is retained with unavailable (`None`) metrics and `accepted == false`
+/// so the damaged seat stays visible next to the aggregate instead of failing
+/// the whole evaluation opaquely. A seat regresses when its ERB-rate-weighted
+/// post RMS exceeds its pre RMS beyond the runtime epsilon; absent metrics
+/// never count as passing.
+pub fn evaluate_multi_seat_acceptance(
+    training_pre: &[Curve],
+    training_post: &[Curve],
+    held_out_pre: &[Curve],
+    held_out_post: &[Curve],
+    target: &Curve,
+) -> Result<MultiSeatAcceptance, String> {
+    let frequency_measure = autoeq_core::AUDITORY_FREQUENCY_MEASURE_VERSION.to_string();
+    let training = evaluate_seat_partition(training_pre, training_post, target, "training")?;
+    if training.seats.is_empty() {
+        return Err("multi-seat acceptance needs a non-empty training seat set".to_string());
+    }
+    let held_out = if held_out_pre.is_empty() && held_out_post.is_empty() {
+        None
+    } else {
+        Some(evaluate_seat_partition(
+            held_out_pre,
+            held_out_post,
+            target,
+            "held-out",
+        )?)
+    };
+    Ok(MultiSeatAcceptance {
+        frequency_measure,
+        training,
+        held_out,
+    })
+}
+
+fn evaluate_seat_partition(
+    pre: &[Curve],
+    post: &[Curve],
+    target: &Curve,
+    label: &str,
+) -> Result<SeatPartitionAcceptance, String> {
+    if pre.len() != post.len() {
+        return Err(format!(
+            "{label} multi-seat acceptance needs equal pre/post seat counts"
+        ));
+    }
+    let mut seats = Vec::with_capacity(pre.len());
+    for (seat_index, (pre, post)) in pre.iter().zip(post.iter()).enumerate() {
+        seats.push(evaluate_seat(pre, post, target, seat_index, label)?);
+    }
+    let mut worst_seat_index = None;
+    let mut worst_improvement = f64::INFINITY;
+    for seat in &seats {
+        if let Some(improvement) = seat.improvement_db
+            && improvement < worst_improvement
+        {
+            worst_improvement = improvement;
+            worst_seat_index = Some(seat.seat_index);
+        }
+    }
+    Ok(SeatPartitionAcceptance {
+        frequency_measure: autoeq_core::AUDITORY_FREQUENCY_MEASURE_VERSION.to_string(),
+        seats,
+        primary_seat_index: 0,
+        worst_seat_index,
+        worst_position_improvement_db: worst_seat_index.map(|_| worst_improvement),
+    })
+}
+
+fn evaluate_seat(
+    pre: &Curve,
+    post: &Curve,
+    target: &Curve,
+    seat_index: usize,
+    label: &str,
+) -> Result<SeatSpectralOutcome, String> {
+    check_seat_grid(pre, post, target, seat_index, label)?;
+    let unavailable = |violation: &str| SeatSpectralOutcome {
+        seat_index,
+        pre_target_weighted_rms_db: None,
+        post_target_weighted_rms_db: None,
+        improvement_db: None,
+        post_p95_abs_residual_db: None,
+        accepted: false,
+        violations: vec![violation.to_string()],
+    };
+    if pre
+        .spl
+        .iter()
+        .chain(&post.spl)
+        .chain(&target.spl)
+        .any(|value| !value.is_finite())
+    {
+        return Ok(unavailable("seat_non_finite_curve_data"));
+    }
+    let pre_residual: Vec<f64> = pre
+        .spl
+        .iter()
+        .zip(&target.spl)
+        .map(|(value, target)| value - target)
+        .collect();
+    let post_residual: Vec<f64> = post
+        .spl
+        .iter()
+        .zip(&target.spl)
+        .map(|(value, target)| value - target)
+        .collect();
+    let (Some(pre_rms), Some(post_rms)) = (
+        autoeq_core::erb_rate_weighted_rms(&pre.freq, &pre_residual),
+        autoeq_core::erb_rate_weighted_rms(&post.freq, &post_residual),
+    ) else {
+        return Ok(unavailable("seat_metric_unavailable"));
+    };
+    let erb_weights = autoeq_core::erb_rate_cell_widths(&post.freq);
+    let post_abs: Vec<f64> = post_residual.iter().map(|value| value.abs()).collect();
+    let post_p95 = weighted_percentile(&post_abs, erb_weights.as_slice().unwrap_or(&[]), 0.95);
+    let improvement = pre_rms - post_rms;
+    let mut violations = Vec::new();
+    if post_rms > pre_rms + runtime_epsilon(pre_rms) {
+        violations.push("seat_target_weighted_rms_regressed".to_string());
+    }
+    Ok(SeatSpectralOutcome {
+        seat_index,
+        pre_target_weighted_rms_db: Some(pre_rms),
+        post_target_weighted_rms_db: Some(post_rms),
+        improvement_db: Some(improvement),
+        post_p95_abs_residual_db: Some(post_p95),
+        accepted: violations.is_empty(),
+        violations,
+    })
+}
+
+/// Structural grid check only: length and frequency alignment. Finiteness is
+/// handled per seat by the caller so one damaged seat degrades to unavailable
+/// metrics instead of aborting the partition.
+fn check_seat_grid(
+    pre: &Curve,
+    post: &Curve,
+    target: &Curve,
+    seat_index: usize,
+    label: &str,
+) -> Result<(), String> {
+    if pre.freq.len() < 2
+        || pre.freq.len() != post.freq.len()
+        || pre.freq.len() != target.freq.len()
+        || pre
+            .freq
+            .iter()
+            .zip(&post.freq)
+            .any(|(a, b)| (a - b).abs() > 1e-9)
+        || pre
+            .freq
+            .iter()
+            .zip(&target.freq)
+            .any(|(a, b)| (a - b).abs() > 1e-9)
+    {
+        return Err(format!(
+            "{label} seat {seat_index} requires explicitly aligned frequency grids"
+        ));
+    }
+    Ok(())
 }
 
 /// Minimum p95 residual increase (dB) treated as a real distribution
@@ -398,6 +671,206 @@ mod tests {
         assert!(
             (report.metrics.improvement_db - (expected_pre_rms - expected_post_rms)).abs() < 1e-12
         );
+    }
+
+    fn grid_curve(freq: &[f64], spl: Vec<f64>) -> Curve {
+        Curve {
+            freq: Array1::from(freq.to_vec()),
+            spl: Array1::from(spl),
+            ..Default::default()
+        }
+    }
+
+    fn log_grid(points: usize) -> Vec<f64> {
+        (0..points)
+            .map(|index| 20.0 * (1000.0_f64).powf(index as f64 / (points - 1) as f64))
+            .collect()
+    }
+
+    /// Same physical response (1 dB floor, 8 dB narrow band around 1 kHz,
+    /// post at half the residual) on a base grid and a band-densified grid.
+    /// The ERB-rate-weighted p95 and correction RMS must be invariant, while
+    /// the legacy unweighted bin percentile moves on the dense grid.
+    #[test]
+    fn correction_p95_is_erb_weighted_and_grid_invariant() {
+        fn residual(frequency: f64) -> f64 {
+            if (950.0..=1050.0).contains(&frequency) {
+                8.0
+            } else {
+                1.0
+            }
+        }
+        let base_freq = log_grid(500);
+        let mut dense_freq: Vec<f64> = base_freq
+            .iter()
+            .copied()
+            .filter(|frequency| *frequency < 950.0 || *frequency > 1050.0)
+            .collect();
+        for index in 0..100 {
+            dense_freq.push(950.0 * (1050.0_f64 / 950.0).powf(index as f64 / 99.0));
+        }
+        dense_freq.sort_by(f64::total_cmp);
+        let report_for = |freq: &[f64]| {
+            let target = grid_curve(freq, vec![0.0; freq.len()]);
+            let pre = grid_curve(freq, freq.iter().map(|f| residual(*f)).collect());
+            let post = grid_curve(freq, freq.iter().map(|f| 0.5 * residual(*f)).collect());
+            evaluate_correction_acceptance(
+                &pre,
+                &post,
+                &target,
+                None,
+                CorrectionAcceptancePolicy::RuntimeSafety,
+            )
+            .expect("acceptance report")
+        };
+        let base = report_for(&base_freq);
+        let dense = report_for(&dense_freq);
+        assert!(
+            (dense.metrics.post_p95_abs_residual_db - base.metrics.post_p95_abs_residual_db)
+                .abs()
+                < 1e-9,
+            "weighted p95 moved under densification: {} -> {}",
+            base.metrics.post_p95_abs_residual_db,
+            dense.metrics.post_p95_abs_residual_db
+        );
+        assert!(
+            (dense.metrics.correction_rms_db - base.metrics.correction_rms_db).abs() < 0.1,
+            "weighted correction RMS moved under densification"
+        );
+        let expected_correction = autoeq_core::erb_rate_weighted_rms(
+            &Array1::from(base_freq.clone()),
+            &base_freq
+                .iter()
+                .map(|f| -0.5 * residual(*f))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        assert!(
+            (base.metrics.correction_rms_db - expected_correction).abs() < 1e-12,
+            "correction RMS is not ERB-rate-weighted"
+        );
+        // Documented grid artifact of the old unweighted definition: the
+        // dense grid pushes the band past 5 % of the bins, so the legacy
+        // percentile jumps from the 0.5 dB floor to the 4 dB band.
+        let legacy_p95 = |freq: &[f64]| {
+            let mut values: Vec<f64> =
+                freq.iter().map(|f| 0.5 * residual(*f)).collect();
+            values.sort_by(f64::total_cmp);
+            values[((values.len() - 1) as f64 * 0.95).ceil() as usize]
+        };
+        assert!((legacy_p95(&base_freq) - 0.5).abs() < 1e-12);
+        assert!((legacy_p95(&dense_freq) - 4.0).abs() < 1e-12);
+    }
+
+    /// Adversarial final realization: three seats improve (good average) but
+    /// seat 3 is damaged. Per-seat, worst-seat, primary-seat, and held-out
+    /// outcomes must be retained and the aggregate must not accept.
+    #[test]
+    fn multi_seat_acceptance_flags_single_damaged_seat() {
+        let freq = vec![20.0, 100.0, 1000.0, 10_000.0];
+        let target = grid_curve(&freq, vec![0.0; 4]);
+        let improved = |scale: f64| {
+            (
+                grid_curve(&freq, vec![4.0, -4.0, 3.0, -3.0]),
+                grid_curve(
+                    &freq,
+                    vec![4.0 * scale, -4.0 * scale, 3.0 * scale, -3.0 * scale],
+                ),
+            )
+        };
+        let (pre0, post0) = improved(0.25);
+        let (pre1, post1) = improved(0.25);
+        let (pre2, post2) = improved(0.25);
+        let (pre3, post3) = improved(2.0);
+        let (held_pre, held_post) = improved(0.25);
+        let summary = evaluate_multi_seat_acceptance(
+            &[pre0, pre1, pre2, pre3],
+            &[post0, post1, post2, post3],
+            &[held_pre],
+            &[held_post],
+            &target,
+        )
+        .expect("multi-seat summary");
+        assert_eq!(summary.training.seats.len(), 4);
+        assert_eq!(summary.training.primary_seat_index, 0);
+        assert_eq!(summary.training.worst_seat_index, Some(3));
+        assert!(
+            summary
+                .training
+                .worst_position_improvement_db
+                .is_some_and(|value| value < 0.0)
+        );
+        for seat in summary.training.seats.iter().take(3) {
+            assert!(seat.accepted, "seat {} should pass", seat.seat_index);
+        }
+        let damaged = &summary.training.seats[3];
+        assert!(!damaged.accepted);
+        assert!(
+            damaged
+                .violations
+                .iter()
+                .any(|violation| violation == "seat_target_weighted_rms_regressed")
+        );
+        assert!(!summary.training.accepted());
+        assert!(summary.held_out.as_ref().is_some_and(|held| held.accepted()));
+        assert!(!summary.accepted());
+    }
+
+    /// Zero-length or unavailable evidence must never read as success: empty
+    /// training errors, a non-finite seat reports `None` metrics with
+    /// `accepted == false`, and a regressed held-out partition fails the
+    /// aggregate even when training passes.
+    #[test]
+    fn unavailable_seat_metrics_never_imply_success() {
+        let freq = vec![20.0, 100.0, 1000.0, 10_000.0];
+        let target = grid_curve(&freq, vec![0.0; 4]);
+        assert!(
+            evaluate_multi_seat_acceptance(&[], &[], &[], &[], &target).is_err(),
+            "empty training seat set must not vacuously succeed"
+        );
+        let good_pre = grid_curve(&freq, vec![4.0, -4.0, 3.0, -3.0]);
+        let good_post = grid_curve(&freq, vec![1.0, -1.0, 0.5, -0.5]);
+        let bad_post = grid_curve(&freq, vec![1.0, f64::NAN, 0.5, -0.5]);
+        let summary = evaluate_multi_seat_acceptance(
+            &[good_pre.clone(), good_pre.clone()],
+            &[good_post, bad_post],
+            &[],
+            &[],
+            &target,
+        )
+        .expect("multi-seat summary");
+        let damaged = &summary.training.seats[1];
+        assert!(!damaged.accepted);
+        assert_eq!(damaged.pre_target_weighted_rms_db, None);
+        assert_eq!(damaged.improvement_db, None);
+        assert!(
+            damaged
+                .violations
+                .iter()
+                .any(|violation| violation == "seat_non_finite_curve_data")
+        );
+        assert!(!summary.training.accepted());
+        assert!(!summary.accepted());
+        assert!(summary.held_out.is_none());
+
+        let regressed_held_pre = grid_curve(&freq, vec![1.0, -1.0, 1.0, -1.0]);
+        let regressed_held_post = grid_curve(&freq, vec![3.0, -3.0, 3.0, -3.0]);
+        let summary = evaluate_multi_seat_acceptance(
+            &[good_pre.clone()],
+            &[grid_curve(&freq, vec![0.5, -0.5, 0.25, -0.25])],
+            &[regressed_held_pre],
+            &[regressed_held_post],
+            &target,
+        )
+        .expect("multi-seat summary");
+        assert!(summary.training.accepted());
+        assert!(
+            summary
+                .held_out
+                .as_ref()
+                .is_some_and(|held| !held.accepted())
+        );
+        assert!(!summary.accepted());
     }
 
     fn runtime_scorecard() -> super::super::AcousticQualityScorecard {

@@ -200,8 +200,32 @@ pub fn load_source_individual_with_support(
     }
 }
 
-/// Load a single measurement from a file or inline data
+/// Load a single measurement from a file or inline data.
+///
+/// Lenient default: a phase array whose length does not match the frequency
+/// grid is dropped with a debug log (historical behavior). Phase-critical
+/// workflows should use [`load_measurement_strict`] instead.
 pub fn load_measurement(measurement: &MeasurementRef) -> Result<Curve, Box<dyn Error>> {
+    load_measurement_with_policy(measurement, false)
+}
+
+/// Strict single-measurement loader for phase-critical workflows.
+///
+/// Unlike [`load_measurement`], a phase array whose length does not match
+/// the frequency grid is an error here instead of a warn-and-drop: silently
+/// discarding phase evidence is unacceptable when downstream phase handling
+/// (delay estimation, coherent averaging) depends on its presence.
+pub fn load_measurement_strict(
+    measurement: &MeasurementRef,
+) -> Result<Curve, Box<dyn Error>> {
+    load_measurement_with_policy(measurement, true)
+}
+
+/// Single-measurement loader with an explicit phase-mismatch policy.
+pub fn load_measurement_with_policy(
+    measurement: &MeasurementRef,
+    strict_phase: bool,
+) -> Result<Curve, Box<dyn Error>> {
     let curve = match measurement {
         MeasurementRef::Path(path) => {
             read_curve_from_csv(path).map_err(|error| -> Box<dyn Error> {
@@ -235,18 +259,29 @@ pub fn load_measurement(measurement: &MeasurementRef) -> Result<Curve, Box<dyn E
                     .into());
                 }
 
-                let phase = inline.phase_deg.as_ref().and_then(|p| {
-                    if p.len() != inline.frequencies.len() {
+                let phase = match inline.phase_deg.as_ref() {
+                    Some(p) if p.len() != inline.frequencies.len() => {
+                        if strict_phase {
+                            return Err(format!(
+                                "Inline measurement phase array length ({}) doesn't match \
+                                 frequencies ({}); strict phase mode refuses to silently drop it \
+                                 (name: {:?})",
+                                p.len(),
+                                inline.frequencies.len(),
+                                inline.name
+                            )
+                            .into());
+                        }
                         log::debug!(
                             "Warning: phase array length ({}) doesn't match frequencies ({}), ignoring phase",
                             p.len(),
                             inline.frequencies.len()
                         );
                         None
-                    } else {
-                        Some(Array1::from(p.clone()))
                     }
-                });
+                    Some(p) => Some(Array1::from(p.clone())),
+                    None => None,
+                };
 
                 Curve {
                     freq: Array1::from(inline.frequencies.clone()),
@@ -270,27 +305,102 @@ pub fn load_source_individual(source: &MeasurementSource) -> Result<Vec<Curve>, 
     load_source_individual_with_support(source).map(|aligned| aligned.curves)
 }
 
-/// Average a set of curves in the power domain after interpolating to the
-/// first curve's frequency grid.
+/// Per-seat provenance carried through loading (additive, all optional
+/// except the seat identity).
 ///
-/// All curves must be non-empty; callers are responsible for checking.
+/// `load_source_detailed` fills in what loading actually knows — the seat id
+/// (measurement name, else `seat-{index}`), the source path when file-backed,
+/// and a phase-confidence estimate from mean coherence when present.
+/// `calibration_id` and `delay_ms` stay `None` here: populating them is the
+/// measurement contract of calibration-aware callers (mic calibration
+/// tables, arrival/delay estimation). [`CoherentAverageContract`] gates on
+/// them, so a coherent average can never silently run on uncalibrated seats.
+#[derive(Debug, Clone, Default)]
+pub struct SeatProvenance {
+    /// Seat identity: measurement name, else `seat-{index}` in input order.
+    pub seat_id: String,
+    /// Source file path for file-backed measurements, if any.
+    pub source_path: Option<String>,
+    /// Microphone/chain calibration identity, when the caller provides one.
+    pub calibration_id: Option<String>,
+    /// Estimated propagation delay in milliseconds, when known.
+    pub delay_ms: Option<f64>,
+    /// Phase trust in `[0, 1]` (mean coherence when the curve carries one).
+    pub phase_confidence: Option<f64>,
+}
+
+/// Explicit measurement contract for a coherent (complex-mean) average.
+///
+/// A coherent average is only meaningful for calibrated, time-aligned seats
+/// with trustworthy phase. The loader enforces that here instead of
+/// exposing an always-on hybrid: `seats` must identify every input curve in
+/// order, each seat's `phase_confidence` must clear `min_phase_confidence`,
+/// and — unless the caller opts out — every seat must carry a
+/// `calibration_id`.
+#[derive(Debug, Clone)]
+pub struct CoherentAverageContract {
+    /// One entry per input curve, in input order.
+    pub seats: Vec<SeatProvenance>,
+    /// Minimum accepted `phase_confidence` per seat (missing counts as 0).
+    pub min_phase_confidence: f64,
+    /// When true (default), every seat must carry a `calibration_id`.
+    pub require_calibration: bool,
+}
+
+impl Default for CoherentAverageContract {
+    fn default() -> Self {
+        Self {
+            seats: Vec::new(),
+            min_phase_confidence: 0.8,
+            require_calibration: true,
+        }
+    }
+}
+
+/// Fully attributed multi-seat load: spatial magnitude, primary seat, and
+/// (only under an explicit contract) a coherent average.
+///
+/// - `spatial_rms`: power-domain (RMS) magnitude average. `phase` is always
+///   `None` — an RMS magnitude must never be paired with an averaged angle.
+/// - `primary_seat`: the first input curve, untouched, carrying that seat's
+///   measured complex response for phase-sensitive work (delay estimation,
+///   GD optimisation).
+/// - `coherent`: complex-mean magnitude *and* angle, present only when the
+///   caller passes a [`CoherentAverageContract`] that all seats satisfy.
+#[derive(Debug, Clone)]
+pub struct DetailedLoad {
+    pub spatial_rms: Curve,
+    pub primary_seat: Curve,
+    pub coherent: Option<Curve>,
+    pub individual: Vec<Curve>,
+    pub seats: Vec<SeatProvenance>,
+    /// Physical intersection all outputs are constrained to, in Hz.
+    pub overlap_hz: (f64, f64),
+    /// Original per-curve support, in input order.
+    pub support_hz: Vec<CurveSupport>,
+    /// Per-bin validity of the shared grid (all true by construction).
+    pub validity_mask: Vec<bool>,
+}
+
+/// Spatial (power-domain RMS) magnitude average.
+///
+/// The output carries **no phase**: combining an RMS magnitude with an
+/// averaged angle produces a hybrid that looks like an ordinary
+/// phase-bearing `Curve` (equal 80 dB SPL at 0° and 180° would keep 80 dB
+/// with a numerically unstable angle), so phase presence can never be used
+/// as proof of coherence. Curves must already share a grid — callers use
+/// the overlap-aligned output; the interpolation here is an identity for
+/// aligned inputs and never extrapolates for them.
 fn average_curves_power_domain(curves: &[Curve]) -> Curve {
     let ref_curve = &curves[0];
     let freqs = ref_curve.freq.clone();
+    debug_assert!(curves.iter().all(|curve| grids_match(&freqs, &curve.freq)));
 
     let mut power_sum = Array1::<f64>::zeros(freqs.len());
     let mut coherence_sum = curves
         .iter()
         .all(|curve| curve.coherence.is_some())
         .then(|| Array1::<f64>::zeros(freqs.len()));
-    let preserve_phase = curves.iter().all(|curve| {
-        curve
-            .phase
-            .as_ref()
-            .is_some_and(|phase| phase.len() == curve.freq.len())
-    });
-    let mut phase_real_sum = preserve_phase.then(|| Array1::<f64>::zeros(freqs.len()));
-    let mut phase_imag_sum = preserve_phase.then(|| Array1::<f64>::zeros(freqs.len()));
 
     for curve in curves {
         let interpolated = interpolate_log_space(&freqs, curve);
@@ -303,47 +413,213 @@ fn average_curves_power_domain(curves: &[Curve]) -> Curve {
         {
             *sum = sum.clone() + coherence;
         }
-        if let (Some(real_sum), Some(imag_sum), Some(phase)) = (
-            phase_real_sum.as_mut(),
-            phase_imag_sum.as_mut(),
-            interpolated.phase.as_ref(),
-        ) {
-            for (((real, imag), &spl), &phase_deg) in real_sum
-                .iter_mut()
-                .zip(imag_sum.iter_mut())
-                .zip(interpolated.spl.iter())
-                .zip(phase.iter())
-            {
-                let amplitude = 10.0_f64.powf(spl / 20.0);
-                let phase_rad = phase_deg.to_radians();
-                *real += amplitude * phase_rad.cos();
-                *imag += amplitude * phase_rad.sin();
-            }
-        }
     }
 
     let avg_power = power_sum / (curves.len() as f64);
     let avg_spl = avg_power.mapv(|p| 10.0 * p.log10());
     let coherence = coherence_sum.map(|sum| sum / curves.len() as f64);
-    let phase = phase_real_sum.zip(phase_imag_sum).map(|(real, imag)| {
-        Array1::from_iter(
-            real.iter()
-                .zip(imag.iter())
-                .map(|(&real, &imag)| imag.atan2(real).to_degrees()),
-        )
-    });
 
     Curve {
         freq: freqs,
         spl: avg_spl,
-        phase,
+        phase: None,
         coherence,
         ..Default::default()
     }
 }
 
+/// Coherent (complex-pressure mean) average under an explicit contract.
+///
+/// Magnitude **and** angle both come from the mean complex pressure, so the
+/// result is a genuine single complex response — never an RMS magnitude
+/// with a grafted-on angle. Fails when any curve lacks phase, when the
+/// contract's seat list does not cover every curve, when a seat's phase
+/// confidence is below the contract minimum, when calibration is required
+/// but missing, or when seats cancel completely (non-finite magnitude).
+pub fn coherent_average_measurement(
+    curves: &[Curve],
+    contract: &CoherentAverageContract,
+) -> Result<Curve, Box<dyn Error>> {
+    if curves.is_empty() {
+        return Err("coherent average needs at least one curve".into());
+    }
+    if contract.seats.len() != curves.len() {
+        return Err(format!(
+            "coherent average needs one contracted seat per curve ({} seats, {} curves)",
+            contract.seats.len(),
+            curves.len()
+        )
+        .into());
+    }
+    let freqs = curves[0].freq.clone();
+    if !curves.iter().all(|curve| grids_match(&freqs, &curve.freq)) {
+        return Err("coherent average needs overlap-aligned curves".into());
+    }
+    for (index, curve) in curves.iter().enumerate() {
+        if curve
+            .phase
+            .as_ref()
+            .is_none_or(|phase| phase.len() != curve.freq.len())
+        {
+            return Err(format!(
+                "coherent average requires measured phase on every seat (seat {} has none)",
+                contract.seats[index].seat_id
+            )
+            .into());
+        }
+    }
+    for seat in &contract.seats {
+        if contract.require_calibration && seat.calibration_id.is_none() {
+            return Err(format!(
+                "coherent average requires a calibration identity for seat '{}'",
+                seat.seat_id
+            )
+            .into());
+        }
+        if seat.phase_confidence.unwrap_or(0.0) < contract.min_phase_confidence {
+            return Err(format!(
+                "seat '{}' phase confidence ({:?}) is below the coherent-average minimum {}",
+                seat.seat_id, seat.phase_confidence, contract.min_phase_confidence
+            )
+            .into());
+        }
+    }
+
+    let mut real_sum = Array1::<f64>::zeros(freqs.len());
+    let mut imag_sum = Array1::<f64>::zeros(freqs.len());
+    let mut coherence_sum = curves
+        .iter()
+        .all(|curve| curve.coherence.is_some())
+        .then(|| Array1::<f64>::zeros(freqs.len()));
+    for curve in curves {
+        let phase = curve.phase.as_ref().expect("phase checked above");
+        for (bin, (&spl, &phase_deg)) in curve.spl.iter().zip(phase.iter()).enumerate() {
+            let amplitude = 10.0_f64.powf(spl / 20.0);
+            let phase_rad = phase_deg.to_radians();
+            real_sum[bin] += amplitude * phase_rad.cos();
+            imag_sum[bin] += amplitude * phase_rad.sin();
+        }
+        if let (Some(sum), Some(coherence)) = (coherence_sum.as_mut(), curve.coherence.as_ref())
+        {
+            *sum = sum.clone() + coherence;
+        }
+    }
+    let count = curves.len() as f64;
+    let mut spl = Array1::<f64>::zeros(freqs.len());
+    let mut phase = Array1::<f64>::zeros(freqs.len());
+    for bin in 0..freqs.len() {
+        let magnitude = (real_sum[bin] / count).hypot(imag_sum[bin] / count);
+        if !magnitude.is_finite() || magnitude <= 0.0 {
+            return Err(format!(
+                "coherent average has non-finite magnitude at {} Hz (seats cancel)",
+                freqs[bin]
+            )
+            .into());
+        }
+        spl[bin] = 20.0 * magnitude.log10();
+        phase[bin] = (imag_sum[bin]).atan2(real_sum[bin]).to_degrees();
+    }
+    let coherence = coherence_sum.map(|sum| sum / count);
+    let averaged = Curve {
+        freq: freqs,
+        spl,
+        phase: Some(phase),
+        coherence,
+        ..Default::default()
+    };
+    averaged.validate("coherent average")?;
+    Ok(averaged)
+}
+
+fn seat_for_ref(measurement: &MeasurementRef, index: usize) -> SeatProvenance {
+    SeatProvenance {
+        seat_id: measurement
+            .name()
+            .map(String::from)
+            .unwrap_or_else(|| format!("seat-{index}")),
+        source_path: measurement.path().map(|path| path.display().to_string()),
+        ..Default::default()
+    }
+}
+
+fn phase_confidence_of(curve: &Curve) -> Option<f64> {
+    curve
+        .coherence
+        .as_ref()
+        .map(|coherence| coherence.iter().sum::<f64>() / coherence.len() as f64)
+}
+
+fn seats_for_aligned(source: &MeasurementSource, curves: &[Curve]) -> Vec<SeatProvenance> {
+    let mut seats: Vec<SeatProvenance> = match source {
+        MeasurementSource::Single(s) => vec![seat_for_ref(&s.measurement, 0)],
+        MeasurementSource::Multiple(m) => m
+            .measurements
+            .iter()
+            .enumerate()
+            .map(|(index, measurement)| seat_for_ref(measurement, index))
+            .collect(),
+        MeasurementSource::InMemory(_) => vec![SeatProvenance {
+            seat_id: "seat-0".to_string(),
+            ..Default::default()
+        }],
+        MeasurementSource::InMemoryMultiple(_) => (0..curves.len())
+            .map(|index| SeatProvenance {
+                seat_id: format!("seat-{index}"),
+                ..Default::default()
+            })
+            .collect(),
+    };
+    for (seat, curve) in seats.iter_mut().zip(curves) {
+        seat.phase_confidence = phase_confidence_of(curve);
+    }
+    seats
+}
+
+/// Load a source with full seat attribution.
+///
+/// Additive companion to [`load_source_with_individual`]: the same
+/// overlap-aligned individuals and spatial-RMS representative, plus the
+/// separately identified primary-seat curve, per-seat provenance
+/// (seat ids, source paths, phase confidence), and — only when
+/// `coherent_contract` is `Some` and every seat satisfies it — a coherent
+/// complex average. Other crates doing phase-sensitive work should consume
+/// `primary_seat` or `coherent`, never `spatial_rms.phase` (always `None`
+/// for multi-seat loads).
+pub fn load_source_detailed(
+    source: &MeasurementSource,
+    coherent_contract: Option<&CoherentAverageContract>,
+) -> Result<DetailedLoad, Box<dyn Error>> {
+    let aligned = load_source_individual_with_support(source)?;
+    let seats = seats_for_aligned(source, &aligned.curves);
+    let spatial_rms = if aligned.curves.len() == 1 {
+        aligned.curves[0].clone()
+    } else {
+        average_curves_power_domain(&aligned.curves)
+    };
+    let primary_seat = aligned.curves[0].clone();
+    let coherent = coherent_contract
+        .map(|contract| coherent_average_measurement(&aligned.curves, contract))
+        .transpose()?;
+    let validity_mask = aligned.validity_mask.first().cloned().unwrap_or_default();
+    Ok(DetailedLoad {
+        spatial_rms,
+        primary_seat,
+        coherent,
+        individual: aligned.curves,
+        seats,
+        overlap_hz: aligned.overlap_hz,
+        support_hz: aligned.support_hz,
+        validity_mask,
+    })
+}
+
 /// Load measurement(s) once and return both the representative response and
 /// the aligned individual responses.
+///
+/// The representative is the spatial (power-domain RMS) magnitude on the
+/// physical overlap grid; for multi-seat loads its `phase` is always `None`
+/// (see [`load_source_detailed`] for the separately identified primary-seat
+/// curve and the contracted coherent average).
 pub fn load_source_with_individual(
     source: &MeasurementSource,
 ) -> Result<(Curve, Vec<Curve>), Box<dyn Error>> {
@@ -550,21 +826,270 @@ mod tests {
     }
 
     #[test]
-    fn load_source_power_average_preserves_circular_phase_when_all_positions_have_phase() {
+    fn load_source_spatial_average_never_carries_averaged_angle() {
         let mut first = sample_curve(0.0);
         first.phase = Some(Array1::from_vec(vec![170.0, 20.0, -45.0]));
         let mut second = sample_curve(0.0);
         second.phase = Some(Array1::from_vec(vec![-170.0, 40.0, -15.0]));
 
-        let source = MeasurementSource::InMemoryMultiple(vec![first, second]);
+        let source = MeasurementSource::InMemoryMultiple(vec![first.clone(), second.clone()]);
         let average = load_source(&source).unwrap();
-        let phase = average
-            .phase
-            .expect("phase must survive all-phase averaging");
+        // An RMS magnitude must never be paired with an averaged angle:
+        // phase presence on the spatial average cannot prove coherence.
+        assert!(average.phase.is_none());
 
+        // The same seat pair under an explicit coherent contract yields a
+        // genuine complex-mean response with circularly averaged phase.
+        let individuals = load_source_individual(&source).unwrap();
+        let seats = vec![
+            SeatProvenance {
+                seat_id: "a".to_string(),
+                calibration_id: Some("mic-1".to_string()),
+                phase_confidence: Some(1.0),
+                ..Default::default()
+            },
+            SeatProvenance {
+                seat_id: "b".to_string(),
+                calibration_id: Some("mic-1".to_string()),
+                phase_confidence: Some(1.0),
+                ..Default::default()
+            },
+        ];
+        let contract = CoherentAverageContract {
+            seats,
+            min_phase_confidence: 0.0,
+            require_calibration: true,
+        };
+        let coherent = coherent_average_measurement(&individuals, &contract).unwrap();
+        let phase = coherent.phase.expect("coherent average carries phase");
         assert!((phase[0].abs() - 180.0).abs() < 1e-9);
         assert!((phase[1] - 30.0).abs() < 1e-9);
         assert!((phase[2] + 30.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn equal_spl_opposite_phase_keeps_spatial_level_without_angle() {
+        // 80 dB at 0° + 80 dB at 180°: the spatial RMS stays 80 dB with NO
+        // phase (previously this kept 80 dB with a numerically unstable
+        // averaged angle). The coherent mean instead cancels (≈ −238 dB).
+        let freq = Array1::from_vec(vec![100.0, 1000.0, 10000.0]);
+        let first = Curve {
+            freq: freq.clone(),
+            spl: Array1::from_vec(vec![80.0, 80.0, 80.0]),
+            phase: Some(Array1::from_vec(vec![0.0, 0.0, 0.0])),
+            ..Default::default()
+        };
+        let second = Curve {
+            freq: freq.clone(),
+            spl: Array1::from_vec(vec![80.0, 80.0, 80.0]),
+            phase: Some(Array1::from_vec(vec![180.0, 180.0, 180.0])),
+            ..Default::default()
+        };
+        let source = MeasurementSource::InMemoryMultiple(vec![first, second]);
+        let average = load_source(&source).unwrap();
+        for spl in average.spl.iter() {
+            assert!((spl - 80.0).abs() < 1e-9);
+        }
+        assert!(average.phase.is_none());
+
+        let individuals = load_source_individual(&source).unwrap();
+        let seats = (0..2)
+            .map(|index| SeatProvenance {
+                seat_id: format!("seat-{index}"),
+                phase_confidence: Some(1.0),
+                ..Default::default()
+            })
+            .collect();
+        let contract = CoherentAverageContract {
+            seats,
+            min_phase_confidence: 0.0,
+            require_calibration: false,
+        };
+        // The seats cancel: the coherent mean collapses ~300 dB below the
+        // spatial RMS instead of inheriting its 80 dB.
+        let coherent = coherent_average_measurement(&individuals, &contract).unwrap();
+        assert!(coherent.phase.is_some());
+        assert!(coherent.spl[0] < -100.0);
+    }
+
+    #[test]
+    fn coherent_average_rejects_non_finite_magnitude() {
+        let freq = Array1::from_vec(vec![100.0, 1000.0]);
+        let loud = |phase: f64| Curve {
+            freq: freq.clone(),
+            spl: Array1::from_vec(vec![1.0e308, 1.0e308]),
+            phase: Some(Array1::from_vec(vec![phase, phase])),
+            ..Default::default()
+        };
+        let individuals = vec![loud(0.0), loud(180.0)];
+        let contract = CoherentAverageContract {
+            seats: vec![
+                SeatProvenance {
+                    seat_id: "a".to_string(),
+                    ..Default::default()
+                },
+                SeatProvenance {
+                    seat_id: "b".to_string(),
+                    ..Default::default()
+                },
+            ],
+            min_phase_confidence: 0.0,
+            require_calibration: false,
+        };
+        let error = coherent_average_measurement(&individuals, &contract).unwrap_err();
+        assert!(
+            error.to_string().contains("non-finite magnitude"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn coherent_average_is_gated_on_calibration_confidence_and_phase() {
+        let mut first = sample_curve(0.0);
+        first.phase = Some(Array1::from_vec(vec![10.0, 20.0, 30.0]));
+        let mut second = sample_curve(0.0);
+        second.phase = Some(Array1::from_vec(vec![12.0, 22.0, 32.0]));
+        let source = MeasurementSource::InMemoryMultiple(vec![first, second]);
+        let individuals = load_source_individual(&source).unwrap();
+
+        // Default contract with no seat provenance: rejected.
+        assert!(coherent_average_measurement(&individuals, &CoherentAverageContract::default())
+            .is_err());
+
+        // Uncalibrated seats under a calibration-requiring contract: rejected.
+        let uncalibrated = vec![
+            SeatProvenance {
+                seat_id: "a".to_string(),
+                phase_confidence: Some(1.0),
+                ..Default::default()
+            },
+            SeatProvenance {
+                seat_id: "b".to_string(),
+                phase_confidence: Some(1.0),
+                ..Default::default()
+            },
+        ];
+        assert!(
+            coherent_average_measurement(
+                &individuals,
+                &CoherentAverageContract {
+                    seats: uncalibrated,
+                    min_phase_confidence: 0.0,
+                    require_calibration: true,
+                }
+            )
+            .is_err()
+        );
+
+        // Low-confidence seat: rejected.
+        let low_confidence = vec![
+            SeatProvenance {
+                seat_id: "a".to_string(),
+                calibration_id: Some("mic-1".to_string()),
+                phase_confidence: Some(0.1),
+                ..Default::default()
+            },
+            SeatProvenance {
+                seat_id: "b".to_string(),
+                calibration_id: Some("mic-1".to_string()),
+                phase_confidence: Some(1.0),
+                ..Default::default()
+            },
+        ];
+        assert!(
+            coherent_average_measurement(
+                &individuals,
+                &CoherentAverageContract {
+                    seats: low_confidence,
+                    min_phase_confidence: 0.8,
+                    require_calibration: true,
+                }
+            )
+            .is_err()
+        );
+
+        // Missing phase on one seat: rejected even with a permissive contract.
+        let no_phase = vec![sample_curve(0.0), sample_curve(0.0)];
+        let permissive = CoherentAverageContract {
+            seats: vec![
+                SeatProvenance {
+                    seat_id: "a".to_string(),
+                    ..Default::default()
+                },
+                SeatProvenance {
+                    seat_id: "b".to_string(),
+                    ..Default::default()
+                },
+            ],
+            min_phase_confidence: 0.0,
+            require_calibration: false,
+        };
+        assert!(coherent_average_measurement(&no_phase, &permissive).is_err());
+    }
+
+    #[test]
+    fn detailed_load_separates_spatial_primary_and_coherent() {
+        let mut first = sample_curve(0.0);
+        first.phase = Some(Array1::from_vec(vec![10.0, 20.0, 30.0]));
+        let mut second = sample_curve(3.0);
+        second.phase = Some(Array1::from_vec(vec![12.0, 22.0, 32.0]));
+        let source = MeasurementSource::InMemoryMultiple(vec![first.clone(), second.clone()]);
+
+        // Without a contract: spatial RMS (no phase) + identified primary.
+        let detailed = load_source_detailed(&source, None).unwrap();
+        assert!(detailed.spatial_rms.phase.is_none());
+        assert_eq!(detailed.primary_seat.spl.to_vec(), first.spl.to_vec());
+        assert!(detailed.primary_seat.phase.is_some());
+        assert!(detailed.coherent.is_none());
+        assert_eq!(
+            detailed.seats.iter().map(|s| s.seat_id.clone()).collect::<Vec<_>>(),
+            vec!["seat-0".to_string(), "seat-1".to_string()]
+        );
+        assert_eq!(detailed.individual.len(), 2);
+
+        // With a satisfied contract: coherent average appears alongside.
+        let seats = vec![
+            SeatProvenance {
+                seat_id: "seat-0".to_string(),
+                calibration_id: Some("mic-1".to_string()),
+                phase_confidence: Some(1.0),
+                ..Default::default()
+            },
+            SeatProvenance {
+                seat_id: "seat-1".to_string(),
+                calibration_id: Some("mic-1".to_string()),
+                phase_confidence: Some(1.0),
+                ..Default::default()
+            },
+        ];
+        let contract = CoherentAverageContract {
+            seats,
+            min_phase_confidence: 0.0,
+            require_calibration: true,
+        };
+        let detailed = load_source_detailed(&source, Some(&contract)).unwrap();
+        let coherent = detailed.coherent.expect("contract satisfied");
+        assert!(coherent.phase.is_some());
+        // Nearly aligned but distinct seat angles: the coherent magnitude is
+        // strictly below the RMS magnitude (triangle inequality).
+        assert!(coherent.spl[0] < detailed.spatial_rms.spl[0]);
+    }
+
+    #[test]
+    fn load_measurement_strict_rejects_mismatched_phase() {
+        let mut inline = sample_inline();
+        inline.phase_deg = Some(vec![0.0, 45.0]);
+        // Lenient default keeps warn-and-drop behavior.
+        let lenient =
+            load_measurement(&MeasurementRef::Inline(inline.clone())).unwrap();
+        assert!(lenient.phase.is_none());
+        // Strict mode errors instead.
+        let error =
+            load_measurement_strict(&MeasurementRef::Inline(inline)).unwrap_err();
+        assert!(
+            error.to_string().contains("strict phase mode"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

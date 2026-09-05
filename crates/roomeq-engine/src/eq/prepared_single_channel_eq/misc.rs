@@ -155,7 +155,6 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
                 fdw_min_window_ms: dc_config.fdw_min_window_ms,
                 fdw_max_window_ms: dc_config.fdw_max_window_ms,
                 fdw_smoothing_octaves: dc_config.fdw_smoothing_octaves,
-                ..Default::default()
             };
 
             let result = match resources::analyze_ssir(resources) {

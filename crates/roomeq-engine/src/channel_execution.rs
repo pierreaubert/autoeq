@@ -251,6 +251,7 @@ fn sub_optimizer_upper_bound(measured_upper: Option<f64>, crossover_upper: Optio
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_clamped_optimizer(
     channel_name: &str,
     room_config: &RoomConfig,

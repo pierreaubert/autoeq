@@ -789,6 +789,7 @@ pub(super) fn run_cross_mode_convergence_tests(
     Ok((out, results))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn run_option_effect_test(
     name: &str,
     fem_dir: &Path,

@@ -257,6 +257,7 @@ fn optimize_channel_eq_adaptive(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn optimize_channel_eq_inner(
     curve: &Curve,
     config: &OptimizerConfig,

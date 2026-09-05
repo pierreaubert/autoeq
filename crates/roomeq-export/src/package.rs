@@ -262,6 +262,21 @@ fn unique_member_name(preferred: &str, assigned: &BTreeSet<String>) -> String {
     unreachable!("u64 package-member namespace exhausted")
 }
 
+fn validate_member_path(path: &Path) -> anyhow::Result<()> {
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        anyhow::bail!(
+            "export package member '{}' must be a safe relative path",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,19 +355,4 @@ mod tests {
         assert_eq!(rewritten[0], rewritten[1]);
         assert_ne!(rewritten[0], rewritten[2]);
     }
-}
-
-fn validate_member_path(path: &Path) -> anyhow::Result<()> {
-    if path.as_os_str().is_empty()
-        || path.is_absolute()
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        anyhow::bail!(
-            "export package member '{}' must be a safe relative path",
-            path.display()
-        );
-    }
-    Ok(())
 }

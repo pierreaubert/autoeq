@@ -11,10 +11,8 @@ pub(super) fn decode_typed_array(bdata: &str, dtype: &str) -> Result<Vec<f64>, B
         "f8" => {
             // Float64Array - 8 bytes per element
             let mut values = Vec::new();
-            for chunk in bytes.chunks_exact(8) {
-                let bits = u64::from_le_bytes([
-                    chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
-                ]);
+            for chunk in bytes.as_chunks::<8>().0 {
+                let bits = u64::from_le_bytes(*chunk);
                 values.push(f64::from_bits(bits));
             }
             values
@@ -22,8 +20,8 @@ pub(super) fn decode_typed_array(bdata: &str, dtype: &str) -> Result<Vec<f64>, B
         "f4" => {
             // Float32Array - 4 bytes per element
             let mut values = Vec::new();
-            for chunk in bytes.chunks_exact(4) {
-                let bits = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+            for chunk in bytes.as_chunks::<4>().0 {
+                let bits = u32::from_le_bytes(*chunk);
                 values.push(f32::from_bits(bits) as f64);
             }
             values
@@ -31,8 +29,8 @@ pub(super) fn decode_typed_array(bdata: &str, dtype: &str) -> Result<Vec<f64>, B
         "i4" => {
             // Int32Array - 4 bytes per element
             let mut values = Vec::new();
-            for chunk in bytes.chunks_exact(4) {
-                let val = i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+            for chunk in bytes.as_chunks::<4>().0 {
+                let val = i32::from_le_bytes(*chunk);
                 values.push(val as f64);
             }
             values
@@ -40,8 +38,8 @@ pub(super) fn decode_typed_array(bdata: &str, dtype: &str) -> Result<Vec<f64>, B
         "i2" => {
             // Int16Array - 2 bytes per element
             let mut values = Vec::new();
-            for chunk in bytes.chunks_exact(2) {
-                let val = i16::from_le_bytes([chunk[0], chunk[1]]);
+            for chunk in bytes.as_chunks::<2>().0 {
+                let val = i16::from_le_bytes(*chunk);
                 values.push(val as f64);
             }
             values
@@ -53,8 +51,8 @@ pub(super) fn decode_typed_array(bdata: &str, dtype: &str) -> Result<Vec<f64>, B
         "u4" => {
             // Uint32Array - 4 bytes per element
             let mut values = Vec::new();
-            for chunk in bytes.chunks_exact(4) {
-                let val = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+            for chunk in bytes.as_chunks::<4>().0 {
+                let val = u32::from_le_bytes(*chunk);
                 values.push(val as f64);
             }
             values
@@ -62,8 +60,8 @@ pub(super) fn decode_typed_array(bdata: &str, dtype: &str) -> Result<Vec<f64>, B
         "u2" => {
             // Uint16Array - 2 bytes per element
             let mut values = Vec::new();
-            for chunk in bytes.chunks_exact(2) {
-                let val = u16::from_le_bytes([chunk[0], chunk[1]]);
+            for chunk in bytes.as_chunks::<2>().0 {
+                let val = u16::from_le_bytes(*chunk);
                 values.push(val as f64);
             }
             values

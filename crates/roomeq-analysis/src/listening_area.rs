@@ -159,8 +159,7 @@ impl<const D: usize> ListeningArea<D> {
         }
         if !config.ambiguity_threshold.is_finite() || config.ambiguity_threshold < 0.0 {
             return Err(AutoeqError::InvalidConfiguration {
-                message: "ListeningArea ambiguity_threshold must be finite and non-negative"
-                    .into(),
+                message: "ListeningArea ambiguity_threshold must be finite and non-negative".into(),
             });
         }
 
@@ -334,7 +333,8 @@ impl<const D: usize> ListeningArea<D> {
     /// Fallible interpolation: like [`Self::interpolate_at`] but rejects
     /// non-finite queries and queries outside the calibration bounding box.
     pub fn try_interpolate_at(&self, p: [f64; D]) -> Result<Vec<Curve>> {
-        self.interpolate_with_evidence(p).map(|response| response.curves)
+        self.interpolate_with_evidence(p)
+            .map(|response| response.curves)
     }
 
     /// Fallible interpolation with support/confidence evidence.
@@ -729,7 +729,7 @@ mod tests {
     /// Equal-SPL curves at equal distances from the query `[0, 0]`:
     /// positions `[-1,0],[0,1],[1,0]`, phases `0/100/-160` deg (spread
     /// >180° in both bins, so the old position-0-referenced unwrap picked
-    /// its branch from an arbitrary reference).
+    /// > its branch from an arbitrary reference).
     fn probe_area(order: &[usize]) -> ListeningArea<2> {
         let positions_all = [[-1.0, 0.0], [0.0, 1.0], [1.0, 0.0]];
         let phases_all = [0.0_f64, 100.0, -160.0];
@@ -766,7 +766,12 @@ mod tests {
         // order and 100° with the first two pairs swapped (120° shift on
         // identical physics). The complex mean must agree for every order.
         let reference = probe_phase(&probe_area(&[0, 1, 2]));
-        for order in [&[1, 0, 2][..], &[2, 1, 0][..], &[0, 2, 1][..], &[2, 0, 1][..]] {
+        for order in [
+            &[1, 0, 2][..],
+            &[2, 1, 0][..],
+            &[0, 2, 1][..],
+            &[2, 0, 1][..],
+        ] {
             let got = probe_phase(&probe_area(order));
             for bin in 0..2 {
                 assert!(
@@ -799,11 +804,10 @@ mod tests {
     #[test]
     fn broad_spread_invariance_holds_for_five_point_field() {
         // Five phases spanning the full circle at five 1D positions.
-        let positions = vec![[-2.0], [-1.0], [0.0], [1.0], [2.0]];
+        let positions = [[-2.0], [-1.0], [0.0], [1.0], [2.0]];
         let phases = [0.0_f64, 120.0, -120.0, 45.0, -90.0];
         let build = |order: &[usize]| {
-            let ordered_positions: Vec<[f64; 1]> =
-                order.iter().map(|&k| positions[k]).collect();
+            let ordered_positions: Vec<[f64; 1]> = order.iter().map(|&k| positions[k]).collect();
             let curves: Vec<Curve> = order
                 .iter()
                 .map(|&k| {
@@ -885,9 +889,7 @@ mod tests {
         .expect("ok");
         let at_origin = area.interpolate_at([0.0]);
         assert!((at_origin[0].spl[0] - 80.0).abs() < 1e-9);
-        let evidence = area
-            .interpolate_with_evidence([0.5])
-            .expect("in support");
+        let evidence = area.interpolate_with_evidence([0.5]).expect("in support");
         assert!((evidence.weights.iter().sum::<f64>() - 1.0).abs() < 1e-12);
         assert!(
             evidence.curves[0]
@@ -926,12 +928,13 @@ mod tests {
         assert!(format!("{outside}").contains("support"));
 
         // In-support evidence: weights sum to 1, confidence in [0, 1].
-        let evidence = area
-            .interpolate_with_evidence([0.5])
-            .expect("in support");
+        let evidence = area.interpolate_with_evidence([0.5]).expect("in support");
         assert!((evidence.weights.iter().sum::<f64>() - 1.0).abs() < 1e-12);
         for conf in &evidence.confidence[0] {
-            assert!((0.0..=1.0).contains(conf), "confidence out of range: {conf}");
+            assert!(
+                (0.0..=1.0).contains(conf),
+                "confidence out of range: {conf}"
+            );
         }
 
         // At a calibration point the evidence collapses exactly with full
@@ -1011,7 +1014,13 @@ mod tests {
         let positions: Vec<[f64; 1]> = train.map(|x| [x]).to_vec();
         let curves: Vec<Curve> = train
             .iter()
-            .map(|&x| make_curve(freq.clone(), vec![80.0 + 3.0 * x, 82.0], vec![20.0 * x, 0.0]))
+            .map(|&x| {
+                make_curve(
+                    freq.clone(),
+                    vec![80.0 + 3.0 * x, 82.0],
+                    vec![20.0 * x, 0.0],
+                )
+            })
             .collect();
         let area: ListeningArea<1> = ListeningArea::new(
             positions,
@@ -1063,7 +1072,10 @@ mod tests {
         let got_phase = evidence.curves[0].phase.as_ref().unwrap()[0];
         let mut phase_err = (got_phase - true_phase).abs();
         phase_err -= 360.0 * (phase_err / 360.0).round();
-        assert!(phase_err.abs() < 3.0, "phase hold-out error too large: {phase_err}");
+        assert!(
+            phase_err.abs() < 3.0,
+            "phase hold-out error too large: {phase_err}"
+        );
         assert!(evidence.confidence[0][0] > 0.9);
         assert!(!evidence.phase_ambiguous[0][0]);
     }

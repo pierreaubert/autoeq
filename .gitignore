@@ -47,6 +47,7 @@ check_output_*.txt
 .codex
 .claude
 .evo
+.muse
 
 # Logs
 logs

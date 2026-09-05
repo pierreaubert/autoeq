@@ -91,7 +91,9 @@ pub fn refine_bass_management_sub_outputs(
 
     let decode = |params: &[f64]| -> Vec<home_cinema::BassManagementSubOutputReport> {
         let min_delay = params
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|chunk| chunk[1].max(0.0))
             .fold(f64::INFINITY, f64::min);
         let min_delay = if min_delay.is_finite() {

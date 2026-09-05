@@ -84,10 +84,7 @@ pub fn evaluate_correction_acceptance(
         improvement_db: improvement,
         improvement_ratio,
         post_p95_abs_residual_db: post_p95,
-        post_worst_abs_residual_db: absolute_residual
-            .iter()
-            .copied()
-            .fold(0.0, f64::max),
+        post_worst_abs_residual_db: absolute_residual.iter().copied().fold(0.0, f64::max),
         correction_rms_db: correction_rms,
         max_abs_correction_db: correction
             .iter()
@@ -466,9 +463,7 @@ pub fn enforce_runtime_acceptance_evidence(
     if acoustic_quality
         .temporal
         .available_headroom_db
-        .is_some_and(|value| {
-            value < policy.min_available_headroom_db - BOOST_HEADROOM_TOLERANCE_DB
-        })
+        .is_some_and(|value| value < policy.min_available_headroom_db - BOOST_HEADROOM_TOLERANCE_DB)
     {
         violations.push("headroom_limit_exceeded".to_string());
     }
@@ -726,8 +721,7 @@ mod tests {
         let base = report_for(&base_freq);
         let dense = report_for(&dense_freq);
         assert!(
-            (dense.metrics.post_p95_abs_residual_db - base.metrics.post_p95_abs_residual_db)
-                .abs()
+            (dense.metrics.post_p95_abs_residual_db - base.metrics.post_p95_abs_residual_db).abs()
                 < 1e-9,
             "weighted p95 moved under densification: {} -> {}",
             base.metrics.post_p95_abs_residual_db,
@@ -753,8 +747,7 @@ mod tests {
         // dense grid pushes the band past 5 % of the bins, so the legacy
         // percentile jumps from the 0.5 dB floor to the 4 dB band.
         let legacy_p95 = |freq: &[f64]| {
-            let mut values: Vec<f64> =
-                freq.iter().map(|f| 0.5 * residual(*f)).collect();
+            let mut values: Vec<f64> = freq.iter().map(|f| 0.5 * residual(*f)).collect();
             values.sort_by(f64::total_cmp);
             values[((values.len() - 1) as f64 * 0.95).ceil() as usize]
         };
@@ -812,7 +805,12 @@ mod tests {
                 .any(|violation| violation == "seat_target_weighted_rms_regressed")
         );
         assert!(!summary.training.accepted());
-        assert!(summary.held_out.as_ref().is_some_and(|held| held.accepted()));
+        assert!(
+            summary
+                .held_out
+                .as_ref()
+                .is_some_and(|held| held.accepted())
+        );
         assert!(!summary.accepted());
     }
 
@@ -856,7 +854,7 @@ mod tests {
         let regressed_held_pre = grid_curve(&freq, vec![1.0, -1.0, 1.0, -1.0]);
         let regressed_held_post = grid_curve(&freq, vec![3.0, -3.0, 3.0, -3.0]);
         let summary = evaluate_multi_seat_acceptance(
-            &[good_pre.clone()],
+            std::slice::from_ref(&good_pre),
             &[grid_curve(&freq, vec![0.5, -0.5, 0.25, -0.25])],
             &[regressed_held_pre],
             &[regressed_held_post],

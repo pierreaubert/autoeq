@@ -104,30 +104,6 @@ pub fn complex_sum_mains(curves: &[&Curve]) -> Curve {
     }
 }
 
-#[cfg(test)]
-mod complex_sum_tests {
-    use super::*;
-    use ndarray::Array1;
-
-    #[test]
-    fn aligns_mismatched_frequency_grids_before_complex_sum() {
-        let make_curve = |count| Curve {
-            freq: Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), count),
-            spl: Array1::zeros(count),
-            phase: Some(Array1::zeros(count)),
-            ..Default::default()
-        };
-        let main = make_curve(100);
-        let bass = make_curve(333);
-
-        let sum = complex_sum_mains(&[&main, &bass]);
-
-        assert_eq!(sum.freq, main.freq);
-        assert_eq!(sum.spl.len(), 100);
-        assert!(sum.spl.iter().all(|value| (*value - 6.0206).abs() < 1e-3));
-    }
-}
-
 pub fn average_mains_magnitude(curves: &[&Curve]) -> Curve {
     assert!(
         !curves.is_empty(),
@@ -250,5 +226,29 @@ pub fn linear_phase_crossover_coefficients(
         crossover.lowpass_coefficients().to_vec()
     } else {
         crossover.highpass_coefficients()
+    }
+}
+
+#[cfg(test)]
+mod complex_sum_tests {
+    use super::*;
+    use ndarray::Array1;
+
+    #[test]
+    fn aligns_mismatched_frequency_grids_before_complex_sum() {
+        let make_curve = |count| Curve {
+            freq: Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), count),
+            spl: Array1::zeros(count),
+            phase: Some(Array1::zeros(count)),
+            ..Default::default()
+        };
+        let main = make_curve(100);
+        let bass = make_curve(333);
+
+        let sum = complex_sum_mains(&[&main, &bass]);
+
+        assert_eq!(sum.freq, main.freq);
+        assert_eq!(sum.spl.len(), 100);
+        assert!(sum.spl.iter().all(|value| (*value - 6.0206).abs() < 1e-3));
     }
 }

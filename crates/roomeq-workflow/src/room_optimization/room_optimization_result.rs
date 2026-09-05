@@ -2027,12 +2027,16 @@ mod tests {
 
     #[test]
     fn target_level_alignment_ignores_a_band_limited_stopband() {
-        let mut reference = roomeq_model::Curve::default();
-        reference.freq = ndarray::array![20.0, 80.0, 120.0, 1_000.0];
-        reference.spl = ndarray::array![80.0, 79.0, 76.0, 20.0];
-        let mut target = roomeq_model::Curve::default();
-        target.freq = reference.freq.clone();
-        target.spl = ndarray::array![0.0, -1.0, -2.0, -3.0];
+        let reference = roomeq_model::Curve {
+            freq: ndarray::array![20.0, 80.0, 120.0, 1_000.0],
+            spl: ndarray::array![80.0, 79.0, 76.0, 20.0],
+            ..Default::default()
+        };
+        let mut target = roomeq_model::Curve {
+            freq: reference.freq.clone(),
+            spl: ndarray::array![0.0, -1.0, -2.0, -3.0],
+            ..Default::default()
+        };
 
         align_target_level(&reference, &mut target);
 

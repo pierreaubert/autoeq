@@ -96,8 +96,10 @@ where
     Some(
         output
             .stdout
-            .chunks_exact(4)
-            .map(|bytes| i32::from_le_bytes(bytes.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|bytes| i32::from_le_bytes(*bytes))
             .collect(),
     )
 }
@@ -353,7 +355,9 @@ fn tool_contract_equalizer_apo_benchmark_processes_real_pcm() {
     let mut reader = hound::WavReader::open(output_path).unwrap();
     let samples: Vec<i16> = reader.samples::<i16>().map(Result::unwrap).collect();
     let left: Vec<f64> = samples
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .skip(4096)
         .map(|frame| frame[0] as f64 / i16::MAX as f64)
         .collect();

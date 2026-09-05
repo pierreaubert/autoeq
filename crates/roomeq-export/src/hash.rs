@@ -16,20 +16,19 @@ const ROUND_CONSTANTS: [u32; 64] = [
 pub(super) fn sha256_hex(input: &[u8]) -> String {
     let bit_len = (input.len() as u64).wrapping_mul(8);
     let mut state = INITIAL_STATE;
-    let mut chunks = input.chunks_exact(64);
-    for chunk in &mut chunks {
+    let (chunks, remainder) = input.as_chunks::<64>();
+    for chunk in chunks {
         compress(&mut state, chunk);
     }
 
     // SHA-256 padding needs at most two blocks. Keeping it on the stack avoids
     // cloning an arbitrarily large convolution resource just to hash it.
-    let remainder = chunks.remainder();
     let mut tail = [0_u8; 128];
     tail[..remainder.len()].copy_from_slice(remainder);
     tail[remainder.len()] = 0x80;
     let padded_len = if remainder.len() < 56 { 64 } else { 128 };
     tail[padded_len - 8..padded_len].copy_from_slice(&bit_len.to_be_bytes());
-    for chunk in tail[..padded_len].chunks_exact(64) {
+    for chunk in tail[..padded_len].as_chunks::<64>().0 {
         compress(&mut state, chunk);
     }
 
@@ -38,8 +37,8 @@ pub(super) fn sha256_hex(input: &[u8]) -> String {
 
 fn compress(state: &mut [u32; 8], chunk: &[u8]) {
     let mut schedule = [0_u32; 64];
-    for (word, bytes) in schedule.iter_mut().zip(chunk.chunks_exact(4)) {
-        *word = u32::from_be_bytes(bytes.try_into().expect("four-byte SHA-256 word"));
+    for (word, bytes) in schedule.iter_mut().zip(chunk.as_chunks::<4>().0) {
+        *word = u32::from_be_bytes(*bytes);
     }
     for index in 16..64 {
         let s0 = schedule[index - 15].rotate_right(7)

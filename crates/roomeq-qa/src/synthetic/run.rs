@@ -7,9 +7,9 @@ use super::consts::MS_OPTIONS;
 use super::consts::OPTIONS;
 use super::consts::SAMPLE_RATE;
 use super::consts::TEMP_DIR_COUNTER;
-use super::option::isolate_schroeder_split_from_multi_measurement;
 use super::misc::avg_epa_preference;
 use super::misc::make_multiseat_qa_curve;
+use super::option::isolate_schroeder_split_from_multi_measurement;
 use super::types::DifficultyLevel;
 use super::types::MultiSubDifficulty;
 use super::types::MultiSubTopology;
@@ -56,16 +56,17 @@ fn stage_outcomes_include_safety_revert(outcomes: &[StageOutcome]) -> bool {
 }
 
 fn correction_was_reverted(result: &RoomOptimizationResult) -> bool {
-    let acceptance_reverted = result
-        .metadata
-        .correction_acceptance
-        .as_ref()
-        .is_some_and(|report| {
-            matches!(
-                report.decision,
-                CorrectionDecision::RevertedStage | CorrectionDecision::IdentityFallback
-            )
-        });
+    let acceptance_reverted =
+        result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .is_some_and(|report| {
+                matches!(
+                    report.decision,
+                    CorrectionDecision::RevertedStage | CorrectionDecision::IdentityFallback
+                )
+            });
     acceptance_reverted || stage_outcomes_include_safety_revert(&result.metadata.stage_outcomes)
 }
 
@@ -139,11 +140,8 @@ pub(super) fn run_single_test(
     if post >= pre {
         let reverted = correction_was_reverted(&result);
         let within_tolerance = score_is_within_runtime_regression_tolerance(pre, post);
-        let decomposed_tradeoff = decomposed_score_is_within_baseline_tradeoff(
-            option_names,
-            baseline_post_score,
-            post,
-        );
+        let decomposed_tradeoff =
+            decomposed_score_is_within_baseline_tradeoff(option_names, baseline_post_score, post);
         let verdict = if reverted {
             "REVERTED"
         } else if decomposed_tradeoff {
@@ -177,64 +175,6 @@ pub(super) fn run_single_test(
             post,
             (1.0 - post / pre) * 100.0
         ),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        decomposed_score_is_within_baseline_tradeoff,
-        score_is_within_runtime_regression_tolerance, stage_outcomes_include_safety_revert,
-    };
-    use roomeq_model::{StageOutcome, StageStatus};
-
-    #[test]
-    fn runtime_score_tolerance_accepts_small_absolute_wobble() {
-        assert!(score_is_within_runtime_regression_tolerance(3.257, 3.357));
-        assert!(!score_is_within_runtime_regression_tolerance(3.257, 3.6));
-    }
-
-    #[test]
-    fn runtime_score_tolerance_scales_for_large_residuals() {
-        assert!(score_is_within_runtime_regression_tolerance(10.0, 10.5));
-        assert!(!score_is_within_runtime_regression_tolerance(10.0, 10.51));
-    }
-
-    #[test]
-    fn decomposed_correction_uses_quality_qa_baseline_tradeoff() {
-        assert!(decomposed_score_is_within_baseline_tradeoff(
-            &["broadband", "decomposed_correction"],
-            Some(2.1),
-            4.2,
-        ));
-        assert!(!decomposed_score_is_within_baseline_tradeoff(
-            &["broadband", "decomposed_correction"],
-            Some(2.1),
-            4.21,
-        ));
-        assert!(!decomposed_score_is_within_baseline_tradeoff(
-            &["broadband"],
-            Some(2.1),
-            2.2,
-        ));
-    }
-
-    #[test]
-    fn structured_final_safety_stage_counts_as_revert() {
-        let outcomes = vec![StageOutcome {
-            checks: Vec::new(),
-            stage: "final_correction_safety_LFE".to_string(),
-            status: StageStatus::Degraded,
-            advisories: vec!["topology_regression_reverted_LFE:mso".to_string()],
-        }];
-
-        assert!(stage_outcomes_include_safety_revert(&outcomes));
-
-        let applied = vec![StageOutcome {
-            status: StageStatus::Applied,
-            ..outcomes[0].clone()
-        }];
-        assert!(!stage_outcomes_include_safety_revert(&applied));
     }
 }
 
@@ -780,5 +720,63 @@ pub(super) fn run_multichannel_test(
             post,
             (1.0 - post / pre) * 100.0
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        decomposed_score_is_within_baseline_tradeoff, score_is_within_runtime_regression_tolerance,
+        stage_outcomes_include_safety_revert,
+    };
+    use roomeq_model::{StageOutcome, StageStatus};
+
+    #[test]
+    fn runtime_score_tolerance_accepts_small_absolute_wobble() {
+        assert!(score_is_within_runtime_regression_tolerance(3.257, 3.357));
+        assert!(!score_is_within_runtime_regression_tolerance(3.257, 3.6));
+    }
+
+    #[test]
+    fn runtime_score_tolerance_scales_for_large_residuals() {
+        assert!(score_is_within_runtime_regression_tolerance(10.0, 10.5));
+        assert!(!score_is_within_runtime_regression_tolerance(10.0, 10.51));
+    }
+
+    #[test]
+    fn decomposed_correction_uses_quality_qa_baseline_tradeoff() {
+        assert!(decomposed_score_is_within_baseline_tradeoff(
+            &["broadband", "decomposed_correction"],
+            Some(2.1),
+            4.2,
+        ));
+        assert!(!decomposed_score_is_within_baseline_tradeoff(
+            &["broadband", "decomposed_correction"],
+            Some(2.1),
+            4.21,
+        ));
+        assert!(!decomposed_score_is_within_baseline_tradeoff(
+            &["broadband"],
+            Some(2.1),
+            2.2,
+        ));
+    }
+
+    #[test]
+    fn structured_final_safety_stage_counts_as_revert() {
+        let outcomes = vec![StageOutcome {
+            checks: Vec::new(),
+            stage: "final_correction_safety_LFE".to_string(),
+            status: StageStatus::Degraded,
+            advisories: vec!["topology_regression_reverted_LFE:mso".to_string()],
+        }];
+
+        assert!(stage_outcomes_include_safety_revert(&outcomes));
+
+        let applied = vec![StageOutcome {
+            status: StageStatus::Applied,
+            ..outcomes[0].clone()
+        }];
+        assert!(!stage_outcomes_include_safety_revert(&applied));
     }
 }

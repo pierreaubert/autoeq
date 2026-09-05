@@ -62,7 +62,7 @@ fn flat_and_asymmetric_candidates_allocate_nothing_after_warmup() {
         objective.penalty_w_ceiling = 1.0;
         assert!(compute_fitness_penalties_ref(&parameters, &objective).is_finite());
 
-        let region = Region::new(&ALLOCATOR);
+        let region = Region::new(ALLOCATOR);
         let fitness = compute_fitness_penalties_ref(&parameters, &objective);
         let allocations = region.change().allocations;
 
@@ -115,7 +115,7 @@ fn assert_multi_measurement_candidates_allocate_nothing_after_warmup() {
             });
 
             assert!(compute_fitness_penalties_ref(&parameters, &combined).is_finite());
-            let region = Region::new(&ALLOCATOR);
+            let region = Region::new(ALLOCATOR);
             let fitness = compute_fitness_penalties_ref(&parameters, &combined);
             let allocations = region.change().allocations;
 
@@ -161,13 +161,13 @@ fn profile_generation_level_solver_allocations() {
     };
 
     let _ = differential_evolution(&noop, &bounds, de_config()).expect("DE warm-up");
-    let de_region = Region::new(&ALLOCATOR);
+    let de_region = Region::new(ALLOCATOR);
     let de_report = differential_evolution(&noop, &bounds, de_config()).expect("profiled DE run");
     let de_stats = de_region.change();
     std::hint::black_box(&de_report);
 
     let _ = cma_es(&noop, cma_config()).expect("CMA-ES warm-up");
-    let cma_region = Region::new(&ALLOCATOR);
+    let cma_region = Region::new(ALLOCATOR);
     let cma_report = cma_es(&noop, cma_config()).expect("profiled CMA-ES run");
     let cma_stats = cma_region.change();
     std::hint::black_box(&cma_report);

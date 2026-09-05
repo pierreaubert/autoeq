@@ -347,26 +347,6 @@ pub(super) fn run_parallel(
     results
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{rejected_identity_fallback, should_validate_generic_acoustics};
-
-    #[test]
-    fn safe_revert_skips_only_generic_acoustic_gate_when_explicitly_allowed() {
-        assert!(!should_validate_generic_acoustics(false, true, true));
-        assert!(should_validate_generic_acoustics(false, true, false));
-        assert!(should_validate_generic_acoustics(false, false, true));
-        assert!(!should_validate_generic_acoustics(true, false, false));
-    }
-
-    #[test]
-    fn only_unapproved_identity_fallback_is_rejected() {
-        assert!(!rejected_identity_fallback(false, false));
-        assert!(rejected_identity_fallback(true, false));
-        assert!(!rejected_identity_fallback(true, true));
-    }
-}
-
 /// Execute one production-backed regression scenario through the canonical
 /// RoomEQ workflow.
 #[doc(hidden)]
@@ -401,5 +381,25 @@ pub fn run_regression_case(
         Err(result
             .error
             .unwrap_or_else(|| "coverage scenario failed without a diagnostic".to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{rejected_identity_fallback, should_validate_generic_acoustics};
+
+    #[test]
+    fn safe_revert_skips_only_generic_acoustic_gate_when_explicitly_allowed() {
+        assert!(!should_validate_generic_acoustics(false, true, true));
+        assert!(should_validate_generic_acoustics(false, true, false));
+        assert!(should_validate_generic_acoustics(false, false, true));
+        assert!(!should_validate_generic_acoustics(true, false, false));
+    }
+
+    #[test]
+    fn only_unapproved_identity_fallback_is_rejected() {
+        assert!(!rejected_identity_fallback(false, false));
+        assert!(rejected_identity_fallback(true, false));
+        assert!(!rejected_identity_fallback(true, true));
     }
 }

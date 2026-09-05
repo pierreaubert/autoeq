@@ -876,10 +876,10 @@ fn apply_inter_channel_timbre_matching_stage(
                     }
                 }
 
-            let status = if !routed_rejections.is_empty() {
+            let status = if !routed_rejections.is_empty()
+                || (failed_count > 0 && applied_count > 0)
+            {
                 StageStatus::Degraded
-            } else if failed_count > 0 && applied_count > 0 {
-                    StageStatus::Degraded
                 } else if failed_count > 0 {
                     StageStatus::Failed
                 } else if applied_count > 0 {
@@ -1091,7 +1091,7 @@ fn apply_final_channel_level_alignment(
         .unwrap_or_default();
 
     let mut applied = gains.iter().collect::<Vec<_>>();
-    applied.sort_by(|(left, _), (right, _)| left.cmp(right));
+    applied.sort_by_key(|(left, _)| *left);
     for (name, gain_db) in &applied {
         let routed = routed_sources.contains(*name);
         if let Some(chain) = result.channels.get_mut(*name) {

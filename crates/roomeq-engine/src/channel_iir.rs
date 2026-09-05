@@ -168,7 +168,6 @@ fn optimize_kautz_modal(
                 fdw_min_window_ms: config.fdw_min_window_ms,
                 fdw_max_window_ms: config.fdw_max_window_ms,
                 fdw_smoothing_octaves: config.fdw_smoothing_octaves,
-                ..Default::default()
             },
         )
         .unwrap_or_default();

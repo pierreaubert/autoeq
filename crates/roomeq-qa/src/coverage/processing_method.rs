@@ -137,66 +137,6 @@ pub(super) fn build_quick_test_matrix(
     .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{
-        ProcessingMethod, build_quick_test_matrix, build_test_matrix_for_tier,
-        required_stage_missing,
-    };
-    use crate::registry::QaTier;
-
-    #[test]
-    fn quick_matrix_is_bounded_and_uses_smoke_expectations() {
-        let cases = build_quick_test_matrix(QaTier::Weekly, None, None);
-        let scenarios = cases
-            .iter()
-            .map(|case| case.scenario.as_str())
-            .collect::<Vec<_>>();
-
-        assert_eq!(scenarios, ["small_stereo_2_0", "small_stereo_2_2_mso"]);
-        assert!(cases.iter().all(|case| {
-            case.method == ProcessingMethod::Iir
-                && case.solver.name() == "fem"
-                && case.expect.improvement_min_pct == 0.01
-                && case.expect.max_post_score == 20.0
-                && case.expect.allow_safe_revert
-                && case.expect.accepts_safe_revert()
-        }));
-    }
-
-    #[test]
-    fn declared_family_safety_mode_preserves_other_quality_modes() {
-        let cases = build_test_matrix_for_tier(QaTier::Weekly, false, None, None);
-        let fir = cases
-            .iter()
-            .find(|case| {
-                case.scenario == "medium_surround_5_1" && case.method == ProcessingMethod::Fir
-            })
-            .unwrap();
-        let iir = cases
-            .iter()
-            .find(|case| {
-                case.scenario == "medium_surround_5_1" && case.method == ProcessingMethod::Iir
-            })
-            .unwrap();
-        assert!(fir.expect.accepts_safe_revert());
-        assert!(!iir.expect.accepts_safe_revert());
-        assert_eq!(
-            iir.expect.gate_purpose,
-            crate::registry::QaGatePurpose::Quality
-        );
-    }
-
-    #[test]
-    fn required_mode_stage_cannot_silently_revert() {
-        assert!(!required_stage_missing(true, true, false, false));
-        assert!(!required_stage_missing(false, false, false, false));
-        assert!(required_stage_missing(true, false, false, false));
-        assert!(required_stage_missing(true, false, true, false));
-        assert!(!required_stage_missing(true, false, true, true));
-    }
-}
-
 fn channel_has_plugin_type(chain: Option<&ChannelDspChain>, plugin_type: &str) -> bool {
     chain.is_some_and(|chain| {
         chain
@@ -451,4 +391,64 @@ pub(super) fn validate_result(
     }
 
     failures
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ProcessingMethod, build_quick_test_matrix, build_test_matrix_for_tier,
+        required_stage_missing,
+    };
+    use crate::registry::QaTier;
+
+    #[test]
+    fn quick_matrix_is_bounded_and_uses_smoke_expectations() {
+        let cases = build_quick_test_matrix(QaTier::Weekly, None, None);
+        let scenarios = cases
+            .iter()
+            .map(|case| case.scenario.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(scenarios, ["small_stereo_2_0", "small_stereo_2_2_mso"]);
+        assert!(cases.iter().all(|case| {
+            case.method == ProcessingMethod::Iir
+                && case.solver.name() == "fem"
+                && case.expect.improvement_min_pct == 0.01
+                && case.expect.max_post_score == 20.0
+                && case.expect.allow_safe_revert
+                && case.expect.accepts_safe_revert()
+        }));
+    }
+
+    #[test]
+    fn declared_family_safety_mode_preserves_other_quality_modes() {
+        let cases = build_test_matrix_for_tier(QaTier::Weekly, false, None, None);
+        let fir = cases
+            .iter()
+            .find(|case| {
+                case.scenario == "medium_surround_5_1" && case.method == ProcessingMethod::Fir
+            })
+            .unwrap();
+        let iir = cases
+            .iter()
+            .find(|case| {
+                case.scenario == "medium_surround_5_1" && case.method == ProcessingMethod::Iir
+            })
+            .unwrap();
+        assert!(fir.expect.accepts_safe_revert());
+        assert!(!iir.expect.accepts_safe_revert());
+        assert_eq!(
+            iir.expect.gate_purpose,
+            crate::registry::QaGatePurpose::Quality
+        );
+    }
+
+    #[test]
+    fn required_mode_stage_cannot_silently_revert() {
+        assert!(!required_stage_missing(true, true, false, false));
+        assert!(!required_stage_missing(false, false, false, false));
+        assert!(required_stage_missing(true, false, false, false));
+        assert!(required_stage_missing(true, false, true, false));
+        assert!(!required_stage_missing(true, false, true, true));
+    }
 }

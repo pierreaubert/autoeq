@@ -369,13 +369,7 @@ pub(super) fn optimize_continuous_mso(
     options: MsoSearchOptions,
     eval: &dyn Fn(&[f64], &[f64], &[bool], &[Vec<(f64, f64)>]) -> f64,
 ) -> MsoSolution {
-    optimize_continuous_mso_with_budget(
-        num_subs,
-        options,
-        &MsoSearchBudget::default(),
-        eval,
-    )
-    .0
+    optimize_continuous_mso_with_budget(num_subs, options, &MsoSearchBudget::default(), eval).0
 }
 
 /// Budget-aware continuous MSO differential-evolution search.
@@ -387,6 +381,10 @@ pub(super) fn optimize_continuous_mso(
 /// wall-clock time, or nested worst-case cost; override the seed; stop on
 /// convergence stall; or cancel cooperatively. Consumed work is reported in
 /// the returned [`MsoSearchReport`].
+#[allow(
+    clippy::type_complexity,
+    reason = "extracting a type alias for this dyn Fn requires explicit lifetimes that pollute every call site"
+)]
 pub(super) fn optimize_continuous_mso_with_budget(
     num_subs: usize,
     options: MsoSearchOptions,
@@ -394,19 +392,17 @@ pub(super) fn optimize_continuous_mso_with_budget(
     eval: &dyn Fn(&[f64], &[f64], &[bool], &[Vec<(f64, f64)>]) -> f64,
 ) -> (MsoSolution, MsoSearchReport) {
     let started = search_started();
-    let report = |evaluations: usize,
-                      generations_run: usize,
-                      best_loss: f64,
-                      stop_reason: &'static str| {
-        MsoSearchReport {
-            evaluations,
-            generations_run,
-            best_loss,
-            stopped_early: stop_reason != "completed",
-            stop_reason,
-            elapsed: started.elapsed(),
-        }
-    };
+    let report =
+        |evaluations: usize, generations_run: usize, best_loss: f64, stop_reason: &'static str| {
+            MsoSearchReport {
+                evaluations,
+                generations_run,
+                best_loss,
+                stopped_early: stop_reason != "completed",
+                stop_reason,
+                elapsed: started.elapsed(),
+            }
+        };
     if num_subs <= 1 {
         return (
             (
@@ -590,12 +586,7 @@ pub(super) fn optimize_continuous_mso_with_budget(
             best_polarities,
             best_allpass_filters,
         ),
-        report(
-            evaluations.get(),
-            generations_run,
-            final_best,
-            stop_reason,
-        ),
+        report(evaluations.get(), generations_run, final_best, stop_reason),
     )
 }
 
@@ -1035,9 +1026,7 @@ fn optimize_continuous_area_dispatch<const D: usize>(
             // an out-of-range tail fraction into a "successful" result.
             if !alpha.is_finite() || *alpha <= 0.0 || *alpha > 1.0 {
                 return Err(AutoeqError::InvalidConfiguration {
-                    message: format!(
-                        "continuous_area CVaR alpha must be in (0, 1], got {alpha}"
-                    ),
+                    message: format!("continuous_area CVaR alpha must be in (0, 1], got {alpha}"),
                 });
             }
             AreaScalarisation::Cvar { alpha: *alpha }
@@ -1889,9 +1878,8 @@ mod tests {
                 "model validator should flag alpha={alpha}: {model_errors:?}"
             );
             let config = continuous_area_config(area);
-            let err =
-                optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48_000.0)
-                    .unwrap_err();
+            let err = optimize_multiseat_continuous_area(&ms, &config, (20.0, 120.0), 48_000.0)
+                .unwrap_err();
             assert!(
                 err.to_string().contains("alpha"),
                 "alpha={alpha} must be rejected, not clamped: {err}"
@@ -1946,9 +1934,7 @@ mod tests {
             cov_diag: vec![0.0625],
             truncation_sigmas: 2.0,
         };
-        area.quadrature = AreaQuadratureKind::GaussLegendre {
-            points_per_axis: 4,
-        };
+        area.quadrature = AreaQuadratureKind::GaussLegendre { points_per_axis: 4 };
         assert!(
             model_errors_for(&area)
                 .iter()
@@ -1969,30 +1955,28 @@ mod tests {
         // 2 subs, gain/delay only → dims=2, pop=(2*24).max(48)=48,
         // gens=(120+2*30).max(200)=200 → 48 initial + 200*47 trials (slot 0
         // stays pinned as the identity anchor).
-        let options = MsoSearchOptions::from_config(
-            &MultiSeatConfig::default(),
-            20.0,
-            120.0,
+        let options = MsoSearchOptions::from_config(&MultiSeatConfig::default(), 20.0, 120.0);
+        let ((gains, _, _, _), report) = super::optimize_continuous_mso_with_budget(
+            2,
+            options,
+            &MsoSearchBudget::default(),
+            &|gains, _, _, _| gains[1].powi(2),
         );
-        let ((gains, _, _, _), report) =
-            super::optimize_continuous_mso_with_budget(2, options, &MsoSearchBudget::default(), &|gains, _, _, _| {
-                gains[1].powi(2)
-            });
         assert_eq!(report.stop_reason, "completed");
         assert!(!report.stopped_early);
         assert_eq!(report.generations_run, 200);
         assert_eq!(report.evaluations, 48 + 200 * 47);
         assert!(report.best_loss.is_finite());
-        assert!(gains[1].abs() < 0.05, "legacy schedule must converge, got {}", gains[1]);
+        assert!(
+            gains[1].abs() < 0.05,
+            "legacy schedule must converge, got {}",
+            gains[1]
+        );
     }
 
     #[test]
     fn mso_budget_caps_area_evaluations() {
-        let options = MsoSearchOptions::from_config(
-            &MultiSeatConfig::default(),
-            20.0,
-            120.0,
-        );
+        let options = MsoSearchOptions::from_config(&MultiSeatConfig::default(), 20.0, 120.0);
         let budget = MsoSearchBudget {
             max_evaluations: Some(100),
             ..MsoSearchBudget::default()
@@ -2011,19 +1995,18 @@ mod tests {
     #[test]
     fn mso_budget_seed_override_is_deterministic() {
         let run = || {
-            let options = MsoSearchOptions::from_config(
-                &MultiSeatConfig::default(),
-                20.0,
-                120.0,
-            );
+            let options = MsoSearchOptions::from_config(&MultiSeatConfig::default(), 20.0, 120.0);
             let budget = MsoSearchBudget {
                 seed: Some(0x1234_5678),
                 max_evaluations: Some(500),
                 ..MsoSearchBudget::default()
             };
-            super::optimize_continuous_mso_with_budget(2, options, &budget, &|gains, delays, _, _| {
-                (gains[1] - 1.0).powi(2) + delays[1].powi(2)
-            })
+            super::optimize_continuous_mso_with_budget(
+                2,
+                options,
+                &budget,
+                &|gains, delays, _, _| (gains[1] - 1.0).powi(2) + delays[1].powi(2),
+            )
             .0
         };
         let (gains_a, delays_a, _, _) = run();
@@ -2034,11 +2017,7 @@ mod tests {
 
     #[test]
     fn mso_budget_convergence_stall_stops_early() {
-        let options = MsoSearchOptions::from_config(
-            &MultiSeatConfig::default(),
-            20.0,
-            120.0,
-        );
+        let options = MsoSearchOptions::from_config(&MultiSeatConfig::default(), 20.0, 120.0);
         let budget = MsoSearchBudget {
             stall_generations: Some(3),
             ..MsoSearchBudget::default()
@@ -2047,18 +2026,18 @@ mod tests {
             super::optimize_continuous_mso_with_budget(2, options, &budget, &|_, _, _, _| 1.0);
         assert_eq!(report.stop_reason, "converged");
         assert!(report.stopped_early);
-        assert!(report.generations_run < 200, "ran {}", report.generations_run);
+        assert!(
+            report.generations_run < 200,
+            "ran {}",
+            report.generations_run
+        );
     }
 
     #[test]
     fn mso_budget_cancellation_stops_search() {
         use std::sync::Arc;
         use std::sync::atomic::AtomicBool;
-        let options = MsoSearchOptions::from_config(
-            &MultiSeatConfig::default(),
-            20.0,
-            120.0,
-        );
+        let options = MsoSearchOptions::from_config(&MultiSeatConfig::default(), 20.0, 120.0);
         let cancelled = Arc::new(AtomicBool::new(true));
         let budget = MsoSearchBudget {
             cancelled: Some(cancelled),

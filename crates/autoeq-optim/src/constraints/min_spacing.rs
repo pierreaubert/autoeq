@@ -112,10 +112,10 @@ mod tests {
     #[test]
     fn constraint_spacing_returns_zero_when_disabled() {
         let xs = vec![2.0, 1.0, 3.0, 2.1, 1.0, 3.0];
-        let mut data = SpacingConstraintData {
+        let data = SpacingConstraintData {
             min_spacing_oct: 0.0,
             peq_model: PeqModel::Pk,
         };
-        assert_eq!(constraint_spacing(&xs, None, &mut data), 0.0);
+        assert_eq!(constraint_spacing(&xs, None, &data), 0.0);
     }
 }

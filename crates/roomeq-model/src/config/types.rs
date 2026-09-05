@@ -690,6 +690,29 @@ pub enum AreaScalarisationKind {
 /// `seat_positions.len()` must equal the number of discrete seats in the
 /// calibration `MultiSeatMeasurements` and each row's length must equal
 /// `dimensions`.
+///
+/// # Seat-identity / ordering contract
+///
+/// `primary_seat` (on [`MultiSeatConfig`](super::multi_seat_config::MultiSeatConfig))
+/// is a positional index while `seat_positions` is a parallel array: the
+/// loader only checks equal counts, not semantic correspondence, so a swapped
+/// order in one sub/source silently combines different physical positions.
+/// Two mechanisms close this gap:
+///
+/// - **Stable seat IDs (recommended).** Set
+///   [`SeatIdentityMap`](super::multi_seat_config::SeatIdentityMap) on the
+///   sibling [`MultiSeatConfig`](super::multi_seat_config::MultiSeatConfig)
+///   to one unique, non-empty ID per seat. Consumers (`roomeq-workflow`,
+///   `roomeq-engine`) must join every source's per-seat measurements to
+///   these IDs via
+///   [`ContinuousListeningAreaConfig::check_source_seat_coverage`] instead of
+///   relying on index order, and must echo the IDs in output reports
+///   ([`ContinuousAreaMetrics`](crate::output::ContinuousAreaMetrics)) so the
+///   correspondence is auditable.
+/// - **Strict positional ordering (legacy).** When no seat IDs are provided,
+///   `seat_positions[i]` corresponds to measurement seat index `i`, and every
+///   sub/source must present seats in exactly the same order. Any reordering
+///   on one source silently mixes positions; prefer stable IDs.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ContinuousListeningAreaConfig {
     /// Number of spatial dimensions (typical: 1 for a couch line, 2 for an
@@ -701,7 +724,10 @@ pub struct ContinuousListeningAreaConfig {
     pub bounds: Vec<(f64, f64)>,
     /// Spatial coordinates of each calibration seat in
     /// `MultiSeatMeasurements`. Outer length = number of seats, inner length =
-    /// `dimensions`. Order must match the seat index in the measurements.
+    /// `dimensions`. Order must match the seat index in the measurements
+    /// (see the strict-ordering contract above when no explicit seat IDs
+    /// are provided via
+    /// [`SeatIdentityMap`](super::multi_seat_config::SeatIdentityMap)).
     pub seat_positions: Vec<Vec<f64>>,
     /// Probability density shape.
     #[serde(default)]
@@ -715,6 +741,82 @@ pub struct ContinuousListeningAreaConfig {
     /// IDW power exponent for spatial interpolation (default 2.0).
     #[serde(default = "default_idw_power")]
     pub idw_power: f64,
+}
+
+impl ContinuousListeningAreaConfig {
+    /// Positional fallback seat ID for index `i`, used when no explicit seat
+    /// IDs are provided.
+    pub fn fallback_seat_id(index: usize) -> String {
+        format!("seat-{index}")
+    }
+
+    /// Canonical seat IDs for this area given explicit IDs (from
+    /// [`SeatIdentityMap`](super::multi_seat_config::SeatIdentityMap)) or
+    /// `None` for the positional fallback `seat-{i}` per position.
+    /// A length-mismatched explicit list is truncated/padded with fallbacks
+    /// so callers always get one ID per position; validation reports the
+    /// mismatch as an error separately.
+    pub fn effective_seat_ids(&self, explicit: Option<&[String]>) -> Vec<String> {
+        match explicit {
+            Some(ids) => (0..self.seat_positions.len())
+                .map(|i| {
+                    ids.get(i)
+                        .filter(|id| !id.is_empty())
+                        .cloned()
+                        .unwrap_or_else(|| Self::fallback_seat_id(i))
+                })
+                .collect(),
+            None => (0..self.seat_positions.len())
+                .map(Self::fallback_seat_id)
+                .collect(),
+        }
+    }
+
+    /// Explicit source x seat completeness/order check for measurement loaders.
+    ///
+    /// Each entry of `per_source_seat_keys` holds the seat keys of one
+    /// sub/source in that source's own order. Returns one error string per
+    /// violation; an empty return means every source covers exactly the
+    /// canonical seat IDs in order. With explicit seat IDs, sources may be
+    /// reordered call-side by joining on the IDs first; without IDs the keys
+    /// must already be the positional fallbacks in order, i.e. every source
+    /// must use the identical seat order (strict-ordering contract).
+    pub fn check_source_seat_coverage(
+        &self,
+        explicit_seat_ids: Option<&[String]>,
+        per_source_seat_keys: &[Vec<String>],
+    ) -> Vec<String> {
+        let expected = self.effective_seat_ids(explicit_seat_ids);
+        Self::check_keys_against(&expected, per_source_seat_keys)
+    }
+
+    /// Shared completeness/order comparison used by [`SeatIdentityMap`](super::multi_seat_config::SeatIdentityMap).
+    pub fn check_keys_against(
+        expected: &[String],
+        per_source_seat_keys: &[Vec<String>],
+    ) -> Vec<String> {
+        let mut errors = Vec::new();
+        for (source_idx, keys) in per_source_seat_keys.iter().enumerate() {
+            if keys.len() != expected.len() {
+                errors.push(format!(
+                    "source[{source_idx}] covers {} seats, expected {} ({})",
+                    keys.len(),
+                    expected.len(),
+                    expected.join(", ")
+                ));
+                continue;
+            }
+            for (pos, (got, want)) in keys.iter().zip(expected.iter()).enumerate() {
+                if got != want {
+                    errors.push(format!(
+                        "source[{source_idx}] seat position {pos} is '{got}', expected '{want}'; \
+                         reorder this source to the canonical seat order (or join on seat IDs)"
+                    ));
+                }
+            }
+        }
+        errors
+    }
 }
 
 /// Product-level perceptual policy preset.

@@ -352,6 +352,18 @@ pub(super) fn default_idw_power() -> f64 {
     2.0
 }
 
+pub(super) fn default_multiseat_max_quadrature_points() -> usize {
+    4096
+}
+
+pub(super) fn default_multiseat_max_points_per_axis() -> usize {
+    32
+}
+
+pub(super) fn default_multiseat_max_allpass_per_sub() -> usize {
+    4
+}
+
 pub(super) fn default_variance_lambda() -> f64 {
     1.0
 }

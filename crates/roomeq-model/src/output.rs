@@ -291,6 +291,70 @@ pub struct BootstrapUncertaintyReport {
     pub used_for_correction_depth_mask: bool,
 }
 
+/// Continuous listening-area evaluation metrics.
+///
+/// All scalar metrics are `Option`: a variance (or loss) of exactly `0.0`
+/// must mean "evaluated and found to be zero", never "not evaluated".
+/// `None` means the quantity was not evaluated for this run (e.g. the
+/// strategy was not `ContinuousArea`, or the producer predates area
+/// metrics). Consumers must not substitute `0.0` for `None`.
+///
+/// Contract for producers (`roomeq-workflow`, `roomeq-engine`): serialize
+/// this struct alongside the run output and echo the canonical seat IDs so
+/// the seat correspondence is auditable. A future optional field on
+/// `OptimizationMetadata` may carry it directly; until then it stands alone
+/// as the additive output contract.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct ContinuousAreaMetrics {
+    /// Canonical seat IDs (explicit [`SeatIdentityMap`](crate::SeatIdentityMap)
+    /// IDs or the positional `seat-{i}` fallback), parallel to the evaluated
+    /// seat order. `None` when the seat correspondence is unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seat_ids: Option<Vec<String>>,
+    /// Number of quadrature points actually evaluated. `None` = not evaluated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub num_quadrature_points: Option<usize>,
+    /// Probability-weighted mean (expected) loss over the area.
+    /// `None` = not evaluated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_loss: Option<f64>,
+    /// Spatial variance of the per-point loss over the area.
+    /// `None` = not evaluated (never default to `0.0`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub area_variance: Option<f64>,
+    /// Worst-case per-point loss over the area's bounding box.
+    /// `None` = not evaluated (only meaningful for worst-case scalarisation).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worst_case_loss: Option<f64>,
+    /// CVaR tail-mean loss. `None` = not evaluated (only meaningful for
+    /// CVaR scalarisation).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cvar_loss: Option<f64>,
+}
+
+impl ContinuousAreaMetrics {
+    /// Unevaluated metrics: every scalar is `None`.
+    pub fn not_evaluated() -> Self {
+        Self {
+            seat_ids: None,
+            num_quadrature_points: None,
+            expected_loss: None,
+            area_variance: None,
+            worst_case_loss: None,
+            cvar_loss: None,
+        }
+    }
+
+    /// Whether any scalar metric was evaluated. A zero variance with
+    /// `is_evaluated() == true` means "evaluated and zero".
+    pub fn is_evaluated(&self) -> bool {
+        self.expected_loss.is_some()
+            || self.area_variance.is_some()
+            || self.worst_case_loss.is_some()
+            || self.cvar_loss.is_some()
+    }
+}
+
 /// Validation/listening-test bundle descriptor.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ValidationBundleReport {

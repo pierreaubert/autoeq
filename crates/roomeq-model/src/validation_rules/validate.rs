@@ -822,6 +822,11 @@ fn validate_continuous_listening_area(config: &RoomConfig, result: &mut Validati
             }
         }
     }
+    if let Some(identity) = ms.seat_identity.as_ref() {
+        for error in identity.validate(area.seat_positions.len()) {
+            result.add_error(error);
+        }
+    }
     if !area.idw_power.is_finite() || area.idw_power <= 0.0 {
         result.add_error(format!(
             "multi_seat.continuous_area.idw_power must be > 0, got {}",
@@ -881,6 +886,51 @@ fn validate_continuous_listening_area(config: &RoomConfig, result: &mut Validati
                 result.add_error(
                     "multi_seat.continuous_area.quadrature.points_per_axis must be > 0".to_string(),
                 );
+            }
+        }
+    }
+
+    let search = ms.effective_search();
+    for error in search.validate() {
+        result.add_error(error);
+    }
+    match &area.quadrature {
+        AreaQuadratureKind::Sobol { num_points, .. }
+        | AreaQuadratureKind::LatinHypercube { num_points, .. } => {
+            if *num_points > search.max_quadrature_points {
+                result.add_error(format!(
+                    "multi_seat.continuous_area.quadrature.num_points {} exceeds \
+                     multi_seat.search.max_quadrature_points {}",
+                    num_points, search.max_quadrature_points
+                ));
+            }
+        }
+        AreaQuadratureKind::GaussLegendre { points_per_axis } => {
+            if *points_per_axis > search.max_points_per_axis {
+                result.add_error(format!(
+                    "multi_seat.continuous_area.quadrature.points_per_axis {} exceeds \
+                     multi_seat.search.max_points_per_axis {}",
+                    points_per_axis, search.max_points_per_axis
+                ));
+            }
+            let total = (*points_per_axis).checked_pow(area.dimensions as u32);
+            match total {
+                Some(total) if total > search.max_quadrature_points => {
+                    result.add_error(format!(
+                        "multi_seat.continuous_area.quadrature total points {} \
+                         (points_per_axis {} ^ dimensions {}) exceeds \
+                         multi_seat.search.max_quadrature_points {}",
+                        total, points_per_axis, area.dimensions, search.max_quadrature_points
+                    ));
+                }
+                None => {
+                    result.add_error(format!(
+                        "multi_seat.continuous_area.quadrature total points \
+                         (points_per_axis {} ^ dimensions {}) overflows",
+                        points_per_axis, area.dimensions
+                    ));
+                }
+                _ => {}
             }
         }
     }
@@ -2419,6 +2469,406 @@ mod room_config_validation_tests {
                 .iter()
                 .any(|e| e.contains("scalarisation.cvar.alpha must be in (0, 1]"))
         );
+    }
+
+    fn area_1d(num_seats: usize) -> ContinuousListeningAreaConfig {
+        ContinuousListeningAreaConfig {
+            dimensions: 1,
+            bounds: vec![(0.0, 1.0)],
+            seat_positions: (0..num_seats).map(|i| vec![i as f64]).collect(),
+            prior: AreaPriorKind::Uniform,
+            quadrature: AreaQuadratureKind::Sobol {
+                num_points: 8,
+                seed: 0,
+            },
+            scalarisation: AreaScalarisationKind::ExpectedValue,
+            idw_power: 2.0,
+        }
+    }
+
+    fn make_seat_config(
+        area: ContinuousListeningAreaConfig,
+        seat_identity: Option<crate::roomeq::types::SeatIdentityMap>,
+    ) -> RoomConfig {
+        let mut config = default_room();
+        config.speakers.insert(
+            "L".to_string(),
+            SpeakerConfig::Single(single_source("l.csv", None)),
+        );
+        config.optimizer.multi_seat = Some(MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::ContinuousArea,
+            continuous_area: Some(area),
+            seat_identity,
+            ..Default::default()
+        });
+        config
+    }
+
+    #[test]
+    fn seat_identity_validation_errors() {
+        use crate::roomeq::types::SeatIdentityMap;
+
+        // Duplicate seat IDs
+        let result = validate_room_config(&make_seat_config(
+            area_1d(2),
+            Some(SeatIdentityMap {
+                ids: vec!["mlp".to_string(), "mlp".to_string()],
+            }),
+        ));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("duplicates seat ID 'mlp'")),
+            "got {:?}",
+            result.errors
+        );
+
+        // Length mismatch
+        let result = validate_room_config(&make_seat_config(
+            area_1d(2),
+            Some(SeatIdentityMap {
+                ids: vec!["only".to_string()],
+            }),
+        ));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("must equal seat count 2")),
+            "got {:?}",
+            result.errors
+        );
+
+        // Empty ID
+        let result = validate_room_config(&make_seat_config(
+            area_1d(2),
+            Some(SeatIdentityMap {
+                ids: vec!["a".to_string(), String::new()],
+            }),
+        ));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("ids[1] must be non-empty")),
+            "got {:?}",
+            result.errors
+        );
+
+        // Valid identity passes
+        let result = validate_room_config(&make_seat_config(
+            area_1d(2),
+            Some(SeatIdentityMap {
+                ids: vec!["left".to_string(), "right".to_string()],
+            }),
+        ));
+        assert!(result.errors.is_empty(), "got {:?}", result.errors);
+
+        // No identity (legacy positional) still passes
+        let result = validate_room_config(&make_seat_config(area_1d(2), None));
+        assert!(result.errors.is_empty(), "got {:?}", result.errors);
+    }
+
+    #[test]
+    fn source_seat_coverage_direct_call() {
+        use crate::roomeq::types::SeatIdentityMap;
+
+        let area = area_1d(2);
+        let ids = vec!["left".to_string(), "right".to_string()];
+
+        // Canonical order passes
+        assert!(
+            area.check_source_seat_coverage(
+                Some(ids.as_slice()),
+                &[ids.clone(), ids.clone()],
+            )
+            .is_empty()
+        );
+
+        // Reordered source list is flagged with the expected position
+        let swapped = vec!["right".to_string(), "left".to_string()];
+        let errors = area.check_source_seat_coverage(
+            Some(ids.as_slice()),
+            &[ids.clone(), swapped],
+        );
+        assert_eq!(errors.len(), 2, "got {errors:?}");
+        assert!(
+            errors.iter().all(|e| e.contains("source[1]")),
+            "got {errors:?}"
+        );
+
+        // Incomplete coverage is flagged
+        let errors = area.check_source_seat_coverage(
+            Some(ids.as_slice()),
+            &[vec!["left".to_string()]],
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("covers 1 seats")),
+            "got {errors:?}"
+        );
+
+        // Positional fallback enforces the strict-ordering contract
+        let positional = vec!["seat-0".to_string(), "seat-1".to_string()];
+        assert!(
+            area.check_source_seat_coverage(None, &[positional.clone()])
+                .is_empty()
+        );
+        let errors = area.check_source_seat_coverage(
+            None,
+            &[vec!["seat-1".to_string(), "seat-0".to_string()]],
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("expected 'seat-0'")),
+            "got {errors:?}"
+        );
+
+        // Same checks through SeatIdentityMap
+        let map = SeatIdentityMap { ids: ids.clone() };
+        assert!(map.validate(2).is_empty());
+        assert!(!map.validate(3).is_empty());
+        assert_eq!(
+            map.effective_ids(2),
+            vec!["left".to_string(), "right".to_string()]
+        );
+        assert!(
+            map.check_source_seat_coverage(2, &[ids]).is_empty()
+        );
+    }
+
+    #[test]
+    fn search_contract_validation() {
+        use crate::roomeq::types::MultiSeatSearchConfig;
+
+        // Default search contract accepts the baseline quadrature
+        let mut config = make_seat_config(area_1d(2), None);
+        let result = validate_room_config(&config);
+        assert!(result.errors.is_empty(), "got {:?}", result.errors);
+
+        // Quadrature points above the cap are rejected
+        if let Some(ms) = config.optimizer.multi_seat.as_mut() {
+            ms.search = Some(MultiSeatSearchConfig {
+                max_quadrature_points: 4,
+                ..Default::default()
+            });
+        }
+        let result = validate_room_config(&config);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("num_points 8 exceeds")
+                    && e.contains("max_quadrature_points 4")),
+            "got {:?}",
+            result.errors
+        );
+
+        // Gauss-Legendre totals above the cap are rejected
+        let mut gl_area = area_1d(2);
+        gl_area.quadrature = AreaQuadratureKind::GaussLegendre {
+            points_per_axis: 8,
+        };
+        let mut config = make_seat_config(gl_area, None);
+        if let Some(ms) = config.optimizer.multi_seat.as_mut() {
+            ms.search = Some(MultiSeatSearchConfig {
+                max_quadrature_points: 7,
+                ..Default::default()
+            });
+        }
+        let result = validate_room_config(&config);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("total points 8")),
+            "got {:?}",
+            result.errors
+        );
+
+        // All-pass filters above the cap are rejected
+        let mut config = make_seat_config(area_1d(2), None);
+        if let Some(ms) = config.optimizer.multi_seat.as_mut() {
+            ms.allpass_filters_per_sub = 5;
+        }
+        let result = validate_room_config(&config);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("allpass_filters_per_sub (5) exceeds")
+                    && e.contains("max_allpass_per_sub (4)")),
+            "got {:?}",
+            result.errors
+        );
+
+        // Zero budgets are rejected (use None for legacy behavior)
+        let mut config = make_seat_config(area_1d(2), None);
+        if let Some(ms) = config.optimizer.multi_seat.as_mut() {
+            ms.search = Some(MultiSeatSearchConfig {
+                evaluation_budget: Some(0),
+                time_budget_ms: Some(0),
+                ..Default::default()
+            });
+        }
+        let result = validate_room_config(&config);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("evaluation_budget must be > 0")),
+            "got {:?}",
+            result.errors
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("time_budget_ms must be > 0")),
+            "got {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn inactive_multiseat_option_combos_warn() {
+        // Disabled multi-seat with search-relevant options set warns
+        let mut config = default_room();
+        config.speakers.insert(
+            "L".to_string(),
+            SpeakerConfig::Single(single_source("l.csv", None)),
+        );
+        config.optimizer.multi_seat = Some(MultiSeatConfig {
+            enabled: false,
+            optimize_polarity: true,
+            allpass_filters_per_sub: 2,
+            continuous_area: Some(area_1d(1)),
+            ..Default::default()
+        });
+        let result = validate_room_config(&config);
+        assert!(result.errors.is_empty(), "got {:?}", result.errors);
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("multi_seat is disabled")),
+            "got {:?}",
+            result.warnings
+        );
+
+        // continuous_area set under a non-continuous strategy warns
+        let mut config = default_room();
+        config.speakers.insert(
+            "L".to_string(),
+            SpeakerConfig::Single(single_source("l.csv", None)),
+        );
+        config.optimizer.multi_seat = Some(MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::Average,
+            continuous_area: Some(area_1d(1)),
+            ..Default::default()
+        });
+        let result = validate_room_config(&config);
+        assert!(result.errors.is_empty(), "got {:?}", result.errors);
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("not consulted")),
+            "got {:?}",
+            result.warnings
+        );
+    }
+
+    #[test]
+    fn seat_and_search_serde_schema_parity() {
+        use crate::roomeq::types::{MultiSeatSearchConfig, SeatIdentityMap};
+
+        // Serialization round-trip preserves the new additive fields
+        let ms = MultiSeatConfig {
+            enabled: true,
+            strategy: MultiSeatStrategy::ContinuousArea,
+            seat_identity: Some(SeatIdentityMap {
+                ids: vec!["a".to_string(), "b".to_string()],
+            }),
+            search: Some(MultiSeatSearchConfig {
+                seed: Some(42),
+                evaluation_budget: Some(1000),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&ms).expect("serialize");
+        let back: MultiSeatConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, ms);
+
+        // Legacy JSON without the new fields still parses (backward compatible)
+        let legacy: MultiSeatConfig =
+            serde_json::from_str(r#"{"enabled":true}"#).expect("legacy parses");
+        assert!(legacy.seat_identity.is_none());
+        assert!(legacy.search.is_none());
+        assert_eq!(legacy.effective_search(), MultiSeatSearchConfig::default());
+
+        // JSON schema advertises the additive contract
+        let schema = schemars::schema_for!(MultiSeatConfig);
+        let schema_json = serde_json::to_value(&schema).expect("schema json");
+        let schema_str = schema_json.to_string();
+        assert!(schema_str.contains("seat_identity"), "{schema_str}");
+        assert!(schema_str.contains("search"), "{schema_str}");
+
+        // Direct-call parity: staged and legacy entry points agree
+        let config = make_seat_config(
+            area_1d(2),
+            Some(SeatIdentityMap {
+                ids: vec!["x".to_string(), "x".to_string()],
+            }),
+        );
+        let legacy_result = validate_room_config(&config);
+        let staged =
+            validate_room_config_staged(&config, RoomValidationContext::structural());
+        let mut legacy_errors = legacy_result.errors.clone();
+        let mut staged_errors: Vec<String> =
+            staged.errors().cloned().collect();
+        legacy_errors.sort();
+        staged_errors.sort();
+        assert_eq!(legacy_errors, staged_errors);
+    }
+
+    #[test]
+    fn continuous_area_metrics_optional_semantics() {
+        use crate::output::ContinuousAreaMetrics;
+
+        // Not evaluated: every scalar is None, never zero
+        let metrics = ContinuousAreaMetrics::not_evaluated();
+        assert!(!metrics.is_evaluated());
+        assert!(metrics.area_variance.is_none());
+        let json = serde_json::to_value(&metrics).expect("serialize");
+        assert!(
+            json.get("area_variance").is_none(),
+            "unevaluated variance must be absent, got {json}"
+        );
+
+        // Evaluated-and-zero stays zero and counts as evaluated
+        let metrics = ContinuousAreaMetrics {
+            seat_ids: Some(vec!["seat-0".to_string()]),
+            num_quadrature_points: Some(8),
+            expected_loss: Some(1.5),
+            area_variance: Some(0.0),
+            worst_case_loss: None,
+            cvar_loss: None,
+        };
+        assert!(metrics.is_evaluated());
+        assert_eq!(metrics.area_variance, Some(0.0));
+        let back: ContinuousAreaMetrics =
+            serde_json::from_str(&serde_json::to_string(&metrics).expect("ser"))
+                .expect("de");
+        assert_eq!(back, metrics);
+
+        // Schema exposes the optional metrics
+        let schema_json =
+            serde_json::to_value(schemars::schema_for!(ContinuousAreaMetrics))
+                .expect("schema json");
+        assert!(schema_json.to_string().contains("area_variance"));
     }
 
     #[test]

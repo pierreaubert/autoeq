@@ -499,20 +499,18 @@ pub fn optimize_drivers_crossover_with_smoothness(
     // Compute pre-optimization objective
     let pre_objective = crate::optim::compute_base_fitness(&x, &objective_data);
 
-    // Run optimization
-    let opt_result = crate::optim::optimize_filters(
+    // Run optimization and classify convergence from structured evidence.
+    // A usable best-effort `Ok` whose status reports budget exhaustion must
+    // NOT set `converged`: convergence, parameter usability (rollback guard
+    // below), and identity fallback (fixed freqs) are independent decisions.
+    let evidence = crate::optim::optimize_filters_detailed(
         &mut x,
         &lower_bounds,
         &upper_bounds,
         objective_data.clone(),
         &params,
     );
-
-    // Check optimization result
-    let converged = match opt_result {
-        Ok((_status, _val)) => true,
-        Err((_err, _val)) => false,
-    };
+    let converged = evidence.converged;
 
     // Compute post-optimization objective
     let mut post_objective = crate::optim::compute_base_fitness(&x, &objective_data);
@@ -588,16 +586,16 @@ pub fn optimize_multisub(
     // Pre-objective
     let pre_objective = crate::optim::compute_base_fitness(&x, &objective_data);
 
-    // Optimize
-    let opt_result = crate::optim::optimize_filters(
+    // Optimize; convergence comes from structured evidence so a usable
+    // best-effort `Ok` after budget exhaustion does not report converged.
+    let evidence = crate::optim::optimize_filters_detailed(
         &mut x,
         &lower_bounds,
         &upper_bounds,
         objective_data.clone(),
         &params,
     );
-
-    let converged = opt_result.is_ok();
+    let converged = evidence.converged;
 
     let mut post_objective = crate::optim::compute_base_fitness(&x, &objective_data);
     if !post_objective.is_finite() || post_objective > pre_objective {
@@ -618,6 +616,26 @@ pub fn optimize_multisub(
         post_objective,
         converged,
     })
+}
+
+/// Split one driver-optimization outcome into independent decisions.
+///
+/// * `converged` follows only [`crate::optim::OptimizerRunEvidence::converged`],
+///   so a usable best-effort `Ok` after budget exhaustion reports `false`.
+/// * `usable` follows only the nonregression guard: the candidate parameters
+///   are kept when the post objective is finite and does not regress past
+///   `pre_objective`, otherwise the caller rolls back to the initial vector.
+/// * identity fallback (fixed crossover frequencies) is handled separately by
+///   the caller and is unaffected by either flag.
+#[cfg(test)]
+pub(crate) fn classify_driver_outcome(
+    evidence: &crate::optim::OptimizerRunEvidence,
+    post_objective: f64,
+    pre_objective: f64,
+) -> (bool, bool) {
+    let converged = evidence.converged;
+    let usable = post_objective.is_finite() && post_objective <= pre_objective;
+    (converged, usable)
 }
 
 #[cfg(test)]
@@ -651,5 +669,49 @@ mod driver_smoothness_tests {
         assert_eq!(actual.schroeder_hz, penalty.schroeder_hz);
         assert_eq!(actual.modal_weight_scale, penalty.modal_weight_scale);
         assert_eq!(actual.exponent, penalty.exponent);
+    }
+
+    #[test]
+    fn finite_best_effort_result_is_usable_but_not_converged() {
+        let evidence = crate::optim::OptimizerRunEvidence::from_backend_result(
+            "autoeq:de",
+            Ok((
+                "AutoEQ DE: maximum evaluations reached (not converged, nfev=100)".to_string(),
+                1.25,
+            )),
+            &[0.5],
+            &[0.0],
+            &[1.0],
+            100,
+            Some(7),
+        );
+        assert!(evidence.best_effort);
+        // Finite improved objective: parameters usable, convergence false.
+        let (converged, usable) = super::classify_driver_outcome(&evidence, 1.0, 2.0);
+        assert!(!converged);
+        assert!(usable);
+    }
+
+    #[test]
+    fn regressed_result_triggers_rollback_without_convergence() {
+        let evidence = crate::optim::OptimizerRunEvidence::from_backend_result(
+            "autoeq:de",
+            Ok((
+                "AutoEQ DE: maximum evaluations reached (not converged, nfev=100)".to_string(),
+                3.0,
+            )),
+            &[0.5],
+            &[0.0],
+            &[1.0],
+            100,
+            Some(7),
+        );
+        // Regressed objective mirrors the nonregression guard: roll back.
+        let (converged, usable) = super::classify_driver_outcome(&evidence, 3.0, 2.0);
+        assert!(!converged);
+        assert!(!usable);
+        // Non-finite post objective is never usable either.
+        let (_, usable) = super::classify_driver_outcome(&evidence, f64::INFINITY, 2.0);
+        assert!(!usable);
     }
 }

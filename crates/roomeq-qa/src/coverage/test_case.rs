@@ -189,6 +189,17 @@ mod tests {
                         object
                             .entry("speakers")
                             .or_insert_with(|| serde_json::json!({}));
+                        // Optimiser fragments may also omit the nested
+                        // `system.speakers` role map; default it the same way
+                        // so fragments lint as full configs.
+                        if let Some(system) = object
+                            .get_mut("system")
+                            .and_then(|system| system.as_object_mut())
+                        {
+                            system
+                                .entry("speakers")
+                                .or_insert_with(|| serde_json::json!({}));
+                        }
                     }
                     Ok(value)
                 })

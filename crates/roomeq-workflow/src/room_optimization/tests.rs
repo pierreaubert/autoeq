@@ -330,6 +330,37 @@ fn routed_safety_replay_restores_the_last_known_safe_dsp_chain() {
     let mut post_safety = pre_safety.clone();
     post_safety.channels.get_mut("L").unwrap().plugins.clear();
     post_safety.channel_results.get_mut("L").unwrap().fir_coeffs = None;
+    // The gate evaluated and reported before the replay failed: that
+    // record must survive the restore, marked so readers know the
+    // described reverts did not stick.
+    post_safety.metadata.correction_acceptance =
+        Some(roomeq_model::CorrectionAcceptanceReport {
+            policy: roomeq_model::CorrectionAcceptancePolicy::RuntimeSafety,
+            runtime_policy: None,
+            decision: roomeq_model::CorrectionDecision::Accepted,
+            accepted: true,
+            metrics: roomeq_model::CorrectionMetricSummary {
+                auditory_frequency_measure: String::from("test-measure"),
+                pre_target_weighted_rms_db: 4.0,
+                post_target_weighted_rms_db: 3.0,
+                improvement_db: 1.0,
+                improvement_ratio: 0.8,
+                post_p95_abs_residual_db: 3.0,
+                post_worst_abs_residual_db: 4.0,
+                correction_rms_db: 1.0,
+                max_abs_correction_db: 2.0,
+            },
+            violations: Vec::new(),
+            reverted_stages: Vec::new(),
+            acoustic_quality: None,
+            realization_quality: None,
+        });
+    post_safety.metadata.stage_outcomes.push(roomeq_model::StageOutcome {
+        checks: Vec::new(),
+        stage: "final_correction_safety".to_string(),
+        status: StageStatus::Applied,
+        advisories: Vec::new(),
+    });
 
     commit_or_restore_routed_safety_replay(
         &mut post_safety,
@@ -356,6 +387,22 @@ fn routed_safety_replay_restores_the_last_known_safe_dsp_chain() {
     let outcome = post_safety.metadata.stage_outcomes.last().unwrap();
     assert_eq!(outcome.stage, "final_correction_safety_routed_replay");
     assert_eq!(outcome.status, StageStatus::Degraded);
+    // The gate's acceptance record survives the restore (marked, not
+    // blessed), with its gate-added stage outcome carried across.
+    let carried = post_safety
+        .metadata
+        .correction_acceptance
+        .as_ref()
+        .expect("acceptance report must survive the restore");
+    assert!(!carried.accepted);
+    assert!(carried
+        .violations
+        .contains(&"safety_replay_rejected_pre_gate_dsp_restored".to_string()));
+    assert!(post_safety
+        .metadata
+        .stage_outcomes
+        .iter()
+        .any(|outcome| outcome.stage == "final_correction_safety"));
 }
 
 fn flat_curve() -> roomeq_model::Curve {

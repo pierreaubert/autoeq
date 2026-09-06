@@ -746,6 +746,7 @@ mod tests {
             objective_before: Some(2.0),
             objective_after: Some(1.0),
             accepted: true,
+            safety_restored: false,
             advisories: Vec::new(),
         }];
         let outputs = vec![BassManagementSubOutputReport {
@@ -807,6 +808,7 @@ mod tests {
             objective_before: Some(1.0),
             objective_after: Some(2.0),
             accepted: false,
+            safety_restored: false,
             advisories: vec!["source_route_candidate_rejected".to_string()],
         }];
         let outputs = vec![BassManagementSubOutputReport {

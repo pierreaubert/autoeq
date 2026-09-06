@@ -38,6 +38,11 @@ pub struct EqOptimizationResult {
     /// verdicts are recorded without removing filters; `into_legacy`
     /// drops them along with the other structured evidence.
     pub audibility_veto: Vec<roomeq_model::FilterVetoVerdict>,
+    /// Stage 1 adjudication record: F0 reference identity, removed filters
+    /// with stable indices for rollback, and cumulative drift stats.
+    /// `None` unless the veto post-pass ran. `into_legacy` drops it along
+    /// with the other structured evidence.
+    pub veto_adjudication: Option<super::audibility_veto::VetoAdjudicationSummary>,
 }
 
 impl EqOptimizationResult {
@@ -246,7 +251,10 @@ fn optimize_channel_eq_adaptive(
             && !veto.elimination_raw_loss_fallback
         {
             let phon = veto.resolved_listening_phon(
-                config.epa_config.as_ref().map(|epa| epa.listening_level_phon),
+                config
+                    .epa_config
+                    .as_ref()
+                    .map(|epa| epa.listening_level_phon),
             );
             let before = best_filters.len();
             best_filters = super::audibility_veto::backward_eliminate_veto_units(
@@ -270,9 +278,10 @@ fn optimize_channel_eq_adaptive(
         }
     }
 
-    // Per-filter audibility veto (Phase A). Report-only by default, so
-    // merely enabling the config records verdicts without changing output.
-    let (kept, veto_loss, audibility_veto) =
+    // Per-filter audibility veto (Stage 1 adjudication). Report-only by
+    // default, so merely enabling the config records verdicts without
+    // changing output.
+    let (kept, veto_loss, audibility_veto, veto_adjudication) =
         apply_veto_postpass(best_filters, best_loss, &prep, config);
     best_filters = kept;
     best_loss = veto_loss;
@@ -288,18 +297,28 @@ fn optimize_channel_eq_adaptive(
         loss: best_loss,
         optimizer_evidence,
         audibility_veto,
+        veto_adjudication,
     })
 }
 
 /// Per-filter audibility veto post-pass shared by the adaptive and
-/// single-pass paths (Phase A).
+/// single-pass paths (Stage 1 adjudication over the Phase A nominations).
 ///
 /// The legacy single-pass path never ran backward elimination, so the veto
 /// is its only pruning — and the place where optimizer-emitted micro
-/// filters would otherwise ship unexamined. Returns the kept filters, the
-/// (possibly recompiled) loss, and verdicts for every evaluated filter.
+/// filters would otherwise ship unexamined. Nominations are adjudicated
+/// one removal at a time against the frozen full chain: a removal is
+/// accepted only below the per-step quantum, within the cumulative cap
+/// (declared pruning budget, else one quantum), and moving no single bin
+/// past the JND floor. Returns the kept filters, the (possibly
+/// recompiled) loss, verdicts with acceptance records, and the
+/// adjudication summary (F0 reference identity plus rollback data).
 /// With no veto config, or a disabled one, the input passes through
-/// untouched with no verdicts.
+/// untouched with no verdicts and no summary.
+///
+/// NOTE: there is no reoptimization after removal on any path. If one is
+/// ever added, it must thread `f0_reference_id` through and compare the
+/// reoptimized chain against F0 — never against the post-removal chain.
 fn apply_veto_postpass(
     filters: Vec<Biquad>,
     loss: f64,
@@ -309,19 +328,24 @@ fn apply_veto_postpass(
     Vec<Biquad>,
     f64,
     Vec<roomeq_model::FilterVetoVerdict>,
+    Option<super::audibility_veto::VetoAdjudicationSummary>,
 ) {
     let Some(veto) = config.filter_audibility.filter(|veto| veto.enabled) else {
-        return (filters, loss, Vec::new());
+        return (filters, loss, Vec::new(), None);
     };
-    let phon = veto
-        .resolved_listening_phon(config.epa_config.as_ref().map(|epa| epa.listening_level_phon));
+    let phon = veto.resolved_listening_phon(
+        config
+            .epa_config
+            .as_ref()
+            .map(|epa| epa.listening_level_phon),
+    );
     let hf_start = veto.resolved_hf_guard_start_hz(
         config
             .high_frequency_correction
             .as_ref()
             .map(|hf| hf.start_hz),
     );
-    let verdicts = {
+    let mut verdicts = {
         let evaluation = super::audibility_veto::VetoEvaluation {
             filters: &filters,
             freqs: &prep.objective_data.freqs,
@@ -331,24 +355,36 @@ fn apply_veto_postpass(
         };
         super::audibility_veto::evaluate_audibility_veto(&evaluation)
     };
-    let (kept, verdicts) =
-        super::audibility_veto::enforce_veto_verdicts(filters, verdicts, !veto.report_only);
-    let loss = if kept.len() != verdicts.len() {
-        recompiled_loss(&kept, prep)
+    let adjudication_config = super::audibility_veto::AdjudicationConfig {
+        listening_phon: phon,
+        per_step_quantum_sones: veto.elimination_loudness_delta_sones,
+        cumulative_cap_sones: config
+            .pruning_budget
+            .as_ref()
+            .and_then(|budget| budget.max_cumulative_delta),
+        local_deviation_cap_db: veto.jnd_db,
+        enforce: !veto.report_only,
+        model_version: env!("CARGO_PKG_VERSION").to_string(),
+    };
+    let adjudication = super::audibility_veto::adjudicate_veto_removals(
+        filters,
+        &mut verdicts,
+        &prep.objective_data.freqs,
+        &adjudication_config,
+    );
+    let loss = if adjudication.kept.len() != verdicts.len() {
+        recompiled_loss(&adjudication.kept, prep)
     } else {
         loss
     };
-    (kept, loss, verdicts)
+    let summary = adjudication.summarize();
+    (adjudication.kept, loss, verdicts, Some(summary))
 }
 
 /// Re-evaluate the scalar objective for a changed filter set so the reported
 /// loss stays honest after veto/elimination removals.
-fn recompiled_loss(
-    filters: &[Biquad],
-    prep: &super::types::PreparedSingleChannelEq,
-) -> f64 {
-    let peq: math_audio_iir_fir::Peq =
-        filters.iter().map(|biquad| (1.0, biquad.clone())).collect();
+fn recompiled_loss(filters: &[Biquad], prep: &super::types::PreparedSingleChannelEq) -> f64 {
+    let peq: math_audio_iir_fir::Peq = filters.iter().map(|biquad| (1.0, biquad.clone())).collect();
     let x = autoeq_core::x2peq::peq2x(&peq, prep.peq_model);
     autoeq_optim::optim::compute_base_fitness(&x, &prep.objective_data)
 }
@@ -410,10 +446,10 @@ fn optimize_channel_eq_inner(
         backend,
     )?;
 
-    // Same Phase A veto as the adaptive path: the legacy single-pass path
+    // Same Stage 1 veto as the adaptive path: the legacy single-pass path
     // never ran elimination, so without this its micro filters ship
     // unexamined. Report-only by default.
-    let (filters, loss, audibility_veto) =
+    let (filters, loss, audibility_veto, veto_adjudication) =
         apply_veto_postpass(filters, loss, &prep, config);
 
     log::info!(
@@ -427,6 +463,7 @@ fn optimize_channel_eq_inner(
         loss,
         optimizer_evidence,
         audibility_veto,
+        veto_adjudication,
     })
 }
 
@@ -1140,11 +1177,15 @@ fn optimize_channel_eq_multi_inner(
         final_loss
     );
 
+    // Joint multi-measurement optimization has no per-filter veto
+    // evaluation yet (Stage 1 audit gap): verdicts stay empty and no
+    // adjudication record is produced. Single-channel paths adjudicate.
     Ok(EqOptimizationResult {
         filters,
         loss: final_loss,
         optimizer_evidence,
         audibility_veto: Vec::new(),
+        veto_adjudication: None,
     })
 }
 
@@ -1493,11 +1534,15 @@ fn optimize_spatial_robustness(
         final_loss
     );
 
+    // Spatial-robustness optimization has no per-filter veto evaluation
+    // yet (Stage 1 audit gap): verdicts stay empty and no adjudication
+    // record is produced. Single-channel paths adjudicate.
     Ok(EqOptimizationResult {
         filters,
         loss: final_loss,
         optimizer_evidence: vec![evidence],
         audibility_veto: Vec::new(),
+        veto_adjudication: None,
     })
 }
 
@@ -2440,7 +2485,7 @@ mod multi_eq_tests {
         // Baseline ("previously"): without the veto the micro-filters ship.
         let baseline = run(None);
         assert!(
-            baseline.filters.len() >= 1,
+            !baseline.filters.is_empty(),
             "fixture must emit filters to veto, got none"
         );
         assert!(baseline.audibility_veto.is_empty());

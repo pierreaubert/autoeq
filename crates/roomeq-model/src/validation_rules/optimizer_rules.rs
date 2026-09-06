@@ -181,6 +181,30 @@ pub fn rule_filter_audibility(ctx: &mut ValidationContext<'_>) {
     }
 }
 
+/// Shape validation for the Stage 0 cumulative pruning budget.
+///
+/// The budget is recorded and reported against; it is not enforced yet
+/// (enforcement arrives with the Stage 1 cumulative checks). These errors
+/// reject nonsense shapes only — a set budget changes no optimizer output.
+pub fn rule_pruning_budget(ctx: &mut ValidationContext<'_>) {
+    let Some(budget) = ctx.opt.pruning_budget.as_ref() else {
+        return;
+    };
+    match budget.max_cumulative_delta {
+        Some(cap) if !cap.is_finite() => {
+            ctx.add_error(format!(
+                "pruning_budget.max_cumulative_delta ({cap}) must be finite"
+            ));
+        }
+        Some(cap) if cap < 0.0 => {
+            ctx.add_error(format!(
+                "pruning_budget.max_cumulative_delta ({cap}) must be non-negative"
+            ));
+        }
+        _ => {}
+    }
+}
+
 pub fn rule_high_frequency_correction(ctx: &mut ValidationContext<'_>) {
     let Some(hf) = ctx.opt.high_frequency_correction else {
         return;
@@ -804,6 +828,7 @@ pub fn run_optimizer_validation_rules(ctx: &mut ValidationContext<'_>) {
     rule_asymmetric_loss(ctx);
     rule_audibility_deadband(ctx);
     rule_filter_audibility(ctx);
+    rule_pruning_budget(ctx);
     rule_high_frequency_correction(ctx);
     rule_early_late_correction(ctx);
     rule_validation_bundle(ctx);
@@ -1305,6 +1330,40 @@ mod optimizer_rule_tests {
                 .iter()
                 .any(|w| w.contains("report_only is false"))
         );
+    }
+
+    #[test]
+    fn rule_pruning_budget_rejects_nonsense_shapes_only() {
+        // Absent budget: no errors, no warnings.
+        let result = run_rule(rule_pruning_budget, &default_config());
+        assert!(result.errors.is_empty());
+        assert!(result.warnings.is_empty());
+
+        // Negative and non-finite caps are structural nonsense.
+        for cap in [-0.5, f64::NAN, f64::INFINITY] {
+            let mut config = default_config();
+            config.pruning_budget = Some(crate::PruningBudget {
+                max_cumulative_delta: Some(cap),
+                ..Default::default()
+            });
+            let result = run_rule(rule_pruning_budget, &config);
+            assert!(
+                result.errors.iter().any(|e| e.contains("max_cumulative_delta")),
+                "cap {cap} should error"
+            );
+        }
+
+        // A well-formed budget validates clean — and warns nothing,
+        // because a set budget still changes no optimizer output.
+        let mut config = default_config();
+        config.pruning_budget = Some(crate::PruningBudget {
+            max_cumulative_delta: Some(0.5),
+            conditions: vec![String::from("seat-1")],
+            ..Default::default()
+        });
+        let result = run_rule(rule_pruning_budget, &config);
+        assert!(result.errors.is_empty());
+        assert!(result.warnings.is_empty());
     }
 
     #[test]

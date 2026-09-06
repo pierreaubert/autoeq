@@ -1,6 +1,6 @@
 [package]
 name = "autoeq-optim"
-version = "0.5.60"
+version = "0.5.61"
 edition = "2024"
 description = "AutoEQ objectives, constraints, and optimizer backends"
 license = "GPL-3.0-or-later"
@@ -32,6 +32,7 @@ rand_chacha = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 metaheuristics-nature = { workspace = true }
 
 [dev-dependencies]

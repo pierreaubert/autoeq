@@ -368,6 +368,13 @@ fn validate_bass_management(
                 ));
                 continue;
             };
+            // A safety-restoring acceptance is the documented cost of
+            // repairing excessive crossover underfill (baseline unsafe,
+            // candidate fully acceptable), not an optimizer defect: exempt
+            // exactly that recorded basis, nothing else.
+            if source.accepted && source.safety_restored {
+                continue;
+            }
             match (source.objective_before, source.objective_after) {
                     (Some(before), Some(after))
                         if before.is_finite()
@@ -555,6 +562,11 @@ fn validate_hybrid_realization(result: &RoomOptimizationResult) -> Vec<String> {
                     .and_then(serde_json::Value::as_str)
                     == Some("hybrid_fir_latency_alignment")
         });
+        // The builder deliberately omits the `eq` plugin when the IIR
+        // stage yields zero filters (e.g. a non-overlapping IIR band on a
+        // range-limited channel): an EQ-less block is a complete chain,
+        // not a dropped stage. Zero or one `eq` is accepted; everything
+        // else about the atomic block stays exact.
         let complete = hybrid_plugins
             .first()
             .is_some_and(|plugin| plugin.plugin_type == "band_split")
@@ -564,7 +576,7 @@ fn validate_hybrid_realization(result: &RoomOptimizationResult) -> Vec<String> {
             && count("band_split") == 1
             && count("convolution") == 1
             && has_alignment_delay
-            && count("eq") == 1
+            && count("eq") <= 1
             && count("band_merge") == 1;
         if complete {
             complete_blocks += 1;

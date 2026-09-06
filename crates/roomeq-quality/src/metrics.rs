@@ -1,6 +1,8 @@
 // Transfer-function metric evaluation.
 use super::types::{AcousticOracle, CandidateTransfer, ImpulseEvidence, ProhibitedBehavior};
 use num_complex::Complex64;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
 const MAGNITUDE_FLOOR: f64 = 1e-12;
@@ -611,6 +613,144 @@ pub fn normalized_timbre_spread_db(channels_db: &[Vec<f64>]) -> Option<f64> {
     Some(mean_spread)
 }
 
+/// Versioned identifier for seat/bin aggregation of per-seat per-bin
+/// values. Linear means coincide for any weights, so the two orders
+/// below always agree here — the order is still recorded on every
+/// aggregate because it binds the moment a nonlinear reduction is used,
+/// and because unnamed orders invite cross-measure confusion.
+pub const SEAT_AGGREGATION_MEASURE_VERSION: &str = "seat-aggregation-v1";
+
+/// Order of the two averaging stages in [`aggregate_seat_bin`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AggregationOrder {
+    /// Weighted mean over bins first, then mean over seats.
+    BinsThenSeats,
+    /// Mean over seats per bin first, then weighted mean over bins.
+    SeatsThenBins,
+}
+
+impl AggregationOrder {
+    /// Stable string id recorded in reports and sidecars.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::BinsThenSeats => "bins-then-seats-v1",
+            Self::SeatsThenBins => "seats-then-bins-v1",
+        }
+    }
+}
+
+/// Aggregate per-seat per-bin values with explicit order.
+///
+/// `values` holds one row per seat, each `bins` long; `bin_weights` holds
+/// the per-bin weights (ERB/log-frequency, matching the frequency
+/// measure in use). Returns `None` on empty input, ragged rows, weight
+/// mismatch, non-finite entries, or a non-positive weight sum — an
+/// aggregate over undefined support is `None`, never zero.
+pub fn aggregate_seat_bin(
+    values: &[Vec<f64>],
+    bin_weights: &[f64],
+    order: AggregationOrder,
+) -> Option<f64> {
+    let bins = bin_weights.len();
+    if values.is_empty()
+        || bins == 0
+        || values.iter().any(|row| row.len() != bins)
+        || values.iter().any(|row| row.iter().any(|value| !value.is_finite()))
+        || bin_weights.iter().any(|weight| !weight.is_finite() || *weight < 0.0)
+    {
+        return None;
+    }
+    let weight_sum: f64 = bin_weights.iter().sum();
+    if !matches!(
+        weight_sum.partial_cmp(&0.0),
+        Some(std::cmp::Ordering::Greater)
+    ) {
+        return None;
+    }
+    let weighted_bin_mean = |row: &[f64]| {
+        row.iter()
+            .zip(bin_weights.iter())
+            .map(|(value, weight)| value * weight)
+            .sum::<f64>()
+            / weight_sum
+    };
+    match order {
+        AggregationOrder::BinsThenSeats => {
+            let per_seat: Vec<f64> = values.iter().map(|row| weighted_bin_mean(row)).collect();
+            Some(per_seat.iter().sum::<f64>() / per_seat.len() as f64)
+        }
+        AggregationOrder::SeatsThenBins => {
+            let per_bin: Vec<f64> = (0..bins)
+                .map(|bin| {
+                    values.iter().map(|row| row[bin]).sum::<f64>() / values.len() as f64
+                })
+                .collect();
+            Some(weighted_bin_mean(&per_bin))
+        }
+    }
+}
+
+/// One seat's scalar score with its frequency support.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeatScore {
+    /// Seat id.
+    pub seat: String,
+    /// Score in dB (higher = worse).
+    pub value_db: f64,
+    /// Bins supporting the value.
+    pub support_bins: usize,
+}
+
+/// Worst seat with at least `min_support_bins` bins of support.
+///
+/// Returns `None` when no seat qualifies — an unsupported worst seat is
+/// absent from the report, never a zero or a guess. Ties resolve to the
+/// last maximum in slice order (`max_by` semantics; deterministic, so
+/// record the input order).
+pub fn worst_supported_seat(
+    scores: &[SeatScore],
+    min_support_bins: usize,
+) -> Option<&SeatScore> {
+    scores
+        .iter()
+        .filter(|score| score.support_bins >= min_support_bins && score.value_db.is_finite())
+        .max_by(|a, b| {
+            a.value_db
+                .partial_cmp(&b.value_db)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+}
+
+/// Deterministic bootstrap 95% interval for the mean of `values`.
+///
+/// Resamples with replacement `resamples` times under `seed` and returns
+/// the 2.5/97.5 percentiles of resampled means. Same seed, same interval:
+/// uncertainty itself is reproducible. Returns `None` on empty input or
+/// zero resamples.
+pub fn bootstrap_mean_ci95(
+    values: &[f64],
+    resamples: usize,
+    seed: u64,
+) -> Option<(f64, f64)> {
+    if values.is_empty() || resamples == 0 || values.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let mut rng = crate::SeededRng::new(seed);
+    let mut means = Vec::with_capacity(resamples);
+    for _ in 0..resamples {
+        let mut sum = 0.0;
+        for _ in 0..values.len() {
+            sum += values[rng.next_below(values.len())];
+        }
+        means.push(sum / values.len() as f64);
+    }
+    means.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let lower_index = ((0.025 * resamples as f64).floor() as usize) % resamples;
+    let upper_index = (((0.975 * resamples as f64).ceil() as usize).saturating_sub(1)) % resamples;
+    Some((means[lower_index], means[upper_index]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -845,6 +985,87 @@ mod tests {
                 .iter()
                 .any(|violation| violation.metric == "group_delay_residual_rms_ms")
         );
+    }
+
+    #[test]
+    fn aggregation_orders_coincide_for_uniform_weights() {
+        // Two seats, three bins, uniform weights: both orders reduce to
+        // the grand mean (hand-computed: 40/6 = 20/3).
+        let values = [vec![1.0, 2.0, 3.0], vec![4.0, 12.0, 18.0]];
+        let weights = [1.0, 1.0, 1.0];
+        let bins_first =
+            aggregate_seat_bin(&values, &weights, AggregationOrder::BinsThenSeats).unwrap();
+        let seats_first =
+            aggregate_seat_bin(&values, &weights, AggregationOrder::SeatsThenBins).unwrap();
+        assert!((bins_first - 20.0 / 3.0).abs() < 1e-12);
+        assert!((seats_first - 20.0 / 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn aggregation_order_is_recorded_but_mean_is_order_free() {
+        // Linear means coincide for any weights — both orders must agree
+        // here (hand-computed 5.0). The order is still recorded on every
+        // aggregate: it binds the moment a nonlinear reduction (median,
+        // worst-bin) is introduced, and it keeps cross-measure
+        // comparisons honest.
+        let values = [vec![1.0, 2.0, 3.0], vec![4.0, 12.0, 18.0]];
+        let weights = [3.0, 1.0, 1.0];
+        let bins_first =
+            aggregate_seat_bin(&values, &weights, AggregationOrder::BinsThenSeats).unwrap();
+        let seats_first =
+            aggregate_seat_bin(&values, &weights, AggregationOrder::SeatsThenBins).unwrap();
+        // Bins-first: seat means (1*3+2+3)/5=1.6 and (12+12+18)/5=8.4, then (1.6+8.4)/2=5.0.
+        assert!((bins_first - 5.0).abs() < 1e-12);
+        // Seats-first: per-bin seat means (2.5, 7.0, 10.5), then (2.5*3+7+10.5)/5=5.0.
+        assert!((seats_first - 5.0).abs() < 1e-12);
+        assert_eq!(AggregationOrder::BinsThenSeats.as_str(), "bins-then-seats-v1");
+        assert_eq!(AggregationOrder::SeatsThenBins.as_str(), "seats-then-bins-v1");
+    }
+
+    #[test]
+    fn aggregation_rejects_undefined_support() {
+        let values = [vec![1.0, 2.0]];
+        assert!(aggregate_seat_bin(&[], &[1.0], AggregationOrder::BinsThenSeats).is_none());
+        assert!(aggregate_seat_bin(&values, &[], AggregationOrder::BinsThenSeats).is_none());
+        assert!(
+            aggregate_seat_bin(&[vec![1.0]], &[1.0, 2.0], AggregationOrder::BinsThenSeats).is_none()
+        );
+        assert!(
+            aggregate_seat_bin(&[vec![f64::NAN, 1.0]], &[1.0, 1.0], AggregationOrder::BinsThenSeats)
+                .is_none()
+        );
+        assert!(
+            aggregate_seat_bin(&values, &[0.0, 0.0], AggregationOrder::BinsThenSeats).is_none()
+        );
+    }
+
+    #[test]
+    fn worst_seat_needs_support() {
+        let scores = [
+            SeatScore { seat: String::from("a"), value_db: 3.0, support_bins: 50 },
+            SeatScore { seat: String::from("b"), value_db: 5.0, support_bins: 4 },
+            SeatScore { seat: String::from("c"), value_db: 4.0, support_bins: 60 },
+        ];
+        // "b" is worst but unsupported at min 10: "c" wins.
+        assert_eq!(worst_supported_seat(&scores, 10).unwrap().seat, "c");
+        // No minimum: "b" wins.
+        assert_eq!(worst_supported_seat(&scores, 0).unwrap().seat, "b");
+        // Impossible minimum: absent, not zero.
+        assert!(worst_supported_seat(&scores, 1000).is_none());
+        assert!(worst_supported_seat(&[], 0).is_none());
+    }
+
+    #[test]
+    fn bootstrap_interval_is_deterministic_and_honest() {
+        let values = [1.0, 2.0, 3.0, 4.0, 10.0];
+        let first = bootstrap_mean_ci95(&values, 2000, 42).unwrap();
+        let second = bootstrap_mean_ci95(&values, 2000, 42).unwrap();
+        assert_eq!(first, second);
+        let mean = values.iter().sum::<f64>() / values.len() as f64;
+        assert!(first.0 <= mean && mean <= first.1, "{first:?} vs {mean}");
+        assert!(first.0 < first.1);
+        assert!(bootstrap_mean_ci95(&[], 100, 1).is_none());
+        assert!(bootstrap_mean_ci95(&values, 0, 1).is_none());
     }
 
     #[test]

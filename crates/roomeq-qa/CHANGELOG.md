@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Exempt documented safety-restoring bass acceptances from the per-source regression gate and accept legitimately EQ-less hybrid correction blocks.
+
 - Add stage-contract, pairwise-parameter, escaped-defect, generated-fixture, and independent serialized-replay gates, plus blocking four-mode KEF, Genelec, and Fidelia measured canaries.
 - Keep the randomized five-seed quality fuzzer in nightly/weekly schedules;
   blocking PR CI now uses deterministic measured-mode, quick safety,

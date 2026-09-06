@@ -1925,8 +1925,32 @@ fn commit_or_restore_routed_safety_replay(
     match post_safety_deployed {
         Ok(deployed) => result.deployed_source_curves = deployed,
         Err(error) => {
+            // The gate already evaluated and reported on its working copy;
+            // restoring the pre-gate snapshot must not silently drop those
+            // records, or the shipped DSP ends up with no acceptance report
+            // at all. Carry the acceptance report and the gate-added stage
+            // outcomes across, marked so readers know the described reverts
+            // did not stick: the report documents what the gate found, and
+            // the violation records that pre-gate DSP was restored.
+            let mut acceptance = result.metadata.correction_acceptance.clone();
+            if let Some(report) = acceptance.as_mut() {
+                report.accepted = false;
+                report.violations.push(
+                    "safety_replay_rejected_pre_gate_dsp_restored".to_string(),
+                );
+                report.violations.sort();
+                report.violations.dedup();
+            }
+            let pre_gate_outcomes = pre_safety_result.metadata.stage_outcomes.len();
+            let mut gate_outcomes =
+                std::mem::take(&mut result.metadata.stage_outcomes);
+            let gate_added = gate_outcomes.split_off(pre_gate_outcomes.min(gate_outcomes.len()));
             *result = pre_safety_result;
             result.deployed_source_curves = pre_safety_deployed;
+            if acceptance.is_some() {
+                result.metadata.correction_acceptance = acceptance;
+            }
+            result.metadata.stage_outcomes.extend(gate_added);
             result.metadata.stage_outcomes.push(StageOutcome {
                 checks: Vec::new(),
                 stage: "final_correction_safety_routed_replay".to_string(),

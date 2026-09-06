@@ -615,6 +615,21 @@
       },
       "type": "object"
     },
+    "BudgetAggregation": {
+      "description": "How per-condition differences aggregate against a cumulative cap.",
+      "oneOf": [
+        {
+          "const": "sum",
+          "description": "Sum of per-condition differences must stay under the cap.",
+          "type": "string"
+        },
+        {
+          "const": "max",
+          "description": "Worst single-condition difference must stay under the cap.",
+          "type": "string"
+        }
+      ]
+    },
     "CardioidConfig": {
       "additionalProperties": false,
       "description": "Configuration for Gradient Cardioid Subwoofer (2 subwoofers)",
@@ -3053,6 +3068,17 @@
           "default": "low_latency",
           "description": "Processing mode — selects the filter class used for correction."
         },
+        "pruning_budget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PruningBudget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Cumulative pruning budget over declared conditions (Stage 0\ncontract). `None` (default) disables budget tracking. A configured\nbudget is validated for shape and reported against; it is not yet\nenforced — budget enforcement arrives with the Stage 1 cumulative\nchecks, so setting this today changes no optimizer output."
+        },
         "psychoacoustic": {
           "default": true,
           "description": "Enable psychoacoustic preprocessing",
@@ -3436,6 +3462,33 @@
         "strict"
       ],
       "type": "string"
+    },
+    "PruningBudget": {
+      "additionalProperties": false,
+      "description": "Cumulative pruning budget over declared conditions.\n\nStage 0 resolution of the cumulative-budget open decision: budgets are\ndeclared up front, span explicit condition ids (seats, programmes,\nlevels), and are disabled (`None` cap) unless configured. A configured\nbudget is validated for shape here; *enforcement* of the budget arrives\nwith the Stage 1 cumulative checks, so a set budget is currently\ntracked in reports, not used to accept or reject removals.\n\nDifferences are measured in approximate masked-loudness delta (sones)\nunder the experimental heuristic proxy until Stage 2 validates a\nreplacement distance.",
+      "properties": {
+        "aggregation": {
+          "$ref": "#/$defs/BudgetAggregation",
+          "default": "sum",
+          "description": "How per-condition differences aggregate against the cap."
+        },
+        "conditions": {
+          "description": "Declared condition ids the budget spans (seats, programmes,\nlevels). Empty means the budget is not bound to conditions yet.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_cumulative_delta": {
+          "description": "Cumulative cap in approximate masked-loudness delta (sones,\nexperimental proxy units). `None` (default) disables budget\ntracking.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
     },
     "PsychoacousticSmoothingConfig": {
       "additionalProperties": false,

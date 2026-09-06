@@ -124,6 +124,7 @@ pub fn process_mixed_crossover(
             loss: request.pre_score,
             optimizer_evidence: Vec::new(),
             audibility_veto: Vec::new(),
+            veto_adjudication: None,
         }
     };
     info!(

@@ -13,6 +13,7 @@ use super::default::default_high_freq_guard_start_hz;
 use super::default::default_high_freq_smoothing_n;
 use super::default::default_max_freq;
 use super::default::validate_config_version;
+use super::filter_audibility_config::FilterAudibilityConfig;
 use super::high_frequency_correction_config::HighFrequencyCorrectionConfig;
 use super::multi_sub_group::MultiSubGroup;
 use super::optimizer_config::OptimizerConfig;
@@ -22,6 +23,8 @@ use super::policy::{
     policy_early_late_correction, policy_high_frequency_guard, policy_multi_measurement,
     policy_psychoacoustic_smoothing, policy_smoothness_penalty, policy_target_response,
 };
+use super::report_outcome::BudgetAggregation;
+use super::report_outcome::PruningBudget;
 use super::room_config::RoomConfig;
 use super::speaker_config::SpeakerConfig;
 use super::speaker_group::SpeakerGroup;

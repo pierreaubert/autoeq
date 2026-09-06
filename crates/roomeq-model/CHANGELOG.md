@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Record the crossover-safety-restoration basis on accepted bass source routes (`BassManagementSourceReport.safety_restored`).
+
 - Add backward-compatible classified stage checks to RoomEQ stage outcomes and output metadata.
 - Reject crossover frequency ranges that are non-finite, non-positive, or not strictly increasing.
 - Resolve file-backed target paths and validate required target files, excursion bounds, CTC robustness, continuous-area priors, height references, supporting-source names, and duplicate subwoofer mappings.

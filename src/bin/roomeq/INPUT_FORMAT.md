@@ -151,6 +151,24 @@ EPA optimization is experimental and uses spectral flatness only. Transfer-only
 loudness, roughness, sharpness, and temporal values are diagnostics rather than
 validated programme-audio or measured-decay objectives.
 
+## Audibility policy selection and staged rollout
+
+`optimizer.filter_audibility` selects the per-filter audibility veto. Absent
+(`None`, the default) disables the veto entirely: legacy output, byte-for-byte.
+When present, the default evaluates every filter and records reason-coded
+verdicts but never removes anything (`report_only: true`); enforcement
+(`report_only: false`) is an explicit opt-in. Thresholds are implementation-time starting calibrations,
+not reference psychoacoustic values — see `ROOMEQ_AUDIBILITY_CONTRACT.md`
+(kept alongside the review docs; the audibility contract is git-ignored by
+repo policy) and `docs/ROOMEQ_MANUAL.md` ("Staged rollout and release
+gates").
+
+Policy records are versioned and explicit: promotion needs the release gates
+its claim requires (correctness and physical safety for safeguards, plus
+perceptual validation for perceptual claims, plus recorded listening outcomes
+for benefit claims). Advisory selections and elapsed warning cycles never
+promote. Deleting a policy selection restores the legacy behavior.
+
 ## Multi-measurement RIR prototype
 
 When a speaker has several measurements captured at different positions, you

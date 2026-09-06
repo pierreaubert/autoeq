@@ -11,6 +11,7 @@ pub mod features;
 pub mod fuzzer;
 pub mod quality;
 pub mod registry;
+pub mod release_gates;
 pub mod stage_contracts;
 pub mod parameter_matrix;
 pub mod synthetic;

@@ -820,3 +820,31 @@ every change and completed scheduled quality runs. Release reports should
 classify escaped defects as optimizer/objective, role/routing, DSP realization,
 acceptance/reporting, or automation reachability, and record unexpected
 reverts, cross-mode drift, mutation survivors, and suite runtime.
+
+### Staged rollout and release gates
+
+New audibility and acceptance policies roll out in three behaviors:
+`Legacy` (policy disabled — the output it replaced, always available),
+`Advisory` (report-only: evaluates and records reason-coded verdicts but
+never changes output — the default whenever a new policy is selected), and `Enforcing`
+(explicit opt-in that changes emitted output). Deleting a policy selection
+restores legacy behavior; enforcement is never the default.
+
+Promotion is evidence-gated by four independent release gates
+(`crates/roomeq-qa/src/release_gates.rs`): implementation correctness,
+physical safety, perceptual-model validation, and demonstrated listening
+benefit. Passing one gate never implies the others. Advisory releases and
+elapsed warning cycles carry no evidence and never promote. Physical
+safeguards promote on correctness plus physical safety alone — the
+optional rerank objective (Stage 4) never blocks them. Perceptual claims
+additionally need perceptual validation; listening-benefit claims need
+recorded listening outcomes.
+
+Every staged artifact carries provenance for its stage: stimulus
+manifests record renderer, version, platform, SPL mapping, and file
+hashes; validation results record the preregistration hash; rerank
+reports record evaluator and loss pins; export round trips
+(`roomeq-export/src/roundtrip.rs`) verify biquad coefficients,
+routing, preamp normalization, delay, and convolution bytes against the
+canonical graph. Demo the gates and round trips without listening
+evidence via `roomeq-qa-synthetic --release-gates`.

@@ -6,10 +6,11 @@ use super::stereo::Stereo20Executor;
 use super::stereo_sub::Stereo21Executor;
 use super::types::{WorkflowAssembly, WorkflowExecutor};
 use ndarray::Array1;
+use math_audio_iir_fir::Biquad;
 use roomeq_model::{
-    CardioidConfig, CrossoverConfig, DBAConfig, MeasurementSource, MultiSubGroup, OptimizerConfig,
-    ProcessingMode, RoomConfig, SpeakerConfig, SubwooferStrategy, SubwooferSystemConfig,
-    SystemConfig, SystemModel, default_config_version,
+    CardioidConfig, CrossoverConfig, DBAConfig, FilterAudibilityConfig, MeasurementSource,
+    MultiSubGroup, OptimizerConfig, ProcessingMode, RoomConfig, SpeakerConfig,
+    SubwooferStrategy, SubwooferSystemConfig, SystemConfig, SystemModel, default_config_version,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -134,6 +135,153 @@ fn stereo_21_room_config(
         ctc: None,
         cea2034_cache: None,
     }
+}
+
+fn rippled_curve() -> roomeq_engine::Curve {
+    // Near-flat curve with a 0.4 dB bump plus fine ripple: the optimizer
+    // emits micro-corrections the veto can adjudicate (deterministic under
+    // the base optimizer seed).
+    let mut curve = flat_curve();
+    curve.spl = curve
+        .spl
+        .iter()
+        .zip(curve.freq.iter())
+        .map(|(&level, &freq)| {
+            let octaves = (freq / 200.0).log2();
+            level + 0.4 * (-0.5 * (octaves * 3.0).powi(2)).exp()
+                + 0.15 * (freq / 37.0).sin()
+        })
+        .collect();
+    curve
+}
+
+fn veto_optimizer(enforce: bool) -> OptimizerConfig {
+    OptimizerConfig {
+        filter_audibility: Some(FilterAudibilityConfig {
+            enabled: true,
+            report_only: !enforce,
+            ..Default::default()
+        }),
+        // Headroom beyond the single real correction: the optimizer spends
+        // spare filters on micro-residue the veto can adjudicate.
+        num_filters: 3,
+        ..base_optimizer()
+    }
+}
+
+fn stereo_veto_result(enforce: bool) -> roomeq_engine::room_result::RoomOptimizationResult {
+    let speakers = HashMap::from([
+        (
+            "left".to_string(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(rippled_curve())),
+        ),
+        (
+            "right".to_string(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(rippled_curve())),
+        ),
+    ]);
+    let sys = SystemConfig {
+        model: SystemModel::Stereo,
+        speakers: HashMap::from([
+            ("Left".to_string(), "left".to_string()),
+            ("Right".to_string(), "right".to_string()),
+        ]),
+        subwoofers: None,
+        bass_management: None,
+        ..Default::default()
+    };
+    let config = RoomConfig {
+        version: default_config_version(),
+        system: Some(sys.clone()),
+        speakers,
+        crossovers: None,
+        target_curve: None,
+        optimizer: veto_optimizer(enforce),
+        provenance: Default::default(),
+        recording_config: None,
+        ctc: None,
+        cea2034_cache: None,
+    };
+    let mut assembly = make_assembly(&config, &sys);
+    Stereo20Executor
+        .execute(&mut assembly)
+        .expect("stereo veto run should succeed")
+}
+
+/// (freq, q, gain) triples of every `eq` plugin in a routed chain, in order.
+fn exported_eq_filters(chain: &roomeq_model::ChannelDspChain) -> Vec<(f64, f64, f64)> {
+    let mut out = Vec::new();
+    for plugin in &chain.plugins {
+        if plugin.plugin_type != "eq" {
+            continue;
+        }
+        let filters = plugin.parameters.get("filters").and_then(|v| v.as_array());
+        let Some(filters) = filters else { continue };
+        for filter in filters {
+            out.push((
+                filter.get("freq").and_then(|v| v.as_f64()).unwrap_or(f64::NAN),
+                filter.get("q").and_then(|v| v.as_f64()).unwrap_or(f64::NAN),
+                filter.get("db_gain").and_then(|v| v.as_f64()).unwrap_or(f64::NAN),
+            ));
+        }
+    }
+    out
+}
+
+fn biquad_triples(filters: &[Biquad]) -> Vec<(f64, f64, f64)> {
+    filters.iter().map(|b| (b.freq, b.q, b.db_gain)).collect()
+}
+
+#[test]
+fn veto_enforcement_propagates_to_exported_chain() {
+    // Twin runs, identical seed and curve: report-only keeps everything the
+    // optimizer emitted, enforced keeps a subsequence of it, and each
+    // routed channel's exported EQ plugin contains exactly its kept set in
+    // order (deletions propagate; nothing stale ships). F0-identity and
+    // nomination/acceptance separation are pinned at engine level; reason
+    // codes do not reach channel results yet (Stage 1 audit gap).
+    let report_only = stereo_veto_result(false);
+    let enforced = stereo_veto_result(true);
+    let mut removed_total = 0usize;
+    for role in ["Left", "Right"] {
+        let ro_kept = biquad_triples(&report_only.channel_results[role].biquads);
+        let enf_kept = biquad_triples(&enforced.channel_results[role].biquads);
+        // Subsequence in order: enforcement only deletes.
+        let mut cursor = 0usize;
+        for kept in &enf_kept {
+            while cursor < ro_kept.len() && ro_kept[cursor] != *kept {
+                cursor += 1;
+            }
+            assert!(
+                cursor < ro_kept.len(),
+                "{role}: kept filter {kept:?} not found in report-only set"
+            );
+            cursor += 1;
+        }
+        removed_total += ro_kept.len() - enf_kept.len();
+        // Exported chain matches the kept set exactly, in order.
+        let exported = exported_eq_filters(&enforced.channels[role]);
+        assert_eq!(
+            exported.len(),
+            enf_kept.len(),
+            "{role}: exported EQ count must match kept filters"
+        );
+        for (exported, kept) in exported.iter().zip(enf_kept.iter()) {
+            for (e, k) in [exported.0, exported.1, exported.2]
+                .iter()
+                .zip([kept.0, kept.1, kept.2])
+            {
+                assert!(
+                    (e - k).abs() <= 1e-9,
+                    "{role}: exported {exported:?} != kept {kept:?}"
+                );
+            }
+        }
+    }
+    assert!(
+        removed_total >= 1,
+        "test needs at least one enforced removal across channels"
+    );
 }
 
 #[test]

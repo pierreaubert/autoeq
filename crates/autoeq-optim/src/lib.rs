@@ -35,6 +35,7 @@ pub mod loss;
 pub mod optim;
 pub mod penalty_mode;
 pub mod problem;
+pub mod rerank;
 pub mod roomeq_types;
 pub mod smoothness_penalty_config;
 

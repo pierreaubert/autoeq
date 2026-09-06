@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Share one crossover-safety-restoration predicate between route acceptance and source-report evidence.
+
 ## 0.5.71
 
 - Fix: fractional delay edge gain error.

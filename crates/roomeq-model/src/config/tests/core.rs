@@ -297,6 +297,35 @@ fn test_optimizer_config_default_matches_omitted_decomposed_correction() {
 }
 
 #[test]
+fn test_optimizer_config_stage0_advisory_defaults() {
+    // Stage 0 acceptance: the heuristic path is advisory by default.
+    // Absent config disables evaluation entirely; a present veto and a
+    // present budget both default to record-without-applying.
+    let config = OptimizerConfig::default();
+    assert!(config.filter_audibility.is_none());
+    assert!(config.pruning_budget.is_none());
+    let veto = FilterAudibilityConfig::default();
+    assert!(veto.enabled);
+    assert!(veto.report_only);
+    let budget = PruningBudget::default();
+    assert!(budget.max_cumulative_delta.is_none());
+
+    // The new knob parses from JSON and round-trips; absent stays absent.
+    let parsed: OptimizerConfig = serde_json::from_value(serde_json::json!({
+        "pruning_budget": {
+            "max_cumulative_delta": 0.5,
+            "aggregation": "max",
+            "conditions": ["seat-1"],
+        },
+    }))
+    .unwrap();
+    let budget = parsed.pruning_budget.unwrap();
+    assert_eq!(budget.max_cumulative_delta, Some(0.5));
+    assert_eq!(budget.aggregation, BudgetAggregation::Max);
+    assert_eq!(budget.conditions, vec![String::from("seat-1")]);
+}
+
+#[test]
 fn test_optimizer_config_default_algorithm_is_cmaes() {
     let config = OptimizerConfig::default();
     assert_eq!(config.algorithm, "autoeq:cmaes");

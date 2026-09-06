@@ -43,6 +43,19 @@ fn has_excessive_underfill(underfills: &[f64]) -> bool {
         .any(|underfill| !bass_management_underfill_is_acceptable(*underfill))
 }
 
+/// True when the candidate restores hard crossover safety: the baseline
+/// has excessive underfill while every candidate underfill is fully
+/// acceptable. Recorded on accepted source reports so QA gates can exempt
+/// exactly this documented tradeoff — and nothing else — from per-source
+/// regression limits.
+fn candidate_restores_hard_safety(
+    candidate_underfills: &[f64],
+    baseline_underfills: &[f64],
+) -> bool {
+    has_excessive_underfill(baseline_underfills)
+        && !has_excessive_underfill(candidate_underfills)
+}
+
 fn should_accept_route_candidate(
     candidate_score: f64,
     baseline_score: f64,
@@ -52,7 +65,7 @@ fn should_accept_route_candidate(
 ) -> bool {
     let baseline_is_unsafe = has_excessive_underfill(baseline_underfills);
     let candidate_restores_safety =
-        baseline_is_unsafe && !has_excessive_underfill(candidate_underfills);
+        candidate_restores_hard_safety(candidate_underfills, baseline_underfills);
     let improves_quality = candidate_score < baseline_score - 1.0e-6;
 
     (candidate_restores_safety || (improves_quality && (!regressed_source || baseline_is_unsafe)))
@@ -1148,6 +1161,7 @@ pub fn baseline_bass_management_source_reports(
                 objective_before: objective,
                 objective_after: objective,
                 accepted: false,
+                safety_restored: false,
                 advisories,
             })
         })
@@ -1566,6 +1580,12 @@ pub fn optimize_bass_management_joint_solution(
                 &baseline_underfills,
             )
         });
+        // Acceptance basis for the report: restoration always implies
+        // acceptance (it satisfies the first disjunct outright), so this
+        // flag marks exactly the documented safety tradeoff.
+        let safety_restored = candidate.as_ref().is_some_and(|(_, _, underfills)| {
+            candidate_restores_hard_safety(underfills, &baseline_underfills)
+        });
         let chosen = if accepted { refined } else { initial.clone() };
         let (_, chosen_losses, _) = evaluate(&chosen).expect("validated source route parameters");
         let chosen_frequency = chosen[0].clamp(minimum_frequency, maximum_frequency);
@@ -1591,6 +1611,7 @@ pub fn optimize_bass_management_joint_solution(
                 objective_before: Some(baseline_losses[source_index]),
                 objective_after: Some(chosen_losses[source_index]),
                 accepted,
+                safety_restored,
                 advisories: vec![if accepted {
                     if improving_but_still_excessive {
                         format!(
@@ -1716,6 +1737,27 @@ mod tests {
             false,
             &[1.1, 1.3, 4.0, 1.1],
             &[1.8, 1.5, 3.5, 8.7],
+        ));
+    }
+
+    #[test]
+    fn safety_restoration_basis_marks_exactly_the_documented_tradeoff() {
+        // Baseline excessive, candidate fully acceptable: the recorded
+        // basis for the QA exemption.
+        assert!(candidate_restores_hard_safety(
+            &[1.1, 1.3, 1.0, 1.1],
+            &[1.8, 1.5, 7.7, 8.7],
+        ));
+        // Safe baselines never mark, however good the candidate is.
+        assert!(!candidate_restores_hard_safety(
+            &[0.5, 0.4],
+            &[0.9, 0.8],
+        ));
+        // A candidate that stays excessive is not a restoration, even
+        // when it improves on the baseline.
+        assert!(!candidate_restores_hard_safety(
+            &[1.1, 1.3, 4.0, 1.1],
+            &[1.8, 1.5, 7.7, 8.7],
         ));
     }
 

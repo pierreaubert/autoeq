@@ -1,6 +1,7 @@
 use super::default::default_high_freq_guard_max_q;
 use super::default::default_high_freq_guard_start_hz;
 use super::default::default_true;
+use super::report_outcome::AssessmentRecord;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -169,10 +170,18 @@ pub struct FilterVetoVerdict {
     /// Approximate masked-loudness delta in sones at calibrated SPL.
     pub loudness_delta_sones: f64,
     /// Keep/remove outcome of the veto rules.
+    ///
+    /// This is the heuristic *nomination*, not an accepted removal: a
+    /// `Remove` here becomes `CandidateRemoval` until the Stage 1
+    /// cumulative adjudication accepts it against the frozen full chain.
     pub decision: VetoDecision,
     /// Which rule produced the decision.
     pub reason: VetoReason,
     /// Whether a `Remove` verdict was actually enforced (false in
     /// report-only mode).
     pub enforced: bool,
+    /// Validated acceptance of the nomination (Stage 1 adjudication).
+    /// Default (unassessed) record when only nomination ran.
+    #[serde(default)]
+    pub acceptance: AssessmentRecord,
 }

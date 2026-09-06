@@ -69,6 +69,395 @@ fn multichannel_mode_supported(
 /// Run the synthetic QA command and report whether the binary should exit
 /// unsuccessfully because one or more scenarios failed.
 /// Execute the bounded PR covering array against real synthetic optimizations.
+/// Render the staged listening-stimulus set plus manifest (Stage 2).
+///
+/// Speech and music are not synthesized: programme material enters staged
+/// corpora as external hash-pinned files (see
+/// `roomeq_quality::StimulusKind::ExternalProgramme`), never as
+/// generated audio. Levels stay clear of the click crest-factor clip
+/// point; production corpora choose levels per stimulus class.
+pub fn run_stimuli(outdir: Option<&str>) -> Result<bool> {
+    use roomeq_quality::{
+        CONVERSION_AFFINE_FS_SPL_V1, SplCalibration, StimulusKind, StimulusRequest,
+        render_stimulus_set,
+    };
+    let dir = outdir.unwrap_or("target/qa/stimuli");
+    let requests = [
+        (StimulusKind::Tone { freq_hz: 1000.0, duration_s: 0.5 }, 1u64),
+        (StimulusKind::ToneBurst { freq_hz: 440.0, duration_s: 0.3, ramp_ms: 5.0 }, 2),
+        (StimulusKind::Sweep { f0_hz: 100.0, f1_hz: 8000.0, duration_s: 1.0, log: true }, 3),
+        (StimulusKind::TransientClick { duration_s: 0.2 }, 4),
+        (StimulusKind::ShapedNoise { pink: false, duration_s: 1.0 }, 5),
+        (StimulusKind::ShapedNoise { pink: true, duration_s: 1.0 }, 6),
+        (StimulusKind::BandLimitedNoise { low_hz: 500.0, high_hz: 1500.0, duration_s: 1.0 }, 7),
+        (StimulusKind::HarmonicComplex { f0_hz: 220.0, n_harmonics: 8, tilt_db_per_octave: 6.0, duration_s: 1.0 }, 8),
+        (StimulusKind::MaskerProbe { masker_freq_hz: 1000.0, probe_freq_hz: 1000.0, masker_duration_s: 0.2, gap_ms: 20.0, probe_duration_s: 0.1 }, 9),
+    ]
+    .into_iter()
+    .map(|(kind, seed)| StimulusRequest { kind, seed })
+    .collect::<Vec<_>>();
+    let calibration = SplCalibration {
+        conversion: String::from(CONVERSION_AFFINE_FS_SPL_V1),
+        db_spl_at_0dbfs_rms: 90.0,
+        levels_db: vec![55.0, 65.0],
+    };
+    let manifest = render_stimulus_set(std::path::Path::new(dir), &requests, &calibration, 48_000.0)
+        .map_err(|error| anyhow::anyhow!("stimulus render failed: {error}"))?;
+    println!(
+        "stimuli: {} files + manifest in {dir} (renderer {})",
+        manifest.files.len(),
+        manifest.renderer
+    );
+    Ok(false)
+}
+
+/// Exercise the Stage 3 acceptance policies on synthetic fixtures.
+///
+/// Not listening evidence: a deterministic plumbing demo showing the four
+/// policy modules (inversion support, band splits, chain constraints,
+/// final validation) accept/reject the expected synthetic cases.
+/// Returns `true` when every demo expectation holds.
+pub fn run_stage3_policies() -> Result<bool> {
+    use roomeq_quality::{
+        AggregationOrder, BandSplitPolicy, BassPolicy, BoundedInversionPolicy, ChainConstraints,
+        ChainEvidence, FinalReferences, InversionEvidence, InversionVerdict, NullClassification,
+        PercentileDomain, SeatMetricDefinition, SubMainSumEvidence, TemporalGate,
+        TemporalGateBasis, WindowDiagnostics, assess_inversion, evaluate_chain_constraints,
+        evaluate_final_validation,
+    };
+    let mut checks = 0usize;
+    let mut passed = 0usize;
+    let mut expect = |label: &str, holds: bool| {
+        checks += 1;
+        if holds {
+            passed += 1;
+        } else {
+            println!("stage3 demo FAIL: {label}");
+        }
+    };
+
+    // 1. Inversion support: ideal null boosts, cancellation never does.
+    let policy = BoundedInversionPolicy {
+        max_boost_db: 9.0,
+        min_confidence: 0.8,
+        min_depth_scale: 0.5,
+        min_support_bins: 8,
+        min_seat_agreement: 2,
+    };
+    let ideal = InversionEvidence {
+        null_depth_db: 12.0,
+        classification: NullClassification::MinimumPhase,
+        classification_confidence: 0.95,
+        measurement_depth_scale: 1.0,
+        supporting_seats: 4,
+        supporting_bins: 24,
+        requested_boost_db: 6.0,
+    };
+    let decision = assess_inversion(&ideal, &policy)
+        .map_err(|error| anyhow::anyhow!("inversion demo: {error}"))?;
+    expect("ideal null allowed", decision.verdict == InversionVerdict::Allowed);
+    let cancellation = InversionEvidence {
+        classification: NullClassification::NonMinimumPhase,
+        ..ideal
+    };
+    let decision = assess_inversion(&cancellation, &policy)
+        .map_err(|error| anyhow::anyhow!("inversion demo: {error}"))?;
+    expect("cancellation cuts-only", decision.verdict == InversionVerdict::CutsOnly);
+    let absent = InversionEvidence { supporting_bins: 0, ..ideal };
+    let decision = assess_inversion(&absent, &policy)
+        .map_err(|error| anyhow::anyhow!("inversion demo: {error}"))?;
+    expect("absent evidence refused", decision.verdict == InversionVerdict::Refuse);
+
+    // 2. Band split: opt-in, smooth, cuts-only bass; diagnostics advisory.
+    let split = BandSplitPolicy::disabled();
+    expect("disabled split validates", split.validate().is_ok());
+    let mut cuts_only = BandSplitPolicy {
+        enabled: true,
+        bass: BassPolicy::CutsOnly,
+        ..BandSplitPolicy::disabled()
+    };
+    expect("cuts-only denies boost", cuts_only.authorize_bass_correction(6.0).is_err());
+    expect("cuts-only keeps cuts", cuts_only.authorize_bass_correction(-4.0).is_ok());
+    cuts_only.width_octaves = 0.0;
+    expect("hard boundary refused", cuts_only.validate().is_err());
+    let diagnostics = WindowDiagnostics {
+        early_direct_delta_db: Some(18.0),
+        late_delta_db: None,
+        induced_group_delay_rms_ms: Some(40.0),
+        timing_trusted: false,
+    };
+    expect(
+        "diagnostics advisory only",
+        diagnostics.advisory_notes().iter().all(|note| note.starts_with("advisory:")),
+    );
+
+    // 3. Chain constraints + temporal gate with stated basis.
+    let constraints = ChainConstraints {
+        max_peak_gain_db: 12.0,
+        min_headroom_db: -12.0,
+        max_latency_ms: 100.0,
+        export_sample_rates_hz: vec![44_100, 48_000],
+    };
+    let evidence = ChainEvidence {
+        peak_gain_db: Some(6.0),
+        headroom_db: Some(-3.0),
+        latency_ms: Some(20.0),
+        export_sample_rate_hz: Some(48_000),
+    };
+    let violations = evaluate_chain_constraints(&evidence, &constraints)
+        .map_err(|error| anyhow::anyhow!("chain demo: {error}"))?;
+    expect("clean chain passes", violations.is_empty());
+    let gate = TemporalGate {
+        name: String::from("induced-group-delay-rms"),
+        limit: 10.0,
+        basis: TemporalGateBasis::EngineeringLimit {
+            rationale: String::from("hybrid output-class latency budget"),
+        },
+        timing_trusted: true,
+    };
+    expect(
+        "trusted excess fails enforced",
+        matches!(
+            gate.apply(Some(12.0), "ms").map_err(|error| anyhow::anyhow!("gate demo: {error}"))?,
+            roomeq_quality::GateOutcome::Fail { .. }
+        ),
+    );
+    let untrusted = TemporalGate { timing_trusted: false, ..gate };
+    expect(
+        "untrusted excess advisory",
+        matches!(
+            untrusted
+                .apply(Some(12.0), "ms")
+                .map_err(|error| anyhow::anyhow!("gate demo: {error}"))?,
+            roomeq_quality::GateOutcome::Advisory { .. }
+        ),
+    );
+
+    // 4. Final validation: candidate beats the identity baseline.
+    let grid: ndarray::Array1<f64> = (0..64)
+        .map(|index| 20.0 * (1000.0_f64).powf(index as f64 / 63.0))
+        .collect();
+    let flat = |offset_db: f64| Curve {
+        freq: grid.clone(),
+        spl: ndarray::Array1::from_elem(64, offset_db),
+        ..Default::default()
+    };
+    let target = flat(80.0);
+    let pre = vec![flat(84.0), flat(84.0)];
+    let candidate = vec![flat(82.0), flat(83.0)];
+    let definition = SeatMetricDefinition {
+        support_band_hz: [50.0, 16_000.0],
+        weighting: String::from("erb-rate"),
+        measure_version: String::from("auditory-frequency-measure-v1"),
+        percentile: 0.95,
+        percentile_domain: PercentileDomain::Bins,
+        aggregation_order: AggregationOrder::BinsThenSeats,
+        uncertainty: String::from("seeded-bootstrap-ci95"),
+        uncertainty_resamples: 200,
+        uncertainty_seed: 7,
+        max_residual_percentile_db: 6.0,
+        permitted_degradation_db: 0.5,
+        min_aggregate_gain_db: 1.0,
+        max_pruning_loss_db: 0.5,
+        min_support_bins: 8,
+    };
+    let references = FinalReferences { baseline_post: pre.clone(), full_chain_post: None };
+    let sub_main = SubMainSumEvidence {
+        sub: flat(80.0),
+        main: flat(80.0),
+        summed: flat(86.0),
+        crossover_band_hz: [60.0, 120.0],
+        max_cancellation_db: 3.0,
+    };
+    let report = evaluate_final_validation(
+        &definition,
+        &pre,
+        &candidate,
+        &target,
+        &references,
+        &sub_main,
+    )
+    .map_err(|error| anyhow::anyhow!("final demo: {error}"))?;
+    expect("better candidate accepted", report.accepted());
+    expect("worst seat is seat-1", report.worst_seat.seat == "seat-1");
+    println!(
+        "stage3 policies: {passed}/{checks} demo expectations hold (aggregate gain {:.2} dB, worst {})",
+        report.aggregate_gain_db, report.worst_seat.seat
+    );
+    Ok(passed == checks)
+}
+
+/// Exercise the Stage 4 rerank pipeline on synthetic fixtures.
+///
+/// Plumbing demo, not proof of improvement: builds a bounded shortlist
+/// (optimizer, Pareto, identity), reranks it with a staged-metric
+/// evaluator under budgets and a transform cache, refines the winner
+/// without switching losses, and compares against EPA/flat baselines on
+/// held-out data. Returns `true` when every demo expectation holds.
+pub fn run_stage4_rerank() -> Result<bool> {
+    use autoeq_optim::rerank::{
+        AuditoryEvaluator, BaselineEntry, BudgetLedger, EvaluatorBasis, GridResolution, LossPin,
+        NominationSource, RerankCache, ShortlistCandidate, StageBudgets, build_shortlist,
+        check_final_resolution, compare_to_baselines, record_refinement, rerank,
+    };
+    let mut checks = 0usize;
+    let mut passed = 0usize;
+    let mut expect = |label: &str, holds: bool| {
+        checks += 1;
+        if holds {
+            passed += 1;
+        } else {
+            println!("stage4 demo FAIL: {label}");
+        }
+    };
+
+    let pin = LossPin { loss: String::from("speaker-flat"), version: String::from("v3") };
+    let nominate = |id: &str, value: f64, source: NominationSource| ShortlistCandidate {
+        id: String::from(id),
+        params: vec![value],
+        fast_value: value,
+        source,
+        loss_pin: pin.clone(),
+        seed: Some(11),
+    };
+    let shortlist = build_shortlist(
+        vec![
+            nominate("opt-a", 2.0, NominationSource::OptimizerRun),
+            nominate("pareto-b", 3.0, NominationSource::ParetoFront),
+            nominate("identity", 9.0, NominationSource::Identity),
+        ],
+        8,
+        true,
+    )
+    .map_err(|error| anyhow::anyhow!("shortlist demo: {error}"))?;
+    expect("shortlist holds three", shortlist.candidates.len() == 3);
+
+    let evaluator = AuditoryEvaluator {
+        name: String::from("final-validation-metric"),
+        model_version: String::from("roomeq-quality-final-v1"),
+        basis: EvaluatorBasis::StagedMetric {
+            metric: String::from("seat-aggregate-gain"),
+        },
+    };
+    let transform = RerankCache::hash_transforms(b"measurement-v1");
+    let mut cache = RerankCache::default();
+    let mut ledger = BudgetLedger::default().with_budgets(StageBudgets {
+        max_evaluations: 10,
+        wall_time_ms: 60_000,
+        max_memory_bytes: u64::MAX,
+    });
+    let report = rerank(&shortlist, &evaluator, &pin, &transform, &mut cache, &mut ledger, |candidate| {
+        Ok(match candidate.id.as_str() {
+            "identity" => 1.0,
+            "opt-a" => 2.5,
+            _ => 4.0,
+        })
+    })
+    .map_err(|error| anyhow::anyhow!("rerank demo: {error}"))?;
+    let winner = &report.ranked[0];
+    expect("identity wins the demo rerank", winner.id == "identity");
+    expect("three evaluations consumed", ledger.evaluations == 3);
+
+    let refined = record_refinement(&winner.id, &pin, &pin, 5, vec![0.0], 1.0)
+        .map_err(|error| anyhow::anyhow!("refine demo: {error}"))?;
+    expect("refinement carries the pin", refined.loss_pin == pin);
+
+    expect(
+        "validated final grid accepted",
+        check_final_resolution(200, 400, GridResolution::Validated, 256).is_ok(),
+    );
+
+    let baselines = vec![
+        BaselineEntry {
+            name: String::from("epa"),
+            held_out_value: 3.0,
+            held_out_id: String::from("held-out-rooms"),
+        },
+        BaselineEntry {
+            name: String::from("speaker-flat"),
+            held_out_value: 4.0,
+            held_out_id: String::from("held-out-rooms"),
+        },
+    ];
+    let comparison = compare_to_baselines(&winner.id, winner.evaluator_score, &baselines, 0.5, None)
+        .map_err(|error| anyhow::anyhow!("baseline demo: {error}"))?;
+    // Identity scores 1.0 vs EPA 3.0: adopted on held-out data (demo
+    // plumbing — a steering fixture, not proof of improvement).
+    expect(
+        "demo winner adopted on held-out",
+        comparison.verdict == autoeq_optim::rerank::ComparisonVerdict::AdoptCandidate,
+    );
+    println!(
+        "stage4 rerank: {passed}/{checks} demo expectations hold (winner {}, {} evaluations)",
+        winner.id, ledger.evaluations
+    );
+    Ok(passed == checks)
+}
+
+/// Exercise the Stage 5 release gates on synthetic records.
+///
+/// Conformance demo, not a release decision: evaluates promotion rules
+/// for legacy, advisory, enforcing physical, and perceptual-claim policy
+/// records against synthetic gate assessments. Returns `true` when every
+/// demo expectation holds.
+pub fn run_release_gates() -> Result<bool> {
+    use crate::release_gates::{
+        GateAssessment, PolicyBehavior, PolicyRelease, ReleaseGate, veto_policy_release,
+    };
+    use roomeq_model::FilterAudibilityConfig;
+    let mut checks = 0usize;
+    let mut passed = 0usize;
+    let mut expect = |label: &str, holds: bool| {
+        checks += 1;
+        if holds {
+            passed += 1;
+        } else {
+            println!("release-gates demo FAIL: {label}");
+        }
+    };
+    let gate = |gate: ReleaseGate, passed: bool| GateAssessment {
+        gate,
+        passed,
+        evidence: String::from("demo-evidence"),
+    };
+    let physical_only = vec![
+        gate(ReleaseGate::ImplementationCorrectness, true),
+        gate(ReleaseGate::PhysicalSafety, true),
+    ];
+    // Physical safeguard promotes without any Stage 4 evidence.
+    let safeguard = PolicyRelease {
+        policy_id: String::from("headroom-guard"),
+        version: String::from("1.0.0"),
+        behavior: PolicyBehavior::Enforcing,
+        perceptual_claim: false,
+    };
+    let promotion = safeguard
+        .promotion(&physical_only, false)
+        .map_err(|error| anyhow::anyhow!("gates demo: {error}"))?;
+    expect("safeguard promotes on two gates", promotion.promoted());
+    // Default veto config is advisory: never promotes, even with full gates.
+    let default = FilterAudibilityConfig::default();
+    let veto = veto_policy_release(Some(&default), "phase-a-1.0");
+    let full = vec![
+        gate(ReleaseGate::ImplementationCorrectness, true),
+        gate(ReleaseGate::PhysicalSafety, true),
+        gate(ReleaseGate::PerceptualValidation, true),
+        gate(ReleaseGate::ListeningBenefit, true),
+    ];
+    let promotion = veto
+        .promotion(&full, false)
+        .map_err(|error| anyhow::anyhow!("gates demo: {error}"))?;
+    expect("advisory veto never promotes", !promotion.promoted());
+    // No selection: legacy promotes unconditionally.
+    let legacy = veto_policy_release(None, "phase-a-1.0");
+    let promotion = legacy
+        .promotion(&[], true)
+        .map_err(|error| anyhow::anyhow!("gates demo: {error}"))?;
+    expect("legacy rollback never blocked", promotion.promoted());
+    println!("release gates: {passed}/{checks} demo expectations hold");
+    Ok(passed == checks)
+}
+
 pub fn run_parameter_matrix() -> Result<bool> {
     let rows = generate_pr_matrix();
     let mut passed = 0usize;
@@ -139,6 +528,22 @@ pub fn run() -> Result<bool> {
     if args.iter().any(|a| a == "--parameter-matrix") {
         return run_parameter_matrix();
     }
+    if args.iter().any(|a| a == "--stimuli") {
+        return run_stimuli(
+            args.windows(2)
+                .find(|w| w[0] == "--stimuli-dir")
+                .map(|w| w[1].as_str()),
+        );
+    }
+    if args.iter().any(|a| a == "--stage3-policies") {
+        return run_stage3_policies();
+    }
+    if args.iter().any(|a| a == "--stage4-rerank") {
+        return run_stage4_rerank();
+    }
+    if args.iter().any(|a| a == "--release-gates") {
+        return run_release_gates();
+    }
     let fail_fast = args.iter().any(|a| a == "--fail-fast");
     let difficulty_filter = args
         .windows(2)
@@ -179,6 +584,11 @@ pub fn run() -> Result<bool> {
         );
         println!("  --pr                     Run the bounded pull-request audibility matrix");
         println!("  --parameter-matrix       Run the 24-row pairwise configuration matrix");
+        println!("  --stimuli [--stimuli-dir DIR]");
+        println!("                           Render the staged listening-stimulus set plus manifest (default DIR: target/qa/stimuli)");
+        println!("  --stage3-policies        Exercise the Stage 3 acceptance policies on synthetic fixtures (plumbing demo, not listening evidence)");
+        println!("  --stage4-rerank          Exercise the Stage 4 shortlist/rerank/refine pipeline on synthetic fixtures (plumbing demo, not proof of improvement)");
+        println!("  --release-gates          Exercise the Stage 5 release-gate promotion rules on synthetic records (conformance demo, not a release decision)");
         println!("  --help, -h               Print this help");
         return Ok(false);
     }

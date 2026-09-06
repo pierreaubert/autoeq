@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Carry the correction-acceptance report and gate-added stage outcomes across routed-safety restores, marked as restored rather than blessed.
+
 - Add explicit stage outcomes, serialized routed-response replay, stale-curve refresh after reversion, passband-safe correction, and final down-only role-pair level alignment.
 - Delegate CTC/replay transfer evaluation to the engine's canonical serialized
   DSP realization while retaining workflow ownership of convolution sidecars,

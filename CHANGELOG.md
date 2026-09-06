@@ -1,4 +1,50 @@
-# Unreleased
+# 0.5.70
+
+## Package versions
+
+- autoeq 0.5.70, autoeq-optim 0.5.61, roomeq-quality 0.5.60, roomeq-qa 0.5.65, roomeq-export 0.5.6, roomeq-model 0.5.10, roomeq-engine 0.5.80, roomeq-workflow 0.5.29, roomeq-analysis 0.5.9.
+
+## Fixes
+
+- Record the crossover-safety-restoration basis on accepted bass source routes (`safety_restored`) and exempt exactly that documented tradeoff from the per-source regression QA gate, instead of failing the intended safety repair of excessive underfill.
+- Carry the correction-acceptance report and gate-added stage outcomes across routed-safety restores (marked as restored, not blessed), instead of shipping DSP with no acceptance record when the safety reversion is rejected.
+- Accept legitimately EQ-less hybrid correction blocks in QA (the builder deliberately omits the `eq` plugin for empty IIR filter sets); every other atomic-block requirement stays exact.
+
+## RoomEQ audibility Stage 5 (evidence-gated rollout)
+
+- Independent release gates (`roomeq-qa/release_gates.rs`): implementation correctness, physical safety, perceptual validation, and listening benefit pass separately; advisory releases and evidence-free passes never promote; physical safeguards promote without Stage 4 evidence; legacy rollback is never gated.
+- Versioned policy selection with legacy-restore guarantee, grounded in the veto config (`None`/disabled → legacy, default selection → advisory, explicit opt-in → enforcing). Documented rollout in `docs/ROOMEQ_MANUAL.md` ("Staged rollout and release gates") and `src/bin/roomeq/INPUT_FORMAT.md`.
+- Export round-trip verifiers (`roomeq-export/roundtrip.rs`): biquad-coefficient JSON parsed back and compared section-by-section against recomputed canonical biquads plus routing/preamp/delay echoes; convolution WAV sidecars decoded and compared sample-exact with hash re-verification; tampered or unmatched artifacts fail. Demo via `roomeq-qa-synthetic --release-gates`.
+
+## RoomEQ audibility Stage 4 (rerank pipeline staging)
+
+- Staged shortlist → rerank → refine pipeline (`autoeq-optim/rerank.rs`): bounded shortlists from fast objectives with Pareto-front and identity inclusion; rerank under a pinned auditory evaluator (staged-metric basis; listening basis requires recorded outcomes) and a pinned loss (mid-run switches abort); evaluation/wall-time/memory budgets with cancellation; content-hashed transform/reference cache for ablation reuse; explicit refinement records.
+- EPA/flat baseline comparison on a single held-out set with keep-simpler default below the adoption margin; coarse-screening nominations with validated-resolution finals; new loss options require stated semantics, finite domain, and reference test, with temporal masking mapped to a supported model stage. Demo via `roomeq-qa-synthetic --stage4-rerank`.
+
+## RoomEQ audibility Stage 3 (acceptance policies)
+
+- Confidence-aware inversion support (`roomeq-quality/inversion_support.rs`): boost-into-null requests need minimum-phase classification plus confidence, measurement-depth, and cross-seat/bin gates; cancellations and uncertain classifications are cuts-only; absent evidence refuses. False-classification, noisy-data, and missing-data tests included.
+- Opt-in band-split policy (`roomeq-quality/band_policy.rs`): disabled by default; enabling requires a positive-width confidence-dependent transition; cuts-only bass posture; distinguished direct vs in-room target tilts; early/direct/late and group-delay diagnostics are advisory by construction (no veto path).
+- Chain constraints and temporal gates (`roomeq-quality/chain_constraints.rs`): defined stability/headroom/latency/export limits with missing-evidence-fails-closed; temporal gates enforce only with trusted timing and a stated engineering or validated-perceptual basis; pre-ringing evidence carries its full measurement definition.
+- Seat-wise metric definition and final validation (`roomeq-quality/final_check.rs`): declared support band, weighting, bins-vs-seats percentile domain, aggregation order, uncertainty, and permitted-degradation budgets; candidates compared against the declared baseline, pruned chains against the accepted full chain; sub/main summation checks; aggregate gain with worst supported seat. Demo via `roomeq-qa-synthetic --stage3-policies`.
+
+## RoomEQ audibility Stage 2 (validation staging)
+
+- Seeded listening-stimulus renderer (`roomeq-quality/stimuli.rs`): tones, bursts, sweeps, transient clicks, white/pink noise, band-limited noise (bandwidth changes), harmonic complexes (equal-level timbre variants), and masker-probe temporal-masking stimuli, plus hash-pinned external programme files (speech/music are never synthesized); named `affine-fs-spl-v1` SPL conversion with clip-refusing level sweeps; byte-stable manifests with file hashes. Render via `roomeq-qa-synthetic --stimuli`.
+- Blinded validation protocol (`roomeq-quality/protocol.rs`): named comparison with reference kind and validated domain, preregistration hashing, exact ABX p-values/rules, power-based trial sizing, detectability/equivalence/preference intents (equivalence requires a prespecified detection bound; preference-only comparisons cannot claim inaudibility), and results sidecars.
+- Staged corpora support: deterministic holdout splits over four validation stages with a required case-kind inclusion list — measurement repeatability, no-correction, sub/main phase, channel balance/timing, plus separate detectability/preference arms (`validation_corpus.rs`); order-explicit seat aggregation with worst-seat support rules and seeded bootstrap intervals (`metrics.rs`).
+
+## RoomEQ audibility Stage 1 (adjudication)
+
+- Split heuristic nominations from validated acceptance: `FilterVetoVerdict.acceptance` carries a Stage 0 `AssessmentRecord` (candidate/accepted removal vs keep, advisory/enforced, provenance with F0 reference).
+- Replace batch veto enforcement with one-at-a-time adjudication against the frozen full chain (incremental quantum, cumulative cap from `pruning_budget` or one quantum by default, JND local-deviation guard); first failure stops, unevaluated candidates stay `NotEvaluated`. `EqOptimizationResult` carries the F0 reference id plus removed filters for rollback.
+- Identity/zero-filter solution admissible through adjudication only; loudness-only elimination retains its finalist by design.
+- Entry-point audit recorded in the contract doc: single-channel paths (all topologies) adjudicate; joint multi-measurement, spatial robustness, and CEA2034 prefilters are explicit gaps with unchanged behavior.
+
+## RoomEQ audibility Stage 0 (contract)
+
+- Record the scientific and engineering contract in `docs/ROOMEQ_AUDIBILITY_CONTRACT.md`: fixed pruning/quality references, resolutions for the plan's open decisions (deferred items marked `unknown`, never assumed), per-stage acceptance criteria, and known implementation issues.
+- Add advisory-only report vocabulary (`ReportOutcome`, `AssessmentConfidence`, `EnforcementState`, `AssessmentProvenance`, `AppliedThreshold`, `AssessmentRecord`) defaulting to an unassessed record, plus an opt-in `optimizer.pruning_budget` (validated for shape, not enforced). No DSP or default behavior changes.
 
 ## RoomEQ audibility Phase A (per-filter veto)
 

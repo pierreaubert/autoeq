@@ -614,6 +614,13 @@ pub struct BassManagementSourceReport {
     pub objective_after: Option<f64>,
     #[serde(default)]
     pub accepted: bool,
+    /// True when the candidate was accepted by restoring hard crossover
+    /// safety (baseline underfill excessive, candidate underfills fully
+    /// acceptable) despite a worse raw per-source objective. The raw
+    /// regression is the documented cost of the safety repair, not an
+    /// optimizer defect: QA gates exempt exactly this basis, nothing else.
+    #[serde(default)]
+    pub safety_restored: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub advisories: Vec<String>,
 }

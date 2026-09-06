@@ -29,6 +29,7 @@ mod misc;
 mod package;
 mod pipewire;
 mod roon_convolver;
+pub mod roundtrip;
 #[cfg(test)]
 mod tests;
 mod types;

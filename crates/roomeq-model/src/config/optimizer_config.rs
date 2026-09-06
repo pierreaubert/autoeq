@@ -45,6 +45,7 @@ use super::policy::policy_multi_measurement;
 use super::policy::policy_psychoacoustic_smoothing;
 use super::policy::policy_smoothness_penalty;
 use super::policy::policy_target_response;
+use super::report_outcome::PruningBudget;
 use super::schroeder_split_config::SchroederSplitConfig;
 use super::sub_optimizer_config::SubOptimizerConfig;
 use super::target_response_config::TargetResponseConfig;
@@ -205,6 +206,13 @@ pub struct OptimizerConfig {
     /// removing filters; enforcement is opt-in via `report_only: false`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter_audibility: Option<FilterAudibilityConfig>,
+    /// Cumulative pruning budget over declared conditions (Stage 0
+    /// contract). `None` (default) disables budget tracking. A configured
+    /// budget is validated for shape and reported against; it is not yet
+    /// enforced — budget enforcement arrives with the Stage 1 cumulative
+    /// checks, so setting this today changes no optimizer output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pruning_budget: Option<PruningBudget>,
     /// Safeguards for high-frequency correction above the conservative range.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub high_frequency_correction: Option<HighFrequencyCorrectionConfig>,
@@ -344,6 +352,7 @@ impl Default for OptimizerConfig {
             perceptual_policy: None,
             audibility_deadband: None,
             filter_audibility: None,
+            pruning_budget: None,
             high_frequency_correction: None,
             early_late_correction: None,
             validation_bundle: None,

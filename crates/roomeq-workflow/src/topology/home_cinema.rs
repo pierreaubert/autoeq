@@ -168,6 +168,67 @@ fn is_source_pre_route_plugin(plugin: &PluginConfigWrapper) -> bool {
         == Some("pre_route")
 }
 
+/// Extract the failing role from a final routed crossover underfill error.
+fn underfill_error_role(message: &str) -> Option<String> {
+    const PREFIX: &str = "final routed crossover underfill for '";
+    let start = message.find(PREFIX)? + PREFIX.len();
+    let rest = &message[start..];
+    let end = rest.find("' is ")?;
+    let role = &rest[..end];
+    (!role.is_empty() && !role.contains('\'')).then(|| role.to_string())
+}
+
+/// A post-route correction EQ shapes only the mains branch, so it can disturb
+/// the calibrated splice. Structural routing, alignment and safety plugins are
+/// never splice-breaking candidates.
+fn is_splice_breaking_correction_eq(plugin: &PluginConfigWrapper) -> bool {
+    if plugin.plugin_type != "eq" {
+        return false;
+    }
+    let stage = plugin
+        .parameters
+        .get("room_eq_stage")
+        .and_then(serde_json::Value::as_str);
+    if stage != Some("post_route") {
+        return false;
+    }
+    matches!(
+        plugin
+            .parameters
+            .get("label")
+            .and_then(serde_json::Value::as_str),
+        Some("room_eq_correction") | Some("post_eq")
+    )
+}
+
+/// Remove the next splice-breaking post-route correction stage class from a
+/// mains chain: the mains-only FIR first (excess-phase rotation breaks the
+/// calibrated splice), then the post-route correction EQ. Returns the removed
+/// stage name, or `None` when nothing revertible remains.
+fn strip_next_splice_breaking_stage(chain: &mut ChannelDspChain) -> Option<&'static str> {
+    if chain
+        .plugins
+        .iter()
+        .any(|plugin| plugin.plugin_type == "convolution")
+    {
+        chain
+            .plugins
+            .retain(|plugin| plugin.plugin_type != "convolution");
+        return Some("fir");
+    }
+    if chain
+        .plugins
+        .iter()
+        .any(is_splice_breaking_correction_eq)
+    {
+        chain
+            .plugins
+            .retain(|plugin| !is_splice_breaking_correction_eq(plugin));
+        return Some("peq");
+    }
+    None
+}
+
 pub(super) fn realize_plugins_on_curve(
     source_channel: &str,
     plugins: Vec<PluginConfigWrapper>,
@@ -1199,6 +1260,97 @@ fn optimize_home_cinema_no_sub(
     })
 }
 
+/// Replay the serialized routed graph until every mains splice sums safely,
+/// reverting splice-breaking post-route correction stages role by role.
+///
+/// A candidate can pass every pre-route check yet cancel at the crossover once
+/// mains-only stages (e.g. a mixed-phase excess-phase FIR) are applied. The
+/// replay is the splice authority, so it reverts the offending role's FIR,
+/// then its post-route correction EQ, and replays again. A role with nothing
+/// revertible left — or a graph that still cancels afterwards — keeps the
+/// original hard error: an unfixable splice must never ship.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn replay_until_splice_safe(
+    channel_chains: &mut HashMap<String, ChannelDspChain>,
+    channel_results: &mut HashMap<String, ChannelOptimizationResult>,
+    splice_reverted: &mut Vec<String>,
+    fir_coeffs_by_channel: &HashMap<String, Vec<f64>>,
+    graph: &BassManagementRoutingGraph,
+    optimization: Option<&engine_home_cinema::BassManagementOptimizationReport>,
+    sample_rate: f64,
+    sidecar_dir: &std::path::Path,
+    role_crossover_hz: &dyn Fn(&str) -> f64,
+    sub_role: &str,
+    sub_min_score: f64,
+    bass_route_upper_hz: f64,
+    max_freq: f64,
+) -> Result<HashMap<String, Curve>> {
+    loop {
+        let replay = reconstruct_deployed_source_curves(
+            channel_chains,
+            fir_coeffs_by_channel,
+            graph,
+            optimization,
+            sample_rate,
+            sidecar_dir,
+        );
+        let error = match replay {
+            Ok(curves) => return Ok(curves),
+            Err(error) => error,
+        };
+        let Some(role) = underfill_error_role(&error.to_string()) else {
+            return Err(error);
+        };
+        let Some(chain) = channel_chains.get_mut(&role) else {
+            return Err(error);
+        };
+        let Some(stage) = strip_next_splice_breaking_stage(chain) else {
+            return Err(error);
+        };
+        log::warn!(
+            "  Final routed replay for '{role}' cancels at the crossover; reverting {stage} and replaying: {error}"
+        );
+        let initial: Curve = chain
+            .initial_curve
+            .clone()
+            .ok_or_else(|| AutoeqError::InvalidMeasurement {
+                message: format!("channel '{role}' has no initial curve for splice revert"),
+            })?
+            .into();
+        let embedded_irs = embedded_convolution_irs(
+            &chain.plugins,
+            fir_coeffs_by_channel.get(&role).map(Vec::as_slice),
+        )?;
+        let realized = crate::ctc::apply_channel_dsp_chain_to_curve_with_embedded_irs(
+            chain,
+            &initial,
+            sample_rate,
+            sidecar_dir,
+            &embedded_irs,
+        )?;
+        let realized_data: CurveData = (&realized).into();
+        chain.eq_response = chain
+            .initial_curve
+            .as_ref()
+            .map(|initial| output::compute_eq_response(initial, &realized_data));
+        chain.final_curve = Some(realized_data);
+        if let Some(channel_result) = channel_results.get_mut(&role) {
+            channel_result.final_curve = realized.clone();
+            if stage == "fir" {
+                channel_result.fir_coeffs = None;
+            } else {
+                channel_result.biquads.clear();
+            }
+            channel_result.post_score = if role == sub_role {
+                compute_flat_loss(&realized, sub_min_score, bass_route_upper_hz)
+            } else {
+                compute_flat_loss(&realized, role_crossover_hz(&role), max_freq)
+            };
+        }
+        splice_reverted.push(format!("{role}:{stage}"));
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn optimize_home_cinema_with_sub(
     config: &RoomConfig,
@@ -2194,7 +2346,17 @@ fn optimize_home_cinema_with_sub(
         );
         let underfill_accepted = post_underfill_db
             .is_none_or(roomeq_engine::topology::bass_management_underfill_is_acceptable);
-        if post < pre && underfill_accepted {
+        // The splice objective above scores the predicted mains+bass sum, but
+        // the published channel score — and the final safety gate — judge the
+        // mains chain alone. A candidate that improves the predicted sum while
+        // damaging the mains response would be reverted wholesale downstream,
+        // taking the main correction with it. Require the mains published
+        // score not to regress so a harmful Post-EQ is dropped instead.
+        let main_pre_score = compute_flat_loss(main_curve, role_xover_freq, main_post_max_freq);
+        let main_post_score =
+            compute_flat_loss(&main_curve_after, role_xover_freq, main_post_max_freq);
+        let mains_preserved = main_post_score <= main_pre_score + 1e-6;
+        if post < pre && underfill_accepted && mains_preserved {
             optimizer_evidence_by_channel
                 .entry(role.clone())
                 .or_default()
@@ -2214,6 +2376,13 @@ fn optimize_home_cinema_with_sub(
                     role,
                     underfill_db,
                     roomeq_engine::topology::MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB,
+                );
+            } else if !mains_preserved {
+                log::warn!(
+                    "  {} Post-EQ discarded: mains published score regressed from {:.4} to {:.4}",
+                    role,
+                    main_pre_score,
+                    main_post_score
                 );
             } else {
                 log::warn!(
@@ -2736,6 +2905,15 @@ fn optimize_home_cinema_with_sub(
         result.final_curve = final_curve;
     }
     let mut final_post_eq_reverted = false;
+    let mut splice_reverted_roles: Vec<String> = Vec::new();
+    let role_crossover_hz = |role: &str| {
+        let group_id =
+            engine_home_cinema::group_id_for_role(engine_home_cinema::role_for_channel(role));
+        group_results_by_id
+            .get(group_id)
+            .and_then(|group| group.selected_crossover_hz)
+            .unwrap_or(final_xo_freq)
+    };
     if let Some(graph) = bass_routing_graph.as_ref() {
         let first_replay = reconstruct_deployed_source_curves(
             &channel_chains,
@@ -2825,16 +3003,37 @@ fn optimize_home_cinema_with_sub(
                     }
                 }
                 final_post_eq_reverted = true;
-                reconstruct_deployed_source_curves(
-                    &channel_chains,
+                replay_until_splice_safe(
+                    &mut channel_chains,
+                    &mut channel_results,
+                    &mut splice_reverted_roles,
                     &pre_eq_fir_coeffs,
                     graph,
                     Some(&bass_management_optimization),
                     sample_rate,
                     output_dir,
+                    &role_crossover_hz,
+                    &sub_role,
+                    sub_min_score,
+                    bass_route_upper_hz,
+                    max_freq,
                 )?
             }
-            Err(error) => return Err(error),
+            Err(_) => replay_until_splice_safe(
+                &mut channel_chains,
+                &mut channel_results,
+                &mut splice_reverted_roles,
+                &pre_eq_fir_coeffs,
+                graph,
+                Some(&bass_management_optimization),
+                sample_rate,
+                output_dir,
+                &role_crossover_hz,
+                &sub_role,
+                sub_min_score,
+                bass_route_upper_hz,
+                max_freq,
+            )?,
         };
     }
     post_scores = channel_results
@@ -2934,15 +3133,30 @@ fn optimize_home_cinema_with_sub(
             supporting_source: None,
             correction_acceptance: None,
             optimizer_evidence: None,
-            stage_outcomes: if final_post_eq_reverted {
-                vec![StageOutcome {
-                    checks: Vec::new(),
-                    stage: "routed_post_eq_final_replay".to_string(),
-                    status: StageStatus::Degraded,
-                    advisories: vec!["post_eq_reverted_after_serialized_route_replay".to_string()],
-                }]
-            } else {
-                Vec::new()
+            stage_outcomes: {
+                let mut outcomes = Vec::new();
+                if final_post_eq_reverted {
+                    outcomes.push(StageOutcome {
+                        checks: Vec::new(),
+                        stage: "routed_post_eq_final_replay".to_string(),
+                        status: StageStatus::Degraded,
+                        advisories: vec![
+                            "post_eq_reverted_after_serialized_route_replay".to_string(),
+                        ],
+                    });
+                }
+                if !splice_reverted_roles.is_empty() {
+                    outcomes.push(StageOutcome {
+                        checks: Vec::new(),
+                        stage: "routed_splice_final_replay".to_string(),
+                        status: StageStatus::Degraded,
+                        advisories: splice_reverted_roles
+                            .iter()
+                            .map(|stage| format!("splice_cancellation_reverted_{stage}"))
+                            .collect(),
+                    });
+                }
+                outcomes
             },
             effective_config: None,
         },
@@ -4176,5 +4390,108 @@ mod tests {
         );
         let result = result.unwrap();
         assert_eq!(result.channels.len(), 3);
+    }
+}
+
+#[cfg(test)]
+mod splice_revert_tests {
+    use super::{
+        is_splice_breaking_correction_eq, strip_next_splice_breaking_stage,
+        underfill_error_role,
+    };
+    use roomeq_model::{ChannelDspChain, PluginConfigWrapper};
+
+    fn staged_plugin(
+        plugin_type: &str,
+        stage: Option<&str>,
+        label: Option<&str>,
+    ) -> PluginConfigWrapper {
+        let mut parameters = serde_json::Map::new();
+        if let Some(stage) = stage {
+            parameters.insert(
+                "room_eq_stage".to_string(),
+                serde_json::Value::String(stage.to_string()),
+            );
+        }
+        if let Some(label) = label {
+            parameters.insert(
+                "label".to_string(),
+                serde_json::Value::String(label.to_string()),
+            );
+        }
+        PluginConfigWrapper {
+            plugin_type: plugin_type.to_string(),
+            parameters: serde_json::Value::Object(parameters),
+        }
+    }
+
+    fn correction_chain() -> ChannelDspChain {
+        ChannelDspChain {
+            channel: "R".to_string(),
+            plugins: vec![
+                staged_plugin("delay", Some("pre_route"), None),
+                staged_plugin("eq", Some("post_route"), Some("room_eq_correction")),
+                staged_plugin("convolution", Some("post_route"), None),
+                staged_plugin(
+                    "crossover",
+                    Some("route_owned"),
+                    Some("room_eq_route_owned"),
+                ),
+            ],
+            drivers: None,
+            initial_curve: None,
+            final_curve: None,
+            eq_response: None,
+            pre_ir: None,
+            post_ir: None,
+            fir_temporal_masking: None,
+            direct_early_late_correction: None,
+            target_curve: None,
+        }
+    }
+
+    #[test]
+    fn underfill_role_parses_routed_error() {
+        let message = "optimization failed: final routed crossover underfill for 'R' is 9.062 dB at 80.0 Hz (limit 3.0 dB)";
+        assert_eq!(underfill_error_role(message).as_deref(), Some("R"));
+        assert_eq!(underfill_error_role("unrelated failure"), None);
+        assert_eq!(underfill_error_role("final routed crossover underfill for '' is "), None);
+    }
+
+    #[test]
+    fn splice_strip_removes_fir_then_peq_and_preserves_routing() {
+        let mut chain = correction_chain();
+        assert_eq!(strip_next_splice_breaking_stage(&mut chain), Some("fir"));
+        assert!(
+            chain.plugins.iter().all(|plugin| plugin.plugin_type != "convolution"),
+            "FIR stage must be gone"
+        );
+        assert_eq!(strip_next_splice_breaking_stage(&mut chain), Some("peq"));
+        let remaining: Vec<_> = chain
+            .plugins
+            .iter()
+            .map(|plugin| plugin.plugin_type.as_str())
+            .collect();
+        assert_eq!(remaining, vec!["delay", "crossover"]);
+        assert_eq!(strip_next_splice_breaking_stage(&mut chain), None);
+    }
+
+    #[test]
+    fn splice_predicates_ignore_structural_plugins() {
+        assert!(!is_splice_breaking_correction_eq(&staged_plugin(
+            "eq",
+            Some("pre_route"),
+            Some("room_eq_correction")
+        )));
+        assert!(!is_splice_breaking_correction_eq(&staged_plugin(
+            "eq",
+            Some("post_route"),
+            Some("channel_matching")
+        )));
+        assert!(is_splice_breaking_correction_eq(&staged_plugin(
+            "eq",
+            Some("post_route"),
+            Some("room_eq_correction")
+        )));
     }
 }

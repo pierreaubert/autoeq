@@ -13,7 +13,7 @@
       "lfe": "L"
     },
     "bass_management": {
-      "enabled": false
+      "enabled": true
     }
   },
   "speakers": {

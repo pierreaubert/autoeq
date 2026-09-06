@@ -9,8 +9,8 @@
     "left": { "measurements": ["left_lp0.csv", "left_lp1.csv", "left_lp2.csv", "left_lp3.csv", "left_lp4.csv"] },
     "lfe": {
       "name": "cardioid_subs",
-      "front": { "measurements": ["sub_top_lp0.csv", "sub_top_lp1.csv", "sub_top_lp2.csv", "sub_top_lp3.csv", "sub_top_lp4.csv"] },
-      "rear": { "measurements": ["sub_bottom_lp0.csv", "sub_bottom_lp1.csv", "sub_bottom_lp2.csv", "sub_bottom_lp3.csv", "sub_bottom_lp4.csv"] },
+      "front": "sub_top_lp0.csv",
+      "rear": "sub_bottom_lp0.csv",
       "separation_meters": 0.5
     },
     "right": { "measurements": ["right_lp0.csv", "right_lp1.csv", "right_lp2.csv", "right_lp3.csv", "right_lp4.csv"] }

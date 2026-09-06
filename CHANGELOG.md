@@ -1,3 +1,16 @@
+# 0.5.71
+
+## Package versions
+
+- autoeq 0.5.71, autoeq-optim 0.5.61, roomeq-quality 0.5.60, roomeq-qa 0.5.65, roomeq-export 0.5.6, roomeq-model 0.5.10, roomeq-engine 0.5.80, roomeq-workflow 0.5.30, roomeq-analysis 0.5.9.
+
+## Fixes
+
+- Cardioid QA fixture now uses single (`Single`) front/rear measurements: multi-file power-domain averaging deliberately drops phase, which gradient-cardioid processing legitimately requires, so the committed multi-file fixture could never pass.
+- Enabled `bass_management` in the `medium_stereo_2_1` and `large_multi_seat_2_1` FEM fixtures so the claimed feature produces runtime evidence like the passing `small_stereo_2_1` setup.
+- Final serialized routed replay reverts splice-breaking post-route correction stages role by role (FIR, then correction EQ) instead of failing the whole optimization when one channel's mains-only stages cancel at the crossover; unfixable splices still hard-fail.
+- Home-cinema Post-EQ now also requires the mains published channel score not to regress, dropping splice-sum improvements that damage the mains response the final safety gate scores.
+
 # 0.5.70
 
 ## Package versions

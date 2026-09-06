@@ -1129,20 +1129,37 @@ impl WorkflowExecutor for Stereo21Executor {
                             reverted = true;
                         }
                     }
-                    if !reverted {
-                        return Err(AutoeqError::OptimizationFailed { message });
+                    if reverted {
+                        bass_management_optimization
+                            .advisories
+                            .push("stereo_post_eq_reverted_for_routed_crossover".to_string());
                     }
-                    bass_management_optimization
-                        .advisories
-                        .push("stereo_post_eq_reverted_for_routed_crossover".to_string());
-                    super::home_cinema::reconstruct_deployed_source_curves(
-                        &channel_chains,
+                    // No Post-EQ left to roll back: the splice break comes from
+                    // a mains-only correction stage (e.g. a mixed-phase FIR).
+                    // Revert it role by role instead of failing the whole run.
+                    let role_crossover_hz = |_: &str| final_xo_freq;
+                    let mut splice_reverted: Vec<String> = Vec::new();
+                    let deployed = super::home_cinema::replay_until_splice_safe(
+                        &mut channel_chains,
+                        &mut channel_results,
+                        &mut splice_reverted,
                         &HashMap::new(),
                         graph,
                         Some(&bass_management_optimization),
                         sample_rate,
                         output_dir,
-                    )?
+                        &role_crossover_hz,
+                        &sub_role,
+                        sub_min_score,
+                        final_xo_freq,
+                        max_freq,
+                    )?;
+                    for stage in splice_reverted {
+                        bass_management_optimization.advisories.push(format!(
+                            "stereo_splice_correction_reverted_{stage}"
+                        ));
+                    }
+                    deployed
                 }
                 Err(error) => return Err(error),
             }

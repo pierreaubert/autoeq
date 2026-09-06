@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Replay the serialized routed graph until every mains splice sums safely, reverting splice-breaking post-route correction stages role by role (mains-only FIR first, then post-route correction EQ) instead of failing the whole run; unfixable splices keep the hard error, and reverts are recorded as degraded stage outcomes.
+- Drop home-cinema Post-EQ candidates that improve the predicted splice sum while regressing the mains published channel score, preserving the main correction the final safety gate would otherwise revert wholesale.
 - Carry the correction-acceptance report and gate-added stage outcomes across routed-safety restores, marked as restored rather than blessed.
 
 - Add explicit stage outcomes, serialized routed-response replay, stale-curve refresh after reversion, passband-safe correction, and final down-only role-pair level alignment.

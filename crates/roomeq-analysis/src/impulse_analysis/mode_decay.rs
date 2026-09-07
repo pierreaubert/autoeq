@@ -52,6 +52,16 @@ pub fn estimate_mode_decays(
         .collect()
 }
 
+/// Relative agreement required between the nominal and wide-band fits.
+///
+/// A genuine room decay is a property of the impulse, so both bandwidths fit
+/// the same tail. An analysis-filter ring scales with Q instead: halving Q
+/// halves the reported RT60 (relative disagreement ~0.5).
+const BANDWIDTH_CONSISTENCY_TOLERANCE: f64 = 0.35;
+/// Confidence ceiling for filter-limited estimates, below
+/// [`MIN_MODE_DECAY_CONFIDENCE`] so callers retain the magnitude-Q fallback.
+const FILTER_LIMITED_CONFIDENCE: f64 = 0.25;
+
 fn estimate_mode_decay(
     mode: &RoomMode,
     impulse: &[f32],
@@ -68,6 +78,39 @@ fn estimate_mode_decay(
     }
 
     let q = mode.q.clamp(1.0, 20.0);
+    let narrow = fit_mode_decay(mode, impulse, sample_rate, q)?;
+    // F07: the bandpass itself rings with T60 ~ ln(1000) Q / (pi f). A room
+    // decay well below that floor is indistinguishable from the filter's own
+    // decay, so changing analysis Q manufactures a "confident" room decay
+    // that tracks Q. Re-fit one octave wider: agreement means the tail is the
+    // room's; disagreement (or no wide fit) means filter-limited.
+    let wide_q = (q / 2.0).max(1.0);
+    if (wide_q - q).abs() < f64::EPSILON {
+        return Some(narrow);
+    }
+    let consistent = fit_mode_decay(mode, impulse, sample_rate, wide_q).is_some_and(|wide| {
+        wide.rt60_seconds.is_finite()
+            && narrow.rt60_seconds.is_finite()
+            && (narrow.rt60_seconds - wide.rt60_seconds).abs()
+                / narrow.rt60_seconds.max(wide.rt60_seconds)
+                <= BANDWIDTH_CONSISTENCY_TOLERANCE
+    });
+    if consistent {
+        Some(narrow)
+    } else {
+        Some(ModeDecayEstimate {
+            confidence: narrow.confidence.min(FILTER_LIMITED_CONFIDENCE),
+            ..narrow
+        })
+    }
+}
+
+fn fit_mode_decay(
+    mode: &RoomMode,
+    impulse: &[f32],
+    sample_rate: f64,
+    q: f64,
+) -> Option<ModeDecayEstimate> {
     let mut filtered: Vec<f64> = impulse.iter().map(|sample| *sample as f64).collect();
     let mut bandpass = Biquad::new(
         BiquadFilterType::Bandpass,
@@ -213,6 +256,65 @@ mod tests {
                 ((-decay * time).exp() * (2.0 * std::f64::consts::PI * 80.0 * time).sin()) as f32
             })
             .collect()
+    }
+
+    #[test]
+    fn delta_impulse_reports_no_confident_room_decay() {
+        // F07: a delta contains no room tail. The bandpass ring alone must
+        // not become a confident ~0.55 s room decay at any analysis Q.
+        let sample_rate = 48_000.0;
+        let mut impulse = vec![0.0_f32; 240_000];
+        impulse[0] = 1.0;
+        for q in [2.0, 10.0, 20.0] {
+            let mode = RoomMode {
+                frequency: 80.0,
+                q,
+                temporal_severity_db: 0.0,
+                prominence_db: 8.0,
+                index: 0,
+            };
+            match estimate_mode_decays(&[mode], &impulse, sample_rate)[0] {
+                None => {}
+                Some(estimate) => assert!(
+                    estimate.confidence < MIN_MODE_DECAY_CONFIDENCE,
+                    "delta impulse produced a confident room decay at Q={q}: \
+                     RT60={:.6} s confidence={:.5}",
+                    estimate.rt60_seconds,
+                    estimate.confidence
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn true_decay_agrees_across_analysis_bandwidth() {
+        // A genuine room decay well above both analysis-filter floors must
+        // stay confident and consistent when the analysis Q changes.
+        let sample_rate = 48_000.0;
+        let impulse = decaying_mode(0.9);
+        let mut estimates = Vec::new();
+        for q in [8.0, 20.0] {
+            let mode = RoomMode {
+                frequency: 80.0,
+                q,
+                temporal_severity_db: 0.0,
+                prominence_db: 10.0,
+                index: 0,
+            };
+            let estimate = estimate_mode_decays(&[mode], &impulse, sample_rate)[0]
+                .expect("true 0.9 s decay should fit");
+            assert!(
+                estimate.confidence >= MIN_MODE_DECAY_CONFIDENCE,
+                "true decay lost confidence at Q={q}: {}",
+                estimate.confidence
+            );
+            estimates.push(estimate.rt60_seconds);
+        }
+        let (a, b) = (estimates[0], estimates[1]);
+        assert!(
+            (a - b).abs() / a.max(b) < 0.35,
+            "true decay disagrees across bandwidth: {a:.3} s vs {b:.3} s"
+        );
     }
 
     #[test]

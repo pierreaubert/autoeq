@@ -534,6 +534,50 @@ fn minimum_phase_flat_correction_keeps_leading_impulse() {
 }
 
 #[test]
+fn gd_delay_preserves_leading_impulse_magnitude() {
+    // F02: a 0.5-sample delay of a leading identity tap must preserve gain.
+    let sample_rate = 48_000.0;
+    let mut identity = vec![0.0; 64];
+    identity[0] = 1.0;
+    let shifted =
+        crate::fir::apply::apply_gd_delay_to_fir_coefficients(&identity, 0.5 / 48.0, sample_rate);
+    for frequency in [100.0, 1_000.0, 10_000.0] {
+        let freqs = Array1::from(vec![frequency]);
+        let response =
+            crate::response::compute_fir_complex_response(&shifted, &freqs, sample_rate);
+        let magnitude_db = 20.0 * response[0].norm().log10();
+        assert!(
+            magnitude_db.abs() < 1.0,
+            "0.5-sample delay changed gain by {magnitude_db:.3} dB at {frequency} Hz"
+        );
+    }
+}
+
+#[test]
+fn gd_delay_extends_support_instead_of_silence() {
+    // F02: a 2 ms shift of a 64-tap filter must extend support, not erase it.
+    let sample_rate = 48_000.0;
+    let mut identity = vec![0.0; 64];
+    identity[0] = 1.0;
+    let shifted =
+        crate::fir::apply::apply_gd_delay_to_fir_coefficients(&identity, 2.0, sample_rate);
+    assert!(
+        shifted.len() > 64,
+        "large delay should extend support, kept len {}",
+        shifted.len()
+    );
+    let freqs = Array1::from(vec![100.0, 1_000.0]);
+    let response = crate::response::compute_fir_complex_response(&shifted, &freqs, sample_rate);
+    for (index, value) in response.iter().enumerate() {
+        let magnitude_db = 20.0 * value.norm().log10();
+        assert!(
+            magnitude_db.abs() < 1.0,
+            "extended delay changed gain by {magnitude_db:.3} dB at bin {index}"
+        );
+    }
+}
+
+#[test]
 fn fractional_delay_preserves_high_frequency_magnitude() {
     let mut coeffs = vec![0.0; 256];
     coeffs[64] = 1.0;
@@ -556,15 +600,28 @@ fn fractional_delay_preserves_high_frequency_magnitude() {
 }
 
 #[test]
-fn fractional_delay_renormalizes_truncated_edge_taps() {
+fn fractional_delay_preserves_interior_without_edge_boost() {
+    // A finite rectangular window zero-padded for delay shows edge transients;
+    // interior taps must stay near unity and no tap may be boosted the way
+    // per-output renormalization boosted a leading impulse by +4.45 dB.
     let coeffs = vec![1.0; 64];
-
     for shift in [7.5, -7.5] {
         let shifted = super::apply_fractional_sample_shift(&coeffs, shift);
-        for (index, value) in shifted.iter().enumerate() {
+        for value in shifted.iter() {
             assert!(
-                (value - 1.0).abs() < 1e-12,
-                "shift {shift} attenuated unity response at sample {index}: {value}"
+                value.is_finite() && *value < 1.5,
+                "shift {shift} boosted an edge tap to {value}"
+            );
+        }
+        let interior = if shift > 0.0 {
+            &shifted[16..64]
+        } else {
+            &shifted[8..48]
+        };
+        for value in interior {
+            assert!(
+                (value - 1.0).abs() < 0.05,
+                "shift {shift} distorted interior unity response: {value}"
             );
         }
     }
@@ -574,12 +631,15 @@ fn fractional_delay_renormalizes_truncated_edge_taps() {
 fn fractional_delay_is_zero_for_integer_shift() {
     let coeffs: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0, 5.0];
     let shifted = super::apply_fractional_sample_shift(&coeffs, 2.0);
-    // Exactly 2.0 samples should be identical to integer shift
+    // Positive integer shifts extend support instead of discarding the tail.
+    assert_eq!(shifted.len(), 7);
     assert_eq!(shifted[0], 0.0);
     assert_eq!(shifted[1], 0.0);
     assert_eq!(shifted[2], 1.0);
     assert_eq!(shifted[3], 2.0);
     assert_eq!(shifted[4], 3.0);
+    assert_eq!(shifted[5], 4.0);
+    assert_eq!(shifted[6], 5.0);
 }
 
 #[test]

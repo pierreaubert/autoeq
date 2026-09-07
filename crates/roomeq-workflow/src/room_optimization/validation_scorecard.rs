@@ -119,6 +119,25 @@ pub(super) fn attach_validation_scorecard(
         );
     }
     if let Some(report) = &mut result.metadata.correction_acceptance {
+        // F05: the runtime gate enforces training + held-out partitions
+        // together, but it runs before this scorecard is attached. A held-out
+        // seat that regresses under the final chain must therefore be gated
+        // here with the same worst-position budget, or the final decision
+        // would certify a seat it never evaluated.
+        if let Some(held_out) = scorecard.held_out.as_ref()
+            && let Some(budget) = report
+                .runtime_policy
+                .as_ref()
+                .map(|policy| policy.max_worst_position_regression_db)
+            && held_out.worst_position_improvement_db < -budget
+        {
+            report
+                .violations
+                .push("worst_position_regressed".to_string());
+            report.violations.sort();
+            report.violations.dedup();
+            report.accepted = false;
+        }
         report.acoustic_quality = Some(scorecard);
     }
     Ok(())
@@ -127,6 +146,106 @@ pub(super) fn attach_validation_scorecard(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn held_out_seat_regression_is_exposed_in_final_decision() {
+        // F05: the representative improves but a held-out seat worsens under
+        // the final chain. The attached decision must expose that regression.
+        use roomeq_model::{
+            CorrectionAcceptancePolicy, CorrectionAcceptanceReport, CorrectionDecision,
+            CorrectionMetricSummary, RuntimeAcceptancePolicy, RuntimeOutputClass,
+        };
+        let mut result = crate::test_fixtures::single_channel_room_result("left");
+        let grid = result.channel_results["left"].initial_curve.freq.clone();
+        let rep_pre = roomeq_model::Curve {
+            freq: grid.clone(),
+            spl: grid
+                .iter()
+                .map(|f| 80.0 + 6.0 * (-((f - 120.0) / 25.0).powi(2)).exp())
+                .collect(),
+            ..Default::default()
+        };
+        let rep_post = roomeq_model::Curve {
+            freq: grid.clone(),
+            spl: ndarray::Array1::from_elem(grid.len(), 80.0),
+            ..Default::default()
+        };
+        result
+            .channel_results
+            .get_mut("left")
+            .unwrap()
+            .initial_curve = rep_pre.clone();
+        result.channel_results.get_mut("left").unwrap().final_curve = rep_post;
+        let cut = math_audio_iir_fir::Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Peak,
+            120.0,
+            48_000.0,
+            1.0,
+            -6.0,
+        );
+        result
+            .channels
+            .get_mut("left")
+            .unwrap()
+            .plugins
+            .push(roomeq_engine::output::create_eq_plugin(&[cut]));
+        // Flat seat: the deployed cut carves a null here, regressing it.
+        let seat = roomeq_model::Curve {
+            freq: grid.clone(),
+            spl: ndarray::Array1::from_elem(grid.len(), 80.0),
+            ..Default::default()
+        };
+        result.metadata.correction_acceptance = Some(CorrectionAcceptanceReport {
+            policy: CorrectionAcceptancePolicy::RuntimeSafety,
+            runtime_policy: Some(RuntimeAcceptancePolicy::for_output_class(
+                RuntimeOutputClass::LowLatencyIir,
+            )),
+            decision: CorrectionDecision::Accepted,
+            accepted: true,
+            metrics: CorrectionMetricSummary {
+                auditory_frequency_measure: "erb".to_string(),
+                pre_target_weighted_rms_db: 3.0,
+                post_target_weighted_rms_db: 0.5,
+                improvement_db: 2.5,
+                improvement_ratio: 6.0,
+                post_p95_abs_residual_db: 1.0,
+                post_worst_abs_residual_db: 2.0,
+                correction_rms_db: 2.0,
+                max_abs_correction_db: 6.0,
+            },
+            violations: Vec::new(),
+            reverted_stages: Vec::new(),
+            acoustic_quality: None,
+            realization_quality: None,
+        });
+        let validation = HashMap::from([("left".to_string(), vec![seat])]);
+        attach_validation_scorecard(&mut result, &validation, 48_000.0)
+            .expect("runtime validation");
+
+        let report = result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .expect("acceptance report");
+        assert!(
+            report
+                .acoustic_quality
+                .as_ref()
+                .and_then(|quality| quality.held_out.as_ref())
+                .is_some(),
+            "held-out seat evidence must be attached"
+        );
+        assert!(
+            report.violations.iter().any(|v| v == "worst_position_regressed"),
+            "seat regression must be exposed, violations={:?}, accepted={}",
+            report.violations,
+            report.accepted
+        );
+        assert!(
+            !report.accepted,
+            "final decision must not accept a regressed held-out seat"
+        );
+    }
 
     #[test]
     fn runtime_validation_populates_held_out_scorecard() {

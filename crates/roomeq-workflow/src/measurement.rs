@@ -143,17 +143,98 @@ fn reconstruct_resampled_phase(original: &Curve, resampled: &mut Curve) {
     resampled.excess_delay_ms = Some(delay_ms);
 }
 
+/// Minimum prominence for a local extremum to survive dense-curve reduction.
+///
+/// Narrow resonances and cancellations narrower than the 4 Hz bass grid would
+/// otherwise vanish when interpolating onto the hybrid grid (F01). Extrema
+/// standing out by at least this amount from both neighbours are retained as
+/// explicit grid points and restored after smoothing.
+const PRESERVED_EXTREMUM_PROMINENCE_DB: f64 = 1.0;
+/// Upper bound on retained extrema so pathological noisy inputs cannot make
+/// the reduced grid quadratic in the source size again.
+const MAX_PRESERVED_EXTREMA: usize = 512;
+
+/// Collect significant local maxima/minima as (frequency, spl, is_max).
+fn significant_extrema(curve: &Curve) -> Vec<(f64, f64, bool)> {
+    if curve.freq.len() != curve.spl.len() || curve.freq.len() < 3 {
+        return Vec::new();
+    }
+    let mut extrema: Vec<(f64, f64, f64, bool)> = Vec::new();
+    for index in 1..curve.freq.len() - 1 {
+        let previous = curve.spl[index - 1];
+        let current = curve.spl[index];
+        let next = curve.spl[index + 1];
+        if !previous.is_finite() || !current.is_finite() || !next.is_finite() {
+            continue;
+        }
+        let frequency = curve.freq[index];
+        if !frequency.is_finite() || frequency <= 0.0 {
+            continue;
+        }
+        if current > previous && current >= next {
+            let prominence = current - previous.max(next);
+            if prominence >= PRESERVED_EXTREMUM_PROMINENCE_DB {
+                extrema.push((frequency, current, prominence, true));
+            }
+        } else if current < previous && current <= next {
+            let prominence = previous.min(next) - current;
+            if prominence >= PRESERVED_EXTREMUM_PROMINENCE_DB {
+                extrema.push((frequency, current, prominence, false));
+            }
+        }
+    }
+    extrema.sort_by(|a, b| {
+        b.2.partial_cmp(&a.2)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    extrema.truncate(MAX_PRESERVED_EXTREMA);
+    extrema
+        .into_iter()
+        .map(|(frequency, spl, _, is_max)| (frequency, spl, is_max))
+        .collect()
+}
+
 fn cap_measurement_curve(curve: Curve, frequency_samples: usize) -> Curve {
     if frequency_samples == 0 || curve.freq.len() <= frequency_samples {
         return curve;
     }
 
-    let Some(frequency_grid) = clipped_hybrid_frequency_grid(&curve, frequency_samples) else {
+    let Some(base_grid) = clipped_hybrid_frequency_grid(&curve, frequency_samples) else {
         return curve;
     };
+    // Preserve significant narrow extrema that fall between hybrid-grid bins.
+    let preserved = significant_extrema(&curve);
+    let mut frequencies = base_grid.to_vec();
+    for (frequency, _, _) in &preserved {
+        let already_close = frequencies
+            .iter()
+            .any(|&existing| (existing - *frequency).abs() <= f64::EPSILON * 8.0);
+        if !already_close {
+            frequencies.push(*frequency);
+        }
+    }
+    frequencies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let frequency_grid = Array1::from_vec(frequencies);
     let resampled = interpolate_log_space(&frequency_grid, &curve);
     let mut smoothed =
         smooth_one_over_n_octave(&resampled, ROOM_EQ_RESAMPLE_SMOOTHING_BANDS_PER_OCTAVE);
+    // Smoothing dilutes single-bin extrema back toward the local mean; restore
+    // the measured peak/null values so loading does not erase them.
+    for (frequency, spl, is_max) in &preserved {
+        if let Some(index) = smoothed
+            .freq
+            .iter()
+            .position(|&candidate| candidate == *frequency)
+        {
+            if *is_max {
+                if smoothed.spl[index] < *spl {
+                    smoothed.spl[index] = *spl;
+                }
+            } else if smoothed.spl[index] > *spl {
+                smoothed.spl[index] = *spl;
+            }
+        }
+    }
     reconstruct_resampled_phase(&curve, &mut smoothed);
     smoothed
 }
@@ -263,6 +344,46 @@ mod tests {
         let path = directory.join("measurement.csv");
         std::fs::write(&path, "frequency,spl\n20,70\n100,71\n1000,69\n").unwrap();
         path
+    }
+
+    #[test]
+    fn dense_and_sparse_sampling_preserve_narrow_resonance() {
+        // F01: the same continuous transfer sampled at 1 Hz and 0.5 Hz must
+        // yield comparable loaded maxima. Gaussian peak: 82 Hz, 12 dB, sigma 0.5 Hz.
+        let directory = tempfile::tempdir().unwrap();
+        let sparse_path = directory.path().join("sparse.csv");
+        let dense_path = directory.path().join("dense.csv");
+        let mut sparse_csv = String::from("frequency,spl\n");
+        for i in 0..=180 {
+            let f = 20.0 + i as f64;
+            let spl = 80.0 + 12.0 * (-0.5 * ((f - 82.0) / 0.5).powi(2)).exp();
+            sparse_csv.push_str(&format!("{f},{spl}\n"));
+        }
+        let mut dense_csv = String::from("frequency,spl\n");
+        for i in 0..=360 {
+            let f = 20.0 + i as f64 / 2.0;
+            let spl = 80.0 + 12.0 * (-0.5 * ((f - 82.0) / 0.5).powi(2)).exp();
+            dense_csv.push_str(&format!("{f},{spl}\n"));
+        }
+        std::fs::write(&sparse_path, sparse_csv).unwrap();
+        std::fs::write(&dense_path, dense_csv).unwrap();
+
+        let sparse = load_curve_from_csv(&sparse_path).unwrap();
+        let dense = load_curve_from_csv(&dense_path).unwrap();
+        let sparse_max = sparse.spl.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let dense_max = dense.spl.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        assert!(
+            sparse_max > 88.0,
+            "sparse input should preserve the 12 dB peak, got {sparse_max}"
+        );
+        assert!(
+            dense_max > 88.0,
+            "dense input erased the narrow resonance, got {dense_max}"
+        );
+        assert!(
+            (sparse_max - dense_max).abs() < 3.0,
+            "density-dependent loss: sparse {sparse_max} vs dense {dense_max}"
+        );
     }
 
     #[test]

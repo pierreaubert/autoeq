@@ -74,7 +74,9 @@ pub enum StimulusKind {
         duration_s: f64,
     },
     /// Band-limited seeded noise for bandwidth-change comparisons: white
-    /// noise through a windowed-sinc FIR bandpass.
+    /// noise through a windowed-sinc FIR bandpass whose tap count scales
+    /// with the band specification (narrow bands get longer filters so the
+    /// transitions stay inside the requested bandwidth).
     BandLimitedNoise {
         /// Lower band edge in Hz (must be positive).
         low_hz: f64,
@@ -537,8 +539,22 @@ pub fn render_samples(
 
 /// 127-tap Hamming-windowed sinc FIR bandpass (lowpass difference).
 fn bandpass_fir(low_hz: f64, high_hz: f64, sample_rate_hz: f64) -> Vec<f64> {
-    const TAPS: usize = 127;
-    let middle = (TAPS - 1) as f64 / 2.0;
+    // F15: tap count follows the band specification. A fixed 127-tap FIR at
+    // 8 kHz has ~200 Hz transitions, which swamps a 100 Hz band (mushy edges,
+    // elevated skirts). Hamming transition bandwidth is ~3.3·fs/N, so N is
+    // sized for transitions well inside the requested bandwidth. The render
+    // loop derives group delay and history length from the returned taps, so
+    // causality compensation tracks automatically.
+    const MIN_TAPS: usize = 127;
+    const MAX_TAPS: usize = 4096;
+    let bandwidth_hz = (high_hz - low_hz).max(f64::EPSILON);
+    let mut taps =
+        ((8.0 * sample_rate_hz / bandwidth_hz).ceil() as usize).clamp(MIN_TAPS, MAX_TAPS);
+    taps |= 1;
+    if taps > MAX_TAPS {
+        taps = MAX_TAPS - 1;
+    }
+    let middle = (taps - 1) as f64 / 2.0;
     let sinc = |x: f64| {
         if x == 0.0 {
             1.0
@@ -546,7 +562,7 @@ fn bandpass_fir(low_hz: f64, high_hz: f64, sample_rate_hz: f64) -> Vec<f64> {
             (std::f64::consts::PI * x).sin() / (std::f64::consts::PI * x)
         }
     };
-    (0..TAPS)
+    (0..taps)
         .map(|tap| {
             let offset = tap as f64 - middle;
             let lowpass = |edge_hz: f64| {
@@ -554,7 +570,7 @@ fn bandpass_fir(low_hz: f64, high_hz: f64, sample_rate_hz: f64) -> Vec<f64> {
             };
             let window = 0.54
                 - 0.46
-                    * (2.0 * std::f64::consts::PI * tap as f64 / (TAPS - 1) as f64).cos();
+                    * (2.0 * std::f64::consts::PI * tap as f64 / (taps - 1) as f64).cos();
             (lowpass(high_hz) - lowpass(low_hz)) * window
         })
         .collect()
@@ -899,6 +915,61 @@ mod stimuli_tests {
             s1 = s0;
         }
         s1 * s1 + s2 * s2 - 2.0 * cosine * s1 * s2
+    }
+
+    /// Magnitude response of a tap vector at one frequency (deterministic).
+    fn fir_magnitude(taps: &[f64], freq_hz: f64, sample_rate_hz: f64) -> f64 {
+        let omega = 2.0 * std::f64::consts::PI * freq_hz / sample_rate_hz;
+        let (mut real, mut imag) = (0.0_f64, 0.0_f64);
+        for (index, tap) in taps.iter().enumerate() {
+            let phase = omega * index as f64;
+            real += tap * phase.cos();
+            imag -= tap * phase.sin();
+        }
+        real.hypot(imag)
+    }
+
+    #[test]
+    fn narrow_band_filter_resolves_its_band() {
+        // F15: the bandpass behind BandLimitedNoise must resolve the
+        // requested band. A fixed 127-tap FIR at 8 kHz has ~200 Hz
+        // transitions, so a 500–600 Hz band arrives with mushy edges and
+        // elevated skirts; taps must scale with the band specification.
+        let taps = bandpass_fir(500.0, 600.0, 8_000.0);
+        let center = fir_magnitude(&taps, 550.0, 8_000.0);
+        let below = fir_magnitude(&taps, 450.0, 8_000.0);
+        let above = fir_magnitude(&taps, 650.0, 8_000.0);
+        assert!(
+            center > 10.0 * below,
+            "low skirt too shallow: center {center:.3e} vs 450 Hz {below:.3e}"
+        );
+        assert!(
+            center > 10.0 * above,
+            "high skirt too shallow: center {center:.3e} vs 650 Hz {above:.3e}"
+        );
+    }
+
+    #[test]
+    fn narrow_band_noise_is_confined_to_its_band() {
+        // End-to-end guard: 500–600 Hz noise at 8 kHz keeps probes a full
+        // bandwidth outside each edge (400 / 700 Hz) 20 dB below center.
+        let kind = StimulusKind::BandLimitedNoise {
+            low_hz: 500.0,
+            high_hz: 600.0,
+            duration_s: 4.0,
+        };
+        let samples = render_samples(&kind, 8_000.0, 31).unwrap();
+        let center = goertzel_power(&samples, 550.0, 8_000.0);
+        let below = goertzel_power(&samples, 400.0, 8_000.0);
+        let above = goertzel_power(&samples, 700.0, 8_000.0);
+        assert!(
+            center > 100.0 * below,
+            "low-side leakage: center {center} vs 400 Hz {below}"
+        );
+        assert!(
+            center > 100.0 * above,
+            "high-side leakage: center {center} vs 700 Hz {above}"
+        );
     }
 
     #[test]

@@ -17,7 +17,9 @@ pub const MIN_MODE_DECAY_CONFIDENCE: f64 = 0.5;
 
 /// Convert a confident measured decay estimate into temporal severity.
 ///
-/// `None` preserves the explicitly labelled magnitude-Q fallback.
+/// `None` preserves the explicitly labelled magnitude-Q fallback — including
+/// outside the validated 32–250 Hz threshold domain (F17), where no study
+/// limit exists to judge the measured decay against.
 pub fn measured_temporal_severity_db(
     mode_frequency_hz: f64,
     estimate: &ModeDecayEstimate,
@@ -27,7 +29,7 @@ pub fn measured_temporal_severity_db(
         return None;
     }
     let threshold =
-        crate::temporal_targets::max_acceptable_decay_time(mode_frequency_hz, use_music_threshold);
+        crate::temporal_targets::max_acceptable_decay_time_checked(mode_frequency_hz, use_music_threshold)?;
     Some(if estimate.rt60_seconds > threshold {
         20.0 * (estimate.rt60_seconds / threshold).log10()
     } else {
@@ -284,6 +286,24 @@ mod tests {
                 ),
             }
         }
+    }
+
+    #[test]
+    fn measured_severity_is_unknown_outside_threshold_domain() {
+        // F17: a confident measured decay at 300 Hz has no study limit to
+        // be judged against, so severity must stay `None` (fallback), not
+        // inherit the 250 Hz clamp.
+        let estimate = ModeDecayEstimate {
+            frequency_hz: 300.0,
+            rt60_seconds: 0.9,
+            rt60_lower_seconds: 0.85,
+            rt60_upper_seconds: 0.95,
+            confidence: 0.9,
+        };
+        assert!(measured_temporal_severity_db(300.0, &estimate, false).is_none());
+        assert!(measured_temporal_severity_db(20.0, &estimate, false).is_none());
+        let in_domain = ModeDecayEstimate { frequency_hz: 80.0, ..estimate };
+        assert!(measured_temporal_severity_db(80.0, &in_domain, false).is_some());
     }
 
     #[test]

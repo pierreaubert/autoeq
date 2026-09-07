@@ -32,9 +32,41 @@ const MUSIC_THRESHOLDS: &[(f64, f64)] = &[
     (250.0, 0.12),
 ];
 
+/// Validated domain of the threshold tables in Hz (F17).
+///
+/// The underlying studies measured 32–250 Hz. Outside this range the tables
+/// are silent: endpoint clamping would invent limits the studies never
+/// measured (a 20 Hz mode is not a 32 Hz mode; a 252 Hz mode is not a
+/// 250 Hz mode).
+pub const DECAY_THRESHOLD_MIN_HZ: f64 = 32.0;
+/// Validated domain of the threshold tables in Hz (F17).
+pub const DECAY_THRESHOLD_MAX_HZ: f64 = 250.0;
+
+/// Whether a frequency lies inside the validated threshold domain.
+pub fn decay_threshold_domain_contains(freq_hz: f64) -> bool {
+    freq_hz.is_finite() && freq_hz >= DECAY_THRESHOLD_MIN_HZ && freq_hz <= DECAY_THRESHOLD_MAX_HZ
+}
+
+/// Get the maximum acceptable decay time at a given frequency, or `None`
+/// outside the validated 32–250 Hz domain.
+///
+/// Prefer this over [`max_acceptable_decay_time`]: unknown audibility must
+/// not become a numeric limit.
+pub fn max_acceptable_decay_time_checked(
+    freq_hz: f64,
+    use_music_thresholds: bool,
+) -> Option<f64> {
+    decay_threshold_domain_contains(freq_hz)
+        .then(|| max_acceptable_decay_time(freq_hz, use_music_thresholds))
+}
+
 /// Get the maximum acceptable decay time at a given frequency.
 /// Interpolates between threshold points in log-frequency.
 /// Below 32Hz: uses 32Hz value. Above 250Hz: uses 250Hz value.
+///
+/// Legacy endpoint-clamped lookup. Do not use this to judge modes outside
+/// 32–250 Hz; use [`max_acceptable_decay_time_checked`] so out-of-domain
+/// modes report unknown instead of inheriting an unmeasured limit.
 pub fn max_acceptable_decay_time(freq_hz: f64, use_music_thresholds: bool) -> f64 {
     let table = if use_music_thresholds {
         MUSIC_THRESHOLDS
@@ -80,7 +112,16 @@ pub fn max_acceptable_q(freq_hz: f64, use_music_thresholds: bool) -> f64 {
 /// Compute a "temporal severity" weight for a detected room mode.
 /// Returns 0.0 if the mode's decay is below threshold (inaudible),
 /// higher values for modes that exceed threshold more severely.
+///
+/// Heuristic magnitude-shaping weight only, never a reverberation-time
+/// verdict: it judges an indirect magnitude Q against study tables, not a
+/// measured decay. Outside the validated 32–250 Hz domain it returns 0.0
+/// (unknown → no modal action), so unmeasured limits cannot trigger
+/// modal treatment.
 pub fn temporal_severity(mode_freq_hz: f64, mode_q: f64, use_music: bool) -> f64 {
+    if !decay_threshold_domain_contains(mode_freq_hz) || !mode_q.is_finite() {
+        return 0.0;
+    }
     let max_q = max_acceptable_q(mode_freq_hz, use_music);
     if mode_q <= max_q {
         0.0
@@ -175,5 +216,19 @@ mod tests {
             (t_300 - t_250).abs() < 1e-10,
             "Above 250Hz should clamp to 250Hz value"
         );
+    }
+
+    #[test]
+    fn out_of_domain_modes_report_unknown_not_a_limit() {
+        // F17: the studies measured 32–250 Hz. Outside, the checked lookup
+        // is silent and severity stays at zero (no modal action on unknown
+        // audibility) instead of inheriting an unmeasured endpoint limit.
+        assert!(max_acceptable_decay_time_checked(20.0, false).is_none());
+        assert!(max_acceptable_decay_time_checked(252.0, false).is_none());
+        assert!(max_acceptable_decay_time_checked(100.0, false).is_some());
+        assert_eq!(temporal_severity(20.0, 30.0, false), 0.0);
+        assert_eq!(temporal_severity(300.0, 30.0, false), 0.0);
+        // In-domain behavior is unchanged: sharp modes stay severe.
+        assert!(temporal_severity(100.0, 30.0, false) > 0.0);
     }
 }

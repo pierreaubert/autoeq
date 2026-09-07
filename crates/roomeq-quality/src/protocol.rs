@@ -269,6 +269,12 @@ impl BlindedProtocol {
 }
 
 /// Exact one-sided binomial upper-tail P(X >= k) at p = 0.5.
+///
+/// The sum is anchored at the distribution mode, whose term is always
+/// representable, and recurrence steps outward from there (F13). Stepping up
+/// from C(n,0) with a separate 2^-n factor instead underflows the factor
+/// while the coefficient overflows, and the trailing `.min(1.0)` then turns
+/// the resulting NaN into a plausible-looking 1.0 for large n.
 pub fn abx_p_value(k_correct: u32, n_trials: u32) -> Result<f64, String> {
     if n_trials == 0 || n_trials > 5_000 {
         return Err(String::from("trials outside 1–5000 exact range"));
@@ -276,23 +282,58 @@ pub fn abx_p_value(k_correct: u32, n_trials: u32) -> Result<f64, String> {
     if k_correct > n_trials {
         return Err(String::from("correct cannot exceed trials"));
     }
-    // term(k) = C(n,k) / 2^n stepped up from C(n,0); direct summation is
-    // exact enough for staged trial counts.
-    let mut cumulative = 0.0_f64;
-    let half_n = 2.0_f64.powi(-(n_trials as i32));
-    let mut binom = 1.0_f64;
-    for k in 0..=n_trials {
-        if k > 0 {
-            binom *= (n_trials - k + 1) as f64 / k as f64;
-        }
-        if k >= k_correct {
-            cumulative += binom * half_n;
-        }
+    if k_correct == 0 {
+        return Ok(1.0);
     }
-    Ok(cumulative.min(1.0))
+    let n = n_trials as usize;
+    let k = k_correct as usize;
+    let mode = n / 2;
+    // log P(X = mode): exact in log space, exp() is safe because the modal
+    // term is >= ~0.005 for every supported n.
+    let mut log_mode = -(n as f64) * std::f64::consts::LN_2;
+    for i in 1..=mode {
+        log_mode += ((n - mode + i) as f64 / i as f64).ln();
+    }
+    if !log_mode.is_finite() {
+        return Err(String::from("binomial mode term is non-finite"));
+    }
+    let mut term = log_mode.exp();
+    if k > mode {
+        // Walk up from the mode, summing the k..=n tail. Terms shrink
+        // monotonically past the mode; once they underflow, nothing further
+        // can contribute.
+        let mut cumulative = 0.0;
+        for j in mode..=n {
+            if j >= k {
+                cumulative += term;
+            }
+            if j < n {
+                term *= (n - j) as f64 / (j + 1) as f64;
+                if term == 0.0 && j + 1 >= k {
+                    break;
+                }
+            }
+        }
+        Ok(cumulative.min(1.0))
+    } else {
+        // Walk down from the mode, summing P(X <= k-1), and complement.
+        // k <= mode keeps the lower sum below ~0.5, so no cancellation.
+        let mut lower = 0.0;
+        for j in (0..mode).rev() {
+            term *= (j + 1) as f64 / (n - j) as f64;
+            if j < k {
+                lower += term;
+            }
+        }
+        Ok((1.0 - lower).clamp(0.0, 1.0))
+    }
 }
 
 /// Smallest k with `abx_p_value(k, n) <= alpha`.
+///
+/// Returns an error when no threshold attains `alpha` (e.g. one trial at
+/// alpha 0.05, where even a perfect score has p = 0.5): there is no valid
+/// significance rule, and callers must not score against a fabricated one.
 pub fn abx_min_correct(n_trials: u32, alpha: f64) -> Result<u32, String> {
     if !(0.0 < alpha && alpha < 1.0) {
         return Err(String::from("alpha must lie in (0, 1)"));
@@ -302,7 +343,9 @@ pub fn abx_min_correct(n_trials: u32, alpha: f64) -> Result<u32, String> {
             return Ok(k);
         }
     }
-    Ok(n_trials)
+    Err(String::from(
+        "no attainable significance threshold: even a perfect score cannot reach alpha at this trial count",
+    ))
 }
 
 /// Normal-approximation trial count for detecting `p_alt` correct at
@@ -555,6 +598,47 @@ mod protocol_tests {
         // the applied rule stays exact, this only stages trial counts).
         let sized = abx_trials_needed(0.75, 0.05, 0.8).unwrap();
         assert!((20..=28).contains(&sized), "sized={sized}");
+    }
+
+    #[test]
+    fn abx_tail_is_exact_at_supported_extremes() {
+        // F13: all-correct null probability is 2^-n, never 1.0.
+        let p30 = abx_p_value(30, 30).unwrap();
+        assert!(
+            (p30 - 2.0_f64.powi(-30)).abs() / 2.0_f64.powi(-30) < 1e-12,
+            "p30={p30:e}"
+        );
+        let p1000 = abx_p_value(1000, 1000).unwrap();
+        assert!(
+            (p1000 - 9.332636185032189e-302).abs() / 9.332636185032189e-302 < 1e-12,
+            "p1000={p1000:e}"
+        );
+        let p1100 = abx_p_value(1100, 1100).unwrap();
+        assert!(
+            p1100 < 1e-300,
+            "all-correct at 1100 trials must be ~2^-1100, got {p1100}"
+        );
+        // 2^-5000 is below f64 range: honest zero, not a plausible p value.
+        assert_eq!(abx_p_value(5000, 5000).unwrap(), 0.0);
+        // Sanity across the range: monotone in k, unity at k=0.
+        let p0 = abx_p_value(0, 5000).unwrap();
+        assert!((p0 - 1.0).abs() < 1e-12, "p0={p0}");
+        let mut previous = 1.0;
+        for k in [1, 7, 2500, 4999, 5000] {
+            let p = abx_p_value(k, 5000).unwrap();
+            assert!(p <= previous, "non-monotone at k={k}: {p} > {previous}");
+            previous = p;
+        }
+    }
+
+    #[test]
+    fn abx_min_correct_reports_unattainable_threshold() {
+        // F13: at one trial and alpha 0.05 no threshold meets alpha (best
+        // achievable p is 0.5), so the rule must be reported unattainable
+        // rather than returning 1 and scoring 1/1 as "pass".
+        assert!(abx_min_correct(1, 0.05).is_err());
+        assert!(abx_min_correct(2, 0.01).is_err());
+        assert_eq!(abx_min_correct(30, 0.05).unwrap(), 20);
     }
 
     #[test]

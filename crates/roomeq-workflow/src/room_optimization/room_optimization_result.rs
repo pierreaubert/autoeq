@@ -1285,15 +1285,16 @@ fn runtime_temporal_quality_evidence(
     pre: &[roomeq_model::Curve],
     post: &[roomeq_model::Curve],
     sample_rate: f64,
-    processing_mode: roomeq_model::ProcessingMode,
+    _processing_mode: roomeq_model::ProcessingMode,
 ) -> roomeq_engine::quality::TemporalQualityEvidence {
-    // In mixed-phase mode the per-channel FIR is the unity-magnitude
-    // excess-phase correction: it spreads energy before its main peak by
-    // design — that precursor content *is* the phase correction, not
-    // defective ringing. The compact magnitude-FIR pre-ringing contract does
-    // not apply; the pre-ringing budget is enforced at design time by the
-    // mixed-phase config.
-    let phase_only_fir = processing_mode == roomeq_model::ProcessingMode::MixedPhase;
+    // Measured temporal facts are mode-independent (F11): a precursor measured
+    // at -8.7 dB is -8.7 dB whether the FIR label says phase-linear or
+    // mixed-phase. An intentional excess-phase correction may still create
+    // audible precursors, so its measured value must reach the acceptance
+    // policy unchanged; design-time suppression is enforced separately by the
+    // mixed-phase config, never by substituting an inaudible sentinel here.
+    // The mode parameter is retained so future mode-specific policies can be
+    // applied transparently to identical evidence.
     let channels: Vec<_> = names
         .iter()
         .map(|name| {
@@ -1302,11 +1303,7 @@ fn runtime_temporal_quality_evidence(
                 .get(name)
                 .and_then(|chain| chain.fir_temporal_masking.as_ref());
             roomeq_engine::quality::TemporalChannelEvidence {
-                pre_ringing_audible_db: if phase_only_fir {
-                    None
-                } else {
-                    masking.map(|metrics| metrics.pre_ringing_audible_db)
-                },
+                pre_ringing_audible_db: masking.map(|metrics| metrics.pre_ringing_audible_db),
                 main_time_ms: masking.map(|metrics| metrics.main_time_ms),
                 fir_taps: result.channel_results[name]
                     .fir_coeffs
@@ -1315,15 +1312,7 @@ fn runtime_temporal_quality_evidence(
             }
         })
         .collect();
-    let mut evidence =
-        roomeq_engine::quality::derive_temporal_quality_evidence(&channels, pre, post, sample_rate);
-    if phase_only_fir && evidence.pre_ringing_energy_db.is_none() {
-        // `None` means missing evidence to the runtime acceptance gate. For a
-        // phase-only FIR the compact magnitude-FIR pre-ringing metric is not
-        // applicable, so use the same inaudible sentinel as an IIR-only chain.
-        evidence.pre_ringing_energy_db = Some(-300.0);
-    }
-    evidence
+    roomeq_engine::quality::derive_temporal_quality_evidence(&channels, pre, post, sample_rate)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -2283,7 +2272,10 @@ mod tests {
     }
 
     #[test]
-    fn temporal_evidence_exempts_mixed_phase_pre_ringing() {
+    fn temporal_evidence_preserves_measured_precursor_across_modes() {
+        // F11: the same FIR/evidence must retain the same measured precursor
+        // value across mode labels. Policy decisions may differ transparently;
+        // measured facts must not.
         let mut result = single_channel_room_result("left");
         result
             .channels
@@ -2301,30 +2293,20 @@ mod tests {
         result.channel_results.get_mut("left").unwrap().fir_coeffs = Some(vec![0.0; 64]);
 
         let names = vec!["left".to_string()];
-        // Mixed-phase FIRs are unity-magnitude excess-phase corrections whose
-        // precursor content is the correction itself: the compact-FIR
-        // pre-ringing budget does not apply.
-        let mixed = runtime_temporal_quality_evidence(
-            &result,
-            &names,
-            &[],
-            &[],
-            48_000.0,
+        for mode in [
             roomeq_model::ProcessingMode::MixedPhase,
-        );
-        assert_eq!(mixed.pre_ringing_energy_db, Some(-300.0));
-
-        // Any other mode keeps the pre-ringing evidence so the acceptance
-        // policy can enforce it.
-        let phase_linear = runtime_temporal_quality_evidence(
-            &result,
-            &names,
-            &[],
-            &[],
-            48_000.0,
             roomeq_model::ProcessingMode::PhaseLinear,
-        );
-        assert_eq!(phase_linear.pre_ringing_energy_db, Some(-8.7));
+            roomeq_model::ProcessingMode::Hybrid,
+        ] {
+            let label = format!("{mode:?}");
+            let evidence =
+                runtime_temporal_quality_evidence(&result, &names, &[], &[], 48_000.0, mode);
+            assert_eq!(
+                evidence.pre_ringing_energy_db,
+                Some(-8.7),
+                "mode {label} must preserve the measured precursor"
+            );
+        }
     }
 
     #[test]

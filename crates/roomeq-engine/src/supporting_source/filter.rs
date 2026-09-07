@@ -111,6 +111,24 @@ pub fn compute_supporting_source_filter(
         0.0
     };
 
+    // 13. Enforce the precedence limit on the realized filter (F08).
+    // Decorrelation, truncation, and peak normalization reshape the response
+    // after the design-time constraint, so re-evaluate taps + gain against
+    // the same bands and scale broadband when the ceiling is breached. The
+    // reported gain is updated to the realized response so downstream curves
+    // describe the deployed filter, not the pre-realization design.
+    let realized_gain_db = enforce_realized_precedence_limit(
+        &mut taps,
+        normalization_gain_db,
+        &primary_smooth.spl,
+        &support_smooth.spl,
+        &config.precedence_limits,
+        &common_freq,
+        config.freq_range_hz,
+        sample_rate,
+    );
+    gain_curve.spl = Array1::from(realized_gain_db);
+
     // A magnitude response has no direct/late time split. Do not manufacture
     // an absolute DRR by assigning a fixed fraction of the same response to
     // both fields: that makes the reported pre-compensation value tautological.
@@ -210,6 +228,78 @@ fn limit_at_freq(f: f64, limits: &[PrecedenceLimitBand]) -> Option<f64> {
         }
     }
     None
+}
+
+/// Realized-response ripple tolerated before the precedence ceiling is
+/// re-enforced. Below this the FIR already honours the design limit and no
+/// broadband scaling is applied.
+const REALIZED_LIMIT_TOLERANCE_DB: f64 = 0.5;
+/// Floor reported for realized filter gain, matching the design mute level.
+const REALIZED_GAIN_FLOOR_DB: f64 = -120.0;
+
+/// Enforce precedence bands on the delivered filter.
+///
+/// Returns the realized filter gain (taps + normalization gain) on
+/// `common_freq` for reporting. When the realized support/primary ratio
+/// breaches a band ceiling beyond tolerance, the taps are scaled down
+/// broadband so the worst bin meets the limit.
+#[allow(clippy::too_many_arguments)]
+fn enforce_realized_precedence_limit(
+    taps: &mut [f64],
+    normalization_gain_db: f64,
+    primary_smooth_db: &Array1<f64>,
+    support_smooth_db: &Array1<f64>,
+    limits: &[PrecedenceLimitBand],
+    common_freq: &Array1<f64>,
+    compensation_band_hz: (f64, f64),
+    sample_rate: f64,
+) -> Vec<f64> {
+    let realized_filter_db = realized_filter_gain_db(taps, normalization_gain_db, common_freq, sample_rate);
+    if taps.is_empty() {
+        return realized_filter_db;
+    }
+    let mut worst_excess_db: f64 = 0.0;
+    for (i, &frequency) in common_freq.iter().enumerate() {
+        if frequency < compensation_band_hz.0 || frequency > compensation_band_hz.1 {
+            continue;
+        }
+        let Some(limit_db) = limit_at_freq(frequency, limits) else {
+            continue;
+        };
+        let realized_ratio_db = realized_filter_db[i] + support_smooth_db[i] - primary_smooth_db[i];
+        worst_excess_db = worst_excess_db.max(realized_ratio_db - limit_db);
+    }
+    if worst_excess_db > REALIZED_LIMIT_TOLERANCE_DB {
+        let scale = 10.0_f64.powf(-worst_excess_db / 20.0);
+        for tap in taps.iter_mut() {
+            *tap *= scale;
+        }
+        return realized_filter_gain_db(taps, normalization_gain_db, common_freq, sample_rate);
+    }
+    realized_filter_db
+}
+
+/// Realized filter gain in dB (taps plus normalization gain) on `freq`.
+fn realized_filter_gain_db(
+    taps: &[f64],
+    normalization_gain_db: f64,
+    freq: &Array1<f64>,
+    sample_rate: f64,
+) -> Vec<f64> {
+    if taps.is_empty() {
+        return vec![REALIZED_GAIN_FLOOR_DB; freq.len()];
+    }
+    crate::response::compute_fir_complex_response(taps, freq, sample_rate)
+        .iter()
+        .map(|h| {
+            let gain = 20.0 * h.norm().log10() + normalization_gain_db;
+            if gain.is_finite() {
+                gain.max(REALIZED_GAIN_FLOOR_DB)
+            } else {
+                REALIZED_GAIN_FLOOR_DB
+            }
+        })
+        .collect()
 }
 
 /// Compute supporting-source gain in dB: sqrt(d² - p²) / s.
@@ -480,6 +570,36 @@ mod tests {
             "minimum-phase peak should be early, got index {} of {}",
             peak_idx,
             result.taps.len()
+        );
+    }
+
+    #[test]
+    fn realized_filter_honours_precedence_limit() {
+        // F08: the delivered FIR + normalization gain must satisfy the same
+        // support/primary limit used to justify the design (6 dB above
+        // 500 Hz), not just the pre-realization target.
+        let freq = vec![20.0, 100.0, 1000.0, 20000.0];
+        let primary = flat_curve(&freq, 80.0);
+        let support = flat_curve(&freq, 75.0);
+        let target = flat_curve(&freq, 100.0);
+        let config = SupportingSourceConfig::default();
+        let result =
+            compute_supporting_source_filter(&primary, &support, &target, &config, 48_000.0)
+                .expect("filter computation should succeed");
+        let grid: Vec<f64> = (0..200)
+            .map(|i| 600.0 * (18000.0_f64 / 600.0).powf(i as f64 / 199.0))
+            .collect();
+        let grid_array = Array1::from(grid);
+        let response =
+            crate::response::compute_fir_complex_response(&result.taps, &grid_array, 48_000.0);
+        let norm_linear = 10.0_f64.powf(result.normalization_gain_db / 20.0);
+        let worst = response
+            .iter()
+            .map(|h| 20.0 * (h.norm() * norm_linear).log10() + 75.0 - 80.0)
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(
+            worst <= 7.0,
+            "realized support/primary reaches {worst:.2} dB above 500 Hz (limit 6 dB)"
         );
     }
 

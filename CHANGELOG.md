@@ -1,3 +1,23 @@
+# 0.5.72
+
+## RoomEQ review follow-up (F05, F15, F16, F18)
+
+- Replay native-grid training/held-out captures through final channel and routed
+  DSP, preserve position/output identity in the quality report, and fail closed on
+  missing branch evidence or worst-seat budget violations after post-processing.
+- Band-limited listening stimuli reject unsupported bandwidth/DC/Nyquist resolution
+  instead of silently capping taps and widening the band; add rate/stopband regressions.
+- Required final sub/main checks reject missing, sparse, or partial crossover support;
+  malformed target grids and unsupported metric definitions fail explicitly.
+- Supporting sources require calibrated relative arrival and shared-phase evidence,
+  or an explicit experimental opt-in. Replay the delivered FIR for coherent-sum
+  checks, enforce its cancellation budget, and distinguish power-average design
+  from acoustic/perceptual evidence in reports. Conflicting delay settings are errors.
+
+## Package versions
+
+- autoeq 0.5.72, roomeq-model 0.5.11, roomeq-quality 0.5.61, roomeq-workflow 0.5.31, roomeq-qa 0.5.66.
+
 # 0.5.71
 
 ## Package versions
@@ -5,6 +25,8 @@
 - autoeq 0.5.71, autoeq-optim 0.5.61, roomeq-quality 0.5.60, roomeq-qa 0.5.65, roomeq-export 0.5.6, roomeq-model 0.5.10, roomeq-engine 0.5.80, roomeq-workflow 0.5.30, roomeq-analysis 0.5.9.
 
 ## Fixes
+
+- REW MDAT CSV extraction now retains measurements with different frequency-point counts and locates impulse responses independently for each measurement. Curve names now prefer the serialized measurement title, preserving spaces and dates.
 
 - Cardioid QA fixture now uses single (`Single`) front/rear measurements: multi-file power-domain averaging deliberately drops phase, which gradient-cardioid processing legitimately requires, so the committed multi-file fixture could never pass.
 - Enabled `bass_management` in the `medium_stereo_2_1` and `large_multi_seat_2_1` FEM fixtures so the claimed feature produces runtime evidence like the passing `small_stereo_2_1` setup.

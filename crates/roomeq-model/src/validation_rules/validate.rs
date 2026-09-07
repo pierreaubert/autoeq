@@ -550,6 +550,29 @@ fn validate_speakers(speakers: &HashMap<String, SpeakerConfig>, result: &mut Val
                 }
 
                 let cfg = &s.supporting_source;
+                if cfg
+                    .acoustic_arrival_offset_ms
+                    .is_some_and(|offset| !offset.is_finite())
+                {
+                    result.add_error(format!(
+                        "Supporting source '{name}' acoustic_arrival_offset_ms must be finite"
+                    ));
+                }
+                if !cfg.max_coherent_cancellation_db.is_finite()
+                    || cfg.max_coherent_cancellation_db < 0.0
+                {
+                    result.add_error(format!("Supporting source '{name}' max_coherent_cancellation_db must be finite and non-negative"));
+                }
+                if !cfg.allow_unverified_acoustics
+                    && (cfg.acoustic_arrival_offset_ms.is_none() || !cfg.shared_phase_reference)
+                {
+                    result.add_error(format!("Supporting source '{name}' requires acoustic_arrival_offset_ms and shared_phase_reference, or explicit allow_unverified_acoustics"));
+                }
+                if let Some(offset) = cfg.acoustic_arrival_offset_ms
+                    && cfg.delay_ms < offset
+                {
+                    result.add_error(format!("Supporting source '{name}' arrival request would require a noncausal advance"));
+                }
                 if !(1.0..=50.0).contains(&cfg.delay_ms) {
                     result.add_error(format!(
                         "Supporting source '{}' delay_ms must be in [1.0, 50.0], got {:.2}",

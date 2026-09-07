@@ -1,6 +1,6 @@
 [package]
 name = "roomeq-quality"
-version = "0.5.60"
+version = "0.5.61"
 edition = "2024"
 description = "Acoustic quality metrics, acceptance policies, and QA fixtures for RoomEQ"
 license = "GPL-3.0-or-later"

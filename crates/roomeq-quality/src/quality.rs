@@ -250,6 +250,7 @@ pub fn evaluate_acoustic_quality(
         && induced_group_delay_rms_ms.is_none_or(f64::is_finite);
 
     Ok(AcousticQualityScorecard {
+        final_seats: Vec::new(),
         training,
         held_out,
         correction_rms_db,

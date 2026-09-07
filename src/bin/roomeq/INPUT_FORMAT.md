@@ -3,6 +3,45 @@
 RoomEQ consumes a JSON configuration file describing the room, speakers,
 measurements, and optimizer settings. The top-level object is a `RoomConfig`.
 
+## Final multi-position validation
+
+Multi-position training captures are retained on their native grids until final
+DSP replay. The final gate evaluates each logical input at each capture index,
+including its contributing physical outputs after routed gain, crossover, delay,
+and pre/post-route DSP. Held-out measurements use physical-output names; a routed
+validation seat must include every contributing output. Single-seat captures are
+not broadcast to missing positions. Named branch captures must have identical seat
+labels/order; unnamed captures retain the explicit positional array-order contract.
+
+`metadata.correction_acceptance.acoustic_quality.final_seats` records partition,
+logical input, capture index, optional seat label, physical outputs, actual supported
+evaluation band, and pre/post target error. Each position's errors use its own
+reported band; the aggregate reports the union and common overlap separately.
+The runtime worst-position budget is enforced after post-processing;
+a regression or missing required replay evidence fails the run, rather than
+certifying only an averaged channel. The comparison removes EQ/convolution correction
+while retaining the final structural routing for its baseline. Ear-identified CTC
+replay and ambiguous multi-seat legacy driver groups are not certified; use explicit
+driver topology IDs for the latter. Missing phase cannot establish a coherent sum.
+Supporting-source outputs use their separate reference-seat acoustic contract;
+they are not certified by the ordinary multi-position correction scorecard.
+
+## Supporting-source acoustic contract
+
+`supporting_source.delay_ms` is the requested reference-seat propagation-plus-
+electrical lag. Set `acoustic_arrival_offset_ms` to measured unfiltered support
+arrival minus primary arrival on a common time reference. The installed delay is
+their difference; negative delay and a conflicting `optimizer.allow_delay: false`
+are errors. Set `shared_phase_reference: true` only for time-referenced measured
+phases. The actual FIR/gain/delay are included in `coherent_sum` reporting and the
+`max_coherent_cancellation_db` engineering budget (default 3 dB).
+
+Without this evidence, explicit `allow_unverified_acoustics: true` is required for
+experimental operation. This opt-in does not establish acoustic validity. Reports
+separate power-average design from coherent prediction, flag missing evidence or
+budget overruns, and do not claim measured onset, fusion, DRR, or listening benefit.
+FIR energy spread and spatial validity require final-chain measurements/listening.
+
 ## Measurement provenance
 
 The optional top-level `provenance` object links each speaker measurement to a

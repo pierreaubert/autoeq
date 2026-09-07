@@ -11,7 +11,7 @@ use roomeq_model::{MeasurementSource, MultiSubGroup};
 /// without a complete label vector there is nothing to compare against, and
 /// the legacy positional (index-order) correspondence applies. Callers must
 /// keep unnamed inputs in identical seat order across subwoofers.
-fn seat_labels(source: &MeasurementSource) -> Option<Vec<String>> {
+pub(crate) fn seat_labels(source: &MeasurementSource) -> Option<Vec<String>> {
     match source {
         MeasurementSource::Single(single) => {
             single.measurement.name().map(|name| vec![name.to_string()])

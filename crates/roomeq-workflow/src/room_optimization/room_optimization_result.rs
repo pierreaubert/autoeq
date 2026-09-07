@@ -911,7 +911,7 @@ fn runtime_acceptance_evidence(
     Some((quality, realization, policy))
 }
 
-fn aggregate_runtime_quality(
+pub(super) fn aggregate_runtime_quality(
     scorecards: &[roomeq_engine::quality::AcousticQualityScorecard],
     temporal: roomeq_engine::quality::TemporalQualityEvidence,
     min_freq_hz: f64,
@@ -3068,6 +3068,10 @@ mod tests {
         result.metadata.supporting_source = Some(HashMap::from([(
             "WideLeft".to_string(),
             roomeq_model::SupportingSourceReport {
+                summation_model: "power_average_design".into(),
+                propagation_relative_arrival_ms: None,
+                coherent_sum: None,
+                max_coherent_cancellation_db: None,
                 enabled: true,
                 primary_output: "WideLeft".to_string(),
                 support_output: "WideLeft_support".to_string(),
@@ -3159,6 +3163,10 @@ mod tests {
         result.metadata.supporting_source = Some(HashMap::from([(
             "WideLeft".to_string(),
             roomeq_model::SupportingSourceReport {
+                summation_model: "power_average_design".into(),
+                propagation_relative_arrival_ms: None,
+                coherent_sum: None,
+                max_coherent_cancellation_db: None,
                 enabled: true,
                 primary_output: "WideLeft".to_string(),
                 support_output: "WideLeft_support".to_string(),

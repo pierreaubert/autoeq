@@ -339,6 +339,8 @@ pub(super) fn generate_stratified_config(
                     primary,
                     support,
                     supporting_source: SupportingSourceConfig {
+                        // Synthetic captures do not establish shared acoustic timing.
+                        allow_unverified_acoustics: true,
                         fir_taps: 256,
                         decorrelation: SupportingSourceDecorrelation::None,
                         ..Default::default()
@@ -431,6 +433,7 @@ pub(super) fn generate_stratified_config(
     };
 
     if scenario_kind == ScenarioKind::SupportingSource {
+        room_config.optimizer.allow_delay = Some(true);
         room_config.system = Some(SystemConfig {
             model: SystemModel::HomeCinema,
             speakers: HashMap::from([

@@ -10,6 +10,7 @@ from scripts.src.dsp import (
     compute_eq_response,
     compute_group_delay_from_ir,
     replay_serialized_output,
+    sum_driver_initial_curves,
     wrap_phase,
 )
 
@@ -402,6 +403,191 @@ class PostDspSourceCurveTests(unittest.TestCase):
         self.assertAlmostEqual(curves["LFE"]["spl"][0], 49.43433115727133, places=6)
         self.assertEqual(curves["R"]["spl"], [42.0])
         self.assertNotEqual(curves["LFE"]["spl"], [99.0])
+
+    def test_mismatched_grids_do_not_drop_main_channels(self):
+        # Mains on a full-range grid, sub branch on a sub-only grid: the
+        # routed branch is resampled onto the main grid instead of the
+        # channel being silently dropped from the corrected-curves row.
+        data = {
+            "metadata": {
+                "bass_management": {
+                    "physical_sub_output": "LFE",
+                    "routing_graph": {
+                        "routes": [
+                            {
+                                "source_channel": "L",
+                                "route_kind": "redirected_bass_lowpass_to_sub",
+                                "crossover_type": "LR24",
+                                "low_pass_hz": 1000.0,
+                                "gain_db": 0.0,
+                                "delay_ms": 0.0,
+                                "polarity_inverted": False,
+                            },
+                            {
+                                "source_channel": "LFE",
+                                "route_kind": "lfe_lowpass_to_sub",
+                                "crossover_type": "LR24",
+                                "low_pass_hz": 1000.0,
+                                "gain_db": 0.0,
+                                "delay_ms": 0.0,
+                                "polarity_inverted": False,
+                            },
+                        ],
+                    },
+                }
+            },
+            "channels": {
+                "L": {
+                    "final_curve": {"freq": [20.0, 40.0], "spl": [70.0, 70.0]},
+                    "plugins": [],
+                },
+                "LFE": {
+                    "initial_curve": {"freq": [30.0, 60.0], "spl": [60.0, 60.0]},
+                    "final_curve": {"freq": [30.0, 60.0], "spl": [60.0, 60.0]},
+                    "plugins": [],
+                },
+            },
+        }
+
+        curves = build_post_dsp_source_curves(data)
+
+        self.assertEqual(set(curves), {"L", "LFE"})
+        self.assertEqual(curves["L"]["freq"], [20.0, 40.0])
+        # Power sum of the 70 dB main and the resampled ~60 dB sub branch
+        # (the 1000 Hz low-pass is ~0 dB down at 20-40 Hz).
+        expected = 10.0 * math.log10(10.0 ** 7.0 + 10.0 ** 6.0)
+        for observed in curves["L"]["spl"]:
+            self.assertAlmostEqual(observed, expected, places=3)
+
+    def test_multisub_lfe_replays_drivers_at_acoustic_level(self):
+        # The channel aggregate of a multi-sub system is level-relative
+        # optimizer state (10 dB here); the corrected LFE curve must replay
+        # the ~70 dB driver measurements instead.
+        data = {
+            "metadata": {
+                "bass_management": {
+                    "physical_sub_output": "LFE",
+                    "routing_graph": {
+                        "routes": [
+                            {
+                                "source_channel": "LFE",
+                                "route_kind": "lfe_lowpass_to_sub",
+                                "crossover_type": "LR24",
+                                "low_pass_hz": 1000.0,
+                                "gain_db": 0.0,
+                                "delay_ms": 0.0,
+                                "polarity_inverted": False,
+                            },
+                        ],
+                    },
+                }
+            },
+            "channels": {
+                "LFE": {
+                    "initial_curve": {"freq": [50.0], "spl": [10.0]},
+                    "final_curve": {"freq": [50.0], "spl": [4.0]},
+                    "plugins": [
+                        {
+                            "plugin_type": "eq",
+                            "parameters": {
+                                "filters": [
+                                    {
+                                        "filter_type": "peak",
+                                        "freq": 50.0,
+                                        "q": 1.0,
+                                        "db_gain": -6.0,
+                                    }
+                                ]
+                            },
+                        }
+                    ],
+                    "drivers": [
+                        {
+                            "name": "sub_1",
+                            "initial_curve": {"freq": [50.0], "spl": [70.0]},
+                            "plugins": [
+                                {
+                                    "plugin_type": "gain",
+                                    "parameters": {"gain_db": 3.0},
+                                }
+                            ],
+                        },
+                        {
+                            "name": "sub_2",
+                            "initial_curve": {"freq": [50.0], "spl": [70.0]},
+                            "plugins": [],
+                        },
+                    ],
+                },
+            },
+        }
+
+        curves = build_post_dsp_source_curves(data)
+
+        self.assertEqual(set(curves), {"LFE"})
+        # Power sum of 73 dB + 70 dB drivers, minus 6 dB shared EQ.
+        expected = (
+            10.0 * math.log10(10.0 ** 7.3 + 10.0 ** 7.0) - 6.0
+        )
+        self.assertAlmostEqual(curves["LFE"]["spl"][0], expected, places=2)
+        self.assertGreater(curves["LFE"]["spl"][0], 60.0)
+
+    def test_driver_baseline_sums_raw_measurements(self):
+        channel = {
+            "initial_curve": {"freq": [50.0], "spl": [10.0]},
+            "drivers": [
+                {"name": "sub_1", "initial_curve": {"freq": [50.0], "spl": [70.0]}},
+                {"name": "sub_2", "initial_curve": {"freq": [50.0], "spl": [70.0]}},
+            ],
+        }
+
+        baseline = sum_driver_initial_curves(channel)
+
+        self.assertIsNotNone(baseline)
+        assert baseline is not None
+        self.assertEqual(baseline["freq"], [50.0])
+        self.assertAlmostEqual(
+            baseline["spl"][0], 10.0 * math.log10(2.0 * 10.0 ** 7.0), places=6
+        )
+        self.assertIsNone(sum_driver_initial_curves({"initial_curve": {}}))
+        self.assertIsNone(sum_driver_initial_curves(None))
+
+    def test_sub_without_own_route_falls_back_to_final(self):
+        data = {
+            "metadata": {
+                "bass_management": {
+                    "physical_sub_output": "LFE",
+                    "routing_graph": {
+                        "routes": [
+                            {
+                                "source_channel": "L",
+                                "route_kind": "redirected_bass_lowpass_to_sub",
+                                "crossover_type": "LR24",
+                                "low_pass_hz": 80.0,
+                                "gain_db": 0.0,
+                                "delay_ms": 0.0,
+                                "polarity_inverted": False,
+                            },
+                        ],
+                    },
+                }
+            },
+            "channels": {
+                "L": {
+                    "final_curve": {"freq": [80.0], "spl": [50.0], "phase": [0.0]},
+                    "plugins": [],
+                },
+                "LFE": {
+                    "initial_curve": {"freq": [80.0], "spl": [60.0], "phase": [0.0]},
+                    "final_curve": {"freq": [80.0], "spl": [55.0], "phase": [0.0]},
+                    "plugins": [],
+                },
+            },
+        }
+
+        curves = build_post_dsp_source_curves(data)
+
+        self.assertEqual(curves["LFE"]["spl"], [55.0])
 
 
 if __name__ == "__main__":

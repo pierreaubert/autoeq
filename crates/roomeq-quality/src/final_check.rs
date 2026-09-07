@@ -194,6 +194,20 @@ impl FinalValidationReport {
 
 /// Shared-grid structural check: length and frequency alignment.
 fn check_grid(curve: &Curve, reference: &Curve, label: &str) -> Result<(), String> {
+    for grid in [curve, reference] {
+        if grid.freq.len() != grid.spl.len()
+            || grid.freq.iter().any(|f| !f.is_finite() || *f <= 0.0)
+            || grid
+                .freq
+                .iter()
+                .zip(grid.freq.iter().skip(1))
+                .any(|(a, b)| a >= b)
+        {
+            return Err(format!(
+                "{label} requires finite ascending frequencies and matching SPL lengths"
+            ));
+        }
+    }
     if curve.freq.len() < 2
         || curve.freq.len() != reference.freq.len()
         || curve
@@ -250,6 +264,12 @@ pub fn evaluate_final_validation(
     sub_main: &SubMainSumEvidence,
 ) -> Result<FinalValidationReport, String> {
     definition.validate()?;
+    check_grid(target, target, "target")?;
+    if definition.weighting != "erb-rate"
+        || definition.measure_version != "auditory-frequency-measure-v1"
+    {
+        return Err("unsupported final-validation weighting or measure version".to_string());
+    }
     if pre.is_empty() {
         return Err(String::from("final validation needs at least one seat"));
     }
@@ -487,10 +507,20 @@ pub fn evaluate_final_validation(
 
     // Final sub/main sum: worst in-band dip of the sum below the louder
     // branch. Structural grid problems already aborted above.
-    let crossover: Vec<usize> =
-        support_indices(&sub_main.main.freq, sub_main.crossover_band_hz);
-    let mut sub_main_detail = String::from("sub/main sum unassessed (empty crossover band)");
-    if !crossover.is_empty() {
+    let crossover: Vec<usize> = support_indices(&sub_main.main.freq, sub_main.crossover_band_hz);
+    let sub_main_detail;
+    // This argument declares a required check, not an optional topology. A
+    // missing/partial band must not certify an unassessed sum. Three bins are
+    // the minimum for an interior dip; the grid must bracket both band edges.
+    let full_band = sub_main.main.freq[0] <= sub_main.crossover_band_hz[0]
+        && sub_main.main.freq[sub_main.main.freq.len() - 1] >= sub_main.crossover_band_hz[1];
+    if crossover.len() < 3 || !full_band {
+        violations.push("sub_main_sum_insufficient_support".to_string());
+        sub_main_detail = format!(
+            "sub/main sum unassessed (insufficient crossover support: {} bins, full band: {full_band})",
+            crossover.len()
+        );
+    } else {
         let mut dip = f64::NEG_INFINITY;
         let mut non_finite = false;
         for index in &crossover {
@@ -586,6 +616,68 @@ mod final_check_tests {
             crossover_band_hz: [60.0, 120.0],
             max_cancellation_db: 3.0,
         }
+    }
+
+    #[test]
+    fn required_crossover_rejects_missing_sparse_and_partial_support() {
+        let grid = grid();
+        let pre = vec![curve(&grid, 84.0)];
+        let post = vec![curve(&grid, 81.0)];
+        let target = curve(&grid, 80.0);
+        let refs = FinalReferences {
+            baseline_post: pre.clone(),
+            full_chain_post: None,
+        };
+        for band in [
+            [30_000.0, 40_000.0],
+            [grid[10], grid[10] + 0.01],
+            [10.0, 100.0],
+            [100.0, 30_000.0],
+        ] {
+            let mut sum = sub_main_ok(&grid);
+            sum.crossover_band_hz = band;
+            let report =
+                evaluate_final_validation(&definition(), &pre, &post, &target, &refs, &sum)
+                    .unwrap();
+            assert!(!report.accepted(), "band {band:?}");
+            assert!(
+                report
+                    .violations
+                    .iter()
+                    .any(|v| v == "sub_main_sum_insufficient_support")
+            );
+        }
+    }
+
+    #[test]
+    fn final_validation_rejects_malformed_target_and_unknown_weighting() {
+        let grid = grid();
+        let pre = vec![curve(&grid, 84.0)];
+        let post = vec![curve(&grid, 81.0)];
+        let refs = FinalReferences {
+            baseline_post: pre.clone(),
+            full_chain_post: None,
+        };
+        let mut target = curve(&grid, 80.0);
+        target.spl = vec![80.0].into();
+        assert!(
+            evaluate_final_validation(
+                &definition(),
+                &pre,
+                &post,
+                &target,
+                &refs,
+                &sub_main_ok(&grid)
+            )
+            .is_err()
+        );
+        let target = curve(&grid, 80.0);
+        let mut def = definition();
+        def.weighting = "unknown".into();
+        assert!(
+            evaluate_final_validation(&def, &pre, &post, &target, &refs, &sub_main_ok(&grid))
+                .is_err()
+        );
     }
 
     #[test]

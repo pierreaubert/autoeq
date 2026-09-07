@@ -3882,6 +3882,8 @@ mod tests {
                 primary: MeasurementSource::InMemory(flat_curve()),
                 support: MeasurementSource::InMemory(flat_curve()),
                 supporting_source: SupportingSourceConfig {
+                    // Synthetic fixture has no shared-time acoustic evidence.
+                    allow_unverified_acoustics: true,
                     delay_ms: 2.0,
                     fir_taps: 128,
                     decorrelation: SupportingSourceDecorrelation::None,
@@ -3902,6 +3904,7 @@ mod tests {
         };
         let mut optimizer = tiny_optimizer();
         optimizer.max_freq = 2_000.0;
+        optimizer.allow_delay = Some(true);
         let config = room_config(speakers, &sys, optimizer, None, None);
         let mut assembly = super::super::types::WorkflowAssembly {
             config: &config,
@@ -3946,6 +3949,8 @@ mod tests {
                 primary: MeasurementSource::InMemory(flat_curve()),
                 support: MeasurementSource::InMemory(flat_curve()),
                 supporting_source: SupportingSourceConfig {
+                    // Synthetic fixture has no shared-time acoustic evidence.
+                    allow_unverified_acoustics: true,
                     delay_ms: 2.0,
                     fir_taps: 128,
                     decorrelation: SupportingSourceDecorrelation::None,
@@ -3960,7 +3965,9 @@ mod tests {
             bass_management: None,
             ..Default::default()
         };
-        let config = room_config(speakers, &sys, tiny_optimizer(), None, None);
+        let mut optimizer = tiny_optimizer();
+        optimizer.allow_delay = Some(true);
+        let config = room_config(speakers, &sys, optimizer, None, None);
         let mut assembly = super::super::types::WorkflowAssembly {
             config: &config,
             sys: &sys,
@@ -3989,6 +3996,8 @@ mod tests {
                 primary: MeasurementSource::InMemory(flat_curve()),
                 support: MeasurementSource::InMemory(flat_curve()),
                 supporting_source: SupportingSourceConfig {
+                    // Synthetic fixture has no shared-time acoustic evidence.
+                    allow_unverified_acoustics: true,
                     fir_taps: 128,
                     decorrelation: SupportingSourceDecorrelation::None,
                     ..Default::default()

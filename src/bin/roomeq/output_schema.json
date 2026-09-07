@@ -15,6 +15,12 @@
           "minItems": 2,
           "type": "array"
         },
+        "final_seats": {
+          "items": {
+            "$ref": "#/$defs/FinalSeatEvaluation"
+          },
+          "type": "array"
+        },
         "finite": {
           "type": "boolean"
         },
@@ -3327,8 +3333,13 @@
       "type": "object"
     },
     "FilterAudibilityConfig": {
-      "description": "Per-filter audibility veto for emitted PEQ filters (Phase A of the\naudibility plan).\n\nEvery threshold here is an implementation-time starting calibration,\nshipped first in report-only mode: with `report_only: true` (the default)\nthe veto evaluates every filter and records reason-coded verdicts but\nnever removes anything, so default behavior is unchanged. Enforcement\n(`report_only: false`) is opt-in. `None` on the owning optimizer config\ndisables the veto entirely (no evaluation, no output change).\n\nThe veto prices each biquad in perceptual units on the ERB-rate axis\n(see `roomeq_engine::eq::audibility_veto`): peak with/without level\ndifference, affected ERB width, and an approximate masked-loudness delta\nat calibrated SPL. None of these is a reference-grade ISO 532\nimplementation; that arrives with the Phase D objective. Threshold\nnumerics must be re-verified against primary psychoacoustic publications\nbefore any default flip.",
+      "description": "Per-filter audibility veto for emitted PEQ filters (Phase A of the\naudibility plan).\n\nEvery threshold here is an implementation-time starting calibration,\nshipped first in report-only mode: with `report_only: true` (the default)\nthe veto evaluates every filter and records reason-coded verdicts but\nnever removes anything, so default behavior is unchanged. Enforcement\n(`report_only: false` plus `allow_enforcement_with_experimental_proxy`)\nis opt-in and experimental. `None` on the owning optimizer config\ndisables the veto entirely (no evaluation, no output change).\n\nThe veto prices each biquad in perceptual units on the ERB-rate axis\n(see `roomeq_engine::eq::audibility_veto`): peak with/without level\ndifference, affected ERB width, and an approximate masked-loudness delta\nat calibrated SPL. None of these is a reference-grade ISO 532\nimplementation; that arrives with the Phase D objective. Threshold\nnumerics must be re-verified against primary psychoacoustic publications\nbefore any default flip.",
       "properties": {
+        "allow_enforcement_with_experimental_proxy": {
+          "default": false,
+          "description": "Explicit acknowledgment that the loudness proxy is experimental and\nunvalidated (see `roomeq_engine::eq::audibility_veto`). Enforcement\nstays advisory until this is set to `true`: `report_only: false`\nalone never removes filters.",
+          "type": "boolean"
+        },
         "elimination_loudness_delta_sones": {
           "default": 0.05,
           "description": "Backward-elimination threshold in approximate masked-loudness delta\n(sones): filters whose removal changes total loudness by less than\nthis are eliminated. Provisional calibration; report-only first.",
@@ -3392,10 +3403,72 @@
         },
         "report_only": {
           "default": true,
-          "description": "Report-only mode: record verdicts but never remove filters.\nEnforcement requires explicitly setting this to `false`.",
+          "description": "Report-only mode: record verdicts but never remove filters.\nEnforcement requires explicitly setting this to `false` *and*\nacknowledging the experimental proxy (see below).",
           "type": "boolean"
         }
       },
+      "type": "object"
+    },
+    "FinalSeatEvaluation": {
+      "description": "One independently replayed final-chain listening-position assessment.",
+      "properties": {
+        "evaluated_band_hz": {
+          "description": "Actual supported evaluation band for this input/position, not the\noptimizer's requested full band.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "improvement_db": {
+          "format": "double",
+          "type": "number"
+        },
+        "logical_input": {
+          "type": "string"
+        },
+        "partition": {
+          "type": "string"
+        },
+        "physical_outputs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "post_weighted_rms_db": {
+          "format": "double",
+          "type": "number"
+        },
+        "pre_weighted_rms_db": {
+          "format": "double",
+          "type": "number"
+        },
+        "seat_index": {
+          "description": "Stable index in the input measurement array; never a channel aggregate.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "seat_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "partition",
+        "logical_input",
+        "seat_index",
+        "physical_outputs",
+        "evaluated_band_hz",
+        "pre_weighted_rms_db",
+        "post_weighted_rms_db",
+        "improvement_db"
+      ],
       "type": "object"
     },
     "FirConfig": {
@@ -5365,7 +5438,7 @@
               "type": "null"
             }
           ],
-          "description": "Per-filter audibility veto (Phase A). `None` (default) disables the\nveto entirely: no evaluation, no preset-output change. `Some` with\n`report_only: true` (default) records reason-coded verdicts without\nremoving filters; enforcement is opt-in via `report_only: false`."
+          "description": "Per-filter audibility veto (Phase A). `None` (default) disables the\nveto entirely: no evaluation, no preset-output change. `Some` with\n`report_only: true` (default) records reason-coded verdicts without\nremoving filters; enforcement is opt-in via `report_only: false` plus\n`allow_enforcement_with_experimental_proxy` (the proxy is unvalidated)."
         },
         "fir": {
           "anyOf": [
@@ -7851,6 +7924,19 @@
     "SupportingSourceConfig": {
       "description": "Configuration for a single supporting-source loudspeaker channel.",
       "properties": {
+        "acoustic_arrival_offset_ms": {
+          "description": "Unfiltered support arrival minus primary arrival at the reference seat,\nmeasured in milliseconds using a common acquisition time reference.\nElectrical delay is `delay_ms - acoustic_arrival_offset_ms`.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "allow_unverified_acoustics": {
+          "default": false,
+          "description": "Explicit experimental opt-in when arrival or coherent-sum evidence is\nunavailable. Power-average design is not a coherent or perceptual guarantee.",
+          "type": "boolean"
+        },
         "decorrelation": {
           "$ref": "#/$defs/SupportingSourceDecorrelation",
           "default": "velvet_noise",
@@ -7889,6 +7975,12 @@
           ],
           "type": "array"
         },
+        "max_coherent_cancellation_db": {
+          "default": 3.0,
+          "description": "Engineering budget for a coherent dip below the louder branch, not an\naudibility threshold.",
+          "format": "double",
+          "type": "number"
+        },
         "precedence_limits": {
           "default": [
             {
@@ -7907,6 +7999,11 @@
             "$ref": "#/$defs/PrecedenceLimitBand"
           },
           "type": "array"
+        },
+        "shared_phase_reference": {
+          "default": false,
+          "description": "Both transfer-function phases retain the same acquisition time reference.",
+          "type": "boolean"
         },
         "target_response": {
           "description": "Target response to match. Defaults to the room-level `target_curve`.",
@@ -7965,6 +8062,7 @@
         "supporting_source": {
           "$ref": "#/$defs/SupportingSourceConfig",
           "default": {
+            "allow_unverified_acoustics": false,
             "decorrelation": "velvet_noise",
             "delay_ms": 10.0,
             "fir_taps": 8192,
@@ -7972,6 +8070,7 @@
               70.0,
               20000.0
             ],
+            "max_coherent_cancellation_db": 3.0,
             "precedence_limits": [
               {
                 "high_hz": 500.0,
@@ -7984,6 +8083,7 @@
                 "low_hz": 500.0
               }
             ],
+            "shared_phase_reference": false,
             "velvet_noise_taps": 4096
           },
           "description": "Supporting-source processing configuration."
@@ -8016,6 +8116,16 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "coherent_sum": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CurveData"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "compensation_band_hz": {
           "description": "Compensation band in Hz.",
@@ -8070,6 +8180,13 @@
           "minimum": 0,
           "type": "integer"
         },
+        "max_coherent_cancellation_db": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "precedence_limit_hits": {
           "description": "Number of frequency bins where the precedence ceiling was hit.",
           "format": "uint",
@@ -8078,6 +8195,19 @@
         },
         "primary_output": {
           "description": "Name of the primary output channel.",
+          "type": "string"
+        },
+        "propagation_relative_arrival_ms": {
+          "description": "Propagation plus electrical delay at the reference seat, excluding FIR\nenergy spread. Not a measured onset or a perceptual fusion guarantee.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "summation_model": {
+          "default": "",
+          "description": "Design uses power averaging; optional prediction retains coherent phase.",
           "type": "string"
         },
         "support_output": {

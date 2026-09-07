@@ -246,7 +246,6 @@ def find_measurement_primitives(data, class_desc_end, prim_fields):
     # the right amount of primitive data.
     # Read first instance to get expected values
     first_params, _ = read_primitive_fields(data, class_desc_end, prim_fields)
-    data_length = first_params['dataLength']
     sample_rate = first_params['sampleRate']
 
     # Calculate the offset of dataLength within primitive fields
@@ -272,7 +271,7 @@ def find_measurement_primitives(data, class_desc_end, prim_fields):
         if prim_start + prim_size > len(data):
             break
         candidate_dl = struct.unpack('>i', data[prim_start + dl_offset:prim_start + dl_offset + 4])[0]
-        if candidate_dl == data_length:
+        if 0 < candidate_dl <= len(data) // 4:
             # Additional validation: check sampleRate
             sr_offset = 0
             for tc, name in prim_fields:
@@ -312,13 +311,6 @@ def _measurement_label(metadata):
     return None
 
 
-_MEASUREMENT_DATE_SUFFIX = re.compile(
-    r"\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
-    r"\s+\d{1,2}(?:,\s*\d{4})?\b.*$",
-    re.IGNORECASE,
-)
-
-
 def _measurement_title(metadata):
     """Return a serialized REW measurement title, if it looks like one."""
     if "\n" in metadata or "\r" in metadata:
@@ -338,8 +330,7 @@ def _measurement_title(metadata):
     if not any("_" in token for token in label.split()):
         return None
 
-    title = _MEASUREMENT_DATE_SUFFIX.sub("", label).strip()
-    return title or None
+    return label
 
 
 def find_measurement_names(data, ir_arrays, measurement_ends):
@@ -347,17 +338,22 @@ def find_measurement_names(data, ir_arrays, measurement_ends):
     Recover REW measurement titles without retaining embedded REW notes.
 
     REW serializes the measurement title separately from a longer notes string.
-    Prefer the single-line, identifier-like title and fall back to the first
-    line of the notes for older or incomplete files.
+    Prefer shortDesc immediately before the serialized signal level, then
+    identifier-like titles and finally the first line of measurement notes.
     """
     names = []
     element_sizes = {'[F': 4, '[D': 8, '[I': 4}
-    for index, (_, arr_len, arr_data, elem_type) in enumerate(ir_arrays):
+    for index, ir_array in enumerate(ir_arrays):
+        if ir_array is None:
+            names.append(None)
+            continue
+        _, arr_len, arr_data, elem_type = ir_array
         ir_end = arr_data + arr_len * element_sizes[elem_type]
         measurement_end = measurement_ends[index]
         search_area = data[ir_end:measurement_end]
         candidates = []
         title_candidates = []
+        short_descriptions = []
         pos = 0
         while pos < len(search_area) - 3:
             if search_area[pos] == 0x74:  # TC_STRING
@@ -365,6 +361,19 @@ def find_measurement_names(data, ir_arrays, measurement_ends):
                 if 1 <= slen <= 4096 and pos + 3 + slen <= len(search_area):
                     try:
                         s = search_area[pos + 3:pos + 3 + slen].decode('utf-8')
+                        # MeasData stores shortDesc directly before sigGenLevelSt.
+                        # This identifies ordinary titles (including spaces and dates)
+                        # without mistaking notes or enum constants for curve names.
+                        next_pos = pos + 3 + slen
+                        if (next_pos + 3 <= len(search_area)
+                                and search_area[next_pos] == 0x74):
+                            level_len = struct.unpack_from('>H', search_area, next_pos + 1)[0]
+                            level_end = next_pos + 3 + level_len
+                            if level_end <= len(search_area):
+                                level = search_area[next_pos + 3:level_end]
+                                if (re.fullmatch(rb'[+-]?(?:\d+(?:\.\d*)?|\.\d+) dBFS', level)
+                                        and s.strip() and '\n' not in s and '\r' not in s):
+                                    short_descriptions.append(s)
                         # Skip Java class/type strings
                         if not any(x in s for x in ['java', 'javax', 'roomeq', 'swing', 'awt',
                                                       'HERMITE', 'TUKEY', 'HANN', 'PERCENT',
@@ -382,10 +391,11 @@ def find_measurement_names(data, ir_arrays, measurement_ends):
             # apparent length could skip the real metadata token.
             pos += 1
         names.append(
-            title_candidates[0]
-            if title_candidates
-            else max(candidates, default=(0, None))[1]
+            short_descriptions[0] if short_descriptions else
+            title_candidates[0] if title_candidates else
+            max(candidates, default=(0, None))[1]
         )
+
     return names
 
 
@@ -474,24 +484,20 @@ def parse_mdat(filepath):
     raw_arrays = scan_float_arrays(data)
     arrays = resolve_array_types(raw_arrays, data)
 
-    # Find IR arrays: power-of-2 sized float arrays that appear once per measurement.
-    # These serve as landmarks separating pre-IR (distortion etc.) from post-IR (phase, SPL).
-    ir_candidates = {}
-    for o, l, d, t in arrays:
-        if t == '[F' and l >= 512 and l & (l - 1) == 0:  # power of 2, >= 512
-            ir_candidates.setdefault(l, []).append((o, l, d, t))
-    # The IR length that matches measurement count is the one we want
-    ir_length = None
+    # Locate the largest power-of-two float array within each measurement.
+    # Measurements may have different IR lengths and frequency grids.
+    measurement_ends = prim_starts[1:] + [len(data)]
     ir_arrays = []
-    for length, candidates in sorted(ir_candidates.items(), reverse=True):
-        if len(candidates) == num_measurements:
-            ir_length = length
-            ir_arrays = sorted(candidates, key=lambda candidate: candidate[0])
-            break
+    for start, end in zip(prim_starts, measurement_ends):
+        candidates = [
+            (o, l, d, t) for o, l, d, t in arrays
+            if t == '[F' and l >= 512 and l & (l - 1) == 0
+            and start < o and d + l * 4 <= end
+        ]
+        ir_arrays.append(max(candidates, key=lambda candidate: candidate[1], default=None))
 
     # Get HTML descriptions for naming
     html_descs = find_html_descriptions(data)
-    measurement_ends = prim_starts[1:] + [len(data)]
     embedded_names = find_measurement_names(data, ir_arrays, measurement_ends)
 
     prim_size = sum(TYPE_SIZES[tc] for tc, _ in prim_fields)
@@ -509,8 +515,8 @@ def parse_mdat(filepath):
         prim_end = meas_start + prim_size
 
         # If we have IR landmarks, prefer post-IR arrays (where phase/SPL live)
-        if ir_arrays and meas_idx < len(ir_arrays):
-            _, _, ir_data_start, _ = ir_arrays[meas_idx]
+        if ir_arrays[meas_idx] is not None:
+            _, ir_length, ir_data_start, _ = ir_arrays[meas_idx]
             ir_data_end = ir_data_start + ir_length * 4
             # Post-IR: between IR end and next measurement's primitive start
             post_ir = [(o, l, d, t) for o, l, d, t in arrays

@@ -540,6 +540,7 @@ and a configurable compensation band.
       "support": "measurements/left_support.csv",
       "supporting_source": {
         "delay_ms": 10.0,
+        "allow_unverified_acoustics": true,
         "freq_range_hz": [70.0, 20000.0],
         "decorrelation": "velvet_noise",
         "fir_taps": 8192,
@@ -555,7 +556,8 @@ and a configurable compensation band.
       "primary": "measurements/right_primary.csv",
       "support": "measurements/right_support.csv",
       "supporting_source": {
-        "delay_ms": 10.0
+        "delay_ms": 10.0,
+        "allow_unverified_acoustics": true
       }
     }
   },
@@ -575,6 +577,39 @@ loading the generated FIR WAV file. `metadata.supporting_source` records this
 as `primary_eq_bypassed_to_preserve_direct_sound`, along with precedence-limit
 and spatial-robustness advisories. Absolute DRR summaries are present only
 when time-gated impulse-response evidence is available.
+
+The example above is explicitly experimental: magnitude curves alone do not
+establish arrival timing or coherent interference. By default supporting-source
+processing requires `acoustic_arrival_offset_ms` (unfiltered support arrival minus
+primary arrival at the reference seat, measured on a common time reference) and
+`shared_phase_reference: true` with measured phase on both transfers. Electrical
+delay is `delay_ms - acoustic_arrival_offset_ms`: a support source arriving 2.5 ms
+earlier needs 12.5 ms electrical delay to achieve a requested 10 ms propagation-plus-
+electrical lag. A required advance, or `optimizer.allow_delay: false` when positive
+electrical delay is needed, is rejected. Do not set the shared-phase flag merely
+because CSVs contain phase columns; independent sweep time origins are insufficient.
+
+The realized FIR, gain, and delay are replayed for the reported coherent sum.
+`max_coherent_cancellation_db` defaults to a 3 dB engineering budget below the
+louder branch; exceeding it rejects a verified-mode run. Explicit
+`allow_unverified_acoustics: true` permits experimental operation with conspicuous
+missing-evidence/over-budget advisories. The report labels the **power-average
+design** separately from `coherent_sum`; the latter is omitted without shared-phase
+evidence. `propagation_relative_arrival_ms` excludes FIR energy spread and is not a
+measured perceptual onset. Reference-seat prediction does not prove fusion,
+localization, DRR, or multi-seat benefit; validate those with final-chain measurements
+and controlled listening. Required evidence is checked before writing the FIR.
+
+### Listening-stimulus resolution
+
+The quality harness's band-limited noise has nominal -6 dB band edges and a
+transition allowance of half the smallest of bandwidth, lower edge, and upper-edge
+clearance to Nyquist. The FIR design targets at least 40 dB stopband rejection
+outside those transitions. Requests exceeding 4095 taps are errors, not silently
+widened bands; for example 90–110 Hz at 48 or 96 kHz is unsupported. Minimum
+bandwidth and edge clearance are approximately `8 * sample_rate / 4095` Hz.
+Deterministic filter-response checks complement seeded waveform tests; finite
+stimulus duration still matters when interpreting measured spectra.
 
 ### Complete Configuration Examples
 

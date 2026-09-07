@@ -1177,6 +1177,34 @@ def _route_color(route_kind: str, alpha: float = 0.58) -> str:
     return colors.get(route_kind, f"rgba(127, 140, 141, {alpha})")
 
 
+def _driver_link_color(alpha: float = 0.58) -> str:
+    return f"rgba(148, 103, 189, {alpha})"
+
+
+def _driver_alignment(driver: dict) -> tuple[float, float, bool]:
+    """Extract the (gain_db, delay_ms, inverted) alignment of a sub driver."""
+    gain_db = 0.0
+    delay_ms = 0.0
+    inverted = False
+    for plugin in driver.get("plugins", []) or []:
+        if not isinstance(plugin, dict):
+            continue
+        params = plugin.get("parameters", {}) or {}
+        plugin_type = str(plugin.get("plugin_type", "")).lower()
+        if plugin_type == "gain":
+            try:
+                gain_db += float(params.get("gain_db", 0.0))
+            except (TypeError, ValueError):
+                pass
+            inverted = inverted or bool(params.get("invert", False))
+        elif plugin_type == "delay":
+            try:
+                delay_ms += float(params.get("delay_ms", 0.0))
+            except (TypeError, ValueError):
+                pass
+    return gain_db, delay_ms, inverted
+
+
 def create_bass_management_routing_figure(data: dict) -> go.Figure | None:
     """Create a Sankey graph from route-level bass-management metadata.
 
@@ -1184,6 +1212,11 @@ def create_bass_management_routing_figure(data: dict) -> go.Figure | None:
     a high-passed self-route plus one low-passed route per physical bass
     output. A Sankey view makes that routing explicit, including per-route
     crossover, gain, delay and polarity metadata.
+
+    A physical bass output may itself fan out to several sub drivers (e.g.
+    a 2.2 rig with two drivers under ``out: LFE``). One link per driver is
+    drawn from the bus node so the split and each driver's alignment
+    gain/delay stay visible instead of collapsing into a single output.
     """
     report = _bass_management_report(data)
     routing_graph = report.get("routing_graph") or {}
@@ -1244,6 +1277,42 @@ def create_bass_management_routing_figure(data: dict) -> go.Figure | None:
             )
         )
 
+    # Multi-driver fan-out from each physical bass output bus.
+    channels_dict = data.get("channels", {}) or {}
+    driver_link_count = 0
+    for channel_name in sorted(channels_dict, key=get_channel_sort_key):
+        channel_data = channels_dict[channel_name] or {}
+        drivers = channel_data.get("drivers") or []
+        if not drivers or f"out:{channel_name}" not in node_index:
+            continue
+        bus_node = node_index[f"out:{channel_name}"]
+        for index, driver in enumerate(drivers):
+            if not isinstance(driver, dict):
+                continue
+            driver_name = str(driver.get("name", f"driver_{index}"))
+            gain_db, delay_ms, inverted = _driver_alignment(driver)
+            try:
+                value = max(10.0 ** (float(gain_db) / 20.0), 0.05)
+            except (TypeError, ValueError):
+                value = 1.0
+            sources.append(bus_node)
+            targets.append(add_node("sub", driver_name))
+            values.append(value)
+            colors.append(_driver_link_color())
+            hover.append(
+                "<br>".join(
+                    [
+                        "<b>Sub driver</b>",
+                        f"output bus: {channel_name}",
+                        f"driver: {driver_name}",
+                        f"gain: {gain_db:+.2f} dB",
+                        f"delay: {delay_ms:.3f} ms",
+                        f"polarity: {'inverted' if inverted else 'normal'}",
+                    ]
+                )
+            )
+            driver_link_count += 1
+
     fig = go.Figure(
         data=[
             go.Sankey(
@@ -1267,7 +1336,7 @@ def create_bass_management_routing_figure(data: dict) -> go.Figure | None:
     )
     fig.update_layout(
         title=dict(text="Bass Management Routing Graph", font=dict(size=14)),
-        height=max(420, min(760, 260 + 18 * len(routes))),
+        height=max(420, min(760, 260 + 18 * (len(routes) + driver_link_count))),
         margin=dict(l=20, r=20, t=60, b=20),
         paper_bgcolor="white",
         plot_bgcolor="white",

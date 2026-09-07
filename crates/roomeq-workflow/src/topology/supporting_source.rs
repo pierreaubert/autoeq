@@ -151,7 +151,10 @@ mod tests {
             version: default_config_version(),
             system: None,
             speakers,
-            optimizer: OptimizerConfig::default(),
+            optimizer: OptimizerConfig {
+                allow_delay: Some(true),
+                ..Default::default()
+            },
             target_curve: None,
             crossovers: None,
             provenance: Default::default(),
@@ -168,6 +171,8 @@ mod tests {
             primary: MeasurementSource::InMemory(flat_curve(80.0)),
             support: MeasurementSource::InMemory(flat_curve(80.0)),
             supporting_source: SupportingSourceConfig {
+                // Synthetic fixture has no shared-time acoustic evidence.
+                allow_unverified_acoustics: true,
                 delay_ms: 2.0,
                 fir_taps: 128,
                 decorrelation: SupportingSourceDecorrelation::None,

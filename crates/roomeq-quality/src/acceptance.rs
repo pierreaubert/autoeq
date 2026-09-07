@@ -891,6 +891,7 @@ mod tests {
             bass_modal_roughness_improvement_db_per_octave2: None,
         };
         super::super::AcousticQualityScorecard {
+            final_seats: Vec::new(),
             training: partition,
             held_out: None,
             correction_rms_db: 2.0,

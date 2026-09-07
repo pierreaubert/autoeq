@@ -31,6 +31,7 @@ fn primary_with_notch() -> Curve {
 
 fn base_optimizer() -> OptimizerConfig {
     OptimizerConfig {
+        allow_delay: Some(true),
         processing_mode: ProcessingMode::LowLatency,
         num_filters: 1,
         max_iter: 20,
@@ -55,6 +56,8 @@ fn stereo_workflow_emits_supporting_source_channels_and_metadata() {
             primary: MeasurementSource::InMemory(primary_with_notch()),
             support: MeasurementSource::InMemory(flat_curve(80.0)),
             supporting_source: SupportingSourceConfig {
+                // Synthetic fixture has no shared-time acoustic evidence.
+                allow_unverified_acoustics: true,
                 delay_ms: 5.0,
                 fir_taps: 256,
                 decorrelation: SupportingSourceDecorrelation::None,
@@ -144,6 +147,8 @@ fn home_cinema_workflow_emits_supporting_source_channels_and_metadata() {
             primary: MeasurementSource::InMemory(primary_with_notch()),
             support: MeasurementSource::InMemory(flat_curve(80.0)),
             supporting_source: SupportingSourceConfig {
+                // Synthetic fixture has no shared-time acoustic evidence.
+                allow_unverified_acoustics: true,
                 delay_ms: 4.0,
                 fir_taps: 256,
                 decorrelation: SupportingSourceDecorrelation::None,
@@ -214,6 +219,8 @@ fn spatial_robustness_advisories_raised_for_multiple_measurements() {
             primary: MeasurementSource::InMemoryMultiple(vec![seat1, seat2]),
             support: MeasurementSource::InMemory(flat_curve(80.0)),
             supporting_source: SupportingSourceConfig {
+                // Synthetic fixture has no shared-time acoustic evidence.
+                allow_unverified_acoustics: true,
                 delay_ms: 3.0,
                 fir_taps: 256,
                 velvet_noise_taps: 128,

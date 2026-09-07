@@ -25,7 +25,11 @@ from .figures import (
     _mode_color,
 )
 from .data_extract import extract_eq_passes, get_channel_sort_key
-from .dsp import build_post_dsp_source_curves, synthesize_lr_channel
+from .dsp import (
+    build_post_dsp_source_curves,
+    sum_driver_initial_curves,
+    synthesize_lr_channel,
+)
 from .target_overlay import build_target_overlay_curves
 
 # Synthetic channel name used for the complex L+R sum tab in the
@@ -955,6 +959,13 @@ def create_html_report(
         active_class = " active" if i == 0 else ""
         safe_id = f"channel_{i}"
         initial_curve = channel_data.get("initial_curve")
+        if channel_data.get("drivers"):
+            # A multi-driver aggregate initial is level-relative optimizer
+            # state; the summed driver measurements are the acoustic baseline
+            # matching the logical-input corrected curve.
+            driver_baseline = sum_driver_initial_curves(channel_data)
+            if driver_baseline is not None:
+                initial_curve = driver_baseline
         final_curve = _channel_display_final_curve(
             channel_name, physical_sub, channel_data, post_dsp_curves
         )

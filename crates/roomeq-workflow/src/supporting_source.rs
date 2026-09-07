@@ -163,6 +163,103 @@ fn anchor_supporting_source_target_to_primary(
     }
 }
 
+fn resolve_support_delay(
+    config: &roomeq_model::SupportingSourceConfig,
+    allow_delay: bool,
+) -> Result<f64> {
+    let invalid = |message: &str| AutoeqError::InvalidConfiguration {
+        message: message.into(),
+    };
+    if !config.delay_ms.is_finite()
+        || config.delay_ms <= 0.0
+        || !config.max_coherent_cancellation_db.is_finite()
+        || config.max_coherent_cancellation_db < 0.0
+    {
+        return Err(invalid(
+            "supporting-source delay and cancellation budget must be finite and valid",
+        ));
+    }
+    let offset = match config.acoustic_arrival_offset_ms {
+        Some(offset) if offset.is_finite() => offset,
+        None if config.allow_unverified_acoustics => 0.0,
+        _ => {
+            return Err(invalid(
+                "supporting source needs finite acoustic_arrival_offset_ms from a common time reference, or explicit allow_unverified_acoustics",
+            ));
+        }
+    };
+    let electrical = config.delay_ms - offset;
+    if !electrical.is_finite() || electrical < 0.0 {
+        return Err(invalid(
+            "supporting-source requested relative arrival requires a noncausal advance; change placement or timing request",
+        ));
+    }
+    if !allow_delay && electrical > 1e-9 {
+        return Err(invalid(
+            "supporting-source arrival requirement conflicts with allow_delay=false",
+        ));
+    }
+    Ok(electrical)
+}
+
+fn coherent_support_sum(
+    primary: &Curve,
+    support: &Curve,
+    band: (f64, f64),
+) -> Result<(Curve, f64)> {
+    primary.validate("coherent supporting-source primary")?;
+    support.validate("coherent supporting-source support")?;
+    let primary_on_grid = autoeq_measurements::read::interpolate_log_space(&support.freq, primary);
+    let (Some(pp), Some(sp)) = (&primary_on_grid.phase, &support.phase) else {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: "coherent support sum requires both measured phases".into(),
+        });
+    };
+    let mut freq = Vec::new();
+    let mut spl = Vec::new();
+    let mut phase = Vec::new();
+    let mut worst = 0.0_f64;
+    for i in 0..support.freq.len() {
+        let f = support.freq[i];
+        if f < band.0 || f > band.1 || f < primary.freq[0] || f > *primary.freq.last().unwrap() {
+            continue;
+        }
+        let p = num_complex::Complex64::from_polar(
+            10.0_f64.powf(primary_on_grid.spl[i] / 20.0),
+            pp[i].to_radians(),
+        );
+        let s = num_complex::Complex64::from_polar(
+            10.0_f64.powf(support.spl[i] / 20.0),
+            sp[i].to_radians(),
+        );
+        let sum = p + s;
+        let level = 20.0 * sum.norm().max(1e-30).log10();
+        if !level.is_finite() || !pp[i].is_finite() || !sp[i].is_finite() {
+            return Err(AutoeqError::InvalidMeasurement {
+                message: "nonfinite coherent supporting-source evidence".into(),
+            });
+        }
+        worst = worst.max(primary_on_grid.spl[i].max(support.spl[i]) - level);
+        freq.push(f);
+        spl.push(level);
+        phase.push(sum.arg().to_degrees());
+    }
+    if freq.len() < 3 {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: "insufficient coherent supporting-source overlap".into(),
+        });
+    }
+    Ok((
+        Curve {
+            freq: freq.into(),
+            spl: spl.into(),
+            phase: Some(phase.into()),
+            ..Default::default()
+        },
+        worst,
+    ))
+}
+
 fn deployed_fir_coefficients(normalized_taps: &[f64], gain_db: f64) -> Vec<f64> {
     let linear_gain = 10.0_f64.powf(gain_db / 20.0);
     normalized_taps
@@ -243,6 +340,20 @@ pub fn process_supporting_source_channel_with_frequency_samples(
             }
         })?;
 
+    primary.validate("supporting-source primary measurement")?;
+    support.validate("supporting-source support measurement")?;
+    let applied_delay_ms = resolve_support_delay(
+        &group.supporting_source,
+        room_config.optimizer.allow_delay(),
+    )?;
+    let coherent = group.supporting_source.shared_phase_reference
+        && primary.phase.is_some()
+        && support.phase.is_some();
+    if !coherent && !group.supporting_source.allow_unverified_acoustics {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: "supporting source requires measured phases with shared_phase_reference, or explicit allow_unverified_acoustics".into(),
+        });
+    }
     let mut target = resolve_supporting_source_target(group, room_config)?;
     // Supporting-source gain is solved in an absolute pressure frame.  Room
     // targets, however, are conventionally level-relative (flat = 0 dB),
@@ -288,19 +399,9 @@ pub fn process_supporting_source_channel_with_frequency_samples(
     }
     let wav_name = format!("{}_fir.wav", support_name);
     let wav_path = output_dir.join(&wav_name);
-    math_audio_iir_fir::save_fir_to_wav(&filter.taps, sample_rate as u32, &wav_path).map_err(
-        |e| AutoeqError::InvalidConfiguration {
-            message: format!("Failed to write supporting-source FIR: {}", e),
-        },
-    )?;
 
     let wav_relative = wav_name; // the DSP chain references the file by basename
 
-    let applied_delay_ms = if room_config.optimizer.allow_delay() {
-        group.supporting_source.delay_ms
-    } else {
-        0.0
-    };
     let (primary_chain, mut support_chain) =
         roomeq_engine::output::build_supporting_source_dsp_chains(
             logical_role,
@@ -322,19 +423,42 @@ pub fn process_supporting_source_channel_with_frequency_samples(
         StatisticalSummary { mean, std }
     });
 
-    let gain_curve = Curve {
-        freq: filter.constrained_target.freq.clone(),
-        spl: ndarray::Array1::from(filter.support_gain_db.clone()),
-        ..Default::default()
+    // Replay the realized FIR, normalization gain, and electrical delay.
+    let mut support_final_curve = crate::ctc::apply_channel_dsp_chain_to_curve_with_embedded_irs(
+        &support_chain,
+        &support,
+        sample_rate,
+        output_dir,
+        &HashMap::from([(wav_relative.clone(), filter.taps.clone())]),
+    )?;
+    if support.phase.is_none() {
+        support_final_curve.phase = None;
+    }
+    let coherent_evidence = if coherent {
+        Some(coherent_support_sum(
+            &primary,
+            &support_final_curve,
+            group.supporting_source.freq_range_hz,
+        )?)
+    } else {
+        None
     };
-    let gain_on_support_grid =
-        autoeq_measurements::read::interpolate_log_space(&support.freq, &gain_curve);
-    let support_final_spl = &support.spl + &gain_on_support_grid.spl;
-    let support_final_curve = Curve {
-        freq: support.freq.clone(),
-        spl: support_final_spl,
-        ..Default::default()
-    };
+    if let Some((_, dip)) = &coherent_evidence
+        && *dip > group.supporting_source.max_coherent_cancellation_db
+        && !group.supporting_source.allow_unverified_acoustics
+    {
+        return Err(AutoeqError::OptimizationFailed {
+            message: format!(
+                "supporting-source coherent cancellation {dip:.2} dB exceeds {:.2} dB budget",
+                group.supporting_source.max_coherent_cancellation_db
+            ),
+        });
+    }
+    math_audio_iir_fir::save_fir_to_wav(&filter.taps, sample_rate as u32, &wav_path).map_err(
+        |e| AutoeqError::InvalidConfiguration {
+            message: format!("Failed to write supporting-source FIR: {}", e),
+        },
+    )?;
     support_chain.final_curve = Some((&support_final_curve).into());
     let deployed_fir_coeffs = deployed_fir_coefficients(&filter.taps, filter.normalization_gain_db);
 
@@ -361,11 +485,26 @@ pub fn process_supporting_source_channel_with_frequency_samples(
 
     let band_hz = group.supporting_source.freq_range_hz;
     let mut advisories = vec![
+        "power_average_design_is_not_coherent_sum".to_string(),
+        "reference_seat_timing_excludes_fir_energy_spread_and_requires_listening_validation"
+            .to_string(),
         "primary_eq_bypassed_to_preserve_direct_sound".to_string(),
         "scores_not_computed_for_supporting_source".to_string(),
     ];
-    if applied_delay_ms != group.supporting_source.delay_ms {
-        advisories.push("support_delay_disabled_by_allow_delay".to_string());
+    if !coherent {
+        advisories.push("coherent_sum_unverified".into());
+    }
+    if group.supporting_source.acoustic_arrival_offset_ms.is_none() {
+        advisories.push("acoustic_arrival_unverified_electrical_delay_only".into());
+    }
+    if group.supporting_source.allow_unverified_acoustics {
+        advisories.push("experimental_acoustics_explicitly_acknowledged".into());
+    }
+    if coherent_evidence
+        .as_ref()
+        .is_some_and(|(_, dip)| *dip > group.supporting_source.max_coherent_cancellation_db)
+    {
+        advisories.push("coherent_cancellation_budget_exceeded".into());
     }
     advisories.extend(
         spatial_robustness_advisories_with_frequency_samples(
@@ -390,6 +529,13 @@ pub fn process_supporting_source_channel_with_frequency_samples(
     );
 
     let report = SupportingSourceReport {
+        summation_model: "power_average_design".into(),
+        propagation_relative_arrival_ms: group
+            .supporting_source
+            .acoustic_arrival_offset_ms
+            .map(|offset| offset + applied_delay_ms),
+        coherent_sum: coherent_evidence.as_ref().map(|(curve, _)| curve.into()),
+        max_coherent_cancellation_db: coherent_evidence.as_ref().map(|(_, dip)| *dip),
         enabled: true,
         primary_output: logical_role.to_string(),
         support_output: support_name,
@@ -501,6 +647,8 @@ mod tests {
             primary: MeasurementSource::InMemory(flat_curve(80.0)),
             support: MeasurementSource::InMemory(flat_curve(80.0)),
             supporting_source: SupportingSourceConfig {
+                // Synthetic fixture has no shared-time acoustic evidence.
+                allow_unverified_acoustics: true,
                 target_response: Some("target_curve".to_string()),
                 ..Default::default()
             },
@@ -529,6 +677,8 @@ mod tests {
             primary: MeasurementSource::InMemory(flat_curve(80.0)),
             support: MeasurementSource::InMemory(flat_curve(80.0)),
             supporting_source: SupportingSourceConfig {
+                // Synthetic fixture has no shared-time acoustic evidence.
+                allow_unverified_acoustics: true,
                 target_response: Some("unknown".to_string()),
                 ..Default::default()
             },
@@ -639,6 +789,8 @@ mod tests {
             primary: MeasurementSource::InMemory(primary_curve.clone()),
             support: MeasurementSource::InMemory(support_curve.clone()),
             supporting_source: SupportingSourceConfig {
+                // Synthetic fixture has no shared-time acoustic evidence.
+                allow_unverified_acoustics: true,
                 delay_ms: 3.0,
                 fir_taps: 128,
                 decorrelation: SupportingSourceDecorrelation::None,
@@ -657,6 +809,8 @@ mod tests {
             cea2034_cache: None,
             ctc: None,
         };
+        let mut room_config = room_config;
+        room_config.optimizer.allow_delay = Some(true);
         let output_dir = std::env::temp_dir();
         let ((primary_chain, support_chain), (primary_result, support_result), report) =
             process_supporting_source_channel(
@@ -713,6 +867,73 @@ mod tests {
     }
 
     #[test]
+    fn support_timing_requires_calibration_and_preserves_relative_arrival() {
+        let mut config = SupportingSourceConfig::default();
+        assert!(resolve_support_delay(&config, true).is_err());
+        config.acoustic_arrival_offset_ms = Some(-10.0);
+        assert_eq!(resolve_support_delay(&config, true).unwrap(), 20.0);
+        assert!(resolve_support_delay(&config, false).is_err());
+        config.acoustic_arrival_offset_ms = Some(10.0);
+        assert_eq!(resolve_support_delay(&config, false).unwrap(), 0.0);
+        config.acoustic_arrival_offset_ms = Some(11.0);
+        assert!(resolve_support_delay(&config, true).is_err());
+        config.acoustic_arrival_offset_ms = Some(f64::NAN);
+        assert!(resolve_support_delay(&config, true).is_err());
+    }
+
+    #[test]
+    fn unverified_acoustics_are_rejected_before_writing_an_artifact() {
+        let mut group = SupportingSourceGroup {
+            name: "unverified".into(),
+            speaker_name: None,
+            primary: MeasurementSource::InMemory(flat_curve(80.0)),
+            support: MeasurementSource::InMemory(flat_curve(80.0)),
+            supporting_source: SupportingSourceConfig::default(),
+        };
+        let room = RoomConfig {
+            optimizer: OptimizerConfig {
+                allow_delay: Some(true),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let error =
+            process_supporting_source_channel("L", &group, &room, 48_000.0, directory.path(), None)
+                .unwrap_err();
+        assert!(error.to_string().contains("acoustic_arrival_offset_ms"));
+        group.supporting_source.acoustic_arrival_offset_ms = Some(0.0);
+        group.supporting_source.shared_phase_reference = true;
+        let error =
+            process_supporting_source_channel("L", &group, &room, 48_000.0, directory.path(), None)
+                .unwrap_err();
+        assert!(error.to_string().contains("measured phases"));
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn coherent_sum_exposes_interference_not_power_average() {
+        let mut primary = flat_curve(80.0);
+        primary.phase = Some(ndarray::Array1::zeros(primary.freq.len()));
+        let mut support = primary.clone();
+        support.phase.as_mut().unwrap().fill(180.0);
+        let (cancelled, dip) = coherent_support_sum(&primary, &support, (100.0, 1000.0)).unwrap();
+        assert!(dip > 100.0);
+        assert!(cancelled.spl.iter().all(|level| *level < 0.0));
+        support.phase.as_mut().unwrap().fill(0.0);
+        let (summed, dip) = coherent_support_sum(&primary, &support, (100.0, 1000.0)).unwrap();
+        assert!(dip < 1e-9);
+        assert!(
+            summed
+                .spl
+                .iter()
+                .all(|level| (*level - 86.0206).abs() < 1e-4)
+        );
+        support.phase = None;
+        assert!(coherent_support_sum(&primary, &support, (100.0, 1000.0)).is_err());
+    }
+
+    #[test]
     fn supporting_source_obeys_allow_delay() {
         let mut room_config = RoomConfig {
             version: default_config_version(),
@@ -733,6 +954,8 @@ mod tests {
             primary: MeasurementSource::InMemory(flat_curve(80.0)),
             support: MeasurementSource::InMemory(flat_curve(80.0)),
             supporting_source: SupportingSourceConfig {
+                // Synthetic fixture has no shared-time acoustic evidence.
+                allow_unverified_acoustics: true,
                 delay_ms: 3.0,
                 fir_taps: 128,
                 decorrelation: SupportingSourceDecorrelation::None,
@@ -740,7 +963,7 @@ mod tests {
             },
         };
         let output_dir = std::env::temp_dir();
-        let ((_, support_chain), _, report) = process_supporting_source_channel(
+        let error = process_supporting_source_channel(
             "L",
             &group,
             &room_config,
@@ -748,19 +971,7 @@ mod tests {
             &output_dir,
             None,
         )
-        .unwrap();
-        assert_eq!(report.delay_ms, 0.0);
-        assert!(
-            !support_chain
-                .plugins
-                .iter()
-                .any(|plugin| plugin.plugin_type == "delay")
-        );
-        assert!(
-            report
-                .advisories
-                .iter()
-                .any(|advisory| { advisory == "support_delay_disabled_by_allow_delay" })
-        );
+        .unwrap_err();
+        assert!(error.to_string().contains("allow_delay=false"));
     }
 }

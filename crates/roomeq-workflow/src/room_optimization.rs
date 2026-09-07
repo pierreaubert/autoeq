@@ -37,9 +37,11 @@ mod process;
 mod room_optimization_callback_observer;
 mod room_optimization_progress;
 mod room_optimization_result;
+mod seat_replay;
 #[cfg(test)]
 mod tests;
 mod types;
+#[cfg(test)]
 mod validation_scorecard;
 
 pub use room_optimization_progress::*;
@@ -133,6 +135,7 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
     observer: Option<Box<dyn PipelineObserver>>,
     frequency_samples: usize,
 ) -> Result<RoomOptimizationResult> {
+    let seat_captures = seat_replay::capture_training(request.config)?;
     let mut result = optimize_room_impl_with_frequency_samples(
         request.config,
         request.sample_rate,
@@ -142,13 +145,14 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
         context.artifact_store,
         frequency_samples,
     )?;
-    if !context.validation_measurements.is_empty() {
-        validation_scorecard::attach_validation_scorecard(
-            &mut result,
-            context.validation_measurements,
-            request.sample_rate,
-        )?;
-    }
+    seat_replay::validate_final_seats(
+        &mut result,
+        &seat_captures,
+        context.validation_measurements,
+        request.config,
+        request.sample_rate,
+        context.output_dir.unwrap_or_else(|| Path::new(".")),
+    )?;
     Ok(result)
 }
 

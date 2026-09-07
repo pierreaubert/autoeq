@@ -291,8 +291,28 @@ pub struct QualityPartitionMetrics {
     pub bass_modal_roughness_improvement_db_per_octave2: Option<f64>,
 }
 
+/// One independently replayed final-chain listening-position assessment.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FinalSeatEvaluation {
+    pub partition: String,
+    pub logical_input: String,
+    /// Stable index in the input measurement array; never a channel aggregate.
+    pub seat_index: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seat_label: Option<String>,
+    pub physical_outputs: Vec<String>,
+    /// Actual supported evaluation band for this input/position, not the
+    /// optimizer's requested full band.
+    pub evaluated_band_hz: [f64; 2],
+    pub pre_weighted_rms_db: f64,
+    pub post_weighted_rms_db: f64,
+    pub improvement_db: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AcousticQualityScorecard {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub final_seats: Vec<FinalSeatEvaluation>,
     pub training: QualityPartitionMetrics,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub held_out: Option<QualityPartitionMetrics>,

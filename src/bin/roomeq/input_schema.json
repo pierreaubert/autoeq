@@ -1911,7 +1911,7 @@
           "type": "integer"
         },
         "tol": {
-          "default": 1e-8,
+          "default": 1e-08,
           "description": "DE convergence tolerance.",
           "format": "double",
           "type": "number"
@@ -2655,7 +2655,7 @@
           "description": "Asymmetric loss weights. `None` preserves the built-in default."
         },
         "atolerance": {
-          "default": 0.00001,
+          "default": 1e-05,
           "description": "Optimization convergence tolerance (absolute)",
           "format": "double",
           "type": "number"
@@ -3171,7 +3171,7 @@
           "description": "Unified target response configuration (shape + preference shelves + broadband pre-correction)"
         },
         "tolerance": {
-          "default": 0.00001,
+          "default": 1e-05,
           "description": "Optimization convergence tolerance (relative)",
           "format": "double",
           "type": "number"
@@ -4477,6 +4477,19 @@
       "additionalProperties": false,
       "description": "Configuration for a single supporting-source loudspeaker channel.",
       "properties": {
+        "acoustic_arrival_offset_ms": {
+          "description": "Unfiltered support arrival minus primary arrival at the reference seat,\nmeasured in milliseconds using a common acquisition time reference.\nElectrical delay is `delay_ms - acoustic_arrival_offset_ms`.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "allow_unverified_acoustics": {
+          "default": false,
+          "description": "Explicit experimental opt-in when arrival or coherent-sum evidence is\nunavailable. Power-average design is not a coherent or perceptual guarantee.",
+          "type": "boolean"
+        },
         "decorrelation": {
           "$ref": "#/$defs/SupportingSourceDecorrelation",
           "default": "velvet_noise",
@@ -4515,6 +4528,12 @@
           ],
           "type": "array"
         },
+        "max_coherent_cancellation_db": {
+          "default": 3.0,
+          "description": "Engineering budget for a coherent dip below the louder branch, not an\naudibility threshold.",
+          "format": "double",
+          "type": "number"
+        },
         "precedence_limits": {
           "default": [
             {
@@ -4533,6 +4552,11 @@
             "$ref": "#/$defs/PrecedenceLimitBand"
           },
           "type": "array"
+        },
+        "shared_phase_reference": {
+          "default": false,
+          "description": "Both transfer-function phases retain the same acquisition time reference.",
+          "type": "boolean"
         },
         "target_response": {
           "description": "Target response to match. Defaults to the room-level `target_curve`.",
@@ -4592,6 +4616,7 @@
         "supporting_source": {
           "$ref": "#/$defs/SupportingSourceConfig",
           "default": {
+            "allow_unverified_acoustics": false,
             "decorrelation": "velvet_noise",
             "delay_ms": 10.0,
             "fir_taps": 8192,
@@ -4599,6 +4624,7 @@
               70.0,
               20000.0
             ],
+            "max_coherent_cancellation_db": 3.0,
             "precedence_limits": [
               {
                 "high_hz": 500.0,
@@ -4611,6 +4637,7 @@
                 "low_hz": 500.0
               }
             ],
+            "shared_phase_reference": false,
             "velvet_noise_taps": 4096
           },
           "description": "Supporting-source processing configuration."
@@ -4969,7 +4996,7 @@
       "default": {
         "algorithm": "autoeq:cmaes",
         "asymmetric_loss": true,
-        "atolerance": 0.00001,
+        "atolerance": 1e-05,
         "elimination_threshold": 0.005,
         "local_algo": "cobyla",
         "loss_type": "flat",
@@ -4989,7 +5016,7 @@
         "refine": true,
         "smooth_n": 2,
         "strategy": "lshade",
-        "tolerance": 0.00001
+        "tolerance": 1e-05
       },
       "description": "Optimizer configuration"
     },

@@ -439,6 +439,17 @@ pub struct StatisticalSummary {
 /// Per-channel supporting-source report.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SupportingSourceReport {
+    /// Design uses power averaging; optional prediction retains coherent phase.
+    #[serde(default)]
+    pub summation_model: String,
+    /// Propagation plus electrical delay at the reference seat, excluding FIR
+    /// energy spread. Not a measured onset or a perceptual fusion guarantee.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub propagation_relative_arrival_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coherent_sum: Option<CurveData>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_coherent_cancellation_db: Option<f64>,
     /// Whether supporting-source processing was enabled for this logical channel.
     pub enabled: bool,
     /// Name of the primary output channel.

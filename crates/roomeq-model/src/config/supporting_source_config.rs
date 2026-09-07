@@ -8,6 +8,26 @@ pub struct SupportingSourceConfig {
     #[serde(default = "default_support_delay_ms")]
     pub delay_ms: f64,
 
+    /// Unfiltered support arrival minus primary arrival at the reference seat,
+    /// measured in milliseconds using a common acquisition time reference.
+    /// Electrical delay is `delay_ms - acoustic_arrival_offset_ms`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acoustic_arrival_offset_ms: Option<f64>,
+
+    /// Both transfer-function phases retain the same acquisition time reference.
+    #[serde(default)]
+    pub shared_phase_reference: bool,
+
+    /// Explicit experimental opt-in when arrival or coherent-sum evidence is
+    /// unavailable. Power-average design is not a coherent or perceptual guarantee.
+    #[serde(default)]
+    pub allow_unverified_acoustics: bool,
+
+    /// Engineering budget for a coherent dip below the louder branch, not an
+    /// audibility threshold.
+    #[serde(default = "default_max_coherent_cancellation_db")]
+    pub max_coherent_cancellation_db: f64,
+
     /// Frequency-dependent precedence limits. The first matching band wins.
     #[serde(default = "default_precedence_limits")]
     pub precedence_limits: Vec<PrecedenceLimitBand>,
@@ -33,10 +53,18 @@ pub struct SupportingSourceConfig {
     pub velvet_noise_taps: usize,
 }
 
+fn default_max_coherent_cancellation_db() -> f64 {
+    3.0
+}
+
 impl Default for SupportingSourceConfig {
     fn default() -> Self {
         Self {
             delay_ms: default_support_delay_ms(),
+            acoustic_arrival_offset_ms: None,
+            shared_phase_reference: false,
+            allow_unverified_acoustics: false,
+            max_coherent_cancellation_db: default_max_coherent_cancellation_db(),
             precedence_limits: default_precedence_limits(),
             freq_range_hz: default_support_freq_range(),
             decorrelation: SupportingSourceDecorrelation::default(),

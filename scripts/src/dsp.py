@@ -406,6 +406,138 @@ def apply_plugins_to_curve(
     return result
 
 
+def _resample_curve_onto_grid(curve: dict | None, target_freq: list[float]) -> dict | None:
+    """Resample a response curve onto ``target_freq`` with log-frequency interpolation.
+
+    SPL is interpolated linearly in log-frequency with edge clamping (a target
+    point outside the source grid holds the nearest edge value). Phase, when
+    present on the source curve, is unwrapped before interpolation and wrapped
+    back to ``[-180, 180)`` afterwards. Returns `None` when either input is
+    unusable so callers can fall back instead of plotting garbage.
+    """
+    if not curve or not target_freq:
+        return None
+    src_freq = curve.get("freq") or []
+    src_spl = curve.get("spl") or []
+    if not src_freq or len(src_freq) != len(src_spl):
+        return None
+    if len(src_freq) == len(target_freq) and all(
+        a == b for a, b in zip(src_freq, target_freq)
+    ):
+        identical: dict = {"freq": list(target_freq), "spl": list(src_spl)}
+        if isinstance(curve.get("phase"), list) and len(curve["phase"]) == len(src_freq):
+            identical["phase"] = list(curve["phase"])
+        return identical
+    if any(not math.isfinite(f) or f <= 0.0 for f in target_freq):
+        return None
+    pairs = sorted(
+        (float(f), float(s))
+        for f, s in zip(src_freq, src_spl)
+        if isinstance(f, (int, float)) and isinstance(s, (int, float))
+        and math.isfinite(f) and math.isfinite(s) and f > 0.0
+    )
+    if not pairs:
+        return None
+    if len(pairs) == 1:
+        # A single-point source resamples to a constant curve.
+        result: dict = {"freq": list(target_freq), "spl": [pairs[0][1]] * len(target_freq)}
+        phase = curve.get("phase")
+        if isinstance(phase, list) and len(phase) == len(src_freq):
+            try:
+                single_phase = float(phase[0])
+            except (TypeError, ValueError):
+                return result
+            if math.isfinite(single_phase):
+                result["phase"] = wrap_phase([single_phase] * len(target_freq))
+        return result
+    log_src = [math.log10(f) for f, _ in pairs]
+    spl_src = [s for _, s in pairs]
+
+    def interp(log_axis: list[float], values: list[float]) -> list[float]:
+        out: list[float] = []
+        for frequency in target_freq:
+            log_f = math.log10(float(frequency))
+            if log_f <= log_axis[0]:
+                out.append(values[0])
+                continue
+            if log_f >= log_axis[-1]:
+                out.append(values[-1])
+                continue
+            upper = 1
+            while upper < len(log_axis) - 1 and log_axis[upper] < log_f:
+                upper += 1
+            lower = upper - 1
+            span = log_axis[upper] - log_axis[lower]
+            position = (log_f - log_axis[lower]) / span if span > 0.0 else 0.0
+            out.append(values[lower] + position * (values[upper] - values[lower]))
+        return out
+
+    result: dict = {"freq": list(target_freq), "spl": interp(log_src, spl_src)}
+    phase = curve.get("phase")
+    if isinstance(phase, list) and len(phase) == len(src_freq):
+        try:
+            phase_pairs = sorted(
+                (float(f), float(p))
+                for f, p in zip(src_freq, phase)
+                if isinstance(f, (int, float)) and isinstance(p, (int, float))
+                and math.isfinite(f) and math.isfinite(p) and f > 0.0
+            )
+        except (TypeError, ValueError):
+            return result
+        if len(phase_pairs) >= 2:
+            result["phase"] = wrap_phase(
+                interp(
+                    [math.log10(f) for f, _ in phase_pairs],
+                    unwrap_phase([p for _, p in phase_pairs]),
+                )
+            )
+    return result
+
+
+def _fold_sum_curves(curves: list[dict | None]) -> dict | None:
+    """Sum response curves that may live on different frequency grids.
+
+    All curves are resampled onto the first usable curve's grid, then folded
+    with :func:`complex_sum_curves` (coherent when every resampled curve
+    carries phase, incoherent power sum otherwise). Returns `None` when no
+    usable curve remains.
+    """
+    usable = [
+        curve
+        for curve in curves
+        if curve and (curve.get("freq") or []) and (curve.get("spl") or [])
+        and len(curve.get("freq") or []) == len(curve.get("spl") or [])
+    ]
+    if not usable:
+        return None
+    reference_freq = list(usable[0]["freq"])
+    total: dict | None = None
+    for curve in usable:
+        resampled = _resample_curve_onto_grid(curve, reference_freq)
+        if resampled is None:
+            return None
+        total = resampled if total is None else complex_sum_curves(total, resampled)
+        if total is None:
+            return None
+    return total
+
+
+def sum_driver_initial_curves(channel_data: dict | None) -> dict | None:
+    """Sum a multi-driver channel's raw per-driver measurements.
+
+    Multi-sub ``initial_curve`` aggregates on the channel are level-relative
+    optimizer state, not microphone data, so the honest acoustic "before"
+    reference is the (power/coherent) sum of the driver ``initial_curve``
+    entries. Returns `None` when the channel has no usable driver curves.
+    """
+    if not channel_data:
+        return None
+    drivers = channel_data.get("drivers") or []
+    return _fold_sum_curves(
+        [driver.get("initial_curve") for driver in drivers if isinstance(driver, dict)]
+    )
+
+
 def replay_serialized_output(data: dict) -> dict[str, dict]:
     """Replay serialized channel chains without consuming reported curves."""
     sample_rate = float(data.get("sample_rate", 48_000.0) or 48_000.0)
@@ -417,6 +549,99 @@ def replay_serialized_output(data: dict) -> dict[str, dict]:
     return replayed
 
 
+def _sub_shared_plugins_for_own_input(sub_channel: dict) -> list[dict]:
+    """Collect the physical-sub input-chain plugins for the sub's own curve.
+
+    Everything on the sub input chain shapes the LFE logical input: unlabeled
+    legacy correction, ``pre_route``/``post_route`` staged correction, and
+    alignment delays. Only calibration the routing graph owns is excluded: the
+    ``post_dsp_input_level_alignment`` trim (applied once via
+    ``input_trim_db``) and ``route_owned`` structural DSP (realized through
+    the route transfer itself).
+    """
+    shared: list[dict] = []
+    for plugin in sub_channel.get("plugins", []) or []:
+        if not isinstance(plugin, dict):
+            continue
+        params = plugin.get("parameters", {}) or {}
+        if (
+            plugin.get("plugin_type") == "gain"
+            and params.get("label") == "post_dsp_input_level_alignment"
+        ):
+            continue
+        if params.get("room_eq_stage") == "route_owned":
+            continue
+        shared.append(plugin)
+    return shared
+
+
+def _corrected_multisub_curve(
+    sub_channel: dict,
+    own_route: dict | None,
+    input_trim_db: dict,
+    sample_rate: float,
+) -> dict | None:
+    """Replay a multi-driver sub from its per-driver measurements.
+
+    A multi-sub channel aggregate ``initial_curve`` is level-relative optimizer
+    state, not microphone data, so driving the reconstruction from it lands
+    tens of dB away from the acoustic response. Each driver instead replays
+    its own alignment plugins plus the shared sub input chain and the LFE
+    route transfer, and the drivers are summed acoustically.
+    """
+    drivers = [
+        driver
+        for driver in (sub_channel.get("drivers") or [])
+        if isinstance(driver, dict) and driver.get("initial_curve")
+    ]
+    if not drivers or own_route is None:
+        return None
+    low_pass_hz = own_route.get("low_pass_hz")
+    if low_pass_hz is None:
+        return None
+    source_name = str(own_route.get("source_channel"))
+    route_tail = [
+        {
+            "plugin_type": "crossover",
+            "parameters": {
+                "type": own_route.get("crossover_type", "LR24"),
+                "output": "low",
+                "frequency": low_pass_hz,
+            },
+        },
+        {
+            "plugin_type": "gain",
+            "parameters": {
+                "gain_db": float(own_route.get("gain_db", 0.0))
+                + float(input_trim_db.get(source_name, 0.0)),
+                "invert": bool(own_route.get("polarity_inverted", False)),
+            },
+        },
+        {
+            "plugin_type": "delay",
+            "parameters": {"delay_ms": own_route.get("delay_ms", 0.0)},
+        },
+    ]
+    shared = _sub_shared_plugins_for_own_input(sub_channel)
+    corrected: list[dict | None] = []
+    for driver in drivers:
+        driver_plugins = [
+            plugin
+            for plugin in (driver.get("plugins") or [])
+            if isinstance(plugin, dict)
+            and (plugin.get("parameters", {}) or {}).get("room_eq_stage")
+            != "route_owned"
+        ]
+        corrected.append(
+            apply_plugins_to_curve(
+                driver.get("initial_curve"),
+                [*driver_plugins, *shared, *route_tail],
+                sample_rate,
+            )
+        )
+    return _fold_sum_curves(corrected)
+
+
 def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
     """Build one microphone-predicted post-DSP curve per input channel.
 
@@ -425,6 +650,12 @@ def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
     The LFE result contains only its own route. The aggregate emitted LFE
     ``final_curve`` is deliberately not reused because it represents the whole
     bass bus and would duplicate unrelated source channels.
+
+    Curves on different frequency grids are resampled onto the main channel
+    grid before summation, and a channel is never silently dropped: when the
+    acoustic sum cannot be formed the reported ``final_curve`` is used.
+    Multi-driver subs replay each driver's own measurement so the result
+    stays at the acoustic level instead of the level-relative aggregate.
     """
     deployed = data.get("deployed_source_curves") or {}
     if deployed:
@@ -516,18 +747,50 @@ def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
         if routed:
             routed_by_source[source_name] = routed
 
+    # A multi-driver sub aggregate is level-relative optimizer state, not
+    # microphone data. Replay each driver's own measurement so the LFE
+    # logical-input curve stays at the acoustic level of the driver curves
+    # shown in the original-curves row.
+    own_route = next(
+        (
+            route
+            for route in routes
+            if route.get("route_kind") == "lfe_lowpass_to_sub"
+            and str(route.get("source_channel")) == sub_name
+            and route.get("low_pass_hz") is not None
+        ),
+        None,
+    )
+    multisub = _corrected_multisub_curve(
+        sub_channel, own_route, input_trim_db, sample_rate
+    )
+    if multisub is not None:
+        routed_by_source[sub_name] = multisub
+
     results: dict[str, dict] = {}
     for name, channel in channels.items():
         routed = routed_by_source.get(name)
+        final_curve = channel.get("final_curve")
         if name == sub_name:
-            if routed:
+            if routed is not None:
                 results[name] = routed
-        elif routed:
-            combined = complex_sum_curves(channel.get("final_curve"), routed)
-            if combined:
-                results[name] = combined
-        elif channel.get("final_curve"):
-            results[name] = channel["final_curve"]
+            elif final_curve:
+                results[name] = final_curve
+        elif routed is not None and final_curve:
+            # The main and sub branches may live on different grids (e.g.
+            # full-range mains vs. a sub-only grid). Resample the sub branch
+            # onto the main grid instead of dropping the channel.
+            aligned = _resample_curve_onto_grid(
+                routed, list(final_curve.get("freq") or [])
+            )
+            combined = (
+                complex_sum_curves(final_curve, aligned)
+                if aligned is not None
+                else None
+            )
+            results[name] = combined if combined is not None else final_curve
+        elif final_curve:
+            results[name] = final_curve
     return results
 
 

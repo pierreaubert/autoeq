@@ -75,8 +75,9 @@ pub enum StimulusKind {
     },
     /// Band-limited seeded noise for bandwidth-change comparisons: white
     /// noise through a windowed-sinc FIR bandpass whose tap count scales
-    /// with the band specification (narrow bands get longer filters so the
-    /// transitions stay inside the requested bandwidth).
+    /// with the band specification. Edges are nominal -6 dB edges, with
+    /// transition allowance half the smallest of bandwidth, low edge, and
+    /// Nyquist clearance. Requests needing more than 4095 taps are rejected.
     BandLimitedNoise {
         /// Lower band edge in Hz (must be positive).
         low_hz: f64,
@@ -435,7 +436,7 @@ pub fn render_samples(
                     "band high edge {high_hz} Hz too close to Nyquist at {sample_rate_hz} Hz"
                 ));
             }
-            let taps = bandpass_fir(*low_hz, *high_hz, sample_rate_hz);
+            let taps = bandpass_fir(*low_hz, *high_hz, sample_rate_hz)?;
             let delay = (taps.len() - 1) / 2;
             let mut samples = Vec::with_capacity(frames);
             let mut history = vec![0.0_f64; taps.len()];
@@ -537,8 +538,12 @@ pub fn render_samples(
     }
 }
 
-/// 127-tap Hamming-windowed sinc FIR bandpass (lowpass difference).
-fn bandpass_fir(low_hz: f64, high_hz: f64, sample_rate_hz: f64) -> Vec<f64> {
+/// Hamming-windowed sinc bandpass. Edges are nominal half-amplitude edges;
+/// the transition allowance is half the smallest of bandwidth, lower edge,
+/// and upper-edge clearance to Nyquist. Stopbands are designed for >=40 dB
+/// attenuation relative to band center, not brick-wall confinement.
+/// Unsupported resolution is an error, never a silently widened stimulus.
+fn bandpass_fir(low_hz: f64, high_hz: f64, sample_rate_hz: f64) -> Result<Vec<f64>, String> {
     // F15: tap count follows the band specification. A fixed 127-tap FIR at
     // 8 kHz has ~200 Hz transitions, which swamps a 100 Hz band (mushy edges,
     // elevated skirts). Hamming transition bandwidth is ~3.3·fs/N, so N is
@@ -546,14 +551,20 @@ fn bandpass_fir(low_hz: f64, high_hz: f64, sample_rate_hz: f64) -> Vec<f64> {
     // loop derives group delay and history length from the returned taps, so
     // causality compensation tracks automatically.
     const MIN_TAPS: usize = 127;
-    const MAX_TAPS: usize = 4096;
-    let bandwidth_hz = (high_hz - low_hz).max(f64::EPSILON);
-    let mut taps =
-        ((8.0 * sample_rate_hz / bandwidth_hz).ceil() as usize).clamp(MIN_TAPS, MAX_TAPS);
-    taps |= 1;
-    if taps > MAX_TAPS {
-        taps = MAX_TAPS - 1;
+    const MAX_TAPS: usize = 4095;
+    let bandwidth_hz = high_hz - low_hz;
+    // Leave a realizable transition to DC and Nyquist as well as between
+    // band edges. A wide band with a 1 Hz lower edge still needs a long FIR.
+    let resolution_hz = bandwidth_hz.min(low_hz).min(sample_rate_hz / 2.0 - high_hz);
+    let requested = (8.0 * sample_rate_hz / resolution_hz).ceil();
+    if !requested.is_finite() || requested > MAX_TAPS as f64 {
+        return Err(format!(
+            "band {low_hz}-{high_hz} Hz at {sample_rate_hz} Hz requires {requested} taps; maximum {MAX_TAPS} (minimum bandwidth/edge clearance {:.3} Hz)",
+            8.0 * sample_rate_hz / MAX_TAPS as f64
+        ));
     }
+    let mut taps = (requested as usize).max(MIN_TAPS);
+    taps |= 1;
     let middle = (taps - 1) as f64 / 2.0;
     let sinc = |x: f64| {
         if x == 0.0 {
@@ -562,18 +573,17 @@ fn bandpass_fir(low_hz: f64, high_hz: f64, sample_rate_hz: f64) -> Vec<f64> {
             (std::f64::consts::PI * x).sin() / (std::f64::consts::PI * x)
         }
     };
-    (0..taps)
+    Ok((0..taps)
         .map(|tap| {
             let offset = tap as f64 - middle;
             let lowpass = |edge_hz: f64| {
                 2.0 * edge_hz / sample_rate_hz * sinc(2.0 * edge_hz * offset / sample_rate_hz)
             };
-            let window = 0.54
-                - 0.46
-                    * (2.0 * std::f64::consts::PI * tap as f64 / (taps - 1) as f64).cos();
+            let window =
+                0.54 - 0.46 * (2.0 * std::f64::consts::PI * tap as f64 / (taps - 1) as f64).cos();
             (lowpass(high_hz) - lowpass(low_hz)) * window
         })
-        .collect()
+        .collect())
 }
 
 /// Tones must clear Nyquist with 5% margin (anti-imaging guard).
@@ -734,15 +744,14 @@ pub fn render_stimulus_set(
     if requests.is_empty() {
         return Err(String::from("stimulus set must list at least one request"));
     }
-    std::fs::create_dir_all(dir)
-        .map_err(|error| format!("cannot create stimulus dir: {error}"))?;
+    std::fs::create_dir_all(dir).map_err(|error| format!("cannot create stimulus dir: {error}"))?;
     let mut files = Vec::new();
     for (index, request) in requests.iter().enumerate() {
         let samples = render_samples(&request.kind, sample_rate_hz, request.seed)?;
         let (assumed, is_programme) = match &request.kind {
-            StimulusKind::ExternalProgramme { assumed_rms_spl_db, .. } => {
-                (*assumed_rms_spl_db, true)
-            }
+            StimulusKind::ExternalProgramme {
+                assumed_rms_spl_db, ..
+            } => (*assumed_rms_spl_db, true),
             _ => (None, false),
         };
         for level_db in &calibration.levels_db {
@@ -753,15 +762,13 @@ pub fn render_stimulus_set(
             let mode = if is_programme && assumed.is_none() {
                 LevelMode::Relative
             } else {
-                let reference = assumed.unwrap_or_else(|| {
-                    20.0 * file_rms.log10() + calibration.db_spl_at_0dbfs_rms
-                });
+                let reference = assumed
+                    .unwrap_or_else(|| 20.0 * file_rms.log10() + calibration.db_spl_at_0dbfs_rms);
                 LevelMode::Absolute {
                     reference_spl_db: reference,
                 }
             };
-            let (scaled, gain_db, spl_db, spl_absolute) =
-                apply_level(&samples, *level_db, mode)?;
+            let (scaled, gain_db, spl_db, spl_absolute) = apply_level(&samples, *level_db, mode)?;
             let file_name = format!(
                 "{index:02}-{}-{}__L{level_db}.wav",
                 request.kind.stem(),
@@ -808,15 +815,13 @@ mod stimuli_tests {
         SplCalibration {
             conversion: String::from(CONVERSION_AFFINE_FS_SPL_V1),
             db_spl_at_0dbfs_rms: 90.0,
-            levels_db: levels.iter().copied().collect(),
+            levels_db: levels.to_vec(),
         }
     }
 
     fn test_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "roomeq-stimuli-test-{}-{name}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("roomeq-stimuli-test-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
     }
@@ -908,9 +913,9 @@ mod stimuli_tests {
     fn goertzel_power(samples: &[f32], freq_hz: f64, sample_rate_hz: f64) -> f64 {
         let omega = 2.0 * std::f64::consts::PI * freq_hz / sample_rate_hz;
         let cosine = omega.cos();
-        let (mut s0, mut s1, mut s2) = (0.0_f64, 0.0_f64, 0.0_f64);
+        let (mut s1, mut s2) = (0.0_f64, 0.0_f64);
         for sample in samples {
-            s0 = f64::from(*sample) + 2.0 * cosine * s1 - s2;
+            let s0 = f64::from(*sample) + 2.0 * cosine * s1 - s2;
             s2 = s1;
             s1 = s0;
         }
@@ -935,7 +940,7 @@ mod stimuli_tests {
         // requested band. A fixed 127-tap FIR at 8 kHz has ~200 Hz
         // transitions, so a 500–600 Hz band arrives with mushy edges and
         // elevated skirts; taps must scale with the band specification.
-        let taps = bandpass_fir(500.0, 600.0, 8_000.0);
+        let taps = bandpass_fir(500.0, 600.0, 8_000.0).unwrap();
         let center = fir_magnitude(&taps, 550.0, 8_000.0);
         let below = fir_magnitude(&taps, 450.0, 8_000.0);
         let above = fir_magnitude(&taps, 650.0, 8_000.0);
@@ -947,6 +952,52 @@ mod stimuli_tests {
             center > 10.0 * above,
             "high skirt too shallow: center {center:.3e} vs 650 Hz {above:.3e}"
         );
+    }
+
+    #[test]
+    fn narrow_band_resolution_limit_is_an_error_not_a_widened_band() {
+        assert!(bandpass_fir(1.0, 1000.0, 48_000.0).is_err());
+        for sample_rate in [44_100.0, 48_000.0, 96_000.0] {
+            assert!(
+                bandpass_fir(90.0, 110.0, sample_rate)
+                    .unwrap_err()
+                    .contains("minimum bandwidth")
+            );
+            let kind = StimulusKind::BandLimitedNoise {
+                low_hz: 90.0,
+                high_hz: 110.0,
+                duration_s: 1.0,
+            };
+            assert!(render_samples(&kind, sample_rate, 31).is_err());
+        }
+    }
+
+    #[test]
+    fn narrow_band_supported_rates_have_forty_db_stopbands() {
+        for (low, high, fs) in [
+            (100.0, 200.0, 48_000.0),
+            (200.0, 400.0, 96_000.0),
+            (500.0, 600.0, 8_000.0),
+            (1_000.0, 2_000.0, 44_100.0),
+        ] {
+            let taps = bandpass_fir(low, high, fs).unwrap();
+            let center = fir_magnitude(&taps, (low + high) / 2.0, fs);
+            let transition = (high - low).min(low).min(fs / 2.0 - high) / 2.0;
+            for i in 0..=256 {
+                let fraction = i as f64 / 256.0;
+                for f in [
+                    fraction * (low - transition).max(0.0),
+                    high + transition + fraction * (fs / 2.0 - high - transition),
+                ] {
+                    if f <= low - transition || f >= high + transition {
+                        assert!(
+                            fir_magnitude(&taps, f, fs) < center * 0.01,
+                            "band {low}-{high} at {fs}: stopband at {f}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

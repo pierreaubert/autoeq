@@ -441,6 +441,16 @@ pub struct ConditionOutcome {
     pub p_value: f64,
     /// `pass` or `fail` under the preregistered rule.
     pub decision: String,
+    /// Minimum correct responses of the rule actually applied.
+    #[serde(default)]
+    pub rule_min_correct: u32,
+    /// Trial count the applied rule was fixed for.
+    #[serde(default)]
+    pub rule_trials: u32,
+    /// One-sided significance level of the applied rule (`0.0` when scored
+    /// without a bound protocol, i.e. alpha unknown).
+    #[serde(default)]
+    pub rule_alpha: f64,
 }
 
 /// Results sidecar for a staged validation run.
@@ -465,13 +475,31 @@ pub struct ValidationResult {
     pub notes: String,
 }
 
-/// Score one ABX condition against its preregistered rule.
+/// Score one ABX condition against explicit rule numbers.
+///
+/// The numbers are recorded into the outcome as the rule applied. Prefer
+/// [`score_abx_condition_under_protocol`], which proves the numbers are the
+/// preregistered rule instead of trusting the caller.
 pub fn score_abx_condition(
     condition: &str,
     correct: u32,
     trials: u32,
     rule_min_correct: u32,
     rule_trials: u32,
+) -> Result<ConditionOutcome, String> {
+    // The loose scorer is not told alpha, so it records 0.0 (unknown) rather
+    // than asserting one; the protocol-bound scorer records the real alpha.
+    score_abx_condition_with_alpha(condition, correct, trials, rule_min_correct, rule_trials, 0.0)
+}
+
+/// Score one ABX condition, recording the applied rule's alpha as well.
+pub fn score_abx_condition_with_alpha(
+    condition: &str,
+    correct: u32,
+    trials: u32,
+    rule_min_correct: u32,
+    rule_trials: u32,
+    rule_alpha: f64,
 ) -> Result<ConditionOutcome, String> {
     if trials != rule_trials {
         return Err(format!(
@@ -485,11 +513,82 @@ pub fn score_abx_condition(
         correct,
         p_value,
         decision: String::from(if correct >= rule_min_correct { "pass" } else { "fail" }),
+        rule_min_correct,
+        rule_trials,
+        rule_alpha,
     })
 }
 
+/// Score one ABX condition under a preregistered protocol.
+///
+/// Proves protocol identity before scoring: re-verifies the preregistration
+/// hash against the canonical bytes, checks the condition against the
+/// protocol's comparison spec, and scores only with the rule embedded in
+/// that protocol — after validating the embedded threshold attains its own
+/// alpha. Any substitution (edited protocol, foreign condition or rule)
+/// fails closed.
+pub fn score_abx_condition_under_protocol(
+    protocol: &BlindedProtocol,
+    condition: &str,
+    correct: u32,
+    trials: u32,
+) -> Result<ConditionOutcome, String> {
+    protocol.verify_prereg()?;
+    let (min_correct, rule_trials, alpha) = match &protocol.decision {
+        DecisionRule::Abx { min_correct, trials, alpha } => (*min_correct, *trials, *alpha),
+        DecisionRule::Mushra { .. } => {
+            return Err(String::from(
+                "protocol embeds a MUSHRA rule: ABX counts cannot be scored against it",
+            ));
+        }
+    };
+    if !protocol.conditions.iter().any(|known| known == condition) {
+        return Err(format!(
+            "condition {condition} is not preregistered under comparison {}",
+            protocol.comparison.name
+        ));
+    }
+    if trials != protocol.trials_per_condition || trials != rule_trials {
+        return Err(format!(
+            "condition {condition}: ran {trials} trials under protocol rule fixed for {rule_trials}; re-preregister instead of reusing the rule"
+        ));
+    }
+    if abx_p_value(min_correct, rule_trials)? > alpha {
+        return Err(format!(
+            "preregistered rule {min_correct}/{rule_trials} cannot attain alpha {alpha}: no valid significance decision exists"
+        ));
+    }
+    score_abx_condition_with_alpha(condition, correct, trials, min_correct, rule_trials, alpha)
+}
+
+/// Write a results sidecar (`validation-result.json`) bound to the protocol
+/// actually scored: re-verifies the preregistration hash, requires the
+/// sidecar's hash to equal it, and requires the scored comparison id to
+/// match the protocol's spec. Prefer this over [`write_results_sidecar`],
+/// which can only check that *some* hash is present.
+pub fn write_results_sidecar_under_protocol(
+    dir: &Path,
+    result: &ValidationResult,
+    protocol: &BlindedProtocol,
+) -> Result<PathBuf, String> {
+    protocol.verify_prereg()?;
+    if result.protocol_hash != protocol.prereg_hash {
+        return Err(String::from(
+            "results carry a different preregistration hash than the protocol scored; re-score under the right protocol instead of storing them under this one",
+        ));
+    }
+    if result.comparison != protocol.comparison.name {
+        return Err(String::from(
+            "results name a different comparison than the protocol scored",
+        ));
+    }
+    write_results_sidecar(dir, result)
+}
+
 /// Write a results sidecar (`validation-result.json`) next to staged
-/// artifacts. Fails closed on preregistration mismatch.
+/// artifacts. Fails closed on a missing preregistration hash; prefer
+/// [`write_results_sidecar_under_protocol`], which additionally proves the
+/// hash and comparison id are the protocol actually scored.
 pub fn write_results_sidecar(dir: &Path, result: &ValidationResult) -> Result<PathBuf, String> {
     if result.protocol_hash.trim().is_empty() {
         return Err(String::from(
@@ -639,6 +738,92 @@ mod protocol_tests {
         assert!(abx_min_correct(1, 0.05).is_err());
         assert!(abx_min_correct(2, 0.01).is_err());
         assert_eq!(abx_min_correct(30, 0.05).unwrap(), 20);
+    }
+
+    fn abx_protocol() -> BlindedProtocol {
+        BlindedProtocol::preregister(
+            ComparisonDesign::Abx,
+            comparison(),
+            vec![String::from("seat-1-vs-f0")],
+            30,
+            0.05,
+            0.8,
+            0.75,
+            DecisionRule::Abx { min_correct: 20, trials: 30, alpha: 0.05 },
+            7,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn scoring_is_bound_to_the_preregistered_protocol() {
+        // F14: scoring must prove protocol identity (hash), comparison id,
+        // and use the embedded rule — loose numbers must not suffice.
+        let protocol = abx_protocol();
+        let outcome =
+            score_abx_condition_under_protocol(&protocol, "seat-1-vs-f0", 20, 30).unwrap();
+        assert_eq!(outcome.decision, "pass");
+        assert_eq!(outcome.rule_min_correct, 20);
+        assert_eq!(outcome.rule_trials, 30);
+        assert_eq!(outcome.rule_alpha, 0.05);
+        // Unknown condition.
+        assert!(
+            score_abx_condition_under_protocol(&protocol, "seat-9-vs-f0", 20, 30).is_err()
+        );
+        // Trial-count drift.
+        assert!(score_abx_condition_under_protocol(&protocol, "seat-1-vs-f0", 20, 31).is_err());
+        // Tampered protocol (hash no longer matches canonical bytes).
+        let mut tampered = protocol.clone();
+        tampered.conditions.push(String::from("seat-9-vs-f0"));
+        assert!(score_abx_condition_under_protocol(&tampered, "seat-1-vs-f0", 20, 30).is_err());
+        // MUSHRA rule cannot score ABX counts.
+        let mut mushra = protocol.clone();
+        mushra.decision = DecisionRule::Mushra { criterion: String::from("median >= 80") };
+        mushra.prereg_hash = mushra.canonical_hash().unwrap();
+        assert!(score_abx_condition_under_protocol(&mushra, "seat-1-vs-f0", 20, 30).is_err());
+        // Unattainable embedded rule (1/1 at alpha 0.05, best p = 0.5).
+        let mut weak = abx_protocol();
+        weak.decision = DecisionRule::Abx { min_correct: 1, trials: 1, alpha: 0.05 };
+        weak.trials_per_condition = 1;
+        weak.prereg_hash = weak.canonical_hash().unwrap();
+        assert!(score_abx_condition_under_protocol(&weak, "seat-1-vs-f0", 1, 1).is_err());
+    }
+
+    #[test]
+    fn sidecar_write_is_bound_to_the_preregistered_protocol() {
+        // F14: the sidecar must record the protocol actually scored.
+        let protocol = abx_protocol();
+        let outcome =
+            score_abx_condition_under_protocol(&protocol, "seat-1-vs-f0", 20, 30).unwrap();
+        let result = ValidationResult {
+            protocol_hash: protocol.prereg_hash.clone(),
+            comparison: protocol.comparison.name.clone(),
+            outcomes: vec![outcome],
+            aggregate_gain_db: 0.0,
+            aggregate_method: String::from("test"),
+            worst_seat: WorstSeatReport {
+                seat: String::from("seat-1-vs-f0"),
+                value_db: 0.0,
+                support_bins: 0,
+                weighting: String::from("test"),
+                aggregation_order: String::from("test"),
+                uncertainty_ci95_db: [0.0, 0.0],
+            },
+            overall: String::from("pass"),
+            notes: String::new(),
+        };
+        let dir = tempfile::tempdir().unwrap();
+        write_results_sidecar_under_protocol(dir.path(), &result, &protocol).unwrap();
+        // Hash mismatch and comparison mismatch fail closed.
+        let mut wrong_hash = result.clone();
+        wrong_hash.protocol_hash = String::from("deadbeef");
+        assert!(write_results_sidecar_under_protocol(dir.path(), &wrong_hash, &protocol).is_err());
+        let mut wrong_comparison = result.clone();
+        wrong_comparison.comparison = String::from("other-comparison");
+        assert!(
+            write_results_sidecar_under_protocol(dir.path(), &wrong_comparison, &protocol)
+                .is_err()
+        );
     }
 
     #[test]

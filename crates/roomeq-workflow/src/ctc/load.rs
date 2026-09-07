@@ -10,9 +10,115 @@ use math_audio_dsp::{
 use num_complex::Complex64;
 use roomeq_engine::error::{AutoeqError, Result};
 use roomeq_model::{CtcConfig, CtcHrtfConfig, CtcMeasurementConfig, CtcWindowConfig};
-use sofa_reader::{SofaFile, SourcePosition};
+use sofa_reader::{Hdf5File, SofaFile, SourcePosition};
 use std::collections::HashMap;
+use std::f64::consts::PI;
 use std::path::Path;
+
+/// SOFA dataset carrying per-measurement, per-receiver delays separately from
+/// `Data.IR`. Units are samples per AES69 (the same index units as `Data.IR`).
+const SOFA_DELAY_DATASET: &str = "Data.Delay";
+
+/// Apply a (possibly fractional) sample delay to a half spectrum.
+///
+/// This is the exact frequency-domain image of shifting the IR: unity
+/// magnitude at every bin, linear phase. Applying SOFA `Data.Delay` this way
+/// keeps the FFT length fixed, so timing stored inline in `Data.IR` and timing
+/// split into `Data.Delay` produce identical transfer matrices.
+pub(super) fn apply_sample_delay_to_half_spectrum(
+    spectrum: &mut [Complex64],
+    delay_samples: f64,
+    fft_size: usize,
+) {
+    if !delay_samples.is_finite() || delay_samples.abs() < 1e-12 || fft_size == 0 {
+        return;
+    }
+    for (bin, value) in spectrum.iter_mut().enumerate() {
+        let phase = -2.0 * PI * bin as f64 * delay_samples / fft_size as f64;
+        *value *= Complex64::from_polar(1.0, phase);
+    }
+}
+
+/// Read per-receiver delays (samples) for one SOFA measurement.
+///
+/// Returns `None` when the file carries no `Data.Delay` dataset (all timing
+/// is embedded in `Data.IR`). Fails closed when the dataset exists but cannot
+/// be interpreted, instead of silently dropping acoustic timing.
+pub(super) fn read_sofa_receiver_delays(
+    hdf5: &Hdf5File,
+    num_measurements: usize,
+    num_receivers: usize,
+    measurement: usize,
+) -> Result<Option<[f64; 2]>> {
+    if !hdf5.has_dataset(SOFA_DELAY_DATASET) {
+        return Ok(None);
+    }
+    let dims = hdf5
+        .dataset_dims(SOFA_DELAY_DATASET)
+        .map_err(|error| AutoeqError::InvalidMeasurement {
+            message: format!("failed to read SOFA {SOFA_DELAY_DATASET} dimensions: {error}"),
+        })?;
+    let values = hdf5
+        .read_f64(SOFA_DELAY_DATASET)
+        .map_err(|error| AutoeqError::InvalidMeasurement {
+            message: format!("failed to read SOFA {SOFA_DELAY_DATASET}: {error}"),
+        })?;
+    select_receiver_delays(
+        &values,
+        &dims,
+        num_measurements,
+        num_receivers,
+        measurement,
+    )
+}
+
+/// Validate `Data.Delay` shape (`[M, R]`) and select one measurement's
+/// per-receiver delays. Pure function over the flattened row-major dataset so
+/// the shape/index contract is unit-testable without a SOFA file.
+pub(super) fn select_receiver_delays(
+    values: &[f64],
+    dims: &[u64],
+    num_measurements: usize,
+    num_receivers: usize,
+    measurement: usize,
+) -> Result<Option<[f64; 2]>> {
+    if dims.len() != 2
+        || dims[0] as usize != num_measurements
+        || dims[1] as usize != num_receivers
+        || values.len() != num_measurements * num_receivers
+    {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: format!(
+                "SOFA {SOFA_DELAY_DATASET} has unsupported shape {dims:?} for \
+                 {num_measurements} measurements x {num_receivers} receivers; \
+                 refusing to silently drop acoustic timing"
+            ),
+        });
+    }
+    if num_receivers != 2 {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: format!(
+                "SOFA {SOFA_DELAY_DATASET} expects exactly two receivers, got {num_receivers}"
+            ),
+        });
+    }
+    let Some(row) = values.chunks_exact(num_receivers).nth(measurement) else {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: format!(
+                "SOFA {SOFA_DELAY_DATASET} has no entry for measurement {measurement}"
+            ),
+        });
+    };
+    let delays = [row[0], row[1]];
+    if delays.iter().any(|delay| !delay.is_finite()) {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: format!(
+                "SOFA {SOFA_DELAY_DATASET} entry for measurement {measurement} is non-finite"
+            ),
+        });
+    }
+    Ok(Some(delays))
+}
 
 pub(super) fn load_measured_spectrum(
     measurements: &CtcMeasurementConfig,
@@ -226,6 +332,18 @@ pub(super) fn load_hrtf_spectrum(
         });
     }
 
+    // `SofaFile` exposes only `Data.IR`; separately stored `Data.Delay`
+    // entries (F10) are read through the same file's HDF5 layer and applied
+    // as exact spectral phase ramps below.
+    let hdf5 = Hdf5File::open(&hrtf.hrtf_file).map_err(|error| {
+        AutoeqError::InvalidMeasurement {
+            message: format!(
+                "failed to open CTC HRTF '{}' delay layer: {}",
+                hrtf.hrtf_file.display(),
+                error
+            ),
+        }
+    })?;
     let mut speaker_spectra = Vec::new();
     let mut speakers = Vec::new();
     for speaker in &hrtf.speakers {
@@ -234,6 +352,9 @@ pub(super) fn load_hrtf_spectrum(
             speaker.elevation_deg as f32,
             speaker.distance_m as f32,
         );
+        // Same nearest-measurement lookup the reader uses for the IRs, so the
+        // delays index the identical measurement.
+        let (measurement, _) = sofa.find_nearest(&position);
         let data = sofa.get_hrtf_at_position(&position).ok_or_else(|| {
             AutoeqError::InvalidMeasurement {
                 message: format!(
@@ -243,10 +364,26 @@ pub(super) fn load_hrtf_spectrum(
             }
         })?;
         speakers.push(speaker.speaker.clone());
-        speaker_spectra.push([
+        let mut spectra = [
             fft_real_to_half_spectrum(&data.ir_left, fft_size),
             fft_real_to_half_spectrum(&data.ir_right, fft_size),
-        ]);
+        ];
+        if let Some(delays) =
+            read_sofa_receiver_delays(&hdf5, sofa.num_measurements, 2, measurement)?
+        {
+            if delays.iter().any(|delay| delay.abs() > 1e-12) {
+                log::info!(
+                    "CTC HRTF '{}' speaker '{}': applying SOFA Data.Delay [{:.3}, {:.3}] samples from measurement {measurement}",
+                    hrtf.hrtf_file.display(),
+                    speaker.speaker,
+                    delays[0],
+                    delays[1],
+                );
+            }
+            apply_sample_delay_to_half_spectrum(&mut spectra[0], delays[0], fft_size);
+            apply_sample_delay_to_half_spectrum(&mut spectra[1], delays[1], fft_size);
+        }
+        speaker_spectra.push(spectra);
     }
 
     Ok(build_matrix_spectrum(

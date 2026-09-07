@@ -1,6 +1,9 @@
 use super::dsp_response_cache::DspResponseCache;
 use super::dsp_response_cache::channel_chain_response;
+use super::fft::fft_real_to_half_spectrum;
+use super::load::apply_sample_delay_to_half_spectrum;
 use super::load::load_measured_spectrum;
+use super::load::select_receiver_delays;
 use super::load::load_raw_sweep_spectrum;
 use super::load::load_two_channel_ir_spectrum;
 use super::misc::CTC_CONDITION_WARNING_THRESHOLD;
@@ -37,6 +40,77 @@ use write::write_mono_float_wav;
 use write::write_mono_impulse;
 use write::write_stereo_impulse;
 use write::write_stereo_split_impulse;
+
+#[test]
+fn sofa_split_delay_matches_embedded_integer_shift() {
+    // F10: timing split into Data.Delay must reproduce timing embedded in
+    // Data.IR. A 12-sample delay as a spectral ramp must equal the FFT of
+    // the 12-sample-shifted IR.
+    let fft_size = 128;
+    let mut ir = vec![0.0_f32; 64];
+    ir[10] = 1.0;
+    ir[11] = 0.5;
+    let mut ramped = fft_real_to_half_spectrum(&ir, fft_size);
+    apply_sample_delay_to_half_spectrum(&mut ramped, 12.0, fft_size);
+    let mut shifted = vec![0.0_f32; 64];
+    shifted[22] = 1.0;
+    shifted[23] = 0.5;
+    let embedded = fft_real_to_half_spectrum(&shifted, fft_size);
+    assert_eq!(ramped.len(), embedded.len());
+    for (a, b) in ramped.iter().zip(embedded.iter()) {
+        assert!(
+            (a - b).norm() < 1e-9,
+            "split delay differs from embedded timing by {}",
+            (a - b).norm()
+        );
+    }
+}
+
+#[test]
+fn sofa_fractional_delay_preserves_magnitude() {
+    // A fractional Data.Delay is pure delay: unity magnitude everywhere.
+    let fft_size = 256;
+    let ir: Vec<f32> = (0..128)
+        .map(|i| (-(i as f32) / 24.0).exp() * (i as f32 * 0.3).sin())
+        .collect();
+    let reference = fft_real_to_half_spectrum(&ir, fft_size);
+    let mut delayed = reference.clone();
+    apply_sample_delay_to_half_spectrum(&mut delayed, 12.7, fft_size);
+    for (a, b) in reference.iter().zip(delayed.iter()) {
+        assert!(
+            (a.norm() - b.norm()).abs() < 1e-12,
+            "fractional delay changed magnitude: {} vs {}",
+            a.norm(),
+            b.norm()
+        );
+    }
+    let expected_phase = -2.0 * PI * 12.7 / fft_size as f64;
+    assert!(
+        (delayed[1].arg() - reference[1].arg() - expected_phase).abs() < 1e-9,
+        "bin-1 phase ramp is wrong"
+    );
+}
+
+#[test]
+fn sofa_delay_selection_validates_shape_and_values() {
+    // Valid [M, R] layout selects the requested measurement row, unequal
+    // left/right included.
+    let delays = select_receiver_delays(&[12.0, 0.0], &[1, 2], 1, 2, 0)
+        .expect("valid layout")
+        .expect("delays present");
+    assert_eq!(delays, [12.0, 0.0]);
+    let delays = select_receiver_delays(&[12.0, 0.0, 0.0, 5.0], &[2, 2], 2, 2, 1)
+        .expect("valid layout")
+        .expect("delays present");
+    assert_eq!(delays, [0.0, 5.0]);
+    // Wrong rank, wrong extents, short data, OOB row, and non-finite
+    // entries must fail closed, never silently drop timing.
+    assert!(select_receiver_delays(&[1.0, 2.0], &[2], 1, 2, 0).is_err());
+    assert!(select_receiver_delays(&[1.0, 2.0], &[1, 3], 1, 2, 0).is_err());
+    assert!(select_receiver_delays(&[1.0], &[1, 2], 1, 2, 0).is_err());
+    assert!(select_receiver_delays(&[1.0, 2.0], &[1, 2], 1, 2, 1).is_err());
+    assert!(select_receiver_delays(&[f64::NAN, 0.0], &[1, 2], 1, 2, 0).is_err());
+}
 
 #[test]
 fn beta_uses_lf_mid_hf_bands() {

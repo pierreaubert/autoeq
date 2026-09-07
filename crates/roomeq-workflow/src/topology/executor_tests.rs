@@ -160,6 +160,7 @@ fn veto_optimizer(enforce: bool) -> OptimizerConfig {
         filter_audibility: Some(FilterAudibilityConfig {
             enabled: true,
             report_only: !enforce,
+            allow_enforcement_with_experimental_proxy: enforce,
             ..Default::default()
         }),
         // Headroom beyond the single real correction: the optimizer spends

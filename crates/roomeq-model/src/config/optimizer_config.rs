@@ -203,7 +203,8 @@ pub struct OptimizerConfig {
     /// Per-filter audibility veto (Phase A). `None` (default) disables the
     /// veto entirely: no evaluation, no preset-output change. `Some` with
     /// `report_only: true` (default) records reason-coded verdicts without
-    /// removing filters; enforcement is opt-in via `report_only: false`.
+    /// removing filters; enforcement is opt-in via `report_only: false` plus
+    /// `allow_enforcement_with_experimental_proxy` (the proxy is unvalidated).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter_audibility: Option<FilterAudibilityConfig>,
     /// Cumulative pruning budget over declared conditions (Stage 0

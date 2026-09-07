@@ -173,10 +173,15 @@ pub fn rule_filter_audibility(ctx: &mut ValidationContext<'_>) {
             veto.elimination_loudness_delta_sones
         ));
     }
-    if !veto.report_only {
+    if !veto.report_only && !veto.enforcement_authorized() {
+        ctx.add_warning(
+            "filter_audibility.report_only is false without \
+             allow_enforcement_with_experimental_proxy: stays advisory, no filters will be removed",
+        );
+    } else if !veto.report_only {
         ctx.add_warning(
             "filter_audibility.report_only is false: inaudible filters will be removed \
-             (Phase A enforcement is opt-in; verify veto counts before relying on it)",
+             under the experimental proxy (verify veto counts before relying on it)",
         );
     }
 }
@@ -1328,7 +1333,24 @@ mod optimizer_rule_tests {
             result
                 .warnings
                 .iter()
-                .any(|w| w.contains("report_only is false"))
+                .any(|w| w.contains("stays advisory")),
+            "unacknowledged enforcement must warn it stays advisory, got {:?}",
+            result.warnings
+        );
+        // Acknowledged experimental enforcement warns about removal.
+        let mut config = default_config();
+        config.filter_audibility = Some(crate::FilterAudibilityConfig {
+            report_only: false,
+            allow_enforcement_with_experimental_proxy: true,
+            ..Default::default()
+        });
+        let result = run_rule(rule_filter_audibility, &config);
+        assert!(result.errors.is_empty());
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("will be removed"))
         );
     }
 

@@ -32,7 +32,8 @@ fn default_veto_listening_phon() -> f64 {
 /// shipped first in report-only mode: with `report_only: true` (the default)
 /// the veto evaluates every filter and records reason-coded verdicts but
 /// never removes anything, so default behavior is unchanged. Enforcement
-/// (`report_only: false`) is opt-in. `None` on the owning optimizer config
+/// (`report_only: false` plus `allow_enforcement_with_experimental_proxy`)
+/// is opt-in and experimental. `None` on the owning optimizer config
 /// disables the veto entirely (no evaluation, no output change).
 ///
 /// The veto prices each biquad in perceptual units on the ERB-rate axis
@@ -48,9 +49,16 @@ pub struct FilterAudibilityConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Report-only mode: record verdicts but never remove filters.
-    /// Enforcement requires explicitly setting this to `false`.
+    /// Enforcement requires explicitly setting this to `false` *and*
+    /// acknowledging the experimental proxy (see below).
     #[serde(default = "default_true")]
     pub report_only: bool,
+    /// Explicit acknowledgment that the loudness proxy is experimental and
+    /// unvalidated (see `roomeq_engine::eq::audibility_veto`). Enforcement
+    /// stays advisory until this is set to `true`: `report_only: false`
+    /// alone never removes filters.
+    #[serde(default)]
+    pub allow_enforcement_with_experimental_proxy: bool,
     /// ERB-mapped level-difference audibility floor in dB. Filters whose
     /// peak with/without difference falls below this are inaudible ripple.
     #[serde(default = "default_veto_jnd_db")]
@@ -95,6 +103,7 @@ impl Default for FilterAudibilityConfig {
         Self {
             enabled: true,
             report_only: true,
+            allow_enforcement_with_experimental_proxy: false,
             jnd_db: default_veto_jnd_db(),
             min_audible_erb_width: default_veto_min_erb_width(),
             mode_proximity_ban_erbs: default_veto_mode_ban_erbs(),
@@ -109,6 +118,14 @@ impl Default for FilterAudibilityConfig {
 }
 
 impl FilterAudibilityConfig {
+    /// Whether filter removals may be applied. The proxy behind the
+    /// nomination is experimental and has no measured listener validation,
+    /// so enforcement requires both opting out of report-only mode and an
+    /// explicit experimental-use acknowledgment.
+    pub fn enforcement_authorized(&self) -> bool {
+        self.enabled && !self.report_only && self.allow_enforcement_with_experimental_proxy
+    }
+
     /// Resolved calibrated evaluation level in phons.
     pub fn resolved_listening_phon(&self, epa_listening_phon: Option<f64>) -> f64 {
         self.listening_level_phon

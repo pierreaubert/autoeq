@@ -1654,8 +1654,13 @@
     },
     "FilterAudibilityConfig": {
       "additionalProperties": false,
-      "description": "Per-filter audibility veto for emitted PEQ filters (Phase A of the\naudibility plan).\n\nEvery threshold here is an implementation-time starting calibration,\nshipped first in report-only mode: with `report_only: true` (the default)\nthe veto evaluates every filter and records reason-coded verdicts but\nnever removes anything, so default behavior is unchanged. Enforcement\n(`report_only: false`) is opt-in. `None` on the owning optimizer config\ndisables the veto entirely (no evaluation, no output change).\n\nThe veto prices each biquad in perceptual units on the ERB-rate axis\n(see `roomeq_engine::eq::audibility_veto`): peak with/without level\ndifference, affected ERB width, and an approximate masked-loudness delta\nat calibrated SPL. None of these is a reference-grade ISO 532\nimplementation; that arrives with the Phase D objective. Threshold\nnumerics must be re-verified against primary psychoacoustic publications\nbefore any default flip.",
+      "description": "Per-filter audibility veto for emitted PEQ filters (Phase A of the\naudibility plan).\n\nEvery threshold here is an implementation-time starting calibration,\nshipped first in report-only mode: with `report_only: true` (the default)\nthe veto evaluates every filter and records reason-coded verdicts but\nnever removes anything, so default behavior is unchanged. Enforcement\n(`report_only: false` plus `allow_enforcement_with_experimental_proxy`)\nis opt-in and experimental. `None` on the owning optimizer config\ndisables the veto entirely (no evaluation, no output change).\n\nThe veto prices each biquad in perceptual units on the ERB-rate axis\n(see `roomeq_engine::eq::audibility_veto`): peak with/without level\ndifference, affected ERB width, and an approximate masked-loudness delta\nat calibrated SPL. None of these is a reference-grade ISO 532\nimplementation; that arrives with the Phase D objective. Threshold\nnumerics must be re-verified against primary psychoacoustic publications\nbefore any default flip.",
       "properties": {
+        "allow_enforcement_with_experimental_proxy": {
+          "default": false,
+          "description": "Explicit acknowledgment that the loudness proxy is experimental and\nunvalidated (see `roomeq_engine::eq::audibility_veto`). Enforcement\nstays advisory until this is set to `true`: `report_only: false`\nalone never removes filters.",
+          "type": "boolean"
+        },
         "elimination_loudness_delta_sones": {
           "default": 0.05,
           "description": "Backward-elimination threshold in approximate masked-loudness delta\n(sones): filters whose removal changes total loudness by less than\nthis are eliminated. Provisional calibration; report-only first.",
@@ -1719,7 +1724,7 @@
         },
         "report_only": {
           "default": true,
-          "description": "Report-only mode: record verdicts but never remove filters.\nEnforcement requires explicitly setting this to `false`.",
+          "description": "Report-only mode: record verdicts but never remove filters.\nEnforcement requires explicitly setting this to `false` *and*\nacknowledging the experimental proxy (see below).",
           "type": "boolean"
         }
       },
@@ -1906,7 +1911,7 @@
           "type": "integer"
         },
         "tol": {
-          "default": 1e-08,
+          "default": 1e-8,
           "description": "DE convergence tolerance.",
           "format": "double",
           "type": "number"
@@ -2650,7 +2655,7 @@
           "description": "Asymmetric loss weights. `None` preserves the built-in default."
         },
         "atolerance": {
-          "default": 1e-05,
+          "default": 0.00001,
           "description": "Optimization convergence tolerance (absolute)",
           "format": "double",
           "type": "number"
@@ -2798,7 +2803,7 @@
               "type": "null"
             }
           ],
-          "description": "Per-filter audibility veto (Phase A). `None` (default) disables the\nveto entirely: no evaluation, no preset-output change. `Some` with\n`report_only: true` (default) records reason-coded verdicts without\nremoving filters; enforcement is opt-in via `report_only: false`."
+          "description": "Per-filter audibility veto (Phase A). `None` (default) disables the\nveto entirely: no evaluation, no preset-output change. `Some` with\n`report_only: true` (default) records reason-coded verdicts without\nremoving filters; enforcement is opt-in via `report_only: false` plus\n`allow_enforcement_with_experimental_proxy` (the proxy is unvalidated)."
         },
         "fir": {
           "anyOf": [
@@ -3166,7 +3171,7 @@
           "description": "Unified target response configuration (shape + preference shelves + broadband pre-correction)"
         },
         "tolerance": {
-          "default": 1e-05,
+          "default": 0.00001,
           "description": "Optimization convergence tolerance (relative)",
           "format": "double",
           "type": "number"
@@ -4964,7 +4969,7 @@
       "default": {
         "algorithm": "autoeq:cmaes",
         "asymmetric_loss": true,
-        "atolerance": 1e-05,
+        "atolerance": 0.00001,
         "elimination_threshold": 0.005,
         "local_algo": "cobyla",
         "loss_type": "flat",
@@ -4984,7 +4989,7 @@
         "refine": true,
         "smooth_n": 2,
         "strategy": "lshade",
-        "tolerance": 1e-05
+        "tolerance": 0.00001
       },
       "description": "Optimizer configuration"
     },

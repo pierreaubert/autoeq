@@ -279,8 +279,15 @@ pub fn apply_audibility_veto(
     if !evaluation.config.enabled || filters.is_empty() {
         return (filters, Vec::new());
     }
+    if !evaluation.config.report_only && !evaluation.config.enforcement_authorized() {
+        log::warn!(
+            "audibility veto enforcement requested (report_only=false) without \
+             allow_enforcement_with_experimental_proxy; staying advisory because \
+             the loudness proxy is experimental and unvalidated"
+        );
+    }
     let verdicts = evaluate_audibility_veto(evaluation);
-    enforce_veto_verdicts(filters, verdicts, !evaluation.config.report_only)
+    enforce_veto_verdicts(filters, verdicts, evaluation.config.enforcement_authorized())
 }
 
 /// Enforce evaluated verdicts: drop `Remove` filters when `enforce` is true.
@@ -478,7 +485,10 @@ fn acceptance_record(
     }
     AssessmentRecord {
         outcome,
-        confidence: AssessmentConfidence::Moderate,
+        // The loudness proxy has no measured listener/model validation, so
+        // even accepted adjudications stay Low confidence (F12). The units
+        // (`sones-experimental-proxy`) and heuristic model name say the same.
+        confidence: AssessmentConfidence::Low,
         enforcement,
         provenance: AssessmentProvenance {
             model: String::from("heuristic-erb-proxy"),
@@ -912,7 +922,11 @@ mod audibility_veto_tests {
         assert_eq!(verdicts[0].reason, VetoReason::Audible);
     }
 
-    fn apply(filters: Vec<Biquad>, report_only: bool) -> (Vec<Biquad>, Vec<FilterVetoVerdict>) {
+    fn apply(
+        filters: Vec<Biquad>,
+        report_only: bool,
+        experimental_ack: bool,
+    ) -> (Vec<Biquad>, Vec<FilterVetoVerdict>) {
         let freqs = grid();
         let evaluation = VetoEvaluation {
             filters: &filters,
@@ -920,18 +934,18 @@ mod audibility_veto_tests {
             listening_phon: 75.0,
             config: FilterAudibilityConfig {
                 report_only,
+                allow_enforcement_with_experimental_proxy: experimental_ack,
                 ..FilterAudibilityConfig::default()
             },
             hf_guard_start_hz: 1600.0,
         };
-        let verdicts = evaluate_audibility_veto(&evaluation);
-        enforce_veto_verdicts(filters, verdicts, !report_only)
+        apply_audibility_veto(filters.clone(), &evaluation)
     }
 
     #[test]
     fn report_only_records_without_removing() {
         let filters = vec![peak(0.2, 500.0, 1.0), peak(3.0, 500.0, 1.0)];
-        let (kept, verdicts) = apply(filters, true);
+        let (kept, verdicts) = apply(filters, true, false);
         assert_eq!(kept.len(), 2, "report-only must not remove");
         assert_eq!(verdicts[0].decision, VetoDecision::Remove);
         assert!(!verdicts[0].enforced);
@@ -940,11 +954,22 @@ mod audibility_veto_tests {
     #[test]
     fn enforcement_removes_with_reason_code() {
         let filters = vec![peak(0.2, 500.0, 1.0), peak(3.0, 500.0, 1.0)];
-        let (kept, verdicts) = apply(filters, false);
+        let (kept, verdicts) = apply(filters, false, true);
         assert_eq!(kept.len(), 1);
         assert!(verdicts[0].enforced);
         assert_eq!(verdicts[0].reason, VetoReason::SubJnd);
         assert!(!verdicts[1].enforced);
+    }
+
+    #[test]
+    fn enforcement_without_experimental_ack_stays_advisory() {
+        // F12: the loudness proxy is unvalidated, so `report_only: false`
+        // alone must not remove filters.
+        let filters = vec![peak(0.2, 500.0, 1.0), peak(3.0, 500.0, 1.0)];
+        let (kept, verdicts) = apply(filters, false, false);
+        assert_eq!(kept.len(), 2, "unacknowledged enforcement must stay advisory");
+        assert!(verdicts.iter().all(|verdict| !verdict.enforced));
+        assert_eq!(verdicts[0].decision, VetoDecision::Remove);
     }
 
     #[test]
@@ -1062,6 +1087,9 @@ mod audibility_veto_tests {
         let record = &verdicts[0].acceptance;
         assert_eq!(record.outcome, ReportOutcome::AcceptedRemoval);
         assert_eq!(record.enforcement, EnforcementState::Enforced);
+        // F12: the proxy has no listener validation; accepted removals stay
+        // Low confidence even when enforced.
+        assert_eq!(record.confidence, AssessmentConfidence::Low);
         assert_eq!(record.provenance.reference, adjudication.f0_reference_id);
         assert_eq!(record.provenance.model, "heuristic-erb-proxy");
         assert!(

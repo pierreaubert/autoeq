@@ -355,6 +355,13 @@ fn apply_veto_postpass(
         };
         super::audibility_veto::evaluate_audibility_veto(&evaluation)
     };
+    if !veto.report_only && !veto.enforcement_authorized() {
+        log::warn!(
+            "audibility veto enforcement requested (report_only=false) without \
+             allow_enforcement_with_experimental_proxy; staying advisory because \
+             the loudness proxy is experimental and unvalidated"
+        );
+    }
     let adjudication_config = super::audibility_veto::AdjudicationConfig {
         listening_phon: phon,
         per_step_quantum_sones: veto.elimination_loudness_delta_sones,
@@ -363,7 +370,7 @@ fn apply_veto_postpass(
             .as_ref()
             .and_then(|budget| budget.max_cumulative_delta),
         local_deviation_cap_db: veto.jnd_db,
-        enforce: !veto.report_only,
+        enforce: veto.enforcement_authorized(),
         model_version: env!("CARGO_PKG_VERSION").to_string(),
     };
     let adjudication = super::audibility_veto::adjudicate_veto_removals(
@@ -2472,6 +2479,10 @@ mod multi_eq_tests {
                     max_db: 0.5,
                     filter_audibility: report_only.map(|report_only| FilterAudibilityConfig {
                         report_only,
+                        // The enforced case below explicitly acknowledges the
+                        // experimental proxy (F12); without it enforcement
+                        // stays advisory.
+                        allow_enforcement_with_experimental_proxy: !report_only,
                         ..FilterAudibilityConfig::default()
                     }),
                     ..OptimizerConfig::default()

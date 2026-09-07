@@ -157,7 +157,9 @@ validated programme-audio or measured-decay objectives.
 (`None`, the default) disables the veto entirely: legacy output, byte-for-byte.
 When present, the default evaluates every filter and records reason-coded
 verdicts but never removes anything (`report_only: true`); enforcement
-(`report_only: false`) is an explicit opt-in. Thresholds are implementation-time starting calibrations,
+(`report_only: false` plus `allow_enforcement_with_experimental_proxy: true`)
+is an explicit experimental opt-in — `report_only: false` alone stays
+advisory. Thresholds are implementation-time starting calibrations,
 not reference psychoacoustic values — see `ROOMEQ_AUDIBILITY_CONTRACT.md`
 (kept alongside the review docs; the audibility contract is git-ignored by
 repo policy) and `docs/ROOMEQ_MANUAL.md` ("Staged rollout and release

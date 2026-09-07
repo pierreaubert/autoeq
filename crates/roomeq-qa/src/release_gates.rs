@@ -167,8 +167,10 @@ pub fn veto_release_behavior(config: Option<&FilterAudibilityConfig>) -> PolicyB
     match config {
         None => PolicyBehavior::Legacy,
         Some(config) if !config.enabled => PolicyBehavior::Legacy,
-        Some(config) if config.report_only => PolicyBehavior::Advisory,
-        Some(_) => PolicyBehavior::Enforcing,
+        Some(config) if config.enforcement_authorized() => PolicyBehavior::Enforcing,
+        // Report-only, or enforcement requested without the experimental
+        // acknowledgment (which stays advisory): no applied change.
+        Some(_) => PolicyBehavior::Advisory,
     }
 }
 
@@ -291,6 +293,12 @@ mod release_gates_tests {
         // perceptual (the veto makes a perceptual claim).
         let mut enforcing = FilterAudibilityConfig::default();
         enforcing.report_only = false;
+        // Without the experimental acknowledgment, enforcement stays advisory.
+        assert_eq!(
+            veto_release_behavior(Some(&enforcing)),
+            PolicyBehavior::Advisory
+        );
+        enforcing.allow_enforcement_with_experimental_proxy = true;
         assert_eq!(
             veto_release_behavior(Some(&enforcing)),
             PolicyBehavior::Enforcing

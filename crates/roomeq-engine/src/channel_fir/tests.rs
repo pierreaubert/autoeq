@@ -157,6 +157,135 @@ fn hybrid_returns_iir_filters_and_required_residual_sidecar() {
 }
 
 #[test]
+fn hybrid_honours_multi_measurement_weights() {
+    // F04: Hybrid must optimize the configured multi-measurement objective,
+    // not just the representative curve. Opposed seats with swapped weights
+    // must yield different IIR solutions.
+    use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy};
+    let frequency = Array1::logspace(10.0, f64::log10(20.0), f64::log10(500.0), 48);
+    let seat_peak = Curve {
+        freq: frequency.clone(),
+        spl: Array1::from(
+            frequency
+                .iter()
+                .map(|f| 80.0 + 6.0 * (-((f - 120.0) / 10.0).powi(2)).exp())
+                .collect::<Vec<_>>(),
+        ),
+        ..Curve::default()
+    };
+    let seat_flat = Curve {
+        freq: frequency.clone(),
+        spl: Array1::from_elem(frequency.len(), 80.0),
+        ..Curve::default()
+    };
+    let representative = Curve {
+        freq: frequency.clone(),
+        spl: (&seat_peak.spl + &seat_flat.spl) / 2.0,
+        ..Curve::default()
+    };
+    let run_with_weights = |weights: Vec<f64>| {
+        let prepared = PreparedChannelInput::new(
+            PreparedChannelMeasurements::new(
+                representative.clone(),
+                vec![seat_peak.clone(), seat_flat.clone()],
+                true,
+            ),
+            None,
+            PreparedCea2034::default(),
+            EqResources::default(),
+        );
+        let mut room_config = config();
+        room_config.optimizer.num_filters = 1;
+        room_config.optimizer.max_iter = 50;
+        room_config.optimizer.population = 12;
+        room_config.optimizer.seed = Some(42);
+        room_config.optimizer.multi_measurement = Some(MultiMeasurementConfig {
+            strategy: MultiMeasurementStrategy::WeightedSum,
+            weights: Some(weights),
+            ..MultiMeasurementConfig::default()
+        });
+        let resources = EqResources::default();
+        let target = build_target_context("left", &room_config, &representative, None);
+        let features = preprocessed(&representative);
+        process_fir_channel(FirChannelRequest {
+            mode: FirChannelMode::Hybrid,
+            channel_name: "left",
+            prepared: &prepared,
+            room_config: &room_config,
+            sample_rate: 48_000.0,
+            target: &target,
+            preprocessed: &features,
+            optimizer: &room_config.optimizer,
+            eq_resources: &resources,
+            sidecar_reference: reference("left_residual_fir_48000hz.wav"),
+            callback: None,
+        })
+        .unwrap()
+    };
+    let peak_first = run_with_weights(vec![1.0, 0.0]);
+    let flat_first = run_with_weights(vec![0.0, 1.0]);
+    let response_at_120 = |filters: &[Biquad]| {
+        let response = autoeq_core::response::compute_peq_complex_response(
+            filters,
+            &Array1::from(vec![120.0]),
+            48_000.0,
+        );
+        20.0 * response[0].norm().log10()
+    };
+    let peak_cut = response_at_120(&peak_first.filters);
+    let flat_cut = response_at_120(&flat_first.filters);
+    assert!(
+        (peak_cut - flat_cut).abs() > 2.0,
+        "hybrid ignored multi-measurement weights: peak-weighted {peak_cut:.2} dB vs flat-weighted {flat_cut:.2} dB"
+    );
+    // The callback path must use the same multi-measurement dispatch.
+    let prepared = PreparedChannelInput::new(
+        PreparedChannelMeasurements::new(
+            representative.clone(),
+            vec![seat_peak.clone(), seat_flat.clone()],
+            true,
+        ),
+        None,
+        PreparedCea2034::default(),
+        EqResources::default(),
+    );
+    let mut room_config = config();
+    room_config.optimizer.num_filters = 1;
+    room_config.optimizer.max_iter = 50;
+    room_config.optimizer.population = 12;
+    room_config.optimizer.seed = Some(42);
+    room_config.optimizer.multi_measurement = Some(MultiMeasurementConfig {
+        strategy: MultiMeasurementStrategy::WeightedSum,
+        weights: Some(vec![1.0, 0.0]),
+        ..MultiMeasurementConfig::default()
+    });
+    let resources = EqResources::default();
+    let target = build_target_context("left", &room_config, &representative, None);
+    let features = preprocessed(&representative);
+    let callback: autoeq_optim::optim::OptimProgressCallback =
+        Box::new(|_, _, _| autoeq_optim::de::CallbackAction::Continue);
+    let with_callback = process_fir_channel(FirChannelRequest {
+        mode: FirChannelMode::Hybrid,
+        channel_name: "left",
+        prepared: &prepared,
+        room_config: &room_config,
+        sample_rate: 48_000.0,
+        target: &target,
+        preprocessed: &features,
+        optimizer: &room_config.optimizer,
+        eq_resources: &resources,
+        sidecar_reference: reference("left_residual_fir_48000hz.wav"),
+        callback: Some(callback),
+    })
+    .unwrap();
+    let callback_cut = response_at_120(&with_callback.filters);
+    assert!(
+        (callback_cut - peak_cut).abs() < 0.5,
+        "hybrid callback path diverged from multi-measurement objective: {callback_cut:.2} vs {peak_cut:.2} dB"
+    );
+}
+
+#[test]
 fn fir_assembly_exports_every_preprocessing_and_preference_stage() {
     let curve = curve(false);
     let prepared = prepared(curve.clone());

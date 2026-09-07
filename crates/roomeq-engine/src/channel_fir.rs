@@ -17,7 +17,7 @@ use crate::channel_result::{
     ChannelProcessingResult, ConvolutionSidecarReference, subtract_target_tilt,
 };
 use crate::channel_target::TargetContext;
-use crate::eq::{self, EqResources};
+use crate::eq::EqResources;
 
 const MAX_PHASE_ONLY_MAGNITUDE_DEVIATION_DB: f64 = 0.5;
 const PHASE_DEPTH_SEARCH_ITERATIONS: usize = 12;
@@ -110,28 +110,19 @@ fn process_phase_linear(request: FirChannelRequest<'_>) -> Result<ChannelProcess
 fn process_hybrid(mut request: FirChannelRequest<'_>) -> Result<ChannelProcessingResult> {
     let optimization_curve =
         subtract_target_tilt(&request.preprocessed.curve_for_optim, request.target);
-    let eq_result = if let Some(callback) = request.callback.take() {
-        eq::optimize_channel_eq_with_callback_detailed(
-            &optimization_curve,
-            request.optimizer,
-            Some(request.eq_resources),
-            request.sample_rate,
-            callback,
-        )
-    } else {
-        eq::optimize_channel_eq_detailed(
-            &optimization_curve,
-            request.optimizer,
-            Some(request.eq_resources),
-            request.sample_rate,
-        )
-    }
-    .map_err(|error| AutoeqError::OptimizationFailed {
-        message: format!(
-            "IIR optimization failed for channel {}: {error}",
-            request.channel_name
-        ),
-    })?;
+    // The Hybrid IIR stage must honour the configured multi-measurement
+    // objective exactly like the mixed-phase path (F04); optimizing only the
+    // representative curve silently drops minimax/variance/spatial strategies.
+    let eq_result = crate::channel_optimizer::optimize_maybe_multi(
+        request.channel_name,
+        request.prepared,
+        &optimization_curve,
+        request.optimizer,
+        request.eq_resources,
+        request.sample_rate,
+        request.callback.take(),
+        request.target.target_tilt_curve.as_ref(),
+    )?;
     info!("  IIR stage: {} filters", eq_result.filters.len());
 
     let iir_response = response::compute_peq_complex_response(

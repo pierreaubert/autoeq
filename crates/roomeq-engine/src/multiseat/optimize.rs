@@ -4,8 +4,8 @@ use super::compute::compute_combined_complex_responses;
 use super::compute::compute_combined_responses;
 use super::consts::MSO_DE_SEED;
 use super::consts::spl_from_complex_responses;
+use super::interpolate::evidence_response_to_complex;
 use super::interpolate::interpolate_all_measurements;
-use super::interpolate::interpolate_curve_to_grid;
 use super::misc::sobol_quadrature_points;
 use super::misc::weighted_variance_from_responses;
 use super::modal::modal_basis_objective_from_responses;
@@ -1078,24 +1078,42 @@ fn optimize_continuous_area_dispatch<const D: usize>(
     }
     let freqs = create_eval_frequency_grid(measurements, eval_min, eval_max);
 
-    let interpolate_at_p = |p: [f64; D]| -> Result<Vec<Vec<Complex64>>> {
-        let virtual_curves = area.interpolate_at(p);
-        // virtual_curves[sub_idx] = Curve at p
+    // Continuous-area interpolation consumes the evidence API (F06): queries
+    // outside the calibration support are rejected, and phase-ambiguous bins
+    // are downweighted by their phasor resultant instead of contributing a
+    // precise-looking full-level transfer the search could exploit.
+    let interpolate_at_p = |p: [f64; D]| -> Result<(Vec<Vec<Complex64>>, f64)> {
+        let response = area.interpolate_with_evidence(p)?;
+        // response.curves[sub_idx] = Curve at p, with per-bin confidence.
         // Convert each to a complex vec on the shared frequency grid.
-        let mut out: Vec<Vec<Complex64>> = Vec::with_capacity(virtual_curves.len());
-        for curve in &virtual_curves {
-            out.push(interpolate_curve_to_grid(curve, &freqs)?);
-        }
-        Ok(out)
+        evidence_response_to_complex(&response, &freqs)
+    };
+    let interpolate_complex_at_p = |p: [f64; D]| -> Result<Vec<Vec<Complex64>>> {
+        interpolate_at_p(p).map(|(complex, _)| complex)
     };
 
     // Pre-bake the complex per-sub responses at each static quadrature point.
     let static_complex: Option<Vec<Vec<Vec<Complex64>>>> = match &static_points {
         Some((pts, _)) => {
             let mut all = Vec::with_capacity(pts.len());
+            let mut max_ambiguous_fraction: f64 = 0.0;
             for p in pts {
-                let per_sub = interpolate_at_p(*p)?;
+                let (per_sub, ambiguous_fraction) = interpolate_at_p(*p).map_err(|error| {
+                    AutoeqError::InvalidMeasurement {
+                        message: format!(
+                            "continuous_area MSO quadrature point {p:?} is outside the calibration support: {error}"
+                        ),
+                    }
+                })?;
+                max_ambiguous_fraction =
+                    max_ambiguous_fraction.max(ambiguous_fraction);
                 all.push(per_sub);
+            }
+            if max_ambiguous_fraction > 0.0 {
+                info!(
+                    "  continuous_area MSO: worst static quadrature point has {:.1}% phase-ambiguous bins (downweighted by phasor resultant)",
+                    100.0 * max_ambiguous_fraction
+                );
             }
             Some(all)
         }
@@ -1161,7 +1179,7 @@ fn optimize_continuous_area_dispatch<const D: usize>(
                         .expect("area evaluator lock")
                         .prepare_candidate(gains, delays, polarities, allpass);
                     let loss_at_position = |_: &[f64], position: [f64; D]| -> f64 {
-                        match interpolate_at_p(position) {
+                        match interpolate_complex_at_p(position) {
                             Ok(per_sub) => evaluator
                                 .lock()
                                 .expect("area evaluator lock")

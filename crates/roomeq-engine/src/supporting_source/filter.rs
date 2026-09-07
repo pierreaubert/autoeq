@@ -49,10 +49,21 @@ pub fn compute_supporting_source_filter(
     let support_gain_db =
         compute_support_gain_db(&constrained_spl, &primary_smooth.spl, &support_smooth.spl);
 
-    // 6. Zero the gain outside the compensation band.
+    // 6. Zero the gain outside the trustworthy support: the configured
+    // compensation band intersected with the measured primary/support overlap
+    // (F09). A parametric target may extend beyond measured data, but a
+    // measured speaker transfer must not become an invertible endpoint
+    // plateau where no measurement exists.
+    let measured_lo = primary.freq[0].max(support.freq[0]);
+    let measured_hi = primary.freq[primary.freq.len() - 1]
+        .min(support.freq[support.freq.len() - 1]);
     let mut windowed_gain_db = support_gain_db.clone();
     for (i, &f) in common_freq.iter().enumerate() {
-        if f < config.freq_range_hz.0 || f > config.freq_range_hz.1 {
+        if f < config.freq_range_hz.0
+            || f > config.freq_range_hz.1
+            || f < measured_lo
+            || f > measured_hi
+        {
             windowed_gain_db[i] = f64::NEG_INFINITY;
         }
     }
@@ -601,6 +612,44 @@ mod tests {
             worst <= 7.0,
             "realized support/primary reaches {worst:.2} dB above 500 Hz (limit 6 dB)"
         );
+    }
+
+    #[test]
+    fn no_gain_outside_measured_support() {
+        // F09: support measured only 100–1000 Hz must not produce an
+        // invertible +5 dB plateau in the unmeasured 2–10 kHz region.
+        let primary = flat_curve(&[20.0, 100.0, 1000.0, 20000.0], 80.0);
+        let support = flat_curve(&[100.0, 200.0, 500.0, 1000.0], 75.0);
+        let target = flat_curve(&[20.0, 100.0, 1000.0, 20000.0], 83.0);
+        let config = SupportingSourceConfig {
+            decorrelation: SupportingSourceDecorrelation::None,
+            ..SupportingSourceConfig::default()
+        };
+        let result =
+            compute_supporting_source_filter(&primary, &support, &target, &config, 48_000.0)
+                .expect("filter computation should succeed");
+        let grid = &result.constrained_target.freq;
+        let gain = &result.support_gain_db;
+        assert_eq!(grid.len(), gain.len());
+        for (i, &f) in grid.iter().enumerate() {
+            if (400.0..=600.0).contains(&f) {
+                assert!(
+                    gain[i] > 0.0,
+                    "in-band support gain should be positive near 500 Hz, got {} dB",
+                    gain[i]
+                );
+            }
+            if (2000.0..=10000.0).contains(&f) {
+                // Muted means filter stopband (tens of dB down), not an
+                // invertible +5 dB plateau; the first octave above the mute
+                // edge still shows the FIR transition slope.
+                assert!(
+                    gain[i] < -40.0,
+                    "unmeasured region must stay muted, got {} dB at {f:.0} Hz",
+                    gain[i]
+                );
+            }
+        }
     }
 
     #[test]

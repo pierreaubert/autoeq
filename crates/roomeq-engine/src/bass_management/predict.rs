@@ -111,11 +111,14 @@ pub fn apply_source_pre_route_transfer(
 
     let mut conditioned = sub_curve.clone();
     conditioned.spl = &conditioned.spl + &transfer.spl;
+    // The product H_acoustic x H_electrical has known phase only when both
+    // factors do. An unknown acoustic phase must stay unknown even when the
+    // electrical transfer contributes phase (F03).
     match (conditioned.phase.as_mut(), transfer.phase.as_ref()) {
         (Some(phase), Some(transfer_phase)) if phase.len() == transfer_phase.len() => {
             *phase = &*phase + transfer_phase;
         }
-        (None, Some(transfer_phase)) => conditioned.phase = Some(transfer_phase.clone()),
+        (None, Some(_)) => {}
         (Some(_), Some(_)) => return None,
         (Some(_), None) | (None, None) => {}
     }
@@ -402,6 +405,39 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn magnitude_only_sub_stays_ineligible_after_pre_route_transfer() {
+        // F03: unknown acoustic phase must not be upgraded to known phase by
+        // the electrical pre-route transfer.
+        use ndarray::Array1;
+        let freq = Array1::from_vec(vec![40.0, 80.0, 160.0]);
+        let sub = Curve {
+            freq: freq.clone(),
+            spl: Array1::from_elem(3, 80.0),
+            phase: None,
+            ..Curve::default()
+        };
+        let transfer = Curve {
+            freq: freq.clone(),
+            spl: Array1::zeros(3),
+            phase: Some(Array1::from_elem(3, -90.0)),
+            ..Curve::default()
+        };
+        let conditioned = apply_source_pre_route_transfer(&sub, Some(&transfer))
+            .expect("conditioning should succeed");
+        assert!(
+            conditioned.phase.is_none(),
+            "magnitude-only acoustic phase was invented: {:?}",
+            conditioned.phase
+        );
+        let graph = routing_graph("LR24", 0.0);
+        assert!(
+            predict_bass_source_curve_from_routes(&sub, Some(&transfer), &graph, "L", 48_000.0)
+                .is_none(),
+            "magnitude-only sub must remain ineligible for coherent prediction"
+        );
     }
 
     #[test]

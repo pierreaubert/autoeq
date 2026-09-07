@@ -4432,6 +4432,22 @@
       },
       "type": "object"
     },
+    "SubwooferCrossoverRef": {
+      "anyOf": [
+        {
+          "description": "Single crossover key shared by every subwoofer.",
+          "type": "string"
+        },
+        {
+          "description": "Positional per-sub crossover keys, one entry per subwoofer.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "Crossover reference(s) for the subwoofer system.\n\nHistorically a single key shared by every sub. It also accepts a\npositional list whose entry `i` applies to sub `i` in\n`speakers.<sub-key>.subwoofers` order (foundation for per-sub splice).\nA one-element list behaves exactly like the shared form."
+    },
     "SubwooferStrategy": {
       "description": "Strategy for subwoofer optimization",
       "oneOf": [
@@ -4464,11 +4480,15 @@
           "description": "Strategy for subwoofer optimization"
         },
         "crossover": {
-          "description": "Crossover reference key (points to entry in `crossovers` map)",
-          "type": [
-            "string",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubwooferCrossoverRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Crossover reference key(s) (each points to an entry in `crossovers`):\neither one key shared by every sub, or a positional list with one\nentry per subwoofer (see [`SubwooferCrossoverRef`])."
         }
       },
       "type": "object"

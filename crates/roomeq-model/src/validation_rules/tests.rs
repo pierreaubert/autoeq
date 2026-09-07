@@ -358,7 +358,7 @@ fn validate_bass_management_rejects_negative_headroom_and_boost() {
             speakers: HashMap::from([("Sub".to_string(), "sub".to_string())]),
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Single,
-                crossover: Some("xo".to_string()),
+                crossover: Some("xo".into()),
                 mapping: HashMap::new(),
             }),
             bass_management: Some(BassManagementConfig {
@@ -458,5 +458,156 @@ fn validate_role_targets_rejects_invalid_bands_and_distances() {
             .errors
             .iter()
             .any(|e| e.contains("cinema_reference_distance_m"))
+    );
+}
+
+/// Two-sub MSO config mirroring `data_tests/roomeq/measured/2.2`: the
+/// `subs` speaker holds two subwoofers and the crossovers map holds
+/// `bass_xover1` / `bass_xover2`.
+fn mso_two_sub_config(crossover: Option<SubwooferCrossoverRef>) -> RoomConfig {
+    fn single(path: &str) -> MeasurementSource {
+        MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Path(PathBuf::from(path)),
+            speaker_name: None,
+        })
+    }
+    let mut speakers = HashMap::new();
+    speakers.insert("L".to_string(), SpeakerConfig::Single(single("L.csv")));
+    speakers.insert("R".to_string(), SpeakerConfig::Single(single("R.csv")));
+    speakers.insert(
+        "subs".to_string(),
+        SpeakerConfig::MultiSub(MultiSubGroup {
+            name: "Two subs".to_string(),
+            speaker_name: None,
+            subwoofers: vec![single("sub1.csv"), single("sub2.csv")],
+            allpass_optimization: false,
+        }),
+    );
+    let lr24_range = |minimum: f64, maximum: f64| CrossoverConfig {
+        crossover_type: "LR24".to_string(),
+        frequency: None,
+        frequencies: None,
+        frequency_range: Some((minimum, maximum)),
+    };
+    RoomConfig {
+        version: default_config_version(),
+        system: Some(SystemConfig {
+            model: SystemModel::Stereo,
+            speakers: HashMap::from([
+                ("L".to_string(), "L".to_string()),
+                ("R".to_string(), "R".to_string()),
+                ("LFE".to_string(), "subs".to_string()),
+            ]),
+            subwoofers: Some(SubwooferSystemConfig {
+                config: SubwooferStrategy::Mso,
+                crossover,
+                mapping: HashMap::from([("subs".to_string(), "L".to_string())]),
+            }),
+            bass_management: None,
+            supporting_source_outputs: None,
+        }),
+        speakers,
+        crossovers: Some(HashMap::from([
+            ("bass_xover1".to_string(), lr24_range(40.0, 130.0)),
+            ("bass_xover2".to_string(), lr24_range(60.0, 130.0)),
+        ])),
+        target_curve: None,
+        optimizer: OptimizerConfig::default(),
+        provenance: Default::default(),
+        recording_config: None,
+        ctc: None,
+        cea2034_cache: None,
+    }
+}
+
+#[test]
+fn subwoofer_crossover_list_matching_sub_count_is_valid() {
+    let config = mso_two_sub_config(Some(SubwooferCrossoverRef::PerSub(vec![
+        "bass_xover1".to_string(),
+        "bass_xover2".to_string(),
+    ])));
+    let result = validate_room_config(&config);
+    assert!(
+        result.is_valid,
+        "per-sub list matching the sub count must validate: {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn subwoofer_crossover_shared_and_single_entry_forms_stay_valid() {
+    for crossover in [
+        SubwooferCrossoverRef::Shared("bass_xover1".to_string()),
+        SubwooferCrossoverRef::PerSub(vec!["bass_xover1".to_string()]),
+    ] {
+        let result = validate_room_config(&mso_two_sub_config(Some(crossover.clone())));
+        assert!(
+            result.is_valid,
+            "shared/single-entry crossover {crossover:?} must validate: {:?}",
+            result.errors
+        );
+    }
+}
+
+#[test]
+fn subwoofer_crossover_rejects_unknown_key() {
+    // Shared form with the dangling `bass_xover` key from the 2.2 fixture.
+    let result = validate_room_config(&mso_two_sub_config(Some(SubwooferCrossoverRef::Shared(
+        "bass_xover".to_string(),
+    ))));
+    assert!(!result.is_valid);
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.contains("non-existent crossover 'bass_xover'")),
+        "unexpected errors: {:?}",
+        result.errors
+    );
+
+    // List form where only the second entry is unknown.
+    let result = validate_room_config(&mso_two_sub_config(Some(SubwooferCrossoverRef::PerSub(
+        vec!["bass_xover1".to_string(), "nope".to_string()],
+    ))));
+    assert!(!result.is_valid);
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.contains("non-existent crossover 'nope'")),
+        "unexpected errors: {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn subwoofer_crossover_rejects_arity_mismatch() {
+    // Three entries for two subwoofers.
+    let result = validate_room_config(&mso_two_sub_config(Some(SubwooferCrossoverRef::PerSub(
+        vec![
+            "bass_xover1".to_string(),
+            "bass_xover2".to_string(),
+            "bass_xover1".to_string(),
+        ],
+    ))));
+    assert!(!result.is_valid);
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.contains("has 3 entries") && e.contains("expected 1 or 2")),
+        "unexpected errors: {:?}",
+        result.errors
+    );
+
+    // Empty list is never a valid arity.
+    let result = validate_room_config(&mso_two_sub_config(Some(SubwooferCrossoverRef::PerSub(
+        Vec::new(),
+    ))));
+    assert!(!result.is_valid);
+    assert!(
+        result.errors.iter().any(|e| e.contains("has 0 entries")),
+        "unexpected errors: {:?}",
+        result.errors
     );
 }

@@ -35,7 +35,8 @@ use super::spl_calibration::SplCalibration;
 use super::types::{
     CrossoverConfig, CtcHeadPositionConfig, CtcHrtfSpeakerConfig, CtcMeasurementFileConfig,
     MultiMeasurementStrategy, PerceptualPolicyPreset, ProcessingMode, RecordingConfiguration,
-    SystemConfig, SystemModel, TargetCurveConfig, TargetShape,
+    SubwooferCrossoverRef, SubwooferStrategy, SubwooferSystemConfig, SystemConfig, SystemModel,
+    TargetCurveConfig, TargetShape,
 };
 use crate::{AsymmetricLossConfig, EpaConfig, PsychoacousticSmoothingConfig};
 use crate::{MeasurementRef, MeasurementSingle, MeasurementSource};

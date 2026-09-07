@@ -189,6 +189,7 @@ fn validate_room_config_rules(config: &RoomConfig) -> ValidationResult {
                     ));
                 }
             }
+            validate_subwoofer_crossovers(subwoofers, config, &mut result);
         }
     }
 
@@ -710,6 +711,62 @@ fn validate_crossovers(
             ));
         }
     }
+}
+
+/// Validate `system.subwoofers.crossover` references.
+///
+/// Every referenced key must exist in the `crossovers` map, and a per-sub
+/// list must hold either a single shared entry or exactly one entry per
+/// subwoofer (positional, aligned with `speakers.<key>.subwoofers` order).
+fn validate_subwoofer_crossovers(
+    subwoofers: &crate::config::SubwooferSystemConfig,
+    config: &RoomConfig,
+    result: &mut ValidationResult,
+) {
+    let Some(crossover) = subwoofers.crossover.as_ref() else {
+        return;
+    };
+    let keys = crossover.as_list();
+    let Some(crossovers) = config.crossovers.as_ref() else {
+        result.add_error(format!(
+            "subwoofers reference crossover key(s) [{}] but no crossovers defined",
+            keys.join(", ")
+        ));
+        return;
+    };
+    for key in &keys {
+        if !crossovers.contains_key(*key) {
+            result.add_error(format!(
+                "subwoofers reference non-existent crossover '{key}'"
+            ));
+        }
+    }
+    let sub_count = subwoofer_count(subwoofers, &config.speakers);
+    if keys.len() != 1 && keys.len() != sub_count {
+        result.add_error(format!(
+            "subwoofers crossover list has {} entries but {} subwoofer(s) configured; expected 1 or {}",
+            keys.len(),
+            sub_count,
+            sub_count
+        ));
+    }
+}
+
+/// Number of physical subwoofers behind the MSO mapping: each mapped
+/// speaker key contributes its multi-sub driver count (1 otherwise, so
+/// unresolved keys still count as a single sub).
+fn subwoofer_count(
+    subwoofers: &crate::config::SubwooferSystemConfig,
+    speakers: &HashMap<String, SpeakerConfig>,
+) -> usize {
+    subwoofers
+        .mapping
+        .keys()
+        .map(|key| match speakers.get(key) {
+            Some(SpeakerConfig::MultiSub(group)) => group.subwoofers.len().max(1),
+            _ => 1,
+        })
+        .sum()
 }
 
 /// Validate interactions between optimizer options and the resolved speaker map.

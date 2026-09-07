@@ -1,0 +1,29 @@
+{
+  "version": "2.1.0",
+  "speakers": {
+    "SVS_NEW_POS_1.txt": {
+      "path": "SVS_NEW_POS_1.txt.csv",
+      "name": "SVS NEW POS 1.txt"
+    },
+    "SVS_NEW_POS_2.txt": {
+      "path": "SVS_NEW_POS_2.txt.csv",
+      "name": "SVS NEW POS 2.txt"
+    },
+    "SVS_RR_POS_1.txt": {
+      "path": "SVS_RR_POS_1.txt.csv",
+      "name": "SVS RR POS 1.txt"
+    },
+    "SVS_RR_POS2.txt": {
+      "path": "SVS_RR_POS2.txt.csv",
+      "name": "SVS RR POS2.txt"
+    },
+    "ULS_II_POS_1_EQ2.txt": {
+      "path": "ULS_II_POS_1_EQ2.txt.csv",
+      "name": "ULS II POS 1 EQ2.txt"
+    },
+    "ULS_II_POS_2_EQ2.txt": {
+      "path": "ULS_II_POS_2_EQ2.txt.csv",
+      "name": "ULS II POS 2 EQ2.txt"
+    }
+  }
+}

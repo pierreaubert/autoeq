@@ -1,0 +1,41 @@
+{
+  "version": "2.1.0",
+  "speakers": {
+    "SVS_NEW_LF_POS1.txt": {
+      "path": "SVS_NEW_LF_POS1.txt.csv",
+      "name": "SVS NEW LF POS1.txt"
+    },
+    "SVS_NEW_LF_POS2.txt": {
+      "path": "SVS_NEW_LF_POS2.txt.csv",
+      "name": "SVS NEW LF POS2.txt"
+    },
+    "SVS_NEW_LF_POS3.txt": {
+      "path": "SVS_NEW_LF_POS3.txt.csv",
+      "name": "SVS NEW LF POS3.txt"
+    },
+    "SVS_RR_POS1.txt": {
+      "path": "SVS_RR_POS1.txt.csv",
+      "name": "SVS RR POS1.txt"
+    },
+    "SVS_RR_POS2.txt": {
+      "path": "SVS_RR_POS2.txt.csv",
+      "name": "SVS RR POS2.txt"
+    },
+    "SVS_RR_POS3.txt": {
+      "path": "SVS_RR_POS3.txt.csv",
+      "name": "SVS RR POS3.txt"
+    },
+    "ULS_II_POS_1_EQ1.txt": {
+      "path": "ULS_II_POS_1_EQ1.txt.csv",
+      "name": "ULS II POS 1 EQ1.txt"
+    },
+    "ULS_II_POS_2_EQ1.txt": {
+      "path": "ULS_II_POS_2_EQ1.txt.csv",
+      "name": "ULS II POS 2 EQ1.txt"
+    },
+    "ULS_II_POS_3_EQ1.txt": {
+      "path": "ULS_II_POS_3_EQ1.txt.csv",
+      "name": "ULS II POS 3 EQ1.txt"
+    }
+  }
+}

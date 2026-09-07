@@ -557,7 +557,7 @@ mod tests {
                 }),
                 subwoofers: Some(SubwooferSystemConfig {
                     config: crate::SubwooferStrategy::default(),
-                    crossover: Some("main".to_string()),
+                    crossover: Some("main".into()),
                     mapping: HashMap::new(),
                 }),
                 ..SystemConfig::default()

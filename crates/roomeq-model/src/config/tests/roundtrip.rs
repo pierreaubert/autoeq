@@ -629,3 +629,83 @@ fn room_config_roundtrip_and_resolve_paths() {
         other => panic!("expected path target curve, got {:?}", other),
     }
 }
+
+#[test]
+fn subwoofer_crossover_ref_parses_shared_string_form() {
+    let parsed: SubwooferCrossoverRef = serde_json::from_str("\"bass_xover\"").unwrap();
+    assert_eq!(
+        parsed,
+        SubwooferCrossoverRef::Shared("bass_xover".to_string())
+    );
+    assert_eq!(parsed.as_list(), vec!["bass_xover"]);
+    assert_eq!(parsed.primary(), "bass_xover");
+}
+
+#[test]
+fn subwoofer_crossover_ref_parses_per_sub_list_form() {
+    let parsed: SubwooferCrossoverRef =
+        serde_json::from_str("[\"bass_xover1\", \"bass_xover2\"]").unwrap();
+    assert_eq!(
+        parsed,
+        SubwooferCrossoverRef::PerSub(vec![
+            "bass_xover1".to_string(),
+            "bass_xover2".to_string(),
+        ])
+    );
+    assert_eq!(parsed.as_list(), vec!["bass_xover1", "bass_xover2"]);
+    assert_eq!(parsed.primary(), "bass_xover1");
+}
+
+#[test]
+fn subwoofer_crossover_ref_shared_serializes_as_plain_string() {
+    // Backward compatibility: the shared form must keep the exact legacy
+    // single-string JSON shape.
+    let shared = SubwooferCrossoverRef::Shared("bass_xover".to_string());
+    assert_eq!(
+        serde_json::to_string(&shared).unwrap(),
+        "\"bass_xover\""
+    );
+
+    let system = SubwooferSystemConfig {
+        config: SubwooferStrategy::Mso,
+        crossover: Some(shared),
+        mapping: HashMap::from([("subs".to_string(), "L".to_string())]),
+    };
+    let value = serde_json::to_value(&system).unwrap();
+    assert_eq!(value["crossover"], serde_json::json!("bass_xover"));
+
+    let back: SubwooferSystemConfig = serde_json::from_value(value).unwrap();
+    assert_eq!(
+        back.crossover.as_ref().map(|c| c.primary()),
+        Some("bass_xover")
+    );
+}
+
+#[test]
+fn subwoofer_crossover_ref_per_sub_roundtrip_and_legacy_accessors() {
+    let per_sub = SubwooferCrossoverRef::PerSub(vec![
+        "bass_xover1".to_string(),
+        "bass_xover2".to_string(),
+    ]);
+    let json = serde_json::to_string(&per_sub).unwrap();
+    let back: SubwooferCrossoverRef = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, per_sub);
+
+    // `From` conversions build the shared form.
+    assert_eq!(
+        SubwooferCrossoverRef::from("bass_xover"),
+        SubwooferCrossoverRef::Shared("bass_xover".to_string())
+    );
+    assert_eq!(
+        SubwooferCrossoverRef::from("bass_xover".to_string()),
+        SubwooferCrossoverRef::Shared("bass_xover".to_string())
+    );
+
+    // Legacy single-key consumers resolve the primary key through deref.
+    let system = SubwooferSystemConfig {
+        config: SubwooferStrategy::Mso,
+        crossover: Some(per_sub),
+        mapping: HashMap::from([("subs".to_string(), "L".to_string())]),
+    };
+    assert_eq!(system.crossover.as_deref(), Some("bass_xover1"));
+}

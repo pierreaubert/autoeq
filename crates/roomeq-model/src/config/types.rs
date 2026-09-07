@@ -375,15 +375,79 @@ pub enum Cea2034CorrectionMode {
     Auto,
 }
 
+/// Crossover reference(s) for the subwoofer system.
+///
+/// Historically a single key shared by every sub. It also accepts a
+/// positional list whose entry `i` applies to sub `i` in
+/// `speakers.<sub-key>.subwoofers` order (foundation for per-sub splice).
+/// A one-element list behaves exactly like the shared form.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SubwooferCrossoverRef {
+    /// Single crossover key shared by every subwoofer.
+    Shared(String),
+    /// Positional per-sub crossover keys, one entry per subwoofer.
+    PerSub(Vec<String>),
+}
+
+impl SubwooferCrossoverRef {
+    /// Every referenced crossover key: the shared key, or the per-sub list.
+    pub fn as_list(&self) -> Vec<&str> {
+        match self {
+            Self::Shared(key) => vec![key.as_str()],
+            Self::PerSub(keys) => keys.iter().map(String::as_str).collect(),
+        }
+    }
+
+    /// Primary key: the shared key, or entry 0 of a per-sub list.
+    ///
+    /// Returns `""` for an empty list (rejected later by validation).
+    /// Legacy single-key consumers resolve this.
+    pub fn primary(&self) -> &str {
+        match self {
+            Self::Shared(key) => key.as_str(),
+            Self::PerSub(keys) => match keys.first() {
+                Some(key) => key.as_str(),
+                None => "",
+            },
+        }
+    }
+}
+
+impl std::ops::Deref for SubwooferCrossoverRef {
+    type Target = str;
+
+    /// Derefs to [`primary`](Self::primary) so legacy
+    /// `crossover.as_deref()` call sites keep resolving the shared (or
+    /// first) key without changes.
+    fn deref(&self) -> &str {
+        self.primary()
+    }
+}
+
+impl From<String> for SubwooferCrossoverRef {
+    fn from(key: String) -> Self {
+        Self::Shared(key)
+    }
+}
+
+impl From<&str> for SubwooferCrossoverRef {
+    fn from(key: &str) -> Self {
+        Self::Shared(key.to_string())
+    }
+}
+
 /// Subwoofer system configuration (part of SystemConfig)
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SubwooferSystemConfig {
     /// Strategy for subwoofer optimization
     #[serde(default)]
     pub config: SubwooferStrategy,
-    /// Crossover reference key (points to entry in `crossovers` map)
+    /// Crossover reference key(s) (each points to an entry in `crossovers`):
+    /// either one key shared by every sub, or a positional list with one
+    /// entry per subwoofer (see [`SubwooferCrossoverRef`]).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub crossover: Option<String>,
+    pub crossover: Option<SubwooferCrossoverRef>,
     /// Mapping of subwoofer measurement key to main speaker logical role
     #[serde(flatten)]
     pub mapping: HashMap<String, String>,

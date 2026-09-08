@@ -6,6 +6,8 @@ use super::sub_driver_info::sum_sub_output_responses_on_grid;
 use super::types::BassManagementJointGroupInput;
 use super::types::SubDriverInfo;
 use super::types::group_crossover_plan;
+use super::types::per_sub_crossover_keys;
+use super::types::per_sub_crossover_plans;
 use crate::error::{AutoeqError, Result};
 use crate::topology::{
     all_curves_have_usable_phase, all_curves_share_frequency_grid,
@@ -52,8 +54,7 @@ fn candidate_restores_hard_safety(
     candidate_underfills: &[f64],
     baseline_underfills: &[f64],
 ) -> bool {
-    has_excessive_underfill(baseline_underfills)
-        && !has_excessive_underfill(candidate_underfills)
+    has_excessive_underfill(baseline_underfills) && !has_excessive_underfill(candidate_underfills)
 }
 
 fn should_accept_route_candidate(
@@ -339,6 +340,7 @@ pub fn optimize_home_cinema_group_crossovers(
                 trim_db,
                 objective_before,
                 objective_after,
+                selected_sub_low_pass_hz: Vec::new(),
                 advisories,
             },
         );
@@ -537,6 +539,7 @@ fn optimize_home_cinema_joint_group_crossovers(
                     trim_db: 0.0,
                     objective_before: None,
                     objective_after: None,
+                    selected_sub_low_pass_hz: Vec::new(),
                     advisories,
                 },
             );
@@ -628,6 +631,7 @@ fn optimize_home_cinema_joint_group_crossovers(
                     input.plan.frequency_hz,
                 ),
                 objective_after: bass_management_objective(objective_after_curve.as_ref(), freq),
+                selected_sub_low_pass_hz: Vec::new(),
                 advisories,
             },
         );
@@ -656,6 +660,7 @@ pub fn optimize_bass_management_joint_solution_legacy(
             gain: 0.0,
             delay: 0.0,
             inverted: false,
+            processing: None,
             initial_curve: aligned_pre_eq_curves.get(sub_role).cloned(),
         }]
     };
@@ -802,6 +807,7 @@ pub fn optimize_bass_management_joint_solution_legacy(
                 trim_db: params[base + 5].clamp(lower_bounds[base + 5], upper_bounds[base + 5]),
                 objective_before: group.objective_before,
                 objective_after: group.objective_after,
+                selected_sub_low_pass_hz: group.selected_sub_low_pass_hz.clone(),
                 advisories: group.advisories.clone(),
             });
         }
@@ -821,6 +827,7 @@ pub fn optimize_bass_management_joint_solution_legacy(
                 strategy_source: output.strategy_source.clone(),
                 headroom_contribution_db: params[base]
                     .clamp(lower_bounds[base], upper_bounds[base]),
+                selected_low_pass_hz: output.selected_low_pass_hz,
             });
         }
         let common_delay = delays.into_iter().fold(f64::INFINITY, f64::min);
@@ -1007,6 +1014,10 @@ pub fn optimize_bass_management_joint_solution_legacy(
 /// delay, and polarity are optimized for each logical source against that
 /// source's own high-pass + redirected low-pass response. Physical sub-output
 /// alignment is supplied by preprocessing and is deliberately fixed here.
+///
+/// A positional per-sub crossover list selects one low-pass for each physical
+/// sub. Selection scores the complete shared array against every logical main
+/// input; the main high-pass is then optimized against that deployed array.
 fn measured_source_route_trim_db(
     main_curve: &Curve,
     sub_curve: &Curve,
@@ -1066,10 +1077,25 @@ fn apply_common_sub_correction(
     measured_sub_curve: &Curve,
     corrected_sub_curve: &Curve,
 ) -> Option<Curve> {
+    // Only the common electrical correction is extrapolated here. Never divide
+    // two independently extrapolated acoustic tails: their slope difference can
+    // become hundreds of dB above a short sub measurement.
+    let low = measured_sub_curve
+        .freq
+        .first()?
+        .max(*corrected_sub_curve.freq.first()?);
+    let high = measured_sub_curve
+        .freq
+        .last()?
+        .min(*corrected_sub_curve.freq.last()?);
+    if low >= high {
+        return None;
+    }
+    let correction_grid = driver_sum.freq.mapv(|frequency| frequency.clamp(low, high));
     let measured =
-        autoeq_core::curve_transforms::interpolate_log_space(&driver_sum.freq, measured_sub_curve);
+        autoeq_core::curve_transforms::interpolate_log_space(&correction_grid, measured_sub_curve);
     let corrected =
-        autoeq_core::curve_transforms::interpolate_log_space(&driver_sum.freq, corrected_sub_curve);
+        autoeq_core::curve_transforms::interpolate_log_space(&correction_grid, corrected_sub_curve);
     let measured_phase = measured.phase.as_ref()?;
     let corrected_phase = corrected.phase.as_ref()?;
     let mut result = driver_sum.clone();
@@ -1108,6 +1134,7 @@ pub fn baseline_bass_management_source_reports(
                 gain: 0.0,
                 delay: 0.0,
                 inverted: false,
+                processing: None,
                 initial_curve: aligned_pre_eq_curves.get(sub_role).cloned(),
             }]
         },
@@ -1168,6 +1195,197 @@ pub fn baseline_bass_management_source_reports(
         .collect()
 }
 
+/// Grid density for the per-sub low-pass search. A deterministic log grid
+/// keeps the stage a fast path: pairs × points coherent splice evaluations,
+/// orders of magnitude below a DE rerun.
+const PER_SUB_SPLICE_GRID_POINTS: usize = 21;
+/// Near-tie tolerance: splice losses within this epsilon keep the candidate
+/// closest to the configured center instead of an arbitrary grid edge.
+const PER_SUB_SPLICE_TIE_EPS: f64 = 1.0e-9;
+
+/// Apply exactly the per-driver low-passes later serialized on the shared
+/// array. Filtered measurements remain separate from the original recordings.
+fn low_pass_driver_inputs(
+    config: &RoomConfig,
+    drivers: &[SubDriverInfo],
+    frequencies: &[f64],
+    sample_rate: f64,
+) -> Option<Vec<SubDriverInfo>> {
+    let plans = per_sub_crossover_plans(config)?;
+    if plans.len() != drivers.len() || frequencies.len() != drivers.len() {
+        return None;
+    }
+    drivers
+        .iter()
+        .zip(plans)
+        .zip(frequencies)
+        .map(|((driver, plan), &frequency)| {
+            let mut result = driver.clone();
+            let curve = driver
+                .processing
+                .as_ref()
+                .map(|processing| &processing.curve)
+                .or(driver.initial_curve.as_ref())?;
+            let kind = if plan
+                .crossover_type
+                .parse::<crate::loss::CrossoverType>()
+                .is_ok()
+            {
+                plan.crossover_type.as_str()
+            } else {
+                "LR24"
+            };
+            let curve =
+                apply_crossover_response_to_curve(curve, kind, frequency, sample_rate, true);
+            result.processing = Some(super::types::SubDriverProcessing {
+                plugins: driver
+                    .processing
+                    .as_ref()
+                    .map(|processing| processing.plugins.clone())
+                    .unwrap_or_default(),
+                curve,
+            });
+            Some(result)
+        })
+        .collect()
+}
+
+/// Coordinate search of the complete shared array, evaluated separately for
+/// every logical input with the actual main HP and shared LP. No positional
+/// main/sub pairing is implied by the per-driver crossover list.
+#[allow(clippy::too_many_arguments)]
+fn apply_per_sub_splice_selection(
+    config: &RoomConfig,
+    main_roles: &[String],
+    aligned_pre_eq_curves: &HashMap<String, Curve>,
+    measured_sub_curve: Option<&Curve>,
+    corrected_sub_curve: Option<&Curve>,
+    source_pre_route_transfers: Option<&HashMap<String, Curve>>,
+    target_curves: Option<&HashMap<String, Curve>>,
+    group_results: &mut BTreeMap<String, home_cinema::BassManagementGroupReport>,
+    sub_outputs: &mut [home_cinema::BassManagementSubOutputReport],
+    drivers: &[SubDriverInfo],
+    sample_rate: f64,
+) -> Vec<String> {
+    if per_sub_crossover_keys(config).is_empty() {
+        return Vec::new();
+    }
+    let Some(plans) = per_sub_crossover_plans(config) else {
+        return vec!["per_sub_splice_skipped_unresolvable_crossover".into()];
+    };
+    if plans.len() != drivers.len() || drivers.len() != sub_outputs.len() {
+        return vec!["per_sub_splice_skipped_driver_count_mismatch".into()];
+    }
+    let evaluate = |frequencies: &[f64]| -> Option<f64> {
+        let filtered = low_pass_driver_inputs(config, drivers, frequencies, sample_rate)?;
+        let mut losses = Vec::new();
+        for role in main_roles {
+            let main = aligned_pre_eq_curves.get(role)?;
+            let group_id = home_cinema::group_id_for_role(home_cinema::role_for_channel(role));
+            let group = group_results.get(group_id)?;
+            let frequency = group
+                .selected_crossover_hz
+                .or(group.configured_crossover_hz)?;
+            let mut sub = sum_sub_output_responses_on_grid(&main.freq, &filtered, sub_outputs)?;
+            sub = apply_common_sub_correction(&sub, measured_sub_curve?, corrected_sub_curve?)?;
+            sub = apply_source_pre_route_transfer(
+                &sub,
+                source_pre_route_transfers.and_then(|transfers| transfers.get(role)),
+            )?;
+            let main_branch = apply_crossover_response_to_curve(
+                main,
+                &group.crossover_type,
+                frequency,
+                sample_rate,
+                false,
+            );
+            let main_branch =
+                apply_delay_and_polarity_to_curve(&main_branch, group.main_delay_ms, false);
+            sub.spl.mapv_inplace(|level| level + group.trim_db);
+            let sub = apply_delay_and_polarity_to_curve(
+                &sub,
+                group.bass_route_delay_ms,
+                group.polarity_inverted,
+            );
+            let predicted = complex_sum_mains(&[&main_branch, &sub]);
+            let target = target_curves.and_then(|targets| targets.get(role));
+            let loss = bass_management_objective_with_target(Some(&predicted), target, frequency)?;
+            let underfill =
+                bass_management_max_underfill_db_with_target(Some(&predicted), target, frequency)
+                    .unwrap_or(0.0);
+            losses.push(
+                loss + 1000.0
+                    * (underfill - ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB)
+                        .max(0.0)
+                        .powi(2),
+            );
+        }
+        if losses.is_empty() {
+            return None;
+        }
+        Some(
+            0.5 * losses.iter().sum::<f64>() / losses.len() as f64
+                + 0.5 * losses.into_iter().fold(f64::NEG_INFINITY, f64::max),
+        )
+    };
+    let mut frequencies: Vec<_> = plans
+        .iter()
+        .map(|plan| plan.selectable_bounds_hz().1)
+        .collect();
+    let Some(mut best) = evaluate(&frequencies).filter(|score| score.is_finite()) else {
+        return vec!["per_sub_splice_skipped_missing_phase_or_correction".into()];
+    };
+    for _ in 0..3 {
+        let mut improved = false;
+        for (index, plan) in plans.iter().enumerate() {
+            let (low, high) = plan.selectable_bounds_hz();
+            for step in 0..PER_SUB_SPLICE_GRID_POINTS {
+                let candidate = (low.ln()
+                    + (high / low).ln() * step as f64 / (PER_SUB_SPLICE_GRID_POINTS - 1) as f64)
+                    .exp()
+                    .clamp(low, high);
+                let previous = frequencies[index];
+                frequencies[index] = candidate;
+                if let Some(score) = evaluate(&frequencies)
+                    .filter(|score| score.is_finite() && *score < best - PER_SUB_SPLICE_TIE_EPS)
+                {
+                    best = score;
+                    improved = true;
+                } else {
+                    frequencies[index] = previous;
+                }
+            }
+        }
+        if !improved {
+            break;
+        }
+    }
+    for (output, &frequency) in sub_outputs.iter_mut().zip(&frequencies) {
+        output.selected_low_pass_hz = Some(frequency);
+    }
+    for group in group_results.values_mut() {
+        group.selected_sub_low_pass_hz = frequencies.clone();
+        group.advisories.push("per_sub_splice_lp_selected".into());
+    }
+    vec![
+        format!(
+            "per_sub_splice_lp_selected:{}",
+            plans
+                .iter()
+                .zip(&frequencies)
+                .map(|(plan, frequency)| format!(
+                    "sub{}:{}={frequency:.3}",
+                    plan.sub_index + 1,
+                    plan.crossover_key
+                ))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        "per_sub_splice_routes_use_driver_lp".into(),
+        "per_sub_splice_scored_deployed_array_per_input".into(),
+    ]
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn optimize_bass_management_joint_solution(
     config: &RoomConfig,
@@ -1192,6 +1410,7 @@ pub fn optimize_bass_management_joint_solution(
             gain: 0.0,
             delay: 0.0,
             inverted: false,
+            processing: None,
             initial_curve: aligned_pre_eq_curves.get(sub_role).cloned(),
         }]
     };
@@ -1223,6 +1442,28 @@ pub fn optimize_bass_management_joint_solution(
         .unwrap_or(config.optimizer.max_db.max(0.0));
     let mut optimized_sources = Vec::new();
     let mut overall_advisories = Vec::new();
+    overall_advisories.extend(apply_per_sub_splice_selection(
+        config,
+        main_roles,
+        aligned_pre_eq_curves,
+        aligned_measurement_curves.get(sub_role),
+        aligned_pre_eq_curves.get(sub_role),
+        source_pre_route_transfers,
+        target_curves,
+        group_results,
+        sub_outputs,
+        &driver_inputs,
+        sample_rate,
+    ));
+
+    let frequencies: Vec<_> = sub_outputs
+        .iter()
+        .filter_map(|output| output.selected_low_pass_hz)
+        .collect();
+    let per_driver_low_pass_active =
+        !frequencies.is_empty() && frequencies.len() == driver_inputs.len();
+    let driver_inputs = low_pass_driver_inputs(config, &driver_inputs, &frequencies, sample_rate)
+        .unwrap_or(driver_inputs);
 
     for (group_index, (group_id, roles)) in grouped_roles.into_iter().enumerate() {
         let Some(previous_group) = group_results.get(&group_id).cloned() else {
@@ -1391,13 +1632,17 @@ pub fn optimize_bass_management_joint_solution(
                     false,
                 );
                 main_branch = apply_delay_and_polarity_to_curve(&main_branch, main_delay_ms, false);
-                let mut bass_branch = apply_crossover_response_to_curve(
-                    &sub_curves[source_index],
-                    crossover_type,
-                    frequency,
-                    sample_rate,
-                    true,
-                );
+                let mut bass_branch = if per_driver_low_pass_active {
+                    sub_curves[source_index].clone()
+                } else {
+                    apply_crossover_response_to_curve(
+                        &sub_curves[source_index],
+                        crossover_type,
+                        frequency,
+                        sample_rate,
+                        true,
+                    )
+                };
                 for spl in bass_branch.spl.iter_mut() {
                     *spl += trim_db;
                 }
@@ -1434,9 +1679,14 @@ pub fn optimize_bass_management_joint_solution(
             let constrained_losses = losses
                 .iter()
                 .zip(&constrained_underfills)
-                .map(|(loss, underfill)| {
+                .zip(&cancellation_underfills)
+                .map(|((loss, underfill), cancellation)| {
                     let excess = (underfill - ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB).max(0.0);
-                    loss + 1_000.0 * excess * excess
+                    let unsafe_excess =
+                        (cancellation - ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB).max(0.0);
+                    // A large target deficit must not hide unsafe cancellation
+                    // inside max(target_deficit, cancellation_deficit).
+                    loss + 1_000.0 * excess * excess + 1_000_000.0 * unsafe_excess * unsafe_excess
                 })
                 .collect::<Vec<_>>();
             let mean = constrained_losses.iter().sum::<f64>() / constrained_losses.len() as f64;
@@ -1706,9 +1956,32 @@ mod tests {
     use ndarray::Array1;
     use roomeq_model::{
         BassManagementConfig, CrossoverConfig, OptimizerConfig, ProcessingMode, RoomConfig,
-        SubwooferStrategy, SubwooferSystemConfig, SystemConfig, SystemModel,
+        SubwooferCrossoverRef, SubwooferStrategy, SubwooferSystemConfig, SystemConfig, SystemModel,
     };
     use std::collections::{BTreeMap, HashMap};
+
+    #[test]
+    fn common_correction_does_not_divide_extrapolated_acoustic_tails() {
+        let measured = crate::Curve {
+            freq: ndarray::array![20.0, 100.0, 199.0, 200.0],
+            spl: ndarray::array![80.0, 80.0, 30.0, 20.0],
+            phase: Some(ndarray::Array1::zeros(4)),
+            ..Default::default()
+        };
+        let mut corrected = measured.clone();
+        corrected.spl[2] += 2.0;
+        corrected.spl[3] += 3.0;
+        let driver_sum = crate::Curve {
+            freq: ndarray::array![20.0, 200.0, 1000.0, 16000.0],
+            spl: ndarray::array![80.0, 20.0, -100.0, -240.0],
+            phase: Some(ndarray::Array1::zeros(4)),
+            ..Default::default()
+        };
+        let result =
+            super::apply_common_sub_correction(&driver_sum, &measured, &corrected).unwrap();
+        assert!((result.spl[2] + 97.0).abs() < 1e-9);
+        assert!((result.spl[3] + 237.0).abs() < 1e-9);
+    }
 
     #[test]
     fn staged_underfill_gate_never_restores_a_worse_baseline() {
@@ -1749,10 +2022,7 @@ mod tests {
             &[1.8, 1.5, 7.7, 8.7],
         ));
         // Safe baselines never mark, however good the candidate is.
-        assert!(!candidate_restores_hard_safety(
-            &[0.5, 0.4],
-            &[0.9, 0.8],
-        ));
+        assert!(!candidate_restores_hard_safety(&[0.5, 0.4], &[0.9, 0.8],));
         // A candidate that stays excessive is not a restoration, even
         // when it improves on the baseline.
         assert!(!candidate_restores_hard_safety(
@@ -1783,7 +2053,7 @@ mod tests {
                 model: SystemModel::HomeCinema,
                 subwoofers: Some(SubwooferSystemConfig {
                     config: SubwooferStrategy::Single,
-                    crossover: Some("bass_xover".to_string()),
+                    crossover: Some("bass_xover".to_string().into()),
                     mapping: HashMap::new(),
                 }),
                 bass_management: Some(BassManagementConfig::default()),
@@ -2123,12 +2393,14 @@ mod tests {
             polarity_inverted: false,
             strategy_source: "default".to_string(),
             headroom_contribution_db: 0.0,
+            selected_low_pass_hz: None,
         }];
         let drivers = vec![SubDriverInfo {
             name: "LFE".to_string(),
             gain: 0.0,
             delay: 0.0,
             inverted: false,
+            processing: None,
             initial_curve: Some(flat_curve_with_phase()),
         }];
 
@@ -2177,12 +2449,14 @@ mod tests {
             polarity_inverted: false,
             strategy_source: "single".to_string(),
             headroom_contribution_db: 0.0,
+            selected_low_pass_hz: None,
         }];
         let drivers = vec![SubDriverInfo {
             name: "LFE".to_string(),
             gain: 0.0,
             delay: 0.0,
             inverted: false,
+            processing: None,
             initial_curve: curves.get("LFE").cloned(),
         }];
 
@@ -2228,6 +2502,7 @@ mod tests {
             polarity_inverted: false,
             strategy_source: "single".to_string(),
             headroom_contribution_db: 0.0,
+            selected_low_pass_hz: None,
         }];
 
         let reports = baseline_bass_management_source_reports(
@@ -2265,6 +2540,7 @@ mod tests {
             polarity_inverted: false,
             strategy_source: "default".to_string(),
             headroom_contribution_db: 0.0,
+            selected_low_pass_hz: None,
         }];
         let drivers = vec![
             SubDriverInfo {
@@ -2272,6 +2548,7 @@ mod tests {
                 gain: 0.0,
                 delay: 0.0,
                 inverted: false,
+                processing: None,
                 initial_curve: Some(flat_curve_with_phase()),
             },
             SubDriverInfo {
@@ -2279,6 +2556,7 @@ mod tests {
                 gain: 0.0,
                 delay: 0.0,
                 inverted: false,
+                processing: None,
                 initial_curve: Some(flat_curve_with_phase()),
             },
         ];
@@ -2316,12 +2594,14 @@ mod tests {
             polarity_inverted: false,
             strategy_source: "default".to_string(),
             headroom_contribution_db: 0.0,
+            selected_low_pass_hz: None,
         }];
         let drivers = vec![SubDriverInfo {
             name: "LFE".to_string(),
             gain: 0.0,
             delay: 0.0,
             inverted: false,
+            processing: None,
             initial_curve: Some(flat_curve_with_phase()),
         }];
 
@@ -2358,7 +2638,7 @@ mod tests {
             }),
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::default(),
-                crossover: Some("bass".to_string()),
+                crossover: Some("bass".to_string().into()),
                 mapping: HashMap::new(),
             }),
             ..SystemConfig::default()
@@ -2384,12 +2664,14 @@ mod tests {
                 polarity_inverted: false,
                 strategy_source: "single".to_string(),
                 headroom_contribution_db: 0.0,
+                selected_low_pass_hz: None,
             }];
             let drivers = vec![SubDriverInfo {
                 name: "LFE".to_string(),
                 gain: 0.0,
                 delay: 0.0,
                 inverted: false,
+                processing: None,
                 initial_curve: curves.get("LFE").cloned(),
             }];
             optimize_bass_management_joint_solution(
@@ -2462,6 +2744,7 @@ mod tests {
                 polarity_inverted: false,
                 strategy_source: "dba_front".to_string(),
                 headroom_contribution_db: 0.0,
+                selected_low_pass_hz: None,
             },
             BassManagementSubOutputReport {
                 output_role: "sub_rear".to_string(),
@@ -2470,6 +2753,7 @@ mod tests {
                 polarity_inverted: false,
                 strategy_source: "dba_rear".to_string(),
                 headroom_contribution_db: 0.0,
+                selected_low_pass_hz: None,
             },
         ];
         let drivers = vec![
@@ -2478,6 +2762,7 @@ mod tests {
                 gain: 0.0,
                 delay: 0.0,
                 inverted: false,
+                processing: None,
                 initial_curve: Some(flat_curve_with_phase()),
             },
             SubDriverInfo {
@@ -2485,6 +2770,7 @@ mod tests {
                 gain: 0.0,
                 delay: 0.0,
                 inverted: false,
+                processing: None,
                 initial_curve: Some(flat_curve_with_phase()),
             },
         ];
@@ -2569,6 +2855,265 @@ mod tests {
                 .unwrap()
                 .iter()
                 .all(|phase| (*phase - 55.0).abs() < 1.0e-9)
+        );
+    }
+
+    fn per_sub_config(crossover: SubwooferCrossoverRef) -> RoomConfig {
+        RoomConfig {
+            version: "1.0.0".to_string(),
+            system: Some(SystemConfig {
+                model: SystemModel::HomeCinema,
+                subwoofers: Some(SubwooferSystemConfig {
+                    config: SubwooferStrategy::Mso,
+                    crossover: Some(crossover),
+                    mapping: HashMap::new(),
+                }),
+                bass_management: Some(BassManagementConfig::default()),
+                ..SystemConfig::default()
+            }),
+            speakers: HashMap::new(),
+            crossovers: Some(HashMap::from([
+                (
+                    "bass_xover1".to_string(),
+                    CrossoverConfig {
+                        crossover_type: "LR24".to_string(),
+                        frequency: None,
+                        frequencies: None,
+                        frequency_range: Some((40.0, 130.0)),
+                    },
+                ),
+                (
+                    "bass_xover2".to_string(),
+                    CrossoverConfig {
+                        crossover_type: "LR24".to_string(),
+                        frequency: None,
+                        frequencies: None,
+                        frequency_range: Some((60.0, 130.0)),
+                    },
+                ),
+            ])),
+            target_curve: None,
+            optimizer: tiny_optimizer(),
+            provenance: Default::default(),
+            recording_config: None,
+            ctc: None,
+            cea2034_cache: None,
+        }
+    }
+
+    fn two_mains() -> Vec<String> {
+        vec!["Left".to_string(), "Right".to_string()]
+    }
+
+    #[test]
+    fn per_sub_crossover_plans_resolve_positional_ranges() {
+        let config = per_sub_config(SubwooferCrossoverRef::PerSub(vec![
+            "bass_xover1".to_string(),
+            "bass_xover2".to_string(),
+        ]));
+        let plans = per_sub_crossover_plans(&config).expect("per-sub plans resolve");
+        assert_eq!(plans.len(), 2);
+        assert_eq!(plans[0].selectable_bounds_hz(), (40.0, 130.0));
+        assert_eq!(plans[1].selectable_bounds_hz(), (60.0, 130.0));
+        assert!((plans[0].configured_hz - (40.0_f64 * 130.0).sqrt()).abs() < 1.0e-9);
+
+        let shared = per_sub_config(SubwooferCrossoverRef::Shared("bass_xover1".to_string()));
+        assert!(per_sub_crossover_keys(&shared).is_empty());
+        assert!(per_sub_crossover_plans(&shared).is_none());
+
+        let single = per_sub_config(SubwooferCrossoverRef::PerSub(vec![
+            "bass_xover1".to_string(),
+        ]));
+        assert!(per_sub_crossover_keys(&single).is_empty());
+        assert!(per_sub_crossover_plans(&single).is_none());
+
+        let missing = per_sub_config(SubwooferCrossoverRef::PerSub(vec![
+            "bass_xover1".to_string(),
+            "no_such_key".to_string(),
+        ]));
+        assert_eq!(per_sub_crossover_keys(&missing).len(), 2);
+        assert!(per_sub_crossover_plans(&missing).is_none());
+    }
+
+    #[test]
+    fn per_sub_splice_selects_one_low_pass_per_sub() {
+        let config = per_sub_config(SubwooferCrossoverRef::PerSub(vec![
+            "bass_xover1".to_string(),
+            "bass_xover2".to_string(),
+        ]));
+        let curves = make_curves(true);
+        let mut group_results = optimize_home_cinema_group_crossovers(
+            &config,
+            &two_mains(),
+            &curves,
+            &curves,
+            "LFE",
+            &fallback_crossover(),
+            48_000.0,
+            None,
+        )
+        .unwrap();
+        let mut sources = Vec::new();
+        let mut sub_outputs = vec![
+            BassManagementSubOutputReport {
+                output_role: "sub1".to_string(),
+                gain_db: 0.0,
+                delay_ms: 0.0,
+                polarity_inverted: false,
+                strategy_source: "mso".to_string(),
+                headroom_contribution_db: 0.0,
+                selected_low_pass_hz: None,
+            },
+            BassManagementSubOutputReport {
+                output_role: "sub2".to_string(),
+                gain_db: 0.0,
+                delay_ms: 0.0,
+                polarity_inverted: false,
+                strategy_source: "mso".to_string(),
+                headroom_contribution_db: 0.0,
+                selected_low_pass_hz: None,
+            },
+        ];
+        let drivers = vec![
+            SubDriverInfo {
+                name: "sub1".to_string(),
+                gain: 0.0,
+                delay: 0.0,
+                inverted: false,
+                processing: None,
+                initial_curve: curves.get("LFE").cloned(),
+            },
+            SubDriverInfo {
+                name: "sub2".to_string(),
+                gain: 0.0,
+                delay: 0.0,
+                inverted: false,
+                processing: None,
+                initial_curve: curves.get("LFE").cloned(),
+            },
+        ];
+
+        let advisories = optimize_bass_management_joint_solution(
+            &config,
+            &two_mains(),
+            &curves,
+            &curves,
+            None,
+            None,
+            &mut group_results,
+            &mut sources,
+            &mut sub_outputs,
+            Some(&drivers),
+            "LFE",
+            48_000.0,
+        );
+
+        // Physical driver order: each LP stays inside its own configured range.
+        let lp1 = sub_outputs[0]
+            .selected_low_pass_hz
+            .expect("sub1 LP selected");
+        let lp2 = sub_outputs[1]
+            .selected_low_pass_hz
+            .expect("sub2 LP selected");
+        assert!(
+            (40.0..=130.0).contains(&lp1),
+            "LP_1 {lp1} outside [40, 130]"
+        );
+        assert!(
+            (60.0..=130.0).contains(&lp2),
+            "LP_2 {lp2} outside [60, 130]"
+        );
+        let group = &group_results["lcr"];
+        assert_eq!(group.selected_sub_low_pass_hz.len(), 2);
+        assert!((group.selected_sub_low_pass_hz[0] - lp1).abs() < 1.0e-12);
+        assert!((group.selected_sub_low_pass_hz[1] - lp2).abs() < 1.0e-12);
+        assert!(
+            group
+                .advisories
+                .contains(&"per_sub_splice_lp_selected".to_string())
+        );
+        assert!(
+            advisories
+                .iter()
+                .any(|advisory| advisory.starts_with("per_sub_splice_lp_selected:")),
+            "missing per-sub selection summary: {advisories:?}"
+        );
+        assert!(
+            advisories.contains(&"per_sub_splice_routes_use_driver_lp".to_string()),
+            "missing shared-bus honesty advisory: {advisories:?}"
+        );
+    }
+
+    #[test]
+    fn per_sub_splice_leaves_single_string_behavior_untouched() {
+        let config = per_sub_config(SubwooferCrossoverRef::Shared("bass_xover1".to_string()));
+        let curves = make_curves(true);
+        let mut group_results = optimize_home_cinema_group_crossovers(
+            &config,
+            &two_mains(),
+            &curves,
+            &curves,
+            "LFE",
+            &fallback_crossover(),
+            48_000.0,
+            None,
+        )
+        .unwrap();
+        let mut sub_outputs = vec![BassManagementSubOutputReport {
+            output_role: "LFE".to_string(),
+            gain_db: 0.0,
+            delay_ms: 0.0,
+            polarity_inverted: false,
+            strategy_source: "mso".to_string(),
+            headroom_contribution_db: 0.0,
+            selected_low_pass_hz: None,
+        }];
+        let drivers = vec![SubDriverInfo {
+            name: "LFE".to_string(),
+            gain: 0.0,
+            delay: 0.0,
+            inverted: false,
+            processing: None,
+            initial_curve: curves.get("LFE").cloned(),
+        }];
+
+        let advisories = optimize_bass_management_joint_solution(
+            &config,
+            &two_mains(),
+            &curves,
+            &curves,
+            None,
+            None,
+            &mut group_results,
+            &mut Vec::new(),
+            &mut sub_outputs,
+            Some(&drivers),
+            "LFE",
+            48_000.0,
+        );
+
+        assert!(sub_outputs[0].selected_low_pass_hz.is_none());
+        for (group_id, group) in &group_results {
+            assert!(
+                group.selected_sub_low_pass_hz.is_empty(),
+                "{group_id} gained per-sub LPs under a shared crossover"
+            );
+            assert!(
+                !group
+                    .advisories
+                    .iter()
+                    .any(|advisory| advisory.contains("per_sub")),
+                "{group_id} gained per-sub advisories under a shared crossover"
+            );
+            // Group frequency selection itself is owned by the route stage,
+            // which runs identically with or without this child: this guard
+            // pins only that the per-sub stage added nothing.
+        }
+        assert!(
+            !advisories
+                .iter()
+                .any(|advisory| advisory.contains("per_sub")),
+            "legacy path emitted per-sub advisories: {advisories:?}"
         );
     }
 }

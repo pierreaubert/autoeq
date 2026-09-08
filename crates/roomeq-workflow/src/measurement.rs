@@ -13,8 +13,7 @@ use roomeq_engine::analysis::frequency_grid::{
 };
 #[cfg(test)]
 use roomeq_engine::analysis::frequency_grid::{
-    ROOM_EQ_RESAMPLE_LOW_FREQ_STEP_HZ, ROOM_EQ_RESAMPLE_MAX_FREQ_HZ, ROOM_EQ_RESAMPLE_MIN_FREQ_HZ,
-    room_eq_hybrid_frequency_grid,
+    ROOM_EQ_RESAMPLE_MAX_FREQ_HZ, ROOM_EQ_RESAMPLE_MIN_FREQ_HZ, room_eq_hybrid_frequency_grid,
 };
 use roomeq_model::{Curve, MeasurementRef, MeasurementSource};
 use std::path::Path;
@@ -183,10 +182,7 @@ fn significant_extrema(curve: &Curve) -> Vec<(f64, f64, bool)> {
             }
         }
     }
-    extrema.sort_by(|a, b| {
-        b.2.partial_cmp(&a.2)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    extrema.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
     extrema.truncate(MAX_PRESERVED_EXTREMA);
     extrema
         .into_iter()
@@ -195,7 +191,13 @@ fn significant_extrema(curve: &Curve) -> Vec<(f64, f64, bool)> {
 }
 
 fn cap_measurement_curve(curve: Curve, frequency_samples: usize) -> Curve {
-    if frequency_samples == 0 || curve.freq.len() <= frequency_samples {
+    if frequency_samples == 0
+        || curve.freq.len() <= frequency_samples
+        || curve
+            .freq
+            .last()
+            .is_some_and(|&frequency| frequency <= 500.0)
+    {
         return curve;
     }
 
@@ -205,6 +207,15 @@ fn cap_measurement_curve(curve: Curve, frequency_samples: usize) -> Curve {
     // Preserve significant narrow extrema that fall between hybrid-grid bins.
     let preserved = significant_extrema(&curve);
     let mut frequencies = base_grid.to_vec();
+    // Phase-critical bass summation needs every measured bin, including bins
+    // which are not extrema in either individual sub's magnitude response.
+    frequencies.extend(
+        curve
+            .freq
+            .iter()
+            .copied()
+            .filter(|&frequency| frequency <= 500.0),
+    );
     for (frequency, _, _) in &preserved {
         let already_close = frequencies
             .iter()
@@ -214,6 +225,7 @@ fn cap_measurement_curve(curve: Curve, frequency_samples: usize) -> Curve {
         }
     }
     frequencies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    frequencies.dedup_by(|a, b| (*a - *b).abs() < 1e-8);
     let frequency_grid = Array1::from_vec(frequencies);
     let resampled = interpolate_log_space(&frequency_grid, &curve);
     let mut smoothed =
@@ -236,6 +248,16 @@ fn cap_measurement_curve(curve: Curve, frequency_samples: usize) -> Curve {
         }
     }
     reconstruct_resampled_phase(&curve, &mut smoothed);
+    for (index, &frequency) in smoothed.freq.iter().enumerate() {
+        if frequency <= 500.0 {
+            smoothed.spl[index] = resampled.spl[index];
+            if let (Some(phase), Some(original)) =
+                (smoothed.phase.as_mut(), resampled.phase.as_ref())
+            {
+                phase[index] = original[index];
+            }
+        }
+    }
     smoothed
 }
 
@@ -347,6 +369,21 @@ mod tests {
     }
 
     #[test]
+    fn sub_measurement_keeps_every_native_bin_and_measured_phase() {
+        let frequencies = Array1::logspace(10.0, 10.0_f64.log10(), 250.0_f64.log10(), 1000);
+        let curve = Curve {
+            spl: frequencies.mapv(|frequency| 80.0 + (frequency * 0.7).sin()),
+            phase: Some(frequencies.mapv(|frequency| -frequency * 7.2)),
+            freq: frequencies,
+            ..Default::default()
+        };
+        let capped = cap_measurement_curve(curve.clone(), 32);
+        assert_eq!(capped.freq, curve.freq);
+        assert_eq!(capped.spl, curve.spl);
+        assert_eq!(capped.phase, curve.phase);
+    }
+
+    #[test]
     fn dense_and_sparse_sampling_preserve_narrow_resonance() {
         // F01: the same continuous transfer sampled at 1 Hz and 0.5 Hz must
         // yield comparable loaded maxima. Gaussian peak: 82 Hz, 12 dB, sigma 0.5 Hz.
@@ -421,9 +458,9 @@ mod tests {
         let curve = load_curve_from_csv(&path).unwrap();
 
         let expected_len = room_eq_hybrid_frequency_grid(DEFAULT_FREQUENCY_SAMPLES).len();
-        assert_eq!(curve.freq.len(), expected_len);
-        assert_eq!(curve.spl.len(), expected_len);
-        assert_eq!(curve.phase.as_ref().unwrap().len(), expected_len);
+        assert!(curve.freq.len() >= expected_len);
+        assert_eq!(curve.spl.len(), curve.freq.len());
+        assert_eq!(curve.phase.as_ref().unwrap().len(), curve.freq.len());
         assert!((curve.freq[0] - ROOM_EQ_RESAMPLE_MIN_FREQ_HZ).abs() < 1e-12);
         assert!((curve.freq.last().copied().unwrap() - ROOM_EQ_RESAMPLE_MAX_FREQ_HZ).abs() < 1e-9);
 
@@ -434,12 +471,24 @@ mod tests {
                 .into_iter()
                 .all(|pair| pair[1] > pair[0])
         );
-        assert!(
-            curve.freq.as_slice().unwrap()[1..=245]
-                .windows(2)
-                .all(|pair| (pair[1] - pair[0] - ROOM_EQ_RESAMPLE_LOW_FREQ_STEP_HZ).abs() < 1e-12)
-        );
-        let high_ratio = curve.freq[247] / curve.freq[246];
+        for index in 0..=400 {
+            let native = 20.0 * 1000.0_f64.powf(index as f64 / 400.0);
+            if native <= 500.0 {
+                assert!(
+                    curve
+                        .freq
+                        .iter()
+                        .any(|&frequency| (frequency - native).abs() < 1e-8)
+                );
+            }
+        }
+        let high: Vec<_> = curve
+            .freq
+            .iter()
+            .copied()
+            .filter(|&frequency| frequency > 2000.0)
+            .collect();
+        let high_ratio = high[1] / high[0];
         let default_ratio = (ROOM_EQ_RESAMPLE_MAX_FREQ_HZ / ROOM_EQ_RESAMPLE_MIN_FREQ_HZ)
             .powf(1.0 / (DEFAULT_FREQUENCY_SAMPLES - 1) as f64);
         assert!((high_ratio - default_ratio).abs() < 0.002);
@@ -461,8 +510,8 @@ mod tests {
         let curve = load_curve_from_csv_with_frequency_samples(&path, 64).unwrap();
 
         let expected_len = room_eq_hybrid_frequency_grid(64).len();
-        assert_eq!(curve.freq.len(), expected_len);
-        assert_eq!(curve.spl.len(), expected_len);
+        assert!(curve.freq.len() >= expected_len);
+        assert_eq!(curve.spl.len(), curve.freq.len());
         assert!((curve.freq[0] - ROOM_EQ_RESAMPLE_MIN_FREQ_HZ).abs() < 1e-12);
         assert!((curve.freq.last().copied().unwrap() - ROOM_EQ_RESAMPLE_MAX_FREQ_HZ).abs() < 1e-9);
     }

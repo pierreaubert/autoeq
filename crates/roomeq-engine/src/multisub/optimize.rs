@@ -303,6 +303,13 @@ pub fn optimize_multisub_with_allpass(
         x[3 * n_drivers + i] = 1.0; // initial AP Q
     }
 
+    // Fix the reference sub's level and delay; shared EQ/level matching owns
+    // common gain, while this stage controls relative array alignment.
+    lower_bounds[0] = x[0];
+    upper_bounds[0] = x[0];
+    lower_bounds[n_drivers] = 0.0;
+    upper_bounds[n_drivers] = 0.0;
+    let initial_x = x.clone();
     // Pre-objective
     let pre_obj = multisub_allpass_loss(
         &drivers_data,
@@ -345,7 +352,12 @@ pub fn optimize_multisub_with_allpass(
     .map_err(|e| format!("all-pass optimization failed: {e}"))?;
 
     x = opt_result.x;
-    let post_obj = opt_result.fun;
+    let mut post_obj = opt_result.fun;
+    if !post_obj.is_finite() || post_obj > pre_obj + 1e-9 {
+        warn!("All-pass MSO objective regressed; retaining initial array controls");
+        x = initial_x;
+        post_obj = pre_obj;
+    }
     let converged = multisub_allpass_converged(opt_result.success);
 
     info!(

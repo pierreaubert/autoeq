@@ -211,7 +211,7 @@ fn stereo_2_1_config() -> RoomConfig {
             ]),
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Single,
-                crossover: Some("xo".to_string()),
+                crossover: Some("xo".to_string().into()),
                 mapping: [("sub".to_string(), "L".to_string())].into(),
             }),
             bass_management: None,

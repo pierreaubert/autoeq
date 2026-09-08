@@ -270,14 +270,19 @@ fn build_clamped_optimizer(
     optimizer.ssir_wav_path = None;
 
     if is_sub_channel {
-        let measured_upper = roomeq_analysis::response_metrics::detect_sub_passband_3db(curve_raw)
-            .map(|(_, high)| high);
+        let measured_upper = curve_raw.freq.last().map(|_| {
+            crate::group_processing::sub_optimizer_config(
+                std::slice::from_ref(curve_raw),
+                &room_config.optimizer,
+            )
+            .max_freq
+        });
         let crossover_upper =
             roomeq_model::home_cinema::bass_management_crossover_frequency_hz(room_config)
                 .map(|frequency| 2.0 * frequency);
         let upper = sub_optimizer_upper_bound(measured_upper, crossover_upper);
         info!(
-            "  Sub channel '{}': clamping optimizer upper bound to {:.1} Hz (measured -3dB high={}, 2*crossover={})",
+            "  Sub channel '{}': clamping optimizer upper bound to {:.1} Hz (final useful response={}, 2*crossover={})",
             channel_name,
             upper,
             measured_upper
@@ -422,6 +427,21 @@ mod tests {
         assert_eq!(optimizer.num_filters, 7);
         assert_eq!(optimizer.max_db, 12.0);
         assert_eq!(optimizer.min_db, -15.0);
+    }
+
+    #[test]
+    fn sub_execution_does_not_reintroduce_first_peak_passband_clamp() {
+        let curve = Curve {
+            freq: ndarray::array![20.0, 30.0, 35.0, 50.0, 80.0, 130.0, 180.0, 200.0],
+            spl: ndarray::array![80.0, 85.0, 60.0, 40.0, 82.0, 68.0, 45.0, 20.0],
+            ..Default::default()
+        };
+        let mut config = RoomConfig::default();
+        config.optimizer.min_freq = 20.0;
+        config.optimizer.max_freq = 16000.0;
+        let bounded =
+            build_clamped_optimizer("LFE", &config, &curve, &curve, 20.0, 130.0, None, false);
+        assert_eq!(bounded.max_freq, 130.0);
     }
 
     #[test]

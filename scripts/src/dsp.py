@@ -406,6 +406,60 @@ def apply_plugins_to_curve(
     return result
 
 
+def resample_spl_onto_grid(
+    source_freq: list[float], source_spl: list[float], target_freq: list[float]
+) -> list[float]:
+    """Resample SPL values onto a display grid with log-frequency interpolation.
+
+    Edge-clamped: targets outside the source support hold the nearest edge
+    value. Returns the source values unchanged when resampling is impossible
+    or the grids already match, so display callers mixing curves from
+    different stages (driver measurements vs. deployed replay grids) share one
+    x-axis instead of crashing on length mismatches.
+    """
+    if (
+        not source_freq
+        or not target_freq
+        or len(source_freq) != len(source_spl)
+        or len(target_freq) == 0
+    ):
+        return list(source_spl)
+    if len(source_freq) == len(target_freq) and all(
+        a == b for a, b in zip(source_freq, target_freq)
+    ):
+        return list(source_spl)
+    pairs = sorted(
+        (float(f), float(s))
+        for f, s in zip(source_freq, source_spl)
+        if isinstance(f, (int, float))
+        and isinstance(s, (int, float))
+        and math.isfinite(f)
+        and math.isfinite(s)
+        and f > 0.0
+    )
+    if not pairs:
+        return list(source_spl)
+    if len(pairs) == 1:
+        return [pairs[0][1]] * len(target_freq)
+    log_src = [math.log10(f) for f, _ in pairs]
+    spl_src = [s for _, s in pairs]
+
+    def interp(log_f: float) -> float:
+        if log_f <= log_src[0]:
+            return spl_src[0]
+        if log_f >= log_src[-1]:
+            return spl_src[-1]
+        upper = 1
+        while upper < len(log_src) - 1 and log_src[upper] < log_f:
+            upper += 1
+        lower = upper - 1
+        span = log_src[upper] - log_src[lower]
+        position = (log_f - log_src[lower]) / span if span > 0.0 else 0.0
+        return spl_src[lower] + position * (spl_src[upper] - spl_src[lower])
+
+    return [interp(math.log10(float(f))) if f > 0.0 else spl_src[0] for f in target_freq]
+
+
 def _resample_curve_onto_grid(curve: dict | None, target_freq: list[float]) -> dict | None:
     """Resample a response curve onto ``target_freq`` with log-frequency interpolation.
 
@@ -575,6 +629,41 @@ def _sub_shared_plugins_for_own_input(sub_channel: dict) -> list[dict]:
     return shared
 
 
+def _multisub_driver_curves(sub_channel: dict) -> list[dict]:
+    """Return usable per-driver measurements of a multi-driver sub channel."""
+    return [
+        driver
+        for driver in (sub_channel.get("drivers") or [])
+        if isinstance(driver, dict) and driver.get("initial_curve")
+    ]
+
+
+def _replay_drivers_through_transfer(
+    drivers: list[dict],
+    shared_plugins: list[dict],
+    route_tail: list[dict],
+    sample_rate: float,
+) -> dict | None:
+    """Replay per-driver measurements through shared DSP plus a route transfer."""
+    replayed: list[dict | None] = []
+    for driver in drivers:
+        driver_plugins = [
+            plugin
+            for plugin in (driver.get("plugins") or [])
+            if isinstance(plugin, dict)
+            and (plugin.get("parameters", {}) or {}).get("room_eq_stage")
+            != "route_owned"
+        ]
+        replayed.append(
+            apply_plugins_to_curve(
+                driver.get("initial_curve"),
+                [*driver_plugins, *shared_plugins, *route_tail],
+                sample_rate,
+            )
+        )
+    return _fold_sum_curves(replayed)
+
+
 def _corrected_multisub_curve(
     sub_channel: dict,
     own_route: dict | None,
@@ -589,11 +678,7 @@ def _corrected_multisub_curve(
     its own alignment plugins plus the shared sub input chain and the LFE
     route transfer, and the drivers are summed acoustically.
     """
-    drivers = [
-        driver
-        for driver in (sub_channel.get("drivers") or [])
-        if isinstance(driver, dict) and driver.get("initial_curve")
-    ]
+    drivers = _multisub_driver_curves(sub_channel)
     if not drivers or own_route is None:
         return None
     low_pass_hz = own_route.get("low_pass_hz")
@@ -623,23 +708,7 @@ def _corrected_multisub_curve(
         },
     ]
     shared = _sub_shared_plugins_for_own_input(sub_channel)
-    corrected: list[dict | None] = []
-    for driver in drivers:
-        driver_plugins = [
-            plugin
-            for plugin in (driver.get("plugins") or [])
-            if isinstance(plugin, dict)
-            and (plugin.get("parameters", {}) or {}).get("room_eq_stage")
-            != "route_owned"
-        ]
-        corrected.append(
-            apply_plugins_to_curve(
-                driver.get("initial_curve"),
-                [*driver_plugins, *shared, *route_tail],
-                sample_rate,
-            )
-        )
-    return _fold_sum_curves(corrected)
+    return _replay_drivers_through_transfer(drivers, shared, route_tail, sample_rate)
 
 
 def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
@@ -676,12 +745,14 @@ def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
     sub_name = bass_management.get("physical_sub_output") or bass_management.get("lfe_channel") or "LFE"
     sub_channel = channels.get(sub_name, {})
     sub_initial = sub_channel.get("initial_curve")
-    if not sub_initial:
+    if not sub_initial and not _multisub_driver_curves(sub_channel):
         return {
             name: channel["final_curve"]
             for name, channel in channels.items()
             if channel.get("final_curve")
         }
+    if not sub_initial:
+        sub_initial = None
 
     # Only destination post-route processing belongs to every signal emitted
     # by the physical sub. The LFE chain's pre-route processing belongs to its
@@ -692,6 +763,37 @@ def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
         if (plugin.get("parameters", {}) or {}).get("room_eq_stage") == "post_route"
     ]
     sample_rate = float(data.get("sample_rate", 48_000.0) or 48_000.0)
+
+    # The channel aggregate of a multi-driver sub is level-relative
+    # optimizer state. Redirected branches must replay the acoustic
+    # per-driver measurements (with driver alignment) instead of that
+    # aggregate, or every main lands tens of dB too quiet.
+    multisub_drivers = _multisub_driver_curves(sub_channel)
+    # Realize the advertised main high-pass when the main chain does not
+    # already realize it: a generic-path main ``final_curve`` is full range,
+    # so summing it directly with the low-pass sub branch double-counts
+    # bass. Routed executors stamp the route-owned high-pass into the chain
+    # (matching the graph after the joint solution adopts it), and replaying
+    # the graph transfer on top would double-filter instead.
+    def _chain_realizes_highpass(channel: dict) -> bool:
+        for plugin in channel.get("plugins", []) or []:
+            if not isinstance(plugin, dict):
+                continue
+            params = plugin.get("parameters", {}) or {}
+            if (
+                str(plugin.get("plugin_type", "")).lower() == "crossover"
+                and str(params.get("output", "")).lower().startswith("high")
+                and params.get("room_eq_stage") == "route_owned"
+            ):
+                return True
+        return False
+
+    main_highpass_by_source: dict[str, dict] = {}
+    for route in routes:
+        if route.get("route_kind") == "main_highpass_to_self" and route.get(
+            "high_pass_hz"
+        ) is not None:
+            main_highpass_by_source[str(route.get("source_channel"))] = route
 
     routed_by_source: dict[str, dict] = {}
     for route in routes:
@@ -719,8 +821,7 @@ def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
         # applying it twice while every other pre-route transfer remains common
         # to the main and redirected-sub branches.
         route_input_trim_db = float(input_trim_db.get(source_name, 0.0))
-        route_plugins = [
-            *source_pre_route_plugins,
+        route_tail = [
             {
                 "plugin_type": "crossover",
                 "parameters": {
@@ -741,9 +842,21 @@ def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
                 "plugin_type": "delay",
                 "parameters": {"delay_ms": route.get("delay_ms", 0.0)},
             },
-            *sub_post_route_plugins,
         ]
-        routed = apply_plugins_to_curve(sub_initial, route_plugins, sample_rate)
+        if multisub_drivers and route_kind == "redirected_bass_lowpass_to_sub":
+            routed = _replay_drivers_through_transfer(
+                multisub_drivers,
+                [*source_pre_route_plugins, *sub_post_route_plugins],
+                route_tail,
+                sample_rate,
+            )
+        else:
+            route_plugins = [
+                *source_pre_route_plugins,
+                *route_tail,
+                *sub_post_route_plugins,
+            ]
+            routed = apply_plugins_to_curve(sub_initial, route_plugins, sample_rate)
         if routed:
             routed_by_source[source_name] = routed
 
@@ -777,14 +890,41 @@ def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
             elif final_curve:
                 results[name] = final_curve
         elif routed is not None and final_curve:
+            # Realize the advertised main high-pass before the acoustic sum,
+            # unless the chain already realizes it (see above).
+            main_branch = final_curve
+            highpass = main_highpass_by_source.get(name)
+            if highpass is not None and not _chain_realizes_highpass(channel):
+                realized = apply_plugins_to_curve(
+                    final_curve,
+                    [
+                        {
+                            "plugin_type": "crossover",
+                            "parameters": {
+                                "type": highpass.get("crossover_type", "LR24"),
+                                "output": "high",
+                                "frequency": highpass.get("high_pass_hz"),
+                            },
+                        },
+                        {
+                            "plugin_type": "delay",
+                            "parameters": {
+                                "delay_ms": highpass.get("delay_ms", 0.0)
+                            },
+                        },
+                    ],
+                    sample_rate,
+                )
+                if realized is not None:
+                    main_branch = realized
             # The main and sub branches may live on different grids (e.g.
             # full-range mains vs. a sub-only grid). Resample the sub branch
             # onto the main grid instead of dropping the channel.
             aligned = _resample_curve_onto_grid(
-                routed, list(final_curve.get("freq") or [])
+                routed, list(main_branch.get("freq") or [])
             )
             combined = (
-                complex_sum_curves(final_curve, aligned)
+                complex_sum_curves(main_branch, aligned)
                 if aligned is not None
                 else None
             )

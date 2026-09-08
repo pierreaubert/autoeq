@@ -18,8 +18,8 @@ use roomeq_engine::room_result::{ChannelOptimizationResult, RoomOptimizationResu
 use roomeq_engine::topology::{
     align_channels_to_lowest, all_curves_have_usable_phase, all_curves_share_frequency_grid,
     apply_crossover_response_to_curve, apply_delay_and_polarity_to_curve, average_mains_magnitude,
-    bass_management_objective, complex_sum_mains, compute_flat_loss, mark_plugin_stage,
-    mark_plugins_stage, mark_route_owned_plugin, normalize_crossover_delays,
+    bass_management_objective, complex_sum_mains, compute_flat_loss, curve_has_usable_phase,
+    mark_plugin_stage, mark_plugins_stage, mark_route_owned_plugin, normalize_crossover_delays,
     predict_bass_management_sum, select_bass_management_crossover_type,
 };
 use roomeq_engine::{
@@ -178,6 +178,38 @@ fn underfill_error_role(message: &str) -> Option<String> {
     (!role.is_empty() && !role.contains('\'')).then(|| role.to_string())
 }
 
+/// True when the joint bass-management optimizer knowingly accepted the
+/// failing role's route with a documented residual-splice tradeoff instead of
+/// restoring a demonstrably worse baseline. This is the only evidence on
+/// which the final replay may ship best-effort degraded curves: an
+/// unaccepted (or unknown) route keeps the hard error.
+///
+/// Both the clean acceptance (`source_route_de_optimized`) and the
+/// still-excessive improvement (`source_route_de_optimized_pending_underfill_correction:*`,
+/// whose corrective pass ran but could not repair the dip) record that the
+/// joint stage reviewed this route and chose it over a worse baseline.
+pub(crate) fn source_route_accepted_with_known_residual(
+    optimization: Option<&engine_home_cinema::BassManagementOptimizationReport>,
+    role: &str,
+) -> bool {
+    optimization
+        .and_then(|report| {
+            report
+                .source_results
+                .iter()
+                .find(|source| source.source_channel == role)
+        })
+        .is_some_and(|source| {
+            source.accepted
+                && source.advisories.iter().any(|advisory| {
+                    advisory == "source_route_de_optimized"
+                        || advisory.starts_with(
+                            "source_route_de_optimized_pending_underfill_correction:",
+                        )
+                })
+        })
+}
+
 /// A post-route correction EQ shapes only the mains branch, so it can disturb
 /// the calibrated splice. Structural routing, alignment and safety plugins are
 /// never splice-breaking candidates.
@@ -216,11 +248,7 @@ fn strip_next_splice_breaking_stage(chain: &mut ChannelDspChain) -> Option<&'sta
             .retain(|plugin| plugin.plugin_type != "convolution");
         return Some("fir");
     }
-    if chain
-        .plugins
-        .iter()
-        .any(is_splice_breaking_correction_eq)
-    {
+    if chain.plugins.iter().any(is_splice_breaking_correction_eq) {
         chain
             .plugins
             .retain(|plugin| !is_splice_breaking_correction_eq(plugin));
@@ -366,6 +394,50 @@ pub(crate) fn reconstruct_deployed_source_curves(
     sample_rate: f64,
     sidecar_dir: &std::path::Path,
 ) -> Result<HashMap<String, Curve>> {
+    reconstruct_deployed_source_curves_impl(
+        channels,
+        fir_coeffs_by_channel,
+        graph,
+        optimization,
+        sample_rate,
+        sidecar_dir,
+        true,
+    )
+}
+
+/// Best-effort deployed curves without the splice-safety gate, for callers
+/// that already established evidence for the residual (or run with the gate
+/// disabled, like level calibration). The returned curves still describe the
+/// actually exported graph; target-residual warnings are the caller's job.
+pub(crate) fn reconstruct_deployed_source_curves_unenforced(
+    channels: &HashMap<String, ChannelDspChain>,
+    fir_coeffs_by_channel: &HashMap<String, Vec<f64>>,
+    graph: &BassManagementRoutingGraph,
+    optimization: Option<&engine_home_cinema::BassManagementOptimizationReport>,
+    sample_rate: f64,
+    sidecar_dir: &std::path::Path,
+) -> Result<HashMap<String, Curve>> {
+    reconstruct_deployed_source_curves_impl(
+        channels,
+        fir_coeffs_by_channel,
+        graph,
+        optimization,
+        sample_rate,
+        sidecar_dir,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn reconstruct_deployed_source_curves_impl(
+    channels: &HashMap<String, ChannelDspChain>,
+    fir_coeffs_by_channel: &HashMap<String, Vec<f64>>,
+    graph: &BassManagementRoutingGraph,
+    optimization: Option<&engine_home_cinema::BassManagementOptimizationReport>,
+    sample_rate: f64,
+    sidecar_dir: &std::path::Path,
+    enforce_splice_safety: bool,
+) -> Result<HashMap<String, Curve>> {
     let lfe_role = &graph.physical_sub_output;
     let mut common_sub_chain =
         channels
@@ -381,6 +453,9 @@ pub(crate) fn reconstruct_deployed_source_curves(
             .and_then(serde_json::Value::as_str)
             == Some("post_route")
     });
+    // Realize drivers once against their own measurements. The common transfer
+    // must not multiply the acoustic array by another electrical driver sum.
+    let sub_driver_chains = common_sub_chain.drivers.take();
     let sub_initial: Curve = common_sub_chain
         .initial_curve
         .clone()
@@ -405,18 +480,29 @@ pub(crate) fn reconstruct_deployed_source_curves(
         .filter(|route| route.route_kind == "redirected_bass_lowpass_to_sub")
         .map(|route| route.destination.as_str())
         .collect::<std::collections::BTreeSet<_>>();
-    let routed_common_sub_curve =
-        if redirected_destinations.len() > 1 {
+    // Sum and filter on the receiving main's grid. Interpolating a previously
+    // summed dB/phase curve across a sub cancellation changes the acoustic model.
+    let realize_sub_on_grid = |frequencies: &ndarray::Array1<f64>| -> Result<Curve> {
+        let input = roomeq_engine::topology::interpolate_bass_response(frequencies, &sub_initial);
+        let common_sub_curve = crate::ctc::apply_channel_dsp_chain_to_curve_with_embedded_irs(
+            &common_sub_chain,
+            &input,
+            sample_rate,
+            sidecar_dir,
+            &common_sub_embedded_irs,
+        )?;
+        Ok(if redirected_destinations.len() > 1 {
             let optimization = optimization.ok_or_else(|| AutoeqError::InvalidConfiguration {
                 message: "missing multi-sub optimization metadata for deployed reconstruction"
                     .to_string(),
             })?;
-            let drivers = common_sub_chain.drivers.as_ref().ok_or_else(|| {
-                AutoeqError::InvalidConfiguration {
-                    message: "missing multi-sub driver chains for deployed reconstruction"
-                        .to_string(),
-                }
-            })?;
+            let drivers =
+                sub_driver_chains
+                    .as_ref()
+                    .ok_or_else(|| AutoeqError::InvalidConfiguration {
+                        message: "missing multi-sub driver chains for deployed reconstruction"
+                            .to_string(),
+                    })?;
             let mut realized_outputs = Vec::with_capacity(drivers.len());
             for driver in drivers {
                 let initial = driver.initial_curve.clone().ok_or_else(|| {
@@ -427,7 +513,7 @@ pub(crate) fn reconstruct_deployed_source_curves(
                         ),
                     }
                 })?;
-                let mut curve = autoeq_core::curve_transforms::interpolate_log_space(
+                let mut curve = roomeq_engine::topology::interpolate_bass_response(
                     &common_sub_curve.freq,
                     &Curve::from(initial),
                 );
@@ -441,19 +527,63 @@ pub(crate) fn reconstruct_deployed_source_curves(
                             driver.name
                         ),
                     })?;
+                let mut filter_chain = common_sub_chain.clone();
+                filter_chain.drivers = None;
+                filter_chain.plugins = driver
+                    .plugins
+                    .iter()
+                    .filter(|plugin| {
+                        plugin.plugin_type != "gain"
+                            && plugin.plugin_type != "delay"
+                            && plugin.plugin_type != "crossover"
+                    })
+                    .cloned()
+                    .collect();
+                curve = crate::ctc::apply_channel_dsp_chain_to_curve(
+                    &filter_chain,
+                    &curve,
+                    sample_rate,
+                )?;
                 curve.spl.mapv_inplace(|level| level + output.gain_db);
-                realized_outputs.push(roomeq_engine::topology::apply_delay_and_polarity_to_curve(
+                let mut curve = roomeq_engine::topology::apply_delay_and_polarity_to_curve(
                     &curve,
                     output.delay_ms,
                     output.polarity_inverted,
-                ));
+                );
+                // Realize each physical driver's low-pass before the sum.
+                // Redirected routes omit a second group LP; LFE retains its
+                // independent cutoff, exactly as in the exported graph.
+                if let Some((frequency, crossover_type)) = output::driver_low_pass(driver) {
+                    curve = apply_crossover_response_to_curve(
+                        &curve,
+                        &crossover_type,
+                        frequency,
+                        sample_rate,
+                        true,
+                    );
+                }
+                realized_outputs.push(curve);
             }
             let output_refs = realized_outputs.iter().collect::<Vec<_>>();
+            // The multi-output replay is a coherent sum and needs measured
+            // phase on every driver. Genuinely phaseless measurements must
+            // fail here with a descriptive error, never a rayon panic.
+            if let Some(driver) = drivers
+                .iter()
+                .zip(output_refs.iter())
+                .find_map(|(driver, curve)| (!curve_has_usable_phase(curve)).then_some(driver))
+            {
+                return Err(AutoeqError::InvalidMeasurement {
+                    message: format!(
+                        "multi-sub driver '{}' has no usable phase for deployed reconstruction; \
+                         coherent replay of {} sub outputs requires measured phase on every driver",
+                        driver.name,
+                        output_refs.len(),
+                    ),
+                });
+            }
             let mut combined = complex_sum_mains(&output_refs);
-            let initial_on_grid = autoeq_core::curve_transforms::interpolate_log_space(
-                &common_sub_curve.freq,
-                &sub_initial,
-            );
+            let initial_on_grid = &input;
             combined.spl = &combined.spl + &common_sub_curve.spl - &initial_on_grid.spl;
             if let (Some(combined_phase), Some(common_phase), Some(initial_phase)) = (
                 combined.phase.as_mut(),
@@ -465,7 +595,8 @@ pub(crate) fn reconstruct_deployed_source_curves(
             combined
         } else {
             common_sub_curve.clone()
-        };
+        })
+    };
     let source_roles = graph
         .routes
         .iter()
@@ -477,15 +608,6 @@ pub(crate) fn reconstruct_deployed_source_curves(
         })
         .map(|route| route.source_channel.clone())
         .collect::<std::collections::BTreeSet<_>>();
-    let source_transfers = source_pre_route_transfers(
-        channels,
-        fir_coeffs_by_channel,
-        source_roles.iter().cloned(),
-        &common_sub_curve,
-        sample_rate,
-        sidecar_dir,
-    )?;
-
     source_roles
         .into_iter()
         .map(|role| {
@@ -498,7 +620,6 @@ pub(crate) fn reconstruct_deployed_source_curves(
                 })
                 .count();
             let collapsed_graph;
-            let mut multi_sub_route_verified = false;
             let source_graph = if redirected_route_count > 1 {
                 let source = optimization
                     .and_then(|report| {
@@ -512,11 +633,6 @@ pub(crate) fn reconstruct_deployed_source_curves(
                             "missing accepted source-route metadata for multi-sub reconstruction '{role}'"
                         ),
                     })?;
-                multi_sub_route_verified = source.accepted
-                    && source
-                        .advisories
-                        .iter()
-                        .any(|advisory| advisory == "source_route_de_optimized");
                 let mut kept_redirected_route = false;
                 let mut routes = Vec::with_capacity(graph.routes.len());
                 for route in &graph.routes {
@@ -577,6 +693,12 @@ pub(crate) fn reconstruct_deployed_source_curves(
                     )?,
                 )
             };
+            let frequencies = main_curve.as_ref().map(|main| &main.freq).unwrap_or(&common_sub_curve.freq);
+            let routed_common_sub_curve = realize_sub_on_grid(frequencies)?;
+            let source_transfers = source_pre_route_transfers(
+                channels, fir_coeffs_by_channel, [role.clone()], &routed_common_sub_curve,
+                sample_rate, sidecar_dir,
+            )?;
             let deployed = engine_bass_management::predict_deployed_source_curve_from_routes(
                 main_curve.as_ref(),
                 &routed_common_sub_curve,
@@ -588,7 +710,7 @@ pub(crate) fn reconstruct_deployed_source_curves(
             .ok_or_else(|| AutoeqError::InvalidMeasurement {
                 message: format!("could not reconstruct deployed source curve '{role}'"),
             })?;
-            if let Some(main) = main_curve.as_ref() {
+            if let Some(main) = main_curve.as_ref() && enforce_splice_safety {
                 let bass = engine_bass_management::predict_bass_source_curve_from_routes(
                     &routed_common_sub_curve,
                     source_transfers.get(&role),
@@ -607,6 +729,7 @@ pub(crate) fn reconstruct_deployed_source_curves(
                             && route.route_kind == "redirected_bass_lowpass_to_sub"
                     })
                     .and_then(|route| route.low_pass_hz)
+                    .or_else(|| graph.routes.iter().find(|route| route.source_channel == role && route.route_kind == "main_highpass_to_self").and_then(|route| route.high_pass_hz))
                     .ok_or_else(|| AutoeqError::InvalidConfiguration {
                         message: format!("missing routed crossover frequency for '{role}'"),
                     })?;
@@ -627,7 +750,7 @@ pub(crate) fn reconstruct_deployed_source_curves(
                         message: format!("mismatched crossover reconstruction grid for '{role}'"),
                     })?;
             if !roomeq_engine::topology::bass_management_underfill_is_acceptable(underfill_db)
-                && !multi_sub_route_verified
+
             {
                     return Err(AutoeqError::OptimizationFailed {
                         message: format!(
@@ -636,15 +759,6 @@ pub(crate) fn reconstruct_deployed_source_curves(
                             roomeq_engine::topology::MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB
                     ),
                 });
-            }
-            if !roomeq_engine::topology::bass_management_underfill_is_acceptable(underfill_db)
-                && multi_sub_route_verified
-            {
-                log::warn!(
-                    "  Multi-sub common-bus replay for '{}' reports {:.3} dB underfill; the accepted per-output route replay passed its 3 dB safety constraint",
-                    role,
-                    underfill_db,
-                );
             }
             if let Some(target) = channels
                 .get(&role)
@@ -695,77 +809,31 @@ fn calibrate_post_dsp_input_levels(
     fir_coeffs_by_channel: &HashMap<String, Vec<f64>>,
     channels: &mut HashMap<String, ChannelDspChain>,
     graph: &mut BassManagementRoutingGraph,
+    optimization: Option<&engine_home_cinema::BassManagementOptimizationReport>,
 ) -> Result<(HashMap<String, f64>, HashMap<String, Curve>)> {
-    let mut common_sub_chain =
-        channels
-            .get(lfe_role)
-            .cloned()
-            .ok_or_else(|| AutoeqError::InvalidConfiguration {
-                message: format!("missing physical sub chain '{lfe_role}' for level calibration"),
-            })?;
-    common_sub_chain.plugins.retain(|plugin| {
-        // Redirected mains enter the physical sub after the LFE logical
-        // input's pre-route chain.  Only destination post-route processing is
-        // common to every signal emitted by the subwoofer.
-        plugin
-            .parameters
-            .get("room_eq_stage")
-            .and_then(|value| value.as_str())
-            == Some("post_route")
-    });
-    let sub_initial: Curve = common_sub_chain
-        .initial_curve
-        .clone()
-        .ok_or_else(|| AutoeqError::InvalidMeasurement {
-            message: format!("physical sub chain '{lfe_role}' has no initial curve"),
-        })?
-        .into();
-    let common_sub_curve = crate::ctc::apply_channel_dsp_chain_to_curve_with_sidecar_dir(
-        &common_sub_chain,
-        &sub_initial,
-        sample_rate,
-        sidecar_dir,
-    )?;
-    let mut source_transfers = source_pre_route_transfers(
+    // Calibration uses the same per-input acoustic graph as final replay.
+    // The splice gate runs after correction rollback; this step only selects
+    // common logical-input level trims and must never sum unrelated inputs.
+    let before = reconstruct_deployed_source_curves_impl(
         channels,
         fir_coeffs_by_channel,
-        main_roles
-            .iter()
-            .cloned()
-            .chain(std::iter::once(lfe_role.to_string())),
-        &common_sub_curve,
+        graph,
+        optimization,
         sample_rate,
         sidecar_dir,
+        false,
     )?;
-
-    let mut means = HashMap::new();
-    for role in main_roles {
-        let main_curve: Curve = channels
-            .get(role)
-            .and_then(|chain| chain.final_curve.clone())
-            .ok_or_else(|| AutoeqError::InvalidMeasurement {
-                message: format!("main channel '{role}' has no final curve"),
-            })?
-            .into();
-        let observed = engine_bass_management::predict_deployed_source_curve_from_routes(
-            Some(&main_curve),
-            &common_sub_curve,
-            source_transfers.get(role),
-            graph,
-            role,
-            sample_rate,
-        )
-        .unwrap_or(main_curve);
-        means.insert(role.clone(), average_spl(&observed, main_band));
-    }
-
-    let target = means
-        .values()
-        .copied()
-        .filter(|value| value.is_finite())
-        .fold(f64::INFINITY, f64::min);
+    let means: HashMap<String, f64> = main_roles
+        .iter()
+        .filter_map(|role| {
+            before
+                .get(role)
+                .map(|curve| (role.clone(), average_spl(curve, main_band)))
+        })
+        .collect();
+    let target = means.values().copied().fold(f64::INFINITY, f64::min);
     if !target.is_finite() || means.len() != main_roles.len() {
-        return Ok((HashMap::new(), HashMap::new()));
+        return Ok((HashMap::new(), before));
     }
     let mut trims: HashMap<String, f64> = means
         .into_iter()
@@ -778,20 +846,6 @@ fn calibrate_post_dsp_input_levels(
             apply_gain_to_main_chain(chain, *trims.get(role).unwrap_or(&0.0));
         }
     }
-    // The serialized pre-route gain is the authoritative trim owner. Refresh
-    // the transfer after inserting it so routing metadata cannot apply the
-    // same logical-input trim a second time during response reconstruction.
-    source_transfers = source_pre_route_transfers(
-        channels,
-        fir_coeffs_by_channel,
-        main_roles
-            .iter()
-            .cloned()
-            .chain(std::iter::once(lfe_role.to_string())),
-        &common_sub_curve,
-        sample_rate,
-        sidecar_dir,
-    )?;
     let logical_input_trims = trims.clone();
 
     // Only the configured correlated-bus headroom model may aggregate
@@ -842,58 +896,21 @@ fn calibrate_post_dsp_input_levels(
         .advisories
         .push("post_dsp_input_levels_aligned_down".to_string());
 
-    let mut calibrated_common_sub_curve = common_sub_curve.clone();
-    shift_curve_level(
-        &mut calibrated_common_sub_curve,
-        *trims.get(lfe_role).unwrap_or(&0.0),
-    );
-    if let Some(final_bass_bus) = engine_bass_management::predict_bass_output_curve_from_routes(
-        &calibrated_common_sub_curve,
-        Some(&source_transfers),
+    let deployed_source_curves = reconstruct_deployed_source_curves_impl(
+        channels,
+        fir_coeffs_by_channel,
         graph,
-        &graph.physical_sub_output,
+        optimization,
         sample_rate,
-    ) && let Some(sub_chain) = channels.get_mut(lfe_role)
-    {
-        let final_data: CurveData = (&final_bass_bus).into();
-        sub_chain.eq_response = sub_chain
-            .initial_curve
-            .as_ref()
-            .map(|initial| output::compute_eq_response(initial, &final_data));
-        sub_chain.final_curve = Some(final_data);
-    }
-
-    let mut deployed_source_curves = HashMap::new();
-    for role in main_roles {
-        let main_curve: Curve = channels
-            .get(role)
-            .and_then(|chain| chain.final_curve.clone())
-            .ok_or_else(|| AutoeqError::InvalidMeasurement {
-                message: format!("main channel '{role}' has no final curve"),
-            })?
-            .into();
-        if let Some(deployed) = engine_bass_management::predict_deployed_source_curve_from_routes(
-            Some(&main_curve),
-            &calibrated_common_sub_curve,
-            source_transfers.get(role),
-            graph,
-            role,
-            sample_rate,
-        ) {
-            deployed_source_curves.insert(role.clone(), deployed);
-        }
-    }
-    if let Some(lfe) = engine_bass_management::predict_deployed_source_curve_from_routes(
-        None,
-        &calibrated_common_sub_curve,
-        source_transfers.get(lfe_role),
-        graph,
-        lfe_role,
-        sample_rate,
+        sidecar_dir,
+        false,
+    )?;
+    if let (Some(curve), Some(chain)) = (
+        deployed_source_curves.get(lfe_role),
+        channels.get_mut(lfe_role),
     ) {
-        deployed_source_curves.insert(lfe_role.to_string(), lfe);
+        chain.final_curve = Some(curve.into());
     }
-
     Ok((trims, deployed_source_curves))
 }
 
@@ -1267,8 +1284,58 @@ fn optimize_home_cinema_no_sub(
 /// mains-only stages (e.g. a mixed-phase excess-phase FIR) are applied. The
 /// replay is the splice authority, so it reverts the offending role's FIR,
 /// then its post-route correction EQ, and replays again. A role with nothing
-/// revertible left — or a graph that still cancels afterwards — keeps the
-/// original hard error: an unfixable splice must never ship.
+/// revertible left keeps the hard error, unless the joint bass-management
+/// optimizer knowingly accepted that role's route with a documented residual
+/// tradeoff (`source_route_de_optimized`): then the replay ships the
+/// Best-effort variant of the enforced replay for read-only snapshots: on a
+/// splice-underfill failure it ships unenforced curves with a degraded entry
+/// instead of failing, but only with the same accepted-route evidence. The
+/// entry uses the `role:accepted_residual_splice_kept` format shared with
+/// [`replay_until_splice_safe`]; callers surface it as a degraded advisory.
+/// Anything else keeps the original hard error.
+pub(crate) fn reconstruct_deployed_snapshot_best_effort(
+    channels: &HashMap<String, ChannelDspChain>,
+    fir_coeffs_by_channel: &HashMap<String, Vec<f64>>,
+    graph: &BassManagementRoutingGraph,
+    optimization: Option<&engine_home_cinema::BassManagementOptimizationReport>,
+    sample_rate: f64,
+    sidecar_dir: &std::path::Path,
+    degraded: &mut Vec<String>,
+) -> Result<HashMap<String, Curve>> {
+    match reconstruct_deployed_source_curves(
+        channels,
+        fir_coeffs_by_channel,
+        graph,
+        optimization,
+        sample_rate,
+        sidecar_dir,
+    ) {
+        Ok(curves) => Ok(curves),
+        Err(error) => {
+            let Some(role) = underfill_error_role(&error.to_string()) else {
+                return Err(error);
+            };
+            if !source_route_accepted_with_known_residual(optimization, &role) {
+                return Err(error);
+            }
+            log::warn!(
+                "  Final routed snapshot for '{role}' keeps an accepted residual splice dip; snapshotting best-effort deployed curves: {error}"
+            );
+            degraded.push(format!("{role}:accepted_residual_splice_kept"));
+            reconstruct_deployed_source_curves_unenforced(
+                channels,
+                fir_coeffs_by_channel,
+                graph,
+                optimization,
+                sample_rate,
+                sidecar_dir,
+            )
+        }
+    }
+}
+
+/// best-effort deployed curves with a degraded advisory instead of failing
+/// the whole run with no output. Anything else keeps the original hard error.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn replay_until_splice_safe(
     channel_chains: &mut HashMap<String, ChannelDspChain>,
@@ -1304,8 +1371,29 @@ pub(crate) fn replay_until_splice_safe(
         let Some(chain) = channel_chains.get_mut(&role) else {
             return Err(error);
         };
-        let Some(stage) = strip_next_splice_breaking_stage(chain) else {
+        let stage = strip_next_splice_breaking_stage(chain);
+        if stage.is_none() && !source_route_accepted_with_known_residual(optimization, &role) {
             return Err(error);
+        }
+        let Some(stage) = stage else {
+            // Nothing revertible remains, but the joint optimizer knowingly
+            // accepted this role's route with a documented residual tradeoff:
+            // the dip comes from the accepted route (or raw acoustics), not
+            // from a strippable correction layer. Ship the best-effort
+            // deployed curves with a degraded advisory instead of failing the
+            // whole run with no output.
+            log::warn!(
+                "  Final routed replay for '{role}' keeps an accepted residual splice dip; shipping best-effort deployed curves: {error}"
+            );
+            splice_reverted.push(format!("{role}:accepted_residual_splice_kept"));
+            return reconstruct_deployed_source_curves_unenforced(
+                channel_chains,
+                fir_coeffs_by_channel,
+                graph,
+                optimization,
+                sample_rate,
+                sidecar_dir,
+            );
         };
         log::warn!(
             "  Final routed replay for '{role}' cancels at the crossover; reverting {stage} and replaying: {error}"
@@ -1349,6 +1437,53 @@ pub(crate) fn replay_until_splice_safe(
         }
         splice_reverted.push(format!("{role}:{stage}"));
     }
+}
+
+/// Resolve the deployable per-driver low-pass for one sub driver.
+///
+/// The frequency is the optimizer-selected per-sub splice value (`LP_i`)
+/// recorded on the matching sub-output report; `None` (skipped pair or legacy
+/// single-crossover run) deploys nothing. The crossover family resolves
+/// positionally from the per-sub crossover list (entry `i` for sub `i`),
+/// falling back to the shared bus low-pass family. Returns `None` unless the
+/// entry is deployable, so legacy behavior stays bit-identical.
+fn per_driver_low_pass_plan(
+    config: &RoomConfig,
+    driver_index: usize,
+    driver_name: &str,
+    sub_outputs: &HashMap<String, engine_home_cinema::BassManagementSubOutputReport>,
+    fallback_crossover_type: &str,
+) -> Option<output::PerDriverLowPass> {
+    let frequency_hz = sub_outputs
+        .get(driver_name)
+        .and_then(|output| output.selected_low_pass_hz)?;
+    // Legacy single-crossover configs (shared key or one-element list) deploy
+    // nothing by construction: the per-sub splice stage never records values
+    // for them, and this guard keeps them bit-identical even if a value were
+    // ever present.
+    let keys = config
+        .system
+        .as_ref()
+        .and_then(|system| system.subwoofers.as_ref())
+        .and_then(|subwoofers| subwoofers.crossover.as_ref())
+        .map(|crossover| crossover.as_list())
+        .filter(|keys| keys.len() >= 2)?;
+    let crossover_type = keys
+        .get(driver_index)
+        .copied()
+        .and_then(|key| {
+            config
+                .crossovers
+                .as_ref()
+                .and_then(|crossovers| crossovers.get(key))
+                .map(|crossover| crossover.crossover_type.clone())
+        })
+        .unwrap_or_else(|| fallback_crossover_type.to_string());
+    let plan = output::PerDriverLowPass {
+        frequency_hz,
+        crossover_type,
+    };
+    plan.is_deployable().then_some(plan)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1477,6 +1612,13 @@ fn optimize_home_cinema_with_sub(
         || {
             let sub_source = MeasurementSource::InMemory(sub_preprocess.combined_curve.clone());
             let mut sub_config = config.clone();
+            if sub_preprocess.common_eq_complete {
+                // The dedicated engine already applied the configured spatial
+                // PEQ/global-EQ policy. Do not replace it with a primary-only fit.
+                sub_config.optimizer.num_filters = 0;
+                sub_config.optimizer.processing_mode = roomeq_model::ProcessingMode::LowLatency;
+                sub_config.optimizer.phase_correction = None;
+            }
             if max_xo > sub_config.optimizer.min_freq {
                 sub_config.optimizer.max_freq = sub_config.optimizer.max_freq.min(max_xo);
             } else {
@@ -1542,7 +1684,9 @@ fn optimize_home_cinema_with_sub(
             pre_eq_fir_coeffs.insert(sub_role.clone(), fir_coeffs);
         }
         pre_eq_initial_curves.insert(sub_role.clone(), ch_result.initial_curve);
-        optimizer_evidence_by_channel.insert(sub_role.clone(), ch_result.optimizer_evidence);
+        let mut sub_evidence = sub_preprocess.optimizer_evidence.clone();
+        sub_evidence.extend(ch_result.optimizer_evidence);
+        optimizer_evidence_by_channel.insert(sub_role.clone(), sub_evidence);
     }
     workflow_stage_event(
         &mut assembly.stage_callback,
@@ -1558,6 +1702,29 @@ fn optimize_home_cinema_with_sub(
         "Optimizing bass-management crossover and routing",
         0.91,
     )?;
+
+    // Include every native sub frequency before realizing main filters. The
+    // receiving main retains its full measured span, even for a short sub file.
+    let bass_samples = sub_preprocess
+        .drivers
+        .as_ref()
+        .map(|drivers| {
+            drivers
+                .iter()
+                .filter_map(|driver| driver.initial_curve.as_ref())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| vec![&sub_preprocess.combined_curve]);
+    for role in main_roles {
+        let initial = &pre_eq_initial_curves[role];
+        let grid =
+            roomeq_engine::topology::bass_management_measurement_grid(initial, &bass_samples);
+        let expanded = autoeq_core::interpolate_log_space(&grid, initial);
+        pre_eq_initial_curves.insert(role.clone(), expanded);
+        if let Some(aligned) = aligned_curves.get_mut(role) {
+            *aligned = autoeq_core::interpolate_log_space(&grid, aligned);
+        }
+    }
 
     let mut aligned_pre_eq_curves: HashMap<String, Curve> = HashMap::new();
     for role in main_roles {
@@ -1625,7 +1792,10 @@ fn optimize_home_cinema_with_sub(
         .collect::<Result<HashMap<_, _>>>()?;
 
     // 3. Bass-managed virtual main
-    let crossover_grid = aligned_pre_eq_curves[&main_roles[0]].freq.clone();
+    let crossover_grid = roomeq_engine::topology::bass_management_measurement_grid(
+        &aligned_pre_eq_curves[&main_roles[0]],
+        &aligned_pre_eq_curves.values().collect::<Vec<_>>(),
+    );
     let aligned_main_phase_curves: Vec<Curve> = main_roles
         .iter()
         .map(|role| {
@@ -1689,7 +1859,7 @@ fn optimize_home_cinema_with_sub(
     let shared_grid_available = measured_grid_available && processed_grid_available;
     let phase_available =
         measured_phase_available && processed_phase_available && shared_grid_available;
-    let mut optimization_advisories = Vec::new();
+    let mut optimization_advisories = sub_preprocess.advisories.clone();
     if !measured_phase_available || !processed_phase_available {
         optimization_advisories.push("missing_phase_crossover_alignment_skipped".to_string());
         let mut missing_roles: Vec<_> = main_roles
@@ -2396,8 +2566,8 @@ fn optimize_home_cinema_with_sub(
         }
     }
 
-    // Sub Post-EQ
-    {
+    // Dedicated multi-seat/all-pass sub EQ is already complete.
+    if !sub_preprocess.common_eq_complete {
         let sub_progress_base =
             0.91 + (main_roles.len() as f64 / total_post_eq_passes as f64) * 0.03;
         workflow_stage_event(
@@ -2713,12 +2883,45 @@ fn optimize_home_cinema_with_sub(
             .cloned()
             .map(|output| (output.output_role.clone(), output))
             .collect();
-    let driver_chains = sub_preprocess.drivers.as_ref().map(|drivers| {
+    // Deploy each selected low-pass before the physical driver sum. The
+    // redirected routes omit a second group low-pass when these are active.
+    // Legacy single-crossover configurations retain their shared route LP.
+    let per_driver_low_passes: Vec<Option<output::PerDriverLowPass>> = sub_preprocess
+        .drivers
+        .as_ref()
+        .map(|drivers| {
+            drivers
+                .iter()
+                .enumerate()
+                .map(|(index, driver)| {
+                    per_driver_low_pass_plan(
+                        config,
+                        index,
+                        &driver.name,
+                        &sub_output_by_role,
+                        &representative_bass_route_type,
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut driver_chains = sub_preprocess.drivers.as_ref().map(|drivers| {
         drivers
             .iter()
             .enumerate()
             .map(|(i, d)| {
-                let mut driver_plugins = Vec::new();
+                let mut driver_plugins = d
+                    .processing
+                    .as_ref()
+                    .map(|processing| {
+                        processing
+                            .plugins
+                            .iter()
+                            .cloned()
+                            .map(|plugin| mark_plugin_stage(plugin, "post_route"))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
                 let output_settings = sub_output_by_role.get(&d.name);
                 let gain_db = output_settings
                     .map(|output| output.gain_db - route_applied_sub_gain_db)
@@ -2748,11 +2951,7 @@ fn optimize_home_cinema_with_sub(
                         "post_route",
                     ));
                 }
-                let driver_curve = d
-                    .initial_curve
-                    .as_ref()
-                    .map(output::extend_curve_to_full_range)
-                    .map(|c| (&c).into());
+                let driver_curve = d.initial_curve.as_ref().map(|c| c.into());
                 DriverDspChain {
                     name: d.name.clone(),
                     index: i,
@@ -2760,8 +2959,24 @@ fn optimize_home_cinema_with_sub(
                     initial_curve: driver_curve,
                 }
             })
-            .collect()
+            .collect::<Vec<DriverDspChain>>()
     });
+    if let Some(chains) = driver_chains.as_mut() {
+        output::stamp_per_driver_low_passes(chains, &per_driver_low_passes, Some("post_route"));
+        let deployed = per_driver_low_passes
+            .iter()
+            .flatten()
+            .filter(|plan| plan.is_deployable())
+            .count();
+        if deployed > 0 {
+            info!(
+                "  Deployed per-sub low-pass to {deployed} sub driver(s) pre-sum (redirected-bass cutoff owned by drivers)"
+            );
+            bass_management_optimization
+                .advisories
+                .push(format!("per_sub_lp_deployed_to_drivers:{deployed}"));
+        }
+    }
 
     // The sub PEQ uses the preprocessed combined measurement as its input.
     let sub_initial_data: CurveData = (&pre_eq_initial_curves[&sub_role]).into();
@@ -2794,6 +3009,7 @@ fn optimize_home_cinema_with_sub(
                 &pre_eq_fir_coeffs,
                 &mut channel_chains,
                 graph,
+                Some(&bass_management_optimization),
             )?
         } else {
             (HashMap::new(), HashMap::new())
@@ -3231,6 +3447,124 @@ mod post_dsp_level_tests {
     }
 
     #[test]
+    fn deployed_array_applies_driver_controls_exactly_once() {
+        use roomeq_model::{
+            BassManagementSourceReport, BassManagementSubOutputReport, DriverDspChain,
+        };
+        let bass_measurement = Curve {
+            freq: ndarray::array![20.0, 40.0, 80.0, 100.0, 200.0],
+            spl: ndarray::array![80.0, 80.0, 80.0, 70.0, 20.0],
+            phase: Some(ndarray::Array1::zeros(5)),
+            ..Default::default()
+        };
+        let mut initial_sum = bass_measurement.clone();
+        initial_sum.spl.mapv_inplace(|level| level + 6.020599913);
+        let mut sub_chain = chain("LFE", initial_sum, None);
+        sub_chain.plugins = vec![mark_plugin_stage(
+            roomeq_engine::output::create_gain_plugin(-6.020599913),
+            "post_route",
+        )];
+        let mut drivers = Vec::new();
+        let mut outputs = Vec::new();
+        let mut routes = Vec::new();
+        for (index, delay) in [4.0, 10.0].into_iter().enumerate() {
+            let name = format!("sub{index}");
+            let mut raw = bass_measurement.clone();
+            raw.phase = Some(
+                raw.freq
+                    .mapv(|frequency| 360.0 * frequency * delay / 1000.0),
+            );
+            drivers.push(DriverDspChain {
+                name: name.clone(),
+                index,
+                plugins: vec![roomeq_engine::output::create_delay_plugin(delay)],
+                initial_curve: Some((&raw).into()),
+            });
+            outputs.push(BassManagementSubOutputReport {
+                output_role: name.clone(),
+                gain_db: 0.0,
+                delay_ms: delay,
+                polarity_inverted: false,
+                strategy_source: "mso".into(),
+                headroom_contribution_db: 0.0,
+                selected_low_pass_hz: None,
+            });
+            let mut route = low_route("L", 0);
+            route.destination = name;
+            route.destination_index = index + 2;
+            route.delay_ms = delay;
+            routes.push(route);
+        }
+        sub_chain.drivers = Some(drivers);
+        let source = BassManagementSourceReport {
+            source_channel: "L".into(),
+            group_id: "lcr".into(),
+            main_delay_ms: 0.0,
+            bass_route_delay_ms: 0.0,
+            polarity_inverted: false,
+            trim_db: 0.0,
+            objective_before: None,
+            objective_after: None,
+            accepted: false,
+            safety_restored: false,
+            advisories: Vec::new(),
+        };
+        let optimization = super::joint_bass_management_report_from_parts(&[], &[source], &outputs);
+        let graph = BassManagementRoutingGraph {
+            physical_sub_output: "LFE".into(),
+            input_channels: vec!["L".into()],
+            output_channels: vec!["L".into(), "LFE".into(), "sub0".into(), "sub1".into()],
+            routes,
+            matrix: None,
+            input_trim_db: HashMap::new(),
+            advisories: Vec::new(),
+        };
+        let main = Curve {
+            freq: ndarray::array![20.0, 40.0, 80.0, 100.0, 200.0, 400.0, 16000.0],
+            spl: ndarray::Array1::from_elem(7, 20.0),
+            phase: Some(ndarray::Array1::zeros(7)),
+            ..Default::default()
+        };
+        let channels = HashMap::from([
+            ("L".into(), chain("L", main.clone(), None)),
+            ("LFE".into(), sub_chain),
+        ]);
+        let actual = reconstruct_deployed_source_curves(
+            &channels,
+            &HashMap::new(),
+            &graph,
+            Some(&optimization),
+            48000.0,
+            std::path::Path::new("."),
+        )
+        .unwrap();
+        let bass = roomeq_engine::topology::apply_crossover_response_to_curve(
+            &roomeq_engine::topology::interpolate_bass_response(&main.freq, &bass_measurement),
+            "LR24",
+            80.0,
+            48000.0,
+            true,
+        );
+        let expected = roomeq_engine::topology::complex_sum_mains(&[&main, &bass]);
+        for (index, &frequency) in main.freq.iter().enumerate() {
+            if frequency <= 200.0 {
+                assert!(
+                    (actual["L"].spl[index] - expected.spl[index]).abs() < 1e-6,
+                    "driver controls mismatch at {frequency}: {} vs {}",
+                    actual["L"].spl[index],
+                    expected.spl[index]
+                );
+            } else {
+                assert!(
+                    (actual["L"].spl[index] - main.spl[index]).abs() < 0.01,
+                    "unmeasured rolled-off bass affected full-range main at {frequency}: {}",
+                    actual["L"].spl[index]
+                );
+            }
+        }
+    }
+
+    #[test]
     fn main_correction_is_staged_after_route_matrix() {
         let plugins =
             stage_main_correction_plugins(vec![roomeq_engine::output::create_gain_plugin(1.0)]);
@@ -3469,6 +3803,147 @@ mod post_dsp_level_tests {
         );
     }
 
+    fn cancelling_setup() -> (
+        HashMap<String, ChannelDspChain>,
+        BassManagementRoutingGraph,
+    ) {
+        let initial = curve(60.0);
+        let graph = BassManagementRoutingGraph {
+            physical_sub_output: "LFE".to_string(),
+            input_channels: vec!["L".to_string(), "LFE".to_string()],
+            output_channels: vec!["L".to_string(), "LFE".to_string()],
+            routes: vec![low_route("L", 0)],
+            matrix: None,
+            input_trim_db: HashMap::new(),
+            advisories: Vec::new(),
+        };
+        let bass = super::engine_bass_management::predict_bass_source_curve_from_routes(
+            &initial, None, &graph, "L", 48_000.0,
+        )
+        .expect("routed bass branch");
+        let mut cancelling_main = bass.clone();
+        cancelling_main
+            .phase
+            .as_mut()
+            .unwrap()
+            .mapv_inplace(|phase| phase + 180.0);
+        let channels = HashMap::from([
+            (
+                "L".to_string(),
+                chain("L", initial.clone(), Some(cancelling_main)),
+            ),
+            (
+                "LFE".to_string(),
+                chain("LFE", initial.clone(), Some(initial)),
+            ),
+        ]);
+        (channels, graph)
+    }
+
+    fn accepted_source(accepted: bool) -> roomeq_model::BassManagementSourceReport {
+        accepted_source_with_advisory(
+            accepted,
+            "source_route_de_optimized",
+        )
+    }
+
+    fn accepted_source_with_advisory(
+        accepted: bool,
+        advisory: &str,
+    ) -> roomeq_model::BassManagementSourceReport {
+        roomeq_model::BassManagementSourceReport {
+            source_channel: "L".to_string(),
+            group_id: "lcr".to_string(),
+            main_delay_ms: 0.0,
+            bass_route_delay_ms: 0.0,
+            polarity_inverted: false,
+            trim_db: 0.0,
+            objective_before: None,
+            objective_after: None,
+            accepted,
+            safety_restored: false,
+            advisories: if accepted {
+                vec![advisory.to_string()]
+            } else {
+                Vec::new()
+            },
+        }
+    }
+
+    #[test]
+    fn splice_replay_ships_best_effort_for_accepted_residual_after_stages_exhausted() {
+        // Both the clean acceptance and the still-excessive improvement record
+        // a reviewed tradeoff; either must ship best-effort, not fail the run.
+        for advisory in [
+            "source_route_de_optimized",
+            "source_route_de_optimized_pending_underfill_correction:4.791db",
+        ] {
+            let (mut channels, graph) = cancelling_setup();
+            // No FIR and no post-route correction EQ: nothing revertible remains.
+            let optimization = super::joint_bass_management_report_from_parts(
+                &[],
+                &[accepted_source_with_advisory(true, advisory)],
+                &[],
+            );
+            let mut reverted = Vec::new();
+            let deployed = super::replay_until_splice_safe(
+                &mut channels,
+                &mut HashMap::new(),
+                &mut reverted,
+                &HashMap::new(),
+                &graph,
+                Some(&optimization),
+                48_000.0,
+                std::path::Path::new("."),
+                &|_| 80.0,
+                "LFE",
+                20.0,
+                130.0,
+                16_000.0,
+            )
+            .expect("accepted residual must ship best-effort, not fail the run");
+            assert!(deployed.contains_key("L"));
+            assert_eq!(reverted, vec!["L:accepted_residual_splice_kept".to_string()]);
+        }
+    }
+
+    #[test]
+    fn splice_replay_keeps_hard_error_without_accepted_route_evidence() {
+        let (mut channels, graph) = cancelling_setup();
+        for optimization in [
+            None,
+            Some(super::joint_bass_management_report_from_parts(
+                &[],
+                &[accepted_source(false)],
+                &[],
+            )),
+        ] {
+            let mut reverted = Vec::new();
+            let error = super::replay_until_splice_safe(
+                &mut channels.clone(),
+                &mut HashMap::new(),
+                &mut reverted,
+                &HashMap::new(),
+                &graph,
+                optimization.as_ref(),
+                48_000.0,
+                std::path::Path::new("."),
+                &|_| 80.0,
+                "LFE",
+                20.0,
+                130.0,
+                16_000.0,
+            )
+            .expect_err("unaccepted splice must stay a hard error");
+            assert!(
+                error
+                    .to_string()
+                    .contains("final routed crossover underfill")
+            );
+            assert!(reverted.is_empty());
+        }
+    }
+
     #[test]
     fn deployed_source_refresh_keeps_safe_route_with_large_target_residual() {
         let initial = curve(60.0);
@@ -3575,6 +4050,7 @@ mod post_dsp_level_tests {
             &HashMap::new(),
             &mut channels,
             &mut graph,
+            None,
         )
         .unwrap();
 
@@ -3607,13 +4083,13 @@ mod post_dsp_level_tests {
 mod tests {
     use super::super::executor_tests::{flat_curve, flat_curve_with_phase, make_assembly};
     use super::super::types::WorkflowExecutor;
-    use super::{HomeCinemaExecutor, canonical_main_roles};
+    use super::{HomeCinemaExecutor, canonical_main_roles, per_driver_low_pass_plan};
     use roomeq_model::{
-        BassManagementConfig, CrossoverConfig, MeasurementSource, MultiMeasurementStrategy,
-        MultiSeatConfig, OptimizerConfig, ProcessingMode, RoomConfig, SpeakerConfig,
-        SubwooferStrategy, SubwooferSystemConfig, SupportingSourceConfig,
-        SupportingSourceDecorrelation, SupportingSourceGroup, SystemConfig, SystemModel,
-        TargetCurveConfig, default_config_version,
+        BassManagementConfig, BassManagementSubOutputReport, CrossoverConfig, MeasurementSource,
+        MultiMeasurementStrategy, MultiSeatConfig, OptimizerConfig, ProcessingMode, RoomConfig,
+        SpeakerConfig, SubwooferCrossoverRef, SubwooferStrategy, SubwooferSystemConfig,
+        SupportingSourceConfig, SupportingSourceDecorrelation, SupportingSourceGroup, SystemConfig,
+        SystemModel, TargetCurveConfig, default_config_version,
     };
     use std::collections::HashMap;
 
@@ -3633,6 +4109,89 @@ mod tests {
             canonical_main_roles(&second, "LFE")
         );
         assert_eq!(canonical_main_roles(&first, "LFE"), vec!["Left", "Right"]);
+    }
+
+    fn per_sub_test_config() -> RoomConfig {
+        let mut sys = home_cinema_sys_with_sub();
+        sys.subwoofers.as_mut().unwrap().crossover = Some(SubwooferCrossoverRef::PerSub(vec![
+            "bass_xover1".to_string(),
+            "bass_xover2".to_string(),
+        ]));
+        room_config(
+            stereo_speakers(),
+            &sys,
+            tiny_optimizer(),
+            Some(HashMap::from([
+                (
+                    "bass_xover1".to_string(),
+                    CrossoverConfig {
+                        crossover_type: "LR24".to_string(),
+                        frequency: Some(80.0),
+                        frequencies: None,
+                        frequency_range: None,
+                    },
+                ),
+                (
+                    "bass_xover2".to_string(),
+                    CrossoverConfig {
+                        crossover_type: "LR48".to_string(),
+                        frequency: Some(95.0),
+                        frequencies: None,
+                        frequency_range: None,
+                    },
+                ),
+            ])),
+            None,
+        )
+    }
+
+    fn sub_output(name: &str, low_pass_hz: Option<f64>) -> BassManagementSubOutputReport {
+        BassManagementSubOutputReport {
+            output_role: name.to_string(),
+            gain_db: 0.0,
+            delay_ms: 0.0,
+            polarity_inverted: false,
+            strategy_source: "mso".to_string(),
+            headroom_contribution_db: 0.0,
+            selected_low_pass_hz: low_pass_hz,
+        }
+    }
+
+    #[test]
+    fn per_driver_low_pass_plan_pairs_positionally_with_own_family() {
+        let config = per_sub_test_config();
+        let outputs = HashMap::from([
+            ("subs_1".to_string(), sub_output("subs_1", Some(80.0))),
+            ("subs_2".to_string(), sub_output("subs_2", Some(95.0))),
+        ]);
+        let first = per_driver_low_pass_plan(&config, 0, "subs_1", &outputs, "LR24").unwrap();
+        assert_eq!(first.frequency_hz, 80.0);
+        assert_eq!(first.crossover_type, "LR24");
+        let second = per_driver_low_pass_plan(&config, 1, "subs_2", &outputs, "LR24").unwrap();
+        assert_eq!(second.frequency_hz, 95.0);
+        assert_eq!(second.crossover_type, "LR48");
+    }
+
+    #[test]
+    fn per_driver_low_pass_plan_deploys_nothing_without_selection() {
+        let config = per_sub_test_config();
+        // Skipped pair: no low-pass recorded, no plugin deployed.
+        let outputs = HashMap::from([("subs_1".to_string(), sub_output("subs_1", None))]);
+        assert!(per_driver_low_pass_plan(&config, 0, "subs_1", &outputs, "LR24").is_none());
+        // Legacy single-crossover config: deploys nothing by construction,
+        // even if a value were ever recorded.
+        let mut legacy = home_cinema_sys_with_sub();
+        legacy.subwoofers.as_mut().unwrap().crossover =
+            Some(SubwooferCrossoverRef::Shared("bass_xo".to_string()));
+        let legacy_config = room_config(
+            stereo_speakers(),
+            &legacy,
+            tiny_optimizer(),
+            Some(crossovers_fixed()),
+            None,
+        );
+        let outputs = HashMap::from([("sub".to_string(), sub_output("sub", Some(80.0)))]);
+        assert!(per_driver_low_pass_plan(&legacy_config, 0, "sub", &outputs, "LR24").is_none());
     }
 
     fn tiny_optimizer() -> OptimizerConfig {
@@ -3682,7 +4241,7 @@ mod tests {
             ]),
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Single,
-                crossover: Some("bass_xo".to_string()),
+                crossover: Some("bass_xo".to_string().into()),
                 mapping: HashMap::from([("sub".to_string(), "Left".to_string())]),
             }),
             bass_management: None,
@@ -4405,8 +4964,7 @@ mod tests {
 #[cfg(test)]
 mod splice_revert_tests {
     use super::{
-        is_splice_breaking_correction_eq, strip_next_splice_breaking_stage,
-        underfill_error_role,
+        is_splice_breaking_correction_eq, strip_next_splice_breaking_stage, underfill_error_role,
     };
     use roomeq_model::{ChannelDspChain, PluginConfigWrapper};
 
@@ -4464,7 +5022,10 @@ mod splice_revert_tests {
         let message = "optimization failed: final routed crossover underfill for 'R' is 9.062 dB at 80.0 Hz (limit 3.0 dB)";
         assert_eq!(underfill_error_role(message).as_deref(), Some("R"));
         assert_eq!(underfill_error_role("unrelated failure"), None);
-        assert_eq!(underfill_error_role("final routed crossover underfill for '' is "), None);
+        assert_eq!(
+            underfill_error_role("final routed crossover underfill for '' is "),
+            None
+        );
     }
 
     #[test]
@@ -4472,7 +5033,10 @@ mod splice_revert_tests {
         let mut chain = correction_chain();
         assert_eq!(strip_next_splice_breaking_stage(&mut chain), Some("fir"));
         assert!(
-            chain.plugins.iter().all(|plugin| plugin.plugin_type != "convolution"),
+            chain
+                .plugins
+                .iter()
+                .all(|plugin| plugin.plugin_type != "convolution"),
             "FIR stage must be gone"
         );
         assert_eq!(strip_next_splice_breaking_stage(&mut chain), Some("peq"));

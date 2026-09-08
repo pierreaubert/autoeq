@@ -7,7 +7,6 @@ use crate::topology::{
     all_curves_have_usable_phase, all_curves_share_frequency_grid, bass_management_objective,
     complex_sum_mains, curve_has_usable_phase, predict_bass_management_sum,
 };
-use autoeq_core::interpolate_log_space;
 use roomeq_model::RoomConfig;
 use std::collections::{BTreeMap, HashMap};
 
@@ -120,6 +119,7 @@ pub fn refine_bass_management_sub_outputs(
                     polarity_inverted: polarity,
                     strategy_source: output.strategy_source.clone(),
                     headroom_contribution_db: gain,
+                    selected_low_pass_hz: output.selected_low_pass_hz,
                 }
             })
             .collect()
@@ -235,11 +235,15 @@ pub fn sum_sub_output_responses_on_grid(
 
     let mut complex_sum = vec![Complex::new(0.0, 0.0); target_freq.len()];
     for (driver, output) in drivers.iter().zip(outputs.iter()) {
-        let curve = driver.initial_curve.as_ref()?;
+        let curve = driver
+            .processing
+            .as_ref()
+            .map(|processing| &processing.curve)
+            .or(driver.initial_curve.as_ref())?;
         if !curve_has_usable_phase(curve) {
             return None;
         }
-        let interpolated = interpolate_log_space(target_freq, curve);
+        let interpolated = crate::topology::interpolate_bass_response(target_freq, curve);
         let phase = interpolated.phase.as_ref()?;
         for idx in 0..target_freq.len() {
             let freq_hz = target_freq[idx];
@@ -302,6 +306,7 @@ mod tests {
             gain: 0.0,
             delay: 0.0,
             inverted,
+            processing: None,
             initial_curve: curve,
         }
     }
@@ -320,6 +325,7 @@ mod tests {
             polarity_inverted: inverted,
             strategy_source: source.to_string(),
             headroom_contribution_db: gain_db,
+            selected_low_pass_hz: None,
         }
     }
 
@@ -516,6 +522,7 @@ mod tests {
                 trim_db: 0.0,
                 objective_before: Some(1.0),
                 objective_after: Some(1.0),
+                selected_sub_low_pass_hz: Vec::new(),
                 advisories: vec!["ok".to_string()],
             },
         );

@@ -694,6 +694,7 @@ fn camilladsp_rejects_multiple_sub_outputs_before_rendering() {
             polarity_inverted: false,
             strategy_source: "mso".to_string(),
             headroom_contribution_db: 0.5,
+            selected_low_pass_hz: None,
         },
         roomeq_model::BassManagementSubOutputReport {
             output_role: "SUB2".to_string(),
@@ -702,6 +703,7 @@ fn camilladsp_rejects_multiple_sub_outputs_before_rendering() {
             polarity_inverted: true,
             strategy_source: "mso".to_string(),
             headroom_contribution_db: -0.5,
+            selected_low_pass_hz: None,
         },
     ];
 
@@ -730,6 +732,7 @@ fn camilladsp_accepts_single_sub_output_declaration() {
         polarity_inverted: false,
         strategy_source: "single".to_string(),
         headroom_contribution_db: 0.0,
+        selected_low_pass_hz: None,
     }];
 
     render_dsp_chain(&output, ExportFormat::CamillaDsp, 48_000.0)

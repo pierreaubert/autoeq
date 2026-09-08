@@ -122,8 +122,20 @@ pub(super) fn create_eval_frequency_grid(
     let log_min = f_min.log10();
     let log_max = f_max.log10();
 
-    Array1::from_shape_fn(num_points, |i| {
+    let base = Array1::from_shape_fn(num_points, |i| {
         let log_f = log_min + (log_max - log_min) * (i as f64 / (num_points - 1) as f64);
         10.0_f64.powf(log_f)
-    })
+    });
+    let mut frequencies = base.to_vec();
+    frequencies.extend(
+        measurements
+            .measurements
+            .iter()
+            .flatten()
+            .flat_map(|curve| curve.freq.iter().copied())
+            .filter(|&frequency| frequency >= f_min && frequency <= f_max),
+    );
+    frequencies.sort_by(f64::total_cmp);
+    frequencies.dedup_by(|a, b| (*a - *b).abs() < 1e-8);
+    Array1::from_vec(frequencies)
 }

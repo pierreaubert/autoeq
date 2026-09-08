@@ -266,6 +266,79 @@ fn select_topology_route_special_bass_configs_without_system_subs_are_generic() 
 }
 
 #[test]
+fn select_topology_route_stereo_mso_sub_reaches_stereo_2_1() {
+    let mut speakers = stereo_speakers();
+    speakers.insert(
+        "subs".to_string(),
+        SpeakerConfig::MultiSub(roomeq_model::MultiSubGroup {
+            name: "Two subs".to_string(),
+            speaker_name: None,
+            subwoofers: vec![
+                MeasurementSource::InMemory(flat_curve()),
+                MeasurementSource::InMemory(flat_curve()),
+            ],
+            allpass_optimization: false,
+        }),
+    );
+    let system = SystemConfig {
+        model: SystemModel::Stereo,
+        speakers: HashMap::from([
+            ("L".to_string(), "left".to_string()),
+            ("R".to_string(), "right".to_string()),
+            ("LFE".to_string(), "subs".to_string()),
+        ]),
+        subwoofers: Some(SubwooferSystemConfig {
+            config: SubwooferStrategy::Mso,
+            crossover: None,
+            mapping: [("subs".to_string(), "L".to_string())].into(),
+        }),
+        bass_management: None,
+        ..Default::default()
+    };
+    let config = base_room_config(speakers, Some(system));
+    assert_eq!(
+        select_topology_route(&config, &observer_none()).unwrap(),
+        TopologyRoute::Stereo2_1,
+        "stereo MSO sub group must use the bass-managed stereo workflow, not generic"
+    );
+}
+
+#[test]
+fn select_topology_route_stereo_group_sub_stays_generic() {
+    let mut speakers = stereo_speakers();
+    speakers.insert(
+        "subs".to_string(),
+        SpeakerConfig::Group(SpeakerGroup {
+            name: "subs".to_string(),
+            speaker_name: None,
+            measurements: vec![MeasurementSource::InMemory(flat_curve())],
+            crossover: None,
+        }),
+    );
+    let system = SystemConfig {
+        model: SystemModel::Stereo,
+        speakers: HashMap::from([
+            ("L".to_string(), "left".to_string()),
+            ("R".to_string(), "right".to_string()),
+            ("LFE".to_string(), "subs".to_string()),
+        ]),
+        subwoofers: Some(SubwooferSystemConfig {
+            config: SubwooferStrategy::Single,
+            crossover: None,
+            mapping: [("subs".to_string(), "L".to_string())].into(),
+        }),
+        bass_management: None,
+        ..Default::default()
+    };
+    let config = base_room_config(speakers, Some(system));
+    assert_eq!(
+        select_topology_route(&config, &observer_none()).unwrap(),
+        TopologyRoute::Generic,
+        "unsupported Group bass output must stay on the generic path"
+    );
+}
+
+#[test]
 fn validate_room_optimization_empty_speakers_fails() {
     let config = RoomConfig {
         version: roomeq_model::default_config_version(),
@@ -528,7 +601,7 @@ fn home_cinema_5_1_4_config() -> RoomConfig {
                 .collect(),
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Single,
-                crossover: Some("main".to_string()),
+                crossover: Some("main".to_string().into()),
                 mapping: [("lfe".to_string(), "L".to_string())].into(),
             }),
             bass_management: None,
@@ -828,7 +901,7 @@ fn crossover_reconstruction_config(
         ]),
         subwoofers: Some(SubwooferSystemConfig {
             config: SubwooferStrategy::Single,
-            crossover: Some("bass_xo".to_string()),
+            crossover: Some("bass_xo".to_string().into()),
             mapping: HashMap::from([("sub".to_string(), "Left".to_string())]),
         }),
         bass_management: Some(roomeq_model::BassManagementConfig {

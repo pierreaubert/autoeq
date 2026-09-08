@@ -49,6 +49,17 @@ pub fn extend_curve_to_full_range(curve: &crate::Curve) -> crate::Curve {
     };
     let points_per_decade = 50;
 
+    // Measured phase must survive display extension: downstream deployed-route
+    // replay coherently sums these curves, and dropping phase here turns that
+    // replay into a panic. Extended points hold the nearest measured edge
+    // value (constant extrapolation; slope extrapolation on wrapped phase
+    // would invent discontinuities).
+    let phase_in = curve
+        .phase
+        .as_ref()
+        .filter(|phase| phase.len() == curve.freq.len());
+    let mut phase_vec = phase_in.map(|_| Vec::new());
+
     let mut freq_vec = Vec::new();
     let mut spl_vec = Vec::new();
 
@@ -58,6 +69,9 @@ pub fn extend_curve_to_full_range(curve: &crate::Curve) -> crate::Curve {
         let log_end = meas_min.log10();
         let decades = log_end - log_start;
         let n_points = ((decades * points_per_decade as f64).ceil() as usize).max(1);
+        if let (Some(phase), Some(out)) = (phase_in, phase_vec.as_mut()) {
+            out.extend(std::iter::repeat_n(phase[0], n_points));
+        }
         for i in 0..n_points {
             let t = i as f64 / n_points as f64;
             let f = 10f64.powf(log_start + t * (log_end - log_start));
@@ -73,6 +87,9 @@ pub fn extend_curve_to_full_range(curve: &crate::Curve) -> crate::Curve {
     // Copy original data
     freq_vec.extend(curve.freq.iter());
     spl_vec.extend(curve.spl.iter());
+    if let (Some(phase), Some(out)) = (phase_in, phase_vec.as_mut()) {
+        out.extend(phase.iter());
+    }
 
     // Append log-spaced points from last measurement frequency to 20 kHz
     if meas_max < DISPLAY_MAX_FREQ * 0.95 {
@@ -80,6 +97,9 @@ pub fn extend_curve_to_full_range(curve: &crate::Curve) -> crate::Curve {
         let log_end = DISPLAY_MAX_FREQ.log10();
         let decades = log_end - log_start;
         let n_points = ((decades * points_per_decade as f64).ceil() as usize).max(1);
+        if let (Some(phase), Some(out)) = (phase_in, phase_vec.as_mut()) {
+            out.extend(std::iter::repeat_n(phase[phase.len() - 1], n_points));
+        }
         for i in 1..=n_points {
             let t = i as f64 / n_points as f64;
             let f = 10f64
@@ -97,7 +117,7 @@ pub fn extend_curve_to_full_range(curve: &crate::Curve) -> crate::Curve {
     crate::Curve {
         freq: Array1::from(freq_vec),
         spl: Array1::from(spl_vec),
-        phase: None,
+        phase: phase_vec.map(Array1::from),
         ..Default::default()
     }
 }

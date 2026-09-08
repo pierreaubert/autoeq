@@ -474,7 +474,7 @@ mod coverage_tests {
                 ]),
                 subwoofers: Some(SubwooferSystemConfig {
                     config: Default::default(),
-                    crossover: Some("sub".to_string()),
+                    crossover: Some("sub".to_string().into()),
                     mapping: HashMap::new(),
                 }),
                 bass_management: Some(BassManagementConfig::default()),
@@ -760,6 +760,7 @@ mod coverage_tests {
                 trim_db: 0.0,
                 objective_before: None,
                 objective_after: None,
+                selected_sub_low_pass_hz: Vec::new(),
                 advisories: Vec::new(),
             }],
             source_results: Vec::new(),

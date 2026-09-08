@@ -217,19 +217,35 @@ fn select_topology_route(
         return Ok(TopologyRoute::Generic);
     };
 
-    // Multi-driver main channels use the generic topology-aware path.  The
-    // home-cinema executor owns its designated bass output and explicitly
-    // supports MultiSub/MSO, cardioid, and DBA preprocessing; treating that
+    // Multi-driver main channels use the generic topology-aware path. The
+    // routed executors own their designated bass output and explicitly
+    // support Single/MultiSub(/MSO)/cardioid/DBA preprocessing; treating that
     // output as an unsupported main group silently bypasses routed bass
-    // management and leaves the published routing graph unrealized.
-    let home_cinema_bass_output = (sys.model == SystemModel::HomeCinema)
+    // management and leaves the published routing graph unrealized (stereo
+    // 2.x with an MSO sub group must reach Stereo 2.1, not Generic).
+    // Group/Topology/SupportingSource bass outputs stay on the generic path.
+    let routed_bass_output = (matches!(
+        sys.model,
+        SystemModel::HomeCinema | SystemModel::Stereo
+    ) && sys.subwoofers.is_some())
         .then(|| roomeq_engine::home_cinema::bass_output_role(config, sys));
     let has_group = sys.speakers.iter().any(|(role, key)| {
-        if home_cinema_bass_output
+        if routed_bass_output
             .as_ref()
             .is_some_and(|bass_output| role == bass_output)
         {
-            return false;
+            if sys.model == SystemModel::HomeCinema {
+                return false;
+            }
+            return !matches!(
+                config.speakers.get(key),
+                Some(
+                    SpeakerConfig::Single(_)
+                        | SpeakerConfig::MultiSub(_)
+                        | SpeakerConfig::Cardioid(_)
+                        | SpeakerConfig::Dba(_)
+                )
+            );
         }
         matches!(
             config.speakers.get(key),
@@ -919,9 +935,20 @@ fn apply_inter_channel_timbre_matching_stage(
     )
 }
 
+/// True when logical inputs flow through the routed per-input bass-management
+/// executor (per-driver sub filters, deployed splice acceptance). That is
+/// HomeCinema and Stereo systems with subwoofers: stereo 2.x with a sub group
+/// runs the same HomeCinemaExecutor path, so its post-route DSP (arrival
+/// alignment delays, logical-input plugin staging, height residual delays)
+/// needs the same pre-route staging, or a mains-only delay shifts just one
+/// splice branch after the joint calibration and recreates a crossover
+/// cancellation that the final replay then rejects.
 fn uses_routed_home_cinema_inputs(config: &RoomConfig) -> bool {
     config.system.as_ref().is_some_and(|system| {
-        system.model == SystemModel::HomeCinema && system.subwoofers.is_some()
+        matches!(
+            system.model,
+            SystemModel::HomeCinema | SystemModel::Stereo
+        ) && system.subwoofers.is_some()
     })
 }
 
@@ -1985,14 +2012,27 @@ fn apply_final_correction_safety_gate_preserving_routed_crossover(
     {
         let optimization = report.optimization.clone();
         let fir_coeffs = retained_fir_coeffs_by_channel(result);
-        let deployed = crate::topology::reconstruct_deployed_source_curves(
+        // An accepted joint-route residual must not fail the run here after
+        // surviving every correction stage: snapshot best-effort curves with
+        // a degraded advisory instead. Anything else keeps the hard error.
+        let mut splice_degraded = Vec::new();
+        let deployed = crate::topology::reconstruct_deployed_snapshot_best_effort(
             &result.channels,
             &fir_coeffs,
             &graph,
             optimization.as_ref(),
             sample_rate,
             sidecar_dir,
+            &mut splice_degraded,
         )?;
+        for entry in &splice_degraded {
+            result.metadata.stage_outcomes.push(StageOutcome {
+                checks: Vec::new(),
+                stage: "routed_splice_final_replay".to_string(),
+                status: StageStatus::Degraded,
+                advisories: vec![format!("splice_cancellation_reverted_{entry}")],
+            });
+        }
         Some((result.clone(), deployed, graph, optimization))
     } else {
         None

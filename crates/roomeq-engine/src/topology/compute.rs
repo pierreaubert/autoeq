@@ -1,7 +1,7 @@
 use super::{
     apply_delay_and_polarity_to_curve, compute_crossover_complex_response, curve_has_usable_phase,
 };
-use autoeq_core::{Curve, interpolate_log_space, response};
+use autoeq_core::{Curve, response};
 use math_audio_dsp::analysis::compute_average_response;
 
 /// Compute flat_loss score for a curve within a frequency range.
@@ -39,7 +39,7 @@ pub fn predict_bass_management_sum(
         return None;
     }
 
-    let sub_on_main_grid = interpolate_log_space(&main_curve.freq, sub_curve);
+    let sub_on_main_grid = super::interpolate_bass_response(&main_curve.freq, sub_curve);
     if !curve_has_usable_phase(&sub_on_main_grid) {
         return None;
     }

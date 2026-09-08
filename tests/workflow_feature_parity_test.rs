@@ -302,7 +302,7 @@ fn make_stereo_2_1_config(optimizer: OptimizerConfig) -> RoomConfig {
             speakers: sys_spk,
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Single,
-                crossover: Some("sub_xover".to_string()),
+                crossover: Some("sub_xover".to_string().into()),
                 mapping: sub_map,
             }),
             bass_management: None,

@@ -97,7 +97,7 @@ fn stereo_21_sub_sys(sub_strategy: SubwooferStrategy) -> SystemConfig {
         ]),
         subwoofers: Some(SubwooferSystemConfig {
             config: sub_strategy,
-            crossover: Some("bass_xo".to_string()),
+            crossover: Some("bass_xo".to_string().into()),
             mapping: HashMap::from([("sub".to_string(), "L".to_string())]),
         }),
         bass_management: None,
@@ -429,7 +429,7 @@ fn home_cinema_executor_with_sub_runs() {
         ]),
         subwoofers: Some(SubwooferSystemConfig {
             config: SubwooferStrategy::Single,
-            crossover: Some("bass_xo".to_string()),
+            crossover: Some("bass_xo".to_string().into()),
             mapping: HashMap::from([("sub".to_string(), "Left".to_string())]),
         }),
         bass_management: None,
@@ -491,7 +491,7 @@ fn stereo_2_1_executor_runs() {
         ]),
         subwoofers: Some(SubwooferSystemConfig {
             config: SubwooferStrategy::Single,
-            crossover: Some("bass_xo".to_string()),
+            crossover: Some("bass_xo".to_string().into()),
             mapping: HashMap::from([("sub".to_string(), "L".to_string())]),
         }),
         bass_management: None,

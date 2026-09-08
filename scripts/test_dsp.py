@@ -10,6 +10,7 @@ from scripts.src.dsp import (
     compute_eq_response,
     compute_group_delay_from_ir,
     replay_serialized_output,
+    resample_spl_onto_grid,
     sum_driver_initial_curves,
     wrap_phase,
 )
@@ -551,6 +552,215 @@ class PostDspSourceCurveTests(unittest.TestCase):
         )
         self.assertIsNone(sum_driver_initial_curves({"initial_curve": {}}))
         self.assertIsNone(sum_driver_initial_curves(None))
+
+    def test_redirected_multisub_replays_drivers_at_acoustic_level(self):
+        # Redirected bass must use the acoustic per-driver measurements, not
+        # the level-relative channel aggregate (10 dB here).
+        data = {
+            "metadata": {
+                "bass_management": {
+                    "physical_sub_output": "LFE",
+                    "routing_graph": {
+                        "routes": [
+                            {
+                                "source_channel": "L",
+                                "route_kind": "redirected_bass_lowpass_to_sub",
+                                "crossover_type": "LR24",
+                                "low_pass_hz": 1000.0,
+                                "gain_db": 0.0,
+                                "delay_ms": 0.0,
+                                "polarity_inverted": False,
+                            },
+                            {
+                                "source_channel": "LFE",
+                                "route_kind": "lfe_lowpass_to_sub",
+                                "crossover_type": "LR24",
+                                "low_pass_hz": 1000.0,
+                                "gain_db": 0.0,
+                                "delay_ms": 0.0,
+                                "polarity_inverted": False,
+                            },
+                        ],
+                    },
+                }
+            },
+            "channels": {
+                "L": {
+                    "final_curve": {"freq": [50.0], "spl": [80.0]},
+                    "plugins": [],
+                },
+                "LFE": {
+                    "initial_curve": {"freq": [50.0], "spl": [10.0]},
+                    "final_curve": {"freq": [50.0], "spl": [4.0]},
+                    "plugins": [],
+                    "drivers": [
+                        {
+                            "name": "sub_1",
+                            "initial_curve": {"freq": [50.0], "spl": [70.0]},
+                            "plugins": [],
+                        },
+                        {
+                            "name": "sub_2",
+                            "initial_curve": {"freq": [50.0], "spl": [70.0]},
+                            "plugins": [],
+                        },
+                    ],
+                },
+            },
+        }
+
+        curves = build_post_dsp_source_curves(data)
+
+        # Power sum of two 70 dB drivers (~76 dB) acoustically summed with the
+        # 80 dB main; the 10 dB aggregate must not appear.
+        expected_sub = 10.0 * math.log10(2.0 * 10.0 ** 7.0)
+        expected = 10.0 * math.log10(10.0 ** 8.0 + 10.0 ** (expected_sub / 10.0))
+        self.assertAlmostEqual(curves["L"]["spl"][0], expected, places=2)
+        self.assertGreater(curves["L"]["spl"][0], 70.0)
+
+    def test_main_highpass_is_realized_before_acoustic_sum(self):
+        # With an 80 Hz LR24 splice, bass at 20 Hz must come almost entirely
+        # from the sub branch: the full-range main would otherwise
+        # double-count it.
+        data = {
+            "metadata": {
+                "bass_management": {
+                    "physical_sub_output": "LFE",
+                    "routing_graph": {
+                        "routes": [
+                            {
+                                "source_channel": "L",
+                                "route_kind": "main_highpass_to_self",
+                                "crossover_type": "LR24",
+                                "high_pass_hz": 80.0,
+                                "delay_ms": 0.0,
+                            },
+                            {
+                                "source_channel": "L",
+                                "route_kind": "redirected_bass_lowpass_to_sub",
+                                "crossover_type": "LR24",
+                                "low_pass_hz": 80.0,
+                                "gain_db": 0.0,
+                                "delay_ms": 0.0,
+                                "polarity_inverted": False,
+                            },
+                            {
+                                "source_channel": "LFE",
+                                "route_kind": "lfe_lowpass_to_sub",
+                                "crossover_type": "LR24",
+                                "low_pass_hz": 1000.0,
+                                "gain_db": 0.0,
+                                "delay_ms": 0.0,
+                                "polarity_inverted": False,
+                            },
+                        ],
+                    },
+                }
+            },
+            "channels": {
+                "L": {
+                    "final_curve": {"freq": [20.0], "spl": [70.0]},
+                    "plugins": [],
+                },
+                "LFE": {
+                    "initial_curve": {"freq": [20.0], "spl": [70.0]},
+                    "final_curve": {"freq": [20.0], "spl": [70.0]},
+                    "plugins": [],
+                },
+            },
+        }
+
+        curves = build_post_dsp_source_curves(data)
+
+        # At 20 Hz (two octaves below an 80 Hz LR24 splice) the high-passed
+        # main is ~48 dB down, so the sum stays within ~1 dB of the sub
+        # branch instead of the ~6 dB lift a full-range double-count gives.
+        self.assertLess(curves["L"]["spl"][0], 71.5)
+        self.assertGreater(curves["L"]["spl"][0], 65.0)
+
+    def test_routed_chain_highpass_is_not_applied_twice(self):
+        # Routed executors stamp the route-owned high-pass into the chain;
+        # the report must use that realized branch as-is instead of adding
+        # the graph transfer a second time. The sub is silent here so the
+        # main branch passes through observably: re-applying an LR24
+        # high-pass at the probe (its own cutoff) would cost ~6 dB.
+        data = {
+            "metadata": {
+                "bass_management": {
+                    "physical_sub_output": "LFE",
+                    "routing_graph": {
+                        "routes": [
+                            {
+                                "source_channel": "L",
+                                "route_kind": "main_highpass_to_self",
+                                "crossover_type": "LR24",
+                                "high_pass_hz": 80.0,
+                                "delay_ms": 0.0,
+                            },
+                            {
+                                "source_channel": "L",
+                                "route_kind": "redirected_bass_lowpass_to_sub",
+                                "crossover_type": "LR24",
+                                "low_pass_hz": 80.0,
+                                "gain_db": 0.0,
+                                "delay_ms": 0.0,
+                                "polarity_inverted": False,
+                            },
+                            {
+                                "source_channel": "LFE",
+                                "route_kind": "lfe_lowpass_to_sub",
+                                "crossover_type": "LR24",
+                                "low_pass_hz": 1000.0,
+                                "gain_db": 0.0,
+                                "delay_ms": 0.0,
+                                "polarity_inverted": False,
+                            },
+                        ],
+                    },
+                }
+            },
+            "channels": {
+                "L": {
+                    "final_curve": {"freq": [80.0], "spl": [70.0]},
+                    "plugins": [
+                        {
+                            "plugin_type": "crossover",
+                            "parameters": {
+                                "type": "LR24",
+                                "output": "high",
+                                "frequency": 80.0,
+                                "room_eq_stage": "route_owned",
+                            },
+                        }
+                    ],
+                },
+                "LFE": {
+                    "initial_curve": {"freq": [80.0], "spl": [-100.0]},
+                    "final_curve": {"freq": [80.0], "spl": [-100.0]},
+                    "plugins": [],
+                },
+            },
+        }
+
+        curves = build_post_dsp_source_curves(data)
+
+        self.assertAlmostEqual(curves["L"]["spl"][0], 70.0, places=1)
+
+    def test_resample_spl_onto_grid_bridges_display_grids(self):
+        # Routed outputs mix driver-measurement and deployed replay grids;
+        # display resampling must interpolate in-band and clamp out-of-band.
+        out = resample_spl_onto_grid([100.0, 200.0], [70.0, 80.0], [100.0, 200.0])
+        self.assertEqual(out, [70.0, 80.0])
+        out = resample_spl_onto_grid(
+            [100.0, 200.0], [70.0, 80.0], [50.0, 100.0, 141.4213562373095, 200.0, 400.0]
+        )
+        self.assertEqual(len(out), 5)
+        self.assertAlmostEqual(out[0], 70.0)
+        self.assertAlmostEqual(out[1], 70.0)
+        self.assertAlmostEqual(out[2], 75.0, places=6)
+        self.assertAlmostEqual(out[3], 80.0)
+        self.assertAlmostEqual(out[4], 80.0)
+        self.assertEqual(resample_spl_onto_grid([], [], [100.0]), [])
 
     def test_sub_without_own_route_falls_back_to_final(self):
         data = {

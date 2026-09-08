@@ -43,7 +43,22 @@ pub struct PreparedSpeakerTopology {
 
 #[cfg(test)]
 mod tests {
-    use super::{expand_acoustic_optimization_bands, initial_crossover_frequencies};
+    use super::{
+        bounded_sub_eq_max, expand_acoustic_optimization_bands, initial_crossover_frequencies,
+    };
+
+    #[test]
+    fn internal_room_null_does_not_truncate_sub_alignment_band() {
+        let curve = crate::Curve {
+            freq: ndarray::array![20.0, 30.0, 35.0, 50.0, 80.0, 130.0, 180.0, 200.0],
+            spl: ndarray::array![80.0, 85.0, 60.0, 40.0, 82.0, 68.0, 45.0, 20.0],
+            ..Default::default()
+        };
+        let mut config = roomeq_model::OptimizerConfig::default();
+        config.min_freq = 20.0;
+        config.max_freq = 16_000.0;
+        assert_eq!(bounded_sub_eq_max(&curve, &config), 130.0);
+    }
 
     #[test]
     fn parallel_drivers_share_their_acoustic_band_limits() {
@@ -65,6 +80,37 @@ mod tests {
         assert_eq!(
             initial_crossover_frequencies(2, Some(&[120.0]), None),
             vec![120.0]
+        );
+    }
+
+    #[test]
+    fn sub_eq_band_excludes_steep_stopband_tail() {
+        use ndarray::Array1;
+        // Flat useful bass to ~150 Hz, then a steep roll-off tail to ~250 Hz
+        // mimicking the audited 2.2 sub measurements.
+        let freq = Array1::from_vec(vec![
+            20.0, 30.0, 50.0, 80.0, 100.0, 130.0, 150.0, 180.0, 210.0, 249.0,
+        ]);
+        let spl = Array1::from_vec(vec![
+            80.0, 80.0, 80.0, 80.0, 80.0, 79.0, 78.0, 60.0, 45.0, 30.0,
+        ]);
+        let combined = crate::Curve {
+            freq,
+            spl,
+            phase: None,
+            ..Default::default()
+        };
+        let mut config = roomeq_model::OptimizerConfig::default();
+        config.min_freq = 20.0;
+        config.max_freq = 16_000.0;
+        let bounded = bounded_sub_eq_max(&combined, &config);
+        assert!(
+            bounded < 249.0,
+            "shared sub EQ must stop before the measurement tail, got {bounded:.1} Hz"
+        );
+        assert!(
+            bounded >= 100.0,
+            "shared sub EQ must keep the useful bass band, got {bounded:.1} Hz"
         );
     }
 }
@@ -120,6 +166,53 @@ fn expand_acoustic_optimization_bands(
         }
     }
     expanded
+}
+
+/// Upper edge for sub alignment/shared EQ, using the final useful response
+/// before the measured stopband. Internal room nulls do not end the passband.
+fn bounded_sub_eq_max(combined: &Curve, config: &OptimizerConfig) -> f64 {
+    // A room null is not the end of a sub's passband. Find the last useful
+    // measured output before the final stopband, rather than the first
+    // threshold crossing after a room-mode peak. Keep native samples intact.
+    let peak = combined
+        .freq
+        .iter()
+        .zip(&combined.spl)
+        .filter(|(frequency, level)| {
+            **frequency >= config.min_freq && **frequency <= config.max_freq && level.is_finite()
+        })
+        .map(|(_, level)| *level)
+        .fold(f64::NEG_INFINITY, f64::max);
+    combined
+        .freq
+        .iter()
+        .zip(&combined.spl)
+        .filter(|(frequency, level)| {
+            frequency.is_finite()
+                && **frequency > config.min_freq
+                && level.is_finite()
+                && **level >= peak - 20.0
+        })
+        .map(|(frequency, _)| *frequency)
+        .next_back()
+        .unwrap_or(config.max_freq)
+        .min(config.max_freq)
+}
+
+/// Shared trustworthy-band policy for sub alignment and EQ. Mains retain their
+/// own measurement range; a short sub measurement never clips a main grid.
+pub fn sub_optimizer_config(curves: &[Curve], config: &OptimizerConfig) -> OptimizerConfig {
+    let mut bounded = config.clone();
+    for curve in curves {
+        if let (Some(&low), Some(&high)) = (curve.freq.first(), curve.freq.last()) {
+            bounded.min_freq = bounded.min_freq.max(low);
+            bounded.max_freq = bounded
+                .max_freq
+                .min(high)
+                .min(bounded_sub_eq_max(curve, config));
+        }
+    }
+    bounded
 }
 
 fn initial_crossover_frequencies(
@@ -768,6 +861,15 @@ pub fn process_multisub_group_with_callback(
     flat_eq_resources: &EqResources,
     callback: Option<OptimProgressCallback>,
 ) -> Result<GroupProcessingResult> {
+    let mut bounded_room_config = room_config.clone();
+    let band_curves = prepared
+        .seat_measurements
+        .as_ref()
+        .map(|seats| seats.iter().flatten().cloned().collect::<Vec<_>>())
+        .unwrap_or_else(|| prepared.subwoofers.clone());
+    bounded_room_config.optimizer = sub_optimizer_config(&band_curves, &room_config.optimizer);
+    let room_config = &bounded_room_config;
+
     if prepared.subwoofers.len() != group.subwoofers.len() {
         return Err(AutoeqError::InvalidMeasurement {
             message: format!(
@@ -849,15 +951,28 @@ pub fn process_multisub_group_with_callback(
         result.gains, result.delays
     );
 
+    // Bound the shared sub EQ to the trustworthy acoustic passband so the
+    // steep measurement roll-off above it cannot join the normalization
+    // reference or the flatness fit (which otherwise trades useful bass for
+    // stopband boost).
+    let mut sub_eq_config = room_config.optimizer.clone();
+    let bounded_max = bounded_sub_eq_max(&combined_curve, &room_config.optimizer);
+    if bounded_max < sub_eq_config.max_freq {
+        info!(
+            "  Multi-sub shared EQ: bounding optimizer band [{:.1}, {:.1}] Hz to final useful sub response at {:.1} Hz",
+            sub_eq_config.min_freq, sub_eq_config.max_freq, bounded_max
+        );
+        sub_eq_config.max_freq = bounded_max;
+    }
     let multisub_eq_optimizer = eq::resolve_multi_measurement_auto_optimizer_config(
         std::slice::from_ref(&combined_curve),
-        &room_config.optimizer,
+        &sub_eq_config,
         eq::MultiEqAutoOptimizerContext::sub_channel(),
     );
     let pre_score = flat_loss_score(
         &combined_curve,
-        room_config.optimizer.min_freq,
-        room_config.optimizer.max_freq,
+        sub_eq_config.min_freq,
+        sub_eq_config.max_freq,
     );
     let eq_result = match callback {
         Some(callback) => eq::optimize_channel_eq_with_callback_detailed(
@@ -1246,6 +1361,18 @@ pub fn process_dba_with_callback(
     eq_resources: &EqResources,
     callback: Option<OptimProgressCallback>,
 ) -> Result<GroupProcessingResult> {
+    let mut bounded_room_config = room_config.clone();
+    bounded_room_config.optimizer = sub_optimizer_config(
+        &prepared
+            .front
+            .iter()
+            .chain(&prepared.rear)
+            .cloned()
+            .collect::<Vec<_>>(),
+        &room_config.optimizer,
+    );
+    let room_config = &bounded_room_config;
+
     let dba_result = dba::optimize_dba_detailed(prepared, &room_config.optimizer, sample_rate)
         .map_err(|e| AutoeqError::OptimizationFailed {
             message: format!("DBA optimization failed: {}", e),
@@ -1402,6 +1529,13 @@ pub fn process_cardioid_with_callback(
     eq_resources: &EqResources,
     callback: Option<OptimProgressCallback>,
 ) -> Result<GroupProcessingResult> {
+    let mut bounded_room_config = room_config.clone();
+    bounded_room_config.optimizer = sub_optimizer_config(
+        &[prepared.front.clone(), prepared.rear.clone()],
+        &room_config.optimizer,
+    );
+    let room_config = &bounded_room_config;
+
     let front_curve = prepared.front.clone();
     let rear_curve = prepared.rear.clone();
     if front_curve.phase.is_none() || rear_curve.phase.is_none() {
@@ -1418,14 +1552,13 @@ pub fn process_cardioid_with_callback(
                 .to_string(),
         });
     }
-    let rear_curve = if roomeq_analysis::frequency_grid::same_frequency_grid(
-        &front_curve.freq,
-        &rear_curve.freq,
-    ) {
-        rear_curve
-    } else {
-        autoeq_core::interpolate_log_space(&front_curve.freq, &rear_curve)
-    };
+    let grid = crate::topology::shared_measurement_grid(&[&front_curve, &rear_curve]).ok_or_else(
+        || AutoeqError::InvalidMeasurement {
+            message: "Cardioid measurements lack common frequency support".into(),
+        },
+    )?;
+    let front_curve = autoeq_core::interpolate_log_space(&grid, &front_curve);
+    let rear_curve = autoeq_core::interpolate_log_space(&grid, &rear_curve);
 
     // 2. Calculate Delay
     let delay_ms = config.separation_meters / 343.0 * 1000.0;

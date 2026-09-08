@@ -76,6 +76,11 @@ pub fn optimize_dba_detailed(
 
     // 2. Load and Sum Rear Array
     let rear_curve = sum_array_response(&input.rear)?;
+    let bounded = crate::group_processing::sub_optimizer_config(
+        &[front_curve.clone(), rear_curve.clone()],
+        config,
+    );
+    let config = &bounded;
 
     // 3. Create optimization targets
     // We have 2 "drivers": Front Aggregate and Rear Aggregate
@@ -140,7 +145,9 @@ pub fn optimize_dba_detailed(
     // Initial guess
     // Rear delay guess: 10ms (~3.4m room)
     // Rear gain guess: -3dB
-    let mut x = vec![0.0, -3.0, 0.0, 10.0];
+    let mut x: Vec<f64> = vec![0.0, -3.0, 0.0, 10.0];
+    x[1] = x[1].clamp(min_gain, max_gain);
+    let initial_x = x.clone();
     let pre_objective = autoeq_optim::optim::compute_base_fitness(&x, &objective_data);
 
     // Optimize
@@ -153,7 +160,7 @@ pub fn optimize_dba_detailed(
     );
     let post_objective = autoeq_optim::optim::compute_base_fitness(&x, &objective_data);
 
-    let optimizer_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
+    let mut optimizer_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
         &optim_params.algo,
         opt_result,
         &x,
@@ -168,6 +175,12 @@ pub fn optimize_dba_detailed(
             optimizer_evidence.status
         )
         .into());
+    }
+
+    if !post_objective.is_finite() || post_objective > pre_objective + 1e-9 {
+        log::warn!("DBA objective regressed; retaining the initial array controls");
+        x = initial_x;
+        optimizer_evidence.selected_for_output = false;
     }
 
     // Recompute scores
@@ -195,7 +208,7 @@ pub fn optimize_dba_detailed(
             delays,
             crossover_freqs,
             pre_objective,
-            post_objective,
+            post_objective: autoeq_optim::optim::compute_base_fitness(&x, &objective_data),
             converged: optimizer_evidence.converged,
         },
         combined_curve,
@@ -216,6 +229,15 @@ pub fn sum_array_response(curves: &[Curve]) -> Result<Curve, Box<dyn Error>> {
     }
 
     for (index, curve) in curves.iter().enumerate() {
+        if curve.spl.len() != curve.freq.len()
+            || curve
+                .phase
+                .as_ref()
+                .is_some_and(|phase| phase.len() != curve.freq.len())
+        {
+            return Err(format!("DBA array curve {index} has mismatched sample arrays").into());
+        }
+
         if curve.phase.is_none() {
             return Err(
                 format!("DBA array summation requires phase data for curve {index}").into(),
@@ -223,8 +245,9 @@ pub fn sum_array_response(curves: &[Curve]) -> Result<Curve, Box<dyn Error>> {
         }
     }
 
-    // Reference freq from first
-    let ref_freq = curves[0].freq.clone();
+    let refs: Vec<_> = curves.iter().collect();
+    let ref_freq = crate::topology::shared_measurement_grid(&refs)
+        .ok_or("DBA array measurements do not share valid frequency support")?;
 
     // Sum complex
     use num_complex::Complex64;
@@ -414,8 +437,18 @@ mod tests {
         );
 
         assert!(expected_pre > 0.0 && expected_pre.is_finite());
-        assert!((result.driver.pre_objective - expected_pre).abs() <= 1e-12);
-        assert!((result.driver.post_objective - expected_post).abs() <= 1e-12);
+        assert!(
+            (result.driver.pre_objective - expected_pre).abs() <= 1e-12,
+            "pre: actual={} expected={}",
+            result.driver.pre_objective,
+            expected_pre
+        );
+        assert!(
+            (result.driver.post_objective - expected_post).abs() <= 1e-12,
+            "post: actual={} expected={}",
+            result.driver.post_objective,
+            expected_post
+        );
     }
 
     #[test]

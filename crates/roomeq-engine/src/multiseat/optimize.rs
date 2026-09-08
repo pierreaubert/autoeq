@@ -1105,8 +1105,7 @@ fn optimize_continuous_area_dispatch<const D: usize>(
                         ),
                     }
                 })?;
-                max_ambiguous_fraction =
-                    max_ambiguous_fraction.max(ambiguous_fraction);
+                max_ambiguous_fraction = max_ambiguous_fraction.max(ambiguous_fraction);
                 all.push(per_sub);
             }
             if max_ambiguous_fraction > 0.0 {
@@ -1152,7 +1151,7 @@ fn optimize_continuous_area_dispatch<const D: usize>(
     // Loss closure: returns scalarised flatness loss across the area.
     let evaluate_area =
         |gains: &[f64], delays: &[f64], polarities: &[bool], allpass: &[Vec<(f64, f64)>]| -> f64 {
-            match &scalarisation {
+            let spatial_loss = match &scalarisation {
                 AreaScalarisation::ExpectedValue => evaluator
                     .lock()
                     .expect("area evaluator lock")
@@ -1161,9 +1160,10 @@ fn optimize_continuous_area_dispatch<const D: usize>(
                     // Validated at the boundary/dispatch: alpha is already in
                     // (0, 1]. Never clamp here; clamping would silently
                     // reinterpret an invalid tail fraction as valid evidence.
-                    evaluator.lock().expect("area evaluator lock").evaluate_cvar(
-                        *alpha, gains, delays, polarities, allpass,
-                    )
+                    evaluator
+                        .lock()
+                        .expect("area evaluator lock")
+                        .evaluate_cvar(*alpha, gains, delays, polarities, allpass)
                 }
                 AreaScalarisation::WorstCase {
                     inner_maxiter,
@@ -1199,7 +1199,8 @@ fn optimize_continuous_area_dispatch<const D: usize>(
                     )
                     .unwrap_or(f64::INFINITY)
                 }
-            }
+            };
+            spatial_loss + 0.01 * gains.iter().map(|gain| gain * gain).sum::<f64>()
         };
 
     let initial_objective = evaluate_area(

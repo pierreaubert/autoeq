@@ -107,7 +107,7 @@ fn execute_topology_workflow_home_cinema_with_sub_returns_result() {
             ]),
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Single,
-                crossover: Some("xo".to_string()),
+                crossover: Some("xo".to_string().into()),
                 mapping: [("sub".to_string(), "Center".to_string())].into(),
             }),
             bass_management: None,

@@ -591,6 +591,16 @@ pub struct BassManagementGroupReport {
     pub objective_before: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub objective_after: Option<f64>,
+    /// Per-sub selected low-pass frequencies in positional sub order
+    /// (entry `i` is the splice low-pass for sub `i`).
+    ///
+    /// Empty unless the subwoofer crossover resolved to a per-sub list and
+    /// the per-sub splice stage ran. The shared-bus routing graph still
+    /// deploys `selected_crossover_hz` on every redirected-bass route; these
+    /// entries are the per-driver values for downstream per-driver export,
+    /// applied pre-sum when drivers share one bus.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selected_sub_low_pass_hz: Vec<f64>,
     pub advisories: Vec<String>,
 }
 
@@ -633,6 +643,13 @@ pub struct BassManagementSubOutputReport {
     pub polarity_inverted: bool,
     pub strategy_source: String,
     pub headroom_contribution_db: f64,
+    /// Low-pass selected for this physical sub output by the per-sub splice
+    /// stage (`None` unless a per-sub crossover list was configured and the
+    /// shared-array splice search for this output ran). This filter owns the
+    /// redirected-bass cutoff, so those routes omit another group low-pass.
+    /// The LFE programme retains its independent low-pass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_low_pass_hz: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

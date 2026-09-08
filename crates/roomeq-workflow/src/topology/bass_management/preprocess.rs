@@ -5,7 +5,7 @@ use log::info;
 use roomeq_engine::Curve;
 use roomeq_engine::bass_management::{SubDriverInfo, SubPreprocessResult};
 use roomeq_engine::error::{AutoeqError, Result};
-use roomeq_engine::topology::{is_valid_frequency_grid, same_frequency_grid};
+use roomeq_engine::topology::is_valid_frequency_grid;
 use roomeq_model::{
     CardioidConfig, DBAConfig, MultiSubGroup, OptimizerConfig, SpeakerConfig, SubwooferStrategy,
 };
@@ -36,6 +36,9 @@ pub(in super::super) fn preprocess_sub_with_frequency_samples(
                     }
                 })?;
             Ok(SubPreprocessResult {
+                common_eq_complete: false,
+                optimizer_evidence: Vec::new(),
+                advisories: Vec::new(),
                 combined_curve: curve,
                 drivers: None,
             })
@@ -82,6 +85,27 @@ pub(in super::super) fn preprocess_multisub_mso_with_frequency_samples(
     sample_rate: f64,
     frequency_samples: usize,
 ) -> Result<SubPreprocessResult> {
+    if ms.allpass_optimization
+        || optimizer
+            .multi_seat
+            .as_ref()
+            .is_some_and(|seat| seat.enabled)
+    {
+        return preprocess_multisub_advanced(ms, optimizer, sample_rate, frequency_samples);
+    }
+    let measured = ms
+        .subwoofers
+        .iter()
+        .map(|source| {
+            load_source_with_frequency_samples(source, frequency_samples).map_err(|error| {
+                AutoeqError::InvalidMeasurement {
+                    message: error.to_string(),
+                }
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let bounded = roomeq_engine::group_processing::sub_optimizer_config(&measured, optimizer);
+    let optimizer = &bounded;
     info!("  MSO optimization for {} subwoofers", ms.subwoofers.len());
 
     let optimized = multisub_resources::optimize_multisub_with_frequency_samples(
@@ -121,13 +145,134 @@ pub(in super::super) fn preprocess_multisub_mso_with_frequency_samples(
             gain: result.gains.get(i).copied().unwrap_or(0.0),
             delay: result.delays.get(i).copied().unwrap_or(0.0),
             inverted: false,
+            processing: None,
             initial_curve: Some(curve),
         });
     }
 
     Ok(SubPreprocessResult {
+        common_eq_complete: false,
+        optimizer_evidence: Vec::new(),
+        advisories: Vec::new(),
         combined_curve: combined,
         drivers: Some(drivers),
+    })
+}
+
+/// Use the same multi-seat/all-pass engine as generic groups and retain its
+/// per-driver transfer functions. Shared PEQ commutes with the array sum and
+/// is included once on each driver before later routed correction.
+fn preprocess_multisub_advanced(
+    ms: &MultiSubGroup,
+    optimizer: &OptimizerConfig,
+    sample_rate: f64,
+    frequency_samples: usize,
+) -> Result<SubPreprocessResult> {
+    use roomeq_engine::bass_management::SubDriverProcessing;
+    let seats = crate::group_measurements::load_multisub_seat_measurements_with_frequency_samples(
+        ms,
+        frequency_samples,
+    )?;
+    let primary = optimizer
+        .multi_seat
+        .as_ref()
+        .map(|seat| seat.primary_seat)
+        .unwrap_or(0);
+    let measurements = ms
+        .subwoofers
+        .iter()
+        .enumerate()
+        .map(|(index, source)| {
+            if let Some(seats) = &seats {
+                return seats[index].get(primary).cloned().ok_or_else(|| {
+                    AutoeqError::InvalidMeasurement {
+                        message: format!("Primary seat {primary} unavailable for sub {index}"),
+                    }
+                });
+            }
+            load_source_with_frequency_samples(source, frequency_samples).map_err(|error| {
+                AutoeqError::InvalidMeasurement {
+                    message: error.to_string(),
+                }
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut room = roomeq_model::RoomConfig::default();
+    room.optimizer =
+        roomeq_engine::group_processing::sub_optimizer_config(&measurements, optimizer);
+    let resources = crate::prepare_eq_resources(&room.optimizer, None).map_err(|error| {
+        AutoeqError::InvalidMeasurement {
+            message: error.to_string(),
+        }
+    })?;
+    let prepared = roomeq_engine::group_processing::PreparedMultiSubGroup {
+        subwoofers: measurements.clone(),
+        seat_measurements: seats,
+    };
+    let (chain, _, _, _, combined, _, _, _, _, evidence) =
+        roomeq_engine::group_processing::process_multisub_group(
+            &ms.name,
+            ms,
+            &room,
+            sample_rate,
+            &prepared,
+            &resources,
+            &resources,
+        )?;
+    let chains = chain
+        .drivers
+        .as_ref()
+        .ok_or_else(|| AutoeqError::InvalidConfiguration {
+            message: "Multi-sub engine omitted driver chains".into(),
+        })?;
+    let mut drivers = Vec::with_capacity(chains.len());
+    for (driver_chain, measurement) in chains.iter().zip(measurements) {
+        let mut gain = 0.0;
+        let mut delay = 0.0;
+        let mut inverted = false;
+        let mut plugins = Vec::new();
+        for plugin in &driver_chain.plugins {
+            match plugin.plugin_type.as_str() {
+                "gain" => {
+                    gain += plugin.parameters["gain_db"].as_f64().unwrap_or(0.0);
+                    inverted ^= plugin.parameters["invert"].as_bool().unwrap_or(false);
+                }
+                "delay" => delay += plugin.parameters["delay_ms"].as_f64().unwrap_or(0.0),
+                _ => plugins.push(plugin.clone()),
+            }
+        }
+        plugins.extend(chain.plugins.iter().cloned());
+        let mut filter_chain = chain.clone();
+        filter_chain.drivers = None;
+        filter_chain.plugins = plugins.clone();
+        let curve =
+            crate::ctc::apply_channel_dsp_chain_to_curve(&filter_chain, &measurement, sample_rate)?;
+        drivers.push(SubDriverInfo {
+            name: driver_chain.name.clone(),
+            gain,
+            delay,
+            inverted,
+            initial_curve: Some(measurement),
+            processing: Some(SubDriverProcessing { plugins, curve }),
+        });
+    }
+    Ok(SubPreprocessResult {
+        combined_curve: combined,
+        drivers: Some(drivers),
+        common_eq_complete: true,
+        optimizer_evidence: evidence,
+        advisories: vec![
+            format!(
+                "sub_alignment_strategy:{}",
+                optimizer
+                    .multi_seat
+                    .as_ref()
+                    .filter(|seat| seat.enabled)
+                    .map(|seat| format!("{:?}", seat.strategy))
+                    .unwrap_or_else(|| "single_seat_allpass".into())
+            ),
+            format!("sub_alignment_primary_seat:{primary}"),
+        ],
     })
 }
 
@@ -151,22 +296,37 @@ pub(in super::super) fn preprocess_multisub_independent_with_frequency_samples(
         curves.push(curve);
     }
 
-    // Power summation on the first sub's frequency grid:
-    // Convert dB to linear power, sum, convert back to dB.
-    // This correctly represents incoherent summation of multiple subs.
-    let ref_freq = curves[0].freq.clone();
-    let mut sum_power = ndarray::Array1::<f64>::zeros(ref_freq.len());
-    for curve in &curves {
-        let interp = interpolate_log_space(&ref_freq, curve);
-        sum_power += &interp.spl.mapv(|db| 10.0_f64.powf(db / 10.0));
+    if curves.is_empty() {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: "Independent sub array is empty".into(),
+        });
     }
-    let avg_spl = sum_power.mapv(|p| 10.0 * p.log10());
-
-    let combined = Curve {
-        freq: ref_freq,
-        spl: avg_spl,
-        phase: None,
-        ..Default::default()
+    let combined = if curves
+        .iter()
+        .all(roomeq_engine::topology::curve_has_usable_phase)
+    {
+        // These physical outputs carry the same logical input.
+        roomeq_engine::dba::sum_array_response(&curves).map_err(|error| {
+            AutoeqError::InvalidMeasurement {
+                message: error.to_string(),
+            }
+        })?
+    } else {
+        log::warn!(
+            "Independent subs lack measured phase: using an incoherent power approximation; coherent splice alignment is unavailable"
+        );
+        let ref_freq = curves[0].freq.clone();
+        let mut sum_power = ndarray::Array1::<f64>::zeros(ref_freq.len());
+        for curve in &curves {
+            let interp = interpolate_log_space(&ref_freq, curve);
+            sum_power += &interp.spl.mapv(|db| 10.0_f64.powf(db / 10.0));
+        }
+        Curve {
+            freq: ref_freq,
+            spl: sum_power.mapv(|power| 10.0 * power.max(1e-24).log10()),
+            phase: None,
+            ..Default::default()
+        }
     };
 
     let drivers: Vec<SubDriverInfo> = curves
@@ -177,11 +337,15 @@ pub(in super::super) fn preprocess_multisub_independent_with_frequency_samples(
             gain: 0.0,
             delay: 0.0,
             inverted: false,
+            processing: None,
             initial_curve: Some(curve),
         })
         .collect();
 
     Ok(SubPreprocessResult {
+        common_eq_complete: false,
+        optimizer_evidence: Vec::new(),
+        advisories: Vec::new(),
         combined_curve: combined,
         drivers: Some(drivers),
     })
@@ -240,11 +404,13 @@ pub(in super::super) fn preprocess_cardioid_with_frequency_samples(
                 .to_string(),
         });
     }
-    let rear_curve = if same_frequency_grid(&front_curve.freq, &rear_curve.freq) {
-        rear_curve
-    } else {
-        interpolate_log_space(&front_curve.freq, &rear_curve)
-    };
+    let grid = roomeq_engine::topology::shared_measurement_grid(&[&front_curve, &rear_curve])
+        .ok_or_else(|| AutoeqError::InvalidMeasurement {
+            message: "Cardioid measurements lack common frequency support".into(),
+        })?;
+    let front_curve = autoeq_core::interpolate_log_space(&grid, &front_curve);
+    let rear_curve = autoeq_core::interpolate_log_space(&grid, &rear_curve);
+
     let delay_ms = c.separation_meters / 343.0 * 1000.0;
     info!(
         "  Cardioid: separation={:.2}m, delay={:.2}ms",
@@ -296,6 +462,7 @@ pub(in super::super) fn preprocess_cardioid_with_frequency_samples(
             gain: 0.0,
             delay: 0.0,
             inverted: false,
+            processing: None,
             initial_curve: Some(front_curve),
         },
         SubDriverInfo {
@@ -303,11 +470,15 @@ pub(in super::super) fn preprocess_cardioid_with_frequency_samples(
             gain: 0.0,
             delay: delay_ms,
             inverted: true,
+            processing: None,
             initial_curve: Some(rear_curve),
         },
     ];
 
     Ok(SubPreprocessResult {
+        common_eq_complete: false,
+        optimizer_evidence: Vec::new(),
+        advisories: Vec::new(),
         combined_curve: combined,
         drivers: Some(drivers),
     })
@@ -351,6 +522,7 @@ pub(in super::super) fn preprocess_dba_with_frequency_samples(
             gain: result.gains.first().copied().unwrap_or(0.0),
             delay: result.delays.first().copied().unwrap_or(0.0),
             inverted: false,
+            processing: None,
             initial_curve: Some(front_curve),
         },
         SubDriverInfo {
@@ -358,11 +530,15 @@ pub(in super::super) fn preprocess_dba_with_frequency_samples(
             gain: result.gains.get(1).copied().unwrap_or(0.0),
             delay: result.delays.get(1).copied().unwrap_or(0.0),
             inverted: true,
+            processing: None,
             initial_curve: Some(rear_curve),
         },
     ];
 
     Ok(SubPreprocessResult {
+        common_eq_complete: false,
+        optimizer_evidence: vec![optimized.optimizer_evidence],
+        advisories: Vec::new(),
         combined_curve: combined,
         drivers: Some(drivers),
     })
@@ -399,6 +575,159 @@ mod tests {
             seed: Some(1),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn preprocess_independent_subs_preserve_coherent_phase() {
+        for (phase, expected) in [(0.0, 86.020599913), (180.0, -240.0)] {
+            let group = MultiSubGroup {
+                name: "subs".into(),
+                speaker_name: None,
+                subwoofers: vec![
+                    MeasurementSource::InMemory(make_curve(16, 80.0, Some(0.0))),
+                    MeasurementSource::InMemory(make_curve(16, 80.0, Some(phase))),
+                ],
+                allpass_optimization: false,
+            };
+            let result =
+                preprocess_multisub_independent_with_frequency_samples(&group, 16).unwrap();
+            assert!(result.combined_curve.phase.is_some());
+            assert!(
+                result
+                    .combined_curve
+                    .spl
+                    .iter()
+                    .all(|&level| (level - expected).abs() < 2.0)
+            );
+            assert!(
+                result
+                    .drivers
+                    .unwrap()
+                    .iter()
+                    .all(|driver| driver.gain == 0.0 && driver.delay == 0.0)
+            );
+        }
+    }
+
+    #[test]
+    fn preprocess_allpass_retains_deployable_filters_and_replay() {
+        let group = MultiSubGroup {
+            name: "subs".into(),
+            speaker_name: None,
+            subwoofers: vec![
+                MeasurementSource::InMemory(make_curve(16, 80.0, Some(0.0))),
+                MeasurementSource::InMemory(make_curve(16, 78.0, Some(40.0))),
+            ],
+            allpass_optimization: true,
+        };
+        let result =
+            preprocess_multisub_mso_with_frequency_samples(&group, &tiny_optimizer(), 48000.0, 16)
+                .unwrap();
+        let mut realized = Vec::new();
+        for driver in result.drivers.as_ref().unwrap() {
+            let processing = driver
+                .processing
+                .as_ref()
+                .expect("all-pass transfer retained");
+            assert!(
+                processing
+                    .plugins
+                    .iter()
+                    .any(|plugin| plugin.parameters["label"] == "group_delay_allpass")
+            );
+            let mut curve = roomeq_engine::topology::apply_delay_and_polarity_to_curve(
+                &processing.curve,
+                driver.delay,
+                driver.inverted,
+            );
+            curve.spl.mapv_inplace(|level| level + driver.gain);
+            realized.push(curve);
+        }
+        let replay = roomeq_engine::dba::sum_array_response(&realized).unwrap();
+        let expected = interpolate_log_space(&replay.freq, &result.combined_curve);
+        assert!(
+            replay
+                .spl
+                .iter()
+                .zip(&expected.spl)
+                .all(|(a, b)| (a - b).abs() < 0.1)
+        );
+    }
+
+    #[test]
+    fn preprocess_multiseat_uses_selected_primary_and_strategy() {
+        let group = MultiSubGroup {
+            name: "subs".into(),
+            speaker_name: None,
+            subwoofers: vec![
+                MeasurementSource::InMemoryMultiple(vec![
+                    make_curve(16, 80.0, Some(0.0)),
+                    make_curve(16, 60.0, Some(0.0))
+                ]);
+                2
+            ],
+            allpass_optimization: false,
+        };
+        let mut optimizer = tiny_optimizer();
+        optimizer.multi_seat = Some(roomeq_model::MultiSeatConfig {
+            enabled: true,
+            strategy: roomeq_model::MultiSeatStrategy::Average,
+            primary_seat: 1,
+            per_sub_peq: false,
+            global_eq: false,
+            search: Some(roomeq_model::MultiSeatSearchConfig {
+                evaluation_budget: Some(30),
+                seed: Some(42),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let result =
+            preprocess_multisub_mso_with_frequency_samples(&group, &optimizer, 48000.0, 16)
+                .unwrap();
+        assert!(
+            result
+                .advisories
+                .iter()
+                .any(|advisory| advisory == "sub_alignment_strategy:Average")
+        );
+        for driver in result.drivers.as_ref().unwrap() {
+            assert!(
+                driver
+                    .initial_curve
+                    .as_ref()
+                    .unwrap()
+                    .spl
+                    .iter()
+                    .all(|&level| level == 60.0)
+            );
+            assert!(driver.processing.as_ref().unwrap().plugins.is_empty());
+        }
+        let realized: Vec<_> = result
+            .drivers
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|driver| {
+                let mut curve = roomeq_engine::topology::apply_delay_and_polarity_to_curve(
+                    &driver.processing.as_ref().unwrap().curve,
+                    driver.delay,
+                    driver.inverted,
+                );
+                curve.spl.mapv_inplace(|level| level + driver.gain);
+                curve
+            })
+            .collect();
+        let replay = roomeq_engine::dba::sum_array_response(&realized).unwrap();
+        let expected = interpolate_log_space(&replay.freq, &result.combined_curve);
+        assert!(
+            replay
+                .spl
+                .iter()
+                .zip(&expected.spl)
+                .all(|(a, b)| (a - b).abs() < 0.1)
+        );
+        assert!(result.combined_curve.spl.iter().all(|&level| level < 75.0));
     }
 
     #[test]

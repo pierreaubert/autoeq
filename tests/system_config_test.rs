@@ -121,7 +121,7 @@ mod tests {
                 speakers: system_speakers,
                 subwoofers: Some(autoeq::roomeq::SubwooferSystemConfig {
                     config: SubwooferStrategy::Single,
-                    crossover: Some("sub_xo".to_string()),
+                    crossover: Some("sub_xo".to_string().into()),
                     mapping: sub_mapping,
                 }),
                 bass_management: None,

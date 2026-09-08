@@ -170,12 +170,17 @@ fn configured_group_crossover_bounds(
     let crossover_key = system
         .bass_management
         .as_ref()
-        .and_then(|bass_management| bass_management.group_crossovers.get(group_id))
+        .and_then(|bass_management| {
+            bass_management
+                .group_crossovers
+                .get(group_id)
+                .map(String::as_str)
+        })
         .or_else(|| {
-            system
-                .subwoofers
-                .as_ref()
-                .and_then(|subwoofers| subwoofers.crossover.as_ref())
+            system.subwoofers.as_ref().and_then(|subwoofers| {
+                // Legacy single-key fallback: the primary (shared/first) key.
+                subwoofers.crossover.as_deref()
+            })
         });
     let crossover = crossover_key.and_then(|key| {
         config

@@ -441,3 +441,113 @@ fn test_export_with_drivers() {
             .contains("cannot represent active-crossover driver branches")
     );
 }
+
+fn per_sub_driver(name: &str, index: usize, low_pass_hz: f64) -> DriverDspChain {
+    DriverDspChain {
+        name: name.to_string(),
+        index,
+        plugins: vec![
+            PluginConfigWrapper {
+                plugin_type: "gain".to_string(),
+                parameters: json!({"gain_db": 0.0, "room_eq_stage": "post_route"}),
+            },
+            PluginConfigWrapper {
+                plugin_type: "crossover".to_string(),
+                parameters: json!({
+                    "type": "LR24",
+                    "frequency": low_pass_hz,
+                    "output": "low",
+                    "room_eq_stage": "post_route",
+                }),
+            },
+        ],
+        initial_curve: None,
+    }
+}
+
+#[test]
+fn per_driver_low_pass_survives_canonical_graph_paths() {
+    // Per-sub splice deployment: one low-pass per sub driver, staged
+    // post-route exactly as the home-cinema executor stamps it.
+    let mut channels = HashMap::new();
+    channels.insert(
+        "LFE".to_string(),
+        ChannelDspChain {
+            channel: "LFE".to_string(),
+            plugins: vec![PluginConfigWrapper {
+                plugin_type: "crossover".to_string(),
+                parameters: json!({
+                    "type": "LR24",
+                    "frequency": 80.0,
+                    "output": "low",
+                    "room_eq_stage": "route_owned",
+                }),
+            }],
+            drivers: Some(vec![
+                per_sub_driver("subs_1", 0, 80.0),
+                per_sub_driver("subs_2", 1, 95.5),
+            ]),
+            initial_curve: None,
+            final_curve: None,
+            eq_response: None,
+            target_curve: None,
+            pre_ir: None,
+            post_ir: None,
+            fir_temporal_masking: None,
+            direct_early_late_correction: None,
+        },
+    );
+    let output = DspGraph {
+        deployed_source_curves: Default::default(),
+        version: "1.3.0".to_string(),
+        global_plugins: Vec::new(),
+        channels,
+        metadata: None,
+    };
+
+    // The canonical graph accepts driver low-passes.
+    output.validate().expect("driver low-pass graph validates");
+
+    // Collection (the path analysis and serial exporters read) surfaces
+    // both per-driver low-passes with their selected frequencies.
+    let chain = output.channels.get("LFE").unwrap();
+    let low_passes: Vec<f64> = super::collect::collect_all_plugins(chain)
+        .into_iter()
+        .filter(|plugin| plugin.plugin_type == "crossover")
+        .filter_map(|plugin| plugin.parameters.get("frequency")?.as_f64())
+        .collect();
+    assert_eq!(low_passes.len(), 3);
+    assert!(low_passes.contains(&80.0));
+    assert!(low_passes.contains(&95.5));
+
+    // JSON round trip preserves them: this is where per-driver LP lives in
+    // the output (`channels.<SUB>.drivers[].plugins`).
+    let round_tripped: DspGraph =
+        serde_json::from_value(serde_json::to_value(&output).unwrap()).unwrap();
+    let drivers = round_tripped
+        .channels
+        .get("LFE")
+        .unwrap()
+        .drivers
+        .as_ref()
+        .unwrap();
+    assert_eq!(drivers.len(), 2);
+    for (driver, expected) in drivers.iter().zip([80.0, 95.5]) {
+        let low_pass = driver
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_type == "crossover")
+            .unwrap();
+        assert_eq!(
+            low_pass
+                .parameters
+                .get("frequency")
+                .and_then(|v| v.as_f64()),
+            Some(expected)
+        );
+        assert_eq!(
+            low_pass.parameters.get("output").and_then(|v| v.as_str()),
+            Some("low")
+        );
+    }
+}

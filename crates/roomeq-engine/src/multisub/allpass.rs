@@ -43,12 +43,14 @@ pub(super) fn compute_combined_with_allpass_complex(
 ) -> Array1<Complex64> {
     let n_drivers = data.drivers.len();
 
-    // Prepare driver curves on common grid (same approach as loss.rs)
+    // Prepare driver curves on the common grid while preserving measured
+    // absolute/relative SPL (same contract as the MSO loss path): resample
+    // only, never normalize per driver.
     let driver_curves: Vec<Curve> = data
         .drivers
         .iter()
         .map(|d| {
-            autoeq_core::normalize_and_interpolate_response_with_range(
+            autoeq_core::interpolate_response(
                 &data.freq_grid,
                 &Curve {
                     freq: d.freq.clone(),
@@ -56,8 +58,6 @@ pub(super) fn compute_combined_with_allpass_complex(
                     phase: d.phase.clone(),
                     ..Default::default()
                 },
-                20.0,
-                20000.0,
             )
         })
         .collect();

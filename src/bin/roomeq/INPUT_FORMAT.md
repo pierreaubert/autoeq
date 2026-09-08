@@ -158,6 +158,19 @@ For home-cinema bass management, `system.bass_management.lfe_low_pass_hz`
 controls the LFE programme path independently of the redirected-bass speaker
 crossover and defaults to 120 Hz.
 
+`system.subwoofers.crossover` accepts either a single crossover key (legacy
+shared behavior, wire-compatible) or a positional list of keys for per-sub
+crossovers: entry `i` applies to sub `i` in driver order. Selection scores
+the complete shared array against every logical main input; the list does not
+create isolated sub-to-main routing. Every listed key must
+exist in `crossovers`; the list must hold exactly 1 entry or exactly one entry
+per sub, else validation fails. A one-element list behaves exactly like the
+shared string. Each selected per-sub low-pass `LP_i` deploys as a low-pass
+`crossover` plugin on `channels.<SUB>.drivers[i].plugins` (pre-sum; the
+redirected-bass routes omit a duplicate group low-pass) and is reported in
+`bass_management.groups[].selected_sub_low_pass_hz` and
+`sub_output_results[].selected_low_pass_hz`.
+
 ## Neutral objective, spatial risk, and preference layers
 
 The neutral flat/asymmetric objective uses the versioned
@@ -295,3 +308,11 @@ Enable the prototype by adding a `rir_prototype` block inside the speaker's
   is enabled, because the prototype builder has already collapsed the
   measurements into a single curve.
 - Time-domain / IR averaging is not supported in this iteration.
+
+Bass measurements retain their native frequency resolution. Main analysis keeps
+its full measured range even when a sub measurement ends near 200 Hz; only a
+sufficiently attenuated, falling sub tail is extrapolated for prediction. Sub EQ
+stays within trustworthy measured support. Routed multi-seat/all-pass processing
+preserves the dedicated engine's filters, primary seat, and global-EQ selection.
+`multi_seat.max_deviation_db` defines a soft penalty for
+`primary_with_constraints`, not a per-seat hard bound.

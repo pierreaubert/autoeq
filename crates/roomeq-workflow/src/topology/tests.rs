@@ -476,6 +476,7 @@ fn bass_management_sub_output_results_dba_roles() {
             gain: 0.0,
             delay: 1.0,
             inverted: false,
+            processing: None,
             initial_curve: None,
         },
         super::bass_management::SubDriverInfo {
@@ -483,6 +484,7 @@ fn bass_management_sub_output_results_dba_roles() {
             gain: 0.0,
             delay: 2.0,
             inverted: true,
+            processing: None,
             initial_curve: None,
         },
     ];

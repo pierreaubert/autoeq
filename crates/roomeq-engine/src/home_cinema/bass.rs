@@ -220,7 +220,13 @@ pub fn bass_management_routing_graph(
                     route_kind: "redirected_bass_lowpass_to_sub".to_string(),
                     crossover_type: crossover.crossover_type.clone(),
                     high_pass_hz: None,
-                    low_pass_hz: crossover.frequency_hz,
+                    // The physical driver's LP is the configured crossover.
+                    // Do not add another group LP to the redirected signal.
+                    low_pass_hz: if sub_output.selected_low_pass_hz.is_some() {
+                        None
+                    } else {
+                        crossover.frequency_hz
+                    },
                     gain_db: route_gain_db,
                     gain_linear: 10.0_f64.powf(route_gain_db / 20.0),
                     matrix_gain: 10.0_f64.powf(route_gain_db / 20.0),
@@ -369,6 +375,7 @@ pub fn bass_management_groups(
                 trim_db: optimization.map(|o| o.applied_sub_gain_db).unwrap_or(0.0),
                 objective_before: optimization.and_then(|o| o.objective_before),
                 objective_after: optimization.and_then(|o| o.objective_after),
+                selected_sub_low_pass_hz: Vec::new(),
                 advisories,
             }
         })
@@ -432,6 +439,7 @@ pub fn bass_management_sub_outputs(
             headroom_contribution_db: optimization
                 .and_then(|o| o.estimated_bass_bus_peak_gain_db)
                 .unwrap_or(0.0),
+            selected_low_pass_hz: None,
         })
         .collect()
 }
@@ -700,7 +708,7 @@ mod tests {
                 ]),
                 subwoofers: Some(SubwooferSystemConfig {
                     config: SubwooferStrategy::Single,
-                    crossover: Some("bass_xover".to_string()),
+                    crossover: Some("bass_xover".to_string().into()),
                     mapping: HashMap::new(),
                 }),
                 bass_management: Some(BassManagementConfig::default()),
@@ -734,6 +742,7 @@ mod tests {
             trim_db: -1.0,
             objective_before: None,
             objective_after: None,
+            selected_sub_low_pass_hz: Vec::new(),
             advisories: Vec::new(),
         }];
         let sources = vec![BassManagementSourceReport {
@@ -756,6 +765,7 @@ mod tests {
             polarity_inverted: false,
             strategy_source: "single".to_string(),
             headroom_contribution_db: -2.0,
+            selected_low_pass_hz: None,
         }];
         let optimization = crate::bass_management::joint_bass_management_report_from_parts(
             &groups, &sources, &outputs,
@@ -782,6 +792,41 @@ mod tests {
     }
 
     #[test]
+    fn driver_low_pass_owns_redirected_cutoff_without_removing_lfe_low_pass() {
+        let config = routed_home_cinema_config();
+        let outputs = vec![BassManagementSubOutputReport {
+            output_role: "LFE".into(),
+            gain_db: 0.0,
+            delay_ms: 0.0,
+            polarity_inverted: false,
+            strategy_source: "mso".into(),
+            headroom_contribution_db: 0.0,
+            selected_low_pass_hz: Some(95.0),
+        }];
+        let optimization =
+            crate::bass_management::joint_bass_management_report_from_parts(&[], &[], &outputs);
+        let graph = bass_management_routing_graph(&config, Some(&optimization)).unwrap();
+        let bass = graph
+            .routes
+            .iter()
+            .find(|route| route.route_kind == "redirected_bass_lowpass_to_sub")
+            .unwrap();
+        let main = graph
+            .routes
+            .iter()
+            .find(|route| route.route_kind == "main_highpass_to_self")
+            .unwrap();
+        let lfe = graph
+            .routes
+            .iter()
+            .find(|route| route.route_kind == "lfe_lowpass_to_sub")
+            .unwrap();
+        assert_eq!(bass.low_pass_hz, None);
+        assert!(main.high_pass_hz.is_some());
+        assert_eq!(lfe.low_pass_hz, Some(120.0));
+    }
+
+    #[test]
     fn routing_graph_uses_reverted_per_source_route_snapshot() {
         let config = routed_home_cinema_config();
         let groups = vec![BassManagementGroupReport {
@@ -796,6 +841,7 @@ mod tests {
             trim_db: -1.0,
             objective_before: None,
             objective_after: None,
+            selected_sub_low_pass_hz: Vec::new(),
             advisories: Vec::new(),
         }];
         let sources = vec![BassManagementSourceReport {
@@ -818,6 +864,7 @@ mod tests {
             polarity_inverted: false,
             strategy_source: "single".to_string(),
             headroom_contribution_db: -2.0,
+            selected_low_pass_hz: None,
         }];
         let optimization = crate::bass_management::joint_bass_management_report_from_parts(
             &groups, &sources, &outputs,

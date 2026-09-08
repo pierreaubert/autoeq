@@ -1,3 +1,4 @@
+use super::build::PerDriverLowPass;
 use super::build::build_cardioid_dsp_chain_with_curves;
 use super::build::build_channel_dsp_chain;
 use super::build::build_channel_dsp_chain_with_curves;
@@ -11,6 +12,8 @@ use super::build::build_multisub_dsp_chain_advanced;
 use super::build::build_multisub_dsp_chain_with_allpass;
 use super::build::build_multisub_dsp_chain_with_curves;
 use super::build::build_supporting_source_dsp_chains;
+use super::build::driver_low_pass;
+use super::build::stamp_per_driver_low_passes;
 use super::create::add_delay_plugin;
 use super::create::create_band_merge_plugin;
 use super::create::create_band_split_plugin;
@@ -654,6 +657,30 @@ fn test_extend_curve_to_full_range_narrow() {
 }
 
 #[test]
+fn test_extend_curve_to_full_range_preserves_phase() {
+    // Deployed-route replay coherently sums extended driver curves; the
+    // extension must not destroy measured phase (regression: stereo 2.2 MSO
+    // replay panicked in complex_sum_mains on phaseless extended drivers).
+    let curve = crate::Curve {
+        freq: Array1::from(vec![100.0, 200.0, 400.0]),
+        spl: Array1::from(vec![70.0, 71.0, 72.0]),
+        phase: Some(Array1::from(vec![10.0, 20.0, 30.0])),
+        ..Default::default()
+    };
+    let extended = extend_curve_to_full_range(&curve);
+    let phase = extended.phase.expect("extended curve must keep phase");
+    assert_eq!(phase.len(), extended.freq.len());
+    // Extended low edge holds the first measured phase; high edge the last.
+    assert_eq!(phase[0], 10.0);
+    assert_eq!(*phase.last().unwrap(), 30.0);
+    // In-band points keep their measured phase.
+    let at_100 = extended.freq.iter().position(|&f| f == 100.0).unwrap();
+    assert_eq!(phase[at_100], 10.0);
+    let at_400 = extended.freq.iter().position(|&f| f == 400.0).unwrap();
+    assert_eq!(phase[at_400], 30.0);
+}
+
+#[test]
 fn test_extend_curve_to_full_range_empty() {
     let curve = crate::Curve {
         freq: Array1::from(vec![]),
@@ -1241,6 +1268,100 @@ fn test_create_crossover_plugin_linearphase_includes_fir_taps() {
         plugin.parameters.get("fir_taps").is_some(),
         "linearphase crossover should include fir_taps"
     );
+}
+
+#[test]
+fn per_driver_low_pass_stamps_one_crossover_per_sub() {
+    let mut chain = build_multisub_dsp_chain("lfe", "subs", 2, &[0.0, -1.0], &[0.0, 2.0], &[]);
+    let plans = vec![
+        Some(PerDriverLowPass {
+            frequency_hz: 80.0,
+            crossover_type: "LR24".to_string(),
+        }),
+        Some(PerDriverLowPass {
+            frequency_hz: 95.5,
+            crossover_type: "LR24".to_string(),
+        }),
+    ];
+    stamp_per_driver_low_passes(chain.drivers.as_mut().unwrap(), &plans, None);
+
+    let drivers = chain.drivers.as_ref().unwrap();
+    assert_eq!(driver_low_pass(&drivers[0]).unwrap().0, 80.0);
+    assert_eq!(driver_low_pass(&drivers[1]).unwrap().0, 95.5);
+    for driver in drivers {
+        let low_passes: Vec<_> = driver
+            .plugins
+            .iter()
+            .filter(|plugin| {
+                plugin.plugin_type == "crossover"
+                    && plugin.parameters.get("output").and_then(|v| v.as_str()) == Some("low")
+            })
+            .collect();
+        assert_eq!(
+            low_passes.len(),
+            1,
+            "driver '{}' must carry exactly one low-pass",
+            driver.name
+        );
+        assert_eq!(
+            low_passes[0]
+                .parameters
+                .get("type")
+                .and_then(|v| v.as_str()),
+            Some("LR24")
+        );
+    }
+}
+
+#[test]
+fn per_driver_low_pass_skips_unset_and_invalid_entries() {
+    let mut chain = build_multisub_dsp_chain("lfe", "subs", 2, &[0.0, 0.0], &[0.0, 0.0], &[]);
+    let plugin_count = chain.drivers.as_ref().unwrap()[1].plugins.len();
+    let plans = vec![
+        None,
+        Some(PerDriverLowPass {
+            frequency_hz: f64::NAN,
+            crossover_type: "LR24".to_string(),
+        }),
+    ];
+    stamp_per_driver_low_passes(chain.drivers.as_mut().unwrap(), &plans, None);
+
+    let drivers = chain.drivers.as_ref().unwrap();
+    assert!(driver_low_pass(&drivers[0]).is_none());
+    assert!(driver_low_pass(&drivers[1]).is_none());
+    assert_eq!(drivers[1].plugins.len(), plugin_count);
+}
+
+#[test]
+fn per_driver_low_pass_stage_tag_is_applied_when_requested() {
+    let mut chain = build_multisub_dsp_chain("lfe", "subs", 1, &[0.0], &[0.0], &[]);
+    let plans = vec![Some(PerDriverLowPass {
+        frequency_hz: 80.0,
+        crossover_type: "LR24".to_string(),
+    })];
+    stamp_per_driver_low_passes(chain.drivers.as_mut().unwrap(), &plans, Some("post_route"));
+
+    let drivers = chain.drivers.as_ref().unwrap();
+    let plugin = drivers[0]
+        .plugins
+        .iter()
+        .find(|plugin| plugin.plugin_type == "crossover")
+        .unwrap();
+    assert_eq!(
+        plugin
+            .parameters
+            .get("room_eq_stage")
+            .and_then(|v| v.as_str()),
+        Some("post_route")
+    );
+}
+
+#[test]
+fn per_driver_low_pass_empty_plan_keeps_legacy_chain_identical() {
+    let mut chain = build_multisub_dsp_chain("lfe", "subs", 2, &[1.5, -1.0], &[0.5, 2.0], &[]);
+    let before = serde_json::to_value(&chain).unwrap();
+    stamp_per_driver_low_passes(chain.drivers.as_mut().unwrap(), &[], None);
+    assert_eq!(serde_json::to_value(&chain).unwrap(), before);
 }
 
 #[test]

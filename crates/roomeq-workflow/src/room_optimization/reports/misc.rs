@@ -1128,7 +1128,7 @@ mod tests {
             ]),
             subwoofers: Some(roomeq_model::SubwooferSystemConfig {
                 config: roomeq_model::SubwooferStrategy::Single,
-                crossover: Some("first".to_string()),
+                crossover: Some("first".to_string().into()),
                 mapping: HashMap::from([("sub".to_string(), "L".to_string())]),
             }),
             ..Default::default()

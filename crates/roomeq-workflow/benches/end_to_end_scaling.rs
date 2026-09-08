@@ -59,7 +59,7 @@ fn config_5_1_4(threads: usize) -> RoomConfig {
             speakers: system_speakers,
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Single,
-                crossover: Some("main".to_string()),
+                crossover: Some("main".to_string().into()),
                 mapping: [("lfe".to_string(), "L".to_string())].into(),
             }),
             bass_management: None,

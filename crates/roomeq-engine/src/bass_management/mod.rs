@@ -12,4 +12,4 @@ pub use misc::*;
 pub use optimize::*;
 pub use predict::*;
 pub use sub_driver_info::*;
-pub use types::{SubDriverInfo, SubPreprocessResult};
+pub use types::{SubDriverInfo, SubDriverProcessing, SubPreprocessResult};

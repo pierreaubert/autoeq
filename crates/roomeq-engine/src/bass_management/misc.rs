@@ -305,6 +305,7 @@ mod tests {
             trim_db: 0.0,
             objective_before: None,
             objective_after: None,
+            selected_sub_low_pass_hz: Vec::new(),
             advisories: vec!["trim_limited_for_headroom".to_string()],
         };
 

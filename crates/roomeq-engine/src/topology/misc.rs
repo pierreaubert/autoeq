@@ -252,3 +252,152 @@ mod complex_sum_tests {
         assert!(sum.spl.iter().all(|value| (*value - 6.0206).abs() < 1e-3));
     }
 }
+
+/// Interpolate a bass measurement without clipping the receiving main's grid.
+/// Outside a demonstrably rolled-off tail, continue only a falling envelope.
+/// An energetic endpoint is held conservatively; it is never assumed silent.
+pub fn interpolate_bass_response(frequencies: &ndarray::Array1<f64>, curve: &Curve) -> Curve {
+    let mut result = autoeq_core::interpolate_log_space(frequencies, curve);
+    if curve.freq.len() < 2 || curve.spl.len() != curve.freq.len() {
+        return result;
+    }
+    let last = curve.freq.len() - 1;
+    let high = curve.freq[last];
+    let peak = curve.spl.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let previous = curve
+        .freq
+        .iter()
+        .rposition(|&frequency| frequency <= high / 2.0_f64.sqrt())
+        .unwrap_or(0);
+    let octaves = (high / curve.freq[previous]).log2();
+    if octaves <= 0.0 {
+        return result;
+    }
+    let slope = (curve.spl[last] - curve.spl[previous]) / octaves;
+    let falling_tail = curve.spl[last] <= peak - 24.0 && slope <= -12.0;
+    for (index, &frequency) in frequencies.iter().enumerate() {
+        if frequency > high {
+            result.spl[index] = if falling_tail {
+                (curve.spl[last] + slope.max(-48.0) * (frequency / high).log2()).max(-240.0)
+            } else {
+                curve.spl[last]
+            };
+            if let (Some(phase), Some(original)) = (result.phase.as_mut(), curve.phase.as_ref()) {
+                phase[index] = original[last];
+            }
+        }
+    }
+    result
+}
+
+#[cfg(test)]
+mod limited_bass_tests {
+    use super::*;
+    use ndarray::array;
+
+    #[test]
+    fn short_rolled_off_sub_keeps_full_range_main_analysis() {
+        let main = Curve {
+            freq: array![50.0, 100.0, 200.0, 1000.0, 16000.0],
+            spl: ndarray::Array1::from_elem(5, 80.0),
+            phase: Some(ndarray::Array1::from_elem(5, 0.0)),
+            ..Default::default()
+        };
+        let sub = Curve {
+            freq: array![50.0, 100.0, 140.0, 200.0],
+            spl: array![80.0, 75.0, 66.0, 50.0],
+            phase: Some(ndarray::Array1::from_elem(4, 0.0)),
+            ..Default::default()
+        };
+        let extended = interpolate_bass_response(&main.freq, &sub);
+        assert_eq!(extended.spl[2], 50.0);
+        assert!(extended.spl[4] < -100.0);
+        let sum = complex_sum_mains(&[&main, &extended]);
+        assert_eq!(sum.freq, main.freq);
+        assert!((sum.spl[4] - 80.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn energetic_sub_endpoint_is_not_invented_as_silent() {
+        let sub = Curve {
+            freq: array![50.0, 100.0, 200.0],
+            spl: ndarray::Array1::from_elem(3, 80.0),
+            ..Default::default()
+        };
+        let extended = interpolate_bass_response(&array![200.0, 1000.0, 16000.0], &sub);
+        assert!(extended.spl.iter().all(|&level| level == 80.0));
+    }
+}
+
+/// Preserve every measured frequency in the common supported span before
+/// summing a physical array. Source order must not choose its resolution.
+pub fn shared_measurement_grid(curves: &[&Curve]) -> Option<ndarray::Array1<f64>> {
+    let (low, high) =
+        roomeq_analysis::frequency_grid::common_frequency_range(curves.iter().copied())?;
+    let mut frequencies: Vec<_> = curves
+        .iter()
+        .flat_map(|curve| curve.freq.iter().copied())
+        .filter(|&frequency| frequency >= low && frequency <= high)
+        .collect();
+    frequencies.sort_by(f64::total_cmp);
+    frequencies.dedup_by(|a, b| (*a - *b).abs() < 1e-8);
+    Some(ndarray::Array1::from_vec(frequencies))
+}
+
+/// Keep the main's full measured span and every available bass sample within it.
+/// A limited-band sub must neither truncate the main nor set its resolution.
+pub fn bass_management_measurement_grid(main: &Curve, sources: &[&Curve]) -> ndarray::Array1<f64> {
+    let (Some(&low), Some(&high)) = (main.freq.first(), main.freq.last()) else {
+        return main.freq.clone();
+    };
+    let mut frequencies = main.freq.to_vec();
+    frequencies.extend(
+        sources
+            .iter()
+            .flat_map(|source| source.freq.iter().copied())
+            .filter(|frequency| frequency.is_finite() && *frequency >= low && *frequency <= high),
+    );
+    frequencies.sort_by(f64::total_cmp);
+    frequencies.dedup();
+    ndarray::Array1::from_vec(frequencies)
+}
+
+#[cfg(test)]
+mod shared_grid_tests {
+    use super::*;
+    #[test]
+    fn crossover_grid_retains_fine_sub_notch_and_full_range_main() {
+        let main = Curve {
+            freq: ndarray::array![20.0, 80.0, 200.0, 1000.0, 16000.0],
+            ..Default::default()
+        };
+        let sub = Curve {
+            freq: ndarray::array![10.0, 20.0, 49.9, 50.0, 50.1, 200.0],
+            ..Default::default()
+        };
+        assert_eq!(
+            bass_management_measurement_grid(&main, &[&sub]),
+            ndarray::array![20.0, 49.9, 50.0, 50.1, 80.0, 200.0, 1000.0, 16000.0]
+        );
+    }
+    #[test]
+    fn source_order_does_not_discard_finer_sub_samples() {
+        let coarse = Curve {
+            freq: ndarray::array![20.0, 80.0, 200.0],
+            ..Default::default()
+        };
+        let fine = Curve {
+            freq: ndarray::array![20.0, 49.9, 50.0, 50.1, 200.0],
+            ..Default::default()
+        };
+        let expected = ndarray::array![20.0, 49.9, 50.0, 50.1, 80.0, 200.0];
+        assert_eq!(
+            shared_measurement_grid(&[&coarse, &fine]).unwrap(),
+            expected
+        );
+        assert_eq!(
+            shared_measurement_grid(&[&fine, &coarse]).unwrap(),
+            expected
+        );
+    }
+}

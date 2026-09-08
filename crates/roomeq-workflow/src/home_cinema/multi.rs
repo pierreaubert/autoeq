@@ -479,7 +479,7 @@ mod multi_seat_branch_tests {
                 ]),
                 subwoofers: Some(SubwooferSystemConfig {
                     config: Default::default(),
-                    crossover: Some("sub".to_string()),
+                    crossover: Some("sub".to_string().into()),
                     mapping: HashMap::new(),
                 }),
                 bass_management: Some(BassManagementConfig::default()),

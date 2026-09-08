@@ -90,16 +90,16 @@ fn multisub_fixture(sub_count: usize) -> (DspGraph, HashMap<String, Vec<f64>>) {
     for sub in &sub_names {
         channels.insert(
             sub.clone(),
-            staged_chain(
-                sub,
-                Vec::new(),
-                vec![eq_filter("peak", 50.0, 1.0, -2.0)],
-            ),
+            staged_chain(sub, Vec::new(), vec![eq_filter("peak", 50.0, 1.0, -2.0)]),
         );
-        channels.get_mut(sub).unwrap().plugins.push(PluginConfigWrapper {
-            plugin_type: "convolution".to_string(),
-            parameters: json!({"ir_file": SUB_IR_FILE, "room_eq_stage": "post_route"}),
-        });
+        channels
+            .get_mut(sub)
+            .unwrap()
+            .plugins
+            .push(PluginConfigWrapper {
+                plugin_type: "convolution".to_string(),
+                parameters: json!({"ir_file": SUB_IR_FILE, "room_eq_stage": "post_route"}),
+            });
     }
 
     let redirected_gain_db = -6.0206;
@@ -202,6 +202,7 @@ fn multisub_fixture(sub_count: usize) -> (DspGraph, HashMap<String, Vec<f64>>) {
                 polarity_inverted: false,
                 strategy_source: "single".to_string(),
                 headroom_contribution_db: 0.0,
+                selected_low_pass_hz: None,
             }],
             headroom_simulation: None,
             advisory: "ok".to_string(),
@@ -262,10 +263,9 @@ fn plugin_response(
             .iter()
             .map(|filter| {
                 let filter = filter.as_object().unwrap();
-                let filter_type = parse_biquad_filter_type(
-                    filter.get("filter_type").unwrap().as_str().unwrap(),
-                )
-                .unwrap();
+                let filter_type =
+                    parse_biquad_filter_type(filter.get("filter_type").unwrap().as_str().unwrap())
+                        .unwrap();
                 Biquad::new(
                     filter_type,
                     filter.get("freq").unwrap().as_f64().unwrap(),
@@ -317,14 +317,8 @@ fn crossover_response(
             } else {
                 BiquadFilterType::Highpass
             };
-            Biquad::new(
-                filter_type,
-                frequency_hz,
-                sample_rate,
-                BUTTERWORTH_Q,
-                0.0,
-            )
-            .complex_response(frequency)
+            Biquad::new(filter_type, frequency_hz, sample_rate, BUTTERWORTH_Q, 0.0)
+                .complex_response(frequency)
         })
         .product()
 }
@@ -459,7 +453,10 @@ fn reference_transfer(
 
 /// One re-parsed CamillaDSP filter stage.
 enum RealizedFilter {
-    Gain { db: f64, inverted: bool },
+    Gain {
+        db: f64,
+        inverted: bool,
+    },
     DelayMs(f64),
     Biquad {
         filter_type: BiquadFilterType,
@@ -472,7 +469,9 @@ enum RealizedFilter {
         freq: f64,
         sections: usize,
     },
-    Conv { file: String },
+    Conv {
+        file: String,
+    },
 }
 
 impl RealizedFilter {
@@ -528,7 +527,10 @@ impl RealizedFilter {
 }
 
 fn parse_number(value: &str) -> f64 {
-    value.trim().parse().unwrap_or_else(|_| panic!("expected number, got '{value}'"))
+    value
+        .trim()
+        .parse()
+        .unwrap_or_else(|_| panic!("expected number, got '{value}'"))
 }
 
 fn camilladsp_biquad_type(name: &str) -> BiquadFilterType {
@@ -550,10 +552,15 @@ fn document_sections(yaml: &str) -> HashMap<String, Vec<String>> {
     let mut sections = HashMap::new();
     let mut current: Option<String> = None;
     for line in yaml.lines() {
-        if !line.starts_with(' ') && !line.starts_with('#') && line.ends_with(':') && !line.is_empty()
+        if !line.starts_with(' ')
+            && !line.starts_with('#')
+            && line.ends_with(':')
+            && !line.is_empty()
         {
             current = Some(line.trim_end_matches(':').to_string());
-            sections.entry(current.clone().unwrap()).or_insert_with(Vec::new);
+            sections
+                .entry(current.clone().unwrap())
+                .or_insert_with(Vec::new);
         } else if let Some(section) = current.as_ref() {
             sections.get_mut(section).unwrap().push(line.to_string());
         }
@@ -567,9 +574,8 @@ fn parse_filters(lines: &[String]) -> HashMap<String, RealizedFilter> {
     let mut index = 0;
     while index < lines.len() {
         let line = &lines[index];
-        let is_entry = line.starts_with("  ")
-            && !line.starts_with("   ")
-            && line.trim_end().ends_with(':');
+        let is_entry =
+            line.starts_with("  ") && !line.starts_with("   ") && line.trim_end().ends_with(':');
         if !is_entry {
             index += 1;
             continue;
@@ -690,8 +696,10 @@ fn parse_mixer_mapping(lines: &[String], entry: &str) -> Vec<(usize, Vec<MixerSo
                 inverted: false,
             });
         } else if let Some(gain) = entry.strip_prefix("gain: ") {
-            current_source.as_mut().expect("mixer gain without source").gain_db =
-                parse_number(gain);
+            current_source
+                .as_mut()
+                .expect("mixer gain without source")
+                .gain_db = parse_number(gain);
         } else if let Some(inverted) = entry.strip_prefix("inverted: ") {
             current_source
                 .as_mut()
@@ -800,7 +808,9 @@ fn realized_transfer(
                     .map(|name| {
                         filters
                             .get(name)
-                            .unwrap_or_else(|| panic!("pipeline references unknown filter '{name}'"))
+                            .unwrap_or_else(|| {
+                                panic!("pipeline references unknown filter '{name}'")
+                            })
                             .response(sample_rate, *frequency, ir_registry)
                     })
                     .product()
@@ -833,8 +843,15 @@ fn realized_transfer(
     assert_eq!(phase, 4, "pipeline never reached the post-route stage");
 
     for (route_index, (dest, sources)) in expand.iter().enumerate() {
-        assert_eq!(*dest, route_index, "expand mixer must list one bus per route");
-        assert_eq!(sources.len(), 1, "expand mixer must map one source per route");
+        assert_eq!(
+            *dest, route_index,
+            "expand mixer must list one bus per route"
+        );
+        assert_eq!(
+            sources.len(),
+            1,
+            "expand mixer must map one source per route"
+        );
     }
     for (dest_index, (dest, _)) in sum.iter().enumerate() {
         assert_eq!(*dest, dest_index, "sum mixer must cover every destination");
@@ -846,12 +863,9 @@ fn realized_transfer(
         }
     }
 
-    let pre_response: Vec<Vec<Complex64>> =
-        pre.iter().map(|names| chain(names)).collect();
-    let route_response: Vec<Vec<Complex64>> =
-        route.iter().map(|names| chain(names)).collect();
-    let post_response: Vec<Vec<Complex64>> =
-        post.iter().map(|names| chain(names)).collect();
+    let pre_response: Vec<Vec<Complex64>> = pre.iter().map(|names| chain(names)).collect();
+    let route_response: Vec<Vec<Complex64>> = route.iter().map(|names| chain(names)).collect();
+    let post_response: Vec<Vec<Complex64>> = post.iter().map(|names| chain(names)).collect();
 
     let expand_signed: Vec<(usize, f64)> = expand
         .iter()
@@ -884,9 +898,7 @@ fn realized_transfer(
                         }
                         bus += Complex64::new(*gain, 0.0) * route_response[route_index][index];
                     }
-                    post_response[dest_index][index]
-                        * pre_response[source_index][index]
-                        * bus
+                    post_response[dest_index][index] * pre_response[source_index][index] * bus
                 })
                 .collect();
             inputs.insert(source.clone(), response);
@@ -919,7 +931,11 @@ fn assert_transfer_matches(
     frequencies: &[f64],
     context: &str,
 ) {
-    assert_eq!(reference.len(), realized.len(), "{context}: output channel set");
+    assert_eq!(
+        reference.len(),
+        realized.len(),
+        "{context}: output channel set"
+    );
     for (destination, reference_inputs) in reference {
         let realized_inputs = &realized[destination];
         assert_eq!(
@@ -998,8 +1014,7 @@ fn multisub_routed_transfer_matches_canonical() {
     // reconstructed preset against the canonical graph.
     for sub_count in [2, 4, 8] {
         for sample_rate in [44_100.0, 48_000.0] {
-            let (graph, registry, yaml, inputs, outputs) =
-                render_routed(sub_count, sample_rate);
+            let (graph, registry, yaml, inputs, outputs) = render_routed(sub_count, sample_rate);
             let frequencies = log_grid();
             let reference = reference_transfer(&graph, sample_rate, &frequencies, &registry);
             let realized = realized_transfer(
@@ -1018,6 +1033,54 @@ fn multisub_routed_transfer_matches_canonical() {
             );
         }
     }
+}
+
+#[test]
+fn driver_owned_low_pass_exports_without_an_extra_redirected_filter() {
+    let (mut graph, registry) = multisub_fixture(2);
+    let frequencies = log_grid();
+    let sample_rate = 48_000.0;
+    let original = reference_transfer(&graph, sample_rate, &frequencies, &registry);
+    let routing = graph
+        .metadata
+        .as_mut()
+        .unwrap()
+        .bass_management
+        .as_mut()
+        .unwrap()
+        .routing_graph
+        .as_mut()
+        .unwrap();
+    for route in &mut routing.routes {
+        if route.route_kind == "redirected_bass_lowpass_to_sub" {
+            route.low_pass_hz = None;
+        }
+    }
+    let inputs = routing.input_channels.clone();
+    let outputs = routing.output_channels.clone();
+    for (name, kind, frequency) in [("SUB1", "LR24", 80.0), ("SUB2", "LR48", 60.0)] {
+        graph.channels.get_mut(name).unwrap().plugins.push(PluginConfigWrapper {
+            plugin_type: "crossover".into(),
+            parameters: json!({"type": kind, "frequency": frequency, "output": "low", "room_eq_stage": "post_route"}),
+        });
+    }
+    let yaml = render_dsp_chain(&graph, ExportFormat::CamillaDsp, sample_rate).unwrap();
+    let realized = realized_transfer(
+        &yaml,
+        sample_rate,
+        &frequencies,
+        &inputs,
+        &outputs,
+        &registry,
+    );
+    let mut expected = original;
+    let mut actual = realized.transfer;
+    // LFE has its independent route cutoff plus the physical driver's LP.
+    // Redirected L/R must retain exactly one low-pass transfer per driver.
+    for by_source in expected.values_mut().chain(actual.values_mut()) {
+        by_source.retain(|source, _| source == "L" || source == "R");
+    }
+    assert_transfer_matches(&expected, &actual, &frequencies, "driver-owned low-pass");
 }
 
 /// Closed-form Linkwitz-Riley low-pass magnitude, independent of the exporter.
@@ -1286,7 +1349,8 @@ fn impulse(spectrum: &[Complex64], points: usize) -> Vec<Complex64> {
     assert_eq!(spectrum.len(), points / 2 + 1);
     (0..points)
         .map(|n| {
-            let mut sample = spectrum[0] + spectrum[points / 2] * if n % 2 == 0 { 1.0 } else { -1.0 };
+            let mut sample =
+                spectrum[0] + spectrum[points / 2] * if n % 2 == 0 { 1.0 } else { -1.0 };
             for (k, component) in spectrum.iter().enumerate().take(points / 2).skip(1) {
                 let angle = TAU * k as f64 * n as f64 / points as f64;
                 sample += (*component * Complex64::from_polar(1.0, angle)) * 2.0;
@@ -1306,8 +1370,15 @@ fn multisub_spatial_magnitude_semantics() {
     let (graph, registry, yaml, inputs, outputs) = render_routed(8, sample_rate);
     let frequencies = log_grid();
     let reference = reference_transfer(&graph, sample_rate, &frequencies, &registry);
-    let realized = realized_transfer(&yaml, sample_rate, &frequencies, &inputs, &outputs, &registry)
-        .transfer;
+    let realized = realized_transfer(
+        &yaml,
+        sample_rate,
+        &frequencies,
+        &inputs,
+        &outputs,
+        &registry,
+    )
+    .transfer;
     let subs: Vec<String> = (1..=8).map(|index| format!("SUB{index}")).collect();
     for (index, frequency) in frequencies.iter().enumerate() {
         let reference_mean: f64 = subs
@@ -1380,7 +1451,10 @@ fn multisub_delay_precision_contract() {
         metadata: None,
     };
     let yaml = render_dsp_chain(&output, ExportFormat::CamillaDsp, 48_000.0).unwrap();
-    assert!(yaml.contains("delay: 1.235"), "unexpected delay line:\n{yaml}");
+    assert!(
+        yaml.contains("delay: 1.235"),
+        "unexpected delay line:\n{yaml}"
+    );
     assert!((1.235f64 - 1.23456).abs() <= 5e-4 + 1e-12);
     let sections = document_sections(&yaml);
     let filters = parse_filters(&sections["filters"]);

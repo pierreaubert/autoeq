@@ -149,7 +149,10 @@ pub fn predict_deployed_source_curve_from_routes(
             sample_rate,
         ),
     ) {
-        (Some(main), Some(sub)) => Some(complex_sum_mains(&[main, &sub])),
+        (Some(main), Some(sub)) => {
+            let sub = crate::topology::interpolate_bass_response(&main.freq, &sub);
+            Some(complex_sum_mains(&[main, &sub]))
+        }
         (Some(main), None) => Some(main.clone()),
         (None, Some(sub)) => Some(sub),
         (None, None) => None,
@@ -178,10 +181,7 @@ pub fn predict_bass_output_curve_from_routes(
         any_route = true;
         let source_pre_route_transfer =
             source_pre_route_transfers.and_then(|transfers| transfers.get(&route.source_channel));
-        let route_curve = apply_source_pre_route_transfer(
-            sub_curve,
-            source_pre_route_transfer,
-        )?;
+        let route_curve = apply_source_pre_route_transfer(sub_curve, source_pre_route_transfer)?;
         let phase = route_curve.phase.as_ref()?;
         let response = if let Some(freq) = route.low_pass_hz {
             compute_crossover_complex_response(
@@ -455,10 +455,17 @@ mod tests {
 
         assert!(same_frequency_grid(&conditioned.freq, &base.freq));
         assert_eq!(conditioned.spl.len(), base.spl.len());
-        assert!(conditioned.spl.iter().all(|level| (*level - 3.0).abs() < 1.0e-9));
-        assert!(conditioned
-            .phase
-            .as_ref()
-            .is_some_and(|phase| phase.iter().all(|value| value.abs() < 1.0e-9)));
+        assert!(
+            conditioned
+                .spl
+                .iter()
+                .all(|level| (*level - 3.0).abs() < 1.0e-9)
+        );
+        assert!(
+            conditioned
+                .phase
+                .as_ref()
+                .is_some_and(|phase| phase.iter().all(|value| value.abs() < 1.0e-9))
+        );
     }
 }

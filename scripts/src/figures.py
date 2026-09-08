@@ -8,6 +8,7 @@ from plotly.subplots import make_subplots
 from . import SMOOTHING_OPTIONS, DEFAULT_SMOOTHING
 from .dsp import (
     smooth_octave,
+    resample_spl_onto_grid,
     compute_eq_response,
     compute_group_delay,
     compute_group_delay_from_ir,
@@ -15,6 +16,25 @@ from .dsp import (
     build_post_dsp_source_curves,
     wrap_phase,
 )
+
+
+def _align_final_to_initial_grid(
+    final_curve: dict | None, freq_data: list[float] | None
+) -> tuple[list[float] | None, list[float] | None]:
+    """Return ``(plot_freq, spl)`` for an After-EQ trace sharing ``freq_data``.
+
+    Routed outputs legitimately mix grids (driver-measurement baselines vs.
+    deployed replay grids); resampling keeps the trace and the smoothing
+    dropdown on one x-axis instead of failing on length mismatches.
+    """
+    if not final_curve:
+        return None, None
+    if freq_data is None:
+        freq_data = final_curve["freq"]
+    spl_raw = resample_spl_onto_grid(
+        final_curve["freq"], final_curve["spl"], freq_data
+    )
+    return freq_data, spl_raw
 from .data_extract import (
     compute_y_range,
     compute_average_spl_in_range,
@@ -109,14 +129,14 @@ def create_channel_figure(
         spl_data_list.append(None)
 
     # Add final curve (after EQ)
+    plot_freq, spl_raw = _align_final_to_initial_grid(final_curve, freq_data)
     if final_curve:
         if freq_data is None:
-            freq_data = final_curve["freq"]
-        spl_raw = final_curve["spl"]
+            freq_data = plot_freq
         spl_smoothed = smooth_octave(freq_data, spl_raw, DEFAULT_SMOOTHING)
         fig.add_trace(
             go.Scatter(
-                x=final_curve["freq"],
+                x=freq_data,
                 y=spl_smoothed,
                 mode="lines",
                 name="After EQ",
@@ -250,14 +270,14 @@ def create_zoomed_figure(
         spl_data_list.append(None)
 
     # Add final curve (after EQ)
+    plot_freq, spl_raw = _align_final_to_initial_grid(final_curve, freq_data)
     if final_curve:
         if freq_data is None:
-            freq_data = final_curve["freq"]
-        spl_raw = final_curve["spl"]
+            freq_data = plot_freq
         spl_smoothed = smooth_octave(freq_data, spl_raw, DEFAULT_SMOOTHING)
         fig.add_trace(
             go.Scatter(
-                x=final_curve["freq"],
+                x=freq_data,
                 y=spl_smoothed,
                 mode="lines",
                 name="After EQ",
@@ -1205,6 +1225,35 @@ def _driver_alignment(driver: dict) -> tuple[float, float, bool]:
     return gain_db, delay_ms, inverted
 
 
+def _driver_low_pass(driver: dict) -> tuple[float | None, str | None]:
+    """Extract the deployed per-driver low-pass (LP_i) of a sub driver, if any.
+
+    Reads the last low-pass ``crossover`` plugin in the driver chain, matching
+    serial DSP order. Returns ``(frequency_hz, crossover_type)`` or
+    ``(None, None)`` when the driver carries no low-pass (legacy
+    single-crossover chains).
+    """
+    frequency: float | None = None
+    crossover_type: str | None = None
+    for plugin in driver.get("plugins", []) or []:
+        if not isinstance(plugin, dict):
+            continue
+        if str(plugin.get("plugin_type", "")).lower() != "crossover":
+            continue
+        params = plugin.get("parameters", {}) or {}
+        if str(params.get("output", "")).lower() not in ("low", "lowpass", "lp"):
+            continue
+        try:
+            candidate = float(params.get("frequency", 0.0))
+        except (TypeError, ValueError):
+            continue
+        if candidate > 0.0:
+            frequency = candidate
+            raw_type = params.get("type")
+            crossover_type = str(raw_type) if raw_type is not None else None
+    return frequency, crossover_type
+
+
 def create_bass_management_routing_figure(data: dict) -> go.Figure | None:
     """Create a Sankey graph from route-level bass-management metadata.
 
@@ -1299,18 +1348,20 @@ def create_bass_management_routing_figure(data: dict) -> go.Figure | None:
             targets.append(add_node("sub", driver_name))
             values.append(value)
             colors.append(_driver_link_color())
-            hover.append(
-                "<br>".join(
-                    [
-                        "<b>Sub driver</b>",
-                        f"output bus: {channel_name}",
-                        f"driver: {driver_name}",
-                        f"gain: {gain_db:+.2f} dB",
-                        f"delay: {delay_ms:.3f} ms",
-                        f"polarity: {'inverted' if inverted else 'normal'}",
-                    ]
+            driver_hover_lines = [
+                "<b>Sub driver</b>",
+                f"output bus: {channel_name}",
+                f"driver: {driver_name}",
+                f"gain: {gain_db:+.2f} dB",
+                f"delay: {delay_ms:.3f} ms",
+                f"polarity: {'inverted' if inverted else 'normal'}",
+            ]
+            lp_hz, lp_type = _driver_low_pass(driver)
+            if lp_hz is not None:
+                driver_hover_lines.append(
+                    f"low-pass: {lp_type or '-'} @ {lp_hz:.1f} Hz"
                 )
-            )
+            hover.append("<br>".join(driver_hover_lines))
             driver_link_count += 1
 
     fig = go.Figure(

@@ -83,31 +83,39 @@ impl std::fmt::Display for CrossoverType {
 }
 
 /// Interpolate and prepare driver curves on a common frequency grid
+///
+/// For `CrossoverType::None` (multi-sub/MSO summation) the measured absolute
+/// and relative SPL is preserved: each driver is only resampled to the common
+/// grid. Normalizing each driver separately would erase the calibrated level
+/// relationship between subs before interference is computed (a flat 80 dB
+/// sub and a flat 70 dB sub must still sum to ~82.4 dB in phase, not 6 dB).
+/// Flatness normalization belongs to the combined-sum loss, not the inputs.
 pub(super) fn prepare_driver_curves(data: &DriversLossData, crossover_freqs: &[f64]) -> Vec<Curve> {
     let n_drivers = data.drivers.len();
     let mut driver_curves = Vec::new();
     for (i, driver) in data.drivers.iter().enumerate() {
-        let (passband_low, passband_high) = if let CrossoverType::None = data.crossover_type {
-            (20.0, 20000.0)
-        } else {
-            (
-                if i == 0 { 20.0 } else { crossover_freqs[i - 1] },
-                if i == n_drivers - 1 {
-                    20000.0
-                } else {
-                    crossover_freqs[i]
-                },
-            )
+        let curve = Curve {
+            freq: driver.freq.clone(),
+            spl: driver.spl.clone(),
+            phase: driver.phase.clone(),
+            ..Default::default()
         };
+        if matches!(data.crossover_type, CrossoverType::None) {
+            driver_curves.push(crate::read::interpolate_response(&data.freq_grid, &curve));
+            continue;
+        }
+        let (passband_low, passband_high) = (
+            if i == 0 { 20.0 } else { crossover_freqs[i - 1] },
+            if i == n_drivers - 1 {
+                20000.0
+            } else {
+                crossover_freqs[i]
+            },
+        );
 
         let interpolated = crate::read::normalize_and_interpolate_response_with_range(
             &data.freq_grid,
-            &Curve {
-                freq: driver.freq.clone(),
-                spl: driver.spl.clone(),
-                phase: driver.phase.clone(),
-                ..Default::default()
-            },
+            &curve,
             passband_low,
             passband_high,
         );
@@ -143,5 +151,41 @@ mod tests {
         let crossover = CrossoverType::from_str("BW24").expect("BW24 must be supported");
         assert_eq!(crossover, CrossoverType::Butterworth4);
         assert_eq!(crossover.to_plugin_string(), "Butterworth24");
+    }
+
+    #[test]
+    fn multisub_none_preserves_relative_calibrated_levels() {
+        use super::super::compute::compute_drivers_combined_response;
+        use super::super::driver_measurement::DriverMeasurement;
+        use super::super::drivers_loss_data::DriversLossData;
+
+        let freq = ndarray::Array1::from_vec(vec![20.0, 50.0, 100.0, 200.0]);
+        let hot = DriverMeasurement {
+            freq: freq.clone(),
+            spl: ndarray::Array1::from_vec(vec![80.0; 4]),
+            phase: None,
+        };
+        let quiet = DriverMeasurement {
+            freq: freq.clone(),
+            spl: ndarray::Array1::from_vec(vec![70.0; 4]),
+            phase: None,
+        };
+        let data = DriversLossData::new_ordered(vec![hot, quiet], CrossoverType::None);
+        let combined =
+            compute_drivers_combined_response(&data, &[0.0, 0.0], &[], Some(&[0.0, 0.0]), 48_000.0);
+        let expected =
+            20.0 * (10.0_f64.powf(80.0 / 20.0) + 10.0_f64.powf(70.0 / 20.0)).log10();
+        for &level in combined.iter() {
+            assert!(
+                (level - expected).abs() < 0.35,
+                "MSO sum must preserve calibrated levels: got {level:.3}, want {expected:.3}"
+            );
+        }
+        // The old per-driver normalization collapsed both drivers to 0 dB and
+        // summed to 6.02 dB; that must not regress.
+        assert!(
+            (expected - 6.0206).abs() > 10.0,
+            "test premise broken: expected acoustic sum must differ from normalized sum"
+        );
     }
 }

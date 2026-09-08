@@ -55,10 +55,7 @@ impl AreaEvaluator {
         workers: usize,
     ) -> Self {
         let num_freqs = freqs.len();
-        let num_subs = static_complex
-            .first()
-            .map(Vec::len)
-            .unwrap_or_default();
+        let num_subs = static_complex.first().map(Vec::len).unwrap_or_default();
         Self {
             static_complex,
             weights,
@@ -135,9 +132,11 @@ impl AreaEvaluator {
                 let allpass_phase = allpass_biquads
                     .get(sub_idx)
                     .map(|filters| {
-                        filters.iter().fold(Complex64::new(1.0, 0.0), |acc, allpass| {
-                            acc * allpass_complex_response(allpass, freq)
-                        })
+                        filters
+                            .iter()
+                            .fold(Complex64::new(1.0, 0.0), |acc, allpass| {
+                                acc * allpass_complex_response(allpass, freq)
+                            })
                     })
                     .unwrap_or_else(|| Complex64::new(1.0, 0.0));
                 factors[freq_idx] =
@@ -209,48 +208,47 @@ impl AreaEvaluator {
         allpass_filters: &[Vec<(f64, f64)>],
     ) -> f64 {
         self.prepare_candidate(gains, delays, polarities, allpass_filters);
-        let mut weighted: Vec<(f64, f64)> = if self.workers <= 1
-            || self.static_complex.len() < PARALLEL_MIN_POINTS
-        {
-            (0..self.static_complex.len())
-                .map(|point_idx| {
-                    let loss = self.point_flatness(point_idx);
-                    let weight = self.weights[point_idx];
-                    (
-                        if loss.is_finite() {
-                            loss
-                        } else {
-                            f64::INFINITY
-                        },
-                        if weight.is_finite() && weight > 0.0 {
-                            weight
-                        } else {
-                            0.0
-                        },
-                    )
-                })
-                .collect()
-        } else {
-            let losses = self.point_losses_parallel();
-            losses
-                .into_iter()
-                .zip(self.weights.iter())
-                .map(|(loss, &weight)| {
-                    (
-                        if loss.is_finite() {
-                            loss
-                        } else {
-                            f64::INFINITY
-                        },
-                        if weight.is_finite() && weight > 0.0 {
-                            weight
-                        } else {
-                            0.0
-                        },
-                    )
-                })
-                .collect()
-        };
+        let mut weighted: Vec<(f64, f64)> =
+            if self.workers <= 1 || self.static_complex.len() < PARALLEL_MIN_POINTS {
+                (0..self.static_complex.len())
+                    .map(|point_idx| {
+                        let loss = self.point_flatness(point_idx);
+                        let weight = self.weights[point_idx];
+                        (
+                            if loss.is_finite() {
+                                loss
+                            } else {
+                                f64::INFINITY
+                            },
+                            if weight.is_finite() && weight > 0.0 {
+                                weight
+                            } else {
+                                0.0
+                            },
+                        )
+                    })
+                    .collect()
+            } else {
+                let losses = self.point_losses_parallel();
+                losses
+                    .into_iter()
+                    .zip(self.weights.iter())
+                    .map(|(loss, &weight)| {
+                        (
+                            if loss.is_finite() {
+                                loss
+                            } else {
+                                f64::INFINITY
+                            },
+                            if weight.is_finite() && weight > 0.0 {
+                                weight
+                            } else {
+                                0.0
+                            },
+                        )
+                    })
+                    .collect()
+            };
         weighted.sort_by(|a, b| b.0.total_cmp(&a.0));
         let mut acc_loss = 0.0;
         let mut acc_mass = 0.0;
@@ -355,7 +353,38 @@ fn flatness_of(
         }
         sum_sq += (spl[freq_idx] - mean).powi(2);
     }
+    // Use a local measured power reference at every quadrature/adversarial
+    // point. A spatially uniform cancellation must never count as perfect EQ.
+    let mut candidate = Vec::with_capacity(count);
+    let mut reference = Vec::with_capacity(count);
+    for (i, &frequency) in freqs.iter().enumerate() {
+        if frequency >= eval_min && frequency <= eval_max {
+            candidate.push(spl[i]);
+            reference.push(
+                10.0 * per_sub
+                    .iter()
+                    .map(|sub| sub[i].norm_sqr())
+                    .sum::<f64>()
+                    .max(1e-24)
+                    .log10(),
+            );
+        }
+    }
+    let low_count = freqs
+        .iter()
+        .filter(|&&frequency| frequency >= eval_min && frequency <= (eval_min * 2.0).min(eval_max))
+        .count();
+    let extension = if low_count > 0 {
+        autoeq_optim::loss::multisub::array_output_penalty(
+            &candidate[..low_count],
+            &reference[..low_count],
+        )
+    } else {
+        0.0
+    };
     (sum_sq / count as f64).sqrt()
+        + autoeq_optim::loss::multisub::array_output_penalty(&candidate, &reference)
+        + extension
 }
 
 #[cfg(test)]
@@ -364,6 +393,25 @@ mod tests {
 
     fn unit_factors(num_subs: usize, num_freqs: usize) -> Vec<Vec<Complex64>> {
         vec![vec![Complex64::new(1.0, 0.0); num_freqs]; num_subs]
+    }
+
+    #[test]
+    fn every_area_point_rejects_complete_cancellation() {
+        let freqs = Array1::from(vec![20.0, 40.0, 80.0, 120.0]);
+        let response = vec![
+            Complex64::new(1.0, 0.0),
+            Complex64::new(2.0, 0.0),
+            Complex64::new(0.5, 0.0),
+            Complex64::new(1.0, 0.0),
+        ];
+        let per_sub = vec![response.clone(), response];
+        let mut factors = unit_factors(2, 4);
+        let mut sum = vec![Complex64::new(0.0, 0.0); 4];
+        let mut spl = vec![0.0; 4];
+        let baseline = flatness_of(&per_sub, &factors, &freqs, 20.0, 120.0, &mut sum, &mut spl);
+        factors[1].fill(Complex64::new(-1.0, 0.0));
+        let cancelled = flatness_of(&per_sub, &factors, &freqs, 20.0, 120.0, &mut sum, &mut spl);
+        assert!(cancelled > baseline + 1000.0);
     }
 
     #[test]

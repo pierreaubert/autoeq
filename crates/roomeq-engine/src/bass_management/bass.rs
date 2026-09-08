@@ -21,6 +21,7 @@ pub fn bass_management_sub_output_results(
             polarity_inverted: false,
             strategy_source: strategy_source.to_string(),
             headroom_contribution_db: shared_gain_db,
+            selected_low_pass_hz: None,
         }];
     };
 
@@ -41,6 +42,7 @@ pub fn bass_management_sub_output_results(
                 strategy_source.to_string()
             },
             headroom_contribution_db: driver.gain + shared_gain_db,
+            selected_low_pass_hz: None,
         })
         .collect()
 }

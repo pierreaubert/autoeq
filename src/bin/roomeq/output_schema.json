@@ -767,6 +767,14 @@
             "null"
           ]
         },
+        "selected_sub_low_pass_hz": {
+          "description": "Per-sub selected low-pass frequencies in positional sub order. Empty unless a per-sub crossover list was resolved and optimized. Each selected low-pass is applied before the physical driver sum and owns the redirected-bass cutoff; those routes omit a second group low-pass. LFE retains its independent cutoff.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
         "trim_db": {
           "format": "double",
           "type": "number"
@@ -1390,6 +1398,14 @@
         },
         "polarity_inverted": {
           "type": "boolean"
+        },
+        "selected_low_pass_hz": {
+          "description": "Low-pass selected for this physical sub output by the per-sub splice\nstage (`None` unless a per-sub crossover list was configured and the\nshared-array splice search for this output ran). Redirected-bass routes omit the\ngroup low-pass when per-driver low-passes are present; this is the\nper-driver value for downstream per-driver export, applied pre-sum\nwhen drivers share one bus.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "strategy_source": {
           "type": "string"

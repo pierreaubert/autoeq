@@ -77,7 +77,7 @@ pub(super) fn apply_final_correction_safety_gate(
         if result
             .channels
             .get(name)
-            .is_some_and(|chain| chain.drivers.is_some())
+            .is_some_and(|chain| chain.drivers.is_some() && !has_route_owned_bass_low_pass(chain))
         {
             let topology_epsilon = (channel.pre_score.abs() * 1e-4).max(1e-6);
             let topology_regressed = !channel.post_score.is_finite()
@@ -1376,25 +1376,28 @@ fn apply_logical_channel_chain(
 }
 
 fn is_graph_routed_bass_output(chain: &ChannelDspChain) -> bool {
-    chain.drivers.is_some()
-        || chain.plugins.iter().any(|plugin| {
-            plugin.plugin_type == "crossover"
-                && plugin
+    chain.drivers.is_some() || has_route_owned_bass_low_pass(chain)
+}
+
+fn has_route_owned_bass_low_pass(chain: &ChannelDspChain) -> bool {
+    chain.plugins.iter().any(|plugin| {
+        plugin.plugin_type == "crossover"
+            && plugin
+                .parameters
+                .get("output")
+                .and_then(serde_json::Value::as_str)
+                == Some("low")
+            && (plugin
+                .parameters
+                .get("room_eq_stage")
+                .and_then(serde_json::Value::as_str)
+                == Some("route_owned")
+                || plugin
                     .parameters
-                    .get("output")
+                    .get("label")
                     .and_then(serde_json::Value::as_str)
-                    == Some("low")
-                && (plugin
-                    .parameters
-                    .get("room_eq_stage")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("route_owned")
-                    || plugin
-                        .parameters
-                        .get("label")
-                        .and_then(serde_json::Value::as_str)
-                        == Some("room_eq_route_owned"))
-        })
+                    == Some("room_eq_route_owned"))
+    })
 }
 
 fn route_passband(
@@ -1698,34 +1701,22 @@ fn sync_chain_reported_curve(chain: &mut ChannelDspChain, final_curve: &roomeq_m
 }
 
 fn correction_stages(chain: &ChannelDspChain) -> BTreeSet<CorrectionStage> {
-    let mut stages: BTreeSet<_> = chain
-        .plugins
-        .iter()
-        .chain(
-            chain
-                .drivers
-                .iter()
-                .flatten()
-                .flat_map(|driver| driver.plugins.iter()),
-        )
-        .filter_map(correction_stage)
-        .collect();
-
-    // MSO alignment is emitted as per-driver gain/delay plugins.  Those
-    // plugins are not correction stages on their own because ordinary routing
-    // gains/delays must remain intact, but a routed multi-sub chain needs the
-    // whole alignment stage to be revertible when its LFE score regresses.
-    if chain.drivers.as_ref().is_some_and(|drivers| {
-        drivers.iter().any(|driver| {
-            driver
+    let mut stages: BTreeSet<_> = chain.plugins.iter().filter_map(correction_stage).collect();
+    // Routed driver controls are already accepted by the array engine and
+    // crossover optimizer. A common-curve EQ check cannot judge or remove them
+    // without changing the physical routing graph it was optimized against.
+    if !has_route_owned_bass_low_pass(chain) {
+        for driver in chain.drivers.iter().flatten() {
+            stages.extend(driver.plugins.iter().filter_map(correction_stage));
+            if driver
                 .plugins
                 .iter()
                 .any(|plugin| matches!(plugin.plugin_type.as_str(), "gain" | "delay"))
-        })
-    }) {
-        stages.insert(CorrectionStage::Mso);
+            {
+                stages.insert(CorrectionStage::Mso);
+            }
+        }
     }
-
     stages
 }
 
@@ -1767,10 +1758,11 @@ fn correction_stage(plugin: &roomeq_model::PluginConfigWrapper) -> Option<Correc
 }
 
 fn remove_correction_stage(chain: &mut ChannelDspChain, stage: CorrectionStage) {
+    let keep_routed_drivers = has_route_owned_bass_low_pass(chain);
     chain
         .plugins
         .retain(|plugin| correction_stage(plugin) != Some(stage));
-    if let Some(drivers) = &mut chain.drivers {
+    if !keep_routed_drivers && let Some(drivers) = &mut chain.drivers {
         for driver in drivers {
             driver.plugins.retain(|plugin| {
                 correction_stage(plugin) != Some(stage)
@@ -2882,6 +2874,54 @@ mod tests {
                     .advisories
                     .contains(&"topology_regression_reverted_lfe:mso".to_string())
         }));
+    }
+
+    #[test]
+    fn final_safety_gate_preserves_routed_array_controls_when_lowpass_changes_flatness() {
+        let mut result = single_channel_room_result("lfe");
+        let initial = result.channel_results["lfe"].initial_curve.clone();
+        let chain = result.channels.get_mut("lfe").unwrap();
+        chain.plugins = vec![roomeq_engine::topology::mark_route_owned_plugin(
+            roomeq_engine::output::create_crossover_plugin("LR24", 120.0, "low"),
+        )];
+        chain.drivers = Some(vec![roomeq_model::DriverDspChain {
+            name: "sub1".into(),
+            index: 0,
+            plugins: vec![
+                roomeq_engine::output::create_gain_plugin(-2.0),
+                roomeq_engine::output::create_delay_plugin(2.0),
+            ],
+            initial_curve: Some((&initial).into()),
+        }]);
+        let drivers = chain.drivers.clone();
+        let final_curve =
+            apply_logical_channel_chain(chain, &initial, 48_000.0, Path::new(".")).unwrap();
+        chain.final_curve = Some((&final_curve).into());
+        let channel = result.channel_results.get_mut("lfe").unwrap();
+        channel.pre_score = 1.0;
+        channel.post_score = 2.0;
+        channel.final_curve = final_curve;
+        apply_final_correction_safety_gate(
+            &mut result,
+            48_000.0,
+            3,
+            (20.0, 20_000.0),
+            Path::new("."),
+            roomeq_model::ProcessingMode::LowLatency,
+            None,
+        );
+        assert_eq!(
+            serde_json::to_value(&result.channels["lfe"].drivers).unwrap(),
+            serde_json::to_value(drivers).unwrap()
+        );
+        assert!(
+            !result
+                .metadata
+                .stage_outcomes
+                .iter()
+                .flat_map(|stage| &stage.advisories)
+                .any(|advisory| advisory.contains("reverted_lfe:mso"))
+        );
     }
 
     #[test]

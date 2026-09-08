@@ -133,5 +133,6 @@ pub fn resolved_bass_sub_outputs(
         polarity_inverted: false,
         strategy_source: "single".to_string(),
         headroom_contribution_db: 0.0,
+        selected_low_pass_hz: None,
     }]
 }

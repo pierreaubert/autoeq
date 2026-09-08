@@ -15,6 +15,7 @@ mod tests;
 mod types;
 mod workflow;
 pub(crate) use home_cinema::reconstruct_deployed_source_curves;
+pub(crate) use home_cinema::reconstruct_deployed_snapshot_best_effort;
 #[cfg(test)]
 pub(crate) use roomeq_engine::topology::*;
 

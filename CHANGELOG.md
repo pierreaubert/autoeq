@@ -1,3 +1,38 @@
+# 0.5.73
+
+## Package versions
+
+- autoeq 0.5.73, autoeq-optim 0.5.62, roomeq-engine 0.5.81, roomeq-export 0.5.7, roomeq-model 0.5.12, roomeq-workflow 0.5.32, roomeq-qa 0.5.67.
+
+## Multi-sub acoustic model and audit fixes
+
+- Keep later useful bass after internal room nulls throughout sub alignment and EQ. Evaluate common EQ independently of LFE routing roll-off while preserving accepted array controls.
+- Preserve native bass measurement samples and phase through loading and the MSO/DBA/spatial evaluation grids; retain full-range main analysis with limited-band sub measurements.
+- Use one per-input stereo/HomeCinema executor, select per-driver low-passes against the deployed shared array before splice optimization, and reconstruct each driver exactly once on the receiving grid. Remove the multi-sub replay safety bypass.
+- Preserve routed all-pass/per-sub PEQ, polarity, primary-seat measurements, optimizer evidence and spatial/global-EQ policy. Sum independent subs coherently when measured phase is available.
+- Add useful-output, low-band, null and gain penalties to ordinary/all-pass MSO, DBA and continuous-area objectives, retain baseline controls on regression, and bound sub alignment/shared EQ across algorithms.
+- Stage stereo-with-sub post-route DSP (arrival-alignment delays, logical-input plugins) pre-route exactly like HomeCinema: stereo 2.x runs the same routed executor, so a mains-only delay must reach both splice branches or it recreates a crossover cancellation after joint calibration.
+- When an accepted joint-route residual (`source_route_de_optimized`, including the pending-correction variant) still exceeds the 3 dB splice gate after every revertible correction stage is stripped, ship the best-effort deployed curves with a `routed_splice_final_replay` degraded advisory instead of failing the run with no output. Unaccepted routes keep the hard error.
+
+## Per-sub low-pass deployment (multi-sub crossovers)
+
+- Deploy the optimizer-selected per-sub low-pass `LP_i` end to end: one
+  low-pass `crossover` plugin per sub driver chain
+  (`channels.<SUB>.drivers[i].plugins`, staged `post_route`), applying before the physical driver sum and owning the redirected-bass cutoff. LFE keeps its independent cutoff.
+- The deployed replay models the same transfer, so reported curves and the
+  crossover safety gate validate the shipped DSP; a
+  `per_sub_lp_deployed_to_drivers:N` optimization advisory records the
+  deployment, and the routing display shows each driver's low-pass on hover.
+- Reports carry per-driver values in
+  `bass_management.groups[].selected_sub_low_pass_hz` and
+  `sub_output_results[].selected_low_pass_hz`; redirected-bass routes omit the group low-pass when per-driver low-passes are present (existing optional route field).
+- Single-crossover configs (shared string or one-element list) retain the shared route low-pass and do not receive per-driver low-pass plugins.
+
+## Verification
+
+- Regenerated the measured stereo 2.2 results in IIR, FIR, mixed and mixed-phase modes. All four pass deployed crossover cancellation checks; bass target deficits remain, especially in mixed-phase mode.
+- Verified independent and all-pass measured smoke runs, native-grid and limited-band response handling, spatial/MSO/DBA output protection, and exported complex transfers. Focused Rust checks and 22 Python DSP/report tests pass.
+
 # 0.5.72
 
 ## RoomEQ review follow-up (F05, F15, F16, F18)

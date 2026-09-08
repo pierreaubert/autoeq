@@ -61,6 +61,8 @@ fn multisub_allpass_loss(
     let normalized = &combined - mean;
 
     autoeq_optim::loss::flat_loss(&data.freq_grid, &normalized, min_freq, max_freq)
+        + autoeq_optim::loss::multisub::multisub_output_penalty(data, &combined, min_freq, max_freq)
+        + 0.01 * gains.iter().map(|gain| gain * gain).sum::<f64>()
 }
 
 #[cfg(test)]
@@ -83,6 +85,19 @@ mod multisub_regression_tests {
     }
 
     /// Regression test: multi-sub loss is finite for identical subs
+    #[test]
+    fn allpass_loss_penalizes_common_attenuation() {
+        let measurement =
+            make_sub_measurement(vec![20.0, 80.0, 200.0], vec![80.0; 3], Some(vec![0.0; 3]));
+        let data =
+            DriversLossData::new(vec![measurement.clone(), measurement], CrossoverType::None);
+        let mut params = vec![0.0, 0.0, 0.0, 0.0, 80.0, 80.0, 1.0, 1.0];
+        let identity = multisub_allpass_loss(&data, &params, 48000.0, 20.0, 200.0);
+        params[0] = -12.0;
+        params[1] = -12.0;
+        assert!(multisub_allpass_loss(&data, &params, 48000.0, 20.0, 200.0) > identity + 100.0);
+    }
+
     #[test]
     fn test_multisub_loss_identical_subs() {
         let freqs = vec![20.0, 40.0, 60.0, 80.0, 100.0, 150.0, 200.0];

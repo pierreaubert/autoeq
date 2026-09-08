@@ -13,6 +13,8 @@ pub struct DriversLossData {
     pub crossover_type: CrossoverType,
     /// Common frequency grid for evaluation
     pub freq_grid: Array1<f64>,
+    /// Calibrated power reference, cached outside optimizer evaluations.
+    pub power_reference: Array1<f64>,
 }
 
 impl DriversLossData {
@@ -70,6 +72,20 @@ impl DriversLossData {
             .map(|d| d.freq_range().1)
             .fold(f64::NEG_INFINITY, f64::max);
 
+        let (min_freq, max_freq) = if crossover_type == CrossoverType::None {
+            (
+                drivers
+                    .iter()
+                    .map(|d| d.freq_range().0)
+                    .fold(f64::NEG_INFINITY, f64::max),
+                drivers
+                    .iter()
+                    .map(|d| d.freq_range().1)
+                    .fold(f64::INFINITY, f64::min),
+            )
+        } else {
+            (min_freq, max_freq)
+        };
         // Create log-spaced frequency grid (10 points per octave)
         let freq_grid = crate::read::create_log_frequency_grid(
             10 * 10, // 10 octaves * 10 points per octave
@@ -77,7 +93,36 @@ impl DriversLossData {
             max_freq.min(20000.0),
         );
 
+        let freq_grid = if crossover_type == CrossoverType::None {
+            let mut frequencies = freq_grid.to_vec();
+            frequencies.extend(
+                drivers
+                    .iter()
+                    .flat_map(|driver| driver.freq.iter().copied())
+                    .filter(|&frequency| {
+                        frequency >= min_freq.max(20.0) && frequency <= max_freq.min(20000.0)
+                    }),
+            );
+            frequencies.sort_by(f64::total_cmp);
+            frequencies.dedup_by(|a, b| (*a - *b).abs() < 1e-8);
+            Array1::from_vec(frequencies)
+        } else {
+            freq_grid
+        };
+        let mut power_reference = Array1::<f64>::zeros(freq_grid.len());
+        for driver in &drivers {
+            let curve = autoeq_core::Curve {
+                freq: driver.freq.clone(),
+                spl: driver.spl.clone(),
+                phase: driver.phase.clone(),
+                ..Default::default()
+            };
+            let aligned = autoeq_core::interpolate_log_space(&freq_grid, &curve);
+            power_reference += &aligned.spl.mapv(|level| 10.0_f64.powf(level / 10.0));
+        }
+        power_reference.mapv_inplace(|power| 10.0 * power.max(1e-24).log10());
         Self {
+            power_reference,
             drivers,
             crossover_type,
             freq_grid,
@@ -137,6 +182,32 @@ mod tests {
             spl: ndarray::Array1::from_vec(vec![70.0 + offset; 3]),
             phase: None,
         }
+    }
+
+    #[test]
+    fn parallel_array_grid_keeps_narrow_measured_cancellation() {
+        let frequencies = ndarray::array![20.0, 49.9, 50.0, 50.1, 200.0];
+        let first = DriverMeasurement {
+            freq: frequencies.clone(),
+            spl: ndarray::Array1::from_elem(5, 80.0),
+            phase: Some(ndarray::Array1::zeros(5)),
+        };
+        let second = DriverMeasurement {
+            phase: Some(ndarray::array![0.0, 0.0, 180.0, 0.0, 0.0]),
+            ..first.clone()
+        };
+        let data = DriversLossData::new_ordered(vec![first, second], CrossoverType::None);
+        for frequency in frequencies {
+            assert!(data.freq_grid.iter().any(|&f| f == frequency));
+        }
+        let combined =
+            compute_drivers_combined_response(&data, &[0.0, 0.0], &[], Some(&[0.0, 0.0]), 48000.0);
+        let index = data.freq_grid.iter().position(|&f| f == 50.0).unwrap();
+        assert!(
+            combined[index] < -200.0,
+            "native cancellation was lost: {}",
+            combined[index]
+        );
     }
 
     #[test]

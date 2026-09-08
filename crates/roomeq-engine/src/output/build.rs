@@ -12,6 +12,102 @@ use math_audio_iir_fir::Biquad;
 use roomeq_model::{ChannelDspChain, DriverDspChain, MixedModeConfig, PluginConfigWrapper};
 use serde_json::json;
 
+/// Per-driver low-pass selected by the per-sub splice stage.
+///
+/// `frequency_hz` is the optimizer-selected `LP_i` for one sub; `None` entries
+/// in a plan vector keep that driver's chain untouched (skipped pair or legacy
+/// single-crossover behavior, bit-identical).
+#[derive(Debug, Clone)]
+pub struct PerDriverLowPass {
+    /// Low-pass frequency in Hz (must be finite and positive to deploy).
+    pub frequency_hz: f64,
+    /// Crossover family for the low-pass (e.g. `"LR24"`).
+    pub crossover_type: String,
+}
+
+impl PerDriverLowPass {
+    /// Deployable only with a finite positive frequency and a non-empty type.
+    pub fn is_deployable(&self) -> bool {
+        self.frequency_hz.is_finite()
+            && self.frequency_hz > 0.0
+            && !self.crossover_type.trim().is_empty()
+    }
+}
+
+/// Append one low-pass crossover plugin per driver from the optimizer-selected
+/// `LP_i` vector.
+///
+/// Entry `i` of `low_passes` applies to driver `i`; `None` leaves that driver
+/// untouched. Entries past the driver count are ignored, and a missing entry
+/// for a trailing driver leaves it untouched, so legacy single-crossover
+/// chains (empty vector) are returned bit-identical. Non-deployable entries
+/// (non-finite/non-positive frequency, empty type) are skipped.
+///
+/// The plugin is appended after the driver's alignment filters. Response
+/// order is irrelevant (the cascade is linear and time-invariant); appending
+/// keeps existing gain/delay/all-pass plugin indices stable. On a shared bus
+/// the driver low-pass applies pre-sum while the bus/route group low-pass
+/// still applies post-sum. When `stage` is `Some`, the plugin is tagged with
+/// that `room_eq_stage` (e.g. `"post_route"` for home-cinema sub drivers).
+pub fn stamp_per_driver_low_passes(
+    drivers: &mut [DriverDspChain],
+    low_passes: &[Option<PerDriverLowPass>],
+    stage: Option<&str>,
+) {
+    for (driver, plan) in drivers.iter_mut().zip(low_passes.iter()) {
+        let Some(plan) = plan.as_ref().filter(|plan| plan.is_deployable()) else {
+            continue;
+        };
+        let mut plugin = create_crossover_plugin(&plan.crossover_type, plan.frequency_hz, "low");
+        if let Some(stage) = stage
+            && let Some(parameters) = plugin.parameters.as_object_mut()
+        {
+            parameters.insert(
+                "room_eq_stage".to_string(),
+                serde_json::Value::String(stage.to_string()),
+            );
+        }
+        driver.plugins.push(plugin);
+    }
+}
+
+/// Collect the deployed per-driver low-pass of one driver chain, if any.
+///
+/// Returns `(frequency_hz, crossover_type)` for the driver's low-pass
+/// crossover plugin. When several are present the last one wins, matching
+/// serial DSP order.
+pub fn driver_low_pass(driver: &DriverDspChain) -> Option<(f64, String)> {
+    driver
+        .plugins
+        .iter()
+        .filter(|plugin| {
+            plugin.plugin_type == "crossover"
+                && plugin
+                    .parameters
+                    .get("output")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|output| {
+                        matches!(
+                            output.to_ascii_lowercase().as_str(),
+                            "low" | "lowpass" | "lp"
+                        )
+                    })
+        })
+        .filter_map(|plugin| {
+            let frequency = plugin
+                .parameters
+                .get("frequency")
+                .and_then(|value| value.as_f64())?;
+            let crossover_type = plugin
+                .parameters
+                .get("type")
+                .and_then(|value| value.as_str())?;
+            (frequency.is_finite() && frequency > 0.0)
+                .then(|| (frequency, crossover_type.to_string()))
+        })
+        .next_back()
+}
+
 /// Build a DSP chain for a single channel
 pub fn build_channel_dsp_chain(
     channel_name: &str,

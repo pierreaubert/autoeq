@@ -169,7 +169,7 @@ fn shared_alignment_fit_band_excludes_subwoofer_and_crossover_rolloff() {
         ]),
         subwoofers: Some(SubwooferSystemConfig {
             config: SubwooferStrategy::Single,
-            crossover: Some("main_sub".to_string()),
+            crossover: Some("main_sub".to_string().into()),
             mapping: HashMap::new(),
         }),
         bass_management: None,

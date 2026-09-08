@@ -59,7 +59,21 @@ pub fn preprocess_channel(
     let cea2034 =
         apply_cea2034_speaker_correction(channel_name, prepared, room_config, curve, sample_rate);
     let curve = cea2034.curve;
-    let (norm_range, _) = roomeq_analysis::response_metrics::detect_passband_and_mean(&curve);
+    let (mut norm_range, _) = roomeq_analysis::response_metrics::detect_passband_and_mean(&curve);
+    if curve
+        .freq
+        .last()
+        .is_some_and(|frequency| *frequency <= 500.0)
+    {
+        // Band-limited bass measurements often contain deep internal room
+        // nulls. Use the final useful tail, not the first peak's threshold
+        // crossing, for both the correction ceiling and level reference.
+        let bounded = crate::group_processing::sub_optimizer_config(
+            std::slice::from_ref(&curve),
+            &room_config.optimizer,
+        );
+        norm_range = Some((bounded.min_freq, bounded.max_freq));
+    }
     if let Some((low, high)) = norm_range {
         info!(
             "  Detected passband for '{}': {:.1} Hz - {:.1} Hz",
@@ -565,6 +579,27 @@ mod tests {
         assert!(features.excursion_filters.is_empty());
         assert!(features.cea2034_plugins.is_empty());
         assert!(features.broadband_plugins.is_empty());
+    }
+
+    #[test]
+    fn band_limited_sub_room_null_keeps_later_bass_in_correction_band() {
+        let curve = Curve {
+            freq: ndarray::array![20.0, 30.0, 35.0, 50.0, 80.0, 130.0, 180.0, 200.0],
+            spl: ndarray::array![80.0, 85.0, 60.0, 40.0, 82.0, 68.0, 45.0, 20.0],
+            ..Default::default()
+        };
+        let input = prepared(curve.clone());
+        let config = RoomConfig {
+            optimizer: OptimizerConfig {
+                min_freq: 20.0,
+                max_freq: 16000.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut target = crate::channel_target::build_target_context("LFE", &config, &curve, None);
+        preprocess_channel("LFE", &input, &config, 48000.0, None, &mut target);
+        assert_eq!(target.max_freq, 130.0);
     }
 
     #[test]

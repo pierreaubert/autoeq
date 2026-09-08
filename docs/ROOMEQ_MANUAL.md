@@ -158,6 +158,39 @@ The optimizer never uses a coherent sum of independent programme channels for
 tonal calibration. Whole-bus aggregation is reserved for the configured
 headroom model, which may add one common down-only input safety trim.
 
+#### Per-sub crossovers (multi-sub low-pass per driver)
+
+A multi-subwoofer system may give each physical sub its own crossover key by
+writing `system.subwoofers.crossover` as a positional list instead of a single
+string:
+
+```json
+"subwoofers": {
+  "config": "mso",
+  "crossover": ["bass_xover1", "bass_xover2"]
+}
+```
+
+Entry `i` applies to physical sub `i` in driver order. The selector evaluates
+all mains as separate logical inputs against the complete shared sub array,
+including the actual main high-pass and each driver's
+low-pass. The selected filters are included before route delay, polarity,
+and trim optimization. A crossover list does not create L-to-left-sub or
+R-to-right-sub routing. Each selected frequency stays inside its own range.
+Every key must exist, and the list must contain either one shared entry or
+one entry per physical sub.
+
+Deployment: `LP_i` is a low-pass `crossover` plugin on each physical sub
+(`channels.<SUB>.drivers[i].plugins`, staged `post_route`). Redirected-bass
+routes omit a second group low-pass when this filter is present. Main high-pass
+frequency remains optimized for the shared main group; the LFE programme keeps
+its independent low-pass. The optimizer, replay and export use this same graph.
+Reports retain `bass_management.groups[].selected_sub_low_pass_hz`,
+`bass_management.optimization.sub_output_results[].selected_low_pass_hz`, and
+the `per_sub_lp_deployed_to_drivers:N` advisory. Legacy shared crossover
+configurations keep their route low-pass and have no per-driver low-pass.
+
+
 ### Multi-driver Speaker (2-way)
 
 ```json
@@ -883,3 +916,42 @@ reports record evaluator and loss pins; export round trips
 routing, preamp normalization, delay, and convolution bytes against the
 canonical graph. Demo the gates and round trips without listening
 evidence via `roomeq-qa-synthetic --release-gates`.
+
+### Multi-sub measurement resolution and output preservation
+
+Bass measurements ending at or below 500 Hz retain every native sample and
+measured phase. Full-range measurements retain their native bass samples while
+using the configured reduced grid above 500 Hz. MSO, DBA, and spatial MSO retain
+all measured frequency points in their common supported band. Interpolating a
+summed magnitude/phase curve is not equivalent to summing individual responses;
+optimization and routed reconstruction sum the drivers on the receiving grid.
+The measurement resolution remains the limit on knowledge of unmeasured nulls.
+
+A sub measurement ending at 200 Hz does not truncate full-range main analysis.
+For prediction above a tail at least 24 dB below its measured peak and falling
+at least 12 dB/octave, the model continues a falling envelope (capped at
+48 dB/octave). An energetic endpoint is held conservatively. Sub alignment and
+EQ remain inside the measured, useful bass band; this prediction extension is
+not new measurement evidence and is never used to extend the sub EQ band.
+
+The useful upper bound is the last measured sample within 20 dB of the in-band
+peak. An internal room null therefore does not truncate later useful bass.
+Crossover evaluation includes the native sub samples even when the receiving
+main measurement has a coarser grid.
+
+Independent subs driven by the same input are summed coherently when measured
+phase is available. Without phase, preprocessing explicitly reports a power-sum
+approximation; phase-critical route verification requires suitable phase data.
+All-pass and multi-seat routed processing use the dedicated sub engine, preserve
+per-driver PEQ/all-pass, polarity and primary-seat measurements, and retain the
+configured global-EQ policy instead of adding another single-seat sub EQ pass.
+
+DBA, ordinary/all-pass MSO and continuous-area scalarizations penalize loss of
+useful output, deep new nulls, low-band loss and unnecessary gain. DBA here
+optimizes measured magnitude with an inverted rear array; room geometry and
+late-energy measurements are still needed to establish rear-wall absorption.
+The cardioid path is a fixed geometric delay/inversion recipe; matching and
+directional measurements are needed to establish rear rejection. Its legitimate
+low-frequency efficiency loss is not treated as an MSO defect.
+`primary_with_constraints.max_deviation_db` is a soft penalty threshold, not a
+hard guarantee at every seat and frequency.

@@ -370,7 +370,7 @@ pub(super) fn build_multichannel_config(
     // Add crossover config if sub is present (required by 2.1 and home cinema workflows)
     let mut crossovers_map = None;
     if let Some(ref mut sc) = sub_config {
-        sc.crossover = Some("lfe_xover".to_string());
+        sc.crossover = Some("lfe_xover".to_string().into());
         let mut xovers = HashMap::new();
         xovers.insert(
             "lfe_xover".to_string(),

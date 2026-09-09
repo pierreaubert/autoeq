@@ -1,3 +1,4 @@
+mod fir_delay;
 mod misc;
 #[cfg(test)]
 mod tests;

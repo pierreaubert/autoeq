@@ -10,14 +10,21 @@ pub struct EpaStrategy {
 
 impl Objective for EpaStrategy {
     fn compute(&self, x: &[f64], ctx: &ObjectiveContext) -> f64 {
-        let peq_spl = ctx.peq_spl(x);
-        let error = &peq_spl - ctx.deviation;
+        self.compute_response(&ctx.peq_spl(x), ctx).expect("scalar response objective")
+    }
+
+    fn compute_response(&self, peq_spl: &ndarray::Array1<f64>, ctx: &ObjectiveContext) -> Option<f64> {
+        if peq_spl.len() != ctx.freqs.len() || peq_spl.len() != ctx.deviation.len()
+            || peq_spl.iter().any(|value| !value.is_finite()) {
+            return Some(f64::INFINITY);
+        }
+        let error = peq_spl - ctx.deviation;
         let error = ctx.apply_deadband(&error);
 
         let flatness = epa_flatness(ctx.freqs, &error, ctx.min_freq, ctx.max_freq, &self.config);
 
         let _ = &self.temporal_masking_modes;
-        flatness + ctx.smoothness_penalty(&peq_spl)
+        Some(flatness + ctx.smoothness_penalty(peq_spl))
     }
 }
 

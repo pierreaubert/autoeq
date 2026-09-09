@@ -27,6 +27,7 @@ mod tests;
 mod types;
 
 pub use compute::*;
+pub use mso_search_budget::{MsoSearchBudget, MsoSearchReport};
 pub use multi_seat_measurements::*;
 pub use optimize::*;
 pub use types::*;

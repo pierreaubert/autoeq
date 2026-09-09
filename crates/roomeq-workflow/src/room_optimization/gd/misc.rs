@@ -18,24 +18,6 @@ pub(super) fn tag_group_delay_plugin(
     plugin
 }
 
-pub(super) fn existing_fir_convolution_filename(chain: &ChannelDspChain) -> Option<String> {
-    chain.plugins.iter().find_map(|plugin| {
-        if plugin.plugin_type != "convolution" {
-            return None;
-        }
-        let ir_file = plugin
-            .parameters
-            .get("ir_file")
-            .and_then(|value| value.as_str())?;
-        let file_name = Path::new(ir_file).file_name()?.to_str()?;
-        let is_full_fir = (file_name.contains("_fir_") || file_name.ends_with("_fir.wav"))
-            && !file_name.contains("residual_fir")
-            && !file_name.contains("excess_phase_fir")
-            && !file_name.contains("band_fir");
-        is_full_fir.then(|| ir_file.to_string())
-    })
-}
-
 pub(in crate::room_optimization) fn source_for_output_channel<'a>(
     config: &'a RoomConfig,
     channel_name: &str,

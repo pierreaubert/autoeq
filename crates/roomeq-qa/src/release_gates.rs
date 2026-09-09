@@ -104,7 +104,9 @@ impl PolicyRelease {
     ) -> Result<Promotion, String> {
         self.validate()?;
         if self.behavior == PolicyBehavior::Legacy {
-            return Ok(Promotion::Promoted(String::from("legacy behavior: no gates required")));
+            return Ok(Promotion::Promoted(String::from(
+                "legacy behavior: no gates required",
+            )));
         }
         if self.behavior == PolicyBehavior::Advisory {
             return Ok(Promotion::Held(String::from(
@@ -123,15 +125,17 @@ impl PolicyRelease {
         }
         let mut missing = Vec::new();
         for gate in need {
-            let pass = gates.iter().any(|assessment| {
-                assessment.gate == gate && assessment.effective_pass()
-            });
+            let pass = gates
+                .iter()
+                .any(|assessment| assessment.gate == gate && assessment.effective_pass());
             if !pass {
                 missing.push(format!("{gate:?}"));
             }
         }
         if missing.is_empty() {
-            Ok(Promotion::Promoted(String::from("required gates pass with evidence")))
+            Ok(Promotion::Promoted(String::from(
+                "required gates pass with evidence",
+            )))
         } else {
             Ok(Promotion::Held(format!(
                 "missing or unassessed gates: {}",
@@ -175,7 +179,10 @@ pub fn veto_release_behavior(config: Option<&FilterAudibilityConfig>) -> PolicyB
 }
 
 /// Release record for the per-filter audibility veto at one selection.
-pub fn veto_policy_release(config: Option<&FilterAudibilityConfig>, version: &str) -> PolicyRelease {
+pub fn veto_policy_release(
+    config: Option<&FilterAudibilityConfig>,
+    version: &str,
+) -> PolicyRelease {
     PolicyRelease {
         policy_id: String::from("filter-audibility-veto"),
         version: String::from(version),
@@ -188,11 +195,28 @@ pub fn veto_policy_release(config: Option<&FilterAudibilityConfig>, version: &st
 mod release_gates_tests {
     use super::*;
 
-    fn gates_with(correctness: bool, safety: bool, perceptual: bool, benefit: bool) -> Vec<GateAssessment> {
+    fn gates_with(
+        correctness: bool,
+        safety: bool,
+        perceptual: bool,
+        benefit: bool,
+    ) -> Vec<GateAssessment> {
         [
-            (ReleaseGate::ImplementationCorrectness, correctness, "qa-suite-green"),
-            (ReleaseGate::PhysicalSafety, safety, "headroom-stability-report"),
-            (ReleaseGate::PerceptualValidation, perceptual, "staged-metric-report"),
+            (
+                ReleaseGate::ImplementationCorrectness,
+                correctness,
+                "qa-suite-green",
+            ),
+            (
+                ReleaseGate::PhysicalSafety,
+                safety,
+                "headroom-stability-report",
+            ),
+            (
+                ReleaseGate::PerceptualValidation,
+                perceptual,
+                "staged-metric-report",
+            ),
             (ReleaseGate::ListeningBenefit, benefit, "abx-protocol-hash"),
         ]
         .into_iter()
@@ -230,7 +254,12 @@ mod release_gates_tests {
         // A pass without evidence is unassessed, not a pass.
         let mut no_evidence = gates_with(true, true, false, false);
         no_evidence[1].evidence = String::from("");
-        assert!(!enforcing_physical().promotion(&no_evidence, false).unwrap().promoted());
+        assert!(
+            !enforcing_physical()
+                .promotion(&no_evidence, false)
+                .unwrap()
+                .promoted()
+        );
     }
 
     #[test]
@@ -304,7 +333,12 @@ mod release_gates_tests {
             PolicyBehavior::Enforcing
         );
         let record = veto_policy_release(Some(&enforcing), "phase-a-1.0");
-        assert!(!record.promotion(&gates_with(true, true, false, false), false).unwrap().promoted());
+        assert!(
+            !record
+                .promotion(&gates_with(true, true, false, false), false)
+                .unwrap()
+                .promoted()
+        );
         assert!(record.promotion(&full, false).unwrap().promoted());
     }
 }

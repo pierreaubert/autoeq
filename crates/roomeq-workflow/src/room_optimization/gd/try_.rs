@@ -1,10 +1,9 @@
 use super::super::types::ChannelOptimizationResult;
 use super::super::*;
+use super::fir_delay::apply_phase_linear_delay_target;
 use super::misc::apply_gd_opt_result;
 use super::misc::build_gd_sweep_realisations_with_frequency_samples;
 use super::misc::coherence_average_gd_realisations;
-use super::misc::existing_fir_convolution_filename;
-use super::misc::tag_group_delay_plugin;
 
 /// Polarity optimization requires trusted phase (coherence). Both GD paths
 /// must gate it off under missing coherence, matching the
@@ -444,151 +443,37 @@ pub(in super::super) fn try_run_phase_linear_fir_gd(
     }
 
     let target = build_gd_alignment_target(&gd_channels, &gd_result, &gd_config);
-    let mut applied = false;
-    let mut phase_updates: Vec<(String, f64, bool)> = Vec::new();
-    let out_dir = output_dir.unwrap_or(Path::new("."));
-
-    for (channel_index, name) in gd_channel_names.iter().enumerate() {
-        let delay_ms = target
-            .per_channel_delay_ms
-            .get(channel_index)
-            .copied()
-            .unwrap_or(0.0);
-        let polarity_inverted = target
-            .per_channel_polarity_inverted
-            .get(channel_index)
-            .copied()
-            .unwrap_or(false);
-        if delay_ms.abs() <= 0.01 && !polarity_inverted {
-            continue;
+    let mut summary =
+        GroupDelayOptSummary::from_result_with_names(&gd_result, gd_channel_names.clone());
+    match apply_phase_linear_delay_target(
+        channel_results,
+        channel_chains,
+        &gd_channel_names,
+        &target.per_channel_delay_ms,
+        &target.per_channel_polarity_inverted,
+        sample_rate,
+        output_dir.unwrap_or(Path::new(".")),
+    ) {
+        Ok(applied_delays) => {
+            summary.applied = !applied_delays.is_empty();
+            summary.channel_names = applied_delays
+                .iter()
+                .map(|(name, _, _)| name.clone())
+                .collect();
+            summary.per_channel_delay_ms =
+                applied_delays.iter().map(|(_, delay, _)| *delay).collect();
+            summary.per_channel_polarity_inverted = applied_delays
+                .iter()
+                .map(|(_, _, polarity)| *polarity)
+                .collect();
+            summary.per_channel_ap_count = vec![0; applied_delays.len()];
         }
-
-        let Some(ch) = channel_results.get_mut(name.as_str()) else {
-            continue;
-        };
-
-        let updated_coeffs = if let Some(existing) = ch.fir_coeffs.as_deref() {
-            let mut coefficients =
-                fir::apply_gd_delay_to_fir_coefficients(existing, delay_ms, sample_rate);
-            if polarity_inverted {
-                coefficients
-                    .iter_mut()
-                    .for_each(|coefficient| *coefficient = -*coefficient);
-            }
-            coefficients
-        } else {
-            let Some(filename) = channel_chains
-                .get(name.as_str())
-                .and_then(existing_fir_convolution_filename)
-            else {
-                warn!(
-                    "GD-Opt FIR target: no in-memory or deployed FIR coefficients for '{}'; skipping adjustment",
-                    name
-                );
-                continue;
-            };
-            let deployed_path = out_dir.join(filename);
-            let decoded = match crate::wav::decode_first_channel(&deployed_path) {
-                Ok(decoded) if decoded.sample_rate == sample_rate.round() as u32 => decoded,
-                Ok(decoded) => {
-                    warn!(
-                        "GD-Opt FIR target: deployed FIR for '{}' uses {} Hz, expected {:.0} Hz; skipping adjustment",
-                        name, decoded.sample_rate, sample_rate
-                    );
-                    continue;
-                }
-                Err(error) => {
-                    warn!(
-                        "GD-Opt FIR target: failed to load deployed FIR for '{}': {}; skipping adjustment",
-                        name, error
-                    );
-                    continue;
-                }
-            };
-            let existing = decoded
-                .samples
-                .into_iter()
-                .map(f64::from)
-                .collect::<Vec<_>>();
-            let mut coefficients =
-                fir::apply_gd_delay_to_fir_coefficients(&existing, delay_ms, sample_rate);
-            if polarity_inverted {
-                coefficients
-                    .iter_mut()
-                    .for_each(|coefficient| *coefficient = -*coefficient);
-            }
-            coefficients
-        };
-
-        ch.fir_coeffs = Some(updated_coeffs.clone());
-
-        let existing_filename = channel_chains
-            .get(name.as_str())
-            .and_then(existing_fir_convolution_filename);
-        let (filename, wav_path) = existing_filename
-            .map(|filename| {
-                let path = out_dir.join(&filename);
-                (filename, path)
-            })
-            .unwrap_or_else(|| {
-                autoeq_artifacts::roomeq::reserve_convolution_artifact_path(
-                    out_dir,
-                    name,
-                    autoeq_artifacts::roomeq::ConvolutionArtifactKind::Fir,
-                    sample_rate,
-                )
-            });
-        if let Err(e) =
-            math_audio_iir_fir::save_fir_to_wav(&updated_coeffs, sample_rate as u32, &wav_path)
-        {
-            warn!(
-                "GD-Opt FIR target: failed to save FIR WAV for '{}': {}",
-                name, e
-            );
+        Err(error) => {
+            summary.applied = false;
+            summary.advisory = format!("gd_fir_delay_not_applied: {error}");
+            return Some(summary);
         }
-
-        if let Some(chain) = channel_chains.get_mut(name.as_str()) {
-            let existing_convolution = chain.plugins.iter_mut().find(|plugin| {
-                plugin.plugin_type == "convolution"
-                    && plugin
-                        .parameters
-                        .get("ir_file")
-                        .and_then(|value| value.as_str())
-                        == Some(filename.as_str())
-            });
-            if let Some(plugin) = existing_convolution {
-                plugin.parameters["label"] =
-                    serde_json::Value::String("group_delay_phase_linear".to_string());
-                plugin.parameters["delay_ms"] = serde_json::json!(delay_ms);
-                plugin.parameters["polarity_inverted"] = serde_json::json!(polarity_inverted);
-            } else {
-                let mut plugin = tag_group_delay_plugin(
-                    roomeq_engine::output::create_convolution_plugin(&filename),
-                    "group_delay_phase_linear",
-                );
-                plugin.parameters["delay_ms"] = serde_json::json!(delay_ms);
-                plugin.parameters["polarity_inverted"] = serde_json::json!(polarity_inverted);
-                chain.plugins.push(plugin);
-            }
-        }
-
-        phase_updates.push((name.clone(), delay_ms, polarity_inverted));
-        applied = true;
     }
-
-    for (name, delay_ms, polarity_inverted) in phase_updates {
-        sync_reported_phase_adjustment(
-            &name,
-            channel_results,
-            channel_chains,
-            delay_ms,
-            polarity_inverted,
-            sample_rate,
-        );
-    }
-
-    let mut summary = GroupDelayOptSummary::from_result_with_names(&gd_result, gd_channel_names)
-        .with_applied(applied);
     if missing_coherence {
         summary.advisory =
             GroupDelayOptSummary::from_advisory(&GdOptAdvisory::MissingCoherenceDelayOnly).advisory;

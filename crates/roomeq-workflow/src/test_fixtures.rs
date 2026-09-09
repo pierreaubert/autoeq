@@ -12,6 +12,7 @@ use std::collections::HashMap;
 /// An empty `OptimizationMetadata` for tests.
 pub fn empty_metadata() -> OptimizationMetadata {
     OptimizationMetadata {
+            final_convolution_sha256: None,
         pre_score: 0.0,
         post_score: 0.0,
         algorithm: "de".to_string(),
@@ -37,6 +38,7 @@ pub fn empty_metadata() -> OptimizationMetadata {
         correction_acceptance: None,
         optimizer_evidence: None,
         stage_outcomes: Vec::new(),
+        qa_seed_distribution: None,
         effective_config: None,
     }
 }

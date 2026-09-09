@@ -1,4 +1,4 @@
-use super::apply::apply_fractional_sample_shift;
+use super::apply::{gd_delay_padding_samples, realize_gd_fir_delay};
 use crate::Curve;
 use crate::eq::{EqResources, PreparedEqTarget};
 pub use autoeq_fir::FirPhase;
@@ -104,6 +104,25 @@ fn is_effectively_identity_fir(coefficients: &[f64]) -> bool {
     (peak.abs() - 1.0).abs() <= 1.0e-5 && off_peak <= 1.0e-8
 }
 
+/// Retry an identity-like excess-phase result only for a nontrivial target.
+pub(super) fn recover_excess_phase_identity(
+    coefficients: Vec<f64>,
+    correct_excess_phase: bool,
+    correction_rms: f64,
+    magnitude_only: impl FnOnce() -> Vec<f64>,
+) -> Vec<f64> {
+    if correct_excess_phase && correction_rms > 0.1 && is_effectively_identity_fir(&coefficients) {
+        EXCESS_PHASE_IDENTITY_WARNING.call_once(|| {
+            log::warn!(
+                "One or more excess-phase FIR designs collapsed to identity despite a non-trivial magnitude correction; retrying magnitude-only Kirkeby inversion"
+            );
+        });
+        magnitude_only()
+    } else {
+        coefficients
+    }
+}
+
 /// Generate an FIR correction filter for a single channel
 ///
 /// This is the main entry point for FIR-based room correction. It handles:
@@ -126,6 +145,15 @@ pub fn generate_fir_correction_prepared(
 ) -> Result<Vec<f64>, Box<dyn Error>> {
     let fir_config = config.fir.as_ref().ok_or("FIR configuration missing")?;
     let n_taps = fir_config.taps;
+
+    // Prepared targets must already share the measurement grid. In particular,
+    // boost capping below is pointwise, not an interpolation operation.
+    if target_curve.freq != measurement.freq
+        || target_curve.spl.len() != measurement.freq.len()
+        || measurement.spl.len() != measurement.freq.len()
+    {
+        return Err("Prepared FIR target and levels must match the measurement frequency grid".into());
+    }
 
     // Optional boost cap: clamp the target-vs-measurement delta to at most
     // `max_boost_db` of positive correction per frequency before designing
@@ -157,7 +185,7 @@ pub fn generate_fir_correction_prepared(
                     threshold_db: pr.threshold_db,
                     max_time_s: pr.max_time_s,
                 });
-        let mut coeffs = autoeq_fir::generate_kirkeby_correction_with_smoothing_and_pre_ringing(
+        let coeffs = autoeq_fir::generate_kirkeby_correction_with_smoothing_and_pre_ringing(
             measurement,
             target_curve,
             sample_rate,
@@ -170,33 +198,29 @@ pub fn generate_fir_correction_prepared(
         );
         let correction_rms =
             correction_rms_db(measurement, target_curve, config.min_freq, config.max_freq);
-        if fir_config.correct_excess_phase
-            && correction_rms > 0.1
-            && is_effectively_identity_fir(&coeffs)
-        {
-            EXCESS_PHASE_IDENTITY_WARNING.call_once(|| {
-                log::warn!(
-                    "One or more excess-phase FIR designs collapsed to identity despite a non-trivial magnitude correction; retrying magnitude-only Kirkeby inversion"
-                );
-            });
-            coeffs = autoeq_fir::generate_kirkeby_correction_with_smoothing_and_pre_ringing(
-                measurement,
-                target_curve,
-                sample_rate,
-                n_taps,
-                config.min_freq,
-                config.max_freq,
-                false,
-                fir_config.phase_smoothing,
-                fir_config
-                    .pre_ringing
-                    .as_ref()
-                    .map(|pr| math_audio_iir_fir::PreRingingConfig {
-                        threshold_db: pr.threshold_db,
-                        max_time_s: pr.max_time_s,
+        let coeffs = recover_excess_phase_identity(
+            coeffs,
+            fir_config.correct_excess_phase,
+            correction_rms,
+            || {
+                autoeq_fir::generate_kirkeby_correction_with_smoothing_and_pre_ringing(
+                    measurement,
+                    target_curve,
+                    sample_rate,
+                    n_taps,
+                    config.min_freq,
+                    config.max_freq,
+                    false,
+                    fir_config.phase_smoothing,
+                    fir_config.pre_ringing.as_ref().map(|pr| {
+                        math_audio_iir_fir::PreRingingConfig {
+                            threshold_db: pr.threshold_db,
+                            max_time_s: pr.max_time_s,
+                        }
                     }),
-            );
-        }
+                )
+            },
+        );
         Ok(coeffs)
     } else {
         // Standard magnitude-based generation
@@ -254,6 +278,9 @@ pub fn generate_fir_correction_prepared(
 
 /// Generate a correction FIR and apply an optional group-delay alignment
 /// target to the selected channel.
+/// All channels receive the common causal padding returned by
+/// `gd_delay_padding_samples(&target.per_channel_delay_ms, sample_rate)`.
+/// Consumers must include that padding in their absolute latency report.
 pub fn generate_fir_correction_with_gd_target_prepared(
     measurement: &Curve,
     config: &OptimizerConfig,
@@ -264,12 +291,14 @@ pub fn generate_fir_correction_with_gd_target_prepared(
 ) -> Result<Vec<f64>, Box<dyn Error>> {
     let mut coeffs =
         generate_fir_correction_prepared(measurement, config, target_curve, sample_rate)?;
-    if let Some(delay_ms) = gd_target
-        .and_then(|target| target.per_channel_delay_ms.get(channel_index))
-        .copied()
-        .filter(|delay| delay.abs() > 1e-6)
-    {
-        coeffs = apply_fractional_sample_shift(&coeffs, delay_ms * 1e-3 * sample_rate);
+    if let Some(target) = gd_target {
+        let delay_ms = target
+            .per_channel_delay_ms
+            .get(channel_index)
+            .copied()
+            .ok_or("missing channel in FIR group-delay target")?;
+        let padding = gd_delay_padding_samples(&target.per_channel_delay_ms, sample_rate);
+        coeffs = realize_gd_fir_delay(&coeffs, delay_ms, sample_rate, padding)?.coefficients;
     }
     if gd_target
         .and_then(|target| target.per_channel_polarity_inverted.get(channel_index))

@@ -169,24 +169,32 @@ pub(super) fn collect_generic_channel_results(
                     step_status: None,
                 },
             )?;
-            let generated =
-                if matches!(config.optimizer.processing_mode, ProcessingMode::MixedPhase) {
-                    post_generate_mixed_phase_fir(
-                        &channel_name,
-                        &initial_curve,
-                        &config.optimizer,
-                        sample_rate,
-                        output_dir,
-                    )
-                    .unwrap_or_else(|error| {
+            let generated = if matches!(
+                config.optimizer.processing_mode,
+                ProcessingMode::MixedPhase
+            ) {
+                match post_generate_mixed_phase_fir(
+                    &channel_name,
+                    &initial_curve,
+                    &config.optimizer,
+                    sample_rate,
+                    output_dir,
+                ) {
+                    Ok(generated) => generated,
+                    Err(MixedPhasePostError::Artifact(message)) => {
+                        return Err(AutoeqError::OptimizationFailed { message });
+                    }
+                    Err(MixedPhasePostError::Candidate(error)) => {
                         log::warn!(
                             "Mixed-phase FIR candidate rejected for '{}': {}",
                             channel_name,
                             error
                         );
                         None
-                    })
-                } else {
+                    }
+                }
+            } else {
+                Some(
                     post_generate_fir(
                         &channel_name,
                         &initial_curve,
@@ -197,7 +205,13 @@ pub(super) fn collect_generic_channel_results(
                         output_dir,
                         None,
                     )
-                };
+                    .ok_or_else(|| AutoeqError::OptimizationFailed {
+                        message: format!(
+                            "required FIR generation or sidecar write failed for '{channel_name}'"
+                        ),
+                    })?,
+                )
+            };
             post_generated_fir = generated.clone();
             generated.map(|generated| generated.coeffs)
         } else {

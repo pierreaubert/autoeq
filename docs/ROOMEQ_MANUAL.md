@@ -2,6 +2,157 @@
 
 `roomeq` is a command-line tool for optimizing multi-channel speaker systems. It analyzes frequency response measurements and generates optimal DSP chains (EQ, crossovers, gains) for each channel.
 
+## Final convolution resource integrity
+
+Best-effort routed snapshots and correction replay treat a reviewed residual
+splice dip as a source-specific exception. They continue checking other logical
+inputs and record each retained residual separately. One reviewed source never
+exempts the remaining mains from validation. These intermediate exceptions do
+not relax the strict final crossover-safety gate or establish final acceptance.
+
+When combined-boost limiting changes a channel's PEQs, its original optimizer
+run remains recorded but is no longer marked selected for output. The applied
+limiting stage records the gain scale and boost limit separately.
+
+Successful limiting also updates the cached biquad coefficients used by IR
+reporting. Previous waveform and early/late reports are invalidated until they
+are rebuilt. If phase evidence is unavailable at refresh, the waveform pair is
+absent rather than retained from an older measurement or correction. These are
+model-derived waveform reports, not a replacement for measured temporal or
+listening evidence.
+
+Combined-boost limiting commits a changed channel only after successful DSP
+replay. Replay failure retains both its original chain and cached response;
+a failed replay is not evidence that the channel meets the boost limit.
+
+When final-seat shape and useful-output checks both fail, the rejection report
+retains both violation codes and the error includes both diagnostics. A shape
+failure does not suppress evidence of lost output.
+
+Legacy MSO with multiple measured seats now retains one coherent combined
+response per seat after selected sub gains/delays for shared sub EQ. The
+configured multi-measurement strategy receives those responses. Routing keeps
+its separate complex representative for crossover timing. Shared-EQ support
+is restricted to common measured support; missing phase or inconsistent
+seat identities/counts cannot be replaced by an invented coherent response.
+This does not change legacy MSO's primary-seat gain/delay search into a
+multi-seat alignment optimizer; use the explicit multi-seat mode for that.
+
+If correction-safety rollback breaks routed playback, the workflow fails.
+The restored pre-gate graph is retained only as diagnostic state: restoring
+routing does not prove that the rejected correction is safe. No validation
+bundle is newly published for this failed workflow.
+
+Final-seat quality rejection sets correction acceptance to `accepted: false`
+and `decision: "rejected"`, retaining seat evidence and violation reasons.
+The workflow returns an error; this decision does not claim that a rollback or
+identity fallback was executed. Consumers of the output decision enum must
+handle the additive `rejected` value.
+
+Channel-matching EQ has explicit logical-input (`pre_route`) ownership, so routed
+playback applies it to both the main and redirected-bass branches. Deployed-source
+curve caches follow the same correction and are restored if matching is discarded.
+
+Routed finalization and direct physical replay reject channel plugins without a
+recognized `pre_route`, `post_route` or `route_owned` stage. CamillaDSP's public
+export validator already enforces this requirement. Driver plugins are owned by
+their explicit physical branch; non-routed chains do not need routing stage tags.
+
+Post-EQ acceptance checks useful-output loss across the representative stage's
+declared band, including bass below the mains scoring band. A rejected candidate
+is discarded through the existing stage path, preserving previous correction,
+routing, gains and delays; its optimizer evidence is not selected for output.
+Stage metadata records output-loss rejections. This necessary stage guard does
+not replace final native-seat checks for cumulative or position-specific loss.
+
+Routed graphs keep logical source inputs separate from physical output-only sub
+channels. Adding independently controlled sub outputs extends the destination
+list, not the list of signals to replay or capture. Route source indices address
+the logical input list; destination indices address the physical output list.
+
+Enabled validation bundles are written only after final-seat validation succeeds.
+They include the workflow sample rate, requested optimizer configuration, final
+DSP graph with acceptance/seat evidence and resource identities, and final
+combined scores. The embedded graph omits the bundle's own just-created report
+pointer. A workflow error does not publish a new bundle; it does not delete an
+older bundle already present in a reused output directory. These descriptors
+are not rendered, level-matched listening assets or proof of perceptual benefit.
+
+Finalization and packaging require every global, channel and driver convolution
+stage to declare a string `ir_file` that is nonblank and contains no NUL byte.
+Malformed declarations are errors, not absent resources; valid references to
+unavailable files remain explicitly unbound at finalization.
+
+Before binding available resources, finalization decodes every referenced WAV
+at the workflow sample rate and requires nonempty, equal-length channels with
+finite samples. This applies even without retained coefficient ownership, such
+as driver or multi-FIR resources. It validates WAV data, not equivalence to
+an accepted acoustic transfer; retained-tap comparisons remain ownership-scoped.
+
+Completed workflows record `metadata.final_convolution_sha256` after the final
+DSP stages, using the configured artifact store. Each reference maps to its
+SHA-256, or `null` when the resource was unavailable at finalization. Packaged
+exports verify this inventory before writing and retain it when sidecars are
+renamed. Changed, missing, or unbound resources require a new validated workflow
+result; exporting must not silently assign replacement files a new identity.
+The export API without sidecar verification rejects bound convolution graphs.
+
+Older/manual graphs without this optional field remain readable and exportable,
+but do not carry this final-workflow integrity guarantee. The inventory records
+byte identity, not acoustic acceptance, audibility, or protection against an
+actor who edits both the file and its recorded digest.
+
+Retained channel FIR coefficients are associated only with that channel's
+single declared channel-level convolution reference. A driver's separate FIR
+must use its own sidecar; it is neither compared against unrelated parent taps
+nor replaced with them when missing. This ownership check does not infer
+coefficient ownership for arbitrary multi-FIR chains.
+
+## CamillaDSP delay realization
+
+
+CamillaDSP exports preserve integer delays in samples. Fractional delays use
+a causal FIR rather than silently rounding to whole samples. Every parallel
+branch receives the same required stage padding, preserving relative timing.
+The YAML `roomeq_delay_realization` declaration records per-stage padding,
+total additional latency, sample rate, and usable frequency band. The same
+typed report is available through the export API and packaged artifact; the
+workflow logs it when fractional-delay processing is present.
+
+The fractional-delay kernel is specified through 0.46 × sample rate, with
+at most 0.01 dB magnitude error; Nyquist is not certified. Added backend
+padding is **in addition to** requested delays, existing correction-FIR
+latency, and device buffering. It is not evidence of acoustic improvement,
+transient headroom, or listener preference. The required matrix backend QA
+checks sampled electrical transfer independently of optimization scores.
+
+### Physical-routing API
+
+`roomeq-model::PhysicalRoutingGraph` is the backend-neutral contract for resolved
+input-to-physical-output routing. Input plugins run before fan-out; every route
+retains its own gain, polarity, crossover family/frequency and delay. Contributions
+sum at each physical output before its ordered output plugins run. Routes may be
+canonicalized for deterministic serialization, but distinct transfers are never
+merged solely because they share an input. Port names are graph identities, not
+sound-card assignments.
+
+`roomeq-engine::physical_routing::resolve_physical_routing` translates supported
+legacy home-cinema channel/driver ownership into this contract. Shared sub EQ is
+assigned to each physical sub, while driver gain/delay/polarity already included
+in route values is not applied again. Unresolved ownership is an error. Electrical
+diagnostics and the sibling SOTF native adapter use this resolver. Native lowering
+preserves signed gains and uses explicit wet-only, zero-feedback alignment delays.
+Unsupported crossover families are rejected rather than replaced with LR24.
+Local PCM regressions cover integer delays, LR24 crossover transfer, shared EQ,
+and route-order invariance at 44.1/48/96 kHz and multiple block sizes. Deployment
+still requires the matching AutoEQ dependency revision. Arbitrary fractional-delay
+and FIR conformance, device routing, acoustic improvement, and transient/continuous
+headroom are not certified by those tests or by model replay alone.
+
+This adds a library contract, not a new RoomEQ input configuration field or a
+replacement of the existing exported `DspGraph` JSON schema. AutoEQ has no new
+dependency on SOTF's player, engine, or plugins.
+
 ## Features
 
 - **Single speaker optimization**: Optimize EQ for individual speakers
@@ -227,6 +378,15 @@ configurations keep their route low-pass and have no per-driver low-pass.
 
 ### Measurement CSV Format
 
+The four-column microphone phase-calibration library API treats calibration
+support as measured evidence: `sample_at` returns `None` outside that support,
+and `apply_to_curve` returns an error without modifying the input if any
+frequency is unsupported or evidence is malformed. Successful application
+invalidates cached phase decomposition. Callers must handle the returned
+`Result`; these helper guarantees do not by themselves establish that a
+recording/export workflow applied the calibration, or establish absolute SPL
+equivalence between CSV, impulse-response and MDAT sources.
+
 Measurement CSV files should have the following columns:
 - `freq`: Frequency in Hz
 - `spl`: Sound pressure level in dB
@@ -243,7 +403,30 @@ freq,spl
 
 ## Optimizer Configuration
 
+For single-channel processing, the requested correction band is intersected
+with the measurement's native frequency support before preprocessing, scoring,
+and PEQ/FIR design. A measurement starting at 100 Hz cannot authorize a 20 Hz
+correction band. Disjoint requested and measured bands fail explicitly; the
+processor does not invent measurements outside the captured range. This
+constrains the design band, not the natural response tails of finite filters.
+
+Progress reporting does not change filter-selection policy. When adaptive
+selection is enabled by `min_filter_improvement`, it remains enabled for
+interactive and QA runs with progress callbacks, including Hybrid's IIR stage.
+A stop request cancels the adaptive run rather than advancing to another pass.
+
 ### Algorithms
+
+Hybrid spatial FIR searches retain the caller's progress/stop callback after
+the IIR stage. DE and CMA-ES check it at native generation boundaries as well
+as scored FIR basis boundaries. COBYLA and ISRES currently check only at stage
+boundaries because the pinned scalar backends lack native stop hooks; their
+search can finish before a pending Stop is observed. A result is discarded
+once Stop is observed. Completed FIR optimizer evidence records
+`callback_cancellation=native_generation_boundaries` or
+`callback_cancellation=stage_boundaries_only` when a callback was supplied.
+These checks do not interrupt FIR template construction, an initial population,
+or an in-flight objective evaluation, and do not promise a maximum stop latency.
 
 - `autoeq:cmaes`: CMA-ES (default global optimizer)
 - `autoeq:de`: Differential Evolution
@@ -851,17 +1034,234 @@ production implementation boundary.
 
 ### QA tiers and scenario registry
 
+Escaped-defect ownership checking now requires a regression identity object with
+`package`, library `target`, and fully qualified `name`, resolved against nextest
+JSON discovery. Ignored or zero-selected inventories cannot establish ownership.
+Recipes are resolved from Just's JSON dump and literal dependency/run commands
+reachable from `.github/workflows/ci.yml`; dynamic shell invocations are not
+guessed. A mutant fixture needs a manifest and runner, not only a README.
+`just qa-roomeq-escaped-defects` resolves and executes the registered exact tests;
+`just qa-roomeq-escaped-defect-mutants` separately executes the registered
+semantic faults. Their evidence records distinguish a completed run from a
+running or failed one and retain per-defect artifact hashes. These recipes are
+wired into the blocking RoomEQ CI workflow; local results are not evidence of
+a hosted CI run. Ownership discovery alone never establishes killed mutants.
+Checker regressions run with
+`python3 -m unittest scripts.test_escaped_defect_ownership`.
+
+The opt-in `--parameter-matrix` runner currently establishes finite-output smoke
+coverage, not complete pairwise execution or useful correction. Its artifact at
+Each parameter-matrix row retains a unique directory under
+`target/qa/roomeq-parameter-bundles/`. `request.json` stores the exact single-speaker
+measurements separately from `configuration_without_speakers`, since internal
+in-memory sources are not serializable CLI measurement references.
+`selected-output.json` and its convolution sidecars retain the selected rerun's
+DSP for independent replay after execution. The matrix's `replay_bundle` links
+these artifacts; earlier bundles are not overwritten by subsequent runs.
+This artifact-retention contract does not establish backend or acoustic success.
+
+`target/qa/roomeq-parameter-matrix.json` records requested axes, effective optimizer
+and routing settings, measurement descriptors, selected DSP rate, delivered FIR
+lengths, stage outcomes, and seed reliability. The selected rate is passed to
+optimization; stereo, redirected 2.1, and 5.1 configurations use their actual
+topology builders. Crossover values request fixed 160 Hz LR24, automatic
+120–220 Hz LR24, and fixed 160 Hz LR48 respectively. The shell contract checks
+each reported physical main/sub branch against its selected crossover group;
+automatic selection without measured phase must remain explicitly skipped,
+not counted as successful search. These route checks are not an independent
+render of every matrix row. Full execution and usefulness/mutation coverage
+remain unfinished. CLI success/failure checks are in
+`scripts/test_roomeq_synthetic_exit.py`; run after building the release QA binary.
+
+The public acoustic quality evaluator now records `useful_output` separately
+from normalized shape RMS, for every training and held-out seat. Its default
+authorized broadband gain is 0 dB. Library callers can use
+`evaluate_acoustic_quality_with_permitted_gain` to declare an intended trim or
+headroom attenuation; this gain is not fitted from the candidate. The unexplained
+loss metric is log-frequency-weighted RMS below the lesser of baseline and target
+(or baseline when no target exists), after the declared gain. This allows removing
+above-target peaks without requiring inversion of existing nulls. The public gate
+uses a configurable 3 dB engineering budget, not a listening-calibrated threshold.
+A separate loss RMS over measured support at or below 200 Hz prevents the main
+band from diluting bass loss; its actual evaluated band is reported, and fewer
+than two supported bass samples leave that evidence absent.
+Absolute target-shortfall RMS remains visible even for authorized attenuation;
+exceeding its separate 3 dB advisory budget reports `best_effort_target_shortfall`.
+Final multi-seat replay now retains this evidence across logical inputs and both
+partitions and enforces the 3 dB loss budget. Explicit per-logical-input correction
+gain allowances use `optimizer.permitted_output_gain_db`; see the input format.
+Structural routing gain remains in both pre/post baselines. Single-seat-only
+paths, structural-route loss, full pipeline/export certification, and electrical
+headroom remain outside this completed integration scope.
+
+Final-seat replay preserves a full-range main when a shorter sub capture has an
+explicit calibrated `optimizer.upper_band_acoustic_bounds` declaration for that
+physical output, partition, and seat. A falling measured tail is not sufficient.
+The bound is processed through the actual branch DSP; aggregate omission must
+stay within 0.1 dB magnitude uncertainty. Reports retain magnitude and phase
+uncertainty without inventing unmeasured phase, and use a conservative improvement
+lower bound. Missing or significant upper-band evidence fails validation instead
+of truncating the main assessment. See `src/bin/roomeq/INPUT_FORMAT.md` for the
+configuration and calibration contract.
+
+Unequal lower endpoints do not silently shorten the assessment band either.
+Within the requested band, if one driver or routed output has measured bass
+that another physical branch does not cover, replay reports insufficient
+summation evidence. Upper-band bounds do not certify missing lower-band
+response. Supply the missing capture or explicitly request only the common
+supported band; replay does not infer a tweeter's acoustic stopband from its
+electrical crossover. ULP-scale endpoint rounding is tolerated, not meaningful
+frequency extrapolation.
+
+Routed correction scores use the same measured passband
+and correction-only basis for pre and post, removing routing transfer from the
+post response. These shape scores do not replace coherent routed-splice,
+useful-level, electrical-headroom, or held-out-seat evidence.
+
+Phase-linear and single-measurement Hybrid FIR outputs publish the calibrated design target,
+including flat targets. Final correction acceptance preserves explicit target
+levels when cropping to a routed passband; only inferred legacy targets are
+re-leveled within that band. A selected crossover must not redefine the target
+after optimization. Native target grids are aligned explicitly to the measured
+response for acceptance. A target that does not cover the evaluated passband is
+not extrapolated or accepted on a silently narrower band.
+
+Hybrid residual FIR design keeps the target level prepared from the original
+optimization input. The IIR stage's residual does not establish a new target
+level; existing FIR boost limits and final acceptance still apply.
+
+For multi-measurement Hybrid with a linear-phase FIR, the residual stage now
+scores the complete IIR+FIR response against the same prepared per-measurement
+objectives as the IIR stage, including weights, spatial masks and bootstrap
+risk. It searches convex combinations of equal-length per-objective,
+representative and neutral FIR designs; this is a finite candidate-basis
+optimization, not an unrestricted FIR optimum. The displayed channel target
+remains a representative target, not a replacement for the per-seat objective
+bank. Optimizer evidence identifies this search and its selected candidate.
+The bounded scalar backends currently supported by this stage are DE, CMA-ES,
+COBYLA and ISRES; another requested backend fails explicitly rather than being
+silently substituted. Multi-measurement minimum-phase Hybrid uses an aligned
+per-objective dB-correction basis instead: each trial is realized through the
+minimum-phase generator before its actual finite-tap response is scored.
+It does not mix minimum-phase coefficients. This costs more per evaluation
+than the cached linear-phase bank. It currently requires aligned objective
+grids and uses the same bounded scalar backends. Kirkeby now uses the same
+realized dB-basis search for multi-seat magnitude selection, while retaining
+the representative residual as its acoustic phase reference. Requested
+excess-phase correction requires actual reference acoustic phase; electrical
+IIR phase cannot replace missing measurement evidence. The scratch-buffer and
+calibration-phase defects are repaired in integrated math-iir-fir 0.5.23, but
+Hybrid reference-phase correction still fails seat-weight separation and temporal
+requirements. A separate primitive diagnostic finds arrival-delay attenuation
+from finite-tap windowing. Do not interpret magnitude improvement as phase
+benefit. Causal-support and phase realization fixes, broader
+minimum-phase outcome checks, full temporal/headroom validation and
+backend-rendered spatial benefit remain open outcome-audit work.
+When a required post-workflow FIR cannot be generated or its WAV cannot be
+written, the workflow fails instead of installing a nonexistent sidecar or
+silently omitting the requested stage.
+
+Fractional FIR group-delay alignment uses a 129-tap windowed-sinc delay kernel
+with a declared usable band up to 0.46 times sample rate and a 0.01 dB magnitude
+tolerance. It allocates enough common integer padding to keep the entire delay
+kernel causal, including requested negative advances; all playback channels
+receive that common latency. For a half-sample delay starting at tap zero,
+the padding is 64 samples (1.333 ms at 48 kHz). The new convolution stage is
+placed before routing, and retains `gd_requested_delay_ms`,
+`gd_effective_delay_ms`, `gd_common_padding_samples`, and
+`gd_usable_band_max_hz`. The group-delay summary reports effective delays,
+and temporal evidence is recomputed from the resulting coefficients. Existing
+FIR sidecars are preserved. Nyquist is outside the fractional-delay guarantee;
+an unsupported measured playback band is reported as an unapplied GD stage.
+
+The required `just qa-roomeq-camilladsp-backend` gate also renders packaged
+fractional-delay exports with CamillaDSP at 44.1, 48, and 96 kHz. It checks
+-0.5, +0.25, and +0.5 sample offsets with original FIR impulses at taps 0 and
+17, after removing the source sidecar directory. Each of these 18 renders is
+checked at 1,025 frequencies from 20 Hz through 0.46 times sample rate against
+an independent pure-delay reference and the reported complex response. This
+is sampled-band evidence, not continuous-frequency or Nyquist certification.
+
 The machine-readable QA inventory is
 `crates/roomeq-qa/src/registry.json`. Registered
 scenarios declare their configuration, solver, processing modes, execution
 tier, claimed features, and quantitative expectations. The `pr`, `nightly`,
 and `weekly` recipes select cumulative cost tiers and do not maintain separate
-case inventories. Stochastic QA runs five deterministic seeds, selects the
-median post-score result, and reports the complete score spread. Runtime safety
+case inventories. Stochastic QA runs five deterministic seeds and selects the
+median explicitly accepted result (or the median of all runs if none is accepted).
+Every seed's acceptance decision, reversion/degradation reasons, optimizer
+termination/budget evidence and final scores are retained in
+`metadata.qa_seed_distribution`, acoustic current/candidate reports, and the
+append-only `target/qa/roomeq-seed-distributions.jsonl` artifact. The
+`accepted_useful_rate` counts explicitly accepted runs with improved delivered
+scores; `safe_output_rate` conservatively counts finite outputs with explicit
+final acceptance and no failed stage. Reverted or missing acceptance does not
+establish safety, even when the pipeline returns successfully. This rate is not
+independent backend certification. Neither rate is replaced by the selected
+median or score spread. Missing acceptance evidence does not count as useful acceptance.
+Completed JSONL records retain the optimizer configuration, requested seeds,
+sample rate, and a separate `final_artifact` verdict with the rerun's scores,
+acceptance, optimizer evidence, and stage outcomes. Population rates describe
+the five selection runs, not the final rerun; `final_artifact_delivered` means
+the pipeline returned successfully, not that the correction was accepted.
+Seed execution errors and non-finite scores fail the QA run after all five
+selection seeds have been attempted. The JSONL artifact retains the completed
+outcomes and identified errors with `status: failed` and
+`phase: seed_selection`; rates retain the five-seed denominator, and failed
+seeds count as neither useful nor verified safe. An error while rerunning the
+selected seed for final artifacts is recorded separately as
+`phase: selected_artifact_run`, preserving the selection population and marking
+`final_artifact_delivered: false`. Its population rates do not certify the
+failed final rerun. Failure to write evidence also fails QA.
+Runtime safety
 fallback is reported as the distinct `REVERTED` outcome and passes only when
 explicitly permitted by the registry. The full registry-driven FEM matrix and
 the retained generated-data integration matrix also run on the scheduled
 weekly workflow.
+
+Acoustic corpus current/candidate scoring and robustness rescoring use the
+runtime physical-seat replay contract. Native training captures are snapshotted
+before optimization; held-out CSVs are not reduced to a display grid. Each
+logical source is reconstructed from its contributing physical outputs, with
+structural routing retained in the correction-disabled baseline. Missing physical
+branches, required phase, or sidecars fail replay. Reports retain
+`playback_evidence` with source/seat/output identity, baseline and delivered
+curves, and summation support evidence. Robustness perturbations operate on
+physical captures before summation; seat dropout removes the same seat across
+all outputs. Declared upper-band bounds are conservatively increased by the
+perturbation's SPL limit and that derivation is retained in their evidence IDs.
+These software replay checks do not supply missing corpus captures or establish
+unmeasured spatial performance. Existing acoustic baselines are not automatically
+recalibrated when scoring changes.
+
+Held-out corpus descriptors accept `seat_id`, an explicit shared listening
+position ID, alongside the physical-output `channel` and capture `path`.
+Coherent multi-output evaluation requires it. Named capture sets are sorted by
+seat ID before replay; every contributing output must have the same ID set.
+Duplicate output/seat pairs, mixed named/unnamed captures, and mismatched sets
+are errors. Runtime seat indices (including support-bound declarations) follow
+this sorted order; reports retain the ID as `seat_label`, including after
+robustness dropout. IDs must come from acquisition provenance, not filename
+guessing. Legacy independent-channel descriptors may remain unnamed and do not
+thereby establish cross-output position identity. A physical sub capture need
+not itself be selected as a logical source for scoring.
+
+Acoustic quality shape normalization fits a constant gain using the same
+log-frequency trapezoid weights as its residual RMS and mean seat spread.
+Adding redundant bass samples therefore does not move the broadband reference.
+Pooled bin percentiles remain explicitly distinct from frequency-integrated
+statistics. Shape scores alone do not establish preserved output level.
+Quality alignment retains the union of supplied pre/post/target grid points,
+so a candidate-only native cancellation bin is not lost by baseline-grid sampling.
+Useful-output evidence includes the worst sampled unexplained loss and runs of
+consecutive samples exceeding the recorded 3 dB diagnostic threshold. These
+`loss_bands` use the fixed evaluation support, calibrated target, and permitted
+gain; they do not classify authorized attenuation as loss. Band endpoints are
+sample locations, not a continuous-frequency guarantee. The diagnostic threshold
+does not replace the separate runtime RMS-loss policy.
+QA peak/dip metrics use a fixed band derived from the uncorrected measurement;
+outer roll-offs can narrow that band, but internal holes and new candidate
+cancellations remain eligible even below 20 dB relative to the response peak.
 
 Gate purpose is part of the acceptance contract. A `safety` case may accept a
 runtime `REVERTED` result only when it explicitly enables safe reversion.
@@ -955,3 +1355,32 @@ directional measurements are needed to establish rear rejection. Its legitimate
 low-frequency efficiency loss is not treated as an MSO defect.
 `primary_with_constraints.max_deviation_db` is a soft penalty threshold, not a
 hard guarantee at every seat and frequency.
+## Prepared FIR target grid contract
+
+The internal prepared-FIR API requires target frequencies to match the
+measurement frequency grid exactly, with one level per frequency in each curve.
+It rejects mismatches before pointwise boost capping or filter design. Callers
+with independent target grids must align them during target preparation; changing
+array order or silently pairing samples by index is not a resampling operation.
+
+## Final-graph electrical headroom assessment
+
+The output metadata includes a `final_graph_sampled_electrical_headroom` stage
+after final level alignment, CTC and convolution artifact binding. This is
+separate from acoustic/correction acceptance: an accepted correction can still
+need an explicit playback gain budget.
+
+The assessment assumes independently phased sinusoidal logical inputs, each
+with peak amplitude 1.0. It evaluates complete serialized input/route/output
+transfers at 8193 points from DC to Nyquist, plus serialized EQ and crossover
+centers. Per-output checks report the sampled amplitude against full scale;
+their diagnostics include peak frequency, required attenuation, grid size and
+input limits. A `degraded` stage identifies sampled overload or unavailable
+electrical evidence. Unsupported global processing or unresolved sidecars is
+not silently omitted and does not receive a passing electrical check.
+
+This report does not apply attenuation, alter the configured correction
+acceptance policy, or certify frequencies between samples, transient/true-peak
+headroom, native-backend agreement, acoustic benefit or device assignment.
+Required attenuation must be reconciled with calibrated useful-output goals;
+it is not a recommendation to attenuate blindly.

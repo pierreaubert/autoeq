@@ -1,0 +1,5 @@
+--- a/crates/roomeq-workflow/src/topology/home_cinema.rs
++++ b/crates/roomeq-workflow/src/topology/home_cinema.rs
+@@ -535 +535 @@
+-                        plugin.plugin_type == "gain"
++                        plugin.plugin_type != "gain"

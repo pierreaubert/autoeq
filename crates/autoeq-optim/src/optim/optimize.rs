@@ -85,15 +85,19 @@ impl OptimizerRunEvidence {
         let objective = raw_objective.is_finite().then_some(raw_objective);
         let max_constraint_violation = max_bound_violation(parameters, lower_bounds, upper_bounds);
         let lower_status = status.to_ascii_lowercase();
-        let mut termination = if !backend_accepted {
-            OptimizerTermination::BackendFailure
-        } else if lower_status.contains("stopped") || lower_status.contains("cancelled") {
+        let mut termination = if lower_status.contains("stopped") || lower_status.contains("cancelled") {
             OptimizerTermination::UserStopped
-        } else if lower_status.contains("not converged")
-            && (lower_status.contains("maximum")
-                || lower_status.contains("maxeval")
-                || lower_status.contains("limit")
-                || lower_status.contains("budget"))
+        } else if !backend_accepted {
+            OptimizerTermination::BackendFailure
+        } else if lower_status.contains("maxevalreached")
+            || lower_status.contains("maximum evaluations reached")
+            || lower_status.contains("maximum iterations reached")
+            || lower_status.contains("evaluation budget exhausted")
+            || (lower_status.contains("not converged")
+                && (lower_status.contains("maximum")
+                    || lower_status.contains("maxeval")
+                    || lower_status.contains("limit")
+                    || lower_status.contains("budget")))
         {
             OptimizerTermination::EvaluationLimit
         } else if lower_status.contains("not converged") {
@@ -109,6 +113,7 @@ impl OptimizerRunEvidence {
         }
         let converged = termination == OptimizerTermination::Converged;
         let best_effort = !converged
+            && termination != OptimizerTermination::UserStopped
             && objective.is_some()
             && max_constraint_violation.is_finite()
             && max_constraint_violation <= 1e-9;

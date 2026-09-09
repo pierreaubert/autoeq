@@ -60,7 +60,13 @@ pub(in super::super) fn post_generate_fir(
         }
         _ => initial_curve,
     };
-    match fir::generate_fir_correction(fir_input, config, target_curve, sample_rate) {
+    // Fix the level reference before applying the IIR candidate, just as the
+    // engine-owned Hybrid path does. The residual is not a new calibration.
+    let coefficients =
+        fir::resolve_fir_target_curve(initial_curve, config, target_curve).and_then(|target| {
+            fir::generate_fir_correction_prepared(fir_input, config, &target, sample_rate)
+        });
+    match coefficients {
         Ok(coeffs) => {
             let mut filename = autoeq_artifacts::roomeq::convolution_artifact_filename(
                 name,
@@ -80,6 +86,7 @@ pub(in super::super) fn post_generate_fir(
                     math_audio_iir_fir::save_fir_to_wav(&coeffs, sample_rate as u32, &wav_path)
                 {
                     warn!("Failed to save FIR WAV for {}: {}", name, e);
+                    return None;
                 } else {
                     info!("  Saved FIR filter to {}", wav_path.display());
                 }
@@ -102,13 +109,19 @@ pub(in super::super) fn post_generate_fir(
 /// The workflow path only runs IIR optimisation.  For MixedPhase we still need
 /// the short FIR that corrects residual excess phase.  This mirrors the logic
 /// in `optimize_speaker_eq` MixedPhase branch but runs after the workflow.
+#[derive(Debug)]
+pub(in super::super) enum MixedPhasePostError {
+    Candidate(String),
+    Artifact(String),
+}
+
 pub(in super::super) fn post_generate_mixed_phase_fir(
     name: &str,
     initial_curve: &Curve,
     config: &roomeq_model::OptimizerConfig,
     sample_rate: f64,
     output_dir: Option<&Path>,
-) -> std::result::Result<Option<GeneratedFir>, String> {
+) -> std::result::Result<Option<GeneratedFir>, MixedPhasePostError> {
     let Some(phase) = initial_curve.phase.as_ref() else {
         return Ok(None);
     };
@@ -168,9 +181,9 @@ pub(in super::super) fn post_generate_mixed_phase_fir(
                 name, max_magnitude_deviation_db
             );
             if max_magnitude_deviation_db > 0.5 {
-                return Err(format!(
+                return Err(MixedPhasePostError::Candidate(format!(
                     "phase-only magnitude deviation {max_magnitude_deviation_db:.2} dB exceeds 0.50 dB"
-                ));
+                )));
             }
             let mixed_phase_report =
                 roomeq_engine::mixed_phase::MixedPhaseCorrectionReport::from_residual(
@@ -197,6 +210,10 @@ pub(in super::super) fn post_generate_mixed_phase_fir(
                     math_audio_iir_fir::save_fir_to_wav(&coeffs, sample_rate as u32, &wav_path)
                 {
                     warn!("Failed to save excess phase FIR for {}: {}", name, e);
+                    return Err(MixedPhasePostError::Artifact(format!(
+                        "failed to write excess-phase FIR for '{name}' to {}: {e}",
+                        wav_path.display()
+                    )));
                 } else {
                     info!("  Saved excess phase FIR to {}", wav_path.display());
                 }
@@ -208,7 +225,9 @@ pub(in super::super) fn post_generate_mixed_phase_fir(
                 mixed_phase_report: Some(mixed_phase_report),
             }))
         }
-        Err(error) => Err(format!("phase decomposition failed: {error}")),
+        Err(error) => Err(MixedPhasePostError::Candidate(format!(
+            "phase decomposition failed: {error}"
+        ))),
     }
 }
 
@@ -343,6 +362,106 @@ mod tests {
     }
 
     #[test]
+    fn hybrid_post_fir_preserves_original_level_reference_at_all_rates() {
+        for sample_rate in [44_100.0, 48_000.0, 96_000.0] {
+            for (candidate_gain, max_boost_db, expected_db) in
+                [(-6.0, None, 0.0), (3.0, None, 0.0), (-6.0, Some(3.0), -3.0)]
+            {
+                let original = small_curve_no_phase();
+                let mut residual = original.clone();
+                residual.spl += candidate_gain;
+                let config = OptimizerConfig {
+                    processing_mode: ProcessingMode::Hybrid,
+                    min_freq: 100.0,
+                    max_freq: 10_000.0,
+                    fir: Some(roomeq_model::FirConfig {
+                        taps: 4096,
+                        phase: "linear".into(),
+                        max_boost_db,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                };
+                let generated = post_generate_fir(
+                    "level_reference",
+                    &original,
+                    &residual,
+                    &config,
+                    None,
+                    sample_rate,
+                    None,
+                    None,
+                )
+                .unwrap();
+                // Independent DTFT: the residual's known constant gain and the
+                // delivered FIR should sum to unity over the interior band.
+                for bin in 0..257 {
+                    let frequency = 500.0 * (10.0_f64).powf(bin as f64 / 256.0);
+                    let (real, imaginary) = generated.coeffs.iter().enumerate().fold(
+                        (0.0, 0.0),
+                        |(real, imaginary), (tap, coefficient)| {
+                            let phase =
+                                -std::f64::consts::TAU * frequency * tap as f64 / sample_rate;
+                            (
+                                real + coefficient * phase.cos(),
+                                imaginary + coefficient * phase.sin(),
+                            )
+                        },
+                    );
+                    let delivered_db = candidate_gain + 20.0 * real.hypot(imaginary).log10();
+                    assert!(
+                        (delivered_db - expected_db).abs() < 0.05,
+                        "rate={sample_rate} gain={candidate_gain} f={frequency} delivered={delivered_db}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn post_fir_write_failure_does_not_return_a_phantom_artifact() {
+        let curve = small_curve_no_phase();
+        let config = OptimizerConfig {
+            processing_mode: ProcessingMode::PhaseLinear,
+            fir: Some(roomeq_model::FirConfig {
+                taps: 64,
+                phase: "linear".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let not_a_directory = directory.path().join("regular_file");
+        std::fs::write(&not_a_directory, b"preserve me").unwrap();
+        assert!(
+            post_generate_fir(
+                "left",
+                &curve,
+                &curve,
+                &config,
+                None,
+                48_000.0,
+                Some(&not_a_directory),
+                None
+            )
+            .is_none()
+        );
+        assert_eq!(std::fs::read(&not_a_directory).unwrap(), b"preserve me");
+        let generated = post_generate_fir(
+            "left",
+            &curve,
+            &curve,
+            &config,
+            None,
+            48_000.0,
+            Some(directory.path()),
+            None,
+        )
+        .unwrap();
+        assert!(directory.path().join(generated.filename).is_file());
+    }
+
+    #[test]
     fn post_generate_fir_returns_none_when_fir_config_missing() {
         let config = OptimizerConfig {
             processing_mode: roomeq_model::ProcessingMode::PhaseLinear,
@@ -459,6 +578,37 @@ mod tests {
             false,
             false,
         ));
+    }
+
+    #[test]
+    fn mixed_phase_write_failure_is_an_artifact_error_not_candidate_rejection() {
+        let curve = small_curve_with_phase();
+        let directory = tempfile::tempdir().unwrap();
+        let obstruction = directory.path().join("regular_file");
+        std::fs::write(&obstruction, b"preserve me").unwrap();
+        let error = post_generate_mixed_phase_fir(
+            "left",
+            &curve,
+            &OptimizerConfig::default(),
+            48_000.0,
+            Some(&obstruction),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, MixedPhasePostError::Artifact(_)),
+            "{error:?}"
+        );
+        assert_eq!(std::fs::read(&obstruction).unwrap(), b"preserve me");
+        let generated = post_generate_mixed_phase_fir(
+            "left",
+            &curve,
+            &OptimizerConfig::default(),
+            48_000.0,
+            Some(directory.path()),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(directory.path().join(generated.filename).is_file());
     }
 
     #[test]

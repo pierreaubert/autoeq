@@ -1,4 +1,6 @@
 use super::area_evaluator::AreaEvaluator;
+#[cfg(test)]
+mod expected_grid;
 use super::average::average_perceptual_from_responses;
 use super::compute::compute_combined_complex_responses;
 use super::compute::compute_combined_responses;
@@ -426,6 +428,20 @@ pub(super) fn optimize_continuous_mso_with_budget(
 
     let evaluations = std::cell::Cell::new(0_usize);
     let eval_limit = budget.max_evaluations.unwrap_or(usize::MAX);
+    let requested_stop = || {
+        if is_cancelled(budget) {
+            Some("cancelled")
+        } else if budget
+            .max_duration
+            .is_some_and(|limit| started.elapsed() >= limit)
+        {
+            Some("time_budget")
+        } else if evaluations.get() >= eval_limit {
+            Some("evaluation_budget")
+        } else {
+            None
+        }
+    };
     // Score one candidate, counting the evaluation. Exhausted budgets score
     // +infinity without calling the (potentially very expensive, worst-case
     // nesting) area evaluator.
@@ -456,8 +472,13 @@ pub(super) fn optimize_continuous_mso_with_budget(
         }
     }
 
-    let mut scores = Vec::with_capacity(population_size);
+    let mut scores = vec![f64::INFINITY; population_size];
+    let mut stop_reason = "completed";
     for (index, params) in population.iter().enumerate() {
+        if let Some(reason) = requested_stop() {
+            stop_reason = reason;
+            break;
+        }
         let (gains, delays, polarities, allpass_filters) =
             decode_mso_params(params, num_subs, options);
         // The seeded all-zero vector is the identity anchor.  Its
@@ -469,29 +490,20 @@ pub(super) fn optimize_continuous_mso_with_budget(
         } else {
             score_candidate(&gains, &delays, &polarities, &allpass_filters)
         };
-        scores.push(score);
+        scores[index] = score;
     }
     let mut best_loss = scores
         .iter()
         .fold(f64::INFINITY, |best, score| best.min(*score));
     let mut stall_count = 0_usize;
-    let mut stop_reason = "completed";
     let mut generations_run = 0_usize;
 
     'generations: for _ in 0..generations {
-        if is_cancelled(budget) {
-            stop_reason = "cancelled";
+        if stop_reason != "completed" {
             break;
         }
-        if budget
-            .max_duration
-            .is_some_and(|limit| started.elapsed() > limit)
-        {
-            stop_reason = "time_budget";
-            break;
-        }
-        if evaluations.get() >= eval_limit {
-            stop_reason = "evaluation_budget";
+        if let Some(reason) = requested_stop() {
+            stop_reason = reason;
             break;
         }
         // Keep candidate zero pinned as the exact no-processing anchor. Its
@@ -499,6 +511,10 @@ pub(super) fn optimize_continuous_mso_with_budget(
         // for scoring/reporting, so mutating this slot would lose that
         // correspondence and could discard a valid optimized all-pass result.
         for target_idx in 1..population_size {
+            if let Some(reason) = requested_stop() {
+                stop_reason = reason;
+                break 'generations;
+            }
             let mut a;
             let mut b;
             let mut c;
@@ -538,8 +554,8 @@ pub(super) fn optimize_continuous_mso_with_budget(
                 population[target_idx] = trial;
                 scores[target_idx] = trial_score;
             }
-            if evaluations.get() >= eval_limit {
-                stop_reason = "evaluation_budget";
+            if let Some(reason) = requested_stop() {
+                stop_reason = reason;
                 break 'generations;
             }
         }
@@ -811,6 +827,39 @@ pub fn optimize_multiseat_continuous_area(
     freq_range: (f64, f64),
     sample_rate: f64,
 ) -> Result<MultiSeatOptimizationResult> {
+    optimize_multiseat_continuous_area_with_budget(
+        measurements,
+        config,
+        freq_range,
+        sample_rate,
+        &MsoSearchBudget::default(),
+    )
+    .map(|(result, _)| result)
+}
+
+/// Optimize with explicit candidate-search limits and consumed-work evidence.
+/// Limits apply to the outer search, not measurement preparation or the
+/// mandatory baseline/final acoustic evaluations. An in-flight inner search
+/// is not interrupted. The report describes the search candidate, while the
+/// returned result retains the final acoustic regression gate/identity fallback.
+/// A cancelled search is an error, never a deployable best-effort result.
+pub fn optimize_multiseat_continuous_area_with_budget(
+    measurements: &MultiSeatMeasurements,
+    config: &MultiSeatConfig,
+    freq_range: (f64, f64),
+    sample_rate: f64,
+    budget: &MsoSearchBudget,
+) -> Result<(MultiSeatOptimizationResult, MsoSearchReport)> {
+    if budget.max_inner_iterations == Some(0) {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: "continuous_area max_inner_iterations must be positive when set".into(),
+        });
+    }
+    if is_cancelled(budget) {
+        return Err(AutoeqError::OptimizationFailed {
+            message: "continuous_area search cancelled before measurement preparation".into(),
+        });
+    }
     let area_cfg =
         config
             .continuous_area
@@ -904,9 +953,27 @@ pub fn optimize_multiseat_continuous_area(
     }
 
     match area_cfg.dimensions {
-        1 => optimize_continuous_area_dispatch::<1>(measurements, config, freq_range, sample_rate),
-        2 => optimize_continuous_area_dispatch::<2>(measurements, config, freq_range, sample_rate),
-        3 => optimize_continuous_area_dispatch::<3>(measurements, config, freq_range, sample_rate),
+        1 => optimize_continuous_area_dispatch::<1>(
+            measurements,
+            config,
+            freq_range,
+            sample_rate,
+            budget,
+        ),
+        2 => optimize_continuous_area_dispatch::<2>(
+            measurements,
+            config,
+            freq_range,
+            sample_rate,
+            budget,
+        ),
+        3 => optimize_continuous_area_dispatch::<3>(
+            measurements,
+            config,
+            freq_range,
+            sample_rate,
+            budget,
+        ),
         d => Err(AutoeqError::InvalidConfiguration {
             message: format!(
                 "continuous_area: dimensions = {} unsupported (only 1, 2, 3 are dispatched)",
@@ -921,7 +988,8 @@ fn optimize_continuous_area_dispatch<const D: usize>(
     config: &MultiSeatConfig,
     freq_range: (f64, f64),
     sample_rate: f64,
-) -> Result<MultiSeatOptimizationResult> {
+    budget: &MsoSearchBudget,
+) -> Result<(MultiSeatOptimizationResult, MsoSearchReport)> {
     use math_audio_optimisation::continuous_area::{
         AreaScalarisation, Prior, Quadrature, build_quadrature_points,
     };
@@ -1002,11 +1070,6 @@ fn optimize_continuous_area_dispatch<const D: usize>(
         },
     };
 
-    // No stage-specific budget fields exist on `MultiSeatConfig` (model
-    // contract unchanged), so the dispatch runs the legacy schedule via a
-    // default budget. A future model field can construct the budget here
-    // without changing the call shape below.
-    let budget = MsoSearchBudget::default();
     let scalarisation: AreaScalarisation = match &area_cfg.scalarisation {
         AreaScalarisationKind::ExpectedValue => AreaScalarisation::ExpectedValue,
         AreaScalarisationKind::WorstCase {
@@ -1139,6 +1202,7 @@ fn optimize_continuous_area_dispatch<const D: usize>(
     // scratch buffers stay shared under the lock — still zero per-point
     // allocation — and every lock scope is a single call (never nested).
     let evaluator = std::sync::Mutex::new(AreaEvaluator::new(
+        measurements.num_subs,
         quad_complex,
         quad_weights,
         freqs.clone(),
@@ -1224,12 +1288,15 @@ fn optimize_continuous_area_dispatch<const D: usize>(
 
     let options = MsoSearchOptions::from_config(config, eval_min, eval_max);
     let ((gains, delays, polarities, allpass_filters), search_report) =
-        optimize_continuous_mso_with_budget(
-            measurements.num_subs,
-            options,
-            &budget,
-            &evaluate_area,
-        );
+        optimize_continuous_mso_with_budget(measurements.num_subs, options, budget, &evaluate_area);
+    if search_report.stop_reason == "cancelled" || is_cancelled(budget) {
+        return Err(AutoeqError::OptimizationFailed {
+            message: format!(
+                "continuous_area search cancelled after {} area evaluations",
+                search_report.evaluations
+            ),
+        });
+    }
     info!(
         "  continuous_area MSO search consumed {} area evaluations over {} generations \
          in {:.2}s (stop: {}, best loss {:.6})",
@@ -1277,24 +1344,32 @@ fn optimize_continuous_area_dispatch<const D: usize>(
         });
     }
     let improvement = initial_objective - accepted_obj;
-    Ok(MultiSeatOptimizationResult {
-        gains: final_gains,
-        delays: final_delays,
-        polarities: final_polarities,
-        allpass_filters: final_allpass,
-        strategy: MultiSeatStrategy::ContinuousArea,
-        objective_name: "continuous_area".to_string(),
-        objective_before: initial_objective,
-        objective_after: accepted_obj,
-        objective_improvement_db: improvement,
-        // Continuous-area path doesn't compute a discrete seat variance.
-        // Report 0/0 so downstream UI knows it isn't applicable; the
-        // continuous-area objective is the authoritative quality signal.
-        variance_before: 0.0,
-        variance_after: 0.0,
-        variance_improvement_db: 0.0,
-        improvement_db: improvement,
-    })
+    if is_cancelled(budget) {
+        return Err(AutoeqError::OptimizationFailed {
+            message: "continuous_area search cancelled during final acoustic verification".into(),
+        });
+    }
+    Ok((
+        MultiSeatOptimizationResult {
+            gains: final_gains,
+            delays: final_delays,
+            polarities: final_polarities,
+            allpass_filters: final_allpass,
+            strategy: MultiSeatStrategy::ContinuousArea,
+            objective_name: "continuous_area".to_string(),
+            objective_before: initial_objective,
+            objective_after: accepted_obj,
+            objective_improvement_db: improvement,
+            // Continuous-area path doesn't compute a discrete seat variance.
+            // Report 0/0 so downstream UI knows it isn't applicable; the
+            // continuous-area objective is the authoritative quality signal.
+            variance_before: 0.0,
+            variance_after: 0.0,
+            variance_improvement_db: 0.0,
+            improvement_db: improvement,
+        },
+        search_report,
+    ))
 }
 
 #[cfg(test)]
@@ -1864,6 +1939,195 @@ mod tests {
     }
 
     #[test]
+    fn continuous_area_worst_case_preserves_constructive_flat_identity() {
+        // Identical calibrated sources at both endpoints imply a spatially
+        // constant, constructive field. There is no shape or output deficit
+        // at identity, independently of where the inner search samples it.
+        let ms = MultiSeatMeasurements::new(vec![
+            vec![create_test_curve(0.0, 0.0); 2],
+            vec![create_test_curve(0.0, 0.0); 2],
+        ])
+        .unwrap();
+        let mut area = unit_area_base();
+        area.scalarisation = AreaScalarisationKind::WorstCase {
+            inner_maxiter: 1,
+            inner_seed: 42,
+        };
+        let result = optimize_multiseat_continuous_area(
+            &ms,
+            &continuous_area_config(area),
+            (20.0, 120.0),
+            48000.0,
+        )
+        .expect("worst-case identity must have finite acoustic evidence");
+        assert!(
+            result.objective_before.abs() < 1e-9,
+            "flat constructive identity scored {}",
+            result.objective_before
+        );
+        assert!(
+            result.objective_after.abs() < 1e-9,
+            "accepted result regressed to {}",
+            result.objective_after
+        );
+    }
+
+    #[test]
+    fn continuous_area_explicit_budget_reaches_each_scalarisation() {
+        let ms = MultiSeatMeasurements::new(vec![
+            vec![create_test_curve(0.0, 0.0); 2],
+            vec![create_test_curve(0.0, 0.0); 2],
+        ])
+        .unwrap();
+        for scalarisation in [
+            AreaScalarisationKind::ExpectedValue,
+            AreaScalarisationKind::Cvar { alpha: 0.25 },
+            AreaScalarisationKind::WorstCase {
+                inner_maxiter: 1,
+                inner_seed: 42,
+            },
+        ] {
+            let mut area = unit_area_base();
+            area.scalarisation = scalarisation;
+            let budget = MsoSearchBudget {
+                max_evaluations: Some(2),
+                ..Default::default()
+            };
+            let (result, report) = optimize_multiseat_continuous_area_with_budget(
+                &ms,
+                &continuous_area_config(area),
+                (20.0, 120.0),
+                48000.0,
+                &budget,
+            )
+            .unwrap();
+            assert_eq!(report.evaluations, 2);
+            assert_eq!(report.stop_reason, "evaluation_budget");
+            assert!(report.stopped_early);
+            assert!(result.objective_before.abs() < 1e-9);
+            assert!(result.objective_after.abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn continuous_area_explicit_budget_rejects_precancelled_request() {
+        let ms = two_sub_two_seat_measurements();
+        let budget = MsoSearchBudget {
+            cancelled: Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                true,
+            ))),
+            ..Default::default()
+        };
+        let error = optimize_multiseat_continuous_area_with_budget(
+            &ms,
+            &continuous_area_config(unit_area_base()),
+            (20.0, 120.0),
+            48000.0,
+            &budget,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("cancelled before measurement preparation")
+        );
+    }
+
+    #[test]
+    fn continuous_expected_corrects_known_relative_arrival_on_analytic_holdouts() {
+        let frequencies = Array1::from_iter((0..257).map(|i| 20.0 + 100.0 * i as f64 / 256.0));
+        let curve = |level: f64, arrival_s: f64| Curve {
+            freq: frequencies.clone(),
+            spl: Array1::from_elem(frequencies.len(), level),
+            phase: Some(frequencies.mapv(|f| -360.0 * f * arrival_s)),
+            ..Default::default()
+        };
+        // Source 1 arrives 1 ms before the reference, identically at both
+        // calibration positions. Adding 1 ms restores a constructive sum.
+        let measurements = MultiSeatMeasurements::new(vec![
+            vec![curve(90.0, 0.010), curve(86.0, 0.010)],
+            vec![curve(90.0, 0.009), curve(86.0, 0.009)],
+        ]).unwrap();
+        let config = continuous_area_config(unit_area_base());
+        let (result, report) = optimize_multiseat_continuous_area_with_budget(
+            &measurements, &config, (20.0, 120.0), 48000.0,
+            &MsoSearchBudget { seed: Some(42), ..Default::default() },
+        ).unwrap();
+        assert_eq!(report.stop_reason, "completed");
+        assert!(result.objective_before > 0.05);
+        assert!(result.objective_after < 0.1 * result.objective_before,
+            "known correctable arrival: {} -> {}", result.objective_before, result.objective_after);
+        assert!((result.delays[1] - 1.0).abs() < 0.03,
+            "expected 1 ms compensation, got {:?}", result.delays);
+        assert!(result.allpass_filters.iter().all(Vec::is_empty));
+        let mut holdouts = Vec::new();
+        // Independently evaluate physical phasors at two unseen synthetic
+        // positions and a denser grid. Do not use the production interpolator
+        // or its response evaluator as this oracle. Common arrival/level may
+        // change; the known relative timing relation remains the same.
+        for (level_db, common_arrival_s) in [(88.0_f64, 0.0103), (87.0, 0.0109)] {
+            let amplitude = 10.0_f64.powf(level_db / 20.0);
+            let mut maximum_error_db = 0.0_f64;
+            let mut baseline_max_error_db = 0.0_f64;
+            for i in 0..1025 {
+                let f = 20.0 + 100.0 * i as f64 / 1024.0;
+                let mut before = num_complex::Complex64::new(0.0, 0.0);
+                let mut after = before;
+                for sub in 0..2 {
+                    let arrival = common_arrival_s - sub as f64 * 0.001;
+                    let acoustic = num_complex::Complex64::from_polar(
+                        amplitude, -std::f64::consts::TAU * f * arrival,
+                    );
+                    before += acoustic;
+                    let polarity = if result.polarities[sub] { -1.0 } else { 1.0 };
+                    after += acoustic * polarity * num_complex::Complex64::from_polar(
+                        10.0_f64.powf(result.gains[sub] / 20.0),
+                        -std::f64::consts::TAU * f * result.delays[sub] / 1000.0,
+                    );
+                }
+                let target = 2.0 * amplitude;
+                maximum_error_db = maximum_error_db.max((20.0 * (after.norm() / target).log10()).abs());
+                baseline_max_error_db = baseline_max_error_db.max((20.0 * (before.norm() / target).log10()).abs());
+            }
+            assert!(baseline_max_error_db > 0.5);
+            assert!(maximum_error_db < 0.03, "held-out constructive target error {maximum_error_db} dB");
+            holdouts.push(serde_json::json!({
+                "level_db": level_db, "common_arrival_s": common_arrival_s,
+                "baseline_max_error_db": baseline_max_error_db, "final_max_error_db": maximum_error_db,
+            }));
+        }
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/qa");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("continuous-expected-analytic-arrival.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "scope": "analytic_common_level_delay_holdouts_not_measured_spatial_validation_or_backend_render",
+                "before": result.objective_before, "after": result.objective_after,
+                "gains_db": result.gains, "delays_ms": result.delays, "holdouts": holdouts,
+            })).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn continuous_area_explicit_budget_rejects_zero_inner_limit() {
+        let budget = MsoSearchBudget {
+            max_inner_iterations: Some(0),
+            ..Default::default()
+        };
+        let error = optimize_multiseat_continuous_area_with_budget(
+            &two_sub_two_seat_measurements(),
+            &continuous_area_config(unit_area_base()),
+            (20.0, 120.0),
+            48000.0,
+            &budget,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("max_inner_iterations must be positive")
+        );
+    }
+
+    #[test]
     fn continuous_area_rejects_degenerate_quadrature_like_cli() {
         let ms = two_sub_two_seat_measurements();
         let mut area = unit_area_base();
@@ -2006,6 +2270,57 @@ mod tests {
             super::optimize_continuous_mso_with_budget(2, options, &budget, &|_, _, _, _| 1.0);
         assert_eq!(report.stop_reason, "cancelled");
         assert_eq!(report.generations_run, 0);
+        assert_eq!(
+            report.evaluations, 0,
+            "pre-cancelled search must not score its population"
+        );
+    }
+
+    #[test]
+    fn mso_budget_cancellation_is_checked_between_candidates() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        for stop_after in [1, 49] {
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let budget = MsoSearchBudget {
+                cancelled: Some(cancelled.clone()),
+                ..Default::default()
+            };
+            let calls = std::cell::Cell::new(0);
+            let options = MsoSearchOptions::from_config(&MultiSeatConfig::default(), 20.0, 120.0);
+            let (_, report) =
+                super::optimize_continuous_mso_with_budget(2, options, &budget, &|_, _, _, _| {
+                    calls.set(calls.get() + 1);
+                    if calls.get() == stop_after {
+                        cancelled.store(true, Ordering::Relaxed);
+                    }
+                    1.0
+                });
+            assert_eq!(report.stop_reason, "cancelled");
+            assert_eq!(calls.get(), stop_after);
+            assert_eq!(report.evaluations, stop_after);
+        }
+    }
+
+    #[test]
+    fn mso_zero_duration_does_not_score_initial_population() {
+        let budget = MsoSearchBudget {
+            max_duration: Some(std::time::Duration::ZERO),
+            ..Default::default()
+        };
+        let options = MsoSearchOptions::from_config(&MultiSeatConfig::default(), 20.0, 120.0);
+        let (_, report) =
+            super::optimize_continuous_mso_with_budget(2, options, &budget, &|_, _, _, _| {
+                panic!("expired budget evaluated a candidate")
+            });
+        assert_eq!(report.stop_reason, "time_budget");
+        assert_eq!(report.evaluations, 0);
+        assert!(
+            !report.best_loss.is_finite(),
+            "no evaluation cannot establish a valid loss"
+        );
     }
 
     #[test]

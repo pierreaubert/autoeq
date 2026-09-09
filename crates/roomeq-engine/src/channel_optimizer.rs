@@ -28,13 +28,27 @@ pub(crate) fn optimize_maybe_multi(
     callback: Option<OptimProgressCallback>,
     target_tilt_curve: Option<&Curve>,
 ) -> Result<EqOptimizationResult> {
+    // Backends may return their best-so-far candidate after Stop. At the
+    // channel boundary that is cancellation, not permission for later FIR
+    // generation or post-processing to produce a completed artifact.
+    let stopped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let callback = callback.map(|mut callback| {
+        let stopped = stopped.clone();
+        Box::new(move |iteration, loss, epa| {
+            let action = callback(iteration, loss, epa);
+            if !matches!(&action, autoeq_optim::de::CallbackAction::Continue) {
+                stopped.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            action
+        }) as OptimProgressCallback
+    });
     let measurements = prepared.measurements();
     let use_multi = should_optimize_multiple_measurements(
         measurements.is_multi_measurement_source(),
         optimizer_config,
     );
 
-    if use_multi {
+    let result = if use_multi {
         let multi_config = optimizer_config
             .multi_measurement
             .as_ref()
@@ -99,10 +113,16 @@ pub(crate) fn optimize_maybe_multi(
         .map_err(|error| AutoeqError::OptimizationFailed {
             message: format!("EQ optimization failed for channel {channel_name}: {error}"),
         })
+    };
+    if stopped.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(AutoeqError::OptimizationFailed {
+            message: format!("EQ optimization stopped by progress callback for channel {channel_name}"),
+        });
     }
+    result
 }
 
-fn apply_representative_preprocessing_to_individuals(
+pub(crate) fn apply_representative_preprocessing_to_individuals(
     representative_raw: &Curve,
     individual_raw: &[Curve],
     representative_optimization: &Curve,

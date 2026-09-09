@@ -10,11 +10,13 @@ use autoeq_optim::loss::DriversLossData;
 
 mod allpass;
 mod optimize;
+mod seat_response;
 #[cfg(test)]
 mod tests;
 mod types;
 
 pub use optimize::*;
+pub use seat_response::render_mso_seat_responses;
 pub use types::*;
 
 use allpass::compute_combined_with_allpass;

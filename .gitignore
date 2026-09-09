@@ -40,14 +40,15 @@ bugs.md
 src/unused.rs
 /plans
 check_output_*.txt
-.qwen
-.tokensave
-.superpowers
+/.qwen
+/.tokensave
+/.superpowers
 /docs/superpowers
-.codex
-.claude
-.evo
-.muse
+/.codex
+/.claude
+/.evo
+/.muse
+/reviews
 
 # Logs
 logs

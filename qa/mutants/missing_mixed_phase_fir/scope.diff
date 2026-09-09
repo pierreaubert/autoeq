@@ -1,0 +1,5 @@
+--- a/crates/roomeq-workflow/src/room_optimization.rs
++++ b/crates/roomeq-workflow/src/room_optimization.rs
+@@ -2074 +2074 @@
+-    if processing_mode == ProcessingMode::MixedPhase {
++    if processing_mode != ProcessingMode::MixedPhase {

@@ -55,6 +55,19 @@ pub fn prepare_channel_execution(
         shared_mean_spl,
         prepared.eq_resources().target.as_ref(),
     )?;
+    // A configured band is not measurement evidence. Clamp before scoring,
+    // preprocessing, and FIR/PEQ dispatch so all stages use the same support.
+    // In particular, out-of-band PEQs can still change the measured response;
+    // warning that such filters will be "ignored" does not make them harmless.
+    target.min_freq = target.min_freq.max(curve.freq[0]);
+    target.max_freq = target.max_freq.min(curve.freq[curve.freq.len() - 1]);
+    if target.min_freq >= target.max_freq {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: format!(
+                "Channel '{channel_name}': configured correction band does not overlap measurement support"
+            ),
+        });
+    }
     let preprocessed = preprocess_channel(
         channel_name,
         prepared,
@@ -264,9 +277,8 @@ fn build_clamped_optimizer(
 ) -> OptimizerConfig {
     let is_sub_channel = is_subwoofer_measurement_channel(channel_name, room_config);
     let mut optimizer = room_config.optimizer.clone();
-    if min_freq != room_config.optimizer.min_freq {
-        optimizer.min_freq = min_freq;
-    }
+    optimizer.min_freq = min_freq;
+    optimizer.max_freq = optimizer.max_freq.min(max_freq);
     optimizer.ssir_wav_path = None;
 
     if is_sub_channel {
@@ -358,14 +370,14 @@ fn warn_if_optimizer_bounds_exceed_data(
     let max_tolerance = data_max * 10_f64.powf(log_margin);
     if optimizer.min_freq < min_tolerance {
         warn!(
-            "Channel '{}': optimizer.min_freq={:.1} Hz is below measurement minimum {:.1} Hz. Filters in [{:.1} .. {:.1}] Hz will have no data to correct and will be ignored.",
-            channel_name, optimizer.min_freq, data_min, optimizer.min_freq, data_min,
+            "Channel '{}': optimizer.min_freq={:.1} Hz is below measurement minimum {:.1} Hz; intersecting the correction band with measured support.",
+            channel_name, optimizer.min_freq, data_min,
         );
     }
     if optimizer.max_freq > max_tolerance {
         warn!(
-            "Channel '{}': optimizer.max_freq={:.1} Hz is above measurement maximum {:.1} Hz. Filters in [{:.1} .. {:.1}] Hz will have no data to correct and will be ignored.",
-            channel_name, optimizer.max_freq, data_max, data_max, optimizer.max_freq,
+            "Channel '{}': optimizer.max_freq={:.1} Hz is above measurement maximum {:.1} Hz; intersecting the correction band with measured support.",
+            channel_name, optimizer.max_freq, data_max,
         );
     }
 }
@@ -376,6 +388,60 @@ mod tests {
     use roomeq_model::SubOptimizerConfig;
 
     use super::*;
+
+    fn bounded_prepared_measurement() -> PreparedChannelInput {
+        let curve = Curve {
+            freq: ndarray::array![100.0, 160.0, 300.0, 6000.0],
+            spl: Array1::from_elem(4, 80.0),
+            ..Curve::default()
+        };
+        PreparedChannelInput::new(
+            crate::PreparedChannelMeasurements::new(curve.clone(), vec![curve], false),
+            None,
+            crate::PreparedCea2034::default(),
+            EqResources::default(),
+        )
+    }
+
+    #[test]
+    fn preparation_intersects_requested_band_with_measurement_before_dispatch() {
+        let prepared = bounded_prepared_measurement();
+        for mode in [
+            ProcessingMode::LowLatency,
+            ProcessingMode::PhaseLinear,
+            ProcessingMode::Hybrid,
+        ] {
+            let mut config = RoomConfig::default();
+            config.optimizer.processing_mode = mode;
+            config.optimizer.min_freq = 20.0;
+            config.optimizer.max_freq = 20_000.0;
+            let execution =
+                prepare_channel_execution("left", &prepared, &config, 48_000.0, None).unwrap();
+            assert_eq!(execution.target.min_freq, 100.0);
+            assert_eq!(execution.optimizer.min_freq, 100.0);
+            assert_eq!(execution.preprocessed.score_min_freq, 100.0);
+            assert_eq!(execution.target.max_freq, 6000.0);
+            assert_eq!(execution.optimizer.max_freq, 6000.0);
+        }
+    }
+
+    #[test]
+    fn preparation_rejects_disjoint_measurement_and_correction_bands() {
+        let prepared = bounded_prepared_measurement();
+        for (low, high) in [(20.0, 80.0), (7000.0, 20_000.0)] {
+            let mut config = RoomConfig::default();
+            config.optimizer.min_freq = low;
+            config.optimizer.max_freq = high;
+            let error = prepare_channel_execution("left", &prepared, &config, 48_000.0, None)
+                .err()
+                .expect("disjoint bands must not synthesize unsupported correction");
+            assert!(
+                error
+                    .to_string()
+                    .contains("does not overlap measurement support")
+            );
+        }
+    }
 
     fn curve() -> Curve {
         Curve {

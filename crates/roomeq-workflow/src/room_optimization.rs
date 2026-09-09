@@ -37,7 +37,7 @@ mod process;
 mod room_optimization_callback_observer;
 mod room_optimization_progress;
 mod room_optimization_result;
-mod seat_replay;
+pub mod seat_replay;
 #[cfg(test)]
 mod tests;
 mod types;
@@ -153,6 +153,10 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
         request.sample_rate,
         context.output_dir.unwrap_or_else(|| Path::new(".")),
     )?;
+    generate_validation_bundle_report(
+        &mut result, request.config, context.output_dir, context.artifact_store,
+        request.sample_rate,
+    )?;
     Ok(result)
 }
 
@@ -224,11 +228,9 @@ fn select_topology_route(
     // management and leaves the published routing graph unrealized (stereo
     // 2.x with an MSO sub group must reach Stereo 2.1, not Generic).
     // Group/Topology/SupportingSource bass outputs stay on the generic path.
-    let routed_bass_output = (matches!(
-        sys.model,
-        SystemModel::HomeCinema | SystemModel::Stereo
-    ) && sys.subwoofers.is_some())
-        .then(|| roomeq_engine::home_cinema::bass_output_role(config, sys));
+    let routed_bass_output = (matches!(sys.model, SystemModel::HomeCinema | SystemModel::Stereo)
+        && sys.subwoofers.is_some())
+    .then(|| roomeq_engine::home_cinema::bass_output_role(config, sys));
     let has_group = sys.speakers.iter().any(|(role, key)| {
         if routed_bass_output
             .as_ref()
@@ -664,6 +666,15 @@ fn optimize_room_impl_with_frequency_samples(
     if let Some(reports) = roomeq_engine::output::take_mixed_phase_reports(&mut result.channels) {
         result.metadata.mixed_phase_per_channel = Some(reports);
     }
+    // Both assembly paths have completed final level alignment, CTC and
+    // convolution binding. Assess that serialized graph, not optimizer caches.
+    // The separately configured correction acceptance policy remains unchanged.
+    let electrical = crate::electrical_headroom::final_graph_unit_peak_stage(
+        &result.to_dsp_chain_output(),
+        sample_rate,
+        output_dir.unwrap_or(Path::new(".")),
+    );
+    result.metadata.stage_outcomes.push(electrical);
 
     emit_pipeline_event(
         &observer_shared,
@@ -945,10 +956,8 @@ fn apply_inter_channel_timbre_matching_stage(
 /// cancellation that the final replay then rejects.
 fn uses_routed_home_cinema_inputs(config: &RoomConfig) -> bool {
     config.system.as_ref().is_some_and(|system| {
-        matches!(
-            system.model,
-            SystemModel::HomeCinema | SystemModel::Stereo
-        ) && system.subwoofers.is_some()
+        matches!(system.model, SystemModel::HomeCinema | SystemModel::Stereo)
+            && system.subwoofers.is_some()
     })
 }
 
@@ -1390,11 +1399,11 @@ fn assemble_workflow_result_with_frequency_samples(
                         sample_rate,
                         Some(out_dir),
                         result.channels.get(&name),
-                    );
-                    if let Some(generated) = &generated {
-                        ch.fir_coeffs = Some(generated.coeffs.clone());
-                    }
-                    generated
+                    ).ok_or_else(|| AutoeqError::OptimizationFailed {
+                        message: format!("required post-workflow FIR generation or sidecar write failed for '{name}' in {}", out_dir.display()),
+                    })?;
+                    ch.fir_coeffs = Some(generated.coeffs.clone());
+                    Some(generated)
                 }
             } else {
                 None
@@ -1474,7 +1483,10 @@ fn assemble_workflow_result_with_frequency_samples(
                         Some(out_dir),
                     ) {
                         Ok(generated) => generated,
-                        Err(error) => {
+                        Err(MixedPhasePostError::Artifact(message)) => {
+                            return Err(AutoeqError::OptimizationFailed { message });
+                        }
+                        Err(MixedPhasePostError::Candidate(error)) => {
                             warn!(
                                 "Mixed-phase FIR candidate rejected for '{}': {}",
                                 name, error
@@ -1911,7 +1923,7 @@ fn assemble_workflow_result_with_frequency_samples(
     }
     update_perceptual_metrics(&mut result.metadata, Some(&result.channels), Some(config));
     apply_ctc_if_enabled(&mut result, config, sample_rate, output_dir)?;
-    generate_validation_bundle_report(&mut result, config, output_dir, store)?;
+    crate::export::bind_final_convolution_artifacts(&mut result, sidecar_dir, store, sample_rate)?;
     emit_pipeline_event(
         observer_shared,
         PipelineEvent::completed(PipelineStepId::MetadataRefresh, "Reports refreshed")
@@ -1952,13 +1964,27 @@ fn commit_or_restore_routed_safety_replay(
     pre_safety_result: RoomOptimizationResult,
     pre_safety_deployed: HashMap<String, Curve>,
     post_safety_deployed: Result<HashMap<String, Curve>>,
-) {
+) -> Result<()> {
     match post_safety_deployed {
         Ok(deployed) => result.deployed_source_curves = deployed,
         Err(error) => {
+            let playback = |state: &RoomOptimizationResult| {
+                let channels: std::collections::BTreeMap<_, _> = state.channels.iter().map(|(name, chain)| {
+                    let drivers = chain.drivers.as_ref().map(|drivers| drivers.iter().map(|driver| {
+                        serde_json::json!({"name": driver.name, "plugins": driver.plugins})
+                    }).collect::<Vec<_>>());
+                    (name, serde_json::json!({"plugins": chain.plugins, "drivers": drivers}))
+                }).collect();
+                serde_json::json!({
+                    "channels": channels,
+                    "fir": retained_fir_coeffs_by_channel(state),
+                    "routing": state.metadata.bass_management.as_ref().and_then(|bass| bass.routing_graph.as_ref()),
+                })
+            };
+            let safety_changed_playback = playback(result) != playback(&pre_safety_result);
             // The gate already evaluated and reported on its working copy;
             // restoring the pre-gate snapshot must not silently drop those
-            // records, or the shipped DSP ends up with no acceptance report
+            // records, or the diagnostic DSP ends up with no acceptance report
             // at all. Carry the acceptance report and the gate-added stage
             // outcomes across, marked so readers know the described reverts
             // did not stick: the report documents what the gate found, and
@@ -1966,15 +1992,15 @@ fn commit_or_restore_routed_safety_replay(
             let mut acceptance = result.metadata.correction_acceptance.clone();
             if let Some(report) = acceptance.as_mut() {
                 report.accepted = false;
-                report.violations.push(
-                    "safety_replay_rejected_pre_gate_dsp_restored".to_string(),
-                );
+                report.decision = roomeq_model::CorrectionDecision::Rejected;
+                report
+                    .violations
+                    .push("safety_replay_rejected_pre_gate_dsp_restored".to_string());
                 report.violations.sort();
                 report.violations.dedup();
             }
             let pre_gate_outcomes = pre_safety_result.metadata.stage_outcomes.len();
-            let mut gate_outcomes =
-                std::mem::take(&mut result.metadata.stage_outcomes);
+            let mut gate_outcomes = std::mem::take(&mut result.metadata.stage_outcomes);
             let gate_added = gate_outcomes.split_off(pre_gate_outcomes.min(gate_outcomes.len()));
             *result = pre_safety_result;
             result.deployed_source_curves = pre_safety_deployed;
@@ -1987,14 +2013,20 @@ fn commit_or_restore_routed_safety_replay(
                 stage: "final_correction_safety_routed_replay".to_string(),
                 status: StageStatus::Degraded,
                 advisories: vec![format!(
-                    "safety reversion rejected because it broke the routed crossover: {error}"
+                    "post-safety routed replay rejected; safety_changed_playback={safety_changed_playback}: {error}"
                 )],
             });
             warn!(
-                "Final correction safety reversion rejected; preserving the pre-gate routed DSP: {error}"
+                "Final correction safety replay rejected; safety_changed_playback={safety_changed_playback}; restoring pre-gate DSP for diagnostics only: {error}"
             );
+            return Err(AutoeqError::OptimizationFailed {
+                message: format!(
+                    "final correction safety routed replay failed; safety_changed_playback={safety_changed_playback}; restored pre-gate DSP is not accepted: {error}"
+                ),
+            });
         }
     }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2063,7 +2095,7 @@ fn apply_final_correction_safety_gate_preserving_routed_crossover(
             pre_safety_result,
             pre_safety_deployed,
             post_safety_deployed,
-        );
+        )?;
     }
 
     Ok(())
@@ -2080,14 +2112,7 @@ fn record_missing_mixed_phase_fir_reversions(
     let mut reverted_stages = result
         .channel_results
         .iter()
-        .filter(|(_, channel)| {
-            channel
-                .initial_curve
-                .phase
-                .as_ref()
-                .is_some_and(|phase| !phase.is_empty())
-                && channel.fir_coeffs.is_none()
-        })
+        .filter(|(_, channel)| channel.fir_coeffs.as_ref().is_none_or(Vec::is_empty))
         .map(|(name, _)| format!("{name}:fir"))
         .collect::<Vec<_>>();
     reverted_stages.sort();
@@ -3504,6 +3529,7 @@ fn assemble_generic_result_with_frequency_samples(
         roomeq_engine::output::take_mixed_phase_reports(&mut channel_chains);
 
     let metadata = OptimizationMetadata {
+            final_convolution_sha256: None,
         pre_score: avg_pre_score,
         post_score: avg_post_score,
         algorithm: config.optimizer.algorithm.clone(),
@@ -3529,6 +3555,7 @@ fn assemble_generic_result_with_frequency_samples(
         correction_acceptance: None,
         optimizer_evidence: None,
         stage_outcomes,
+        qa_seed_distribution: None,
         effective_config: None,
     };
 
@@ -3601,7 +3628,7 @@ fn assemble_generic_result_with_frequency_samples(
     )?;
     refresh_final_reports(&mut result, config, sample_rate, sidecar_dir);
     apply_ctc_if_enabled(&mut result, config, sample_rate, output_dir)?;
-    generate_validation_bundle_report(&mut result, config, output_dir, store)?;
+    crate::export::bind_final_convolution_artifacts(&mut result, sidecar_dir, store, sample_rate)?;
     emit_pipeline_event(
         observer_shared,
         PipelineEvent::completed(PipelineStepId::MetadataRefresh, "Reports refreshed"),

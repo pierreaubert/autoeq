@@ -137,6 +137,7 @@ impl WorkflowExecutor for GenericExecutor {
             combined_pre_score: avg_pre,
             combined_post_score: avg_post,
             metadata: OptimizationMetadata {
+            final_convolution_sha256: None,
                 pre_score: avg_pre,
                 post_score: avg_post,
                 algorithm: config.optimizer.algorithm.clone(),
@@ -162,6 +163,7 @@ impl WorkflowExecutor for GenericExecutor {
                 correction_acceptance: None,
                 optimizer_evidence: None,
                 stage_outcomes: Vec::new(),
+                qa_seed_distribution: None,
                 effective_config: None,
             },
         })

@@ -49,18 +49,52 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
+pub(super) struct AssessedOptimization {
+    result: RoomOptimizationResult,
+    pub(super) scorecard: MetricScorecard,
+}
+
+impl std::ops::Deref for AssessedOptimization {
+    type Target = RoomOptimizationResult;
+    fn deref(&self) -> &Self::Target {
+        &self.result
+    }
+}
+
 pub(super) fn run_optimization(
     config: &RoomConfig,
     seed_runs: usize,
-) -> Result<RoomOptimizationResult> {
+) -> Result<AssessedOptimization> {
     let id = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!("roomeq_qa_{}_{}", std::process::id(), id));
     std::fs::create_dir_all(&temp_dir)?;
     let result = if seed_runs == 1 {
-        crate::optimize_room_single_seed(config, SAMPLE_RATE)
+        roomeq_workflow::optimize_room(config, SAMPLE_RATE, None, Some(&temp_dir))
+            .map_err(|error| anyhow::anyhow!(error.to_string()))
     } else {
         crate::optimize_room(config, SAMPLE_RATE, Some(&temp_dir))
     };
+    let result = result.and_then(|result| {
+        let electrical = super::electrical::assess(&result, SAMPLE_RATE, &temp_dir);
+        let mut scorecard = super::metric_scorecard::compute_result_scorecard(&result, electrical);
+        let bundle_root = super::misc::find_project_root()?.join("target/qa/electrical-replays");
+        std::fs::create_dir_all(&bundle_root)?;
+        let bundle = bundle_root.join(format!(
+            "{}-{id}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_micros()
+        ));
+        match super::electrical::retain_replay_bundle(&result, SAMPLE_RATE, &temp_dir, &bundle) {
+            Ok(()) => scorecard.replay_bundle = Some(bundle),
+            Err(error) => {
+                scorecard.max_boost_db = f64::INFINITY;
+                scorecard.electrical = Some(Err(format!(
+                    "failed to retain final replay bundle: {error:#}"
+                )));
+            }
+        }
+        Ok(AssessedOptimization { result, scorecard })
+    });
     let _ = std::fs::remove_dir_all(&temp_dir);
     result
 }
@@ -554,7 +588,7 @@ pub(super) fn run_cross_mode_convergence_tests(
             });
         }
 
-        mode_results.push((mode_name, result));
+        mode_results.push((mode_name, result.result));
     }
 
     // CM-1: Frequency-response convergence from the final deployed channel

@@ -9,11 +9,137 @@ from scripts.src.dsp import (
     build_post_dsp_source_curves,
     compute_eq_response,
     compute_group_delay_from_ir,
+    per_driver_corrected_curve,
+    per_driver_effective_eq,
     replay_serialized_output,
     resample_spl_onto_grid,
     sum_driver_initial_curves,
     wrap_phase,
 )
+
+
+def _two_sub_data():
+    """Minimal stereo + two-subwoofer fixture mirroring the 2.2_sigberg1 setup."""
+    freq = [20.0, 30.0, 38.0, 60.0, 80.0, 120.0, 200.0]
+
+    def flat(level):
+        return {
+            "freq": list(freq),
+            "spl": [level] * len(freq),
+            "phase": [0.0] * len(freq),
+        }
+    shared_eq = {
+        "filter_type": "peak",
+        "freq": 38.0,
+        "q": 2.0,
+        "db_gain": -6.0,
+    }
+    lfe = {
+        "channel": "LFE",
+        "plugins": [
+            {
+                "plugin_type": "gain",
+                "parameters": {"gain_db": -7.0, "room_eq_stage": "pre_route"},
+            },
+            {
+                "plugin_type": "eq",
+                "parameters": {
+                    "label": "room_eq_correction",
+                    "room_eq_stage": "post_route",
+                    "filters": [shared_eq],
+                },
+            },
+            {
+                "plugin_type": "crossover",
+                "parameters": {
+                    "frequency": 120.0,
+                    "output": "low",
+                    "room_eq_stage": "route_owned",
+                    "type": "LR24",
+                },
+            },
+        ],
+        "drivers": [
+            {
+                "name": "Two subs_1",
+                "index": 0,
+                "plugins": [
+                    {
+                        "plugin_type": "crossover",
+                        "parameters": {
+                            "frequency": 80.0,
+                            "output": "low",
+                            "room_eq_stage": "post_route",
+                            "type": "LR24",
+                        },
+                    },
+                ],
+                "initial_curve": flat(80.0),
+            },
+            {
+                "name": "Two subs_2",
+                "index": 1,
+                "plugins": [
+                    {
+                        "plugin_type": "gain",
+                        "parameters": {"gain_db": -4.0, "room_eq_stage": "post_route"},
+                    },
+                    {
+                        "plugin_type": "crossover",
+                        "parameters": {
+                            "frequency": 90.0,
+                            "output": "low",
+                            "room_eq_stage": "post_route",
+                            "type": "LR24",
+                        },
+                    },
+                ],
+                "initial_curve": flat(76.0),
+            },
+        ],
+        "initial_curve": flat(70.0),
+        "final_curve": flat(69.0),
+    }
+    routes = [
+        {
+            "source_channel": "LFE",
+            "destination": "Two subs_1",
+            "route_kind": "lfe_lowpass_to_sub",
+            "crossover_type": "LR24",
+            "low_pass_hz": 120.0,
+            "gain_db": 14.0,
+            "delay_ms": 0.0,
+            "polarity_inverted": False,
+        },
+        {
+            "source_channel": "LFE",
+            "destination": "Two subs_2",
+            "route_kind": "lfe_lowpass_to_sub",
+            "crossover_type": "LR24",
+            "low_pass_hz": 120.0,
+            "gain_db": 10.0,
+            "delay_ms": 0.0,
+            "polarity_inverted": False,
+        },
+    ]
+    return {
+        "channels": {"LFE": lfe},
+        "metadata": {
+            "bass_management": {
+                "physical_sub_output": "LFE",
+                "routing_graph": {"routes": routes},
+            },
+            "effective_config": {
+                "system": {"speakers": {"LFE": "subs"}},
+                "speakers": {
+                    "subs": {
+                        "name": "Two subs",
+                        "subwoofers": [{"name": "Left Sub"}, {"name": "Right Sub"}],
+                    }
+                },
+            },
+        },
+    }
 
 
 class BiquadParityTests(unittest.TestCase):
@@ -798,6 +924,77 @@ class PostDspSourceCurveTests(unittest.TestCase):
         curves = build_post_dsp_source_curves(data)
 
         self.assertEqual(curves["LFE"]["spl"], [55.0])
+
+
+class PerDriverSubCurveTests(unittest.TestCase):
+    def test_effective_eq_combines_shared_eq_with_per_sub_chain(self):
+        data = _two_sub_data()
+
+        first = per_driver_effective_eq(data, "LFE", 0)
+        second = per_driver_effective_eq(data, "LFE", 1)
+
+        for curve in (first, second):
+            self.assertIsNotNone(curve)
+            assert curve is not None
+            self.assertEqual(
+                curve["freq"],
+                data["channels"]["LFE"]["drivers"][0]["initial_curve"]["freq"],
+            )
+
+        # Sub 1: -7 dB shared + 14 dB route; sub 2 adds -4 dB driver and
+        # a 10 dB route gain. All other terms cancel below the low-pass
+        # corners, so the 20 Hz offset between the two subs is 8 dB.
+        low_index = first["freq"].index(20.0)
+        self.assertAlmostEqual(
+            first["spl"][low_index] - second["spl"][low_index], 8.0, places=1
+        )
+
+        # The shared -6 dB peak at 38 Hz shapes both subs identically:
+        # same dip depth relative to 20 Hz on each curve.
+        edge_index = first["freq"].index(20.0)
+        dip_index = first["freq"].index(38.0)
+        first_dip = first["spl"][dip_index] - first["spl"][edge_index]
+        second_dip = second["spl"][dip_index] - second["spl"][edge_index]
+        self.assertLess(first_dip, -3.0)
+        # The 80/90 Hz low-pass skirts already differ slightly at 38 Hz,
+        # so the shared-dip comparison allows a small tolerance.
+        self.assertAlmostEqual(first_dip, second_dip, delta=0.25)
+
+    def test_effective_eq_needs_no_routing_graph(self):
+        data = _two_sub_data()
+        del data["metadata"]["bass_management"]["routing_graph"]
+
+        first = per_driver_effective_eq(data, "LFE", 0)
+        second = per_driver_effective_eq(data, "LFE", 1)
+
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        assert first is not None and second is not None
+        # Without route gains only the -4 dB driver gain separates the subs.
+        low_index = first["freq"].index(20.0)
+        self.assertAlmostEqual(
+            first["spl"][low_index] - second["spl"][low_index], 4.0, places=1
+        )
+
+    def test_effective_eq_rejects_bad_driver_index(self):
+        data = _two_sub_data()
+
+        self.assertIsNone(per_driver_effective_eq(data, "LFE", 2))
+        self.assertIsNone(per_driver_effective_eq(data, "LFE", -1))
+        self.assertIsNone(per_driver_effective_eq(data, "missing", 0))
+
+    def test_corrected_curve_is_measurement_through_own_chain(self):
+        data = _two_sub_data()
+
+        corrected = per_driver_corrected_curve(data, "LFE", 1)
+        effective = per_driver_effective_eq(data, "LFE", 1)
+        initial = data["channels"]["LFE"]["drivers"][1]["initial_curve"]
+
+        self.assertIsNotNone(corrected)
+        assert corrected is not None and effective is not None
+        self.assertEqual(corrected["freq"], initial["freq"])
+        for out, raw, shaping in zip(corrected["spl"], initial["spl"], effective["spl"]):
+            self.assertAlmostEqual(out, raw + shaping, places=1)
 
 
 if __name__ == "__main__":

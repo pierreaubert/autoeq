@@ -21,6 +21,7 @@ use std::path::Path;
 
 mod channel;
 mod collect;
+mod delay;
 mod conformance;
 mod export_format;
 mod extract;
@@ -37,6 +38,16 @@ mod write;
 
 pub use export_format::*;
 pub use package::*;
+pub use delay::CamillaDspDelayRealization;
+
+/// Backend-specific added latency and validity, derived from the same stage
+/// plan used to render the artifact. Canonical acoustic timing is not mutated.
+pub fn camilladsp_delay_realization(graph: &DspGraph, sample_rate: f64) -> anyhow::Result<CamillaDspDelayRealization> {
+    graph.validate().map_err(anyhow::Error::msg)?;
+    ensure_external_export_supported(graph, ExportFormat::CamillaDsp)?;
+    validate_camilladsp_input(graph, Some(sample_rate))?;
+    Ok(delay::report(graph, sample_rate))
+}
 
 use channel::channel_short_name;
 use channel::equalizer_apo_channel_name;
@@ -60,8 +71,6 @@ use misc::roon_filter_type;
 use pipewire::pipewire_channel_position;
 use pipewire::pipewire_filter_label;
 use write::write_camilladsp_crossover_filter;
-use write::write_camilladsp_delay_filter;
-use write::write_camilladsp_filters_for_plugins;
 use write::write_camilladsp_pipeline_filter_step;
 
 /// Render one external artifact after applying the backend's conformance
@@ -99,6 +108,7 @@ pub fn build_export_package(
     occupied_names: &BTreeSet<String>,
     reusable_names: &HashMap<String, String>,
 ) -> anyhow::Result<ExportPackage> {
+    package::validate_final_convolution_identity(graph, resources)?;
     graph.validate().map_err(anyhow::Error::msg)?;
     let mut members = Vec::new();
 
@@ -281,10 +291,15 @@ fn export_camilladsp(output: &DspGraph, sample_rate: f64) -> anyhow::Result<Stri
     writeln!(out, "filters:")?;
 
     let mut channel_filter_names = Vec::with_capacity(channels.len());
+    let delay_report = delay::report(output, sample_rate);
+    let padding = delay_report.serial_padding_samples;
+    writeln!(out, "# roomeq_delay_realization: {}", serde_json::to_string(&delay_report)?)?;
+    writeln!(out, "# roomeq_common_delay_padding_samples: {padding}")?;
+    writeln!(out, "# roomeq_delay_usable_band_hz: 0..{}", delay_report.usable_band_upper_hz)?;
     for (ch_name, chain) in &channels {
         let prefix = normalize_export_identifier(ch_name);
         let filter_names =
-            write_camilladsp_filters_for_plugins(&mut out, &mut manifest, &prefix, &chain.plugins)?;
+            delay::write_stage(&mut out, &mut manifest, &prefix, &chain.plugins, sample_rate, padding)?;
         channel_filter_names.push(filter_names);
     }
     writeln!(out)?;
@@ -324,6 +339,13 @@ fn export_camilladsp_routed(
     writeln!(out)?;
 
     let (input_channels, output_channels) = routed_channel_names(output, graph);
+    let delay_report = delay::report(output, sample_rate);
+    let pre_padding = delay_report.pre_route_padding_samples;
+    let post_padding = delay_report.post_route_padding_samples;
+    let route_padding = delay_report.route_padding_samples;
+    writeln!(out, "# roomeq_delay_realization: {}", serde_json::to_string(&delay_report)?)?;
+    writeln!(out, "# roomeq_common_delay_padding_samples: {}", pre_padding + route_padding + post_padding)?;
+    writeln!(out, "# roomeq_delay_usable_band_hz: 0..{}", delay_report.usable_band_upper_hz)?;
 
     writeln!(out, "devices:")?;
     writeln!(out, "  samplerate: {}", sample_rate as u32)?;
@@ -346,11 +368,13 @@ fn export_camilladsp_routed(
         })?;
         let prefix = format!("pre_{}", normalize_export_identifier(channel_name));
         let plugins = plugins_for_stage(chain, "pre_route");
-        pre_route_filter_names.push(write_camilladsp_filters_for_plugins(
+        pre_route_filter_names.push(delay::write_stage(
             &mut out,
             &mut manifest,
             &prefix,
             &plugins,
+            sample_rate,
+            pre_padding,
         )?);
     }
 
@@ -374,12 +398,14 @@ fn export_camilladsp_routed(
             )?;
             filter_names.push(format!("{prefix}_crossover"));
         }
-        if route.delay_ms.abs() > 0.001 {
-            write_camilladsp_delay_filter(
+        if route.delay_ms != 0.0 || route_padding != 0 {
+            delay::write_delay(
                 &mut out,
                 &mut manifest,
                 &format!("{prefix}_delay"),
                 route.delay_ms,
+                sample_rate,
+                route_padding,
             )?;
             filter_names.push(format!("{prefix}_delay"));
         }
@@ -393,11 +419,13 @@ fn export_camilladsp_routed(
         })?;
         let prefix = format!("post_{}", normalize_export_identifier(channel_name));
         let plugins = plugins_for_stage(chain, "post_route");
-        post_route_filter_names.push(write_camilladsp_filters_for_plugins(
+        post_route_filter_names.push(delay::write_stage(
             &mut out,
             &mut manifest,
             &prefix,
             &plugins,
+            sample_rate,
+            post_padding,
         )?);
     }
     writeln!(out)?;

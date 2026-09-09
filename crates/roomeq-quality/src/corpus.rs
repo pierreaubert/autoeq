@@ -34,6 +34,10 @@ pub enum QualityGateMode {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct HeldOutMeasurement {
+    /// Shared physical listening-position identity. Required for coherent
+    /// multi-output QA replay; legacy independent-channel lists may omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seat_id: Option<String>,
     pub channel: String,
     pub path: PathBuf,
 }
@@ -145,9 +149,13 @@ impl AcousticCorpusScenario {
                     measurement.path.display()
                 ));
             }
-            if !self.channels.is_empty() && !self.channels.contains(&measurement.channel) {
+            if measurement
+                .seat_id
+                .as_ref()
+                .is_some_and(|id| id.trim().is_empty())
+            {
                 return Err(format!(
-                    "scenario '{}' held-out channel '{}' is not selected for scoring",
+                    "scenario '{}' held-out channel '{}' has an empty seat identity",
                     self.id, measurement.channel
                 ));
             }
@@ -578,10 +586,12 @@ mod tests {
 
         scenario.held_out = vec![
             HeldOutMeasurement {
+                seat_id: None,
                 channel: "L".to_string(),
                 path: scenario.config.clone(),
             },
             HeldOutMeasurement {
+                seat_id: None,
                 channel: "L".to_string(),
                 path: scenario.config.clone(),
             },
@@ -596,6 +606,27 @@ mod tests {
         scenario
             .validate()
             .expect("covered held-out channels must validate");
+    }
+
+    #[test]
+    fn physical_held_out_output_need_not_be_a_scored_logical_source() {
+        let mut scenario = valid_scenario();
+        scenario.channels = vec!["L".into()];
+        scenario.held_out = vec![HeldOutMeasurement {
+            channel: "physical_sub".into(),
+            path: scenario.config.clone(),
+            seat_id: Some("seat_a".into()),
+        }];
+        scenario
+            .validate()
+            .expect("physical branch may contribute to a different logical source");
+        scenario.held_out[0].seat_id = Some(" ".into());
+        assert!(
+            scenario
+                .validate()
+                .unwrap_err()
+                .contains("empty seat identity")
+        );
     }
 
     #[test]

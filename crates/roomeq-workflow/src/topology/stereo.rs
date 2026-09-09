@@ -131,6 +131,7 @@ impl WorkflowExecutor for Stereo20Executor {
             roomeq_engine::output::compute_epa_multichannel(&channel_chains, &epa_cfg);
 
         let mut metadata = OptimizationMetadata {
+            final_convolution_sha256: None,
             pre_score: avg_pre,
             post_score: avg_post,
             algorithm: config.optimizer.algorithm.clone(),
@@ -156,6 +157,7 @@ impl WorkflowExecutor for Stereo20Executor {
             correction_acceptance: None,
             optimizer_evidence: None,
             stage_outcomes: Vec::new(),
+            qa_seed_distribution: None,
             effective_config: None,
         };
 

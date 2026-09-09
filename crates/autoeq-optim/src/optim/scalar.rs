@@ -73,25 +73,63 @@ pub fn optimize_bounded_scalar<F>(
 where
     F: Fn(&[f64]) -> f64 + Sync,
 {
+    optimize_bounded_scalar_with_callback(bounds, initial, config, objective, None)
+}
+
+/// Native generation-boundary cancellation for DE and CMA-ES.
+/// A stopped run returns an error, never a deliverable best-effort candidate.
+/// Backends without native callbacks reject callback requests before scoring.
+/// This does not interrupt an in-flight objective evaluation or initial population.
+pub fn optimize_bounded_scalar_with_callback<F>(
+    bounds: &[(f64, f64)],
+    initial: &[f64],
+    config: &ScalarOptimConfig,
+    objective: F,
+    callback: Option<super::OptimProgressCallback>,
+) -> Result<ScalarOptimResult, String>
+where
+    F: Fn(&[f64]) -> f64 + Sync,
+{
     validate_problem(bounds, initial)?;
 
     let backend = registry::resolve(&config.algorithm)
         .ok_or_else(|| format!("Unknown algorithm: {}", config.algorithm))?;
     let canonical = backend.name().to_string();
 
+    if callback.is_some() && !matches!(canonical.as_str(), "autoeq:cmaes" | "autoeq:de") {
+        return Err(format!(
+            "native scalar cancellation is not supported by {canonical}"
+        ));
+    }
+    let stopped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let callback = callback.map(|mut callback| {
+        let stopped = stopped.clone();
+        Box::new(move |iteration, loss, preference| {
+            let action = callback(iteration, loss, preference);
+            if matches!(action, crate::de::CallbackAction::Stop) {
+                stopped.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            action
+        }) as super::OptimProgressCallback
+    });
+
     let f = |x: &Array1<f64>| objective(x.as_slice().unwrap());
     let x0 = clamp_initial(initial, bounds);
 
-    match canonical.as_str() {
-        "autoeq:cmaes" => optimize_cmaes(&canonical, bounds, x0, config, &f),
-        "autoeq:de" => optimize_de(&canonical, bounds, x0, config, &f),
+    let result = match canonical.as_str() {
+        "autoeq:cmaes" => optimize_cmaes(&canonical, bounds, x0, config, &f, callback),
+        "autoeq:de" => optimize_de(&canonical, bounds, x0, config, &f, callback),
         "autoeq:cobyla" => optimize_cobyla(&canonical, bounds, x0, config, &f),
         "autoeq:isres" => optimize_isres(&canonical, bounds, x0, config, &f),
         other => Err(format!(
             "Algorithm '{}' is registered for PEQ filter optimization but is not supported for bounded scalar RoomEQ objectives",
             other
         )),
+    };
+    if stopped.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(format!("{canonical} scalar optimization stopped by user"));
     }
+    result
 }
 
 fn validate_problem(bounds: &[(f64, f64)], initial: &[f64]) -> Result<(), String> {
@@ -132,6 +170,7 @@ fn optimize_cmaes<F>(
     x0: Array1<f64>,
     config: &ScalarOptimConfig,
     f: &F,
+    callback: Option<super::OptimProgressCallback>,
 ) -> Result<ScalarOptimResult, String>
 where
     F: Fn(&Array1<f64>) -> f64 + Sync,
@@ -149,6 +188,13 @@ where
             seed: config.seed,
             f_tol: config.atolerance.max(1e-12),
             stagnation_window: 80,
+            callback: callback.map(|mut callback| {
+                Box::new(
+                    move |progress: &math_audio_optimisation::cmaes::CmaEsIntermediate| {
+                        callback(progress.iter, progress.fun, None)
+                    },
+                ) as math_audio_optimisation::cmaes::CmaEsCallback
+            }),
             ..Default::default()
         },
     )
@@ -169,6 +215,7 @@ fn optimize_de<F>(
     x0: Array1<f64>,
     config: &ScalarOptimConfig,
     f: &F,
+    callback: Option<super::OptimProgressCallback>,
 ) -> Result<ScalarOptimResult, String>
 where
     F: Fn(&Array1<f64>) -> f64 + Sync,
@@ -186,6 +233,11 @@ where
         .disp(false);
     if let Some(seed) = config.seed {
         builder = builder.seed(seed);
+    }
+    if let Some(mut callback) = callback {
+        builder = builder.callback(Box::new(move |progress| {
+            callback(progress.iter, progress.fun, None)
+        }));
     }
 
     let de_config = builder
@@ -278,6 +330,124 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_scalar_stop_is_not_a_successful_candidate() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        for algorithm in ["autoeq:de", "cma-es"] {
+            let evaluations = AtomicUsize::new(0);
+            let calls = Arc::new(AtomicUsize::new(0));
+            let callback_calls = calls.clone();
+            let result = optimize_bounded_scalar_with_callback(
+                &[(-2.0, 2.0), (-2.0, 2.0)],
+                &[1.5, 1.5],
+                &ScalarOptimConfig {
+                    algorithm: algorithm.into(),
+                    max_iter: 1000,
+                    population: 8,
+                    seed: Some(7),
+                    ..Default::default()
+                },
+                |x| {
+                    evaluations.fetch_add(1, Ordering::Relaxed);
+                    quadratic(x)
+                },
+                Some(Box::new(move |_, loss, preference| {
+                    assert!(loss.is_finite());
+                    assert_eq!(preference, None);
+                    callback_calls.fetch_add(1, Ordering::Relaxed);
+                    crate::de::CallbackAction::Stop
+                })),
+            );
+            assert!(
+                result.unwrap_err().contains("stopped by user"),
+                "{algorithm}"
+            );
+            assert_eq!(calls.load(Ordering::Relaxed), 1, "{algorithm}");
+            assert!(evaluations.load(Ordering::Relaxed) < 100, "{algorithm}");
+        }
+    }
+
+    #[test]
+    fn unsupported_native_scalar_stop_is_rejected_before_scoring() {
+        for algorithm in ["autoeq:cobyla", "autoeq:isres"] {
+            let result = optimize_bounded_scalar_with_callback(
+                &[(-1.0, 1.0)],
+                &[0.0],
+                &ScalarOptimConfig {
+                    algorithm: algorithm.into(),
+                    ..Default::default()
+                },
+                |_| panic!("unsupported cancellation must not launch search"),
+                Some(Box::new(|_, _, _| crate::de::CallbackAction::Stop)),
+            );
+            assert!(result.unwrap_err().contains("not supported"));
+        }
+    }
+
+    #[test]
+    fn continuing_scalar_callback_preserves_seeded_search() {
+        for algorithm in ["autoeq:de", "autoeq:cmaes"] {
+            let config = ScalarOptimConfig {
+                algorithm: algorithm.into(),
+                max_iter: 80,
+                population: 8,
+                seed: Some(7),
+                strategy: "rand1bin".into(),
+                ..Default::default()
+            };
+            let bounds = &[(-2.0, 2.0), (-2.0, 2.0)];
+            let initial = &[1.5, 1.5];
+            let plain = optimize_bounded_scalar(bounds, initial, &config, quadratic).unwrap();
+            let repeated = optimize_bounded_scalar(bounds, initial, &config, quadratic).unwrap();
+            assert_eq!(plain.x, repeated.x, "plain repeat {algorithm}");
+            let observed = optimize_bounded_scalar_with_callback(
+                bounds,
+                initial,
+                &config,
+                quadratic,
+                Some(Box::new(|_, _, _| crate::de::CallbackAction::Continue)),
+            )
+            .unwrap();
+            assert_eq!(plain.x, observed.x, "{algorithm}");
+            assert_eq!(plain.fun, observed.fun, "{algorithm}");
+            assert_eq!(plain.success, observed.success, "{algorithm}");
+            assert_eq!(plain.message, observed.message, "{algorithm}");
+        }
+    }
+
+    #[test]
+    fn seeded_lshade_scalar_search_is_reproducible() {
+        // The pinned archive uses an unseeded RNG when replacing full entries.
+        // Keep this regression active until the dependency honours its seed.
+        let config = ScalarOptimConfig {
+            algorithm: "autoeq:de".into(),
+            strategy: "lshade".into(),
+            max_iter: 80,
+            population: 8,
+            seed: Some(7),
+            ..Default::default()
+        };
+        let run = || {
+            optimize_bounded_scalar(&[(-2.0, 2.0), (-2.0, 2.0)], &[1.5, 1.5], &config, quadratic)
+                .unwrap()
+        };
+        let first = run();
+        for _ in 0..3 {
+            let repeated = run();
+            assert_eq!(
+                first.x, repeated.x,
+                "seeded L-SHADE parameter reproducibility"
+            );
+            assert_eq!(
+                first.fun, repeated.fun,
+                "seeded L-SHADE loss reproducibility"
+            );
+        }
+    }
 
     fn quadratic(x: &[f64]) -> f64 {
         (x[0] - 0.25).powi(2) + (x[1] + 0.5).powi(2)

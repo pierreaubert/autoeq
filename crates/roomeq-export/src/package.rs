@@ -13,6 +13,28 @@ pub struct ConvolutionResource {
     pub bytes: Arc<[u8]>,
 }
 
+impl ConvolutionResource {
+    pub fn sha256(&self) -> String {
+        sha256_hex(&self.bytes)
+    }
+}
+
+pub(crate) fn validate_final_convolution_identity(graph: &DspGraph, resources: &[ConvolutionResource]) -> anyhow::Result<()> {
+    let references = checked_convolution_resource_references(graph)?;
+    let Some(inventory) = graph.metadata.as_ref().and_then(|metadata| metadata.final_convolution_sha256.as_ref()) else {
+        return Ok(()); // Legacy/manual graphs have no final-workflow binding.
+    };
+    anyhow::ensure!(references.iter().collect::<BTreeSet<_>>() == inventory.keys().collect::<BTreeSet<_>>(),
+        "final convolution inventory does not match graph references");
+    let supplied = resource_map(resources)?;
+    for reference in references {
+        let expected = inventory[&reference].as_ref().with_context(|| format!("final convolution artifact '{reference}' is unbound"))?;
+        let bytes = supplied.get(reference.as_str()).with_context(|| format!("missing final convolution artifact '{reference}'"))?;
+        anyhow::ensure!(sha256_hex(bytes) == *expected, "final convolution artifact '{reference}' changed since workflow completion");
+    }
+    Ok(())
+}
+
 /// One deterministic export package member.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportPackageMember {
@@ -46,6 +68,35 @@ pub struct ExportPackage {
 }
 
 impl ExportPackage {
+    /// Revalidate public members before persistence. The package may have been
+    /// modified since construction; a filename/hash pair is not proof of bytes.
+    pub fn validate_integrity(&self) -> anyhow::Result<()> {
+        let mut paths = BTreeSet::new();
+        for member in &self.members {
+            validate_member_path(&member.relative_path)?;
+            anyhow::ensure!(paths.insert(&member.relative_path), "duplicate export package member");
+            anyhow::ensure!(sha256_hex(&member.bytes) == member.sha256,
+                "export package content hash mismatch for '{}'", member.relative_path.display());
+        }
+        Ok(())
+    }
+    /// Read the typed delay contract from the exact packaged CamillaDSP
+    /// artifact, including its backend-only additional latency. Other formats
+    /// return None. Malformed or ambiguous declarations fail explicitly.
+    pub fn camilladsp_delay_realization(&self) -> anyhow::Result<Option<crate::CamillaDspDelayRealization>> {
+        let mut report = None;
+        for member in &self.members {
+            let Ok(text) = std::str::from_utf8(&member.bytes) else { continue };
+            for line in text.lines() {
+                if let Some(json) = line.strip_prefix("# roomeq_delay_realization: ") {
+                    anyhow::ensure!(report.is_none(), "multiple CamillaDSP delay reports in one package");
+                    report = Some(serde_json::from_str(json).context("invalid packaged CamillaDSP delay report")?);
+                }
+            }
+        }
+        Ok(report)
+    }
+
     pub fn new(mut members: Vec<ExportPackageMember>) -> anyhow::Result<Self> {
         members.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
         for pair in members.windows(2) {
@@ -66,8 +117,8 @@ impl ExportPackage {
     }
 }
 
-/// Return every convolution reference in deterministic order so a workflow
-/// can load exactly the resources required by a graph.
+/// Best-effort reference discovery for legacy inspection callers.
+/// Finalization and export must use `checked_convolution_resource_references`.
 pub fn convolution_resource_references(graph: &DspGraph) -> Vec<String> {
     let mut references = BTreeSet::new();
     collect_references(&graph.global_plugins, &mut references);
@@ -82,6 +133,32 @@ pub fn convolution_resource_references(graph: &DspGraph) -> Vec<String> {
     references.into_iter().collect()
 }
 
+/// Collect every declared FIR resource, rejecting malformed stages rather than
+/// silently omitting them from the final playback inventory.
+pub fn checked_convolution_resource_references(graph: &DspGraph) -> anyhow::Result<Vec<String>> {
+    let validate = |plugins: &[PluginConfigWrapper], owner: &str| -> anyhow::Result<()> {
+        for (index, plugin) in plugins.iter().enumerate() {
+            if plugin.plugin_type != "convolution" {
+                continue;
+            }
+            let reference = plugin.parameters.get("ir_file")
+                .and_then(serde_json::Value::as_str)
+                .with_context(|| format!("{owner} convolution stage {index} requires string field 'ir_file'"))?;
+            anyhow::ensure!(!reference.trim().is_empty() && !reference.contains('\0'),
+                "{owner} convolution stage {index} requires a nonblank, NUL-free 'ir_file'");
+        }
+        Ok(())
+    };
+    validate(&graph.global_plugins, "global")?;
+    for (name, chain) in &graph.channels {
+        validate(&chain.plugins, &format!("channel '{name}'"))?;
+        for driver in chain.drivers.iter().flatten() {
+            validate(&driver.plugins, &format!("channel '{name}' driver '{}'", driver.name))?;
+        }
+    }
+    Ok(convolution_resource_references(graph))
+}
+
 /// Rewrite convolution references to package-local member names and return
 /// the sidecar members without touching the filesystem.
 pub fn package_convolution_sidecars(
@@ -90,6 +167,7 @@ pub fn package_convolution_sidecars(
     occupied_names: &BTreeSet<String>,
     reusable_names: &HashMap<String, String>,
 ) -> anyhow::Result<(DspGraph, Vec<ExportPackageMember>)> {
+    validate_final_convolution_identity(graph, resources)?;
     let resources = resource_map(resources)?;
     let mut packaged_by_reference = HashMap::new();
     let mut assigned = occupied_names.clone();
@@ -100,7 +178,7 @@ pub fn package_convolution_sidecars(
     // byte comparison inside a hash bucket only guards against collisions.
     let mut content_groups = Vec::<(String, Arc<[u8]>, Vec<String>)>::new();
     let mut group_by_hash = HashMap::<String, usize>::new();
-    for reference in convolution_resource_references(graph) {
+    for reference in checked_convolution_resource_references(graph)? {
         let bytes = resources.get(reference.as_str()).copied().ok_or_else(|| {
             anyhow::anyhow!("missing explicit convolution resource '{reference}'")
         })?;
@@ -172,6 +250,10 @@ pub fn package_convolution_sidecars(
         }
     }
 
+    if let Some(inventory) = graph.metadata.as_mut().and_then(|metadata| metadata.final_convolution_sha256.as_mut()) {
+        *inventory = inventory.iter().map(|(reference, hash)|
+            (packaged_by_reference[reference].clone(), hash.clone())).collect();
+    }
     Ok((graph, members.into_values().collect()))
 }
 
@@ -302,6 +384,46 @@ mod tests {
                 direct_early_late_correction: None,
             },
         )
+    }
+
+    #[test]
+    fn malformed_convolution_stages_cannot_disappear_from_resource_inventory() {
+        for scope in ["global", "channel", "driver"] {
+            for parameters in [
+                serde_json::json!({}),
+                serde_json::json!({"ir_file": null}),
+                serde_json::json!({"ir_file": 42}),
+                serde_json::json!({"ir_file": ""}),
+                serde_json::json!({"ir_file": "  "}),
+                serde_json::json!({"ir_file": "bad\u{0}.wav"}),
+            ] {
+                let plugin = PluginConfigWrapper {
+                    plugin_type: "convolution".into(), parameters,
+                };
+                let (name, mut chain) = convolution_chain("left", "valid.wav");
+                chain.plugins.clear();
+                let mut graph = DspGraph {
+                    version: "1.3.0".into(), global_plugins: Vec::new(),
+                    channels: HashMap::new(), metadata: None,
+                    deployed_source_curves: Default::default(),
+                };
+                match scope {
+                    "global" => graph.global_plugins.push(plugin),
+                    "channel" => chain.plugins.push(plugin),
+                    _ => chain.drivers = Some(vec![roomeq_model::DriverDspChain {
+                        name: "woofer".into(), index: 0, plugins: vec![plugin],
+                        initial_curve: None,
+                    }]),
+                }
+                graph.channels.insert(name, chain);
+                let error = checked_convolution_resource_references(&graph).unwrap_err();
+                assert!(error.to_string().contains(scope), "{error}");
+                // Legacy graphs also must not package a malformed stage.
+                assert!(package_convolution_sidecars(
+                    &graph, &[], &BTreeSet::new(), &HashMap::new()
+                ).is_err());
+            }
+        }
     }
 
     #[test]

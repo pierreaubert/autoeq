@@ -1,6 +1,9 @@
 //! Path-free FIR and mixed-phase processing for one prepared RoomEQ channel.
 
 mod assemble;
+mod progress;
+mod spatial_linear;
+mod spatial_realized;
 #[cfg(test)]
 mod tests;
 
@@ -88,10 +91,15 @@ pub fn process_fir_channel(request: FirChannelRequest<'_>) -> Result<ChannelProc
 fn process_phase_linear(request: FirChannelRequest<'_>) -> Result<ChannelProcessingResult> {
     info!("  Generating FIR filter...");
     let input_curve = subtract_target_tilt(&request.preprocessed.curve_for_optim, request.target);
-    let coefficients = crate::fir::generate_fir_correction_with_resources(
+    let design_target = crate::fir::prepared_fir_target_curve(
         &input_curve,
         request.optimizer,
         request.eq_resources,
+    );
+    let coefficients = crate::fir::generate_fir_correction_prepared(
+        &input_curve,
+        request.optimizer,
+        &design_target,
         request.sample_rate,
     )
     .map_err(|error| AutoeqError::OptimizationFailed {
@@ -104,23 +112,33 @@ fn process_phase_linear(request: FirChannelRequest<'_>) -> Result<ChannelProcess
             sidecar_reference: request.sidecar_reference.clone(),
         },
         request.preprocessed.optimizer_evidence.clone(),
+        Some(&design_target),
     )
 }
 
 fn process_hybrid(mut request: FirChannelRequest<'_>) -> Result<ChannelProcessingResult> {
+    let progress = progress::FirProgress::new(request.callback.take());
     let optimization_curve =
         subtract_target_tilt(&request.preprocessed.curve_for_optim, request.target);
+    if request.optimizer.fir.as_ref().is_some_and(|fir|
+        fir.phase.eq_ignore_ascii_case("kirkeby") && fir.correct_excess_phase)
+        && optimization_curve.phase.is_none()
+    {
+        return Err(AutoeqError::OptimizationFailed {
+            message: "Kirkeby excess-phase correction requires acoustic phase on the reference curve".into(),
+        });
+    }
     // The Hybrid IIR stage must honour the configured multi-measurement
     // objective exactly like the mixed-phase path (F04); optimizing only the
     // representative curve silently drops minimax/variance/spatial strategies.
-    let eq_result = crate::channel_optimizer::optimize_maybe_multi(
+    let mut eq_result = crate::channel_optimizer::optimize_maybe_multi(
         request.channel_name,
         request.prepared,
         &optimization_curve,
         request.optimizer,
         request.eq_resources,
         request.sample_rate,
-        request.callback.take(),
+        progress.callback(),
         request.target.target_tilt_curve.as_ref(),
     )?;
     info!("  IIR stage: {} filters", eq_result.filters.len());
@@ -131,15 +149,42 @@ fn process_hybrid(mut request: FirChannelRequest<'_>) -> Result<ChannelProcessin
         request.sample_rate,
     );
     let residual_curve = response::apply_complex_response(&optimization_curve, &iir_response);
-    let coefficients = crate::fir::generate_fir_correction_with_resources(
-        &residual_curve,
+    // The IIR candidate must not redefine the target's calibrated level.
+    // Prepare it from the original optimization input, then correct the residual
+    // to that fixed reference (subject to the existing FIR boost limits).
+    let residual_target = crate::fir::prepared_fir_target_curve(
+        &optimization_curve,
         request.optimizer,
         request.eq_resources,
+    );
+    let coefficients = crate::fir::generate_fir_correction_prepared(
+        &residual_curve,
+        request.optimizer,
+        &residual_target,
         request.sample_rate,
     )
     .map_err(|error| AutoeqError::OptimizationFailed {
         message: format!("FIR generation failed: {error}"),
     })?;
+    let coefficients = if request.optimizer.multi_measurement.is_some()
+        && request.optimizer.fir.as_ref().is_some_and(|fir| fir.phase.eq_ignore_ascii_case("linear"))
+    {
+        let (coefficients, evidence) = spatial_linear::optimize(
+            &request, &optimization_curve, &eq_result.filters, coefficients, &progress,
+        )?;
+        eq_result.optimizer_evidence.push(evidence);
+        coefficients
+    } else if request.optimizer.multi_measurement.is_some()
+        && request.optimizer.fir.as_ref().is_some_and(|fir| fir.phase.eq_ignore_ascii_case("minimum") || fir.phase.eq_ignore_ascii_case("kirkeby"))
+    {
+        let (coefficients, evidence) = spatial_realized::optimize(
+            &request, &optimization_curve, &eq_result.filters, &progress,
+        )?;
+        eq_result.optimizer_evidence.push(evidence);
+        coefficients
+    } else {
+        coefficients
+    };
     assemble::assemble_fir_result(
         &request,
         FirOptimizerOutput::Hybrid {
@@ -148,6 +193,7 @@ fn process_hybrid(mut request: FirChannelRequest<'_>) -> Result<ChannelProcessin
             sidecar_reference: request.sidecar_reference.clone(),
         },
         with_preprocessing_evidence(request.preprocessed, eq_result.optimizer_evidence),
+        Some(&residual_target),
     )
 }
 
@@ -244,6 +290,7 @@ fn process_mixed_phase(mut request: FirChannelRequest<'_>) -> Result<ChannelProc
             report,
         },
         with_preprocessing_evidence(request.preprocessed, eq_result.optimizer_evidence),
+        None,
     )?;
     info!(
         "  Mixed-phase result: pre={:.6}, post={:.6}",

@@ -23,16 +23,18 @@ qa-roomeq-stage-contracts:
 	python3 -m unittest scripts.test_dsp
 
 qa-roomeq-parameters-pr:
+	python3 scripts/test_parameter_signal_contract.py
+	python3 scripts/test_parameter_crossover_contract.py
 	python3 scripts/check_parameter_matrix.py
 	cargo test --release -p roomeq-qa parameter_matrix --lib
-	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --parameter-matrix
+	cargo build --features qa --bin roomeq-qa-synthetic --no-default-features --release
+	python3 scripts/test_roomeq_synthetic_exit.py
 
 qa-roomeq-escaped-defects:
-	python3 scripts/check_escaped_defects.py
-	cargo test --release -p roomeq-engine spectral_alignment_interpolates --lib
-	cargo test --release -p roomeq-engine serialized_biquad_response --lib
-	cargo test --release -p roomeq-workflow serialized_biquad_response --lib
-	cargo test --release -p roomeq-qa registry --lib
+	python3 scripts/check_escaped_defects.py --execute --evidence target/qa/escaped-defects/regressions.json
+
+qa-roomeq-escaped-defect-mutants:
+	python3 scripts/run_escaped_defect_mutations.py
 
 [group('qa-roomeq')]
 qa-roomeq-nightly:
@@ -262,7 +264,7 @@ qa-roomeq-phase-critical:
 qa-roomeq-perceptual:
 	# nextest's explicit no-test failure prevents stale filters from producing a false-green QA run.
 	cargo nextest run --release -p autoeq-optim --lib --no-tests fail -E 'test(/loss::epa::/)'
-	cargo nextest run --release -p roomeq-workflow --lib --no-tests fail -E 'test(/generate_validation_bundle_report_creates_json|correction_report_(rejected_guardrails|failed_constraints_and_null_advisory)/)'
+	cargo nextest run --release -p roomeq-workflow --lib --no-tests fail -E 'test(/generate_validation_bundle_report_creates_json|validation_bundle_matches_final_pipeline_playback_evidence|rejected_final_seat_validation_does_not_publish_validation_bundle|correction_report_(rejected_guardrails|failed_constraints_and_null_advisory)/)'
 	cargo nextest run --release -p roomeq-workflow --lib --no-tests fail -E 'test(/home_cinema_(no_sub|with_sub)_multiseat_rejection_reports|run_channel_via_generic_path_multiseat_rejected_recovers|all_channel_multiseat_acceptance_rejects_subs/)'
 	cargo nextest run --release -p roomeq-qa --lib --no-tests fail -E 'test(/scorecard_/)'
 
@@ -292,6 +294,8 @@ qa-roomeq-contract-pr maxeval="600000":
 	cargo test --release -p roomeq-engine dsp_realization --lib
 	cargo test --release -p roomeq-engine main_sub_optimizer_matches --lib
 	cargo test --release -p roomeq-workflow ctc --lib
+	cargo nextest run --release -p roomeq-workflow --lib --no-tests fail -E 'test(/channel_matching_is_applied_to_the_complete_routed_source|routed_finalization_and_replay_reject_unowned_channel_stages/)'
+	cargo nextest run --release -p roomeq-workflow --lib --no-tests fail -E 'test(/(best_effort_snapshot|splice_replay)_checks_every_unaccepted_source|best_effort_records_each_accepted_residual_source|splice_replay_reverts_later_source_after_accepted_residual/)'
 	cargo test --release -p roomeq-qa registry --lib
 	cargo test --release -p roomeq-qa quality_maxeval --lib
 	cargo test --release -p roomeq-qa quality_seed_runs --lib
@@ -388,3 +392,11 @@ qa-audibility-nightly:
 	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --full-matrix
 	just qa-roomeq-acoustic-nightly
 	just qa-roomeq-coverage-gate
+# Require actual PCM backend execution; missing CamillaDSP is a failure.
+qa-roomeq-camilladsp-backend:
+    python3 scripts/run_camilladsp_backend_contracts.py
+
+# Generate the actual selected artifacts, then require every backend replay.
+qa-roomeq-matrix-backend: qa-roomeq-parameters-pr
+    python3 scripts/test_roomeq_matrix_backend.py
+    python3 scripts/run_roomeq_matrix_backend.py

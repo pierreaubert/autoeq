@@ -108,6 +108,118 @@ def extract_crossover_frequencies(channel_data: dict) -> list[float]:
     return sorted(crossover_freqs)
 
 
+def get_plottable_drivers(channel_data: dict | None) -> list[dict]:
+    """Return driver dicts that carry their own measured initial curve.
+
+    A channel with such drivers (multi-sub LFE, multi-driver speakers) is
+    displayed per driver: Row 1 of the overview already expands them, and
+    the EQ row plus the per-channel tabs follow the same rule so a
+    two-subwoofer setup shows one EQ and one tab per subwoofer instead of
+    a single collapsed LFE entry.
+    """
+    if not isinstance(channel_data, dict):
+        return []
+    drivers = channel_data.get("drivers") or []
+    plottable = []
+    for driver in drivers:
+        if not isinstance(driver, dict):
+            continue
+        initial = driver.get("initial_curve") or {}
+        if initial.get("freq") and initial.get("spl"):
+            plottable.append(driver)
+    return plottable
+
+
+def _configured_sub_names(data: dict, channel_name: str, driver_count: int) -> list[str]:
+    """Resolve friendly per-driver names from the effective config.
+
+    For a bass-managed channel the logical channel (e.g. ``LFE``) maps to
+    a speaker group (e.g. ``subs``) via ``system.speakers``, and the group
+    lists its physical subwoofers by name (e.g. ``Left Sub``). Returns []
+    when the config is absent or does not match ``driver_count`` so callers
+    fall back to the serialized driver names.
+    """
+    if driver_count <= 0:
+        return []
+    effective = ((data.get("metadata") or {}).get("effective_config") or {})
+    if not isinstance(effective, dict):
+        return []
+    system_speakers = ((effective.get("system") or {}).get("speakers") or {})
+    speaker_key = system_speakers.get(channel_name) if isinstance(system_speakers, dict) else None
+    speakers = effective.get("speakers") or {}
+    group = speakers.get(speaker_key) if isinstance(speakers, dict) else None
+    subwoofers = (group or {}).get("subwoofers") or [] if isinstance(group, dict) else []
+    names = [
+        str(entry.get("name"))
+        for entry in subwoofers
+        if isinstance(entry, dict) and entry.get("name")
+    ]
+    return names if len(names) == driver_count else []
+
+
+def driver_display_names(data: dict, channel_name: str) -> list[str]:
+    """Return one display name per plottable driver of ``channel_name``."""
+    channel = (data.get("channels") or {}).get(channel_name) or {}
+    drivers = get_plottable_drivers(channel)
+    friendly = _configured_sub_names(data, channel_name, len(drivers))
+    if friendly:
+        return friendly
+    names = []
+    for index, driver in enumerate(drivers):
+        raw = driver.get("name") or driver.get("index", index)
+        names.append(str(raw))
+    return names
+
+
+def channel_has_eq(channel_data: dict | None) -> bool:
+    """Return whether a channel carries any EQ (channel or driver level).
+
+    Covers stored ``eq_response`` curves as well as EQ filter plugins on
+    the channel chain or any driver chain. The overview EQ row only
+    expands multi-driver channels per sub when this holds, so runs
+    without EQ keep their legacy (empty) EQ row instead of showing
+    crossover-only shaping labeled as EQ.
+    """
+    if not isinstance(channel_data, dict):
+        return False
+    if (channel_data.get("eq_response") or {}).get("spl"):
+        return True
+    chains = [channel_data.get("plugins") or []]
+    for driver in channel_data.get("drivers") or []:
+        if isinstance(driver, dict):
+            chains.append(driver.get("plugins") or [])
+    for plugins in chains:
+        for plugin in plugins:
+            if not isinstance(plugin, dict):
+                continue
+            if plugin.get("plugin_type") != "eq":
+                continue
+            if (plugin.get("parameters") or {}).get("filters"):
+                return True
+    return False
+
+
+def display_channel_entries(data: dict) -> list[dict]:
+    """Expand multi-driver channels into per-driver display entries.
+
+    Returns ordered ``{"label", "channel", "driver"}`` dicts where
+    ``driver`` is the driver index or `None` for whole-channel entries.
+    Channels without plottable drivers yield a single entry labeled with
+    the channel name, preserving legacy behavior.
+    """
+    channels = data.get("channels") or {}
+    entries: list[dict] = []
+    for name in sorted(channels.keys(), key=get_channel_sort_key):
+        channel = channels[name]
+        drivers = get_plottable_drivers(channel)
+        if not drivers:
+            entries.append({"label": name, "channel": name, "driver": None})
+            continue
+        for index, label in enumerate(driver_display_names(data, name)):
+            entries.append({"label": label, "channel": name, "driver": index})
+    return entries
+
+
 def extract_eq_passes(channel_data: dict) -> list[dict]:
     """
     Extract EQ plugins from a channel, grouped by pass label.

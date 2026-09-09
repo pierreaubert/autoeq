@@ -1,0 +1,16 @@
+{
+  "id": "physical_sub_gain_double_applied",
+  "runner": "check.py",
+  "test_source": "crates/roomeq-workflow/src/topology/home_cinema.rs",
+  "regression_test": {
+    "package": "roomeq-workflow",
+    "target": "roomeq_workflow",
+    "name": "topology::home_cinema::post_dsp_level_tests::deployed_array_applies_driver_controls_exactly_once"
+  },
+  "mutation": {
+    "package": "roomeq-workflow",
+    "file": "crates/roomeq-workflow/src/topology/home_cinema.rs",
+    "selector": "replace != with == in reconstruct_deployed_source_curves_impl",
+    "scope_diff": "qa/mutants/double_sub_gain/scope.diff"
+  }
+}

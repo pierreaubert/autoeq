@@ -71,11 +71,22 @@ fn correction_was_reverted(result: &RoomOptimizationResult) -> bool {
 }
 
 pub(super) fn run_optimization(config: &RoomConfig) -> Result<RoomOptimizationResult> {
+    run_optimization_at_rate(config, SAMPLE_RATE)
+}
+
+pub(super) fn run_optimization_at_rate(
+    config: &RoomConfig,
+    sample_rate: f64,
+) -> Result<RoomOptimizationResult> {
+    anyhow::ensure!(
+        sample_rate.is_finite() && sample_rate > 0.0,
+        "invalid QA DSP sample rate"
+    );
     let id = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir =
         std::env::temp_dir().join(format!("roomeq_qa_syn_{}_{}", std::process::id(), id));
     std::fs::create_dir_all(&temp_dir)?;
-    let result = crate::optimize_room(config, SAMPLE_RATE, Some(&temp_dir));
+    let result = crate::optimize_room(config, sample_rate, Some(&temp_dir));
     let _ = std::fs::remove_dir_all(&temp_dir);
     result
 }

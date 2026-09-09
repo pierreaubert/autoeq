@@ -43,7 +43,7 @@ fn camilladsp_error(output: &DspGraph) -> String {
 /// Run a backend CLI against raw interleaved S32_LE PCM. The command contract
 /// is deliberately backend-neutral: the executable receives the generated
 /// config path and communicates PCM through stdin/stdout.
-fn run_optional_pcm_backend_contract<F>(
+pub(super) fn run_optional_pcm_backend_contract<F>(
     binary_env: &str,
     extension: &str,
     config: &str,
@@ -73,15 +73,16 @@ where
         .stderr(Stdio::piped())
         .spawn()
         .unwrap_or_else(|error| panic!("failed to run PCM backend '{binary}': {error}"));
-    {
-        let stdin = child.stdin.as_mut().unwrap();
-        for sample in input {
+    let mut stdin = child.stdin.take().unwrap();
+    let samples = input.to_vec();
+    let writer = std::thread::spawn(move || {
+        for sample in samples {
             stdin.write_all(&sample.to_le_bytes()).unwrap();
         }
-    }
-    drop(child.stdin.take());
+    });
 
     let output = child.wait_with_output().unwrap();
+    writer.join().expect("PCM input writer failed");
     assert!(
         output.status.success(),
         "PCM backend failed: {binary}\nstatus: {}\nstderr:\n{}",

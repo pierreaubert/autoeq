@@ -8,11 +8,18 @@ pub struct FlatStrategy;
 
 impl Objective for FlatStrategy {
     fn compute(&self, x: &[f64], ctx: &ObjectiveContext) -> f64 {
-        let peq_spl = ctx.peq_spl(x);
-        let error = &peq_spl - ctx.deviation;
+        self.compute_response(&ctx.peq_spl(x), ctx).expect("scalar response objective")
+    }
+
+    fn compute_response(&self, peq_spl: &ndarray::Array1<f64>, ctx: &ObjectiveContext) -> Option<f64> {
+        if peq_spl.len() != ctx.freqs.len() || peq_spl.len() != ctx.deviation.len()
+            || peq_spl.iter().any(|value| !value.is_finite()) {
+            return Some(f64::INFINITY);
+        }
+        let error = peq_spl - ctx.deviation;
         let error = ctx.apply_deadband(&error);
         let base_loss = flat_loss(ctx.freqs, &error, ctx.min_freq, ctx.max_freq);
-        base_loss + ctx.smoothness_penalty(&peq_spl)
+        Some(base_loss + ctx.smoothness_penalty(peq_spl))
     }
 }
 
@@ -38,6 +45,24 @@ mod tests {
             smooth_n: 1,
             audibility_deadband: None,
             smoothness_penalty: None,
+        }
+    }
+
+    #[test]
+    fn realized_response_keeps_signed_error_and_rejects_invalid_response() {
+        let frequencies = Array1::from_iter((0..64).map(|i| 20.0 * 1000.0_f64.powf(i as f64 / 63.0)));
+        let deviation = Array1::zeros(64);
+        let ctx = context(&frequencies, &deviation);
+        // A correction alternating +6/-6 dB has RMS 6 dB, not zero.
+        // No PEQ fit or parameter reconstruction participates in this oracle.
+        let correction = Array1::from_iter((0..64).map(|i| if i % 2 == 0 { 6.0 } else { -6.0 }));
+        let score = FlatStrategy.compute_response(&correction, &ctx).unwrap();
+        assert!((score - 6.0).abs() < 1e-12);
+        assert_eq!(FlatStrategy.compute_response(&Array1::zeros(63), &ctx), Some(f64::INFINITY));
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut broken = correction.clone();
+            broken[31] = invalid;
+            assert_eq!(FlatStrategy.compute_response(&broken, &ctx), Some(f64::INFINITY));
         }
     }
 

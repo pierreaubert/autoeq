@@ -52,6 +52,37 @@ fn package_convolution_sidecars_returns_hashed_member_and_rewritten_graph() {
 }
 
 #[test]
+fn bound_wav_identity_is_enforced_by_camilla_and_roon_packages() {
+    let mut output = make_test_output();
+    add_convolution(&mut output, "left", "left.wav");
+    let original = resource("left.wav", test_wav(48_000, 1, 64));
+    output.metadata.as_mut().unwrap().final_convolution_sha256 = Some(
+        std::collections::BTreeMap::from([("left.wav".into(), Some(original.sha256()))]));
+    let build = |graph: &DspGraph, format, resources: &[ConvolutionResource]| {
+        build_export_package(graph, format, Path::new("room.json"), 48_000.0,
+            resources, &BTreeSet::new(), &HashMap::new())
+    };
+    for format in [ExportFormat::CamillaDsp, ExportFormat::RoonDsp] {
+        let package = build(&output, format, std::slice::from_ref(&original)).unwrap();
+        package.validate_integrity().unwrap();
+        // Another valid mono WAV would be accepted by format validation alone.
+        let replacement = resource("left.wav", test_wav(48_000, 1, 128));
+        let error = build(&output, format, &[replacement]).err().expect("replacement WAV must be rejected");
+        assert!(error.to_string().contains("changed since workflow completion"), "{format:?}: {error}");
+
+        let mut missing_identity = output.clone();
+        missing_identity.metadata.as_mut().unwrap().final_convolution_sha256.as_mut().unwrap().clear();
+        let error = build(&missing_identity, format, std::slice::from_ref(&original)).err().expect("missing identity must be rejected");
+        assert!(error.to_string().contains("inventory does not match"), "{format:?}: {error}");
+
+        let mut unbound = output.clone();
+        unbound.metadata.as_mut().unwrap().final_convolution_sha256.as_mut().unwrap().insert("left.wav".into(), None);
+        let error = build(&unbound, format, std::slice::from_ref(&original)).err().expect("unbound WAV must be rejected");
+        assert!(error.to_string().contains("unbound"), "{format:?}: {error}");
+    }
+}
+
+#[test]
 fn package_convolution_sidecars_avoids_explicit_destination_collisions() {
     let mut output = make_test_output();
     add_convolution(&mut output, "left", "L_fir_96000hz.wav");

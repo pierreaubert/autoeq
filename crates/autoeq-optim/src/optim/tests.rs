@@ -5,6 +5,37 @@ mod outcome_evidence_tests {
     use super::super::{OptimizerConfidence, OptimizerRunEvidence, OptimizerTermination};
 
     #[test]
+    fn stopped_candidate_is_diagnostic_not_deployable_best_effort() {
+        for accepted in [false, true] {
+            let value = ("optimization stopped by callback (nfev=3)".to_string(), 0.25);
+            let evidence = OptimizerRunEvidence::from_backend_result(
+                "autoeq:de", if accepted { Ok(value) } else { Err(value) },
+                &[0.5], &[0.0], &[1.0], 40, Some(42),
+            );
+            assert_eq!(evidence.termination, OptimizerTermination::UserStopped);
+            assert!(!evidence.converged);
+            assert!(!evidence.best_effort);
+            assert_eq!(evidence.confidence, OptimizerConfidence::Unusable);
+            assert_eq!(evidence.objective, Some(0.25));
+            assert_eq!(evidence.evaluation_count, Some(3));
+        }
+    }
+
+    #[test]
+    fn native_budget_status_is_not_convergence_without_extra_qualifier() {
+        for status in ["AutoEQ COBYLA: MaxevalReached", "maximum evaluations reached",
+            "maximum iterations reached", "evaluation budget exhausted"] {
+            let evidence = OptimizerRunEvidence::from_backend_result(
+                "autoeq:cobyla", Ok((status.into(), 0.25)), &[0.5], &[0.0], &[1.0], 40, Some(42),
+            );
+            assert_eq!(evidence.termination, OptimizerTermination::EvaluationLimit, "{status}");
+            assert!(!evidence.converged, "{status}");
+            assert!(evidence.best_effort, "finite bounded candidate should remain usable: {status}");
+            assert_eq!(evidence.confidence, OptimizerConfidence::Low);
+        }
+    }
+
+    #[test]
     fn ok_status_marked_not_converged_is_best_effort_not_success() {
         let evidence = OptimizerRunEvidence::from_backend_result(
             "autoeq:bo",

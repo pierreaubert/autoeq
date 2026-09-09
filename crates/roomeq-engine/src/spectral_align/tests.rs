@@ -231,9 +231,19 @@ fn test_single_channel() {
 
 #[test]
 fn test_spectral_alignment_interpolates_mismatched_frequency_grids() {
-    let left = make_curve(|_| 0.0);
-    let mut right = make_curve(|_| 1.0);
-    right.freq[10] *= 1.01;
+    // The same log-linear acoustic shape on two different native grids.
+    // Constant curves cannot distinguish interpolation from indexing by row.
+    let shape = |f: f64| 6.0 * (f / 1000.0).log2();
+    let left = make_curve(shape);
+    let mut right = left.clone();
+    let low = right.freq[0].ln();
+    let span = right.freq[right.freq.len() - 1].ln() - low;
+    for (frequency, level) in right.freq.iter_mut().zip(right.spl.iter_mut()) {
+        let t = (frequency.ln() - low) / span;
+        let warped = t + 0.08 * (std::f64::consts::PI * t).sin();
+        *frequency = (low + span * warped).exp();
+        *level = shape(*frequency) + 1.0;
+    }
 
     let curves = HashMap::from([
         ("L".to_string(), left.clone()),
@@ -248,6 +258,14 @@ fn test_spectral_alignment_interpolates_mismatched_frequency_grids() {
         icd.deviation_per_freq
             .iter()
             .all(|point| point.1.is_finite())
+    );
+    assert!(
+        icd.passband_rms_db < 1e-8,
+        "same acoustic shape diverged: {icd:?}"
+    );
+    assert!(
+        icd.midrange_peak_db < 1e-8,
+        "grid interpolation introduced a peak: {icd:?}"
     );
     let corrections = correct_inter_channel_deviation(&curves, 50.0, 4, SAMPLE_RATE);
     assert_eq!(corrections.len(), 2);

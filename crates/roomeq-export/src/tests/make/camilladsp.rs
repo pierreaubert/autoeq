@@ -16,8 +16,39 @@ fn test_export_camilladsp() {
     assert!(result.contains("type: Highshelf"));
     assert!(result.contains("type: Gain"));
     assert!(result.contains("type: Delay"));
-    assert!(result.contains("unit: ms"));
+    assert!(result.contains("unit: samples"));
     assert!(result.contains("pipeline:"));
+}
+
+#[test]
+fn camilladsp_package_retains_typed_backend_latency_contract() {
+    let mut output = make_test_output();
+    for chain in output.channels.values_mut() {
+        for plugin in &mut chain.plugins {
+            if plugin.plugin_type == "delay" {
+                plugin.parameters["delay_ms"] = json!(0.0);
+            }
+        }
+    }
+    let plugin = output.channels.get_mut("left").unwrap().plugins.iter_mut()
+        .find(|plugin| plugin.plugin_type == "delay").unwrap();
+    plugin.parameters["delay_ms"] = json!(1.23456);
+    let report = crate::camilladsp_delay_realization(&output, 48_000.0).unwrap();
+    assert_eq!(report.serial_padding_samples, 5);
+    assert_eq!(report.common_padding_samples, 5);
+    assert_eq!(report.additional_latency_ms, 5.0 / 48.0);
+    assert!(report.fractional_delay_present);
+    assert_eq!(report.usable_band_upper_hz, 22_080.0);
+    let package = crate::build_export_package(&output, ExportFormat::CamillaDsp,
+        std::path::Path::new("room.yaml"), 48_000.0, &[],
+        &std::collections::BTreeSet::new(), &std::collections::HashMap::new()).unwrap();
+    let packaged = package.camilladsp_delay_realization().unwrap().unwrap();
+    assert!((packaged.additional_latency_ms - report.additional_latency_ms).abs() < 1e-12);
+    let normalized = crate::CamillaDspDelayRealization {
+        additional_latency_ms: report.additional_latency_ms, ..packaged
+    };
+    assert_eq!(normalized, report);
+    assert!(crate::camilladsp_delay_realization(&output, 48_000.5).is_err());
 }
 
 #[test]
@@ -38,7 +69,7 @@ fn test_export_camilladsp_routed_bass_management_graph() {
     assert!(result.contains("route_1_L_to_LFE_crossover:"));
     assert!(result.contains("type: LinkwitzRileyLowpass"));
     assert!(result.contains("route_1_L_to_LFE_delay:"));
-    assert!(result.contains("delay: 2.500"));
+    assert!(result.contains("delay: 120\n      unit: samples"));
     assert!(result.contains("gain: -6.000000"));
     assert!(result.contains("inverted: true"));
     assert!(result.contains("post_LFE_peq_0:"));

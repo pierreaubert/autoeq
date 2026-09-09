@@ -291,6 +291,36 @@ pub struct QualityPartitionMetrics {
     pub bass_modal_roughness_improvement_db_per_octave2: Option<f64>,
 }
 
+/// Calibrated upper bound on an unmeasured acoustic transfer, before DSP.
+/// This is an external evidence declaration, not a fitted extrapolation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct UpperBandAcousticBound {
+    /// `training` or `held_out`, matching the immutable capture partition.
+    pub partition: String,
+    pub seat_index: usize,
+    /// Bound must overlap the measurement endpoint and cover the assessed band.
+    pub band_hz: [f64; 2],
+    /// Same input reference and SPL calibration as the corresponding capture.
+    pub max_spl_db: f64,
+    /// Stable reference to the calibration, specification, or measurement proof.
+    pub evidence_id: String,
+}
+
+/// Bound retained when a physical branch is omitted outside measured support.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SummationSupportEvidence {
+    pub physical_output: String,
+    pub measured_band_hz: [f64; 2],
+    pub omitted_band_hz: [f64; 2],
+    pub acoustic_bound: UpperBandAcousticBound,
+    /// Worst ratio of all omitted amplitude bounds to the retained complex sum.
+    pub max_sum_omitted_amplitude_ratio: f64,
+    /// Worst -20 log10(1-rho), including actual baseline/candidate DSP.
+    pub max_magnitude_uncertainty_db: f64,
+    /// Worst asin(rho) phase uncertainty of the retained nominal complex sum.
+    pub max_phase_uncertainty_deg: f64,
+}
+
 /// One independently replayed final-chain listening-position assessment.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FinalSeatEvaluation {
@@ -301,16 +331,71 @@ pub struct FinalSeatEvaluation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seat_label: Option<String>,
     pub physical_outputs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pre_summation_support: Vec<SummationSupportEvidence>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub post_summation_support: Vec<SummationSupportEvidence>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unassessed_bands_hz: Vec<[f64; 2]>,
     /// Actual supported evaluation band for this input/position, not the
     /// optimizer's requested full band.
     pub evaluated_band_hz: [f64; 2],
     pub pre_weighted_rms_db: f64,
     pub post_weighted_rms_db: f64,
     pub improvement_db: f64,
+    /// Improvement after subtracting pre/post summation uncertainty budgets.
+    #[serde(default)]
+    pub improvement_lower_bound_db: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct OutputLossBand {
+    /// Endpoints of consecutive evaluation samples exceeding the threshold.
+    /// This does not establish a continuous-frequency bound between samples.
+    pub sampled_band_hz: [f64; 2],
+    pub sample_count: usize,
+    pub worst_frequency_hz: f64,
+    pub worst_loss_db: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct UsefulOutputEvidence {
+    /// Present when evaluated by logical-input final playback replay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logical_input: Option<String>,
+    pub partition: String,
+    pub seat_index: usize,
+    /// Authorized broadband change, independent of fitted shape normalization.
+    pub permitted_gain_db: f64,
+    pub evaluated_band_hz: [f64; 2],
+    pub mean_level_change_db: f64,
+    /// Log-frequency-weighted RMS of losses beyond the authorized gain.
+    pub unexplained_loss_rms_db: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worst_unexplained_loss_db: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worst_loss_frequency_hz: Option<f64>,
+    /// Diagnostic threshold only; aggregate runtime policy remains separate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loss_band_threshold_db: Option<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub loss_bands: Vec<OutputLossBand>,
+    /// Separate bass assessment so a broad main band cannot dilute lost bass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bass_evaluated_band_hz: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bass_unexplained_loss_rms_db: Option<f64>,
+    /// Calibrated target deficit, without fitting away broadband level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_shortfall_rms_db: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AcousticQualityScorecard {
+    /// Unnormalized output evidence; absent in legacy scorecards, never inferred
+    /// from level-independent shape metrics.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub useful_output: Vec<UsefulOutputEvidence>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub final_seats: Vec<FinalSeatEvaluation>,
     pub training: QualityPartitionMetrics,
@@ -340,6 +425,7 @@ pub enum CorrectionAcceptancePolicy {
 #[serde(rename_all = "snake_case")]
 pub enum CorrectionDecision {
     Accepted,
+    Rejected,
     RevertedStage,
     IdentityFallback,
 }

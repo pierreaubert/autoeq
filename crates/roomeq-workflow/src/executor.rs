@@ -39,24 +39,29 @@ impl RoomEqExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rayon::prelude::*;
     use std::collections::BTreeSet;
-    use std::sync::Mutex;
 
     #[test]
     fn executor_uses_exact_owned_worker_budget() {
         let executor = RoomEqExecutor::new(3).expect("executor");
-        let workers = Mutex::new(BTreeSet::new());
-        executor.install(|| {
-            (0..300usize).into_par_iter().for_each(|_| {
-                workers
-                    .lock()
-                    .expect("worker set")
-                    .insert(rayon::current_thread_index().expect("inside pool"));
-                std::thread::yield_now();
-            });
+        // Work stealing need not visit every worker for a short parallel
+        // iterator. Broadcast exercises each worker in the installed registry.
+        let workers = executor.install(|| {
+            rayon::broadcast(|context| {
+                let index = rayon::current_thread_index().expect("inside pool");
+                assert_eq!(index, context.index());
+                assert_eq!(rayon::current_num_threads(), 3);
+                assert_eq!(
+                    std::thread::current().name(),
+                    Some(format!("roomeq-worker-{index}").as_str())
+                );
+                index
+            })
         });
         assert_eq!(executor.worker_count(), 3);
-        assert_eq!(workers.into_inner().expect("worker set").len(), 3);
+        assert_eq!(
+            workers.into_iter().collect::<BTreeSet<_>>(),
+            BTreeSet::from([0, 1, 2])
+        );
     }
 }

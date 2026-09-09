@@ -208,11 +208,9 @@ impl DecisionCaseKind {
                 "deterministic_seed",
                 "final_realization",
             ],
-            Self::PhasePermutation => &[
-                "phase_permutation",
-                "seat_invariance",
-                "deterministic_seed",
-            ],
+            Self::PhasePermutation => {
+                &["phase_permutation", "seat_invariance", "deterministic_seed"]
+            }
             Self::MeasuredSupport => &["measured_support", "missing_phase_rejection"],
             Self::InvalidFront => &["invalid_front", "front_validation"],
             Self::ModalPhase => &[
@@ -592,10 +590,7 @@ impl ScenarioRegistry {
             if case.kind == DecisionCaseKind::ContinuousCvar {
                 match case.cvar_alpha {
                     Some(alpha) if alpha.is_finite() && alpha > 0.0 && alpha <= 1.0 => {}
-                    _ => bail!(
-                        "decision case '{}' needs a cvar_alpha in (0, 1]",
-                        case.id
-                    ),
+                    _ => bail!("decision case '{}' needs a cvar_alpha in (0, 1]", case.id),
                 }
             }
             if case.kind == DecisionCaseKind::ContinuousWorstCase
@@ -611,9 +606,7 @@ impl ScenarioRegistry {
         // must select at least one decision case.
         for tier in [QaTier::Pr, QaTier::Nightly] {
             if self.decision_cases_for(tier).next().is_none() {
-                bail!(
-                    "RoomEQ QA registry selects no decision cases for tier '{tier:?}'"
-                );
+                bail!("RoomEQ QA registry selects no decision cases for tier '{tier:?}'");
             }
         }
         let mut runners = HashSet::new();
@@ -970,10 +963,12 @@ mod tests {
                 perceptual_policy: None,
                 bootstrap_uncertainty: None,
                 validation_bundle: None,
+                final_convolution_sha256: None,
                 supporting_source: None,
                 correction_acceptance: None,
                 optimizer_evidence: None,
                 stage_outcomes: Vec::new(),
+                qa_seed_distribution: None,
                 effective_config: None,
             },
         };

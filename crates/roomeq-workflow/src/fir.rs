@@ -4,7 +4,7 @@ use autoeq_measurements::Curve;
 use roomeq_model::{OptimizerConfig, TargetCurveConfig};
 use std::error::Error;
 
-fn resolve_fir_target_curve(
+pub(crate) fn resolve_fir_target_curve(
     measurement: &Curve,
     config: &OptimizerConfig,
     target_config: Option<&TargetCurveConfig>,

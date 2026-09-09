@@ -26,6 +26,58 @@ driver topology IDs for the latter. Missing phase cannot establish a coherent su
 Supporting-source outputs use their separate reference-seat acoustic contract;
 they are not certified by the ordinary multi-position correction scorecard.
 
+### Explicit correction gain allowances
+
+Final-seat useful-output assessment accepts explicit broadband correction gain
+allowances through `optimizer.permitted_output_gain_db`, keyed by logical input,
+for example `{"left": -6.0, "right": -6.0}`. The default is 0 dB. This declares
+an intended trim or headroom attenuation; it does not install gain DSP and is
+never inferred from the candidate. The measured correction is compared with the
+allowance at every training and held-out seat. Unexplained full-band or bass loss
+above the 3 dB engineering budget fails final-seat validation. Structural routing
+gain is retained in both baseline and candidate and is not a correction gain.
+Reports retain logical-input, partition, seat, and calibrated target-shortfall
+evidence separately from normalized shape error. Single-seat-only and other
+paths outside final-seat replay still require the broader runtime audit.
+
+### Unequal upper-band measurement support
+
+Final coherent replay does not extrapolate a short subwoofer capture or silently
+truncate a full-range main. An omitted upper-band branch requires an explicit
+calibrated acoustic upper bound, identified separately for each physical output,
+partition (`training` or `held_out`), and seat index:
+
+```json
+"optimizer": {
+  "upper_band_acoustic_bounds": {
+    "sub": [{
+      "partition": "training",
+      "seat_index": 0,
+      "band_hz": [200, 20000],
+      "max_spl_db": 20,
+      "evidence_id": "calibrated-source-upper-bound"
+    }]
+  }
+}
+```
+
+This example is illustrative, not a default acoustic assumption. The bound must
+use the original capture calibration and input reference, overlap its measured
+endpoint, and cover the assessment band. A decreasing measured tail alone does
+not establish a bound. Bounds cannot be broadcast across seats. Replay applies
+the actual branch DSP to the bound and allows omission only when aggregate
+magnitude uncertainty is at most 0.1 dB. It does not invent unmeasured phase.
+Final-seat support evidence records magnitude and phase uncertainty, and the
+improvement lower bound includes both baseline and candidate uncertainty.
+Missing, contradictory, or acoustically significant bounds fail validation.
+
+Final coherent replay also checks lower measurement support. A driver or routed
+output starting above another branch's measured bass is insufficient evidence
+within the requested optimizer band. `upper_band_acoustic_bounds` cannot be
+used as a lower-band bound. Supply lower-frequency measurements or explicitly
+restrict `optimizer.min_freq` to the common supported band; no lower-band
+roll-off is inferred from crossover settings.
+
 ## Supporting-source acoustic contract
 
 `supporting_source.delay_ms` is the requested reference-seat propagation-plus-

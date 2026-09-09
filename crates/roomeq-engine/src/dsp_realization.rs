@@ -692,6 +692,46 @@ mod tests {
     }
 
     #[test]
+    fn mixed_fir_iir_replay_matches_independent_complex_branch_sum() {
+        struct Ir;
+        impl ConvolutionIrProvider for Ir {
+            fn taps(&mut self, file: &str, _sample_rate: u32) -> Result<&[f64]> {
+                assert_eq!(file, "low.wav");
+                Ok(&[1.0, 0.5])
+            }
+        }
+        for rate in [44100.0, 48000.0, 96000.0] {
+            let peak = Biquad::new(BiquadFilterType::Peak, 2000.0, rate, 1.2, 3.0);
+            let mut eq = crate::output::create_eq_plugin(std::slice::from_ref(&peak));
+            eq.parameters["channels"] = serde_json::json!([2, 3]);
+            let mut fir = crate::output::create_convolution_plugin("low.wav");
+            fir.parameters["channels"] = serde_json::json!([0, 1]);
+            let chain = chain(vec![
+                create_band_split_plugin(1000.0, "LR24"), fir, eq,
+                create_band_merge_plugin(2), create_gain_plugin(-6.0),
+            ]);
+            let low = Biquad::new(BiquadFilterType::Lowpass, 1000.0, rate, std::f64::consts::FRAC_1_SQRT_2, 0.0);
+            let high = Biquad::new(BiquadFilterType::Highpass, 1000.0, rate, std::f64::consts::FRAC_1_SQRT_2, 0.0);
+            let mut provider = Ir;
+            let mut realized = RealizedDsp::new(&chain, rate, &mut provider).unwrap();
+            for frequency in [100.0, 800.0, 1000.0, 2000.0, 10000.0] {
+                let z = Complex64::from_polar(1.0, -std::f64::consts::TAU * frequency / rate);
+                let section = |filter: &Biquad| {
+                    let (a1, a2, b0, b1, b2) = filter.constants();
+                    (b0 + b1 * z + b2 * z * z) / (1.0 + a1 * z + a2 * z * z)
+                };
+                // Independent coefficient-polynomial/DTFT oracle: parallel
+                // branches add complexly, then the full-band gain is applied.
+                let expected = (section(&low).powu(2) * (1.0 + 0.5 * z)
+                    + section(&high).powu(2) * section(&peak)) * 10.0_f64.powf(-6.0 / 20.0);
+                let actual = realized.response_at(frequency).unwrap();
+                assert!((actual - expected).norm() < 1e-10,
+                    "mixed branch mismatch at {frequency} Hz / {rate}: {actual} vs {expected}");
+            }
+        }
+    }
+
+    #[test]
     fn realization_evaluates_warped_biquad_topology() {
         let filter = Biquad::new(BiquadFilterType::Peak, 100.0, 48_000.0, 2.0, -6.0);
         let chain = chain(vec![create_warped_eq_plugin(&[], &[filter], Some(0.8))]);

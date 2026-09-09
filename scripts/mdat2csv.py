@@ -578,13 +578,27 @@ def sanitize_identifier(name, max_len=100):
 
 def export_csv(measurement, output_dir):
     """Export a single measurement to CSV."""
+    freqs = measurement['freq']
+    spl = measurement['spl']
+    phase = measurement['phase']
+    # Validate before opening the destination: a failed import must not leave
+    # a plausible partial curve or overwrite an existing valid export.
+    if not freqs or any(not math.isfinite(f) or f <= 0 for f in freqs):
+        raise ValueError("CSV export requires finite positive frequencies")
+    if any(b <= a for a, b in zip(freqs, freqs[1:])):
+        raise ValueError("CSV export requires strictly increasing frequencies")
+    if spl is None:
+        raise ValueError("CSV export requires an SPL curve")
+    for label, values in [('SPL', spl), ('phase', phase)]:
+        if values is not None and (
+            len(values) != len(freqs)
+            or any(not math.isfinite(value) for value in values)
+        ):
+            raise ValueError(f"Invalid {label} array: expected finite values on the frequency grid")
     os.makedirs(output_dir, exist_ok=True)
     name = sanitize_identifier(measurement['name'])
     filepath = os.path.join(output_dir, f"{name}.csv")
 
-    freqs = measurement['freq']
-    spl = measurement['spl']
-    phase = measurement['phase']
 
     with open(filepath, 'w') as f:
         f.write("freq_hz,spl_db,phase_deg\n")
@@ -665,13 +679,13 @@ def main():
               f"{'SPL:yes' if has_spl else 'SPL:NO'}{spl_range}{html_info}, "
               f"{'Phase:yes' if has_phase else 'Phase:NO'}{phase_range}")
 
-        if has_spl or has_phase:
+        if has_spl:
             filepath = export_csv(m, output_dir)
             csv_paths.append(filepath)
             print(f"      -> {filepath}")
         else:
             csv_paths.append(None)
-            print(f"      -> SKIPPED (no SPL or phase data found)")
+            print(f"      -> SKIPPED (no SPL data found; phase alone is not a response curve)")
 
     json_path = export_recordings_json(measurements, csv_paths, output_dir)
     print(f"\n  recordings.json -> {json_path}")

@@ -8,6 +8,7 @@ pub mod config_loader;
 pub mod ctc;
 pub mod dba;
 pub mod eq;
+pub mod electrical_headroom;
 pub mod eq_resources;
 pub mod executor;
 pub mod export;

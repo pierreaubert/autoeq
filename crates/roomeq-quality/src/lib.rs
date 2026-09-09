@@ -30,6 +30,7 @@ mod types;
 mod validation_corpus;
 
 pub use acceptance::*;
+pub mod electrical_headroom;
 pub use band_policy::*;
 pub use chain_constraints::*;
 pub use corpus::*;

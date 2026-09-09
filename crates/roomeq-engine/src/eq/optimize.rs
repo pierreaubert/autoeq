@@ -20,621 +20,15 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
 
-fn bootstrap_uncertainty_depth(
-    frequencies: &ndarray::Array1<f64>,
-    bootstrap: &spatial_robustness::BootstrapBand,
-    config: &SpatialRobustnessConfig,
-) -> ndarray::Array1<f64> {
-    spatial_robustness::correction_depth_mask(frequencies, &bootstrap.per_bin_std, config)
-}
-
-#[derive(Debug, Clone)]
-pub struct EqOptimizationResult {
-    pub filters: Vec<Biquad>,
-    pub loss: f64,
-    pub optimizer_evidence: Vec<autoeq_optim::optim::OptimizerRunEvidence>,
-    /// Reason-coded per-filter audibility verdicts (Phase A). Empty unless
-    /// `OptimizerConfig.filter_audibility` is set. In report-only mode the
-    /// verdicts are recorded without removing filters; `into_legacy`
-    /// drops them along with the other structured evidence.
-    pub audibility_veto: Vec<roomeq_model::FilterVetoVerdict>,
-    /// Stage 1 adjudication record: F0 reference identity, removed filters
-    /// with stable indices for rollback, and cumulative drift stats.
-    /// `None` unless the veto post-pass ran. `into_legacy` drops it along
-    /// with the other structured evidence.
-    pub veto_adjudication: Option<super::audibility_veto::VetoAdjudicationSummary>,
-}
-
-impl EqOptimizationResult {
-    fn into_legacy(self) -> (Vec<Biquad>, f64) {
-        (self.filters, self.loss)
-    }
-}
-
-/// Optimize EQ filters for a single channel using autoeq's workflow
-///
-/// # Arguments
-/// * `curve` - Frequency response curve to optimize (on-axis measurement)
-/// * `config` - Optimizer configuration
-/// * `resources` - Optional target and impulse-response resources prepared by the workflow
-/// * `sample_rate` - Sample rate for filter design
-///
-/// # Returns
-/// * Tuple of (optimized Biquad filters, final loss value)
-pub fn optimize_channel_eq(
-    curve: &Curve,
-    config: &OptimizerConfig,
-    resources: Option<&EqResources>,
-    sample_rate: f64,
-) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
-    optimize_channel_eq_detailed(curve, config, resources, sample_rate)
-        .map(EqOptimizationResult::into_legacy)
-}
-
-/// Detailed variant of [`optimize_channel_eq`] retaining termination,
-/// evaluation-budget, seed, constraint, restart, and confidence evidence.
-pub fn optimize_channel_eq_detailed(
-    curve: &Curve,
-    config: &OptimizerConfig,
-    resources: Option<&EqResources>,
-    sample_rate: f64,
-) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    optimize_channel_eq_inner(
-        curve,
-        config,
-        resources,
-        sample_rate,
-        None,
-        None,
-        None,
-        &RealOptimizerBackend::new(),
-    )
-}
-
-pub(super) fn optimize_channel_eq_detailed_with_normalization_mean(
-    curve: &Curve,
-    config: &OptimizerConfig,
-    resources: Option<&EqResources>,
-    sample_rate: f64,
-    normalization_mean_spl: f64,
-) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    optimize_channel_eq_inner(
-        curve,
-        config,
-        resources,
-        sample_rate,
-        Some(normalization_mean_spl),
-        None,
-        None,
-        &RealOptimizerBackend::new(),
-    )
-}
-
-/// Optimize one channel with the CEA-2034 spinorama curves required by the
-/// speaker-score objective.
-pub fn optimize_channel_eq_with_spin_detailed(
-    curve: &Curve,
-    spin_data: &HashMap<String, Curve>,
-    config: &OptimizerConfig,
-    resources: Option<&EqResources>,
-    sample_rate: f64,
-) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    optimize_channel_eq_inner(
-        curve,
-        config,
-        resources,
-        sample_rate,
-        None,
-        Some(spin_data),
-        None,
-        &RealOptimizerBackend::new(),
-    )
-}
-
-/// Optimize EQ filters for a single channel with per-iteration progress callback
-#[allow(dead_code)]
-pub fn optimize_channel_eq_with_callback(
-    curve: &Curve,
-    config: &OptimizerConfig,
-    resources: Option<&EqResources>,
-    sample_rate: f64,
-    callback: autoeq_optim::optim::OptimProgressCallback,
-) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
-    optimize_channel_eq_with_callback_detailed(curve, config, resources, sample_rate, callback)
-        .map(EqOptimizationResult::into_legacy)
-}
-
-/// Callback variant retaining structured optimizer evidence.
-pub fn optimize_channel_eq_with_callback_detailed(
-    curve: &Curve,
-    config: &OptimizerConfig,
-    resources: Option<&EqResources>,
-    sample_rate: f64,
-    callback: autoeq_optim::optim::OptimProgressCallback,
-) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    optimize_channel_eq_inner(
-        curve,
-        config,
-        resources,
-        sample_rate,
-        None,
-        None,
-        Some(callback),
-        &RealOptimizerBackend::new(),
-    )
-}
-
-/// Forward iterative optimization: try 1..=max_filters, stop when improvement stalls.
-fn optimize_channel_eq_adaptive(
-    curve: &Curve,
-    config: &OptimizerConfig,
-    resources: Option<&EqResources>,
-    sample_rate: f64,
-    normalization_mean_spl: Option<f64>,
-    spin_data: Option<&HashMap<String, Curve>>,
-    backend: &dyn OptimizerBackend,
-) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    let prep = if let Some(spin_data) = spin_data {
-        prepare_single_channel_eq_with_spin(
-            curve,
-            config,
-            resources,
-            sample_rate,
-            Some(spin_data),
-            normalization_mean_spl,
-        )?
-    } else {
-        prepare_single_channel_eq_with_normalization(
-            curve,
-            config,
-            resources,
-            sample_rate,
-            normalization_mean_spl,
-        )?
-    };
-    let max_filters = config.num_filters;
-    let base_budget_per_step = adaptive_budget_for_step(config.max_iter, max_filters, 1);
-
-    let mut best_filters: Vec<Biquad> = vec![];
-    let mut best_loss = f64::INFINITY;
-    let mut optimizer_evidence = Vec::new();
-
-    log::info!(
-        "  Adaptive filter selection: up to {} filters, threshold={:.6}, base budget/step={}",
-        max_filters,
-        config.min_filter_improvement,
-        base_budget_per_step
-    );
-
-    for k in 1..=max_filters {
-        let budget_per_step = adaptive_budget_for_step(config.max_iter, max_filters, k);
-        let (filters, loss, _x, mut pass_evidence) =
-            run_optimization_pass(&prep, k, budget_per_step, config, None, backend)?;
-
-        let improvement = best_loss - loss;
-        log::info!(
-            "  Adaptive: k={}/{}, loss={:.6}, improvement={:.6}",
-            k,
-            max_filters,
-            loss,
-            improvement
-        );
-
-        if k > 1 && improvement < config.min_filter_improvement {
-            for evidence in &mut pass_evidence {
-                evidence.selected_for_output = false;
-            }
-            optimizer_evidence.extend(pass_evidence);
-            log::info!(
-                "  Stopping at {} filters: improvement {:.6} < threshold {:.6}",
-                k - 1,
-                improvement,
-                config.min_filter_improvement
-            );
-            break;
-        }
-
-        for evidence in &mut optimizer_evidence {
-            evidence.selected_for_output = false;
-        }
-        optimizer_evidence.extend(pass_evidence);
-        best_filters = filters;
-        best_loss = loss;
-    }
-
-    // Backward elimination: veto (loudness-delta) units when the Phase A
-    // audibility veto is active, raw loss units otherwise (or under the
-    // back-compat fallback flag).
-    let veto_config = config.filter_audibility.filter(|veto| veto.enabled);
-    if config.elimination_threshold > 0.0 && best_filters.len() > 1 {
-        if let Some(veto) = veto_config
-            && !veto.elimination_raw_loss_fallback
-        {
-            let phon = veto.resolved_listening_phon(
-                config
-                    .epa_config
-                    .as_ref()
-                    .map(|epa| epa.listening_level_phon),
-            );
-            let before = best_filters.len();
-            best_filters = super::audibility_veto::backward_eliminate_veto_units(
-                best_filters,
-                &prep.objective_data.freqs,
-                phon,
-                veto.elimination_loudness_delta_sones,
-            );
-            if best_filters.len() != before {
-                best_loss = recompiled_loss(&best_filters, &prep);
-            }
-        } else {
-            let (pruned, pruned_loss) = backward_eliminate(
-                best_filters,
-                &prep.objective_data,
-                prep.peq_model,
-                config.elimination_threshold,
-            );
-            best_filters = pruned;
-            best_loss = pruned_loss;
-        }
-    }
-
-    // Per-filter audibility veto (Stage 1 adjudication). Report-only by
-    // default, so merely enabling the config records verdicts without
-    // changing output.
-    let (kept, veto_loss, audibility_veto, veto_adjudication) =
-        apply_veto_postpass(best_filters, best_loss, &prep, config);
-    best_filters = kept;
-    best_loss = veto_loss;
-
-    log::info!(
-        "  Adaptive EQ optimization: {} filters, final loss={:.6}",
-        best_filters.len(),
-        best_loss
-    );
-
-    Ok(EqOptimizationResult {
-        filters: best_filters,
-        loss: best_loss,
-        optimizer_evidence,
-        audibility_veto,
-        veto_adjudication,
-    })
-}
-
-/// Per-filter audibility veto post-pass shared by the adaptive and
-/// single-pass paths (Stage 1 adjudication over the Phase A nominations).
-///
-/// The legacy single-pass path never ran backward elimination, so the veto
-/// is its only pruning — and the place where optimizer-emitted micro
-/// filters would otherwise ship unexamined. Nominations are adjudicated
-/// one removal at a time against the frozen full chain: a removal is
-/// accepted only below the per-step quantum, within the cumulative cap
-/// (declared pruning budget, else one quantum), and moving no single bin
-/// past the JND floor. Returns the kept filters, the (possibly
-/// recompiled) loss, verdicts with acceptance records, and the
-/// adjudication summary (F0 reference identity plus rollback data).
-/// With no veto config, or a disabled one, the input passes through
-/// untouched with no verdicts and no summary.
-///
-/// NOTE: there is no reoptimization after removal on any path. If one is
-/// ever added, it must thread `f0_reference_id` through and compare the
-/// reoptimized chain against F0 — never against the post-removal chain.
-fn apply_veto_postpass(
-    filters: Vec<Biquad>,
-    loss: f64,
-    prep: &super::types::PreparedSingleChannelEq,
-    config: &OptimizerConfig,
-) -> (
-    Vec<Biquad>,
-    f64,
-    Vec<roomeq_model::FilterVetoVerdict>,
-    Option<super::audibility_veto::VetoAdjudicationSummary>,
-) {
-    let Some(veto) = config.filter_audibility.filter(|veto| veto.enabled) else {
-        return (filters, loss, Vec::new(), None);
-    };
-    let phon = veto.resolved_listening_phon(
-        config
-            .epa_config
-            .as_ref()
-            .map(|epa| epa.listening_level_phon),
-    );
-    let hf_start = veto.resolved_hf_guard_start_hz(
-        config
-            .high_frequency_correction
-            .as_ref()
-            .map(|hf| hf.start_hz),
-    );
-    let mut verdicts = {
-        let evaluation = super::audibility_veto::VetoEvaluation {
-            filters: &filters,
-            freqs: &prep.objective_data.freqs,
-            listening_phon: phon,
-            config: veto,
-            hf_guard_start_hz: hf_start,
-        };
-        super::audibility_veto::evaluate_audibility_veto(&evaluation)
-    };
-    if !veto.report_only && !veto.enforcement_authorized() {
-        log::warn!(
-            "audibility veto enforcement requested (report_only=false) without \
-             allow_enforcement_with_experimental_proxy; staying advisory because \
-             the loudness proxy is experimental and unvalidated"
-        );
-    }
-    let adjudication_config = super::audibility_veto::AdjudicationConfig {
-        listening_phon: phon,
-        per_step_quantum_sones: veto.elimination_loudness_delta_sones,
-        cumulative_cap_sones: config
-            .pruning_budget
-            .as_ref()
-            .and_then(|budget| budget.max_cumulative_delta),
-        local_deviation_cap_db: veto.jnd_db,
-        enforce: veto.enforcement_authorized(),
-        model_version: env!("CARGO_PKG_VERSION").to_string(),
-    };
-    let adjudication = super::audibility_veto::adjudicate_veto_removals(
-        filters,
-        &mut verdicts,
-        &prep.objective_data.freqs,
-        &adjudication_config,
-    );
-    let loss = if adjudication.kept.len() != verdicts.len() {
-        recompiled_loss(&adjudication.kept, prep)
-    } else {
-        loss
-    };
-    let summary = adjudication.summarize();
-    (adjudication.kept, loss, verdicts, Some(summary))
-}
-
-/// Re-evaluate the scalar objective for a changed filter set so the reported
-/// loss stays honest after veto/elimination removals.
-fn recompiled_loss(filters: &[Biquad], prep: &super::types::PreparedSingleChannelEq) -> f64 {
-    let peq: math_audio_iir_fir::Peq = filters.iter().map(|biquad| (1.0, biquad.clone())).collect();
-    let x = autoeq_core::x2peq::peq2x(&peq, prep.peq_model);
-    autoeq_optim::optim::compute_base_fitness(&x, &prep.objective_data)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn optimize_channel_eq_inner(
-    curve: &Curve,
-    config: &OptimizerConfig,
-    resources: Option<&EqResources>,
-    sample_rate: f64,
-    normalization_mean_spl: Option<f64>,
-    spin_data: Option<&HashMap<String, Curve>>,
-    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
-    backend: &dyn OptimizerBackend,
-) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    let measurement_quality = autoeq_optim::measurements::assess_measurement_quality(curve);
-    let uncertainty_scaled_config =
-        uncertainty_scaled_optimizer_config(config, &measurement_quality);
-    let config = &uncertainty_scaled_config;
-
-    // Use adaptive filter selection when enabled and no callback
-    if config.min_filter_improvement > 0.0 && config.num_filters > 1 && callback.is_none() {
-        return optimize_channel_eq_adaptive(
-            curve,
-            config,
-            resources,
-            sample_rate,
-            normalization_mean_spl,
-            spin_data,
-            backend,
-        );
-    }
-
-    // Single-pass optimization (legacy path or callback path)
-    let prep = if let Some(spin_data) = spin_data {
-        prepare_single_channel_eq_with_spin(
-            curve,
-            config,
-            resources,
-            sample_rate,
-            Some(spin_data),
-            normalization_mean_spl,
-        )?
-    } else {
-        prepare_single_channel_eq_with_normalization(
-            curve,
-            config,
-            resources,
-            sample_rate,
-            normalization_mean_spl,
-        )?
-    };
-    let (filters, loss, _x, optimizer_evidence) = run_optimization_pass(
-        &prep,
-        config.num_filters,
-        config.max_iter,
-        config,
-        callback,
-        backend,
-    )?;
-
-    // Same Stage 1 veto as the adaptive path: the legacy single-pass path
-    // never ran elimination, so without this its micro filters ship
-    // unexamined. Report-only by default.
-    let (filters, loss, audibility_veto, veto_adjudication) =
-        apply_veto_postpass(filters, loss, &prep, config);
-
-    log::info!(
-        "EQ optimization: {} filters, final loss={:.6}",
-        filters.len(),
-        loss
-    );
-
-    Ok(EqOptimizationResult {
-        filters,
-        loss,
-        optimizer_evidence,
-        audibility_veto,
-        veto_adjudication,
-    })
-}
-
-/// Optimize EQ filters across multiple measurement curves simultaneously.
-///
-/// Finds a single shared EQ that works well across all measurements,
-/// using the configured multi-measurement strategy to combine per-curve losses.
-///
-/// # Arguments
-/// * `curves` - Multiple frequency response curves (different positions/measurements)
-/// * `config` - Optimizer configuration
-/// * `multi_config` - Multi-measurement strategy configuration
-/// * `resources` - Optional target and impulse-response resources prepared by the workflow
-/// * `sample_rate` - Sample rate for filter design
-///
-/// # Returns
-/// * Tuple of (optimized Biquad filters, final loss value)
-#[allow(dead_code)]
-pub fn optimize_channel_eq_multi(
+/// Prepare the shared per-seat objective independently of its PEQ solver.
+/// FIR consumers must evaluate these same targets, masks and risk policy.
+pub(crate) fn prepare_multi_measurement_objective(
     curves: &[Curve],
     config: &OptimizerConfig,
     multi_config: &MultiMeasurementConfig,
     resources: Option<&EqResources>,
     sample_rate: f64,
-) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
-    optimize_channel_eq_multi_detailed(curves, config, multi_config, resources, sample_rate)
-        .map(EqOptimizationResult::into_legacy)
-}
-
-/// Detailed multi-measurement variant retaining optimizer evidence.
-pub fn optimize_channel_eq_multi_detailed(
-    curves: &[Curve],
-    config: &OptimizerConfig,
-    multi_config: &MultiMeasurementConfig,
-    resources: Option<&EqResources>,
-    sample_rate: f64,
-) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    optimize_channel_eq_multi_inner(
-        curves,
-        config,
-        multi_config,
-        resources,
-        sample_rate,
-        None,
-        &RealOptimizerBackend::new(),
-    )
-}
-
-#[allow(dead_code)]
-pub fn optimize_channel_eq_multi_with_auto_optimizer(
-    curves: &[Curve],
-    config: &OptimizerConfig,
-    multi_config: &MultiMeasurementConfig,
-    resources: Option<&EqResources>,
-    sample_rate: f64,
-    auto_context: MultiEqAutoOptimizerContext,
-) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
-    optimize_channel_eq_multi_with_auto_optimizer_detailed(
-        curves,
-        config,
-        multi_config,
-        resources,
-        sample_rate,
-        auto_context,
-    )
-    .map(EqOptimizationResult::into_legacy)
-}
-
-pub fn optimize_channel_eq_multi_with_auto_optimizer_detailed(
-    curves: &[Curve],
-    config: &OptimizerConfig,
-    multi_config: &MultiMeasurementConfig,
-    resources: Option<&EqResources>,
-    sample_rate: f64,
-    auto_context: MultiEqAutoOptimizerContext,
-) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    let resolved_config =
-        resolve_multi_measurement_auto_optimizer_config(curves, config, auto_context);
-    optimize_channel_eq_multi_inner(
-        curves,
-        &resolved_config,
-        multi_config,
-        resources,
-        sample_rate,
-        None,
-        &RealOptimizerBackend::new(),
-    )
-}
-
-/// Auto-optimizer variant retaining per-iteration progress reporting.
-#[allow(clippy::too_many_arguments)]
-pub fn optimize_channel_eq_multi_with_auto_optimizer_and_callback_detailed(
-    curves: &[Curve],
-    config: &OptimizerConfig,
-    multi_config: &MultiMeasurementConfig,
-    resources: Option<&EqResources>,
-    sample_rate: f64,
-    auto_context: MultiEqAutoOptimizerContext,
-    callback: autoeq_optim::optim::OptimProgressCallback,
-) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    let resolved_config =
-        resolve_multi_measurement_auto_optimizer_config(curves, config, auto_context);
-    optimize_channel_eq_multi_inner(
-        curves,
-        &resolved_config,
-        multi_config,
-        resources,
-        sample_rate,
-        Some(callback),
-        &RealOptimizerBackend::new(),
-    )
-}
-
-/// Optimize EQ across multiple measurement curves with per-iteration progress callback
-#[allow(dead_code)]
-pub fn optimize_channel_eq_multi_with_callback(
-    curves: &[Curve],
-    config: &OptimizerConfig,
-    multi_config: &MultiMeasurementConfig,
-    resources: Option<&EqResources>,
-    sample_rate: f64,
-    callback: autoeq_optim::optim::OptimProgressCallback,
-) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
-    optimize_channel_eq_multi_with_callback_detailed(
-        curves,
-        config,
-        multi_config,
-        resources,
-        sample_rate,
-        callback,
-    )
-    .map(EqOptimizationResult::into_legacy)
-}
-
-/// Callback variant retaining structured optimizer evidence.
-pub fn optimize_channel_eq_multi_with_callback_detailed(
-    curves: &[Curve],
-    config: &OptimizerConfig,
-    multi_config: &MultiMeasurementConfig,
-    resources: Option<&EqResources>,
-    sample_rate: f64,
-    callback: autoeq_optim::optim::OptimProgressCallback,
-) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    optimize_channel_eq_multi_inner(
-        curves,
-        config,
-        multi_config,
-        resources,
-        sample_rate,
-        Some(callback),
-        &RealOptimizerBackend::new(),
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn optimize_channel_eq_multi_inner(
-    curves: &[Curve],
-    config: &OptimizerConfig,
-    multi_config: &MultiMeasurementConfig,
-    resources: Option<&EqResources>,
-    sample_rate: f64,
-    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
-    backend: &dyn OptimizerBackend,
-) -> Result<EqOptimizationResult, Box<dyn Error>> {
+) -> Result<(autoeq_optim::optim::ObjectiveData, autoeq_optim::OptimParams, OptimizerConfig), Box<dyn Error>> {
     if curves.is_empty() {
         return Err("no_measurements".into());
     }
@@ -1019,7 +413,6 @@ fn optimize_channel_eq_multi_inner(
         return Err("multi-measurement optimization requires at least one objective".into());
     };
     primary.multi_objective = Some(multi_data);
-    let final_objective = primary.clone();
 
     let optim_params = build_optim_params(
         config,
@@ -1029,6 +422,657 @@ fn optimize_channel_eq_multi_inner(
         loss_type,
         peq_model,
     );
+
+    Ok((primary, optim_params, config.clone()))
+}
+
+fn bootstrap_uncertainty_depth(
+    frequencies: &ndarray::Array1<f64>,
+    bootstrap: &spatial_robustness::BootstrapBand,
+    config: &SpatialRobustnessConfig,
+) -> ndarray::Array1<f64> {
+    spatial_robustness::correction_depth_mask(frequencies, &bootstrap.per_bin_std, config)
+}
+
+#[derive(Debug, Clone)]
+pub struct EqOptimizationResult {
+    pub filters: Vec<Biquad>,
+    pub loss: f64,
+    pub optimizer_evidence: Vec<autoeq_optim::optim::OptimizerRunEvidence>,
+    /// Reason-coded per-filter audibility verdicts (Phase A). Empty unless
+    /// `OptimizerConfig.filter_audibility` is set. In report-only mode the
+    /// verdicts are recorded without removing filters; `into_legacy`
+    /// drops them along with the other structured evidence.
+    pub audibility_veto: Vec<roomeq_model::FilterVetoVerdict>,
+    /// Stage 1 adjudication record: F0 reference identity, removed filters
+    /// with stable indices for rollback, and cumulative drift stats.
+    /// `None` unless the veto post-pass ran. `into_legacy` drops it along
+    /// with the other structured evidence.
+    pub veto_adjudication: Option<super::audibility_veto::VetoAdjudicationSummary>,
+}
+
+impl EqOptimizationResult {
+    fn into_legacy(self) -> (Vec<Biquad>, f64) {
+        (self.filters, self.loss)
+    }
+}
+
+/// Optimize EQ filters for a single channel using autoeq's workflow
+///
+/// # Arguments
+/// * `curve` - Frequency response curve to optimize (on-axis measurement)
+/// * `config` - Optimizer configuration
+/// * `resources` - Optional target and impulse-response resources prepared by the workflow
+/// * `sample_rate` - Sample rate for filter design
+///
+/// # Returns
+/// * Tuple of (optimized Biquad filters, final loss value)
+pub fn optimize_channel_eq(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+    optimize_channel_eq_detailed(curve, config, resources, sample_rate)
+        .map(EqOptimizationResult::into_legacy)
+}
+
+/// Detailed variant of [`optimize_channel_eq`] retaining termination,
+/// evaluation-budget, seed, constraint, restart, and confidence evidence.
+pub fn optimize_channel_eq_detailed(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    optimize_channel_eq_inner(
+        curve,
+        config,
+        resources,
+        sample_rate,
+        None,
+        None,
+        None,
+        &RealOptimizerBackend::new(),
+    )
+}
+
+pub(super) fn optimize_channel_eq_detailed_with_normalization_mean(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    normalization_mean_spl: f64,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    optimize_channel_eq_inner(
+        curve,
+        config,
+        resources,
+        sample_rate,
+        Some(normalization_mean_spl),
+        None,
+        None,
+        &RealOptimizerBackend::new(),
+    )
+}
+
+/// Optimize one channel with the CEA-2034 spinorama curves required by the
+/// speaker-score objective.
+pub fn optimize_channel_eq_with_spin_detailed(
+    curve: &Curve,
+    spin_data: &HashMap<String, Curve>,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    optimize_channel_eq_inner(
+        curve,
+        config,
+        resources,
+        sample_rate,
+        None,
+        Some(spin_data),
+        None,
+        &RealOptimizerBackend::new(),
+    )
+}
+
+/// Optimize EQ filters for a single channel with per-iteration progress callback
+#[allow(dead_code)]
+pub fn optimize_channel_eq_with_callback(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    callback: autoeq_optim::optim::OptimProgressCallback,
+) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+    optimize_channel_eq_with_callback_detailed(curve, config, resources, sample_rate, callback)
+        .map(EqOptimizationResult::into_legacy)
+}
+
+/// Callback variant retaining structured optimizer evidence.
+pub fn optimize_channel_eq_with_callback_detailed(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    callback: autoeq_optim::optim::OptimProgressCallback,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    optimize_channel_eq_inner(
+        curve,
+        config,
+        resources,
+        sample_rate,
+        None,
+        None,
+        Some(callback),
+        &RealOptimizerBackend::new(),
+    )
+}
+
+/// Forward iterative optimization: try 1..=max_filters, stop when improvement stalls.
+fn optimize_channel_eq_adaptive(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    normalization_mean_spl: Option<f64>,
+    spin_data: Option<&HashMap<String, Curve>>,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+    backend: &dyn OptimizerBackend,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    let prep = if let Some(spin_data) = spin_data {
+        prepare_single_channel_eq_with_spin(
+            curve,
+            config,
+            resources,
+            sample_rate,
+            Some(spin_data),
+            normalization_mean_spl,
+        )?
+    } else {
+        prepare_single_channel_eq_with_normalization(
+            curve,
+            config,
+            resources,
+            sample_rate,
+            normalization_mean_spl,
+        )?
+    };
+    let max_filters = config.num_filters;
+    let base_budget_per_step = adaptive_budget_for_step(config.max_iter, max_filters, 1);
+
+    let mut best_filters: Vec<Biquad> = vec![];
+    let mut best_loss = f64::INFINITY;
+    let mut optimizer_evidence = Vec::new();
+    // Each pass owns its callback, while the user's observer spans all passes.
+    // Observing progress must not select a different optimization algorithm.
+    let callback = callback.map(|callback| std::sync::Arc::new(std::sync::Mutex::new(callback)));
+    let stopped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let last_iteration = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+    log::info!(
+        "  Adaptive filter selection: up to {} filters, threshold={:.6}, base budget/step={}",
+        max_filters,
+        config.min_filter_improvement,
+        base_budget_per_step
+    );
+
+    for k in 1..=max_filters {
+        let budget_per_step = adaptive_budget_for_step(config.max_iter, max_filters, k);
+        let pass_callback = callback.as_ref().map(|callback| {
+            let callback = std::sync::Arc::clone(callback);
+            let stopped = std::sync::Arc::clone(&stopped);
+            let last_iteration = std::sync::Arc::clone(&last_iteration);
+            let offset = last_iteration.load(std::sync::atomic::Ordering::Relaxed);
+            Box::new(move |iteration, loss, epa| {
+                let iteration = offset.saturating_add(iteration);
+                last_iteration.fetch_max(iteration, std::sync::atomic::Ordering::Relaxed);
+                let action = callback.lock().expect("progress callback mutex poisoned")(
+                    iteration, loss, epa,
+                );
+                if !matches!(&action, autoeq_optim::de::CallbackAction::Continue) {
+                    stopped.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                action
+            }) as autoeq_optim::optim::OptimProgressCallback
+        });
+        let (filters, loss, _x, mut pass_evidence) =
+            run_optimization_pass(&prep, k, budget_per_step, config, pass_callback, backend)?;
+        if stopped.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err("Adaptive EQ optimization stopped by progress callback".into());
+        }
+
+        let improvement = best_loss - loss;
+        log::info!(
+            "  Adaptive: k={}/{}, loss={:.6}, improvement={:.6}",
+            k,
+            max_filters,
+            loss,
+            improvement
+        );
+
+        if k > 1 && improvement < config.min_filter_improvement {
+            for evidence in &mut pass_evidence {
+                evidence.selected_for_output = false;
+            }
+            optimizer_evidence.extend(pass_evidence);
+            log::info!(
+                "  Stopping at {} filters: improvement {:.6} < threshold {:.6}",
+                k - 1,
+                improvement,
+                config.min_filter_improvement
+            );
+            break;
+        }
+
+        for evidence in &mut optimizer_evidence {
+            evidence.selected_for_output = false;
+        }
+        optimizer_evidence.extend(pass_evidence);
+        best_filters = filters;
+        best_loss = loss;
+    }
+
+    // Backward elimination: veto (loudness-delta) units when the Phase A
+    // audibility veto is active, raw loss units otherwise (or under the
+    // back-compat fallback flag).
+    let veto_config = config.filter_audibility.filter(|veto| veto.enabled);
+    if config.elimination_threshold > 0.0 && best_filters.len() > 1 {
+        if let Some(veto) = veto_config
+            && !veto.elimination_raw_loss_fallback
+        {
+            let phon = veto.resolved_listening_phon(
+                config
+                    .epa_config
+                    .as_ref()
+                    .map(|epa| epa.listening_level_phon),
+            );
+            let before = best_filters.len();
+            best_filters = super::audibility_veto::backward_eliminate_veto_units(
+                best_filters,
+                &prep.objective_data.freqs,
+                phon,
+                veto.elimination_loudness_delta_sones,
+            );
+            if best_filters.len() != before {
+                best_loss = recompiled_loss(&best_filters, &prep);
+            }
+        } else {
+            let (pruned, pruned_loss) = backward_eliminate(
+                best_filters,
+                &prep.objective_data,
+                prep.peq_model,
+                config.elimination_threshold,
+            );
+            best_filters = pruned;
+            best_loss = pruned_loss;
+        }
+    }
+
+    // Per-filter audibility veto (Stage 1 adjudication). Report-only by
+    // default, so merely enabling the config records verdicts without
+    // changing output.
+    let (kept, veto_loss, audibility_veto, veto_adjudication) =
+        apply_veto_postpass(best_filters, best_loss, &prep, config);
+    best_filters = kept;
+    best_loss = veto_loss;
+
+    log::info!(
+        "  Adaptive EQ optimization: {} filters, final loss={:.6}",
+        best_filters.len(),
+        best_loss
+    );
+
+    Ok(EqOptimizationResult {
+        filters: best_filters,
+        loss: best_loss,
+        optimizer_evidence,
+        audibility_veto,
+        veto_adjudication,
+    })
+}
+
+/// Per-filter audibility veto post-pass shared by the adaptive and
+/// single-pass paths (Stage 1 adjudication over the Phase A nominations).
+///
+/// The legacy single-pass path never ran backward elimination, so the veto
+/// is its only pruning — and the place where optimizer-emitted micro
+/// filters would otherwise ship unexamined. Nominations are adjudicated
+/// one removal at a time against the frozen full chain: a removal is
+/// accepted only below the per-step quantum, within the cumulative cap
+/// (declared pruning budget, else one quantum), and moving no single bin
+/// past the JND floor. Returns the kept filters, the (possibly
+/// recompiled) loss, verdicts with acceptance records, and the
+/// adjudication summary (F0 reference identity plus rollback data).
+/// With no veto config, or a disabled one, the input passes through
+/// untouched with no verdicts and no summary.
+///
+/// NOTE: there is no reoptimization after removal on any path. If one is
+/// ever added, it must thread `f0_reference_id` through and compare the
+/// reoptimized chain against F0 — never against the post-removal chain.
+fn apply_veto_postpass(
+    filters: Vec<Biquad>,
+    loss: f64,
+    prep: &super::types::PreparedSingleChannelEq,
+    config: &OptimizerConfig,
+) -> (
+    Vec<Biquad>,
+    f64,
+    Vec<roomeq_model::FilterVetoVerdict>,
+    Option<super::audibility_veto::VetoAdjudicationSummary>,
+) {
+    let Some(veto) = config.filter_audibility.filter(|veto| veto.enabled) else {
+        return (filters, loss, Vec::new(), None);
+    };
+    let phon = veto.resolved_listening_phon(
+        config
+            .epa_config
+            .as_ref()
+            .map(|epa| epa.listening_level_phon),
+    );
+    let hf_start = veto.resolved_hf_guard_start_hz(
+        config
+            .high_frequency_correction
+            .as_ref()
+            .map(|hf| hf.start_hz),
+    );
+    let mut verdicts = {
+        let evaluation = super::audibility_veto::VetoEvaluation {
+            filters: &filters,
+            freqs: &prep.objective_data.freqs,
+            listening_phon: phon,
+            config: veto,
+            hf_guard_start_hz: hf_start,
+        };
+        super::audibility_veto::evaluate_audibility_veto(&evaluation)
+    };
+    if !veto.report_only && !veto.enforcement_authorized() {
+        log::warn!(
+            "audibility veto enforcement requested (report_only=false) without \
+             allow_enforcement_with_experimental_proxy; staying advisory because \
+             the loudness proxy is experimental and unvalidated"
+        );
+    }
+    let adjudication_config = super::audibility_veto::AdjudicationConfig {
+        listening_phon: phon,
+        per_step_quantum_sones: veto.elimination_loudness_delta_sones,
+        cumulative_cap_sones: config
+            .pruning_budget
+            .as_ref()
+            .and_then(|budget| budget.max_cumulative_delta),
+        local_deviation_cap_db: veto.jnd_db,
+        enforce: veto.enforcement_authorized(),
+        model_version: env!("CARGO_PKG_VERSION").to_string(),
+    };
+    let adjudication = super::audibility_veto::adjudicate_veto_removals(
+        filters,
+        &mut verdicts,
+        &prep.objective_data.freqs,
+        &adjudication_config,
+    );
+    let loss = if adjudication.kept.len() != verdicts.len() {
+        recompiled_loss(&adjudication.kept, prep)
+    } else {
+        loss
+    };
+    let summary = adjudication.summarize();
+    (adjudication.kept, loss, verdicts, Some(summary))
+}
+
+/// Re-evaluate the scalar objective for a changed filter set so the reported
+/// loss stays honest after veto/elimination removals.
+fn recompiled_loss(filters: &[Biquad], prep: &super::types::PreparedSingleChannelEq) -> f64 {
+    let peq: math_audio_iir_fir::Peq = filters.iter().map(|biquad| (1.0, biquad.clone())).collect();
+    let x = autoeq_core::x2peq::peq2x(&peq, prep.peq_model);
+    autoeq_optim::optim::compute_base_fitness(&x, &prep.objective_data)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn optimize_channel_eq_inner(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    normalization_mean_spl: Option<f64>,
+    spin_data: Option<&HashMap<String, Curve>>,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+    backend: &dyn OptimizerBackend,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    let measurement_quality = autoeq_optim::measurements::assess_measurement_quality(curve);
+    let uncertainty_scaled_config =
+        uncertainty_scaled_optimizer_config(config, &measurement_quality);
+    let config = &uncertainty_scaled_config;
+
+    // A progress observer must not disable the requested adaptive selection.
+    if config.min_filter_improvement > 0.0 && config.num_filters > 1 {
+        return optimize_channel_eq_adaptive(
+            curve,
+            config,
+            resources,
+            sample_rate,
+            normalization_mean_spl,
+            spin_data,
+            callback,
+            backend,
+        );
+    }
+
+    // Single-pass optimization when adaptive selection is disabled.
+    let prep = if let Some(spin_data) = spin_data {
+        prepare_single_channel_eq_with_spin(
+            curve,
+            config,
+            resources,
+            sample_rate,
+            Some(spin_data),
+            normalization_mean_spl,
+        )?
+    } else {
+        prepare_single_channel_eq_with_normalization(
+            curve,
+            config,
+            resources,
+            sample_rate,
+            normalization_mean_spl,
+        )?
+    };
+    let (filters, loss, _x, optimizer_evidence) = run_optimization_pass(
+        &prep,
+        config.num_filters,
+        config.max_iter,
+        config,
+        callback,
+        backend,
+    )?;
+
+    // Same Stage 1 veto as the adaptive path: the legacy single-pass path
+    // never ran elimination, so without this its micro filters ship
+    // unexamined. Report-only by default.
+    let (filters, loss, audibility_veto, veto_adjudication) =
+        apply_veto_postpass(filters, loss, &prep, config);
+
+    log::info!(
+        "EQ optimization: {} filters, final loss={:.6}",
+        filters.len(),
+        loss
+    );
+
+    Ok(EqOptimizationResult {
+        filters,
+        loss,
+        optimizer_evidence,
+        audibility_veto,
+        veto_adjudication,
+    })
+}
+
+/// Optimize EQ filters across multiple measurement curves simultaneously.
+///
+/// Finds a single shared EQ that works well across all measurements,
+/// using the configured multi-measurement strategy to combine per-curve losses.
+///
+/// # Arguments
+/// * `curves` - Multiple frequency response curves (different positions/measurements)
+/// * `config` - Optimizer configuration
+/// * `multi_config` - Multi-measurement strategy configuration
+/// * `resources` - Optional target and impulse-response resources prepared by the workflow
+/// * `sample_rate` - Sample rate for filter design
+///
+/// # Returns
+/// * Tuple of (optimized Biquad filters, final loss value)
+#[allow(dead_code)]
+pub fn optimize_channel_eq_multi(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+    optimize_channel_eq_multi_detailed(curves, config, multi_config, resources, sample_rate)
+        .map(EqOptimizationResult::into_legacy)
+}
+
+/// Detailed multi-measurement variant retaining optimizer evidence.
+pub fn optimize_channel_eq_multi_detailed(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    optimize_channel_eq_multi_inner(
+        curves,
+        config,
+        multi_config,
+        resources,
+        sample_rate,
+        None,
+        &RealOptimizerBackend::new(),
+    )
+}
+
+#[allow(dead_code)]
+pub fn optimize_channel_eq_multi_with_auto_optimizer(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    auto_context: MultiEqAutoOptimizerContext,
+) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+    optimize_channel_eq_multi_with_auto_optimizer_detailed(
+        curves,
+        config,
+        multi_config,
+        resources,
+        sample_rate,
+        auto_context,
+    )
+    .map(EqOptimizationResult::into_legacy)
+}
+
+pub fn optimize_channel_eq_multi_with_auto_optimizer_detailed(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    auto_context: MultiEqAutoOptimizerContext,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    let resolved_config =
+        resolve_multi_measurement_auto_optimizer_config(curves, config, auto_context);
+    optimize_channel_eq_multi_inner(
+        curves,
+        &resolved_config,
+        multi_config,
+        resources,
+        sample_rate,
+        None,
+        &RealOptimizerBackend::new(),
+    )
+}
+
+/// Auto-optimizer variant retaining per-iteration progress reporting.
+#[allow(clippy::too_many_arguments)]
+pub fn optimize_channel_eq_multi_with_auto_optimizer_and_callback_detailed(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    auto_context: MultiEqAutoOptimizerContext,
+    callback: autoeq_optim::optim::OptimProgressCallback,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    let resolved_config =
+        resolve_multi_measurement_auto_optimizer_config(curves, config, auto_context);
+    optimize_channel_eq_multi_inner(
+        curves,
+        &resolved_config,
+        multi_config,
+        resources,
+        sample_rate,
+        Some(callback),
+        &RealOptimizerBackend::new(),
+    )
+}
+
+/// Optimize EQ across multiple measurement curves with per-iteration progress callback
+#[allow(dead_code)]
+pub fn optimize_channel_eq_multi_with_callback(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    callback: autoeq_optim::optim::OptimProgressCallback,
+) -> Result<(Vec<Biquad>, f64), Box<dyn Error>> {
+    optimize_channel_eq_multi_with_callback_detailed(
+        curves,
+        config,
+        multi_config,
+        resources,
+        sample_rate,
+        callback,
+    )
+    .map(EqOptimizationResult::into_legacy)
+}
+
+/// Callback variant retaining structured optimizer evidence.
+pub fn optimize_channel_eq_multi_with_callback_detailed(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    callback: autoeq_optim::optim::OptimProgressCallback,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    optimize_channel_eq_multi_inner(
+        curves,
+        config,
+        multi_config,
+        resources,
+        sample_rate,
+        Some(callback),
+        &RealOptimizerBackend::new(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn optimize_channel_eq_multi_inner(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+    backend: &dyn OptimizerBackend,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    let (primary, optim_params, effective_config) = prepare_multi_measurement_objective(
+        curves, config, multi_config, resources, sample_rate,
+    )?;
+    let config = &effective_config;
+    let final_objective = primary.clone();
 
     // Setup bounds and initial guess
     let (lower_bounds, upper_bounds) = autoeq_optim::optim::setup::setup_bounds(&optim_params);
@@ -2135,6 +2179,51 @@ mod multi_eq_tests {
         assert!(!evidence.converged);
         assert!(evidence.best_effort);
         assert_eq!(evidence.evaluation_count, Some(25));
+    }
+
+    #[test]
+    fn reusable_multi_objective_retains_rate_weights_and_bootstrap_population() {
+        let first = make_simple_room_curve();
+        let mut second = first.clone();
+        second.spl = second.spl.mapv(|value| 0.5 * value + 3.0);
+        let config = OptimizerConfig { psychoacoustic: false, seed: Some(42), ..OptimizerConfig::default() };
+        for rate in [44_100.0, 48_000.0, 96_000.0] {
+            let weighted = MultiMeasurementConfig {
+                strategy: MultiMeasurementStrategy::WeightedSum,
+                weights: Some(vec![9.0, 1.0]), ..MultiMeasurementConfig::default()
+            };
+            let (objective, params, _) = prepare_multi_measurement_objective(
+                &[first.clone(), second.clone()], &config, &weighted, None, rate,
+            ).unwrap();
+            let multi = objective.multi_objective.as_ref().unwrap();
+            assert_eq!(multi.weights, vec![0.9, 0.1]);
+            assert_eq!(multi.objectives.len(), 2);
+            assert!(multi.objectives.iter().all(|seat| seat.srate == rate));
+            assert_eq!(params.sample_rate, rate);
+            let responses: Vec<_> = multi.objectives.iter().map(|seat| Array1::zeros(seat.freqs.len())).collect();
+            assert!(autoeq_optim::optim::compute_response_fitness(&responses, &objective).unwrap().is_finite());
+
+            let bootstrap = MultiMeasurementConfig {
+                strategy: MultiMeasurementStrategy::MinimaxUncertainty,
+                bootstrap_uncertainty: Some(roomeq_model::BootstrapUncertaintyConfig {
+                    num_resamples: 7, seed: 19,
+                    scalarisation: roomeq_model::BootstrapScalarisation::Cvar,
+                    cvar_alpha: 0.3, ..Default::default()
+                }), ..Default::default()
+            };
+            let (prepared, _, _) = prepare_multi_measurement_objective(
+                &[first.clone(), second.clone()], &config, &bootstrap, None, rate,
+            ).unwrap();
+            let bank = prepared.multi_objective.as_ref().unwrap();
+            assert_eq!(bank.objectives.len(), 7, "FIR must see bootstrap bank, not two original seats");
+            assert_eq!(bank.uncertainty_cvar_alpha, Some(0.3));
+            let (repeated, _, _) = prepare_multi_measurement_objective(
+                &[first.clone(), second.clone()], &config, &bootstrap, None, rate,
+            ).unwrap();
+            for (a, b) in bank.objectives.iter().zip(&repeated.multi_objective.as_ref().unwrap().objectives) {
+                assert_eq!(a.deviation, b.deviation, "same bootstrap seed must preserve the objective bank");
+            }
+        }
     }
 
     #[test]

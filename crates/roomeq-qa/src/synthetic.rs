@@ -30,6 +30,7 @@ mod option;
 mod run;
 mod types;
 
+use crate::parameter_matrix::generate_pr_matrix;
 use channel_layout::sub_topos_for_layout;
 use consts::ALL_DIFFICULTIES;
 use consts::ALL_LAYOUTS;
@@ -44,7 +45,6 @@ use consts::SEED;
 use generate::generate_ms_option_combos;
 use generate::generate_option_combos;
 use misc::fmt_epa;
-use crate::parameter_matrix::generate_pr_matrix;
 use run::multiseat_api_guard_test_count;
 use run::report_multiseat_api_guard_tests;
 use run::run_multichannel_test;
@@ -83,15 +83,72 @@ pub fn run_stimuli(outdir: Option<&str>) -> Result<bool> {
     };
     let dir = outdir.unwrap_or("target/qa/stimuli");
     let requests = [
-        (StimulusKind::Tone { freq_hz: 1000.0, duration_s: 0.5 }, 1u64),
-        (StimulusKind::ToneBurst { freq_hz: 440.0, duration_s: 0.3, ramp_ms: 5.0 }, 2),
-        (StimulusKind::Sweep { f0_hz: 100.0, f1_hz: 8000.0, duration_s: 1.0, log: true }, 3),
+        (
+            StimulusKind::Tone {
+                freq_hz: 1000.0,
+                duration_s: 0.5,
+            },
+            1u64,
+        ),
+        (
+            StimulusKind::ToneBurst {
+                freq_hz: 440.0,
+                duration_s: 0.3,
+                ramp_ms: 5.0,
+            },
+            2,
+        ),
+        (
+            StimulusKind::Sweep {
+                f0_hz: 100.0,
+                f1_hz: 8000.0,
+                duration_s: 1.0,
+                log: true,
+            },
+            3,
+        ),
         (StimulusKind::TransientClick { duration_s: 0.2 }, 4),
-        (StimulusKind::ShapedNoise { pink: false, duration_s: 1.0 }, 5),
-        (StimulusKind::ShapedNoise { pink: true, duration_s: 1.0 }, 6),
-        (StimulusKind::BandLimitedNoise { low_hz: 500.0, high_hz: 1500.0, duration_s: 1.0 }, 7),
-        (StimulusKind::HarmonicComplex { f0_hz: 220.0, n_harmonics: 8, tilt_db_per_octave: 6.0, duration_s: 1.0 }, 8),
-        (StimulusKind::MaskerProbe { masker_freq_hz: 1000.0, probe_freq_hz: 1000.0, masker_duration_s: 0.2, gap_ms: 20.0, probe_duration_s: 0.1 }, 9),
+        (
+            StimulusKind::ShapedNoise {
+                pink: false,
+                duration_s: 1.0,
+            },
+            5,
+        ),
+        (
+            StimulusKind::ShapedNoise {
+                pink: true,
+                duration_s: 1.0,
+            },
+            6,
+        ),
+        (
+            StimulusKind::BandLimitedNoise {
+                low_hz: 500.0,
+                high_hz: 1500.0,
+                duration_s: 1.0,
+            },
+            7,
+        ),
+        (
+            StimulusKind::HarmonicComplex {
+                f0_hz: 220.0,
+                n_harmonics: 8,
+                tilt_db_per_octave: 6.0,
+                duration_s: 1.0,
+            },
+            8,
+        ),
+        (
+            StimulusKind::MaskerProbe {
+                masker_freq_hz: 1000.0,
+                probe_freq_hz: 1000.0,
+                masker_duration_s: 0.2,
+                gap_ms: 20.0,
+                probe_duration_s: 0.1,
+            },
+            9,
+        ),
     ]
     .into_iter()
     .map(|(kind, seed)| StimulusRequest { kind, seed })
@@ -101,8 +158,9 @@ pub fn run_stimuli(outdir: Option<&str>) -> Result<bool> {
         db_spl_at_0dbfs_rms: 90.0,
         levels_db: vec![55.0, 65.0],
     };
-    let manifest = render_stimulus_set(std::path::Path::new(dir), &requests, &calibration, 48_000.0)
-        .map_err(|error| anyhow::anyhow!("stimulus render failed: {error}"))?;
+    let manifest =
+        render_stimulus_set(std::path::Path::new(dir), &requests, &calibration, 48_000.0)
+            .map_err(|error| anyhow::anyhow!("stimulus render failed: {error}"))?;
     println!(
         "stimuli: {} files + manifest in {dir} (renderer {})",
         manifest.files.len(),
@@ -117,7 +175,7 @@ pub fn run_stimuli(outdir: Option<&str>) -> Result<bool> {
 /// policy modules (inversion support, band splits, chain constraints,
 /// final validation) accept/reject the expected synthetic cases.
 /// Returns `true` when every demo expectation holds.
-pub fn run_stage3_policies() -> Result<bool> {
+pub fn run_stage3_policies() -> Result<QaRunOutcome> {
     use roomeq_quality::{
         AggregationOrder, BandSplitPolicy, BassPolicy, BoundedInversionPolicy, ChainConstraints,
         ChainEvidence, FinalReferences, InversionEvidence, InversionVerdict, NullClassification,
@@ -155,18 +213,30 @@ pub fn run_stage3_policies() -> Result<bool> {
     };
     let decision = assess_inversion(&ideal, &policy)
         .map_err(|error| anyhow::anyhow!("inversion demo: {error}"))?;
-    expect("ideal null allowed", decision.verdict == InversionVerdict::Allowed);
+    expect(
+        "ideal null allowed",
+        decision.verdict == InversionVerdict::Allowed,
+    );
     let cancellation = InversionEvidence {
         classification: NullClassification::NonMinimumPhase,
         ..ideal
     };
     let decision = assess_inversion(&cancellation, &policy)
         .map_err(|error| anyhow::anyhow!("inversion demo: {error}"))?;
-    expect("cancellation cuts-only", decision.verdict == InversionVerdict::CutsOnly);
-    let absent = InversionEvidence { supporting_bins: 0, ..ideal };
+    expect(
+        "cancellation cuts-only",
+        decision.verdict == InversionVerdict::CutsOnly,
+    );
+    let absent = InversionEvidence {
+        supporting_bins: 0,
+        ..ideal
+    };
     let decision = assess_inversion(&absent, &policy)
         .map_err(|error| anyhow::anyhow!("inversion demo: {error}"))?;
-    expect("absent evidence refused", decision.verdict == InversionVerdict::Refuse);
+    expect(
+        "absent evidence refused",
+        decision.verdict == InversionVerdict::Refuse,
+    );
 
     // 2. Band split: opt-in, smooth, cuts-only bass; diagnostics advisory.
     let split = BandSplitPolicy::disabled();
@@ -176,8 +246,14 @@ pub fn run_stage3_policies() -> Result<bool> {
         bass: BassPolicy::CutsOnly,
         ..BandSplitPolicy::disabled()
     };
-    expect("cuts-only denies boost", cuts_only.authorize_bass_correction(6.0).is_err());
-    expect("cuts-only keeps cuts", cuts_only.authorize_bass_correction(-4.0).is_ok());
+    expect(
+        "cuts-only denies boost",
+        cuts_only.authorize_bass_correction(6.0).is_err(),
+    );
+    expect(
+        "cuts-only keeps cuts",
+        cuts_only.authorize_bass_correction(-4.0).is_ok(),
+    );
     cuts_only.width_octaves = 0.0;
     expect("hard boundary refused", cuts_only.validate().is_err());
     let diagnostics = WindowDiagnostics {
@@ -188,7 +264,10 @@ pub fn run_stage3_policies() -> Result<bool> {
     };
     expect(
         "diagnostics advisory only",
-        diagnostics.advisory_notes().iter().all(|note| note.starts_with("advisory:")),
+        diagnostics
+            .advisory_notes()
+            .iter()
+            .all(|note| note.starts_with("advisory:")),
     );
 
     // 3. Chain constraints + temporal gate with stated basis.
@@ -218,11 +297,15 @@ pub fn run_stage3_policies() -> Result<bool> {
     expect(
         "trusted excess fails enforced",
         matches!(
-            gate.apply(Some(12.0), "ms").map_err(|error| anyhow::anyhow!("gate demo: {error}"))?,
+            gate.apply(Some(12.0), "ms")
+                .map_err(|error| anyhow::anyhow!("gate demo: {error}"))?,
             roomeq_quality::GateOutcome::Fail { .. }
         ),
     );
-    let untrusted = TemporalGate { timing_trusted: false, ..gate };
+    let untrusted = TemporalGate {
+        timing_trusted: false,
+        ..gate
+    };
     expect(
         "untrusted excess advisory",
         matches!(
@@ -261,7 +344,10 @@ pub fn run_stage3_policies() -> Result<bool> {
         max_pruning_loss_db: 0.5,
         min_support_bins: 8,
     };
-    let references = FinalReferences { baseline_post: pre.clone(), full_chain_post: None };
+    let references = FinalReferences {
+        baseline_post: pre.clone(),
+        full_chain_post: None,
+    };
     let sub_main = SubMainSumEvidence {
         sub: flat(80.0),
         main: flat(80.0),
@@ -284,7 +370,7 @@ pub fn run_stage3_policies() -> Result<bool> {
         "stage3 policies: {passed}/{checks} demo expectations hold (aggregate gain {:.2} dB, worst {})",
         report.aggregate_gain_db, report.worst_seat.seat
     );
-    Ok(passed == checks)
+    Ok(QaRunOutcome::from_counts(passed, checks))
 }
 
 /// Exercise the Stage 4 rerank pipeline on synthetic fixtures.
@@ -294,7 +380,7 @@ pub fn run_stage3_policies() -> Result<bool> {
 /// evaluator under budgets and a transform cache, refines the winner
 /// without switching losses, and compares against EPA/flat baselines on
 /// held-out data. Returns `true` when every demo expectation holds.
-pub fn run_stage4_rerank() -> Result<bool> {
+pub fn run_stage4_rerank() -> Result<QaRunOutcome> {
     use autoeq_optim::rerank::{
         AuditoryEvaluator, BaselineEntry, BudgetLedger, EvaluatorBasis, GridResolution, LossPin,
         NominationSource, RerankCache, ShortlistCandidate, StageBudgets, build_shortlist,
@@ -311,7 +397,10 @@ pub fn run_stage4_rerank() -> Result<bool> {
         }
     };
 
-    let pin = LossPin { loss: String::from("speaker-flat"), version: String::from("v3") };
+    let pin = LossPin {
+        loss: String::from("speaker-flat"),
+        version: String::from("v3"),
+    };
     let nominate = |id: &str, value: f64, source: NominationSource| ShortlistCandidate {
         id: String::from(id),
         params: vec![value],
@@ -346,13 +435,21 @@ pub fn run_stage4_rerank() -> Result<bool> {
         wall_time_ms: 60_000,
         max_memory_bytes: u64::MAX,
     });
-    let report = rerank(&shortlist, &evaluator, &pin, &transform, &mut cache, &mut ledger, |candidate| {
-        Ok(match candidate.id.as_str() {
-            "identity" => 1.0,
-            "opt-a" => 2.5,
-            _ => 4.0,
-        })
-    })
+    let report = rerank(
+        &shortlist,
+        &evaluator,
+        &pin,
+        &transform,
+        &mut cache,
+        &mut ledger,
+        |candidate| {
+            Ok(match candidate.id.as_str() {
+                "identity" => 1.0,
+                "opt-a" => 2.5,
+                _ => 4.0,
+            })
+        },
+    )
     .map_err(|error| anyhow::anyhow!("rerank demo: {error}"))?;
     let winner = &report.ranked[0];
     expect("identity wins the demo rerank", winner.id == "identity");
@@ -379,8 +476,9 @@ pub fn run_stage4_rerank() -> Result<bool> {
             held_out_id: String::from("held-out-rooms"),
         },
     ];
-    let comparison = compare_to_baselines(&winner.id, winner.evaluator_score, &baselines, 0.5, None)
-        .map_err(|error| anyhow::anyhow!("baseline demo: {error}"))?;
+    let comparison =
+        compare_to_baselines(&winner.id, winner.evaluator_score, &baselines, 0.5, None)
+            .map_err(|error| anyhow::anyhow!("baseline demo: {error}"))?;
     // Identity scores 1.0 vs EPA 3.0: adopted on held-out data (demo
     // plumbing — a steering fixture, not proof of improvement).
     expect(
@@ -391,7 +489,7 @@ pub fn run_stage4_rerank() -> Result<bool> {
         "stage4 rerank: {passed}/{checks} demo expectations hold (winner {}, {} evaluations)",
         winner.id, ledger.evaluations
     );
-    Ok(passed == checks)
+    Ok(QaRunOutcome::from_counts(passed, checks))
 }
 
 /// Exercise the Stage 5 release gates on synthetic records.
@@ -400,7 +498,7 @@ pub fn run_stage4_rerank() -> Result<bool> {
 /// for legacy, advisory, enforcing physical, and perceptual-claim policy
 /// records against synthetic gate assessments. Returns `true` when every
 /// demo expectation holds.
-pub fn run_release_gates() -> Result<bool> {
+pub fn run_release_gates() -> Result<QaRunOutcome> {
     use crate::release_gates::{
         GateAssessment, PolicyBehavior, PolicyRelease, ReleaseGate, veto_policy_release,
     };
@@ -455,11 +553,261 @@ pub fn run_release_gates() -> Result<bool> {
         .map_err(|error| anyhow::anyhow!("gates demo: {error}"))?;
     expect("legacy rollback never blocked", promotion.promoted());
     println!("release gates: {passed}/{checks} demo expectations hold");
-    Ok(passed == checks)
+    Ok(QaRunOutcome::from_counts(passed, checks))
 }
 
-pub fn run_parameter_matrix() -> Result<bool> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QaRunOutcome {
+    Passed,
+    Failed,
+}
+
+impl QaRunOutcome {
+    fn from_counts(passed: usize, total: usize) -> Self {
+        if total > 0 && passed == total {
+            Self::Passed
+        } else {
+            Self::Failed
+        }
+    }
+
+    pub fn has_failures(self) -> bool {
+        self == Self::Failed
+    }
+}
+
+#[cfg(test)]
+mod outcome_tests {
+    use super::{QaRunOutcome, write_parameter_matrix_artifact};
+
+    #[test]
+    fn parameter_matrix_bundles_are_distinct_and_retain_measurement_inputs() {
+        let root = tempfile::tempdir().unwrap();
+        let first = super::create_parameter_matrix_bundle(root.path(), 0).unwrap();
+        let second = super::create_parameter_matrix_bundle(root.path(), 0).unwrap();
+        assert_ne!(first, second);
+        assert!(first.is_dir() && second.is_dir());
+        let rows = super::generate_pr_matrix();
+        let curve = super::generate_flat_curve(20.0, 20_000.0, 100);
+        let config = super::build::build_parameter_config(
+            &curve, &rows[0], roomeq_model::ProcessingMode::Hybrid, 96_000.0,
+        );
+        let path = first.join("request.json");
+        write_parameter_matrix_artifact(&path, &super::parameter_matrix_request(&config).unwrap()).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&path).unwrap(),
+        ).unwrap();
+        let mut recovered: roomeq_model::RoomConfig = serde_json::from_value(
+            saved["configuration_without_speakers"].clone(),
+        ).unwrap();
+        let measurements: std::collections::BTreeMap<String, roomeq_model::Curve> =
+            serde_json::from_value(saved["single_speaker_measurements"].clone()).unwrap();
+        for (name, curve) in measurements {
+            recovered.speakers.insert(name, roomeq_model::SpeakerConfig::Single(
+                roomeq_model::MeasurementSource::InMemory(curve),
+            ));
+        }
+        assert_eq!(super::parameter_matrix_request(&recovered).unwrap(), saved);
+        assert!(!second.join("request.json").exists());
+    }
+
+    #[test]
+    #[ignore = "focused full five-seed matrix row; run explicitly during outcome audit"]
+    fn hybrid_short_lfe_parameter_row_retains_requested_fir() {
+        let result = run_parameter_row_fixture(10);
+        let lfe = &result.channel_results["LFE"];
+        assert!(lfe.post_score < lfe.pre_score);
+        assert!(result.combined_post_score < result.combined_pre_score);
+        assert_eq!(lfe.fir_coeffs.as_ref().map(Vec::len), Some(480));
+    }
+
+    #[test]
+    #[ignore = "focused full five-seed matrix row; run explicitly during outcome audit"]
+    fn phase_linear_routed_row_preserves_correction_scores_after_report_refresh() {
+        let result = run_parameter_row_fixture(1);
+        for (name, channel) in &result.channel_results {
+            assert!(channel.post_score < channel.pre_score,
+                "{name}: report refresh must retain correction-only scores: {} -> {}",
+                channel.pre_score, channel.post_score);
+            assert_eq!(channel.fir_coeffs.as_ref().map(Vec::len), Some(960));
+        }
+        assert!(result.combined_post_score < result.combined_pre_score);
+    }
+
+    fn run_parameter_row_fixture(index: usize) -> roomeq_engine::room_result::RoomOptimizationResult {
+        let rows = super::generate_pr_matrix();
+        let row = &rows[index];
+        let sample_rate = [44_100.0, 48_000.0, 96_000.0][row.sample_rate as usize];
+        let curve = super::generate_flat_curve(
+            20.0,
+            (sample_rate / 2.0 - 100.0_f64).max(1_000.0_f64),
+            [100, 200, 400][row.grid_size as usize],
+        );
+        let mut config = super::build::build_parameter_config(
+            &curve, row, match row.mode {
+                0 => roomeq_model::ProcessingMode::LowLatency,
+                1 => roomeq_model::ProcessingMode::PhaseLinear,
+                _ => roomeq_model::ProcessingMode::Hybrid,
+            }, sample_rate,
+        );
+        config.optimizer.num_filters = [3, 7, 11][row.filter_count as usize];
+        config.optimizer.max_freq = (sample_rate / 2.0 - 100.0_f64).min(config.optimizer.max_freq);
+        config.optimizer.max_iter = 120;
+        config.optimizer.seed = Some(super::SEED + index as u64);
+        super::run::run_optimization_at_rate(&config, sample_rate).unwrap()
+    }
+
+    #[test]
+    fn parameter_matrix_checkpoints_preserve_completed_rows_and_final_format() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("matrix.json");
+        let rows = serde_json::json!([{"row": 0, "post_score": 1.25}]);
+        let checkpoint = serde_json::json!({
+            "status": "running", "expected_rows": 16, "completed_rows": rows,
+        });
+        write_parameter_matrix_artifact(&path, &checkpoint).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved, checkpoint);
+        // A partially serialized replacement must not destroy the last checkpoint.
+        let invalid = std::collections::BTreeMap::from([((1, 2), 3)]);
+        assert!(write_parameter_matrix_artifact(&path, &invalid).is_err());
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved, checkpoint);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+        write_parameter_matrix_artifact(&path, &rows).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            saved, rows,
+            "completed artifacts retain the existing array format"
+        );
+    }
+
+    #[test]
+    fn parameter_matrix_artifact_write_failure_is_fatal() {
+        let directory = tempfile::tempdir().unwrap();
+        let obstruction = directory.path().join("not_a_directory");
+        std::fs::write(&obstruction, b"keep").unwrap();
+        assert!(
+            write_parameter_matrix_artifact(
+                &obstruction.join("matrix.json"),
+                &serde_json::json!([]),
+            )
+            .is_err()
+        );
+        assert_eq!(std::fs::read(&obstruction).unwrap(), b"keep");
+    }
+
+    #[test]
+    fn qa_outcomes_use_the_launcher_failure_convention() {
+        assert!(!QaRunOutcome::from_counts(16, 16).has_failures());
+        assert!(QaRunOutcome::from_counts(15, 16).has_failures());
+        assert!(QaRunOutcome::from_counts(0, 0).has_failures());
+    }
+}
+
+fn write_parameter_matrix_artifact(
+    path: &std::path::Path,
+    value: &impl serde::Serialize,
+) -> Result<()> {
+    let parent = path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let mut pending = tempfile::NamedTempFile::new_in(parent)?;
+    serde_json::to_writer_pretty(&mut pending, value)?;
+    pending.as_file().sync_all()?;
+    pending.persist(path)?;
+    Ok(())
+}
+
+fn create_parameter_matrix_bundle(root: &std::path::Path, row: usize) -> Result<std::path::PathBuf> {
+    std::fs::create_dir_all(root)?;
+    Ok(tempfile::Builder::new()
+        .prefix(&format!("row-{row:02}-"))
+        .tempdir_in(root)?
+        .keep())
+}
+
+fn parameter_matrix_request(config: &roomeq_model::RoomConfig) -> Result<serde_json::Value> {
+    let mut configuration = config.clone();
+    configuration.speakers.clear();
+    let mut measurements = std::collections::BTreeMap::new();
+    for (name, speaker) in &config.speakers {
+        match speaker {
+            roomeq_model::SpeakerConfig::Single(roomeq_model::MeasurementSource::InMemory(curve)) => {
+                measurements.insert(name, curve);
+            }
+            _ => anyhow::bail!("matrix replay bundle requires an explicit single in-memory measurement for {name}"),
+        }
+    }
+    Ok(serde_json::json!({
+        "format": "roomeq_parameter_request_v1",
+        "configuration_without_speakers": configuration,
+        "single_speaker_measurements": measurements,
+    }))
+}
+
+fn parameter_crossover_execution(topology: usize, crossover: usize, phase: usize,
+    bass: &serde_json::Value) -> Result<&'static str> {
+    if topology == 0 {
+        anyhow::ensure!(bass.is_null(), "unrouted row unexpectedly has bass management");
+        return Ok("not_applicable");
+    }
+    anyhow::ensure!(bass["enabled"] == true, "routed row did not enable bass management");
+    let expected_type = if crossover == 2 { "LR48" } else { "LR24" };
+    anyhow::ensure!(bass["optimization"]["crossover_type"] == expected_type,
+        "crossover type did not reach runtime");
+    anyhow::ensure!(bass["routing_graph"]["routes"].as_array().is_some_and(|routes| !routes.is_empty()),
+        "crossover produced no routes");
+    if crossover == 1 && phase != 1 {
+        anyhow::ensure!(bass["optimization"]["applied"] == false,
+            "phase-free automatic crossover unexpectedly reported applied");
+        return Ok("unsupported_missing_phase");
+    }
+    if crossover == 1 {
+        anyhow::ensure!(bass["optimization"]["applied"] == true,
+            "automatic crossover selection did not execute");
+        Ok("automatic_selection_applied")
+    } else { Ok("fixed_routes_emitted") }
+}
+
+#[cfg(test)]
+mod crossover_execution_tests {
+    use super::parameter_crossover_execution;
+    use serde_json::json;
+
+    #[test]
+    fn crossover_status_distinguishes_execution_support_and_applicability() {
+        let mut bass = json!({"enabled": true,
+            "optimization": {"crossover_type": "LR24", "applied": true},
+            "routing_graph": {"routes": [{}]}});
+        assert_eq!(parameter_crossover_execution(0, 1, 0, &json!(null)).unwrap(), "not_applicable");
+        assert_eq!(parameter_crossover_execution(1, 0, 1, &bass).unwrap(), "fixed_routes_emitted");
+        assert_eq!(parameter_crossover_execution(1, 1, 1, &bass).unwrap(), "automatic_selection_applied");
+        bass["optimization"]["applied"] = json!(false);
+        assert_eq!(parameter_crossover_execution(1, 1, 0, &bass).unwrap(), "unsupported_missing_phase");
+        assert!(parameter_crossover_execution(1, 1, 1, &bass).is_err());
+        bass["routing_graph"]["routes"] = json!([]);
+        assert!(parameter_crossover_execution(1, 0, 1, &bass).is_err());
+    }
+}
+
+pub fn run_parameter_matrix() -> Result<QaRunOutcome> {
     let rows = generate_pr_matrix();
+    let artifact = std::path::Path::new("target/qa/roomeq-parameter-matrix.json");
+    if let Some(parent) = artifact.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    write_parameter_matrix_artifact(
+        artifact,
+        &serde_json::json!({
+            "status": "running", "expected_rows": rows.len(), "completed_rows": []
+        }),
+    )?;
     let mut passed = 0usize;
     let mut records = Vec::with_capacity(rows.len());
     for (index, row) in rows.iter().enumerate() {
@@ -471,33 +819,150 @@ pub fn run_parameter_matrix() -> Result<bool> {
             _ => ProcessingMode::Hybrid,
         };
         let mode_name = format!("{mode:?}");
-        let curve = generate_flat_curve(20.0, (sample_rate / 2.0 - 100.0_f64).max(1_000.0_f64), point_count);
-        let mut config = build::build_config(&curve, mode);
+        let curve = generate_flat_curve(
+            20.0,
+            (sample_rate / 2.0 - 100.0_f64).max(1_000.0_f64),
+            point_count,
+        );
+        let mut config = build::build_parameter_config(&curve, row, mode, sample_rate);
         config.optimizer.num_filters = [3, 7, 11][row.filter_count as usize];
         config.optimizer.max_freq = (sample_rate / 2.0 - 100.0_f64).min(config.optimizer.max_freq);
         config.optimizer.max_iter = 120;
         config.optimizer.seed = Some(SEED + index as u64);
-        let result = run::run_optimization(&config)?;
+        // Preserve the selected rerun's sidecars for independent backend replay.
+        // Unique directories prevent a later run from overwriting old evidence.
+        let bundle = create_parameter_matrix_bundle(
+            std::path::Path::new("target/qa/roomeq-parameter-bundles"), index,
+        )?;
+        write_parameter_matrix_artifact(&bundle.join("request.json"), &serde_json::json!({
+            "row": index, "requested_axes": row, "sample_rate_hz": sample_rate,
+            "inputs": parameter_matrix_request(&config)?,
+        }))?;
+        let result = match crate::optimize_room(&config, sample_rate, Some(&bundle)) {
+            Ok(result) => result,
+            Err(error) => {
+                write_parameter_matrix_artifact(
+                    artifact,
+                    &serde_json::json!({
+                        "status": "failed", "expected_rows": rows.len(),
+                        "failed_row": index, "requested_axes": row, "replay_bundle": bundle,
+                        "sample_rate_hz": sample_rate, "optimizer": config.optimizer,
+                        "error": format!("{error:#}"), "completed_rows": records,
+                    }),
+                )?;
+                return Err(error);
+            }
+        };
         if !result.combined_post_score.is_finite() {
+            write_parameter_matrix_artifact(
+                artifact,
+                &serde_json::json!({
+                    "status": "failed", "expected_rows": rows.len(),
+                    "failed_row": index, "requested_axes": row, "replay_bundle": bundle,
+                    "sample_rate_hz": sample_rate, "optimizer": config.optimizer,
+                    "error": "non-finite post score",
+                    "non_finite_post_score": result.combined_post_score.to_string(),
+                    "completed_rows": records,
+                }),
+            )?;
             anyhow::bail!("pairwise row {index} produced a non-finite score");
         }
+        write_parameter_matrix_artifact(
+            &bundle.join("selected-output.json"), &result.to_dsp_chain_output(),
+        )?;
+        let crossover_execution = match parameter_crossover_execution(
+            row.topology as usize, row.crossover as usize, row.phase as usize,
+            &serde_json::to_value(&result.metadata.bass_management)?) {
+            Ok(status) => status,
+            Err(error) => {
+                write_parameter_matrix_artifact(artifact, &serde_json::json!({
+                    "status": "failed", "expected_rows": rows.len(), "failed_row": index,
+                    "requested_axes": row, "replay_bundle": bundle,
+                    "sample_rate_hz": sample_rate, "error": format!("{error:#}"),
+                    "completed_rows": records,
+                }))?;
+                return Err(error);
+            }
+        };
         records.push(serde_json::json!({
             "row": index,
+            "replay_bundle": {
+                "directory": bundle,
+                "request": "request.json",
+                "selected_output": "selected-output.json",
+                "scope": "selected_rerun_dsp_and_sidecars_not_backend_certification",
+            },
+            "requested_axes": row,
+            "crossover_execution": crossover_execution,
+            "unexecuted_axes": if crossover_execution == "unsupported_missing_phase" {
+                vec!["crossover"]
+            } else { Vec::<&str>::new() },
+            "not_applicable_axes": if crossover_execution == "not_applicable" {
+                vec!["crossover"]
+            } else { Vec::<&str>::new() },
+            "outcome_scope": "finite_output_smoke",
+            "effective_config": {
+                "optimizer": config.optimizer,
+                "system": config.system,
+                "crossovers": config.crossovers,
+                "speaker_names": ({
+                    let mut names: Vec<_> = config.speakers.keys().collect();
+                    names.sort();
+                    names
+                }),
+                "measurement_source": "in_memory_parameter_fixture",
+                "measurement_profile": "4db_log_gaussian_300hz_sigma_0.7",
+                "measurements": config.speakers.iter().filter_map(|(name, speaker)| {
+                    if let roomeq_model::SpeakerConfig::Single(roomeq_model::MeasurementSource::InMemory(curve)) = speaker {
+                        Some((name.clone(), serde_json::json!({
+                            "band_hz": [curve.freq[0], curve.freq[curve.freq.len()-1]],
+                            "grid_points": curve.freq.len(), "has_phase": curve.phase.is_some(),
+                        })))
+                    } else { None }
+                }).collect::<std::collections::BTreeMap<_, _>>(),
+            },
             "sample_rate_hz": sample_rate,
-            "grid_points": point_count,
+            "delivered_biquad_sample_rates_hz": result.channel_results.iter().map(|(name, channel)|
+                (name.clone(), channel.biquads.iter().map(|filter| filter.srate).collect::<Vec<_>>())
+            ).collect::<std::collections::BTreeMap<_, _>>(),
+            "requested_grid_points": point_count,
             "mode": mode_name,
             "filter_count": config.optimizer.num_filters,
+            "requested_fir_duration_ms": ([5, 10, 20][row.fir_duration as usize]),
+            "fir_duration_applicable": config.optimizer.processing_mode != ProcessingMode::LowLatency,
+            "delivered_fir_taps": result.channel_results.iter().map(|(name, channel)|
+                (name.clone(), channel.fir_coeffs.as_ref().map(Vec::len))
+            ).collect::<std::collections::BTreeMap<_, _>>(),
             "pre_score": result.combined_pre_score,
             "post_score": result.combined_post_score,
             "stage_outcomes": result.metadata.stage_outcomes,
+            "selected_acceptance": result.metadata.correction_acceptance,
+            "selected_channel_scores": result.channel_results.iter().map(|(name, channel)| {
+                (name.clone(), serde_json::json!({"pre": channel.pre_score, "post": channel.post_score}))
+            }).collect::<std::collections::BTreeMap<_, _>>(),
+            "home_cinema_layout": result.metadata.home_cinema_layout,
+            "bass_management": result.metadata.bass_management,
+            "seed_distribution": result.metadata.qa_seed_distribution,
         }));
+        write_parameter_matrix_artifact(
+            artifact,
+            &serde_json::json!({
+                "status": "running", "expected_rows": rows.len(),
+                "completed_rows": records,
+            }),
+        )?;
         passed += 1;
     }
     let artifact = std::path::Path::new("target/qa/roomeq-parameter-matrix.json");
-    if let Some(parent) = artifact.parent() { std::fs::create_dir_all(parent)?; }
-    std::fs::write(artifact, serde_json::to_vec_pretty(&records)?)?;
-    println!("parameter matrix: {passed}/{} rows passed", rows.len());
-    Ok(passed == rows.len())
+    if let Some(parent) = artifact.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    write_parameter_matrix_artifact(artifact, &records)?;
+    println!(
+        "parameter matrix: {passed}/{} finite-output smoke rows passed (full axis execution is not yet established)",
+        rows.len()
+    );
+    Ok(QaRunOutcome::from_counts(passed, rows.len()))
 }
 
 pub fn run() -> Result<bool> {
@@ -526,7 +991,7 @@ pub fn run() -> Result<bool> {
     let full_matrix = args.iter().any(|a| a == "--full-matrix");
     let pr_matrix = args.iter().any(|a| a == "--pr");
     if args.iter().any(|a| a == "--parameter-matrix") {
-        return run_parameter_matrix();
+        return run_parameter_matrix().map(QaRunOutcome::has_failures);
     }
     if args.iter().any(|a| a == "--stimuli") {
         return run_stimuli(
@@ -536,13 +1001,13 @@ pub fn run() -> Result<bool> {
         );
     }
     if args.iter().any(|a| a == "--stage3-policies") {
-        return run_stage3_policies();
+        return run_stage3_policies().map(QaRunOutcome::has_failures);
     }
     if args.iter().any(|a| a == "--stage4-rerank") {
-        return run_stage4_rerank();
+        return run_stage4_rerank().map(QaRunOutcome::has_failures);
     }
     if args.iter().any(|a| a == "--release-gates") {
-        return run_release_gates();
+        return run_release_gates().map(QaRunOutcome::has_failures);
     }
     let fail_fast = args.iter().any(|a| a == "--fail-fast");
     let difficulty_filter = args
@@ -583,12 +1048,22 @@ pub fn run() -> Result<bool> {
             "  --full-matrix            Include WarpedIir/KautzModal and every multichannel processing mode"
         );
         println!("  --pr                     Run the bounded pull-request audibility matrix");
-        println!("  --parameter-matrix       Run the 24-row pairwise configuration matrix");
+        println!(
+            "  --parameter-matrix       Run bounded pairwise smoke rows; artifacts identify unexecuted axes"
+        );
         println!("  --stimuli [--stimuli-dir DIR]");
-        println!("                           Render the staged listening-stimulus set plus manifest (default DIR: target/qa/stimuli)");
-        println!("  --stage3-policies        Exercise the Stage 3 acceptance policies on synthetic fixtures (plumbing demo, not listening evidence)");
-        println!("  --stage4-rerank          Exercise the Stage 4 shortlist/rerank/refine pipeline on synthetic fixtures (plumbing demo, not proof of improvement)");
-        println!("  --release-gates          Exercise the Stage 5 release-gate promotion rules on synthetic records (conformance demo, not a release decision)");
+        println!(
+            "                           Render the staged listening-stimulus set plus manifest (default DIR: target/qa/stimuli)"
+        );
+        println!(
+            "  --stage3-policies        Exercise the Stage 3 acceptance policies on synthetic fixtures (plumbing demo, not listening evidence)"
+        );
+        println!(
+            "  --stage4-rerank          Exercise the Stage 4 shortlist/rerank/refine pipeline on synthetic fixtures (plumbing demo, not proof of improvement)"
+        );
+        println!(
+            "  --release-gates          Exercise the Stage 5 release-gate promotion rules on synthetic records (conformance demo, not a release decision)"
+        );
         println!("  --help, -h               Print this help");
         return Ok(false);
     }

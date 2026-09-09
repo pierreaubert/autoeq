@@ -175,10 +175,12 @@ fn result_with_channel_slopes(
             perceptual_policy: None,
             bootstrap_uncertainty: None,
             validation_bundle: None,
+            final_convolution_sha256: None,
             supporting_source: None,
             correction_acceptance: None,
             optimizer_evidence: None,
             stage_outcomes: Vec::new(),
+            qa_seed_distribution: None,
             effective_config: None,
         },
     }
@@ -233,6 +235,322 @@ fn result_with_inter_channel_slope(channel_slope_db_per_octave: f64) -> RoomOpti
     ]);
     result.combined_post_score = 1.0;
     result
+}
+
+#[test]
+fn electrical_scorecard_gates_cascade_and_retains_sidecar_evidence() {
+    for sample_rate in [44100.0, 48000.0, 96000.0] {
+        let directory = tempfile::tempdir().unwrap();
+        let mut result = result_with_channel_slopes(0.0, 0.0, 0.0);
+        result.combined_pre_score = 10.0;
+        result.combined_post_score = 5.0;
+        let filter = math_audio_iir_fir::Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Peak,
+            80.0,
+            sample_rate,
+            2.0,
+            3.0,
+        );
+        result.channel_results.get_mut("L").unwrap().biquads = vec![filter.clone(); 6];
+        result.channels.get_mut("L").unwrap().plugins = vec![
+            roomeq_engine::output::create_eq_plugin(&vec![filter; 6]),
+            roomeq_engine::output::create_convolution_plugin("gain.wav"),
+        ];
+        let mut writer = hound::WavWriter::create(
+            directory.path().join("gain.wav"),
+            hound::WavSpec {
+                channels: 1,
+                sample_rate: sample_rate as u32,
+                bits_per_sample: 32,
+                sample_format: hound::SampleFormat::Float,
+            },
+        )
+        .unwrap();
+        writer.write_sample(2.0_f32).unwrap();
+        writer.finalize().unwrap();
+        let assessment = super::electrical::assess(&result, sample_rate, directory.path());
+        let scorecard = super::metric_scorecard::compute_result_scorecard(&result, assessment);
+        assert!((scorecard.max_section_gain_db - 3.0).abs() < 1e-9);
+        assert!(
+            (scorecard.max_boost_db - 24.020599913).abs() < 1e-5,
+            "{scorecard:?}"
+        );
+        let missing_directory = directory.path().to_path_buf();
+        let retained = tempfile::tempdir().unwrap();
+        let bundle = retained.path().join("replay");
+        super::electrical::retain_replay_bundle(&result, sample_rate, directory.path(), &bundle)
+            .unwrap();
+        assert!(
+            super::electrical::retain_replay_bundle(
+                &result,
+                sample_rate,
+                directory.path(),
+                &bundle
+            )
+            .is_err()
+        );
+        directory.close().unwrap();
+        let graph: roomeq_model::DspGraph =
+            serde_json::from_slice(&std::fs::read(bundle.join("graph.json")).unwrap()).unwrap();
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(bundle.join("assessment.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest["sample_rate_hz"], sample_rate);
+        assert!(
+            manifest["frequencies_hz"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!(80.0))
+        );
+        let mut packaged_result = result.clone();
+        packaged_result.channels = graph.channels;
+        packaged_result.metadata = graph.metadata.unwrap();
+        let packaged_peaks =
+            super::electrical::assess(&packaged_result, sample_rate, &bundle).unwrap();
+        assert_eq!(
+            &packaged_peaks,
+            scorecard.electrical.as_ref().unwrap().as_ref().unwrap()
+        );
+        // Retained evidence remains usable after the same cleanup boundary as
+        // the runner; a fresh replay must fail, not substitute a PEQ statistic.
+        let peaks = scorecard.electrical.as_ref().unwrap().as_ref().unwrap();
+        assert_eq!(peaks[0].sample_rate_hz, sample_rate);
+        assert_eq!(peaks[0].input_peak_limits["L"], 1.0);
+        assert_eq!(
+            peaks[0].output,
+            serde_json::json!(["channel", "L"]).to_string()
+        );
+        let missing = super::metric_scorecard::compute_result_scorecard(
+            &result,
+            super::electrical::assess(&result, sample_rate, &missing_directory),
+        );
+        assert!(missing.max_boost_db.is_infinite());
+        assert!(missing.electrical.as_ref().unwrap().is_err());
+        for reverted in [false, true] {
+            let mut row = TestResult {
+                label: "cascade +50% max_db".into(),
+                pre_score: 10.0,
+                scorecard: scorecard.clone(),
+                pass: true,
+                reason: "shape passed".into(),
+            };
+            row.scorecard.correction_reverted = reverted;
+            super::enforce_registry_expectations(
+                "electrical/cascade",
+                &[],
+                crate::registry::ScenarioExpect {
+                    improvement_min_pct: 0.0,
+                    max_post_score: 20.0,
+                    max_boost_db: 12.0,
+                    allow_safe_revert: true,
+                    gate_purpose: crate::registry::QaGatePurpose::Safety,
+                },
+                std::slice::from_mut(&mut row),
+            );
+            assert!(
+                !row.pass,
+                "electrical clipping cannot pass via rollback or wider section bounds"
+            );
+            assert!(row.reason.contains("sampled electrical max boost"));
+        }
+    }
+}
+
+#[test]
+fn electrical_qa_expands_canonical_global_bass_routes_once() {
+    let mut result = result_with_channel_slopes(0.0, 0.0, 0.0);
+    result.channels.clear();
+    for (name, gain, stage) in [
+        ("L", 6.0, "pre_route"),
+        ("R", 6.0, "pre_route"),
+        ("sub", 3.0, "post_route"),
+    ] {
+        let mut chain = channel_chain_with_slopes(0.0, 0.0, 0.0);
+        chain.channel = name.into();
+        let mut plugin = roomeq_engine::output::create_gain_plugin(gain);
+        plugin.parameters["room_eq_stage"] = serde_json::json!(stage);
+        chain.plugins = vec![plugin];
+        result.channels.insert(name.into(), chain);
+    }
+    let routing = roomeq_model::BassManagementRoutingGraph {
+        physical_sub_output: "sub".into(),
+        input_channels: vec!["L".into(), "R".into()],
+        output_channels: vec!["sub".into()],
+        routes: ["L", "R"]
+            .iter()
+            .enumerate()
+            .map(|(index, name)| roomeq_model::BassManagementRoute {
+                group_id: None,
+                source_channel: (*name).into(),
+                source_index: index,
+                destination: "sub".into(),
+                destination_index: 0,
+                pre_chain_channel: Some((*name).into()),
+                post_chain_channel: Some("sub".into()),
+                route_kind: "low".into(),
+                crossover_type: "LR24".into(),
+                high_pass_hz: None,
+                low_pass_hz: None,
+                gain_db: -6.0,
+                gain_linear: 10.0_f64.powf(-6.0 / 20.0),
+                matrix_gain: 0.5,
+                delay_ms: 0.0,
+                polarity_inverted: index == 1,
+            })
+            .collect(),
+        matrix: Some(roomeq_model::BassManagementMatrix {
+            input_channel_map: vec![0, 1],
+            output_channel_map: vec![0],
+            matrix: vec![0.5, -0.5],
+            route_count: 2,
+        }),
+        input_trim_db: HashMap::new(),
+        advisories: Vec::new(),
+    };
+    result.metadata.bass_management = Some(roomeq_model::BassManagementReport {
+        enabled: true,
+        crossover_type: "LR24".into(),
+        crossover_frequency_hz: None,
+        redirected_bass_enabled: true,
+        lfe_channel: "LFE".into(),
+        lfe_playback_gain_db: 0.0,
+        lfe_low_pass_hz: 120.0,
+        lfe_gain_applied_to_chain: false,
+        sub_trim_db: 0.0,
+        max_sub_boost_db: 12.0,
+        headroom_margin_db: 0.0,
+        applied_sub_gain_db: None,
+        gain_limited: false,
+        physical_sub_output: "sub".into(),
+        redirected_bass_channel_count: 2,
+        main_high_pass_hz: None,
+        sub_low_pass_hz: None,
+        lfe_headroom_required_db: 0.0,
+        signal_flow: Vec::new(),
+        signal_flow_advisories: Vec::new(),
+        routing_graph: Some(routing),
+        optimization: None,
+        groups: Vec::new(),
+        sub_outputs: Vec::new(),
+        headroom_simulation: None,
+        advisory: String::new(),
+    });
+    let peaks = super::electrical::assess(&result, 48000.0, std::path::Path::new(".")).unwrap();
+    assert_eq!(peaks.len(), 1);
+    assert_eq!(peaks[0].output, "sub");
+    assert_eq!(peaks[0].inputs, vec!["L", "R"]);
+    // +6 pre -6 route +3 post, plus 6.0206 dB concurrent-input sum.
+    assert!((peaks[0].required_attenuation_db - 9.020599913).abs() < 1e-6);
+    let mut graph = result.to_dsp_chain_output();
+    assert_eq!(graph.global_plugins.len(), 1);
+    graph.global_plugins[0].parameters["matrix"][0] = serde_json::json!(99.0);
+    assert!(roomeq_workflow::electrical_headroom::canonical_electrical_routing(&graph).is_err());
+    graph = result.to_dsp_chain_output();
+    graph
+        .global_plugins
+        .push(roomeq_engine::output::create_gain_plugin(20.0));
+    assert!(roomeq_workflow::electrical_headroom::canonical_electrical_routing(&graph).is_err());
+    graph = result.to_dsp_chain_output();
+    graph.global_plugins.clear();
+    assert!(roomeq_workflow::electrical_headroom::canonical_electrical_routing(&graph).is_err());
+}
+
+#[test]
+fn electrical_qa_keeps_same_named_driver_ports_separate() {
+    let mut result = result_with_channel_slopes(0.0, 0.0, 0.0);
+    result.channels.clear();
+    for (name, invert) in [("L", false), ("R", true)] {
+        let mut chain = channel_chain_with_slopes(0.0, 0.0, 0.0);
+        chain.channel = name.into();
+        chain.plugins = vec![roomeq_engine::output::create_gain_plugin(6.0)];
+        chain.drivers = Some(vec![
+            roomeq_model::DriverDspChain {
+                name: "woofer".into(),
+                index: 0,
+                initial_curve: None,
+                plugins: vec![roomeq_engine::output::create_gain_plugin_with_invert(
+                    3.0, invert,
+                )],
+            },
+            roomeq_model::DriverDspChain {
+                name: "tweeter".into(),
+                index: 1,
+                initial_curve: None,
+                plugins: vec![roomeq_engine::output::create_gain_plugin(-12.0)],
+            },
+        ]);
+        result.channels.insert(name.into(), chain);
+    }
+    let peaks = super::electrical::assess(&result, 48000.0, std::path::Path::new(".")).unwrap();
+    assert_eq!(peaks.len(), 4);
+    for name in ["L", "R"] {
+        let woofer = serde_json::json!(["driver", name, 0, "woofer"]).to_string();
+        let tweeter = serde_json::json!(["driver", name, 1, "tweeter"]).to_string();
+        let woofer = peaks.iter().find(|p| p.output == woofer).unwrap();
+        let tweeter = peaks.iter().find(|p| p.output == tweeter).unwrap();
+        assert_eq!(woofer.inputs, vec![name]);
+        assert_eq!(tweeter.inputs, vec![name]);
+        assert!((woofer.required_attenuation_db - 9.0).abs() < 1e-9);
+        assert!((tweeter.peak_dbfs.unwrap() + 6.0).abs() < 1e-9);
+        assert_eq!(tweeter.required_attenuation_db, 0.0);
+    }
+    let drivers = result
+        .channels
+        .get_mut("L")
+        .unwrap()
+        .drivers
+        .as_mut()
+        .unwrap();
+    drivers[1].name = "woofer".into();
+    assert!(super::electrical::assess(&result, 48000.0, std::path::Path::new(".")).is_err());
+}
+
+#[test]
+fn electrical_artifact_retains_assessed_and_unassessed_rows() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let result = result_with_channel_slopes(0.0, 0.0, 0.0);
+    let scorecard = super::metric_scorecard::compute_result_scorecard(
+        &result,
+        super::electrical::assess(&result, 48000.0, std::path::Path::new(".")),
+    );
+    let mut row = TestResult {
+        label: "identity".into(),
+        pre_score: 10.0,
+        scorecard,
+        pass: true,
+        reason: "registry passed".into(),
+    };
+    super::electrical::append_evidence(file.path(), "quality/example", std::slice::from_ref(&row))
+        .unwrap();
+    row.scorecard.electrical = Some(Err("missing required FIR".into()));
+    row.pass = false;
+    super::electrical::append_evidence(file.path(), "quality/example", &[row]).unwrap();
+    let records: Vec<serde_json::Value> = std::fs::read_to_string(file.path())
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0]["registry_id"], "quality/example");
+    assert_eq!(records[0]["status"], "assessed");
+    assert_eq!(
+        records[0]["assessment_kind"],
+        "sampled_steady_state_sinusoidal"
+    );
+    assert_eq!(records[0]["outputs"][0]["sample_rate_hz"], 48000.0);
+    assert_eq!(records[0]["outputs"][0]["input_peak_limits"]["L"], 1.0);
+    assert_eq!(records[0]["transient_peak_certified"], false);
+    assert_eq!(records[1]["status"], "unassessed");
+    assert_eq!(records[1]["error"], "missing required FIR");
+    assert_eq!(records[1]["registry_pass"], false);
+    assert!(records[1]["outputs"].is_null());
+    super::electrical::append_execution_failure(file.path(), "quality/failed", "seat regressed")
+        .unwrap();
+    let text = std::fs::read_to_string(file.path()).unwrap();
+    let failure: serde_json::Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
+    assert_eq!(failure["status"], "execution_failed");
+    assert_eq!(failure["registry_id"], "quality/failed");
+    assert_eq!(failure["registry_pass"], false);
 }
 
 #[test]
@@ -414,6 +732,9 @@ fn scorecard_allows_small_roughness_regression_when_baseline_already_violates_li
         flat_loss: 10.0,
         peak_residual_db: 1.0,
         max_boost_db: 0.0,
+        max_section_gain_db: 0.0,
+        replay_bundle: None,
+        electrical: None,
         correction_reverted: false,
         epa_preference: None,
         epa_sharpness: None,
@@ -424,6 +745,9 @@ fn scorecard_allows_small_roughness_regression_when_baseline_already_violates_li
         flat_loss: 9.0,
         peak_residual_db: 1.0,
         max_boost_db: 0.0,
+        max_section_gain_db: 0.0,
+        replay_bundle: None,
+        electrical: None,
         correction_reverted: false,
         epa_preference: None,
         epa_sharpness: None,
@@ -446,6 +770,9 @@ fn scorecard_allows_absolute_slack_at_flat_loss_ratio_boundary() {
         flat_loss: 9.0,
         peak_residual_db: 10.0,
         max_boost_db: 0.0,
+        max_section_gain_db: 0.0,
+        replay_bundle: None,
+        electrical: None,
         correction_reverted: false,
         epa_preference: None,
         epa_sharpness: None,
@@ -456,6 +783,9 @@ fn scorecard_allows_absolute_slack_at_flat_loss_ratio_boundary() {
         flat_loss: 14.30,
         peak_residual_db: 10.0,
         max_boost_db: 0.0,
+        max_section_gain_db: 0.0,
+        replay_bundle: None,
+        electrical: None,
         correction_reverted: false,
         epa_preference: None,
         epa_sharpness: None,
@@ -480,6 +810,9 @@ fn scorecard_with_epa(
         flat_loss: 1.0,
         peak_residual_db: 1.0,
         max_boost_db: 0.0,
+        max_section_gain_db: 0.0,
+        replay_bundle: None,
+        electrical: None,
         correction_reverted: false,
         epa_preference: preference,
         epa_sharpness: sharpness,
@@ -576,6 +909,9 @@ fn registry_expectations_block_weak_or_overboosted_quality_results() {
             flat_loss: 9.9995,
             peak_residual_db: 1.0,
             max_boost_db: 12.5,
+            max_section_gain_db: 3.0,
+            replay_bundle: None,
+            electrical: None,
             correction_reverted: false,
             epa_preference: None,
             epa_sharpness: None,
@@ -618,7 +954,10 @@ fn registry_expectations_block_weak_or_overboosted_quality_results() {
         },
         &mut results,
     );
-    assert!(results[0].pass, "{}", results[0].reason);
+    assert!(
+        !results[0].pass,
+        "relaxed section bounds do not relax electrical limits"
+    );
 
     results[0].pass = true;
     results[0].reason = "runtime safety fallback".to_string();
@@ -651,6 +990,9 @@ fn registry_functional_artifact_accepts_safe_revert() {
             flat_loss: 11.0,
             peak_residual_db: 1.0,
             max_boost_db: 3.0,
+            max_section_gain_db: 3.0,
+            replay_bundle: None,
+            electrical: None,
             correction_reverted: true,
             epa_preference: None,
             epa_sharpness: None,
@@ -687,6 +1029,9 @@ fn registry_correction_thresholds_skip_relationship_only_rows() {
             flat_loss: 50.0,
             peak_residual_db: 0.0,
             max_boost_db: 50.0,
+            max_section_gain_db: 0.0,
+            replay_bundle: None,
+            electrical: None,
             correction_reverted: false,
             epa_preference: None,
             epa_sharpness: None,

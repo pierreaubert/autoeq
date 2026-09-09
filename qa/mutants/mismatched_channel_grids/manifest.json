@@ -1,0 +1,15 @@
+{
+  "id": "mismatched_channel_grids",
+  "runner": "check.py",
+  "test_source": "crates/roomeq-engine/src/spectral_align/tests.rs",
+  "regression_test": {
+    "package": "roomeq-engine",
+    "target": "roomeq_engine",
+    "name": "spectral_align::tests::test_spectral_alignment_interpolates_mismatched_frequency_grids"
+  },
+  "mutation": {
+    "package": "roomeq-analysis",
+    "file": "crates/roomeq-analysis/src/frequency_grid.rs",
+    "selector": "replace same_frequency_grid -> bool with true"
+  }
+}

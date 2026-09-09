@@ -13,7 +13,8 @@ pub struct QualityEvaluationConfig {
     pub max_freq_hz: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schroeder_hz: Option<f64>,
-    /// Remove each measurement's broadband level before scoring its shape.
+    /// Remove each measurement's log-frequency-weighted broadband level before
+    /// scoring its shape, using the same measure as the residual RMS.
     pub normalize_level: bool,
 }
 
@@ -85,6 +86,12 @@ pub fn derive_temporal_quality_evidence(
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct QualityGatePolicy {
+    /// Engineering budget for loss beyond the explicitly permitted gain.
+    #[serde(default = "default_output_budget_db")]
+    pub max_unexplained_output_loss_db: f64,
+    /// Advisory only: exceeding this marks target attainment as best effort.
+    #[serde(default = "default_output_budget_db")]
+    pub max_target_shortfall_db: f64,
     pub min_held_out_improvement_db: f64,
     pub max_p95_regression_db: f64,
     pub max_boost_db: f64,
@@ -99,12 +106,18 @@ impl Default for QualityGatePolicy {
     /// currently useful QA behavior; changing them changes what QA accepts.
     fn default() -> Self {
         Self {
+            max_unexplained_output_loss_db: default_output_budget_db(),
+            max_target_shortfall_db: default_output_budget_db(),
             min_held_out_improvement_db: 0.1,
             max_p95_regression_db: 0.25,
             max_boost_db: 12.0,
             max_upper_band_regression_db: 0.5,
         }
     }
+}
+
+fn default_output_budget_db() -> f64 {
+    3.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -181,8 +194,9 @@ pub struct QualityBaselineComparison {
 ///
 /// Measure contract: partition `pre/post_p95_abs_residual_db` and
 /// `post_worst_abs_residual_db` are pooled unweighted-bin statistics across
-/// the partition's seats, while per-seat `weighted_rms` values use the
-/// ERB-rate measure. Neither p95 is the same metric as the ERB-rate-weighted
+/// the partition's seats, while per-seat `weighted_rms`, the fitted reference
+/// level, and mean seat spread use normalized log-frequency trapezoid weights.
+/// Neither p95 is the same metric as the ERB-rate-weighted
 /// correction-acceptance p95 or the log-frequency oracle p95: never compare
 /// them across paths as if they were.
 pub fn evaluate_acoustic_quality(
@@ -194,6 +208,34 @@ pub fn evaluate_acoustic_quality(
     config: QualityEvaluationConfig,
     temporal: TemporalQualityEvidence,
 ) -> Result<AcousticQualityScorecard, String> {
+    evaluate_acoustic_quality_with_permitted_gain(
+        training_pre,
+        training_post,
+        held_out_pre,
+        held_out_post,
+        target,
+        config,
+        temporal,
+        0.0,
+    )
+}
+
+/// Score shape and useful output separately. `permitted_gain_db` is an explicit
+/// authorized broadband trim, not a gain fitted to the candidate or target.
+#[allow(clippy::too_many_arguments)]
+pub fn evaluate_acoustic_quality_with_permitted_gain(
+    training_pre: &[Curve],
+    training_post: &[Curve],
+    held_out_pre: &[Curve],
+    held_out_post: &[Curve],
+    target: Option<&Curve>,
+    config: QualityEvaluationConfig,
+    temporal: TemporalQualityEvidence,
+    permitted_gain_db: f64,
+) -> Result<AcousticQualityScorecard, String> {
+    if !permitted_gain_db.is_finite() {
+        return Err("invalid permitted acoustic gain".into());
+    }
     config.validate()?;
     validate_pairs("training", training_pre, training_post)?;
     if !held_out_pre.is_empty() || !held_out_post.is_empty() {
@@ -249,7 +291,59 @@ pub fn evaluate_acoustic_quality(
     .all(f64::is_finite)
         && induced_group_delay_rms_ms.is_none_or(f64::is_finite);
 
+    let mut useful_output = Vec::new();
+    for (partition, pre, post) in [
+        ("training", training_pre, training_post),
+        ("held_out", held_out_pre, held_out_post),
+    ] {
+        for (seat_index, (pre, post)) in pre.iter().zip(post).enumerate() {
+            let samples = aligned_samples(pre, post, target, config)?;
+            let frequencies: Vec<_> = samples.iter().map(|s| s.frequency).collect();
+            let changes: Vec<_> = samples.iter().map(|s| s.post - s.pre).collect();
+            let losses: Vec<_> = samples
+                .iter()
+                .map(|s| {
+                    // Removing an excess above the calibrated target is correction,
+                    // not lost useful output. Never require filling a baseline null.
+                    let reference = target.map_or(s.pre, |_| s.pre.min(s.target));
+                    (reference + permitted_gain_db - s.post).max(0.0)
+                })
+                .collect();
+            let deficits: Vec<_> = samples
+                .iter()
+                .map(|s| (s.target - s.post).max(0.0))
+                .collect();
+            let bass_count = frequencies.iter().take_while(|f| **f <= 200.0).count();
+            let bass_band =
+                (bass_count >= 2).then(|| [frequencies[0], frequencies[bass_count - 1]]);
+            let bass_loss = (bass_count >= 2)
+                .then(|| weighted_rms(&frequencies[..bass_count], &losses[..bass_count]));
+            let worst = losses
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.total_cmp(b))
+                .unwrap()
+                .0;
+            useful_output.push(roomeq_model::UsefulOutputEvidence {
+                logical_input: None,
+                partition: partition.into(),
+                seat_index,
+                permitted_gain_db,
+                evaluated_band_hz: [frequencies[0], *frequencies.last().unwrap()],
+                mean_level_change_db: weighted_mean(&frequencies, &changes),
+                unexplained_loss_rms_db: weighted_rms(&frequencies, &losses),
+                worst_unexplained_loss_db: Some(losses[worst]),
+                worst_loss_frequency_hz: (losses[worst] > 0.0).then_some(frequencies[worst]),
+                loss_band_threshold_db: Some(3.0),
+                loss_bands: sampled_loss_bands(&frequencies, &losses, 3.0),
+                bass_evaluated_band_hz: bass_band,
+                bass_unexplained_loss_rms_db: bass_loss,
+                target_shortfall_rms_db: target.map(|_| weighted_rms(&frequencies, &deficits)),
+            });
+        }
+    }
     Ok(AcousticQualityScorecard {
+        useful_output,
         final_seats: Vec::new(),
         training,
         held_out,
@@ -271,9 +365,51 @@ pub fn evaluate_quality_gate(
 ) -> QualityGateReport {
     let mut violations = Vec::new();
     let mut advisories = Vec::new();
+    if !policy.max_unexplained_output_loss_db.is_finite()
+        || policy.max_unexplained_output_loss_db < 0.0
+        || !policy.max_target_shortfall_db.is_finite()
+        || policy.max_target_shortfall_db < 0.0
+    {
+        violations.push("invalid_useful_output_policy".into());
+    }
     if !scorecard.finite {
         violations.push("non_finite_quality_metrics".to_string());
     }
+    if scorecard.useful_output.is_empty() {
+        violations.push("useful_output_evidence_unavailable".into());
+    }
+    for evidence in &scorecard.useful_output {
+        if !evidence.unexplained_loss_rms_db.is_finite()
+            || !evidence.mean_level_change_db.is_finite()
+            || !evidence.permitted_gain_db.is_finite()
+            || evidence
+                .bass_unexplained_loss_rms_db
+                .is_some_and(|v| !v.is_finite())
+            || evidence
+                .target_shortfall_rms_db
+                .is_some_and(|v| !v.is_finite())
+        {
+            violations.push("non_finite_useful_output_metrics".into());
+        } else if evidence.unexplained_loss_rms_db > policy.max_unexplained_output_loss_db {
+            violations.push("unexplained_useful_output_loss".into());
+        }
+        if evidence
+            .bass_unexplained_loss_rms_db
+            .is_some_and(|v| v > policy.max_unexplained_output_loss_db)
+        {
+            violations.push("unexplained_bass_output_loss".into());
+        }
+        if evidence
+            .target_shortfall_rms_db
+            .is_some_and(|v| v > policy.max_target_shortfall_db)
+        {
+            advisories.push("best_effort_target_shortfall".into());
+        }
+    }
+    violations.sort();
+    violations.dedup();
+    advisories.sort();
+    advisories.dedup();
     if scorecard.max_boost_db > policy.max_boost_db {
         violations.push("maximum_boost_exceeded".to_string());
     }
@@ -415,11 +551,11 @@ fn evaluate_partition(
         let samples = aligned_samples(pre, post, target, config)?;
         let mut pre_residual: Vec<f64> = samples.iter().map(|s| s.pre - s.target).collect();
         let mut post_residual: Vec<f64> = samples.iter().map(|s| s.post - s.target).collect();
-        if config.normalize_level {
-            center(&mut pre_residual);
-            center(&mut post_residual);
-        }
         let frequencies: Vec<f64> = samples.iter().map(|s| s.frequency).collect();
+        if config.normalize_level {
+            center(&frequencies, &mut pre_residual);
+            center(&frequencies, &mut post_residual);
+        }
         pre_rms_values.push(weighted_rms(&frequencies, &pre_residual));
         post_rms_values.push(weighted_rms(&frequencies, &post_residual));
         pre_abs.extend(pre_residual.iter().map(|value| value.abs()));
@@ -523,6 +659,37 @@ fn modal_roughness(
     (!curvatures.is_empty()).then(|| rms(&curvatures))
 }
 
+fn sampled_loss_bands(
+    frequencies: &[f64],
+    losses: &[f64],
+    threshold: f64,
+) -> Vec<roomeq_model::OutputLossBand> {
+    let mut bands = Vec::new();
+    let mut index = 0;
+    while index < losses.len() {
+        if losses[index] <= threshold {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        let mut worst = index;
+        while index + 1 < losses.len() && losses[index + 1] > threshold {
+            index += 1;
+            if losses[index] > losses[worst] {
+                worst = index;
+            }
+        }
+        bands.push(roomeq_model::OutputLossBand {
+            sampled_band_hz: [frequencies[start], frequencies[index]],
+            sample_count: index - start + 1,
+            worst_frequency_hz: frequencies[worst],
+            worst_loss_db: losses[worst],
+        });
+        index += 1;
+    }
+    bands
+}
+
 fn aligned_samples(
     pre: &Curve,
     post: &Curve,
@@ -546,15 +713,23 @@ fn aligned_samples(
     if high <= low {
         return Err("quality curves have no overlap in the evaluation band".to_string());
     }
-    let samples: Vec<_> = pre
+    // Every supplied grid can carry distinct evidence (e.g. a new native
+    // cancellation bin in post). Sampling only the baseline grid can erase it.
+    let mut frequencies: Vec<_> = pre
         .freq
         .iter()
+        .chain(post.freq.iter())
+        .chain(target.into_iter().flat_map(|curve| curve.freq.iter()))
         .copied()
-        .zip(pre.spl.iter().copied())
-        .filter(|(frequency, _)| *frequency >= low && *frequency <= high)
-        .map(|(frequency, pre_value)| Sample {
+        .filter(|frequency| *frequency >= low && *frequency <= high)
+        .collect();
+    frequencies.sort_by(f64::total_cmp);
+    frequencies.dedup();
+    let samples: Vec<_> = frequencies
+        .into_iter()
+        .map(|frequency| Sample {
             frequency,
-            pre: pre_value,
+            pre: sample_log(pre, frequency, &pre.spl),
             post: sample_log(post, frequency, &post.spl),
             target: target.map_or(0.0, |curve| sample_log(curve, frequency, &curve.spl)),
         })
@@ -602,7 +777,9 @@ fn normalized_seat_spread(
         })
         .collect();
     if config.normalize_level {
-        seats.iter_mut().for_each(|values| center(values));
+        seats
+            .iter_mut()
+            .for_each(|values| center(&frequencies, values));
     }
     let spreads: Vec<f64> = (0..frequencies.len())
         .map(|index| {
@@ -617,7 +794,7 @@ fn normalized_seat_spread(
         })
         .collect();
     Ok((
-        spreads.iter().sum::<f64>() / spreads.len() as f64,
+        weighted_mean(&frequencies, &spreads),
         spreads.into_iter().fold(0.0, f64::max),
     ))
 }
@@ -723,8 +900,22 @@ fn sample_log(curve: &Curve, frequency: f64, values: &ndarray::Array1<f64>) -> f
     values[lower] + t * (values[upper] - values[lower])
 }
 
-fn center(values: &mut [f64]) {
-    let mean = values.iter().sum::<f64>() / values.len().max(1) as f64;
+fn weighted_mean(frequencies: &[f64], values: &[f64]) -> f64 {
+    values
+        .iter()
+        .zip(log_frequency_weights(frequencies))
+        .map(|(value, weight)| value * weight)
+        .sum()
+}
+
+fn center(frequencies: &[f64], values: &mut [f64]) {
+    // The best constant gain fit minimizes the same integrated squared error
+    // used by weighted_rms. Row density must not choose the reference level.
+    // Subtract an observed reference first to avoid losing precision when a
+    // large common calibration offset is present.
+    let reference = values.first().copied().unwrap_or(0.0);
+    values.iter_mut().for_each(|value| *value -= reference);
+    let mean = weighted_mean(frequencies, values);
     values.iter_mut().for_each(|value| *value -= mean);
 }
 
@@ -787,6 +978,253 @@ mod tests {
             schroeder_hz: Some(200.0),
             normalize_level: true,
         }
+    }
+
+    #[test]
+    fn output_loss_keeps_candidate_native_nulls_and_sampled_band_diagnostics() {
+        let pre = curve(&[20.0, 500.0], &[80.0, 80.0]);
+        let frequencies = [20.0, 59.0, 60.0, 90.0, 120.0, 121.0, 200.0, 201.0, 500.0];
+        let mut previous_loss = 0.0;
+        for depth in [19.9, 20.1, 30.0, 60.0] {
+            let post = curve(
+                &frequencies,
+                &[
+                    80.0,
+                    80.0,
+                    80.0 - depth,
+                    79.0 - depth,
+                    80.0 - depth,
+                    80.0,
+                    80.0,
+                    74.0,
+                    80.0,
+                ],
+            );
+            let score = evaluate_acoustic_quality(
+                &[pre.clone()],
+                &[post],
+                &[],
+                &[],
+                Some(&pre),
+                QualityEvaluationConfig {
+                    max_freq_hz: 500.0,
+                    ..config()
+                },
+                Default::default(),
+            )
+            .unwrap();
+            let loss = &score.useful_output[0];
+            assert!(loss.unexplained_loss_rms_db > previous_loss);
+            previous_loss = loss.unexplained_loss_rms_db;
+            assert_eq!(loss.worst_unexplained_loss_db, Some(depth + 1.0));
+            assert_eq!(loss.worst_loss_frequency_hz, Some(90.0));
+            assert_eq!(loss.loss_bands.len(), 2);
+            assert_eq!(loss.loss_bands[0].sampled_band_hz, [60.0, 120.0]);
+            assert_eq!(loss.loss_bands[0].sample_count, 3);
+            assert_eq!(loss.loss_bands[1].sampled_band_hz, [201.0, 201.0]);
+            assert_eq!(loss.loss_bands[1].sample_count, 1);
+        }
+    }
+
+    #[test]
+    fn output_loss_diagnostics_respect_permitted_trim_and_fixed_role_band() {
+        let pre = curve(&[20.0, 100.0, 200.0, 500.0], &[80.0; 4]);
+        let post = curve(&[20.0, 100.0, 200.0, 500.0], &[40.0, 40.0, 40.0, -40.0]);
+        let score = evaluate_acoustic_quality_with_permitted_gain(
+            &[pre.clone()],
+            &[post],
+            &[],
+            &[],
+            Some(&pre),
+            QualityEvaluationConfig {
+                max_freq_hz: 200.0,
+                ..config()
+            },
+            Default::default(),
+            -40.0,
+        )
+        .unwrap();
+        let loss = &score.useful_output[0];
+        assert_eq!(loss.worst_unexplained_loss_db, Some(0.0));
+        assert_eq!(loss.worst_loss_frequency_hz, None);
+        assert!(loss.loss_bands.is_empty());
+        assert_eq!(loss.evaluated_band_hz, [20.0, 200.0]);
+    }
+
+    #[test]
+    fn useful_output_distinguishes_loss_authorized_trim_and_target_shortfall() {
+        let frequencies: Vec<_> = (0..=300)
+            .map(|i| 20.0 * 1000.0_f64.powf(i as f64 / 300.0))
+            .collect();
+        let pre = curve(
+            &frequencies,
+            &frequencies
+                .iter()
+                .map(|f| {
+                    if *f > 500.0 && *f < 2000.0 {
+                        86.0
+                    } else {
+                        80.0
+                    }
+                })
+                .collect::<Vec<_>>(),
+        );
+        let target = curve(&frequencies, &vec![80.0; frequencies.len()]);
+        let evaluate = |post: &Curve, target: &Curve, gain| {
+            evaluate_acoustic_quality_with_permitted_gain(
+                std::slice::from_ref(&pre),
+                std::slice::from_ref(post),
+                std::slice::from_ref(&pre),
+                std::slice::from_ref(post),
+                Some(target),
+                config(),
+                TemporalQualityEvidence::default(),
+                gain,
+            )
+            .unwrap()
+        };
+        let lost = curve(&frequencies, &vec![40.0; frequencies.len()]);
+        let score = evaluate(&lost, &target, 0.0);
+        assert!(score.training.post_weighted_rms_median_db < 1e-10);
+        assert!((score.useful_output[0].unexplained_loss_rms_db - 40.0).abs() < 1e-9);
+        assert!(!evaluate_quality_gate(&score, QualityGatePolicy::default(), true).passed);
+        for gain in [-6.0, -12.0] {
+            let trimmed = curve(&frequencies, &vec![80.0 + gain; frequencies.len()]);
+            let authorized = evaluate(&trimmed, &target, gain);
+            let gate = evaluate_quality_gate(&authorized, QualityGatePolicy::default(), true);
+            assert!(gate.passed, "{gate:?}");
+            assert!(
+                gate.advisories
+                    .contains(&"best_effort_target_shortfall".into())
+            );
+            assert!(
+                !evaluate_quality_gate(
+                    &evaluate(&trimmed, &target, 0.0),
+                    QualityGatePolicy::default(),
+                    true
+                )
+                .passed
+            );
+        }
+        let missing_bass = curve(
+            &frequencies,
+            &frequencies
+                .iter()
+                .map(|f| if *f < 200.0 { 40.0 } else { 80.0 })
+                .collect::<Vec<_>>(),
+        );
+        let bass_score = evaluate(&missing_bass, &target, 0.0);
+        assert!(
+            bass_score.useful_output[0]
+                .bass_unexplained_loss_rms_db
+                .unwrap()
+                > 39.0
+        );
+        assert!(
+            evaluate_quality_gate(&bass_score, QualityGatePolicy::default(), true)
+                .violations
+                .contains(&"unexplained_bass_output_loss".into())
+        );
+        assert!(
+            !evaluate_quality_gate(
+                &evaluate(&missing_bass, &target, 0.0),
+                QualityGatePolicy::default(),
+                true
+            )
+            .passed
+        );
+        let raised_target = curve(&frequencies, &vec![100.0; frequencies.len()]);
+        let best_effort = evaluate(&target, &raised_target, 0.0);
+        assert!(best_effort.useful_output[0].unexplained_loss_rms_db < 3.0);
+        assert!(
+            (best_effort.useful_output[0]
+                .target_shortfall_rms_db
+                .unwrap()
+                - 20.0)
+                .abs()
+                < 1e-9
+        );
+        assert!(evaluate_quality_gate(&best_effort, QualityGatePolicy::default(), true).passed);
+    }
+
+    #[test]
+    fn redundant_bass_samples_do_not_change_normalized_quality() {
+        let regular: Vec<f64> = (0..=1000)
+            .map(|i| 20.0 * 1000.0_f64.powf(i as f64 / 1000.0))
+            .collect();
+        let mut clustered = regular.clone();
+        clustered.extend((0..10_000).map(|i| 20.0 * 2.0_f64.powf((i as f64 + 0.5) / 10_000.0)));
+        clustered.sort_by(f64::total_cmp);
+        clustered.dedup();
+
+        // All rows are samples of the same log-linear interpolant. The target
+        // also has a slope; held-out seats differ in calibration and slope.
+        let evaluate = |frequencies: &[f64]| {
+            let response = |offset: f64, slope: f64| {
+                curve(
+                    frequencies,
+                    &frequencies
+                        .iter()
+                        .map(|f| offset + slope * (f / 20.0).log10())
+                        .collect::<Vec<_>>(),
+                )
+            };
+            let target = response(80.0, -2.0);
+            let pre = response(80.0, 4.0);
+            let post = response(80.0, 1.0);
+            let held_pre = response(83.0, 5.0);
+            let held_post = response(83.0, 1.5);
+            evaluate_acoustic_quality(
+                &[pre],
+                &[post],
+                &[held_pre],
+                &[held_post],
+                Some(&target),
+                config(),
+                TemporalQualityEvidence::default(),
+            )
+            .unwrap()
+        };
+        let regular_score = evaluate(&regular);
+        let clustered_score = evaluate(&clustered);
+        // A ramp from 0 to 18 dB has standard deviation 18/sqrt(12).
+        let expected = 18.0 / 12.0_f64.sqrt();
+        for score in [&regular_score, &clustered_score] {
+            assert!((score.training.pre_weighted_rms_median_db - expected).abs() < 2e-5);
+        }
+        for (a, b) in [
+            (&regular_score.training, &clustered_score.training),
+            (
+                regular_score.held_out.as_ref().unwrap(),
+                clustered_score.held_out.as_ref().unwrap(),
+            ),
+        ] {
+            assert!((a.pre_weighted_rms_median_db - b.pre_weighted_rms_median_db).abs() < 2e-5);
+            assert!((a.post_weighted_rms_median_db - b.post_weighted_rms_median_db).abs() < 2e-5);
+            assert!(
+                (a.worst_position_improvement_db - b.worst_position_improvement_db).abs() < 2e-5
+            );
+        }
+        assert_eq!(
+            evaluate_quality_gate(&regular_score, QualityGatePolicy::default(), true).passed,
+            evaluate_quality_gate(&clustered_score, QualityGatePolicy::default(), true).passed,
+        );
+
+        let spread = |frequencies: &[f64]| {
+            let flat = curve(frequencies, &vec![80.0; frequencies.len()]);
+            let tilted = curve(
+                frequencies,
+                &frequencies
+                    .iter()
+                    .map(|f| 83.0 + 6.0 * (f / 20.0).log10())
+                    .collect::<Vec<_>>(),
+            );
+            normalized_seat_spread(&[flat, tilted], None, config()).unwrap()
+        };
+        let a = spread(&regular);
+        let b = spread(&clustered);
+        assert!((a.0 - b.0).abs() < 2e-5);
+        assert!((a.1 - b.1).abs() < 2e-5);
     }
 
     #[test]
@@ -1112,8 +1550,10 @@ mod tests {
         let (mean, maximum) =
             normalized_seat_spread(&[first, second], None, config()).expect("shared band");
 
-        assert!(mean > 0.0);
-        assert!(maximum > mean);
+        // Trapezoid weights are 1/4, 1/2, 1/4. Centering [0,2,0]
+        // gives [-1,1,-1], hence exactly 0.5 dB spread at every bin.
+        assert!((mean - 0.5).abs() < 1e-12);
+        assert!((maximum - 0.5).abs() < 1e-12);
     }
 
     #[test]

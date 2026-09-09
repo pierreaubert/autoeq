@@ -11,6 +11,8 @@ homepage = "https://github.com/pierreaubert/autoeq"
 workspace = true
 
 [dependencies]
+serde = { workspace = true }
+roomeq-engine = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 hound = { workspace = true }
@@ -20,5 +22,6 @@ serde_json = { workspace = true }
 zip = { workspace = true }
 
 [dev-dependencies]
+roomeq-workflow = { workspace = true }
 num-complex = { workspace = true }
 tempfile = { workspace = true }

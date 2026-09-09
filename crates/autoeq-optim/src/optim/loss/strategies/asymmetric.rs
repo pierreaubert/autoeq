@@ -12,8 +12,15 @@ pub struct AsymmetricStrategy {
 
 impl Objective for AsymmetricStrategy {
     fn compute(&self, x: &[f64], ctx: &ObjectiveContext) -> f64 {
-        let peq_spl = ctx.peq_spl(x);
-        let error = &peq_spl - ctx.deviation;
+        self.compute_response(&ctx.peq_spl(x), ctx).expect("scalar response objective")
+    }
+
+    fn compute_response(&self, peq_spl: &ndarray::Array1<f64>, ctx: &ObjectiveContext) -> Option<f64> {
+        if peq_spl.len() != ctx.freqs.len() || peq_spl.len() != ctx.deviation.len()
+            || peq_spl.iter().any(|value| !value.is_finite()) {
+            return Some(f64::INFINITY);
+        }
+        let error = peq_spl - ctx.deviation;
         let error = ctx.apply_deadband(&error);
         let base_loss = weighted_mse_asymmetric(
             ctx.freqs,
@@ -23,6 +30,6 @@ impl Objective for AsymmetricStrategy {
             &self.config,
             self.null_suppression.as_deref(),
         );
-        base_loss + ctx.smoothness_penalty(&peq_spl)
+        Some(base_loss + ctx.smoothness_penalty(peq_spl))
     }
 }

@@ -15,7 +15,7 @@ use super::misc::slope_of_curve_data;
 use super::misc::target_curve_for_channel;
 use super::misc::variance;
 use super::option_override::OptionOverride;
-use super::peak::peak_dip_from_mean;
+use super::peak::{measured_band, peak_dip_from_mean};
 use super::residual::residual_slope_to_curve;
 use super::residual::residual_slope_to_target;
 use autoeq_optim::loss::regression_slope_per_octave_in_range;
@@ -937,11 +937,24 @@ pub(super) fn validate_asymmetric_loss(
 
     for (ch_name, baseline_ch) in &baseline_result.channel_results {
         if let Some(option_ch) = option_result.channel_results.get(ch_name) {
-            let fmin = 20.0;
-            let fmax = 500.0;
+            let Some((fmin, fmax)) = measured_band(&baseline_ch.initial_curve, 20.0, 500.0) else {
+                return (
+                    false,
+                    format!("{ch_name}: insufficient baseline peak/dip support"),
+                );
+            };
 
             let (b_peak, b_dip) = peak_dip_from_mean(&baseline_ch.final_curve, fmin, fmax);
             let (o_peak, o_dip) = peak_dip_from_mean(&option_ch.final_curve, fmin, fmax);
+            if [b_peak, b_dip, o_peak, o_dip]
+                .iter()
+                .any(|v| !v.is_finite())
+            {
+                return (
+                    false,
+                    format!("{ch_name}: missing or non-finite peak/dip evidence"),
+                );
+            }
 
             if b_dip > 0.01 && o_dip > 0.01 {
                 baseline_ratio_sum += b_peak / b_dip;

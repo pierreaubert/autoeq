@@ -157,7 +157,8 @@ pub struct DriverDspChain {
     pub initial_curve: Option<CurveData>,
 }
 
-/// Wrapper for AudioEngine PluginConfig (re-exported from src-audio)
+/// Backend-neutral serialized plugin descriptor. Native adapters translate this
+/// contract into their runtime types; the model does not depend on AudioEngine.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct PluginConfigWrapper {
     pub plugin_type: String,
@@ -576,6 +577,34 @@ pub struct RoomOptimizerEvidence {
     pub runs_by_channel: BTreeMap<String, Vec<crate::OptimizerRunEvidence>>,
 }
 
+/// Durable outcome of one QA seed, including rejected and reverted attempts.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct QaSeedOutcome {
+    pub seed: u64,
+    pub pre_score: f64,
+    pub post_score: f64,
+    /// Explicit acceptance plus a material improvement of the delivered score.
+    pub accepted_useful: bool,
+    /// Finite output with explicit final acceptance and no Failed stage.
+    /// False includes unverified/reverted output, not only proven unsafe DSP.
+    /// This does not imply useful EQ or independent backend certification.
+    pub safe_output: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance: Option<crate::CorrectionAcceptanceReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub optimizer_evidence: Option<RoomOptimizerEvidence>,
+    pub stage_outcomes: Vec<StageOutcome>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct QaSeedDistribution {
+    pub selected_seed: u64,
+    pub accepted_useful_rate: f64,
+    pub safe_output_rate: f64,
+    pub post_score_spread: f64,
+    pub outcomes: Vec<QaSeedOutcome>,
+}
+
 /// Optimization metadata
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct OptimizationMetadata {
@@ -654,6 +683,11 @@ pub struct OptimizationMetadata {
     /// Validation/listening-test bundle descriptor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub validation_bundle: Option<ValidationBundleReport>,
+    /// Final workflow sidecar byte identities. None is legacy/unbound; a null
+    /// member means the final artifact was unavailable. This is integrity
+    /// evidence, not an acoustic acceptance or listening-success certificate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_convolution_sha256: Option<std::collections::BTreeMap<String, Option<String>>>,
     /// Supporting-source room-compensation reports, keyed by logical channel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supporting_source: Option<HashMap<String, SupportingSourceReport>>,
@@ -667,6 +701,9 @@ pub struct OptimizationMetadata {
     /// Structured outcomes for optional/degradable processing stages.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stage_outcomes: Vec<StageOutcome>,
+    /// Full QA seed population; the selected median is not a reliability rate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qa_seed_distribution: Option<QaSeedDistribution>,
     /// Fully merged configuration used for this run. The CLI records this
     /// when `--override-config` is supplied so QA and display tooling can
     /// verify that an override did not silently replace unrelated sections.

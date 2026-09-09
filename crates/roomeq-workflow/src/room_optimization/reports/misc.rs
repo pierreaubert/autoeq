@@ -144,6 +144,7 @@ pub(in super::super) fn generate_validation_bundle_report(
     config: &RoomConfig,
     output_dir: Option<&Path>,
     store: &dyn autoeq_artifacts::ArtifactStore,
+    sample_rate: f64,
 ) -> Result<()> {
     let Some(bundle) = config.optimizer.validation_bundle_config() else {
         result.metadata.validation_bundle = None;
@@ -177,6 +178,13 @@ pub(in super::super) fn generate_validation_bundle_report(
 
     let payload = serde_json::json!({
         "version": "roomeq-validation-bundle-v1",
+        // Snapshot the same final object returned to the caller, after final-seat
+        // validation. This is evidence context, not rendered listening assets.
+        "sample_rate": sample_rate,
+        "requested_optimizer": config.optimizer,
+        "final_playback": result.to_dsp_chain_output(),
+        "final_combined_pre_score": result.combined_pre_score,
+        "final_combined_post_score": result.combined_post_score,
         "target_lufs": bundle.target_lufs,
         "policy": result.metadata.perceptual_policy,
         "abx": bundle.abx.then(|| serde_json::json!({
@@ -507,12 +515,19 @@ pub(in super::super) fn apply_channel_matching_correction(
         }
 
         if let Some(chain) = result.channels.get_mut(&correction.channel_name) {
-            chain
-                .plugins
-                .push(roomeq_engine::output::create_labeled_eq_plugin(
-                    &correction.filters,
-                    "channel_matching",
-                ));
+            let mut plugin = roomeq_engine::output::create_labeled_eq_plugin(
+                &correction.filters, "channel_matching",
+            );
+            // Matching is designed from logical-source responses. It must act
+            // before a routed source splits into mains and redirected bass.
+            plugin.parameters["room_eq_stage"] = serde_json::json!("pre_route");
+            chain.plugins.push(plugin);
+        }
+        if let Some(deployed) = result.deployed_source_curves.get_mut(&correction.channel_name) {
+            let response = roomeq_engine::response::compute_peq_complex_response(
+                &correction.filters, &deployed.freq, sample_rate,
+            );
+            *deployed = roomeq_engine::response::apply_complex_response(deployed, &response);
         }
 
         if let Some(ch_result) = result.channel_results.get_mut(&correction.channel_name) {
@@ -1027,6 +1042,10 @@ mod tests {
     #[test]
     fn apply_channel_matching_correction_adds_plugin_and_updates_curve() {
         let mut result = result_with_channel("left");
+        let mut deployed = result.channel_results["left"].final_curve.clone();
+        deployed.spl.mapv_inplace(|level| level + 7.0);
+        let deployed_before = deployed.spl[10];
+        result.deployed_source_curves.insert("left".into(), deployed);
         let filter = Biquad::new(BiquadFilterType::Peak, 1000.0, 48_000.0, 1.0, 3.0);
         let correction = ChannelMatchingResult {
             channel_name: "left".to_string(),
@@ -1040,6 +1059,8 @@ mod tests {
             "curve should change after applying filter"
         );
         assert_eq!(result.channels["left"].plugins.len(), 1);
+        assert_eq!(result.channels["left"].plugins[0].parameters["room_eq_stage"], "pre_route");
+        assert!((result.deployed_source_curves["left"].spl[10] - deployed_before - (after - before)).abs() < 1e-10);
     }
 
     #[test]
@@ -1075,7 +1096,7 @@ mod tests {
         let dir = Path::new("reports/test");
         let config = room_config_with_validation_bundle();
         let store = autoeq_artifacts::MemoryArtifactStore::new();
-        generate_validation_bundle_report(&mut result, &config, Some(dir), &store).unwrap();
+        generate_validation_bundle_report(&mut result, &config, Some(dir), &store, 48_000.0).unwrap();
         assert!(result.metadata.validation_bundle.is_some());
         let bundle = result.metadata.validation_bundle.as_ref().unwrap();
         assert!(
@@ -1114,7 +1135,7 @@ mod tests {
         });
         let config = room_config_default();
         let store = autoeq_artifacts::MemoryArtifactStore::new();
-        generate_validation_bundle_report(&mut result, &config, None, &store).unwrap();
+        generate_validation_bundle_report(&mut result, &config, None, &store, 48_000.0).unwrap();
         assert!(result.metadata.validation_bundle.is_none());
     }
 

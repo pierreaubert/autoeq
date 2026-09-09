@@ -70,17 +70,57 @@ impl MicPhaseCalibration {
         }
     }
 
-    /// Interpolate the calibration at a single frequency. Returns
-    /// `(mag_db, phase_deg, coherence)` at that frequency, or `None`
-    /// if the cal is empty. Uses piecewise linear interpolation in
-    /// linear frequency with flat extrapolation at both ends (same
-    /// policy as the CSV reader's `read_curve_from_csv`).
+    /// Interpolate within measured calibration support, or return None for
+    /// malformed calibration, nonfinite queries or out-of-band frequencies.
+    /// Uses linear-frequency interpolation, not acoustic extrapolation.
     pub fn sample_at(&self, freq_hz: f64) -> Option<(f64, f64, f64)> {
+        self.validate().ok()?;
+        self.sample_validated(freq_hz)
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        let n = self.freq.len();
+        if n == 0
+            || self.mag_db.len() != n
+            || self.phase_deg.len() != n
+            || self.coherence.len() != n
+        {
+            return Err("microphone calibration has empty or mismatched arrays".into());
+        }
+        if self.freq.iter().any(|f| !f.is_finite() || *f <= 0.0)
+            || self
+                .freq
+                .iter()
+                .zip(self.freq.iter().skip(1))
+                .any(|(a, b)| b <= a)
+            || self
+                .mag_db
+                .iter()
+                .chain(self.phase_deg.iter())
+                .any(|v| !v.is_finite())
+            || self
+                .coherence
+                .iter()
+                .any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))
+        {
+            return Err("microphone calibration has invalid frequency, magnitude, phase or coherence evidence".into());
+        }
+        Ok(())
+    }
+
+    fn sample_validated(&self, freq_hz: f64) -> Option<(f64, f64, f64)> {
         let n = self.freq.len();
         if n == 0 {
             return None;
         }
         if !freq_hz.is_finite() {
+            return None;
+        }
+        let tolerance = 8.0 * f64::EPSILON * freq_hz.abs().max(self.freq[n - 1]);
+        if freq_hz <= 0.0
+            || freq_hz < self.freq[0] - tolerance
+            || freq_hz > self.freq[n - 1] + tolerance
+        {
             return None;
         }
         if freq_hz <= self.freq[0] {
@@ -119,42 +159,43 @@ impl MicPhaseCalibration {
         ))
     }
 
-    /// Subtract the mic's magnitude and phase contributions from
-    /// `curve`, in place.
-    ///
-    /// - `curve.spl[k] -= mag_db(curve.freq[k])`
-    /// - `curve.phase[k] -= phase_deg(curve.freq[k])` (when phase is present)
-    /// - `curve.coherence[k] *= cal_coherence(curve.freq[k])`
-    ///   (when coherence is present) — noisy cal bins drag the
-    ///   curve's own coherence down, which is exactly what the
-    ///   confidence gate (GD-1g) needs.
-    ///
-    /// Silently no-op when `curve.freq.len() != curve.spl.len()` —
-    /// malformed curves are rejected by the preceding CSV reader and
-    /// shouldn't reach this path, but we fail closed rather than
-    /// panic.
-    pub fn apply_to_curve(&self, curve: &mut Curve) {
-        let n = curve.freq.len();
-        if n == 0 || curve.spl.len() != n {
-            return;
+    /// Atomically subtract microphone magnitude/phase and multiply coherence.
+    /// Malformed evidence, unsupported frequencies, and nonfinite results are
+    /// errors. No fields are changed on error. Cached phase decomposition is
+    /// invalidated on success; missing measured phase/coherence stay absent.
+    pub fn apply_to_curve(&self, curve: &mut Curve) -> Result<(), String> {
+        self.validate()?;
+        curve
+            .validate("microphone calibration input")
+            .map_err(|e| e.to_string())?;
+        if curve
+            .coherence
+            .as_ref()
+            .is_some_and(|values| values.iter().any(|v| !(0.0..=1.0).contains(v)))
+        {
+            return Err("measurement coherence must be in [0, 1]".into());
         }
-        for i in 0..n {
-            let (mag, phase, coh) = match self.sample_at(curve.freq[i]) {
-                Some(tuple) => tuple,
-                None => continue,
-            };
-            curve.spl[i] -= mag;
-            if let Some(ref mut phase_arr) = curve.phase
-                && phase_arr.len() == n
-            {
-                phase_arr[i] -= phase;
+        let mut corrected = curve.clone();
+        for i in 0..curve.freq.len() {
+            let (mag, phase, coh) = self.sample_validated(curve.freq[i]).ok_or_else(|| {
+                format!("microphone calibration does not cover {} Hz", curve.freq[i])
+            })?;
+            corrected.spl[i] -= mag;
+            if let Some(ref mut values) = corrected.phase {
+                values[i] -= phase;
             }
-            if let Some(ref mut coh_arr) = curve.coherence
-                && coh_arr.len() == n
-            {
-                coh_arr[i] *= coh;
+            if let Some(ref mut values) = corrected.coherence {
+                values[i] *= coh;
             }
         }
+        corrected.min_phase = None;
+        corrected.excess_phase = None;
+        corrected.excess_delay_ms = None;
+        corrected
+            .validate("microphone calibration output")
+            .map_err(|e| e.to_string())?;
+        *curve = corrected;
+        Ok(())
     }
 }
 
@@ -176,8 +217,10 @@ impl MicPhaseCalibration {
 /// loader. For 2-column magnitude-only calibrations use the
 /// pre-existing [`math_audio_dsp::analysis::MicrophoneCompensation`].
 ///
-/// Frequencies must be strictly increasing. Rows with non-finite
-/// values are dropped.
+/// Frequencies must be positive and strictly increasing; coherence must be
+/// in [0, 1]. Malformed, short, or non-finite data rows reject the file with
+/// a row number. Dropping them would manufacture calibration by interpolating
+/// across missing evidence. Blank lines and comments remain permitted.
 pub fn load_mic_phase_calibration(path: &Path) -> Result<MicPhaseCalibration, Box<dyn Error>> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
@@ -247,8 +290,14 @@ pub fn load_mic_phase_calibration(path: &Path) -> Result<MicPhaseCalibration, Bo
             return Err("mic phase calibration header was not parsed".into());
         };
         let max_idx = freq_idx.max(mag_idx).max(phase_idx).max(coh_idx);
+        let invalid_row = || {
+            format!(
+                "invalid mic phase calibration row {} in {path:?}",
+                line_num + 1
+            )
+        };
         if parts.len() <= max_idx {
-            continue; // short row; skip
+            return Err(invalid_row().into());
         }
 
         let (Ok(f), Ok(m), Ok(p), Ok(c)) = (
@@ -257,15 +306,13 @@ pub fn load_mic_phase_calibration(path: &Path) -> Result<MicPhaseCalibration, Bo
             parts[phase_idx].parse::<f64>(),
             parts[coh_idx].parse::<f64>(),
         ) else {
-            log::debug!(
-                "[mic_phase_calibration] Skipping malformed row {} in {path:?}: {:?}",
-                line_num + 1,
-                parts
-            );
-            continue;
+            return Err(invalid_row().into());
         };
         if !(f.is_finite() && m.is_finite() && p.is_finite() && c.is_finite()) {
-            continue;
+            return Err(invalid_row().into());
+        }
+        if f <= 0.0 || !(0.0..=1.0).contains(&c) {
+            return Err(invalid_row().into());
         }
         freqs.push(f);
         mags.push(m);
@@ -371,7 +418,28 @@ frequency_hz,mag_db,phase_deg,coherence
     }
 
     #[test]
-    fn malformed_row_is_dropped_but_loader_still_succeeds() {
+    fn invalid_calibration_values_cannot_be_interpolated_across() {
+        for row in [
+            "50,NaN,0,1",
+            "50,0,NaN,1",
+            "50,0,0,NaN",
+            "50,0,0,-0.1",
+            "50,0,0,1.1",
+            "0,0,0,1",
+            "-50,0,0,1",
+        ] {
+            let csv =
+                format!("frequency_hz,mag_db,phase_deg,coherence\n20,0,0,1\n{row}\n200,0,0,1\n");
+            let file = write_cal_csv(&csv);
+            let error = load_mic_phase_calibration(file.path())
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("row 3"), "{row}: {error}");
+        }
+    }
+
+    #[test]
+    fn malformed_row_rejects_file() {
         let csv = "\
 frequency_hz,mag_db,phase_deg,coherence
 20.0,2.0,-10.0,0.95
@@ -379,9 +447,10 @@ frequency_hz,mag_db,phase_deg,coherence
 200.0,0.0,0.0,0.99
 ";
         let f = write_cal_csv(csv);
-        let cal = load_mic_phase_calibration(f.path()).unwrap();
-        assert_eq!(cal.freq.len(), 2);
-        assert!((cal.freq[1] - 200.0).abs() < 1e-9);
+        let error = load_mic_phase_calibration(f.path())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("row 3"), "{error}");
     }
 
     #[test]
@@ -448,28 +517,15 @@ frequency_hz,mag_db,phase_deg,coherence
     }
 
     #[test]
-    fn sample_at_below_min_returns_first() {
-        let cal = MicPhaseCalibration {
-            freq: Array1::from_vec(vec![50.0, 500.0]),
-            mag_db: Array1::from_vec(vec![1.0, 2.0]),
-            phase_deg: Array1::from_vec(vec![-10.0, 5.0]),
-            coherence: Array1::from_vec(vec![0.9, 0.95]),
-        };
-        // Below the cal's min frequency: flat extrapolation.
-        let (m, _, _) = cal.sample_at(10.0).unwrap();
-        assert!((m - 1.0).abs() < 1e-9);
+    fn sample_at_below_min_returns_none() {
+        let cal = MicPhaseCalibration::identity(vec![50.0, 500.0].into());
+        assert!(cal.sample_at(10.0).is_none());
     }
 
     #[test]
-    fn sample_at_above_max_returns_last() {
-        let cal = MicPhaseCalibration {
-            freq: Array1::from_vec(vec![50.0, 500.0]),
-            mag_db: Array1::from_vec(vec![1.0, 2.0]),
-            phase_deg: Array1::from_vec(vec![-10.0, 5.0]),
-            coherence: Array1::from_vec(vec![0.9, 0.95]),
-        };
-        let (m, _, _) = cal.sample_at(50_000.0).unwrap();
-        assert!((m - 2.0).abs() < 1e-9);
+    fn sample_at_above_max_returns_none() {
+        let cal = MicPhaseCalibration::identity(vec![50.0, 500.0].into());
+        assert!(cal.sample_at(50_000.0).is_none());
     }
 
     #[test]
@@ -484,10 +540,90 @@ frequency_hz,mag_db,phase_deg,coherence
             ..Default::default()
         };
         let before = curve.clone();
-        cal.apply_to_curve(&mut curve);
+        cal.apply_to_curve(&mut curve).unwrap();
         assert_eq!(before.spl, curve.spl);
         assert_eq!(before.phase, curve.phase);
         assert_eq!(before.coherence, curve.coherence);
+    }
+
+    #[test]
+    fn unsupported_calibration_band_does_not_partially_modify_curve() {
+        let cal = MicPhaseCalibration {
+            freq: vec![20.0, 200.0].into(),
+            mag_db: vec![3.0, 4.0].into(),
+            phase_deg: vec![10.0, 20.0].into(),
+            coherence: vec![0.8, 0.9].into(),
+        };
+        let mut curve = Curve {
+            freq: vec![20.0, 100.0, 500.0].into(),
+            spl: vec![80.0; 3].into(),
+            phase: Some(vec![0.0; 3].into()),
+            coherence: Some(vec![1.0; 3].into()),
+            ..Default::default()
+        };
+        let before = curve.clone();
+        assert!(
+            cal.apply_to_curve(&mut curve)
+                .unwrap_err()
+                .contains("does not cover")
+        );
+        assert_eq!(
+            curve.spl, before.spl,
+            "unsupported calibration must be atomic"
+        );
+        assert_eq!(curve.phase, before.phase);
+        assert_eq!(curve.coherence, before.coherence);
+    }
+
+    #[test]
+    fn malformed_calibration_and_overflow_reject_without_mutation() {
+        let good = MicPhaseCalibration::identity(vec![20.0, 200.0].into());
+        let curve = Curve {
+            freq: good.freq.clone(),
+            spl: vec![80.0; 2].into(),
+            phase: Some(vec![0.0; 2].into()),
+            ..Default::default()
+        };
+        let mut cases = vec![good.clone(); 4];
+        cases[0].mag_db = vec![0.0].into();
+        cases[1].freq[1] = 20.0;
+        cases[2].coherence[1] = 1.1;
+        cases[3].phase_deg[1] = f64::NAN;
+        for cal in cases {
+            assert!(cal.sample_at(20.0).is_none());
+            let mut input = curve.clone();
+            assert!(cal.apply_to_curve(&mut input).is_err());
+            assert_eq!(input.spl, curve.spl);
+            assert_eq!(input.phase, curve.phase);
+        }
+        let mut cal = good;
+        cal.mag_db.fill(-f64::MAX);
+        let mut input = curve;
+        input.spl.fill(f64::MAX);
+        assert!(cal.apply_to_curve(&mut input).is_err());
+        assert!(input.spl.iter().all(|value| *value == f64::MAX));
+    }
+
+    #[test]
+    fn calibrated_curve_invalidates_derived_phase_cache() {
+        let mut cal = MicPhaseCalibration::identity(vec![20.0, 200.0].into());
+        cal.mag_db.fill(2.0);
+        cal.phase_deg.fill(10.0);
+        let mut curve = Curve {
+            freq: cal.freq.clone(),
+            spl: vec![80.0; 2].into(),
+            phase: Some(vec![0.0; 2].into()),
+            min_phase: Some(vec![1.0; 2].into()),
+            excess_phase: Some(vec![2.0; 2].into()),
+            excess_delay_ms: Some(3.0),
+            ..Default::default()
+        };
+        cal.apply_to_curve(&mut curve).unwrap();
+        assert_eq!(curve.spl.to_vec(), vec![78.0; 2]);
+        assert_eq!(curve.phase.unwrap().to_vec(), vec![-10.0; 2]);
+        assert!(curve.min_phase.is_none());
+        assert!(curve.excess_phase.is_none());
+        assert!(curve.excess_delay_ms.is_none());
     }
 
     #[test]
@@ -507,7 +643,7 @@ frequency_hz,mag_db,phase_deg,coherence
             coherence: Some(Array1::from_vec(vec![1.0, 1.0, 1.0])),
             ..Default::default()
         };
-        cal.apply_to_curve(&mut curve);
+        cal.apply_to_curve(&mut curve).unwrap();
         // spl: subtract mic's magnitude
         assert!((curve.spl[0] - 58.0).abs() < 1e-9); // 60 - 2
         assert!((curve.spl[1] - 80.0).abs() < 1e-9); // 80 - 0
@@ -542,7 +678,7 @@ frequency_hz,mag_db,phase_deg,coherence
             coherence: None,
             ..Default::default()
         };
-        cal.apply_to_curve(&mut curve);
+        cal.apply_to_curve(&mut curve).unwrap();
         assert_eq!(curve.phase, None);
         assert_eq!(curve.coherence, None);
         assert!((curve.spl[0] - 58.0).abs() < 1e-9);
@@ -572,19 +708,21 @@ frequency_hz,mag_db,phase_deg,coherence
     }
 
     #[test]
-    fn load_mic_phase_calibration_short_row_skipped() {
+    fn load_mic_phase_calibration_short_row_rejected() {
         let csv = "\
 frequency_hz,mag_db,phase_deg,coherence
 20.0,2.0,-10.0,0.95
 50.0,1.0\n200.0,0.0,0.0,0.99
 ";
         let f = write_cal_csv(csv);
-        let cal = load_mic_phase_calibration(f.path()).unwrap();
-        assert_eq!(cal.freq.len(), 2);
+        let error = load_mic_phase_calibration(f.path())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("row 3"), "{error}");
     }
 
     #[test]
-    fn load_mic_phase_calibration_non_finite_value_skipped() {
+    fn load_mic_phase_calibration_non_finite_value_rejected() {
         let csv = "\
 frequency_hz,mag_db,phase_deg,coherence
 20.0,2.0,-10.0,0.95
@@ -592,8 +730,10 @@ frequency_hz,mag_db,phase_deg,coherence
 200.0,0.0,0.0,0.99
 ";
         let f = write_cal_csv(csv);
-        let cal = load_mic_phase_calibration(f.path()).unwrap();
-        assert_eq!(cal.freq.len(), 2);
+        let error = load_mic_phase_calibration(f.path())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("row 3"), "{error}");
     }
 
     #[test]
@@ -643,7 +783,7 @@ frequency_hz,mag_db,phase_deg,coherence
             coherence: None,
             ..Default::default()
         };
-        cal.apply_to_curve(&mut curve);
+        assert!(cal.apply_to_curve(&mut curve).is_err());
         assert!(curve.spl.is_empty());
     }
 
@@ -657,8 +797,8 @@ frequency_hz,mag_db,phase_deg,coherence
             coherence: None,
             ..Default::default()
         };
-        cal.apply_to_curve(&mut curve);
-        // Should silently no-op
+        assert!(cal.apply_to_curve(&mut curve).is_err());
+        // Explicit failure must leave the input unchanged
         assert_eq!(curve.spl.len(), 1);
     }
 
@@ -673,8 +813,8 @@ frequency_hz,mag_db,phase_deg,coherence
             coherence: Some(Array1::from_vec(vec![1.0, 1.0])),
             ..Default::default()
         };
-        cal.apply_to_curve(&mut curve);
-        // phase length mismatch → phase not modified
+        assert!(cal.apply_to_curve(&mut curve).is_err());
+        // Invalid optional fields reject the entire correction
         assert_eq!(curve.phase.as_ref().unwrap().len(), 1);
         assert_eq!(curve.spl[0], 80.0);
     }

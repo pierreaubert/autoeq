@@ -1,0 +1,5 @@
+--- a/crates/roomeq-engine/src/channel_preprocessing.rs
++++ b/crates/roomeq-engine/src/channel_preprocessing.rs
+@@ -84 +84 @@
+-            if bounded_max_freq > target.max_freq {
++            if bounded_max_freq < target.max_freq {

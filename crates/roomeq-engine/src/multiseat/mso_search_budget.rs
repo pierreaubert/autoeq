@@ -15,48 +15,51 @@ use std::time::{Duration, Instant};
 /// closure, which itself sweeps Q quadrature points (and, for the worst-case
 /// scalarisation, nests another inner DE per call — see `inner_maxiter`).
 #[derive(Debug, Clone, Default)]
-pub(super) struct MsoSearchBudget {
+pub struct MsoSearchBudget {
     /// Cap on total area-loss evaluations (initial population scoring counts).
     /// `None` runs the legacy `population_size * (1 + generations)` schedule.
-    pub(super) max_evaluations: Option<usize>,
-    /// Wall-clock cap on the search. Checked once per generation.
+    pub max_evaluations: Option<usize>,
+    /// Wall-clock cap on the search. Checked between candidate evaluations,
+    /// including the initial population; an in-flight evaluation is not interrupted.
     /// `None` runs to completion.
-    pub(super) max_duration: Option<Duration>,
+    pub max_duration: Option<Duration>,
     /// Override the DE seed. `None` keeps `MSO_DE_SEED ^ num_subs`.
-    pub(super) seed: Option<u64>,
+    pub seed: Option<u64>,
     /// Stop after this many generations without improvement. `None` never
     /// stops early on convergence.
-    pub(super) stall_generations: Option<usize>,
-    /// Cooperative cancellation flag, checked once per generation.
+    pub stall_generations: Option<usize>,
+    /// Cooperative cancellation flag, checked between candidate evaluations.
     /// `None` disables cancellation.
-    pub(super) cancelled: Option<Arc<AtomicBool>>,
+    pub cancelled: Option<Arc<AtomicBool>>,
     /// Cap on the nested worst-case inner search iterations. `None` keeps the
     /// configured `inner_maxiter`. Applied as `min(configured, cap)` at the
     /// dispatch site; the outer DE always honors `max_evaluations`.
-    pub(super) max_inner_iterations: Option<usize>,
+    pub max_inner_iterations: Option<usize>,
     /// Explicit shared worker budget for fanning one area evaluation over
     /// quadrature points. `Some(n)` caps threads at `n`; `None` stays
     /// sequential for small point counts and otherwise uses the available
     /// parallelism under a hard cap.
-    pub(super) parallel_workers: Option<usize>,
+    pub parallel_workers: Option<usize>,
 }
 
 /// Consumed-work report for one `optimize_continuous_mso_with_budget` run.
 #[derive(Debug, Clone)]
-pub(super) struct MsoSearchReport {
+pub struct MsoSearchReport {
     /// Total area-loss evaluations consumed (population scoring + trials).
-    pub(super) evaluations: usize,
+    /// Does not include dispatch's separate baseline/final acoustic verification
+    /// or the position evaluations inside a worst-case inner search.
+    pub evaluations: usize,
     /// Generations completed (initial scoring is generation 0 work).
-    pub(super) generations_run: usize,
+    pub generations_run: usize,
     /// Best loss observed.
-    pub(super) best_loss: f64,
+    pub best_loss: f64,
     /// Whether the search stopped before the full generation schedule.
-    pub(super) stopped_early: bool,
+    pub stopped_early: bool,
     /// Machine-readable stop cause: "completed", "evaluation_budget",
     /// "time_budget", "cancelled", or "converged".
-    pub(super) stop_reason: &'static str,
+    pub stop_reason: &'static str,
     /// Wall-clock time consumed by the search.
-    pub(super) elapsed: Duration,
+    pub elapsed: Duration,
 }
 
 pub(super) fn is_cancelled(budget: &MsoSearchBudget) -> bool {

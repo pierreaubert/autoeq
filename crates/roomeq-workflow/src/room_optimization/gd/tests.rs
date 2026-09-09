@@ -1,8 +1,7 @@
 use super::misc::{
     apply_gd_opt_result, build_gd_sweep_realisations_with_frequency_samples,
     coherence_average_gd_realisations, corrected_realisation_to_gd_input,
-    existing_fir_convolution_filename, gd_phase_response_for_curve, interpolate_optional_array_log,
-    source_for_output_channel,
+    gd_phase_response_for_curve, interpolate_optional_array_log, source_for_output_channel,
 };
 use super::{
     effective_optimize_polarity, try_run_gd_opt_with_frequency_samples, try_run_phase_linear_fir_gd,
@@ -12,11 +11,367 @@ use math_audio_iir_fir::{Biquad, BiquadFilterType};
 use ndarray::Array1;
 use roomeq_engine::gd_opt::{ChannelGdResult, GroupDelayOptResult};
 use roomeq_model::{
-    ChannelDspChain, GroupDelayOptimizationConfig, OptimizerConfig, PluginConfigWrapper,
-    RoomConfig, SpeakerConfig,
+    ChannelDspChain, GroupDelayOptimizationConfig, OptimizerConfig, RoomConfig, SpeakerConfig,
 };
 use roomeq_model::{Curve, MeasurementSource};
 use std::collections::HashMap;
+
+#[test]
+fn tool_contract_camilladsp_fractional_gd_matches_exported_response() {
+    use num_complex::Complex64;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let Ok(binary) = std::env::var("ROOMEQ_CAMILLADSP_BIN") else {
+        eprintln!("skipping optional PCM backend contract; set ROOMEQ_CAMILLADSP_BIN");
+        return;
+    };
+    let amplitude = 1_i32 << 28;
+    let impulse_offset = 128;
+    for sample_rate in [44_100.0, 48_000.0, 96_000.0] {
+        for shift_samples in [-0.5, 0.25, 0.5] {
+            for original_impulse in [0, 17] {
+                let source = tempfile::tempdir().unwrap();
+                let destination = tempfile::tempdir().unwrap();
+                let mut result = channel_result("left", 0.0);
+                let frequencies = Array1::linspace(20.0, 0.46 * sample_rate, 1025);
+                result.final_curve.freq = frequencies.clone();
+                result.final_curve.spl = Array1::from_elem(frequencies.len(), 80.0);
+                result.final_curve.coherence = None;
+                result.final_curve.phase =
+                    Some(frequencies.mapv(|f| -360.0 * f * original_impulse as f64 / sample_rate));
+                let mut coefficients = vec![0.0; 64];
+                coefficients[original_impulse] = 1.0;
+                result.fir_coeffs = Some(coefficients);
+                let mut results = HashMap::from([("left".into(), result)]);
+                let mut chains = HashMap::from([("left".into(), dsp_chain("left"))]);
+                let applied = super::fir_delay::apply_phase_linear_delay_target(
+                    &mut results,
+                    &mut chains,
+                    &["left".into()],
+                    &[shift_samples * 1000.0 / sample_rate],
+                    &[false],
+                    sample_rate,
+                    source.path(),
+                )
+                .unwrap();
+                let effective_samples =
+                    original_impulse as f64 + applied[0].1 * sample_rate / 1000.0;
+                let mut graph = roomeq_model::DspGraph::new(roomeq_model::default_config_version());
+                graph.channels = chains;
+                let config_path = destination.path().join("fractional-delay.yml");
+                crate::export_dsp_chain_with_convolution_sidecars(
+                    &graph,
+                    crate::ExportFormat::CamillaDsp,
+                    &config_path,
+                    sample_rate,
+                    source.path(),
+                )
+                .unwrap();
+                // Only the packaged export may be used by playback.
+                source.close().unwrap();
+                let mut child = Command::new(&binary)
+                    .arg(&config_path)
+                    .current_dir(destination.path())
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                let mut input = child.stdin.take().unwrap();
+                let writer = std::thread::spawn(move || {
+                    for index in 0..4096 {
+                        let sample = if index == impulse_offset {
+                            amplitude
+                        } else {
+                            0
+                        };
+                        input.write_all(&sample.to_le_bytes()).unwrap();
+                    }
+                });
+                let output = child.wait_with_output().unwrap();
+                writer.join().unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert_eq!(output.stdout.len() % 4, 0);
+                let pcm: Vec<_> = output
+                    .stdout
+                    .chunks_exact(4)
+                    .map(|sample| i32::from_le_bytes(sample.try_into().unwrap()))
+                    .collect();
+                let report = &results["left"].final_curve;
+                let taps = results["left"].fir_coeffs.as_ref().unwrap().len();
+                assert!(pcm.len() >= impulse_offset + taps);
+                assert!(pcm[..impulse_offset].iter().all(|value| value.abs() <= 16));
+                assert!(
+                    pcm[impulse_offset + taps..]
+                        .iter()
+                        .all(|value| value.abs() <= 16)
+                );
+                for (index, frequency) in frequencies.iter().copied().enumerate() {
+                    // DTFT H(f)=sum h[n] exp(-j 2 pi f n/fs), normalized by
+                    // the injected S32_LE impulse, not by output DC or peak.
+                    let measured: Complex64 = pcm[impulse_offset..impulse_offset + taps]
+                        .iter()
+                        .enumerate()
+                        .map(|(n, value)| {
+                            Complex64::from_polar(
+                                *value as f64 / amplitude as f64,
+                                -std::f64::consts::TAU * frequency * n as f64 / sample_rate,
+                            )
+                        })
+                        .sum();
+                    let ideal = Complex64::from_polar(
+                        1.0,
+                        -std::f64::consts::TAU * frequency * effective_samples / sample_rate,
+                    );
+                    let reported = Complex64::from_polar(
+                        10.0_f64.powf((report.spl[index] - 80.0) / 20.0),
+                        report.phase.as_ref().unwrap()[index].to_radians(),
+                    );
+                    assert!(
+                        (20.0 * measured.norm().log10()).abs() <= 0.01,
+                        "rate={sample_rate} shift={shift_samples} origin={original_impulse} f={frequency}: magnitude {}",
+                        measured.norm()
+                    );
+                    assert!(
+                        (measured - ideal).norm() < 0.002,
+                        "delivered fractional-delay phase/magnitude mismatch"
+                    );
+                    assert!(
+                        (measured - reported).norm() < 2e-5,
+                        "packaged PCM differs from reported transfer"
+                    );
+                }
+                eprintln!(
+                    "fractional GD backend: rate={sample_rate} shift={shift_samples} origin={original_impulse}: 1025 complex bins passed"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn fractional_gd_sidecars_match_reported_transfer_and_shared_latency() {
+    use num_complex::Complex64;
+    for sample_rate in [44_100.0, 48_000.0, 96_000.0] {
+        let directory = tempfile::tempdir().unwrap();
+        let mut results = HashMap::new();
+        let mut chains = HashMap::new();
+        for name in ["left", "right", "unknown_phase"] {
+            let mut result = channel_result(name, 0.0);
+            result.final_curve.freq = Array1::linspace(20.0, 20_000.0, 257);
+            result.final_curve.spl = Array1::from_elem(257, 80.0);
+            result.final_curve.coherence = None;
+            result.final_curve.phase = (name != "unknown_phase").then(|| Array1::zeros(257));
+            let mut taps = vec![0.0; 64];
+            taps[0] = 1.0;
+            result.fir_coeffs = Some(taps);
+            results.insert(name.into(), result);
+            chains.insert(name.into(), dsp_chain(name));
+        }
+        let applied = super::fir_delay::apply_phase_linear_delay_target(
+            &mut results,
+            &mut chains,
+            &["left".into(), "right".into()],
+            &[0.5 * 1000.0 / sample_rate, 0.0],
+            &[true, false],
+            sample_rate,
+            directory.path(),
+        )
+        .unwrap();
+        assert_eq!(applied.len(), 3);
+        for (name, delay, inverted) in applied {
+            let chain = &chains[&name];
+            let plugin = chain.plugins.last().unwrap();
+            let padding = plugin.parameters["gd_common_padding_samples"]
+                .as_u64()
+                .unwrap();
+            assert_eq!(padding, roomeq_engine::fir::GD_DELAY_KERNEL_HALF as u64);
+            let samples = padding as f64 + if name == "left" { 0.5 } else { 0.0 };
+            assert!((delay - samples * 1000.0 / sample_rate).abs() < 1e-12);
+            assert_eq!(plugin.parameters["room_eq_stage"], "pre_route");
+            let path = directory
+                .path()
+                .join(plugin.parameters["ir_file"].as_str().unwrap());
+            let decoded = crate::wav::decode_first_channel(&path).unwrap();
+            assert_eq!(decoded.sample_rate, sample_rate as u32);
+            let report = &results[&name].final_curve;
+            for (i, frequency) in report.freq.iter().enumerate() {
+                // Independent direct DFT of the emitted f32 WAV, not the
+                // production response helper or its in-memory coefficients.
+                let actual: Complex64 = decoded
+                    .samples
+                    .iter()
+                    .enumerate()
+                    .map(|(n, tap)| {
+                        Complex64::from_polar(
+                            *tap as f64,
+                            -2.0 * std::f64::consts::PI * frequency * n as f64 / sample_rate,
+                        )
+                    })
+                    .sum();
+                let expected = Complex64::from_polar(
+                    if inverted { -1.0 } else { 1.0 },
+                    -2.0 * std::f64::consts::PI * frequency * samples / sample_rate,
+                );
+                assert!((actual / expected - Complex64::new(1.0, 0.0)).norm() < 0.001);
+                assert!((report.spl[i] - 80.0 - 20.0 * actual.norm().log10()).abs() < 1e-5);
+                if let Some(phase) = &report.phase {
+                    let reported = Complex64::from_polar(
+                        10.0_f64.powf((report.spl[i] - 80.0) / 20.0),
+                        phase[i].to_radians(),
+                    );
+                    assert!((reported - actual).norm() < 1e-6);
+                }
+            }
+            assert_eq!(report.phase.is_none(), name == "unknown_phase");
+            assert_eq!(
+                chain.final_curve.as_ref().unwrap().phase.is_none(),
+                name == "unknown_phase"
+            );
+        }
+        let mut room = roomeq_engine::room_result::RoomOptimizationResult {
+            channels: chains,
+            channel_results: results,
+            deployed_source_curves: HashMap::new(),
+            combined_pre_score: 0.0,
+            combined_post_score: 0.0,
+            metadata: crate::test_fixtures::empty_metadata(),
+        };
+        super::super::refresh_temporal_ir_evidence(
+            &mut room,
+            &RoomConfig::default(),
+            sample_rate,
+            directory.path(),
+        );
+        for chain in room.channels.values() {
+            let temporal = chain
+                .fir_temporal_masking
+                .as_ref()
+                .expect("delivered temporal evidence");
+            let expected = roomeq_engine::fir::GD_DELAY_KERNEL_HALF as f64 * 1000.0 / sample_rate;
+            assert!(
+                (temporal.main_time_ms - expected).abs() <= 1000.0 / sample_rate + 1e-12,
+                "{} at {sample_rate}: observed {} ms, expected {expected} ms",
+                chain.channel,
+                temporal.main_time_ms
+            );
+        }
+    }
+}
+
+#[test]
+fn gd_delay_failure_keeps_previous_coefficients_and_reports() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut original = channel_result("left", 0.0);
+    original.fir_coeffs = Some(vec![1.0]);
+    let mut results = HashMap::from([("left".into(), original.clone())]);
+    let mut chains = HashMap::from([("left".into(), dsp_chain("left"))]);
+    let missing_directory = directory.path().join("missing");
+    let error = super::fir_delay::apply_phase_linear_delay_target(
+        &mut results,
+        &mut chains,
+        &["left".into()],
+        &[0.5 / 48.0],
+        &[false],
+        48_000.0,
+        &missing_directory,
+    )
+    .unwrap_err();
+    assert!(error.contains("cannot write GD FIR"));
+    assert_eq!(results["left"].fir_coeffs, original.fir_coeffs);
+    assert_eq!(results["left"].final_curve.spl, original.final_curve.spl);
+    assert_eq!(
+        results["left"].final_curve.phase,
+        original.final_curve.phase
+    );
+    assert!(chains["left"].plugins.is_empty());
+
+    results.get_mut("left").unwrap().final_curve.freq = Array1::linspace(20.0, 23_000.0, 32);
+    let error = super::fir_delay::apply_phase_linear_delay_target(
+        &mut results,
+        &mut chains,
+        &["left".into()],
+        &[0.5 / 48.0],
+        &[false],
+        48_000.0,
+        directory.path(),
+    )
+    .unwrap_err();
+    assert!(error.contains("supported fractional-delay bandwidth"));
+    assert!(chains["left"].plugins.is_empty());
+}
+
+#[test]
+fn gd_delay_keeps_existing_convolution_sidecar_and_applies_each_filter_once() {
+    use num_complex::Complex64;
+    let directory = tempfile::tempdir().unwrap();
+    let coefficients = vec![1.0, -0.25, 0.125];
+    let original_path = directory.path().join("existing.wav");
+    math_audio_iir_fir::save_fir_to_wav(&coefficients, 48_000, &original_path).unwrap();
+    let original_bytes = std::fs::read(&original_path).unwrap();
+    let mut result = channel_result("left", 0.0);
+    result.final_curve = roomeq_engine::response::apply_complex_response(
+        &result.final_curve,
+        &roomeq_engine::response::compute_fir_complex_response(
+            &coefficients,
+            &result.final_curve.freq,
+            48_000.0,
+        ),
+    );
+    result.fir_coeffs = Some(coefficients);
+    let mut results = HashMap::from([("left".into(), result)]);
+    let mut chain = dsp_chain("left");
+    chain
+        .plugins
+        .push(roomeq_engine::output::create_convolution_plugin(
+            "existing.wav",
+        ));
+    let mut chains = HashMap::from([("left".into(), chain)]);
+    super::fir_delay::apply_phase_linear_delay_target(
+        &mut results,
+        &mut chains,
+        &["left".into()],
+        &[0.5 / 48.0],
+        &[false],
+        48_000.0,
+        directory.path(),
+    )
+    .unwrap();
+    assert_eq!(std::fs::read(original_path).unwrap(), original_bytes);
+    assert_eq!(chains["left"].plugins.len(), 2);
+    for (i, frequency) in results["left"].final_curve.freq.iter().enumerate() {
+        let mut actual = Complex64::new(1.0, 0.0);
+        for plugin in &chains["left"].plugins {
+            let samples = crate::wav::decode_first_channel(
+                &directory
+                    .path()
+                    .join(plugin.parameters["ir_file"].as_str().unwrap()),
+            )
+            .unwrap()
+            .samples;
+            actual *= samples
+                .iter()
+                .enumerate()
+                .map(|(n, tap)| {
+                    Complex64::from_polar(
+                        *tap as f64,
+                        -2.0 * std::f64::consts::PI * frequency * n as f64 / 48_000.0,
+                    )
+                })
+                .sum::<Complex64>();
+        }
+        let reported = &results["left"].final_curve;
+        let response = Complex64::from_polar(
+            10.0_f64.powf((reported.spl[i] - 80.0) / 20.0),
+            reported.phase.as_ref().unwrap()[i].to_radians(),
+        );
+        assert!((actual - response).norm() < 1e-6);
+    }
+}
 
 fn log_freq_grid(start_hz: f64, stop_hz: f64, n: usize) -> Array1<f64> {
     Array1::logspace(10.0, f64::log10(start_hz), f64::log10(stop_hz), n)
@@ -125,46 +480,6 @@ fn missing_coherence_gates_polarity_off_in_both_gd_paths() {
     assert!(!effective_optimize_polarity(true, true));
     assert!(!effective_optimize_polarity(false, false));
     assert!(!effective_optimize_polarity(false, true));
-}
-
-#[test]
-fn existing_fir_convolution_filename_matches_full_fir() {
-    let mut chain = dsp_chain("left");
-    chain.plugins.push(PluginConfigWrapper {
-        plugin_type: "convolution".to_string(),
-        parameters: serde_json::json!({ "ir_file": "Left_fir_48000hz_004.wav" }),
-    });
-    assert_eq!(
-        existing_fir_convolution_filename(&chain),
-        Some("Left_fir_48000hz_004.wav".to_string())
-    );
-}
-
-#[test]
-fn existing_fir_convolution_filename_skips_residual_and_excess_phase() {
-    let mut chain = dsp_chain("left");
-    chain.plugins.push(PluginConfigWrapper {
-        plugin_type: "convolution".to_string(),
-        parameters: serde_json::json!({ "ir_file": "left_residual_fir_48000hz_001.wav" }),
-    });
-    assert!(existing_fir_convolution_filename(&chain).is_none());
-
-    chain.plugins.clear();
-    chain.plugins.push(PluginConfigWrapper {
-        plugin_type: "convolution".to_string(),
-        parameters: serde_json::json!({ "ir_file": "left_excess_phase_fir_48000hz_001.wav" }),
-    });
-    assert!(existing_fir_convolution_filename(&chain).is_none());
-}
-
-#[test]
-fn existing_fir_convolution_filename_non_convolution_is_ignored() {
-    let mut chain = dsp_chain("left");
-    chain.plugins.push(PluginConfigWrapper {
-        plugin_type: "eq".to_string(),
-        parameters: serde_json::json!({ "ir_file": "Left_fir_48000hz_004.wav" }),
-    });
-    assert!(existing_fir_convolution_filename(&chain).is_none());
 }
 
 #[test]

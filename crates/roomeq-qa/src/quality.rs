@@ -23,6 +23,7 @@ mod apply;
 mod consts;
 mod count;
 mod counting_semaphore;
+mod electrical;
 mod enable;
 mod group;
 mod group_delay_qa_profile;
@@ -72,11 +73,18 @@ fn enforce_registry_expectations(
         let functional_artifact = claims.iter().any(|claim| claim == "functional_artifact");
         let allowed_safe_revert = matches!(original_outcome, QaOutcome::Reverted)
             && (expect.accepts_safe_revert() || functional_artifact);
-        // `WiderDb` deliberately relaxes the configured gain bound to test
-        // optimizer monotonicity. Baselines and every other mutation still
-        // enforce the registry's deployment boost ceiling.
-        let deliberately_relaxed_max_db = result.label.ends_with(" +50% max_db");
         let mut failures = Vec::new();
+        // A relaxed optimizer bound or acoustic safety rollback does not
+        // authorize exceeding the electrical output budget.
+        if result.pre_score > 0.0 && result.scorecard.max_boost_db > expect.max_boost_db {
+            failures.push(format!(
+                "sampled electrical max boost {:.2} dB exceeds registry limit {:.2} dB",
+                result.scorecard.max_boost_db, expect.max_boost_db
+            ));
+        }
+        if let Some(Err(error)) = &result.scorecard.electrical {
+            failures.push(format!("electrical headroom unassessed: {error}"));
+        }
         let flat_loss = result.scorecard.flat_loss;
         if !result.pre_score.is_finite()
             || !flat_loss.is_finite()
@@ -88,15 +96,6 @@ fn enforce_registry_expectations(
                 failures.push(format!(
                     "post score {flat_loss:.4} exceeds registry limit {:.4}",
                     expect.max_post_score
-                ));
-            }
-            if result.pre_score > 0.0
-                && !deliberately_relaxed_max_db
-                && result.scorecard.max_boost_db > expect.max_boost_db
-            {
-                failures.push(format!(
-                    "max boost {:.2} dB exceeds registry limit {:.2} dB",
-                    result.scorecard.max_boost_db, expect.max_boost_db
                 ));
             }
             let requires_flat_improvement = !claims
@@ -264,6 +263,21 @@ pub fn run() -> Result<bool> {
     // Run all test cases with a bounded permit pool. The outer thread is
     // spawned immediately but `sem.acquire()` gates entry to the actual
     // optimization — so at most `jobs` cases are resident simultaneously.
+    let evidence_dir = project_root.join("target/qa");
+    std::fs::create_dir_all(&evidence_dir)?;
+    let evidence_path = evidence_dir.join(format!(
+        "roomeq-electrical-headroom-{}-{}.jsonl",
+        std::process::id(),
+        chrono::Utc::now().timestamp_micros()
+    ));
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&evidence_path)?;
+    println!(
+        "Electrical assessment evidence: {}",
+        evidence_path.display()
+    );
     let semaphore = Arc::new(CountingSemaphore::new(jobs));
     let handles: Vec<_> = cases_to_run
         .into_iter()
@@ -272,6 +286,7 @@ pub fn run() -> Result<bool> {
             let fem_dir = fem_dir.clone();
             let optim_dir = optim_dir.clone();
             let sem = Arc::clone(&semaphore);
+            let evidence_path = evidence_path.clone();
             std::thread::spawn(move || -> Result<(String, Vec<TestResult>)> {
                 sem.acquire();
                 let RegisteredTestCase {
@@ -384,6 +399,20 @@ pub fn run() -> Result<bool> {
                 };
                 if let Ok((_, results)) = &mut result {
                     enforce_registry_expectations(&id, &claims, expect, results);
+                    if let Err(error) = electrical::append_evidence(&evidence_path, &id, results) {
+                        result = Err(error.context("failed to retain electrical QA evidence"));
+                    }
+                }
+                if let Err(error) = &result {
+                    if let Err(evidence_error) = electrical::append_execution_failure(
+                        &evidence_path,
+                        &id,
+                        &format!("{error:#}"),
+                    ) {
+                        result = Err(anyhow!(
+                            "{error:#}; failed to retain execution failure: {evidence_error:#}"
+                        ));
+                    }
                 }
                 sem.release();
                 result

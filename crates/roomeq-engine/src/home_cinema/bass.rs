@@ -159,6 +159,10 @@ pub fn bass_management_routing_graph(
             .cmp(&home_cinema_role_sort_index(role_for_channel(b)))
             .then_with(|| a.cmp(b))
     });
+
+    // Physical sub outputs are destinations, not additional source signals.
+    // Keep logical input indices fixed while extending the output namespace.
+    let input_channels = channel_order.clone();
     let sub_outputs = resolved_bass_sub_outputs(&bass_role, optimization);
     for output in &sub_outputs {
         if !channel_order.contains(&output.output_role) {
@@ -174,7 +178,7 @@ pub fn bass_management_routing_graph(
         });
 
     let mut routes = Vec::new();
-    for (source_index, source_channel) in channel_order.iter().enumerate() {
+    for (source_index, source_channel) in input_channels.iter().enumerate() {
         let role = role_for_channel(source_channel);
         let is_lfe = role == HomeCinemaRole::Lfe || source_channel == &effective.config.lfe_channel;
         let group_id = group_id_for_role(role);
@@ -306,7 +310,7 @@ pub fn bass_management_routing_graph(
 
     Some(BassManagementRoutingGraph {
         physical_sub_output: bass_role,
-        input_channels: channel_order.clone(),
+        input_channels,
         output_channels: channel_order,
         routes,
         matrix,
@@ -725,6 +729,34 @@ mod tests {
             )])),
             ..RoomConfig::default()
         }
+    }
+
+    #[test]
+    fn physical_sub_outputs_are_not_promoted_to_logical_inputs() {
+        let config = routed_home_cinema_config();
+        let outputs: Vec<_> = ["sub_a", "sub_b"].into_iter().map(|name| {
+            BassManagementSubOutputReport {
+                output_role: name.into(), gain_db: 0.0, delay_ms: 0.0,
+                polarity_inverted: false, strategy_source: "mso".into(),
+                headroom_contribution_db: 0.0, selected_low_pass_hz: None,
+            }
+        }).collect();
+        let optimization = crate::bass_management::joint_bass_management_report_from_parts(
+            &[], &[], &outputs,
+        );
+        let graph = bass_management_routing_graph(&config, Some(&optimization)).unwrap();
+        for name in ["sub_a", "sub_b"] {
+            assert!(graph.output_channels.iter().any(|output| output == name));
+            assert!(!graph.input_channels.iter().any(|input| input == name),
+                "physical output {name} became a source with no playback branches");
+        }
+        for route in &graph.routes {
+            assert_eq!(graph.input_channels[route.source_index], route.source_channel);
+            assert_eq!(graph.output_channels[route.destination_index], route.destination);
+        }
+        assert!(graph.input_channels.iter().all(|input| {
+            graph.routes.iter().any(|route| &route.source_channel == input)
+        }));
     }
 
     #[test]

@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 pub const MAX_PR_ROWS: usize = 24;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct ParameterRow {
     pub topology: u8,
     pub mode: u8,
@@ -36,9 +36,15 @@ impl ParameterRow {
 
     fn from_values(values: [u8; Self::WIDTH]) -> Self {
         Self {
-            topology: values[0], mode: values[1], sample_rate: values[2],
-            filter_count: values[3], grid_size: values[4], measurement_shape: values[5],
-            phase: values[6], crossover: values[7], fir_duration: values[8],
+            topology: values[0],
+            mode: values[1],
+            sample_rate: values[2],
+            filter_count: values[3],
+            grid_size: values[4],
+            measurement_shape: values[5],
+            phase: values[6],
+            crossover: values[7],
+            fir_duration: values[8],
         }
     }
 }
@@ -47,7 +53,9 @@ fn applicable(row: ParameterRow) -> bool {
     // FIR duration is irrelevant to IIR, but retaining a canonical value
     // makes the matrix rectangular and keeps pair accounting mechanical.
     // Automatic crossover is only meaningful for redirected/sub topologies.
-    if row.crossover == 1 && row.topology == 0 { return false; }
+    if row.crossover == 1 && row.topology == 0 {
+        return false;
+    }
     true
 }
 
@@ -61,9 +69,14 @@ pub fn generate_pr_matrix() -> Vec<ParameterRow> {
     for encoded in 0..3usize.pow(ParameterRow::WIDTH as u32) {
         let mut n = encoded;
         let mut values = [0u8; ParameterRow::WIDTH];
-        for value in &mut values { *value = (n % 3) as u8; n /= 3; }
+        for value in &mut values {
+            *value = (n % 3) as u8;
+            n /= 3;
+        }
         let row = ParameterRow::from_values(values);
-        if applicable(row) { candidates.push(row); }
+        if applicable(row) {
+            candidates.push(row);
+        }
     }
 
     let mut uncovered = BTreeSet::new();
@@ -77,10 +90,23 @@ pub fn generate_pr_matrix() -> Vec<ParameterRow> {
 
     let mut rows = Vec::new();
     while !uncovered.is_empty() && rows.len() < MAX_PR_ROWS {
-        let selected = candidates.iter().max_by_key(|candidate| {
-            (0..ParameterRow::WIDTH).flat_map(|a| ((a + 1)..ParameterRow::WIDTH).map(move |b| (a, b)))
-                .filter(|(a, b)| uncovered.contains(&pair_key(*a, candidate.value(*a), *b, candidate.value(*b)))).count()
-        }).copied().expect("parameter matrix has candidates");
+        let selected = candidates
+            .iter()
+            .max_by_key(|candidate| {
+                (0..ParameterRow::WIDTH)
+                    .flat_map(|a| ((a + 1)..ParameterRow::WIDTH).map(move |b| (a, b)))
+                    .filter(|(a, b)| {
+                        uncovered.contains(&pair_key(
+                            *a,
+                            candidate.value(*a),
+                            *b,
+                            candidate.value(*b),
+                        ))
+                    })
+                    .count()
+            })
+            .copied()
+            .expect("parameter matrix has candidates");
         for a in 0..ParameterRow::WIDTH {
             for b in (a + 1)..ParameterRow::WIDTH {
                 uncovered.remove(&pair_key(a, selected.value(a), b, selected.value(b)));
@@ -89,7 +115,10 @@ pub fn generate_pr_matrix() -> Vec<ParameterRow> {
         rows.push(selected);
         candidates.retain(|candidate| *candidate != selected);
     }
-    assert!(uncovered.is_empty(), "pairwise matrix exceeds {MAX_PR_ROWS} rows");
+    assert!(
+        uncovered.is_empty(),
+        "pairwise matrix exceeds {MAX_PR_ROWS} rows"
+    );
     rows
 }
 
@@ -102,17 +131,28 @@ mod tests {
         let rows = generate_pr_matrix();
         assert!(!rows.is_empty());
         assert!(rows.len() <= MAX_PR_ROWS);
-        let candidates: Vec<_> = (0..3usize.pow(ParameterRow::WIDTH as u32)).filter_map(|encoded| {
-            let mut n = encoded;
-            let mut values = [0u8; ParameterRow::WIDTH];
-            for value in &mut values { *value = (n % 3) as u8; n /= 3; }
-            let row = ParameterRow::from_values(values);
-            applicable(row).then_some(row)
-        }).collect();
-        for a in 0..ParameterRow::WIDTH { for b in (a + 1)..ParameterRow::WIDTH {
-            for candidate in &candidates {
-                assert!(rows.iter().any(|row| row.value(a) == candidate.value(a) && row.value(b) == candidate.value(b)), "uncovered valid pair");
+        let candidates: Vec<_> = (0..3usize.pow(ParameterRow::WIDTH as u32))
+            .filter_map(|encoded| {
+                let mut n = encoded;
+                let mut values = [0u8; ParameterRow::WIDTH];
+                for value in &mut values {
+                    *value = (n % 3) as u8;
+                    n /= 3;
+                }
+                let row = ParameterRow::from_values(values);
+                applicable(row).then_some(row)
+            })
+            .collect();
+        for a in 0..ParameterRow::WIDTH {
+            for b in (a + 1)..ParameterRow::WIDTH {
+                for candidate in &candidates {
+                    assert!(
+                        rows.iter().any(|row| row.value(a) == candidate.value(a)
+                            && row.value(b) == candidate.value(b)),
+                        "uncovered valid pair"
+                    );
+                }
             }
-        }}
+        }
     }
 }

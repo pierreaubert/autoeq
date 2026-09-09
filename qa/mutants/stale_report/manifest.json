@@ -1,0 +1,15 @@
+{
+  "id": "stale_reported_curve_after_reversion",
+  "runner": "check.py",
+  "test_source": "crates/roomeq-workflow/src/room_optimization/tests.rs",
+  "regression_test": {
+    "package": "roomeq-workflow",
+    "target": "roomeq_workflow",
+    "name": "room_optimization::tests::routed_safety_replay_publishes_fresh_curve_after_correction_reversion"
+  },
+  "mutation": {
+    "package": "roomeq-workflow",
+    "file": "crates/roomeq-workflow/src/room_optimization.rs",
+    "selector": "replace commit_or_restore_routed_safety_replay -> Result<\\(\\)> with Ok\\(\\(\\)\\)"
+  }
+}

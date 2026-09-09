@@ -1,0 +1,15 @@
+{
+  "id": "mixed_mode_crossover_reconstruction",
+  "runner": "check.py",
+  "test_source": "crates/roomeq-engine/src/dsp_realization.rs",
+  "regression_test": {
+    "package": "roomeq-engine",
+    "target": "roomeq_engine",
+    "name": "dsp_realization::tests::mixed_fir_iir_replay_matches_independent_complex_branch_sum"
+  },
+  "mutation": {
+    "package": "roomeq-engine",
+    "file": "crates/roomeq-engine/src/dsp_realization.rs",
+    "selector": "replace \\+ with \\* in mixed_band_response"
+  }
+}

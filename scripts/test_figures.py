@@ -13,6 +13,109 @@ from scripts.src.figures import (
 )
 
 
+def two_sub_overview_data():
+    """Stereo + two-subwoofer fixture with a shared LFE EQ."""
+    freq = [20.0, 40.0, 80.0, 160.0]
+    main = {
+        "initial_curve": {"freq": list(freq), "spl": [70.0] * len(freq)},
+        "final_curve": {"freq": list(freq), "spl": [71.0] * len(freq)},
+        "eq_response": {"freq": list(freq), "spl": [0.5] * len(freq)},
+        "plugins": [],
+    }
+    sub_freq = [20.0, 40.0, 80.0, 160.0]
+    shared_eq = {"filter_type": "peak", "freq": 40.0, "q": 1.0, "db_gain": -3.0}
+    lfe = {
+        "initial_curve": {"freq": list(sub_freq), "spl": [60.0] * len(sub_freq)},
+        "final_curve": {"freq": list(sub_freq), "spl": [61.0] * len(sub_freq)},
+        "plugins": [
+            {
+                "plugin_type": "eq",
+                "parameters": {
+                    "label": "room_eq_correction",
+                    "room_eq_stage": "post_route",
+                    "filters": [shared_eq],
+                },
+            },
+        ],
+        "drivers": [
+            {
+                "name": "Two subs_1",
+                "initial_curve": {"freq": list(sub_freq), "spl": [70.0] * len(sub_freq)},
+                "plugins": [
+                    {
+                        "plugin_type": "crossover",
+                        "parameters": {
+                            "frequency": 80.0,
+                            "output": "low",
+                            "room_eq_stage": "post_route",
+                            "type": "LR24",
+                        },
+                    },
+                ],
+            },
+            {
+                "name": "Two subs_2",
+                "initial_curve": {"freq": list(sub_freq), "spl": [66.0] * len(sub_freq)},
+                "plugins": [
+                    {
+                        "plugin_type": "gain",
+                        "parameters": {"gain_db": -4.0, "room_eq_stage": "post_route"},
+                    },
+                    {
+                        "plugin_type": "crossover",
+                        "parameters": {
+                            "frequency": 90.0,
+                            "output": "low",
+                            "room_eq_stage": "post_route",
+                            "type": "LR24",
+                        },
+                    },
+                ],
+            },
+        ],
+    }
+    routes = [
+        {
+            "source_channel": "LFE",
+            "destination": "Two subs_1",
+            "route_kind": "lfe_lowpass_to_sub",
+            "crossover_type": "LR24",
+            "low_pass_hz": 120.0,
+            "gain_db": 14.0,
+            "delay_ms": 0.0,
+            "polarity_inverted": False,
+        },
+        {
+            "source_channel": "LFE",
+            "destination": "Two subs_2",
+            "route_kind": "lfe_lowpass_to_sub",
+            "crossover_type": "LR24",
+            "low_pass_hz": 120.0,
+            "gain_db": 10.0,
+            "delay_ms": 0.0,
+            "polarity_inverted": False,
+        },
+    ]
+    return {
+        "channels": {"L": dict(main), "R": dict(main), "LFE": lfe},
+        "metadata": {
+            "bass_management": {
+                "physical_sub_output": "LFE",
+                "routing_graph": {"routes": routes},
+            },
+            "effective_config": {
+                "system": {"speakers": {"L": "L", "R": "R", "LFE": "subs"}},
+                "speakers": {
+                    "subs": {
+                        "name": "Two subs",
+                        "subwoofers": [{"name": "Left Sub"}, {"name": "Right Sub"}],
+                    }
+                },
+            },
+        },
+    }
+
+
 class ChannelOverlayFigureTests(unittest.TestCase):
     def test_all_channels_corrected_row_contains_channel_target(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -228,6 +331,84 @@ class ChannelOverlayFigureTests(unittest.TestCase):
         labels = list(fig.data[0].node.label)
         self.assertNotIn("sub: sub_1", labels)
         self.assertFalse(any(label.startswith("sub: ") for label in labels))
+
+
+class MultiSubEqRowTests(unittest.TestCase):
+    def test_eq_row_shows_one_trace_per_subwoofer(self):
+        fig = create_combined_figure(two_sub_overview_data())
+        eq_names = sorted(
+            trace.name for trace in fig.data if trace.name.startswith("EQ: ")
+        )
+
+        self.assertEqual(
+            eq_names, ["EQ: L", "EQ: Left Sub", "EQ: R", "EQ: Right Sub"]
+        )
+        self.assertNotIn("EQ: LFE", eq_names)
+
+    def test_per_sub_eq_traces_differ(self):
+        fig = create_combined_figure(two_sub_overview_data())
+        by_name = {trace.name: trace for trace in fig.data}
+
+        first = list(by_name["EQ: Left Sub"].y)
+        second = list(by_name["EQ: Right Sub"].y)
+        self.assertEqual(len(first), len(second))
+        self.assertGreater(
+            max(abs(a - b) for a, b in zip(first, second)), 1.0
+        )
+
+    def test_driver_traces_use_lines_and_cross_markers(self):
+        fig = create_combined_figure(two_sub_overview_data())
+        by_name = {trace.name: trace for trace in fig.data}
+
+        first = by_name["EQ: Left Sub"]
+        self.assertEqual(first.mode, "lines")
+
+        second = by_name["EQ: Right Sub"]
+        self.assertEqual(second.mode, "lines+markers")
+        self.assertEqual(second.marker.symbol, "cross")
+        opacity = list(second.marker.opacity)
+        self.assertEqual(len(opacity), len(second.y))
+        for index, value in enumerate(opacity):
+            self.assertEqual(value, 1.0 if index % 10 == 0 else 0.0)
+
+        original_first = by_name["Original: LFE/Two subs_1"]
+        self.assertEqual(original_first.mode, "lines")
+        original_second = by_name["Original: LFE/Two subs_2"]
+        self.assertEqual(original_second.mode, "lines+markers")
+        self.assertEqual(original_second.marker.symbol, "cross")
+
+        # Whole-channel traces stay plain lines.
+        self.assertEqual(by_name["EQ: L"].mode, "lines")
+
+    def test_single_sub_keeps_collapsed_eq_trace(self):
+        data = two_sub_overview_data()
+        channel = data["channels"]["LFE"]
+        channel["drivers"] = []
+        channel["eq_response"] = {
+            "freq": [20.0, 40.0],
+            "spl": [1.0, -1.0],
+        }
+
+        fig = create_combined_figure(data)
+        eq_names = sorted(
+            trace.name for trace in fig.data if trace.name.startswith("EQ: ")
+        )
+
+        self.assertEqual(eq_names, ["EQ: L", "EQ: LFE", "EQ: R"])
+
+    def test_drivers_without_eq_emit_no_eq_trace(self):
+        data = two_sub_overview_data()
+        channel = data["channels"]["LFE"]
+        channel["plugins"] = []
+        for driver in channel["drivers"]:
+            driver["plugins"] = []
+
+        fig = create_combined_figure(data)
+        eq_names = sorted(
+            trace.name for trace in fig.data if trace.name.startswith("EQ: ")
+        )
+
+        self.assertEqual(eq_names, ["EQ: L", "EQ: R"])
 
 
 if __name__ == "__main__":

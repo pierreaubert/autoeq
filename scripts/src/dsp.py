@@ -5,6 +5,8 @@ import sys
 
 import numpy as np
 
+from .data_extract import get_plottable_drivers
+
 
 def smooth_octave(freq: list[float], spl: list[float], octave_fraction: float) -> list[float]:
     """
@@ -709,6 +711,153 @@ def _corrected_multisub_curve(
     ]
     shared = _sub_shared_plugins_for_own_input(sub_channel)
     return _replay_drivers_through_transfer(drivers, shared, route_tail, sample_rate)
+
+
+def driver_destination_route(data: dict, driver_name: str) -> dict | None:
+    """Return the bass-management route feeding one physical driver.
+
+    A physical sub has one route per logical input; the sub's own
+    (LFE) route is preferred, then a redirected-bass route, then any
+    route to that destination. Returns `None` when the routing graph
+    has no route to ``driver_name`` (e.g. standalone multi-sub runs).
+    """
+    graph = ((data.get("metadata") or {}).get("bass_management") or {}).get(
+        "routing_graph", {}
+    ) or {}
+    candidates = [
+        route
+        for route in (graph.get("routes", []) or [])
+        if isinstance(route, dict) and str(route.get("destination")) == driver_name
+    ]
+    for preferred_kind in ("lfe_lowpass_to_sub", "redirected_bass_lowpass_to_sub"):
+        for route in candidates:
+            if route.get("route_kind") == preferred_kind:
+                return route
+    return candidates[0] if candidates else None
+
+
+def _route_tail_plugins(route: dict | None) -> list[dict]:
+    """Convert a routing-graph route into replayable DSP plugins."""
+    if not route:
+        return []
+    tail: list[dict] = []
+    low_pass_hz = route.get("low_pass_hz")
+    high_pass_hz = route.get("high_pass_hz")
+    if low_pass_hz is not None:
+        tail.append(
+            {
+                "plugin_type": "crossover",
+                "parameters": {
+                    "type": route.get("crossover_type", "LR24"),
+                    "output": "low",
+                    "frequency": low_pass_hz,
+                },
+            }
+        )
+    elif high_pass_hz is not None:
+        tail.append(
+            {
+                "plugin_type": "crossover",
+                "parameters": {
+                    "type": route.get("crossover_type", "LR24"),
+                    "output": "high",
+                    "frequency": high_pass_hz,
+                },
+            }
+        )
+    try:
+        gain_db = float(route.get("gain_db", 0.0))
+    except (TypeError, ValueError):
+        gain_db = 0.0
+    tail.append(
+        {
+            "plugin_type": "gain",
+            "parameters": {
+                "gain_db": gain_db,
+                "invert": bool(route.get("polarity_inverted", False)),
+            },
+        }
+    )
+    try:
+        delay_ms = float(route.get("delay_ms", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        delay_ms = 0.0
+    if delay_ms:
+        tail.append({"plugin_type": "delay", "parameters": {"delay_ms": delay_ms}})
+    return tail
+
+
+def per_driver_chain_plugins(
+    data: dict, channel_name: str, driver_index: int
+) -> list[dict] | None:
+    """Return the full magnitude-shaping chain of one physical driver.
+
+    The chain is the driver's own alignment plugins (gain / crossover /
+    per-sub EQ, excluding graph-owned stages) followed by the shared
+    channel input chain (same ownership rule as the logical-input
+    reconstruction) and the destination-matched route transfer. Returns
+    `None` when the driver index is invalid.
+    """
+    channel = (data.get("channels") or {}).get(channel_name)
+    drivers = get_plottable_drivers(channel)
+    if driver_index < 0 or driver_index >= len(drivers):
+        return None
+    driver = drivers[driver_index]
+    driver_plugins = [
+        plugin
+        for plugin in (driver.get("plugins") or [])
+        if isinstance(plugin, dict)
+        and (plugin.get("parameters", {}) or {}).get("room_eq_stage") != "route_owned"
+    ]
+    shared = _sub_shared_plugins_for_own_input(channel or {})
+    route = driver_destination_route(data, str(driver.get("name")))
+    return [*driver_plugins, *shared, *_route_tail_plugins(route)]
+
+
+def per_driver_effective_eq(
+    data: dict, channel_name: str, driver_index: int
+) -> dict | None:
+    """Return the total per-driver shaping curve on the driver's own grid.
+
+    A flat 0 dB input is replayed through
+    :func:`per_driver_chain_plugins`, so the result combines the shared
+    channel EQ with that driver's gain, crossover, and route transfer.
+    This is what the "All EQ Responses" overview row plots for each
+    subwoofer of a multi-sub channel. Returns `None` when the driver
+    has no usable frequency grid.
+    """
+    channel = (data.get("channels") or {}).get(channel_name)
+    drivers = get_plottable_drivers(channel)
+    if driver_index < 0 or driver_index >= len(drivers):
+        return None
+    grid = (drivers[driver_index].get("initial_curve") or {}).get("freq") or []
+    chain = per_driver_chain_plugins(data, channel_name, driver_index) or []
+    if not grid or not chain:
+        return None
+    sample_rate = float(data.get("sample_rate", 48_000.0) or 48_000.0)
+    return apply_plugins_to_curve(
+        {"freq": list(grid), "spl": [0.0] * len(grid)}, chain, sample_rate
+    )
+
+
+def per_driver_corrected_curve(
+    data: dict, channel_name: str, driver_index: int
+) -> dict | None:
+    """Replay one driver's measurement through its full deployed chain.
+
+    Returns `None` when the driver measurement or chain is unusable so
+    callers can fall back to the raw driver measurement.
+    """
+    channel = (data.get("channels") or {}).get(channel_name)
+    drivers = get_plottable_drivers(channel)
+    if driver_index < 0 or driver_index >= len(drivers):
+        return None
+    initial = drivers[driver_index].get("initial_curve")
+    chain = per_driver_chain_plugins(data, channel_name, driver_index) or []
+    if not initial or not chain:
+        return None
+    sample_rate = float(data.get("sample_rate", 48_000.0) or 48_000.0)
+    return apply_plugins_to_curve(initial, chain, sample_rate)
 
 
 def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:

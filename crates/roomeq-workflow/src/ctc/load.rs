@@ -53,23 +53,17 @@ pub(super) fn read_sofa_receiver_delays(
     if !hdf5.has_dataset(SOFA_DELAY_DATASET) {
         return Ok(None);
     }
-    let dims = hdf5
-        .dataset_dims(SOFA_DELAY_DATASET)
-        .map_err(|error| AutoeqError::InvalidMeasurement {
-            message: format!("failed to read SOFA {SOFA_DELAY_DATASET} dimensions: {error}"),
-        })?;
-    let values = hdf5
-        .read_f64(SOFA_DELAY_DATASET)
-        .map_err(|error| AutoeqError::InvalidMeasurement {
-            message: format!("failed to read SOFA {SOFA_DELAY_DATASET}: {error}"),
-        })?;
-    select_receiver_delays(
-        &values,
-        &dims,
-        num_measurements,
-        num_receivers,
-        measurement,
-    )
+    let dims =
+        hdf5.dataset_dims(SOFA_DELAY_DATASET)
+            .map_err(|error| AutoeqError::InvalidMeasurement {
+                message: format!("failed to read SOFA {SOFA_DELAY_DATASET} dimensions: {error}"),
+            })?;
+    let values =
+        hdf5.read_f64(SOFA_DELAY_DATASET)
+            .map_err(|error| AutoeqError::InvalidMeasurement {
+                message: format!("failed to read SOFA {SOFA_DELAY_DATASET}: {error}"),
+            })?;
+    select_receiver_delays(&values, &dims, num_measurements, num_receivers, measurement)
 }
 
 /// Validate `Data.Delay` shape (`[M, R]`) and select one measurement's
@@ -335,15 +329,14 @@ pub(super) fn load_hrtf_spectrum(
     // `SofaFile` exposes only `Data.IR`; separately stored `Data.Delay`
     // entries (F10) are read through the same file's HDF5 layer and applied
     // as exact spectral phase ramps below.
-    let hdf5 = Hdf5File::open(&hrtf.hrtf_file).map_err(|error| {
-        AutoeqError::InvalidMeasurement {
+    let hdf5 =
+        Hdf5File::open(&hrtf.hrtf_file).map_err(|error| AutoeqError::InvalidMeasurement {
             message: format!(
                 "failed to open CTC HRTF '{}' delay layer: {}",
                 hrtf.hrtf_file.display(),
                 error
             ),
-        }
-    })?;
+        })?;
     let mut speaker_spectra = Vec::new();
     let mut speakers = Vec::new();
     for speaker in &hrtf.speakers {

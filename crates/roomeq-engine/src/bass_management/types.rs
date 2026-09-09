@@ -27,6 +27,9 @@ pub struct SubDriverProcessing {
 
 /// Result of subwoofer preprocessing
 pub struct SubPreprocessResult {
+    /// Per-seat combined responses for shared EQ, distinct from routing's
+    /// representative complex response. Controls are already applied once.
+    pub shared_eq_seats: Option<Vec<Curve>>,
     /// Dedicated spatial/global sub EQ already ran before routed integration.
     pub common_eq_complete: bool,
     pub advisories: Vec<String>,

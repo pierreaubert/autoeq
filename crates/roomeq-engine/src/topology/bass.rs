@@ -239,6 +239,18 @@ pub fn bass_management_crossover_cancellation_underfill_db(
     combined: &Curve,
     xover_freq: f64,
 ) -> Option<f64> {
+    bass_management_crossover_cancellation_worst_bin(main_branch, bass_branch, combined, xover_freq)
+        .map(|(_, deficit)| deficit)
+}
+
+/// Frequency and deficit of the worst cancellation bin, not the configured
+/// crossover center. The deficit is relative to the louder physical branch.
+pub fn bass_management_crossover_cancellation_worst_bin(
+    main_branch: &Curve,
+    bass_branch: &Curve,
+    combined: &Curve,
+    xover_freq: f64,
+) -> Option<(f64, f64)> {
     if !same_frequency_grid(&main_branch.freq, &bass_branch.freq)
         || !same_frequency_grid(&main_branch.freq, &combined.freq)
         || main_branch.spl.len() != bass_branch.spl.len()
@@ -262,8 +274,8 @@ pub fn bass_management_crossover_cancellation_underfill_db(
                 && bass.is_finite()
                 && sum.is_finite()
         })
-        .map(|(((_, main), bass), sum)| (main.max(*bass) - *sum).max(0.0))
-        .reduce(f64::max)
+        .map(|(((frequency, main), bass), sum)| (*frequency, (main.max(*bass) - *sum).max(0.0)))
+        .max_by(|left, right| left.1.total_cmp(&right.1))
 }
 
 pub fn bass_management_crossover_type_candidates(requested: &str) -> Vec<String> {
@@ -400,5 +412,16 @@ mod tests {
             bass_management_crossover_cancellation_underfill_db(&main, &bass, &combined, 80.0)
                 .expect("shared grid");
         assert!(underfill <= 1.0e-12);
+    }
+
+    #[test]
+    fn cancellation_worst_bin_is_not_assumed_to_be_crossover_center() {
+        let main = curve_with_levels(|_| -6.0);
+        let bass = main.clone();
+        let combined = curve_with_levels(|frequency| if frequency == 117.0 { -18.0 } else { -6.0 });
+        assert_eq!(bass_management_crossover_cancellation_worst_bin(&main, &bass, &combined, 80.0), Some((117.0, 12.0)));
+        let mut shifted = combined.clone();
+        shifted.freq += 0.5;
+        assert_eq!(bass_management_crossover_cancellation_worst_bin(&main, &bass, &shifted, 80.0), None);
     }
 }

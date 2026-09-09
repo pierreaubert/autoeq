@@ -1,21 +1,115 @@
-/// Apply a GD-alignment delay to existing FIR coefficients.
-///
-/// A pure delay is `H(f) * exp(-j 2 pi f tau)`: unity magnitude at every
-/// frequency. To honour that contract the filter support is extended for
-/// positive delays instead of silently discarding coefficients that move past
-/// the end of the array. Fractional shifts use a Lanczos-windowed sinc
-/// interpolator with zero padding and full-kernel normalization so edge taps
-/// are interpolated rather than renormalized to unity (F02).
+/// Half-support of the band-limited delay kernel. Its specified usable band is
+/// 0..=0.46 * sample_rate, with <= 0.01 dB magnitude error. Nyquist itself is
+/// deliberately excluded: a finite real FIR cannot implement an arbitrary
+/// fractional delay there.
+pub const GD_DELAY_KERNEL_HALF: usize = 64;
+pub const GD_DELAY_MAX_NORMALIZED_FREQUENCY: f64 = 0.46;
+pub const GD_DELAY_MAGNITUDE_TOLERANCE_DB: f64 = 0.01;
+
+/// Common integer padding needed to realize a set of requested delays without
+/// cropping any leading input coefficients. Use the maximum for the entire
+/// alignment group, including its zero-delay reference.
+pub fn gd_delay_padding_samples(delays_ms: &[f64], sample_rate: f64) -> usize {
+    delays_ms
+        .iter()
+        .map(|delay| {
+            let shift = delay * sample_rate / 1000.0;
+            let fractional = (shift - shift.round()).abs() > 1e-9;
+            let earliest = if fractional {
+                shift.floor() - GD_DELAY_KERNEL_HALF as f64
+            } else {
+                shift.round()
+            };
+            (-earliest).max(0.0).ceil() as usize
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+/// Realized delay and the latency needed to keep its whole kernel causal.
+#[derive(Debug, Clone)]
+pub struct GdFirDelay {
+    pub coefficients: Vec<f64>,
+    pub effective_delay_ms: f64,
+    pub common_padding_samples: usize,
+}
+
+/// Apply a delay with explicitly allocated common causal support. The common
+/// padding must be identical for every aligned channel; it preserves relative
+/// timing, and must appear in reported/exported absolute latency.
+pub fn realize_gd_fir_delay(
+    coeffs: &[f64],
+    delay_ms: f64,
+    sample_rate: f64,
+    common_padding_samples: usize,
+) -> Result<GdFirDelay, String> {
+    if !sample_rate.is_finite()
+        || sample_rate <= 0.0
+        || !delay_ms.is_finite()
+        || coeffs.is_empty()
+        || coeffs.iter().any(|c| !c.is_finite())
+    {
+        return Err("invalid FIR delay input".into());
+    }
+    let required = gd_delay_padding_samples(&[delay_ms], sample_rate);
+    if common_padding_samples < required {
+        return Err(format!(
+            "FIR delay requires at least {required} common padding samples"
+        ));
+    }
+    let shift = delay_ms * sample_rate / 1000.0 + common_padding_samples as f64;
+    let nearest = shift.round();
+    let coefficients = if (shift - nearest).abs() <= 1e-9 {
+        apply_sample_shift(coeffs, nearest as isize)
+    } else {
+        let base = shift.floor() as usize - GD_DELAY_KERNEL_HALF;
+        let fraction = shift - shift.floor();
+        let kernel: Vec<f64> = (0..=2 * GD_DELAY_KERNEL_HALF)
+            .map(|index| {
+                let x = index as f64 - GD_DELAY_KERNEL_HALF as f64 - fraction;
+                // Symmetric Blackman window around the fractional kernel center.
+                let radius = GD_DELAY_KERNEL_HALF as f64;
+                let window = if x.abs() <= radius {
+                    0.42 + 0.5 * (std::f64::consts::PI * x / radius).cos()
+                        + 0.08 * (2.0 * std::f64::consts::PI * x / radius).cos()
+                } else {
+                    0.0
+                };
+                sinc(x) * window
+            })
+            .collect();
+        let dc: f64 = kernel.iter().sum();
+        let mut output = vec![0.0; base + coeffs.len() + kernel.len() - 1];
+        for (index, coefficient) in coeffs.iter().enumerate() {
+            if *coefficient == 0.0 {
+                continue;
+            }
+            for (tap, weight) in kernel.iter().enumerate() {
+                output[base + index + tap] += coefficient * weight / dc;
+            }
+        }
+        output
+    };
+    Ok(GdFirDelay {
+        coefficients,
+        effective_delay_ms: shift * 1000.0 / sample_rate,
+        common_padding_samples,
+    })
+}
+
+/// Convenience realization for a single FIR. This adds the causal padding
+/// returned by `gd_delay_padding_samples(&[delay_ms], sample_rate)`; the actual
+/// delay is requested delay plus that padding. Group callers must use
+/// `realize_gd_fir_delay` with shared padding and retain its latency metadata.
 pub fn apply_gd_delay_to_fir_coefficients(
     coeffs: &[f64],
     delay_ms: f64,
     sample_rate: f64,
 ) -> Vec<f64> {
-    if delay_ms.abs() <= 1e-6 {
-        return coeffs.to_vec();
-    }
-    let delay_samples = delay_ms * 1e-3 * sample_rate;
-    apply_fractional_sample_shift(coeffs, delay_samples)
+    let padding = gd_delay_padding_samples(&[delay_ms], sample_rate);
+    realize_gd_fir_delay(coeffs, delay_ms, sample_rate, padding)
+        .expect("valid FIR delay coefficients, rate and delay")
+        .coefficients
 }
 
 /// Shift FIR coefficients by a given number of samples (positive = later).
@@ -40,73 +134,6 @@ pub(super) fn apply_sample_shift(coeffs: &[f64], shift: isize) -> Vec<f64> {
         }
         shifted
     }
-}
-
-/// Shift FIR coefficients by a fractional number of samples using a
-/// 16-tap Lanczos-windowed sinc interpolator. Positive shift = later.
-///
-/// The interpolator zero-pads outside the coefficient array and normalizes by
-/// the full kernel weight (including out-of-bounds taps). Renormalizing by
-/// only the in-bounds weights boosts edge energy: for a leading impulse that
-/// produced +4.45 dB of spurious gain. Positive shifts extend support by
-/// `ceil(shift)` samples so large delays remain unity-magnitude instead of
-/// collapsing to silence.
-pub(super) fn apply_fractional_sample_shift(coeffs: &[f64], shift: f64) -> Vec<f64> {
-    let n = coeffs.len();
-    if shift.abs() < 1e-9 {
-        return coeffs.to_vec();
-    }
-    let integer_shift = shift.round();
-    if (shift - integer_shift).abs() < 1e-9 {
-        return apply_sample_shift(coeffs, integer_shift as isize);
-    }
-    const HALF_WIDTH: isize = 8;
-    let output_len = if shift > 0.0 {
-        n + shift.ceil() as usize
-    } else {
-        n
-    };
-    let mut shifted = vec![0.0; output_len];
-    for (i, output) in shifted.iter_mut().enumerate() {
-        let src = i as f64 - shift;
-        let base = src.floor() as isize;
-        let frac = src - base as f64;
-        let mut full_normalization = 0.0;
-        let mut value = 0.0;
-        for offset in (-HALF_WIDTH + 1)..=HALF_WIDTH {
-            let distance = frac - offset as f64;
-            let weight = sinc(distance) * sinc(distance / HALF_WIDTH as f64);
-            full_normalization += weight;
-            let index = base + offset;
-            if (0..n as isize).contains(&index) {
-                value += weight * coeffs[index as usize];
-            }
-        }
-        if full_normalization.abs() > 1e-12 {
-            *output = value / full_normalization;
-        }
-    }
-    // A causal finite-length positive delay discards the ideal pre-ringing
-    // before sample zero, which raises LF gain for leading-edge energy
-    // (about +1 dB for a leading impulse at half-sample delay). A pure
-    // delay preserves DC gain and positive shifts extend support so no input
-    // energy is legitimately removed; restore the coefficient sum with a
-    // single global scale. This is distinct from per-tap renormalization,
-    // which caused the +4.45 dB edge boost. Negative shifts legitimately drop
-    // leading energy when advancing, so they are left unscaled.
-    if shift > 0.0 {
-        let input_sum: f64 = coeffs.iter().sum();
-        let output_sum: f64 = shifted.iter().sum();
-        if input_sum.abs() > 1e-9 && output_sum.abs() > 1e-12 {
-            let scale = input_sum / output_sum;
-            if scale.is_finite() && (scale - 1.0).abs() < 0.5 && scale > 0.0 {
-                for output in shifted.iter_mut() {
-                    *output *= scale;
-                }
-            }
-        }
-    }
-    shifted
 }
 
 fn sinc(value: f64) -> f64 {

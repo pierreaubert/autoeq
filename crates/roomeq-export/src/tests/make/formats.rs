@@ -636,7 +636,7 @@ fn pipewire_and_camilladsp_exports_preserve_the_same_serial_semantics() {
     assert!(camilla.contains("gain: -2.50"));
 
     assert!(pipewire.contains("\"Delay (s)\" = 0.001500000"));
-    assert!(camilla.contains("delay: 1.500"));
+    assert!(camilla.contains("delay: 72\n      unit: samples"));
     assert_eq!(
         pipewire.matches("label = bq_").count(),
         camilla.matches("type: Biquad").count()
@@ -646,9 +646,12 @@ fn pipewire_and_camilladsp_exports_preserve_the_same_serial_semantics() {
     let pipewire_delay = pipewire.find("ch0_left_plugin_1_delay").unwrap();
     let pipewire_eq = pipewire.find("ch0_left_plugin_2_eq_0").unwrap();
     assert!(pipewire_gain < pipewire_delay && pipewire_delay < pipewire_eq);
-    let camilla_gain = camilla.find("left_gain:").unwrap();
-    let camilla_delay = camilla.find("left_delay:").unwrap();
-    let camilla_eq = camilla.find("left_peq_0:").unwrap();
+    // Execution order is defined by pipeline references, not the order of
+    // named filter definitions in the YAML mapping.
+    let pipeline = camilla.split_once("pipeline:").unwrap().1;
+    let camilla_gain = pipeline.find("- left_gain").unwrap();
+    let camilla_delay = pipeline.find("- left_delay").unwrap();
+    let camilla_eq = pipeline.find("- left_peq_0").unwrap();
     assert!(camilla_gain < camilla_delay && camilla_delay < camilla_eq);
 }
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import json
+import csv
 import struct
 import tempfile
 import unittest
@@ -10,6 +11,41 @@ import mdat2csv
 
 
 class Mdat2CsvTests(unittest.TestCase):
+    def test_csv_preserves_native_unequal_grids_and_narrow_null(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for index, frequencies in enumerate(([20., 79., 80., 81., 500.], [30., 80., 400.])):
+                levels = [40. if f == 80. else 80. for f in frequencies]
+                phases = [-0.36 * f for f in frequencies]
+                path = mdat2csv.export_csv({
+                    'name': f'seat_{index}', 'freq': frequencies,
+                    'spl': levels, 'phase': phases,
+                }, directory)
+                with open(path, newline='') as stream:
+                    rows = list(csv.DictReader(stream))
+                self.assertEqual([float(r['freq_hz']) for r in rows], frequencies)
+                self.assertEqual([float(r['spl_db']) for r in rows], levels)
+                for row, expected in zip(rows, phases):
+                    self.assertAlmostEqual(float(row['phase_deg']), expected, delta=0.5e-6)
+
+    def test_invalid_csv_data_does_not_overwrite_existing_export(self):
+        invalid = [
+            {'spl': None}, {'spl': [80.]}, {'spl': [80., float('nan')]},
+            {'phase': [0.]}, {'phase': [0., float('inf')]},
+            {'freq': [20., 20.]}, {'freq': [80., 20.]},
+            {'freq': [0., 80.]}, {'freq': [20., float('nan')]},
+            {'freq': []},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / 'seat.csv'
+            destination.write_text('existing valid export', encoding='utf-8')
+            for change in invalid:
+                measurement = {'name': 'seat', 'freq': [20., 80.],
+                               'spl': [80., 40.], 'phase': None}
+                measurement.update(change)
+                with self.subTest(change=change), self.assertRaises(ValueError):
+                    mdat2csv.export_csv(measurement, directory)
+                self.assertEqual(destination.read_text(), 'existing valid export')
+
     def test_measurements_can_have_different_point_counts(self):
         fields = [('I', 'dataLength'), ('I', 'sampleRate')]
         first = struct.pack('>ii', 1068, 48000)

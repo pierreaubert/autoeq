@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 
+import tempfile
 import unittest
+from pathlib import Path
 
+from scripts.src.data_extract import display_channel_entries
 from scripts.src.report import (
     _channel_display_final_curve,
     _comparison_source_label,
+    _driver_shaping_summary_html,
     _has_redirected_bass_route,
     _mixed_phase_summary_html,
+    create_html_report,
 )
+from scripts.test_figures import two_sub_overview_data
 
 
 class MixedPhaseReportTests(unittest.TestCase):
@@ -109,6 +115,78 @@ class ChannelDisplayCurveTests(unittest.TestCase):
             _channel_display_final_curve("L", "LFE", channel, {"L": routed_sum}),
             main_only,
         )
+
+
+class SubDriverTabTests(unittest.TestCase):
+    def test_two_subs_expand_into_per_sub_tabs(self):
+        entries = display_channel_entries(two_sub_overview_data())
+
+        self.assertEqual(
+            [(entry["label"], entry["channel"], entry["driver"]) for entry in entries],
+            [
+                ("L", "L", None),
+                ("R", "R", None),
+                ("Left Sub", "LFE", 0),
+                ("Right Sub", "LFE", 1),
+            ],
+        )
+
+    def test_driver_names_fall_back_without_effective_config(self):
+        data = two_sub_overview_data()
+        del data["metadata"]["effective_config"]
+
+        entries = display_channel_entries(data)
+
+        self.assertEqual(
+            [entry["label"] for entry in entries],
+            ["L", "R", "Two subs_1", "Two subs_2"],
+        )
+
+    def test_channels_without_drivers_keep_single_tab(self):
+        entries = display_channel_entries(
+            {"channels": {"L": {}, "R": {}, "LFE": {}}}
+        )
+
+        self.assertEqual(
+            [(entry["label"], entry["driver"]) for entry in entries],
+            [("L", None), ("R", None), ("LFE", None)],
+        )
+
+    def test_driver_shaping_summary_lists_chain(self):
+        data = two_sub_overview_data()
+
+        first = _driver_shaping_summary_html(data, "LFE", 0)
+        second = _driver_shaping_summary_html(data, "LFE", 1)
+
+        for expected in (
+            "driver gain +0.0 dB",
+            "low-pass LR24 @ 80.0 Hz",
+            "LFE route gain +14.0 dB",
+            "LFE route low-pass @ 120.0 Hz",
+        ):
+            self.assertIn(expected, first)
+        for expected in (
+            "driver gain -4.0 dB",
+            "low-pass LR24 @ 90.0 Hz",
+            "LFE route gain +10.0 dB",
+        ):
+            self.assertIn(expected, second)
+        self.assertEqual(_driver_shaping_summary_html(data, "LFE", 7), "")
+
+    def test_html_report_renders_per_sub_tabs(self):
+        data = two_sub_overview_data()
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.html"
+            create_html_report(data, output, None)
+            html = output.read_text(encoding="utf-8")
+
+        self.assertIn(">Left Sub</button>", html)
+        self.assertIn(">Right Sub</button>", html)
+        self.assertNotIn(">LFE</button>", html)
+        self.assertIn("<h2>Channel: Left Sub</h2>", html)
+        self.assertIn("Sub DSP Chain", html)
+        self.assertIn("EQ: Left Sub", html)
+        self.assertIn("EQ: Right Sub", html)
 
 
 if __name__ == "__main__":

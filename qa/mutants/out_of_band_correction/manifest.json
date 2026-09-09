@@ -1,0 +1,16 @@
+{
+  "id": "correction_above_reliable_passband",
+  "runner": "check.py",
+  "test_source": "crates/roomeq-engine/src/channel_preprocessing.rs",
+  "regression_test": {
+    "package": "roomeq-engine",
+    "target": "roomeq_engine",
+    "name": "channel_preprocessing::tests::preprocessing_caps_correction_at_detected_upper_passband"
+  },
+  "mutation": {
+    "package": "roomeq-engine",
+    "file": "crates/roomeq-engine/src/channel_preprocessing.rs",
+    "selector": "replace < with > in preprocess_channel",
+    "scope_diff": "qa/mutants/out_of_band_correction/scope.diff"
+  }
+}

@@ -72,6 +72,15 @@ where
 /// Optimizer configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct OptimizerConfig {
+    /// Explicit authorized broadband output change by logical input, in dB.
+    /// Used only for useful-output assessment; does not install a gain plugin.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub permitted_output_gain_db: std::collections::HashMap<String, f64>,
+    /// Explicit calibrated upper-band acoustic bounds for final-seat replay,
+    /// keyed by physical output. Never inferred from candidate response tails.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub upper_band_acoustic_bounds:
+        std::collections::HashMap<String, Vec<crate::UpperBandAcousticBound>>,
     /// Processing mode — selects the filter class used for correction.
     #[serde(default, alias = "mode")]
     pub processing_mode: ProcessingMode,
@@ -316,6 +325,8 @@ pub struct OptimizerConfig {
 impl Default for OptimizerConfig {
     fn default() -> Self {
         Self {
+            upper_band_acoustic_bounds: std::collections::HashMap::new(),
+            permitted_output_gain_db: std::collections::HashMap::new(),
             loss_type: default_loss_type(),
             algorithm: default_algorithm(),
             strategy: default_strategy(),

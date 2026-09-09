@@ -77,7 +77,7 @@ pub(super) fn parse_biquad_filter_type(value: &str) -> Option<BiquadFilterType> 
     }
 }
 
-pub(super) fn checked_sample_rate(sample_rate: f64) -> Result<u32> {
+pub(crate) fn checked_sample_rate(sample_rate: f64) -> Result<u32> {
     if !sample_rate.is_finite() || sample_rate <= 0.0 || sample_rate > u32::MAX as f64 {
         return Err(AutoeqError::InvalidConfiguration {
             message: format!("invalid sample rate for CTC: {}", sample_rate),
@@ -138,14 +138,37 @@ pub(super) fn ir_to_half_spectrum(
     }
 }
 
-pub(super) fn read_wav_channels_f64(
+pub(crate) fn read_wav_channels_f64(
     path: &Path,
     sample_rate: u32,
     label: &str,
 ) -> Result<Vec<Vec<f64>>> {
-    let mut reader = WavReader::open(path).map_err(|err| AutoeqError::InvalidMeasurement {
+    let reader = WavReader::open(path).map_err(|err| AutoeqError::InvalidMeasurement {
         message: format!("failed to open {} '{}': {}", label, path.display(), err),
     })?;
+    decode_wav_channels_f64(reader, path, sample_rate, label)
+}
+
+pub(crate) fn read_wav_bytes_channels_f64(
+    bytes: &[u8],
+    path: &Path,
+    sample_rate: u32,
+    label: &str,
+) -> Result<Vec<Vec<f64>>> {
+    let reader = WavReader::new(std::io::Cursor::new(bytes)).map_err(|err| {
+        AutoeqError::InvalidMeasurement {
+            message: format!("failed to open {} '{}': {}", label, path.display(), err),
+        }
+    })?;
+    decode_wav_channels_f64(reader, path, sample_rate, label)
+}
+
+fn decode_wav_channels_f64<R: std::io::Read>(
+    mut reader: WavReader<R>,
+    path: &Path,
+    sample_rate: u32,
+    label: &str,
+) -> Result<Vec<Vec<f64>>> {
     let spec = reader.spec();
     if spec.sample_rate != sample_rate {
         return Err(AutoeqError::InvalidMeasurement {

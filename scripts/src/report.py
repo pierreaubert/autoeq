@@ -24,9 +24,19 @@ from .figures import (
     _mode_label,
     _mode_color,
 )
-from .data_extract import extract_eq_passes, get_channel_sort_key
+from .data_extract import (
+    channel_has_eq,
+    display_channel_entries,
+    extract_eq_passes,
+    get_channel_sort_key,
+    get_plottable_drivers,
+)
 from .dsp import (
     build_post_dsp_source_curves,
+    driver_destination_route,
+    per_driver_chain_plugins,
+    per_driver_corrected_curve,
+    per_driver_effective_eq,
     sum_driver_initial_curves,
     synthesize_lr_channel,
 )
@@ -72,6 +82,89 @@ def _channel_display_final_curve(
     if channel_name == physical_sub:
         return post_dsp_curves.get(channel_name) or channel_data.get("final_curve")
     return channel_data.get("final_curve")
+
+
+def _driver_shaping_summary_html(
+    data: dict, channel_name: str, driver_index: int
+) -> str:
+    """Render the per-sub DSP chain summary for a driver tab.
+
+    Lists the driver alignment (gain / delay / low-pass) plus the
+    destination-matched route transfer, i.e. everything the tab's EQ
+    plot combines on top of the shared channel EQ filters.
+    """
+    channel = (data.get("channels") or {}).get(channel_name) or {}
+    drivers = get_plottable_drivers(channel)
+    if driver_index < 0 or driver_index >= len(drivers):
+        return ""
+    driver = drivers[driver_index]
+
+    gain_db = 0.0
+    delay_ms = 0.0
+    inverted = False
+    low_pass_hz: float | None = None
+    low_pass_type: str | None = None
+    for plugin in driver.get("plugins") or []:
+        if not isinstance(plugin, dict):
+            continue
+        params = plugin.get("parameters") or {}
+        kind = str(plugin.get("plugin_type", "")).lower()
+        if kind == "gain":
+            try:
+                gain_db += float(params.get("gain_db", 0.0))
+            except (TypeError, ValueError):
+                pass
+            inverted = inverted or bool(params.get("invert", False))
+        elif kind == "delay":
+            try:
+                delay_ms += float(params.get("delay_ms", 0.0))
+            except (TypeError, ValueError):
+                pass
+        elif kind == "crossover" and str(params.get("output", "")).lower().startswith(
+            "low"
+        ):
+            try:
+                candidate = float(params.get("frequency", 0.0))
+            except (TypeError, ValueError):
+                continue
+            if candidate > 0.0:
+                low_pass_hz = candidate
+                raw_type = params.get("type")
+                low_pass_type = str(raw_type) if raw_type is not None else None
+
+    parts = [f"driver gain {gain_db:+.1f} dB"]
+    if inverted:
+        parts.append("polarity inverted")
+    if abs(delay_ms) > 1e-9:
+        parts.append(f"delay {delay_ms:.3f} ms")
+    if low_pass_hz is not None:
+        lp_label = f" {low_pass_type}" if low_pass_type else ""
+        parts.append(f"low-pass{lp_label} @ {low_pass_hz:.1f} Hz")
+
+    route = driver_destination_route(data, str(driver.get("name")))
+    route_gain: float | None = None
+    route_lp: float | None = None
+    if route is not None and route.get("route_kind") == "lfe_lowpass_to_sub":
+        try:
+            route_gain = float(route.get("gain_db", 0.0))
+        except (TypeError, ValueError):
+            route_gain = None
+        low = route.get("low_pass_hz")
+        try:
+            route_lp = float(low) if low is not None else None
+        except (TypeError, ValueError):
+            route_lp = None
+    if route_gain is not None:
+        parts.append(f"LFE route gain {route_gain:+.1f} dB")
+    if route_lp is not None:
+        parts.append(f"LFE route low-pass @ {route_lp:.1f} Hz")
+
+    return (
+        '<div class="filters-section">\n'
+        "    <h3>Sub DSP Chain</h3>\n"
+        f'    <div class="filter-list">{escape("; ".join(parts))}</div>\n'
+        "</div>\n"
+    )
 
 
 # Ordered EPA fields with their display labels and formatting rules.
@@ -946,32 +1039,85 @@ def create_html_report(
         data, target_references, output_json_path
     )
 
-    # Individual channel sections in tabs
+    # Individual channel sections in tabs. Multi-driver channels (e.g.
+    # two subwoofers on one LFE bus) expand into one tab per physical
+    # driver so each subwoofer gets its own plots and filter details.
+    tab_entries = display_channel_entries(data)
     html_parts.append('<div class="tabs-container">\n')
     html_parts.append('    <div class="tab-header">\n')
-    for i, (channel_name, _) in enumerate(channels):
+    for i, entry in enumerate(tab_entries):
         active_class = " active" if i == 0 else ""
         safe_id = f"channel_{i}"
-        html_parts.append(f'        <button class="tab-btn{active_class}" onclick="openChannel(event, \'{safe_id}\')">{channel_name}</button>\n')
+        html_parts.append(f'        <button class="tab-btn{active_class}" onclick="openChannel(event, \'{safe_id}\')">{escape(entry["label"])}</button>\n')
     html_parts.append('    </div>\n')
 
-    for i, (channel_name, channel_data) in enumerate(channels):
+    for i, entry in enumerate(tab_entries):
+        channel_name = entry["channel"]
+        driver_index = entry["driver"]
+        tab_label = entry["label"]
+        safe_label = escape(tab_label)
+        channel_data = channels_dict[channel_name]
+        is_driver_tab = driver_index is not None
         active_class = " active" if i == 0 else ""
         safe_id = f"channel_{i}"
-        initial_curve = channel_data.get("initial_curve")
-        if channel_data.get("drivers"):
-            # A multi-driver aggregate initial is level-relative optimizer
-            # state; the summed driver measurements are the acoustic baseline
-            # matching the logical-input corrected curve.
-            driver_baseline = sum_driver_initial_curves(channel_data)
-            if driver_baseline is not None:
-                initial_curve = driver_baseline
-        final_curve = _channel_display_final_curve(
-            channel_name, physical_sub, channel_data, post_dsp_curves
-        )
+
+        if is_driver_tab:
+            # Physical sub output: its own measurement replayed through
+            # its full deployed chain (shared EQ plus per-sub
+            # gain/crossover/route).
+            drivers = get_plottable_drivers(channel_data)
+            driver = (
+                drivers[driver_index]
+                if 0 <= driver_index < len(drivers)
+                else {}
+            )
+            chain = per_driver_chain_plugins(data, channel_name, driver_index) or []
+            eq_source: dict = {"plugins": chain}
+            initial_curve = driver.get("initial_curve")
+            final_curve = per_driver_corrected_curve(data, channel_name, driver_index)
+            passes = extract_eq_passes(eq_source)
+            # The tab EQ plot appears only when EQ exists (mirroring the
+            # legacy empty-EQ behavior); otherwise the tab keeps its
+            # response plots without an EQ section.
+            eq_response_view = (
+                per_driver_effective_eq(data, channel_name, driver_index)
+                if channel_has_eq(channel_data)
+                else None
+            )
+            target_view = None
+            lfe_plus_channel = None
+            ir_pre = driver.get("pre_ir")
+            ir_post = driver.get("post_ir")
+            caption_html = (
+                f'<p class="epa-footer">Physical sub output of {escape(channel_name)}: '
+                "its measurement through this sub's own DSP chain "
+                "(shared EQ + per-sub gain/crossover/route). The EQ plot below "
+                "shows this total per-sub shaping.</p>\n"
+            )
+        else:
+            initial_curve = channel_data.get("initial_curve")
+            if channel_data.get("drivers"):
+                # A multi-driver aggregate initial is level-relative optimizer
+                # state; the summed driver measurements are the acoustic baseline
+                # matching the logical-input corrected curve.
+                driver_baseline = sum_driver_initial_curves(channel_data)
+                if driver_baseline is not None:
+                    initial_curve = driver_baseline
+            final_curve = _channel_display_final_curve(
+                channel_name, physical_sub, channel_data, post_dsp_curves
+            )
+            eq_source = channel_data
+            passes = extract_eq_passes(channel_data)
+            eq_response_view = channel_data.get("eq_response")
+            target_view = target_curves.get(channel_name)
+            lfe_plus_channel = None
+            if channel_name != physical_sub and _has_redirected_bass_route(data, channel_name):
+                lfe_plus_channel = post_dsp_curves.get(channel_name)
+            ir_pre = channel_data.get("pre_ir")
+            ir_post = channel_data.get("post_ir")
+            caption_html = ""
 
         # Extract EQ filters (grouped by pass for 3-pass pipeline)
-        passes = extract_eq_passes(channel_data)
         eq_filters = []
         for p in passes:
             eq_filters.extend(p["filters"])
@@ -980,31 +1126,28 @@ def create_html_report(
             f"""
         <div id="{safe_id}" class="tab-content{active_class}">
             <div class="channel-section">
-                <h2>Channel: {channel_name}</h2>
-"""
+                <h2>Channel: {safe_label}</h2>
+{caption_html}"""
         )
 
         # Full range plot
         fig_full = create_channel_figure(
-            channel_name, initial_curve, final_curve, " (Full Range)"
+            tab_label, initial_curve, final_curve, " (Full Range)"
         )
-        lfe_plus_channel = None
-        if channel_name != physical_sub and _has_redirected_bass_route(data, channel_name):
-            lfe_plus_channel = post_dsp_curves.get(channel_name)
         add_channel_response_overlays(
             fig_full,
-            channel_name,
-            target_curves.get(channel_name),
+            tab_label,
+            target_view,
             lfe_plus_channel,
         )
         full_html = fig_full.to_html(full_html=False, include_plotlyjs=False)
 
         # Zoomed plot (20-1200 Hz)
-        fig_zoom = create_zoomed_figure(channel_name, initial_curve, final_curve)
+        fig_zoom = create_zoomed_figure(tab_label, initial_curve, final_curve)
         add_channel_response_overlays(
             fig_zoom,
-            channel_name,
-            target_curves.get(channel_name),
+            tab_label,
+            target_view,
             lfe_plus_channel,
         )
         zoom_html = fig_zoom.to_html(full_html=False, include_plotlyjs=False)
@@ -1024,10 +1167,10 @@ def create_html_report(
 
         # EQ response plot (uses per-pass breakdown when 3-pass labels are present)
         fig_eq = create_multipass_eq_figure(
-            channel_name, channel_data, channel_data.get("eq_response")
+            tab_label, eq_source, eq_response_view
         )
         if fig_eq is None:
-            fig_eq = create_eq_figure(channel_name, eq_filters, channel_data.get("eq_response"))
+            fig_eq = create_eq_figure(tab_label, eq_filters, eq_response_view)
         if fig_eq:
             eq_html = fig_eq.to_html(full_html=False, include_plotlyjs=False)
             html_parts.append(
@@ -1040,9 +1183,9 @@ def create_html_report(
 
         # IR waveform plot
         fig_ir = create_ir_figure(
-            channel_name,
-            channel_data.get("pre_ir"),
-            channel_data.get("post_ir"),
+            tab_label,
+            ir_pre,
+            ir_post,
         )
         if fig_ir:
             ir_html = fig_ir.to_html(full_html=False, include_plotlyjs=False)
@@ -1108,6 +1251,11 @@ def create_html_report(
                 </div>
 """
             )
+
+        if is_driver_tab:
+            shaping_html = _driver_shaping_summary_html(data, channel_name, driver_index)
+            if shaping_html:
+                html_parts.append(shaping_html)
 
         html_parts.append(
             """

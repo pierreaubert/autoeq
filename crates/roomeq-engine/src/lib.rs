@@ -92,6 +92,8 @@ pub mod multisub;
 /// Deterministic DSP-chain and response assembly.
 pub mod output;
 pub mod phase_alignment;
+/// Resolve canonical physical routing independently of playback backends.
+pub mod physical_routing;
 /// Prepared pipeline requests, observable events, and the production execution port.
 pub mod pipeline;
 /// Progress reporting for long-running RoomEQ operations.

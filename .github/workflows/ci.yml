@@ -118,12 +118,82 @@ jobs:
 
       - name: Strict RoomEQ config and registry lint
         run: cargo test -p roomeq-qa strictly_deserialize --lib
+      - name: Install exact-test discovery
+        uses: taiki-e/install-action@cargo-nextest
+      - name: Escaped-defect ownership and exact regressions
+        run: just qa-roomeq-escaped-defects
+      - name: Pairwise parameter execution and exit contracts
+        run: just qa-roomeq-parameters-pr
+      - name: Upload parameter-matrix evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roomeq-parameter-matrix
+          path: |
+            target/qa/roomeq-parameter-matrix.json
+            target/qa/roomeq-seed-distributions.jsonl
+      - name: Upload escaped-defect evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roomeq-escaped-defect-regressions
+          path: target/qa/escaped-defects/
 
       - name: Run deterministic RoomEQ correctness contracts
         run: just qa-roomeq-contract-pr
 
       - name: Run RoomEQ CI QA
         run: just qa-roomeq-ci
+
+  qa-roomeq-escaped-mutations:
+    name: RoomEQ Escaped-Defect Mutations
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: extractions/setup-just@v4
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-mutants
+      - name: Verify ownership and mutation-runner failure contracts
+        run: python3 -m unittest scripts.test_escaped_defect_ownership scripts.test_run_escaped_defect_mutations
+      - name: Registered escaped-defect mutations
+        run: just qa-roomeq-escaped-defect-mutants
+      - name: Upload mutation execution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roomeq-escaped-defect-mutations
+          path: target/qa/escaped-defects/
+
+  qa-roomeq-camilladsp:
+    name: RoomEQ Required CamillaDSP Contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: extractions/setup-just@v4
+      - name: Verify required-backend launcher failure contracts
+        run: python3 scripts/test_camilladsp_backend_contracts.py
+      - name: Install Linux audio build dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev libpulse-dev libjack-jackd2-dev
+      - name: Install verified CamillaDSP revision
+        run: cargo install --locked --git https://github.com/HEnquist/camilladsp.git --rev 05e9cfcdf43c0dfe078ed3feb8af4c8bd701fd74 CamillaDSP
+      - name: Execute required PCM backend contracts
+        run: just qa-roomeq-camilladsp-backend
+      - name: Replay all selected parameter-matrix outputs through CamillaDSP
+        run: just qa-roomeq-matrix-backend
+      - name: Upload actual backend evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roomeq-camilladsp-backend
+          path: |
+            target/qa/camilladsp-backend-contracts.*
+            target/qa/roomeq-matrix-backend.*
+            target/qa/roomeq-parameter-matrix.json
+            target/qa/roomeq-parameter-bundles/
 
   qa-roomeq-macos:
     name: RoomEQ macOS Acoustic Baseline

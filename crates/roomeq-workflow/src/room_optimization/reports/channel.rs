@@ -134,6 +134,7 @@ pub(in super::super) fn compute_and_correct_icd(
         let mut applied_any = false;
         let baseline_channel_results = result.channel_results.clone();
         let baseline_channels = result.channels.clone();
+        let baseline_deployed_source_curves = result.deployed_source_curves.clone();
 
         if matching_groups.is_empty() {
             info!("No role-compatible channel matching groups found; skipping ICD correction");
@@ -210,6 +211,7 @@ pub(in super::super) fn compute_and_correct_icd(
             );
             result.channel_results = baseline_channel_results;
             result.channels = baseline_channels;
+            result.deployed_source_curves = baseline_deployed_source_curves;
             result.metadata.inter_channel_deviation = Some(icd);
             return;
         }
@@ -219,7 +221,8 @@ pub(in super::super) fn compute_and_correct_icd(
             .channel_results
             .iter()
             .filter(|(name, _)| !is_subwoofer_channel(config, name))
-            .map(|(name, ch)| (name.clone(), ch.final_curve.clone()))
+            .map(|(name, ch)| (name.clone(), result.deployed_source_curves.get(name)
+                .cloned().unwrap_or_else(|| ch.final_curve.clone())))
             .collect();
         let icd_after =
             roomeq_engine::spectral_align::compute_inter_channel_deviation(&corrected_curves, f3);

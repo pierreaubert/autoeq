@@ -46,7 +46,10 @@ pub(super) fn apply_qa_overrides(config: &mut RoomConfig, maxeval: usize) {
     config.optimizer.max_iter = if replaced_auto_de {
         maxeval
     } else {
-        qa_budget_for_algorithm(&config.optimizer.algorithm, config.optimizer.max_iter.min(maxeval))
+        qa_budget_for_algorithm(
+            &config.optimizer.algorithm,
+            config.optimizer.max_iter.min(maxeval),
+        )
     };
     config.optimizer.seed = Some(SEED);
     // Pin evaluation to a single thread: parallel optimizer evaluation order
@@ -145,7 +148,13 @@ mod tests {
 
     #[test]
     fn qa_budget_distinguishes_de_from_cmaes() {
-        assert_eq!(qa_budget_for_algorithm("autoeq:de", QA_MAXEVAL), DE_QA_MAXEVAL);
-        assert_eq!(qa_budget_for_algorithm("autoeq:cmaes", QA_MAXEVAL), QA_MAXEVAL);
+        assert_eq!(
+            qa_budget_for_algorithm("autoeq:de", QA_MAXEVAL),
+            DE_QA_MAXEVAL
+        );
+        assert_eq!(
+            qa_budget_for_algorithm("autoeq:cmaes", QA_MAXEVAL),
+            QA_MAXEVAL
+        );
     }
 }

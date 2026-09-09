@@ -481,10 +481,12 @@ fn test_create_dsp_chain_output() {
         perceptual_policy: None,
         bootstrap_uncertainty: None,
         validation_bundle: None,
+        final_convolution_sha256: None,
         supporting_source: None,
         correction_acceptance: None,
         optimizer_evidence: None,
         stage_outcomes: Vec::new(),
+        qa_seed_distribution: None,
         effective_config: None,
     };
 
@@ -555,10 +557,12 @@ fn test_create_dsp_chain_output_adds_ctc_global_xtc_plugin() {
         perceptual_policy: None,
         bootstrap_uncertainty: None,
         validation_bundle: None,
+        final_convolution_sha256: None,
         supporting_source: None,
         correction_acceptance: None,
         optimizer_evidence: None,
         stage_outcomes: Vec::new(),
+        qa_seed_distribution: None,
         effective_config: None,
     };
 

@@ -14,7 +14,7 @@ use super::consts::SCORECARD_SHARPNESS_MIN;
 use super::group::group_delay_std_dev;
 use super::misc::convergence_epsilon;
 use super::mutation::Mutation;
-use super::peak::peak_deviation_db;
+use super::peak::{measured_band, peak_deviation_db};
 use roomeq_engine::room_result::RoomOptimizationResult;
 use roomeq_model::CorrectionDecision;
 
@@ -25,8 +25,12 @@ pub(super) struct MetricScorecard {
     pub(super) flat_loss: f64,
     /// Maximum positive deviation (peak) across channels in passband (dB).
     pub(super) peak_residual_db: f64,
-    /// Largest positive gain requested by any deployed PEQ section (dB).
+    /// Required attenuation for the sampled delivered electrical output peak.
+    /// Infinity means replay failed; it must never fall back to section gain.
     pub(super) max_boost_db: f64,
+    pub(super) max_section_gain_db: f64,
+    pub(super) electrical: Option<super::electrical::ElectricalAssessment>,
+    pub(super) replay_bundle: Option<std::path::PathBuf>,
     /// Runtime safety replaced some or all of the requested correction.
     pub(super) correction_reverted: bool,
     /// Average EPA preference score across channels (higher = better).
@@ -43,9 +47,13 @@ impl std::fmt::Display for MetricScorecard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "flat={:.4} peak={:.2}dB boost={:.2}dB",
+            "flat={:.4} peak={:.2}dB sampled_electrical={:.2}dB",
             self.flat_loss, self.peak_residual_db, self.max_boost_db
         )?;
+        write!(f, " section={:.2}dB", self.max_section_gain_db)?;
+        if let Some(Err(error)) = &self.electrical {
+            write!(f, " electrical_unassessed={error}")?;
+        }
         if let Some(v) = self.epa_preference {
             write!(f, " epa={:.2}", v)?;
         }
@@ -66,14 +74,32 @@ impl std::fmt::Display for MetricScorecard {
 }
 
 /// Compute the full scorecard from a single optimization result.
-pub(super) fn compute_scorecard(result: &RoomOptimizationResult) -> MetricScorecard {
+pub(super) fn compute_scorecard(result: &super::run::AssessedOptimization) -> MetricScorecard {
+    result.scorecard.clone()
+}
+
+pub(super) fn compute_result_scorecard(
+    result: &RoomOptimizationResult,
+    electrical: super::electrical::ElectricalAssessment,
+) -> MetricScorecard {
     let flat_loss = result.combined_post_score;
-    let max_boost_db = result
+    let max_section_gain_db = result
         .channel_results
         .values()
         .flat_map(|channel| channel.biquads.iter())
         .map(|biquad| biquad.db_gain)
         .fold(0.0_f64, f64::max);
+    let max_boost_db = electrical
+        .as_ref()
+        .ok()
+        .filter(|peaks| !peaks.is_empty())
+        .map(|peaks| {
+            peaks
+                .iter()
+                .map(|p| p.required_attenuation_db)
+                .fold(0.0_f64, f64::max)
+        })
+        .unwrap_or(f64::INFINITY);
     let correction_reverted =
         result
             .metadata
@@ -90,7 +116,10 @@ pub(super) fn compute_scorecard(result: &RoomOptimizationResult) -> MetricScorec
     // passband mean, across all channels. Measures flatness of the result.
     let mut peak_residual_db = 0.0_f64;
     for ch in result.channel_results.values() {
-        let peak_dev = peak_deviation_db(&ch.final_curve, SCORECARD_FMIN, SCORECARD_FMAX);
+        let peak_dev = measured_band(&ch.initial_curve, SCORECARD_FMIN, SCORECARD_FMAX)
+            .map_or(f64::INFINITY, |(low, high)| {
+                peak_deviation_db(&ch.final_curve, low, high)
+            });
         peak_residual_db = peak_residual_db.max(peak_dev);
     }
 
@@ -120,6 +149,9 @@ pub(super) fn compute_scorecard(result: &RoomOptimizationResult) -> MetricScorec
         flat_loss,
         peak_residual_db,
         max_boost_db,
+        max_section_gain_db,
+        electrical: Some(electrical),
+        replay_bundle: None,
         correction_reverted,
         epa_preference,
         epa_sharpness,
@@ -346,6 +378,9 @@ pub(super) fn placeholder_scorecard(flat_loss: f64) -> MetricScorecard {
         flat_loss,
         peak_residual_db: 0.0,
         max_boost_db: 0.0,
+        max_section_gain_db: 0.0,
+        electrical: None,
+        replay_bundle: None,
         correction_reverted: false,
         epa_preference: None,
         epa_sharpness: None,

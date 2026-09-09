@@ -14,6 +14,7 @@ from .dsp import (
     compute_group_delay_from_ir,
     generate_freq_points,
     build_post_dsp_source_curves,
+    per_driver_effective_eq,
     wrap_phase,
 )
 
@@ -36,11 +37,14 @@ def _align_final_to_initial_grid(
     )
     return freq_data, spl_raw
 from .data_extract import (
+    channel_has_eq,
     compute_y_range,
     compute_average_spl_in_range,
+    driver_display_names,
     extract_eq_passes,
     get_all_crossover_frequencies,
     get_channel_sort_key,
+    get_plottable_drivers,
 )
 from .target_overlay import build_target_overlay_curves
 
@@ -754,6 +758,33 @@ def _get_driver_initial_curves(channel_data: dict) -> list[tuple[str, dict]] | N
     return result if result else None
 
 
+# One cross marker every N points on multi-driver traces: enough to tell
+# the drivers apart without cluttering dense frequency grids.
+_MARKER_EVERY_N_POINTS = 10
+
+
+def _driver_trace_kwargs(driver_index: int, color: str, point_count: int) -> dict:
+    """Return Plotly style kwargs distinguishing drivers within one channel.
+
+    Drivers share their channel color. The first driver is a plain solid
+    line; additional drivers use lines+cross markers instead of dash
+    patterns so the traces stay distinguishable in monochrome. Markers
+    render on every ``_MARKER_EVERY_N_POINTS``-th point via a per-point
+    opacity array, keeping a single trace per driver.
+    """
+    if driver_index <= 0:
+        return {"mode": "lines", "line": dict(color=color, width=2)}
+    opacity = [
+        1.0 if index % _MARKER_EVERY_N_POINTS == 0 else 0.0
+        for index in range(max(0, point_count))
+    ]
+    return {
+        "mode": "lines+markers",
+        "line": dict(color=color, width=2),
+        "marker": dict(symbol="cross", size=6, color=color, opacity=opacity),
+    }
+
+
 def create_combined_figure(data: dict, json_path: "None | object" = None) -> go.Figure:
     """Create a combined figure with 3-row subplots: Original, EQ, Corrected.
 
@@ -801,9 +832,6 @@ def create_combined_figure(data: dict, json_path: "None | object" = None) -> go.
     # Generate frequency points for EQ response
     freq_points = generate_freq_points(20.0, 20000.0, 500)
 
-    # Driver line dash patterns for distinguishing drivers within a channel
-    driver_dashes = ["solid", "dash", "dot", "dashdot"]
-
     # Collect all curves for y-range computation
     all_initial_curves: list[dict | None] = []
     all_corrected_curves: list[dict | None] = []
@@ -833,12 +861,57 @@ def create_combined_figure(data: dict, json_path: "None | object" = None) -> go.
     initial_y_min, initial_y_max = compute_y_range(all_initial_curves)
     corrected_y_min, corrected_y_max = compute_y_range(all_corrected_curves)
 
-    # Compute EQ y-range
-    all_eq_values: list[float] = []
-    for _, channel_data in channels:
+    # EQ traces for row 2. Multi-driver channels (e.g. two subwoofers
+    # sharing one LFE bus) expand into one effective per-driver shaping
+    # curve so each physical sub is visible instead of a single collapsed
+    # channel trace. Entries are (trace name, freq, spl, color index,
+    # driver index or None, legend group).
+    eq_row_traces: list[tuple[str, list, list, int, int | None, str]] = []
+    for channel_index, (channel_name, channel_data) in enumerate(channels):
+        drivers = get_plottable_drivers(channel_data)
+        if drivers and channel_has_eq(channel_data):
+            labels = driver_display_names(data, channel_name)
+            expanded = False
+            for driver_index in range(len(drivers)):
+                effective = per_driver_effective_eq(data, channel_name, driver_index)
+                if (
+                    effective
+                    and effective.get("freq")
+                    and effective.get("spl")
+                ):
+                    if driver_index < len(labels):
+                        label = labels[driver_index]
+                    else:
+                        label = f"{channel_name}/{driver_index}"
+                    eq_row_traces.append(
+                        (
+                            f"EQ: {label}",
+                            effective["freq"],
+                            effective["spl"],
+                            channel_index,
+                            driver_index,
+                            f"ch_{channel_name}",
+                        )
+                    )
+                    expanded = True
+            if expanded:
+                continue
         eq_response_data = channel_data.get("eq_response")
-        if eq_response_data and "spl" in eq_response_data:
-            all_eq_values.extend(eq_response_data["spl"])
+        if (
+            eq_response_data
+            and "freq" in eq_response_data
+            and "spl" in eq_response_data
+        ):
+            eq_row_traces.append(
+                (
+                    f"EQ: {channel_name}",
+                    eq_response_data["freq"],
+                    eq_response_data["spl"],
+                    channel_index,
+                    None,
+                    f"ch_{channel_name}",
+                )
+            )
         else:
             plugins = channel_data.get("plugins", [])
             eq_filters = []
@@ -848,7 +921,21 @@ def create_combined_figure(data: dict, json_path: "None | object" = None) -> go.
                     eq_filters.extend(filters)
             if eq_filters:
                 eq_resp = compute_eq_response(eq_filters, freq_points)
-                all_eq_values.extend(eq_resp)
+                eq_row_traces.append(
+                    (
+                        f"EQ: {channel_name}",
+                        freq_points,
+                        eq_resp,
+                        channel_index,
+                        None,
+                        f"ch_{channel_name}",
+                    )
+                )
+
+    # Compute EQ y-range
+    all_eq_values: list[float] = []
+    for _, _, eq_spl_values, _, _, _ in eq_row_traces:
+        all_eq_values.extend(eq_spl_values)
 
     if all_eq_values:
         eq_y_upper = min(20, math.ceil(max(all_eq_values) / 5) * 5 + 5)
@@ -885,14 +972,9 @@ def create_combined_figure(data: dict, json_path: "None | object" = None) -> go.
                     go.Scatter(
                         x=dcurve["freq"],
                         y=spl_smoothed,
-                        mode="lines",
                         name=f"Original: {channel_name}/{driver_name}",
-                        line=dict(
-                            color=color,
-                            width=2,
-                            dash=driver_dashes[d_idx % len(driver_dashes)],
-                        ),
                         legendgroup=f"ch_{channel_name}",
+                        **_driver_trace_kwargs(d_idx, color, len(spl_smoothed)),
                     ),
                     row=1,
                     col=1,
@@ -924,45 +1006,31 @@ def create_combined_figure(data: dict, json_path: "None | object" = None) -> go.
                 )
                 trace_y_data.append(spl_smoothed)
 
-    # --- Row 2: EQ responses ---
-    for i, (channel_name, channel_data) in enumerate(channels):
-        color = channel_colors[i % len(channel_colors)]
-
-        eq_response_data = channel_data.get("eq_response")
-        if (
-            eq_response_data
-            and "freq" in eq_response_data
-            and "spl" in eq_response_data
-        ):
-            eq_freq = eq_response_data["freq"]
-            eq_spl = eq_response_data["spl"]
+    # --- Row 2: EQ responses (per-driver entries for multi-driver channels) ---
+    for trace_name, eq_freq, eq_spl, color_index, driver_index, legendgroup in eq_row_traces:
+        color = channel_colors[color_index % len(channel_colors)]
+        if driver_index is None:
+            style_kwargs: dict = {
+                "mode": "lines",
+                "line": dict(color=color, width=2),
+            }
         else:
-            plugins = channel_data.get("plugins", [])
-            eq_filters = []
-            for plugin in plugins:
-                if plugin.get("plugin_type") == "eq":
-                    filters = plugin.get("parameters", {}).get("filters", [])
-                    eq_filters.extend(filters)
-            eq_freq = freq_points if eq_filters else None
-            eq_spl = (
-                compute_eq_response(eq_filters, freq_points) if eq_filters else None
+            style_kwargs = _driver_trace_kwargs(
+                driver_index, color, len(eq_spl)
             )
-
-        if eq_spl:
-            fig.add_trace(
-                go.Scatter(
-                    x=eq_freq,
-                    y=eq_spl,
-                    mode="lines",
-                    name=f"EQ: {channel_name}",
-                    line=dict(color=color, width=2),
-                    legendgroup=f"ch_{channel_name}",
-                    showlegend=False,
-                ),
-                row=2,
-                col=1,
-            )
-            trace_y_data.append(eq_spl)
+        fig.add_trace(
+            go.Scatter(
+                x=eq_freq,
+                y=eq_spl,
+                name=trace_name,
+                legendgroup=legendgroup,
+                showlegend=False,
+                **style_kwargs,
+            ),
+            row=2,
+            col=1,
+        )
+        trace_y_data.append(eq_spl)
 
     # 0 dB reference on EQ plot
     fig.add_trace(

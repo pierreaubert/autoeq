@@ -440,6 +440,13 @@ pub fn coherent_average_measurement(
     curves: &[Curve],
     contract: &CoherentAverageContract,
 ) -> Result<Curve, Box<dyn Error>> {
+    if !contract.min_phase_confidence.is_finite()
+        || !(0.0..=1.0).contains(&contract.min_phase_confidence)
+    {
+        return Err(
+            "coherent average minimum phase confidence must be finite and in [0, 1]".into(),
+        );
+    }
     if curves.is_empty() {
         return Err("coherent average needs at least one curve".into());
     }
@@ -469,12 +476,23 @@ pub fn coherent_average_measurement(
         }
     }
     for seat in &contract.seats {
-        if contract.require_calibration && seat.calibration_id.is_none() {
+        if contract.require_calibration
+            && seat
+                .calibration_id
+                .as_ref()
+                .is_none_or(|id| id.trim().is_empty())
+        {
             return Err(format!(
                 "coherent average requires a calibration identity for seat '{}'",
                 seat.seat_id
             )
             .into());
+        }
+        if seat
+            .phase_confidence
+            .is_some_and(|confidence| !confidence.is_finite() || !(0.0..=1.0).contains(&confidence))
+        {
+            return Err(format!("seat '{}' has invalid phase confidence", seat.seat_id).into());
         }
         if seat.phase_confidence.unwrap_or(0.0) < contract.min_phase_confidence {
             return Err(format!(
@@ -1025,6 +1043,37 @@ mod tests {
             require_calibration: false,
         };
         assert!(coherent_average_measurement(&no_phase, &permissive).is_err());
+    }
+
+    #[test]
+    fn coherent_average_rejects_malformed_evidence() {
+        let mut curve = sample_curve(0.0);
+        curve.phase = Some(Array1::from_vec(vec![10.0, 20.0, 30.0]));
+        let curves = vec![curve];
+        let valid = CoherentAverageContract {
+            seats: vec![SeatProvenance {
+                seat_id: "primary".into(),
+                calibration_id: Some("mic-1".into()),
+                phase_confidence: Some(1.0),
+                ..Default::default()
+            }],
+            min_phase_confidence: 0.8,
+            require_calibration: true,
+        };
+        assert!(coherent_average_measurement(&curves, &valid).is_ok());
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.1, 1.1] {
+            let mut contract = valid.clone();
+            contract.min_phase_confidence = value;
+            assert!(coherent_average_measurement(&curves, &contract).is_err());
+            let mut contract = valid.clone();
+            contract.seats[0].phase_confidence = Some(value);
+            assert!(coherent_average_measurement(&curves, &contract).is_err());
+        }
+        for id in [None, Some("".into()), Some(" \t\n".into())] {
+            let mut contract = valid.clone();
+            contract.seats[0].calibration_id = id;
+            assert!(coherent_average_measurement(&curves, &contract).is_err());
+        }
     }
 
     #[test]

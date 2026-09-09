@@ -36,6 +36,7 @@ pub(in super::super) fn preprocess_sub_with_frequency_samples(
                     }
                 })?;
             Ok(SubPreprocessResult {
+                shared_eq_seats: None,
                 common_eq_complete: false,
                 optimizer_evidence: Vec::new(),
                 advisories: Vec::new(),
@@ -126,6 +127,11 @@ pub(in super::super) fn preprocess_multisub_mso_with_frequency_samples(
         combined.coherence = primary.coherence.clone();
     }
     let result = optimized.base;
+    let shared_eq_seats = crate::group_measurements::load_multisub_seat_measurements_with_frequency_samples(
+        ms, frequency_samples,
+    )?.map(|seats| roomeq_engine::multisub::render_mso_seat_responses(
+        &seats, &result.gains, &result.delays,
+    )).transpose()?;
 
     info!(
         "  MSO result: gains={:?}, delays={:?}",
@@ -151,6 +157,7 @@ pub(in super::super) fn preprocess_multisub_mso_with_frequency_samples(
     }
 
     Ok(SubPreprocessResult {
+        shared_eq_seats,
         common_eq_complete: false,
         optimizer_evidence: Vec::new(),
         advisories: Vec::new(),
@@ -258,6 +265,7 @@ fn preprocess_multisub_advanced(
     }
     Ok(SubPreprocessResult {
         combined_curve: combined,
+        shared_eq_seats: None,
         drivers: Some(drivers),
         common_eq_complete: true,
         optimizer_evidence: evidence,
@@ -343,6 +351,7 @@ pub(in super::super) fn preprocess_multisub_independent_with_frequency_samples(
         .collect();
 
     Ok(SubPreprocessResult {
+        shared_eq_seats: None,
         common_eq_complete: false,
         optimizer_evidence: Vec::new(),
         advisories: Vec::new(),
@@ -476,6 +485,7 @@ pub(in super::super) fn preprocess_cardioid_with_frequency_samples(
     ];
 
     Ok(SubPreprocessResult {
+        shared_eq_seats: None,
         common_eq_complete: false,
         optimizer_evidence: Vec::new(),
         advisories: Vec::new(),
@@ -536,6 +546,7 @@ pub(in super::super) fn preprocess_dba_with_frequency_samples(
     ];
 
     Ok(SubPreprocessResult {
+        shared_eq_seats: None,
         common_eq_complete: false,
         optimizer_evidence: vec![optimized.optimizer_evidence],
         advisories: Vec::new(),
@@ -575,6 +586,28 @@ mod tests {
             seed: Some(1),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn legacy_mso_retains_each_shared_eq_seat_separately_from_routing() {
+        let source = MeasurementSource::InMemoryMultiple(vec![
+            make_curve(16, 80.0, Some(37.0)),
+            make_curve(16, 90.0, Some(-89.0)),
+        ]);
+        let group = MultiSubGroup {
+            name: "subs".into(), speaker_name: None,
+            subwoofers: vec![source.clone(), source], allpass_optimization: false,
+        };
+        let result = preprocess_multisub_mso_with_frequency_samples(
+            &group, &tiny_optimizer(), 48_000.0, 16,
+        ).unwrap();
+        let seats = result.shared_eq_seats.as_ref().expect("shared EQ lost measured seats");
+        assert_eq!(seats.len(), 2);
+        for (first, second) in seats[0].spl.iter().zip(&seats[1].spl) {
+            assert!((second - first - 10.0).abs() < 1e-8);
+        }
+        assert!(result.combined_curve.phase.is_some(), "routing lost complex phase");
+        assert!(!result.common_eq_complete);
     }
 
     #[test]

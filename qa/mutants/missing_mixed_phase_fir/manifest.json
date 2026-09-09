@@ -1,0 +1,16 @@
+{
+  "id": "missing_mixed_phase_fir",
+  "runner": "check.py",
+  "test_source": "crates/roomeq-workflow/src/room_optimization/tests.rs",
+  "regression_test": {
+    "package": "roomeq-workflow",
+    "target": "roomeq_workflow",
+    "name": "room_optimization::tests::mixed_phase_missing_fir_is_scoped_degradation"
+  },
+  "mutation": {
+    "package": "roomeq-workflow",
+    "file": "crates/roomeq-workflow/src/room_optimization.rs",
+    "selector": "replace != with == in record_missing_mixed_phase_fir_reversions",
+    "scope_diff": "qa/mutants/missing_mixed_phase_fir/scope.diff"
+  }
+}

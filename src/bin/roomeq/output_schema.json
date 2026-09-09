@@ -63,6 +63,13 @@
         },
         "training": {
           "$ref": "#/$defs/QualityPartitionMetrics"
+        },
+        "useful_output": {
+          "description": "Unnormalized output evidence; absent in legacy scorecards, never inferred\nfrom level-independent shape metrics.",
+          "items": {
+            "$ref": "#/$defs/UsefulOutputEvidence"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -768,7 +775,7 @@
           ]
         },
         "selected_sub_low_pass_hz": {
-          "description": "Per-sub selected low-pass frequencies in positional sub order. Empty unless a per-sub crossover list was resolved and optimized. Each selected low-pass is applied before the physical driver sum and owns the redirected-bass cutoff; those routes omit a second group low-pass. LFE retains its independent cutoff.",
+          "description": "Per-sub selected low-pass frequencies in positional sub order\n(entry `i` is the splice low-pass for sub `i`).\n\nEmpty unless the subwoofer crossover resolved to a per-sub list and\nthe per-sub splice stage ran. The shared-bus routing graph still\ndeploys `selected_crossover_hz` on every redirected-bass route; these\nentries are the per-driver values for downstream per-driver export,\napplied pre-sum when drivers share one bus.",
           "items": {
             "format": "double",
             "type": "number"
@@ -1400,7 +1407,7 @@
           "type": "boolean"
         },
         "selected_low_pass_hz": {
-          "description": "Low-pass selected for this physical sub output by the per-sub splice\nstage (`None` unless a per-sub crossover list was configured and the\nshared-array splice search for this output ran). Redirected-bass routes omit the\ngroup low-pass when per-driver low-passes are present; this is the\nper-driver value for downstream per-driver export, applied pre-sum\nwhen drivers share one bus.",
+          "description": "Low-pass selected for this physical sub output by the per-sub splice\nstage (`None` unless a per-sub crossover list was configured and the\nshared-array splice search for this output ran). This filter owns the\nredirected-bass cutoff, so those routes omit another group low-pass.\nThe LFE programme retains its independent low-pass.",
           "format": "double",
           "type": [
             "number",
@@ -2069,6 +2076,7 @@
     "CorrectionDecision": {
       "enum": [
         "accepted",
+        "rejected",
         "reverted_stage",
         "identity_fallback"
       ],
@@ -3442,6 +3450,12 @@
           "format": "double",
           "type": "number"
         },
+        "improvement_lower_bound_db": {
+          "default": 0.0,
+          "description": "Improvement after subtracting pre/post summation uncertainty budgets.",
+          "format": "double",
+          "type": "number"
+        },
         "logical_input": {
           "type": "string"
         },
@@ -3454,9 +3468,21 @@
           },
           "type": "array"
         },
+        "post_summation_support": {
+          "items": {
+            "$ref": "#/$defs/SummationSupportEvidence"
+          },
+          "type": "array"
+        },
         "post_weighted_rms_db": {
           "format": "double",
           "type": "number"
+        },
+        "pre_summation_support": {
+          "items": {
+            "$ref": "#/$defs/SummationSupportEvidence"
+          },
+          "type": "array"
         },
         "pre_weighted_rms_db": {
           "format": "double",
@@ -3473,6 +3499,18 @@
             "string",
             "null"
           ]
+        },
+        "unassessed_bands_hz": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -5213,6 +5251,17 @@
           "format": "double",
           "type": "number"
         },
+        "qa_seed_distribution": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QaSeedDistribution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Full QA seed population; the selected median is not a reliability rate."
+        },
         "stage_outcomes": {
           "description": "Structured outcomes for optional/degradable processing stages.",
           "items": {
@@ -5690,6 +5739,14 @@
           ],
           "description": "Product-level perceptual policy preset. When omitted, legacy optimizer\ndefaults are preserved."
         },
+        "permitted_output_gain_db": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "description": "Explicit authorized broadband output change by logical input, in dB.\nUsed only for useful-output assessment; does not install a gain plugin.",
+          "type": "object"
+        },
         "phase_alignment": {
           "anyOf": [
             {
@@ -5827,6 +5884,16 @@
           "format": "double",
           "type": "number"
         },
+        "upper_band_acoustic_bounds": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/UpperBandAcousticBound"
+            },
+            "type": "array"
+          },
+          "description": "Explicit calibrated upper-band acoustic bounds for final-seat replay,\nkeyed by physical output. Never inferred from candidate response tails.",
+          "type": "object"
+        },
         "validation_bundle": {
           "anyOf": [
             {
@@ -5960,6 +6027,40 @@
         "invalid_result"
       ],
       "type": "string"
+    },
+    "OutputLossBand": {
+      "properties": {
+        "sample_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sampled_band_hz": {
+          "description": "Endpoints of consecutive evaluation samples exceeding the threshold.\nThis does not establish a continuous-frequency bound between samples.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "worst_frequency_hz": {
+          "format": "double",
+          "type": "number"
+        },
+        "worst_loss_db": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "sampled_band_hz",
+        "sample_count",
+        "worst_frequency_hz",
+        "worst_loss_db"
+      ],
+      "type": "object"
     },
     "ParallelDriverGroup": {
       "description": "Drivers that radiate in parallel within one acoustic crossover band.",
@@ -6539,6 +6640,102 @@
           "type": "integer"
         }
       },
+      "type": "object"
+    },
+    "QaSeedDistribution": {
+      "properties": {
+        "accepted_useful_rate": {
+          "format": "double",
+          "type": "number"
+        },
+        "outcomes": {
+          "items": {
+            "$ref": "#/$defs/QaSeedOutcome"
+          },
+          "type": "array"
+        },
+        "post_score_spread": {
+          "format": "double",
+          "type": "number"
+        },
+        "safe_output_rate": {
+          "format": "double",
+          "type": "number"
+        },
+        "selected_seed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "selected_seed",
+        "accepted_useful_rate",
+        "safe_output_rate",
+        "post_score_spread",
+        "outcomes"
+      ],
+      "type": "object"
+    },
+    "QaSeedOutcome": {
+      "description": "Durable outcome of one QA seed, including rejected and reverted attempts.",
+      "properties": {
+        "acceptance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CorrectionAcceptanceReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "accepted_useful": {
+          "description": "Explicit acceptance plus a material improvement of the delivered score.",
+          "type": "boolean"
+        },
+        "optimizer_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RoomOptimizerEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "post_score": {
+          "format": "double",
+          "type": "number"
+        },
+        "pre_score": {
+          "format": "double",
+          "type": "number"
+        },
+        "safe_output": {
+          "description": "Finite output with explicit final acceptance and no Failed stage.\nFalse includes unverified/reverted output, not only proven unsafe DSP.\nThis does not imply useful EQ or independent backend certification.",
+          "type": "boolean"
+        },
+        "seed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "stage_outcomes": {
+          "items": {
+            "$ref": "#/$defs/StageOutcome"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "seed",
+        "pre_score",
+        "post_score",
+        "accepted_useful",
+        "safe_output",
+        "stage_outcomes"
+      ],
       "type": "object"
     },
     "QualityPartitionMetrics": {
@@ -7957,6 +8154,60 @@
       },
       "type": "object"
     },
+    "SummationSupportEvidence": {
+      "description": "Bound retained when a physical branch is omitted outside measured support.",
+      "properties": {
+        "acoustic_bound": {
+          "$ref": "#/$defs/UpperBandAcousticBound"
+        },
+        "max_magnitude_uncertainty_db": {
+          "description": "Worst -20 log10(1-rho), including actual baseline/candidate DSP.",
+          "format": "double",
+          "type": "number"
+        },
+        "max_phase_uncertainty_deg": {
+          "description": "Worst asin(rho) phase uncertainty of the retained nominal complex sum.",
+          "format": "double",
+          "type": "number"
+        },
+        "max_sum_omitted_amplitude_ratio": {
+          "description": "Worst ratio of all omitted amplitude bounds to the retained complex sum.",
+          "format": "double",
+          "type": "number"
+        },
+        "measured_band_hz": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "omitted_band_hz": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "physical_output": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "physical_output",
+        "measured_band_hz",
+        "omitted_band_hz",
+        "acoustic_bound",
+        "max_sum_omitted_amplitude_ratio",
+        "max_magnitude_uncertainty_db",
+        "max_phase_uncertainty_deg"
+      ],
+      "type": "object"
+    },
     "SupportingSourceConfig": {
       "description": "Configuration for a single supporting-source loudspeaker channel.",
       "properties": {
@@ -8621,6 +8872,154 @@
         "arrival_spread_after_ms",
         "channels",
         "advisories"
+      ],
+      "type": "object"
+    },
+    "UpperBandAcousticBound": {
+      "description": "Calibrated upper bound on an unmeasured acoustic transfer, before DSP.\nThis is an external evidence declaration, not a fitted extrapolation.",
+      "properties": {
+        "band_hz": {
+          "description": "Bound must overlap the measurement endpoint and cover the assessed band.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "evidence_id": {
+          "description": "Stable reference to the calibration, specification, or measurement proof.",
+          "type": "string"
+        },
+        "max_spl_db": {
+          "description": "Same input reference and SPL calibration as the corresponding capture.",
+          "format": "double",
+          "type": "number"
+        },
+        "partition": {
+          "description": "`training` or `held_out`, matching the immutable capture partition.",
+          "type": "string"
+        },
+        "seat_index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "partition",
+        "seat_index",
+        "band_hz",
+        "max_spl_db",
+        "evidence_id"
+      ],
+      "type": "object"
+    },
+    "UsefulOutputEvidence": {
+      "properties": {
+        "bass_evaluated_band_hz": {
+          "description": "Separate bass assessment so a broad main band cannot dilute lost bass.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "bass_unexplained_loss_rms_db": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "evaluated_band_hz": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "logical_input": {
+          "description": "Present when evaluated by logical-input final playback replay.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "loss_band_threshold_db": {
+          "description": "Diagnostic threshold only; aggregate runtime policy remains separate.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "loss_bands": {
+          "items": {
+            "$ref": "#/$defs/OutputLossBand"
+          },
+          "type": "array"
+        },
+        "mean_level_change_db": {
+          "format": "double",
+          "type": "number"
+        },
+        "partition": {
+          "type": "string"
+        },
+        "permitted_gain_db": {
+          "description": "Authorized broadband change, independent of fitted shape normalization.",
+          "format": "double",
+          "type": "number"
+        },
+        "seat_index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "target_shortfall_rms_db": {
+          "description": "Calibrated target deficit, without fitting away broadband level.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "unexplained_loss_rms_db": {
+          "description": "Log-frequency-weighted RMS of losses beyond the authorized gain.",
+          "format": "double",
+          "type": "number"
+        },
+        "worst_loss_frequency_hz": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "worst_unexplained_loss_db": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "partition",
+        "seat_index",
+        "permitted_gain_db",
+        "evaluated_band_hz",
+        "mean_level_change_db",
+        "unexplained_loss_rms_db"
       ],
       "type": "object"
     },

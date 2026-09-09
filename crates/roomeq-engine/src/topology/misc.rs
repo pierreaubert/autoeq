@@ -363,6 +363,28 @@ pub fn bass_management_measurement_grid(main: &Curve, sources: &[&Curve]) -> nda
 }
 
 #[cfg(test)]
+mod crossover_response_tests {
+    #[test]
+    fn production_lr_branches_match_the_squared_butterworth_law() {
+        for rate in [44_100.0, 48_000.0, 96_000.0] {
+            for (kind, order) in [("LR24", 4), ("LR48", 8)] {
+                let frequencies = ndarray::Array1::from_vec(vec![30.0, 60.0, 120.0]);
+                let low = super::compute_crossover_complex_response(kind, 60.0, rate, true, &frequencies);
+                let high = super::compute_crossover_complex_response(kind, 60.0, rate, false, &frequencies);
+                for (index, frequency) in frequencies.iter().enumerate() {
+                    let x = (std::f64::consts::PI * frequency / rate).tan()
+                        / (std::f64::consts::PI * 60.0 / rate).tan();
+                    let expected = 1.0 / (1.0 + x.powi(order));
+                    assert!((low[index].norm() - expected).abs() < 1e-8);
+                    assert!(((low[index] + high[index]).norm() - 1.0).abs() < 1e-8);
+                }
+                assert!((low[1].norm() - 0.5).abs() < 1e-8);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod shared_grid_tests {
     use super::*;
     #[test]

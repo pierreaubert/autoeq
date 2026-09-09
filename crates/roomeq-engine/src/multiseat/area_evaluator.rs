@@ -46,6 +46,7 @@ pub(super) struct AreaEvaluator {
 
 impl AreaEvaluator {
     pub(super) fn new(
+        num_subs: usize,
         static_complex: Vec<Vec<Vec<Complex64>>>,
         weights: Vec<f64>,
         freqs: Array1<f64>,
@@ -55,7 +56,9 @@ impl AreaEvaluator {
         workers: usize,
     ) -> Self {
         let num_freqs = freqs.len();
-        let num_subs = static_complex.first().map(Vec::len).unwrap_or_default();
+        // Worst-case search supplies positions dynamically and has no static
+        // quadrature. Source count belongs to the measurement contract, not
+        // to the optional pre-baked point collection.
         Self {
             static_complex,
             weights,
@@ -253,6 +256,11 @@ impl AreaEvaluator {
         let mut acc_loss = 0.0;
         let mut acc_mass = 0.0;
         for (loss, weight) in &weighted {
+            // Zero probability does not end the tail: lower-loss points can
+            // still carry mass needed to reach alpha.
+            if *weight <= 0.0 {
+                continue;
+            }
             let take = (alpha - acc_mass).min(*weight);
             if take <= 0.0 {
                 break;
@@ -319,6 +327,21 @@ fn flatness_of(
     sum: &mut [Complex64],
     spl: &mut [f64],
 ) -> f64 {
+    let bins = freqs.len();
+    if per_sub.is_empty()
+        || factors.len() != per_sub.len()
+        || sum.len() < bins
+        || spl.len() < bins
+        || per_sub.iter().chain(factors).any(|row| row.len() != bins)
+        || !eval_min.is_finite()
+        || !eval_max.is_finite()
+        || eval_min > eval_max
+        || freqs
+            .iter()
+            .any(|frequency| !frequency.is_finite() || *frequency <= 0.0)
+    {
+        return f64::INFINITY;
+    }
     let mut count = 0_usize;
     for (freq_idx, &freq) in freqs.iter().enumerate() {
         if freq < eval_min || freq > eval_max {
@@ -326,10 +349,20 @@ fn flatness_of(
         }
         let mut combined = Complex64::new(0.0, 0.0);
         for (sub_idx, sub_data) in per_sub.iter().enumerate() {
-            let Some(factor_row) = factors.get(sub_idx) else {
-                continue;
-            };
+            let factor_row = &factors[sub_idx];
+            let sample = sub_data[freq_idx];
+            let factor = factor_row[freq_idx];
+            if !sample.re.is_finite()
+                || !sample.im.is_finite()
+                || !factor.re.is_finite()
+                || !factor.im.is_finite()
+            {
+                return f64::INFINITY;
+            }
             combined += sub_data[freq_idx] * factor_row[freq_idx];
+        }
+        if !combined.re.is_finite() || !combined.im.is_finite() {
+            return f64::INFINITY;
         }
         sum[freq_idx] = combined;
         spl[freq_idx] = 20.0 * combined.norm().max(SFM_EPS).log10();
@@ -415,6 +448,65 @@ mod tests {
     }
 
     #[test]
+    fn malformed_area_transfer_cannot_become_finite_evidence() {
+        let freqs = Array1::from(vec![20.0, 40.0, 80.0, 120.0]);
+        let valid = vec![vec![Complex64::new(1.0, 0.0); 4]; 2];
+        let mut nan = valid.clone();
+        nan[0][1].re = f64::NAN;
+        let mut short = valid.clone();
+        short[0].pop();
+        let mut invalid_factors = unit_factors(2, 4);
+        invalid_factors[0][0].im = f64::NAN;
+        let cases = [
+            (nan, unit_factors(2, 4)),
+            (short, unit_factors(2, 4)),
+            (valid.clone(), invalid_factors),
+            (
+                vec![vec![Complex64::new(f64::MAX, 0.0); 4]; 2],
+                unit_factors(2, 4),
+            ),
+            (valid.clone(), unit_factors(1, 4)),
+            (valid.clone(), unit_factors(2, 3)),
+            (Vec::new(), Vec::new()),
+        ];
+        for (per_sub, factors) in cases {
+            let mut sum = vec![Complex64::new(0.0, 0.0); 4];
+            let mut spl = vec![0.0; 4];
+            let loss = flatness_of(&per_sub, &factors, &freqs, 20.0, 120.0, &mut sum, &mut spl);
+            assert!(
+                !loss.is_finite(),
+                "malformed response was accepted as {loss}"
+            );
+        }
+    }
+
+    #[test]
+    fn cancelled_array_objective_has_squared_output_penalty_not_db_units() {
+        let freqs = Array1::from(vec![20.0, 40.0, 80.0, 120.0]);
+        for level_db in [80.0_f64, 90.0, 100.0] {
+            let amplitude = 10.0_f64.powf(level_db / 20.0);
+            let per_sub = vec![vec![Complex64::new(amplitude, 0.0); 4]; 2];
+            let mut factors = unit_factors(2, 4);
+            factors[1].fill(Complex64::new(-1.0, 0.0));
+            let mut sum = vec![Complex64::new(0.0, 0.0); 4];
+            let mut spl = vec![0.0; 4];
+            let observed = flatness_of(&per_sub, &factors, &freqs, 20.0, 120.0, &mut sum, &mut spl);
+            assert!(sum.iter().all(|value| *value == Complex64::new(0.0, 0.0)));
+            // Two equal sources have power-reference level L + 10log10(2).
+            // Exact cancellation uses the declared numerical -240 dB floor.
+            // Zero shape variance remains, but broadband and bass-extension
+            // guards each charge the mean (>3 dB) and local (>12 dB) deficit.
+            let deficit = level_db + 10.0 * 2.0_f64.log10() - (-240.0);
+            let expected = 2.0 * (4.0 * (deficit - 3.0).powi(2) + (deficit - 12.0).powi(2));
+            assert!(
+                (observed - expected).abs() < 1e-6,
+                "{level_db}: {observed} vs {expected}"
+            );
+            assert!(observed > 1_000_000.0);
+        }
+    }
+
+    #[test]
     fn flat_response_has_zero_flatness_loss() {
         let freqs = Array1::from(vec![20.0, 40.0, 80.0, 120.0]);
         let per_sub = vec![vec![Complex64::new(1.0, 0.0); 4]; 2];
@@ -443,5 +535,68 @@ mod tests {
         assert_eq!(AreaEvaluator::resolve_workers(None, 8), 1);
         let auto = AreaEvaluator::resolve_workers(None, 1000);
         assert!((1..=PARALLEL_MAX_WORKERS).contains(&auto));
+    }
+
+    #[test]
+    fn cvar_zero_mass_points_do_not_truncate_the_tail() {
+        // Single-source responses have no cancellation/output deficit. Their
+        // two-bin population standard deviations are independently 20, 10, 0.
+        // The 75% upper tail contains all 50% mass at loss 20 and 25% at 0.
+        for (copies, workers) in [(1, 1), (16, 4)] {
+            let mut points = Vec::new();
+            let mut weights = Vec::new();
+            for (amplitude, mass) in [(100.0, 0.5), (10.0, 0.0), (1.0, 0.5)] {
+                for _ in 0..copies {
+                    points.push(vec![vec![
+                        Complex64::new(1.0, 0.0),
+                        Complex64::new(amplitude, 0.0),
+                    ]]);
+                    weights.push(mass / copies as f64);
+                }
+            }
+            let mut evaluator = AreaEvaluator::new(
+                1,
+                points,
+                weights,
+                Array1::from(vec![20.0, 40.0]),
+                48000.0,
+                20.0,
+                40.0,
+                workers,
+            );
+            let observed = evaluator.evaluate_cvar(0.75, &[0.0], &[0.0], &[false], &[vec![]]);
+            let expected = 20.0 * 0.5 / 0.75;
+            assert!(
+                (observed - expected).abs() < 1e-10,
+                "copies={copies}, workers={workers}: {observed} vs {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn adversarial_points_use_candidate_factors_without_static_quadrature() {
+        let mut evaluator = AreaEvaluator::new(
+            2,
+            Vec::new(),
+            Vec::new(),
+            Array1::from(vec![20.0, 40.0]),
+            48000.0,
+            20.0,
+            40.0,
+            1,
+        );
+        let per_sub = vec![vec![Complex64::new(10000.0, 0.0); 2]; 2];
+        evaluator.prepare_candidate(&[0.0, 0.0], &[0.0, 0.0], &[false, false], &[vec![], vec![]]);
+        let constructive = evaluator.point_flatness_from_per_sub(&per_sub);
+        assert!(
+            constructive.abs() < 1e-10,
+            "constructive loss {constructive}"
+        );
+        evaluator.prepare_candidate(&[0.0, 0.0], &[0.0, 0.0], &[false, true], &[vec![], vec![]]);
+        let cancelled = evaluator.point_flatness_from_per_sub(&per_sub);
+        assert!(
+            cancelled.is_finite() && cancelled > 1_000_000.0,
+            "candidate polarity must affect the ad-hoc point: {cancelled}"
+        );
     }
 }

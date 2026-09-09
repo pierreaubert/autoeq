@@ -100,6 +100,33 @@ pub fn apply_channel_dsp_chain_to_curve_with_embedded_irs(
     RealizedDsp::new(chain, sample_rate, &mut cache)?.apply_to_curve(curve)
 }
 
+/// Evaluate electrical transfer directly, including DC and exact zeros, without
+/// the positive-frequency/acoustic-SPL contract of `Curve`.
+pub fn channel_electrical_response_with_embedded_irs(
+    chain: &ChannelDspChain,
+    frequencies: &[f64],
+    sample_rate: f64,
+    sidecar_dir: &Path,
+    embedded_irs: &HashMap<String, Vec<f64>>,
+) -> Result<Vec<Complex64>> {
+    let mut cache =
+        DspResponseCache::with_sidecar_dir(checked_sample_rate(sample_rate)?, sidecar_dir);
+    for (ir_file, taps) in embedded_irs {
+        let path = Path::new(ir_file);
+        let resolved = if path.is_relative() {
+            sidecar_dir.join(path)
+        } else {
+            path.to_path_buf()
+        };
+        cache.convolution_ir.insert(resolved, taps.clone());
+    }
+    let mut realized = RealizedDsp::new(chain, sample_rate, &mut cache)?;
+    frequencies
+        .iter()
+        .map(|frequency| realized.response_at(*frequency))
+        .collect()
+}
+
 pub(super) struct DspResponseCache {
     sample_rate: u32,
     sidecar_dir: PathBuf,

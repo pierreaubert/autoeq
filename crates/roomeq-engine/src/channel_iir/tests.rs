@@ -30,6 +30,84 @@ fn modal_curve() -> Curve {
     }
 }
 
+#[test]
+#[ignore = "explicit matched-budget advanced-mode outcome experiment"]
+fn advanced_modes_matched_budget_multirate_outcomes() {
+    use crate::dsp_realization::{NoConvolutionIr, RealizedDsp};
+    let mut evidence = Vec::new();
+    let mut regressions = Vec::new();
+    for rate in [44_100.0, 48_000.0, 96_000.0] {
+        for (name, mode, processing) in [
+            ("peq", IirChannelMode::LowLatency, roomeq_model::ProcessingMode::LowLatency),
+            ("warped_iir", IirChannelMode::WarpedIir, roomeq_model::ProcessingMode::WarpedIir),
+            ("kautz_modal", IirChannelMode::KautzModal, roomeq_model::ProcessingMode::KautzModal),
+        ] {
+            let curve = modal_curve();
+            let input = prepared(curve.clone());
+            let mut config = RoomConfig::default();
+            config.optimizer.processing_mode = processing;
+            config.optimizer.algorithm = "autoeq:de".into();
+            config.optimizer.seed = Some(42);
+            config.optimizer.num_filters = 1;
+            config.optimizer.max_iter = 120;
+            config.optimizer.min_freq = 20.0;
+            config.optimizer.max_freq = 500.0;
+            config.optimizer.min_db = -8.0;
+            config.optimizer.max_db = 3.0;
+            config.optimizer.min_q = 0.5;
+            config.optimizer.max_q = 20.0;
+            let target = build_target_context("left", &config, &curve, None);
+            let features = preprocessed(&curve);
+            let resources = EqResources::default();
+            let result = process_iir_channel(IirChannelRequest {
+                mode, channel_name: "left", prepared: &input, room_config: &config,
+                sample_rate: rate, target: &target, preprocessed: &features,
+                optimizer: &config.optimizer, eq_resources: &resources, callback: None,
+            }).unwrap();
+            let serialized = serde_json::to_value(&result.channel).unwrap();
+            let chain = serde_json::from_value(serialized.clone()).unwrap();
+            let mut provider = NoConvolutionIr;
+            let mut realized = RealizedDsp::new(&chain, rate, &mut provider).unwrap();
+            for shift in [0.0, 3.0] {
+                // Independent denser grid; shifted case is a declared analytic
+                // perturbation, not a measured held-out seat or decay model.
+                let mut pre_sum = 0.0;
+                let mut post_sum = 0.0;
+                let mut maximum_gain = f64::NEG_INFINITY;
+                for bin in 0..=256 {
+                    let frequency = 20.0 * 25.0_f64.powf(bin as f64 / 256.0);
+                    let residual = 8.0 * (-((frequency - 100.0 - shift) / 8.0).powi(2)).exp();
+                    let gain = 20.0 * realized.response_at(frequency).unwrap().norm().log10();
+                    let weight = if bin == 0 || bin == 256 { 0.5 } else { 1.0 };
+                    pre_sum += weight * residual.powi(2);
+                    post_sum += weight * (residual + gain).powi(2);
+                    maximum_gain = maximum_gain.max(gain);
+                }
+                let pre_rms = (pre_sum / 256.0).sqrt();
+                let post_rms = (post_sum / 256.0).sqrt();
+                let useful = post_rms < pre_rms;
+                evidence.push(serde_json::json!({"mode": name, "sample_rate_hz": rate,
+                    "analytic_mode_shift_hz": shift, "pre_rms_db": pre_rms, "post_rms_db": post_rms,
+                    "useful": useful, "delivered_filter_count": result.filters.len(),
+                    "maximum_sampled_gain_db": maximum_gain, "requested_optimizer": config.optimizer,
+                    "serialized_channel": serialized}));
+                if !post_rms.is_finite() || result.filters.len() > 1
+                    || maximum_gain > config.optimizer.max_db + 0.01 {
+                    regressions.push(format!("{name} at {rate}: nonfinite result or section/gain budget exceeded (gain {maximum_gain} dB)"));
+                }
+            }
+        }
+    }
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/qa");
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join("advanced-mode-matched-budget.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "scope": "analytic_magnitude_challenge_not_physical_heldout_decay_or_listener_evidence",
+            "outcomes": evidence, "contract_failures": regressions,
+        })).unwrap()).unwrap();
+    assert!(regressions.is_empty(), "{regressions:?}");
+}
+
 fn prepared(curve: Curve) -> PreparedChannelInput {
     PreparedChannelInput::new(
         PreparedChannelMeasurements::new(curve.clone(), vec![curve], false),

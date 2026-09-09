@@ -173,21 +173,6 @@ pub(super) fn write_camilladsp_crossover_filter(
     Ok(())
 }
 
-pub(super) fn write_camilladsp_delay_filter(
-    out: &mut String,
-    manifest: &mut ExportArtifactManifest,
-    name: &str,
-    delay_ms: f64,
-) -> anyhow::Result<()> {
-    manifest.define_node(ExportNodeKind::Processor, name)?;
-    writeln!(out, "  {name}:")?;
-    writeln!(out, "    type: Delay")?;
-    writeln!(out, "    parameters:")?;
-    writeln!(out, "      delay: {delay_ms:.3}")?;
-    writeln!(out, "      unit: ms")?;
-    Ok(())
-}
-
 pub(super) fn camilladsp_crossover_filter_type(
     crossover_type: &str,
     output: &str,

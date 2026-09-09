@@ -12,8 +12,10 @@
 //!   budget-capped, invalid entries rejected).
 //! * Continuous expected / CVaR / worst-case objectives invoke
 //!   `optimize_multiseat_continuous_area` with deterministic seeds and
-//!   resource budgets. The worst-case search is wall-clock bounded and
-//!   reports inner/outer evaluation counts.
+//!   configured quadrature/inner-iteration limits. Worst-case search receives
+//!   a cooperative time budget; the separate total-runtime gate remains.
+//!   Actual outer-search counts and stop reasons are retained. In-flight
+//!   inner evaluations and final verification are not forcibly interrupted.
 //! * Regression expectations cover phase permutation (seat/sub order
 //!   invariance), measured support (missing-phase rejection), invalid fronts,
 //!   and synthetic modal phase. Safety-fallback entries accept a clean
@@ -31,7 +33,8 @@ use autoeq_optim::optim::pareto::{ParetoFilter, extract_non_dominated};
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use roomeq_engine::multiseat::{
-    MultiSeatMeasurements, optimize_multiseat, optimize_multiseat_continuous_area,
+    MultiSeatMeasurements, MsoSearchBudget, optimize_multiseat,
+    optimize_multiseat_continuous_area_with_budget,
 };
 use roomeq_model::{
     AreaPriorKind, AreaQuadratureKind, AreaScalarisationKind, ContinuousListeningAreaConfig, Curve,
@@ -104,8 +107,7 @@ pub fn modal_fixture() -> &'static Vec<Vec<Curve>> {
         let modal = |peak_db: f64, center_hz: f64| {
             move |f: f64| {
                 let width = 6.0;
-                let bump =
-                    peak_db * (-((f - center_hz) / width).powi(2)).exp();
+                let bump = peak_db * (-((f - center_hz) / width).powi(2)).exp();
                 90.0 + bump
             }
         };
@@ -134,8 +136,7 @@ fn sized_fixture(subs: usize, seats: usize) -> Vec<Vec<Curve>> {
                 .map(|seat| {
                     let offset = (sub * seats + seat) as f64;
                     let shaped = move |f: f64| {
-                        flat(f)
-                            + 4.0 * ((f / 25.0 + offset).sin())
+                        flat(f) + 4.0 * ((f / 25.0 + offset).sin())
                             - 3.0 * ((f / 60.0 + offset * 0.5).cos())
                     };
                     make_multiseat_qa_curve(shaped, 15.0 * offset, true)
@@ -170,14 +171,46 @@ struct Candidate {
 /// Canonical NSGA-II pool: 5 Pareto-optimal points plus 3 dominated decoys.
 fn nsga2_pool() -> Vec<Candidate> {
     vec![
-        Candidate { flatness: 3.20, count: 3, boost: 1.0 },
-        Candidate { flatness: 2.40, count: 5, boost: 2.0 },
-        Candidate { flatness: 1.90, count: 7, boost: 3.0 },
-        Candidate { flatness: 1.70, count: 9, boost: 5.0 },
-        Candidate { flatness: 1.65, count: 11, boost: 8.0 },
-        Candidate { flatness: 2.60, count: 7, boost: 4.0 },
-        Candidate { flatness: 2.00, count: 9, boost: 6.0 },
-        Candidate { flatness: 3.40, count: 5, boost: 1.5 },
+        Candidate {
+            flatness: 3.20,
+            count: 3,
+            boost: 1.0,
+        },
+        Candidate {
+            flatness: 2.40,
+            count: 5,
+            boost: 2.0,
+        },
+        Candidate {
+            flatness: 1.90,
+            count: 7,
+            boost: 3.0,
+        },
+        Candidate {
+            flatness: 1.70,
+            count: 9,
+            boost: 5.0,
+        },
+        Candidate {
+            flatness: 1.65,
+            count: 11,
+            boost: 8.0,
+        },
+        Candidate {
+            flatness: 2.60,
+            count: 7,
+            boost: 4.0,
+        },
+        Candidate {
+            flatness: 2.00,
+            count: 9,
+            boost: 6.0,
+        },
+        Candidate {
+            flatness: 3.40,
+            count: 5,
+            boost: 1.5,
+        },
     ]
 }
 
@@ -200,10 +233,7 @@ fn validate_front(filters: &[ParetoFilter]) -> Result<(), String> {
     }
     for (index, filter) in filters.iter().enumerate() {
         let score = filter.score_loss.unwrap_or(0.0);
-        if !filter.flatness_loss.is_finite()
-            || !score.is_finite()
-            || filter.num_filters == 0
-        {
+        if !filter.flatness_loss.is_finite() || !score.is_finite() || filter.num_filters == 0 {
             return Err(format!("front entry {index} is invalid"));
         }
     }
@@ -284,7 +314,10 @@ fn compromise_pick(front: &[&ParetoFilter], three_objective: bool) -> usize {
 /// between the flatness/count extremes (2-objective space).
 fn knee_pick(front: &[&ParetoFilter]) -> usize {
     let flat: Vec<f64> = front.iter().map(|filter| filter.flatness_loss).collect();
-    let count: Vec<f64> = front.iter().map(|filter| filter.num_filters as f64).collect();
+    let count: Vec<f64> = front
+        .iter()
+        .map(|filter| filter.num_filters as f64)
+        .collect();
     let (flat_min, flat_max) = flat
         .iter()
         .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &value| {
@@ -332,10 +365,7 @@ fn knee_pick(front: &[&ParetoFilter]) -> usize {
 /// Shared NSGA-II/III decision core: budget-capped pool, seeded shuffle,
 /// front validation, non-dominated extraction, compromise pick. Returns the
 /// picked canonical pool index plus the front size.
-fn nsga_decision(
-    spec: &DecisionCaseSpec,
-    three_objective: bool,
-) -> Result<(usize, usize), String> {
+fn nsga_decision(spec: &DecisionCaseSpec, three_objective: bool) -> Result<(usize, usize), String> {
     let pool = nsga2_pool();
     if pool.len() > spec.maxeval {
         return Err(format!(
@@ -512,18 +542,19 @@ fn run_measured_support_case(spec: &DecisionCaseSpec) -> TestResult {
         ..Default::default()
     };
     match MultiSeatMeasurements::new(phaseless) {
-        Ok(measurements) => match optimize_multiseat(&measurements, &config, (20.0, 120.0), SAMPLE_RATE)
-        {
-            Ok(_) => fail(name, "phaseless measurements were accepted".to_string()),
-            Err(_) => TestResult {
-                name,
-                passed: true,
-                pre_score: 0.0,
-                post_score: 0.0,
-                epa_preference: None,
-                reason: "OK: missing phase rejected at optimization".to_string(),
-            },
-        },
+        Ok(measurements) => {
+            match optimize_multiseat(&measurements, &config, (20.0, 120.0), SAMPLE_RATE) {
+                Ok(_) => fail(name, "phaseless measurements were accepted".to_string()),
+                Err(_) => TestResult {
+                    name,
+                    passed: true,
+                    pre_score: 0.0,
+                    post_score: 0.0,
+                    epa_preference: None,
+                    reason: "OK: missing phase rejected at optimization".to_string(),
+                },
+            }
+        }
         Err(_) => TestResult {
             name,
             passed: true,
@@ -550,6 +581,18 @@ fn check_realization(
     result: &roomeq_engine::multiseat::MultiSeatOptimizationResult,
     subs: usize,
 ) -> Result<String, String> {
+    if result.polarities.len() != subs || result.allpass_filters.len() != subs {
+        return Err(format!(
+            "final realization has polarities={} allpass_rows={} for {subs} subs",
+            result.polarities.len(), result.allpass_filters.len(),
+        ));
+    }
+    if result.allpass_filters.iter().flatten().any(|&(frequency, q)| {
+        !frequency.is_finite() || frequency <= 0.0 || frequency >= SAMPLE_RATE / 2.0
+            || !q.is_finite() || q <= 0.0
+    }) {
+        return Err("final realization contains invalid all-pass frequency/Q".into());
+    }
     if result.gains.len() != subs || result.delays.len() != subs {
         return Err(format!(
             "final realization has gains={} delays={} for {subs} subs",
@@ -557,7 +600,12 @@ fn check_realization(
             result.delays.len()
         ));
     }
-    if !result.gains.iter().chain(result.delays.iter()).all(|v| v.is_finite()) {
+    if !result
+        .gains
+        .iter()
+        .chain(result.delays.iter())
+        .all(|v| v.is_finite())
+    {
         return Err("final realization is non-finite".to_string());
     }
     if !result.objective_before.is_finite() || !result.objective_after.is_finite() {
@@ -600,7 +648,12 @@ fn run_phase_permutation_case(spec: &DecisionCaseSpec) -> TestResult {
     }
     let seat_ms = match MultiSeatMeasurements::new(seat_permuted) {
         Ok(measurements) => measurements,
-        Err(error) => return fail(name, format!("failed to build permuted measurements: {error}")),
+        Err(error) => {
+            return fail(
+                name,
+                format!("failed to build permuted measurements: {error}"),
+            );
+        }
     };
     let seat_before = match run(&seat_ms) {
         Ok(value) => value,
@@ -617,7 +670,12 @@ fn run_phase_permutation_case(spec: &DecisionCaseSpec) -> TestResult {
     sub_permuted.reverse();
     let sub_ms = match MultiSeatMeasurements::new(sub_permuted) {
         Ok(measurements) => measurements,
-        Err(error) => return fail(name, format!("failed to build permuted measurements: {error}")),
+        Err(error) => {
+            return fail(
+                name,
+                format!("failed to build permuted measurements: {error}"),
+            );
+        }
     };
     let sub_before = match run(&sub_ms) {
         Ok(value) => value,
@@ -646,7 +704,9 @@ fn continuous_scalarisation(spec: &DecisionCaseSpec) -> Result<AreaScalarisation
     match spec.kind {
         DecisionCaseKind::ContinuousExpected => Ok(AreaScalarisationKind::ExpectedValue),
         DecisionCaseKind::ContinuousCvar => {
-            let alpha = spec.cvar_alpha.ok_or_else(|| "cvar_alpha missing".to_string())?;
+            let alpha = spec
+                .cvar_alpha
+                .ok_or_else(|| "cvar_alpha missing".to_string())?;
             if !alpha.is_finite() || alpha <= 0.0 || alpha > 1.0 {
                 return Err("cvar_alpha out of (0, 1]".to_string());
             }
@@ -666,6 +726,14 @@ fn continuous_objective_name(spec: &DecisionCaseSpec) -> &'static str {
         DecisionCaseKind::ContinuousCvar => "cvar",
         DecisionCaseKind::ContinuousWorstCase => "worst_case",
         _ => "continuous",
+    }
+}
+
+fn continuous_search_budget(spec: &DecisionCaseSpec) -> MsoSearchBudget {
+    MsoSearchBudget {
+        max_duration: (spec.kind == DecisionCaseKind::ContinuousWorstCase)
+            .then(|| std::time::Duration::from_millis(spec.timeout_ms)),
+        ..Default::default()
     }
 }
 
@@ -699,37 +767,101 @@ fn run_continuous_case(spec: &DecisionCaseSpec, caps: MatrixCaps) -> TestResult 
         ..Default::default()
     };
     let start = Instant::now();
-    let result = optimize_multiseat_continuous_area(&measurements, &config, (20.0, 120.0), SAMPLE_RATE);
+    let result = optimize_multiseat_continuous_area_with_budget(
+        &measurements, &config, (20.0, 120.0), SAMPLE_RATE,
+        &continuous_search_budget(spec),
+    );
     let elapsed_ms = start.elapsed().as_millis() as u64;
-    let result = match result {
+    let (result, search_report) = match result {
         Ok(result) => result,
         Err(error) => return fail(name, format!("optimization failed: {error}")),
     };
-    // Worst-case inner/outer search is wall-clock bounded by the registry
-    // budget; report both evaluation counts with the elapsed time.
-    let inner_evals = if spec.kind == DecisionCaseKind::ContinuousWorstCase {
+    let mut row = report_continuous_case(spec, name, objective, outer_points, elapsed_ms, &result);
+    row.reason.push_str(&format!(
+        "; search_outer_evaluations={} search_generations={} search_stop={} search_stopped_early={} search_elapsed_ms={} search_best_loss={} search_counts_exclude_baseline_final_and_inner_positions=true",
+        search_report.evaluations, search_report.generations_run,
+        search_report.stop_reason, search_report.stopped_early,
+        search_report.elapsed.as_millis(), search_report.best_loss,
+    ));
+    row
+}
+
+fn report_continuous_case(
+    spec: &DecisionCaseSpec,
+    name: String,
+    objective: &str,
+    outer_points: usize,
+    elapsed_ms: u64,
+    result: &roomeq_engine::multiseat::MultiSeatOptimizationResult,
+) -> TestResult {
+    // Configuration limits are not consumed evaluation counts. Worst-case
+    // search samples dynamic positions, not the static quadrature collection.
+    let inner_maxiter = if spec.kind == DecisionCaseKind::ContinuousWorstCase {
         spec.inner_maxiter
     } else {
         0
     };
+    let counts = format!(
+        "configured_quadrature_points={outer_points} static_quadrature_used={} configured_inner_maxiter={inner_maxiter} inner_position_evaluation_count=unavailable elapsed_ms={elapsed_ms}",
+        spec.kind != DecisionCaseKind::ContinuousWorstCase,
+    );
+    // Do not erase completed acoustic objective evidence on a report failure.
+    let failure = |reason: String| TestResult {
+        name: name.clone(),
+        passed: false,
+        pre_score: result.objective_before,
+        post_score: result.objective_after,
+        epa_preference: None,
+        reason,
+    };
     if spec.kind == DecisionCaseKind::ContinuousWorstCase && elapsed_ms > spec.timeout_ms {
-        return fail(
-            name,
-            format!(
-                "worst-case search exceeded timeout: {elapsed_ms}ms > {}ms (outer {outer_points}, inner {inner_evals})",
-                spec.timeout_ms,
-            ),
-        );
+        return failure(format!(
+            "worst-case search exceeded timeout: {elapsed_ms}ms > {}ms; {counts}",
+            spec.timeout_ms,
+        ));
     }
     if result.objective_name != "continuous_area" {
-        return fail(
-            name,
-            format!("unexpected objective '{}'", result.objective_name),
-        );
+        return failure(format!("unexpected objective '{}'; {counts}", result.objective_name));
     }
-    let quality_bar = result.objective_after <= result.objective_before + 0.05;
-    let realization = check_realization(objective, &result, spec.subs);
-    let counts = format!("outer_evals={outer_points} inner_evals={inner_evals} elapsed_ms={elapsed_ms}");
+    report_multiseat_candidate(spec, name, objective, result, &counts)
+}
+
+fn report_multiseat_candidate(
+    spec: &DecisionCaseSpec,
+    name: String,
+    objective: &str,
+    result: &roomeq_engine::multiseat::MultiSeatOptimizationResult,
+    counts: &str,
+) -> TestResult {
+    let failure = |reason: String| TestResult {
+        name: name.clone(),
+        passed: false,
+        pre_score: result.objective_before,
+        post_score: result.objective_after,
+        epa_preference: None,
+        reason,
+    };
+    let improvement_pct = if result.objective_before > 0.0 {
+        100.0 * (result.objective_before - result.objective_after) / result.objective_before
+    } else {
+        0.0
+    };
+    let quality_bar = improvement_pct >= spec.expect.improvement_min_pct
+        && result.objective_after <= spec.expect.max_post_score;
+    let realization = check_realization(objective, result, spec.subs).and_then(|summary| {
+        // This candidate contains one gain per physical output followed by
+        // delay/polarity/valid all-pass controls, all of unit ideal magnitude.
+        // This is not a substitute for replaying a later PEQ/FIR/routed chain.
+        let maximum_gain_db = result.gains.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        if maximum_gain_db > spec.expect.max_boost_db {
+            Err(format!(
+                "output gain {maximum_gain_db} dB exceeds registered maximum {} dB",
+                spec.expect.max_boost_db,
+            ))
+        } else {
+            Ok(format!("{summary}; maximum_output_gain_db={maximum_gain_db}"))
+        }
+    });
     match (quality_bar, realization) {
         (true, Ok(summary)) => TestResult {
             name,
@@ -737,26 +869,26 @@ fn run_continuous_case(spec: &DecisionCaseSpec, caps: MatrixCaps) -> TestResult 
             pre_score: result.objective_before,
             post_score: result.objective_after,
             epa_preference: None,
-            reason: format!("OK: continuous {objective} {summary}; {counts}"),
+            reason: format!("OK: {objective} {summary}; {counts}"),
         },
-        (false, _) if spec.expect.gate_purpose == QaGatePurpose::Safety => TestResult {
+        (false, Ok(_)) if spec.expect.gate_purpose == QaGatePurpose::Safety
+            && spec.expect.allow_safe_revert
+            && result.objective_after <= result.objective_before + 0.05 => TestResult {
             name,
             passed: true,
             pre_score: result.objective_before,
             post_score: result.objective_after,
             epa_preference: None,
             reason: format!(
-                "REVERTED: continuous {objective} regressed but safety gate accepts fallback; {counts}"
+                "OK: safety-only {objective} is non-regressing; quality thresholds unmet; no rollback inferred; {counts}"
             ),
         },
-        (false, _) => fail(
-            name,
-            format!(
-                "continuous {objective} regressed {:.3} -> {:.3}; {counts}",
-                result.objective_before, result.objective_after
-            ),
-        ),
-        (true, Err(reason)) => fail(name, format!("{reason}; {counts}")),
+        (_, Err(reason)) => failure(format!("{reason}; {counts}")),
+        (false, Ok(_)) => failure(format!(
+            "{objective} missed quality thresholds: {:.6} -> {:.6}, improvement_pct={improvement_pct:.6} required_min_pct={}, required_max_post_score={}; {counts}",
+            result.objective_before, result.objective_after,
+            spec.expect.improvement_min_pct, spec.expect.max_post_score,
+        )),
     }
 }
 
@@ -776,45 +908,25 @@ fn run_modal_phase_case(spec: &DecisionCaseSpec) -> TestResult {
         Ok(result) => result,
         Err(error) => return fail(name, format!("optimization failed: {error}")),
     };
+    report_modal_phase_result(spec, name, &result)
+}
+
+fn report_modal_phase_result(
+    spec: &DecisionCaseSpec,
+    name: String,
+    result: &roomeq_engine::multiseat::MultiSeatOptimizationResult,
+) -> TestResult {
     if result.objective_name != "modal_basis" {
-        return fail(
+        return TestResult {
             name,
-            format!("unexpected objective '{}'", result.objective_name),
-        );
-    }
-    let quality_bar = result.objective_after <= result.objective_before + 0.05;
-    match (quality_bar, check_realization("modal_basis", &result, spec.subs)) {
-        (true, Ok(summary)) => TestResult {
-            name,
-            passed: true,
+            passed: false,
             pre_score: result.objective_before,
             post_score: result.objective_after,
             epa_preference: None,
-            reason: format!("OK: synthetic modal phase {summary}"),
-        },
-        // Safety-fallback entries stay separate from quality gates: a finite
-        // realization that misses the quality bar is a clean revert, not a
-        // failure.
-        (_, _) if spec.expect.gate_purpose == QaGatePurpose::Safety => TestResult {
-            name,
-            passed: true,
-            pre_score: result.objective_before,
-            post_score: result.objective_after,
-            epa_preference: None,
-            reason: format!(
-                "REVERTED: modal-phase safety fallback; objective {:.3} -> {:.3}",
-                result.objective_before, result.objective_after
-            ),
-        },
-        (false, _) => fail(
-            name,
-            format!(
-                "modal_basis regressed {:.3} -> {:.3}",
-                result.objective_before, result.objective_after
-            ),
-        ),
-        (true, Err(reason)) => fail(name, reason),
+            reason: format!("unexpected objective '{}'", result.objective_name),
+        };
     }
+    report_multiseat_candidate(spec, name, "modal_basis", result, "fixture=synthetic_modal_phase")
 }
 
 /// Dispatch one registry decision case to its invoked test.
@@ -876,10 +988,9 @@ pub(super) fn release_decision_case_count(tier: QaTier) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        compromise_pick, continuous_scalarisation, knee_pick, matrix_caps, nsga2_pool,
-        nsga_decision, pareto_knee_decision, release_decision_case_count,
-        run_release_decision_matrix, run_release_decision_matrix_for, shuffled_order,
-        to_pareto_filters, validate_front,
+        compromise_pick, continuous_scalarisation, knee_pick, matrix_caps, nsga_decision,
+        nsga2_pool, pareto_knee_decision, release_decision_case_count, run_release_decision_matrix,
+        run_release_decision_matrix_for, shuffled_order, to_pareto_filters, validate_front,
     };
     use crate::registry::{DecisionCaseKind, QaTier, load_registry};
     use autoeq_optim::optim::pareto::extract_non_dominated;
@@ -990,10 +1101,7 @@ mod tests {
         });
         let knee_a = knee_pick(&front_a);
         let knee_b = knee_pick(&front_b);
-        assert_eq!(
-            front_a[knee_a].flatness_loss,
-            front_b[knee_b].flatness_loss
-        );
+        assert_eq!(front_a[knee_a].flatness_loss, front_b[knee_b].flatness_loss);
     }
 
     #[test]
@@ -1023,6 +1131,94 @@ mod tests {
         assert!(spec.timeout_ms > 0);
         assert!(spec.inner_maxiter > 0);
         assert!(continuous_scalarisation(&spec).is_ok());
+        assert_eq!(super::continuous_search_budget(&spec).max_duration,
+            Some(std::time::Duration::from_millis(spec.timeout_ms)));
+        for kind in [DecisionCaseKind::ContinuousExpected, DecisionCaseKind::ContinuousCvar] {
+            assert!(super::continuous_search_budget(&spec_for(kind)).max_duration.is_none());
+        }
+    }
+
+    #[test]
+    fn continuous_report_preserves_scores_on_timeout_and_realization_failure() {
+        let spec = spec_for(DecisionCaseKind::ContinuousWorstCase);
+        let mut result = roomeq_engine::multiseat::MultiSeatOptimizationResult {
+            gains: vec![0.0; spec.subs],
+            delays: vec![0.0; spec.subs],
+            polarities: vec![false; spec.subs],
+            allpass_filters: vec![vec![]; spec.subs],
+            strategy: roomeq_model::MultiSeatStrategy::ContinuousArea,
+            objective_name: "continuous_area".into(),
+            objective_before: 4.25,
+            objective_after: 2.5,
+            objective_improvement_db: 1.75,
+            variance_before: 0.0,
+            variance_after: 0.0,
+            variance_improvement_db: 0.0,
+            improvement_db: 1.75,
+        };
+        let report = |result: &roomeq_engine::multiseat::MultiSeatOptimizationResult, elapsed| {
+            super::report_continuous_case(&spec, "timeout-fixture".into(), "worst_case", 16, elapsed, result)
+        };
+        let timeout = report(&result, spec.timeout_ms + 1);
+        assert!(!timeout.passed);
+        assert!(timeout.reason.contains("exceeded timeout"));
+        assert_eq!((timeout.pre_score, timeout.post_score), (4.25, 2.5));
+        assert!(timeout.reason.contains("static_quadrature_used=false"));
+        assert!(timeout.reason.contains("inner_position_evaluation_count=unavailable"));
+        assert!(!timeout.reason.contains("outer_evals="));
+        assert!(!timeout.reason.contains("inner_evals="));
+        let at_limit = report(&result, spec.timeout_ms);
+        assert!(at_limit.passed,
+            "exactly the existing timeout remains permitted: {}", at_limit.reason);
+        result.objective_after = result.objective_before;
+        assert!(!report(&result, 1).passed, "unchanged objective does not meet required improvement");
+        result.objective_before = 100.0;
+        result.objective_after = 90.0;
+        assert!(!report(&result, 1).passed, "improvement alone does not meet max_post_score");
+        result.objective_before = 4.25;
+        result.objective_after = 2.5;
+        let mut excessive_gain = result.clone();
+        excessive_gain.gains[1] = spec.expect.max_boost_db + 1.0;
+        assert!(!report(&excessive_gain, 1).passed, "output gain exceeds the registered boost ceiling");
+        excessive_gain.gains[1] = spec.expect.max_boost_db;
+        assert!(report(&excessive_gain, 1).passed, "exact gain ceiling remains permitted");
+        let mut missing_polarity = result.clone();
+        missing_polarity.polarities.pop();
+        assert!(!report(&missing_polarity, 1).passed, "missing polarity is incomplete transfer evidence");
+        let mut missing_allpass = result.clone();
+        missing_allpass.allpass_filters.pop();
+        assert!(!report(&missing_allpass, 1).passed, "missing all-pass row is incomplete transfer evidence");
+        for (frequency, q) in [(0.0, 1.0), (24000.0, 1.0), (80.0, 0.0), (80.0, f64::NAN)] {
+            let mut malformed = result.clone();
+            malformed.allpass_filters[1] = vec![(frequency, q)];
+            assert!(!report(&malformed, 1).passed, "invalid all-pass {frequency}/{q} was accepted");
+        }
+        result.gains.clear();
+        let invalid_transfer = report(&result, 1);
+        assert!(!invalid_transfer.passed);
+        assert_eq!((invalid_transfer.pre_score, invalid_transfer.post_score), (4.25, 2.5));
+        let mut safety_spec = spec.clone();
+        safety_spec.expect.gate_purpose = crate::registry::QaGatePurpose::Safety;
+        safety_spec.expect.allow_safe_revert = true;
+        result.objective_after = result.objective_before;
+        let safety = |value: &roomeq_engine::multiseat::MultiSeatOptimizationResult| {
+            super::report_continuous_case(&safety_spec, "safety-fixture".into(), "worst_case", 16, 1, value)
+        };
+        assert!(!safety(&result).passed, "safety policy cannot accept invalid transfer evidence");
+        result.gains = vec![0.0; spec.subs];
+        let valid_safety = safety(&result);
+        assert!(valid_safety.passed);
+        assert!(valid_safety.reason.contains("safety-only"));
+        assert!(!valid_safety.reason.starts_with("REVERTED:"), "no rollback occurred");
+        result.objective_name = "modal_basis".into();
+        let mut modal_spec = spec_for(DecisionCaseKind::ModalPhase);
+        assert!(!super::report_modal_phase_result(&modal_spec, "modal-fixture".into(), &result).passed,
+            "unchanged modal objective does not meet required improvement");
+        modal_spec.expect.gate_purpose = crate::registry::QaGatePurpose::Safety;
+        modal_spec.expect.allow_safe_revert = true;
+        result.polarities.clear();
+        assert!(!super::report_modal_phase_result(&modal_spec, "modal-fixture".into(), &result).passed,
+            "modal safety fallback cannot accept invalid realization");
     }
 
     #[test]
@@ -1043,10 +1239,83 @@ mod tests {
     #[test]
     fn tmp_probe_nightly_matrix() {
         let rows = run_release_decision_matrix_for(QaTier::Nightly);
+        let expected = release_decision_case_count(QaTier::Nightly);
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/qa");
+        std::fs::create_dir_all(&directory).unwrap();
+        let records: Vec<_> = rows.iter().map(|row| serde_json::json!({
+            "name": row.name, "assertion_passed": row.passed,
+            "outcome": format!("{:?}", row.outcome()), "reason": row.reason,
+            "pre_score": row.pre_score, "post_score": row.post_score,
+            "epa_preference": row.epa_preference,
+        })).collect();
+        std::fs::write(directory.join("nightly-decision-matrix.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "scope": "registered_nightly_decision_contracts_not_full_acoustic_or_release_certification",
+                "expected_rows": expected, "executed_rows": rows.len(), "rows": records,
+            })).unwrap()).unwrap();
         for row in &rows {
-            println!("PROBE {} passed={} reason={}", row.name, row.passed, row.reason);
+            println!(
+                "PROBE {} passed={} reason={}",
+                row.name, row.passed, row.reason
+            );
         }
-        assert!(!rows.is_empty());
+        assert!(expected > 0, "nightly registry must select at least one case");
+        assert_eq!(rows.len(), expected, "nightly decision inventory mismatch");
+        let failures: Vec<_> = rows.iter().filter(|row| !row.passed)
+            .map(|row| format!("{}: {}", row.name, row.reason)).collect();
+        assert!(failures.is_empty(), "nightly decision failures: {}", failures.join("; "));
+    }
+
+    #[test]
+    fn continuous_expected_seed_diagnostic_retains_non_improvement() {
+        let spec = spec_for(DecisionCaseKind::ContinuousExpected);
+        let measurements = roomeq_engine::multiseat::MultiSeatMeasurements::new(
+            super::canonical_fixture().clone(),
+        ).unwrap();
+        let config = roomeq_model::MultiSeatConfig {
+            enabled: true,
+            strategy: roomeq_model::MultiSeatStrategy::ContinuousArea,
+            continuous_area: Some(roomeq_model::ContinuousListeningAreaConfig {
+                dimensions: 1,
+                bounds: vec![(0.0, 1.0)],
+                seat_positions: vec![vec![0.0], vec![1.0]],
+                prior: roomeq_model::AreaPriorKind::Uniform,
+                quadrature: roomeq_model::AreaQuadratureKind::Sobol {
+                    num_points: spec.outer_points, seed: spec.seed,
+                },
+                scalarisation: roomeq_model::AreaScalarisationKind::ExpectedValue,
+                idw_power: 2.0,
+            }),
+            ..Default::default()
+        };
+        let mut records = Vec::new();
+        for seed in [None, Some(1), Some(42), Some(spec.seed)] {
+            let budget = roomeq_engine::multiseat::MsoSearchBudget { seed, ..Default::default() };
+            let (result, report) = roomeq_engine::multiseat::optimize_multiseat_continuous_area_with_budget(
+                &measurements, &config, (20.0, 120.0), super::SAMPLE_RATE, &budget,
+            ).unwrap();
+            assert_eq!(report.stop_reason, "completed");
+            assert_eq!(report.evaluations, 9448);
+            assert!(result.objective_before.is_finite() && result.objective_after.is_finite());
+            let improvement_pct = 100.0 * (result.objective_before - result.objective_after)
+                / result.objective_before;
+            records.push(serde_json::json!({
+                "outer_seed_override": seed, "before": result.objective_before,
+                "after": result.objective_after, "improvement_pct": improvement_pct,
+                "meets_registry_improvement": improvement_pct >= spec.expect.improvement_min_pct,
+                "gains_db": result.gains, "delays_ms": result.delays,
+                "polarities": result.polarities, "allpass_filters": result.allpass_filters,
+                "search_evaluations": report.evaluations, "generations": report.generations_run,
+            }));
+        }
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/qa");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("continuous-expected-seed-diagnostic.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "scope": "seed_sensitivity_diagnostic_not_quality_acceptance_or_global_optimality_proof",
+                "required_improvement_pct": spec.expect.improvement_min_pct,
+                "records": records,
+            })).unwrap()).unwrap();
     }
 
     #[test]

@@ -279,6 +279,7 @@ mod tests {
         let mut chains = std::collections::HashMap::new();
         let mut results = std::collections::HashMap::new();
         let mut metadata = OptimizationMetadata {
+            final_convolution_sha256: None,
             pre_score: 0.0,
             post_score: 0.0,
             algorithm: "cobyla".to_string(),
@@ -304,6 +305,7 @@ mod tests {
             correction_acceptance: None,
             optimizer_evidence: None,
             stage_outcomes: Vec::new(),
+            qa_seed_distribution: None,
             effective_config: None,
         };
 
@@ -344,6 +346,7 @@ mod tests {
         let mut chains = std::collections::HashMap::new();
         let mut results = std::collections::HashMap::new();
         let mut metadata = OptimizationMetadata {
+            final_convolution_sha256: None,
             pre_score: 0.0,
             post_score: 0.0,
             algorithm: "cobyla".to_string(),
@@ -369,6 +372,7 @@ mod tests {
             correction_acceptance: None,
             optimizer_evidence: None,
             stage_outcomes: Vec::new(),
+            qa_seed_distribution: None,
             effective_config: None,
         };
 

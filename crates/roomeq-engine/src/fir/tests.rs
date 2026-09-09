@@ -137,6 +137,35 @@ fn kirkeby_config(max_boost_db: Option<f64>) -> OptimizerConfig {
     config
 }
 
+#[test]
+fn prepared_fir_rejects_unaligned_target_before_boost_capping() {
+    let measurement = create_test_curve(&[20.0, 100.0, 1000.0], &[80.0, 70.0, 80.0]);
+    for phase in ["linear", "minimum", "kirkeby"] {
+        for cap in [None, Some(3.0)] {
+            let mut config = kirkeby_config(cap);
+            config.fir.as_mut().unwrap().phase = phase.into();
+            for target in [
+                create_test_curve(&[20.0, 200.0, 1000.0], &[80.0, 80.0, 80.0]),
+                create_test_curve(&[20.0, 1000.0], &[80.0, 80.0]),
+                create_test_curve(&[20.0, 100.0, 1000.0], &[80.0, 80.0]),
+            ] {
+                let error = generate_fir_correction_prepared(
+                    &measurement,
+                    &config,
+                    &target,
+                    48_000.0,
+                )
+                .err()
+                .expect("prepared target grid must be aligned before coefficient design");
+                assert!(
+                    error.to_string().contains("measurement frequency grid"),
+                    "{error}"
+                );
+            }
+        }
+    }
+}
+
 /// Response of an FIR correction at a given frequency, in dB.
 fn fir_response_db(coeffs: &[f64], freq: f64, sample_rate: f64) -> f64 {
     let freqs = Array1::from(vec![freq]);
@@ -541,13 +570,12 @@ fn gd_delay_preserves_leading_impulse_magnitude() {
     identity[0] = 1.0;
     let shifted =
         crate::fir::apply::apply_gd_delay_to_fir_coefficients(&identity, 0.5 / 48.0, sample_rate);
-    for frequency in [100.0, 1_000.0, 10_000.0] {
+    for frequency in [100.0, 1_000.0, 10_000.0, 15_000.0, 20_000.0] {
         let freqs = Array1::from(vec![frequency]);
-        let response =
-            crate::response::compute_fir_complex_response(&shifted, &freqs, sample_rate);
+        let response = crate::response::compute_fir_complex_response(&shifted, &freqs, sample_rate);
         let magnitude_db = 20.0 * response[0].norm().log10();
         assert!(
-            magnitude_db.abs() < 1.0,
+            magnitude_db.abs() < super::GD_DELAY_MAGNITUDE_TOLERANCE_DB,
             "0.5-sample delay changed gain by {magnitude_db:.3} dB at {frequency} Hz"
         );
     }
@@ -578,79 +606,61 @@ fn gd_delay_extends_support_instead_of_silence() {
 }
 
 #[test]
-fn fractional_delay_preserves_high_frequency_magnitude() {
-    let mut coeffs = vec![0.0; 256];
-    coeffs[64] = 1.0;
-    let shifted = super::apply_fractional_sample_shift(&coeffs, 0.5);
-    let frequency = 20_000.0;
-    let sample_rate = 48_000.0;
-    let omega = 2.0 * std::f64::consts::PI * frequency / sample_rate;
-    let response = shifted
-        .iter()
-        .enumerate()
-        .map(|(index, value)| num_complex::Complex64::from_polar(*value, -omega * index as f64))
-        .sum::<num_complex::Complex64>();
-    let magnitude_db = 20.0 * response.norm().log10();
-
-    assert!(
-        magnitude_db > -0.5,
-        "fractional delay introduced {magnitude_db:.3} dB at 20 kHz"
-    );
-    assert!((shifted.iter().sum::<f64>() - 1.0).abs() < 1e-12);
-}
-
-#[test]
-fn fractional_delay_preserves_interior_without_edge_boost() {
-    // A finite rectangular window zero-padded for delay shows edge transients;
-    // interior taps must stay near unity and no tap may be boosted the way
-    // per-output renormalization boosted a leading impulse by +4.45 dB.
-    let coeffs = vec![1.0; 64];
-    for shift in [7.5, -7.5] {
-        let shifted = super::apply_fractional_sample_shift(&coeffs, shift);
-        for value in shifted.iter() {
-            assert!(
-                value.is_finite() && *value < 1.5,
-                "shift {shift} boosted an edge tap to {value}"
-            );
-        }
-        let interior = if shift > 0.0 {
-            &shifted[16..64]
-        } else {
-            &shifted[8..48]
-        };
-        for value in interior {
-            assert!(
-                (value - 1.0).abs() < 0.05,
-                "shift {shift} distorted interior unity response: {value}"
-            );
+fn causal_gd_delay_matches_dense_complex_transfer_at_supported_rates() {
+    use super::{gd_delay_padding_samples, realize_gd_fir_delay};
+    use num_complex::Complex64;
+    for sample_rate in [44_100.0, 48_000.0, 88_200.0, 96_000.0] {
+        let shifts = [-3.75, -0.5, 0.0, 0.1, 0.25, 0.5, 0.9, 4.125, 96.0];
+        let delays: Vec<_> = shifts.iter().map(|s| s * 1000.0 / sample_rate).collect();
+        let padding = gd_delay_padding_samples(&delays, sample_rate);
+        let frequencies = Array1::linspace(
+            0.0,
+            sample_rate * super::GD_DELAY_MAX_NORMALIZED_FREQUENCY,
+            1025,
+        );
+        for (shift, delay) in shifts.iter().zip(delays) {
+            for position in [0, 31, 63] {
+                let mut input = vec![0.0; 64];
+                input[position] = 1.0;
+                let realized = realize_gd_fir_delay(&input, delay, sample_rate, padding).unwrap();
+                assert_eq!(realized.common_padding_samples, padding);
+                assert!(
+                    (realized.effective_delay_ms - (shift + padding as f64) * 1000.0 / sample_rate)
+                        .abs()
+                        < 1e-10
+                );
+                let response = crate::response::compute_fir_complex_response(
+                    &realized.coefficients,
+                    &frequencies,
+                    sample_rate,
+                );
+                for (f, actual) in frequencies.iter().zip(response) {
+                    let phase = -2.0 * std::f64::consts::PI * f / sample_rate
+                        * (position as f64 + shift + padding as f64);
+                    let expected = Complex64::from_polar(1.0, phase);
+                    let error = actual / expected;
+                    assert!(
+                        (20.0 * error.norm().log10()).abs()
+                            < super::GD_DELAY_MAGNITUDE_TOLERANCE_DB,
+                        "{sample_rate} Hz, shift {shift}, position {position}, f={f}: {error}"
+                    );
+                    assert!(
+                        error.arg().abs() < 0.001,
+                        "delay phase error: {error} at {f}"
+                    );
+                }
+            }
         }
     }
 }
 
 #[test]
-fn fractional_delay_is_zero_for_integer_shift() {
-    let coeffs: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-    let shifted = super::apply_fractional_sample_shift(&coeffs, 2.0);
-    // Positive integer shifts extend support instead of discarding the tail.
-    assert_eq!(shifted.len(), 7);
-    assert_eq!(shifted[0], 0.0);
-    assert_eq!(shifted[1], 0.0);
-    assert_eq!(shifted[2], 1.0);
-    assert_eq!(shifted[3], 2.0);
-    assert_eq!(shifted[4], 3.0);
-    assert_eq!(shifted[5], 4.0);
-    assert_eq!(shifted[6], 5.0);
-}
-
-#[test]
-fn fractional_delay_handles_negative_shift() {
-    let mut coeffs = vec![0.0; 64];
-    coeffs[32] = 1.0;
-    // Negative shift = advance by 1.5 samples
-    let shifted = super::apply_fractional_sample_shift(&coeffs, -1.5);
-    assert!(shifted[30].abs() > 0.5);
-    assert!(shifted[31].abs() > 0.5);
-    assert!((shifted.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+fn gd_advance_requires_causal_support_instead_of_cropping_leading_energy() {
+    let input = [1.0, -0.25, 0.5];
+    assert!(super::realize_gd_fir_delay(&input, -0.5 / 48.0, 48_000.0, 0).is_err());
+    let padding = super::gd_delay_padding_samples(&[-0.5 / 48.0], 48_000.0);
+    let shifted = super::realize_gd_fir_delay(&input, -0.5 / 48.0, 48_000.0, padding).unwrap();
+    assert!((shifted.coefficients.iter().sum::<f64>() - input.iter().sum::<f64>()).abs() < 1e-12);
 }
 
 #[test]
@@ -683,37 +693,33 @@ fn excess_phase_collapse_falls_back_to_magnitude_correction() {
     config.fir.as_mut().unwrap().taps = 4_096;
     config.fir.as_mut().unwrap().correct_excess_phase = true;
 
-    let raw = autoeq_fir::generate_kirkeby_correction_with_smoothing_and_pre_ringing(
-        &measurement,
-        &target,
-        48_000.0,
-        4_096,
-        config.min_freq,
-        config.max_freq,
-        true,
-        0.167,
-        None,
-    );
-    let raw_peak_index = raw
-        .iter()
-        .enumerate()
-        .max_by(|(_, left), (_, right)| left.abs().total_cmp(&right.abs()))
-        .map(|(index, _)| index)
-        .unwrap();
-    let raw_off_peak = raw
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| *index != raw_peak_index)
-        .map(|(_, coefficient)| coefficient.abs())
-        .reduce(f64::max)
-        .unwrap_or(0.0);
+    // Inject the failed-design result explicitly: upstream no longer collapses
+    // for this fixture, but the recovery boundary must remain covered.
+    let mut collapsed = vec![0.0; 4_096];
+    collapsed[2_048] = 1.0;
+    let mut retried = false;
+    let coefficients = super::generate::recover_excess_phase_identity(collapsed, true, 1.0, || {
+        retried = true;
+        autoeq_fir::generate_kirkeby_correction_with_smoothing_and_pre_ringing(
+            &measurement,
+            &target,
+            48_000.0,
+            4_096,
+            config.min_freq,
+            config.max_freq,
+            false,
+            0.167,
+            None,
+        )
+    });
     assert!(
-        raw_off_peak <= 1.0e-8,
-        "fixture must reproduce the excess-phase identity collapse"
+        retried,
+        "identity collapse must invoke magnitude-only recovery"
     );
-
-    let coefficients = generate_fir_correction_prepared(&measurement, &config, &target, 48_000.0)
-        .expect("collapsed excess-phase design must retain magnitude correction");
+    let published = generate_fir_correction_prepared(&measurement, &config, &target, 48_000.0)
+        .expect("published excess-phase design must retain magnitude correction");
+    assert!(published.iter().all(|coefficient| coefficient.is_finite()));
+    assert!(fir_response_db(&published, 100.0, 48_000.0).abs() > 0.1);
     let peak_index = coefficients
         .iter()
         .enumerate()
@@ -730,4 +736,20 @@ fn excess_phase_collapse_falls_back_to_magnitude_correction() {
 
     assert!(off_peak > 1.0e-4, "fallback FIR remained identity-like");
     assert!(fir_response_db(&coefficients, 100.0, 48_000.0).abs() > 0.1);
+}
+
+#[test]
+fn excess_phase_recovery_preserves_valid_or_unrequested_designs() {
+    for (coefficients, enabled, rms) in [
+        (vec![0.0, 1.0, 0.0], false, 1.0),
+        (vec![0.0, 1.0, 0.0], true, 0.1),
+        (vec![0.5, 0.25, -0.1], true, 1.0),
+    ] {
+        let expected = coefficients.clone();
+        let actual =
+            super::generate::recover_excess_phase_identity(coefficients, enabled, rms, || {
+                panic!("valid or unrequested correction must not invoke fallback")
+            });
+        assert_eq!(actual, expected);
+    }
 }

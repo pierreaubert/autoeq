@@ -3039,6 +3039,14 @@
           ],
           "description": "Product-level perceptual policy preset. When omitted, legacy optimizer\ndefaults are preserved."
         },
+        "permitted_output_gain_db": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "description": "Explicit authorized broadband output change by logical input, in dB.\nUsed only for useful-output assessment; does not install a gain plugin.",
+          "type": "object"
+        },
         "phase_alignment": {
           "anyOf": [
             {
@@ -3175,6 +3183,16 @@
           "description": "Optimization convergence tolerance (relative)",
           "format": "double",
           "type": "number"
+        },
+        "upper_band_acoustic_bounds": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/UpperBandAcousticBound"
+            },
+            "type": "array"
+          },
+          "description": "Explicit calibrated upper-band acoustic bounds for final-seat replay,\nkeyed by physical output. Never inferred from candidate response tails.",
+          "type": "object"
         },
         "validation_bundle": {
           "anyOf": [
@@ -4920,6 +4938,48 @@
           "type": "string"
         }
       ]
+    },
+    "UpperBandAcousticBound": {
+      "additionalProperties": false,
+      "description": "Calibrated upper bound on an unmeasured acoustic transfer, before DSP.\nThis is an external evidence declaration, not a fitted extrapolation.",
+      "properties": {
+        "band_hz": {
+          "description": "Bound must overlap the measurement endpoint and cover the assessed band.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "evidence_id": {
+          "description": "Stable reference to the calibration, specification, or measurement proof.",
+          "type": "string"
+        },
+        "max_spl_db": {
+          "description": "Same input reference and SPL calibration as the corresponding capture.",
+          "format": "double",
+          "type": "number"
+        },
+        "partition": {
+          "description": "`training` or `held_out`, matching the immutable capture partition.",
+          "type": "string"
+        },
+        "seat_index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "partition",
+        "seat_index",
+        "band_hz",
+        "max_spl_db",
+        "evidence_id"
+      ],
+      "type": "object"
     },
     "UserPreference": {
       "additionalProperties": false,

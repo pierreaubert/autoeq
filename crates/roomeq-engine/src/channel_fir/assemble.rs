@@ -15,20 +15,37 @@ pub(super) fn assemble_fir_result(
     request: &FirChannelRequest<'_>,
     optimizer_output: FirOptimizerOutput,
     optimizer_evidence: Vec<OptimizerRunEvidence>,
+    design_target: Option<&Curve>,
 ) -> Result<ChannelProcessingResult> {
     let dsp = assemble_dsp_chain(request, &optimizer_output);
-    let target_curve = request.target.target_tilt_curve.as_ref().map(|tilt| {
-        let display_tilt = autoeq_core::interpolate_log_space(
-            &request.prepared.measurements().representative().freq,
-            tilt,
-        );
-        CurveData {
-            freq: display_tilt.freq.to_vec(),
-            spl: (&display_tilt.spl + request.target.mean_spl).to_vec(),
+    let target_curve = if let Some(design_target) = design_target {
+        // Use the very same calibrated reference passed to FIR design. The
+        // design input had target tilt removed, so restore it for reporting.
+        let grid = &request.prepared.measurements().representative().freq;
+        let mut display_target = autoeq_core::interpolate_log_space(grid, design_target);
+        if let Some(tilt) = &request.target.target_tilt_curve {
+            display_target.spl += &autoeq_core::interpolate_log_space(grid, tilt).spl;
+        }
+        Some(CurveData {
+            freq: display_target.freq.to_vec(),
+            spl: display_target.spl.to_vec(),
             phase: None,
             norm_range: request.preprocessed.norm_range,
-        }
-    });
+        })
+    } else {
+        request.target.target_tilt_curve.as_ref().map(|tilt| {
+            let display_tilt = autoeq_core::interpolate_log_space(
+                &request.prepared.measurements().representative().freq,
+                tilt,
+            );
+            CurveData {
+                freq: display_tilt.freq.to_vec(),
+                spl: (&display_tilt.spl + request.target.mean_spl).to_vec(),
+                phase: None,
+                norm_range: request.preprocessed.norm_range,
+            }
+        })
+    };
     let raw_curve = request.prepared.measurements().representative();
     let display_initial = output::extend_curve_to_full_range(raw_curve);
     let (final_curve, _) = corrected_curves(request, &optimizer_output, &display_initial, false);
@@ -143,6 +160,22 @@ fn assemble_dsp_chain(
                 } else {
                     output::create_convolution_plugin(sidecar_reference.filename())
                 });
+            }
+        }
+    }
+    // Magnitude-only Kirkeby design explicitly centers the zero-phase IFFT
+    // at taps/2. Keep that known scheduling delay separate from correction
+    // so a routed rollback does not move only one branch in time.
+    if !matches!(optimizer_output, FirOptimizerOutput::MixedPhase { .. })
+        && let Some(fir) = request.optimizer.fir.as_ref()
+        && fir.phase.eq_ignore_ascii_case("kirkeby")
+        && !fir.correct_excess_phase
+        && fir.pre_ringing.is_none()
+    {
+        for plugin in &mut plugins {
+            if plugin.plugin_type == "convolution" {
+                plugin.parameters["correction_design_delay_ms"] =
+                    serde_json::json!((fir.taps / 2) as f64 * 1000.0 / request.sample_rate);
             }
         }
     }

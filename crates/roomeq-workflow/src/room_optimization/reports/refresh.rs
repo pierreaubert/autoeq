@@ -41,22 +41,11 @@ pub(in super::super) fn refresh_final_reports(
         // deployment, not correction. Evaluate the de-routed final curve, the
         // same basis the acceptance gate uses, so an identity fallback scores
         // post == pre instead of showing a phantom routing regression.
-        let post_basis = result
-            .channels
-            .get(&ch_result.name)
-            .and_then(|chain| {
-                let baseline = super::super::room_optimization_result::routed_baseline_curve(
-                    chain,
-                    &ch_result.initial_curve,
-                    sample_rate,
-                )?;
-                super::super::room_optimization_result::remove_routing_transfer(
-                    &ch_result.initial_curve,
-                    &baseline,
-                    &ch_result.final_curve,
-                )
-            })
-            .unwrap_or_else(|| ch_result.final_curve.clone());
+        let post_basis = result.channels.get(&ch_result.name).and_then(|chain| {
+            super::super::room_optimization_result::correction_only_curve(
+                chain, &ch_result.initial_curve, &ch_result.final_curve, sample_rate, sidecar_dir,
+            )
+        }).unwrap_or_else(|| ch_result.final_curve.clone());
         ch_result.post_score =
             recompute_curve_flatness_score(&post_basis, score_min_freq, score_max_freq);
         log::debug!(
@@ -196,6 +185,14 @@ pub(in super::super) fn refresh_temporal_ir_evidence(
         .collect();
 
     for (channel_name, initial_curve, biquads, fir_coeffs, delay_ms) in ir_inputs {
+        // Rebuild this channel's waveform pair or report it as unavailable.
+        // In particular, missing phase must not retain an earlier pre/post IR
+        // as if it were evidence for the current measurement and correction.
+        if let Some(chain) = result.channels.get_mut(&channel_name) {
+            chain.pre_ir = None;
+            chain.post_ir = None;
+            chain.direct_early_late_correction = None;
+        }
         if let Some((pre_ir, post_ir)) =
             roomeq_engine::analysis::ir_waveform::compute_channel_ir_waveforms(
                 &initial_curve,
@@ -299,6 +296,33 @@ mod tests {
     use crate::test_fixtures::single_channel_room_result;
 
     #[test]
+    fn report_refresh_scores_routed_bass_correction_not_composite_programme_energy() {
+        let mut result = single_channel_room_result("LFE");
+        let initial = result.channel_results["LFE"].initial_curve.clone();
+        let chain = result.channels.get_mut("LFE").unwrap();
+        chain.plugins = vec![roomeq_engine::topology::mark_route_owned_plugin(
+            roomeq_engine::output::create_crossover_plugin("LR24", 120.0, "low"),
+        )];
+        let mut composite = crate::room_optimization::room_optimization_result::routed_baseline_curve(
+            chain, &initial, 48_000.0,
+        ).unwrap();
+        // Redirected inputs can add non-flat programme energy at the physical
+        // sub. It is not the LFE input's correction transfer.
+        for (f, level) in composite.freq.iter().zip(composite.spl.iter_mut()) {
+            *level += 6.0 * (-(f / 80.0).ln().powi(2) / 0.3).exp();
+        }
+        result.channel_results.get_mut("LFE").unwrap().final_curve = composite;
+        let mut config = RoomConfig::default();
+        config.optimizer.min_freq = 20.0;
+        config.optimizer.max_freq = 120.0;
+        refresh_final_reports(&mut result, &config, 48_000.0, Path::new("."));
+        let channel = &result.channel_results["LFE"];
+        assert!((channel.pre_score - channel.post_score).abs() < 1e-10,
+            "route-only correction must remain identity after report refresh: {} -> {}",
+            channel.pre_score, channel.post_score);
+    }
+
+    #[test]
     fn temporal_ir_evidence_populated_for_fir_chain_before_gate() {
         // Regression test: stages that add FIR taps late in the pipeline must
         // have temporal masking evidence available before the final safety
@@ -398,6 +422,24 @@ mod tests {
         );
 
         assert!(result.channels["L"].fir_temporal_masking.is_none());
+    }
+
+    #[test]
+    fn temporal_ir_refresh_clears_waveforms_when_phase_evidence_is_unavailable() {
+        let mut result = single_channel_room_result("L");
+        let initial = &mut result.channel_results.get_mut("L").unwrap().initial_curve;
+        initial.phase = Some(ndarray::Array1::zeros(initial.freq.len()));
+        refresh_temporal_ir_evidence(
+            &mut result, &RoomConfig::default(), 48_000.0, Path::new("."),
+        );
+        assert!(result.channels["L"].pre_ir.is_some());
+        assert!(result.channels["L"].post_ir.is_some());
+        result.channel_results.get_mut("L").unwrap().initial_curve.phase = None;
+        refresh_temporal_ir_evidence(
+            &mut result, &RoomConfig::default(), 48_000.0, Path::new("."),
+        );
+        assert!(result.channels["L"].pre_ir.is_none(), "stale measured-phase pre-IR survived");
+        assert!(result.channels["L"].post_ir.is_none(), "stale measured-phase post-IR survived");
     }
 
     #[test]

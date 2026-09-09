@@ -192,9 +192,65 @@ keyed by a height channel name or by `top_front`, `top_middle`, or `top_rear`.
 
 ## Configuration schema version
 
+Schema **2.2.0** adds `optimizer.fir.placement`:
+
+```json
+{
+  "version": "2.2.0",
+  "optimizer": {
+    "processing_mode": "phase_linear",
+    "min_freq": 20.0,
+    "max_freq": 200.0,
+    "fir": {
+      "placement": "per_driver",
+      "taps": 4096,
+      "phase": "kirkeby",
+      "correct_excess_phase": true,
+      "max_boost_db": 4.0
+    }
+  }
+}
+```
+
+This is a configuration fragment; supply the usual `speakers` measurements.
+`shared` is the default and preserves existing behavior. `per_driver` requires
+version 2.2.x and `phase_linear`, `hybrid`, or `mixed_phase` processing. It
+currently supports independent legacy or explicit-driver groups (such as paired
+main/sub outputs) and standalone speakers. Standalone speakers keep their
+existing single-FIR design. Bass-management routing, arrays and shared
+multi-sub outputs are rejected: those need a joint routing-matrix objective.
+Group captures must have phase and a common timing reference. An output
+directory is required for the physical FIR sidecars.
+
+For a group, each physical driver's ordered plugin list receives a convolution
+and a unique WAV; no additional shared residual FIR is generated. Retained
+gain, delay, crossover and IIR stages remain in place. All physical FIRs in a
+group use the same causal support. `mixed_phase` designs phase-only correction
+using `mixed_phase.max_fir_length_ms`; the other modes use `fir.taps`.
+
+The joint objective uses the calibrated complex sum and absolute group target.
+Magnitude correction is tapered inside the configured frequency band and
+limited by both optimizer and FIR boost bounds. Deep local dips (6 dB below
+a half-octave neighbourhood envelope), coherence below 0.8, and less than
+10 dB signal/noise margin are conservatively protected. Their FIR boost is
+limited to 0 dB (0.1 dB finite-realization tolerance); combined-response nulls
+are excluded from the target-error objective. This does not identify SBIR with
+certainty or remove existing IIR boost. Independent phase adjustment may repair
+main/sub interference without adding electrical energy at a room null.
+
+Every candidate is evaluated from its actual finite taps. Non-improving or
+unsafe sets are replaced with identity FIRs carrying the same causal delay;
+logs and convolution parameters record before/after RMS, protected-bin count,
+tap count and latency. Outside-band magnitude leakage is limited to 0.5 dB
+on the evaluation grid (finite FIRs cannot have brick-wall correction support).
+If a later runtime safety gate removes correction, it preserves each physical
+FIR's design delay as an explicit delay stage. Delay metadata on a retained
+convolution is descriptive: do not add that delay a second time in the host.
+Placement is not automatic: the engine does not compare shared/per-driver modes.
+
 The top-level `version` is validated before paths are resolved or optimization
 starts. RoomEQ accepts the historical `1.0.x` through `1.2.x` schema lines and
-the `2.0.x` through `2.1.x` lines. The current default is `2.1.0`. Malformed
+the `2.0.x` through `2.2.x` lines. The current default is `2.2.0`. Malformed
 versions and unknown minor or major versions fail closed instead of being
 interpreted with current defaults.
 

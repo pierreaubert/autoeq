@@ -29,6 +29,7 @@ use std::sync::{
 };
 
 mod gd;
+mod per_driver_fir;
 mod phase;
 mod reports;
 

@@ -1426,7 +1426,19 @@ fn runtime_temporal_quality_evidence(
                 fir_taps: result.channel_results[name]
                     .fir_coeffs
                     .as_ref()
-                    .map(Vec::len),
+                    .map(Vec::len)
+                    .or_else(|| {
+                        result
+                            .channels
+                            .get(name)
+                            .and_then(|chain| chain.drivers.as_ref())
+                            .into_iter()
+                            .flatten()
+                            .flat_map(|driver| &driver.plugins)
+                            .filter_map(|p| p.parameters.get("fir_taps").and_then(|v| v.as_u64()))
+                            .max()
+                            .map(|n| n as usize)
+                    }),
             }
         })
         .collect();
@@ -1468,6 +1480,9 @@ fn apply_logical_channel_chain(
     sample_rate: f64,
     sidecar_dir: &Path,
 ) -> Result<roomeq_model::Curve> {
+    if super::per_driver_fir::has_physical_fir(chain) {
+        return super::per_driver_fir::replay(chain, curve, sample_rate, sidecar_dir);
+    }
     // ChannelOptimizationResult stores the logical combined response. Physical
     // sub-driver branches are validated by bass-management output evidence and
     // cannot be re-applied to that already-combined curve.
@@ -1913,7 +1928,14 @@ fn correction_stage(plugin: &roomeq_model::PluginConfigWrapper) -> Option<Correc
 fn remove_correction_stage(chain: &mut ChannelDspChain, stage: CorrectionStage) {
     let keep_routed_drivers = has_route_owned_bass_low_pass(chain);
     if stage == CorrectionStage::Fir {
-        for plugin in &mut chain.plugins {
+        for plugin in chain.plugins.iter_mut().chain(
+            chain
+                .drivers
+                .iter_mut()
+                .filter(|_| !keep_routed_drivers)
+                .flatten()
+                .flat_map(|driver| &mut driver.plugins),
+        ) {
             if correction_stage(plugin) == Some(stage)
                 && plugin.plugin_type == "convolution"
                 && let Some(delay_ms) = plugin.parameters.get("correction_design_delay_ms")
@@ -1921,7 +1943,11 @@ fn remove_correction_stage(chain: &mut ChannelDspChain, stage: CorrectionStage) 
                     .filter(|delay| delay.is_finite() && *delay >= 0.0)
             {
                 let routing_stage = plugin.parameters.get("room_eq_stage").cloned();
+                let placement = plugin.parameters.get("room_eq_fir_placement").cloned();
                 *plugin = roomeq_engine::output::create_delay_plugin(delay_ms);
+                if let Some(placement) = placement {
+                    plugin.parameters["room_eq_fir_placement"] = placement;
+                }
                 if let Some(stage) = routing_stage {
                     plugin.parameters["room_eq_stage"] = stage;
                 }
@@ -1937,7 +1963,9 @@ fn remove_correction_stage(chain: &mut ChannelDspChain, stage: CorrectionStage) 
             driver.plugins.retain(|plugin| {
                 correction_stage(plugin) != Some(stage)
                     && !(stage == CorrectionStage::Mso
-                        && matches!(plugin.plugin_type.as_str(), "gain" | "delay"))
+                        && matches!(plugin.plugin_type.as_str(), "gain" | "delay")
+                        && plugin.parameters.get("label").and_then(|v| v.as_str())
+                            != Some("fir_design_delay"))
             });
         }
     }
@@ -3847,5 +3875,40 @@ fn combined_boost_limit_refreshes_biquad_coefficients_and_ir_report() {
         let actual_ir = result.channels["left"].post_ir.as_ref().unwrap();
         assert_eq!(actual_ir.amplitude, expected_ir.amplitude);
         assert_ne!(actual_ir.amplitude, old_ir.amplitude);
+    }
+}
+#[cfg(test)]
+mod per_driver_latency_tests {
+    use super::*;
+    #[test]
+    fn per_driver_fir_safety_reversion_keeps_common_causal_support() {
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        let chain = result.channels.get_mut("L").unwrap();
+        chain.plugins.clear();
+        chain.drivers = Some(
+            (0..2)
+                .map(|index| {
+                    let mut plugin = roomeq_engine::output::create_convolution_plugin(&format!(
+                        "driver{index}.wav"
+                    ));
+                    plugin.parameters["room_eq_fir_placement"] = serde_json::json!("per_driver");
+                    plugin.parameters["correction_design_delay_ms"] = serde_json::json!(42.6666667);
+                    roomeq_model::DriverDspChain {
+                        index,
+                        name: format!("driver{index}"),
+                        plugins: vec![plugin],
+                        initial_curve: chain.initial_curve.clone(),
+                    }
+                })
+                .collect(),
+        );
+        remove_correction_stage(chain, CorrectionStage::Fir);
+        remove_correction_stage(chain, CorrectionStage::Mso);
+        for driver in chain.drivers.as_ref().unwrap() {
+            assert_eq!(driver.plugins.len(), 1);
+            assert_eq!(driver.plugins[0].plugin_type, "delay");
+            assert_eq!(driver.plugins[0].parameters["delay_ms"], 42.6666667);
+        }
+        assert!(super::super::per_driver_fir::has_physical_fir(chain));
     }
 }

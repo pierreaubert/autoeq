@@ -152,6 +152,7 @@ fn test_mixedphase_with_phase_data() {
                 phase_smoothing_octaves: 0.167,
             }),
             fir: Some(FirConfig {
+                placement: Default::default(),
                 taps: 512,
                 phase: "kirkeby".to_string(),
                 correct_excess_phase: true,

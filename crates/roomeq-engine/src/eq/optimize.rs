@@ -1927,6 +1927,7 @@ mod processing_mode_tests {
     #[test]
     fn test_processing_mode_phaselinear_config() {
         let fir_config = FirConfig {
+            placement: Default::default(),
             taps: 4096,
             phase: "kirkeby".to_string(),
             correct_excess_phase: false,
@@ -1947,6 +1948,7 @@ mod processing_mode_tests {
     #[test]
     fn test_processing_mode_hybrid_config() {
         let fir_config = FirConfig {
+            placement: Default::default(),
             taps: 4096,
             phase: "kirkeby".to_string(),
             correct_excess_phase: false,

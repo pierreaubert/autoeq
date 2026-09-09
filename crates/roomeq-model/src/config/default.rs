@@ -2,7 +2,8 @@ use super::types::BassHeadroomModelKind;
 use super::types::MultiMeasurementStrategy;
 
 /// Current configuration version.
-pub const CURRENT_CONFIG_VERSION: &str = "2.1.0";
+// 2.2 adds opt-in physical-driver FIR deployment; older inputs remain shared.
+pub const CURRENT_CONFIG_VERSION: &str = "2.2.0";
 
 /// Configuration version (semantic versioning).
 pub fn default_config_version() -> String {
@@ -12,7 +13,7 @@ pub fn default_config_version() -> String {
 /// Validate the RoomEQ configuration schema version.
 ///
 /// The loader retains explicit compatibility with the historical 1.0–1.2
-/// schemas and the current 2.0–2.1 schemas. Patch releases within those
+/// schemas and the current 2.0–2.2 schemas. Patch releases within those
 /// schema lines are compatible; unknown minor/major versions fail closed so
 /// new fields are not silently interpreted with old defaults.
 pub fn validate_config_version(version: &str) -> Result<(), String> {
@@ -31,11 +32,11 @@ pub fn validate_config_version(version: &str) -> Result<(), String> {
     let minor = parse(parts[1])?;
     let _patch = parse(parts[2])?;
 
-    if matches!((major, minor), (1, 0..=2) | (2, 0..=1)) {
+    if matches!((major, minor), (1, 0..=2) | (2, 0..=2)) {
         Ok(())
     } else {
         Err(format!(
-            "unsupported RoomEQ config version '{version}'; supported schema lines are 1.0.x–1.2.x and 2.0.x–2.1.x (current {CURRENT_CONFIG_VERSION})"
+            "unsupported RoomEQ config version '{version}'; supported schema lines are 1.0.x–1.2.x and 2.0.x–2.2.x (current {CURRENT_CONFIG_VERSION})"
         ))
     }
 }

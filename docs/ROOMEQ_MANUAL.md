@@ -1384,3 +1384,32 @@ acceptance policy, or certify frequencies between samples, transient/true-peak
 headroom, native-backend agreement, acoustic benefit or device assignment.
 Required attenuation must be reconciled with calibrated useful-output goals;
 it is not a recommendation to attenuate blindly.
+
+## Per-driver FIR placement (input schema 2.2.0)
+
+Set `optimizer.fir.placement` to `per_driver` to try separate FIRs for the
+physical speakers in each independent main/sub group. The default, `shared`,
+is unchanged. Phase mode is independent of placement. See
+[the input contract](../src/bin/roomeq/INPUT_FORMAT.md#configuration-schema-version)
+for the JSON fragment, supported group types, safeguards and limitations.
+
+The engine retains crossover, gain, delay and intentional IIR stages, then
+evaluates complete sets of per-driver FIRs against the calibrated acoustic sum.
+It does not flatten every physical speaker towards the full-range target.
+Each exported driver's plugin list references its own WAV; load all of them on
+their respective physical outputs. Mixed-phase FIRs remain phase-only, and all
+branches have a common causal support budget. Minimum-phase FIRs remain causal
+without imposing a linear-phase centering delay.
+
+Conservative null masks prevent FIR boost into deep local dips, low-coherence
+bins and low signal/noise regions. A remaining target deficit at a protected
+null is intentional, not an invitation to increase boost. Single-position
+measurements cannot definitively distinguish all SBIR/room nulls. Relative
+main/sub phase correction can help interference, but cannot guarantee room-wide
+improvement. Validate other seats and listen at matched levels.
+
+The measured `2.2_sigberg2/optimiser-fir.json` opts in. Use `placement: shared`
+for an A/B run in a separate output directory. Compare the complete replayed
+response, not an individual driver's SPL against the whole-system target.
+Automatic shared/per-driver selection is not implemented. Routed systems with
+shared physical subs are explicitly rejected by this initial option.

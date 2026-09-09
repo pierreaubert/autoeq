@@ -185,6 +185,73 @@ pub(in super::super) fn refresh_temporal_ir_evidence(
         .collect();
 
     for (channel_name, initial_curve, biquads, fir_coeffs, delay_ms) in ir_inputs {
+        if result
+            .channels
+            .get(&channel_name)
+            .is_some_and(super::super::per_driver_fir::has_physical_fir)
+        {
+            // There is no common FIR to multiply onto the summed capture.
+            // Render the acoustic post IR from the replayed complex response;
+            // use the worst physical FIR for conservative temporal acceptance.
+            let chain = result.channels.get(&channel_name).unwrap();
+            let mut metrics = Vec::new();
+            for driver in chain.drivers.as_deref().unwrap_or_default() {
+                for plugin in &driver.plugins {
+                    if plugin.plugin_type != "convolution" {
+                        continue;
+                    }
+                    if let Some(path) = plugin.parameters.get("ir_file").and_then(|v| v.as_str())
+                        && let Ok(wav) = crate::wav::decode_first_channel(&sidecar_dir.join(path))
+                        && wav.sample_rate == sample_rate.round() as u32
+                    {
+                        let taps: Vec<f64> = wav.samples.into_iter().map(f64::from).collect();
+                        if let Some(m) =
+                            roomeq_engine::loss::epa::score::temporal_ir_masking_metrics(
+                                &taps,
+                                sample_rate,
+                                &runtime_epa_cfg.temporal_masking,
+                            )
+                        {
+                            metrics.push(roomeq_engine::report_adapter::to_temporal_ir_masking(m));
+                        }
+                    }
+                }
+            }
+            let post = super::super::per_driver_fir::replay(
+                chain,
+                &initial_curve,
+                sample_rate,
+                sidecar_dir,
+            )
+            .ok();
+            let pre_ir = roomeq_engine::analysis::ir_waveform::compute_channel_ir_waveforms(
+                &initial_curve,
+                &[],
+                None,
+                0.0,
+                sample_rate,
+            )
+            .map(|pair| pair.0);
+            let post_ir = post
+                .and_then(|curve| {
+                    roomeq_engine::analysis::ir_waveform::compute_channel_ir_waveforms(
+                        &curve,
+                        &[],
+                        None,
+                        0.0,
+                        sample_rate,
+                    )
+                })
+                .map(|pair| pair.0);
+            let chain = result.channels.get_mut(&channel_name).unwrap();
+            chain.pre_ir = pre_ir;
+            chain.post_ir = post_ir;
+            chain.fir_temporal_masking = metrics.into_iter().max_by(|a, b| {
+                a.pre_ringing_audible_db
+                    .total_cmp(&b.pre_ringing_audible_db)
+            });
+            continue;
+        }
         // Rebuild this channel's waveform pair or report it as unavailable.
         // In particular, missing phase must not retain an earlier pre/post IR
         // as if it were evidence for the current measurement and correction.

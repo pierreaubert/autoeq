@@ -61,6 +61,7 @@ pub(super) fn option_pre_ringing(config: &mut RoomConfig) {
     config.optimizer.processing_mode = ProcessingMode::PhaseLinear;
     if config.optimizer.fir.is_none() {
         config.optimizer.fir = Some(FirConfig {
+            placement: Default::default(),
             taps: 2048,
             phase: "kirkeby".to_string(),
             correct_excess_phase: false,

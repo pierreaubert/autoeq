@@ -91,6 +91,7 @@ fn ensure_fir_config(config: &mut RoomConfig) {
         ProcessingMode::PhaseLinear | ProcessingMode::Hybrid => {
             if config.optimizer.fir.is_none() {
                 config.optimizer.fir = Some(FirConfig {
+                    placement: Default::default(),
                     taps: 4096,
                     phase: "kirkeby".to_string(),
                     correct_excess_phase: false,

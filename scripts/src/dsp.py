@@ -379,6 +379,18 @@ def apply_plugins_to_curve(
                     * _biquad_complex_response(coefficients, frequency, sample_rate)
                     for value, frequency in zip(transfer, frequencies)
                 ]
+        elif plugin_type == "convolution" and parameters.get("room_eq_fir_placement") == "per_driver":
+            taps = parameters.get("_fir_taps")
+            if not taps or parameters.get("_fir_sample_rate") != sample_rate:
+                raise ValueError("Physical FIR replay requires its matching WAV sidecar; use load_roomeq_json")
+            # Direct Horner DTFT: includes each driver's own phase and latency.
+            for index, frequency in enumerate(frequencies):
+                angle = -2.0 * math.pi * frequency / sample_rate
+                z = complex(math.cos(angle), math.sin(angle))
+                h = 0j
+                for tap in reversed(taps):
+                    h = h * z + tap
+                transfer[index] *= h
         elif plugin_type == "crossover":
             crossover = _crossover_response(
                 str(parameters.get("type", "LR24")),

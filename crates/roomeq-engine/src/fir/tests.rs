@@ -125,6 +125,7 @@ fn predefined_fir_target_uses_measurement_absolute_level() {
 fn kirkeby_config(max_boost_db: Option<f64>) -> OptimizerConfig {
     let mut config = OptimizerConfig::default();
     config.fir = Some(FirConfig {
+        placement: Default::default(),
         taps: 2048,
         phase: "kirkeby".to_string(),
         correct_excess_phase: false,
@@ -331,6 +332,7 @@ fn test_generate_fir_correction_basic() {
 
     let mut config = OptimizerConfig::default();
     config.fir = Some(FirConfig {
+        placement: Default::default(),
         taps: 1024,
         phase: "linear".to_string(),
         correct_excess_phase: false,
@@ -451,6 +453,7 @@ fn test_generate_fir_correction_kirkeby_mode() {
 
     let mut config = OptimizerConfig::default();
     config.fir = Some(FirConfig {
+        placement: Default::default(),
         taps: 2048,
         phase: "kirkeby".to_string(),
         correct_excess_phase: false,
@@ -500,6 +503,7 @@ fn test_invalid_phase_type_returns_error() {
 
     let mut config = OptimizerConfig::default();
     config.fir = Some(FirConfig {
+        placement: Default::default(),
         taps: 1024,
         phase: "invalid_phase_type".to_string(),
         correct_excess_phase: false,
@@ -536,6 +540,7 @@ fn minimum_phase_flat_correction_keeps_leading_impulse() {
 
     let mut config = OptimizerConfig::default();
     config.fir = Some(FirConfig {
+        placement: Default::default(),
         taps: 256,
         phase: "minimum".to_string(),
         correct_excess_phase: false,

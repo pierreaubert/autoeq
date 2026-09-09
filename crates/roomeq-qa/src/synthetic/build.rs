@@ -178,6 +178,7 @@ pub(super) fn configure_processing_mode(optimizer: &mut OptimizerConfig, mode: P
 
 fn default_qa_fir_config() -> FirConfig {
     FirConfig {
+        placement: Default::default(),
         taps: 2048,
         phase: "kirkeby".to_string(),
         correct_excess_phase: false,

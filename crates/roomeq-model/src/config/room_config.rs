@@ -16,7 +16,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RoomConfig {
     /// Configuration schema version. Supported lines are 1.0.x–1.2.x and
-    /// 2.0.x–2.1.x; the current version is 2.1.0.
+    /// 2.0.x–2.2.x; the current version is 2.2.0.
     #[serde(default = "default_config_version")]
     pub version: String,
     /// System configuration (v2.1) - Decouples logical roles from measurements
@@ -96,6 +96,36 @@ impl RoomConfig {
 
     fn structural_errors(&self) -> Vec<String> {
         let mut errors = Vec::new();
+        if self
+            .optimizer
+            .fir
+            .as_ref()
+            .is_some_and(|fir| fir.placement == super::FirPlacement::PerDriver)
+        {
+            if !self.version.starts_with("2.2.") {
+                errors.push("fir.placement=per_driver requires config version 2.2.x".into());
+            }
+            if !matches!(
+                self.optimizer.processing_mode,
+                super::ProcessingMode::PhaseLinear
+                    | super::ProcessingMode::Hybrid
+                    | super::ProcessingMode::MixedPhase
+            ) {
+                errors.push("fir.placement=per_driver requires phase_linear, hybrid or mixed_phase processing".into());
+            }
+            // Shared physical outputs require a matrix objective, not separate
+            // independently generated logical-group corrections.
+            if self.system.as_ref().is_some_and(|s| {
+                s.subwoofers.is_some() || s.bass_management.as_ref().is_some_and(|b| b.enabled)
+            }) || self.speakers.values().any(|s| {
+                !matches!(
+                    s,
+                    SpeakerConfig::Group(_) | SpeakerConfig::Topology(_) | SpeakerConfig::Single(_)
+                )
+            }) {
+                errors.push("fir.placement=per_driver currently supports standalone channels and independent speaker groups, not bass-management routing, arrays or shared multi-sub outputs".into());
+            }
+        }
         if self.speakers.is_empty() {
             errors.push("room configuration requires at least one speaker".to_string());
         }

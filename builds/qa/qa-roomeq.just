@@ -17,6 +17,9 @@ qa-roomeq-pr:
 	just qa-roomeq-escaped-defects
 
 qa-roomeq-stage-contracts:
+	python3 -m unittest scripts.test_per_driver_fir
+	cargo test --release -p roomeq-engine per_driver_fir --lib
+	cargo test --release -p roomeq-workflow per_driver --lib
 	cargo test --release -p roomeq-qa stage_contracts --lib
 	cargo test --release -p roomeq-workflow dsp_realization --lib
 	cargo test --release -p roomeq-engine dsp_realization --lib

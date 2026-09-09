@@ -14,6 +14,7 @@ fn optimizer_for_mode(processing_mode: ProcessingMode) -> OptimizerConfig {
         psychoacoustic: false,
         refine: false,
         fir: Some(roomeq_model::FirConfig {
+            placement: Default::default(),
             taps: 128,
             phase: "linear".to_string(),
             correct_excess_phase: false,
@@ -194,6 +195,7 @@ fn optimize_room_impl_generic_multiple_channels_phase_linear_succeeds() {
     );
     let mut optimizer = optimizer_for_mode(ProcessingMode::PhaseLinear);
     optimizer.fir = Some(roomeq_model::FirConfig {
+        placement: Default::default(),
         taps: 128,
         phase: "linear".to_string(),
         correct_excess_phase: false,

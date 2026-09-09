@@ -1,5 +1,21 @@
 # Unreleased
 
+## Opt-in physical-driver FIR correction
+
+- Add RoomEQ input schema 2.2.0 and `optimizer.fir.placement`: `shared`
+  remains the default; `per_driver` jointly evaluates one finite FIR per
+  physical driver in independent speaker groups. Standalone channels retain
+  their existing single-FIR path. Unsupported shared-output/bass-management routing
+  fails explicitly rather than silently ignoring placement.
+- Preserve calibrated driver SPL, retained crossover/IIR transfer and one
+  absolute group target. Use common causal support, bounded correction, and
+  conservative room-null/coherence/noise masks with a realized no-boost check.
+  Mixed-phase placement remains phase-only after IIR; unsafe or non-improving
+  candidates fall back to explicitly reported delayed identity filters.
+- Export unique per-driver WAVs and replay physical captures through their
+  own filters for acoustic and temporal evidence. Enable the option in the
+  measured Sigberg paired-sub FIR example.
+
 ## RoomEQ limited-band level alignment
 
 - Preserve measured absolute and relative SPL when summing crossover drivers; remove hidden per-driver normalization that was not represented in exported DSP gains. Reports use the serialized absolute target rather than re-aligning dotted target overlays to each channel's bass band.

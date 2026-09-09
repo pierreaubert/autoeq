@@ -1758,6 +1758,11 @@
           "format": "double",
           "type": "number"
         },
+        "placement": {
+          "$ref": "#/$defs/FirPlacement",
+          "default": "shared",
+          "description": "Shared logical-channel FIR (default), or jointly evaluated physical-driver FIRs."
+        },
         "pre_ringing": {
           "anyOf": [
             {
@@ -1778,6 +1783,14 @@
         }
       },
       "type": "object"
+    },
+    "FirPlacement": {
+      "description": "Where FIR correction is deployed. Phase mode is configured independently.",
+      "enum": [
+        "shared",
+        "per_driver"
+      ],
+      "type": "string"
     },
     "FrequencyBandWeights": {
       "additionalProperties": false,
@@ -5145,8 +5158,8 @@
       "description": "Optional target curve (freq, spl)"
     },
     "version": {
-      "default": "2.1.0",
-      "description": "Configuration schema version. Supported lines are 1.0.x–1.2.x and\n2.0.x–2.1.x; the current version is 2.1.0.",
+      "default": "2.2.0",
+      "description": "Configuration schema version. Supported lines are 1.0.x–1.2.x and\n2.0.x–2.2.x; the current version is 2.2.0.",
       "type": "string"
     }
   },

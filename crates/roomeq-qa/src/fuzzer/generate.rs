@@ -623,6 +623,7 @@ pub(super) fn generate_random_mixed_config(
 
     let fir_config = if matches!(processing_mode, ProcessingMode::PhaseLinear) {
         Some(FirConfig {
+            placement: Default::default(),
             taps: 1024,
             phase: "linear".to_string(),
             correct_excess_phase: false,

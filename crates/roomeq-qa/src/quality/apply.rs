@@ -162,6 +162,7 @@ pub(super) fn apply_option_override(config: &mut RoomConfig, option: &OptionOver
             config.optimizer.processing_mode = ProcessingMode::PhaseLinear;
             if config.optimizer.fir.is_none() {
                 config.optimizer.fir = Some(FirConfig {
+                    placement: Default::default(),
                     taps: 2048,
                     phase: "kirkeby".to_string(),
                     correct_excess_phase: false,
@@ -208,6 +209,7 @@ pub(super) fn apply_option_override(config: &mut RoomConfig, option: &OptionOver
                     config.optimizer.processing_mode = ProcessingMode::PhaseLinear;
                     config.optimizer.max_freq = config.optimizer.max_freq.min(1_500.0);
                     config.optimizer.fir = Some(FirConfig {
+                        placement: Default::default(),
                         taps: 2048,
                         phase: "linear".to_string(),
                         correct_excess_phase: false,
@@ -219,6 +221,7 @@ pub(super) fn apply_option_override(config: &mut RoomConfig, option: &OptionOver
                 GroupDelayQaProfile::MixedPhase => {
                     config.optimizer.processing_mode = ProcessingMode::MixedPhase;
                     config.optimizer.fir = Some(FirConfig {
+                        placement: Default::default(),
                         taps: 2048,
                         phase: "kirkeby".to_string(),
                         correct_excess_phase: false,

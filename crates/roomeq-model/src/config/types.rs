@@ -558,9 +558,21 @@ impl<'de> Deserialize<'de> for TargetCurveConfig {
     }
 }
 
+/// Where FIR correction is deployed. Phase mode is configured independently.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FirPlacement {
+    #[default]
+    Shared,
+    PerDriver,
+}
+
 /// FIR filter configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct FirConfig {
+    /// Shared logical-channel FIR (default), or jointly evaluated physical-driver FIRs.
+    #[serde(default)]
+    pub placement: FirPlacement,
     /// Number of taps (coefficients)
     #[serde(default = "default_fir_taps")]
     pub taps: usize,
@@ -587,6 +599,7 @@ pub struct FirConfig {
 impl Default for FirConfig {
     fn default() -> Self {
         Self {
+            placement: FirPlacement::Shared,
             taps: default_fir_taps(),
             phase: default_fir_phase(),
             correct_excess_phase: false,

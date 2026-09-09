@@ -297,6 +297,7 @@ mod tests {
 
     fn fir_config() -> roomeq_model::FirConfig {
         roomeq_model::FirConfig {
+            placement: Default::default(),
             taps: 64,
             phase: "linear".to_string(),
             correct_excess_phase: false,

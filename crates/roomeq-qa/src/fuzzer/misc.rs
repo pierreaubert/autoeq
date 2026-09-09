@@ -60,6 +60,7 @@ pub(super) fn base_optimizer_config(
 
 pub(super) fn fir_config(phase: &str) -> FirConfig {
     FirConfig {
+        placement: Default::default(),
         taps: 1024,
         phase: phase.to_string(),
         correct_excess_phase: phase == "kirkeby",

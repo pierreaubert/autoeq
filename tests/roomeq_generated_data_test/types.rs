@@ -20,6 +20,7 @@ pub(super) fn all_mode_configs() -> Vec<ModeConfig> {
             name: "fir",
             processing_mode: ProcessingMode::PhaseLinear,
             fir: Some(FirConfig {
+                placement: Default::default(),
                 taps: 4096,
                 phase: "kirkeby".to_string(),
                 correct_excess_phase: false,
@@ -33,6 +34,7 @@ pub(super) fn all_mode_configs() -> Vec<ModeConfig> {
             name: "hybrid",
             processing_mode: ProcessingMode::Hybrid,
             fir: Some(FirConfig {
+                placement: Default::default(),
                 taps: 4096,
                 phase: "kirkeby".to_string(),
                 correct_excess_phase: false,

@@ -1,12 +1,12 @@
 #[test]
 fn room_config_version_policy_accepts_supported_generations_and_rejects_unknown_versions() {
-    for version in ["1.0.0", "1.2.7", "2.0.0", "2.1.0"] {
+    for version in ["1.0.0", "1.2.7", "2.0.0", "2.1.0", "2.2.0", "2.2.7"] {
         assert!(
             validate_config_version(version).is_ok(),
             "known compatible version {version} should be accepted"
         );
     }
-    for version in ["", "2", "2.1", "0.9.0", "1.3.0", "2.2.0", "3.0.0"] {
+    for version in ["", "2", "2.1", "0.9.0", "1.3.0", "2.3.0", "3.0.0"] {
         assert!(
             validate_config_version(version).is_err(),
             "unknown version {version:?} should be rejected"
@@ -579,4 +579,48 @@ fn enabled_phase_alignment_allows_delay_in_low_latency_mode_unless_overridden() 
     assert!(config.allow_delay());
     config.allow_delay = Some(false);
     assert!(!config.allow_delay());
+}
+#[test]
+fn fir_placement_defaults_roundtrips_and_rejects_unknown_values() {
+    let legacy: crate::FirConfig = serde_json::from_str("{}").unwrap();
+    assert_eq!(legacy.placement, crate::FirPlacement::Shared);
+    let explicit: crate::FirConfig = serde_json::from_str(r#"{"placement":"per_driver"}"#).unwrap();
+    assert_eq!(explicit.placement, crate::FirPlacement::PerDriver);
+    assert_eq!(
+        serde_json::to_value(&explicit).unwrap()["placement"],
+        "per_driver"
+    );
+    assert!(serde_json::from_str::<crate::FirConfig>(r#"{"placement":"auto"}"#).is_err());
+}
+
+#[test]
+fn per_driver_placement_validates_version_mode_and_independent_routing() {
+    let mut config: crate::RoomConfig = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../data_tests/roomeq/measured/2.2_sigberg2/recordings-stereo-paired-subs.json"
+    )))
+    .unwrap();
+    config.optimizer.processing_mode = crate::ProcessingMode::PhaseLinear;
+    config.optimizer.fir = Some(crate::FirConfig {
+        placement: crate::FirPlacement::PerDriver,
+        ..Default::default()
+    });
+    assert!(
+        config.validate_structure().is_ok(),
+        "{:?}",
+        config.validate_structure()
+    );
+    config.version = "2.1.0".into();
+    assert!(config.validate_structure().unwrap_err().contains("2.2"));
+    config.version = "2.2.0".into();
+    config.optimizer.processing_mode = crate::ProcessingMode::LowLatency;
+    assert!(
+        config
+            .validate_structure()
+            .unwrap_err()
+            .contains("processing")
+    );
+    config.optimizer.processing_mode = crate::ProcessingMode::PhaseLinear;
+    config.system.as_mut().unwrap().bass_management = Some(crate::BassManagementConfig::default());
+    assert!(config.validate_structure().unwrap_err().contains("routing"));
 }

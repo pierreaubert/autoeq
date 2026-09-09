@@ -121,11 +121,11 @@ pub(super) fn collect_generic_channel_results(
     for res in results {
         let (
             channel_name,
-            chain,
+            mut chain,
             pre_score,
             post_score,
             initial_curve,
-            final_curve,
+            mut final_curve,
             biquads,
             mean_spl,
             arrival_time_ms,
@@ -133,6 +133,20 @@ pub(super) fn collect_generic_channel_results(
             optimizer_evidence,
         ) = res?;
 
+        let physical_fir = config
+            .optimizer
+            .fir
+            .as_ref()
+            .is_some_and(|fir| fir.placement == roomeq_model::FirPlacement::PerDriver)
+            && chain
+                .drivers
+                .as_ref()
+                .is_some_and(|drivers| !drivers.is_empty())
+            && config.optimizer.processing_mode != ProcessingMode::LowLatency;
+        if physical_fir {
+            final_curve =
+                super::per_driver_fir::generate(&mut chain, config, sample_rate, output_dir)?;
+        }
         channel_chains.insert(channel_name.clone(), chain);
         curves.insert(channel_name.clone(), final_curve.clone());
         pre_scores.push(pre_score);
@@ -145,7 +159,8 @@ pub(super) fn collect_generic_channel_results(
         // Post-generate FIR coefficients for channels that need them but don't have them
         // (e.g., speaker groups that only support IIR internally)
         let mut post_generated_fir = None;
-        let fir_coeffs = if fir_coeffs.is_none()
+        let fir_coeffs = if !physical_fir
+            && fir_coeffs.is_none()
             && !matches!(config.optimizer.processing_mode, ProcessingMode::LowLatency)
         {
             send_progress(

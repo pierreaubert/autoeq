@@ -934,6 +934,7 @@ fn crossover_reconstruction_config(
         ProcessingMode::PhaseLinear | ProcessingMode::MixedPhase
     ) {
         optimizer.fir = Some(roomeq_model::FirConfig {
+            placement: Default::default(),
             taps: 1024,
             phase: "kirkeby".to_string(),
             correct_excess_phase: false,

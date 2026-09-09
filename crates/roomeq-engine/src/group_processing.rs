@@ -650,7 +650,8 @@ fn process_speaker_topology_impl(
     };
 
     // 7. Optimize Crossover (using linearized drivers)
-    let (gains, delays, crossover_freqs, combined_curve, inversions) = if n_drivers == 1 {
+    let level_reference_drivers = acoustic_drivers.clone();
+    let (mut gains, mut delays, crossover_freqs, mut combined_curve, inversions) = if n_drivers == 1 {
         (
             vec![0.0],
             vec![0.0],
@@ -672,19 +673,25 @@ fn process_speaker_topology_impl(
         })?
     };
 
+    if let Some(aligned) = crossover::align_two_band_target_levels(
+        &level_reference_drivers, &mut gains, &mut delays, &crossover_freqs, &inversions,
+        crossover_type, &room_config.optimizer, eq_resources, sample_rate, None,
+    ) {
+        combined_curve = aligned;
+    }
     info!(
         "  Optimized crossover: freqs={:?}, gains={:?}, delays={:?}, inversions={:?}",
         crossover_freqs, gains, delays, inversions
     );
 
-    let driver_gains = driver_band_indices
+    let mut driver_gains = driver_band_indices
         .iter()
         .enumerate()
         .map(|(driver_index, &band_index)| {
             topology_bands.relative_gains[driver_index] + gains[band_index]
         })
         .collect::<Vec<_>>();
-    let driver_delays = driver_band_indices
+    let mut driver_delays = driver_band_indices
         .iter()
         .enumerate()
         .map(|(driver_index, &band_index)| {
@@ -706,21 +713,13 @@ fn process_speaker_topology_impl(
     let max_freq = room_config.optimizer.max_freq;
     let pre_global_eq_score = flat_loss_score(&combined_curve, min_freq, max_freq);
 
-    let global_result = match options.callback {
-        Some(callback) => eq::optimize_channel_eq_with_callback_detailed(
-            &combined_curve,
-            &room_config.optimizer,
-            Some(eq_resources),
-            sample_rate,
-            callback,
-        ),
-        None => eq::optimize_channel_eq_detailed(
-            &combined_curve,
-            &room_config.optimizer,
-            Some(eq_resources),
-            sample_rate,
-        ),
-    }
+    let global_result = eq::optimize_group_eq_with_upper_reference(
+        &combined_curve,
+        &room_config.optimizer,
+        Some(eq_resources),
+        sample_rate,
+        options.callback,
+    )
     .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!(
             "Global EQ optimization failed for channel {}: {}",
@@ -732,14 +731,23 @@ fn process_speaker_topology_impl(
     let global_evidence_start = optimizer_evidence.len();
     optimizer_evidence.extend(global_result.optimizer_evidence);
 
-    let (global_eq_filters, post_score, final_curve) =
-        if eq_score_regressed(pre_global_eq_score, post_score) {
+    let global_resp = response::compute_peq_complex_response(
+        &global_eq_filters, &combined_curve.freq, sample_rate,
+    );
+    let candidate_curve = response::apply_complex_response(&combined_curve, &global_resp);
+    // Compare both candidates against one target-level reference. Mean-normalized
+    // flatness cannot judge a correction of the bass/treble level relationship.
+    let (acceptance_pre, acceptance_post) = eq::group_upper_reference_scores(
+        &combined_curve, &candidate_curve, &room_config.optimizer, Some(eq_resources),
+    ).unwrap_or((pre_global_eq_score, post_score));
+    let (global_eq_filters, post_score, mut final_curve) =
+        if eq_score_regressed(acceptance_pre, acceptance_post) {
             for evidence in &mut optimizer_evidence[global_evidence_start..] {
                 evidence.selected_for_output = false;
             }
             warn!(
-                "  Global EQ rejected for speaker group {}: flat loss {:.6} -> {:.6}",
-                channel_name, pre_global_eq_score, post_score
+                "  Global EQ rejected for speaker group {}: target error {:.6} -> {:.6}",
+                channel_name, acceptance_pre, acceptance_post
             );
             (Vec::new(), pre_global_eq_score, combined_curve.clone())
         } else {
@@ -748,14 +756,23 @@ fn process_speaker_topology_impl(
                 "  Pre-score: {:.6}, Post-score: {:.6}",
                 pre_global_eq_score, post_score
             );
-            let global_resp = response::compute_peq_complex_response(
-                &global_eq_filters,
-                &combined_curve.freq,
-                sample_rate,
-            );
-            let final_curve = response::apply_complex_response(&combined_curve, &global_resp);
-            (global_eq_filters, post_score, final_curve)
+            (global_eq_filters, post_score, candidate_curve)
         };
+
+    // Shape EQ can change the band mean. Finish level calibration using the
+    // actual corrected complex sum, without inserting any out-of-band filters.
+    if let Some(aligned) = crossover::align_two_band_target_levels(
+        &level_reference_drivers, &mut gains, &mut delays, &crossover_freqs, &inversions,
+        crossover_type, &room_config.optimizer, eq_resources, sample_rate, Some(&global_eq_filters),
+    ) {
+        combined_curve = aligned;
+        let response = response::compute_peq_complex_response(&global_eq_filters, &combined_curve.freq, sample_rate);
+        final_curve = response::apply_complex_response(&combined_curve, &response);
+        for (driver_index, &band_index) in driver_band_indices.iter().enumerate() {
+            driver_gains[driver_index] = topology_bands.relative_gains[driver_index] + gains[band_index];
+            driver_delays[driver_index] = topology_bands.relative_delays[driver_index] + delays[band_index];
+        }
+    }
 
     // 9. Build Output DSP Chain
     // We now have per-driver filters AND global filters.
@@ -800,6 +817,10 @@ fn process_speaker_topology_impl(
     chain.initial_curve = Some(initial_data.clone());
     chain.final_curve = Some(final_data.clone());
     chain.eq_response = Some(output::compute_eq_response(&initial_data, &final_data));
+
+    chain.target_curve = eq::group_upper_reference_target(
+        &combined_curve, &room_config.optimizer, Some(eq_resources),
+    ).map(|target| (&target).into());
 
     // Use global mean for level alignment
     let min_freq = room_config.optimizer.min_freq;

@@ -9,6 +9,52 @@ use std::sync::Once;
 
 static EXCESS_PHASE_IDENTITY_WARNING: Once = Once::new();
 
+/// Fit the realized finite FIR, not just the pre-window inversion spectrum.
+/// Windowing a band-limited excess-phase inverse can attenuate its bass even
+/// when the requested magnitude was correct. Retain only improving candidates.
+pub fn generate_group_residual_fir_prepared(
+    measurement: &Curve,
+    config: &OptimizerConfig,
+    target: &Curve,
+    sample_rate: f64,
+) -> Result<Vec<f64>, Box<dyn Error>> {
+    let mut best = generate_fir_correction_prepared(measurement, config, target, sample_rate)?;
+    let Some(fir) = config.fir.as_ref().filter(|fir|
+        fir.phase.eq_ignore_ascii_case("kirkeby") && fir.correct_excess_phase)
+    else { return Ok(best); };
+    let evaluate = |coeffs: &[f64]| {
+        let response = crate::response::compute_fir_complex_response(coeffs, &measurement.freq, sample_rate);
+        let corrected = crate::response::apply_complex_response(measurement, &response);
+        let score = crate::group::target_error_score(&corrected, target, config.min_freq, config.max_freq);
+        (score, corrected)
+    };
+    let (mut best_score, mut realized) = evaluate(&best);
+    let initial_score = best_score;
+    let mut design_target = target.clone();
+    for _ in 0..6 {
+        if best_score < 0.05 { break; }
+        for i in 0..design_target.freq.len() {
+            if (config.min_freq..=config.max_freq).contains(&design_target.freq[i]) {
+                let error = target.spl[i] - realized.spl[i];
+                design_target.spl[i] = (design_target.spl[i] + 0.8 * error)
+                    .clamp(target.spl[i] - 12.0, target.spl[i] + 12.0);
+            }
+        }
+        let candidate = generate_fir_correction_prepared(measurement, config, &design_target, sample_rate)?;
+        let (score, candidate_curve) = evaluate(&candidate);
+        // Keep the existing Kirkeby boost limit (or a stricter explicit cap).
+        let boost_limit = fir.max_boost_db.unwrap_or(15.0);
+        let boost_ok = candidate_curve.spl.iter().zip(measurement.spl.iter())
+            .all(|(&after, &before)| after.is_finite() && after - before <= boost_limit + 0.1);
+        if !score.is_finite() || !boost_ok || score >= best_score { break; }
+        best_score = score;
+        best = candidate;
+        realized = candidate_curve;
+    }
+    log::info!("Realized residual FIR target RMS: {initial_score:.3} -> {best_score:.3} dB ({} taps)", best.len());
+    Ok(best)
+}
+
 /// Resolve a workflow-prepared FIR target on the measurement grid.
 pub fn prepared_fir_target_curve(
     measurement: &Curve,

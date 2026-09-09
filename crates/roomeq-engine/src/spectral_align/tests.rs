@@ -17,6 +17,41 @@ use make::make_curve;
 use make::make_narrow_curve;
 use misc::SAMPLE_RATE;
 
+#[test]
+fn bass_only_alignment_uses_upper_level_not_bass_shelf_intercept() {
+    let mut curves = HashMap::new();
+    // Different modal responses below 200 Hz, identical upper-band shape.
+    // Include the actual pre-alignment main trims from the paired-sub report.
+    curves.insert("L".to_string(), make_curve(|f| {
+        80.0 - 0.8999688409227122 - 8.0 * (f / 20.0).log10() / 3.0
+            + if f < 200.0 { 12.0 * (f / 20.0).ln().sin() } else { 0.0 }
+    }));
+    curves.insert("R".to_string(), make_curve(|f| {
+        86.0 - 8.0 * (f / 20.0).log10() / 3.0
+            + if f < 200.0 { -9.0 * (f / 20.0).ln().sin() } else { 0.0 }
+    }));
+    let results = compute_spectral_alignment(&curves, SAMPLE_RATE, 20.0, 200.0);
+    for result in results.values() {
+        assert_eq!(result.lowshelf_gain_db, 0.0);
+        assert_eq!(result.highshelf_gain_db, 0.0);
+        assert!(result.flat_gain_db.abs() < 4.0);
+    }
+    let l = &results["L"];
+    let r = &results["R"];
+    assert!((-0.8999688409227122 + l.flat_gain_db - 6.0 - r.flat_gain_db).abs() < 0.05);
+}
+
+#[test]
+fn upper_target_reference_preserves_bass_to_treble_target_relationship() {
+    let target = make_curve(|f| -8.0 * (f / 20.0).log10() / 3.0);
+    let measured = make_curve(|f| 80.0 - 8.0 * (f / 20.0).log10() / 3.0
+        + if f < 190.0 { 10.0 } else { 0.0 });
+    let reference = super::compute::upper_band_target_reference(&measured, &target, 200.0).unwrap();
+    assert!((reference - 80.0).abs() < 1e-9);
+    // The bass excess remains a 10 dB correction demand, not a new zero.
+    assert!((measured.spl[0] - reference - target.spl[0] - 10.0).abs() < 1e-9);
+}
+
 /// Correct inter-channel deviations by adding targeted PEQ filters.
 ///
 /// For each channel, finds the N largest deviations from the group average

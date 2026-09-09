@@ -1,5 +1,15 @@
 # Unreleased
 
+## RoomEQ limited-band level alignment
+
+- Preserve measured absolute and relative SPL when summing crossover drivers; remove hidden per-driver normalization that was not represented in exported DSP gains. Reports use the serialized absolute target rather than re-aligning dotted target overlays to each channel's bass band.
+
+- Constrain role-based inter-channel matching to the configured correction band; a 200 Hz maximum no longer permits matching PEQs at 351/463 Hz.
+- Calibrate relative main/sub levels against the target before and after global EQ, using the realized complex crossover response and existing driver-gain bounds. This preserves bass-to-treble level balance instead of asking PEQ boost to recover a mis-scaled subwoofer.
+
+- Fix paired main/sub groups receiving opposite broadband gain limits from a bass-only shelf fit. Use measured upper-band levels for limited-band channel alignment and recheck the final response against the shared target after channel matching.
+- Anchor group bass EQ and its acceptance checks to the same target reference as the uncorrected upper band; export that target instead of independently normalizing away bass/treble level error. Configured boost limits still apply.
+
 ## RoomEQ outcome audit (in progress)
 
 - Make excess-phase identity-recovery tests independent of the repaired upstream

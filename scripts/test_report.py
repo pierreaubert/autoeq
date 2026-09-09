@@ -1,19 +1,55 @@
 #!/usr/bin/env python3
 
+import copy
 import tempfile
 import unittest
 from pathlib import Path
 
 from scripts.src.data_extract import display_channel_entries
+from scripts.src.dsp import split_driver_eq_plugins
 from scripts.src.report import (
+    _all_eq_filters_html,
     _channel_display_final_curve,
     _comparison_source_label,
+    _crossover_config_html,
+    _driver_eq_filters_html,
     _driver_shaping_summary_html,
     _has_redirected_bass_route,
     _mixed_phase_summary_html,
     create_html_report,
 )
 from scripts.test_figures import two_sub_overview_data
+
+
+def _driver_eq_split_data():
+    """Two-sub fixture with driver-level EQ on the first sub only."""
+    data = copy.deepcopy(two_sub_overview_data())
+    driver_eq = [
+        {"filter_type": "peak", "freq": 55.0, "q": 2.0, "db_gain": 1.5},
+        {"filter_type": "peak", "freq": 77.0, "q": 3.0, "db_gain": -2.5},
+    ]
+    first_sub = data["channels"]["LFE"]["drivers"][0]
+    first_sub["plugins"].append(
+        {"plugin_type": "eq", "parameters": {"filters": driver_eq}}
+    )
+    # A graph-owned stage must not leak into either filter list.
+    first_sub["plugins"].append(
+        {
+            "plugin_type": "eq",
+            "parameters": {
+                "room_eq_stage": "route_owned",
+                "filters": [
+                    {
+                        "filter_type": "peak",
+                        "freq": 90.0,
+                        "q": 1.0,
+                        "db_gain": 9.0,
+                    }
+                ],
+            },
+        }
+    )
+    return data
 
 
 class MixedPhaseReportTests(unittest.TestCase):
@@ -187,6 +223,136 @@ class SubDriverTabTests(unittest.TestCase):
         self.assertIn("Sub DSP Chain", html)
         self.assertIn("EQ: Left Sub", html)
         self.assertIn("EQ: Right Sub", html)
+
+
+class DriverEqFilterSplitTests(unittest.TestCase):
+    def test_split_counts_driver_vs_shared_filters(self):
+        data = _driver_eq_split_data()
+
+        split = split_driver_eq_plugins(data, "LFE", 0)
+        assert split is not None
+        driver_plugins, shared_plugins = split
+
+        driver_count = sum(
+            len(plugin["parameters"]["filters"]) for plugin in driver_plugins
+        )
+        shared_count = sum(
+            len(plugin["parameters"]["filters"]) for plugin in shared_plugins
+        )
+        self.assertEqual(driver_count, 2)
+        self.assertEqual(shared_count, 1)
+
+    def test_split_excludes_route_owned_stages(self):
+        data = _driver_eq_split_data()
+
+        split = split_driver_eq_plugins(data, "LFE", 0)
+        assert split is not None
+        driver_plugins, _ = split
+
+        freqs = [
+            filt["freq"]
+            for plugin in driver_plugins
+            for filt in plugin["parameters"]["filters"]
+        ]
+        self.assertNotIn(90.0, freqs)
+
+    def test_split_rejects_invalid_driver(self):
+        data = _driver_eq_split_data()
+
+        self.assertIsNone(split_driver_eq_plugins(data, "LFE", 7))
+        self.assertIsNone(split_driver_eq_plugins(data, "L", 0))
+        self.assertEqual(_driver_eq_filters_html(data, "LFE", 7, "eq_9"), "")
+
+    def test_driver_tab_renders_per_origin_inner_tabs(self):
+        data = _driver_eq_split_data()
+
+        html = _driver_eq_filters_html(data, "LFE", 0, "eq_2")
+
+        self.assertIn("Driver: Left Sub (2)", html)
+        self.assertIn("Shared channel LFE (1)", html)
+        self.assertIn("eq_2_drv", html)
+        self.assertIn("eq_2_sh", html)
+        self.assertIn("openEqTab", html)
+        # Numbering restarts in each tab: Filter 1 appears once per tab.
+        self.assertEqual(html.count("Filter 1:"), 2)
+        self.assertEqual(html.count("Filter 2:"), 1)
+        # The driver tab panel precedes the shared channel panel.
+        self.assertLess(html.index("55.0 Hz"), html.index("40.0 Hz"))
+
+    def test_single_origin_renders_without_inner_tabs(self):
+        data = _driver_eq_split_data()
+
+        html = _driver_eq_filters_html(data, "LFE", 1, "eq_3")
+
+        self.assertIn("Shared channel LFE (1)", html)
+        self.assertNotIn("eq-tab-btn", html)
+        self.assertIn("40.0 Hz", html)
+
+    def test_no_eq_renders_no_section(self):
+        data = two_sub_overview_data()
+        data["channels"]["LFE"]["plugins"] = []
+
+        self.assertEqual(_driver_eq_filters_html(data, "LFE", 0, "eq_3"), "")
+
+    def test_html_report_splits_driver_tab_filters(self):
+        data = _driver_eq_split_data()
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.html"
+            create_html_report(data, output, None)
+            html = output.read_text(encoding="utf-8")
+
+        self.assertIn("Driver: Left Sub (2)", html)
+        self.assertIn("Shared channel LFE (1)", html)
+        self.assertIn("function openEqTab", html)
+
+
+class SummarySectionTests(unittest.TestCase):
+    def test_all_eq_filters_lists_every_origin(self):
+        html = _all_eq_filters_html(_driver_eq_split_data())
+
+        self.assertIn("<h2>All EQ Filters</h2>", html)
+        self.assertIn("Driver: Left Sub (2)", html)
+        self.assertIn("Shared channel LFE (1)", html)
+        self.assertIn("<td>55.0 Hz</td>", html)
+        self.assertIn("<td>40.0 Hz</td>", html)
+
+    def test_all_eq_filters_skips_channels_without_eq(self):
+        data = two_sub_overview_data()
+        data["channels"]["LFE"]["plugins"] = []
+
+        html = _all_eq_filters_html(data)
+
+        self.assertEqual(html, "")
+
+    def test_crossover_config_lists_plugins_and_routes(self):
+        html = _crossover_config_html(two_sub_overview_data())
+
+        self.assertIn("<h2>Crossover Configuration</h2>", html)
+        self.assertIn("Deployed Crossover DSP", html)
+        self.assertIn("Driver Left Sub", html)
+        self.assertIn("LR24", html)
+        self.assertIn("80.0 Hz", html)
+        self.assertIn("Routing-Graph Crossovers", html)
+        self.assertIn("120.0 Hz", html)
+
+    def test_crossover_config_empty_without_crossovers(self):
+        self.assertEqual(_crossover_config_html({"channels": {"L": {}}}), "")
+        self.assertEqual(_crossover_config_html({}), "")
+
+    def test_html_report_contains_summary_sections(self):
+        data = _driver_eq_split_data()
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.html"
+            create_html_report(data, output, None)
+            html = output.read_text(encoding="utf-8")
+
+        self.assertIn("<h2>All EQ Filters</h2>", html)
+        self.assertIn("<h2>Crossover Configuration</h2>", html)
+        # Summaries precede the per-channel tabs.
+        self.assertLess(
+            html.index("<h2>All EQ Filters</h2>"),
+            html.index('<div class="tabs-container">'),
+        )
 
 
 if __name__ == "__main__":

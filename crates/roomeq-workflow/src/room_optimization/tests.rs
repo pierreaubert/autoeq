@@ -2,6 +2,23 @@ use super::types::{CallbackAction, ChannelOptimizationResult, GenericChannelColl
 use super::*;
 
 #[test]
+fn generic_group_final_level_uses_target_without_deployed_source_curves() {
+    let mut result = crate::test_fixtures::single_channel_room_result("L");
+    let target = result.channel_results["L"].initial_curve.clone();
+    result.channel_results.get_mut("L").unwrap().final_curve.spl += 5.0;
+    let chain = result.channels.get_mut("L").unwrap();
+    chain.drivers = Some(Vec::new());
+    chain.target_curve = Some((&target).into());
+    let mut config = RoomConfig::default();
+    config.optimizer.max_freq = 200.0;
+    let outcome = apply_final_channel_level_alignment(&mut result, &config, 48_000.0, Path::new(".")).unwrap();
+    assert_eq!(outcome.status, StageStatus::Applied);
+    assert!((result.channel_results["L"].final_curve.spl[10] - target.spl[10]).abs() < 1e-9);
+    assert!(result.channels["L"].plugins.iter().any(|plugin|
+        plugin.plugin_type == "gain" && plugin.parameters["gain_db"].as_f64() == Some(-5.0)));
+}
+
+#[test]
 fn mixed_phase_missing_fir_is_scoped_degradation() {
     for has_phase in [false, true] {
         for taps in [None, Some(Vec::new()), Some(vec![1.0])] {

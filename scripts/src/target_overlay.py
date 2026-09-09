@@ -222,10 +222,8 @@ def build_target_overlay_curves(
     reference_curves: dict[str, dict],
     json_path: Path | None = None,
 ) -> dict[str, dict]:
-    """Build one level-aligned target overlay for each displayed channel curve."""
+    """Use serialized absolute targets; align legacy relative targets only."""
     target = load_target_shape(data, json_path)
-    if target is None:
-        return {}
 
     optimizer = (
         ((data.get("metadata") or {}).get("effective_config") or {}).get("optimizer")
@@ -236,6 +234,17 @@ def build_target_overlay_curves(
 
     result = {}
     for channel_name, reference in reference_curves.items():
+        absolute_target = ((data.get("channels") or {}).get(channel_name) or {}).get("target_curve")
+        if absolute_target and absolute_target.get("freq") and absolute_target.get("spl"):
+            frequencies = list(reference.get("freq") or [])
+            if frequencies:
+                result[channel_name] = {
+                    "freq": frequencies,
+                    "spl": _interpolate_log_space(absolute_target, frequencies),
+                }
+            continue
+        if target is None:
+            continue
         channel_target = _target_shape_for_channel(data, channel_name, target, reference)
         alignment_min, alignment_max = _target_alignment_band_for_channel(
             data, channel_name, min_freq, max_freq

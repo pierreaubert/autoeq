@@ -84,44 +84,25 @@ impl std::fmt::Display for CrossoverType {
 
 /// Interpolate and prepare driver curves on a common frequency grid
 ///
-/// For `CrossoverType::None` (multi-sub/MSO summation) the measured absolute
+/// For every topology, including crossovers, the measured absolute
 /// and relative SPL is preserved: each driver is only resampled to the common
 /// grid. Normalizing each driver separately would erase the calibrated level
 /// relationship between subs before interference is computed (a flat 80 dB
 /// sub and a flat 70 dB sub must still sum to ~82.4 dB in phase, not 6 dB).
 /// Flatness normalization belongs to the combined-sum loss, not the inputs.
-pub(super) fn prepare_driver_curves(data: &DriversLossData, crossover_freqs: &[f64]) -> Vec<Curve> {
-    let n_drivers = data.drivers.len();
-    let mut driver_curves = Vec::new();
-    for (i, driver) in data.drivers.iter().enumerate() {
+pub(super) fn prepare_driver_curves(data: &DriversLossData, _crossover_freqs: &[f64]) -> Vec<Curve> {
+    data.drivers.iter().map(|driver| {
         let curve = Curve {
             freq: driver.freq.clone(),
             spl: driver.spl.clone(),
             phase: driver.phase.clone(),
             ..Default::default()
         };
-        if matches!(data.crossover_type, CrossoverType::None) {
-            driver_curves.push(crate::read::interpolate_response(&data.freq_grid, &curve));
-            continue;
-        }
-        let (passband_low, passband_high) = (
-            if i == 0 { 20.0 } else { crossover_freqs[i - 1] },
-            if i == n_drivers - 1 {
-                20000.0
-            } else {
-                crossover_freqs[i]
-            },
-        );
-
-        let interpolated = crate::read::normalize_and_interpolate_response_with_range(
-            &data.freq_grid,
-            &curve,
-            passband_low,
-            passband_high,
-        );
-        driver_curves.push(interpolated);
-    }
-    driver_curves
+        // Crossover DSP acts on calibrated measurements. Independent passband
+        // normalization changes relative source levels without exporting those
+        // hidden trims, so the predicted response no longer matches playback.
+        crate::read::interpolate_response(&data.freq_grid, &curve)
+    }).collect()
 }
 
 /// Validate driver arguments (shared by combined and per-driver functions)
@@ -151,6 +132,22 @@ mod tests {
         let crossover = CrossoverType::from_str("BW24").expect("BW24 must be supported");
         assert_eq!(crossover, CrossoverType::Butterworth4);
         assert_eq!(crossover.to_plugin_string(), "Butterworth24");
+    }
+
+    #[test]
+    fn crossover_preserves_calibrated_levels_and_explicit_gains() {
+        use super::super::compute::compute_drivers_combined_response;
+        use super::super::driver_measurement::DriverMeasurement;
+        use super::super::drivers_loss_data::DriversLossData;
+        let freq = ndarray::Array1::from_vec(vec![20.0, 80.0, 20_000.0]);
+        let sub = DriverMeasurement { freq: freq.clone(), spl: ndarray::Array1::from_elem(3, 80.0), phase: None };
+        let main = DriverMeasurement { freq, spl: ndarray::Array1::from_elem(3, 70.0), phase: None };
+        let data = DriversLossData::new_ordered(vec![sub, main], CrossoverType::LinkwitzRiley4);
+        for gain in [0.0, 6.0] {
+            let combined = compute_drivers_combined_response(&data, &[gain, gain], &[80.0], Some(&[0.0, 0.0]), 48_000.0);
+            assert!((combined[0] - 80.0 - gain).abs() < 0.1);
+            assert!((combined[combined.len()-1] - 70.0 - gain).abs() < 0.1);
+        }
     }
 
     #[test]

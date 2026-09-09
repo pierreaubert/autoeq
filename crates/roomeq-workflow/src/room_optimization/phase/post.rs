@@ -58,13 +58,25 @@ pub(in super::super) fn post_generate_fir(
             });
             hybrid_input.as_ref().unwrap_or(final_curve)
         }
+        // Groups have already applied driver EQ, crossover calibration and
+        // global EQ. Their FIR must correct the remaining complex response,
+        // not design a second full correction from the pre-global-EQ curve.
+        _ if chain.is_some_and(|chain| chain.drivers.is_some()) => final_curve,
         _ => initial_curve,
     };
     // Fix the level reference before applying the IIR candidate, just as the
     // engine-owned Hybrid path does. The residual is not a new calibration.
+    let prepared_target = match chain.and_then(|chain| chain.target_curve.clone()) {
+        Some(target) => Ok(Curve::from(target)),
+        None => fir::resolve_fir_target_curve(initial_curve, config, target_curve),
+    };
     let coefficients =
-        fir::resolve_fir_target_curve(initial_curve, config, target_curve).and_then(|target| {
-            fir::generate_fir_correction_prepared(fir_input, config, &target, sample_rate)
+        prepared_target.and_then(|target| {
+            if chain.is_some_and(|chain| chain.drivers.is_some()) {
+                roomeq_engine::fir::generate_group_residual_fir_prepared(fir_input, config, &target, sample_rate)
+            } else {
+                fir::generate_fir_correction_prepared(fir_input, config, &target, sample_rate)
+            }
         });
     match coefficients {
         Ok(coeffs) => {
@@ -309,6 +321,35 @@ mod tests {
             spl: Array1::from_elem(32, 80.0),
             phase: Some(Array1::from_elem(32, 0.0)),
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn group_fir_uses_residual_response_and_serialized_target() {
+        let final_curve = small_curve_with_phase();
+        let mut initial = final_curve.clone();
+        for (&frequency, level) in initial.freq.iter().zip(initial.spl.iter_mut()) {
+            if frequency <= 200.0 { *level += 8.0; }
+        }
+        let mut chain = crate::test_fixtures::single_channel_room_result("L").channels.remove("L").unwrap();
+        chain.drivers = Some(Vec::new());
+        chain.target_curve = Some((&final_curve).into());
+        let config = OptimizerConfig {
+            processing_mode: roomeq_model::ProcessingMode::PhaseLinear,
+            min_freq: 20.0,
+            max_freq: 200.0,
+            fir: Some(fir_config()),
+            ..OptimizerConfig::default()
+        };
+        let generated = post_generate_fir(
+            "L", &initial, &final_curve, &config, None, 48_000.0, None, Some(&chain),
+        ).unwrap();
+        let response = roomeq_engine::response::compute_fir_complex_response(
+            &generated.coeffs, &Array1::from_vec(vec![30.0, 50.0, 100.0, 160.0, 1000.0]), 48_000.0,
+        );
+        for value in response {
+            assert!((20.0 * value.norm().log10()).abs() < 0.25,
+                "already corrected group must not receive a second bass correction");
         }
     }
 

@@ -90,6 +90,18 @@ pub(super) fn apply_final_correction_safety_gate(
             .get(name)
             .is_some_and(|chain| chain.drivers.is_some() && !has_route_owned_bass_low_pass(chain))
         {
+            // A group with limited-band EQ carries an absolute broadband
+            // target. Do not erase its bass/treble error by re-centering each
+            // curve, or compare normalized flatness with target-relative loss.
+            if let Some(target) = result.channels.get(name).and_then(|chain| chain.target_curve.clone()) {
+                let target: roomeq_model::Curve = target.into();
+                let score = |curve: &roomeq_model::Curve| {
+                    roomeq_engine::group::target_error_score(curve, &target, evaluation_band.0, evaluation_band.1)
+                };
+                channel.pre_score = score(&channel.initial_curve);
+                channel.post_score = score(&channel.final_curve);
+                score_basis_changed = true;
+            }
             let topology_epsilon = (channel.pre_score.abs() * 1e-4).max(1e-6);
             let topology_regressed = !channel.post_score.is_finite()
                 || channel.post_score > channel.pre_score + topology_epsilon;
@@ -2901,6 +2913,38 @@ fn to_dsp_chain_output_includes_channels_and_metadata() {
             .plugins;
 
         assert!(sanity_check_result(&result).is_ok());
+    }
+
+    #[test]
+    fn final_safety_gate_keeps_group_target_level_correction() {
+        let mut result = single_channel_room_result("left");
+        let target = result.channel_results["left"].initial_curve.clone();
+        let filter = math_audio_iir_fir::Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Lowshelf,
+            200.0, 48_000.0, 0.707, -6.0,
+        );
+        let response = roomeq_engine::response::compute_peq_complex_response(
+            &[filter], &target.freq, 48_000.0,
+        );
+        let channel = result.channel_results.get_mut("left").unwrap();
+        channel.initial_curve.spl = &target.spl - &ndarray::Array1::from_iter(
+            response.iter().map(|value| 20.0 * value.norm().log10()),
+        );
+        channel.final_curve = target.clone();
+        // Old mixed score bases falsely said the correction regressed.
+        channel.pre_score = 0.1;
+        channel.post_score = 3.0;
+        let chain = result.channels.get_mut("left").unwrap();
+        chain.drivers = Some(Vec::new());
+        chain.target_curve = Some((&target).into());
+        chain.plugins.push(roomeq_engine::output::create_gain_plugin(0.0));
+        apply_final_correction_safety_gate(
+            &mut result, 48_000.0, 3, (20.0, 200.0), Path::new("."),
+            roomeq_model::ProcessingMode::LowLatency, None,
+        );
+        assert!(result.channel_results["left"].pre_score > 4.0);
+        assert!(result.channel_results["left"].post_score < 1e-6);
+        assert_eq!(result.channel_results["left"].final_curve.spl, target.spl);
     }
 
     #[test]

@@ -814,6 +814,38 @@ def per_driver_chain_plugins(
     return [*driver_plugins, *shared, *_route_tail_plugins(route)]
 
 
+def split_driver_eq_plugins(
+    data: dict, channel_name: str, driver_index: int
+) -> tuple[list[dict], list[dict]] | None:
+    """Split one driver's EQ plugins by ownership.
+
+    Returns ``(driver_eq_plugins, shared_eq_plugins)`` where the first list
+    holds the physical driver's own EQ plugins and the second holds the
+    shared channel input-chain EQ plugins, using the same ownership rules as
+    :func:`per_driver_chain_plugins` (graph-owned ``route_owned`` stages are
+    excluded from both). Route-tail transfers carry no EQ plugins.
+    Returns `None` when the driver index is invalid.
+    """
+    channel = (data.get("channels") or {}).get(channel_name)
+    drivers = get_plottable_drivers(channel)
+    if driver_index < 0 or driver_index >= len(drivers):
+        return None
+    driver = drivers[driver_index]
+    driver_eq = [
+        plugin
+        for plugin in (driver.get("plugins") or [])
+        if isinstance(plugin, dict)
+        and plugin.get("plugin_type") == "eq"
+        and (plugin.get("parameters", {}) or {}).get("room_eq_stage") != "route_owned"
+    ]
+    shared_eq = [
+        plugin
+        for plugin in _sub_shared_plugins_for_own_input(channel or {})
+        if isinstance(plugin, dict) and plugin.get("plugin_type") == "eq"
+    ]
+    return (driver_eq, shared_eq)
+
+
 def per_driver_effective_eq(
     data: dict, channel_name: str, driver_index: int
 ) -> dict | None:

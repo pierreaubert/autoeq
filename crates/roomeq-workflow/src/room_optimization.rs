@@ -1095,6 +1095,47 @@ fn apply_final_channel_level_alignment(
     sample_rate: f64,
     sidecar_dir: &Path,
 ) -> Result<StageOutcome> {
+    // Generic groups do not populate deployed_source_curves. Recheck the final
+    // reported group response against its explicit shared target after ICD and
+    // safety replay, which can change the upper-band level after initial alignment.
+    if result.deployed_source_curves.is_empty() {
+        let trims: Vec<_> = result.channel_results.iter().filter_map(|(name, channel)| {
+            let chain = result.channels.get(name)?;
+            chain.drivers.as_ref()?;
+            let target: Curve = chain.target_curve.clone()?.into();
+            let residual = roomeq_engine::spectral_align::upper_band_target_reference(
+                &channel.final_curve, &target, config.optimizer.max_freq,
+            )?;
+            Some((name.clone(), residual))
+        }).collect();
+        if !trims.is_empty() {
+            for (name, residual) in &trims {
+                let gain = (-residual).clamp(-12.0, 12.0);
+                if gain.abs() > 1e-6 {
+                    if let Some(chain) = result.channels.get_mut(name) {
+                        insert_final_level_gain(chain, gain, false);
+                    }
+                    sync_reported_gain_adjustment(name, &mut result.channel_results,
+                        &mut result.channels, gain, false, sample_rate);
+                }
+            }
+            let worst_residual = trims.iter().map(|(name, _)| {
+                let target: Curve = result.channels[name].target_curve.clone().unwrap().into();
+                roomeq_engine::spectral_align::upper_band_target_reference(
+                    &result.channel_results[name].final_curve, &target, config.optimizer.max_freq,
+                ).map(f64::abs).unwrap_or(f64::INFINITY)
+            }).fold(0.0_f64, f64::max);
+            let mut check = StageCheck::pass("final_upper_band_target_error_db", StageCheckKind::Safety);
+            check.observed = Some(worst_residual);
+            check.limit = Some(FINAL_CHANNEL_LEVEL_TOLERANCE_DB);
+            check.passed = worst_residual <= FINAL_CHANNEL_LEVEL_TOLERANCE_DB;
+            return Ok(StageOutcome {
+                checks: vec![check], stage: "final_channel_level_alignment".to_string(),
+                status: if worst_residual <= FINAL_CHANNEL_LEVEL_TOLERANCE_DB { StageStatus::Applied } else { StageStatus::Degraded },
+                advisories: Vec::new(),
+            });
+        }
+    }
     let curves = result
         .deployed_source_curves
         .iter()
@@ -2668,6 +2709,24 @@ fn assemble_generic_result_with_frequency_samples(
         .map(|(name, curve)| (name.clone(), curve.clone()))
         .collect();
     if spectral_curves.len() > 1 {
+        // Group EQ has anchored each target to its measured upper band. Use
+        // one shared absolute target when applying inter-channel level trims.
+        let targets: Option<Vec<Curve>> = spectral_curves.keys().map(|name| {
+            channel_chains.get(name)?.target_curve.clone().map(Curve::from)
+        }).collect();
+        if let Some(targets) = targets {
+            let mut shared = targets[0].clone();
+            shared.spl.fill(0.0);
+            for target in &targets {
+                shared.spl += &autoeq_core::interpolate_log_space(&shared.freq, target).spl;
+            }
+            shared.spl /= targets.len() as f64;
+            for name in spectral_curves.keys() {
+                if let Some(chain) = channel_chains.get_mut(name) {
+                    chain.target_curve = Some((&shared).into());
+                }
+            }
+        }
         send_progress(
             observer_shared,
             PipelineStepId::SpectralAlignment,

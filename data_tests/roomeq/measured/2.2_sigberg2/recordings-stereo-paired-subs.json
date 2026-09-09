@@ -58,7 +58,7 @@
     "loss_type": "flat",
     "min_freq": 20.0,
     "max_freq": 200.0,
-    "num_filters": 10,
+    "num_filters": 7,
     "min_q": 0.5,
     "max_q": 6.0,
     "min_db": -12.0,

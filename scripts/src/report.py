@@ -27,6 +27,7 @@ from .figures import (
 from .data_extract import (
     channel_has_eq,
     display_channel_entries,
+    driver_display_names,
     extract_eq_passes,
     get_channel_sort_key,
     get_plottable_drivers,
@@ -37,6 +38,7 @@ from .dsp import (
     per_driver_chain_plugins,
     per_driver_corrected_curve,
     per_driver_effective_eq,
+    split_driver_eq_plugins,
     sum_driver_initial_curves,
     synthesize_lr_channel,
 )
@@ -165,6 +167,310 @@ def _driver_shaping_summary_html(
         f'    <div class="filter-list">{escape("; ".join(parts))}</div>\n'
         "</div>\n"
     )
+
+
+def _format_eq_filter_line(filt: dict, number: int) -> str:
+    """Render one numbered EQ filter row."""
+    filter_type = filt.get("filter_type", "peak")
+    freq = filt.get("freq", 0)
+    q = filt.get("q", 1)
+    gain = filt.get("db_gain", 0)
+    return (
+        f"Filter {number}: {filter_type.upper()} @ {freq:.1f} Hz, "
+        f"Q={q:.2f}, Gain={gain:+.1f} dB<br>\n"
+    )
+
+
+def _eq_passes_list_html(passes: list[dict]) -> str:
+    """Render EQ passes, grouped by pass label when labels are present.
+
+    Numbering restarts at 1 within each rendered group; callers splitting
+    filters by origin render one group per origin.
+    """
+    parts: list[str] = []
+    has_labeled = any(p["label"] for p in passes)
+    if has_labeled:
+        for p in passes:
+            parts.append(
+                f'\n                    <h4 style="color: {p["color"]}; '
+                'margin-bottom: 5px;">'
+                f"{p['display_name']}</h4>\n"
+                '                    <div class="filter-list" '
+                'style="margin-bottom: 10px;">\n'
+            )
+            for j, filt in enumerate(p["filters"], 1):
+                parts.append(_format_eq_filter_line(filt, j))
+            parts.append("                    </div>\n")
+    else:
+        parts.append('\n                    <div class="filter-list">\n')
+        number = 0
+        for p in passes:
+            for filt in p["filters"]:
+                number += 1
+                parts.append(_format_eq_filter_line(filt, number))
+        parts.append("                    </div>\n")
+    return "".join(parts)
+
+
+def _driver_eq_filters_html(
+    data: dict, channel_name: str, driver_index: int, id_prefix: str
+) -> str:
+    """Render a driver tab's EQ filters split by ownership.
+
+    A driver tab's deployed chain merges the physical driver's own EQ with
+    the shared channel input-chain EQ. Listing that merge as one flat
+    1..N+M list hides which PEQ lives where, so each origin gets its own
+    inner tab (styled like the outer channel tabs) with a 1..N numbering.
+    Returns an empty string when neither origin carries EQ filters,
+    mirroring the legacy empty-EQ behavior.
+    """
+    split = split_driver_eq_plugins(data, channel_name, driver_index)
+    if split is None:
+        return ""
+    driver_plugins, shared_plugins = split
+    names = driver_display_names(data, channel_name)
+    if 0 <= driver_index < len(names):
+        driver_name = names[driver_index]
+    else:
+        drivers = get_plottable_drivers(
+            (data.get("channels") or {}).get(channel_name) or {}
+        )
+        driver_name = (
+            str(drivers[driver_index].get("name") or driver_index)
+            if 0 <= driver_index < len(drivers)
+            else str(driver_index)
+        )
+    driver_passes = extract_eq_passes({"plugins": driver_plugins})
+    shared_passes = extract_eq_passes({"plugins": shared_plugins})
+    driver_count = sum(len(p["filters"]) for p in driver_passes)
+    shared_count = sum(len(p["filters"]) for p in shared_passes)
+    if driver_count == 0 and shared_count == 0:
+        return ""
+    total = driver_count + shared_count
+    safe_driver = escape(driver_name)
+    safe_channel = escape(str(channel_name))
+    parts = [
+        '\n                <div class="filters-section">\n'
+        "                    <h3>EQ Filters</h3>\n"
+        '                    <p class="epa-footer">'
+        f"{total} PEQ filter(s) total: {driver_count} driver + "
+        f"{shared_count} shared channel. Numbering restarts in each tab; "
+        "the EQ plot shows the combined response.</p>\n"
+    ]
+    if driver_count > 0 and shared_count > 0:
+        drv_id = f"{id_prefix}_drv"
+        sh_id = f"{id_prefix}_sh"
+        parts.append(
+            '                    <div class="eq-tabs">\n'
+            '                        <div class="eq-tab-header">\n'
+            '                            <button class="eq-tab-btn active" '
+            f'onclick="openEqTab(event, \'{drv_id}\')">'
+            f"Driver: {safe_driver} ({driver_count})</button>\n"
+            '                            <button class="eq-tab-btn" '
+            f'onclick="openEqTab(event, \'{sh_id}\')">'
+            f"Shared channel {safe_channel} ({shared_count})</button>\n"
+            "                        </div>\n"
+            f'                        <div id="{drv_id}" class="eq-tab-panel active">\n'
+            f"{_eq_passes_list_html(driver_passes)}"
+            "                        </div>\n"
+            f'                        <div id="{sh_id}" class="eq-tab-panel">\n'
+            f"{_eq_passes_list_html(shared_passes)}"
+            "                        </div>\n"
+            "                    </div>\n"
+        )
+    else:
+        origin = f"Driver: {safe_driver}" if driver_count > 0 else f"Shared channel {safe_channel}"
+        passes = driver_passes if driver_count > 0 else shared_passes
+        parts.append(
+            f"                    <h4>{origin} ({total})</h4>\n"
+            f"{_eq_passes_list_html(passes)}"
+        )
+    parts.append("                </div>\n")
+    return "".join(parts)
+
+
+def _eq_filter_table_html(passes: list[dict]) -> str:
+    """Render EQ passes as compact tables (one per pass when labeled)."""
+    parts: list[str] = []
+    has_labeled = any(p["label"] for p in passes)
+    for p in passes:
+        if not p["filters"]:
+            continue
+        if has_labeled:
+            parts.append(
+                f'            <h4 style="color: {p["color"]}; margin-bottom: 5px;">'
+                f"{p['display_name']}</h4>\n"
+            )
+        parts.append(
+            '            <table class="bm-table">\n'
+            "                <thead><tr><th>#</th><th>Type</th><th>Freq</th>"
+            "<th>Q</th><th>Gain</th></tr></thead>\n"
+            "                <tbody>\n"
+        )
+        for j, filt in enumerate(p["filters"], 1):
+            filter_type = str(filt.get("filter_type", "peak")).upper()
+            freq = filt.get("freq", 0)
+            q = filt.get("q", 1)
+            gain = filt.get("db_gain", 0)
+            freq_str = f"{freq:.1f} Hz" if isinstance(freq, (int, float)) else "-"
+            q_str = f"{q:.2f}" if isinstance(q, (int, float)) else "-"
+            gain_str = f"{gain:+.1f} dB" if isinstance(gain, (int, float)) else "-"
+            parts.append(
+                f"                    <tr><td>{j}</td><td>{filter_type}</td>"
+                f"<td>{freq_str}</td><td>{q_str}</td><td>{gain_str}</td></tr>\n"
+            )
+        parts.append("                </tbody>\n            </table>\n")
+    return "".join(parts)
+
+
+def _all_eq_filters_html(data: dict) -> str:
+    """Render every EQ filter list in one summary section.
+
+    Mirrors the per-tab filter sections (driver tabs split by origin with a
+    1..N numbering) so the whole correction is visible without switching
+    tabs. Returns an empty string when no channel carries EQ filters.
+    """
+    channels = data.get("channels") or {}
+    blocks: list[str] = []
+    for entry in display_channel_entries(data):
+        channel_name = entry["channel"]
+        driver_index = entry["driver"]
+        safe_label = escape(str(entry["label"]))
+        groups: list[tuple[str, list[dict]]] = []
+        if driver_index is not None:
+            split = split_driver_eq_plugins(data, channel_name, driver_index)
+            if split is None:
+                continue
+            names = driver_display_names(data, channel_name)
+            driver_name = (
+                names[driver_index]
+                if 0 <= driver_index < len(names)
+                else str(driver_index)
+            )
+            driver_passes = extract_eq_passes({"plugins": split[0]})
+            shared_passes = extract_eq_passes({"plugins": split[1]})
+            if any(p["filters"] for p in driver_passes):
+                groups.append((f"Driver: {driver_name}", driver_passes))
+            if any(p["filters"] for p in shared_passes):
+                groups.append((f"Shared channel {channel_name}", shared_passes))
+        else:
+            passes = extract_eq_passes(channels.get(channel_name) or {})
+            if any(p["filters"] for p in passes):
+                groups.append((f"Channel {channel_name}", passes))
+        if not groups:
+            continue
+        blocks.append(f"            <h3>{safe_label}</h3>\n")
+        for origin, passes in groups:
+            count = sum(len(p["filters"]) for p in passes)
+            blocks.append(f"            <h4>{escape(origin)} ({count})</h4>\n")
+            blocks.append(_eq_filter_table_html(passes))
+    if not blocks:
+        return ""
+    return (
+        '        <div class="plot-container">\n'
+        "            <h2>All EQ Filters</h2>\n"
+        '            <p class="epa-footer">Complete PEQ listing for every '
+        "channel and driver (same data and numbering as the per-tab "
+        "sections below).</p>\n"
+        + "".join(blocks)
+        + "        </div>\n"
+    )
+
+
+def _crossover_config_html(data: dict) -> str:
+    """Render the crossover configuration in one summary section.
+
+    Covers the deployed crossover/band-split DSP plugins (per channel and
+    per driver) plus the routing-graph crossover cutoffs, so the full
+    crossover setup is visible without opening individual tabs. Returns an
+    empty string when no crossover configuration exists.
+    """
+    channels = data.get("channels") or {}
+    if not isinstance(channels, dict):
+        return ""
+    plugin_rows: list[str] = []
+    for name in sorted(channels.keys(), key=get_channel_sort_key):
+        channel = channels[name] or {}
+        owners: list[tuple[str, list[dict]]] = [(f"Channel {name}", channel.get("plugins") or [])]
+        names = driver_display_names(data, name)
+        for index, driver in enumerate(get_plottable_drivers(channel)):
+            label = (
+                names[index]
+                if 0 <= index < len(names)
+                else str((driver or {}).get("name") or index)
+            )
+            owners.append((f"Driver {label}", (driver or {}).get("plugins") or []))
+        for owner, plugins in owners:
+            for plugin in plugins:
+                if not isinstance(plugin, dict):
+                    continue
+                kind = str(plugin.get("plugin_type", "")).lower()
+                if kind not in ("crossover", "band_split"):
+                    continue
+                params = plugin.get("parameters") or {}
+                freq = params.get("frequency")
+                freq_str = f"{freq:.1f} Hz" if isinstance(freq, (int, float)) else "-"
+                if kind == "band_split":
+                    type_str = str(params.get("type", "band_split"))
+                    output_str = "-"
+                else:
+                    type_str = str(params.get("type", "-"))
+                    output_str = str(params.get("output", "-"))
+                stage = params.get("room_eq_stage")
+                stage_str = str(stage) if stage is not None else "-"
+                plugin_rows.append(
+                    f"                    <tr><td>{escape(str(owner))}</td>"
+                    f"<td>{escape(type_str)}</td><td>{escape(output_str)}</td>"
+                    f"<td>{freq_str}</td><td>{escape(stage_str)}</td></tr>\n"
+                )
+    route_rows: list[str] = []
+    bass_management = (data.get("metadata") or {}).get("bass_management", {}) or {}
+    graph = bass_management.get("routing_graph", {}) or {}
+    for route in graph.get("routes", []) or []:
+        if not isinstance(route, dict):
+            continue
+        low = route.get("low_pass_hz")
+        high = route.get("high_pass_hz")
+        if low is None and high is None:
+            continue
+        low_str = f"{low:.1f} Hz" if isinstance(low, (int, float)) else "-"
+        high_str = f"{high:.1f} Hz" if isinstance(high, (int, float)) else "-"
+        crossover_type = route.get("crossover_type")
+        type_str = str(crossover_type) if crossover_type is not None else "-"
+        route_rows.append(
+            f"                    <tr><td>{escape(str(route.get('source_channel', '-')))} "
+            f"\u2192 {escape(str(route.get('destination', '-')))}</td>"
+            f"<td>{escape(str(route.get('route_kind', '-')))}</td>"
+            f"<td>{escape(type_str)}</td><td>{low_str}</td><td>{high_str}</td></tr>\n"
+        )
+    if not plugin_rows and not route_rows:
+        return ""
+    parts = [
+        '        <div class="plot-container">\n'
+        "            <h2>Crossover Configuration</h2>\n"
+    ]
+    if plugin_rows:
+        parts.append(
+            "            <h3>Deployed Crossover DSP</h3>\n"
+            '            <table class="bm-table">\n'
+            "                <thead><tr><th>Owner</th><th>Type</th><th>Output</th>"
+            "<th>Frequency</th><th>Stage</th></tr></thead>\n"
+            "                <tbody>\n"
+            + "".join(plugin_rows)
+            + "                </tbody>\n            </table>\n"
+        )
+    if route_rows:
+        parts.append(
+            "            <h3>Routing-Graph Crossovers</h3>\n"
+            '            <table class="bm-table">\n'
+            "                <thead><tr><th>Route</th><th>Kind</th><th>Type</th>"
+            "<th>Low-pass</th><th>High-pass</th></tr></thead>\n"
+            "                <tbody>\n"
+            + "".join(route_rows)
+            + "                </tbody>\n            </table>\n"
+        )
+    parts.append("        </div>\n")
+    return "".join(parts)
 
 
 # Ordered EPA fields with their display labels and formatting rules.
@@ -899,8 +1205,62 @@ def create_html_report(
         .tab-content.active {
             display: block;
         }
+        /* Inner EQ tabs: per-origin filter lists inside driver tabs.
+           Scoped classes so they never clash with the outer channel tabs. */
+        .eq-tabs {
+            margin-top: 10px;
+        }
+        .eq-tab-header {
+            display: flex;
+            flex-wrap: wrap;
+            background: #ececec;
+            padding: 6px 6px 0;
+            border-radius: 6px 6px 0 0;
+            gap: 2px;
+        }
+        .eq-tab-btn {
+            padding: 6px 14px;
+            border: none;
+            background: #d8d8d8;
+            cursor: pointer;
+            border-radius: 4px 4px 0 0;
+            font-weight: 600;
+            font-size: 0.85em;
+            color: #666;
+            transition: all 0.2s;
+        }
+        .eq-tab-btn:hover {
+            background: #c8c8c8;
+        }
+        .eq-tab-btn.active {
+            background: #f8f8f8;
+            color: #4a90d9;
+            border-top: 2px solid #4a90d9;
+        }
+        .eq-tab-panel {
+            display: none;
+        }
+        .eq-tab-panel.active {
+            display: block;
+        }
     </style>
     <script>
+        function openEqTab(evt, panelId) {
+            var container = evt.currentTarget.closest(".eq-tabs");
+            if (!container) {
+                return;
+            }
+            var panels = container.querySelectorAll(".eq-tab-panel");
+            for (var i = 0; i < panels.length; i++) {
+                panels[i].classList.remove("active");
+            }
+            var btns = container.querySelectorAll(".eq-tab-btn");
+            for (var j = 0; j < btns.length; j++) {
+                btns[j].classList.remove("active");
+            }
+            document.getElementById(panelId).classList.add("active");
+            evt.currentTarget.classList.add("active");
+        }
         function openChannel(evt, channelId) {
             var i, tabcontent, tablinks;
             tabcontent = document.getElementsByClassName("tab-content");
@@ -1002,6 +1362,11 @@ def create_html_report(
         </div>
 """
     )
+
+    # Single-screen summaries: the full PEQ listing and the crossover
+    # configuration, so nothing requires switching per-channel tabs.
+    html_parts.append(_all_eq_filters_html(data))
+    html_parts.append(_crossover_config_html(data))
 
     # Bass-management routing/headroom section. This is driven by the
     # route-level #14 schema, not the deprecated single matrix summary.
@@ -1203,9 +1568,15 @@ def create_html_report(
         if epa_html:
             html_parts.append(epa_html)
 
-        # Filter details (grouped by pass when 3-pass labels are present)
+        # Filter details (grouped by pass when 3-pass labels are present).
+        # Driver tabs merge the driver EQ with the shared channel EQ, so
+        # they render per-origin inner tabs instead of one flat list.
         has_labeled = any(p["label"] for p in passes)
-        if has_labeled and passes:
+        if is_driver_tab:
+            html_parts.append(
+                _driver_eq_filters_html(data, channel_name, driver_index, f"eq_{i}")
+            )
+        elif has_labeled and passes:
             html_parts.append(
                 """
                 <div class="filters-section">

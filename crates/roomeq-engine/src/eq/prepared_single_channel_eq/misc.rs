@@ -18,6 +18,55 @@ use roomeq_model::OptimizerConfig;
 use std::collections::HashMap;
 use std::error::Error;
 
+#[cfg(test)]
+mod level_reference_tests {
+    use super::*;
+    use ndarray::Array1;
+
+    #[test]
+    fn limited_band_preparation_does_not_normalize_away_bass_excess() {
+        let freq = Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), 512);
+        let target_spl = freq.mapv(|f| -8.0 * (f / 20.0).log10() / 3.0);
+        let target = Curve { freq: freq.clone(), spl: target_spl.clone(), ..Curve::default() };
+        let curve = Curve {
+            spl: &target_spl + &freq.mapv(|f| 80.0 + if f < 190.0 { 10.0 } else { 0.0 }),
+            freq,
+            ..Curve::default()
+        };
+        let config = OptimizerConfig {
+            min_freq: 20.0,
+            max_freq: 200.0,
+            psychoacoustic: false,
+            ..OptimizerConfig::default()
+        };
+        let resources = EqResources {
+            target: Some(resources::PreparedEqTarget::Curve(Box::new(target))),
+            ..EqResources::default()
+        };
+        let target = resources::target_curve(&curve, Some(&resources));
+        let corrected = Curve {
+            freq: curve.freq.clone(),
+            spl: &target_spl + 80.0,
+            ..Curve::default()
+        };
+        let (before, after) = crate::eq::group_upper_reference_scores(
+            &curve, &corrected, &config, Some(&resources),
+        ).unwrap();
+        assert!(before > 9.0, "baseline must include the bass level error");
+        assert!(after < 1e-6, "an aligned response must not be rejected");
+        let reference = crate::spectral_align::upper_band_target_reference(&curve, &target, config.max_freq);
+        let prepared = prepare_single_channel_eq_with_normalization(
+            &curve, &config, Some(&resources), 48_000.0, reference,
+        ).unwrap();
+        let data = &prepared.objective_data;
+        let bass: Vec<_> = data.freqs.iter().zip(data.deviation.iter())
+            .filter(|(f, _)| **f >= 30.0 && **f <= 150.0).map(|(_, d)| *d).collect();
+        assert!(!bass.is_empty());
+        let mean = bass.iter().sum::<f64>() / bass.len() as f64;
+        assert!((mean + 10.0).abs() < 0.1, "bass must demand -10 dB, got {mean}");
+    }
+}
+
 /// Prepare shared data for single-channel EQ optimization.
 ///
 /// Handles normalization, psychoacoustic smoothing, target curve, deviation,

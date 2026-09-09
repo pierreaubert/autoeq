@@ -11,6 +11,21 @@ from scripts.src.target_overlay import (
 
 
 class TargetOverlayTests(unittest.TestCase):
+    def test_serialized_shared_target_is_not_reanchored_to_each_bass_response(self):
+        target = {"freq": [20.0, 20_000.0], "spl": [84.0, 76.0]}
+        data = {
+            "channels": {name: {"target_curve": target} for name in ("L", "R")},
+            "metadata": {"effective_config": {"optimizer": {"min_freq": 20.0, "max_freq": 200.0}}},
+        }
+        references = {
+            "L": {"freq": [20.0, 200.0, 20_000.0], "spl": [70.0, 72.0, 76.0]},
+            "R": {"freq": [20.0, 200.0, 20_000.0], "spl": [90.0, 88.0, 76.0]},
+        }
+        overlays = build_target_overlay_curves(data, references)
+        self.assertEqual(overlays["L"], overlays["R"])
+        self.assertEqual(overlays["L"]["spl"][0], 84.0)
+        self.assertEqual(overlays["L"]["spl"][-1], 76.0)
+
     def test_interpolates_target_in_log_frequency_and_aligns_level(self):
         target = {"freq": [20.0, 20_000.0], "spl": [0.0, -10.0]}
         reference = {

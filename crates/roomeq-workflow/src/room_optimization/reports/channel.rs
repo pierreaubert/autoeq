@@ -32,6 +32,17 @@ pub(in super::super) fn channel_matching_profile_for_role_key(
     }
 }
 
+fn matching_profile_inside_correction_band(
+    mut profile: roomeq_engine::spectral_align::ChannelMatchingCorrectionProfile,
+    min_freq: f64,
+    max_freq: f64,
+    f3: f64,
+) -> Option<roomeq_engine::spectral_align::ChannelMatchingCorrectionProfile> {
+    profile.min_freq_hz = profile.min_freq_hz.max(min_freq);
+    profile.max_freq_hz = profile.max_freq_hz.min(max_freq);
+    (profile.max_freq_hz > profile.min_freq_hz.max(f3)).then_some(profile)
+}
+
 pub(in super::super) fn channel_matching_band_rms_db(
     icd: &roomeq_model::InterChannelDeviation,
     band: (f64, f64),
@@ -149,6 +160,14 @@ pub(in super::super) fn compute_and_correct_icd(
                     profile.correction,
                     &group.curves,
                 );
+            // Role presets describe useful matching ranges, not permission to
+            // add EQ outside the user's correction band. Check the intersection
+            // before profile sanitization can turn an empty band back around.
+            let Some(correction_profile) = matching_profile_inside_correction_band(
+                correction_profile, config.optimizer.min_freq, config.optimizer.max_freq, f3,
+            ) else {
+                continue;
+            };
             let matching_band = correction_profile.matching_band(f3);
 
             let group_icd =
@@ -313,6 +332,26 @@ mod tests {
             ctc: None,
             cea2034_cache: None,
         }
+    }
+
+    #[test]
+    fn channel_matching_respects_bass_only_optimizer_bounds() {
+        let profile = channel_matching_profile_for_role_key("front_lr", 0.1).correction;
+        let bounded = matching_profile_inside_correction_band(profile, 20.0, 200.0, 50.0).unwrap();
+        assert_eq!(bounded.max_freq_hz, 200.0);
+        let curves = HashMap::from([
+            ("L".to_string(), wavy_curve()),
+            ("R".to_string(), small_curve()),
+        ]);
+        let corrections = roomeq_engine::spectral_align::correct_inter_channel_deviation_with_profile(
+            &curves, 50.0, 5, 48_000.0, bounded,
+        );
+        for correction in corrections {
+            for filter in correction.filters {
+                assert!(filter.freq >= 20.0 && filter.freq <= 200.0, "{}", filter.freq);
+            }
+        }
+        assert!(matching_profile_inside_correction_band(profile, 20.0, 50.0, 50.0).is_none());
     }
 
     #[test]

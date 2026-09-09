@@ -570,6 +570,50 @@ pub fn optimize_channel_eq_with_callback_detailed(
     )
 }
 
+/// Optimize a combined speaker group against one bass/treble target reference.
+pub(crate) fn optimize_group_eq_with_upper_reference(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    // Only the combined main+sub response owns the broadband target. Individual
+    // band-limited drivers must not use their out-of-passband noise as an anchor.
+    let target = resources::target_curve(curve, resources);
+    let reference = crate::spectral_align::upper_band_target_reference(curve, &target, config.max_freq);
+    optimize_channel_eq_inner(
+        curve, config, resources, sample_rate, reference, None, callback,
+        &RealOptimizerBackend::new(),
+    )
+}
+
+/// Absolute target for a combined response with a measured uncorrected upper band.
+pub(crate) fn group_upper_reference_target(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+) -> Option<Curve> {
+    let mut target = resources::target_curve(curve, resources);
+    let reference = crate::spectral_align::upper_band_target_reference(curve, &target, config.max_freq)?;
+    target.spl += reference;
+    Some(target)
+}
+
+/// Compare candidates using the same target and level anchor as group EQ.
+pub(crate) fn group_upper_reference_scores(
+    before: &Curve,
+    after: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+) -> Option<(f64, f64)> {
+    let target = group_upper_reference_target(before, config, resources)?;
+    let score = |curve: &Curve| {
+        crate::group::target_error_score(curve, &target, config.min_freq, config.max_freq)
+    };
+    Some((score(before), score(after)))
+}
+
 /// Forward iterative optimization: try 1..=max_filters, stop when improvement stalls.
 fn optimize_channel_eq_adaptive(
     curve: &Curve,

@@ -9,6 +9,44 @@ use log::warn;
 use ndarray::Array1;
 use std::collections::HashMap;
 
+/// Target-relative level above a limited correction band. Require an octave of
+/// measured upper-band support; never extrapolate a subwoofer into a main.
+/// Integration in log frequency makes the reference independent of bin density.
+pub fn upper_band_target_reference(
+    curve: &Curve,
+    target: &Curve,
+    correction_max: f64,
+) -> Option<f64> {
+    if !correction_max.is_finite() || correction_max <= 0.0
+        || curve.freq != target.freq || curve.freq.len() != curve.spl.len()
+        || target.spl.len() != curve.freq.len()
+        || !roomeq_analysis::frequency_grid::is_valid_frequency_grid(&curve.freq)
+    {
+        return None;
+    }
+    let upper = curve.freq.last()?.min(20_000.0);
+    let lower = correction_max.max(curve.freq[0]);
+    if upper < 2.0 * lower { return None; }
+    let mut area = 0.0;
+    let mut span = 0.0;
+    for i in 1..curve.freq.len() {
+        let lo = curve.freq[i - 1].max(lower);
+        let hi = curve.freq[i].min(upper);
+        if hi <= lo { continue; }
+        let x0 = curve.freq[i - 1].ln();
+        let dx = curve.freq[i].ln() - x0;
+        let y0 = curve.spl[i - 1] - target.spl[i - 1];
+        let y1 = curve.spl[i] - target.spl[i];
+        if !y0.is_finite() || !y1.is_finite() { return None; }
+        let a = (lo.ln() - x0) / dx;
+        let b = (hi.ln() - x0) / dx;
+        let width = hi.ln() - lo.ln();
+        area += (y0 + 0.5 * (a + b) * (y1 - y0)) * width;
+        span += width;
+    }
+    (span > 0.0).then_some(area / span)
+}
+
 /// Compute spectral alignment corrections for all channels.
 ///
 /// 1. Computes a pointwise-average reference curve.
@@ -46,6 +84,31 @@ pub fn compute_spectral_alignment(
         curves
     };
     let freq = &curves.values().next().unwrap().freq;
+
+    // Bass-only EQ must not infer a broadband trim from a bass-only shelf fit.
+    // Its upper band owns the level reference used during target preparation.
+    // Only align levels here: upper-band spectral shape is outside EQ scope.
+    let zero_target = Curve {
+        freq: freq.clone(),
+        spl: Array1::zeros(freq.len()),
+        ..Curve::default()
+    };
+    let upper_levels: Option<Vec<_>> = curves.iter().map(|(name, curve)| {
+        upper_band_target_reference(curve, &zero_target, max_freq)
+            .map(|level| (name, level))
+    }).collect();
+    if let Some(levels) = upper_levels {
+        let reference = levels.iter().map(|(_, level)| level).sum::<f64>() / levels.len() as f64;
+        return levels.into_iter().map(|(name, level)| {
+            let gain = (reference - level).clamp(-MAX_FLAT_GAIN_DB, MAX_FLAT_GAIN_DB);
+            (name.clone(), SpectralAlignmentResult {
+                lowshelf_gain_db: 0.0,
+                highshelf_gain_db: 0.0,
+                flat_gain_db: if gain.abs() < MIN_CORRECTION_DB { 0.0 } else { gain },
+                residual_rms_db: 0.0,
+            })
+        }).collect();
+    }
 
     // Build mask: only consider frequencies within [min_freq, max_freq]
     let mask: Vec<bool> = freq

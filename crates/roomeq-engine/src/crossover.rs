@@ -17,6 +17,9 @@ use std::error::Error;
 
 use roomeq_model::{CrossoverConfig, OptimizerConfig, RoomConfig};
 
+mod level_alignment;
+pub(crate) use level_alignment::align_two_band_target_levels;
+
 /// Determine one optimizer frequency band per ordered speaker driver.
 pub fn determine_optimization_bands(
     driver_count: usize,

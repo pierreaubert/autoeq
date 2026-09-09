@@ -201,9 +201,9 @@ pub(super) fn collect_generic_channel_results(
                         &final_curve,
                         &config.optimizer,
                         config.target_curve.as_ref(),
-                        sample_rate,
-                        output_dir,
-                        None,
+                            sample_rate,
+                            output_dir,
+                            channel_chains.get(&channel_name),
                     )
                     .ok_or_else(|| AutoeqError::OptimizationFailed {
                         message: format!(

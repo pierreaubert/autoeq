@@ -120,6 +120,12 @@ pub fn flat_loss_score(curve: &Curve, min_freq: f64, max_freq: f64) -> f64 {
     autoeq_optim::loss::flat_loss(&curve.freq, &normalized, min_freq, max_freq)
 }
 
+/// Target-relative RMS without independently normalizing either response.
+pub fn target_error_score(curve: &Curve, target: &Curve, min_freq: f64, max_freq: f64) -> f64 {
+    let target = autoeq_core::interpolate_log_space(&curve.freq, target);
+    autoeq_optim::loss::flat_loss(&curve.freq, &(&curve.spl - &target.spl), min_freq, max_freq)
+}
+
 pub fn eq_score_regressed(pre_score: f64, post_score: f64) -> bool {
     !post_score.is_finite()
         || (pre_score.is_finite() && post_score > pre_score + GLOBAL_EQ_REGRESSION_TOLERANCE)

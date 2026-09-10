@@ -142,7 +142,7 @@ pub(crate) fn run_channel_via_generic_path_with_frequency_samples(
     let stopped = progress
         .as_ref()
         .map(|progress| Arc::clone(&progress.stopped));
-    let mut processed = crate::channel::process_single_channel_with_frequency_samples(
+    let processed = crate::channel::process_single_channel_with_frequency_samples(
         role,
         source,
         effective_config,
@@ -152,8 +152,9 @@ pub(crate) fn run_channel_via_generic_path_with_frequency_samples(
         probe_arrival_overrides.and_then(|overrides| overrides.get(role).copied()),
         None,
         frequency_samples,
-    )?;
+    );
     workflow_progress_stopped(&stopped, "TopologyWorkflowExecution")?;
+    let mut processed = processed?;
 
     let mut multiseat_rejection = None;
     if derived_multiseat_config.is_some() {
@@ -183,7 +184,7 @@ pub(crate) fn run_channel_via_generic_path_with_frequency_samples(
             let stopped = progress
                 .as_ref()
                 .map(|progress| Arc::clone(&progress.stopped));
-            processed = crate::channel::process_single_channel_with_frequency_samples(
+            let retry = crate::channel::process_single_channel_with_frequency_samples(
                 role,
                 source,
                 config,
@@ -193,8 +194,9 @@ pub(crate) fn run_channel_via_generic_path_with_frequency_samples(
                 probe_arrival_overrides.and_then(|overrides| overrides.get(role).copied()),
                 None,
                 frequency_samples,
-            )?;
+            );
             workflow_progress_stopped(&stopped, "TopologyWorkflowExecution")?;
+            processed = retry?;
         }
     }
 

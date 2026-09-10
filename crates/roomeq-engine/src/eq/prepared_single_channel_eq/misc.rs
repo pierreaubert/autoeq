@@ -731,6 +731,12 @@ pub(in super::super) fn run_optimization_pass(
         prep.peq_model,
         prep.objective_data.max_db,
     );
+    zero_null_filling_boosts(
+        &mut x_final,
+        &prep.objective_data.freqs,
+        prep.objective_data.null_suppression.as_deref(),
+        prep.peq_model,
+    );
     let final_loss =
         autoeq_optim::optim::compute_fitness_penalties_ref(&x_final, &prep.objective_data);
     for evidence in &mut optimizer_evidence {
@@ -801,6 +807,113 @@ fn clamp_combined_boost(
         max_boost_db,
         original_peak,
     );
+}
+
+/// Zero positive filter gains centered inside suppressed narrow nulls.
+///
+/// High-Q dips are acoustic cancellations that EQ boost cannot fill (see the
+/// detection-time rationale above `null_suppression_mask`). The mask only
+/// removes the loss reward for filling them, which leaves the optimizer
+/// indifferent: free boost variables still drift into nulls, wasting
+/// headroom that downstream gates read as lost useful output. A filter whose
+/// center sits where the mask is more suppressed than not (< 0.5)
+/// contributes its boost overwhelmingly to unfillable output, so its gain is
+/// zeroed here and the near-zero prune below removes it. Cuts are preserved:
+/// taming a resonance that happens to neighbor a null stays legitimate.
+fn zero_null_filling_boosts(
+    x: &mut [f64],
+    freqs: &ndarray::Array1<f64>,
+    null_suppression: Option<&ndarray::Array1<f64>>,
+    peq_model: PeqModel,
+) -> usize {
+    let (Some(freq_grid), Some(mask)) = (
+        freqs.as_slice(),
+        null_suppression.and_then(|mask| mask.as_slice()),
+    ) else {
+        return 0;
+    };
+    if freq_grid.len() != mask.len() || freq_grid.is_empty() {
+        return 0;
+    }
+    let suppression_at = |center_hz: f64| {
+        let mut best = 0;
+        for (index, frequency) in freq_grid.iter().enumerate() {
+            if (frequency - center_hz).abs() < (freq_grid[best] - center_hz).abs() {
+                best = index;
+            }
+        }
+        mask[best]
+    };
+    let mut dropped = 0;
+    for index in 0..peq_model.num_filters(x) {
+        let mut params = peq_model.get_filter_params(x, index);
+        if params.gain <= 0.0 {
+            continue;
+        }
+        if suppression_at(10.0_f64.powf(params.freq)) < 0.5 {
+            params.gain = 0.0;
+            peq_model.set_filter_params(x, index, &params);
+            dropped += 1;
+        }
+    }
+    if dropped > 0 {
+        log::info!(
+            "  Dropped {dropped} null-filling boost(s) centered inside suppressed narrow nulls"
+        );
+    }
+    dropped
+}
+
+#[cfg(test)]
+mod null_boost_tests {
+    use super::*;
+    use autoeq_core::param_utils::PeqLayout;
+
+    #[test]
+    fn boosts_centered_in_suppressed_nulls_are_zeroed_and_cuts_kept() {
+        let freqs = ndarray::arr1(&[70.0, 76.0, 82.0, 150.0]);
+        // Suppression core at 76 Hz (mask < 0.5), taper edge at 82 Hz.
+        let mask = ndarray::arr1(&[1.0, 0.0, 0.8, 1.0]);
+        let mut parameters = Vec::new();
+        for (frequency, q, gain) in [
+            (76.0_f64, 5.0_f64, 6.0_f64),
+            (76.0_f64, 5.0_f64, -6.0_f64),
+            (150.0_f64, 1.0_f64, 4.5_f64),
+            (70.0_f64, 1.0_f64, 3.0_f64),
+        ] {
+            parameters.extend_from_slice(&[frequency.log10(), q, gain]);
+        }
+        let dropped = zero_null_filling_boosts(
+            &mut parameters,
+            &freqs,
+            Some(&mask),
+            PeqModel::Pk,
+        );
+        assert_eq!(dropped, 1);
+        let gains: Vec<f64> = (0..4)
+            .map(|index| PeqModel::Pk.get_filter_params(&parameters, index).gain)
+            .collect();
+        assert_eq!(gains, vec![0.0, -6.0, 4.5, 3.0]);
+    }
+
+    #[test]
+    fn missing_or_mismatched_mask_disables_pruning() {
+        let freqs = ndarray::arr1(&[76.0]);
+        let mut parameters = vec![76.0_f64.log10(), 5.0, 6.0];
+        assert_eq!(
+            zero_null_filling_boosts(&mut parameters, &freqs, None, PeqModel::Pk),
+            0
+        );
+        let short = ndarray::arr1(&[0.0, 0.0]);
+        assert_eq!(
+            zero_null_filling_boosts(&mut parameters, &freqs, Some(&short), PeqModel::Pk),
+            0
+        );
+        assert_eq!(
+            PeqModel::Pk.get_filter_params(&parameters, 0).gain,
+            6.0
+        );
+    }
 }
 
 #[cfg(test)]

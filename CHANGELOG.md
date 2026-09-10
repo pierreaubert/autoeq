@@ -1,5 +1,14 @@
 # Unreleased
 
+## RoomEQ test recovery
+
+- Preserve observer cancellation diagnostics when a topology channel's optimizer
+  returns early, including the multi-seat retry path.
+- Preserve the underlying measurement-load error during raw seat capture so
+  missing-file diagnostics include the path that failed.
+- Retain supporting-source convolution taps exactly as written to the WAV;
+  normalization gain remains owned by its separate DSP plugin.
+
 ## RoomEQ band-limited driver resampling
 
 - Stop slope-extrapolating band-limited drivers onto full-range grids: a
@@ -25,6 +34,18 @@
 - A multi-sub group with a single subwoofer is now a configuration error
   (MSO requires at least 2 subwoofers; use Single config) instead of
   panicking later in multi-sub optimization.
+- Routed final-seat replay no longer compares single-position measurement
+  names as seat orders; only multi-seat label sequences must match
+  (measured 2.1_sigberg2 with Left/Right/Sub captures now replays).
+- Seat-replay useful-output loss no longer counts correction cuts that land
+  closer to the target than the baseline, even when they stop short of it;
+  only overshoot past the baseline's own distance from target counts as lost
+  output (the remaining shortfall stays advisory). Deep but target-directed
+  resonance cuts no longer force the strength search to mute the channel.
+- The single-channel optimizer now drops positive-gain filters centered
+  inside suppressed narrow nulls (mask < 0.5) instead of leaving the
+  free boost variables parked there: null-filling boosts waste headroom that
+  downstream gates read as lost output. Cuts are preserved.
 
 ## Final electrical and cumulative correction selection
 

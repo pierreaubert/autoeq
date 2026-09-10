@@ -26,6 +26,7 @@ _site
 [a-z]*.md
 !artifacts.md
 !docs/CRATE_PARTITION_PLAN.md
+!docs/ROOMEQ_INCREMENTAL_PLAN.md
 
 # python
 __pycache__

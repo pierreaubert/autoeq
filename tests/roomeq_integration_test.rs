@@ -178,14 +178,28 @@ fn test_roomeq_multidriver_config() {
     // The EQ computed on the combined (summed) response is intentionally
     // placed at channel level, upstream of the crossover split — see
     // `build_multidriver_dsp_chain` ("Build combined EQ (applied to summed
-    // output)"). Any other plugin type at channel level would be a bug.
+    // output)"). Final channel-level alignment may add one labelled gain;
+    // crossover processing must remain on the driver branches.
     for plugin in plugins {
-        assert_eq!(
-            plugin["plugin_type"].as_str().unwrap_or_default(),
-            "eq",
-            "multi-driver channel-level plugins may only carry the combined-response EQ, got: {plugin}"
+        let combined_eq = plugin["plugin_type"] == "eq";
+        let level_alignment = plugin["plugin_type"] == "gain"
+            && plugin["parameters"]["label"] == "final_channel_level_alignment"
+            && plugin["parameters"]["gain_db"]
+                .as_f64()
+                .is_some_and(f64::is_finite);
+        assert!(
+            combined_eq || level_alignment,
+            "unexpected multi-driver channel-level processing: {plugin}"
         );
     }
+    assert!(
+        plugins
+            .iter()
+            .filter(|plugin| plugin["plugin_type"] == "gain")
+            .count()
+            <= 1,
+        "final channel-level alignment must not be applied more than once"
+    );
 
     let drivers = left_channel["drivers"]
         .as_array()

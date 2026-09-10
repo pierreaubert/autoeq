@@ -103,7 +103,7 @@ pub fn capture_training(config: &RoomConfig) -> Result<Vec<Capture>> {
                 source,
                 usize::MAX,
             )
-            .map_err(|error| invalid(error.to_string()))?;
+            .map_err(|error| invalid(format!("{error:#}")))?;
             for curve in &curves {
                 curve.validate("final-seat raw capture")?;
             }
@@ -138,6 +138,10 @@ fn physical_captures(
         for other in &captures[..i] {
             if (routed || capture.channel == other.channel)
                 && let (Some(a), Some(b)) = (&capture.seat_labels, &other.seat_labels)
+                // Single-curve captures carry the measurement name, not seat
+                // order; only multi-seat label sequences can disagree.
+                && a.len() > 1
+                && b.len() > 1
                 && a != b
             {
                 return Err(invalid(
@@ -1213,6 +1217,32 @@ mod tests {
                 .to_string()
                 .contains("labels differ")
         );
+    }
+
+    #[test]
+    fn routed_single_position_captures_do_not_compare_measurement_names() {
+        // Regression (measured 2.1_sigberg2): single-seat file captures are
+        // labeled with their measurement names ("Left" vs "Sub"), which are
+        // not seat orders. Routed replay must accept them.
+        let (result, _, flat) = routed_fixture();
+        let captures = vec![
+            Capture {
+                channel: "left".into(),
+                driver: None,
+                curves: vec![flat.clone()],
+                seat_labels: Some(vec!["Left".into()]),
+            },
+            Capture {
+                channel: "sub".into(),
+                driver: None,
+                curves: vec![flat],
+                seat_labels: Some(vec!["Sub".into()]),
+            },
+        ];
+        let physical = physical_captures(&captures, &result)
+            .expect("single-position routed captures must replay");
+        assert!(physical.contains_key("left"));
+        assert!(physical.contains_key("sub"));
     }
 
     #[test]

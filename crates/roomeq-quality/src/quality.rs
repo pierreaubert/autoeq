@@ -306,7 +306,20 @@ pub fn evaluate_acoustic_quality_with_permitted_gain(
                     // Removing an excess above the calibrated target is correction,
                     // not lost useful output. Never require filling a baseline null.
                     let reference = target.map_or(s.pre, |_| s.pre.min(s.target));
-                    (reference + permitted_gain_db - s.post).max(0.0)
+                    let loss = (reference + permitted_gain_db - s.post).max(0.0);
+                    // A cut that lands closer to the target than the baseline
+                    // is still correction even when it stops short of it; only
+                    // overshoot past the baseline's own distance from target
+                    // counts as lost output. The remaining shortfall is tracked
+                    // separately and stays advisory.
+                    if loss > 0.0
+                        && target.is_some()
+                        && (s.post - s.target).abs() <= (s.pre - s.target).abs()
+                    {
+                        0.0
+                    } else {
+                        loss
+                    }
                 })
                 .collect();
             let deficits: Vec<_> = samples
@@ -1145,6 +1158,66 @@ mod tests {
                 < 1e-9
         );
         assert!(evaluate_quality_gate(&best_effort, QualityGatePolicy::default(), true).passed);
+    }
+
+    #[test]
+    fn useful_output_exempts_cuts_that_stop_short_of_target() {
+        // A correction cut that moves the response toward the target but
+        // stops short of it is still correction: only overshoot past the
+        // baseline's own distance from target counts as lost useful output.
+        // Regression case: a subwoofer resonance correction was rejected
+        // because its skirts stopped short of the target.
+        let frequencies = [40.0, 60.0, 100.0];
+        let flat = |level: f64| curve(&frequencies, &[level; 3]);
+        let pre = flat(88.0);
+        let target = flat(83.0);
+        let evaluate = |post: &Curve| {
+            evaluate_acoustic_quality_with_permitted_gain(
+                &[pre.clone()],
+                std::slice::from_ref(post),
+                &[],
+                &[],
+                Some(&target),
+                QualityEvaluationConfig {
+                    max_freq_hz: 200.0,
+                    ..config()
+                },
+                Default::default(),
+                0.0,
+            )
+            .unwrap()
+        };
+        // Stops 1.5 dB short of the target but 3.5 dB closer than the
+        // baseline: no lost output.
+        let short = evaluate(&flat(81.5));
+        assert_eq!(short.useful_output[0].unexplained_loss_rms_db, 0.0);
+        // Overshoot past the mirror of the baseline distance still counts.
+        let over = evaluate(&flat(76.0));
+        assert!(
+            (over.useful_output[0].unexplained_loss_rms_db - 7.0).abs() < 1e-9,
+            "overshoot loss={}, want 7.0",
+            over.useful_output[0].unexplained_loss_rms_db
+        );
+        // Deepening a dip below the target still counts.
+        let dip = evaluate_acoustic_quality_with_permitted_gain(
+            &[flat(70.0)],
+            &[flat(65.0)],
+            &[],
+            &[],
+            Some(&target),
+            QualityEvaluationConfig {
+                max_freq_hz: 200.0,
+                ..config()
+            },
+            Default::default(),
+            0.0,
+        )
+        .unwrap();
+        assert!(
+            (dip.useful_output[0].unexplained_loss_rms_db - 5.0).abs() < 1e-9,
+            "dip loss={}, want 5.0",
+            dip.useful_output[0].unexplained_loss_rms_db
+        );
     }
 
     #[test]

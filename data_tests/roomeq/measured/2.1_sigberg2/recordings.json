@@ -8,7 +8,7 @@
       "LFE": "subs"
     },
     "subwoofers": {
-      "config": "mso",
+      "config": "single",
       "crossover": "bass_xover",
       "subs": "L"
     }
@@ -23,14 +23,8 @@
       "name": "Right"
     },
     "subs": {
-      "name": "1 sub",
-      "subwoofers": [
-        {
-          "path": "sub.csv",
-          "name": "Sub"
-        }
-      ],
-      "allpass_optimization": false
+      "path": "sub.csv",
+      "name": "Sub"
     }
   },
   "crossovers": {

@@ -22,6 +22,9 @@
   clip the raw measurement where display extension continues past it: the
   left-sub trace no longer draws a line from its 199.95 Hz capture end to
   20 kHz. Pure-DSP transfers (EQ responses) stay full-range.
+- A multi-sub group with a single subwoofer is now a configuration error
+  (MSO requires at least 2 subwoofers; use Single config) instead of
+  panicking later in multi-sub optimization.
 
 ## Final electrical and cumulative correction selection
 

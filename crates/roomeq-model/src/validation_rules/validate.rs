@@ -516,8 +516,8 @@ fn validate_speakers(speakers: &HashMap<String, SpeakerConfig>, result: &mut Val
                     result.add_error(format!("Multi-sub '{}' has no subwoofers", name));
                 }
                 if ms.subwoofers.len() == 1 {
-                    result.add_warning(format!(
-                        "Multi-sub '{}' has only 1 subwoofer, consider using Single config",
+                    result.add_error(format!(
+                        "Multi-sub '{}' has only 1 subwoofer; MSO requires at least 2 subwoofers, use Single config for a single sub",
                         name
                     ));
                 }
@@ -1867,9 +1867,9 @@ mod room_config_validation_tests {
         let result = validate_room_config(&config);
         assert!(
             result
-                .warnings
+                .errors
                 .iter()
-                .any(|w| w.contains("only 1 subwoofer"))
+                .any(|e| e.contains("only 1 subwoofer"))
         );
 
         // DBA empty front/rear

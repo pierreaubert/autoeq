@@ -827,6 +827,55 @@ fn test_same_frequency_grid_false() {
 }
 
 #[test]
+fn test_extend_curve_to_full_range_ignores_noisy_last_bin() {
+    // Regression (measured 2.2_sigberg3 right_sub): a subwoofer measured to
+    // 200 Hz whose dense linear tail ends one noisy bin higher reached
+    // 1004 dB at 20 kHz under single-pair slope extrapolation. The edge
+    // octave trend stays near the flat measured level instead.
+    let mut freq: Vec<f64> = ndarray::Array1::logspace(
+        10.0,
+        10.0_f64.log10(),
+        190.0_f64.log10(),
+        48,
+    )
+    .to_vec();
+    freq.extend([192.0, 194.0, 196.0, 198.0, 199.0, 199.5, 200.0]);
+    let len = freq.len();
+    let mut spl = vec![53.0; len];
+    spl[len - 1] = 53.8;
+    let curve = crate::Curve {
+        freq: ndarray::Array1::from_vec(freq),
+        spl: ndarray::Array1::from_vec(spl),
+        phase: Some(ndarray::Array1::zeros(len)),
+        ..Default::default()
+    };
+    let extended = extend_curve_to_full_range(&curve);
+    let last = *extended.freq.last().unwrap();
+    assert!(last >= 19900.0 && last <= 20000.0);
+    let max = extended
+        .spl
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    assert!(
+        max < 90.0,
+        "noisy edge bin must not invent out-of-band level, got {max}"
+    );
+    let tail = *extended.spl.last().unwrap();
+    assert!(
+        (tail - 53.8).abs() < 30.0,
+        "extended tail must stay near the measured edge, got {tail}"
+    );
+    // Original measurement points are preserved.
+    let at_200 = extended
+        .freq
+        .iter()
+        .position(|&f| f == 200.0)
+        .expect("measured edge must survive");
+    assert!((extended.spl[at_200] - 53.8).abs() < 1e-12);
+}
+
+#[test]
 fn test_extend_curve_to_full_range_prepends_and_appends() {
     let curve = crate::Curve {
         freq: Array1::from_vec(vec![100.0, 200.0, 400.0]),
@@ -998,6 +1047,66 @@ fn test_build_multidriver_dsp_chain_with_curves() {
     assert!(drivers[1].initial_curve.is_some());
     assert!(drivers[0].plugins.iter().any(|p| p.plugin_type == "eq"));
     assert!(chain.plugins.iter().any(|p| p.plugin_type == "eq"));
+}
+
+#[test]
+fn test_build_topology_chain_records_driver_measured_bands() {
+    use super::build::build_topology_dsp_chain_with_curves;
+    let driver_curves: Vec<crate::Curve> = vec![
+        crate::Curve {
+            freq: Array1::from(vec![10.0, 100.0, 200.0, 20000.0]),
+            spl: Array1::from(vec![60.0, 61.0, 62.0, 63.0]),
+            phase: None,
+            ..Default::default()
+        },
+        crate::Curve {
+            freq: Array1::from(vec![10.0, 100.0, 20000.0]),
+            spl: Array1::from(vec![65.0, 66.0, 64.0]),
+            phase: None,
+            ..Default::default()
+        },
+    ];
+    let names = vec!["left_sub".to_string(), "left_main".to_string()];
+    let bands = [[10.0, 199.951172], [10.0, 19964.99]];
+    let chain = build_topology_dsp_chain_with_curves(
+        "L",
+        &names,
+        &[0, 1],
+        &[0.0, 0.0],
+        &[0.0, 0.0],
+        &[false, false],
+        &[100.0],
+        "LR24",
+        &[],
+        &[vec![], vec![]],
+        &driver_curves,
+        Some(&bands),
+    );
+    let drivers = chain.drivers.as_ref().unwrap();
+    assert_eq!(drivers.len(), 2);
+    assert_eq!(drivers[0].measured_band_hz, Some([10.0, 199.951172]));
+    assert_eq!(drivers[1].measured_band_hz, Some([10.0, 19964.99]));
+    // Without bands the field stays absent for backward compatibility.
+    let chain = build_topology_dsp_chain_with_curves(
+        "L",
+        &names,
+        &[0, 1],
+        &[0.0, 0.0],
+        &[0.0, 0.0],
+        &[false, false],
+        &[100.0],
+        "LR24",
+        &[],
+        &[vec![], vec![]],
+        &driver_curves,
+        None,
+    );
+    let drivers = chain.drivers.as_ref().unwrap();
+    assert!(
+        drivers
+            .iter()
+            .all(|driver| driver.measured_band_hz.is_none())
+    );
 }
 
 #[test]

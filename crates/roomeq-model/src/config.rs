@@ -23,6 +23,8 @@ mod default;
 mod early_late_correction_config;
 mod excursion_protection_config;
 mod filter_audibility_config;
+mod finalization_config;
+pub use finalization_config::FinalizationConfig;
 mod group_delay_optimization_config;
 mod high_freq_filter_config;
 mod high_frequency_correction_config;

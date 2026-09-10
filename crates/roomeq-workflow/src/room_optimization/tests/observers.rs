@@ -11,6 +11,15 @@ fn canonical_mso_seed151_output_loss_diagnostic() {
     assert!(error.contains("useful output"), "{error}");
 }
 
+#[test]
+#[ignore = "explicit candidate artifact/ablation diagnosis, not an acceptance gate"]
+fn canonical_mso_candidate_diagnostic() {
+    let seed = std::env::var("ROOMEQ_DIAGNOSTIC_SEED")
+        .expect("set ROOMEQ_DIAGNOSTIC_SEED for this diagnostic")
+        .parse().expect("diagnostic seed must be an unsigned integer");
+    capture_canonical_mso_output_loss(seed);
+}
+
 fn capture_canonical_mso_output_loss(seed: u64) -> Option<String> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let (mut config, _) = crate::load_merged_config_strict(
@@ -312,9 +321,13 @@ fn validation_bundle_matches_final_pipeline_playback_evidence() {
     let electrical: Vec<_> = stages.iter().filter(|stage|
         stage.stage == "final_graph_sampled_electrical_headroom").collect();
     assert_eq!(electrical.len(), 1);
-    assert_eq!(electrical[0], &crate::electrical_headroom::final_graph_unit_peak_stage(
-        &result.to_dsp_chain_output(), 44_100.0, dir.path(),
-    ));
+    assert!(electrical[0].advisories.contains(&"enforced_independently_phased_sinusoidal_input_peaks".into()));
+    assert_eq!(electrical[0].status, StageStatus::Applied);
+    // This fixture is an identity electrical path; its accepted bundle must
+    // retain the enforced unit-peak result, not the former advisory-only report.
+    assert!(electrical[0].checks.iter().all(|check| check.passed
+        && (check.observed.unwrap() - 1.0).abs() < 1e-9
+        && check.limit == Some(1.0)));
     assert!(!electrical[0].checks.is_empty());
     assert!(!bundle["final_playback"]["metadata"]["correction_acceptance"].is_null());
     let seats = bundle["final_playback"]["metadata"]["correction_acceptance"]

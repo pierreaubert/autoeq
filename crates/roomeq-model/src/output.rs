@@ -155,6 +155,12 @@ pub struct DriverDspChain {
     /// Initial frequency response curve for this driver before optimization (optional)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial_curve: Option<CurveData>,
+    /// Measured frequency span of this driver's capture in Hz, when the
+    /// stored display curve was extended past it for full-range DSP replay.
+    /// Plots of the raw measurement should clip to this band; points outside
+    /// it are trend continuation, not data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measured_band_hz: Option<[f64; 2]>,
 }
 
 /// Backend-neutral serialized plugin descriptor. Native adapters translate this

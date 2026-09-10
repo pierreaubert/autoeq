@@ -643,6 +643,16 @@ fn home_cinema_5_1_4_config() -> RoomConfig {
 #[test]
 fn optimize_home_cinema_5_1_4_fixed_seed_matches_one_and_four_workers() {
     let mut serial_config = home_cinema_5_1_4_config();
+    // Test deterministic optimization at a declared small-signal level.
+    serial_config.optimizer.finalization.default_input_peak = 0.01;
+    // This deterministic synthetic fixture models zero-phase physical sources.
+    // State that evidence explicitly: production final replay cannot infer
+    // coherent phase from a magnitude-only measurement.
+    for speaker in serial_config.speakers.values_mut() {
+        if let SpeakerConfig::Single(MeasurementSource::InMemory(curve)) = speaker {
+            curve.phase = Some(ndarray::Array1::zeros(curve.freq.len()));
+        }
+    }
     serial_config.optimizer.parallel_threads = Some(1);
     let serial = optimize_room(&serial_config, 48_000.0, None, None)
         .expect("single-worker 5.1.4 RoomEQ run must succeed");
@@ -1074,7 +1084,10 @@ fn home_cinema_crossover_reconstructs_for_all_modes_and_sample_rates() {
         cases.into_par_iter().for_each(
             |(crossover_type, mode_name, processing_mode, sample_rate)| {
                 let case = format!("{crossover_type}/{mode_name}/{sample_rate:.0}Hz");
-                let config = crossover_reconstruction_config(crossover_type, processing_mode);
+                let mut config = crossover_reconstruction_config(crossover_type, processing_mode);
+                // Linear transfer conformance uses excitation below clipping;
+                // full-scale headroom has separate regression coverage.
+                config.optimizer.finalization.default_input_peak = 0.01;
                 let output_dir = output_root.join(&case);
                 std::fs::create_dir_all(&output_dir)
                     .expect("create crossover reconstruction case directory");

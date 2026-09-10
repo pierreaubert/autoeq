@@ -468,6 +468,7 @@ fn electrical_qa_keeps_same_named_driver_ports_separate() {
                 name: "woofer".into(),
                 index: 0,
                 initial_curve: None,
+                measured_band_hz: None,
                 plugins: vec![roomeq_engine::output::create_gain_plugin_with_invert(
                     3.0, invert,
                 )],
@@ -476,6 +477,7 @@ fn electrical_qa_keeps_same_named_driver_ports_separate() {
                 name: "tweeter".into(),
                 index: 1,
                 initial_curve: None,
+                measured_band_hz: None,
                 plugins: vec![roomeq_engine::output::create_gain_plugin(-12.0)],
             },
         ]);

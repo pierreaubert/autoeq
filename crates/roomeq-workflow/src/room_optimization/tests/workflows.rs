@@ -162,6 +162,9 @@ fn optimize_room_with_group_delay_enabled_succeeds() {
 #[test]
 fn optimize_room_with_phase_alignment_enabled_succeeds() {
     let mut config = stereo_2_1_config();
+    // This dispatch test uses small-signal excitation, not simultaneous
+    // full-scale programme inputs. Full-scale rejection is tested separately.
+    config.optimizer.finalization.default_input_peak = 0.01;
     let mut phased = flat_curve();
     phased.phase = Some(ndarray::Array1::zeros(phased.freq.len()));
     for name in ["left", "right", "sub"] {

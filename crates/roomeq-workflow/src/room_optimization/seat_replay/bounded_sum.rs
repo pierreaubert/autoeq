@@ -184,7 +184,14 @@ pub(super) fn sum_branches(branches: &[Branch], low_limit: f64, high_limit: f64)
         let mut omitted_indices = Vec::new();
         for (index, branch) in branches.iter().enumerate() {
             let endpoint = *branch.measured.freq.last().unwrap();
-            if *frequency <= endpoint {
+            // Grid-quantization allowance: a round assessment edge (200 Hz)
+            // routinely lands a fraction of a measurement bin past a dense
+            // capture's last bin (199.951 Hz). Genuine coverage gaps are
+            // octaves, never fractions of a bin, so anything beyond this
+            // allowance still requires an explicit upper-band declaration.
+            let covered =
+                *frequency <= endpoint || *frequency - endpoint <= 1e-3 * endpoint.max(1.0);
+            if covered {
                 retained += num_complex::Complex64::from_polar(
                     10.0_f64.powf(aligned[index].spl[i] / 20.0),
                     aligned[index].phase.as_ref().unwrap()[i].to_radians(),
@@ -253,4 +260,53 @@ pub(super) fn sum_branches(branches: &[Branch], low_limit: f64, high_limit: f64)
         },
         support: evidence.into_iter().flatten().collect(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn branch(output: &str, last_hz: f64) -> Branch {
+        let freq = ndarray::Array1::logspace(10.0, 10.0_f64.log10(), last_hz.log10(), 32);
+        let len = freq.len();
+        Branch {
+            output: output.into(),
+            measured: Curve {
+                freq,
+                spl: ndarray::Array1::from_elem(len, 70.0),
+                phase: Some(ndarray::Array1::zeros(len)),
+                ..Default::default()
+            },
+            upper: None,
+        }
+    }
+
+    #[test]
+    fn sub_bin_past_assessment_edge_is_covered() {
+        // REW linear tails end at 199.951172 Hz against a round 200 Hz
+        // assessment edge: a fraction of a measurement bin, not missing
+        // evidence (measured 2.2_sigberg3 left_sub).
+        let branches = [
+            branch("left_sub", 199.951172),
+            branch("left_main", 20_000.0),
+        ];
+        let summed = sum_branches(&branches, 20.0, 200.0)
+            .expect("sub-bin endpoint gap must not fail summation");
+        assert!(summed.support.is_empty());
+        let top = *summed.curve.freq.last().unwrap();
+        assert!((top - 200.0).abs() < 1e-9, "unexpected top {top}");
+    }
+
+    #[test]
+    fn genuine_upper_gap_still_needs_declaration() {
+        let branches = [branch("left_sub", 150.0), branch("left_main", 20_000.0)];
+        let error = match sum_branches(&branches, 20.0, 200.0) {
+            Ok(_) => panic!("50 Hz coverage gap must not sum silently"),
+            Err(error) => error.to_string(),
+        };
+        assert!(
+            error.contains("insufficient summation evidence"),
+            "{error}"
+        );
+    }
 }

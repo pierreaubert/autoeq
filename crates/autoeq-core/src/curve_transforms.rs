@@ -273,6 +273,92 @@ pub fn interpolate_response(output_frequencies: &Array1<f64>, curve: &Curve) -> 
     interpolate_log_space(output_frequencies, curve)
 }
 
+/// Interpolate in log-frequency space without inventing data outside the
+/// measured band: interior points use log-frequency interpolation, while
+/// points below/above the measured range hold the nearest measured edge
+/// value (magnitude and phase alike).
+///
+/// Crossover summation of band-limited drivers (e.g. a subwoofer measured to
+/// 200 Hz summed with a full-range main) must not slope-extrapolate the
+/// band-limited driver: a single noisy edge bin implies an arbitrary
+/// dB-per-octave trend that dominates the sum far outside the measurement
+/// (hundreds of dB at 20 kHz) and poisons target references derived from it.
+pub fn interpolate_log_space_hold_edges(output_frequencies: &Array1<f64>, curve: &Curve) -> Curve {
+    let mut interpolated = interpolate_log_space(output_frequencies, curve);
+    let Some(&first_freq) = curve.freq.first() else {
+        return interpolated;
+    };
+    let Some(&last_freq) = curve.freq.last() else {
+        return interpolated;
+    };
+    if curve.spl.is_empty() {
+        return interpolated;
+    }
+    let first_spl = curve.spl[0];
+    let last_spl = curve.spl[curve.spl.len() - 1];
+    let first_phase = curve.phase.as_ref().and_then(|phase| phase.first().copied());
+    let last_phase = curve.phase.as_ref().and_then(|phase| phase.last().copied());
+    let first_coherence = curve
+        .coherence
+        .as_ref()
+        .and_then(|values| values.first().copied());
+    let last_coherence = curve
+        .coherence
+        .as_ref()
+        .and_then(|values| values.last().copied());
+    let first_noise = curve
+        .noise_floor_db
+        .as_ref()
+        .and_then(|values| values.first().copied());
+    let last_noise = curve
+        .noise_floor_db
+        .as_ref()
+        .and_then(|values| values.last().copied());
+    for (index, &frequency) in output_frequencies.iter().enumerate() {
+        if frequency < first_freq {
+            interpolated.spl[index] = first_spl;
+            if let (Some(phase), Some(edge)) =
+                (interpolated.phase.as_mut(), first_phase)
+            {
+                phase[index] = edge;
+            }
+            if let (Some(values), Some(edge)) =
+                (interpolated.coherence.as_mut(), first_coherence)
+            {
+                values[index] = edge;
+            }
+            if let (Some(values), Some(edge)) = (interpolated.noise_floor_db.as_mut(), first_noise)
+            {
+                values[index] = edge;
+            }
+        } else if frequency > last_freq {
+            interpolated.spl[index] = last_spl;
+            if let (Some(phase), Some(edge)) = (interpolated.phase.as_mut(), last_phase) {
+                phase[index] = edge;
+            }
+            if let (Some(values), Some(edge)) =
+                (interpolated.coherence.as_mut(), last_coherence)
+            {
+                values[index] = edge;
+            }
+            if let (Some(values), Some(edge)) = (interpolated.noise_floor_db.as_mut(), last_noise)
+            {
+                values[index] = edge;
+            }
+        }
+    }
+    interpolated
+}
+
+/// Interpolate without changing absolute SPL levels and without inventing
+/// data outside the measured band (see [`interpolate_log_space_hold_edges`]).
+pub fn interpolate_response_hold_edges(
+    output_frequencies: &Array1<f64>,
+    curve: &Curve,
+) -> Curve {
+    interpolate_log_space_hold_edges(output_frequencies, curve)
+}
+
 /// Interpolate and normalize over a caller-selected frequency band.
 pub fn normalize_and_interpolate_response_with_range(
     output_frequencies: &Array1<f64>,

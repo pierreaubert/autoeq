@@ -38,6 +38,7 @@ def _align_final_to_initial_grid(
     return freq_data, spl_raw
 from .data_extract import (
     channel_has_eq,
+    clip_curve_to_measured_band,
     compute_y_range,
     compute_average_spl_in_range,
     driver_display_names,
@@ -753,6 +754,9 @@ def _get_driver_initial_curves(channel_data: dict) -> list[tuple[str, dict]] | N
         initial_curve = driver.get("initial_curve")
         if initial_curve and "freq" in initial_curve and "spl" in initial_curve:
             name = driver.get("name", f"driver_{driver.get('index', '?')}")
+            # Raw measurements stop at the recorded band; the stored curve
+            # continues past it for DSP replay and must not be drawn as data.
+            initial_curve = clip_curve_to_measured_band(initial_curve, driver)
             result.append((name, initial_curve))
 
     return result if result else None

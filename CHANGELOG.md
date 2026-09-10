@@ -1,5 +1,48 @@
 # Unreleased
 
+## RoomEQ band-limited driver resampling
+
+- Stop slope-extrapolating band-limited drivers onto full-range grids: a
+  subwoofer measured to 200 Hz with one noisy edge bin reached 1004 dB at
+  20 kHz, dominating crossover sums, poisoning target references, and
+  diverging the R-specific global EQ (measured 2.2_sigberg3: R 6.10 -> 309.5
+  and reverted to no EQ; now 6.10 -> 2.03 with EQ kept). Crossover summation
+  (`prepare_driver_curves`, `DriversLossData::power_reference`) now holds
+  measured edge values outside the band; display extension
+  (`extend_curve_to_full_range`) follows a capped least-squares trend over
+  the edge octave instead of a single bin pair.
+- Tolerate sub-bin measurement/assessment endpoint mismatch in bounded final
+  replay (199.951 Hz capture against a round 200 Hz band edge); genuine
+  coverage gaps still require explicit upper-band declarations.
+- Defer cumulative final selection with a recorded skip while no
+  correction-acceptance report exists for the route (acceptance attachment is
+  still being wired); previously shippable runs no longer fail closed on the
+  missing report. The full selection engages unchanged once acceptance exists.
+- Record each topology driver's measured span (`measured_band_hz`) so plots
+  clip the raw measurement where display extension continues past it: the
+  left-sub trace no longer draws a line from its 199.95 Hz capture end to
+  20 kHz. Pure-DSP transfers (EQ responses) stay full-range.
+
+## Final electrical and cumulative correction selection
+
+- Preserve synchronous primary-seat complex measurements for normal MSO driver
+  records and main-channel route optimization/replay. Spatial EQ still uses all
+  configured measurements; magnitude-only seat averages no longer replace the
+  physical responses used for crossover timing.
+- Refine main and sub correction strengths separately, preserve fractional FIR
+  delay, bind refined WAV bytes through the artifact store, and recheck channel
+  alignment before final electrical and acoustic acceptance.
+
+- Add explicit logical-input peak assumptions, sampled output ceilings and an
+  attenuation search limit under `optimizer.finalization`.
+- Select complete delivered correction candidates after late DSP assembly,
+  checking electrical headroom, routed crossover safety and each available
+  physical seat together. Preserve a fixed structural baseline and include
+  correction-owned headroom attenuation in useful-output checks, including
+  single-seat systems. Missing evidence or no feasible candidate fails closed.
+- Preserve correction-owned physical-output gain through the shared routing
+  resolver, without duplicating structural driver gains already baked into routes.
+
 ## Opt-in physical-driver FIR correction
 
 - Add RoomEQ input schema 2.2.0 and `optimizer.fir.placement`: `shared`

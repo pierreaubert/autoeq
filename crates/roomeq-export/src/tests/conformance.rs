@@ -751,6 +751,7 @@ fn camilladsp_routed_export_rejects_driver_branches() {
             parameters: json!({"gain_db": -3.0}),
         }],
         initial_curve: None,
+        measured_band_hz: None,
     }]);
 
     let error = camilladsp_error(&output);

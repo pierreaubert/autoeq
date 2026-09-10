@@ -1474,7 +1474,7 @@ fn correction_free_chain(chain: &ChannelDspChain) -> ChannelDspChain {
     baseline
 }
 
-fn apply_logical_channel_chain(
+pub(super) fn apply_logical_channel_chain(
     chain: &ChannelDspChain,
     curve: &roomeq_model::Curve,
     sample_rate: f64,
@@ -3330,6 +3330,7 @@ fn to_dsp_chain_output_includes_channels_and_metadata() {
                     roomeq_engine::output::create_delay_plugin(2.0),
                 ],
                 initial_curve: None,
+                measured_band_hz: None,
             }]);
 
         apply_final_correction_safety_gate(
@@ -3372,6 +3373,10 @@ fn to_dsp_chain_output_includes_channels_and_metadata() {
                 roomeq_engine::output::create_delay_plugin(2.0),
             ],
             initial_curve: Some((&initial).into()),
+            measured_band_hz: match (initial.freq.first(), initial.freq.last()) {
+                (Some(&low), Some(&high)) => Some([low, high]),
+                _ => None,
+            },
         }]);
         let drivers = chain.drivers.clone();
         let final_curve =
@@ -3898,6 +3903,12 @@ mod per_driver_latency_tests {
                         name: format!("driver{index}"),
                         plugins: vec![plugin],
                         initial_curve: chain.initial_curve.clone(),
+                        measured_band_hz: chain.initial_curve.as_ref().and_then(|curve| {
+                            match (curve.freq.first(), curve.freq.last()) {
+                                (Some(&low), Some(&high)) => Some([low, high]),
+                                _ => None,
+                            }
+                        }),
                     }
                 })
                 .collect(),

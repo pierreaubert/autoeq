@@ -124,6 +124,7 @@ pub fn resolve_physical_routing(
                     }
                     match plugin.plugin_type.as_str() {
                         // These controls are already included in the producer's route values.
+                        "gain" if plugin.parameters.get("room_eq_correction_gain").and_then(|v| v.as_bool()) == Some(true) => plugins.push(plugin.clone()),
                         "gain" | "delay" => (),
                         // Linear residual processing stays after the common sub correction.
                         "eq" | "convolution" => plugins.push(plugin.clone()),
@@ -339,12 +340,14 @@ mod tests {
                 name: "subs_1".into(),
                 index: 0,
                 initial_curve: None,
+                measured_band_hz: None,
                 plugins: vec![tagged("delay", json!({"delay_ms": 9.0}), "post_route")],
             },
             DriverDspChain {
                 name: "subs_2".into(),
                 index: 1,
                 initial_curve: None,
+                measured_band_hz: None,
                 plugins: vec![tagged("gain", json!({"gain_db": -5.0}), "post_route")],
             },
         ]);
@@ -447,6 +450,21 @@ mod tests {
             assert_eq!(route.polarity_inverted, route.output_index == 4);
             assert_eq!(route.crossover.as_ref().unwrap().crossover_type, "LR48");
         }
+    }
+
+    #[test]
+    fn physical_routing_preserves_correction_owned_output_attenuation_once() {
+        let (mut channels, graph) = fixture();
+        channels.get_mut("LFE").unwrap().drivers.as_mut().unwrap()[0].plugins.push(tagged(
+            "gain", json!({"gain_db": -4.0, "room_eq_correction_gain": true}), "post_route",
+        ));
+        let physical = resolve_physical_routing(&channels, &graph).unwrap();
+        let owned: Vec<_> = physical.outputs[3].plugins.iter()
+            .filter(|plugin| plugin.parameters.get("room_eq_correction_gain").and_then(|v| v.as_bool()) == Some(true)).collect();
+        assert_eq!(owned.len(), 1);
+        assert_eq!(owned[0].parameters["gain_db"], -4.0);
+        assert!(physical.outputs[4].plugins.iter().all(|plugin| plugin.parameters.get("room_eq_correction_gain").is_none()));
+        assert_eq!(physical.routes.iter().find(|route| route.output_index == 3).unwrap().gain_db, 4.0);
     }
 
     #[test]

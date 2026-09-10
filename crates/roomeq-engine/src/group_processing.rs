@@ -782,6 +782,15 @@ fn process_speaker_topology_impl(
         .iter()
         .map(output::extend_curve_to_full_range)
         .collect();
+    // Record each driver's measured span so plots clip the raw measurement
+    // where the extension above continues past it for DSP replay.
+    let driver_measured_bands: Vec<[f64; 2]> = driver_curves
+        .iter()
+        .map(|curve| {
+            let last = curve.freq.len() - 1;
+            [curve.freq[0], curve.freq[last]]
+        })
+        .collect();
 
     let mut chain = output::build_topology_dsp_chain_with_curves(
         channel_name,
@@ -795,6 +804,7 @@ fn process_speaker_topology_impl(
         &global_eq_filters,
         &per_driver_filters,
         &driver_curves_for_display,
+        Some(&driver_measured_bands),
     );
 
     // Detect passband

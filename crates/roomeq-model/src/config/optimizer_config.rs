@@ -72,6 +72,9 @@ where
 /// Optimizer configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct OptimizerConfig {
+    /// Final graph electrical limits and cumulative correction selection.
+    #[serde(default)]
+    pub finalization: super::FinalizationConfig,
     /// Explicit authorized broadband output change by logical input, in dB.
     /// Used only for useful-output assessment; does not install a gain plugin.
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
@@ -325,6 +328,7 @@ pub struct OptimizerConfig {
 impl Default for OptimizerConfig {
     fn default() -> Self {
         Self {
+            finalization: super::FinalizationConfig::default(),
             upper_band_acoustic_bounds: std::collections::HashMap::new(),
             permitted_output_gain_db: std::collections::HashMap::new(),
             loss_type: default_loss_type(),

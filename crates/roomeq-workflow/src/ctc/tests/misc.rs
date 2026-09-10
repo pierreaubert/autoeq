@@ -57,6 +57,7 @@ fn joint_room_eq_path_models_driver_crossover_branches() {
             }),
         }],
         initial_curve: None,
+        measured_band_hz: None,
     };
     let chain = test_channel_chain(Vec::new(), Some(vec![low_driver]));
     let mut cache = DspResponseCache::new(48_000);

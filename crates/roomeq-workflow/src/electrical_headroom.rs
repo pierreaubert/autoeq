@@ -27,6 +27,89 @@ pub struct ExpandedElectricalPath {
     pub stages: Vec<ChannelDspChain>,
 }
 
+/// Evaluate the exact final graph under explicitly configured input peaks.
+/// Returns errors for unavailable evidence; no acoustic cancellation is used.
+pub fn assess_final_graph(
+    graph: &roomeq_model::DspGraph,
+    sample_rate_hz: f64,
+    sidecar_dir: &Path,
+    policy: &roomeq_model::FinalizationConfig,
+) -> Result<Vec<SampledElectricalOutputPeak>> {
+
+    let expanded = if let Some(routing) = canonical_electrical_routing(graph)? {
+        expand_routed_electrical_paths(&graph.channels, routing)?
+    } else {
+        expand_independent_electrical_paths(
+            &graph.channels,
+            &independent_graph_output_ports(&graph.channels),
+        )?
+    };
+    let stages: Vec<Vec<_>> = expanded
+        .iter()
+        .map(|path| path.stages.iter().collect())
+        .collect();
+    let paths: Vec<_> = expanded
+        .iter()
+        .zip(&stages)
+        .map(|(path, stages)| SerializedElectricalPath {
+            input: &path.input,
+            output: &path.output,
+            stages,
+        })
+        .collect();
+    let mut limits: BTreeMap<String, f64> = expanded
+        .iter()
+        .map(|path| (path.input.clone(), policy.default_input_peak))
+        .collect();
+    if let Some(routing) = canonical_electrical_routing(graph)? {
+        for input in &routing.input_channels {
+            limits.entry(input.clone()).or_insert(policy.default_input_peak);
+        }
+    }
+    policy.validate().map_err(|message| AutoeqError::InvalidConfiguration { message })?;
+    for (input, peak) in &policy.input_peak_limits {
+        let limit = limits.get_mut(input).ok_or_else(|| AutoeqError::InvalidConfiguration {
+            message: format!("electrical input peak override names unknown input '{input}'"),
+        })?;
+        *limit = *peak;
+    }
+    let mut frequencies: Vec<_> = (0..=8192)
+        .map(|i| sample_rate_hz * 0.5 * i as f64 / 8192.0)
+        .collect();
+    // Retain narrow serialized EQ/crossover centers independently of any
+    // optimizer cache, which may have been cleared by rollback or export.
+    for path in &expanded {
+        for stage in &path.stages {
+            for plugin in &stage.plugins {
+                let filters = plugin.parameters.get("filters").and_then(|v| v.as_array());
+                for value in
+                    std::iter::once(&plugin.parameters).chain(filters.into_iter().flatten())
+                {
+                    for key in ["freq", "frequency"] {
+                        if let Some(frequency) = value.get(key).and_then(|v| v.as_f64())
+                            && frequency.is_finite()
+                            && frequency > 0.0
+                            && frequency < sample_rate_hz / 2.0
+                        {
+                            frequencies.push(frequency);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    frequencies.sort_by(f64::total_cmp);
+    frequencies.dedup();
+    replay_sampled_electrical_headroom(
+        &paths,
+        &frequencies,
+        sample_rate_hz,
+        &limits,
+        sidecar_dir,
+        &HashMap::new(),
+    )
+}
+
 /// Final serialized-graph assessment under an explicit independent unit-peak
 /// logical-input policy. Passing sampled frequencies is not a continuous-band,
 /// transient, true-peak, native-backend, or physical-device safety certificate.
@@ -36,68 +119,9 @@ pub fn final_graph_unit_peak_stage(
     sidecar_dir: &Path,
 ) -> roomeq_model::StageOutcome {
     use roomeq_model::{StageCheck, StageCheckKind, StageOutcome, StageStatus};
-    let assessment = || -> Result<Vec<SampledElectricalOutputPeak>> {
-        let expanded = if let Some(routing) = canonical_electrical_routing(graph)? {
-            expand_routed_electrical_paths(&graph.channels, routing)?
-        } else {
-            expand_independent_electrical_paths(
-                &graph.channels,
-                &independent_graph_output_ports(&graph.channels),
-            )?
-        };
-        let stages: Vec<Vec<_>> = expanded
-            .iter()
-            .map(|path| path.stages.iter().collect())
-            .collect();
-        let paths: Vec<_> = expanded
-            .iter()
-            .zip(&stages)
-            .map(|(path, stages)| SerializedElectricalPath {
-                input: &path.input,
-                output: &path.output,
-                stages,
-            })
-            .collect();
-        let limits = expanded
-            .iter()
-            .map(|path| (path.input.clone(), 1.0))
-            .collect();
-        let mut frequencies: Vec<_> = (0..=8192)
-            .map(|i| sample_rate_hz * 0.5 * i as f64 / 8192.0)
-            .collect();
-        // Retain narrow serialized EQ/crossover centers independently of any
-        // optimizer cache, which may have been cleared by rollback or export.
-        for path in &expanded {
-            for stage in &path.stages {
-                for plugin in &stage.plugins {
-                    let filters = plugin.parameters.get("filters").and_then(|v| v.as_array());
-                    for value in
-                        std::iter::once(&plugin.parameters).chain(filters.into_iter().flatten())
-                    {
-                        for key in ["freq", "frequency"] {
-                            if let Some(frequency) = value.get(key).and_then(|v| v.as_f64())
-                                && frequency.is_finite()
-                                && frequency > 0.0
-                                && frequency < sample_rate_hz / 2.0
-                            {
-                                frequencies.push(frequency);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        frequencies.sort_by(f64::total_cmp);
-        frequencies.dedup();
-        replay_sampled_electrical_headroom(
-            &paths,
-            &frequencies,
-            sample_rate_hz,
-            &limits,
-            sidecar_dir,
-            &HashMap::new(),
-        )
-    };
+    let assessment = || assess_final_graph(
+        graph, sample_rate_hz, sidecar_dir, &roomeq_model::FinalizationConfig::default(),
+    );
     let mut outcome = StageOutcome {
         stage: "final_graph_sampled_electrical_headroom".into(),
         status: StageStatus::Applied,
@@ -426,6 +450,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn final_graph_policy_uses_declared_input_peaks_and_rejects_unknown_inputs() {
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        result.channels.get_mut("L").unwrap().plugins = vec![roomeq_engine::output::create_gain_plugin(6.0)];
+        let mut policy = roomeq_model::FinalizationConfig::default();
+        policy.default_input_peak = 0.125;
+        policy.input_peak_limits.insert("L".into(), 0.25);
+        let output = assess_final_graph(&result.to_dsp_chain_output(), 48000.0, Path::new("."), &policy).unwrap();
+        assert!((output[0].peak_amplitude - 0.25 * 10.0_f64.powf(6.0 / 20.0)).abs() < 1e-9);
+        policy.input_peak_limits.insert("typo".into(), 0.5);
+        assert!(assess_final_graph(&result.to_dsp_chain_output(), 48000.0, Path::new("."), &policy).unwrap_err().to_string().contains("unknown input"));
+        policy.input_peak_limits.remove("typo");
+        policy.input_peak_limits.insert("L".into(), 0.0);
+        assert!(assess_final_graph(&result.to_dsp_chain_output(), 48000.0, Path::new("."), &policy).is_err());
+    }
+
+    #[test]
     fn final_graph_assessment_uses_serialized_cascade_without_mutation() {
         let mut result = crate::test_fixtures::single_channel_room_result("L");
         let peak = math_audio_iir_fir::Biquad::new(
@@ -569,6 +609,7 @@ mod tests {
                 index: 0,
                 plugins: vec![roomeq_engine::output::create_gain_plugin(3.0)],
                 initial_curve: None,
+                measured_band_hz: None,
             },
             roomeq_model::DriverDspChain {
                 name: "tweeter".into(),
@@ -577,6 +618,7 @@ mod tests {
                     3.0, true,
                 )],
                 initial_curve: None,
+                measured_band_hz: None,
             },
         ]);
         let mut mapping = BTreeMap::from([
@@ -831,6 +873,7 @@ mod tests {
             index: 0,
             plugins: Vec::new(),
             initial_curve: None,
+            measured_band_hz: None,
         }]);
         let stages = [&chain];
         let paths = [SerializedElectricalPath {

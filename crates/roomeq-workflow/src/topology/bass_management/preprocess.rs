@@ -138,14 +138,17 @@ pub(in super::super) fn preprocess_multisub_mso_with_frequency_samples(
         result.gains, result.delays
     );
 
-    // Load individual curves for driver info
+    // Route alignment must use the same synchronous seat as the MSO solve.
+    // `load_source` intentionally drops phase when averaging multiple seats;
+    // that spatial magnitude is not a physical driver's complex response.
+    let primary_seat = optimizer.multi_seat.as_ref().map(|seat| seat.primary_seat).unwrap_or(0);
+    let primary_measurements = multisub_resources::load_primary_measurements_with_frequency_samples(
+        &ms.subwoofers,
+        primary_seat,
+        frequency_samples,
+    ).map_err(|error| AutoeqError::InvalidMeasurement { message: error.to_string() })?;
     let mut drivers = Vec::new();
-    for (i, source) in ms.subwoofers.iter().enumerate() {
-        let curve = load_source_with_frequency_samples(source, frequency_samples).map_err(|e| {
-            AutoeqError::InvalidMeasurement {
-                message: e.to_string(),
-            }
-        })?;
+    for (i, curve) in primary_measurements.into_iter().enumerate() {
         drivers.push(SubDriverInfo {
             name: format!("{}_{}", ms.name, i + 1),
             gain: result.gains.get(i).copied().unwrap_or(0.0),
@@ -608,6 +611,12 @@ mod tests {
         }
         assert!(result.combined_curve.phase.is_some(), "routing lost complex phase");
         assert!(!result.common_eq_complete);
+        for driver in result.drivers.as_ref().unwrap() {
+            let physical = driver.initial_curve.as_ref().unwrap();
+            assert!(physical.spl.iter().all(|spl| (*spl - 80.0).abs() < 1e-8));
+            assert!(physical.phase.as_ref().expect("routing lost primary-seat phase")
+                .iter().all(|phase| (*phase - 37.0).abs() < 1e-8));
+        }
     }
 
     #[test]

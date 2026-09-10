@@ -182,6 +182,7 @@ fn physical_captures(
 
 fn correction(plugin: &PluginConfigWrapper) -> bool {
     matches!(plugin.plugin_type.as_str(), "eq" | "convolution")
+        || plugin.parameters.get("room_eq_correction_gain").and_then(|v| v.as_bool()) == Some(true)
 }
 
 fn apply(
@@ -558,6 +559,7 @@ fn replay(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn validate_final_seats(
     result: &mut RoomOptimizationResult,
     captures: &[Capture],
@@ -566,8 +568,36 @@ pub(super) fn validate_final_seats(
     fs: f64,
     dir: &Path,
 ) -> Result<()> {
+    validate_final_seats_impl(result, captures, held_out, config, fs, dir, None)
+}
+
+/// Final selection also checks single-seat systems: a single capture is not an
+/// exemption from delivered gain or useful-output limits.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn validate_candidate_final_seats(
+    result: &mut RoomOptimizationResult,
+    baseline: &RoomOptimizationResult,
+    captures: &[Capture],
+    held_out: &HashMap<String, Vec<Curve>>,
+    config: &RoomConfig,
+    fs: f64,
+    dir: &Path,
+) -> Result<()> {
+    validate_final_seats_impl(result, captures, held_out, config, fs, dir, Some(baseline))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_final_seats_impl(
+    result: &mut RoomOptimizationResult,
+    captures: &[Capture],
+    held_out: &HashMap<String, Vec<Curve>>,
+    config: &RoomConfig,
+    fs: f64,
+    dir: &Path,
+    baseline: Option<&RoomOptimizationResult>,
+) -> Result<()> {
     crate::export::validate_final_routed_stage_ownership(result)?;
-    if !captures.iter().any(|c| c.curves.len() > 1) && held_out.is_empty() {
+    if baseline.is_none() && !captures.iter().any(|c| c.curves.len() > 1) && held_out.is_empty() {
         return Ok(());
     }
     if captures.iter().any(|capture| {
@@ -576,7 +606,7 @@ pub(super) fn validate_final_seats(
             .as_ref()
             .and_then(|system| system.speakers.get(&capture.channel))
             .unwrap_or(&capture.channel);
-        matches!(config.speakers.get(key), Some(SpeakerConfig::Group(_)))
+        capture.curves.len() > 1 && matches!(config.speakers.get(key), Some(SpeakerConfig::Group(_)))
     }) {
         return Err(invalid(
             "final-seat replay of legacy driver groups requires explicit topology IDs",
@@ -607,6 +637,25 @@ pub(super) fn validate_final_seats(
     };
     inputs.sort();
     inputs.dedup();
+    // Some routing layouts retain a silent logical slot (e.g. an unused LFE
+    // input). It has no acoustic branches in either graph. Do not confuse it
+    // with a lost branch in a previously active input.
+    if let Some(graph) = result.metadata.bass_management.as_ref().and_then(|bass| bass.routing_graph.as_ref()) {
+        let baseline_graph = baseline.and_then(|before| before.metadata.bass_management.as_ref()).and_then(|bass| bass.routing_graph.as_ref());
+        let silent: Vec<_> = inputs.iter().filter(|input| {
+            !graph.routes.iter().any(|route| &route.source_channel == *input)
+                && baseline_graph.is_none_or(|before| !before.routes.iter().any(|route| &route.source_channel == *input))
+        }).cloned().collect();
+        inputs.retain(|input| !silent.contains(input));
+        for input in silent {
+            result.metadata.stage_outcomes.push(roomeq_model::StageOutcome {
+                stage: "final_acoustic_silent_input".into(),
+                status: roomeq_model::StageStatus::Skipped,
+                advisories: vec![format!("logical_input={input}; no_routes_in_baseline_or_delivered_graph")],
+                checks: Vec::new(),
+            });
+        }
+    }
     for (partition, physical) in [("training", &training), ("held_out", &held)] {
         if physical.is_empty() {
             continue;
@@ -673,7 +722,7 @@ pub(super) fn validate_final_seats(
                     fs,
                     dir,
                 };
-                let (pre, outputs) = replay(result, physical, input, seat, true, &context)?;
+                let (pre, outputs) = replay(baseline.unwrap_or(result), physical, input, seat, true, &context)?;
                 let (post, _) = replay(result, physical, input, seat, false, &context)?;
                 let uncertainty_db = pre.uncertainty_db() + post.uncertainty_db();
                 let pre_support = pre.support;

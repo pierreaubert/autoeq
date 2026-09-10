@@ -245,3 +245,36 @@ fn interpolate_linear_preserves_phase() {
     let phase = result.phase.unwrap();
     assert!((phase[0] - 45.0).abs() < 1e-12);
 }
+
+#[test]
+fn interpolate_hold_edges_matches_interior_and_holds_exterior() {
+    // Band-limited driver (e.g. a subwoofer measured to 200 Hz) with a noisy
+    // last bin must not slope-extrapolate into fantasy levels far outside
+    // the measurement.
+    let curve = Curve {
+        freq: Array1::from_vec(vec![100.0, 150.0, 199.5, 200.0]),
+        spl: Array1::from_vec(vec![60.0, 61.0, 61.5, 63.0]),
+        phase: Some(Array1::from_vec(vec![0.0, 5.0, 8.0, 9.0])),
+        ..Default::default()
+    };
+    let freq_out = Array1::from_vec(vec![50.0, 125.0, 200.0, 1000.0, 20000.0]);
+    let sloped = interpolate_log_space(&freq_out, &curve);
+    let held = interpolate_log_space_hold_edges(&freq_out, &curve);
+    // Interior points agree with log-frequency interpolation.
+    assert!((held.spl[1] - sloped.spl[1]).abs() < 1e-9);
+    assert!((held.spl[2] - 63.0).abs() < 1e-12);
+    // Exterior points hold the measured edge instead of continuing the
+    // last-bin slope (which would add hundreds of dB by 20 kHz).
+    assert!((held.spl[0] - 60.0).abs() < 1e-12);
+    assert!((held.spl[3] - 63.0).abs() < 1e-12);
+    assert!((held.spl[4] - 63.0).abs() < 1e-12);
+    assert!(
+        sloped.spl[4] > 200.0,
+        "test premise broken: {}",
+        sloped.spl[4]
+    );
+    let phase = held.phase.expect("phase must be preserved");
+    assert!((phase[0] - 0.0).abs() < 1e-12);
+    assert!((phase[3] - 9.0).abs() < 1e-9);
+    assert!((phase[4] - 9.0).abs() < 1e-9);
+}

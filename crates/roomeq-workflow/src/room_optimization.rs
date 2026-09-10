@@ -29,6 +29,7 @@ use std::sync::{
 };
 
 mod gd;
+mod finalization;
 mod per_driver_fir;
 mod phase;
 mod reports;
@@ -146,13 +147,14 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
         context.artifact_store,
         frequency_samples,
     )?;
-    seat_replay::validate_final_seats(
+    finalization::select(
         &mut result,
         &seat_captures,
         context.validation_measurements,
         request.config,
         request.sample_rate,
         context.output_dir.unwrap_or_else(|| Path::new(".")),
+        context.artifact_store,
     )?;
     generate_validation_bundle_report(
         &mut result, request.config, context.output_dir, context.artifact_store,
@@ -1933,7 +1935,7 @@ fn assemble_workflow_result_with_frequency_samples(
     // computed before the gate runs, not only in the post-gate refresh.
     let sidecar_dir = output_dir.unwrap_or(Path::new("."));
     refresh_temporal_ir_evidence(&mut result, config, sample_rate, sidecar_dir);
-    apply_final_correction_safety_gate_preserving_routed_crossover(
+    prepare_cumulative_correction(
         &mut result,
         sample_rate,
         config.optimizer.smooth_n,
@@ -1947,7 +1949,7 @@ fn assemble_workflow_result_with_frequency_samples(
         config.optimizer.processing_mode.clone(),
     );
     let level_alignment =
-        apply_final_channel_level_alignment(&mut result, config, sample_rate, sidecar_dir)?;
+        prepare_final_channel_level_alignment(&mut result, config, sample_rate, sidecar_dir);
     workflow_refresh_needed |= level_alignment.status == StageStatus::Applied;
     result.metadata.stage_outcomes.push(level_alignment);
 
@@ -2072,6 +2074,46 @@ fn commit_or_restore_routed_safety_replay(
 }
 
 #[allow(clippy::too_many_arguments)]
+// Inner assembly may retain a rejected graph only as a refinement seed. The
+// public pipeline must pass finalization::select before publishing any result.
+fn prepare_cumulative_correction(
+    result: &mut RoomOptimizationResult,
+    sample_rate: f64,
+    smoothing_n: usize,
+    evaluation_band: (f64, f64),
+    sidecar_dir: &Path,
+    processing_mode: ProcessingMode,
+    group_delay_budget_ms: Option<f64>,
+) -> Result<()> {
+    if let Err(error) = apply_final_correction_safety_gate_preserving_routed_crossover(
+        result, sample_rate, smoothing_n, evaluation_band, sidecar_dir,
+        processing_mode, group_delay_budget_ms,
+    ) {
+        result.metadata.stage_outcomes.push(StageOutcome {
+            stage: "correction_candidate_requires_final_refinement".into(),
+            status: StageStatus::Degraded,
+            advisories: vec![error.to_string()],
+            checks: Vec::new(),
+        });
+    }
+    Ok(())
+}
+
+fn prepare_final_channel_level_alignment(
+    result: &mut RoomOptimizationResult,
+    config: &RoomConfig,
+    sample_rate: f64,
+    sidecar_dir: &Path,
+) -> StageOutcome {
+    apply_final_channel_level_alignment(result, config, sample_rate, sidecar_dir)
+        .unwrap_or_else(|error| StageOutcome {
+            stage: "channel_level_candidate_requires_final_refinement".into(),
+            status: StageStatus::Degraded,
+            advisories: vec![error.to_string()],
+            checks: Vec::new(),
+        })
+}
+
 fn apply_final_correction_safety_gate_preserving_routed_crossover(
     result: &mut RoomOptimizationResult,
     sample_rate: f64,
@@ -3665,7 +3707,7 @@ fn assemble_generic_result_with_frequency_samples(
 
     let sidecar_dir = output_dir.unwrap_or(Path::new("."));
     refresh_temporal_ir_evidence(&mut result, config, sample_rate, sidecar_dir);
-    apply_final_correction_safety_gate_preserving_routed_crossover(
+    prepare_cumulative_correction(
         &mut result,
         sample_rate,
         config.optimizer.smooth_n,
@@ -3679,7 +3721,7 @@ fn assemble_generic_result_with_frequency_samples(
         config.optimizer.processing_mode.clone(),
     );
     let level_alignment =
-        apply_final_channel_level_alignment(&mut result, config, sample_rate, sidecar_dir)?;
+        prepare_final_channel_level_alignment(&mut result, config, sample_rate, sidecar_dir);
     result.metadata.stage_outcomes.push(level_alignment);
 
     emit_pipeline_event(

@@ -117,7 +117,10 @@ impl DriversLossData {
                 phase: driver.phase.clone(),
                 ..Default::default()
             };
-            let aligned = autoeq_core::interpolate_log_space(&freq_grid, &curve);
+            // Hold band edges (see prepare_driver_curves): slope
+            // extrapolation of a band-limited driver invents arbitrary
+            // out-of-band power that corrupts the reference.
+            let aligned = autoeq_core::interpolate_log_space_hold_edges(&freq_grid, &curve);
             power_reference += &aligned.spl.mapv(|level| 10.0_f64.powf(level / 10.0));
         }
         power_reference.mapv_inplace(|power| 10.0 * power.max(1e-24).log10());
@@ -222,5 +225,61 @@ mod tests {
     fn crossover_still_rejects_more_than_four_drivers() {
         let drivers = (0..5).map(|index| measurement(index as f64)).collect();
         let _ = DriversLossData::new(drivers, CrossoverType::LinkwitzRiley4);
+    }
+
+    #[test]
+    fn band_limited_sub_does_not_extrapolate_into_main_band() {
+        // Regression: a subwoofer measured to 200 Hz with a noisy last bin
+        // slope-extrapolated to thousands of dB at 20 kHz, dominating the
+        // crossover sum and poisoning target references (measured
+        // 2.2_sigberg3 R reached 1004 dB). The dense linear tail mimics the
+        // real REW capture, whose last 0.4 Hz bin implies ~+140 dB/oct.
+        let mut sub_points: Vec<f64> =
+            ndarray::Array1::logspace(10.0, 10.0_f64.log10(), 190.0_f64.log10(), 48).to_vec();
+        sub_points.extend([192.0, 194.0, 196.0, 198.0, 199.0, 199.5, 200.0]);
+        let sub_len = sub_points.len();
+        let mut sub_spl = ndarray::Array1::from_elem(sub_len, 60.0);
+        sub_spl[sub_len - 1] = 61.5;
+        let sub = DriverMeasurement {
+            freq: ndarray::Array1::from_vec(sub_points),
+            spl: sub_spl,
+            phase: Some(ndarray::Array1::zeros(sub_len)),
+        };
+        let main_freq = ndarray::Array1::logspace(
+            10.0,
+            10.0_f64.log10(),
+            20_000.0_f64.log10(),
+            64,
+        );
+        let main = DriverMeasurement {
+            freq: main_freq,
+            spl: ndarray::Array1::from_elem(64, 65.0),
+            phase: Some(ndarray::Array1::zeros(64)),
+        };
+        let data = DriversLossData::new_ordered(vec![sub, main], CrossoverType::LinkwitzRiley4);
+        assert!(
+            data.power_reference.iter().all(|&level| level < 80.0),
+            "power reference invented out-of-band level: max={}",
+            data.power_reference
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max)
+        );
+        let combined = compute_drivers_combined_response(
+            &data,
+            &[0.0, 0.0],
+            &[100.0],
+            Some(&[0.0, 0.0]),
+            48000.0,
+        );
+        let top = combined[combined.len() - 1];
+        assert!(
+            (top - 65.0).abs() < 3.0,
+            "20 kHz combined must be main-dominated, got {top}"
+        );
+        assert!(
+            combined.iter().all(|&level| level < 90.0),
+            "combined response invented out-of-band level"
+        );
     }
 }

@@ -412,7 +412,7 @@ mod tests {
                     "channel" => chain.plugins.push(plugin),
                     _ => chain.drivers = Some(vec![roomeq_model::DriverDspChain {
                         name: "woofer".into(), index: 0, plugins: vec![plugin],
-                        initial_curve: None,
+                        initial_curve: None, measured_band_hz: None,
                     }]),
                 }
                 graph.channels.insert(name, chain);

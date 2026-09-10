@@ -101,7 +101,13 @@ pub(super) fn prepare_driver_curves(data: &DriversLossData, _crossover_freqs: &[
         // Crossover DSP acts on calibrated measurements. Independent passband
         // normalization changes relative source levels without exporting those
         // hidden trims, so the predicted response no longer matches playback.
-        crate::read::interpolate_response(&data.freq_grid, &curve)
+        //
+        // Edges hold instead of slope-extrapolating: a band-limited driver
+        // (e.g. a subwoofer measured to 200 Hz on a grid spanning to 20 kHz)
+        // must not invent hundreds of dB from one noisy edge bin. The held
+        // level is then shaped by that driver's crossover low-pass, which
+        // attenuates it to negligibility outside its passband.
+        autoeq_core::interpolate_log_space_hold_edges(&data.freq_grid, &curve)
     }).collect()
 }
 

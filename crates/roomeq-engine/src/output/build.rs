@@ -283,6 +283,7 @@ pub fn build_multidriver_dsp_chain_with_curves(
             index: i,
             plugins: driver_plugins,
             initial_curve: driver_curve,
+            measured_band_hz: None,
         });
     }
 
@@ -309,6 +310,10 @@ pub fn build_multidriver_dsp_chain_with_curves(
 
 /// Build per-driver DSP for an explicit topology whose acoustic bands may
 /// contain multiple parallel drivers.
+///
+/// `driver_measured_bands` optionally records each driver's capture span so
+/// plots can clip the raw measurement where display extension continues past
+/// it; `None` (or a missing entry) leaves the band unrecorded.
 #[allow(clippy::too_many_arguments)]
 pub fn build_topology_dsp_chain_with_curves(
     channel_name: &str,
@@ -322,6 +327,7 @@ pub fn build_topology_dsp_chain_with_curves(
     eq_filters: &[Biquad],
     driver_eqs: &[Vec<Biquad>],
     driver_initial_curves: &[crate::Curve],
+    driver_measured_bands: Option<&[[f64; 2]]>,
 ) -> ChannelDspChain {
     debug_assert_eq!(driver_names.len(), driver_band_indices.len());
     debug_assert_eq!(driver_names.len(), driver_gains.len());
@@ -372,6 +378,9 @@ pub fn build_topology_dsp_chain_with_curves(
                 index: driver_index,
                 plugins,
                 initial_curve: Some((&driver_initial_curves[driver_index]).into()),
+                measured_band_hz: driver_measured_bands
+                    .and_then(|bands| bands.get(driver_index))
+                    .copied(),
             }
         })
         .collect();
@@ -569,6 +578,7 @@ pub fn build_multisub_dsp_chain_advanced(
             index: i,
             plugins: sub_plugins,
             initial_curve: driver_curve,
+            measured_band_hz: None,
         });
     }
 
@@ -638,6 +648,7 @@ fn build_dual_driver_array_chain(
         index: 0,
         plugins: front_plugins,
         initial_curve: front_curve,
+        measured_band_hz: None,
     });
 
     // Rear (Index 1) - Inverted
@@ -656,6 +667,7 @@ fn build_dual_driver_array_chain(
         index: 1,
         plugins: rear_plugins,
         initial_curve: rear_curve,
+        measured_band_hz: None,
     });
 
     // Combined EQ

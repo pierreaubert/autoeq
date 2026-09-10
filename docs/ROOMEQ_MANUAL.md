@@ -1090,9 +1090,22 @@ exceeding its separate 3 dB advisory budget reports `best_effort_target_shortfal
 Final multi-seat replay now retains this evidence across logical inputs and both
 partitions and enforces the 3 dB loss budget. Explicit per-logical-input correction
 gain allowances use `optimizer.permitted_output_gain_db`; see the input format.
-Structural routing gain remains in both pre/post baselines. Single-seat-only
-paths, structural-route loss, full pipeline/export certification, and electrical
-headroom remain outside this completed integration scope.
+Structural routing gain remains in both pre/post baselines. Final cumulative selection also evaluates single-seat paths. It enforces
+`optimizer.finalization` electrical limits on the assembled graph and tries
+reduced correction strengths with bounded headroom attenuation. Main and sub
+strengths can vary separately to preserve useful bass correction. Configured
+channel-level alignment is reapplied before final electrical and acoustic
+checks. Every candidate is evaluated against the same structural baseline;
+correction-owned headroom attenuation remains part of the useful-output test.
+Rejected search alternatives are diagnostics, with separate enforced safety
+evidence for the selected graph.
+
+The default input assumption is independently phased unit-peak sinusoids on
+every logical input, with a sampled output ceiling of 0 dBFS. The default 12 dB
+attenuation search limit does not grant an acoustic gain allowance. See
+`INPUT_FORMAT.md` for input assumptions and gain policy. The electrical verdict
+covers the reported frequency grid; continuous-frequency, transient, true-peak
+and physical-device certification remain separate work.
 
 Final-seat replay preserves a full-range main when a shorter sub capture has an
 explicit calibrated `optimizer.upper_band_acoustic_bounds` declaration for that

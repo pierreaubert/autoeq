@@ -836,12 +836,14 @@ mod tests {
                 index: 0,
                 plugins: vec![create_gain_plugin(0.0)],
                 initial_curve: None,
+                measured_band_hz: None,
             },
             DriverDspChain {
                 name: "tweeter".to_string(),
                 index: 1,
                 plugins: vec![create_gain_plugin(0.0)],
                 initial_curve: None,
+                measured_band_hz: None,
             },
         ]);
         let mut provider = NoConvolutionIr;

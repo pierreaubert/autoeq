@@ -411,5 +411,73 @@ class MultiSubEqRowTests(unittest.TestCase):
         self.assertEqual(eq_names, ["EQ: L", "EQ: R"])
 
 
+def topology_sub_data():
+    """Stereo-topology fixture: sub measured to ~200 Hz, main full-range."""
+    freq = [20.0, 100.0, 199.951172, 1000.0, 20000.0]
+    driver = {
+        "name": "left_sub",
+        "measured_band_hz": [10.0, 199.951172],
+        "initial_curve": {"freq": list(freq), "spl": [60.0] * len(freq)},
+        "plugins": [
+            {
+                "plugin_type": "crossover",
+                "parameters": {"frequency": 100.0, "output": "low", "type": "LR24"},
+            },
+        ],
+    }
+    main = {
+        "name": "left_main",
+        "initial_curve": {"freq": list(freq), "spl": [65.0] * len(freq)},
+        "plugins": [
+            {
+                "plugin_type": "crossover",
+                "parameters": {"frequency": 100.0, "output": "high", "type": "LR24"},
+            },
+        ],
+    }
+    return {
+        "channels": {
+            "L": {
+                "initial_curve": {"freq": list(freq), "spl": [70.0] * len(freq)},
+                "final_curve": {"freq": list(freq), "spl": [71.0] * len(freq)},
+                "eq_response": {"freq": list(freq), "spl": [0.5] * len(freq)},
+                "plugins": [],
+                "drivers": [driver, main],
+            }
+        }
+    }
+
+
+class DriverMeasuredBandTests(unittest.TestCase):
+    def test_original_driver_trace_stops_at_measured_band(self):
+        fig = create_combined_figure(topology_sub_data())
+        by_name = {trace.name: trace for trace in fig.data}
+
+        sub = by_name["Original: L/left_sub"]
+        self.assertAlmostEqual(max(sub.x), 199.951172)
+        self.assertEqual(len(sub.x), 3)
+        self.assertEqual(len(sub.y), 3)
+
+        # Drivers without a recorded band keep their full stored grid.
+        main = by_name["Original: L/left_main"]
+        self.assertAlmostEqual(max(main.x), 20000.0)
+
+    def test_clip_helper_passes_through_without_band(self):
+        from scripts.src.data_extract import clip_curve_to_measured_band
+
+        curve = {"freq": [20.0, 20000.0], "spl": [60.0, 61.0]}
+        self.assertIs(clip_curve_to_measured_band(curve, {}), curve)
+        self.assertIs(
+            clip_curve_to_measured_band(curve, {"measured_band_hz": [20.0, 20000.0]}),
+            curve,
+        )
+        clipped = clip_curve_to_measured_band(
+            {"freq": [20.0, 200.0, 20000.0], "spl": [60.0, 61.0, 62.0]},
+            {"measured_band_hz": [10.0, 200.0]},
+        )
+        self.assertEqual(clipped["freq"], [20.0, 200.0])
+        self.assertEqual(clipped["spl"], [60.0, 61.0])
+
+
 if __name__ == "__main__":
     unittest.main()

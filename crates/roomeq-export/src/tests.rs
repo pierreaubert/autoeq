@@ -394,6 +394,7 @@ fn test_export_with_drivers() {
                         },
                     ],
                     initial_curve: None,
+                    measured_band_hz: None,
                 },
                 DriverDspChain {
                     name: "tweeter".to_string(),
@@ -403,6 +404,7 @@ fn test_export_with_drivers() {
                         parameters: json!({"gain_db": 0.0, "invert": true}),
                     }],
                     initial_curve: None,
+                    measured_band_hz: None,
                 },
             ]),
             initial_curve: None,
@@ -462,6 +464,7 @@ fn per_sub_driver(name: &str, index: usize, low_pass_hz: f64) -> DriverDspChain 
             },
         ],
         initial_curve: None,
+        measured_band_hz: None,
     }
 }
 

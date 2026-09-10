@@ -96,6 +96,9 @@ impl RoomConfig {
 
     fn structural_errors(&self) -> Vec<String> {
         let mut errors = Vec::new();
+        if let Err(error) = self.optimizer.finalization.validate() {
+            errors.push(error);
+        }
         if self
             .optimizer
             .fir

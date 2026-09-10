@@ -568,16 +568,17 @@ fn reconstruct_deployed_source_curves_impl(
                     .plugins
                     .iter()
                     .filter(|plugin| {
-                        plugin.plugin_type != "gain"
+                        (plugin.plugin_type != "gain" || plugin.parameters.get("room_eq_correction_gain").and_then(|v| v.as_bool()) == Some(true))
                             && plugin.plugin_type != "delay"
                             && plugin.plugin_type != "crossover"
                     })
                     .cloned()
                     .collect();
-                curve = crate::ctc::apply_channel_dsp_chain_to_curve(
+                curve = crate::ctc::apply_channel_dsp_chain_to_curve_with_sidecar_dir(
                     &filter_chain,
                     &curve,
                     sample_rate,
+                    sidecar_dir,
                 )?;
                 curve.spl.mapv_inplace(|level| level + output.gain_db);
                 let mut curve = roomeq_engine::topology::apply_delay_and_polarity_to_curve(
@@ -787,9 +788,9 @@ fn reconstruct_deployed_source_curves_impl(
             if !roomeq_engine::topology::bass_management_underfill_is_acceptable(underfill_db)
 
             {
-                    return Err(AutoeqError::OptimizationFailed {
-                        message: format!(
-                            "final routed crossover underfill for '{role}' is \
+                return Err(AutoeqError::OptimizationFailed {
+                    message: format!(
+                        "final routed crossover underfill for '{role}' is \
                             {underfill_db:.3} dB at {worst_frequency_hz:.1} Hz (crossover {crossover_hz:.1} Hz; limit {:.1} dB)",
                             roomeq_engine::topology::MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB
                     ),
@@ -1699,7 +1700,16 @@ fn optimize_home_cinema_with_sub(
             pre_eq_fir_coeffs.insert(role.clone(), fir_coeffs);
         }
         pre_eq_plugins.insert(role.clone(), stage_main_correction_plugins(chain.plugins));
-        pre_eq_initial_curves.insert(role.clone(), ch_result.initial_curve);
+        // The EQ solve uses every configured seat, but physical route timing
+        // must use one synchronous complex capture. Its magnitude-only
+        // multi-seat summary is not a measured transfer function.
+        let source = resolve_single_source(&role, config, sys)?;
+        let primary_seat = config.optimizer.multi_seat.as_ref()
+            .map(|seat| seat.primary_seat).unwrap_or(0);
+        let mut primary = crate::multisub::load_primary_measurements_with_frequency_samples(
+            std::slice::from_ref(source), primary_seat, assembly.frequency_samples,
+        ).map_err(|error| AutoeqError::InvalidMeasurement { message: error.to_string() })?;
+        pre_eq_initial_curves.insert(role.clone(), primary.remove(0));
         optimizer_evidence_by_channel.insert(role.clone(), ch_result.optimizer_evidence);
     }
 
@@ -3019,6 +3029,7 @@ fn optimize_home_cinema_with_sub(
                     index: i,
                     plugins: driver_plugins,
                     initial_curve: driver_curve,
+                    measured_band_hz: None,
                 }
             })
             .collect::<Vec<DriverDspChain>>()
@@ -3200,7 +3211,26 @@ fn optimize_home_cinema_with_sub(
             Some(&bass_management_optimization),
             sample_rate,
             output_dir,
-        );
+        )
+        .or_else(|error| {
+            // This executor assembles an internal correction candidate. Keep a
+            // crossover-rejected candidate available to cumulative refinement;
+            // the public pipeline must still pass strict final routed replay.
+            // Missing measurements and other reconstruction errors are not
+            // repairable by changing correction strength.
+            if underfill_error_role(&error.to_string()).is_none() {
+                return Err(error);
+            }
+            log::warn!("Deferring candidate crossover rejection to final correction selection: {error}");
+            reconstruct_deployed_source_curves_unenforced(
+                &channel_chains,
+                &pre_eq_fir_coeffs,
+                graph,
+                Some(&bass_management_optimization),
+                sample_rate,
+                output_dir,
+            )
+        });
         deployed_source_curves = match first_replay {
             Ok(curves) => curves,
             Err(first_error)
@@ -3584,6 +3614,10 @@ mod post_dsp_level_tests {
                     roomeq_engine::output::create_delay_plugin(delay),
                 ],
                 initial_curve: Some((&raw).into()),
+                measured_band_hz: match (raw.freq.first(), raw.freq.last()) {
+                    (Some(&low), Some(&high)) => Some([low, high]),
+                    _ => None,
+                },
             });
             outputs.push(BassManagementSubOutputReport {
                 output_role: name.clone(),
@@ -5101,6 +5135,37 @@ mod tests {
                 result.channels[channel_name].target_curve.is_some(),
                 "{channel_name} output chain must retain its prepared target"
             );
+        }
+    }
+
+    #[test]
+    fn home_cinema_routing_retains_primary_main_capture() {
+        let sys = home_cinema_sys_with_sub();
+        let mut speakers = stereo_speakers_with_phase();
+        let mut first = flat_curve_with_phase();
+        first.spl.fill(80.0);
+        first.phase.as_mut().unwrap().fill(37.0);
+        let mut second = first.clone();
+        second.spl.fill(90.0);
+        second.phase.as_mut().unwrap().fill(-89.0);
+        for name in ["left", "right"] {
+            speakers.insert(name.into(), SpeakerConfig::Single(
+                MeasurementSource::InMemoryMultiple(vec![first.clone(), second.clone()]),
+            ));
+        }
+        speakers.insert("sub".into(), SpeakerConfig::Single(
+            MeasurementSource::InMemory(flat_curve_with_phase()),
+        ));
+        let mut optimizer = tiny_optimizer();
+        optimizer.max_freq = 2000.0;
+        let config = room_config(speakers, &sys, optimizer, Some(crossovers_fixed()), None);
+        let mut assembly = make_assembly(&config, &sys);
+        let result = HomeCinemaExecutor.execute(&mut assembly).unwrap();
+        for name in ["Left", "Right"] {
+            let initial: roomeq_engine::Curve = result.channels[name].initial_curve.clone().unwrap().into();
+            assert!(initial.spl.iter().all(|spl| (*spl - 80.0).abs() < 1e-8));
+            assert!(initial.phase.as_ref().expect("routing lost measured primary phase")
+                .iter().all(|phase| (*phase - 37.0).abs() < 1e-8));
         }
     }
 

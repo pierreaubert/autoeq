@@ -11,6 +11,7 @@ fn driver(name: &str, index: usize, gain: f64, delay: f64) -> DriverDspChain {
             roomeq_engine::output::create_delay_plugin(delay),
         ],
         initial_curve: None,
+        measured_band_hz: None,
     }
 }
 
@@ -91,6 +92,7 @@ fn driver_fir_is_not_mistaken_for_parent_retained_fir() {
         index: 0,
         plugins: vec![convolution("driver.wav")],
         initial_curve: None,
+        measured_band_hz: None,
     }]);
     result.channel_results.get_mut("left").unwrap().fir_coeffs = Some(vec![0.25]);
     physical.insert("woofer".into(), vec![capture(20.0, 20_000.0, 80.0, 0.0)]);

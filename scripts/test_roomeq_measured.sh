@@ -11,6 +11,7 @@ for scenario in \
     2.2_unknown \
     2.2_sigberg1 \
     2.2_sigberg2 \
+    2.2_sigberg3 \
     2.2_genelec \
     2.0_8361a \
     2.0_d3v \

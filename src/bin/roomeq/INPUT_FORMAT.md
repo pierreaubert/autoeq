@@ -5,6 +5,55 @@ measurements, and optimizer settings. The top-level object is a `RoomConfig`.
 
 ## Final multi-position validation
 
+### Final electrical limits and cumulative correction selection
+
+`optimizer.finalization` defines the electrical assumptions used after all
+processing and artifact assembly:
+
+```json
+{
+  "default_input_peak": 1.0,
+  "input_peak_limits": {"L": 1.0, "R": 1.0, "LFE": 1.0},
+  "output_ceiling_dbfs": 0.0,
+  "max_attenuation_db": 12.0
+}
+```
+
+Input names refer to logical inputs. Omitted inputs use `default_input_peak`
+(1.0 when unspecified);
+unknown names and peaks outside `(0, 1]` are errors. The ceiling must be finite
+and at most 0 dBFS. The attenuation limit is finite and between 0 and 60 dB.
+These defaults are active even when the object is omitted.
+
+Finalization tries the complete correction and reduced strengths, preserving
+structural routing, crossover and polarity controls. Main and sub correction
+strengths can vary separately. Each candidate is replayed with per-output,
+common, or cut-only frequency-selective headroom attenuation. Configured
+channel-level alignment is reapplied before final checks. Every available
+training and held-out seat is checked against the same structural acoustic
+baseline, including single-seat systems. No valid candidate means an
+optimization error. Rejected alternatives are diagnostic search outcomes;
+the selected graph has separate enforced safety checks.
+Frequency-selective trials add at most twelve common PEQ/shelf sections, keep
+their centers inside the declared correction band, and bound the sum
+of their cuts by `max_attenuation_db`. Complete-graph replay, rather than section
+gain alone, decides whether the electrical ceiling is satisfied.
+Electrical overload outside that band uses a shelf anchored at the band edge;
+its in-band acoustic effect must still pass the same seat checks.
+
+`max_attenuation_db` limits what DSP may be tried; it does **not** grant an
+acoustic output-loss allowance. An intended level reduction must be declared
+separately through `optimizer.permitted_output_gain_db`. The selector never
+derives that allowance from its candidate. Cutting excess output above the
+target remains permitted by the existing useful-output metric.
+
+The electrical bound is for independently phased simultaneous sinusoids on the
+reported frequency grid, including serialized filter centers. It is not a
+continuous-frequency, transient, true-peak or physical-device certificate.
+Final electrical evidence and candidate decisions are retained in
+`metadata.stage_outcomes`; rejected trial checks describe alternatives, not the
+selected graph. Missing electrical or physical replay evidence is an error.
+
 Multi-position training captures are retained on their native grids until final
 DSP replay. The final gate evaluates each logical input at each capture index,
 including its contributing physical outputs after routed gain, crossover, delay,

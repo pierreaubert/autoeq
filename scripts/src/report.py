@@ -26,6 +26,7 @@ from .figures import (
 )
 from .data_extract import (
     channel_has_eq,
+    clip_curve_to_measured_band,
     display_channel_entries,
     driver_display_names,
     extract_eq_passes,
@@ -1438,8 +1439,12 @@ def create_html_report(
             )
             chain = per_driver_chain_plugins(data, channel_name, driver_index) or []
             eq_source: dict = {"plugins": chain}
-            initial_curve = driver.get("initial_curve")
-            final_curve = per_driver_corrected_curve(data, channel_name, driver_index)
+            # Raw measurements stop at the recorded band; the stored curve
+            # continues past it for DSP replay and must not be drawn as data.
+            initial_curve = clip_curve_to_measured_band(driver.get("initial_curve"), driver)
+            final_curve = clip_curve_to_measured_band(
+                per_driver_corrected_curve(data, channel_name, driver_index), driver
+            )
             passes = extract_eq_passes(eq_source)
             # The tab EQ plot appears only when EQ exists (mirroring the
             # legacy empty-EQ behavior); otherwise the tab keeps its

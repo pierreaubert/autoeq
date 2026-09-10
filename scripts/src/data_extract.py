@@ -108,6 +108,49 @@ def extract_crossover_frequencies(channel_data: dict) -> list[float]:
     return sorted(crossover_freqs)
 
 
+def clip_curve_to_measured_band(curve: dict | None, driver: dict | None) -> dict | None:
+    """Clip a driver measurement trace to its measured frequency span.
+
+    The stored driver curve is extended past the capture for full-range DSP
+    replay; points outside ``driver["measured_band_hz"]`` are trend
+    continuation, not data, so measurement plots must not draw them. Curves
+    without a recorded band (older outputs, same-band arrays) pass through
+    unchanged, as do pure-DSP transfers, which callers keep full-range.
+    """
+    if not isinstance(curve, dict) or not isinstance(driver, dict):
+        return curve
+    band = driver.get("measured_band_hz")
+    if (
+        not isinstance(band, (list, tuple))
+        or len(band) != 2
+        or not all(isinstance(edge, (int, float)) for edge in band)
+    ):
+        return curve
+    low, high = float(band[0]), float(band[1])
+    if not (low < high):
+        return curve
+    freq = curve.get("freq") or []
+    if len(freq) < 2:
+        return curve
+    keep = [
+        index
+        for index, value in enumerate(freq)
+        if isinstance(value, (int, float))
+        and value >= low * (1.0 - 1e-9)
+        and value <= high * (1.0 + 1e-9)
+    ]
+    if len(keep) == len(freq):
+        return curve
+    if len(keep) < 2:
+        return curve
+    keep_set = set(keep)
+    clipped = dict(curve)
+    for key, values in curve.items():
+        if isinstance(values, list) and len(values) == len(freq):
+            clipped[key] = [value for index, value in enumerate(values) if index in keep_set]
+    return clipped
+
+
 def get_plottable_drivers(channel_data: dict | None) -> list[dict]:
     """Return driver dicts that carry their own measured initial curve.
 

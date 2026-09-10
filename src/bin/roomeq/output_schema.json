@@ -3071,6 +3071,19 @@
           ],
           "description": "Initial frequency response curve for this driver before optimization (optional)"
         },
+        "measured_band_hz": {
+          "description": "Measured frequency span of this driver's capture in Hz, when the\nstored display curve was extended past it for full-range DSP replay.\nPlots of the raw measurement should clip to this band; points outside\nit are trend continuation, not data.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "name": {
           "description": "Driver name (e.g. \"woofer\", \"tweeter\")",
           "type": "string"
@@ -3523,6 +3536,40 @@
         "post_weighted_rms_db",
         "improvement_db"
       ],
+      "type": "object"
+    },
+    "FinalizationConfig": {
+      "additionalProperties": false,
+      "description": "Electrical assumptions and bounded search for the final delivered correction.\nAcoustic gain allowances remain owned by `permitted_output_gain_db`.",
+      "properties": {
+        "default_input_peak": {
+          "default": 1.0,
+          "description": "Peak bound for logical inputs without a named override, relative to full scale.",
+          "format": "double",
+          "type": "number"
+        },
+        "input_peak_limits": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "default": {},
+          "description": "Independently phased logical-input sinusoid peaks relative to full scale.\nOmitted inputs use `default_input_peak`; unknown names are errors.",
+          "type": "object"
+        },
+        "max_attenuation_db": {
+          "default": 12.0,
+          "description": "Maximum additional attenuation the selector may install. It does not\nauthorize acoustic output loss: the final acoustic gate still applies.",
+          "format": "double",
+          "type": "number"
+        },
+        "output_ceiling_dbfs": {
+          "default": 0.0,
+          "description": "Maximum sampled physical-output level, in dBFS (must be <= 0).",
+          "format": "double",
+          "type": "number"
+        }
+      },
       "type": "object"
     },
     "FirConfig": {
@@ -5531,6 +5578,16 @@
           ],
           "description": "Per-filter audibility veto (Phase A). `None` (default) disables the\nveto entirely: no evaluation, no preset-output change. `Some` with\n`report_only: true` (default) records reason-coded verdicts without\nremoving filters; enforcement is opt-in via `report_only: false` plus\n`allow_enforcement_with_experimental_proxy` (the proxy is unvalidated)."
         },
+        "finalization": {
+          "$ref": "#/$defs/FinalizationConfig",
+          "default": {
+            "default_input_peak": 1.0,
+            "input_peak_limits": {},
+            "max_attenuation_db": 12.0,
+            "output_ceiling_dbfs": 0.0
+          },
+          "description": "Final graph electrical limits and cumulative correction selection."
+        },
         "fir": {
           "anyOf": [
             {
@@ -7447,6 +7504,12 @@
             "asymmetric_loss": true,
             "atolerance": 1e-05,
             "elimination_threshold": 0.005,
+            "finalization": {
+              "default_input_peak": 1.0,
+              "input_peak_limits": {},
+              "max_attenuation_db": 12.0,
+              "output_ceiling_dbfs": 0.0
+            },
             "local_algo": "cobyla",
             "loss_type": "flat",
             "max_db": 4.0,

@@ -15,7 +15,7 @@ pub use roomeq_engine::multisub::{
     optimize_multisub_with_allpass as optimize_multisub_with_allpass_prepared,
 };
 
-fn load_primary_measurements_with_frequency_samples(
+pub(crate) fn load_primary_measurements_with_frequency_samples(
     sources: &[MeasurementSource],
     primary_seat: usize,
     frequency_samples: usize,

@@ -185,6 +185,10 @@ mod tests {
                     index,
                     plugins: vec![],
                     initial_curve: Some((&raw).into()),
+                    measured_band_hz: match (raw.freq.first(), raw.freq.last()) {
+                        (Some(&low), Some(&high)) => Some([low, high]),
+                        _ => None,
+                    },
                 })
                 .collect(),
         );

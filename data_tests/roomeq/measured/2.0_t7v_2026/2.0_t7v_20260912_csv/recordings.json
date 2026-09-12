@@ -1,0 +1,13 @@
+{
+  "version": "2.1.0",
+  "speakers": {
+    "L_Sep_12": {
+      "path": "L_Sep_12.csv",
+      "name": "L Sep 12"
+    },
+    "R_Sep_12": {
+      "path": "R_Sep_12.csv",
+      "name": "R Sep 12"
+    }
+  }
+}

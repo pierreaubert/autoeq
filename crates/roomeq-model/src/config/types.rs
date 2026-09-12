@@ -292,6 +292,25 @@ pub enum ProcessingMode {
     KautzModal,
 }
 
+impl ProcessingMode {
+    /// Return the temporal acceptance class for this processing mode.
+    ///
+    /// Spectral and spatial checks are shared by all modes; only the
+    /// realization's latency, group-delay and pre-ringing envelope changes.
+    /// Keeping this mapping in the model prevents workflow and report code
+    /// from silently assigning FIR or hybrid output the low-latency IIR
+    /// limits.
+    pub fn runtime_output_class(self) -> crate::RuntimeOutputClass {
+        match self {
+            Self::PhaseLinear => crate::RuntimeOutputClass::Fir,
+            Self::Hybrid | Self::MixedPhase => crate::RuntimeOutputClass::Hybrid,
+            Self::LowLatency | Self::WarpedIir | Self::KautzModal => {
+                crate::RuntimeOutputClass::LowLatencyIir
+            }
+        }
+    }
+}
+
 /// Strategy for subwoofer optimization
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -1041,6 +1060,7 @@ pub struct CtcHrtfSpeakerConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RuntimeOutputClass;
 
     #[test]
     fn supporting_source_output_naming_default_suffix() {
@@ -1063,5 +1083,33 @@ mod tests {
     fn supporting_source_output_naming_deserializes_default() {
         let back: SupportingSourceOutputNaming = serde_json::from_str("{}").unwrap();
         assert_eq!(back.suffix, "_support");
+    }
+
+    #[test]
+    fn processing_mode_maps_to_shared_runtime_output_class() {
+        assert_eq!(
+            ProcessingMode::LowLatency.runtime_output_class(),
+            RuntimeOutputClass::LowLatencyIir
+        );
+        assert_eq!(
+            ProcessingMode::WarpedIir.runtime_output_class(),
+            RuntimeOutputClass::LowLatencyIir
+        );
+        assert_eq!(
+            ProcessingMode::KautzModal.runtime_output_class(),
+            RuntimeOutputClass::LowLatencyIir
+        );
+        assert_eq!(
+            ProcessingMode::PhaseLinear.runtime_output_class(),
+            RuntimeOutputClass::Fir
+        );
+        assert_eq!(
+            ProcessingMode::Hybrid.runtime_output_class(),
+            RuntimeOutputClass::Hybrid
+        );
+        assert_eq!(
+            ProcessingMode::MixedPhase.runtime_output_class(),
+            RuntimeOutputClass::Hybrid
+        );
     }
 }

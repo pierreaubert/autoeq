@@ -48,6 +48,26 @@ pub fn load_multisub_seat_measurements_with_frequency_samples(
                     group.name
                 ),
             })?;
+        // A one-seat source can carry a descriptive subwoofer name; that name
+        // is not a listening-seat identity.  Still establish the cardinality
+        // up front so a mixed one-seat/multi-seat group is rejected rather
+        // than silently pairing positions by accident.
+        if let Some(expected) = expected_seats {
+            if curves.len() != expected && (curves.len() > 1 || expected > 1) {
+                return Err(AutoeqError::InvalidConfiguration {
+                    message: format!(
+                        "Multi-seat multi-sub group '{}' inconsistent seat counts: sub 0 {}, sub {} {}",
+                        group.name,
+                        expected,
+                        sub_index,
+                        curves.len()
+                    ),
+                });
+            }
+        } else {
+            expected_seats = Some(curves.len());
+        }
+
         if curves.len() > 1 {
             any_multi_seat = true;
         }
@@ -71,21 +91,23 @@ pub fn load_multisub_seat_measurements_with_frequency_samples(
         // one physical seat, so a swapped order would silently combine
         // different listening positions. Unlabeled inputs keep the legacy
         // positional contract (identical order required, unchecked).
-        match (seat_labels(source), &expected_labels) {
-            (Some(labels), Some((reference, expected))) if labels != *expected => {
-                return Err(AutoeqError::InvalidConfiguration {
-                    message: format!(
-                        "Multi-seat multi-sub group '{}' has inconsistent seat order: sub {reference} is [{}], sub {} is [{}]; \
+        if any_multi_seat {
+            match (seat_labels(source), &expected_labels) {
+                (Some(labels), Some((reference, expected))) if labels != *expected => {
+                    return Err(AutoeqError::InvalidConfiguration {
+                        message: format!(
+                            "Multi-seat multi-sub group '{}' has inconsistent seat order: sub {reference} is [{}], sub {} is [{}]; \
                          reorder the measurements so each index is the same physical seat",
-                        group.name,
-                        expected.join(", "),
-                        sub_index,
-                        labels.join(", ")
-                    ),
-                });
+                            group.name,
+                            expected.join(", "),
+                            sub_index,
+                            labels.join(", ")
+                        ),
+                    });
+                }
+                (Some(labels), None) => expected_labels = Some((sub_index, labels)),
+                _ => {}
             }
-            (Some(labels), None) => expected_labels = Some((sub_index, labels)),
-            _ => {}
         }
         per_sub.push(curves);
     }
@@ -100,7 +122,9 @@ pub fn load_multisub_seat_measurements_with_frequency_samples(
 #[cfg(test)]
 mod tests {
     use ndarray::array;
-    use roomeq_model::{InlineMeasurement, MeasurementMultiple, MeasurementRef, MeasurementSource};
+    use roomeq_model::{
+        InlineMeasurement, MeasurementMultiple, MeasurementRef, MeasurementSource, SpeakerConfig,
+    };
 
     use super::*;
 
@@ -166,6 +190,24 @@ mod tests {
             allpass_optimization: false,
         };
         assert!(load_multisub_seat_measurements(&group).unwrap().is_none());
+    }
+
+    #[test]
+    fn measured_sigberg_two_sub_config_loads_as_independent_subs() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../data_tests/roomeq/measured/2.2_sigberg2/recordings.json");
+        if !path.is_file() {
+            return;
+        }
+        let (config, _, _) = crate::config_loader::load_config(&path, None).unwrap();
+        let SpeakerConfig::MultiSub(group) = config.speakers.get("subs").unwrap() else {
+            panic!("expected measured subs speaker to deserialize as MultiSub");
+        };
+        let loaded = load_multisub_seat_measurements(group).unwrap();
+        assert!(
+            loaded.is_none(),
+            "single-position subs must not require shared seat IDs"
+        );
     }
 
     #[test]

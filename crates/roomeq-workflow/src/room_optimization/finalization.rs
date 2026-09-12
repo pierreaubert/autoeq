@@ -27,26 +27,113 @@ pub(super) fn select(
     dir: &Path,
     store: &dyn autoeq_artifacts::ArtifactStore,
 ) -> Result<()> {
+    let snapshot = result.clone();
+    match select_inner(result, captures, held_out, config, fs, dir, store) {
+        Ok(()) => {
+            if let Some(report) = result.metadata.correction_acceptance.as_mut() {
+                super::validation_scorecard::align_report_metrics_to_scorecard(report);
+                report.refresh_outcome();
+            }
+            Ok(())
+        }
+        Err(error) => {
+            *result = snapshot;
+            Err(error)
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn select_inner(
+    result: &mut RoomOptimizationResult,
+    captures: &[seat_replay::Capture],
+    held_out: &HashMap<String, Vec<Curve>>,
+    config: &RoomConfig,
+    fs: f64,
+    dir: &Path,
+    store: &dyn autoeq_artifacts::ArtifactStore,
+) -> Result<()> {
     config.optimizer.finalization.validate().map_err(failed)?;
-    // Interim compatibility: no production pipeline path attaches a
-    // correction-acceptance report yet (attach_validation_scorecard has no
-    // production caller and returns early without held-out measurements), so
-    // generic routes arrive with nothing for the strength trials to select
-    // on. Failing closed here would reject every such run, including
-    // previously shippable ones. Record the skip visibly and deliver the
-    // pipeline result; once an acceptance report exists the full selection
-    // below engages unchanged. TODO: remove when acceptance attachment is
-    // wired for all routes.
-    if result.metadata.correction_acceptance.is_none() {
+
+    // CTC measurements describe ear transfer functions, not room-seat
+    // captures.  They cannot be replayed by the physical-seat validator that
+    // proves a RoomEQ correction survived the final graph.  Keep generating
+    // the CTC artifact, but do not turn the missing room-seat evidence into an
+    // accepted acoustic claim (or fail the entire CTC artifact-producing run).
+    if result.metadata.ctc.is_some() {
+        if let Some(report) = result.metadata.correction_acceptance.as_mut() {
+            report.accepted = false;
+            report.decision = roomeq_model::CorrectionDecision::Rejected;
+            report
+                .violations
+                .push("ctc_final_seat_evidence_insufficient".to_string());
+            report.violations.sort();
+            report.violations.dedup();
+            report.refresh_outcome();
+        }
         result.metadata.stage_outcomes.push(StageOutcome {
             stage: "final_correction_selection".into(),
-            status: StageStatus::Skipped,
+            status: StageStatus::Degraded,
             advisories: vec![
-                "selection_without_acceptance_evidence_deferred".into(),
+                "ctc_artifact_retained_without_room_seat_acceptance".into(),
+                "final_seat_evidence=insufficient_evidence".into(),
             ],
             checks: Vec::new(),
         });
         return Ok(());
+    }
+
+    // A direct caller with no captures has no evidence that can be replayed;
+    // preserve that explicit deferred outcome. Production routes attach the
+    // scorecard immediately before this call, while callers with captures are
+    // given the same evaluator here so the finalizer cannot bypass evidence.
+    if result.metadata.correction_acceptance.is_none() && captures.is_empty() && held_out.is_empty()
+    {
+        result.metadata.stage_outcomes.push(StageOutcome {
+            stage: "final_correction_selection".into(),
+            status: StageStatus::Skipped,
+            advisories: vec!["selection_without_acceptance_evidence_deferred".into()],
+            checks: Vec::new(),
+        });
+        return Ok(());
+    }
+    if result.metadata.correction_acceptance.is_none() {
+        super::validation_scorecard::attach_validation_scorecard(
+            result,
+            held_out,
+            fs,
+            roomeq_model::auto_tune::resolved_schroeder_hz(&config.optimizer),
+            config.optimizer.processing_mode.clone(),
+        )?;
+    }
+    if result.metadata.correction_acceptance.is_none() {
+        result.metadata.stage_outcomes.push(StageOutcome {
+            stage: "final_correction_selection".into(),
+            status: StageStatus::Degraded,
+            advisories: vec!["final_acceptance_evidence=insufficient_evidence".into()],
+            checks: Vec::new(),
+        });
+        return Err(failed("final correction acceptance evidence unavailable"));
+    }
+
+    // A multi-branch physical replay needs a measured phase for every
+    // branch. Magnitude-only driver CSVs still support the magnitude EQ and
+    // export path, but they cannot prove coherent crossover summation or
+    // source timing. Keep the optimized graph and report that limitation
+    // explicitly instead of turning an evidence gap into a failed run (or
+    // inventing zero phase).
+    if seat_replay::has_unmeasured_multi_branch_phase(captures) {
+        return publish_baseline(
+            result,
+            captures,
+            held_out,
+            config,
+            fs,
+            dir,
+            store,
+            "final_seat_phase_evidence_insufficient",
+            Vec::new(),
+        );
     }
     let original = result.clone();
     // Strength changes cannot supply missing physical measurements, coherent
@@ -67,6 +154,22 @@ pub(super) fn select(
             dir,
         )
     {
+        if error
+            .to_string()
+            .contains("insufficient summation evidence")
+        {
+            return publish_baseline(
+                result,
+                captures,
+                held_out,
+                config,
+                fs,
+                dir,
+                store,
+                &error.to_string(),
+                Vec::new(),
+            );
+        }
         return Err(error);
     }
     let mut best: Option<(f64, RoomOptimizationResult)> = None;
@@ -82,6 +185,19 @@ pub(super) fn select(
         .filter(|name| is_subwoofer_channel(config, name))
         .cloned()
         .collect();
+    // Role-specific refinement is useful when a chain contains repeated
+    // correction sections (the cumulative-overcorrection case). Expanding it
+    // across every ordinary stereo/cinema run multiplies expensive final graph
+    // replays without changing the already-valid full-strength result.
+    let allow_role_refinement = !sub_roles.is_empty()
+        && sub_roles.len() < original.channels.len()
+        && original.channels.len() <= 3
+        && has_repeated_eq_sections(&original)
+        && !config
+            .optimizer
+            .excursion_protection
+            .as_ref()
+            .is_some_and(|protection| protection.enabled);
     let mut parameters: Vec<_> = strengths
         .into_iter()
         .flat_map(|strength| {
@@ -95,7 +211,7 @@ pub(super) fn select(
     // A main's correction and a shared sub array's correction affect different
     // acoustic branches. Reducing both together can destroy a useful bass
     // correction just to repair a main's target error or crossover rotation.
-    if !sub_roles.is_empty() && sub_roles.len() < original.channels.len() {
+    if allow_role_refinement {
         for main_strength in strengths {
             for sub_strength in strengths {
                 if main_strength != sub_strength {
@@ -116,6 +232,7 @@ pub(super) fn select(
                 (strength, sub_strength),
                 &sub_roles,
                 config,
+                held_out,
                 fs,
                 dir,
                 store,
@@ -139,7 +256,7 @@ pub(super) fn select(
             .as_ref()
             .map(|value| value.result.clone())
             .unwrap_or_else(|_| original.clone());
-        let mut intact_full_correction = false;
+        let mut stop_after_trial = false;
         let attempt = (|| -> Result<f64> {
             let policy = &config.optimizer.finalization;
             let before = &prepared
@@ -236,11 +353,31 @@ pub(super) fn select(
                 .correction_acceptance
                 .as_mut()
                 .ok_or_else(|| failed("final correction acceptance unavailable"))?;
-            if !report.accepted {
+            let accepted_via_safe_reversion = matches!(
+                report.decision,
+                roomeq_model::CorrectionDecision::RevertedStage
+                    | roomeq_model::CorrectionDecision::IdentityFallback
+            );
+            if !report.accepted && !accepted_via_safe_reversion {
                 return Err(failed(format!(
                     "final correction policy rejected: {:?}",
                     report.violations
                 )));
+            }
+            super::validation_scorecard::align_report_metrics_to_scorecard(report);
+            // Passing vetoes is necessary but does not establish improvement.
+            // A realized identity is unchanged; a nonidentity candidate must
+            // improve the declared primary metric to be selected.
+            if report.metrics.improvement_db <= 1e-6 {
+                if report.metrics.correction_rms_db.abs() <= 1e-6
+                    && report.metrics.max_abs_correction_db.abs() <= 1e-6
+                {
+                    report.accepted = false;
+                    report.decision = roomeq_model::CorrectionDecision::IdentityFallback;
+                    report.refresh_outcome();
+                } else {
+                    return Err(failed("final primary target metric did not improve"));
+                }
             }
             let quality = report
                 .acoustic_quality
@@ -265,40 +402,46 @@ pub(super) fn select(
             if !score.is_finite() {
                 return Err(failed("nonfinite final candidate score"));
             }
-            candidate
-                .metadata
-                .stage_outcomes
-                .retain(|stage| stage.stage != "final_graph_sampled_electrical_headroom");
-            candidate.metadata.stage_outcomes.push(StageOutcome {
-                stage: "final_graph_sampled_electrical_headroom".into(),
-                status: StageStatus::Applied,
-                advisories: vec![
-                    "enforced_independently_phased_sinusoidal_input_peaks".into(),
-                    "sampled_sinusoidal_only_not_full_band_transient_or_native_certificate".into(),
-                    format!(
-                        "required_peak_attenuation_db={attenuation:.9}; mode={attenuation_mode}"
-                    ),
-                ],
-                checks: outputs
-                    .iter()
-                    .map(|output| StageCheck {
-                        id: format!("sampled_physical_output:{}", output.output),
-                        kind: StageCheckKind::Safety,
-                        passed: true,
-                        observed: Some(output.peak_amplitude),
-                        limit: Some(10.0_f64.powf(policy.output_ceiling_dbfs / 20.0)),
-                        diagnostic: Some(
-                            serde_json::to_string(output).expect("finite electrical evidence"),
-                        ),
-                    })
-                    .collect(),
-            });
+            record_final_electrical_stage(
+                &mut candidate,
+                &outputs,
+                policy,
+                format!("required_peak_attenuation_db={attenuation:.9}; mode={attenuation_mode}"),
+            );
             crate::export::bind_final_convolution_artifacts(&mut candidate, dir, store, fs)?;
             refresh_final_reports(&mut candidate, config, fs, dir);
             sanity_check_result(&candidate)?;
-            intact_full_correction = strength == 1.0
+            let intact_full_correction = strength == 1.0
                 && sub_strength == 1.0
                 && same_correction_kernels(&original, &candidate);
+            let all_seats_improved = candidate
+                .metadata
+                .correction_acceptance
+                .as_ref()
+                .and_then(|report| report.acoustic_quality.as_ref())
+                .is_some_and(|quality| {
+                    quality
+                        .final_seats
+                        .iter()
+                        .all(|seat| seat.improvement_lower_bound_db > 1e-6)
+                });
+            let residual_is_negligible = candidate
+                .metadata
+                .correction_acceptance
+                .as_ref()
+                .and_then(|report| report.acoustic_quality.as_ref())
+                .is_some_and(|quality| {
+                    quality
+                        .final_seats
+                        .iter()
+                        .map(|seat| seat.post_weighted_rms_db)
+                        .sum::<f64>()
+                        / quality.final_seats.len().max(1) as f64
+                        <= 0.05
+                });
+            stop_after_trial = (intact_full_correction
+                && (all_seats_improved || !allow_role_refinement))
+                || residual_is_negligible;
             Ok(score)
         })();
         trials.push(StageCheck {
@@ -329,29 +472,24 @@ pub(super) fn select(
                     checks: Vec::new(),
                 });
                 best = Some((score, candidate));
-            }
-            // A fully retained correction that satisfies the complete contract
-            // needs no strength search. In particular, avoid repeatedly designing
-            // and replaying long FIRs for already-valid output. A safety rollback
-            // cannot take this shortcut because its kernels no longer match.
-            if intact_full_correction {
-                break;
+                if stop_after_trial {
+                    break;
+                }
             }
         }
     }
     let Some((_, mut selected)) = best else {
-        return Err(failed(format!(
-            "no cumulative correction satisfies electrical and acoustic limits: {}",
-            trials
-                .iter()
-                .map(|trial| format!(
-                    "{}: {}",
-                    trial.id,
-                    trial.diagnostic.as_deref().unwrap_or("rejected")
-                ))
-                .collect::<Vec<_>>()
-                .join("; ")
-        )));
+        return publish_baseline(
+            result,
+            captures,
+            held_out,
+            config,
+            fs,
+            dir,
+            store,
+            "no_candidate_within_electrical_acoustic_limits",
+            trials,
+        );
     };
     selected.metadata.stage_outcomes.push(StageOutcome {
         stage: "final_correction_selection".into(),
@@ -360,7 +498,179 @@ pub(super) fn select(
         checks: trials,
     });
     *result = selected;
+    preserve_safety_reversion_decision(result);
     Ok(())
+}
+
+/// Publish the exact correction-free graph used as the replay baseline.
+/// Missing measurements remain an evidence limitation, with no accepted claim.
+#[allow(clippy::too_many_arguments)]
+fn publish_baseline(
+    result: &mut RoomOptimizationResult,
+    captures: &[seat_replay::Capture],
+    held_out: &HashMap<String, Vec<Curve>>,
+    config: &RoomConfig,
+    fs: f64,
+    dir: &Path,
+    store: &dyn autoeq_artifacts::ArtifactStore,
+    reason: &str,
+    trials: Vec<StageCheck>,
+) -> Result<()> {
+    let mut baseline = result.clone();
+    seat_replay::restore_structural_baseline(&mut baseline);
+    let frozen_baseline = baseline.clone();
+    let policy = &config.optimizer.finalization;
+    let outputs = crate::electrical_headroom::assess_final_graph(
+        &baseline.to_dsp_chain_output(),
+        fs,
+        dir,
+        policy,
+    )?;
+    let attenuation = outputs
+        .iter()
+        .filter_map(|output| output.peak_dbfs)
+        .map(|peak| (peak - policy.output_ceiling_dbfs).max(0.0))
+        .fold(0.0_f64, f64::max);
+    if attenuation > policy.max_attenuation_db + 1e-6 {
+        return Err(failed(format!(
+            "structural baseline requires {attenuation:.3} dB safety attenuation beyond {:.3} dB limit",
+            policy.max_attenuation_db,
+        )));
+    }
+    if attenuation > 1e-6 {
+        // The same pre-route attenuation on every programme input preserves
+        // main/sub balance. It remains visible relative to the frozen baseline.
+        install_attenuation(&mut baseline, attenuation + 1e-6)?;
+    }
+    refresh_responses(&mut baseline, fs, dir)?;
+    refresh_final_reports(&mut baseline, config, fs, dir);
+    refresh_temporal_ir_evidence(&mut baseline, config, fs, dir);
+    if let Some(report) = baseline.metadata.correction_acceptance.as_mut() {
+        // Candidate evidence must never be attached to the delivered fallback.
+        report.acoustic_quality = None;
+        report.realization_quality = None;
+        report.violations.clear();
+        report.metrics.post_target_weighted_rms_db = report.metrics.pre_target_weighted_rms_db;
+        report.metrics.improvement_db = 0.0;
+        report.metrics.improvement_ratio = 0.0;
+        report.metrics.correction_rms_db = 0.0;
+        report.metrics.max_abs_correction_db = 0.0;
+    }
+    let replay = seat_replay::validate_candidate_final_seats(
+        &mut baseline,
+        &frozen_baseline,
+        captures,
+        held_out,
+        config,
+        fs,
+        dir,
+    );
+    let mut advisories = vec![reason.to_string(), "structural_baseline_published".into()];
+    if attenuation > 1e-6 {
+        advisories.push(format!("baseline_safety_attenuation_db={attenuation:.6}"));
+    }
+    if let Err(error) = replay {
+        match error {
+            AutoeqError::InvalidMeasurement { .. }
+                if error.to_string().contains("insufficient")
+                    || error.to_string().contains("phase")
+                    || error.to_string().contains("no final-seat") =>
+            {
+                let evidence = format!("baseline_evidence_insufficient: {error}");
+                if let Some(report) = baseline.metadata.correction_acceptance.as_mut() {
+                    report.violations.push(evidence.clone());
+                }
+                advisories.push(evidence);
+            }
+            AutoeqError::OptimizationFailed { .. } => {
+                // A pre-existing room defect is not a correction regression.
+                advisories.push(format!("baseline_quality_limit: {error}"));
+            }
+            _ => return Err(error),
+        }
+    }
+    if let Some(report) = baseline.metadata.correction_acceptance.as_mut() {
+        report.accepted = false;
+        report.decision = if attenuation > 1e-6 {
+            report
+                .violations
+                .push("baseline_requires_safety_attenuation".into());
+            roomeq_model::CorrectionDecision::Rejected
+        } else {
+            roomeq_model::CorrectionDecision::IdentityFallback
+        };
+        report.violations.push(reason.to_string());
+        report.violations.sort();
+        report.violations.dedup();
+        report.refresh_outcome();
+    }
+    crate::export::bind_final_convolution_artifacts(&mut baseline, dir, store, fs)?;
+    let outputs = crate::electrical_headroom::assess_final_graph(
+        &baseline.to_dsp_chain_output(),
+        fs,
+        dir,
+        policy,
+    )?;
+    if outputs.iter().any(|output| {
+        output
+            .peak_dbfs
+            .is_some_and(|peak| peak > policy.output_ceiling_dbfs + 1e-6)
+    }) {
+        return Err(failed(
+            "structural fallback exceeds the electrical output ceiling",
+        ));
+    }
+    record_final_electrical_stage(
+        &mut baseline,
+        &outputs,
+        policy,
+        format!("required_peak_attenuation_db={attenuation:.9}; mode=structural_fallback"),
+    );
+    sanity_check_result(&baseline)?;
+    baseline.metadata.stage_outcomes.push(StageOutcome {
+        stage: "final_correction_selection".into(),
+        status: StageStatus::Degraded,
+        advisories,
+        checks: trials,
+    });
+    *result = baseline;
+    Ok(())
+}
+
+fn record_final_electrical_stage(
+    result: &mut RoomOptimizationResult,
+    outputs: &[roomeq_engine::quality::electrical_headroom::SampledElectricalOutputPeak],
+    policy: &roomeq_model::FinalizationConfig,
+    detail: String,
+) {
+    result
+        .metadata
+        .stage_outcomes
+        .retain(|stage| stage.stage != "final_graph_sampled_electrical_headroom");
+    result.metadata.stage_outcomes.push(StageOutcome {
+        stage: "final_graph_sampled_electrical_headroom".into(),
+        status: StageStatus::Applied,
+        advisories: vec![
+            "enforced_independently_phased_sinusoidal_input_peaks".into(),
+            "sampled_sinusoidal_only_not_full_band_transient_or_native_certificate".into(),
+            detail,
+        ],
+        checks: outputs
+            .iter()
+            .map(|output| StageCheck {
+                id: format!("sampled_physical_output:{}", output.output),
+                kind: StageCheckKind::Safety,
+                passed: output
+                    .peak_dbfs
+                    .is_none_or(|peak| peak <= policy.output_ceiling_dbfs + 1e-6),
+                observed: Some(output.peak_amplitude),
+                limit: Some(10.0_f64.powf(policy.output_ceiling_dbfs / 20.0)),
+                diagnostic: Some(
+                    serde_json::to_string(output).expect("finite electrical evidence"),
+                ),
+            })
+            .collect(),
+    });
 }
 
 fn prepare_candidate(
@@ -368,6 +678,7 @@ fn prepare_candidate(
     strengths: (f64, f64),
     sub_roles: &std::collections::BTreeSet<String>,
     config: &RoomConfig,
+    validation: &HashMap<String, Vec<Curve>>,
     fs: f64,
     dir: &Path,
     store: &dyn autoeq_artifacts::ArtifactStore,
@@ -384,7 +695,7 @@ fn prepare_candidate(
             store,
         )?;
     }
-    rebuild(&mut result, config, fs, dir)?;
+    rebuild(&mut result, config, validation, fs, dir)?;
     let electrical = crate::electrical_headroom::assess_final_graph(
         &result.to_dsp_chain_output(),
         fs,
@@ -435,6 +746,43 @@ fn same_correction_kernels(
     fingerprint(before) == fingerprint(after)
 }
 
+fn has_repeated_eq_sections(result: &RoomOptimizationResult) -> bool {
+    fn inspect(
+        plugins: &[PluginConfigWrapper],
+        seen: &mut std::collections::HashSet<String>,
+    ) -> bool {
+        plugins
+            .iter()
+            .filter(|plugin| plugin.plugin_type == "eq")
+            .flat_map(|plugin| {
+                plugin
+                    .parameters
+                    .get("filters")
+                    .and_then(|filters| filters.as_array())
+                    .into_iter()
+                    .flatten()
+            })
+            .any(|filter| !seen.insert(serde_json::to_string(filter).unwrap()))
+    }
+    for chain in result.channels.values() {
+        // Identical EQ on parallel outputs is not repeated processing on a
+        // signal path. Only serial channel/driver sections can accumulate it.
+        let mut seen = std::collections::HashSet::new();
+        if inspect(&chain.plugins, &mut seen) {
+            return true;
+        }
+        if let Some(drivers) = &chain.drivers {
+            if drivers
+                .iter()
+                .any(|driver| inspect(&driver.plugins, &mut seen.clone()))
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 fn refresh_responses(result: &mut RoomOptimizationResult, fs: f64, dir: &Path) -> Result<()> {
     for (name, channel) in &mut result.channel_results {
         let chain = result
@@ -450,7 +798,8 @@ fn refresh_responses(result: &mut RoomOptimizationResult, fs: f64, dir: &Path) -
         channel.final_curve = realized.clone();
         chain.final_curve = Some((&realized).into());
         chain.eq_response = None;
-        channel.biquads.clear();
+        // Keep the optimizer's filter metadata synchronized with the
+        // serialized chain; safety reversion already clears it explicitly.
     }
     if let Some(bass) = &result.metadata.bass_management
         && let Some(graph) = &bass.routing_graph
@@ -471,6 +820,7 @@ fn refresh_responses(result: &mut RoomOptimizationResult, fs: f64, dir: &Path) -
 fn rebuild(
     result: &mut RoomOptimizationResult,
     config: &RoomConfig,
+    validation: &HashMap<String, Vec<Curve>>,
     fs: f64,
     dir: &Path,
 ) -> Result<()> {
@@ -488,7 +838,53 @@ fn rebuild(
     );
     refresh_responses(result, fs, dir)?;
     refresh_temporal_ir_evidence(result, config, fs, dir);
+    // Runtime safety evaluates the deployed graph and may revert unsafe
+    // stages. Rebuild the canonical before/after scorecard afterwards so
+    // serialized scalar metrics and the detailed scorecard describe the
+    // same realized graph. Runtime evidence remains available on the report
+    // for diagnostics, but it must not replace the shared evaluator.
+    if !validation.is_empty() {
+        super::validation_scorecard::attach_validation_scorecard(
+            result,
+            validation,
+            fs,
+            roomeq_model::auto_tune::resolved_schroeder_hz(&config.optimizer),
+            config.optimizer.processing_mode.clone(),
+        )?;
+    }
+    preserve_safety_reversion_decision(result);
     Ok(())
+}
+
+fn preserve_safety_reversion_decision(result: &mut RoomOptimizationResult) {
+    let reverted: Vec<_> = result
+        .metadata
+        .stage_outcomes
+        .iter()
+        .filter(|stage| {
+            stage.stage.starts_with("final_correction_safety_")
+                && matches!(stage.status, StageStatus::Degraded)
+        })
+        .map(|stage| stage.stage.clone())
+        .collect();
+    if reverted.is_empty() {
+        return;
+    }
+    if let Some(report) = result.metadata.correction_acceptance.as_mut() {
+        report.accepted = false;
+        if matches!(report.decision, roomeq_model::CorrectionDecision::Accepted) {
+            report.decision = roomeq_model::CorrectionDecision::RevertedStage;
+        }
+        report
+            .violations
+            .push("audibility_regression_reverted".to_string());
+        report.reverted_stages.extend(reverted);
+        report.violations.sort();
+        report.violations.dedup();
+        report.reverted_stages.sort();
+        report.reverted_stages.dedup();
+        report.refresh_outcome();
+    }
 }
 
 /// Fit a conservative cut-only common electrical correction. Applying the same
@@ -598,6 +994,7 @@ fn install_attenuation(result: &mut RoomOptimizationResult, attenuation: f64) ->
             .ok_or_else(|| failed("missing headroom input owner"))?;
         let mut gain = roomeq_engine::output::create_gain_plugin(-attenuation);
         gain.parameters["room_eq_correction_gain"] = serde_json::json!(true);
+        gain.parameters["room_eq_safety_gain"] = serde_json::json!(true);
         gain.parameters["label"] = serde_json::json!("final_electrical_headroom");
         if routed_inputs.is_some() {
             gain.parameters["room_eq_stage"] = serde_json::json!("pre_route");
@@ -626,6 +1023,7 @@ fn install_output_attenuation(
         }
         let mut gain = roomeq_engine::output::create_gain_plugin(-attenuation - 1e-6);
         gain.parameters["room_eq_correction_gain"] = serde_json::json!(true);
+        gain.parameters["room_eq_safety_gain"] = serde_json::json!(true);
         gain.parameters["label"] = serde_json::json!("final_electrical_headroom");
         if routed {
             gain.parameters["room_eq_stage"] = serde_json::json!("post_route");
@@ -941,6 +1339,87 @@ mod tests {
         run_canonical_seeds(&[seed]);
     }
 
+    #[test]
+    fn rebuild_keeps_canonical_scorecard_and_scalar_metrics_in_sync() {
+        let (mut result, config) = fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let validation = HashMap::from([(
+            "L".to_string(),
+            vec![result.channel_results["L"].initial_curve.clone()],
+        )]);
+
+        rebuild(&mut result, &config, &validation, 48_000.0, dir.path())
+            .expect("final rebuild should produce acceptance evidence");
+
+        let report = result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .expect("rebuild should retain correction acceptance");
+        let scorecard = report
+            .acoustic_quality
+            .as_ref()
+            .expect("rebuild should attach the canonical scorecard");
+
+        assert_eq!(
+            report.metrics.pre_target_weighted_rms_db,
+            scorecard.training.pre_weighted_rms_median_db
+        );
+        assert_eq!(
+            report.metrics.post_target_weighted_rms_db,
+            scorecard.training.post_weighted_rms_median_db
+        );
+        assert_eq!(
+            report.metrics.improvement_db,
+            scorecard.training.improvement_median_db
+        );
+    }
+
+    #[test]
+    fn selection_reconciles_metrics_after_final_seat_replay() {
+        let (mut result, config) = fixture();
+        let captures = seat_replay::capture_training(&config).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let store = autoeq_artifacts::MemoryArtifactStore::new();
+
+        select(
+            &mut result,
+            &captures,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            dir.path(),
+            &store,
+        )
+        .expect("final seat replay should complete");
+
+        let report = result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .expect("selection should retain correction acceptance");
+        let scorecard = report
+            .acoustic_quality
+            .as_ref()
+            .expect("selection should retain the quality scorecard");
+        assert!(
+            !scorecard.final_seats.is_empty(),
+            "final seat replay evidence must be retained"
+        );
+        assert_eq!(
+            report.metrics.pre_target_weighted_rms_db,
+            scorecard.training.pre_weighted_rms_median_db
+        );
+        assert_eq!(
+            report.metrics.post_target_weighted_rms_db,
+            scorecard.training.post_weighted_rms_median_db
+        );
+        assert_eq!(
+            report.metrics.improvement_db,
+            scorecard.training.improvement_median_db
+        );
+    }
+
     fn run_canonical_seeds(seeds: &[u64]) {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let (mut config, _) = crate::load_merged_config_strict(
@@ -1045,10 +1524,195 @@ mod tests {
     }
 
     #[test]
-    fn electrical_attenuation_cannot_hide_in_single_seat_baseline() {
+    fn published_baseline_replays_identity_and_clears_candidate_evidence() {
+        let (mut result, config) = fixture();
+        let peak = math_audio_iir_fir::Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Peak,
+            120.0,
+            48_000.0,
+            2.0,
+            12.0,
+        );
+        result.channels.get_mut("L").unwrap().plugins =
+            vec![roomeq_engine::output::create_eq_plugin(&[peak])];
+        let captures = seat_replay::capture_training(&config).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let store = autoeq_artifacts::FsArtifactStore::new();
+        rebuild(&mut result, &config, &HashMap::new(), 48_000.0, dir.path()).unwrap();
+        publish_baseline(
+            &mut result,
+            &captures,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            dir.path(),
+            &store,
+            "no_candidate_within_electrical_acoustic_limits",
+            Vec::new(),
+        )
+        .unwrap();
+        assert!(result.channels["L"].plugins.is_empty());
+        assert!(result.channel_results["L"].biquads.is_empty());
+        assert!(result.channel_results["L"].fir_coeffs.is_none());
+        let report = result.metadata.correction_acceptance.as_ref().unwrap();
+        assert!(!report.accepted);
+        assert_eq!(
+            report.decision,
+            roomeq_model::CorrectionDecision::IdentityFallback
+        );
+        assert_eq!(report.outcome, roomeq_model::RoomEqOutcome::Unchanged);
+        let score = report
+            .acoustic_quality
+            .as_ref()
+            .expect("fallback must be replayed");
+        assert!(!score.final_seats.is_empty());
+        for seat in &score.final_seats {
+            assert!(seat.improvement_db.abs() < 1e-9);
+            assert!((seat.pre_weighted_rms_db - seat.post_weighted_rms_db).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn shared_stereo_eq_is_not_serial_overcorrection() {
+        let (mut result, _) = fixture();
+        let filter = math_audio_iir_fir::Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Peak,
+            120.0,
+            48_000.0,
+            2.0,
+            -6.0,
+        );
+        let eq = roomeq_engine::output::create_eq_plugin(&[filter]);
+        result.channels.get_mut("L").unwrap().plugins = vec![eq.clone()];
+        result
+            .channels
+            .insert("R".into(), result.channels["L"].clone());
+        assert!(!has_repeated_eq_sections(&result));
+        result.channels.get_mut("L").unwrap().plugins.push(eq);
+        assert!(has_repeated_eq_sections(&result));
+    }
+
+    #[test]
+    fn baseline_removes_complete_hybrid_stage_and_preserves_protection() {
+        let (mut result, _) = fixture();
+        let mark = |plugin| {
+            roomeq_engine::topology::mark_plugin_correction_stage(
+                plugin,
+                roomeq_engine::topology::HYBRID_CROSSOVER_CORRECTION_STAGE,
+            )
+        };
+        let mut protection =
+            roomeq_engine::output::create_eq_plugin(&[math_audio_iir_fir::Biquad::new(
+                math_audio_iir_fir::BiquadFilterType::Highpass,
+                25.0,
+                48_000.0,
+                0.707,
+                0.0,
+            )]);
+        protection.parameters["label"] = serde_json::json!("excursion_protection");
+        let alignment = roomeq_engine::output::create_delay_plugin(2.0);
+        result.channels.get_mut("L").unwrap().plugins = vec![
+            protection.clone(),
+            alignment.clone(),
+            mark(roomeq_engine::output::create_band_split_plugin(
+                300.0, "LR24",
+            )),
+            mark(roomeq_engine::output::create_convolution_plugin(
+                "discarded.wav",
+            )),
+            mark(roomeq_engine::output::create_delay_plugin(10.0)),
+            mark(roomeq_engine::output::create_band_merge_plugin(2)),
+        ];
+        seat_replay::restore_structural_baseline(&mut result);
+        assert_eq!(
+            serde_json::to_value(&result.channels["L"].plugins).unwrap(),
+            serde_json::to_value(vec![protection, alignment]).unwrap()
+        );
+        sanity_check_result(&result).unwrap();
+    }
+
+    #[test]
+    fn selection_identity_is_unchanged_not_an_accepted_improvement() {
+        let (mut result, config) = fixture();
+        result.channels.get_mut("L").unwrap().plugins.clear();
+        let captures = seat_replay::capture_training(&config).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let store = autoeq_artifacts::FsArtifactStore::new();
+        rebuild(&mut result, &config, &HashMap::new(), 48_000.0, dir.path()).unwrap();
+        select(
+            &mut result,
+            &captures,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            dir.path(),
+            &store,
+        )
+        .unwrap();
+        let report = result.metadata.correction_acceptance.as_ref().unwrap();
+        assert_eq!(report.outcome, roomeq_model::RoomEqOutcome::Unchanged);
+        assert!(!report.accepted);
+        assert!(report.metrics.improvement_db.abs() < 1e-9);
+    }
+
+    #[test]
+    fn fallback_with_structural_gain_is_safe_and_not_reported_unchanged() {
         let (mut result, config) = fixture();
         result.channels.get_mut("L").unwrap().plugins =
             vec![roomeq_engine::output::create_gain_plugin(6.0)];
+        let captures = seat_replay::capture_training(&config).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let store = autoeq_artifacts::FsArtifactStore::new();
+        rebuild(&mut result, &config, &HashMap::new(), 48_000.0, dir.path()).unwrap();
+        publish_baseline(
+            &mut result,
+            &captures,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            dir.path(),
+            &store,
+            "no_candidate_within_electrical_acoustic_limits",
+            Vec::new(),
+        )
+        .unwrap();
+        let outputs = crate::electrical_headroom::assess_final_graph(
+            &result.to_dsp_chain_output(),
+            48_000.0,
+            dir.path(),
+            &config.optimizer.finalization,
+        )
+        .unwrap();
+        assert!(
+            outputs
+                .iter()
+                .all(|output| output.peak_dbfs.unwrap() <= 1e-6)
+        );
+        let report = result.metadata.correction_acceptance.as_ref().unwrap();
+        assert_eq!(report.outcome, roomeq_model::RoomEqOutcome::Rejected);
+        assert!(!report.accepted);
+        assert!(
+            report
+                .violations
+                .iter()
+                .any(|v| v == "baseline_requires_safety_attenuation")
+        );
+        assert!(
+            result
+                .metadata
+                .stage_outcomes
+                .iter()
+                .flat_map(|stage| &stage.advisories)
+                .any(|note| note.starts_with("baseline_safety_attenuation_db=6.000"))
+        );
+    }
+
+    #[test]
+    fn electrical_attenuation_cannot_hide_in_single_seat_baseline() {
+        let (mut result, config) = fixture();
+        let mut correction_gain = roomeq_engine::output::create_gain_plugin(6.0);
+        correction_gain.parameters["room_eq_correction_gain"] = serde_json::json!(true);
+        result.channels.get_mut("L").unwrap().plugins = vec![correction_gain];
         result
             .channels
             .get_mut("L")
@@ -1062,7 +1726,7 @@ mod tests {
         let before = serde_json::to_value(result.to_dsp_chain_output()).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let store = autoeq_artifacts::FsArtifactStore::new();
-        let error = select(
+        select(
             &mut result,
             &captures,
             &HashMap::new(),
@@ -1071,12 +1735,42 @@ mod tests {
             dir.path(),
             &store,
         )
-        .unwrap_err();
-        assert!(error.to_string().contains("useful output"), "{error}");
-        assert_eq!(
+        .unwrap();
+        assert_ne!(
             serde_json::to_value(result.to_dsp_chain_output()).unwrap(),
-            before
+            before,
+            "an unsafe candidate must be replaced by the identity fallback"
         );
+        assert!(result.channels["L"].plugins.is_empty());
+        let report = result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .expect("fallback retains an explicit acceptance report");
+        assert!(!report.accepted);
+        assert_eq!(
+            report.decision,
+            roomeq_model::CorrectionDecision::IdentityFallback
+        );
+        assert_eq!(report.outcome, roomeq_model::RoomEqOutcome::Unchanged);
+        assert!(
+            report.violations.iter().any(|violation| {
+                matches!(
+                    violation.as_str(),
+                    "no_candidate_within_electrical_acoustic_limits"
+                        | "audibility_regression_reverted"
+                )
+            }),
+            "violations={:?}",
+            report.violations
+        );
+        assert!(result.metadata.stage_outcomes.iter().any(|stage| {
+            stage.stage == "final_correction_selection"
+                && matches!(
+                    stage.status,
+                    roomeq_model::StageStatus::Applied | roomeq_model::StageStatus::Degraded
+                )
+        }));
     }
 
     #[test]
@@ -1190,9 +1884,7 @@ mod tests {
             .metadata
             .correction_acceptance
             .as_ref()
-            .unwrap()
-            .acoustic_quality
-            .as_ref()
+            .and_then(|report| report.acoustic_quality.as_ref())
             .unwrap();
         assert!(quality.final_seats[0].improvement_db > 0.5, "{quality:?}");
         assert_eq!(quality.final_seats.len(), 2);

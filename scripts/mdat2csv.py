@@ -576,7 +576,7 @@ def sanitize_identifier(name, max_len=100):
     return re.sub(r'_+', '_', identifier).strip('_')
 
 
-def export_csv(measurement, output_dir):
+def export_csv(measurement, output_dir, *, overwrite=True):
     """Export a single measurement to CSV."""
     freqs = measurement['freq']
     spl = measurement['spl']
@@ -600,7 +600,11 @@ def export_csv(measurement, output_dir):
     filepath = os.path.join(output_dir, f"{name}.csv")
 
 
-    with open(filepath, 'w') as f:
+    try:
+        stream = open(filepath, 'w' if overwrite else 'x')
+    except FileExistsError:
+        return filepath
+    with stream as f:
         f.write("freq_hz,spl_db,phase_deg\n")
         for i in range(len(freqs)):
             freq = freqs[i]
@@ -611,7 +615,7 @@ def export_csv(measurement, output_dir):
     return filepath
 
 
-def export_recordings_json(measurements, csv_paths, output_dir):
+def export_recordings_json(measurements, csv_paths, output_dir, *, overwrite=True):
     """
     Export a recordings.json file conforming to the roomeq input_schema.json.
     Each measurement becomes a speaker entry referencing its CSV file.
@@ -636,7 +640,11 @@ def export_recordings_json(measurements, csv_paths, output_dir):
     }
 
     json_path = os.path.join(output_dir, "recordings.json")
-    with open(json_path, 'w') as f:
+    try:
+        stream = open(json_path, 'w' if overwrite else 'x')
+    except FileExistsError:
+        return json_path
+    with stream as f:
         json.dump(config, f, indent=2)
         f.write('\n')
 
@@ -644,13 +652,16 @@ def export_recordings_json(measurements, csv_paths, output_dir):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <file.mdat> [output_dir]")
+    args = sys.argv[1:]
+    overwrite = '--no-clobber' not in args
+    args = [arg for arg in args if arg != '--no-clobber']
+    if not args:
+        print(f"Usage: {sys.argv[0]} <file.mdat> [output_dir] [--no-clobber]")
         sys.exit(1)
 
-    mdat_path = sys.argv[1]
-    if len(sys.argv) > 2:
-        output_dir = sys.argv[2]
+    mdat_path = args[0]
+    if len(args) > 1:
+        output_dir = args[1]
     else:
         output_dir = os.path.splitext(mdat_path)[0] + "_csv"
 
@@ -680,14 +691,14 @@ def main():
               f"{'Phase:yes' if has_phase else 'Phase:NO'}{phase_range}")
 
         if has_spl:
-            filepath = export_csv(m, output_dir)
+            filepath = export_csv(m, output_dir, overwrite=overwrite)
             csv_paths.append(filepath)
             print(f"      -> {filepath}")
         else:
             csv_paths.append(None)
             print(f"      -> SKIPPED (no SPL data found; phase alone is not a response curve)")
 
-    json_path = export_recordings_json(measurements, csv_paths, output_dir)
+    json_path = export_recordings_json(measurements, csv_paths, output_dir, overwrite=overwrite)
     print(f"\n  recordings.json -> {json_path}")
 
 

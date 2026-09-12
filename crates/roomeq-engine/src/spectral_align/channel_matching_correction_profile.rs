@@ -18,6 +18,11 @@ pub struct ChannelMatchingCorrectionProfile {
     pub min_freq_hz: f64,
     /// Upper matching band edge for this role.
     pub max_freq_hz: f64,
+    /// Maximum Q for a channel-matching filter. Matching has no repeated-seat
+    /// evidence for a narrow room feature, so the safe default is broad
+    /// (Q=1) correction. A high-Q modal cut belongs to the room optimizer,
+    /// where Schroeder and resonance evidence are available.
+    pub max_q: f64,
 }
 
 impl Default for ChannelMatchingCorrectionProfile {
@@ -27,6 +32,7 @@ impl Default for ChannelMatchingCorrectionProfile {
             correction_weight: 1.0,
             min_freq_hz: 0.0,
             max_freq_hz: 10_000.0,
+            max_q: 1.0,
         }
     }
 }
@@ -50,12 +56,14 @@ impl ChannelMatchingCorrectionProfile {
         let correction_weight = finite_or_zero(self.correction_weight).max(0.0);
         let min = finite_or_zero(self.min_freq_hz).max(0.0);
         let max = finite_or_zero(self.max_freq_hz).max(0.0);
+        let max_q = finite_or_zero(self.max_q).clamp(0.5, 8.0);
         let (min_freq_hz, max_freq_hz) = if min <= max { (min, max) } else { (max, min) };
         Self {
             peak_tolerance_db,
             correction_weight,
             min_freq_hz,
             max_freq_hz,
+            max_q,
         }
     }
 }
@@ -204,7 +212,7 @@ pub fn correct_inter_channel_deviation_with_profile(
                 continue;
             }
             // Q based on deviation width: narrow for sharp peaks, broader for gentle humps
-            let q = estimate_correction_q(&smoothed_diff, freq, idx);
+            let q = estimate_correction_q(&smoothed_diff, freq, idx).min(profile.max_q);
 
             filters.push(Biquad::new(
                 math_audio_iir_fir::BiquadFilterType::Peak,

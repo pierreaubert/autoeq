@@ -23,7 +23,9 @@ pub(crate) fn bind_final_convolution_artifacts(
     let graph = result.to_dsp_chain_output();
     let mut inventory = std::collections::BTreeMap::new();
     let references = checked_convolution_resource_references(&graph).map_err(|error| {
-        autoeq_core::AutoeqError::InvalidMeasurement { message: error.to_string() }
+        autoeq_core::AutoeqError::InvalidMeasurement {
+            message: error.to_string(),
+        }
     })?;
     for reference in references {
         let path = Path::new(&reference);
@@ -117,18 +119,29 @@ pub(crate) fn bind_final_convolution_artifacts(
 pub(crate) fn validate_final_routed_stage_ownership(
     result: &roomeq_engine::room_result::RoomOptimizationResult,
 ) -> autoeq_core::Result<()> {
-    if result.metadata.bass_management.as_ref()
-        .and_then(|report| report.routing_graph.as_ref()).is_none() {
+    if result
+        .metadata
+        .bass_management
+        .as_ref()
+        .and_then(|report| report.routing_graph.as_ref())
+        .is_none()
+    {
         return Ok(());
     }
     let mut channels: Vec<_> = result.channels.iter().collect();
     channels.sort_by_key(|(name, _)| *name);
     for (name, chain) in channels {
         for (index, plugin) in chain.plugins.iter().enumerate() {
-            let stage = plugin.parameters.get("room_eq_stage").and_then(|value| value.as_str());
+            let stage = plugin
+                .parameters
+                .get("room_eq_stage")
+                .and_then(|value| value.as_str());
             if !matches!(stage, Some("pre_route" | "post_route" | "route_owned")) {
                 return Err(autoeq_core::AutoeqError::InvalidMeasurement {
-                    message: format!("routed channel '{name}' plugin #{index} ('{}') requires explicit pre_route, post_route or route_owned ownership; got {stage:?}", plugin.plugin_type),
+                    message: format!(
+                        "routed channel '{name}' plugin #{index} ('{}') requires explicit pre_route, post_route or route_owned ownership; got {stage:?}",
+                        plugin.plugin_type
+                    ),
                 });
             }
         }
@@ -143,11 +156,20 @@ pub fn export_dsp_chain(
     path: &Path,
     sample_rate: f64,
 ) -> anyhow::Result<()> {
-    anyhow::ensure!(!graph.metadata.as_ref().and_then(|metadata| metadata.final_convolution_sha256.as_ref()).is_some_and(|inventory| !inventory.is_empty()),
-        "bound convolution artifacts require export with verified sidecars");
+    anyhow::ensure!(
+        !graph
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.final_convolution_sha256.as_ref())
+            .is_some_and(|inventory| !inventory.is_empty()),
+        "bound convolution artifacts require export with verified sidecars"
+    );
     let content = render_dsp_graph(graph, format, sample_rate)?;
     if format == ExportFormat::CamillaDsp {
-        log_backend_delay(&roomeq_export::camilladsp_delay_realization(graph, sample_rate)?);
+        log_backend_delay(&roomeq_export::camilladsp_delay_realization(
+            graph,
+            sample_rate,
+        )?);
     }
     std::fs::write(path, content)
         .with_context(|| format!("failed to write external export '{}'", path.display()))?;
@@ -339,8 +361,12 @@ fn occupied_member_names(directory: &Path) -> anyhow::Result<BTreeSet<String>> {
 
 fn log_backend_delay(report: &roomeq_export::CamillaDspDelayRealization) {
     if report.fractional_delay_present {
-        log::info!("CamillaDSP fractional-delay realization adds {} common samples ({:.6} ms); delay usable band 0..{} Hz. This excludes requested delays, existing FIR latency and device buffers.",
-            report.common_padding_samples, report.additional_latency_ms, report.usable_band_upper_hz);
+        log::info!(
+            "CamillaDSP fractional-delay realization adds {} common samples ({:.6} ms); delay usable band 0..{} Hz. This excludes requested delays, existing FIR latency and device buffers.",
+            report.common_padding_samples,
+            report.additional_latency_ms,
+            report.usable_band_upper_hz
+        );
     }
 }
 
@@ -461,9 +487,11 @@ mod tests {
             let mut result = crate::test_fixtures::single_channel_room_result("left");
             result.channels = convolution_graph("impulse.wav").channels;
             result.channels.get_mut("left").unwrap().plugins[0].parameters = parameters;
-            assert!(bind_final_convolution_artifacts(
-                &mut result, source.path(), &store, 48_000.0
-            ).is_err(), "malformed convolution declaration was omitted from final evidence");
+            assert!(
+                bind_final_convolution_artifacts(&mut result, source.path(), &store, 48_000.0)
+                    .is_err(),
+                "malformed convolution declaration was omitted from final evidence"
+            );
             assert!(result.metadata.final_convolution_sha256.is_none());
         }
     }
@@ -484,24 +512,39 @@ mod tests {
                 let mut result = crate::test_fixtures::single_channel_room_result("left");
                 result.channels = convolution_graph("impulse.wav").channels;
                 result.channel_results.get_mut("left").unwrap().fir_coeffs = None;
-                store.write(&source.path().join("impulse.wav"), &bytes).unwrap();
-                assert!(bind_final_convolution_artifacts(
-                    &mut result, source.path(), &store, rate as f64
-                ).is_err(), "invalid unretained resource was bound at {rate} Hz");
+                store
+                    .write(&source.path().join("impulse.wav"), &bytes)
+                    .unwrap();
+                assert!(
+                    bind_final_convolution_artifacts(
+                        &mut result,
+                        source.path(),
+                        &store,
+                        rate as f64
+                    )
+                    .is_err(),
+                    "invalid unretained resource was bound at {rate} Hz"
+                );
                 assert!(result.metadata.final_convolution_sha256.is_none());
             }
             let mut result = crate::test_fixtures::single_channel_room_result("left");
             result.channels = convolution_graph("impulse.wav").channels;
             result.channel_results.get_mut("left").unwrap().fir_coeffs = None;
             let bytes = mono_fir_bytes(&[0.5, -0.25], rate);
-            store.write(&source.path().join("impulse.wav"), &bytes).unwrap();
-            bind_final_convolution_artifacts(
-                &mut result, source.path(), &store, rate as f64
-            ).unwrap();
+            store
+                .write(&source.path().join("impulse.wav"), &bytes)
+                .unwrap();
+            bind_final_convolution_artifacts(&mut result, source.path(), &store, rate as f64)
+                .unwrap();
             let expected = ConvolutionResource {
-                reference: "impulse.wav".into(), bytes: bytes.into(),
-            }.sha256();
-            assert_eq!(result.metadata.final_convolution_sha256.as_ref().unwrap()["impulse.wav"], Some(expected));
+                reference: "impulse.wav".into(),
+                bytes: bytes.into(),
+            }
+            .sha256();
+            assert_eq!(
+                result.metadata.final_convolution_sha256.as_ref().unwrap()["impulse.wav"],
+                Some(expected)
+            );
         }
     }
 
@@ -533,24 +576,55 @@ mod tests {
         let destination = tempfile::tempdir().unwrap();
         let reference = "impulse.wav";
         let original = mono_fir_bytes(&[0.5], 48_000);
-        store.write(&source.path().join(reference), &original).unwrap();
+        store
+            .write(&source.path().join(reference), &original)
+            .unwrap();
         let mut result = crate::test_fixtures::single_channel_room_result("left");
         result.channels = convolution_graph(reference).channels;
         bind_final_convolution_artifacts(&mut result, source.path(), &store, 48_000.0).unwrap();
-        let graph: DspGraph = serde_json::from_slice(&serde_json::to_vec(&result.to_dsp_chain_output()).unwrap()).unwrap();
+        let graph: DspGraph =
+            serde_json::from_slice(&serde_json::to_vec(&result.to_dsp_chain_output()).unwrap())
+                .unwrap();
         std::fs::write(source.path().join(reference), b"replacement").unwrap();
         let target = destination.path().join("room.yml");
-        let error = export_dsp_chain_with_convolution_sidecars(&graph, ExportFormat::CamillaDsp,
-            &target, 48_000.0, source.path()).unwrap_err();
-        assert!(error.to_string().contains("changed since workflow completion"), "{error}");
+        let error = export_dsp_chain_with_convolution_sidecars(
+            &graph,
+            ExportFormat::CamillaDsp,
+            &target,
+            48_000.0,
+            source.path(),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("changed since workflow completion"),
+            "{error}"
+        );
         assert!(!target.exists());
         std::fs::write(source.path().join(reference), original).unwrap();
         std::fs::write(destination.path().join(reference), b"occupied").unwrap();
-        let packaged = package_convolution_sidecars(&graph, source.path(), destination.path()).unwrap();
+        let packaged =
+            package_convolution_sidecars(&graph, source.path(), destination.path()).unwrap();
         assert_eq!(convolution_reference(&packaged), "impulse_002.wav");
-        assert!(packaged.metadata.as_ref().unwrap().final_convolution_sha256.as_ref().unwrap().contains_key("impulse_002.wav"));
-        export_dsp_chain_with_convolution_sidecars(&packaged, ExportFormat::CamillaDsp,
-            &target, 48_000.0, destination.path()).unwrap();
+        assert!(
+            packaged
+                .metadata
+                .as_ref()
+                .unwrap()
+                .final_convolution_sha256
+                .as_ref()
+                .unwrap()
+                .contains_key("impulse_002.wav")
+        );
+        export_dsp_chain_with_convolution_sidecars(
+            &packaged,
+            ExportFormat::CamillaDsp,
+            &target,
+            48_000.0,
+            destination.path(),
+        )
+        .unwrap();
         assert!(export_dsp_chain(&graph, ExportFormat::CamillaDsp, &target, 48_000.0).is_err());
     }
 
@@ -562,10 +636,19 @@ mod tests {
         let mut result = crate::test_fixtures::single_channel_room_result("left");
         result.channels = convolution_graph("missing.wav").channels;
         bind_final_convolution_artifacts(&mut result, source.path(), &store, 48_000.0).unwrap();
-        assert_eq!(result.metadata.final_convolution_sha256.as_ref().unwrap()["missing.wav"], None);
+        assert_eq!(
+            result.metadata.final_convolution_sha256.as_ref().unwrap()["missing.wav"],
+            None
+        );
         std::fs::write(source.path().join("missing.wav"), b"newly appeared").unwrap();
-        let error = export_dsp_chain_with_convolution_sidecars(&result.to_dsp_chain_output(),
-            ExportFormat::CamillaDsp, &destination.path().join("room.yml"), 48_000.0, source.path()).unwrap_err();
+        let error = export_dsp_chain_with_convolution_sidecars(
+            &result.to_dsp_chain_output(),
+            ExportFormat::CamillaDsp,
+            &destination.path().join("room.yml"),
+            48_000.0,
+            source.path(),
+        )
+        .unwrap_err();
         assert!(error.to_string().contains("unbound"), "{error}");
     }
 
@@ -578,11 +661,15 @@ mod tests {
         let mut package = ExportPackage::new(vec![
             ExportPackageMember::new("config.json", b"replacement config".to_vec()).unwrap(),
             ExportPackageMember::new("impulse.wav", b"accepted impulse".to_vec()).unwrap(),
-        ]).unwrap();
+        ])
+        .unwrap();
         // Keep the recorded identity, but replace a later member's actual bytes.
         package.members[1].bytes = b"stale or replaced impulse".to_vec().into();
         let error = persist_export_package(&package, destination.path()).unwrap_err();
-        assert!(error.to_string().contains("content hash mismatch"), "{error}");
+        assert!(
+            error.to_string().contains("content hash mismatch"),
+            "{error}"
+        );
         assert_eq!(std::fs::read(&output).unwrap(), b"existing accepted config");
         assert!(!destination.path().join("impulse.wav").exists());
     }
@@ -594,7 +681,9 @@ mod tests {
         let destination = directory.path().join("not_created");
         let mut member = ExportPackageMember::new("impulse.wav", vec![0_u8]).unwrap();
         member.relative_path = "../escaped.wav".into();
-        let package = ExportPackage { members: vec![member] };
+        let package = ExportPackage {
+            members: vec![member],
+        };
         assert!(persist_export_package(&package, &destination).is_err());
         assert!(!destination.exists());
         assert!(!directory.path().join("escaped.wav").exists());

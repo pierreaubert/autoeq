@@ -7,10 +7,7 @@
 
 use super::*;
 use autoeq_core::Curve;
-use autoeq_optim::optim::{
-    compute_response_fitness,
-    scalar::ScalarOptimConfig,
-};
+use autoeq_optim::optim::{compute_response_fitness, scalar::ScalarOptimConfig};
 use num_complex::Complex64;
 
 pub(super) fn optimize(
@@ -175,7 +172,8 @@ pub(super) fn optimize(
         seed: effective.seed,
         ..Default::default()
     };
-    let result = progress.optimize(&vec![(0.0, 1.0); count], &best, &config, evaluate)
+    let result = progress
+        .optimize(&vec![(0.0, 1.0); count], &best, &config, evaluate)
         .map_err(|error| fail(format!("Hybrid FIR basis optimizer: {error}")))?;
     let returned_loss = evaluate(&result.x);
     let selected_search = returned_loss.is_finite() && returned_loss < best_loss;

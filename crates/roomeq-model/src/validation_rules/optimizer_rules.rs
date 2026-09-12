@@ -32,6 +32,16 @@ pub fn rule_freq_range(ctx: &mut ValidationContext<'_>) {
     }
 }
 
+/// Validate the optional active-correction support without changing the
+/// observation band used by reports and acceptance.
+pub fn rule_correction_band(ctx: &mut ValidationContext<'_>) {
+    if let Some(policy) = ctx.opt.correction_band {
+        if let Err(error) = policy.validate_against(ctx.opt.min_freq, ctx.opt.max_freq) {
+            ctx.add_error(format!("optimizer.correction_band: {error}"));
+        }
+    }
+}
+
 pub fn rule_q_range(ctx: &mut ValidationContext<'_>) {
     if ctx.opt.min_q > ctx.opt.max_q {
         ctx.add_error(format!(
@@ -233,6 +243,12 @@ pub fn rule_high_frequency_correction(ctx: &mut ValidationContext<'_>) {
         ctx.add_error(format!(
             "high_frequency_correction.max_q ({}) must be positive",
             hf.max_q
+        ));
+    }
+    if hf.max_q < ctx.opt.min_q {
+        ctx.add_error(format!(
+            "high_frequency_correction.max_q ({}) must be >= optimizer.min_q ({})",
+            hf.max_q, ctx.opt.min_q
         ));
     }
 }
@@ -827,6 +843,7 @@ pub fn run_optimizer_validation_rules(ctx: &mut ValidationContext<'_>) {
     rule_num_filters(ctx);
     rule_finite_numeric_bounds(ctx);
     rule_freq_range(ctx);
+    rule_correction_band(ctx);
     rule_q_range(ctx);
     rule_smooth_n(ctx);
     rule_psychoacoustic_smoothing(ctx);
@@ -1330,10 +1347,7 @@ mod optimizer_rule_tests {
         let result = run_rule(rule_filter_audibility, &config);
         assert!(result.errors.is_empty());
         assert!(
-            result
-                .warnings
-                .iter()
-                .any(|w| w.contains("stays advisory")),
+            result.warnings.iter().any(|w| w.contains("stays advisory")),
             "unacknowledged enforcement must warn it stays advisory, got {:?}",
             result.warnings
         );
@@ -1370,7 +1384,10 @@ mod optimizer_rule_tests {
             });
             let result = run_rule(rule_pruning_budget, &config);
             assert!(
-                result.errors.iter().any(|e| e.contains("max_cumulative_delta")),
+                result
+                    .errors
+                    .iter()
+                    .any(|e| e.contains("max_cumulative_delta")),
                 "cap {cap} should error"
             );
         }

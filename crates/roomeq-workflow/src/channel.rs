@@ -28,6 +28,8 @@ pub type ChannelWorkflowResult = (
     Option<f64>,
     Option<Vec<f64>>,
     Vec<OptimizerRunEvidence>,
+    Vec<roomeq_model::FilterVetoVerdict>,
+    Option<roomeq_model::VetoAdjudicationReport>,
 );
 
 /// Load resources, execute one channel, and persist any generated sidecar.
@@ -187,6 +189,8 @@ fn result_tuple(result: ChannelProcessingResult) -> ChannelWorkflowResult {
         result.arrival_time_ms,
         result.fir_coeffs,
         result.optimizer_evidence,
+        result.audibility_veto,
+        result.veto_adjudication,
     )
 }
 

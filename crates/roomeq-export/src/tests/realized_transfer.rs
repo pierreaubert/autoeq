@@ -42,21 +42,38 @@ fn characterize_matrix_fractional_delay_backend() {
     let delay_ms = 0.10478137820238476;
     for subsample in [false, true] {
         // Isolate backend realization from exporter decimal quantization.
-        let yaml = format!("devices:\n  samplerate: 48000\n  chunksize: 4096\n  capture:\n    type: Stdin\n    channels: 1\n    format: S32_LE\n  playback:\n    type: Stdout\n    channels: 1\n    format: S32_LE\nfilters:\n  delay:\n    type: Delay\n    parameters:\n      delay: {delay_ms:.16}\n      unit: ms\n      subsample: {subsample}\npipeline:\n  - type: Filter\n    channels: [0]\n    names: [delay]\n");
+        let yaml = format!(
+            "devices:\n  samplerate: 48000\n  chunksize: 4096\n  capture:\n    type: Stdin\n    channels: 1\n    format: S32_LE\n  playback:\n    type: Stdout\n    channels: 1\n    format: S32_LE\nfilters:\n  delay:\n    type: Delay\n    parameters:\n      delay: {delay_ms:.16}\n      unit: ms\n      subsample: {subsample}\npipeline:\n  - type: Filter\n    channels: [0]\n    names: [delay]\n"
+        );
         let amplitude = 1 << 26;
         let mut input = vec![0_i32; 65_536];
         input[0] = amplitude;
         let rendered = super::conformance::run_optional_pcm_backend_contract(
-            "ROOMEQ_CAMILLADSP_BIN", "yaml", &yaml, &input, |_| {},
-        ).expect("backend is required");
+            "ROOMEQ_CAMILLADSP_BIN",
+            "yaml",
+            &yaml,
+            &input,
+            |_| {},
+        )
+        .expect("backend is required");
         for frequency in [100.0, 3079.853052118983, 10_000.0, 20_000.0] {
-            let actual: Complex64 = rendered.iter().enumerate().map(|(index, sample)| {
-                Complex64::from_polar(*sample as f64 / amplitude as f64,
-                    -TAU * frequency * index as f64 / rate)
-            }).sum();
+            let actual: Complex64 = rendered
+                .iter()
+                .enumerate()
+                .map(|(index, sample)| {
+                    Complex64::from_polar(
+                        *sample as f64 / amplitude as f64,
+                        -TAU * frequency * index as f64 / rate,
+                    )
+                })
+                .sum();
             let ideal = Complex64::from_polar(1.0, -TAU * frequency * delay_ms / 1000.0);
-            eprintln!("delay diagnostic subsample={subsample}, {frequency} Hz: magnitude {} dB, phase error {} rad, complex error {}",
-                20.0 * actual.norm().log10(), (actual / ideal).arg(), (actual - ideal).norm());
+            eprintln!(
+                "delay diagnostic subsample={subsample}, {frequency} Hz: magnitude {} dB, phase error {} rad, complex error {}",
+                20.0 * actual.norm().log10(),
+                (actual / ideal).arg(),
+                (actual - ideal).norm()
+            );
         }
     }
 }
@@ -70,11 +87,14 @@ fn record_backend_row_failure(
 ) {
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(evidence)));
     if let Err(payload) = outcome {
-        let message = payload.downcast_ref::<String>().map(String::as_str)
+        let message = payload
+            .downcast_ref::<String>()
+            .map(String::as_str)
             .or_else(|| payload.downcast_ref::<&str>().copied())
             .unwrap_or("non-string backend replay panic");
         evidence["status"] = json!("failed");
-        evidence["failure"] = json!({"kind": "backend_replay_assertion_or_setup_failure", "message": message});
+        evidence["failure"] =
+            json!({"kind": "backend_replay_assertion_or_setup_failure", "message": message});
         save(evidence);
         std::panic::resume_unwind(payload);
     }
@@ -86,14 +106,22 @@ fn backend_row_failure_preserves_context_and_still_fails() {
     let mut evidence = json!({"status": "running", "row": 3, "run_id": "fault-test",
         "comparisons": [{"input": "L", "output": "L", "frequency_count": 49}]});
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        record_backend_row_failure(&mut evidence, |record| {
-            saved.replace(Some(record.clone()));
-        }, |record| {
-            record["active_comparison"] = json!({"input": "R", "output": "SUB1", "frequency_hz": 80.0});
-            panic!("injected missing sub route");
-        });
+        record_backend_row_failure(
+            &mut evidence,
+            |record| {
+                saved.replace(Some(record.clone()));
+            },
+            |record| {
+                record["active_comparison"] =
+                    json!({"input": "R", "output": "SUB1", "frequency_hz": 80.0});
+                panic!("injected missing sub route");
+            },
+        );
     }));
-    assert!(outcome.is_err(), "failure must propagate to the required runner");
+    assert!(
+        outcome.is_err(),
+        "failure must propagate to the required runner"
+    );
     let record = saved.into_inner().expect("terminal evidence was saved");
     assert_eq!(record["status"], "failed");
     assert_eq!(record["run_id"], "fault-test");
@@ -112,7 +140,10 @@ fn parameter_matrix_backend_complex_transfer() {
     std::env::var("ROOMEQ_CAMILLADSP_BIN").expect("backend is required");
     let matrix = std::env::var("ROOMEQ_PARAMETER_MATRIX").expect("matrix is required");
     let backend = std::env::var("ROOMEQ_CAMILLADSP_BIN").unwrap();
-    let version = std::process::Command::new(&backend).arg("--version").output().unwrap();
+    let version = std::process::Command::new(&backend)
+        .arg("--version")
+        .output()
+        .unwrap();
     assert!(version.status.success());
     let rows: Vec<serde_json::Value> =
         serde_json::from_slice(&std::fs::read(matrix).unwrap()).unwrap();
@@ -134,135 +165,201 @@ fn parameter_matrix_backend_complex_transfer() {
             "requested_axes": row["requested_axes"], "unexecuted_axes": row["unexecuted_axes"]});
         save_evidence(&evidence);
         record_backend_row_failure(&mut evidence, &save_evidence, |evidence| {
-        evidence["phase"] = json!("load_and_validate_artifacts");
-        let graph: DspGraph = serde_json::from_slice(&std::fs::read(
-            directory.join(bundle["selected_output"].as_str().unwrap()),
-        ).unwrap()).unwrap();
-        let rate = row["sample_rate_hz"].as_f64().unwrap();
-        let mut irs = HashMap::new();
-        for chain in graph.channels.values() {
-            assert!(chain.drivers.as_ref().is_none_or(|drivers| drivers.is_empty()),
-                "driver graphs require a separate physical-output oracle");
-            for plugin in &chain.plugins {
-                if plugin.plugin_type == "convolution" {
-                    let name = plugin.parameters["ir_file"].as_str().unwrap();
-                    let path = directory.join(name).canonicalize().unwrap();
-                    assert!(path.starts_with(directory.canonicalize().unwrap()));
-                    let mut reader = hound::WavReader::open(path).unwrap();
-                    assert_eq!(reader.spec().sample_rate, rate as u32);
-                    assert_eq!(reader.spec().channels, 1);
-                    let taps: Vec<f64> = reader.samples::<f32>()
-                        .map(|sample| sample.unwrap() as f64).collect();
-                    assert!(!taps.is_empty() && taps.iter().all(|tap| tap.is_finite()));
-                    irs.insert(name.to_owned(), taps);
+            evidence["phase"] = json!("load_and_validate_artifacts");
+            let graph: DspGraph = serde_json::from_slice(
+                &std::fs::read(directory.join(bundle["selected_output"].as_str().unwrap()))
+                    .unwrap(),
+            )
+            .unwrap();
+            let rate = row["sample_rate_hz"].as_f64().unwrap();
+            let mut irs = HashMap::new();
+            for chain in graph.channels.values() {
+                assert!(
+                    chain
+                        .drivers
+                        .as_ref()
+                        .is_none_or(|drivers| drivers.is_empty()),
+                    "driver graphs require a separate physical-output oracle"
+                );
+                for plugin in &chain.plugins {
+                    if plugin.plugin_type == "convolution" {
+                        let name = plugin.parameters["ir_file"].as_str().unwrap();
+                        let path = directory.join(name).canonicalize().unwrap();
+                        assert!(path.starts_with(directory.canonicalize().unwrap()));
+                        let mut reader = hound::WavReader::open(path).unwrap();
+                        assert_eq!(reader.spec().sample_rate, rate as u32);
+                        assert_eq!(reader.spec().channels, 1);
+                        let taps: Vec<f64> = reader
+                            .samples::<f32>()
+                            .map(|sample| sample.unwrap() as f64)
+                            .collect();
+                        assert!(!taps.is_empty() && taps.iter().all(|tap| tap.is_finite()));
+                        irs.insert(name.to_owned(), taps);
+                    }
                 }
             }
-        }
-        let frequencies: Vec<f64> = (0..49)
-            .map(|bin| 20.0 * 1000.0_f64.powf(bin as f64 / 48.0)).collect();
-        let routing = graph.metadata.as_ref().and_then(|m| m.bass_management.as_ref())
-            .and_then(|b| b.routing_graph.as_ref()).filter(|r| !r.routes.is_empty());
-        let (inputs, outputs, expected) = if let Some(routing) = routing {
-            (routing.input_channels.clone(), routing.output_channels.clone(),
-                reference_transfer_with_delay_model(&graph, rate, &frequencies, &irs, false))
-        } else {
-            let mut names: Vec<String> = graph.channels.keys().cloned().collect();
-            names.sort();
-            let transfer = names.iter().map(|destination| {
-                let by_source = names.iter().map(|source| {
-                    let response = frequencies.iter().map(|frequency| {
-                        if source == destination {
-                            graph.channels[destination].plugins.iter().map(|plugin|
-                                plugin_response(plugin, rate, *frequency, &irs)).product()
-                        } else { Complex64::new(0.0, 0.0) }
-                    }).collect::<Vec<_>>();
-                    (source.clone(), response)
-                }).collect::<HashMap<_, _>>();
-                (destination.clone(), by_source)
-            }).collect::<HashMap<_, _>>();
-            (names.clone(), names, transfer)
-        };
-        let yaml = render_dsp_chain(&graph, ExportFormat::CamillaDsp, rate).unwrap();
-        let common_padding: f64 = yaml.lines().find_map(|line|
-            line.strip_prefix("# roomeq_common_delay_padding_samples: "))
-            .expect("export must declare its common causal latency").parse().unwrap();
-        assert_eq!(common_padding, reference_padding_samples(&graph, rate));
-        let padding_to_apply = if routing.is_some() { 0.0 } else { common_padding };
-        let mut hashes = serde_json::Map::new();
-        for filename in irs.keys().map(String::as_str).chain([
-            bundle["selected_output"].as_str().unwrap(), bundle["request"].as_str().unwrap()]) {
-            hashes.insert(filename.to_owned(), json!(crate::hash::sha256_hex(&std::fs::read(directory.join(filename)).unwrap())));
-        }
-        evidence["artifact_sha256"] = json!(hashes);
-        evidence["yaml_sha256"] = json!(crate::hash::sha256_hex(yaml.as_bytes()));
-        std::fs::write(directory.join("backend-camilladsp.yaml"), &yaml).unwrap();
-        evidence["sample_rate_hz"] = json!(rate);
-        evidence["common_padding_samples"] = json!(common_padding);
-        evidence["frequencies_hz"] = json!(frequencies);
-        evidence["input_channels"] = json!(inputs);
-        evidence["output_channels"] = json!(outputs);
-        save_evidence(&evidence);
-        let frames = 131_072;
-        let amplitude = 1 << 26;
-        evidence["frames_per_input"] = json!(frames);
-        evidence["impulse_amplitude_s32"] = json!(amplitude);
-        evidence["absolute_error_allowance"] = json!(0.0001);
-        evidence["relative_error_allowance"] = json!(0.01);
-        let mut max_error = 0.0_f64;
-        let mut comparisons = Vec::new();
-        for (source_index, source) in inputs.iter().enumerate() {
-            evidence["phase"] = json!("render_backend_input");
-            evidence["active_comparison"] = json!({"input": source});
-            let mut input = vec![0_i32; frames * inputs.len()];
-            input[source_index] = amplitude;
-            let rendered = super::conformance::run_optional_pcm_backend_contract(
-                "ROOMEQ_CAMILLADSP_BIN", "yaml", &yaml, &input, |dir| {
-                    for name in irs.keys() {
-                        std::fs::copy(directory.join(name), dir.join(name)).unwrap();
+            let frequencies: Vec<f64> = (0..49)
+                .map(|bin| 20.0 * 1000.0_f64.powf(bin as f64 / 48.0))
+                .collect();
+            let routing = graph
+                .metadata
+                .as_ref()
+                .and_then(|m| m.bass_management.as_ref())
+                .and_then(|b| b.routing_graph.as_ref())
+                .filter(|r| !r.routes.is_empty());
+            let (inputs, outputs, expected) = if let Some(routing) = routing {
+                (
+                    routing.input_channels.clone(),
+                    routing.output_channels.clone(),
+                    reference_transfer_with_delay_model(&graph, rate, &frequencies, &irs, false),
+                )
+            } else {
+                let mut names: Vec<String> = graph.channels.keys().cloned().collect();
+                names.sort();
+                let transfer = names
+                    .iter()
+                    .map(|destination| {
+                        let by_source = names
+                            .iter()
+                            .map(|source| {
+                                let response = frequencies
+                                    .iter()
+                                    .map(|frequency| {
+                                        if source == destination {
+                                            graph.channels[destination]
+                                                .plugins
+                                                .iter()
+                                                .map(|plugin| {
+                                                    plugin_response(plugin, rate, *frequency, &irs)
+                                                })
+                                                .product()
+                                        } else {
+                                            Complex64::new(0.0, 0.0)
+                                        }
+                                    })
+                                    .collect::<Vec<_>>();
+                                (source.clone(), response)
+                            })
+                            .collect::<HashMap<_, _>>();
+                        (destination.clone(), by_source)
+                    })
+                    .collect::<HashMap<_, _>>();
+                (names.clone(), names, transfer)
+            };
+            let yaml = render_dsp_chain(&graph, ExportFormat::CamillaDsp, rate).unwrap();
+            let common_padding: f64 = yaml
+                .lines()
+                .find_map(|line| line.strip_prefix("# roomeq_common_delay_padding_samples: "))
+                .expect("export must declare its common causal latency")
+                .parse()
+                .unwrap();
+            assert_eq!(common_padding, reference_padding_samples(&graph, rate));
+            let padding_to_apply = if routing.is_some() {
+                0.0
+            } else {
+                common_padding
+            };
+            let mut hashes = serde_json::Map::new();
+            for filename in irs.keys().map(String::as_str).chain([
+                bundle["selected_output"].as_str().unwrap(),
+                bundle["request"].as_str().unwrap(),
+            ]) {
+                hashes.insert(
+                    filename.to_owned(),
+                    json!(crate::hash::sha256_hex(
+                        &std::fs::read(directory.join(filename)).unwrap()
+                    )),
+                );
+            }
+            evidence["artifact_sha256"] = json!(hashes);
+            evidence["yaml_sha256"] = json!(crate::hash::sha256_hex(yaml.as_bytes()));
+            std::fs::write(directory.join("backend-camilladsp.yaml"), &yaml).unwrap();
+            evidence["sample_rate_hz"] = json!(rate);
+            evidence["common_padding_samples"] = json!(common_padding);
+            evidence["frequencies_hz"] = json!(frequencies);
+            evidence["input_channels"] = json!(inputs);
+            evidence["output_channels"] = json!(outputs);
+            save_evidence(&evidence);
+            let frames = 131_072;
+            let amplitude = 1 << 26;
+            evidence["frames_per_input"] = json!(frames);
+            evidence["impulse_amplitude_s32"] = json!(amplitude);
+            evidence["absolute_error_allowance"] = json!(0.0001);
+            evidence["relative_error_allowance"] = json!(0.01);
+            let mut max_error = 0.0_f64;
+            let mut comparisons = Vec::new();
+            for (source_index, source) in inputs.iter().enumerate() {
+                evidence["phase"] = json!("render_backend_input");
+                evidence["active_comparison"] = json!({"input": source});
+                let mut input = vec![0_i32; frames * inputs.len()];
+                input[source_index] = amplitude;
+                let rendered = super::conformance::run_optional_pcm_backend_contract(
+                    "ROOMEQ_CAMILLADSP_BIN",
+                    "yaml",
+                    &yaml,
+                    &input,
+                    |dir| {
+                        for name in irs.keys() {
+                            std::fs::copy(directory.join(name), dir.join(name)).unwrap();
+                        }
+                    },
+                )
+                .expect("required backend did not execute");
+                assert!(rendered.len() >= frames * outputs.len());
+                for (output_index, destination) in outputs.iter().enumerate() {
+                    let mut path_max_error = 0.0_f64;
+                    let mut complex_samples = Vec::with_capacity(frequencies.len());
+                    for (bin, frequency) in frequencies.iter().enumerate() {
+                        evidence["phase"] = json!("compare_complex_transfer");
+                        evidence["active_comparison"] = json!({"input": source, "output": destination, "frequency_hz": frequency});
+                        let step = Complex64::from_polar(1.0, -TAU * frequency / rate);
+                        let mut phase = Complex64::new(1.0, 0.0);
+                        let mut actual = Complex64::new(0.0, 0.0);
+                        for frame in rendered.chunks_exact(outputs.len()).take(frames) {
+                            actual += phase * (frame[output_index] as f64 / amplitude as f64);
+                            phase *= step;
+                        }
+                        let target = expected[destination][source][bin]
+                            * Complex64::from_polar(
+                                1.0,
+                                -TAU * frequency * padding_to_apply / rate,
+                            );
+                        let error = (actual - target).norm();
+                        evidence["active_comparison"]["actual_complex"] =
+                            json!([actual.re, actual.im]);
+                        evidence["active_comparison"]["expected_complex"] =
+                            json!([target.re, target.im]);
+                        evidence["active_comparison"]["absolute_complex_error"] = json!(error);
+                        max_error = max_error.max(error);
+                        path_max_error = path_max_error.max(error);
+                        complex_samples.push(json!({"actual": [actual.re, actual.im], "expected": [target.re, target.im]}));
+                        assert!(
+                            error <= 0.0001 + 0.01 * target.norm(),
+                            "row {index} {source}->{destination} at {frequency} Hz: actual {actual}, expected {target}, error {error}"
+                        );
                     }
-                },
-            ).expect("required backend did not execute");
-            assert!(rendered.len() >= frames * outputs.len());
-            for (output_index, destination) in outputs.iter().enumerate() {
-                let mut path_max_error = 0.0_f64;
-                let mut complex_samples = Vec::with_capacity(frequencies.len());
-                for (bin, frequency) in frequencies.iter().enumerate() {
-                    evidence["phase"] = json!("compare_complex_transfer");
-                    evidence["active_comparison"] = json!({"input": source, "output": destination, "frequency_hz": frequency});
-                    let step = Complex64::from_polar(1.0, -TAU * frequency / rate);
-                    let mut phase = Complex64::new(1.0, 0.0);
-                    let mut actual = Complex64::new(0.0, 0.0);
-                    for frame in rendered.chunks_exact(outputs.len()).take(frames) {
-                        actual += phase * (frame[output_index] as f64 / amplitude as f64);
-                        phase *= step;
-                    }
-                    let target = expected[destination][source][bin]
-                        * Complex64::from_polar(1.0, -TAU * frequency * padding_to_apply / rate);
-                    let error = (actual - target).norm();
-                    evidence["active_comparison"]["actual_complex"] = json!([actual.re, actual.im]);
-                    evidence["active_comparison"]["expected_complex"] = json!([target.re, target.im]);
-                    evidence["active_comparison"]["absolute_complex_error"] = json!(error);
-                    max_error = max_error.max(error);
-                    path_max_error = path_max_error.max(error);
-                    complex_samples.push(json!({"actual": [actual.re, actual.im], "expected": [target.re, target.im]}));
-                    assert!(error <= 0.0001 + 0.01 * target.norm(),
-                        "row {index} {source}->{destination} at {frequency} Hz: actual {actual}, expected {target}, error {error}");
-                }
-                comparisons.push(json!({"input": source, "output": destination,
+                    comparisons.push(json!({"input": source, "output": destination,
                     "max_absolute_complex_error": path_max_error, "frequency_count": frequencies.len(), "complex_samples": complex_samples}));
-                evidence["comparisons"] = json!(comparisons);
+                    evidence["comparisons"] = json!(comparisons);
+                }
             }
-        }
-        evidence["status"] = json!("passed");
-        evidence["phase"] = json!("complete");
-        evidence.as_object_mut().unwrap().remove("active_comparison");
-        evidence["comparisons"] = json!(comparisons);
-        evidence["frames_per_input"] = json!(frames);
-        evidence["impulse_amplitude_s32"] = json!(amplitude);
-        evidence["absolute_error_allowance"] = json!(0.0001);
-        evidence["relative_error_allowance"] = json!(0.01);
-        save_evidence(&evidence);
-        eprintln!("matrix backend row {index}: {} inputs, {} outputs, {rate} Hz, max complex error {max_error}", inputs.len(), outputs.len());
+            evidence["status"] = json!("passed");
+            evidence["phase"] = json!("complete");
+            evidence
+                .as_object_mut()
+                .unwrap()
+                .remove("active_comparison");
+            evidence["comparisons"] = json!(comparisons);
+            evidence["frames_per_input"] = json!(frames);
+            evidence["impulse_amplitude_s32"] = json!(amplitude);
+            evidence["absolute_error_allowance"] = json!(0.0001);
+            evidence["relative_error_allowance"] = json!(0.01);
+            save_evidence(&evidence);
+            eprintln!(
+                "matrix backend row {index}: {} inputs, {} outputs, {rate} Hz, max complex error {max_error}",
+                inputs.len(),
+                outputs.len()
+            );
         });
     }
 }
@@ -450,6 +547,8 @@ fn multisub_fixture(sub_count: usize) -> (DspGraph, HashMap<String, Vec<f64>>) {
         final_convolution_sha256: None,
         supporting_source: None,
         correction_acceptance: None,
+        audibility_veto: None,
+        veto_adjudication: None,
         optimizer_evidence: None,
         stage_outcomes: Vec::new(),
         qa_seed_distribution: None,
@@ -535,11 +634,17 @@ fn plugin_response(
 fn oracle_crossover_q(order: usize, linkwitz_riley: bool) -> Vec<f64> {
     let butterworth_order = if linkwitz_riley { order / 2 } else { order };
     assert!(butterworth_order >= 2 && butterworth_order % 2 == 0);
-    let mut q: Vec<_> = (0..butterworth_order / 2).map(|index| {
-        1.0 / (2.0 * (((2 * index + 1) as f64 * std::f64::consts::PI)
-            / (2 * butterworth_order) as f64).cos())
-    }).collect();
-    if linkwitz_riley { q.extend(q.clone()); }
+    let mut q: Vec<_> = (0..butterworth_order / 2)
+        .map(|index| {
+            1.0 / (2.0
+                * (((2 * index + 1) as f64 * std::f64::consts::PI)
+                    / (2 * butterworth_order) as f64)
+                    .cos())
+        })
+        .collect();
+    if linkwitz_riley {
+        q.extend(q.clone());
+    }
     q
 }
 
@@ -560,15 +665,15 @@ fn crossover_response(
         "butterworth24" | "bw24" => (4, false),
         other => panic!("fixture uses unsupported crossover '{other}'"),
     };
-    oracle_crossover_q(order, linkwitz_riley).into_iter()
+    oracle_crossover_q(order, linkwitz_riley)
+        .into_iter()
         .map(|q| {
             let filter_type = if lowpass {
                 BiquadFilterType::Lowpass
             } else {
                 BiquadFilterType::Highpass
             };
-            Biquad::new(filter_type, frequency_hz, sample_rate, q, 0.0)
-                .complex_response(frequency)
+            Biquad::new(filter_type, frequency_hz, sample_rate, q, 0.0).complex_response(frequency)
         })
         .product()
 }
@@ -606,22 +711,59 @@ fn chain_response(
 /// Every parallel stage includes its zero-delay branches. Do not read the
 /// export's latency declaration to determine the expected padding.
 fn reference_padding_samples(graph: &DspGraph, rate: f64) -> f64 {
-    let stage_padding = |delays: Vec<f64>| delays.into_iter().map(|ms| {
-        let samples = ms * rate / 1000.0;
-        if (samples - samples.round()).abs() <= 1e-9 { 0.0 }
-        else { (64.0 - samples.floor()).max(0.0) }
-    }).fold(0.0_f64, f64::max);
-    let chain_delay = |name: &String, stage: Option<&str>| graph.channels[name].plugins.iter()
-        .filter(|p| p.plugin_type == "delay" && stage.is_none_or(|s|
-            p.parameters["room_eq_stage"].as_str() == Some(s)))
-        .map(|p| p.parameters["delay_ms"].as_f64().unwrap()).sum::<f64>();
-    if let Some(routing) = graph.metadata.as_ref().and_then(|m| m.bass_management.as_ref())
-        .and_then(|b| b.routing_graph.as_ref()).filter(|r| !r.routes.is_empty()) {
-        stage_padding(routing.input_channels.iter().map(|name| chain_delay(name, Some("pre_route"))).collect())
-            + stage_padding(routing.routes.iter().map(|r| r.delay_ms).collect())
-            + stage_padding(routing.output_channels.iter().map(|name| chain_delay(name, Some("post_route"))).collect())
+    let stage_padding = |delays: Vec<f64>| {
+        delays
+            .into_iter()
+            .map(|ms| {
+                let samples = ms * rate / 1000.0;
+                if (samples - samples.round()).abs() <= 1e-9 {
+                    0.0
+                } else {
+                    (64.0 - samples.floor()).max(0.0)
+                }
+            })
+            .fold(0.0_f64, f64::max)
+    };
+    let chain_delay = |name: &String, stage: Option<&str>| {
+        graph.channels[name]
+            .plugins
+            .iter()
+            .filter(|p| {
+                p.plugin_type == "delay"
+                    && stage.is_none_or(|s| p.parameters["room_eq_stage"].as_str() == Some(s))
+            })
+            .map(|p| p.parameters["delay_ms"].as_f64().unwrap())
+            .sum::<f64>()
+    };
+    if let Some(routing) = graph
+        .metadata
+        .as_ref()
+        .and_then(|m| m.bass_management.as_ref())
+        .and_then(|b| b.routing_graph.as_ref())
+        .filter(|r| !r.routes.is_empty())
+    {
+        stage_padding(
+            routing
+                .input_channels
+                .iter()
+                .map(|name| chain_delay(name, Some("pre_route")))
+                .collect(),
+        ) + stage_padding(routing.routes.iter().map(|r| r.delay_ms).collect())
+            + stage_padding(
+                routing
+                    .output_channels
+                    .iter()
+                    .map(|name| chain_delay(name, Some("post_route")))
+                    .collect(),
+            )
     } else {
-        stage_padding(graph.channels.keys().map(|name| chain_delay(name, None)).collect())
+        stage_padding(
+            graph
+                .channels
+                .keys()
+                .map(|name| chain_delay(name, None))
+                .collect(),
+        )
     }
 }
 
@@ -650,9 +792,11 @@ fn reference_delay_shape(delay_ms: f64, rate: f64, frequency: f64) -> Complex64 
     for index in 0..129 {
         let distance = index as f64 - center;
         let angle = std::f64::consts::PI * distance;
-        let coefficient = if distance.abs() > 64.0 { 0.0 } else {
-            (angle.sin() / angle) * (0.42 + 0.5 * (angle / 64.0).cos()
-                + 0.08 * (angle / 32.0).cos())
+        let coefficient = if distance.abs() > 64.0 {
+            0.0
+        } else {
+            (angle.sin() / angle)
+                * (0.42 + 0.5 * (angle / 64.0).cos() + 0.08 * (angle / 32.0).cos())
         };
         dc += coefficient;
         response += Complex64::from_polar(coefficient, -TAU * frequency * index as f64 / rate);
@@ -667,12 +811,23 @@ fn reference_transfer_with_delay_model(
     ir_registry: &HashMap<String, Vec<f64>>,
     finite_delay: bool,
 ) -> HashMap<String, HashMap<String, Vec<Complex64>>> {
-    let shape = |delay, frequency| if finite_delay {
-        reference_delay_shape(delay, sample_rate, frequency)
-    } else { Complex64::new(1.0, 0.0) };
-    let chain_delay = |name: &String, stage: &str| graph.channels[name].plugins.iter()
-        .filter(|p| p.plugin_type == "delay" && p.parameters["room_eq_stage"].as_str() == Some(stage))
-        .map(|p| p.parameters["delay_ms"].as_f64().unwrap()).sum::<f64>();
+    let shape = |delay, frequency| {
+        if finite_delay {
+            reference_delay_shape(delay, sample_rate, frequency)
+        } else {
+            Complex64::new(1.0, 0.0)
+        }
+    };
+    let chain_delay = |name: &String, stage: &str| {
+        graph.channels[name]
+            .plugins
+            .iter()
+            .filter(|p| {
+                p.plugin_type == "delay" && p.parameters["room_eq_stage"].as_str() == Some(stage)
+            })
+            .map(|p| p.parameters["delay_ms"].as_f64().unwrap())
+            .sum::<f64>()
+    };
     let routing = graph
         .metadata
         .as_ref()
@@ -752,14 +907,22 @@ fn reference_transfer_with_delay_model(
                                 1.0,
                                 -TAU * frequency * route.delay_ms / 1000.0,
                             );
-                            Complex64::new(gain, 0.0) * branch * delay * shape(route.delay_ms, *frequency)
+                            Complex64::new(gain, 0.0)
+                                * branch
+                                * delay
+                                * shape(route.delay_ms, *frequency)
                         })
                         .sum();
-                    post[index] * pre[index] * bus
+                    post[index]
+                        * pre[index]
+                        * bus
                         * shape(chain_delay(source, "pre_route"), *frequency)
                         * shape(chain_delay(destination, "post_route"), *frequency)
                         * Complex64::from_polar(
-                        1.0, -TAU * frequency * reference_padding_samples(graph, sample_rate) / sample_rate)
+                            1.0,
+                            -TAU * frequency * reference_padding_samples(graph, sample_rate)
+                                / sample_rate,
+                        )
                 })
                 .collect();
             inputs.insert(source.clone(), response);
@@ -809,7 +972,9 @@ impl RealizedFilter {
             Self::DelayMs(delay_ms) => {
                 Complex64::from_polar(1.0, -TAU * frequency * delay_ms / 1000.0)
             }
-            Self::DelaySamples(samples) => Complex64::from_polar(1.0, -TAU * frequency * samples / sample_rate),
+            Self::DelaySamples(samples) => {
+                Complex64::from_polar(1.0, -TAU * frequency * samples / sample_rate)
+            }
             Self::InlineConv(taps) => fir_response(taps, sample_rate, frequency),
             Self::Biquad {
                 filter_type,
@@ -822,7 +987,8 @@ impl RealizedFilter {
                 lowpass,
                 freq,
                 q_values,
-            } => q_values.iter()
+            } => q_values
+                .iter()
                 .map(|q| {
                     Biquad::new(
                         if *lowpass {
@@ -932,13 +1098,11 @@ fn parse_filters(lines: &[String]) -> HashMap<String, RealizedFilter> {
                 db: parse_number(&params["gain"]),
                 inverted: params.get("inverted").is_some_and(|v| v == "true"),
             },
-            "Delay" => {
-                match params["unit"].as_str() {
-                    "ms" => RealizedFilter::DelayMs(parse_number(&params["delay"])),
-                    "samples" => RealizedFilter::DelaySamples(parse_number(&params["delay"])),
-                    unit => panic!("unsupported delay unit {unit}"),
-                }
-            }
+            "Delay" => match params["unit"].as_str() {
+                "ms" => RealizedFilter::DelayMs(parse_number(&params["delay"])),
+                "samples" => RealizedFilter::DelaySamples(parse_number(&params["delay"])),
+                unit => panic!("unsupported delay unit {unit}"),
+            },
             "Biquad" => RealizedFilter::Biquad {
                 filter_type: camilladsp_biquad_type(&params["type"]),
                 freq: parse_number(&params["freq"]),
@@ -963,7 +1127,10 @@ fn parse_filters(lines: &[String]) -> HashMap<String, RealizedFilter> {
                 RealizedFilter::Crossover {
                     lowpass,
                     freq: parse_number(&params["freq"]),
-                    q_values: oracle_crossover_q(order, params["type"].starts_with("LinkwitzRiley")),
+                    q_values: oracle_crossover_q(
+                        order,
+                        params["type"].starts_with("LinkwitzRiley"),
+                    ),
                 }
             }
             "Conv" if params.get("type").is_some_and(|kind| kind == "Values") => {
@@ -1444,42 +1611,77 @@ fn tool_contract_camilladsp_multisub_coherent_peak_at_all_rates() {
             let (_graph, irs, yaml, inputs, outputs) = render_routed(sub_count, rate);
             let frequencies = log_grid();
             let predicted = realized_transfer(&yaml, rate, &frequencies, &inputs, &outputs, &irs);
-            let physical_subs: Vec<_> = outputs.iter().enumerate().filter(|(_, name)| name.starts_with("SUB")).collect();
+            let physical_subs: Vec<_> = outputs
+                .iter()
+                .enumerate()
+                .filter(|(_, name)| name.starts_with("SUB"))
+                .collect();
             assert_eq!(physical_subs.len(), sub_count);
             for (output_index, target) in physical_subs {
-            let (bin, expected) = (0..frequencies.len()).map(|bin| {
-                (bin, inputs.iter().map(|input| predicted.transfer[target][input][bin].norm()).sum::<f64>())
-            }).max_by(|left, right| left.1.total_cmp(&right.1)).unwrap();
-            let frequency = frequencies[bin];
-            let frames = 65_536;
-            let scale = 0.005;
-            let mut samples = Vec::with_capacity(frames * inputs.len());
-            for frame in 0..frames {
-                for input in &inputs {
-                    let phase = predicted.transfer[target][input][bin].arg();
-                    let value = scale * (std::f64::consts::TAU * frequency * frame as f64 / rate - phase).sin();
-                    samples.push((value * i32::MAX as f64).round() as i32);
-                }
-            }
-            let rendered = super::conformance::run_optional_pcm_backend_contract(
-                "ROOMEQ_CAMILLADSP_BIN", "yaml", &yaml, &samples, |dir| {
-                    for (name, coefficients) in &irs {
-                        let spec = hound::WavSpec { channels: 1, sample_rate: rate as u32,
-                            bits_per_sample: 32, sample_format: hound::SampleFormat::Float };
-                        let mut writer = hound::WavWriter::create(dir.join(name), spec).unwrap();
-                        for coefficient in coefficients { writer.write_sample(*coefficient as f32).unwrap(); }
-                        writer.finalize().unwrap();
+                let (bin, expected) = (0..frequencies.len())
+                    .map(|bin| {
+                        (
+                            bin,
+                            inputs
+                                .iter()
+                                .map(|input| predicted.transfer[target][input][bin].norm())
+                                .sum::<f64>(),
+                        )
+                    })
+                    .max_by(|left, right| left.1.total_cmp(&right.1))
+                    .unwrap();
+                let frequency = frequencies[bin];
+                let frames = 65_536;
+                let scale = 0.005;
+                let mut samples = Vec::with_capacity(frames * inputs.len());
+                for frame in 0..frames {
+                    for input in &inputs {
+                        let phase = predicted.transfer[target][input][bin].arg();
+                        let value = scale
+                            * (std::f64::consts::TAU * frequency * frame as f64 / rate - phase)
+                                .sin();
+                        samples.push((value * i32::MAX as f64).round() as i32);
                     }
-                },
-            ).expect("explicitly enabled backend must execute");
-            assert!(rendered.len() >= frames * outputs.len());
-            let peak = rendered.chunks_exact(outputs.len()).skip(frames / 2).take(frames / 2)
-                .map(|frame| frame[output_index].unsigned_abs() as f64 / i32::MAX as f64)
-                .fold(0.0_f64, f64::max);
-            let error_db = 20.0 * (peak / (scale * expected)).log10();
-            eprintln!("CamillaDSP: {sub_count} subs, {rate} Hz, {target}, {frequency} Hz tone: peak error {error_db:.6} dB");
-            assert!(error_db.abs() < 0.05,
-                "{sub_count} subs at {rate} Hz, {target}: actual {peak}, predicted {}, error {error_db} dB", scale * expected);
+                }
+                let rendered = super::conformance::run_optional_pcm_backend_contract(
+                    "ROOMEQ_CAMILLADSP_BIN",
+                    "yaml",
+                    &yaml,
+                    &samples,
+                    |dir| {
+                        for (name, coefficients) in &irs {
+                            let spec = hound::WavSpec {
+                                channels: 1,
+                                sample_rate: rate as u32,
+                                bits_per_sample: 32,
+                                sample_format: hound::SampleFormat::Float,
+                            };
+                            let mut writer =
+                                hound::WavWriter::create(dir.join(name), spec).unwrap();
+                            for coefficient in coefficients {
+                                writer.write_sample(*coefficient as f32).unwrap();
+                            }
+                            writer.finalize().unwrap();
+                        }
+                    },
+                )
+                .expect("explicitly enabled backend must execute");
+                assert!(rendered.len() >= frames * outputs.len());
+                let peak = rendered
+                    .chunks_exact(outputs.len())
+                    .skip(frames / 2)
+                    .take(frames / 2)
+                    .map(|frame| frame[output_index].unsigned_abs() as f64 / i32::MAX as f64)
+                    .fold(0.0_f64, f64::max);
+                let error_db = 20.0 * (peak / (scale * expected)).log10();
+                eprintln!(
+                    "CamillaDSP: {sub_count} subs, {rate} Hz, {target}, {frequency} Hz tone: peak error {error_db:.6} dB"
+                );
+                assert!(
+                    error_db.abs() < 0.05,
+                    "{sub_count} subs at {rate} Hz, {target}: actual {peak}, predicted {}, error {error_db} dB",
+                    scale * expected
+                );
             }
         }
     }
@@ -1604,7 +1806,6 @@ fn multisub_crossover_anchor_holds_across_sample_rates() {
         }
     }
 }
-
 
 #[test]
 fn multisub_allpass_is_phase_only() {
@@ -1902,7 +2103,10 @@ fn multisub_delay_precision_contract() {
     };
     let yaml = render_dsp_chain(&output, ExportFormat::CamillaDsp, 48_000.0).unwrap();
     assert!(yaml.contains("type: Values"));
-    assert!(!yaml.contains("delay: 1.235"), "must not quantize milliseconds");
+    assert!(
+        !yaml.contains("delay: 1.235"),
+        "must not quantize milliseconds"
+    );
     let sections = document_sections(&yaml);
     let filters = parse_filters(&sections["filters"]);
     let registry = HashMap::new();
@@ -1911,12 +2115,16 @@ fn multisub_delay_precision_contract() {
     for bin in 0..=128 {
         let frequency = 0.46 * 48_000.0 * bin as f64 / 128.0;
         let response = filters["left_delay"].response(48_000.0, frequency, &registry);
-        let expected = Complex64::from_polar(1.0,
-            -TAU * frequency * (0.001_234_56 + padding / 48_000.0));
-        assert!((20.0 * response.norm().log10()).abs() <= 0.01,
-            "magnitude contract at {frequency} Hz");
-        assert!((response / expected).arg().abs() <= 0.001,
-            "phase contract at {frequency} Hz");
+        let expected =
+            Complex64::from_polar(1.0, -TAU * frequency * (0.001_234_56 + padding / 48_000.0));
+        assert!(
+            (20.0 * response.norm().log10()).abs() <= 0.01,
+            "magnitude contract at {frequency} Hz"
+        );
+        assert!(
+            (response / expected).arg().abs() <= 0.001,
+            "phase contract at {frequency} Hz"
+        );
     }
 }
 
@@ -1926,11 +2134,24 @@ fn tiny_route_delay_survives_export_and_missing_branch_padding_is_detected() {
     for chain in graph.channels.values_mut() {
         chain.plugins.retain(|plugin| plugin.plugin_type != "delay");
     }
-    let routing = graph.metadata.as_mut().unwrap().bass_management.as_mut().unwrap()
-        .routing_graph.as_mut().unwrap();
-    for route in &mut routing.routes { route.delay_ms = 0.0; }
-    let index = routing.routes.iter().position(|route|
-        route.source_channel == "L" && route.destination == "SUB1").unwrap();
+    let routing = graph
+        .metadata
+        .as_mut()
+        .unwrap()
+        .bass_management
+        .as_mut()
+        .unwrap()
+        .routing_graph
+        .as_mut()
+        .unwrap();
+    for route in &mut routing.routes {
+        route.delay_ms = 0.0;
+    }
+    let index = routing
+        .routes
+        .iter()
+        .position(|route| route.source_channel == "L" && route.destination == "SUB1")
+        .unwrap();
     // The former route writer silently omitted delays <= 0.001 ms.
     routing.routes[index].delay_ms = 0.0005;
     let inputs = routing.input_channels.clone();
@@ -1943,14 +2164,22 @@ fn tiny_route_delay_survives_export_and_missing_branch_padding_is_detected() {
     assert_eq!(report.common_padding_samples, 64);
     let yaml = render_dsp_chain(&graph, ExportFormat::CamillaDsp, rate).unwrap();
     let actual = realized_transfer(&yaml, rate, &frequencies, &inputs, &outputs, &irs);
-    assert_transfer_matches(&expected, &actual.transfer, &frequencies, "tiny route delay");
+    assert_transfer_matches(
+        &expected,
+        &actual.transfer,
+        &frequencies,
+        "tiny route delay",
+    );
     let name = format!("  - route_{index}_L_to_SUB1_delay\n");
     assert_eq!(yaml.matches(&name).count(), 1);
     let omitted = yaml.replace(&name, "");
     let faulty = realized_transfer(&omitted, rate, &frequencies, &inputs, &outputs, &irs);
     let reference = expected["SUB1"]["L"][0];
     let error = (faulty.transfer["SUB1"]["L"][0] - reference).norm() / reference.norm();
-    assert!(error > 0.1, "omitting one branch's support must be detected: {error}");
+    assert!(
+        error > 0.1,
+        "omitting one branch's support must be detected: {error}"
+    );
 }
 
 #[test]

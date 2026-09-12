@@ -2,6 +2,112 @@
 use roomeq_model::{AutoeqError, ChannelDspChain, Curve, Result, RoomConfig};
 use std::path::Path;
 
+/// Realize a routed common output FIR on each physical branch. Only post-route
+/// filters commute with the branch sum: F * sum(B_i) = sum(F * B_i).
+/// Pre-route filters belong to logical sources and must never be distributed.
+pub(super) fn distribute_routed_firs(
+    result: &mut super::RoomOptimizationResult,
+    config: &RoomConfig,
+    dir: &Path,
+    store: &dyn autoeq_artifacts::ArtifactStore,
+) -> Result<()> {
+    if !config
+        .optimizer
+        .fir
+        .as_ref()
+        .is_some_and(|fir| fir.placement == roomeq_model::FirPlacement::PerDriver)
+    {
+        return Ok(());
+    }
+    for (owner, chain) in &mut result.channels {
+        let has_routed_fir = chain.plugins.iter().any(|plugin| {
+            plugin.plugin_type == "convolution"
+                && plugin
+                    .parameters
+                    .get("room_eq_stage")
+                    .and_then(|v| v.as_str())
+                    == Some("post_route")
+        });
+        if chain
+            .drivers
+            .as_ref()
+            .is_some_and(|drivers| !drivers.is_empty())
+            && has_routed_fir
+            && chain
+                .plugins
+                .iter()
+                .any(|plugin| matches!(plugin.plugin_type.as_str(), "band_split" | "band_merge"))
+        {
+            return Err(invalid(
+                "routed per_driver FIR placement cannot move a convolution out of its frequency-split hybrid block; whole-block physical realization is required",
+            ));
+        }
+        let Some(drivers) = chain.drivers.as_mut().filter(|drivers| !drivers.is_empty()) else {
+            continue;
+        };
+        let mut moved = Vec::new();
+        for (plugin_index, plugin) in chain.plugins.iter().enumerate() {
+            if plugin.plugin_type != "convolution"
+                || plugin
+                    .parameters
+                    .get("room_eq_stage")
+                    .and_then(|v| v.as_str())
+                    != Some("post_route")
+            {
+                continue;
+            }
+            let filename = plugin
+                .parameters
+                .get("ir_file")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| invalid("routed convolution is missing its artifact path"))?;
+            let source = dir.join(filename);
+            let bytes = store.read(&source)?.ok_or_else(|| {
+                invalid(format!(
+                    "missing routed FIR artifact '{}'",
+                    source.display()
+                ))
+            })?;
+            for driver in drivers.iter_mut() {
+                // Encode owner bytes to avoid sanitized-name collisions. Probe the
+                // store too, so in-memory exports have the same no-overwrite contract.
+                let owner_key: String = owner
+                    .as_bytes()
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect();
+                let stem = format!("physical_{owner_key}_{}_{}", driver.index, plugin_index);
+                let mut suffix = 0usize;
+                let (filename, path) = loop {
+                    let filename = format!("{stem}_{suffix}.wav");
+                    let path = dir.join(&filename);
+                    if store.read(&path)?.is_none() {
+                        break (filename, path);
+                    }
+                    suffix += 1;
+                };
+                store.write(&path, &bytes)?;
+                let mut physical = plugin.clone();
+                physical.parameters["ir_file"] = serde_json::json!(filename);
+                physical.parameters["room_eq_fir_placement"] = serde_json::json!("per_driver");
+                physical.parameters["room_eq_fir_design_scope"] =
+                    serde_json::json!("shared_kernel_per_physical_output");
+                driver.plugins.push(physical);
+            }
+            moved.push(plugin_index);
+        }
+        if !moved.is_empty() {
+            for index in moved.into_iter().rev() {
+                chain.plugins.remove(index);
+            }
+            if let Some(channel) = result.channel_results.get_mut(owner) {
+                channel.fir_coeffs = None;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn invalid(message: impl Into<String>) -> AutoeqError {
     AutoeqError::InvalidConfiguration {
         message: message.into(),
@@ -203,6 +309,125 @@ mod tests {
         });
         (chain, config, target)
     }
+    #[test]
+    fn routed_split_fir_cannot_move_outside_its_owning_block() {
+        let (mut chain, config, _) = setup();
+        let mut convolution = roomeq_engine::output::create_convolution_plugin("common.wav");
+        convolution.parameters["room_eq_stage"] = serde_json::json!("post_route");
+        let mut split = convolution.clone();
+        split.plugin_type = "band_split".into();
+        chain.plugins = vec![split, convolution];
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        result.channels.insert("L".into(), chain.clone());
+        let store = autoeq_artifacts::MemoryArtifactStore::default();
+        let error =
+            distribute_routed_firs(&mut result, &config, Path::new("."), &store).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("whole-block physical realization")
+        );
+        assert_eq!(result.channels["L"].plugins.len(), chain.plugins.len());
+        assert!(
+            result.channels["L"]
+                .drivers
+                .as_ref()
+                .unwrap()
+                .iter()
+                .all(|driver| driver.plugins.is_empty())
+        );
+    }
+
+    #[test]
+    fn routed_shared_kernel_preserves_each_source_and_physical_branch() {
+        use autoeq_artifacts::{ArtifactStore, FsArtifactStore, MemoryArtifactStore};
+        let (mut chain, config, grid) = setup();
+        let dir = tempfile::tempdir().unwrap();
+        let taps = [0.0, 0.25, 0.5, 0.25];
+        math_audio_iir_fir::save_fir_to_wav(&taps, 48000, &dir.path().join("common.wav")).unwrap();
+        let mut common = roomeq_engine::output::create_convolution_plugin("common.wav");
+        common.parameters["room_eq_stage"] = serde_json::json!("post_route");
+        common.parameters["latency_samples"] = serde_json::json!(2);
+        chain.plugins.push(common.clone());
+        for driver in chain.drivers.as_mut().unwrap() {
+            driver
+                .plugins
+                .push(roomeq_engine::output::create_gain_plugin(
+                    -3.0 * driver.index as f64,
+                ));
+        }
+        let before = chain.clone();
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        result.channels.insert("L".into(), chain);
+        distribute_routed_firs(&mut result, &config, dir.path(), &FsArtifactStore::new()).unwrap();
+        let after = &result.channels["L"];
+        assert!(after.plugins.is_empty());
+        let drivers = after.drivers.as_ref().unwrap();
+        assert_ne!(
+            drivers[0].plugins.last().unwrap().parameters["ir_file"],
+            drivers[1].plugins.last().unwrap().parameters["ir_file"]
+        );
+        // Distinct logical source gains and phases exercise each route column.
+        // Equality on every physical output also proves equality of any acoustic sum.
+        for (gain_db, phase_deg) in [(0.0, 0.0), (-7.0, 117.0)] {
+            let mut source = grid.clone();
+            source.spl += gain_db;
+            source.phase.as_mut().unwrap().fill(phase_deg);
+            for i in 0..drivers.len() {
+                let render = |parent: &ChannelDspChain| {
+                    let mut branch = parent.clone();
+                    branch.plugins = parent.drivers.as_ref().unwrap()[i].plugins.clone();
+                    branch.plugins.extend(parent.plugins.clone());
+                    branch.drivers = None;
+                    crate::ctc::apply_channel_dsp_chain_to_curve_with_sidecar_dir(
+                        &branch,
+                        &source,
+                        48000.0,
+                        dir.path(),
+                    )
+                    .unwrap()
+                };
+                let a = render(&before);
+                let b = render(after);
+                for (a, b) in a.spl.iter().zip(b.spl.iter()) {
+                    assert!((a - b).abs() < 1e-9);
+                }
+                for (a, b) in a.phase.unwrap().iter().zip(b.phase.unwrap().iter()) {
+                    assert!((a - b).abs() < 1e-9);
+                }
+                assert_eq!(
+                    drivers[i].plugins.last().unwrap().parameters["latency_samples"],
+                    2
+                );
+            }
+        }
+        // Memory stores must receive actual bytes, and pre-route source filters
+        // must remain on their owner instead of leaking into other input routes.
+        let memory = MemoryArtifactStore::default();
+        memory
+            .write(
+                &dir.path().join("common.wav"),
+                &std::fs::read(dir.path().join("common.wav")).unwrap(),
+            )
+            .unwrap();
+        let mut before = before;
+        common.parameters["room_eq_stage"] = serde_json::json!("pre_route");
+        before.plugins.insert(0, common);
+        result.channels.insert("L".into(), before);
+        distribute_routed_firs(&mut result, &config, dir.path(), &memory).unwrap();
+        assert_eq!(result.channels["L"].plugins.len(), 1);
+        assert_eq!(
+            result.channels["L"].plugins[0].parameters["room_eq_stage"],
+            "pre_route"
+        );
+        for driver in result.channels["L"].drivers.as_ref().unwrap() {
+            let name = driver.plugins.last().unwrap().parameters["ir_file"]
+                .as_str()
+                .unwrap();
+            assert!(memory.read(&dir.path().join(name)).unwrap().is_some());
+        }
+    }
+
     #[test]
     fn per_driver_sidecars_replay_the_physical_sum_and_have_unique_paths() {
         let (mut chain, config, target) = setup();

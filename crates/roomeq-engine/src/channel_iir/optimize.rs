@@ -17,10 +17,15 @@ pub(super) fn optimize_iir_eq(
     sample_rate: f64,
     callback: Option<OptimProgressCallback>,
     target_tilt_curve: Option<&Curve>,
-) -> Result<(Vec<Biquad>, Vec<OptimizerRunEvidence>)> {
+) -> Result<(
+    Vec<Biquad>,
+    Vec<OptimizerRunEvidence>,
+    Vec<roomeq_model::FilterVetoVerdict>,
+    Option<roomeq_model::VetoAdjudicationReport>,
+)> {
     if optimizer_config.num_filters == 0 {
         info!("  Skipping PEQ optimization because num_filters is 0");
-        return Ok((Vec::new(), Vec::new()));
+        return Ok((Vec::new(), Vec::new(), Vec::new(), None));
     }
 
     if optimizer_config.multi_measurement.is_some()
@@ -73,7 +78,12 @@ pub(super) fn optimize_iir_eq(
             "  Schroeder split: {} low-freq filters + {} high-freq filters",
             low_filter_count, high_filter_count
         );
-        return Ok((filters, result.optimizer_evidence));
+        return Ok((
+            filters,
+            result.optimizer_evidence,
+            result.audibility_veto,
+            result.veto_adjudication,
+        ));
     }
 
     let result = crate::channel_optimizer::optimize_maybe_multi(
@@ -86,5 +96,14 @@ pub(super) fn optimize_iir_eq(
         callback,
         target_tilt_curve,
     )?;
-    Ok((result.filters, result.optimizer_evidence))
+    let veto_adjudication = result
+        .veto_adjudication
+        .as_ref()
+        .map(crate::eq::audibility_veto::VetoAdjudicationSummary::to_report);
+    Ok((
+        result.filters,
+        result.optimizer_evidence,
+        result.audibility_veto,
+        veto_adjudication,
+    ))
 }

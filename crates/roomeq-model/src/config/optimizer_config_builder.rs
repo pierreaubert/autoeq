@@ -58,6 +58,7 @@ impl OptimizerConfigBuilder {
     setter!(max_db, f64);
     setter!(min_freq, f64);
     setter!(max_freq, f64);
+    setter!(correction_band, Option<super::CorrectionBandPolicy>);
     setter!(max_iter, usize);
     setter!(population, usize);
     setter!(peq_model, String);

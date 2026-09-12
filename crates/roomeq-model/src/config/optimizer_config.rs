@@ -84,6 +84,10 @@ pub struct OptimizerConfig {
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub upper_band_acoustic_bounds:
         std::collections::HashMap<String, Vec<crate::UpperBandAcousticBound>>,
+    /// Optional explicit frequency support for active correction. The
+    /// observation/evaluation band remains `min_freq..=max_freq`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correction_band: Option<super::CorrectionBandPolicy>,
     /// Processing mode — selects the filter class used for correction.
     #[serde(default, alias = "mode")]
     pub processing_mode: ProcessingMode,
@@ -330,6 +334,7 @@ impl Default for OptimizerConfig {
         Self {
             finalization: super::FinalizationConfig::default(),
             upper_band_acoustic_bounds: std::collections::HashMap::new(),
+            correction_band: None,
             permitted_output_gain_db: std::collections::HashMap::new(),
             loss_type: default_loss_type(),
             algorithm: default_algorithm(),
@@ -401,6 +406,29 @@ impl Default for OptimizerConfig {
 }
 
 impl OptimizerConfig {
+    /// Return the configured active-correction band, or the legacy optimizer
+    /// band when no explicit policy is selected.
+    pub fn active_correction_band(&self) -> [f64; 2] {
+        self.correction_band
+            .map(|policy| {
+                [
+                    policy.min_hz.max(self.min_freq),
+                    policy.max_hz.min(self.max_freq),
+                ]
+            })
+            .unwrap_or([self.min_freq, self.max_freq])
+    }
+
+    /// Clamp the active-correction band to a curve's native support without
+    /// changing the observation band used by reporting and acceptance.
+    pub fn active_correction_band_for_data(&self, data_min_hz: f64, data_max_hz: f64) -> [f64; 2] {
+        let [configured_min, configured_max] = self.active_correction_band();
+        [
+            configured_min.max(data_min_hz),
+            configured_max.min(data_max_hz),
+        ]
+    }
+
     /// Resolve psychoacoustic smoothing settings, falling back to the historical
     /// 1/48 octave below 100 Hz through 1/6 octave above 1 kHz curve.
     pub fn psychoacoustic_smoothing_config(&self) -> PsychoacousticSmoothingConfig {

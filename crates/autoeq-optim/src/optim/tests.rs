@@ -7,10 +7,18 @@ mod outcome_evidence_tests {
     #[test]
     fn stopped_candidate_is_diagnostic_not_deployable_best_effort() {
         for accepted in [false, true] {
-            let value = ("optimization stopped by callback (nfev=3)".to_string(), 0.25);
+            let value = (
+                "optimization stopped by callback (nfev=3)".to_string(),
+                0.25,
+            );
             let evidence = OptimizerRunEvidence::from_backend_result(
-                "autoeq:de", if accepted { Ok(value) } else { Err(value) },
-                &[0.5], &[0.0], &[1.0], 40, Some(42),
+                "autoeq:de",
+                if accepted { Ok(value) } else { Err(value) },
+                &[0.5],
+                &[0.0],
+                &[1.0],
+                40,
+                Some(42),
             );
             assert_eq!(evidence.termination, OptimizerTermination::UserStopped);
             assert!(!evidence.converged);
@@ -23,14 +31,31 @@ mod outcome_evidence_tests {
 
     #[test]
     fn native_budget_status_is_not_convergence_without_extra_qualifier() {
-        for status in ["AutoEQ COBYLA: MaxevalReached", "maximum evaluations reached",
-            "maximum iterations reached", "evaluation budget exhausted"] {
+        for status in [
+            "AutoEQ COBYLA: MaxevalReached",
+            "maximum evaluations reached",
+            "maximum iterations reached",
+            "evaluation budget exhausted",
+        ] {
             let evidence = OptimizerRunEvidence::from_backend_result(
-                "autoeq:cobyla", Ok((status.into(), 0.25)), &[0.5], &[0.0], &[1.0], 40, Some(42),
+                "autoeq:cobyla",
+                Ok((status.into(), 0.25)),
+                &[0.5],
+                &[0.0],
+                &[1.0],
+                40,
+                Some(42),
             );
-            assert_eq!(evidence.termination, OptimizerTermination::EvaluationLimit, "{status}");
+            assert_eq!(
+                evidence.termination,
+                OptimizerTermination::EvaluationLimit,
+                "{status}"
+            );
             assert!(!evidence.converged, "{status}");
-            assert!(evidence.best_effort, "finite bounded candidate should remain usable: {status}");
+            assert!(
+                evidence.best_effort,
+                "finite bounded candidate should remain usable: {status}"
+            );
             assert_eq!(evidence.confidence, OptimizerConfidence::Low);
         }
     }
@@ -275,11 +300,12 @@ mod backend_tests {
     };
     use super::super::setup::{
         ProgressCallbackConfig, initial_guess, perform_optimization,
-        perform_optimization_with_callback, perform_optimization_with_progress, setup_bounds,
-        setup_objective_data,
+        perform_optimization_with_callback, perform_optimization_with_progress,
+        q_max_for_frequency_range, setup_bounds, setup_objective_data,
     };
     use super::super::types::MultiObjectiveData;
     use crate::Curve;
+    use crate::FrequencyQPolicy;
     use crate::cli::Args;
     use clap::Parser;
 
@@ -294,6 +320,60 @@ mod backend_tests {
         args.min_db = -12.0;
         args.max_db = 12.0;
         args
+    }
+
+    #[test]
+    fn frequency_q_policy_keeps_modal_freedom_but_caps_guarded_ranges() {
+        let mut params = OptimParams::from(&small_args());
+        params.num_filters = 3;
+        params.min_freq = 20.0;
+        params.max_freq = 20_000.0;
+        params.min_q = 0.5;
+        params.max_q = 12.0;
+        params.frequency_q_policy = Some(FrequencyQPolicy {
+            schroeder_hz: Some(500.0),
+            low_max_q: Some(12.0),
+            high_start_hz: Some(1_600.0),
+            high_max_q: Some(0.8),
+        });
+
+        assert_eq!(q_max_for_frequency_range(&params, 80.0, 300.0), 12.0);
+        let crossing = q_max_for_frequency_range(&params, 300.0, 800.0);
+        assert!(crossing > 0.8 && crossing < 12.0);
+        assert_eq!(q_max_for_frequency_range(&params, 2_000.0, 8_000.0), 0.8);
+
+        let (_, upper) = setup_bounds(&params);
+        for filter in 0..params.num_filters {
+            let offset = filter * 3;
+            let f_high = 10.0_f64.powf(upper[offset]);
+            if f_high >= 1_600.0 {
+                assert!(upper[offset + 1] <= 0.8);
+            }
+        }
+    }
+
+    #[test]
+    fn frequency_q_policy_is_continuous_at_schroeder_boundary() {
+        let mut params = OptimParams::from(&small_args());
+        params.min_freq = 20.0;
+        params.max_freq = 20_000.0;
+        params.min_q = 0.5;
+        params.max_q = 12.0;
+        params.frequency_q_policy = Some(FrequencyQPolicy {
+            schroeder_hz: Some(500.0),
+            low_max_q: Some(12.0),
+            high_start_hz: Some(1_600.0),
+            high_max_q: Some(0.8),
+        });
+        let below = q_max_for_frequency_range(&params, 499.0, 499.0);
+        let above = q_max_for_frequency_range(&params, 501.0, 501.0);
+        assert_eq!(below, 12.0);
+        assert!(above < below);
+        assert!(above > 0.8);
+        assert!(
+            (below - above) < 1.0,
+            "Schroeder boundary Q jump is too large"
+        );
     }
 
     fn scalar_objective() -> (ObjectiveData, OptimParams, Vec<f64>, Vec<f64>, Vec<f64>) {

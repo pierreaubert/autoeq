@@ -1,5 +1,54 @@
 # Unreleased
 
+## RoomEQ channel-matching safety
+
+- Constrain channel-matching PEQs to a broad Q≤1 default because matching lacks
+  repeated-seat evidence for narrow room features; high-Q modal cuts remain
+  owned by the room optimizer’s Schroeder-aware path.
+
+## RoomEQ measured replay edge handling
+
+- Accept a lower observation edge that is at most one native measurement bin
+  (and 1% of the edge) below a capture, hold the measured edge instead of
+  extrapolating it, and continue rejecting genuinely truncated captures.
+
+## RoomEQ measured recovery
+
+- Support routed per-driver FIR placement using a transfer-equivalent common
+  post-route kernel with unique physical-output artifacts; preserve pre-route
+  source ownership and label the constrained shared-kernel design explicitly.
+- Preflight every requested measured configuration and regenerate missing REW
+  CSV derivatives without overwriting existing exports. Correct the two 200 Hz
+  fixtures' hybrid processing splits and KEF's generated CSV filenames.
+
+- Require explicit acoustic bounds for unmeasured branch tails. An electrical
+  low-pass never supplies a fabricated -120 dB acoustic capability declaration.
+- Publish and replay the structural baseline when correction cannot be safely
+  accepted; discard rejected candidate metrics and report missing evidence.
+- Check useful-output metric fields individually so NaN cannot hide in a maximum.
+- Recheck electrical headroom after fallback; report necessary safety attenuation
+  instead of labelling a changed output unchanged. Identity is not an accepted
+  improvement, and runtime rejection reasons survive rollback.
+- Remove owned Hybrid split/filter/delay/merge stages atomically on fallback,
+  preserving explicit excursion protection and speaker arrival alignment.
+- Isolate measured IIR/FIR/mixed/mixed-phase artifacts by mode, retain run logs,
+  validate native manifests and FIR hashes, and support bounded scenario subsets.
+
+## RoomEQ quality ownership
+
+- Consolidate shared RMS and log-frequency weighted RMS kernels under
+  `roomeq-quality::metrics`; acceptance, quality, and oracle paths now use one
+  implementation, quality aggregation calls the shared percentile primitive,
+  and aligned-grid checks use one shared predicate without changing thresholds
+  or metric definitions.
+
+## RoomEQ explicit correction support
+
+- Add opt-in `optimizer.correction_band` to constrain active EQ while keeping
+  the observation band fixed. Natural source roll-off is allowed only when
+  explicitly declared and is reported separately from evaluated-band metrics;
+  the policy never installs an implicit high-pass or low-pass.
+
 ## RoomEQ test recovery
 
 - Preserve observer cancellation diagnostics when a topology channel's optimizer

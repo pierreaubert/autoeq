@@ -141,13 +141,22 @@ impl StimulusKind {
             Self::ShapedNoise { pink, .. } => {
                 String::from(if *pink { "noise-pink" } else { "noise-white" })
             }
-            Self::BandLimitedNoise { low_hz, high_hz, .. } => {
+            Self::BandLimitedNoise {
+                low_hz, high_hz, ..
+            } => {
                 format!("noise-band-{low_hz}-{high_hz}hz")
             }
-            Self::HarmonicComplex { f0_hz, n_harmonics, .. } => {
+            Self::HarmonicComplex {
+                f0_hz, n_harmonics, ..
+            } => {
                 format!("complex-{f0_hz}hz-x{n_harmonics}")
             }
-            Self::MaskerProbe { masker_freq_hz, probe_freq_hz, gap_ms, .. } => {
+            Self::MaskerProbe {
+                masker_freq_hz,
+                probe_freq_hz,
+                gap_ms,
+                ..
+            } => {
                 format!("masker-{masker_freq_hz}-{probe_freq_hz}hz-gap{gap_ms}ms")
             }
             Self::ExternalProgramme { path, .. } => format!(
@@ -330,7 +339,10 @@ pub fn render_samples(
 ) -> Result<Vec<f32>, String> {
     let mut rng = SeededRng::new(seed);
     match kind {
-        StimulusKind::Tone { freq_hz, duration_s } => {
+        StimulusKind::Tone {
+            freq_hz,
+            duration_s,
+        } => {
             let frames = validate_render(sample_rate_hz, *duration_s)?;
             check_tone_freq(*freq_hz, sample_rate_hz)?;
             let mut samples = Vec::with_capacity(frames);
@@ -341,7 +353,11 @@ pub fn render_samples(
             normalize_peak(&mut samples)?;
             Ok(samples)
         }
-        StimulusKind::ToneBurst { freq_hz, duration_s, ramp_ms } => {
+        StimulusKind::ToneBurst {
+            freq_hz,
+            duration_s,
+            ramp_ms,
+        } => {
             let frames = validate_render(sample_rate_hz, *duration_s)?;
             check_tone_freq(*freq_hz, sample_rate_hz)?;
             if !ramp_ms.is_finite() || *ramp_ms < 0.0 {
@@ -352,14 +368,18 @@ pub fn render_samples(
             for index in 0..frames {
                 let time = index as f64 / sample_rate_hz;
                 let envelope = ramp_gain(index, frames, ramp_frames);
-                samples.push(
-                    (envelope * (2.0 * std::f64::consts::PI * freq_hz * time).sin()) as f32,
-                );
+                samples
+                    .push((envelope * (2.0 * std::f64::consts::PI * freq_hz * time).sin()) as f32);
             }
             normalize_peak(&mut samples)?;
             Ok(samples)
         }
-        StimulusKind::Sweep { f0_hz, f1_hz, duration_s, log } => {
+        StimulusKind::Sweep {
+            f0_hz,
+            f1_hz,
+            duration_s,
+            log,
+        } => {
             let frames = validate_render(sample_rate_hz, *duration_s)?;
             check_tone_freq(*f0_hz, sample_rate_hz)?;
             check_tone_freq(*f1_hz, sample_rate_hz)?;
@@ -414,14 +434,23 @@ pub fn render_samples(
                 stages[3] = 0.86650 * stages[3] + white * 0.3104856;
                 stages[4] = 0.55000 * stages[4] + white * 0.5329522;
                 stages[5] = -0.7616 * stages[5] - white * 0.0168980;
-                let pink_sample =
-                    stages[0] + stages[1] + stages[2] + stages[3] + stages[4] + stages[5] + white * 0.5362;
+                let pink_sample = stages[0]
+                    + stages[1]
+                    + stages[2]
+                    + stages[3]
+                    + stages[4]
+                    + stages[5]
+                    + white * 0.5362;
                 samples.push((pink_sample * 0.11) as f32);
             }
             normalize_peak(&mut samples)?;
             Ok(samples)
         }
-        StimulusKind::BandLimitedNoise { low_hz, high_hz, duration_s } => {
+        StimulusKind::BandLimitedNoise {
+            low_hz,
+            high_hz,
+            duration_s,
+        } => {
             let frames = validate_render(sample_rate_hz, *duration_s)?;
             if !low_hz.is_finite() || *low_hz <= 0.0 {
                 return Err(format!("band low edge {low_hz} must be positive"));
@@ -455,7 +484,12 @@ pub fn render_samples(
             normalize_peak(&mut samples)?;
             Ok(samples)
         }
-        StimulusKind::HarmonicComplex { f0_hz, n_harmonics, tilt_db_per_octave, duration_s } => {
+        StimulusKind::HarmonicComplex {
+            f0_hz,
+            n_harmonics,
+            tilt_db_per_octave,
+            duration_s,
+        } => {
             let frames = validate_render(sample_rate_hz, *duration_s)?;
             check_tone_freq(*f0_hz, sample_rate_hz)?;
             if *n_harmonics == 0 {
@@ -470,9 +504,8 @@ pub fn render_samples(
             }
             let partials: Vec<(f64, f64, f64)> = (1..=*n_harmonics)
                 .map(|order| {
-                    let amplitude = 10.0_f64.powf(
-                        -tilt_db_per_octave * f64::from(order).log2() / 20.0,
-                    );
+                    let amplitude =
+                        10.0_f64.powf(-tilt_db_per_octave * f64::from(order).log2() / 20.0);
                     let phase = 2.0 * std::f64::consts::PI * rng.next_f64();
                     (f64::from(order) * *f0_hz, amplitude, phase)
                 })
@@ -505,11 +538,15 @@ pub fn render_samples(
             }
             let masker_frames =
                 validate_render(sample_rate_hz, *masker_duration_s).map_err(|_| {
-                    format!("masker duration {masker_duration_s}s outside 1 ms–{MAX_STIMULUS_SECONDS}s")
+                    format!(
+                        "masker duration {masker_duration_s}s outside 1 ms–{MAX_STIMULUS_SECONDS}s"
+                    )
                 })?;
             let probe_frames =
                 validate_render(sample_rate_hz, *probe_duration_s).map_err(|_| {
-                    format!("probe duration {probe_duration_s}s outside 1 ms–{MAX_STIMULUS_SECONDS}s")
+                    format!(
+                        "probe duration {probe_duration_s}s outside 1 ms–{MAX_STIMULUS_SECONDS}s"
+                    )
                 })?;
             let gap_frames = (gap_ms / 1000.0 * sample_rate_hz).round() as usize;
             let ramp_frames = (0.005 * sample_rate_hz).round() as usize;
@@ -622,8 +659,7 @@ fn load_programme(path: &Path, sha256: &str) -> Result<Vec<f32>, String> {
     match reader.spec().sample_format {
         hound::SampleFormat::Float => {
             for sample in reader.samples::<f32>() {
-                let sample =
-                    sample.map_err(|error| format!("programme sample error: {error}"))?;
+                let sample = sample.map_err(|error| format!("programme sample error: {error}"))?;
                 frame.push(sample);
                 if frame.len() == channels {
                     mono.push(read_frame(&frame));
@@ -633,8 +669,7 @@ fn load_programme(path: &Path, sha256: &str) -> Result<Vec<f32>, String> {
         }
         hound::SampleFormat::Int => {
             for sample in reader.samples::<i32>() {
-                let sample =
-                    sample.map_err(|error| format!("programme sample error: {error}"))?;
+                let sample = sample.map_err(|error| format!("programme sample error: {error}"))?;
                 frame.push(sample as f32 / i32::MAX as f32);
                 if frame.len() == channels {
                     mono.push(read_frame(&frame));
@@ -829,16 +864,54 @@ mod stimuli_tests {
     #[test]
     fn all_kinds_render_finite_bounded_audio() {
         let kinds = [
-            StimulusKind::Tone { freq_hz: 1000.0, duration_s: 0.1 },
-            StimulusKind::ToneBurst { freq_hz: 440.0, duration_s: 0.1, ramp_ms: 5.0 },
-            StimulusKind::Sweep { f0_hz: 100.0, f1_hz: 8000.0, duration_s: 0.2, log: true },
-            StimulusKind::Sweep { f0_hz: 100.0, f1_hz: 8000.0, duration_s: 0.2, log: false },
+            StimulusKind::Tone {
+                freq_hz: 1000.0,
+                duration_s: 0.1,
+            },
+            StimulusKind::ToneBurst {
+                freq_hz: 440.0,
+                duration_s: 0.1,
+                ramp_ms: 5.0,
+            },
+            StimulusKind::Sweep {
+                f0_hz: 100.0,
+                f1_hz: 8000.0,
+                duration_s: 0.2,
+                log: true,
+            },
+            StimulusKind::Sweep {
+                f0_hz: 100.0,
+                f1_hz: 8000.0,
+                duration_s: 0.2,
+                log: false,
+            },
             StimulusKind::TransientClick { duration_s: 0.1 },
-            StimulusKind::ShapedNoise { pink: false, duration_s: 0.2 },
-            StimulusKind::ShapedNoise { pink: true, duration_s: 0.2 },
-            StimulusKind::BandLimitedNoise { low_hz: 500.0, high_hz: 1500.0, duration_s: 0.2 },
-            StimulusKind::HarmonicComplex { f0_hz: 220.0, n_harmonics: 8, tilt_db_per_octave: 6.0, duration_s: 0.2 },
-            StimulusKind::MaskerProbe { masker_freq_hz: 1000.0, probe_freq_hz: 1000.0, masker_duration_s: 0.1, gap_ms: 20.0, probe_duration_s: 0.05 },
+            StimulusKind::ShapedNoise {
+                pink: false,
+                duration_s: 0.2,
+            },
+            StimulusKind::ShapedNoise {
+                pink: true,
+                duration_s: 0.2,
+            },
+            StimulusKind::BandLimitedNoise {
+                low_hz: 500.0,
+                high_hz: 1500.0,
+                duration_s: 0.2,
+            },
+            StimulusKind::HarmonicComplex {
+                f0_hz: 220.0,
+                n_harmonics: 8,
+                tilt_db_per_octave: 6.0,
+                duration_s: 0.2,
+            },
+            StimulusKind::MaskerProbe {
+                masker_freq_hz: 1000.0,
+                probe_freq_hz: 1000.0,
+                masker_duration_s: 0.1,
+                gap_ms: 20.0,
+                probe_duration_s: 0.05,
+            },
         ];
         for kind in kinds {
             let duration = kind.duration_s().unwrap();
@@ -853,7 +926,10 @@ mod stimuli_tests {
 
     #[test]
     fn render_is_deterministic() {
-        let kind = StimulusKind::ShapedNoise { pink: true, duration_s: 0.3 };
+        let kind = StimulusKind::ShapedNoise {
+            pink: true,
+            duration_s: 0.3,
+        };
         let first = render_samples(&kind, SAMPLE_RATE, 20260905).unwrap();
         let second = render_samples(&kind, SAMPLE_RATE, 20260905).unwrap();
         assert_eq!(first, second);
@@ -863,35 +939,71 @@ mod stimuli_tests {
 
     #[test]
     fn invalid_params_fail_closed() {
-        let tone = StimulusKind::Tone { freq_hz: 1000.0, duration_s: 0.1 };
+        let tone = StimulusKind::Tone {
+            freq_hz: 1000.0,
+            duration_s: 0.1,
+        };
         assert!(render_samples(&tone, 1000.0, 1).is_err());
-        let long = StimulusKind::Tone { freq_hz: 1000.0, duration_s: 120.0 };
+        let long = StimulusKind::Tone {
+            freq_hz: 1000.0,
+            duration_s: 120.0,
+        };
         assert!(render_samples(&long, SAMPLE_RATE, 1).is_err());
-        let alias = StimulusKind::Tone { freq_hz: 30_000.0, duration_s: 0.1 };
+        let alias = StimulusKind::Tone {
+            freq_hz: 30_000.0,
+            duration_s: 0.1,
+        };
         assert!(render_samples(&alias, SAMPLE_RATE, 1).is_err());
-        let flat_sweep = StimulusKind::Sweep { f0_hz: 500.0, f1_hz: 500.0, duration_s: 0.2, log: true };
+        let flat_sweep = StimulusKind::Sweep {
+            f0_hz: 500.0,
+            f1_hz: 500.0,
+            duration_s: 0.2,
+            log: true,
+        };
         assert!(render_samples(&flat_sweep, SAMPLE_RATE, 1).is_err());
-        assert!(render_stimulus_set(&test_dir("empty"), &[], &calibration(&[75.0]), SAMPLE_RATE).is_err());
+        assert!(
+            render_stimulus_set(&test_dir("empty"), &[], &calibration(&[75.0]), SAMPLE_RATE)
+                .is_err()
+        );
         let bad_conversion = SplCalibration {
             conversion: String::from("nope"),
             db_spl_at_0dbfs_rms: 90.0,
             levels_db: vec![75.0],
         };
-        let request = StimulusRequest { kind: tone, seed: 1 };
-        assert!(render_stimulus_set(&test_dir("badconv"), &[request], &bad_conversion, SAMPLE_RATE).is_err());
+        let request = StimulusRequest {
+            kind: tone,
+            seed: 1,
+        };
+        assert!(
+            render_stimulus_set(
+                &test_dir("badconv"),
+                &[request],
+                &bad_conversion,
+                SAMPLE_RATE
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn spl_mapping_hits_the_declared_level() {
         // 1 kHz sine at 75 dB SPL under a 90 dBFS reference: file RMS must
         // equal 10^((75-90)/20) exactly (gain arithmetic, not hearing).
-        let kind = StimulusKind::Tone { freq_hz: 1000.0, duration_s: 0.5 };
+        let kind = StimulusKind::Tone {
+            freq_hz: 1000.0,
+            duration_s: 0.5,
+        };
         let samples = render_samples(&kind, SAMPLE_RATE, 3).unwrap();
         let file_rms = rms(&samples);
         let reference = 20.0 * file_rms.log10() + 90.0;
-        let (scaled, gain_db, spl_db, absolute) =
-            apply_level(&samples, 75.0, LevelMode::Absolute { reference_spl_db: reference })
-                .unwrap();
+        let (scaled, gain_db, spl_db, absolute) = apply_level(
+            &samples,
+            75.0,
+            LevelMode::Absolute {
+                reference_spl_db: reference,
+            },
+        )
+        .unwrap();
         assert!(absolute);
         assert_eq!(spl_db, Some(75.0));
         let expected_gain = 75.0 - reference;
@@ -901,11 +1013,20 @@ mod stimuli_tests {
 
     #[test]
     fn clipping_errors_instead_of_truncating() {
-        let kind = StimulusKind::Tone { freq_hz: 1000.0, duration_s: 0.1 };
+        let kind = StimulusKind::Tone {
+            freq_hz: 1000.0,
+            duration_s: 0.1,
+        };
         let samples = render_samples(&kind, SAMPLE_RATE, 3).unwrap();
         let file_rms = rms(&samples);
         let reference = 20.0 * file_rms.log10() + 90.0;
-        let loud = apply_level(&samples, 130.0, LevelMode::Absolute { reference_spl_db: reference });
+        let loud = apply_level(
+            &samples,
+            130.0,
+            LevelMode::Absolute {
+                reference_spl_db: reference,
+            },
+        );
         assert!(loud.is_err(), "130 dB SPL from a 90 dBFS map must refuse");
     }
 
@@ -1179,7 +1300,10 @@ mod stimuli_tests {
     fn make_set_requests() -> Vec<StimulusRequest> {
         vec![
             StimulusRequest {
-                kind: StimulusKind::Tone { freq_hz: 1000.0, duration_s: 0.1 },
+                kind: StimulusKind::Tone {
+                    freq_hz: 1000.0,
+                    duration_s: 0.1,
+                },
                 seed: 5,
             },
             StimulusRequest {
@@ -1239,7 +1363,10 @@ mod stimuli_tests {
     fn uncalibrated_programme_sweeps_relative_gains() {
         // Without an assumed reference, sweep levels are relative gains
         // and the manifest says so (spl_absolute false, no spl_db).
-        let kind = StimulusKind::Tone { freq_hz: 500.0, duration_s: 0.1 };
+        let kind = StimulusKind::Tone {
+            freq_hz: 500.0,
+            duration_s: 0.1,
+        };
         let samples = render_samples(&kind, SAMPLE_RATE, 9).unwrap();
         let (scaled, gain_db, spl_db, absolute) =
             apply_level(&samples, -6.0, LevelMode::Relative).unwrap();

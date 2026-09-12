@@ -700,6 +700,14 @@ pub struct OptimizationMetadata {
     /// Audibility-first acceptance decision for the final correction chain.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correction_acceptance: Option<crate::CorrectionAcceptanceReport>,
+    /// Per-filter audibility-veto verdicts keyed by channel.  Report-only
+    /// decisions remain visible even when no filter was removed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audibility_veto: Option<std::collections::BTreeMap<String, Vec<crate::FilterVetoVerdict>>>,
+    /// Frozen-chain adjudication summaries keyed by channel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub veto_adjudication:
+        Option<std::collections::BTreeMap<String, crate::VetoAdjudicationReport>>,
     /// Backend termination, convergence, budget, seed, constraint, and
     /// confidence evidence for the optimizer runs that produced each channel.
     #[serde(default, skip_serializing_if = "Option::is_none")]

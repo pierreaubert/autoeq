@@ -10,6 +10,26 @@ use crate::optim::SmoothnessPenaltyConfig;
 
 pub use autoeq_core::PeqModel;
 
+/// Optional frequency-dependent Q policy used by RoomEQ.
+///
+/// The optimizer still receives rectangular parameter bounds, therefore a
+/// filter whose allowed frequency interval can reach a guarded band gets the
+/// guarded (lower) Q ceiling.  This is intentionally conservative: it makes
+/// the emitted candidate safe for the whole interval rather than allowing a
+/// high-Q solution to move into a position-dependent upper-band feature.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FrequencyQPolicy {
+    /// Schroeder/transition frequency.  Intervals entirely below it use
+    /// `low_max_q`; intervals crossing it use the upper-band ceiling.
+    pub schroeder_hz: Option<f64>,
+    /// Maximum Q for intervals entirely below the transition.
+    pub low_max_q: Option<f64>,
+    /// Upper-band guard start in Hz.
+    pub high_start_hz: Option<f64>,
+    /// Maximum Q for any interval that can reach the upper-band guard.
+    pub high_max_q: Option<f64>,
+}
+
 /// Optimization-relevant parameters extracted from either `cli::Args`
 /// (for the autoeq binary) or `roomeq::OptimizerConfig` (for room EQ).
 ///
@@ -39,6 +59,9 @@ pub struct OptimParams {
     pub spacing_weight: f64,
     pub smoothness_penalty: Option<SmoothnessPenaltyConfig>,
     pub audibility_deadband: Option<crate::roomeq::AudibilityDeadbandConfig>,
+    /// Optional frequency-dependent Q ceilings. `None` preserves the CLI
+    /// optimizer's legacy global bounds.
+    pub frequency_q_policy: Option<FrequencyQPolicy>,
 
     // -- Algorithm --
     pub algo: String,
@@ -97,6 +120,7 @@ impl From<&Args> for OptimParams {
                 None
             },
             audibility_deadband: None,
+            frequency_q_policy: None,
             algo: args.algo.clone(),
             population: args.population,
             maxeval: args.maxeval,

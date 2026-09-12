@@ -93,8 +93,14 @@ impl BandSplitPolicy {
             ));
         }
         for (name, tilt) in [
-            ("direct_target_tilt_db_per_octave", self.direct_target_tilt_db_per_octave),
-            ("room_target_tilt_db_per_octave", self.room_target_tilt_db_per_octave),
+            (
+                "direct_target_tilt_db_per_octave",
+                self.direct_target_tilt_db_per_octave,
+            ),
+            (
+                "room_target_tilt_db_per_octave",
+                self.room_target_tilt_db_per_octave,
+            ),
         ] {
             if !tilt.is_finite() {
                 return Err(format!("{name} must be finite"));

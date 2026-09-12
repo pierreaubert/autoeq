@@ -72,6 +72,10 @@ pub struct ChannelProcessingResult {
     pub fir_coeffs: Option<Vec<f64>>,
     pub convolution_sidecar: Option<GeneratedConvolutionSidecar>,
     pub optimizer_evidence: Vec<OptimizerRunEvidence>,
+    /// Per-filter audibility decisions, retained through export/reporting.
+    pub audibility_veto: Vec<roomeq_model::FilterVetoVerdict>,
+    /// Frozen-chain adjudication summary, when the veto post-pass ran.
+    pub veto_adjudication: Option<roomeq_model::VetoAdjudicationReport>,
 }
 
 #[cfg(test)]

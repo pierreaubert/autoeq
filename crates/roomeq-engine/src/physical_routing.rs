@@ -124,10 +124,18 @@ pub fn resolve_physical_routing(
                     }
                     match plugin.plugin_type.as_str() {
                         // These controls are already included in the producer's route values.
-                        "gain" if plugin.parameters.get("room_eq_correction_gain").and_then(|v| v.as_bool()) == Some(true) => plugins.push(plugin.clone()),
+                        "gain"
+                            if plugin
+                                .parameters
+                                .get("room_eq_correction_gain")
+                                .and_then(|v| v.as_bool())
+                                == Some(true) =>
+                        {
+                            plugins.push(plugin.clone())
+                        }
                         "gain" | "delay" => (),
                         // Linear residual processing stays after the common sub correction.
-                        "eq" | "convolution" => plugins.push(plugin.clone()),
+                        "eq" | "convolution" | "crossover" => plugins.push(plugin.clone()),
                         _ => return Err(invalid("unsupported physical sub driver processing")),
                     }
                 }
@@ -455,16 +463,42 @@ mod tests {
     #[test]
     fn physical_routing_preserves_correction_owned_output_attenuation_once() {
         let (mut channels, graph) = fixture();
-        channels.get_mut("LFE").unwrap().drivers.as_mut().unwrap()[0].plugins.push(tagged(
-            "gain", json!({"gain_db": -4.0, "room_eq_correction_gain": true}), "post_route",
-        ));
+        channels.get_mut("LFE").unwrap().drivers.as_mut().unwrap()[0]
+            .plugins
+            .push(tagged(
+                "gain",
+                json!({"gain_db": -4.0, "room_eq_correction_gain": true}),
+                "post_route",
+            ));
         let physical = resolve_physical_routing(&channels, &graph).unwrap();
-        let owned: Vec<_> = physical.outputs[3].plugins.iter()
-            .filter(|plugin| plugin.parameters.get("room_eq_correction_gain").and_then(|v| v.as_bool()) == Some(true)).collect();
+        let owned: Vec<_> = physical.outputs[3]
+            .plugins
+            .iter()
+            .filter(|plugin| {
+                plugin
+                    .parameters
+                    .get("room_eq_correction_gain")
+                    .and_then(|v| v.as_bool())
+                    == Some(true)
+            })
+            .collect();
         assert_eq!(owned.len(), 1);
         assert_eq!(owned[0].parameters["gain_db"], -4.0);
-        assert!(physical.outputs[4].plugins.iter().all(|plugin| plugin.parameters.get("room_eq_correction_gain").is_none()));
-        assert_eq!(physical.routes.iter().find(|route| route.output_index == 3).unwrap().gain_db, 4.0);
+        assert!(
+            physical.outputs[4]
+                .plugins
+                .iter()
+                .all(|plugin| plugin.parameters.get("room_eq_correction_gain").is_none())
+        );
+        assert_eq!(
+            physical
+                .routes
+                .iter()
+                .find(|route| route.output_index == 3)
+                .unwrap()
+                .gain_db,
+            4.0
+        );
     }
 
     #[test]
@@ -488,9 +522,14 @@ mod tests {
         driver
             .plugins
             .push(tagged("eq", json!({"filters": []}), "post_route"));
+        driver.plugins.push(tagged(
+            "crossover",
+            json!({"type": "LR24", "frequency": 80.0, "output": "low"}),
+            "post_route",
+        ));
         graph.routes[0].delay_ms = 0.0001;
         let physical = resolve_physical_routing(&channels, &graph).unwrap();
-        assert_eq!(physical.outputs[3].plugins.len(), 4);
+        assert_eq!(physical.outputs[3].plugins.len(), 5);
         let plugins = physical_route_plugins(
             physical
                 .routes

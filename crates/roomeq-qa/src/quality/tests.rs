@@ -139,6 +139,8 @@ fn result_with_channel_slopes(
         biquads: Vec::new(),
         fir_coeffs: None,
         optimizer_evidence: Vec::new(),
+        audibility_veto: Vec::new(),
+        veto_adjudication: None,
     };
     RoomOptimizationResult {
         channels: HashMap::from([(
@@ -178,6 +180,8 @@ fn result_with_channel_slopes(
             final_convolution_sha256: None,
             supporting_source: None,
             correction_acceptance: None,
+            audibility_veto: None,
+            veto_adjudication: None,
             optimizer_evidence: None,
             stage_outcomes: Vec::new(),
             qa_seed_distribution: None,
@@ -217,6 +221,8 @@ fn result_with_inter_channel_slope(channel_slope_db_per_octave: f64) -> RoomOpti
                 biquads: Vec::new(),
                 fir_coeffs: None,
                 optimizer_evidence: Vec::new(),
+                audibility_veto: Vec::new(),
+                veto_adjudication: None,
             },
         ),
         (
@@ -230,6 +236,8 @@ fn result_with_inter_channel_slope(channel_slope_db_per_octave: f64) -> RoomOpti
                 biquads: Vec::new(),
                 fir_coeffs: None,
                 optimizer_evidence: Vec::new(),
+                audibility_veto: Vec::new(),
+                veto_adjudication: None,
             },
         ),
     ]);

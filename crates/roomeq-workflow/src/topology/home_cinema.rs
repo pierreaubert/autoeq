@@ -220,15 +220,30 @@ fn post_eq_useful_output_loss(
     max_freq: f64,
 ) -> Result<f64> {
     let score = roomeq_engine::quality::evaluate_acoustic_quality_with_permitted_gain(
-        std::slice::from_ref(before), std::slice::from_ref(after), &[], &[], target,
+        std::slice::from_ref(before),
+        std::slice::from_ref(after),
+        &[],
+        &[],
+        target,
         roomeq_engine::quality::QualityEvaluationConfig {
-            min_freq_hz: min_freq, max_freq_hz: max_freq,
-            schroeder_hz: None, normalize_level: true,
-        }, Default::default(), 0.0,
-    ).map_err(|message| AutoeqError::InvalidMeasurement { message })?;
-    Ok(score.useful_output.iter().map(|output| {
-        output.unexplained_loss_rms_db.max(output.bass_unexplained_loss_rms_db.unwrap_or(0.0))
-    }).fold(0.0_f64, f64::max))
+            min_freq_hz: min_freq,
+            max_freq_hz: max_freq,
+            schroeder_hz: None,
+            normalize_level: true,
+        },
+        Default::default(),
+        0.0,
+    )
+    .map_err(|message| AutoeqError::InvalidMeasurement { message })?;
+    Ok(score
+        .useful_output
+        .iter()
+        .map(|output| {
+            output
+                .unexplained_loss_rms_db
+                .max(output.bass_unexplained_loss_rms_db.unwrap_or(0.0))
+        })
+        .fold(0.0_f64, f64::max))
 }
 
 /// A post-route correction EQ can disturb the calibrated splice; structural
@@ -568,7 +583,12 @@ fn reconstruct_deployed_source_curves_impl(
                     .plugins
                     .iter()
                     .filter(|plugin| {
-                        (plugin.plugin_type != "gain" || plugin.parameters.get("room_eq_correction_gain").and_then(|v| v.as_bool()) == Some(true))
+                        (plugin.plugin_type != "gain"
+                            || plugin
+                                .parameters
+                                .get("room_eq_correction_gain")
+                                .and_then(|v| v.as_bool())
+                                == Some(true))
                             && plugin.plugin_type != "delay"
                             && plugin.plugin_type != "crossover"
                     })
@@ -1164,6 +1184,8 @@ fn supporting_only_home_cinema_result(config: &RoomConfig) -> RoomOptimizationRe
             validation_bundle: None,
             supporting_source: None,
             correction_acceptance: None,
+            audibility_veto: None,
+            veto_adjudication: None,
             optimizer_evidence: None,
             stage_outcomes: Vec::new(),
             qa_seed_distribution: None,
@@ -1307,6 +1329,8 @@ fn optimize_home_cinema_no_sub(
             validation_bundle: None,
             supporting_source: None,
             correction_acceptance: None,
+            audibility_veto: None,
+            veto_adjudication: None,
             optimizer_evidence: None,
             stage_outcomes: Vec::new(),
             qa_seed_distribution: None,
@@ -1343,7 +1367,8 @@ pub(crate) fn reconstruct_deployed_snapshot_best_effort(
         ) {
             Ok(curves) => {
                 degraded.extend(
-                    accepted_residuals.into_iter()
+                    accepted_residuals
+                        .into_iter()
                         .map(|role| format!("{role}:accepted_residual_splice_kept")),
                 );
                 return Ok(curves);
@@ -1401,7 +1426,8 @@ pub(crate) fn replay_until_splice_safe(
         let error = match replay {
             Ok(curves) => {
                 splice_reverted.extend(
-                    accepted_residuals.into_iter()
+                    accepted_residuals
+                        .into_iter()
                         .map(|role| format!("{role}:accepted_residual_splice_kept")),
                 );
                 return Ok(curves);
@@ -1704,11 +1730,20 @@ fn optimize_home_cinema_with_sub(
         // must use one synchronous complex capture. Its magnitude-only
         // multi-seat summary is not a measured transfer function.
         let source = resolve_single_source(&role, config, sys)?;
-        let primary_seat = config.optimizer.multi_seat.as_ref()
-            .map(|seat| seat.primary_seat).unwrap_or(0);
+        let primary_seat = config
+            .optimizer
+            .multi_seat
+            .as_ref()
+            .map(|seat| seat.primary_seat)
+            .unwrap_or(0);
         let mut primary = crate::multisub::load_primary_measurements_with_frequency_samples(
-            std::slice::from_ref(source), primary_seat, assembly.frequency_samples,
-        ).map_err(|error| AutoeqError::InvalidMeasurement { message: error.to_string() })?;
+            std::slice::from_ref(source),
+            primary_seat,
+            assembly.frequency_samples,
+        )
+        .map_err(|error| AutoeqError::InvalidMeasurement {
+            message: error.to_string(),
+        })?;
         pre_eq_initial_curves.insert(role.clone(), primary.remove(0));
         optimizer_evidence_by_channel.insert(role.clone(), ch_result.optimizer_evidence);
     }
@@ -1731,11 +1766,14 @@ fn optimize_home_cinema_with_sub(
             pre_eq_fir_coeffs.insert(sub_role.clone(), fir_coeffs);
         }
         // Spatial EQ inputs must not replace routing's complex representative.
-        pre_eq_initial_curves.insert(sub_role.clone(), if sub_preprocess.shared_eq_seats.is_some() {
-            sub_preprocess.combined_curve.clone()
-        } else {
-            ch_result.initial_curve
-        });
+        pre_eq_initial_curves.insert(
+            sub_role.clone(),
+            if sub_preprocess.shared_eq_seats.is_some() {
+                sub_preprocess.combined_curve.clone()
+            } else {
+                ch_result.initial_curve
+            },
+        );
         let mut sub_evidence = sub_preprocess.optimizer_evidence.clone();
         sub_evidence.extend(ch_result.optimizer_evidence);
         optimizer_evidence_by_channel.insert(sub_role.clone(), sub_evidence);
@@ -2580,11 +2618,14 @@ fn optimize_home_cinema_with_sub(
             compute_flat_loss(&main_curve_after, role_xover_freq, main_post_max_freq);
         let mains_preserved = main_post_score <= main_pre_score + 1e-6;
         let output_loss = post_eq_useful_output_loss(
-            &post_curve, &post_curve_after, prepared_target.as_ref(),
-            config.optimizer.min_freq, main_post_max_freq,
+            &post_curve,
+            &post_curve_after,
+            prepared_target.as_ref(),
+            config.optimizer.min_freq,
+            main_post_max_freq,
         )?;
-        let output_preserved = output_loss <= roomeq_engine::quality::QualityGatePolicy::default()
-            .max_unexplained_output_loss_db;
+        let output_preserved = output_loss
+            <= roomeq_engine::quality::QualityGatePolicy::default().max_unexplained_output_loss_db;
         if !output_preserved {
             post_eq_output_rejections.push((role.clone(), output_loss));
         }
@@ -2610,7 +2651,9 @@ fn optimize_home_cinema_with_sub(
                     roomeq_engine::topology::MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB,
                 );
             } else if !output_preserved {
-                log::warn!("{role} Post-EQ discarded: full-band useful output loss {output_loss:.3} dB");
+                log::warn!(
+                    "{role} Post-EQ discarded: full-band useful output loss {output_loss:.3} dB"
+                );
             } else if !mains_preserved {
                 log::warn!(
                     "  {} Post-EQ discarded: mains published score regressed from {:.4} to {:.4}",
@@ -2644,7 +2687,7 @@ fn optimize_home_cinema_with_sub(
         let mut opt_config = config.optimizer.clone();
         opt_config.max_freq = bass_route_upper_hz - 20.0;
         let sub_post_eq_band_empty = opt_config.max_freq <= opt_config.min_freq;
-            if sub_post_eq_band_empty {
+        if sub_post_eq_band_empty {
             log::warn!(
                 "  Sub Post-EQ skipped: bass-route upper bound {:.1} Hz leaves no optimization band above min_freq {:.1} Hz after the 20 Hz guard band",
                 bass_route_upper_hz,
@@ -2725,17 +2768,21 @@ fn optimize_home_cinema_with_sub(
             routed_underfill.as_ref().is_none_or(|(_, underfill_db)| {
                 roomeq_engine::topology::bass_management_underfill_is_acceptable(*underfill_db)
             });
-            let output_loss = post_eq_useful_output_loss(
-                &sub_post, &sub_after_eq, None, sub_min_score, bass_route_upper_hz,
-            )?;
-            let output_preserved = output_loss <= roomeq_engine::quality::QualityGatePolicy::default()
-                .max_unexplained_output_loss_db;
-            if !output_preserved {
-                post_eq_output_rejections.push((sub_role.clone(), output_loss));
-            }
-            if sub_post_eq_band_empty {
-                post_eq_filters.insert(sub_role.clone(), Vec::new());
-            } else if post < pre && routed_underfill_accepted && output_preserved {
+        let output_loss = post_eq_useful_output_loss(
+            &sub_post,
+            &sub_after_eq,
+            None,
+            sub_min_score,
+            bass_route_upper_hz,
+        )?;
+        let output_preserved = output_loss
+            <= roomeq_engine::quality::QualityGatePolicy::default().max_unexplained_output_loss_db;
+        if !output_preserved {
+            post_eq_output_rejections.push((sub_role.clone(), output_loss));
+        }
+        if sub_post_eq_band_empty {
+            post_eq_filters.insert(sub_role.clone(), Vec::new());
+        } else if post < pre && routed_underfill_accepted && output_preserved {
             optimizer_evidence_by_channel
                 .entry(sub_role.clone())
                 .or_default()
@@ -2759,7 +2806,7 @@ fn optimize_home_cinema_with_sub(
                 );
             } else {
                 log::warn!(
-                        "  Sub Post-EQ discarded: score {:.4} -> {:.4} or full-band useful output loss exceeded its budget",
+                    "  Sub Post-EQ discarded: score {:.4} -> {:.4} or full-band useful output loss exceeded its budget",
                     pre,
                     post
                 );
@@ -3135,6 +3182,8 @@ fn optimize_home_cinema_with_sub(
                 optimizer_evidence: optimizer_evidence_by_channel
                     .remove(role)
                     .unwrap_or_default(),
+                audibility_veto: Vec::new(),
+                veto_adjudication: None,
             },
         );
     }
@@ -3161,6 +3210,8 @@ fn optimize_home_cinema_with_sub(
                 optimizer_evidence: optimizer_evidence_by_channel
                     .remove(&sub_role)
                     .unwrap_or_default(),
+                audibility_veto: Vec::new(),
+                veto_adjudication: None,
             },
         );
     }
@@ -3221,7 +3272,9 @@ fn optimize_home_cinema_with_sub(
             if underfill_error_role(&error.to_string()).is_none() {
                 return Err(error);
             }
-            log::warn!("Deferring candidate crossover rejection to final correction selection: {error}");
+            log::warn!(
+                "Deferring candidate crossover rejection to final correction selection: {error}"
+            );
             reconstruct_deployed_source_curves_unenforced(
                 &channel_chains,
                 &pre_eq_fir_coeffs,
@@ -3441,6 +3494,8 @@ fn optimize_home_cinema_with_sub(
             validation_bundle: None,
             supporting_source: None,
             correction_acceptance: None,
+            audibility_veto: None,
+            veto_adjudication: None,
             optimizer_evidence: None,
             stage_outcomes: {
                 let mut outcomes = Vec::new();
@@ -3526,13 +3581,26 @@ mod post_dsp_level_tests {
         let before = curve(80.0);
         let mut after = before.clone();
         for (frequency, level) in after.freq.iter().zip(after.spl.iter_mut()) {
-            if *frequency <= 80.0 { *level -= 20.0; }
+            if *frequency <= 80.0 {
+                *level -= 20.0;
+            }
         }
-        assert!(post_eq_useful_output_loss(&before, &after, Some(&before), 20.0, 400.0).unwrap() > 10.0);
-        assert_eq!(post_eq_useful_output_loss(&before, &after, Some(&before), 100.0, 400.0).unwrap(), 0.0);
-        assert_eq!(post_eq_useful_output_loss(&before, &before, Some(&before), 20.0, 400.0).unwrap(), 0.0);
+        assert!(
+            post_eq_useful_output_loss(&before, &after, Some(&before), 20.0, 400.0).unwrap() > 10.0
+        );
+        assert_eq!(
+            post_eq_useful_output_loss(&before, &after, Some(&before), 100.0, 400.0).unwrap(),
+            0.0
+        );
+        assert_eq!(
+            post_eq_useful_output_loss(&before, &before, Some(&before), 20.0, 400.0).unwrap(),
+            0.0
+        );
         let peak = curve(95.0);
-        assert_eq!(post_eq_useful_output_loss(&peak, &before, Some(&before), 20.0, 400.0).unwrap(), 0.0);
+        assert_eq!(
+            post_eq_useful_output_loss(&peak, &before, Some(&before), 20.0, 400.0).unwrap(),
+            0.0
+        );
     }
 
     fn chain(name: &str, initial: Curve, final_curve: Option<Curve>) -> ChannelDspChain {
@@ -4045,7 +4113,7 @@ mod post_dsp_level_tests {
 
     #[test]
     fn splice_replay_keeps_hard_error_without_accepted_route_evidence() {
-        let (mut channels, graph) = cancelling_setup();
+        let (channels, graph) = cancelling_setup();
         for optimization in [
             None,
             Some(super::joint_bass_management_report_from_parts(
@@ -4094,32 +4162,59 @@ mod post_dsp_level_tests {
     #[test]
     fn best_effort_snapshot_checks_every_unaccepted_source() {
         let (channels, graph) = two_cancelling_sources();
-        let optimization = super::joint_bass_management_report_from_parts(
-            &[], &[accepted_source(true)], &[],
-        );
+        let optimization =
+            super::joint_bass_management_report_from_parts(&[], &[accepted_source(true)], &[]);
         let mut degraded = Vec::new();
         let error = super::reconstruct_deployed_snapshot_best_effort(
-            &channels, &HashMap::new(), &graph, Some(&optimization),
-            48_000.0, std::path::Path::new("."), &mut degraded,
-        ).expect_err("the accepted L residual must not exempt unaccepted R");
-        assert_eq!(super::underfill_error_role(&error.to_string()).as_deref(), Some("R"));
-        assert!(degraded.is_empty(), "failed snapshot must not publish partial acceptance");
+            &channels,
+            &HashMap::new(),
+            &graph,
+            Some(&optimization),
+            48_000.0,
+            std::path::Path::new("."),
+            &mut degraded,
+        )
+        .expect_err("the accepted L residual must not exempt unaccepted R");
+        assert_eq!(
+            super::underfill_error_role(&error.to_string()).as_deref(),
+            Some("R")
+        );
+        assert!(
+            degraded.is_empty(),
+            "failed snapshot must not publish partial acceptance"
+        );
     }
 
     #[test]
     fn splice_replay_checks_every_unaccepted_source() {
         let (mut channels, graph) = two_cancelling_sources();
-        let optimization = super::joint_bass_management_report_from_parts(
-            &[], &[accepted_source(true)], &[],
-        );
+        let optimization =
+            super::joint_bass_management_report_from_parts(&[], &[accepted_source(true)], &[]);
         let mut reverted = Vec::new();
         let error = super::replay_until_splice_safe(
-            &mut channels, &mut HashMap::new(), &mut reverted, &HashMap::new(),
-            &graph, Some(&optimization), 48_000.0, std::path::Path::new("."),
-            &|_| 80.0, "LFE", 20.0, 130.0, 16_000.0,
-        ).expect_err("the accepted L residual must not skip R's replay");
-        assert_eq!(super::underfill_error_role(&error.to_string()).as_deref(), Some("R"));
-        assert!(reverted.is_empty(), "no correction was reverted and replay failed");
+            &mut channels,
+            &mut HashMap::new(),
+            &mut reverted,
+            &HashMap::new(),
+            &graph,
+            Some(&optimization),
+            48_000.0,
+            std::path::Path::new("."),
+            &|_| 80.0,
+            "LFE",
+            20.0,
+            130.0,
+            16_000.0,
+        )
+        .expect_err("the accepted L residual must not skip R's replay");
+        assert_eq!(
+            super::underfill_error_role(&error.to_string()).as_deref(),
+            Some("R")
+        );
+        assert!(
+            reverted.is_empty(),
+            "no correction was reverted and replay failed"
+        );
     }
 
     #[test]
@@ -4128,57 +4223,105 @@ mod post_dsp_level_tests {
         let left = accepted_source(true);
         let mut right = left.clone();
         right.source_channel = "R".into();
-        let optimization = super::joint_bass_management_report_from_parts(
-            &[], &[left, right], &[],
-        );
+        let optimization = super::joint_bass_management_report_from_parts(&[], &[left, right], &[]);
         let expected = vec![
             "L:accepted_residual_splice_kept".to_string(),
             "R:accepted_residual_splice_kept".to_string(),
         ];
         let mut degraded = Vec::new();
         let snapshot = super::reconstruct_deployed_snapshot_best_effort(
-            &channels, &HashMap::new(), &graph, Some(&optimization),
-            48_000.0, std::path::Path::new("."), &mut degraded,
-        ).unwrap();
+            &channels,
+            &HashMap::new(),
+            &graph,
+            Some(&optimization),
+            48_000.0,
+            std::path::Path::new("."),
+            &mut degraded,
+        )
+        .unwrap();
         assert_eq!(degraded, expected);
         let mut reverted = Vec::new();
         let deployed = super::replay_until_splice_safe(
-            &mut channels, &mut HashMap::new(), &mut reverted, &HashMap::new(),
-            &graph, Some(&optimization), 48_000.0, std::path::Path::new("."),
-            &|_| 80.0, "LFE", 20.0, 130.0, 16_000.0,
-        ).unwrap();
+            &mut channels,
+            &mut HashMap::new(),
+            &mut reverted,
+            &HashMap::new(),
+            &graph,
+            Some(&optimization),
+            48_000.0,
+            std::path::Path::new("."),
+            &|_| 80.0,
+            "LFE",
+            20.0,
+            130.0,
+            16_000.0,
+        )
+        .unwrap();
         assert_eq!(reverted, expected);
         assert_eq!(deployed["R"].spl, snapshot["R"].spl);
-        assert!(reconstruct_deployed_source_curves(
-            &channels, &HashMap::new(), &graph, Some(&optimization),
-            48_000.0, std::path::Path::new("."),
-        ).is_err(), "best-effort exceptions must not relax the strict replay API");
+        assert!(
+            reconstruct_deployed_source_curves(
+                &channels,
+                &HashMap::new(),
+                &graph,
+                Some(&optimization),
+                48_000.0,
+                std::path::Path::new("."),
+            )
+            .is_err(),
+            "best-effort exceptions must not relax the strict replay API"
+        );
     }
 
     #[test]
     fn splice_replay_reverts_later_source_after_accepted_residual() {
         let (mut channels, graph) = two_cancelling_sources();
         let bass = super::engine_bass_management::predict_bass_source_curve_from_routes(
-            &curve(60.0), None, &graph, "R", 48_000.0,
-        ).unwrap();
+            &curve(60.0),
+            None,
+            &graph,
+            "R",
+            48_000.0,
+        )
+        .unwrap();
         let mut right = chain("R", bass, None);
         right.plugins.push(mark_plugin_stage(
-            roomeq_engine::output::create_labeled_eq_plugin(&[
-                super::Biquad::new(super::BiquadFilterType::AllPass, 80.0, 48_000.0, 1.0, 0.0),
-            ], "post_eq"),
+            roomeq_engine::output::create_labeled_eq_plugin(
+                &[super::Biquad::new(
+                    super::BiquadFilterType::AllPass,
+                    80.0,
+                    48_000.0,
+                    1.0,
+                    0.0,
+                )],
+                "post_eq",
+            ),
             "post_route",
         ));
         channels.insert("R".into(), right);
-        let optimization = super::joint_bass_management_report_from_parts(
-            &[], &[accepted_source(true)], &[],
-        );
+        let optimization =
+            super::joint_bass_management_report_from_parts(&[], &[accepted_source(true)], &[]);
         let mut reverted = Vec::new();
         let deployed = super::replay_until_splice_safe(
-            &mut channels, &mut HashMap::new(), &mut reverted, &HashMap::new(),
-            &graph, Some(&optimization), 48_000.0, std::path::Path::new("."),
-            &|_| 80.0, "LFE", 20.0, 130.0, 16_000.0,
-        ).unwrap();
-        assert!(channels["R"].plugins.is_empty(), "R's phase-breaking EQ was not examined");
+            &mut channels,
+            &mut HashMap::new(),
+            &mut reverted,
+            &HashMap::new(),
+            &graph,
+            Some(&optimization),
+            48_000.0,
+            std::path::Path::new("."),
+            &|_| 80.0,
+            "LFE",
+            20.0,
+            130.0,
+            16_000.0,
+        )
+        .unwrap();
+        assert!(
+            channels["R"].plugins.is_empty(),
+            "R's phase-breaking EQ was not examined"
+        );
         assert!(reverted.contains(&"R:peq".to_string()));
         assert!(reverted.contains(&"L:accepted_residual_splice_kept".to_string()));
         assert!(!reverted.contains(&"R:accepted_residual_splice_kept".to_string()));
@@ -5149,23 +5292,35 @@ mod tests {
         second.spl.fill(90.0);
         second.phase.as_mut().unwrap().fill(-89.0);
         for name in ["left", "right"] {
-            speakers.insert(name.into(), SpeakerConfig::Single(
-                MeasurementSource::InMemoryMultiple(vec![first.clone(), second.clone()]),
-            ));
+            speakers.insert(
+                name.into(),
+                SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(vec![
+                    first.clone(),
+                    second.clone(),
+                ])),
+            );
         }
-        speakers.insert("sub".into(), SpeakerConfig::Single(
-            MeasurementSource::InMemory(flat_curve_with_phase()),
-        ));
+        speakers.insert(
+            "sub".into(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve_with_phase())),
+        );
         let mut optimizer = tiny_optimizer();
         optimizer.max_freq = 2000.0;
         let config = room_config(speakers, &sys, optimizer, Some(crossovers_fixed()), None);
         let mut assembly = make_assembly(&config, &sys);
         let result = HomeCinemaExecutor.execute(&mut assembly).unwrap();
         for name in ["Left", "Right"] {
-            let initial: roomeq_engine::Curve = result.channels[name].initial_curve.clone().unwrap().into();
+            let initial: roomeq_engine::Curve =
+                result.channels[name].initial_curve.clone().unwrap().into();
             assert!(initial.spl.iter().all(|spl| (*spl - 80.0).abs() < 1e-8));
-            assert!(initial.phase.as_ref().expect("routing lost measured primary phase")
-                .iter().all(|phase| (*phase - 37.0).abs() < 1e-8));
+            assert!(
+                initial
+                    .phase
+                    .as_ref()
+                    .expect("routing lost measured primary phase")
+                    .iter()
+                    .all(|phase| (*phase - 37.0).abs() < 1e-8)
+            );
         }
     }
 

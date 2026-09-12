@@ -18,6 +18,8 @@ pub struct ChannelOptimizationResult {
     pub biquads: Vec<Biquad>,
     pub fir_coeffs: Option<Vec<f64>>,
     pub optimizer_evidence: Vec<OptimizerRunEvidence>,
+    pub audibility_veto: Vec<roomeq_model::FilterVetoVerdict>,
+    pub veto_adjudication: Option<roomeq_model::VetoAdjudicationReport>,
 }
 
 /// Result for a single speaker optimization.
@@ -31,6 +33,8 @@ pub struct SpeakerOptimizationResult {
     pub biquads: Vec<Biquad>,
     pub fir_coeffs: Option<Vec<f64>>,
     pub optimizer_evidence: Vec<OptimizerRunEvidence>,
+    pub audibility_veto: Vec<roomeq_model::FilterVetoVerdict>,
+    pub veto_adjudication: Option<roomeq_model::VetoAdjudicationReport>,
 }
 
 /// Complete in-memory result of a RoomEQ optimization workflow.

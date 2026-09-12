@@ -707,11 +707,26 @@ mod tests {
             let mut fir = crate::output::create_convolution_plugin("low.wav");
             fir.parameters["channels"] = serde_json::json!([0, 1]);
             let chain = chain(vec![
-                create_band_split_plugin(1000.0, "LR24"), fir, eq,
-                create_band_merge_plugin(2), create_gain_plugin(-6.0),
+                create_band_split_plugin(1000.0, "LR24"),
+                fir,
+                eq,
+                create_band_merge_plugin(2),
+                create_gain_plugin(-6.0),
             ]);
-            let low = Biquad::new(BiquadFilterType::Lowpass, 1000.0, rate, std::f64::consts::FRAC_1_SQRT_2, 0.0);
-            let high = Biquad::new(BiquadFilterType::Highpass, 1000.0, rate, std::f64::consts::FRAC_1_SQRT_2, 0.0);
+            let low = Biquad::new(
+                BiquadFilterType::Lowpass,
+                1000.0,
+                rate,
+                std::f64::consts::FRAC_1_SQRT_2,
+                0.0,
+            );
+            let high = Biquad::new(
+                BiquadFilterType::Highpass,
+                1000.0,
+                rate,
+                std::f64::consts::FRAC_1_SQRT_2,
+                0.0,
+            );
             let mut provider = Ir;
             let mut realized = RealizedDsp::new(&chain, rate, &mut provider).unwrap();
             for frequency in [100.0, 800.0, 1000.0, 2000.0, 10000.0] {
@@ -723,10 +738,13 @@ mod tests {
                 // Independent coefficient-polynomial/DTFT oracle: parallel
                 // branches add complexly, then the full-band gain is applied.
                 let expected = (section(&low).powu(2) * (1.0 + 0.5 * z)
-                    + section(&high).powu(2) * section(&peak)) * 10.0_f64.powf(-6.0 / 20.0);
+                    + section(&high).powu(2) * section(&peak))
+                    * 10.0_f64.powf(-6.0 / 20.0);
                 let actual = realized.response_at(frequency).unwrap();
-                assert!((actual - expected).norm() < 1e-10,
-                    "mixed branch mismatch at {frequency} Hz / {rate}: {actual} vs {expected}");
+                assert!(
+                    (actual - expected).norm() < 1e-10,
+                    "mixed branch mismatch at {frequency} Hz / {rate}: {actual} vs {expected}"
+                );
             }
         }
     }

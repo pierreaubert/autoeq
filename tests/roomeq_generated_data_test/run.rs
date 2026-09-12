@@ -148,7 +148,6 @@ fn run_roomeq_on_generated(scenario_name: &str) {
 
     // Reduce iterations for faster tests
     config.optimizer.max_iter = 2000;
-    config.optimizer.refine = false;
     // Use fixed seed for reproducible results
     config.optimizer.seed = Some(42);
 

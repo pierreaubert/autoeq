@@ -966,6 +966,8 @@ mod tests {
                 final_convolution_sha256: None,
                 supporting_source: None,
                 correction_acceptance: None,
+                audibility_veto: None,
+                veto_adjudication: None,
                 optimizer_evidence: None,
                 stage_outcomes: Vec::new(),
                 qa_seed_distribution: None,

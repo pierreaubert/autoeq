@@ -98,6 +98,8 @@ pub mod physical_routing;
 pub mod pipeline;
 /// Progress reporting for long-running RoomEQ operations.
 pub mod progress;
+/// Filesystem-capable validation of configured measurement provenance.
+pub mod provenance;
 pub mod report_adapter;
 /// Shared in-memory results returned by RoomEQ execution workflows.
 pub mod room_result;

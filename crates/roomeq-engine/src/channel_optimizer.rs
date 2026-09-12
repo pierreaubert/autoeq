@@ -116,7 +116,9 @@ pub(crate) fn optimize_maybe_multi(
     };
     if stopped.load(std::sync::atomic::Ordering::Relaxed) {
         return Err(AutoeqError::OptimizationFailed {
-            message: format!("EQ optimization stopped by progress callback for channel {channel_name}"),
+            message: format!(
+                "EQ optimization stopped by progress callback for channel {channel_name}"
+            ),
         });
     }
     result

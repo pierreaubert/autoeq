@@ -1865,12 +1865,7 @@ mod room_config_validation_tests {
             }),
         );
         let result = validate_room_config(&config);
-        assert!(
-            result
-                .errors
-                .iter()
-                .any(|e| e.contains("only 1 subwoofer"))
-        );
+        assert!(result.errors.iter().any(|e| e.contains("only 1 subwoofer")));
 
         // DBA empty front/rear
         let mut config = default_room();
@@ -2660,19 +2655,13 @@ mod room_config_validation_tests {
 
         // Canonical order passes
         assert!(
-            area.check_source_seat_coverage(
-                Some(ids.as_slice()),
-                &[ids.clone(), ids.clone()],
-            )
-            .is_empty()
+            area.check_source_seat_coverage(Some(ids.as_slice()), &[ids.clone(), ids.clone()],)
+                .is_empty()
         );
 
         // Reordered source list is flagged with the expected position
         let swapped = vec!["right".to_string(), "left".to_string()];
-        let errors = area.check_source_seat_coverage(
-            Some(ids.as_slice()),
-            &[ids.clone(), swapped],
-        );
+        let errors = area.check_source_seat_coverage(Some(ids.as_slice()), &[ids.clone(), swapped]);
         assert_eq!(errors.len(), 2, "got {errors:?}");
         assert!(
             errors.iter().all(|e| e.contains("source[1]")),
@@ -2680,10 +2669,8 @@ mod room_config_validation_tests {
         );
 
         // Incomplete coverage is flagged
-        let errors = area.check_source_seat_coverage(
-            Some(ids.as_slice()),
-            &[vec!["left".to_string()]],
-        );
+        let errors =
+            area.check_source_seat_coverage(Some(ids.as_slice()), &[vec!["left".to_string()]]);
         assert!(
             errors.iter().any(|e| e.contains("covers 1 seats")),
             "got {errors:?}"
@@ -2695,10 +2682,8 @@ mod room_config_validation_tests {
             area.check_source_seat_coverage(None, std::slice::from_ref(&positional))
                 .is_empty()
         );
-        let errors = area.check_source_seat_coverage(
-            None,
-            &[vec!["seat-1".to_string(), "seat-0".to_string()]],
-        );
+        let errors = area
+            .check_source_seat_coverage(None, &[vec!["seat-1".to_string(), "seat-0".to_string()]]);
         assert!(
             errors.iter().any(|e| e.contains("expected 'seat-0'")),
             "got {errors:?}"
@@ -2712,9 +2697,7 @@ mod room_config_validation_tests {
             map.effective_ids(2),
             vec!["left".to_string(), "right".to_string()]
         );
-        assert!(
-            map.check_source_seat_coverage(2, &[ids]).is_empty()
-        );
+        assert!(map.check_source_seat_coverage(2, &[ids]).is_empty());
     }
 
     #[test]
@@ -2735,20 +2718,16 @@ mod room_config_validation_tests {
         }
         let result = validate_room_config(&config);
         assert!(
-            result
-                .errors
-                .iter()
-                .any(|e| e.contains("num_points 8 exceeds")
-                    && e.contains("max_quadrature_points 4")),
+            result.errors.iter().any(
+                |e| e.contains("num_points 8 exceeds") && e.contains("max_quadrature_points 4")
+            ),
             "got {:?}",
             result.errors
         );
 
         // Gauss-Legendre totals above the cap are rejected
         let mut gl_area = area_1d(2);
-        gl_area.quadrature = AreaQuadratureKind::GaussLegendre {
-            points_per_axis: 8,
-        };
+        gl_area.quadrature = AreaQuadratureKind::GaussLegendre { points_per_axis: 8 };
         let mut config = make_seat_config(gl_area, None);
         if let Some(ms) = config.optimizer.multi_seat.as_mut() {
             ms.search = Some(MultiSeatSearchConfig {
@@ -2758,10 +2737,7 @@ mod room_config_validation_tests {
         }
         let result = validate_room_config(&config);
         assert!(
-            result
-                .errors
-                .iter()
-                .any(|e| e.contains("total points 8")),
+            result.errors.iter().any(|e| e.contains("total points 8")),
             "got {:?}",
             result.errors
         );
@@ -2851,10 +2827,7 @@ mod room_config_validation_tests {
         let result = validate_room_config(&config);
         assert!(result.errors.is_empty(), "got {:?}", result.errors);
         assert!(
-            result
-                .warnings
-                .iter()
-                .any(|w| w.contains("not consulted")),
+            result.warnings.iter().any(|w| w.contains("not consulted")),
             "got {:?}",
             result.warnings
         );
@@ -2904,11 +2877,9 @@ mod room_config_validation_tests {
             }),
         );
         let legacy_result = validate_room_config(&config);
-        let staged =
-            validate_room_config_staged(&config, RoomValidationContext::structural());
+        let staged = validate_room_config_staged(&config, RoomValidationContext::structural());
         let mut legacy_errors = legacy_result.errors.clone();
-        let mut staged_errors: Vec<String> =
-            staged.errors().cloned().collect();
+        let mut staged_errors: Vec<String> = staged.errors().cloned().collect();
         legacy_errors.sort();
         staged_errors.sort();
         assert_eq!(legacy_errors, staged_errors);
@@ -2940,14 +2911,12 @@ mod room_config_validation_tests {
         assert!(metrics.is_evaluated());
         assert_eq!(metrics.area_variance, Some(0.0));
         let back: ContinuousAreaMetrics =
-            serde_json::from_str(&serde_json::to_string(&metrics).expect("ser"))
-                .expect("de");
+            serde_json::from_str(&serde_json::to_string(&metrics).expect("ser")).expect("de");
         assert_eq!(back, metrics);
 
         // Schema exposes the optional metrics
-        let schema_json =
-            serde_json::to_value(schemars::schema_for!(ContinuousAreaMetrics))
-                .expect("schema json");
+        let schema_json = serde_json::to_value(schemars::schema_for!(ContinuousAreaMetrics))
+            .expect("schema json");
         assert!(schema_json.to_string().contains("area_variance"));
     }
 

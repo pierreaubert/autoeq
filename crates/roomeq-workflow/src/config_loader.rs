@@ -6,6 +6,7 @@ use crate::measurement::{
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use roomeq_engine::provenance::validate_provenance_references;
 use roomeq_model::validation_rules::{
     RoomValidationContext, collect_sources, validate_room_config_staged,
 };
@@ -203,6 +204,24 @@ pub fn validate_room_config_for_workflow_with_frequency_samples(
         }
     }
     report.record(ValidationStage::Acoustic, errors, Vec::new());
+    let provenance = validate_provenance_references(config);
+    if !provenance.errors.is_empty() || !provenance.warnings.is_empty() {
+        let mut resolved_errors = report
+            .stage(ValidationStage::ResolvedResource)
+            .errors
+            .clone();
+        let mut resolved_warnings = report
+            .stage(ValidationStage::ResolvedResource)
+            .warnings
+            .clone();
+        resolved_errors.extend(provenance.errors);
+        resolved_warnings.extend(provenance.warnings);
+        report.record(
+            ValidationStage::ResolvedResource,
+            resolved_errors,
+            resolved_warnings,
+        );
+    }
     report
 }
 
@@ -275,7 +294,8 @@ mod sample_rate_tests {
 mod tests {
     use super::*;
     use roomeq_model::{
-        InlineMeasurement, MeasurementRef, MeasurementSingle, MeasurementSource, SpeakerConfig,
+        InlineMeasurement, MeasurementProvenanceReference, MeasurementRef, MeasurementSingle,
+        MeasurementSource, ProvenanceValidationMode, SpeakerConfig,
     };
 
     fn write_config(dir: &tempfile::TempDir, name: &str, content: &str) -> PathBuf {
@@ -462,6 +482,31 @@ mod tests {
                 .errors()
                 .any(|error| error.contains("missing.csv"))
         );
+    }
+
+    #[test]
+    fn workflow_validation_records_provenance_warning_and_strict_error() {
+        for (mode, expect_error) in [
+            (ProvenanceValidationMode::Warn, false),
+            (ProvenanceValidationMode::Strict, true),
+        ] {
+            let mut config = RoomConfig::default();
+            config.provenance.validation_mode = mode;
+            config.provenance.measurements.insert(
+                "left".to_string(),
+                MeasurementProvenanceReference {
+                    record_id: "record".to_string(),
+                    content_hash: "hash".to_string(),
+                    schema_version: 1,
+                    sidecar_path: Some("/path/that/does/not/exist".into()),
+                },
+            );
+            let report =
+                validate_room_config_for_workflow(&config, RoomValidationContext::structural());
+            let stage = report.stage(ValidationStage::ResolvedResource);
+            assert_eq!(stage.errors.is_empty(), !expect_error);
+            assert_eq!(stage.warnings.is_empty(), expect_error);
+        }
     }
 
     #[test]

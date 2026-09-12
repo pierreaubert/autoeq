@@ -114,10 +114,7 @@ fn common_overlap_grid(
         .filter(|freq| *freq >= lower - 1e-9 && *freq <= upper + 1e-9)
         .map(|freq| freq.clamp(lower, upper))
         .collect();
-    grid.sort_by(|a, b| {
-        a.partial_cmp(b)
-            .expect("validated frequencies are finite")
-    });
+    grid.sort_by(|a, b| a.partial_cmp(b).expect("validated frequencies are finite"));
     grid.dedup_by(|a, b| (*a - *b).abs() <= 1e-9);
     if grid.len() < 2 {
         return Err(format!(
@@ -133,10 +130,7 @@ fn common_overlap_grid(
 
 /// Validate, intersect, and resample a set of curves onto their shared
 /// physical support. See [`AlignedCurves`].
-fn load_aligned_curves(
-    curves: &[Curve],
-    context: &str,
-) -> Result<AlignedCurves, Box<dyn Error>> {
+fn load_aligned_curves(curves: &[Curve], context: &str) -> Result<AlignedCurves, Box<dyn Error>> {
     let Some(_) = curves.first() else {
         return Err(format!("{context} is empty").into());
     };
@@ -215,9 +209,7 @@ pub fn load_measurement(measurement: &MeasurementRef) -> Result<Curve, Box<dyn E
 /// the frequency grid is an error here instead of a warn-and-drop: silently
 /// discarding phase evidence is unacceptable when downstream phase handling
 /// (delay estimation, coherent averaging) depends on its presence.
-pub fn load_measurement_strict(
-    measurement: &MeasurementRef,
-) -> Result<Curve, Box<dyn Error>> {
+pub fn load_measurement_strict(measurement: &MeasurementRef) -> Result<Curve, Box<dyn Error>> {
     load_measurement_with_policy(measurement, true)
 }
 
@@ -241,7 +233,11 @@ pub fn load_measurement_with_policy(
             // If inline data is empty but csv_path is provided, load from CSV
             if inline.frequencies.is_empty() || inline.magnitude_db.is_empty() {
                 if let Some(ref csv_path) = inline.csv_path {
-                    read_curve_from_csv(&PathBuf::from(csv_path))?
+                    read_curve_from_csv(&PathBuf::from(csv_path)).map_err(
+                        |error| -> Box<dyn Error> {
+                            format!("Failed to load measurement '{csv_path}': {error}").into()
+                        },
+                    )?
                 } else {
                     return Err(format!(
                         "Inline measurement has empty data and no csv_path to fall back to (name: {:?})",
@@ -517,8 +513,7 @@ pub fn coherent_average_measurement(
             real_sum[bin] += amplitude * phase_rad.cos();
             imag_sum[bin] += amplitude * phase_rad.sin();
         }
-        if let (Some(sum), Some(coherence)) = (coherence_sum.as_mut(), curve.coherence.as_ref())
-        {
+        if let (Some(sum), Some(coherence)) = (coherence_sum.as_mut(), curve.coherence.as_ref()) {
             *sum = sum.clone() + coherence;
         }
     }
@@ -971,8 +966,10 @@ mod tests {
         let individuals = load_source_individual(&source).unwrap();
 
         // Default contract with no seat provenance: rejected.
-        assert!(coherent_average_measurement(&individuals, &CoherentAverageContract::default())
-            .is_err());
+        assert!(
+            coherent_average_measurement(&individuals, &CoherentAverageContract::default())
+                .is_err()
+        );
 
         // Uncalibrated seats under a calibration-requiring contract: rejected.
         let uncalibrated = vec![
@@ -1091,7 +1088,11 @@ mod tests {
         assert!(detailed.primary_seat.phase.is_some());
         assert!(detailed.coherent.is_none());
         assert_eq!(
-            detailed.seats.iter().map(|s| s.seat_id.clone()).collect::<Vec<_>>(),
+            detailed
+                .seats
+                .iter()
+                .map(|s| s.seat_id.clone())
+                .collect::<Vec<_>>(),
             vec!["seat-0".to_string(), "seat-1".to_string()]
         );
         assert_eq!(detailed.individual.len(), 2);
@@ -1129,12 +1130,10 @@ mod tests {
         let mut inline = sample_inline();
         inline.phase_deg = Some(vec![0.0, 45.0]);
         // Lenient default keeps warn-and-drop behavior.
-        let lenient =
-            load_measurement(&MeasurementRef::Inline(inline.clone())).unwrap();
+        let lenient = load_measurement(&MeasurementRef::Inline(inline.clone())).unwrap();
         assert!(lenient.phase.is_none());
         // Strict mode errors instead.
-        let error =
-            load_measurement_strict(&MeasurementRef::Inline(inline)).unwrap_err();
+        let error = load_measurement_strict(&MeasurementRef::Inline(inline)).unwrap_err();
         assert!(
             error.to_string().contains("strict phase mode"),
             "unexpected error: {error}"
@@ -1266,7 +1265,10 @@ mod tests {
             spl: Array1::from_vec(vec![80.0, 81.0]),
             ..Default::default()
         };
-        for curves in [vec![low.clone(), high.clone()], vec![high.clone(), low.clone()]] {
+        for curves in [
+            vec![low.clone(), high.clone()],
+            vec![high.clone(), low.clone()],
+        ] {
             let source = MeasurementSource::InMemoryMultiple(curves);
             for error in [
                 load_source_individual(&source).unwrap_err(),
@@ -1356,10 +1358,7 @@ mod tests {
             speaker_name: None,
         });
         let reversed = MeasurementSource::Multiple(MeasurementMultiple {
-            measurements: vec![
-                MeasurementRef::Path(path_b),
-                MeasurementRef::Path(path_a),
-            ],
+            measurements: vec![MeasurementRef::Path(path_b), MeasurementRef::Path(path_a)],
             speaker_name: None,
         });
         for source in [source, reversed] {
@@ -1388,7 +1387,9 @@ mod tests {
         });
         let error = load_source_individual(&source).unwrap_err();
         assert!(
-            error.to_string().contains("no overlapping frequency support"),
+            error
+                .to_string()
+                .contains("no overlapping frequency support"),
             "unexpected error: {error}"
         );
         std::fs::remove_dir_all(&dir).ok();

@@ -113,6 +113,8 @@ fn process_phase_linear(request: FirChannelRequest<'_>) -> Result<ChannelProcess
         },
         request.preprocessed.optimizer_evidence.clone(),
         Some(&design_target),
+        Vec::new(),
+        None,
     )
 }
 
@@ -120,12 +122,17 @@ fn process_hybrid(mut request: FirChannelRequest<'_>) -> Result<ChannelProcessin
     let progress = progress::FirProgress::new(request.callback.take());
     let optimization_curve =
         subtract_target_tilt(&request.preprocessed.curve_for_optim, request.target);
-    if request.optimizer.fir.as_ref().is_some_and(|fir|
-        fir.phase.eq_ignore_ascii_case("kirkeby") && fir.correct_excess_phase)
+    if request
+        .optimizer
+        .fir
+        .as_ref()
+        .is_some_and(|fir| fir.phase.eq_ignore_ascii_case("kirkeby") && fir.correct_excess_phase)
         && optimization_curve.phase.is_none()
     {
         return Err(AutoeqError::OptimizationFailed {
-            message: "Kirkeby excess-phase correction requires acoustic phase on the reference curve".into(),
+            message:
+                "Kirkeby excess-phase correction requires acoustic phase on the reference curve"
+                    .into(),
         });
     }
     // The Hybrid IIR stage must honour the configured multi-measurement
@@ -167,24 +174,42 @@ fn process_hybrid(mut request: FirChannelRequest<'_>) -> Result<ChannelProcessin
         message: format!("FIR generation failed: {error}"),
     })?;
     let coefficients = if request.optimizer.multi_measurement.is_some()
-        && request.optimizer.fir.as_ref().is_some_and(|fir| fir.phase.eq_ignore_ascii_case("linear"))
+        && request
+            .optimizer
+            .fir
+            .as_ref()
+            .is_some_and(|fir| fir.phase.eq_ignore_ascii_case("linear"))
     {
         let (coefficients, evidence) = spatial_linear::optimize(
-            &request, &optimization_curve, &eq_result.filters, coefficients, &progress,
+            &request,
+            &optimization_curve,
+            &eq_result.filters,
+            coefficients,
+            &progress,
         )?;
         eq_result.optimizer_evidence.push(evidence);
         coefficients
     } else if request.optimizer.multi_measurement.is_some()
-        && request.optimizer.fir.as_ref().is_some_and(|fir| fir.phase.eq_ignore_ascii_case("minimum") || fir.phase.eq_ignore_ascii_case("kirkeby"))
+        && request.optimizer.fir.as_ref().is_some_and(|fir| {
+            fir.phase.eq_ignore_ascii_case("minimum") || fir.phase.eq_ignore_ascii_case("kirkeby")
+        })
     {
         let (coefficients, evidence) = spatial_realized::optimize(
-            &request, &optimization_curve, &eq_result.filters, &progress,
+            &request,
+            &optimization_curve,
+            &eq_result.filters,
+            &progress,
         )?;
         eq_result.optimizer_evidence.push(evidence);
         coefficients
     } else {
         coefficients
     };
+    let audibility_veto = eq_result.audibility_veto.clone();
+    let veto_adjudication = eq_result
+        .veto_adjudication
+        .as_ref()
+        .map(crate::eq::audibility_veto::VetoAdjudicationSummary::to_report);
     assemble::assemble_fir_result(
         &request,
         FirOptimizerOutput::Hybrid {
@@ -194,6 +219,8 @@ fn process_hybrid(mut request: FirChannelRequest<'_>) -> Result<ChannelProcessin
         },
         with_preprocessing_evidence(request.preprocessed, eq_result.optimizer_evidence),
         Some(&residual_target),
+        audibility_veto,
+        veto_adjudication,
     )
 }
 
@@ -281,6 +308,11 @@ fn process_mixed_phase(mut request: FirChannelRequest<'_>) -> Result<ChannelProc
     let (fir_coefficients, report) = generated
         .map(|(coefficients, report)| (Some(coefficients), Some(report)))
         .unwrap_or((None, None));
+    let audibility_veto = eq_result.audibility_veto.clone();
+    let veto_adjudication = eq_result
+        .veto_adjudication
+        .as_ref()
+        .map(crate::eq::audibility_veto::VetoAdjudicationSummary::to_report);
     let result = assemble::assemble_fir_result(
         &request,
         FirOptimizerOutput::MixedPhase {
@@ -291,6 +323,8 @@ fn process_mixed_phase(mut request: FirChannelRequest<'_>) -> Result<ChannelProc
         },
         with_preprocessing_evidence(request.preprocessed, eq_result.optimizer_evidence),
         None,
+        audibility_veto,
+        veto_adjudication,
     )?;
     info!(
         "  Mixed-phase result: pre={:.6}, post={:.6}",

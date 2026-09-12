@@ -89,6 +89,32 @@ Reports retain logical-input, partition, seat, and calibrated target-shortfall
 evidence separately from normalized shape error. Single-seat-only and other
 paths outside final-seat replay still require the broader runtime audit.
 
+### Explicit correction band and natural roll-off
+
+`optimizer.correction_band` is optional. It narrows where EQ may actively
+shape a response while leaving the configured observation band
+(`optimizer.min_freq..=max_freq`) intact for before/after scoring:
+
+```json
+"optimizer": {
+  "min_freq": 20,
+  "max_freq": 20000,
+  "correction_band": {
+    "min_hz": 40,
+    "max_hz": 16000,
+    "allow_natural_rolloff": true
+  }
+}
+```
+
+This is an explicit capability compromise for sources that cannot usefully
+deliver the full requested extension (for example, leaving a subwoofer's
+natural 20–40 Hz roll-off alone). It never installs a high-pass or low-pass
+by itself, and it cannot move outside the observation band. A narrowed range
+must set `allow_natural_rolloff: true`; otherwise configuration validation
+fails rather than silently leaving scored bins untreated. Reports retain the
+fixed evaluated band and the requested correction band separately.
+
 ### Unequal upper-band measurement support
 
 Final coherent replay does not extrapolate a short subwoofer capture or silently
@@ -118,7 +144,10 @@ the actual branch DSP to the bound and allows omission only when aggregate
 magnitude uncertainty is at most 0.1 dB. It does not invent unmeasured phase.
 Final-seat support evidence records magnitude and phase uncertainty, and the
 improvement lower bound includes both baseline and candidate uncertainty.
-Missing, contradictory, or acoustically significant bounds fail validation.
+Missing bounds prevent an accepted correction: RoomEQ publishes the structural
+baseline and reports `insufficient_evidence`. Contradictory declarations remain
+configuration errors. Electrical crossover settings do not establish an acoustic
+bound for unmeasured response.
 
 Final coherent replay also checks lower measurement support. A driver or routed
 output starting above another branch's measured bass is insufficient evidence
@@ -266,8 +295,14 @@ This is a configuration fragment; supply the usual `speakers` measurements.
 version 2.2.x and `phase_linear`, `hybrid`, or `mixed_phase` processing. It
 currently supports independent legacy or explicit-driver groups (such as paired
 main/sub outputs) and standalone speakers. Standalone speakers keep their
-existing single-FIR design. Bass-management routing, arrays and shared
-multi-sub outputs are rejected: those need a joint routing-matrix objective.
+existing single-FIR design. Bass-management and shared multi-sub outputs deploy
+the common post-route FIR on each physical driver with distinct sidecars and
+`room_eq_fir_design_scope: shared_kernel_per_physical_output`. This preserves
+every logical-input transfer, rather than independently inverting source curves
+that share an output. Pre-route FIRs stay on their logical source. Arrays and
+supporting-source outputs remain unsupported for this placement.
+Routed frequency-split hybrid blocks also remain unsupported: moving only their
+convolution outside the split/merge block would change the realized transfer.
 Group captures must have phase and a common timing reference. An output
 directory is required for the physical FIR sidecars.
 

@@ -79,16 +79,17 @@ pub fn process_iir_channel(mut request: IirChannelRequest<'_>) -> Result<IirChan
 
     match request.mode {
         IirChannelMode::LowLatency | IirChannelMode::WarpedIir => {
-            let (eq_filters, optimizer_evidence) = optimize::optimize_iir_eq(
-                request.channel_name,
-                request.prepared,
-                &optimization_curve,
-                request.optimizer,
-                request.eq_resources,
-                request.sample_rate,
-                request.callback.take(),
-                request.target.target_tilt_curve.as_ref(),
-            )?;
+            let (eq_filters, optimizer_evidence, audibility_veto, veto_adjudication) =
+                optimize::optimize_iir_eq(
+                    request.channel_name,
+                    request.prepared,
+                    &optimization_curve,
+                    request.optimizer,
+                    request.eq_resources,
+                    request.sample_rate,
+                    request.callback.take(),
+                    request.target.target_tilt_curve.as_ref(),
+                )?;
             info!("  Optimized {} EQ filters", eq_filters.len());
 
             let preference_filters = preference_filters(
@@ -113,6 +114,8 @@ pub fn process_iir_channel(mut request: IirChannelRequest<'_>) -> Result<IirChan
                 &request,
                 output,
                 with_preprocessing_evidence(request.preprocessed, optimizer_evidence),
+                audibility_veto,
+                veto_adjudication,
             )
         }
         IirChannelMode::KautzModal => {
@@ -121,6 +124,8 @@ pub fn process_iir_channel(mut request: IirChannelRequest<'_>) -> Result<IirChan
                 &request,
                 output,
                 request.preprocessed.optimizer_evidence.clone(),
+                Vec::new(),
+                None,
             )
         }
     }

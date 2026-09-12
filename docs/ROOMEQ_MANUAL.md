@@ -1113,9 +1113,19 @@ physical output, partition, and seat. A falling measured tail is not sufficient.
 The bound is processed through the actual branch DSP; aggregate omission must
 stay within 0.1 dB magnitude uncertainty. Reports retain magnitude and phase
 uncertainty without inventing unmeasured phase, and use a conservative improvement
-lower bound. Missing or significant upper-band evidence fails validation instead
-of truncating the main assessment. See `src/bin/roomeq/INPUT_FORMAT.md` for the
+lower bound. Missing upper-band evidence publishes the correction-free structural
+baseline with `insufficient_evidence`, instead of inventing acoustic support or
+truncating the main assessment. An electrical low-pass alone supplies no acoustic
+capability bound. See `src/bin/roomeq/INPUT_FORMAT.md` for the
 configuration and calibration contract.
+
+`optimizer.correction_band` is an optional explicit active-correction range.
+It can leave a source's natural extension (for example 20–40 Hz) untouched
+while the fixed `optimizer.min_freq..=max_freq` observation band remains in
+the before/after score. A narrowed range must set
+`allow_natural_rolloff: true`; no high-pass or low-pass is installed by this
+policy. Final-seat reports expose the requested correction band separately
+from the evaluated band.
 
 Unequal lower endpoints do not silently shorten the assessment band either.
 Within the requested band, if one driver or routed output has measured bass
@@ -1401,7 +1411,11 @@ it is not a recommendation to attenuate blindly.
 ## Per-driver FIR placement (input schema 2.2.0)
 
 Set `optimizer.fir.placement` to `per_driver` to try separate FIRs for the
-physical speakers in each independent main/sub group. The default, `shared`,
+physical speakers in each independent main/sub group. Shared routed sub outputs
+deploy the common post-route kernel on each physical driver, preserving every
+logical-input transfer. This constrained shared-kernel design is not independent
+multi-input matrix inversion. Pre-route source filters remain on their owner.
+The default, `shared`,
 is unchanged. Phase mode is independent of placement. See
 [the input contract](../src/bin/roomeq/INPUT_FORMAT.md#configuration-schema-version)
 for the JSON fragment, supported group types, safeguards and limitations.

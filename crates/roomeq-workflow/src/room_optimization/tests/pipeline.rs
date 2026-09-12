@@ -376,6 +376,8 @@ fn assemble_generic_result_non_empty_success() {
             biquads: Vec::new(),
             fir_coeffs: None,
             optimizer_evidence: Vec::new(),
+            audibility_veto: Vec::new(),
+            veto_adjudication: None,
         },
     );
     let mut curves = HashMap::new();

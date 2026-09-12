@@ -127,11 +127,19 @@ pub(in super::super) fn preprocess_multisub_mso_with_frequency_samples(
         combined.coherence = primary.coherence.clone();
     }
     let result = optimized.base;
-    let shared_eq_seats = crate::group_measurements::load_multisub_seat_measurements_with_frequency_samples(
-        ms, frequency_samples,
-    )?.map(|seats| roomeq_engine::multisub::render_mso_seat_responses(
-        &seats, &result.gains, &result.delays,
-    )).transpose()?;
+    let shared_eq_seats =
+        crate::group_measurements::load_multisub_seat_measurements_with_frequency_samples(
+            ms,
+            frequency_samples,
+        )?
+        .map(|seats| {
+            roomeq_engine::multisub::render_mso_seat_responses(
+                &seats,
+                &result.gains,
+                &result.delays,
+            )
+        })
+        .transpose()?;
 
     info!(
         "  MSO result: gains={:?}, delays={:?}",
@@ -141,12 +149,20 @@ pub(in super::super) fn preprocess_multisub_mso_with_frequency_samples(
     // Route alignment must use the same synchronous seat as the MSO solve.
     // `load_source` intentionally drops phase when averaging multiple seats;
     // that spatial magnitude is not a physical driver's complex response.
-    let primary_seat = optimizer.multi_seat.as_ref().map(|seat| seat.primary_seat).unwrap_or(0);
-    let primary_measurements = multisub_resources::load_primary_measurements_with_frequency_samples(
-        &ms.subwoofers,
-        primary_seat,
-        frequency_samples,
-    ).map_err(|error| AutoeqError::InvalidMeasurement { message: error.to_string() })?;
+    let primary_seat = optimizer
+        .multi_seat
+        .as_ref()
+        .map(|seat| seat.primary_seat)
+        .unwrap_or(0);
+    let primary_measurements =
+        multisub_resources::load_primary_measurements_with_frequency_samples(
+            &ms.subwoofers,
+            primary_seat,
+            frequency_samples,
+        )
+        .map_err(|error| AutoeqError::InvalidMeasurement {
+            message: error.to_string(),
+        })?;
     let mut drivers = Vec::new();
     for (i, curve) in primary_measurements.into_iter().enumerate() {
         drivers.push(SubDriverInfo {
@@ -598,24 +614,38 @@ mod tests {
             make_curve(16, 90.0, Some(-89.0)),
         ]);
         let group = MultiSubGroup {
-            name: "subs".into(), speaker_name: None,
-            subwoofers: vec![source.clone(), source], allpass_optimization: false,
+            name: "subs".into(),
+            speaker_name: None,
+            subwoofers: vec![source.clone(), source],
+            allpass_optimization: false,
         };
-        let result = preprocess_multisub_mso_with_frequency_samples(
-            &group, &tiny_optimizer(), 48_000.0, 16,
-        ).unwrap();
-        let seats = result.shared_eq_seats.as_ref().expect("shared EQ lost measured seats");
+        let result =
+            preprocess_multisub_mso_with_frequency_samples(&group, &tiny_optimizer(), 48_000.0, 16)
+                .unwrap();
+        let seats = result
+            .shared_eq_seats
+            .as_ref()
+            .expect("shared EQ lost measured seats");
         assert_eq!(seats.len(), 2);
         for (first, second) in seats[0].spl.iter().zip(&seats[1].spl) {
             assert!((second - first - 10.0).abs() < 1e-8);
         }
-        assert!(result.combined_curve.phase.is_some(), "routing lost complex phase");
+        assert!(
+            result.combined_curve.phase.is_some(),
+            "routing lost complex phase"
+        );
         assert!(!result.common_eq_complete);
         for driver in result.drivers.as_ref().unwrap() {
             let physical = driver.initial_curve.as_ref().unwrap();
             assert!(physical.spl.iter().all(|spl| (*spl - 80.0).abs() < 1e-8));
-            assert!(physical.phase.as_ref().expect("routing lost primary-seat phase")
-                .iter().all(|phase| (*phase - 37.0).abs() < 1e-8));
+            assert!(
+                physical
+                    .phase
+                    .as_ref()
+                    .expect("routing lost primary-seat phase")
+                    .iter()
+                    .all(|phase| (*phase - 37.0).abs() < 1e-8)
+            );
         }
     }
 

@@ -110,10 +110,15 @@ pub fn assess_inversion(
 ) -> Result<InversionDecision, String> {
     policy.validate()?;
     if !evidence.null_depth_db.is_finite() || evidence.null_depth_db < 0.0 {
-        return Err(String::from("null_depth_db must be finite and non-negative"));
+        return Err(String::from(
+            "null_depth_db must be finite and non-negative",
+        ));
     }
     for (name, value) in [
-        ("classification_confidence", evidence.classification_confidence),
+        (
+            "classification_confidence",
+            evidence.classification_confidence,
+        ),
         ("measurement_depth_scale", evidence.measurement_depth_scale),
     ] {
         if !value.is_finite() || !(0.0..=1.0).contains(&value) {

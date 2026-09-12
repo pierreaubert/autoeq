@@ -6,10 +6,10 @@ use roomeq_engine::room_result::RoomOptimizationResult;
 use roomeq_model::Curve;
 use roomeq_quality::{
     AcousticBaselinePlatform, AcousticCorpusBaseline, AcousticCorpusBaselineEntry,
-    AcousticCorpusManifest, AcousticCorpusScenario, AcousticQualityScorecard, QaTier,
-    QualityBaselineComparison, QualityBaselineMetrics, QualityBaselinePartition,
-    QualityEvaluationConfig, QualityGateMode, QualityGatePolicy, QualityGateReport,
-    QualityRegressionPolicy, TemporalChannelEvidence, TemporalQualityEvidence,
+    AcousticCorpusManifest, AcousticCorpusScenario, AcousticQualityScorecard,
+    HeadPositionPerturbationConfig, QaTier, QualityBaselineComparison, QualityBaselineMetrics,
+    QualityBaselinePartition, QualityEvaluationConfig, QualityGateMode, QualityGatePolicy,
+    QualityGateReport, QualityRegressionPolicy, TemporalChannelEvidence, TemporalQualityEvidence,
     compare_quality_to_baseline, derive_temporal_quality_evidence, evaluate_acoustic_quality,
     evaluate_quality_gate,
 };
@@ -138,6 +138,17 @@ struct RobustnessSummary {
     dropout_fraction: Option<f64>,
     worst_weighted_rms_delta_db: f64,
     worst_p95_delta_db: f64,
+    /// `not_provided` is intentional: ordinary seat/noise robustness is not a
+    /// head-position experiment.  `synthetic_proxy` is never a binaural or
+    /// precedence claim.
+    head_position_evidence: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    head_position_level_db: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    head_position_timing_ms: Option<f64>,
+    head_position_timing_evidence_available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    head_position_worst_weighted_rms_delta_db: Option<f64>,
     all_finite: bool,
 }
 
@@ -786,6 +797,9 @@ fn evaluate_robustness(
 
     let mut worst_weighted_rms_delta_db = f64::NEG_INFINITY;
     let mut worst_p95_delta_db = f64::NEG_INFINITY;
+    let mut head_position_worst_weighted_rms_delta_db =
+        config.head_position.as_ref().map(|_| f64::NEG_INFINITY);
+    let mut head_position_timing_evidence_available = true;
     let mut all_finite = true;
     let mut playback_evidence = Vec::new();
     for seed in &config.seeds {
@@ -828,6 +842,15 @@ fn evaluate_robustness(
                 for value in &mut noisy.spl {
                     *value += sign * level_error_db;
                 }
+            }
+            if let Some(head_position) = config.head_position.as_ref() {
+                let timing_applied = apply_head_position_perturbation(
+                    noisy,
+                    seed.wrapping_add(index as u64),
+                    head_position,
+                    scenario.schroeder_hz,
+                );
+                head_position_timing_evidence_available &= timing_applied;
             }
         }
         let mut perturbed_config = room_config.clone();
@@ -901,8 +924,18 @@ fn evaluate_robustness(
         worst_p95_delta_db = worst_p95_delta_db.max(
             scorecard.training.post_p95_abs_residual_db - base_metrics.post_p95_abs_residual_db,
         );
+        if let Some(worst_delta) = head_position_worst_weighted_rms_delta_db.as_mut() {
+            *worst_delta = (*worst_delta).max(
+                scorecard.training.post_weighted_rms_median_db
+                    - base_metrics.post_weighted_rms_median_db,
+            );
+        }
         all_finite &= scorecard.finite;
     }
+    let head_position_evidence = head_position_evidence_label(
+        config.head_position.as_ref(),
+        head_position_timing_evidence_available,
+    );
     Ok(Some(RobustnessSummary {
         playback_evidence,
         run_count: config.seeds.len(),
@@ -913,6 +946,12 @@ fn evaluate_robustness(
         dropout_fraction: config.seat_dropout_fraction,
         worst_weighted_rms_delta_db,
         worst_p95_delta_db,
+        head_position_evidence: head_position_evidence.to_string(),
+        head_position_level_db: config.head_position.as_ref().map(|value| value.level_db),
+        head_position_timing_ms: config.head_position.as_ref().map(|value| value.timing_ms),
+        head_position_timing_evidence_available,
+        head_position_worst_weighted_rms_delta_db: head_position_worst_weighted_rms_delta_db
+            .filter(|value| value.is_finite()),
         all_finite,
     }))
 }
@@ -944,6 +983,54 @@ fn apply_deterministic_measurement_noise(
         curve.freq.len(),
         coherence_floor,
     ));
+}
+
+/// Apply a bounded, deterministic head-position sensitivity proxy.
+///
+/// The level perturbation is intentionally concentrated above the transition
+/// region, where small listener/microphone moves most often change directivity
+/// and interference.  A timing perturbation is applied only when a measured
+/// phase vector exists; returning `false` keeps that evidence gap explicit.
+fn apply_head_position_perturbation(
+    curve: &mut Curve,
+    seed: u64,
+    config: &HeadPositionPerturbationConfig,
+    schroeder_hz: Option<f64>,
+) -> bool {
+    let transition_hz = schroeder_hz.unwrap_or(300.0).max(100.0);
+    let sign = if level_error_sign(seed, 0) { 1.0 } else { -1.0 };
+    for (index, (frequency, level)) in curve.freq.iter().zip(curve.spl.iter_mut()).enumerate() {
+        if !frequency.is_finite() || *frequency <= 0.0 {
+            continue;
+        }
+        let upper_weight = ((*frequency / transition_hz).log2() / 2.0).clamp(0.0, 1.0);
+        let ripple = ((*frequency).log2() * 3.17 + seed as f64 * 0.000_001 + index as f64).sin();
+        *level += sign * config.level_db * upper_weight * (0.5 + 0.5 * ripple);
+    }
+    if config.timing_ms == 0.0 {
+        return true;
+    }
+    let Some(phase) = curve.phase.as_mut() else {
+        return false;
+    };
+    for (frequency, phase_deg) in curve.freq.iter().zip(phase.iter_mut()) {
+        *phase_deg += sign * 360.0 * frequency * config.timing_ms / 1_000.0;
+    }
+    curve.min_phase = None;
+    curve.excess_phase = None;
+    curve.excess_delay_ms = None;
+    true
+}
+
+fn head_position_evidence_label(
+    config: Option<&HeadPositionPerturbationConfig>,
+    timing_evidence_available: bool,
+) -> &'static str {
+    match config {
+        None => "not_provided",
+        Some(_) if !timing_evidence_available => "synthetic_proxy_timing_evidence_missing",
+        Some(_) => "synthetic_proxy",
+    }
 }
 
 fn candidate_deltas(
@@ -1486,7 +1573,8 @@ mod tests {
             "topology": "2.1", "sample_rate": 48000.0, "config": "unused.json",
             "evaluation_band_hz": [20.0, 10000.0],
             "robustness": {"seeds": [42], "noise_peak_db": 0.1, "coherence_floor": 0.9,
-                "seat_dropout_fraction": 0.5, "level_calibration_error_db": 0.2}
+            "seat_dropout_fraction": 0.5, "level_calibration_error_db": 0.2,
+            "head_position": {"level_db": 2.0, "timing_ms": 0.3}}
         }))
         .unwrap();
         let mut two_seats = physical.clone();
@@ -1522,6 +1610,10 @@ mod tests {
         assert_eq!(retained[0].physical_outputs, ["left", "sub"]);
         assert_eq!(retained[0].seat_index, 1);
         assert_eq!(retained[0].seat_label.as_deref(), Some("training-1"));
+        assert_eq!(robustness.head_position_evidence, "synthetic_proxy");
+        assert!(robustness.head_position_timing_evidence_available);
+        assert_eq!(robustness.head_position_level_db, Some(2.0));
+        assert_eq!(robustness.head_position_timing_ms, Some(0.3));
         assert!(
             retained[0].delivered.spl[0] < -20.0,
             "robustness lost the sub-only fault"
@@ -1626,5 +1718,68 @@ mod tests {
         assert_ne!(first.spl, other.spl);
         assert!(first.spl.iter().all(|value| value.abs() <= 0.2));
         assert!(first.coherence.unwrap().iter().all(|value| *value == 0.8));
+    }
+
+    #[test]
+    fn head_position_proxy_is_seeded_bounded_and_phase_explicit() {
+        let mut with_phase = Curve {
+            freq: Array1::from(vec![20.0, 200.0, 1_000.0, 10_000.0]),
+            spl: Array1::zeros(4),
+            phase: Some(Array1::zeros(4)),
+            ..Default::default()
+        };
+        let mut repeat = with_phase.clone();
+        let config = HeadPositionPerturbationConfig {
+            level_db: 3.0,
+            timing_ms: 0.4,
+        };
+        assert!(config.validate().is_ok());
+        assert!(apply_head_position_perturbation(
+            &mut with_phase,
+            7,
+            &config,
+            Some(200.0),
+        ));
+        assert!(apply_head_position_perturbation(
+            &mut repeat,
+            7,
+            &config,
+            Some(200.0),
+        ));
+        assert_eq!(with_phase.spl, repeat.spl);
+        assert_eq!(with_phase.phase, repeat.phase);
+        assert!(with_phase.spl[0].abs() <= 1e-12);
+        assert!(with_phase.spl[3].abs() <= config.level_db);
+        assert!(with_phase.phase.as_ref().unwrap()[3].abs() > 1e-6);
+
+        let mut magnitude_only = Curve {
+            freq: Array1::from(vec![20.0, 1_000.0]),
+            spl: Array1::zeros(2),
+            ..Default::default()
+        };
+        assert!(!apply_head_position_perturbation(
+            &mut magnitude_only,
+            7,
+            &config,
+            Some(200.0),
+        ));
+        assert!(magnitude_only.spl[1].abs() > 0.0);
+    }
+
+    #[test]
+    fn robustness_summary_marks_missing_head_position_evidence() {
+        assert_eq!(head_position_evidence_label(None, true), "not_provided");
+        let config = HeadPositionPerturbationConfig {
+            level_db: 2.0,
+            timing_ms: 0.3,
+        };
+        assert_eq!(
+            head_position_evidence_label(Some(&config), false),
+            "synthetic_proxy_timing_evidence_missing"
+        );
+        assert_eq!(
+            head_position_evidence_label(Some(&config), true),
+            "synthetic_proxy"
+        );
     }
 }

@@ -18,6 +18,8 @@ pub(super) fn assemble_iir_result(
     request: &IirChannelRequest<'_>,
     optimizer_output: IirOptimizerOutput,
     optimizer_evidence: Vec<OptimizerRunEvidence>,
+    audibility_veto: Vec<roomeq_model::FilterVetoVerdict>,
+    veto_adjudication: Option<roomeq_model::VetoAdjudicationReport>,
 ) -> Result<IirChannelResult> {
     let dsp = assemble_dsp_chain(request, &optimizer_output);
     let raw_curve = request.prepared.measurements().representative();
@@ -94,6 +96,8 @@ pub(super) fn assemble_iir_result(
         fir_coeffs: None,
         convolution_sidecar: None,
         optimizer_evidence,
+        audibility_veto,
+        veto_adjudication,
     })
 }
 

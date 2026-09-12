@@ -38,9 +38,21 @@ fn advanced_modes_matched_budget_multirate_outcomes() {
     let mut regressions = Vec::new();
     for rate in [44_100.0, 48_000.0, 96_000.0] {
         for (name, mode, processing) in [
-            ("peq", IirChannelMode::LowLatency, roomeq_model::ProcessingMode::LowLatency),
-            ("warped_iir", IirChannelMode::WarpedIir, roomeq_model::ProcessingMode::WarpedIir),
-            ("kautz_modal", IirChannelMode::KautzModal, roomeq_model::ProcessingMode::KautzModal),
+            (
+                "peq",
+                IirChannelMode::LowLatency,
+                roomeq_model::ProcessingMode::LowLatency,
+            ),
+            (
+                "warped_iir",
+                IirChannelMode::WarpedIir,
+                roomeq_model::ProcessingMode::WarpedIir,
+            ),
+            (
+                "kautz_modal",
+                IirChannelMode::KautzModal,
+                roomeq_model::ProcessingMode::KautzModal,
+            ),
         ] {
             let curve = modal_curve();
             let input = prepared(curve.clone());
@@ -60,10 +72,18 @@ fn advanced_modes_matched_budget_multirate_outcomes() {
             let features = preprocessed(&curve);
             let resources = EqResources::default();
             let result = process_iir_channel(IirChannelRequest {
-                mode, channel_name: "left", prepared: &input, room_config: &config,
-                sample_rate: rate, target: &target, preprocessed: &features,
-                optimizer: &config.optimizer, eq_resources: &resources, callback: None,
-            }).unwrap();
+                mode,
+                channel_name: "left",
+                prepared: &input,
+                room_config: &config,
+                sample_rate: rate,
+                target: &target,
+                preprocessed: &features,
+                optimizer: &config.optimizer,
+                eq_resources: &resources,
+                callback: None,
+            })
+            .unwrap();
             let serialized = serde_json::to_value(&result.channel).unwrap();
             let chain = serde_json::from_value(serialized.clone()).unwrap();
             let mut provider = NoConvolutionIr;
@@ -91,8 +111,10 @@ fn advanced_modes_matched_budget_multirate_outcomes() {
                     "useful": useful, "delivered_filter_count": result.filters.len(),
                     "maximum_sampled_gain_db": maximum_gain, "requested_optimizer": config.optimizer,
                     "serialized_channel": serialized}));
-                if !post_rms.is_finite() || result.filters.len() > 1
-                    || maximum_gain > config.optimizer.max_db + 0.01 {
+                if !post_rms.is_finite()
+                    || result.filters.len() > 1
+                    || maximum_gain > config.optimizer.max_db + 0.01
+                {
                     regressions.push(format!("{name} at {rate}: nonfinite result or section/gain budget exceeded (gain {maximum_gain} dB)"));
                 }
             }
@@ -100,11 +122,15 @@ fn advanced_modes_matched_budget_multirate_outcomes() {
     }
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/qa");
     std::fs::create_dir_all(&directory).unwrap();
-    std::fs::write(directory.join("advanced-mode-matched-budget.json"),
+    std::fs::write(
+        directory.join("advanced-mode-matched-budget.json"),
         serde_json::to_vec_pretty(&serde_json::json!({
             "scope": "analytic_magnitude_challenge_not_physical_heldout_decay_or_listener_evidence",
             "outcomes": evidence, "contract_failures": regressions,
-        })).unwrap()).unwrap();
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     assert!(regressions.is_empty(), "{regressions:?}");
 }
 
@@ -194,6 +220,8 @@ fn low_latency_assembly_orders_passes_and_builds_report() {
             preference_filters: vec![preference],
         },
         Vec::new(),
+        Vec::new(),
+        None,
     )
     .unwrap();
 
@@ -293,6 +321,8 @@ fn warped_assembly_keeps_standard_hpf_and_marks_optimized_filters() {
             warped_lambda: 0.5,
         },
         Vec::new(),
+        Vec::new(),
+        None,
     )
     .unwrap();
 

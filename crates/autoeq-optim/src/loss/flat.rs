@@ -6,6 +6,7 @@
 
 use super::enhanced_weights::{FrequencyBandWeights, PreparedWeightedLoss, combined_weighted_loss};
 use ndarray::Array1;
+use std::sync::Arc;
 
 /// Default blend for `flat_loss`: 70% ERB-weighted, 30% band-weighted.
 ///
@@ -19,6 +20,7 @@ const DEFAULT_FLAT_BAND_WEIGHT: f64 = 0.3;
 #[derive(Debug, Clone)]
 pub struct PreparedFlatLoss {
     weighted: PreparedWeightedLoss,
+    null_suppression: Option<Arc<Array1<f64>>>,
 }
 
 impl PreparedFlatLoss {
@@ -31,13 +33,44 @@ impl PreparedFlatLoss {
                 max_freq,
                 FrequencyBandWeights::default(),
             ),
+            null_suppression: None,
+        }
+    }
+
+    /// Prepare the RoomEQ flat objective with a dip-only narrow-null mask.
+    /// The optional mask is kept outside the public allocating `flat_loss`
+    /// helper so speaker/headphone callers retain their historical behavior.
+    pub fn new_with_null_suppression(
+        freqs: &Array1<f64>,
+        min_freq: f64,
+        max_freq: f64,
+        null_suppression: Arc<Array1<f64>>,
+    ) -> Self {
+        Self {
+            weighted: PreparedWeightedLoss::new(
+                freqs,
+                min_freq,
+                max_freq,
+                FrequencyBandWeights::default(),
+            ),
+            null_suppression: Some(null_suppression),
         }
     }
 
     /// Evaluate a full-grid residual without allocating.
     pub fn evaluate(&self, error: &Array1<f64>) -> f64 {
-        self.weighted
-            .evaluate(error, DEFAULT_FLAT_ERB_WEIGHT, DEFAULT_FLAT_BAND_WEIGHT)
+        match self.null_suppression.as_deref() {
+            Some(mask) => self.weighted.evaluate_with_dip_suppression(
+                error,
+                DEFAULT_FLAT_ERB_WEIGHT,
+                DEFAULT_FLAT_BAND_WEIGHT,
+                mask.as_slice().unwrap_or(&[]),
+            ),
+            None => {
+                self.weighted
+                    .evaluate(error, DEFAULT_FLAT_ERB_WEIGHT, DEFAULT_FLAT_BAND_WEIGHT)
+            }
+        }
     }
 }
 
@@ -168,5 +201,23 @@ mod tests {
         let expected = flat_loss(&freqs, &error, 35.0, 16_000.0);
         let actual = PreparedFlatLoss::new(&freqs, 35.0, 16_000.0).evaluate(&error);
         assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+    }
+
+    #[test]
+    fn prepared_flat_loss_suppresses_only_boost_into_nulls() {
+        let freqs = Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), 128);
+        let dip = Array1::from_elem(freqs.len(), -2.0);
+        let peak = Array1::from_elem(freqs.len(), 2.0);
+        let mut mask = Array1::ones(freqs.len());
+        mask[64] = 0.0;
+        let masked =
+            PreparedFlatLoss::new_with_null_suppression(&freqs, 20.0, 20_000.0, Arc::new(mask));
+        let unmasked = PreparedFlatLoss::new(&freqs, 20.0, 20_000.0);
+
+        assert!(
+            masked.evaluate(&dip) < unmasked.evaluate(&dip),
+            "narrow-null dip suppression must reduce boost incentive"
+        );
+        assert_eq!(masked.evaluate(&peak), unmasked.evaluate(&peak));
     }
 }

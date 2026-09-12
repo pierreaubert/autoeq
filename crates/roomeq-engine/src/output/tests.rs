@@ -244,6 +244,7 @@ fn test_create_convolution_plugin() {
         plugin.parameters.get("ir_file").unwrap().as_str().unwrap(),
         "left_fir.wav"
     );
+    assert_eq!(plugin.parameters["room_eq_stage"], "post_route");
 }
 
 #[test]
@@ -484,6 +485,8 @@ fn test_create_dsp_chain_output() {
         final_convolution_sha256: None,
         supporting_source: None,
         correction_acceptance: None,
+        audibility_veto: None,
+        veto_adjudication: None,
         optimizer_evidence: None,
         stage_outcomes: Vec::new(),
         qa_seed_distribution: None,
@@ -560,6 +563,8 @@ fn test_create_dsp_chain_output_adds_ctc_global_xtc_plugin() {
         final_convolution_sha256: None,
         supporting_source: None,
         correction_acceptance: None,
+        audibility_veto: None,
+        veto_adjudication: None,
         optimizer_evidence: None,
         stage_outcomes: Vec::new(),
         qa_seed_distribution: None,
@@ -832,13 +837,8 @@ fn test_extend_curve_to_full_range_ignores_noisy_last_bin() {
     // 200 Hz whose dense linear tail ends one noisy bin higher reached
     // 1004 dB at 20 kHz under single-pair slope extrapolation. The edge
     // octave trend stays near the flat measured level instead.
-    let mut freq: Vec<f64> = ndarray::Array1::logspace(
-        10.0,
-        10.0_f64.log10(),
-        190.0_f64.log10(),
-        48,
-    )
-    .to_vec();
+    let mut freq: Vec<f64> =
+        ndarray::Array1::logspace(10.0, 10.0_f64.log10(), 190.0_f64.log10(), 48).to_vec();
     freq.extend([192.0, 194.0, 196.0, 198.0, 199.0, 199.5, 200.0]);
     let len = freq.len();
     let mut spl = vec![53.0; len];

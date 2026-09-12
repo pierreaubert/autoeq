@@ -369,8 +369,15 @@ mod crossover_response_tests {
         for rate in [44_100.0, 48_000.0, 96_000.0] {
             for (kind, order) in [("LR24", 4), ("LR48", 8)] {
                 let frequencies = ndarray::Array1::from_vec(vec![30.0, 60.0, 120.0]);
-                let low = super::compute_crossover_complex_response(kind, 60.0, rate, true, &frequencies);
-                let high = super::compute_crossover_complex_response(kind, 60.0, rate, false, &frequencies);
+                let low =
+                    super::compute_crossover_complex_response(kind, 60.0, rate, true, &frequencies);
+                let high = super::compute_crossover_complex_response(
+                    kind,
+                    60.0,
+                    rate,
+                    false,
+                    &frequencies,
+                );
                 for (index, frequency) in frequencies.iter().enumerate() {
                     let x = (std::f64::consts::PI * frequency / rate).tan()
                         / (std::f64::consts::PI * 60.0 / rate).tan();

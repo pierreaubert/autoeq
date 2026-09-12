@@ -3022,6 +3022,7 @@ version = "0.5.81"
 dependencies = [
  "autoeq-core",
  "autoeq-fir",
+ "autoeq-measurements",
  "autoeq-optim",
  "hound",
  "log",
@@ -3043,6 +3044,7 @@ dependencies = [
  "schemars 1.2.2",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

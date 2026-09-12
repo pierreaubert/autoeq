@@ -11,6 +11,24 @@ import mdat2csv
 
 
 class Mdat2CsvTests(unittest.TestCase):
+    def test_no_clobber_preserves_existing_exports_and_creates_missing_csvs(self):
+        measurement = {
+            'name': 'seat', 'freq': [20., 80.],
+            'spl': [80., 81.], 'phase': [0., 10.],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            existing_csv = Path(directory) / 'seat.csv'
+            existing_csv.write_text('user measurement', encoding='utf-8')
+            existing_config = Path(directory) / 'recordings.json'
+            existing_config.write_text('user configuration', encoding='utf-8')
+            path = mdat2csv.export_csv(measurement, directory, overwrite=False)
+            mdat2csv.export_recordings_json([measurement], [path], directory, overwrite=False)
+            self.assertEqual(existing_csv.read_text(), 'user measurement')
+            self.assertEqual(existing_config.read_text(), 'user configuration')
+            measurement['name'] = 'missing_seat'
+            created = mdat2csv.export_csv(measurement, directory, overwrite=False)
+            self.assertTrue(Path(created).read_text().startswith('freq_hz,spl_db,phase_deg'))
+
     def test_csv_preserves_native_unequal_grids_and_narrow_null(self):
         with tempfile.TemporaryDirectory() as directory:
             for index, frequencies in enumerate(([20., 79., 80., 81., 500.], [30., 80., 400.])):

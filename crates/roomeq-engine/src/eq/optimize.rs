@@ -20,6 +20,132 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
 
+/// Derive audibility-veto modal evidence for one measurement using the same
+/// decomposition thresholds as the single-channel path.  Multi-measurement
+/// optimization must not silently lose this evidence: otherwise the shared
+/// post-pass would claim that a boost is safe merely because the first
+/// channel happened not to carry the decomposition metadata.
+fn mode_proximity_evidence_for_curve(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    effective_min_freq: f64,
+    effective_max_freq: f64,
+) -> Vec<autoeq_optim::roomeq::ModeProximityEvidence> {
+    let Some(dc) = config
+        .decomposed_correction
+        .as_ref()
+        .filter(|dc| dc.enabled)
+    else {
+        return Vec::new();
+    };
+
+    let (sum, count) = curve
+        .freq
+        .iter()
+        .zip(curve.spl.iter())
+        .filter(|(frequency, level)| {
+            **frequency >= effective_min_freq
+                && **frequency <= effective_max_freq
+                && level.is_finite()
+        })
+        .fold((0.0, 0usize), |(sum, count), (_, level)| {
+            (sum + *level, count + 1)
+        });
+    if count == 0 {
+        return Vec::new();
+    }
+
+    // Keep the mode detector level-independent, matching the normalized
+    // single-channel preparation.  No temporal severity is inferred here;
+    // only an IR-backed path may populate that field.
+    let normalized_spl = curve.spl.mapv(|level| level - sum / count as f64);
+    let analysis_config = roomeq_analysis::impulse_analysis::DecomposedCorrectionConfig {
+        schroeder_freq: dc
+            .room_dimensions
+            .as_ref()
+            .map(|dimensions| dimensions.schroeder_frequency())
+            .unwrap_or(dc.schroeder_freq),
+        transition_width_oct: dc.transition_width_oct,
+        min_mode_q: dc.min_mode_q,
+        min_mode_prominence_db: dc.min_mode_prominence_db,
+        mode_correction_weight: dc.mode_correction_weight,
+        early_reflection_weight: dc.early_reflection_weight,
+        steady_state_weight: dc.steady_state_weight,
+        fdw_enabled: dc.fdw_enabled,
+        fdw_cycles: dc.fdw_cycles,
+        fdw_min_window_ms: dc.fdw_min_window_ms,
+        fdw_max_window_ms: dc.fdw_max_window_ms,
+        fdw_smoothing_octaves: dc.fdw_smoothing_octaves,
+    };
+    roomeq_analysis::impulse_analysis::analyze_decomposed_correction(
+        &curve.freq,
+        &normalized_spl,
+        &analysis_config,
+    )
+    .room_modes
+    .into_iter()
+    .filter(|mode| {
+        mode.frequency.is_finite()
+            && mode.frequency > 0.0
+            && mode.q.is_finite()
+            && mode.q > 0.0
+            && mode.prominence_db.is_finite()
+            && mode.prominence_db >= dc.min_mode_prominence_db
+    })
+    .map(|mode| autoeq_optim::roomeq::ModeProximityEvidence {
+        frequency_hz: mode.frequency,
+        q: mode.q,
+        prominence_db: mode.prominence_db,
+        temporal_severity_db: None,
+    })
+    .collect()
+}
+
+/// Put all seats on one explicitly measured common grid before any
+/// multi-objective or spatial statistic is computed. A newly added
+/// measurement often has a different FFT density or end points; rejecting it
+/// at a later `zip`/percentile call makes the workflow appear flaky. The
+/// common span is an intersection (never extrapolation), and the first
+/// measurement supplies the native grid density for deterministic results.
+fn align_multi_measurement_curves(curves: &[Curve]) -> Result<Vec<Curve>, Box<dyn Error>> {
+    let (common_min, common_max) = roomeq_analysis::frequency_grid::common_frequency_range(curves)
+        .ok_or_else(|| {
+            "multi-measurement curves have no common measured frequency span".to_string()
+        })?;
+    if !common_min.is_finite() || !common_max.is_finite() || common_max <= common_min {
+        return Err("multi-measurement curves have invalid common frequency span".into());
+    }
+    let reference = &curves[0];
+    if reference.freq.len() != reference.spl.len() {
+        return Err(
+            "multi-measurement reference curve has mismatched frequency/SPL lengths".into(),
+        );
+    }
+    let grid = ndarray::Array1::from_iter(
+        reference
+            .freq
+            .iter()
+            .copied()
+            .filter(|frequency| *frequency >= common_min && *frequency <= common_max),
+    );
+    if grid.len() < 2 {
+        return Err("multi-measurement common span has fewer than two reference samples".into());
+    }
+    curves
+        .iter()
+        .enumerate()
+        .map(|(index, curve)| {
+            if curve.freq.len() != curve.spl.len() {
+                return Err(format!(
+                    "multi-measurement curve {index} has mismatched frequency/SPL lengths"
+                )
+                .into());
+            }
+            Ok(autoeq_core::interpolate_log_space(&grid, curve))
+        })
+        .collect()
+}
+
 /// Prepare the shared per-seat objective independently of its PEQ solver.
 /// FIR consumers must evaluate these same targets, masks and risk policy.
 pub(crate) fn prepare_multi_measurement_objective(
@@ -28,7 +154,14 @@ pub(crate) fn prepare_multi_measurement_objective(
     multi_config: &MultiMeasurementConfig,
     resources: Option<&EqResources>,
     sample_rate: f64,
-) -> Result<(autoeq_optim::optim::ObjectiveData, autoeq_optim::OptimParams, OptimizerConfig), Box<dyn Error>> {
+) -> Result<
+    (
+        autoeq_optim::optim::ObjectiveData,
+        autoeq_optim::OptimParams,
+        OptimizerConfig,
+    ),
+    Box<dyn Error>,
+> {
     if curves.is_empty() {
         return Err("no_measurements".into());
     }
@@ -48,6 +181,11 @@ pub(crate) fn prepare_multi_measurement_objective(
     }
     let ignore_configured_weights = multi_config.rir_prototype.is_some()
         || multi_config.strategy == MultiMeasurementStrategy::MinimaxUncertainty;
+    // Align before quality assessment as well as prototype/bootstrap/spatial
+    // processing: the quality assessor otherwise rejects a valid seat solely
+    // because it was captured with a different FFT grid.
+    let aligned_curves = align_multi_measurement_curves(curves)?;
+    let curves = aligned_curves.as_slice();
 
     let measurement_quality =
         autoeq_optim::measurements::assess_multiple_measurement_quality(curves);
@@ -151,14 +289,21 @@ pub(crate) fn prepare_multi_measurement_objective(
     // Clamp optimizer frequency range to the measurement data range of the first curve
     let data_min_freq = curves[0].freq[0];
     let data_max_freq = curves[0].freq[curves[0].freq.len() - 1];
-    let effective_min_freq = config.min_freq.max(data_min_freq);
-    let effective_max_freq = config.max_freq.min(data_max_freq);
+    let [configured_min_freq, configured_max_freq] = config.active_correction_band();
+    let effective_min_freq = configured_min_freq.max(data_min_freq);
+    let effective_max_freq = configured_max_freq.min(data_max_freq);
+    if effective_max_freq <= effective_min_freq {
+        return Err(format!(
+            "active correction band [{effective_min_freq:.1}, {effective_max_freq:.1}] Hz has no common measured support"
+        )
+        .into());
+    }
 
     if effective_max_freq < config.max_freq || effective_min_freq > config.min_freq {
         log::warn!(
             "  Clamping optimizer freq range [{:.1}, {:.1}] to measurement data range [{:.1}, {:.1}]",
-            config.min_freq,
-            config.max_freq,
+            configured_min_freq,
+            configured_max_freq,
             effective_min_freq,
             effective_max_freq
         );
@@ -319,6 +464,12 @@ pub(crate) fn prepare_multi_measurement_objective(
         objective_data.smoothness_penalty = optim_params_multi.smoothness_penalty.clone();
         objective_data.max_boost_envelope = config.max_boost_envelope.clone();
         objective_data.min_cut_envelope = config.min_cut_envelope.clone();
+        objective_data.mode_proximity_evidence = mode_proximity_evidence_for_curve(
+            curve,
+            config,
+            effective_min_freq,
+            effective_max_freq,
+        );
         if let Some(depth) = spatial_correction_depth.as_ref() {
             if depth.len() != objective_data.deviation.len() {
                 return Err("spatial correction-depth grid does not match objective grid".into());
@@ -581,9 +732,16 @@ pub(crate) fn optimize_group_eq_with_upper_reference(
     // Only the combined main+sub response owns the broadband target. Individual
     // band-limited drivers must not use their out-of-passband noise as an anchor.
     let target = resources::target_curve(curve, resources);
-    let reference = crate::spectral_align::upper_band_target_reference(curve, &target, config.max_freq);
+    let reference =
+        crate::spectral_align::upper_band_target_reference(curve, &target, config.max_freq);
     optimize_channel_eq_inner(
-        curve, config, resources, sample_rate, reference, None, callback,
+        curve,
+        config,
+        resources,
+        sample_rate,
+        reference,
+        None,
+        callback,
         &RealOptimizerBackend::new(),
     )
 }
@@ -595,7 +753,8 @@ pub(crate) fn group_upper_reference_target(
     resources: Option<&EqResources>,
 ) -> Option<Curve> {
     let mut target = resources::target_curve(curve, resources);
-    let reference = crate::spectral_align::upper_band_target_reference(curve, &target, config.max_freq)?;
+    let reference =
+        crate::spectral_align::upper_band_target_reference(curve, &target, config.max_freq)?;
     target.spl += reference;
     Some(target)
 }
@@ -828,6 +987,7 @@ fn apply_veto_postpass(
             listening_phon: phon,
             config: veto,
             hf_guard_start_hz: hf_start,
+            mode_proximity_evidence: &prep.objective_data.mode_proximity_evidence,
         };
         super::audibility_veto::evaluate_audibility_veto(&evaluation)
     };
@@ -870,6 +1030,87 @@ fn recompiled_loss(filters: &[Biquad], prep: &super::types::PreparedSingleChanne
     let peq: math_audio_iir_fir::Peq = filters.iter().map(|biquad| (1.0, biquad.clone())).collect();
     let x = autoeq_core::x2peq::peq2x(&peq, prep.peq_model);
     autoeq_optim::optim::compute_base_fitness(&x, &prep.objective_data)
+}
+
+/// Apply the same audibility nomination and frozen-chain adjudication to a
+/// multi-measurement objective.  Joint and spatial optimizers historically
+/// bypassed this post-pass, which made their result semantics differ from
+/// single-channel EQ.  Keep the objective data as the sole source for the
+/// frequency grid and recompute the scalar loss after an enforced removal.
+fn apply_veto_postpass_for_objective(
+    filters: Vec<Biquad>,
+    loss: f64,
+    objective_data: &autoeq_optim::optim::ObjectiveData,
+    config: &OptimizerConfig,
+) -> (
+    Vec<Biquad>,
+    f64,
+    Vec<roomeq_model::FilterVetoVerdict>,
+    Option<super::audibility_veto::VetoAdjudicationSummary>,
+) {
+    let Some(veto) = config.filter_audibility.filter(|veto| veto.enabled) else {
+        return (filters, loss, Vec::new(), None);
+    };
+    let phon = veto.resolved_listening_phon(
+        config
+            .epa_config
+            .as_ref()
+            .map(|epa| epa.listening_level_phon),
+    );
+    let hf_start = veto.resolved_hf_guard_start_hz(
+        config
+            .high_frequency_correction
+            .as_ref()
+            .map(|hf| hf.start_hz),
+    );
+    let mut verdicts = {
+        let evaluation = super::audibility_veto::VetoEvaluation {
+            filters: &filters,
+            freqs: &objective_data.freqs,
+            listening_phon: phon,
+            config: veto,
+            hf_guard_start_hz: hf_start,
+            mode_proximity_evidence: &objective_data.mode_proximity_evidence,
+        };
+        super::audibility_veto::evaluate_audibility_veto(&evaluation)
+    };
+    if !veto.report_only && !veto.enforcement_authorized() {
+        log::warn!(
+            "audibility veto enforcement requested without experimental-proxy authorization; staying advisory"
+        );
+    }
+    let adjudication = super::audibility_veto::adjudicate_veto_removals(
+        filters,
+        &mut verdicts,
+        &objective_data.freqs,
+        &super::audibility_veto::AdjudicationConfig {
+            listening_phon: phon,
+            per_step_quantum_sones: veto.elimination_loudness_delta_sones,
+            cumulative_cap_sones: config
+                .pruning_budget
+                .as_ref()
+                .and_then(|budget| budget.max_cumulative_delta),
+            local_deviation_cap_db: veto.jnd_db,
+            enforce: veto.enforcement_authorized(),
+            model_version: env!("CARGO_PKG_VERSION").to_string(),
+        },
+    );
+    let summary = adjudication.summarize();
+    let loss = if adjudication.kept.len() != verdicts.len() {
+        recompiled_objective_loss(&adjudication.kept, objective_data)
+    } else {
+        loss
+    };
+    (adjudication.kept, loss, verdicts, Some(summary))
+}
+
+fn recompiled_objective_loss(
+    filters: &[Biquad],
+    objective_data: &autoeq_optim::optim::ObjectiveData,
+) -> f64 {
+    let peq: math_audio_iir_fir::Peq = filters.iter().map(|biquad| (1.0, biquad.clone())).collect();
+    let x = autoeq_core::x2peq::peq2x(&peq, objective_data.peq_model);
+    autoeq_optim::optim::compute_base_fitness(&x, objective_data)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1112,9 +1353,8 @@ fn optimize_channel_eq_multi_inner(
     callback: Option<autoeq_optim::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    let (primary, optim_params, effective_config) = prepare_multi_measurement_objective(
-        curves, config, multi_config, resources, sample_rate,
-    )?;
+    let (primary, optim_params, effective_config) =
+        prepare_multi_measurement_objective(curves, config, multi_config, resources, sample_rate)?;
     let config = &effective_config;
     let final_objective = primary.clone();
 
@@ -1272,15 +1512,14 @@ fn optimize_channel_eq_multi_inner(
         final_loss
     );
 
-    // Joint multi-measurement optimization has no per-filter veto
-    // evaluation yet (Stage 1 audit gap): verdicts stay empty and no
-    // adjudication record is produced. Single-channel paths adjudicate.
+    let (filters, final_loss, audibility_veto, veto_adjudication) =
+        apply_veto_postpass_for_objective(filters, final_loss, &final_objective, config);
     Ok(EqOptimizationResult {
         filters,
         loss: final_loss,
         optimizer_evidence,
-        audibility_veto: Vec::new(),
-        veto_adjudication: None,
+        audibility_veto,
+        veto_adjudication,
     })
 }
 
@@ -1304,341 +1543,6 @@ fn uncertainty_scaled_optimizer_config(
         );
     }
     scaled
-}
-
-/// Spatial robustness optimization.
-///
-/// Instead of running multi-objective optimization across all curves, this:
-/// 1. Computes RMS power average across all positions
-/// 2. Computes per-frequency spatial variance
-/// 3. Builds a correction depth mask (high correction where consistent, low where variable)
-/// 4. Scales the target deviation by the mask before single-curve optimization
-///
-/// The mask ensures the optimizer focuses filter resources on spatially consistent
-/// features (room modes) and avoids wasting filters on position-dependent effects
-/// (comb filtering from reflections).
-#[deprecated(note = "SpatialRobustness now uses direct per-seat multi-objective optimization")]
-#[allow(dead_code)]
-fn optimize_spatial_robustness(
-    curves: &[Curve],
-    config: &OptimizerConfig,
-    multi_config: &MultiMeasurementConfig,
-    resources: Option<&EqResources>,
-    sample_rate: f64,
-    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
-    backend: &dyn OptimizerBackend,
-) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    // Build spatial robustness config from serde config or defaults
-    let sr_config = match &multi_config.spatial_robustness {
-        Some(sc) => SpatialRobustnessConfig {
-            variance_threshold_db: sc.variance_threshold_db,
-            transition_width_db: sc.transition_width_db,
-            min_correction_depth: sc.min_correction_depth,
-            mask_smoothing_octaves: sc.mask_smoothing_octaves,
-        },
-        None => SpatialRobustnessConfig::default(),
-    };
-
-    // Analyze spatial robustness, optionally with bootstrap confidence bands.
-    let mut analysis = if let Some(boot_cfg) = multi_config.bootstrap_uncertainty.as_ref() {
-        let bootstrap = spatial_robustness::BootstrapConfig {
-            effective_sample_size: boot_cfg.effective_spatial_sample_size,
-            num_resamples: boot_cfg.num_resamples,
-            alpha: boot_cfg.alpha,
-            seed: boot_cfg.seed,
-        };
-        spatial_robustness::analyze_spatial_robustness_with_bootstrap(
-            curves,
-            &sr_config,
-            &bootstrap,
-            multi_config.weights.as_deref(),
-        )?
-    } else {
-        spatial_robustness::try_analyze_spatial_robustness_weighted(
-            curves,
-            &sr_config,
-            multi_config.weights.as_deref(),
-        )?
-    };
-
-    if let Some(bootstrap) = analysis.bootstrap.as_ref() {
-        let uncertainty_depth =
-            bootstrap_uncertainty_depth(&analysis.averaged_curve.freq, bootstrap, &sr_config);
-        analysis.correction_depth = &analysis.correction_depth * &uncertainty_depth;
-        let mean_std =
-            bootstrap.per_bin_std.iter().sum::<f64>() / bootstrap.per_bin_std.len().max(1) as f64;
-        log::info!(
-            "  Bootstrap uncertainty mask: mean standard deviation={:.2} dB, depth multiplier mean={:.2}",
-            mean_std,
-            uncertainty_depth.iter().sum::<f64>() / uncertainty_depth.len().max(1) as f64,
-        );
-    }
-
-    log::info!(
-        "  Spatial robustness: {} positions, variance range {:.1}-{:.1} dB",
-        curves.len(),
-        analysis
-            .spatial_variance
-            .iter()
-            .cloned()
-            .fold(f64::INFINITY, f64::min),
-        analysis
-            .spatial_variance
-            .iter()
-            .cloned()
-            .fold(f64::NEG_INFINITY, f64::max),
-    );
-
-    let mean_depth =
-        analysis.correction_depth.iter().sum::<f64>() / analysis.correction_depth.len() as f64;
-    log::info!(
-        "  Correction depth: mean={:.2}, min={:.2}, max={:.2}",
-        mean_depth,
-        analysis
-            .correction_depth
-            .iter()
-            .cloned()
-            .fold(f64::INFINITY, f64::min),
-        analysis
-            .correction_depth
-            .iter()
-            .cloned()
-            .fold(f64::NEG_INFINITY, f64::max),
-    );
-
-    // Use the RMS-averaged curve as input to the single-curve optimizer.
-    // The correction depth mask is applied by scaling the deviation curve:
-    // where depth is low, the deviation appears small → optimizer won't place filters there.
-    let averaged_curve = &analysis.averaged_curve;
-    {
-        let (spl_min, spl_max) = averaged_curve
-            .spl
-            .iter()
-            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &v| {
-                (lo.min(v), hi.max(v))
-            });
-        log::debug!(
-            "  Spatial robustness input: {} curves, averaged n={} spl_range=[{:.6}, {:.6}] dB",
-            curves.len(),
-            averaged_curve.freq.len(),
-            spl_min,
-            spl_max
-        );
-        for (idx, curve) in curves.iter().enumerate() {
-            let (lo, hi) = curve
-                .spl
-                .iter()
-                .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &v| {
-                    (lo.min(v), hi.max(v))
-                });
-            log::debug!(
-                "    seat curve {}: n={} spl_range=[{:.6}, {:.6}] dB",
-                idx,
-                curve.freq.len(),
-                lo,
-                hi
-            );
-        }
-    }
-
-    // Clamp frequency range
-    let data_min_freq = averaged_curve.freq[0];
-    let data_max_freq = averaged_curve.freq[averaged_curve.freq.len() - 1];
-    let effective_min_freq = config.min_freq.max(data_min_freq);
-    let effective_max_freq = config.max_freq.min(data_max_freq);
-
-    // Normalize by subtracting mean SPL in optimization range
-    let mean_spl = roomeq_analysis::response_metrics::mean_response_in_range(
-        averaged_curve,
-        effective_min_freq,
-        effective_max_freq,
-    );
-    let mut normalized_curve = Curve {
-        freq: averaged_curve.freq.clone(),
-        spl: &averaged_curve.spl - mean_spl,
-        phase: averaged_curve.phase.clone(),
-        ..Default::default()
-    };
-
-    // Apply psychoacoustic smoothing if enabled
-    if config.psychoacoustic {
-        log::info!("  Applying psychoacoustic smoothing to spatially averaged curve");
-        let smoothing_config = crate::config_adapter::to_measurement_smoothing(
-            config.psychoacoustic_smoothing_config(),
-        );
-        normalized_curve =
-            autoeq_optim::read::smooth_psychoacoustic(&normalized_curve, &smoothing_config);
-    }
-
-    // Parse PEQ model
-    let peq_model = config
-        .peq_model
-        .parse::<PeqModel>()
-        .map_err(|e| format!("Invalid PEQ model '{}': {}", config.peq_model, e))?;
-
-    // Parse loss type
-    let loss_type = match config.loss_type.as_str() {
-        "flat" => {
-            if config.asymmetric_loss {
-                LossType::SpeakerFlatAsymmetric
-            } else {
-                LossType::SpeakerFlat
-            }
-        }
-        "score" => LossType::SpeakerScore,
-        "epa" => LossType::Epa,
-        _ => return Err(format!("Unknown loss type: {}", config.loss_type).into()),
-    };
-
-    // Build target curve
-    let target_curve = resources::target_curve(&normalized_curve, resources);
-
-    // Compute raw deviation
-    let raw_deviation = &target_curve.spl - &normalized_curve.spl;
-
-    // Apply correction depth mask to deviation.
-    // This is the key spatial robustness step: the deviation at frequencies where the
-    // spatial variance is high gets scaled down, so the optimizer doesn't try to correct
-    // position-dependent features.
-    let masked_deviation = &raw_deviation * &analysis.correction_depth;
-
-    let band_len = raw_deviation.len().max(1) as f64;
-    let raw_rms = (raw_deviation.iter().map(|v| v * v).sum::<f64>() / band_len).sqrt();
-    let masked_rms = (masked_deviation.iter().map(|v| v * v).sum::<f64>() / band_len).sqrt();
-    log::debug!(
-        "  Spatial robustness deviation: raw_rms={:.6} dB, masked_rms={:.6} dB",
-        raw_rms,
-        masked_rms
-    );
-
-    let deviation_curve = Curve {
-        freq: normalized_curve.freq.clone(),
-        spl: masked_deviation,
-        phase: None,
-        ..Default::default()
-    };
-
-    let optim_params = build_optim_params(
-        config,
-        effective_min_freq,
-        effective_max_freq,
-        sample_rate,
-        loss_type,
-        peq_model,
-    );
-
-    // Setup objective data with the masked deviation
-    let (mut objective_data, _use_cea) = setup_objective_data(
-        &optim_params,
-        &normalized_curve,
-        &target_curve,
-        &deviation_curve,
-        &None,
-    )?;
-
-    // Propagate EPA config so compute_base_fitness uses user-provided
-    // weights when loss_type == LossType::Epa.
-    objective_data.epa_config = config
-        .epa_config
-        .as_ref()
-        .map(crate::config_adapter::to_optimizer_epa);
-    objective_data.asymmetric_loss_config =
-        crate::config_adapter::to_optimizer_asymmetric_loss(config.asymmetric_loss_config());
-    objective_data.smoothness_penalty = optim_params.smoothness_penalty.clone();
-    objective_data.max_boost_envelope = config.max_boost_envelope.clone();
-    objective_data.min_cut_envelope = config.min_cut_envelope.clone();
-    objective_data.objective = Some(objective_data.build_objective());
-    let final_objective = objective_data.clone();
-
-    let (lower_bounds, upper_bounds) = autoeq_optim::optim::setup::setup_bounds(&optim_params);
-    let mut x =
-        autoeq_optim::optim::setup::initial_guess(&optim_params, &lower_bounds, &upper_bounds);
-
-    let opt_result = if let Some(cb) = callback {
-        backend.optimize_filters_with_callback(
-            &mut x,
-            &lower_bounds,
-            &upper_bounds,
-            objective_data,
-            &optim_params,
-            cb,
-        )
-    } else {
-        backend.optimize_filters(
-            &mut x,
-            &lower_bounds,
-            &upper_bounds,
-            objective_data,
-            &optim_params,
-        )
-    };
-
-    let mut evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
-        &optim_params.algo,
-        opt_result,
-        &x,
-        &lower_bounds,
-        &upper_bounds,
-        optim_params.maxeval,
-        optim_params.seed,
-    );
-    if !evidence.converged {
-        if evidence.best_effort {
-            log::warn!(
-                "  Spatial robustness optimization did not fully converge: {}",
-                evidence.status
-            );
-        } else {
-            return Err(format!(
-                "spatial robustness optimizer produced unusable result: {}",
-                evidence.status
-            )
-            .into());
-        }
-    }
-    let _optimizer_loss = evidence
-        .objective
-        .ok_or("spatial robustness optimizer did not return a finite objective")?;
-    let x_after_boost = if let Some(envelope) = &config.max_boost_envelope {
-        autoeq_optim::optim::clamp_gains_to_envelope(&x, envelope, optim_params.peq_model)
-    } else {
-        x.to_vec()
-    };
-    let x_final = if let Some(envelope) = &config.min_cut_envelope {
-        autoeq_optim::optim::clamp_cuts_to_envelope(
-            &x_after_boost,
-            envelope,
-            optim_params.peq_model,
-        )
-    } else {
-        x_after_boost
-    };
-    let final_loss = autoeq_optim::optim::compute_fitness_penalties_ref(&x_final, &final_objective);
-    evidence.objective = Some(final_loss);
-
-    let peq = autoeq_core::x2peq::x2peq(&x_final, sample_rate, optim_params.peq_model);
-    let filters: Vec<Biquad> = peq
-        .into_iter()
-        .map(|(_weight, biquad)| biquad)
-        .filter(|b| b.db_gain.abs() >= 0.05)
-        .collect();
-
-    log::info!(
-        "Spatial robustness EQ: {} filters, final loss={:.6}",
-        filters.len(),
-        final_loss
-    );
-
-    // Spatial-robustness optimization has no per-filter veto evaluation
-    // yet (Stage 1 audit gap): verdicts stay empty and no adjudication
-    // record is produced. Single-channel paths adjudicate.
-    Ok(EqOptimizationResult {
-        filters,
-        loss: final_loss,
-        optimizer_evidence: vec![evidence],
-        audibility_veto: Vec::new(),
-        veto_adjudication: None,
-    })
 }
 
 #[cfg(test)]
@@ -2193,6 +2097,156 @@ mod multi_eq_tests {
     }
 
     #[test]
+    fn multi_measurement_objective_carries_measured_mode_evidence() {
+        let n = 257;
+        let log_min = 20.0_f64.ln();
+        let log_max = 2_000.0_f64.ln();
+        let freq =
+            Array1::from_iter((0..n).map(|index| {
+                (log_min + (log_max - log_min) * index as f64 / (n - 1) as f64).exp()
+            }));
+        let spl = freq
+            .mapv(|frequency| 8.0 * (-((frequency.log2() - 80.0_f64.log2()) / 0.12).powi(2)).exp());
+        let curve = Curve {
+            freq,
+            spl,
+            phase: None,
+            ..Default::default()
+        };
+        let mut config = OptimizerConfig::default();
+        config.min_freq = 20.0;
+        config.max_freq = 2_000.0;
+        config.decomposed_correction = Some(roomeq_model::DecomposedCorrectionSerdeConfig {
+            enabled: true,
+            ..Default::default()
+        });
+
+        let (objective, _, _) = prepare_multi_measurement_objective(
+            &[curve],
+            &config,
+            &MultiMeasurementConfig::default(),
+            None,
+            48_000.0,
+        )
+        .expect("multi-measurement objective");
+        assert!(
+            objective
+                .mode_proximity_evidence
+                .iter()
+                .any(|mode| (mode.frequency_hz - 80.0).abs() < 8.0
+                    && mode.q > 3.0
+                    && mode.prominence_db >= 3.0),
+            "expected measured modal evidence, got {:?}",
+            objective.mode_proximity_evidence
+        );
+    }
+
+    #[test]
+    fn multi_measurement_objective_resamples_mismatched_grids_to_common_span() {
+        let first = make_simple_room_curve();
+        let second_freq = Array1::<f64>::linspace(30.0, 18_000.0, 73);
+        let second = Curve {
+            spl: second_freq.mapv(|frequency| {
+                2.0 * (-((frequency.log2() - 120.0_f64.log2()) / 0.4).powi(2)).exp()
+            }),
+            freq: second_freq,
+            phase: None,
+            ..Default::default()
+        };
+        let (objective, _, _) = prepare_multi_measurement_objective(
+            &[first, second],
+            &OptimizerConfig::default(),
+            &MultiMeasurementConfig::default(),
+            None,
+            48_000.0,
+        )
+        .expect("mismatched measured grids should be explicitly aligned");
+        let objectives = &objective
+            .multi_objective
+            .as_ref()
+            .expect("multi objective")
+            .objectives;
+        assert_eq!(objectives.len(), 2);
+        assert_eq!(objectives[0].freqs.as_ref(), objectives[1].freqs.as_ref());
+        assert!(objectives[0].freqs[0] >= 30.0);
+        assert!(objectives[0].freqs[objectives[0].freqs.len() - 1] <= 18_000.0);
+    }
+
+    #[test]
+    fn shared_veto_postpass_keeps_multi_measurement_report_only_results() {
+        let curve = make_simple_room_curve();
+        let (objective, _, _) = prepare_multi_measurement_objective(
+            &[curve],
+            &OptimizerConfig::default(),
+            &MultiMeasurementConfig::default(),
+            None,
+            48_000.0,
+        )
+        .unwrap();
+        let config = OptimizerConfig {
+            filter_audibility: Some(roomeq_model::FilterAudibilityConfig {
+                report_only: true,
+                ..Default::default()
+            }),
+            ..OptimizerConfig::default()
+        };
+        let filter = Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Peak,
+            80.0,
+            48_000.0,
+            1.0,
+            0.1,
+        );
+        let (kept, _, verdicts, summary) =
+            apply_veto_postpass_for_objective(vec![filter], 1.0, &objective, &config);
+        assert_eq!(kept.len(), 1, "report-only must not remove filters");
+        assert_eq!(verdicts.len(), 1);
+        assert_eq!(
+            verdicts[0].acceptance.outcome,
+            roomeq_model::ReportOutcome::CandidateRemoval
+        );
+        assert!(!verdicts[0].enforced);
+        assert!(summary.is_some_and(|summary| !summary.enforced));
+    }
+
+    #[test]
+    fn shared_veto_postpass_enforces_authorized_multi_measurement_results() {
+        let curve = make_simple_room_curve();
+        let (objective, _, _) = prepare_multi_measurement_objective(
+            &[curve],
+            &OptimizerConfig::default(),
+            &MultiMeasurementConfig::default(),
+            None,
+            48_000.0,
+        )
+        .unwrap();
+        let config = OptimizerConfig {
+            filter_audibility: Some(roomeq_model::FilterAudibilityConfig {
+                report_only: false,
+                allow_enforcement_with_experimental_proxy: true,
+                ..Default::default()
+            }),
+            ..OptimizerConfig::default()
+        };
+        let filter = Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Peak,
+            80.0,
+            48_000.0,
+            1.0,
+            0.1,
+        );
+        let (kept, _, verdicts, summary) =
+            apply_veto_postpass_for_objective(vec![filter], 1.0, &objective, &config);
+        assert!(
+            kept.is_empty(),
+            "authorized veto should remove the sub-JND filter"
+        );
+        assert_eq!(verdicts.len(), 1);
+        assert!(verdicts[0].enforced);
+        assert!(summary.is_some_and(|summary| summary.enforced));
+    }
+
+    #[test]
     fn multi_eq_detailed_reports_ok_non_convergence_as_low_confidence() {
         let curve = make_simple_room_curve();
         let config = OptimizerConfig {
@@ -2232,48 +2286,90 @@ mod multi_eq_tests {
         let first = make_simple_room_curve();
         let mut second = first.clone();
         second.spl = second.spl.mapv(|value| 0.5 * value + 3.0);
-        let config = OptimizerConfig { psychoacoustic: false, seed: Some(42), ..OptimizerConfig::default() };
+        let config = OptimizerConfig {
+            psychoacoustic: false,
+            seed: Some(42),
+            ..OptimizerConfig::default()
+        };
         for rate in [44_100.0, 48_000.0, 96_000.0] {
             let weighted = MultiMeasurementConfig {
                 strategy: MultiMeasurementStrategy::WeightedSum,
-                weights: Some(vec![9.0, 1.0]), ..MultiMeasurementConfig::default()
+                weights: Some(vec![9.0, 1.0]),
+                ..MultiMeasurementConfig::default()
             };
             let (objective, params, _) = prepare_multi_measurement_objective(
-                &[first.clone(), second.clone()], &config, &weighted, None, rate,
-            ).unwrap();
+                &[first.clone(), second.clone()],
+                &config,
+                &weighted,
+                None,
+                rate,
+            )
+            .unwrap();
             let multi = objective.multi_objective.as_ref().unwrap();
             assert_eq!(multi.weights, vec![0.9, 0.1]);
             assert_eq!(multi.objectives.len(), 2);
             assert!(multi.objectives.iter().all(|seat| seat.srate == rate));
             assert_eq!(params.sample_rate, rate);
-            let responses: Vec<_> = multi.objectives.iter().map(|seat| Array1::zeros(seat.freqs.len())).collect();
-            assert!(autoeq_optim::optim::compute_response_fitness(&responses, &objective).unwrap().is_finite());
+            let responses: Vec<_> = multi
+                .objectives
+                .iter()
+                .map(|seat| Array1::zeros(seat.freqs.len()))
+                .collect();
+            assert!(
+                autoeq_optim::optim::compute_response_fitness(&responses, &objective)
+                    .unwrap()
+                    .is_finite()
+            );
 
             let bootstrap = MultiMeasurementConfig {
                 strategy: MultiMeasurementStrategy::MinimaxUncertainty,
                 bootstrap_uncertainty: Some(roomeq_model::BootstrapUncertaintyConfig {
-                    num_resamples: 7, seed: 19,
+                    num_resamples: 7,
+                    seed: 19,
                     scalarisation: roomeq_model::BootstrapScalarisation::Cvar,
-                    cvar_alpha: 0.3, ..Default::default()
-                }), ..Default::default()
+                    cvar_alpha: 0.3,
+                    ..Default::default()
+                }),
+                ..Default::default()
             };
             let (prepared, _, _) = prepare_multi_measurement_objective(
-                &[first.clone(), second.clone()], &config, &bootstrap, None, rate,
-            ).unwrap();
+                &[first.clone(), second.clone()],
+                &config,
+                &bootstrap,
+                None,
+                rate,
+            )
+            .unwrap();
             let bank = prepared.multi_objective.as_ref().unwrap();
-            assert_eq!(bank.objectives.len(), 7, "FIR must see bootstrap bank, not two original seats");
+            assert_eq!(
+                bank.objectives.len(),
+                7,
+                "FIR must see bootstrap bank, not two original seats"
+            );
             assert_eq!(bank.uncertainty_cvar_alpha, Some(0.3));
             let (repeated, _, _) = prepare_multi_measurement_objective(
-                &[first.clone(), second.clone()], &config, &bootstrap, None, rate,
-            ).unwrap();
-            for (a, b) in bank.objectives.iter().zip(&repeated.multi_objective.as_ref().unwrap().objectives) {
-                assert_eq!(a.deviation, b.deviation, "same bootstrap seed must preserve the objective bank");
+                &[first.clone(), second.clone()],
+                &config,
+                &bootstrap,
+                None,
+                rate,
+            )
+            .unwrap();
+            for (a, b) in bank
+                .objectives
+                .iter()
+                .zip(&repeated.multi_objective.as_ref().unwrap().objectives)
+            {
+                assert_eq!(
+                    a.deviation, b.deviation,
+                    "same bootstrap seed must preserve the objective bank"
+                );
             }
         }
     }
 
     #[test]
-    fn optimize_channel_eq_multi_rejects_mismatched_measurement_grids() {
+    fn optimize_channel_eq_multi_aligns_mismatched_measurement_grids() {
         let first = make_simple_room_curve();
         let mut second = first.clone();
         second.freq[10] *= 1.001;
@@ -2286,19 +2382,16 @@ mod multi_eq_tests {
             ..OptimizerConfig::default()
         };
 
-        let error = optimize_channel_eq_multi(
+        let result = optimize_channel_eq_multi_detailed(
             &[first, second],
             &config,
             &MultiMeasurementConfig::default(),
             None,
             48_000.0,
         )
-        .expect_err("mismatched grids must be rejected before optimization");
+        .expect("mismatched measured grids should be aligned before optimization");
 
-        assert!(
-            error.to_string().contains("mismatched_measurement_grids"),
-            "unexpected error: {error}"
-        );
+        assert!(result.loss.is_finite());
     }
 
     #[test]

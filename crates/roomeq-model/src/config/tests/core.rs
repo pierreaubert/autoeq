@@ -111,10 +111,8 @@ fn structural_validation_rejects_invalid_gain_envelopes() {
             speaker_name: None,
         })),
     );
-    config.optimizer.max_boost_envelope =
-        Some(vec![(20.0, 6.0), (200.0, 3.0), (200.0, 2.0)]);
-    config.optimizer.min_cut_envelope =
-        Some(vec![(20.0, -6.0), (200.0, f64::NEG_INFINITY)]);
+    config.optimizer.max_boost_envelope = Some(vec![(20.0, 6.0), (200.0, 3.0), (200.0, 2.0)]);
+    config.optimizer.min_cut_envelope = Some(vec![(20.0, -6.0), (200.0, f64::NEG_INFINITY)]);
 
     let report = config.validation_report();
     let errors = &report.stage(ValidationStage::Structural).errors;
@@ -622,5 +620,13 @@ fn per_driver_placement_validates_version_mode_and_independent_routing() {
     );
     config.optimizer.processing_mode = crate::ProcessingMode::PhaseLinear;
     config.system.as_mut().unwrap().bass_management = Some(crate::BassManagementConfig::default());
-    assert!(config.validate_structure().unwrap_err().contains("routing"));
+    assert!(config.validate_structure().is_ok());
+    let mut shared: crate::RoomConfig = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../data_tests/roomeq/measured/2.2_sigberg2/recordings.json"
+    )))
+    .unwrap();
+    shared.version = "2.2.0".into();
+    shared.optimizer = config.optimizer;
+    assert!(shared.validate_structure().is_ok());
 }

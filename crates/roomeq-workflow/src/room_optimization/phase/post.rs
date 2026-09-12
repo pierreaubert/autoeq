@@ -70,14 +70,18 @@ pub(in super::super) fn post_generate_fir(
         Some(target) => Ok(Curve::from(target)),
         None => fir::resolve_fir_target_curve(initial_curve, config, target_curve),
     };
-    let coefficients =
-        prepared_target.and_then(|target| {
-            if chain.is_some_and(|chain| chain.drivers.is_some()) {
-                roomeq_engine::fir::generate_group_residual_fir_prepared(fir_input, config, &target, sample_rate)
-            } else {
-                fir::generate_fir_correction_prepared(fir_input, config, &target, sample_rate)
-            }
-        });
+    let coefficients = prepared_target.and_then(|target| {
+        if chain.is_some_and(|chain| chain.drivers.is_some()) {
+            roomeq_engine::fir::generate_group_residual_fir_prepared(
+                fir_input,
+                config,
+                &target,
+                sample_rate,
+            )
+        } else {
+            fir::generate_fir_correction_prepared(fir_input, config, &target, sample_rate)
+        }
+    });
     match coefficients {
         Ok(coeffs) => {
             let mut filename = autoeq_artifacts::roomeq::convolution_artifact_filename(
@@ -330,9 +334,14 @@ mod tests {
         let final_curve = small_curve_with_phase();
         let mut initial = final_curve.clone();
         for (&frequency, level) in initial.freq.iter().zip(initial.spl.iter_mut()) {
-            if frequency <= 200.0 { *level += 8.0; }
+            if frequency <= 200.0 {
+                *level += 8.0;
+            }
         }
-        let mut chain = crate::test_fixtures::single_channel_room_result("L").channels.remove("L").unwrap();
+        let mut chain = crate::test_fixtures::single_channel_room_result("L")
+            .channels
+            .remove("L")
+            .unwrap();
         chain.drivers = Some(Vec::new());
         chain.target_curve = Some((&final_curve).into());
         let config = OptimizerConfig {
@@ -343,14 +352,26 @@ mod tests {
             ..OptimizerConfig::default()
         };
         let generated = post_generate_fir(
-            "L", &initial, &final_curve, &config, None, 48_000.0, None, Some(&chain),
-        ).unwrap();
+            "L",
+            &initial,
+            &final_curve,
+            &config,
+            None,
+            48_000.0,
+            None,
+            Some(&chain),
+        )
+        .unwrap();
         let response = roomeq_engine::response::compute_fir_complex_response(
-            &generated.coeffs, &Array1::from_vec(vec![30.0, 50.0, 100.0, 160.0, 1000.0]), 48_000.0,
+            &generated.coeffs,
+            &Array1::from_vec(vec![30.0, 50.0, 100.0, 160.0, 1000.0]),
+            48_000.0,
         );
         for value in response {
-            assert!((20.0 * value.norm().log10()).abs() < 0.25,
-                "already corrected group must not receive a second bass correction");
+            assert!(
+                (20.0 * value.norm().log10()).abs() < 0.25,
+                "already corrected group must not receive a second bass correction"
+            );
         }
     }
 

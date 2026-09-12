@@ -4,6 +4,20 @@ use ndarray::Array1;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Serializable summary of the audibility-veto adjudication against the
+/// frozen full chain.  The engine retains removed filter coefficients for
+/// rollback; reports/sidecars carry stable indices and measured deltas so the
+/// decision remains inspectable without duplicating DSP state.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct VetoAdjudicationReport {
+    pub f0_reference_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed_filter_indices: Vec<usize>,
+    pub cumulative_loudness_delta_sones: f64,
+    pub max_local_deviation_db: f64,
+    pub enforced: bool,
+}
+
 /// True impulse-response temporal masking metrics for FIR / phase correction.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TemporalIrMaskingMetrics {
@@ -234,6 +248,11 @@ pub struct CtcBinauralDiagnostics {
     pub cue_deviation_score: f64,
     pub externalization_risk: String,
     pub imaging_risk: String,
+    /// Availability of time-referenced binaural/IR evidence. This records an
+    /// evidence boundary only; it is not a claim that a precedence effect is
+    /// audible or preferred for a listener.
+    #[serde(default)]
+    pub precedence_evidence: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hrtf_candidate_comparison: Option<CtcHrtfCandidateComparison>,
 }
@@ -253,6 +272,15 @@ pub struct TemporalQualityEvidence {
     pub latency_ms: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub available_headroom_db: Option<f64>,
+    /// True only when both pre and post responses carried measured phase.
+    /// A missing phase is an evidence limitation, never a zero-phase claim.
+    #[serde(default)]
+    pub phase_evidence_available: bool,
+    /// True when temporal measurements required by the output class exist.
+    /// For an IIR-only chain this is true because no FIR precursor claim is
+    /// being made; FIR and hybrid paths must provide measured masking data.
+    #[serde(default)]
+    pub temporal_evidence_available: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -407,6 +435,10 @@ pub struct AcousticQualityScorecard {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub induced_group_delay_rms_ms: Option<f64>,
     pub temporal: TemporalQualityEvidence,
+    /// Explicit active-correction support, when a policy was selected.
+    /// `evaluated_band_hz` remains the fixed observation band.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correction_band_hz: Option<[f64; 2]>,
     pub evaluated_band_hz: [f64; 2],
     pub measurement_overlap_hz: [f64; 2],
     pub finite: bool,
@@ -428,6 +460,20 @@ pub enum CorrectionDecision {
     Rejected,
     RevertedStage,
     IdentityFallback,
+}
+
+/// User-facing outcome of comparing a realized correction with its frozen
+/// original baseline. This is deliberately separate from the implementation
+/// decision so an identity fallback can be reported as unchanged and a
+/// phase/seat evidence gap can be reported as insufficient evidence.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RoomEqOutcome {
+    Accepted,
+    Unchanged,
+    Rejected,
+    #[default]
+    InsufficientEvidence,
 }
 
 pub const RUNTIME_ACCEPTANCE_POLICY_VERSION: &str = "1.0.0";
@@ -546,6 +592,9 @@ pub struct CorrectionAcceptanceReport {
     pub runtime_policy: Option<RuntimeAcceptancePolicy>,
     pub decision: CorrectionDecision,
     pub accepted: bool,
+    /// Stable four-state summary kept alongside the detailed decision.
+    #[serde(default)]
+    pub outcome: RoomEqOutcome,
     pub metrics: CorrectionMetricSummary,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub violations: Vec<String>,
@@ -557,4 +606,115 @@ pub struct CorrectionAcceptanceReport {
     pub acoustic_quality: Option<AcousticQualityScorecard>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub realization_quality: Option<RealizationQualityEvidence>,
+}
+
+impl CorrectionAcceptanceReport {
+    /// Derive the stable four-state outcome vocabulary from the detailed
+    /// acceptance record. An evidence limitation always wins over a generic
+    /// rejection, so callers cannot mistake an unmeasured phase claim for a
+    /// proven bad correction.
+    pub fn derived_outcome(&self) -> RoomEqOutcome {
+        if self.violations.iter().any(|violation| {
+            violation.contains("insufficient")
+                || violation.contains("evidence_missing")
+                || violation.contains("evidence_unavailable")
+        }) {
+            return RoomEqOutcome::InsufficientEvidence;
+        }
+        if self.accepted && self.decision == CorrectionDecision::Accepted {
+            RoomEqOutcome::Accepted
+        } else if self.decision == CorrectionDecision::IdentityFallback {
+            RoomEqOutcome::Unchanged
+        } else {
+            RoomEqOutcome::Rejected
+        }
+    }
+
+    /// Refresh the serialized outcome after a caller changes violations or
+    /// the detailed acceptance decision.
+    pub fn refresh_outcome(&mut self) {
+        self.outcome = self.derived_outcome();
+    }
+}
+
+#[cfg(test)]
+mod outcome_tests {
+    use super::*;
+
+    fn report(
+        decision: CorrectionDecision,
+        accepted: bool,
+        violations: Vec<&str>,
+    ) -> CorrectionAcceptanceReport {
+        CorrectionAcceptanceReport {
+            policy: CorrectionAcceptancePolicy::RuntimeSafety,
+            runtime_policy: None,
+            decision,
+            accepted,
+            outcome: RoomEqOutcome::Unchanged,
+            metrics: CorrectionMetricSummary {
+                auditory_frequency_measure: "erb_rate".into(),
+                pre_target_weighted_rms_db: 1.0,
+                post_target_weighted_rms_db: 1.0,
+                improvement_db: 0.0,
+                improvement_ratio: 0.0,
+                post_p95_abs_residual_db: 1.0,
+                post_worst_abs_residual_db: 1.0,
+                correction_rms_db: 0.0,
+                max_abs_correction_db: 0.0,
+            },
+            violations: violations.into_iter().map(str::to_string).collect(),
+            reverted_stages: Vec::new(),
+            acoustic_quality: None,
+            realization_quality: None,
+        }
+    }
+
+    #[test]
+    fn outcome_distinguishes_acceptance_identity_rejection_and_evidence_gap() {
+        assert_eq!(
+            report(CorrectionDecision::Accepted, true, vec![]).derived_outcome(),
+            RoomEqOutcome::Accepted
+        );
+        assert_eq!(
+            report(CorrectionDecision::IdentityFallback, false, vec![]).derived_outcome(),
+            RoomEqOutcome::Unchanged
+        );
+        assert_eq!(
+            report(
+                CorrectionDecision::Rejected,
+                false,
+                vec!["no_safe_candidate"]
+            )
+            .derived_outcome(),
+            RoomEqOutcome::Rejected
+        );
+        assert_eq!(
+            report(
+                CorrectionDecision::Rejected,
+                false,
+                vec!["final_seat_phase_evidence_insufficient"],
+            )
+            .derived_outcome(),
+            RoomEqOutcome::InsufficientEvidence
+        );
+    }
+
+    #[test]
+    fn outcome_is_serialized_and_legacy_reports_default_to_insufficient_evidence() {
+        let mut report = report(CorrectionDecision::Accepted, true, vec![]);
+        report.refresh_outcome();
+        let value = serde_json::to_value(&report).expect("serialize acceptance report");
+        assert_eq!(value["outcome"], serde_json::json!("accepted"));
+
+        let mut legacy = value;
+        legacy
+            .as_object_mut()
+            .expect("report object")
+            .remove("outcome");
+        let decoded: CorrectionAcceptanceReport =
+            serde_json::from_value(legacy).expect("legacy report remains readable");
+        assert_eq!(decoded.outcome, RoomEqOutcome::InsufficientEvidence);
+        assert_eq!(decoded.derived_outcome(), RoomEqOutcome::Accepted);
+    }
 }

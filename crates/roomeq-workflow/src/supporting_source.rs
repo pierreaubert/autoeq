@@ -461,6 +461,8 @@ pub fn process_supporting_source_channel_with_frequency_samples(
         biquads: Vec::new(),
         fir_coeffs: None,
         optimizer_evidence: Vec::new(),
+        audibility_veto: Vec::new(),
+        veto_adjudication: None,
     };
     let support_result = ChannelOptimizationResult {
         name: support_name.clone(),
@@ -473,6 +475,8 @@ pub fn process_supporting_source_channel_with_frequency_samples(
         // gain is already a separate plugin in support_chain, so folding it
         // into these taps would disagree with the artifact and replay it twice.
         fir_coeffs: Some(filter.taps.clone()),
+        audibility_veto: Vec::new(),
+        veto_adjudication: None,
         optimizer_evidence: Vec::new(),
     };
 

@@ -873,6 +873,32 @@
       ],
       "type": "object"
     },
+    "CorrectionBandPolicy": {
+      "additionalProperties": false,
+      "description": "Optional, explicit frequency range in which RoomEQ is allowed to shape\nthe response.\n\nThe optimizer's observation/evaluation band remains unchanged. When the\nrange is narrower than that band, bins outside it are retained in the\nmeasured graph and scorecard; with `allow_natural_rolloff`, the existing\nsource response is allowed to remain there instead of being flattened.",
+      "properties": {
+        "allow_natural_rolloff": {
+          "default": false,
+          "description": "Permit measured response outside the correction support to remain\nnaturally rolled off. This never installs a high-pass or low-pass.",
+          "type": "boolean"
+        },
+        "max_hz": {
+          "description": "Upper edge of the correction support in Hz.",
+          "format": "double",
+          "type": "number"
+        },
+        "min_hz": {
+          "description": "Lower edge of the correction support in Hz.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "min_hz",
+        "max_hz"
+      ],
+      "type": "object"
+    },
     "CrossoverConfig": {
       "additionalProperties": false,
       "description": "Crossover configuration",
@@ -1958,7 +1984,7 @@
           "type": "integer"
         },
         "tol": {
-          "default": 1e-08,
+          "default": 1e-8,
           "description": "DE convergence tolerance.",
           "format": "double",
           "type": "number"
@@ -2702,7 +2728,7 @@
           "description": "Asymmetric loss weights. `None` preserves the built-in default."
         },
         "atolerance": {
-          "default": 1e-05,
+          "default": 0.00001,
           "description": "Optimization convergence tolerance (absolute)",
           "format": "double",
           "type": "number"
@@ -2790,6 +2816,17 @@
             }
           ],
           "description": "Inter-channel consistency correction configuration"
+        },
+        "correction_band": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CorrectionBandPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional explicit frequency support for active correction. The\nobservation/evaluation band remains `min_freq..=max_freq`."
         },
         "decomposed_correction": {
           "anyOf": [
@@ -3236,7 +3273,7 @@
           "description": "Unified target response configuration (shape + preference shelves + broadband pre-correction)"
         },
         "tolerance": {
-          "default": 1e-05,
+          "default": 0.00001,
           "description": "Optimization convergence tolerance (relative)",
           "format": "double",
           "type": "number"
@@ -5133,7 +5170,7 @@
       "default": {
         "algorithm": "autoeq:cmaes",
         "asymmetric_loss": true,
-        "atolerance": 1e-05,
+        "atolerance": 0.00001,
         "elimination_threshold": 0.005,
         "finalization": {
           "default_input_peak": 1.0,
@@ -5159,7 +5196,7 @@
         "refine": true,
         "smooth_n": 2,
         "strategy": "lshade",
-        "tolerance": 1e-05
+        "tolerance": 0.00001
       },
       "description": "Optimizer configuration"
     },

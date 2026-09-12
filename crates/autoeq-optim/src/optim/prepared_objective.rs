@@ -18,7 +18,17 @@ impl PreparedObjective {
             data.loss_type,
             LossType::SpeakerFlat | LossType::HeadphoneFlat
         )
-        .then(|| PreparedFlatLoss::new(&data.freqs, data.min_freq, data.max_freq));
+        .then(|| match data.null_suppression.clone() {
+            Some(mask) if matches!(data.loss_type, LossType::SpeakerFlat) => {
+                PreparedFlatLoss::new_with_null_suppression(
+                    &data.freqs,
+                    data.min_freq,
+                    data.max_freq,
+                    mask,
+                )
+            }
+            _ => PreparedFlatLoss::new(&data.freqs, data.min_freq, data.max_freq),
+        });
         let asymmetric = matches!(data.loss_type, LossType::SpeakerFlatAsymmetric).then(|| {
             PreparedAsymmetricLoss::new(
                 &data.freqs,

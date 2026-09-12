@@ -676,6 +676,7 @@ mod tests {
                     acceptance.decision = CorrectionDecision::RevertedStage;
                     acceptance.violations.push("injected_regression".into());
                     acceptance.reverted_stages.push("primary_correction".into());
+                    acceptance.refresh_outcome();
                 }
                 let mut metadata: roomeq_model::OptimizationMetadata =
                     serde_json::from_value(serde_json::json!({"pre_score": 2.0, "post_score": 1.0,

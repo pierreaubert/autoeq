@@ -590,22 +590,27 @@ mod outcome_tests {
         let rows = super::generate_pr_matrix();
         let curve = super::generate_flat_curve(20.0, 20_000.0, 100);
         let config = super::build::build_parameter_config(
-            &curve, &rows[0], roomeq_model::ProcessingMode::Hybrid, 96_000.0,
+            &curve,
+            &rows[0],
+            roomeq_model::ProcessingMode::Hybrid,
+            96_000.0,
         );
         let path = first.join("request.json");
-        write_parameter_matrix_artifact(&path, &super::parameter_matrix_request(&config).unwrap()).unwrap();
-        let saved: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(&path).unwrap(),
-        ).unwrap();
-        let mut recovered: roomeq_model::RoomConfig = serde_json::from_value(
-            saved["configuration_without_speakers"].clone(),
-        ).unwrap();
+        write_parameter_matrix_artifact(&path, &super::parameter_matrix_request(&config).unwrap())
+            .unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let mut recovered: roomeq_model::RoomConfig =
+            serde_json::from_value(saved["configuration_without_speakers"].clone()).unwrap();
         let measurements: std::collections::BTreeMap<String, roomeq_model::Curve> =
             serde_json::from_value(saved["single_speaker_measurements"].clone()).unwrap();
         for (name, curve) in measurements {
-            recovered.speakers.insert(name, roomeq_model::SpeakerConfig::Single(
-                roomeq_model::MeasurementSource::InMemory(curve),
-            ));
+            recovered.speakers.insert(
+                name,
+                roomeq_model::SpeakerConfig::Single(roomeq_model::MeasurementSource::InMemory(
+                    curve,
+                )),
+            );
         }
         assert_eq!(super::parameter_matrix_request(&recovered).unwrap(), saved);
         assert!(!second.join("request.json").exists());
@@ -626,15 +631,20 @@ mod outcome_tests {
     fn phase_linear_routed_row_preserves_correction_scores_after_report_refresh() {
         let result = run_parameter_row_fixture(1);
         for (name, channel) in &result.channel_results {
-            assert!(channel.post_score < channel.pre_score,
+            assert!(
+                channel.post_score < channel.pre_score,
                 "{name}: report refresh must retain correction-only scores: {} -> {}",
-                channel.pre_score, channel.post_score);
+                channel.pre_score,
+                channel.post_score
+            );
             assert_eq!(channel.fir_coeffs.as_ref().map(Vec::len), Some(960));
         }
         assert!(result.combined_post_score < result.combined_pre_score);
     }
 
-    fn run_parameter_row_fixture(index: usize) -> roomeq_engine::room_result::RoomOptimizationResult {
+    fn run_parameter_row_fixture(
+        index: usize,
+    ) -> roomeq_engine::room_result::RoomOptimizationResult {
         let rows = super::generate_pr_matrix();
         let row = &rows[index];
         let sample_rate = [44_100.0, 48_000.0, 96_000.0][row.sample_rate as usize];
@@ -644,11 +654,14 @@ mod outcome_tests {
             [100, 200, 400][row.grid_size as usize],
         );
         let mut config = super::build::build_parameter_config(
-            &curve, row, match row.mode {
+            &curve,
+            row,
+            match row.mode {
                 0 => roomeq_model::ProcessingMode::LowLatency,
                 1 => roomeq_model::ProcessingMode::PhaseLinear,
                 _ => roomeq_model::ProcessingMode::Hybrid,
-            }, sample_rate,
+            },
+            sample_rate,
         );
         config.optimizer.num_filters = [3, 7, 11][row.filter_count as usize];
         config.optimizer.max_freq = (sample_rate / 2.0 - 100.0_f64).min(config.optimizer.max_freq);
@@ -724,7 +737,10 @@ fn write_parameter_matrix_artifact(
     Ok(())
 }
 
-fn create_parameter_matrix_bundle(root: &std::path::Path, row: usize) -> Result<std::path::PathBuf> {
+fn create_parameter_matrix_bundle(
+    root: &std::path::Path,
+    row: usize,
+) -> Result<std::path::PathBuf> {
     std::fs::create_dir_all(root)?;
     Ok(tempfile::Builder::new()
         .prefix(&format!("row-{row:02}-"))
@@ -738,10 +754,14 @@ fn parameter_matrix_request(config: &roomeq_model::RoomConfig) -> Result<serde_j
     let mut measurements = std::collections::BTreeMap::new();
     for (name, speaker) in &config.speakers {
         match speaker {
-            roomeq_model::SpeakerConfig::Single(roomeq_model::MeasurementSource::InMemory(curve)) => {
+            roomeq_model::SpeakerConfig::Single(roomeq_model::MeasurementSource::InMemory(
+                curve,
+            )) => {
                 measurements.insert(name, curve);
             }
-            _ => anyhow::bail!("matrix replay bundle requires an explicit single in-memory measurement for {name}"),
+            _ => anyhow::bail!(
+                "matrix replay bundle requires an explicit single in-memory measurement for {name}"
+            ),
         }
     }
     Ok(serde_json::json!({
@@ -751,28 +771,50 @@ fn parameter_matrix_request(config: &roomeq_model::RoomConfig) -> Result<serde_j
     }))
 }
 
-fn parameter_crossover_execution(topology: usize, crossover: usize, phase: usize,
-    bass: &serde_json::Value) -> Result<&'static str> {
+fn parameter_crossover_execution(
+    topology: usize,
+    crossover: usize,
+    phase: usize,
+    bass: &serde_json::Value,
+) -> Result<&'static str> {
     if topology == 0 {
-        anyhow::ensure!(bass.is_null(), "unrouted row unexpectedly has bass management");
+        anyhow::ensure!(
+            bass.is_null(),
+            "unrouted row unexpectedly has bass management"
+        );
         return Ok("not_applicable");
     }
-    anyhow::ensure!(bass["enabled"] == true, "routed row did not enable bass management");
+    anyhow::ensure!(
+        bass["enabled"] == true,
+        "routed row did not enable bass management"
+    );
     let expected_type = if crossover == 2 { "LR48" } else { "LR24" };
-    anyhow::ensure!(bass["optimization"]["crossover_type"] == expected_type,
-        "crossover type did not reach runtime");
-    anyhow::ensure!(bass["routing_graph"]["routes"].as_array().is_some_and(|routes| !routes.is_empty()),
-        "crossover produced no routes");
+    anyhow::ensure!(
+        bass["optimization"]["crossover_type"] == expected_type,
+        "crossover type did not reach runtime"
+    );
+    anyhow::ensure!(
+        bass["routing_graph"]["routes"]
+            .as_array()
+            .is_some_and(|routes| !routes.is_empty()),
+        "crossover produced no routes"
+    );
     if crossover == 1 && phase != 1 {
-        anyhow::ensure!(bass["optimization"]["applied"] == false,
-            "phase-free automatic crossover unexpectedly reported applied");
+        anyhow::ensure!(
+            bass["optimization"]["applied"] == false,
+            "phase-free automatic crossover unexpectedly reported applied"
+        );
         return Ok("unsupported_missing_phase");
     }
     if crossover == 1 {
-        anyhow::ensure!(bass["optimization"]["applied"] == true,
-            "automatic crossover selection did not execute");
+        anyhow::ensure!(
+            bass["optimization"]["applied"] == true,
+            "automatic crossover selection did not execute"
+        );
         Ok("automatic_selection_applied")
-    } else { Ok("fixed_routes_emitted") }
+    } else {
+        Ok("fixed_routes_emitted")
+    }
 }
 
 #[cfg(test)]
@@ -785,11 +827,23 @@ mod crossover_execution_tests {
         let mut bass = json!({"enabled": true,
             "optimization": {"crossover_type": "LR24", "applied": true},
             "routing_graph": {"routes": [{}]}});
-        assert_eq!(parameter_crossover_execution(0, 1, 0, &json!(null)).unwrap(), "not_applicable");
-        assert_eq!(parameter_crossover_execution(1, 0, 1, &bass).unwrap(), "fixed_routes_emitted");
-        assert_eq!(parameter_crossover_execution(1, 1, 1, &bass).unwrap(), "automatic_selection_applied");
+        assert_eq!(
+            parameter_crossover_execution(0, 1, 0, &json!(null)).unwrap(),
+            "not_applicable"
+        );
+        assert_eq!(
+            parameter_crossover_execution(1, 0, 1, &bass).unwrap(),
+            "fixed_routes_emitted"
+        );
+        assert_eq!(
+            parameter_crossover_execution(1, 1, 1, &bass).unwrap(),
+            "automatic_selection_applied"
+        );
         bass["optimization"]["applied"] = json!(false);
-        assert_eq!(parameter_crossover_execution(1, 1, 0, &bass).unwrap(), "unsupported_missing_phase");
+        assert_eq!(
+            parameter_crossover_execution(1, 1, 0, &bass).unwrap(),
+            "unsupported_missing_phase"
+        );
         assert!(parameter_crossover_execution(1, 1, 1, &bass).is_err());
         bass["routing_graph"]["routes"] = json!([]);
         assert!(parameter_crossover_execution(1, 0, 1, &bass).is_err());
@@ -832,12 +886,16 @@ pub fn run_parameter_matrix() -> Result<QaRunOutcome> {
         // Preserve the selected rerun's sidecars for independent backend replay.
         // Unique directories prevent a later run from overwriting old evidence.
         let bundle = create_parameter_matrix_bundle(
-            std::path::Path::new("target/qa/roomeq-parameter-bundles"), index,
+            std::path::Path::new("target/qa/roomeq-parameter-bundles"),
+            index,
         )?;
-        write_parameter_matrix_artifact(&bundle.join("request.json"), &serde_json::json!({
-            "row": index, "requested_axes": row, "sample_rate_hz": sample_rate,
-            "inputs": parameter_matrix_request(&config)?,
-        }))?;
+        write_parameter_matrix_artifact(
+            &bundle.join("request.json"),
+            &serde_json::json!({
+                "row": index, "requested_axes": row, "sample_rate_hz": sample_rate,
+                "inputs": parameter_matrix_request(&config)?,
+            }),
+        )?;
         let result = match crate::optimize_room(&config, sample_rate, Some(&bundle)) {
             Ok(result) => result,
             Err(error) => {
@@ -868,19 +926,26 @@ pub fn run_parameter_matrix() -> Result<QaRunOutcome> {
             anyhow::bail!("pairwise row {index} produced a non-finite score");
         }
         write_parameter_matrix_artifact(
-            &bundle.join("selected-output.json"), &result.to_dsp_chain_output(),
+            &bundle.join("selected-output.json"),
+            &result.to_dsp_chain_output(),
         )?;
         let crossover_execution = match parameter_crossover_execution(
-            row.topology as usize, row.crossover as usize, row.phase as usize,
-            &serde_json::to_value(&result.metadata.bass_management)?) {
+            row.topology as usize,
+            row.crossover as usize,
+            row.phase as usize,
+            &serde_json::to_value(&result.metadata.bass_management)?,
+        ) {
             Ok(status) => status,
             Err(error) => {
-                write_parameter_matrix_artifact(artifact, &serde_json::json!({
-                    "status": "failed", "expected_rows": rows.len(), "failed_row": index,
-                    "requested_axes": row, "replay_bundle": bundle,
-                    "sample_rate_hz": sample_rate, "error": format!("{error:#}"),
-                    "completed_rows": records,
-                }))?;
+                write_parameter_matrix_artifact(
+                    artifact,
+                    &serde_json::json!({
+                        "status": "failed", "expected_rows": rows.len(), "failed_row": index,
+                        "requested_axes": row, "replay_bundle": bundle,
+                        "sample_rate_hz": sample_rate, "error": format!("{error:#}"),
+                        "completed_rows": records,
+                    }),
+                )?;
                 return Err(error);
             }
         };

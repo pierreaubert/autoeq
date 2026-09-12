@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::metrics::{log_frequency_weights, percentile};
+use super::metrics::{percentile, rms, weighted_mean, weighted_rms};
 use autoeq_core::Curve;
 pub use roomeq_model::{
     AcousticQualityScorecard, QualityPartitionMetrics, TemporalQualityEvidence,
@@ -77,10 +77,25 @@ pub fn derive_temporal_quality_evidence(
         .flat_map(|(pre, post)| post.spl.iter().zip(&pre.spl))
         .map(|(post, pre)| post - pre)
         .fold(0.0_f64, f64::max);
+    let phase_evidence_available = !pre.is_empty()
+        && pre.len() == post.len()
+        && pre.iter().zip(post).all(|(before, after)| {
+            before.phase.as_ref().is_some_and(|phase| {
+                after.phase.as_ref().is_some_and(|other| {
+                    phase.len() == before.freq.len() && other.len() == after.freq.len()
+                })
+            })
+        });
+    let temporal_evidence_available = !has_fir
+        || channels.iter().all(|channel| {
+            channel.pre_ringing_audible_db.is_some() && channel.main_time_ms.is_some()
+        });
     TemporalQualityEvidence {
         pre_ringing_energy_db,
         latency_ms: Some(latency_ms),
         available_headroom_db: Some(-max_boost_db.max(0.0)),
+        phase_evidence_available,
+        temporal_evidence_available,
     }
 }
 
@@ -365,6 +380,7 @@ pub fn evaluate_acoustic_quality_with_permitted_gain(
         max_cut_db,
         induced_group_delay_rms_ms,
         temporal,
+        correction_band_hz: None,
         evaluated_band_hz: [config.min_freq_hz, config.max_freq_hz],
         measurement_overlap_hz: [overlap_low, overlap_high],
         finite,
@@ -601,12 +617,12 @@ fn evaluate_partition(
         .zip(&post_rms_values)
         .map(|(pre, post)| pre - post)
         .fold(f64::INFINITY, f64::min);
-    let pre_median = median(pre_rms_values);
-    let post_median = median(post_rms_values);
+    let pre_median = percentile(pre_rms_values, 0.5);
+    let post_median = percentile(post_rms_values, 0.5);
     let bass_pre_modal_roughness_db_per_octave2 =
-        (!bass_pre_modal_roughness.is_empty()).then(|| median(bass_pre_modal_roughness));
+        (!bass_pre_modal_roughness.is_empty()).then(|| percentile(bass_pre_modal_roughness, 0.5));
     let bass_post_modal_roughness_db_per_octave2 =
-        (!bass_post_modal_roughness.is_empty()).then(|| median(bass_post_modal_roughness));
+        (!bass_post_modal_roughness.is_empty()).then(|| percentile(bass_post_modal_roughness, 0.5));
     let bass_modal_roughness_improvement_db_per_octave2 = bass_pre_modal_roughness_db_per_octave2
         .zip(bass_post_modal_roughness_db_per_octave2)
         .map(|(pre, post)| pre - post);
@@ -621,9 +637,9 @@ fn evaluate_partition(
         post_worst_abs_residual_db: post_abs.into_iter().fold(0.0, f64::max),
         mean_normalized_seat_spread_db: mean_spread,
         max_normalized_seat_spread_db: max_spread,
-        bass_post_weighted_rms_db: (!bass_post.is_empty()).then(|| median(bass_post)),
-        upper_pre_weighted_rms_db: (!upper_pre.is_empty()).then(|| median(upper_pre)),
-        upper_post_weighted_rms_db: (!upper_post.is_empty()).then(|| median(upper_post)),
+        bass_post_weighted_rms_db: (!bass_post.is_empty()).then(|| percentile(bass_post, 0.5)),
+        upper_pre_weighted_rms_db: (!upper_pre.is_empty()).then(|| percentile(upper_pre, 0.5)),
+        upper_post_weighted_rms_db: (!upper_post.is_empty()).then(|| percentile(upper_post, 0.5)),
         bass_pre_modal_roughness_db_per_octave2,
         bass_post_modal_roughness_db_per_octave2,
         bass_modal_roughness_improvement_db_per_octave2,
@@ -913,14 +929,6 @@ fn sample_log(curve: &Curve, frequency: f64, values: &ndarray::Array1<f64>) -> f
     values[lower] + t * (values[upper] - values[lower])
 }
 
-fn weighted_mean(frequencies: &[f64], values: &[f64]) -> f64 {
-    values
-        .iter()
-        .zip(log_frequency_weights(frequencies))
-        .map(|(value, weight)| value * weight)
-        .sum()
-}
-
 fn center(frequencies: &[f64], values: &mut [f64]) {
     // The best constant gain fit minimizes the same integrated squared error
     // used by weighted_rms. Row density must not choose the reference level.
@@ -930,16 +938,6 @@ fn center(frequencies: &[f64], values: &mut [f64]) {
     values.iter_mut().for_each(|value| *value -= reference);
     let mean = weighted_mean(frequencies, values);
     values.iter_mut().for_each(|value| *value -= mean);
-}
-
-fn weighted_rms(frequencies: &[f64], values: &[f64]) -> f64 {
-    let weights = log_frequency_weights(frequencies);
-    values
-        .iter()
-        .zip(weights)
-        .map(|(value, weight)| value * value * weight)
-        .sum::<f64>()
-        .sqrt()
 }
 
 fn band_rms(frequencies: &[f64], values: &[f64], low: f64, high: f64) -> Option<f64> {
@@ -953,14 +951,6 @@ fn band_rms(frequencies: &[f64], values: &[f64], low: f64, high: f64) -> Option<
         let (frequencies, values): (Vec<_>, Vec<_>) = selected.into_iter().unzip();
         weighted_rms(&frequencies, &values)
     })
-}
-
-fn median(values: Vec<f64>) -> f64 {
-    percentile(values, 0.5)
-}
-
-fn rms(values: &[f64]) -> f64 {
-    (values.iter().map(|value| value * value).sum::<f64>() / values.len().max(1) as f64).sqrt()
 }
 
 fn curve_max_freq(curve: &Curve) -> Result<f64, String> {

@@ -66,17 +66,13 @@ impl MultiSeatSearchConfig {
     pub fn validate(&self) -> Vec<String> {
         let mut errors = Vec::new();
         if self.evaluation_budget == Some(0) {
-            errors.push(
-                "multi_seat.search.evaluation_budget must be > 0 when set".to_string(),
-            );
+            errors.push("multi_seat.search.evaluation_budget must be > 0 when set".to_string());
         }
         if self.time_budget_ms == Some(0) {
             errors.push("multi_seat.search.time_budget_ms must be > 0 when set".to_string());
         }
         if self.max_quadrature_points == 0 {
-            errors.push(
-                "multi_seat.search.max_quadrature_points must be > 0".to_string(),
-            );
+            errors.push("multi_seat.search.max_quadrature_points must be > 0".to_string());
         }
         if self.max_points_per_axis == 0 {
             errors.push("multi_seat.search.max_points_per_axis must be > 0".to_string());

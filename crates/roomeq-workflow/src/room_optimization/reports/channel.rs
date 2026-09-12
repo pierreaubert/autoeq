@@ -28,6 +28,7 @@ pub(in super::super) fn channel_matching_profile_for_role_key(
             correction_weight,
             min_freq_hz,
             max_freq_hz,
+            max_q: 1.0,
         },
     }
 }
@@ -139,6 +140,7 @@ pub(in super::super) fn compute_and_correct_icd(
     let enabled = matching_cfg.enabled;
     let threshold = matching_cfg.threshold_db;
     let max_filters = matching_cfg.max_filters;
+    let [active_min_freq, active_max_freq] = config.optimizer.active_correction_band();
 
     if enabled {
         let matching_groups = role_aware_channel_matching_groups_with_keys(&final_curves);
@@ -164,7 +166,10 @@ pub(in super::super) fn compute_and_correct_icd(
             // add EQ outside the user's correction band. Check the intersection
             // before profile sanitization can turn an empty band back around.
             let Some(correction_profile) = matching_profile_inside_correction_band(
-                correction_profile, config.optimizer.min_freq, config.optimizer.max_freq, f3,
+                correction_profile,
+                active_min_freq,
+                active_max_freq,
+                f3,
             ) else {
                 continue;
             };
@@ -240,8 +245,16 @@ pub(in super::super) fn compute_and_correct_icd(
             .channel_results
             .iter()
             .filter(|(name, _)| !is_subwoofer_channel(config, name))
-            .map(|(name, ch)| (name.clone(), result.deployed_source_curves.get(name)
-                .cloned().unwrap_or_else(|| ch.final_curve.clone())))
+            .map(|(name, ch)| {
+                (
+                    name.clone(),
+                    result
+                        .deployed_source_curves
+                        .get(name)
+                        .cloned()
+                        .unwrap_or_else(|| ch.final_curve.clone()),
+                )
+            })
             .collect();
         let icd_after =
             roomeq_engine::spectral_align::compute_inter_channel_deviation(&corrected_curves, f3);
@@ -302,6 +315,8 @@ mod tests {
             biquads: Vec::new(),
             fir_coeffs: None,
             optimizer_evidence: Vec::new(),
+            audibility_veto: Vec::new(),
+            veto_adjudication: None,
         };
         RoomOptimizationResult {
             channels: HashMap::new(),
@@ -343,12 +358,17 @@ mod tests {
             ("L".to_string(), wavy_curve()),
             ("R".to_string(), small_curve()),
         ]);
-        let corrections = roomeq_engine::spectral_align::correct_inter_channel_deviation_with_profile(
-            &curves, 50.0, 5, 48_000.0, bounded,
-        );
+        let corrections =
+            roomeq_engine::spectral_align::correct_inter_channel_deviation_with_profile(
+                &curves, 50.0, 5, 48_000.0, bounded,
+            );
         for correction in corrections {
             for filter in correction.filters {
-                assert!(filter.freq >= 20.0 && filter.freq <= 200.0, "{}", filter.freq);
+                assert!(
+                    filter.freq >= 20.0 && filter.freq <= 200.0,
+                    "{}",
+                    filter.freq
+                );
             }
         }
         assert!(matching_profile_inside_correction_band(profile, 20.0, 50.0, 50.0).is_none());
@@ -360,6 +380,32 @@ mod tests {
         assert!((profile.rms_threshold_db - 2.0).abs() < 1e-9);
         assert_eq!(profile.correction.min_freq_hz, 80.0);
         assert_eq!(profile.correction.max_freq_hz, 16_000.0);
+        assert_eq!(profile.correction.max_q, 1.0);
+    }
+
+    #[test]
+    fn channel_matching_skips_when_active_band_has_no_role_overlap() {
+        let left = wavy_curve();
+        let right = small_curve();
+        let mut result = result_with_channel("left", left.clone());
+        let right_result = result_with_channel("right", right.clone());
+        result.channel_results.extend(right_result.channel_results);
+
+        let mut config = config_with_channel_matching(true);
+        config.optimizer.correction_band = Some(roomeq_model::CorrectionBandPolicy {
+            min_hz: 20.0,
+            max_hz: 60.0,
+            allow_natural_rolloff: false,
+        });
+
+        compute_and_correct_icd(&mut result, &config, 48_000.0);
+
+        // Front-L/R matching starts at 80 Hz.  A 20–60 Hz active band must
+        // therefore produce no channel-matching filters, even when ICD is
+        // large in the measured curves.
+        assert_eq!(result.channel_results["left"].final_curve.spl, left.spl);
+        assert_eq!(result.channel_results["right"].final_curve.spl, right.spl);
+        assert!(result.metadata.inter_channel_deviation.is_some());
     }
 
     #[test]
@@ -473,6 +519,8 @@ mod tests {
                         biquads: Vec::new(),
                         fir_coeffs: None,
                         optimizer_evidence: Vec::new(),
+                        audibility_veto: Vec::new(),
+                        veto_adjudication: None,
                     },
                 ),
                 (
@@ -486,6 +534,8 @@ mod tests {
                         biquads: Vec::new(),
                         fir_coeffs: None,
                         optimizer_evidence: Vec::new(),
+                        audibility_veto: Vec::new(),
+                        veto_adjudication: None,
                     },
                 ),
             ]),
@@ -559,6 +609,7 @@ mod tests {
                 correction_weight: 1.0,
                 min_freq_hz: 100.0,
                 max_freq_hz: 10_000.0,
+                max_q: 1.0,
             },
         };
         let (min, max) = profile.correction.matching_band(150.0);

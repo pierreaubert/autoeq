@@ -55,8 +55,8 @@ pub fn compute_supporting_source_filter(
     // measured speaker transfer must not become an invertible endpoint
     // plateau where no measurement exists.
     let measured_lo = primary.freq[0].max(support.freq[0]);
-    let measured_hi = primary.freq[primary.freq.len() - 1]
-        .min(support.freq[support.freq.len() - 1]);
+    let measured_hi =
+        primary.freq[primary.freq.len() - 1].min(support.freq[support.freq.len() - 1]);
     let mut windowed_gain_db = support_gain_db.clone();
     for (i, &f) in common_freq.iter().enumerate() {
         if f < config.freq_range_hz.0
@@ -265,7 +265,8 @@ fn enforce_realized_precedence_limit(
     compensation_band_hz: (f64, f64),
     sample_rate: f64,
 ) -> Vec<f64> {
-    let realized_filter_db = realized_filter_gain_db(taps, normalization_gain_db, common_freq, sample_rate);
+    let realized_filter_db =
+        realized_filter_gain_db(taps, normalization_gain_db, common_freq, sample_rate);
     if taps.is_empty() {
         return realized_filter_db;
     }

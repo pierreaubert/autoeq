@@ -27,7 +27,11 @@ mod level_reference_tests {
     fn limited_band_preparation_does_not_normalize_away_bass_excess() {
         let freq = Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), 512);
         let target_spl = freq.mapv(|f| -8.0 * (f / 20.0).log10() / 3.0);
-        let target = Curve { freq: freq.clone(), spl: target_spl.clone(), ..Curve::default() };
+        let target = Curve {
+            freq: freq.clone(),
+            spl: target_spl.clone(),
+            ..Curve::default()
+        };
         let curve = Curve {
             spl: &target_spl + &freq.mapv(|f| 80.0 + if f < 190.0 { 10.0 } else { 0.0 }),
             freq,
@@ -49,21 +53,35 @@ mod level_reference_tests {
             spl: &target_spl + 80.0,
             ..Curve::default()
         };
-        let (before, after) = crate::eq::group_upper_reference_scores(
-            &curve, &corrected, &config, Some(&resources),
-        ).unwrap();
+        let (before, after) =
+            crate::eq::group_upper_reference_scores(&curve, &corrected, &config, Some(&resources))
+                .unwrap();
         assert!(before > 9.0, "baseline must include the bass level error");
         assert!(after < 1e-6, "an aligned response must not be rejected");
-        let reference = crate::spectral_align::upper_band_target_reference(&curve, &target, config.max_freq);
+        let reference =
+            crate::spectral_align::upper_band_target_reference(&curve, &target, config.max_freq);
         let prepared = prepare_single_channel_eq_with_normalization(
-            &curve, &config, Some(&resources), 48_000.0, reference,
-        ).unwrap();
+            &curve,
+            &config,
+            Some(&resources),
+            48_000.0,
+            reference,
+        )
+        .unwrap();
         let data = &prepared.objective_data;
-        let bass: Vec<_> = data.freqs.iter().zip(data.deviation.iter())
-            .filter(|(f, _)| **f >= 30.0 && **f <= 150.0).map(|(_, d)| *d).collect();
+        let bass: Vec<_> = data
+            .freqs
+            .iter()
+            .zip(data.deviation.iter())
+            .filter(|(f, _)| **f >= 30.0 && **f <= 150.0)
+            .map(|(_, d)| *d)
+            .collect();
         assert!(!bass.is_empty());
         let mean = bass.iter().sum::<f64>() / bass.len() as f64;
-        assert!((mean + 10.0).abs() < 0.1, "bass must demand -10 dB, got {mean}");
+        assert!(
+            (mean + 10.0).abs() < 0.1,
+            "bass must demand -10 dB, got {mean}"
+        );
     }
 }
 
@@ -129,8 +147,9 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
     // Clamp optimizer frequency range to measurement data range.
     let data_min_freq = curve.freq[0];
     let data_max_freq = curve.freq[curve.freq.len() - 1];
-    let effective_min_freq = config.min_freq.max(data_min_freq);
-    let effective_max_freq = config.max_freq.min(data_max_freq);
+    let [configured_min_freq, configured_max_freq] = config.active_correction_band();
+    let effective_min_freq = configured_min_freq.max(data_min_freq);
+    let effective_max_freq = configured_max_freq.min(data_max_freq);
 
     let points_in_range = curve
         .freq
@@ -139,19 +158,25 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
         .count();
     log::info!(
         "  Optimizer freq range: configured=[{:.1}, {:.1}], data=[{:.1}, {:.1}], effective=[{:.1}, {:.1}], {} points in range",
-        config.min_freq,
-        config.max_freq,
+        configured_min_freq,
+        configured_max_freq,
         data_min_freq,
         data_max_freq,
         effective_min_freq,
         effective_max_freq,
         points_in_range,
     );
+    if effective_max_freq <= effective_min_freq || points_in_range < 2 {
+        return Err(format!(
+            "active correction band [{effective_min_freq:.1}, {effective_max_freq:.1}] Hz has insufficient measured support"
+        )
+        .into());
+    }
     if effective_max_freq < config.max_freq || effective_min_freq > config.min_freq {
         log::warn!(
             "  Clamping optimizer freq range [{:.1}, {:.1}] to measurement data range [{:.1}, {:.1}]",
-            config.min_freq,
-            config.max_freq,
+            configured_min_freq,
+            configured_max_freq,
             effective_min_freq,
             effective_max_freq
         );
@@ -366,14 +391,14 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
             .unwrap_or_default();
 
     // Detect narrow nulls on the unsmoothed deviation curve and build a
-    // per-sample suppression mask for the asymmetric loss dip branch.
+    // per-sample suppression mask for RoomEQ flat/asymmetric loss dip branches.
     // High-Q dips = acoustic cancellation nulls that cannot be filled by
     // EQ boost; the mask drives their contribution to the loss toward
     // zero so the optimizer does not waste filters boosting into them.
     // Low-Q dips are left at full weight and stay legitimate correction
-    // targets. The mask is only built when asymmetric loss is active —
-    // other loss types do not consume it.
-    let null_suppression_mask = if config.asymmetric_loss {
+    // targets. The mask is built for RoomEQ flat/asymmetric objectives;
+    // other loss types retain the evidence but safely ignore it.
+    let null_suppression_mask = if config.asymmetric_loss || config.loss_type == "flat" {
         let null_config = impulse_analysis::NullDetectionConfig::default();
         let nulls = impulse_analysis::detect_narrow_nulls(
             &normalized_curve_unsmoothed.freq,
@@ -381,7 +406,7 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
             &null_config,
         );
         log::info!(
-            "  Narrow-null detection: {} high-Q dip(s) suppressed for asymmetric loss",
+            "  Narrow-null detection: {} high-Q dip(s) suppressed for RoomEQ flat/asymmetric loss",
             nulls.len()
         );
         for n in &nulls {
@@ -515,9 +540,25 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
     // land on detected room modes instead of on whatever
     // `create_smart_initial_guesses::find_peaks` decides to flag.
     objective_data.detected_problems = detected_problems;
-    // Hand the narrow-null suppression mask over to the asymmetric loss
-    // branch of `compute_base_fitness`. `None` when `asymmetric_loss` is
-    // disabled, in which case the loss does not consume the mask anyway.
+    objective_data.mode_proximity_evidence = decomposed_result
+        .as_ref()
+        .map(|result| {
+            result
+                .room_modes
+                .iter()
+                .map(|mode| autoeq_optim::roomeq::ModeProximityEvidence {
+                    frequency_hz: mode.frequency,
+                    q: mode.q,
+                    prominence_db: mode.prominence_db,
+                    temporal_severity_db: (mode.temporal_severity_db > 0.0)
+                        .then_some(mode.temporal_severity_db),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    // Hand the narrow-null suppression mask to the selected prepared
+    // objective. Flat and asymmetric losses de-weight cancellation dips;
+    // other loss types ignore it safely.
     objective_data.null_suppression = null_suppression_mask.map(std::sync::Arc::new);
 
     // A measured decomposition may refine consumers whose contract calls for
@@ -883,12 +924,7 @@ mod null_boost_tests {
         ] {
             parameters.extend_from_slice(&[frequency.log10(), q, gain]);
         }
-        let dropped = zero_null_filling_boosts(
-            &mut parameters,
-            &freqs,
-            Some(&mask),
-            PeqModel::Pk,
-        );
+        let dropped = zero_null_filling_boosts(&mut parameters, &freqs, Some(&mask), PeqModel::Pk);
         assert_eq!(dropped, 1);
         let gains: Vec<f64> = (0..4)
             .map(|index| PeqModel::Pk.get_filter_params(&parameters, index).gain)
@@ -909,10 +945,7 @@ mod null_boost_tests {
             zero_null_filling_boosts(&mut parameters, &freqs, Some(&short), PeqModel::Pk),
             0
         );
-        assert_eq!(
-            PeqModel::Pk.get_filter_params(&parameters, 0).gain,
-            6.0
-        );
+        assert_eq!(PeqModel::Pk.get_filter_params(&parameters, 0).gain, 6.0);
     }
 }
 

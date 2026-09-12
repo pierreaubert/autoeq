@@ -20,7 +20,10 @@ mod tests {
         autoeq::Curve {
             freq: ndarray::Array1::from_vec(freq),
             spl: ndarray::Array1::from_vec(spl),
-            phase: None,
+            // These are deterministic routing fixtures; declare their
+            // relative phase explicitly so coherent 2.1 replay is assessed
+            // rather than rejected for missing evidence.
+            phase: Some(ndarray::Array1::zeros(n)),
             ..Default::default()
         }
     }

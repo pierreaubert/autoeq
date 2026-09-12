@@ -516,16 +516,22 @@ pub(in super::super) fn apply_channel_matching_correction(
 
         if let Some(chain) = result.channels.get_mut(&correction.channel_name) {
             let mut plugin = roomeq_engine::output::create_labeled_eq_plugin(
-                &correction.filters, "channel_matching",
+                &correction.filters,
+                "channel_matching",
             );
             // Matching is designed from logical-source responses. It must act
             // before a routed source splits into mains and redirected bass.
             plugin.parameters["room_eq_stage"] = serde_json::json!("pre_route");
             chain.plugins.push(plugin);
         }
-        if let Some(deployed) = result.deployed_source_curves.get_mut(&correction.channel_name) {
+        if let Some(deployed) = result
+            .deployed_source_curves
+            .get_mut(&correction.channel_name)
+        {
             let response = roomeq_engine::response::compute_peq_complex_response(
-                &correction.filters, &deployed.freq, sample_rate,
+                &correction.filters,
+                &deployed.freq,
+                sample_rate,
             );
             *deployed = roomeq_engine::response::apply_complex_response(deployed, &response);
         }
@@ -635,6 +641,8 @@ mod tests {
             biquads: Vec::new(),
             fir_coeffs: None,
             optimizer_evidence: Vec::new(),
+            audibility_veto: Vec::new(),
+            veto_adjudication: None,
         };
         let chain = ChannelDspChain {
             channel: name.to_string(),
@@ -1045,7 +1053,9 @@ mod tests {
         let mut deployed = result.channel_results["left"].final_curve.clone();
         deployed.spl.mapv_inplace(|level| level + 7.0);
         let deployed_before = deployed.spl[10];
-        result.deployed_source_curves.insert("left".into(), deployed);
+        result
+            .deployed_source_curves
+            .insert("left".into(), deployed);
         let filter = Biquad::new(BiquadFilterType::Peak, 1000.0, 48_000.0, 1.0, 3.0);
         let correction = ChannelMatchingResult {
             channel_name: "left".to_string(),
@@ -1059,8 +1069,15 @@ mod tests {
             "curve should change after applying filter"
         );
         assert_eq!(result.channels["left"].plugins.len(), 1);
-        assert_eq!(result.channels["left"].plugins[0].parameters["room_eq_stage"], "pre_route");
-        assert!((result.deployed_source_curves["left"].spl[10] - deployed_before - (after - before)).abs() < 1e-10);
+        assert_eq!(
+            result.channels["left"].plugins[0].parameters["room_eq_stage"],
+            "pre_route"
+        );
+        assert!(
+            (result.deployed_source_curves["left"].spl[10] - deployed_before - (after - before))
+                .abs()
+                < 1e-10
+        );
     }
 
     #[test]
@@ -1096,7 +1113,8 @@ mod tests {
         let dir = Path::new("reports/test");
         let config = room_config_with_validation_bundle();
         let store = autoeq_artifacts::MemoryArtifactStore::new();
-        generate_validation_bundle_report(&mut result, &config, Some(dir), &store, 48_000.0).unwrap();
+        generate_validation_bundle_report(&mut result, &config, Some(dir), &store, 48_000.0)
+            .unwrap();
         assert!(result.metadata.validation_bundle.is_some());
         let bundle = result.metadata.validation_bundle.as_ref().unwrap();
         assert!(

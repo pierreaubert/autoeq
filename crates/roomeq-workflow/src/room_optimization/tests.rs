@@ -11,11 +11,18 @@ fn generic_group_final_level_uses_target_without_deployed_source_curves() {
     chain.target_curve = Some((&target).into());
     let mut config = RoomConfig::default();
     config.optimizer.max_freq = 200.0;
-    let outcome = apply_final_channel_level_alignment(&mut result, &config, 48_000.0, Path::new(".")).unwrap();
+    let outcome =
+        apply_final_channel_level_alignment(&mut result, &config, 48_000.0, Path::new("."))
+            .unwrap();
     assert_eq!(outcome.status, StageStatus::Applied);
     assert!((result.channel_results["L"].final_curve.spl[10] - target.spl[10]).abs() < 1e-9);
-    assert!(result.channels["L"].plugins.iter().any(|plugin|
-        plugin.plugin_type == "gain" && plugin.parameters["gain_db"].as_f64() == Some(-5.0)));
+    assert!(
+        result.channels["L"]
+            .plugins
+            .iter()
+            .any(|plugin| plugin.plugin_type == "gain"
+                && plugin.parameters["gain_db"].as_f64() == Some(-5.0))
+    );
 }
 
 #[test]
@@ -38,6 +45,7 @@ fn mixed_phase_missing_fir_is_scoped_degradation() {
             .unwrap();
             acceptance.accepted = true;
             acceptance.decision = roomeq_model::CorrectionDecision::Accepted;
+            acceptance.refresh_outcome();
             result.metadata.correction_acceptance = Some(acceptance);
             let before_channels = serde_json::to_value(&result.channels).unwrap();
             record_missing_mixed_phase_fir_reversions(&mut result, ProcessingMode::LowLatency);
@@ -409,6 +417,7 @@ fn routed_safety_replay_restores_the_last_known_safe_dsp_chain() {
         runtime_policy: None,
         decision: roomeq_model::CorrectionDecision::Accepted,
         accepted: true,
+        outcome: roomeq_model::RoomEqOutcome::Accepted,
         metrics: roomeq_model::CorrectionMetricSummary {
             auditory_frequency_measure: String::from("test-measure"),
             pre_target_weighted_rms_db: 4.0,
@@ -442,11 +451,23 @@ fn routed_safety_replay_restores_the_last_known_safe_dsp_chain() {
         Err(AutoeqError::OptimizationFailed {
             message: "final routed crossover underfill exceeds 3 dB".to_string(),
         }),
-    ).unwrap_err();
-    assert!(error.to_string().contains("restored pre-gate DSP is not accepted"));
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("restored pre-gate DSP is not accepted")
+    );
     assert!(error.to_string().contains("safety_changed_playback=true"));
-    assert_eq!(post_safety.metadata.correction_acceptance.as_ref().unwrap().decision,
-        roomeq_model::CorrectionDecision::Rejected);
+    assert_eq!(
+        post_safety
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .unwrap()
+            .decision,
+        roomeq_model::CorrectionDecision::Rejected
+    );
 
     assert_eq!(
         post_safety.channels["L"].plugins.len(),
@@ -492,7 +513,10 @@ fn routed_safety_replay_publishes_fresh_curve_after_correction_reversion() {
     let mut initial = before.channel_results["L"].initial_curve.clone();
     initial.phase = Some(Array1::zeros(initial.freq.len()));
     let chain = before.channels.get_mut("L").unwrap();
-    chain.plugins = vec![output::create_gain_plugin(-6.0), output::create_gain_plugin(12.0)];
+    chain.plugins = vec![
+        output::create_gain_plugin(-6.0),
+        output::create_gain_plugin(12.0),
+    ];
     let old_curve = crate::ctc::apply_channel_dsp_chain_to_curve(chain, &initial, 48000.0).unwrap();
     before.deployed_source_curves = HashMap::from([("L".into(), old_curve.clone())]);
     let old_deployed = before.deployed_source_curves.clone();
@@ -500,23 +524,42 @@ fn routed_safety_replay_publishes_fresh_curve_after_correction_reversion() {
     // Model the state handed to the production commit path after correction
     // rollback: retain required -6 dB gain, remove only the +12 dB correction.
     after.channels.get_mut("L").unwrap().plugins.pop();
-    let fresh = crate::ctc::apply_channel_dsp_chain_to_curve(
-        &after.channels["L"], &initial, 48000.0,
-    ).unwrap();
+    let fresh =
+        crate::ctc::apply_channel_dsp_chain_to_curve(&after.channels["L"], &initial, 48000.0)
+            .unwrap();
     after.channels.get_mut("L").unwrap().final_curve = Some((&fresh).into());
     after.channel_results.get_mut("L").unwrap().final_curve = fresh.clone();
     assert!((old_curve.spl[0] - fresh.spl[0] - 12.0).abs() < 1e-9);
     commit_or_restore_routed_safety_replay(
-        &mut after, before, old_deployed, Ok(HashMap::from([("L".into(), fresh)])),
-    ).unwrap();
+        &mut after,
+        before,
+        old_deployed,
+        Ok(HashMap::from([("L".into(), fresh)])),
+    )
+    .unwrap();
     let published = after.to_dsp_chain_output();
     assert_eq!(published.channels["L"].plugins.len(), 1);
-    assert_eq!(published.channels["L"].plugins[0].parameters["gain_db"], -6.0);
-    for (reported, original) in published.deployed_source_curves["L"].spl.iter().zip(initial.spl.iter()) {
-        assert!((reported - (original - 6.0)).abs() < 1e-9,
-            "serialized deployed curve retained removed correction");
+    assert_eq!(
+        published.channels["L"].plugins[0].parameters["gain_db"],
+        -6.0
+    );
+    for (reported, original) in published.deployed_source_curves["L"]
+        .spl
+        .iter()
+        .zip(initial.spl.iter())
+    {
+        assert!(
+            (reported - (original - 6.0)).abs() < 1e-9,
+            "serialized deployed curve retained removed correction"
+        );
     }
-    assert_eq!(published.deployed_source_curves["L"].phase.as_ref().unwrap(), &vec![0.0; initial.freq.len()]);
+    assert_eq!(
+        published.deployed_source_curves["L"]
+            .phase
+            .as_ref()
+            .unwrap(),
+        &vec![0.0; initial.freq.len()]
+    );
 }
 
 fn flat_curve() -> roomeq_model::Curve {

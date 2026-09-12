@@ -58,6 +58,7 @@ pub struct ObjectiveDataBuilder {
     epa_config: Option<crate::loss::epa::score::EpaConfig>,
     temporal_masking_modes: Vec<crate::loss::epa::score::TemporalMaskingMode>,
     detected_problems: Vec<(f64, f64, f64)>,
+    mode_proximity_evidence: Vec<crate::roomeq::ModeProximityEvidence>,
     null_suppression: Option<Array1<f64>>,
     asymmetric_loss_config: AsymmetricLossConfig,
     smoothness_penalty: Option<SmoothnessPenaltyConfig>,
@@ -108,6 +109,7 @@ impl ObjectiveDataBuilder {
             epa_config: None,
             temporal_masking_modes: Vec::new(),
             detected_problems: Vec::new(),
+            mode_proximity_evidence: Vec::new(),
             null_suppression: None,
             asymmetric_loss_config: AsymmetricLossConfig::default(),
             smoothness_penalty: None,
@@ -383,7 +385,13 @@ impl ObjectiveDataBuilder {
         self
     }
 
-    /// Set the null-suppression mask for asymmetric loss.
+    /// Set explicit measured modal evidence for proximity safety checks.
+    pub fn mode_proximity_evidence(mut self, v: Vec<crate::roomeq::ModeProximityEvidence>) -> Self {
+        self.mode_proximity_evidence = v;
+        self
+    }
+
+    /// Set the null-suppression mask for RoomEQ flat/asymmetric loss.
     pub fn null_suppression(mut self, v: Array1<f64>) -> Self {
         self.null_suppression = Some(v);
         self
@@ -505,6 +513,7 @@ impl ObjectiveDataBuilder {
             epa_config: self.epa_config,
             temporal_masking_modes: self.temporal_masking_modes,
             detected_problems: self.detected_problems,
+            mode_proximity_evidence: self.mode_proximity_evidence,
             null_suppression: self.null_suppression.map(Arc::new),
             asymmetric_loss_config: self.asymmetric_loss_config,
             smoothness_penalty: self.smoothness_penalty,

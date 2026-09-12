@@ -15,6 +15,22 @@ pub struct AudibilityDeadbandConfig {
     pub schroeder_hz: f64,
 }
 
+/// Explicit evidence for a measured modal resonance.
+///
+/// This is deliberately separate from an optimizer seed tuple: a mode is
+/// usable by a proximity safety rule only when its frequency, narrowness and
+/// prominence came from the measurement/decomposition stage.  Missing
+/// evidence means no mode-proximity veto is asserted.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct ModeProximityEvidence {
+    pub frequency_hz: f64,
+    pub q: f64,
+    pub prominence_db: f64,
+    /// Optional measured temporal severity above the decay threshold.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temporal_severity_db: Option<f64>,
+}
+
 impl Default for AudibilityDeadbandConfig {
     fn default() -> Self {
         Self {

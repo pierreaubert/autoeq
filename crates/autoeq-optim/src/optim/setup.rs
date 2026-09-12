@@ -276,7 +276,14 @@ pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
         // in a narrow range).
         let f_high_adjusted = f_high_adjusted.max(f_low_adjusted);
 
-        // Add bounds based on model type
+        // Add bounds based on model type.  A frequency-dependent policy is
+        // resolved for the complete rectangular frequency interval so a
+        // filter cannot move into a guarded band with an unsafe Q.
+        let q_upper = q_max_for_frequency_range(
+            params,
+            10.0_f64.powf(f_low_adjusted),
+            10.0_f64.powf(f_high_adjusted),
+        );
         match model {
             PeqModel::Pk
             | PeqModel::HpPk
@@ -285,7 +292,7 @@ pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
             | PeqModel::LsPkHs => {
                 // Fixed filter types: [freq, Q, gain]
                 lower_bounds.extend_from_slice(&[f_low_adjusted, q_lower, gain_lower]);
-                upper_bounds.extend_from_slice(&[f_high_adjusted, params.max_q, params.max_db]);
+                upper_bounds.extend_from_slice(&[f_high_adjusted, q_upper, params.max_db]);
             }
             PeqModel::FreePkFree | PeqModel::Free => {
                 // Free filter types: [type, freq, Q, gain]
@@ -300,7 +307,7 @@ pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
                 upper_bounds.extend_from_slice(&[
                     type_high,
                     f_high_adjusted,
-                    params.max_q,
+                    q_upper,
                     params.max_db,
                 ]);
             }
@@ -431,6 +438,78 @@ pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
     }
 
     (lower_bounds, upper_bounds)
+}
+
+/// Resolve the safest Q ceiling for a filter whose rectangular frequency
+/// bounds are `[f_low_hz, f_high_hz]`.
+///
+/// A PEQ parameter vector cannot express a coupled `Q(frequency)` constraint.
+/// Applying the ceiling to the whole interval is therefore deliberately
+/// conservative: any candidate that remains inside the optimizer bounds is
+/// safe even when its centre frequency moves to the guarded edge.  The
+/// transition rule keeps high-Q modal freedom below Schroeder while using the
+/// upper-band ceiling for intervals that cross the transition.
+pub fn q_max_for_frequency_range(
+    params: &crate::OptimParams,
+    f_low_hz: f64,
+    f_high_hz: f64,
+) -> f64 {
+    let mut upper = params.max_q;
+    let high = f_low_hz.max(f_high_hz);
+    if let Some(policy) = params.frequency_q_policy {
+        if let Some(transition) = policy
+            .schroeder_hz
+            .filter(|value| value.is_finite() && *value > 0.0)
+        {
+            let low_max_q = policy
+                .low_max_q
+                .filter(|value| value.is_finite() && *value > 0.0);
+            let high_max_q = policy
+                .high_max_q
+                .filter(|value| value.is_finite() && *value > 0.0);
+
+            // A rectangular PEQ bound cannot express Q as a function of
+            // centre frequency. Use a log-frequency blend at the upper edge
+            // of the interval instead of a discontinuous Schroeder switch.
+            // The guarded upper band is reached at `high_start_hz`, or one
+            // octave above transition when no explicit start is configured.
+            let blend_end = policy
+                .high_start_hz
+                .filter(|value| value.is_finite() && *value > transition)
+                .unwrap_or(transition * 2.0);
+            if let (Some(low_q), Some(high_q)) = (low_max_q, high_max_q) {
+                if high <= transition {
+                    upper = upper.min(low_q);
+                } else if high >= blend_end {
+                    upper = upper.min(high_q);
+                } else {
+                    let t = (high / transition).log2() / (blend_end / transition).log2();
+                    let t = t.clamp(0.0, 1.0);
+                    // Smoothstep avoids a slope discontinuity at the modal /
+                    // upper-band boundary while remaining monotone.
+                    let t = t * t * (3.0 - 2.0 * t);
+                    upper = upper.min(low_q + (high_q - low_q) * t);
+                }
+            } else if high <= transition {
+                if let Some(low_q) = low_max_q {
+                    upper = upper.min(low_q);
+                }
+            } else if let Some(high_q) = high_max_q {
+                upper = upper.min(high_q);
+            }
+        }
+        if let Some(start) = policy
+            .high_start_hz
+            .filter(|value| value.is_finite() && *value > 0.0)
+            && high >= start
+            && let Some(high_max_q) = policy
+                .high_max_q
+                .filter(|value| value.is_finite() && *value > 0.0)
+        {
+            upper = upper.min(high_max_q);
+        }
+    }
+    upper.max(params.min_q.max(0.1))
 }
 
 /// Set up objective data for multi-subwoofer optimization.

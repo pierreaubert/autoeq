@@ -35,7 +35,6 @@ pub fn assess_final_graph(
     sidecar_dir: &Path,
     policy: &roomeq_model::FinalizationConfig,
 ) -> Result<Vec<SampledElectricalOutputPeak>> {
-
     let expanded = if let Some(routing) = canonical_electrical_routing(graph)? {
         expand_routed_electrical_paths(&graph.channels, routing)?
     } else {
@@ -63,14 +62,20 @@ pub fn assess_final_graph(
         .collect();
     if let Some(routing) = canonical_electrical_routing(graph)? {
         for input in &routing.input_channels {
-            limits.entry(input.clone()).or_insert(policy.default_input_peak);
+            limits
+                .entry(input.clone())
+                .or_insert(policy.default_input_peak);
         }
     }
-    policy.validate().map_err(|message| AutoeqError::InvalidConfiguration { message })?;
+    policy
+        .validate()
+        .map_err(|message| AutoeqError::InvalidConfiguration { message })?;
     for (input, peak) in &policy.input_peak_limits {
-        let limit = limits.get_mut(input).ok_or_else(|| AutoeqError::InvalidConfiguration {
-            message: format!("electrical input peak override names unknown input '{input}'"),
-        })?;
+        let limit = limits
+            .get_mut(input)
+            .ok_or_else(|| AutoeqError::InvalidConfiguration {
+                message: format!("electrical input peak override names unknown input '{input}'"),
+            })?;
         *limit = *peak;
     }
     let mut frequencies: Vec<_> = (0..=8192)
@@ -119,9 +124,14 @@ pub fn final_graph_unit_peak_stage(
     sidecar_dir: &Path,
 ) -> roomeq_model::StageOutcome {
     use roomeq_model::{StageCheck, StageCheckKind, StageOutcome, StageStatus};
-    let assessment = || assess_final_graph(
-        graph, sample_rate_hz, sidecar_dir, &roomeq_model::FinalizationConfig::default(),
-    );
+    let assessment = || {
+        assess_final_graph(
+            graph,
+            sample_rate_hz,
+            sidecar_dir,
+            &roomeq_model::FinalizationConfig::default(),
+        )
+    };
     let mut outcome = StageOutcome {
         stage: "final_graph_sampled_electrical_headroom".into(),
         status: StageStatus::Applied,
@@ -452,17 +462,42 @@ mod tests {
     #[test]
     fn final_graph_policy_uses_declared_input_peaks_and_rejects_unknown_inputs() {
         let mut result = crate::test_fixtures::single_channel_room_result("L");
-        result.channels.get_mut("L").unwrap().plugins = vec![roomeq_engine::output::create_gain_plugin(6.0)];
+        result.channels.get_mut("L").unwrap().plugins =
+            vec![roomeq_engine::output::create_gain_plugin(6.0)];
         let mut policy = roomeq_model::FinalizationConfig::default();
         policy.default_input_peak = 0.125;
         policy.input_peak_limits.insert("L".into(), 0.25);
-        let output = assess_final_graph(&result.to_dsp_chain_output(), 48000.0, Path::new("."), &policy).unwrap();
+        let output = assess_final_graph(
+            &result.to_dsp_chain_output(),
+            48000.0,
+            Path::new("."),
+            &policy,
+        )
+        .unwrap();
         assert!((output[0].peak_amplitude - 0.25 * 10.0_f64.powf(6.0 / 20.0)).abs() < 1e-9);
         policy.input_peak_limits.insert("typo".into(), 0.5);
-        assert!(assess_final_graph(&result.to_dsp_chain_output(), 48000.0, Path::new("."), &policy).unwrap_err().to_string().contains("unknown input"));
+        assert!(
+            assess_final_graph(
+                &result.to_dsp_chain_output(),
+                48000.0,
+                Path::new("."),
+                &policy
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("unknown input")
+        );
         policy.input_peak_limits.remove("typo");
         policy.input_peak_limits.insert("L".into(), 0.0);
-        assert!(assess_final_graph(&result.to_dsp_chain_output(), 48000.0, Path::new("."), &policy).is_err());
+        assert!(
+            assess_final_graph(
+                &result.to_dsp_chain_output(),
+                48000.0,
+                Path::new("."),
+                &policy
+            )
+            .is_err()
+        );
     }
 
     #[test]

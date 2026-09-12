@@ -26,8 +26,11 @@ prod-autoeq:
 	cargo build --release --features cli --bin autoeq-download-speakers
 
 [group('build')]
-prod-roomeq:
+roomeq:
 	cargo build --release --features cli --bin roomeq
+
+[group('build')]
+prod-roomeq: roomeq
 	cargo build --release --features qa --bin roomeq-qa-quality
 	cargo build --release --features qa --bin roomeq-qa-coverage
 	cargo build --release --features qa --bin roomeq-qa-features

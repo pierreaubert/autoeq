@@ -155,6 +155,8 @@ impl WorkflowExecutor for Stereo20Executor {
             validation_bundle: None,
             supporting_source: None,
             correction_acceptance: None,
+            audibility_veto: None,
+            veto_adjudication: None,
             optimizer_evidence: None,
             stage_outcomes: Vec::new(),
             qa_seed_distribution: None,

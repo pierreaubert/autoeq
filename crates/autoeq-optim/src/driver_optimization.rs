@@ -49,6 +49,7 @@ pub fn create_driver_optimization_params(
         spacing_weight: 0.0,
         smoothness_penalty: None,
         audibility_deadband: None,
+        frequency_q_policy: None,
         algo: algorithm.to_string(),
         population,
         maxeval: max_iter,

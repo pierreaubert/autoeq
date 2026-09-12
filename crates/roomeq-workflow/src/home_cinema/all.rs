@@ -158,6 +158,8 @@ pub fn all_channel_multiseat_acceptance_with_frequency_samples(
                 biquads: Vec::new(),
                 fir_coeffs: None,
                 optimizer_evidence: Vec::new(),
+                audibility_veto: Vec::new(),
+                veto_adjudication: None,
             },
             band_hz,
             policy.primary_seat,

@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use roomeq_model::{AutoeqError, Curve, Result};
+use roomeq_model::{
+    AcousticQualityScorecard, AutoeqError, CorrectionAcceptanceReport, Curve, Result,
+};
 
 use super::RoomOptimizationResult;
 
@@ -8,15 +10,22 @@ pub(super) fn attach_validation_scorecard(
     result: &mut RoomOptimizationResult,
     validation: &HashMap<String, Vec<Curve>>,
     sample_rate: f64,
+    schroeder_hz: Option<f64>,
+    processing_mode: roomeq_model::ProcessingMode,
 ) -> Result<()> {
     use roomeq_engine::quality::{
-        CorrectionAcceptancePolicy, QualityEvaluationConfig, TemporalChannelEvidence,
-        derive_temporal_quality_evidence, evaluate_acoustic_quality,
+        CorrectionAcceptancePolicy, QualityEvaluationConfig, RuntimeAcceptancePolicy,
+        TemporalChannelEvidence, derive_temporal_quality_evidence, evaluate_acoustic_quality,
         evaluate_correction_acceptance,
     };
 
     let mut names: Vec<_> = result.channel_results.keys().cloned().collect();
     names.sort();
+    if names.is_empty() {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: "cannot evaluate RoomEQ quality without output channels".to_string(),
+        });
+    }
     let training_pre: Vec<_> = names
         .iter()
         .map(|name| result.channel_results[name].initial_curve.clone())
@@ -46,10 +55,6 @@ pub(super) fn attach_validation_scorecard(
             )?);
         }
     }
-    if held_out_pre.is_empty() {
-        return Ok(());
-    }
-
     let min_freq_hz = training_pre
         .iter()
         .chain(&training_post)
@@ -57,13 +62,18 @@ pub(super) fn attach_validation_scorecard(
         .chain(&held_out_post)
         .map(|curve| curve.freq[0])
         .fold(0.0_f64, f64::max);
+    // The evaluator aligns every curve pair on its own measured support.  Use
+    // the widest available upper bound here so a short-band subwoofer cannot
+    // hide a main speaker's measured upper band from the shared scorecard.
+    // The common-overlap diagnostic remains conservative, while each
+    // `useful_output` entry records the actual per-channel band.
     let max_freq_hz = training_pre
         .iter()
         .chain(&training_post)
         .chain(&held_out_pre)
         .chain(&held_out_post)
         .filter_map(|curve| curve.freq.last().copied())
-        .fold(f64::INFINITY, f64::min);
+        .fold(0.0_f64, f64::max);
     let temporal_channels: Vec<_> = names
         .iter()
         .map(|name| {
@@ -93,7 +103,7 @@ pub(super) fn attach_validation_scorecard(
         QualityEvaluationConfig {
             min_freq_hz,
             max_freq_hz,
-            schroeder_hz: None,
+            schroeder_hz,
             normalize_level: true,
         },
         temporal,
@@ -119,6 +129,21 @@ pub(super) fn attach_validation_scorecard(
         );
     }
     if let Some(report) = &mut result.metadata.correction_acceptance {
+        if report.runtime_policy.is_none() {
+            report.runtime_policy = Some(RuntimeAcceptancePolicy::for_output_class(
+                processing_mode.runtime_output_class(),
+            ));
+        }
+        align_acceptance_metrics_with_scorecard(report, &scorecard);
+        let training_improvement = scorecard.training.improvement_median_db;
+        let training_epsilon =
+            (scorecard.training.pre_weighted_rms_median_db.abs() * 1e-4).max(1e-6);
+        if !training_improvement.is_finite() || training_improvement < -training_epsilon {
+            report
+                .violations
+                .push("target_weighted_rms_regressed".to_string());
+            report.accepted = false;
+        }
         // F05: the runtime gate enforces training + held-out partitions
         // together, but it runs before this scorecard is attached. A held-out
         // seat that regresses under the final chain must therefore be gated
@@ -139,13 +164,83 @@ pub(super) fn attach_validation_scorecard(
             report.accepted = false;
         }
         report.acoustic_quality = Some(scorecard);
+        report.refresh_outcome();
     }
     Ok(())
+}
+
+/// Map the requested processing mode to the temporal budget that applies to
+/// the realized graph.  The scorecard is shared by all modes, but a full FIR
+/// or a mixed/excess-phase chain has a different latency/pre-ringing envelope
+/// than a low-latency IIR chain.  Keep this mapping at the validation boundary
+/// so a missing policy can never silently inherit the IIR defaults.
+/// Keep the serialized scalar summary on the same realized-graph metric as
+/// the detailed scorecard. A legacy one-channel summary is useful for older
+/// callers, but cannot be allowed to contradict the multi-channel decision.
+fn align_acceptance_metrics_with_scorecard(
+    report: &mut CorrectionAcceptanceReport,
+    scorecard: &AcousticQualityScorecard,
+) {
+    let training = &scorecard.training;
+    report.metrics.pre_target_weighted_rms_db = training.pre_weighted_rms_median_db;
+    report.metrics.post_target_weighted_rms_db = training.post_weighted_rms_median_db;
+    report.metrics.improvement_db = training.improvement_median_db;
+    report.metrics.improvement_ratio = if training.pre_weighted_rms_median_db.abs() > 1e-9 {
+        training.improvement_median_db / training.pre_weighted_rms_median_db.abs()
+    } else {
+        0.0
+    };
+    report.metrics.post_p95_abs_residual_db = training.post_p95_abs_residual_db;
+    report.metrics.post_worst_abs_residual_db = training.post_worst_abs_residual_db;
+    report.metrics.correction_rms_db = scorecard.correction_rms_db;
+    report.metrics.max_abs_correction_db =
+        scorecard.max_boost_db.abs().max(scorecard.max_cut_db.abs());
+}
+
+/// Reconcile the legacy scalar summary after later final-seat replay has
+/// enriched or replaced the detailed scorecard. This intentionally preserves
+/// the scorecard (including `final_seats`) instead of re-running validation
+/// and losing the replay evidence.
+pub(super) fn align_report_metrics_to_scorecard(report: &mut CorrectionAcceptanceReport) {
+    if let Some(scorecard) = report.acoustic_quality.clone() {
+        align_acceptance_metrics_with_scorecard(report, &scorecard);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_policy_follows_processing_mode() {
+        use roomeq_engine::quality::RuntimeOutputClass;
+        use roomeq_model::ProcessingMode;
+
+        assert_eq!(
+            ProcessingMode::LowLatency.runtime_output_class(),
+            RuntimeOutputClass::LowLatencyIir
+        );
+        assert_eq!(
+            ProcessingMode::WarpedIir.runtime_output_class(),
+            RuntimeOutputClass::LowLatencyIir
+        );
+        assert_eq!(
+            ProcessingMode::KautzModal.runtime_output_class(),
+            RuntimeOutputClass::LowLatencyIir
+        );
+        assert_eq!(
+            ProcessingMode::PhaseLinear.runtime_output_class(),
+            RuntimeOutputClass::Fir
+        );
+        assert_eq!(
+            ProcessingMode::Hybrid.runtime_output_class(),
+            RuntimeOutputClass::Hybrid
+        );
+        assert_eq!(
+            ProcessingMode::MixedPhase.runtime_output_class(),
+            RuntimeOutputClass::Hybrid
+        );
+    }
 
     #[test]
     fn held_out_seat_regression_is_exposed_in_final_decision() {
@@ -202,6 +297,7 @@ mod tests {
             )),
             decision: CorrectionDecision::Accepted,
             accepted: true,
+            outcome: roomeq_model::RoomEqOutcome::Accepted,
             metrics: CorrectionMetricSummary {
                 auditory_frequency_measure: "erb".to_string(),
                 pre_target_weighted_rms_db: 3.0,
@@ -219,8 +315,14 @@ mod tests {
             realization_quality: None,
         });
         let validation = HashMap::from([("left".to_string(), vec![seat])]);
-        attach_validation_scorecard(&mut result, &validation, 48_000.0)
-            .expect("runtime validation");
+        attach_validation_scorecard(
+            &mut result,
+            &validation,
+            48_000.0,
+            None,
+            roomeq_model::ProcessingMode::LowLatency,
+        )
+        .expect("runtime validation");
 
         let report = result
             .metadata
@@ -236,7 +338,10 @@ mod tests {
             "held-out seat evidence must be attached"
         );
         assert!(
-            report.violations.iter().any(|v| v == "worst_position_regressed"),
+            report
+                .violations
+                .iter()
+                .any(|v| v == "worst_position_regressed"),
             "seat regression must be exposed, violations={:?}, accepted={}",
             report.violations,
             report.accepted
@@ -253,8 +358,14 @@ mod tests {
         let validation_curve = result.channel_results["left"].initial_curve.clone();
         let validation = HashMap::from([("left".to_string(), vec![validation_curve])]);
 
-        attach_validation_scorecard(&mut result, &validation, 48_000.0)
-            .expect("runtime validation");
+        attach_validation_scorecard(
+            &mut result,
+            &validation,
+            48_000.0,
+            Some(200.0),
+            roomeq_model::ProcessingMode::LowLatency,
+        )
+        .expect("runtime validation");
 
         let quality = result
             .metadata
@@ -269,6 +380,25 @@ mod tests {
                 .expect("held-out metrics")
                 .curve_count,
             1
+        );
+        let training = &quality.training;
+        assert!(
+            training.upper_pre_weighted_rms_db.is_some()
+                && training.upper_post_weighted_rms_db.is_some(),
+            "resolved Schroeder split must populate upper-band diagnostics"
+        );
+        let report = result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .expect("acceptance report");
+        assert_eq!(
+            report.metrics.pre_target_weighted_rms_db,
+            training.pre_weighted_rms_median_db
+        );
+        assert_eq!(
+            report.metrics.post_target_weighted_rms_db,
+            training.post_weighted_rms_median_db
         );
     }
 }

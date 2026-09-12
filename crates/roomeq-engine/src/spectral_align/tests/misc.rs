@@ -50,12 +50,14 @@ fn test_channel_matching_correction_profile_leaves_role_tolerance() {
         correction_weight: 1.0,
         min_freq_hz: 80.0,
         max_freq_hz: 16_000.0,
+        max_q: 1.0,
     };
     let loose = ChannelMatchingCorrectionProfile {
         peak_tolerance_db: 1.0,
         correction_weight: 0.65,
         min_freq_hz: 120.0,
         max_freq_hz: 10_000.0,
+        max_q: 1.0,
     };
 
     assert_close(channel_matching_correction_gain(0.8, loose), 0.0);

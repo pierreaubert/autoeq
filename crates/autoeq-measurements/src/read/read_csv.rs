@@ -13,7 +13,8 @@ use ndarray::Array1;
 pub fn load_frequency_response(
     path: &PathBuf,
 ) -> Result<(Array1<f64>, Array1<f64>), Box<dyn std::error::Error>> {
-    let file = File::open(path)?;
+    let file = File::open(path)
+        .map_err(|error| format!("failed to open '{}': {error}", path.display()))?;
     let reader = BufReader::new(file);
 
     let mut frequencies = Vec::new();
@@ -196,7 +197,8 @@ pub fn load_driver_measurement(
     ),
     Box<dyn std::error::Error>,
 > {
-    let file = File::open(path)?;
+    let file = File::open(path)
+        .map_err(|error| format!("failed to open '{}': {error}", path.display()))?;
     let reader = BufReader::new(file);
 
     let mut frequencies = Vec::new();

@@ -16,7 +16,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::metrics::{
-    AggregationOrder, SeatScore, bootstrap_mean_ci95, weighted_percentile, worst_supported_seat,
+    AggregationOrder, SeatScore, bootstrap_mean_ci95, same_frequency_grid, weighted_percentile,
+    worst_supported_seat,
 };
 use super::protocol::WorstSeatReport;
 
@@ -208,14 +209,7 @@ fn check_grid(curve: &Curve, reference: &Curve, label: &str) -> Result<(), Strin
             ));
         }
     }
-    if curve.freq.len() < 2
-        || curve.freq.len() != reference.freq.len()
-        || curve
-            .freq
-            .iter()
-            .zip(reference.freq.iter())
-            .any(|(a, b)| (a - b).abs() > 1e-9)
-    {
+    if !same_frequency_grid(curve, reference) {
         return Err(format!("{label} requires the shared frequency grid"));
     }
     if curve.spl.len() != curve.freq.len() {
@@ -334,9 +328,8 @@ pub fn evaluate_final_validation(
             accepted: false,
             violations: Vec::new(),
         };
-        let gather = |curve: &Curve| -> Vec<f64> {
-            support.iter().map(|index| curve.spl[*index]).collect()
-        };
+        let gather =
+            |curve: &Curve| -> Vec<f64> { support.iter().map(|index| curve.spl[*index]).collect() };
         let pre_spl = gather(pre_curve);
         let cand_spl = gather(cand_curve);
         let base_spl = gather(base_curve);
@@ -360,12 +353,14 @@ pub fn evaluate_final_validation(
         };
         outcome.candidate_improvement_db = pre_rms - cand_rms;
         outcome.baseline_improvement_db = pre_rms - base_rms;
-        outcome.degradation_vs_baseline_db = outcome.baseline_improvement_db
-            - outcome.candidate_improvement_db;
+        outcome.degradation_vs_baseline_db =
+            outcome.baseline_improvement_db - outcome.candidate_improvement_db;
         gains.push(base_rms - cand_rms);
         if let Some(weights) = &weights {
-            let abs_residual: Vec<f64> =
-                residual(&cand_spl).iter().map(|value| value.abs()).collect();
+            let abs_residual: Vec<f64> = residual(&cand_spl)
+                .iter()
+                .map(|value| value.abs())
+                .collect();
             let weighted_mean: f64 = abs_residual
                 .iter()
                 .zip(weights.iter())
@@ -437,8 +432,7 @@ pub fn evaluate_final_validation(
             for (seat_index, cand_curve) in candidate_post.iter().enumerate() {
                 let cand_spl: Vec<f64> =
                     support.iter().map(|index| cand_curve.spl[*index]).collect();
-                let target_spl: Vec<f64> =
-                    support.iter().map(|index| target.spl[*index]).collect();
+                let target_spl: Vec<f64> = support.iter().map(|index| target.spl[*index]).collect();
                 let abs_residual: Vec<f64> = cand_spl
                     .iter()
                     .zip(target_spl.iter())
@@ -451,9 +445,7 @@ pub fn evaluate_final_validation(
                         definition.percentile,
                     ));
                 } else {
-                    violations.push(format!(
-                        "seat_{seat_index}_percentile_weights_unavailable"
-                    ));
+                    violations.push(format!("seat_{seat_index}_percentile_weights_unavailable"));
                 }
             }
             worst
@@ -482,10 +474,7 @@ pub fn evaluate_final_validation(
             seat: score.seat.clone(),
             value_db: score.value_db,
             support_bins: score.support_bins,
-            weighting: format!(
-                "{} {}",
-                definition.weighting, definition.measure_version
-            ),
+            weighting: format!("{} {}", definition.weighting, definition.measure_version),
             aggregation_order: definition.aggregation_order.as_str().to_string(),
             uncertainty_ci95_db: aggregate_gain_ci95_db,
         },
@@ -495,10 +484,7 @@ pub fn evaluate_final_validation(
                 seat: String::from("unsupported"),
                 value_db: f64::NAN,
                 support_bins: 0,
-                weighting: format!(
-                    "{} {}",
-                    definition.weighting, definition.measure_version
-                ),
+                weighting: format!("{} {}", definition.weighting, definition.measure_version),
                 aggregation_order: definition.aggregation_order.as_str().to_string(),
                 uncertainty_ci95_db: aggregate_gain_ci95_db,
             }
@@ -702,7 +688,11 @@ mod final_check_tests {
         )
         .unwrap();
         assert!(report.accepted(), "{:?}", report.violations);
-        assert!((report.aggregate_gain_db - 1.5).abs() < 1e-9, "{}", report.aggregate_gain_db);
+        assert!(
+            (report.aggregate_gain_db - 1.5).abs() < 1e-9,
+            "{}",
+            report.aggregate_gain_db
+        );
         // Seat 1 improved less: worst supported seat by residual.
         assert_eq!(report.worst_seat.seat, "seat-1");
         assert!(report.aggregate_gain_ci95_db[0] <= report.aggregate_gain_db);

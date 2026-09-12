@@ -116,17 +116,21 @@ impl RoomConfig {
             ) {
                 errors.push("fir.placement=per_driver requires phase_linear, hybrid or mixed_phase processing".into());
             }
-            // Shared physical outputs require a matrix objective, not separate
-            // independently generated logical-group corrections.
-            if self.system.as_ref().is_some_and(|s| {
-                s.subwoofers.is_some() || s.bass_management.as_ref().is_some_and(|b| b.enabled)
-            }) || self.speakers.values().any(|s| {
+            // Shared routed outputs use one common kernel deployed per physical
+            // branch, not independent inversions of logical-source objectives.
+            if self.speakers.values().any(|s| {
                 !matches!(
                     s,
-                    SpeakerConfig::Group(_) | SpeakerConfig::Topology(_) | SpeakerConfig::Single(_)
+                    SpeakerConfig::Group(_)
+                        | SpeakerConfig::Topology(_)
+                        | SpeakerConfig::Single(_)
+                        | SpeakerConfig::MultiSub(_)
                 )
             }) {
-                errors.push("fir.placement=per_driver currently supports standalone channels and independent speaker groups, not bass-management routing, arrays or shared multi-sub outputs".into());
+                errors.push(
+                    "fir.placement=per_driver does not support arrays or supporting-source outputs"
+                        .into(),
+                );
             }
         }
         if self.speakers.is_empty() {

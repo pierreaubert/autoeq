@@ -120,14 +120,17 @@ pub struct ObjectiveData {
     /// Defaults to empty, which preserves the old behaviour
     /// (auto-detected peaks/dips).
     pub detected_problems: Vec<(f64, f64, f64)>,
-    /// Per-frequency dip-suppression mask for
-    /// [`LossType::SpeakerFlatAsymmetric`].
+    /// Measured modal evidence used by the audibility veto's optional
+    /// proximity rule.  This is empty when no decomposition evidence exists.
+    pub mode_proximity_evidence: Vec<crate::roomeq::ModeProximityEvidence>,
+    /// Per-frequency dip-suppression mask for RoomEQ flat and asymmetric
+    /// objectives.
     ///
-    /// `Some(mask)` scales the dip branch of the asymmetric loss toward
-    /// zero inside detected narrow nulls (see
+    /// `Some(mask)` scales only the boost-seeking dip residual toward zero
+    /// inside detected narrow nulls (see
     /// [`crate::roomeq::impulse_analysis::build_null_suppression_mask`]).
-    /// `None` disables suppression — dips are weighted with the
-    /// full `bass_dip_weight` / `dip_weight` of the asymmetric config.
+    /// `None` disables suppression; asymmetric dips use their configured
+    /// `bass_dip_weight` / `dip_weight`, while flat loss remains symmetric.
     /// Must have the same length as `freqs` when provided.
     pub null_suppression: Option<Arc<Array1<f64>>>,
     /// Peak/dip weights for [`LossType::SpeakerFlatAsymmetric`].

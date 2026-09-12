@@ -16,6 +16,8 @@ pub(super) fn assemble_fir_result(
     optimizer_output: FirOptimizerOutput,
     optimizer_evidence: Vec<OptimizerRunEvidence>,
     design_target: Option<&Curve>,
+    audibility_veto: Vec<roomeq_model::FilterVetoVerdict>,
+    veto_adjudication: Option<roomeq_model::VetoAdjudicationReport>,
 ) -> Result<ChannelProcessingResult> {
     let dsp = assemble_dsp_chain(request, &optimizer_output);
     let target_curve = if let Some(design_target) = design_target {
@@ -103,6 +105,8 @@ pub(super) fn assemble_fir_result(
         fir_coeffs,
         convolution_sidecar,
         optimizer_evidence,
+        audibility_veto,
+        veto_adjudication,
     })
 }
 

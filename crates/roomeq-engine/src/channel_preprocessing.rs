@@ -124,13 +124,16 @@ pub fn preprocess_channel(
         .target_response
         .as_ref()
         .is_some_and(|response| response.broadband_precorrection);
+    let [active_min_freq, active_max_freq] = room_config.optimizer.active_correction_band();
+    let broadband_min_freq = score_min_freq.max(active_min_freq).min(target.max_freq);
+    let broadband_max_freq = target.max_freq.min(active_max_freq);
     let broadband = apply_broadband_precorrection_with_f3_curve(
         room_config,
         &curve,
         measurement,
         mean_spl,
-        score_min_freq,
-        target.max_freq,
+        broadband_min_freq,
+        broadband_max_freq,
         sample_rate,
     );
 
@@ -217,8 +220,12 @@ fn apply_cea2034_speaker_correction(
                 schroeder_freq,
                 name
             );
-            let plugin =
-                output::create_labeled_eq_plugin(&result.filters, "cea2034_speaker_correction");
+            // CEA-2034 is an externally measured loudspeaker/directivity
+            // prefilter, not a room-response inversion. It is intentionally
+            // outside the per-filter RoomEQ audibility veto; the complete
+            // realized chain remains subject to scorecard and safety gates.
+            // Keep the exemption explicit in exported graph metadata.
+            let plugin = create_cea2034_plugin(&result.filters);
             AppliedCea2034Correction {
                 curve: result.corrected_curve,
                 filters: result.filters,
@@ -234,6 +241,16 @@ fn apply_cea2034_speaker_correction(
             unchanged_cea2034(curve)
         }
     }
+}
+
+/// Build the explicit CEA-2034 source-model prefilter marker. CEA-2034
+/// filters are intentionally outside the room-response per-filter veto, but
+/// the complete realized graph is still evaluated by the acoustic scorecard.
+fn create_cea2034_plugin(filters: &[Biquad]) -> PluginConfigWrapper {
+    let mut plugin = output::create_labeled_eq_plugin(filters, "cea2034_speaker_correction");
+    plugin.parameters["room_eq_audibility_scope"] =
+        serde_json::json!("source_model_prefilter_exempt");
+    plugin
 }
 
 fn unchanged_cea2034(curve: Curve) -> AppliedCea2034Correction {
@@ -278,6 +295,9 @@ fn apply_broadband_precorrection_with_f3_curve(
         .target_response
         .as_ref()
         .is_some_and(|response| response.broadband_precorrection)
+        || !min_freq.is_finite()
+        || !max_freq.is_finite()
+        || max_freq <= min_freq
     {
         return unchanged_broadband(curve);
     }
@@ -320,7 +340,12 @@ fn apply_broadband_precorrection_with_f3_curve(
     let shelf_filters = spectral_align::create_alignment_filters(&alignment, sample_rate);
     let mut plugins = Vec::new();
     let exported_flat_gain = if alignment.flat_gain_db.abs() >= spectral_align::MIN_CORRECTION_DB {
-        plugins.push(output::create_gain_plugin(alignment.flat_gain_db));
+        let mut gain = output::create_gain_plugin(alignment.flat_gain_db);
+        // This gain is part of the broadband EQ correction. Mark it so
+        // final-seat replay removes it from the original baseline while
+        // retaining route/calibration gains that are not corrections.
+        gain.parameters["room_eq_correction_gain"] = serde_json::json!(true);
+        plugins.push(gain);
         alignment.flat_gain_db
     } else {
         0.0
@@ -579,6 +604,19 @@ mod tests {
         assert!(features.excursion_filters.is_empty());
         assert!(features.cea2034_plugins.is_empty());
         assert!(features.broadband_plugins.is_empty());
+    }
+
+    #[test]
+    fn cea2034_plugin_declares_source_model_prefilter_scope() {
+        let plugin = create_cea2034_plugin(&[]);
+        assert_eq!(
+            plugin.parameters.get("room_eq_audibility_scope"),
+            Some(&serde_json::json!("source_model_prefilter_exempt"))
+        );
+        assert_eq!(
+            plugin.parameters.get("label"),
+            Some(&serde_json::json!("cea2034_speaker_correction"))
+        );
     }
 
     #[test]

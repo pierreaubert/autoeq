@@ -53,13 +53,43 @@ impl OptimizerConfigExt for OptimizerConfig {
                 schroeder_hz: value.schroeder_hz,
             }
         });
+        let frequency_q_policy = {
+            let transition = self
+                .schroeder_split
+                .as_ref()
+                .filter(|split| split.enabled)
+                .map(|split| {
+                    (
+                        split
+                            .room_dimensions
+                            .as_ref()
+                            .map(|dimensions| dimensions.schroeder_frequency())
+                            .unwrap_or(split.schroeder_freq),
+                        split.low_freq_config.max_q,
+                    )
+                });
+            let high = self
+                .high_frequency_correction
+                .filter(|config| config.enabled)
+                .map(|config| (config.start_hz, config.max_q));
+            match (transition, high) {
+                (None, None) => None,
+                (transition, high) => Some(autoeq_optim::FrequencyQPolicy {
+                    schroeder_hz: transition.map(|(frequency, _)| frequency),
+                    low_max_q: transition.map(|(_, max_q)| max_q),
+                    high_start_hz: high.map(|(frequency, _)| frequency),
+                    high_max_q: high.map(|(_, max_q)| max_q),
+                }),
+            }
+        };
 
+        let [active_min_freq, active_max_freq] = self.active_correction_band();
         OptimParams {
             num_filters: self.num_filters,
             peq_model,
             sample_rate,
-            min_freq: self.min_freq,
-            max_freq: self.max_freq,
+            min_freq: active_min_freq,
+            max_freq: active_max_freq,
             min_q: self.min_q,
             max_q: self.max_q,
             min_db: self.min_db,
@@ -71,6 +101,7 @@ impl OptimizerConfigExt for OptimizerConfig {
             spacing_weight: 20.0,
             smoothness_penalty,
             audibility_deadband,
+            frequency_q_policy,
             algo: self.algorithm.clone(),
             population: self.population,
             maxeval: self.max_iter,
@@ -271,5 +302,37 @@ mod tests {
         assert_eq!(params.bo_posterior_std_threshold, 0.02);
         assert_eq!(params.bo_acquisition, "ei");
         assert!(params.bo_ehvi);
+    }
+
+    #[test]
+    fn optimizer_adapter_carries_frequency_q_policy() {
+        let mut high = roomeq_model::HighFrequencyCorrectionConfig::default();
+        high.start_hz = 1_600.0;
+        high.max_q = 0.8;
+        let mut config = OptimizerConfig::default();
+        config.high_frequency_correction = Some(high);
+        let params = config.to_optim_params(48_000.0);
+        let policy = params
+            .frequency_q_policy
+            .expect("HF policy should be present");
+        assert_eq!(policy.high_start_hz, Some(1_600.0));
+        assert_eq!(policy.high_max_q, Some(0.8));
+    }
+
+    #[test]
+    fn optimizer_adapter_uses_explicit_correction_band() {
+        let config = OptimizerConfig {
+            min_freq: 20.0,
+            max_freq: 20_000.0,
+            correction_band: Some(roomeq_model::CorrectionBandPolicy {
+                min_hz: 40.0,
+                max_hz: 16_000.0,
+                allow_natural_rolloff: true,
+            }),
+            ..OptimizerConfig::default()
+        };
+        let params = config.to_optim_params(48_000.0);
+        assert_eq!(params.min_freq, 40.0);
+        assert_eq!(params.max_freq, 16_000.0);
     }
 }

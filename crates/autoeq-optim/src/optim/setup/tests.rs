@@ -1,11 +1,73 @@
 use super::misc::initial_guess;
 use super::{
-    setup_bounds, setup_drivers_bounds, setup_drivers_bounds_fixed_freqs,
-    setup_drivers_objective_data, setup_multisub_bounds, setup_multisub_objective_data,
+    q_max_for_frequency_range, setup_bounds, setup_drivers_bounds,
+    setup_drivers_bounds_fixed_freqs, setup_drivers_objective_data, setup_multisub_bounds,
+    setup_multisub_objective_data,
 };
 
+use crate::FrequencyQPolicy;
 use crate::OptimParams;
 use crate::roomeq::OptimizerConfig;
+
+#[test]
+fn frequency_q_policy_keeps_modal_freedom_but_caps_guarded_ranges() {
+    let config = OptimizerConfig {
+        num_filters: 3,
+        min_freq: 20.0,
+        max_freq: 20_000.0,
+        min_q: 0.5,
+        max_q: 12.0,
+        ..OptimizerConfig::default()
+    };
+    let mut params = OptimParams::from(&config);
+    params.frequency_q_policy = Some(FrequencyQPolicy {
+        schroeder_hz: Some(500.0),
+        low_max_q: Some(12.0),
+        high_start_hz: Some(1_600.0),
+        high_max_q: Some(0.8),
+    });
+
+    assert_eq!(q_max_for_frequency_range(&params, 80.0, 300.0), 12.0);
+    let crossing = q_max_for_frequency_range(&params, 300.0, 800.0);
+    assert!(crossing > 0.8 && crossing < 12.0);
+    assert_eq!(q_max_for_frequency_range(&params, 2_000.0, 8_000.0), 0.8);
+
+    let (_, upper) = setup_bounds(&params);
+    for filter in 0..params.num_filters {
+        let offset = filter * 3;
+        let f_high = 10.0_f64.powf(upper[offset]);
+        if f_high >= 1_600.0 {
+            assert!(upper[offset + 1] <= 0.8);
+        }
+    }
+}
+
+#[test]
+fn frequency_q_policy_is_continuous_at_schroeder_boundary() {
+    let config = OptimizerConfig {
+        min_freq: 20.0,
+        max_freq: 20_000.0,
+        min_q: 0.5,
+        max_q: 12.0,
+        ..OptimizerConfig::default()
+    };
+    let mut params = OptimParams::from(&config);
+    params.frequency_q_policy = Some(FrequencyQPolicy {
+        schroeder_hz: Some(500.0),
+        low_max_q: Some(12.0),
+        high_start_hz: Some(1_600.0),
+        high_max_q: Some(0.8),
+    });
+    let below = q_max_for_frequency_range(&params, 499.0, 499.0);
+    let above = q_max_for_frequency_range(&params, 501.0, 501.0);
+    assert_eq!(below, 12.0);
+    assert!(above < below);
+    assert!(above > 0.8);
+    assert!(
+        (below - above) < 1.0,
+        "Schroeder boundary Q jump is too large"
+    );
+}
 
 #[test]
 fn setup_bounds_keeps_special_filters_inside_narrow_measurement_ranges() {

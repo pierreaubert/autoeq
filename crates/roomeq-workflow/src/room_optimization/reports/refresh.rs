@@ -41,11 +41,19 @@ pub(in super::super) fn refresh_final_reports(
         // deployment, not correction. Evaluate the de-routed final curve, the
         // same basis the acceptance gate uses, so an identity fallback scores
         // post == pre instead of showing a phantom routing regression.
-        let post_basis = result.channels.get(&ch_result.name).and_then(|chain| {
-            super::super::room_optimization_result::correction_only_curve(
-                chain, &ch_result.initial_curve, &ch_result.final_curve, sample_rate, sidecar_dir,
-            )
-        }).unwrap_or_else(|| ch_result.final_curve.clone());
+        let post_basis = result
+            .channels
+            .get(&ch_result.name)
+            .and_then(|chain| {
+                super::super::room_optimization_result::correction_only_curve(
+                    chain,
+                    &ch_result.initial_curve,
+                    &ch_result.final_curve,
+                    sample_rate,
+                    sidecar_dir,
+                )
+            })
+            .unwrap_or_else(|| ch_result.final_curve.clone());
         ch_result.post_score =
             recompute_curve_flatness_score(&post_basis, score_min_freq, score_max_freq);
         log::debug!(
@@ -370,9 +378,11 @@ mod tests {
         chain.plugins = vec![roomeq_engine::topology::mark_route_owned_plugin(
             roomeq_engine::output::create_crossover_plugin("LR24", 120.0, "low"),
         )];
-        let mut composite = crate::room_optimization::room_optimization_result::routed_baseline_curve(
-            chain, &initial, 48_000.0,
-        ).unwrap();
+        let mut composite =
+            crate::room_optimization::room_optimization_result::routed_baseline_curve(
+                chain, &initial, 48_000.0,
+            )
+            .unwrap();
         // Redirected inputs can add non-flat programme energy at the physical
         // sub. It is not the LFE input's correction transfer.
         for (f, level) in composite.freq.iter().zip(composite.spl.iter_mut()) {
@@ -384,9 +394,12 @@ mod tests {
         config.optimizer.max_freq = 120.0;
         refresh_final_reports(&mut result, &config, 48_000.0, Path::new("."));
         let channel = &result.channel_results["LFE"];
-        assert!((channel.pre_score - channel.post_score).abs() < 1e-10,
+        assert!(
+            (channel.pre_score - channel.post_score).abs() < 1e-10,
             "route-only correction must remain identity after report refresh: {} -> {}",
-            channel.pre_score, channel.post_score);
+            channel.pre_score,
+            channel.post_score
+        );
     }
 
     #[test]
@@ -497,16 +510,33 @@ mod tests {
         let initial = &mut result.channel_results.get_mut("L").unwrap().initial_curve;
         initial.phase = Some(ndarray::Array1::zeros(initial.freq.len()));
         refresh_temporal_ir_evidence(
-            &mut result, &RoomConfig::default(), 48_000.0, Path::new("."),
+            &mut result,
+            &RoomConfig::default(),
+            48_000.0,
+            Path::new("."),
         );
         assert!(result.channels["L"].pre_ir.is_some());
         assert!(result.channels["L"].post_ir.is_some());
-        result.channel_results.get_mut("L").unwrap().initial_curve.phase = None;
+        result
+            .channel_results
+            .get_mut("L")
+            .unwrap()
+            .initial_curve
+            .phase = None;
         refresh_temporal_ir_evidence(
-            &mut result, &RoomConfig::default(), 48_000.0, Path::new("."),
+            &mut result,
+            &RoomConfig::default(),
+            48_000.0,
+            Path::new("."),
         );
-        assert!(result.channels["L"].pre_ir.is_none(), "stale measured-phase pre-IR survived");
-        assert!(result.channels["L"].post_ir.is_none(), "stale measured-phase post-IR survived");
+        assert!(
+            result.channels["L"].pre_ir.is_none(),
+            "stale measured-phase pre-IR survived"
+        );
+        assert!(
+            result.channels["L"].post_ir.is_none(),
+            "stale measured-phase post-IR survived"
+        );
     }
 
     #[test]

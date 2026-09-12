@@ -79,3 +79,6 @@ CTAGS
 *#
 .#*
 .idea
+
+# Reproducible derivatives of tracked measured REW captures.
+/data_tests/roomeq/measured/*/*_csv/

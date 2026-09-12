@@ -7,7 +7,7 @@ pub use roomeq_model::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::metrics::weighted_percentile;
+use super::metrics::{rms, same_frequency_grid, weighted_percentile};
 
 /// Evaluate a single pre/post/target triplet against a fixture policy.
 ///
@@ -134,6 +134,11 @@ pub fn evaluate_correction_acceptance(
             CorrectionDecision::IdentityFallback
         },
         accepted: violations.is_empty(),
+        outcome: if violations.is_empty() {
+            roomeq_model::RoomEqOutcome::Accepted
+        } else {
+            roomeq_model::RoomEqOutcome::Unchanged
+        },
         metrics,
         violations,
         reverted_stages: Vec::new(),
@@ -367,20 +372,7 @@ fn check_seat_grid(
     seat_index: usize,
     label: &str,
 ) -> Result<(), String> {
-    if pre.freq.len() < 2
-        || pre.freq.len() != post.freq.len()
-        || pre.freq.len() != target.freq.len()
-        || pre
-            .freq
-            .iter()
-            .zip(&post.freq)
-            .any(|(a, b)| (a - b).abs() > 1e-9)
-        || pre
-            .freq
-            .iter()
-            .zip(&target.freq)
-            .any(|(a, b)| (a - b).abs() > 1e-9)
-    {
+    if !same_frequency_grid(pre, post) || !same_frequency_grid(pre, target) {
         return Err(format!(
             "{label} seat {seat_index} requires explicitly aligned frequency grids"
         ));
@@ -481,6 +473,17 @@ pub fn enforce_runtime_acceptance_evidence(
         None => violations.push("pre_ringing_evidence_missing".to_string()),
         _ => {}
     }
+    if matches!(
+        policy.output_class,
+        RuntimeOutputClass::Fir | RuntimeOutputClass::Hybrid
+    ) {
+        if !acoustic_quality.temporal.temporal_evidence_available {
+            violations.push("temporal_evidence_missing".to_string());
+        }
+        if !acoustic_quality.temporal.phase_evidence_available {
+            violations.push("phase_evidence_missing".to_string());
+        }
+    }
     if acoustic_quality
         .induced_group_delay_rms_ms
         .is_some_and(|value| value > policy.max_induced_group_delay_rms_ms)
@@ -513,6 +516,7 @@ pub fn enforce_runtime_acceptance_evidence(
             report.decision = CorrectionDecision::IdentityFallback;
         }
     }
+    report.refresh_outcome();
     Ok(())
 }
 
@@ -520,28 +524,12 @@ fn validate_shared_grid(pre: &Curve, post: &Curve, target: &Curve) -> Result<(),
     for (name, curve) in [("pre", pre), ("post", post), ("target", target)] {
         curve.validate(name).map_err(|error| error.to_string())?;
     }
-    if pre.freq.len() != post.freq.len()
-        || pre.freq.len() != target.freq.len()
-        || pre
-            .freq
-            .iter()
-            .zip(&post.freq)
-            .any(|(a, b)| (a - b).abs() > 1e-9)
-        || pre
-            .freq
-            .iter()
-            .zip(&target.freq)
-            .any(|(a, b)| (a - b).abs() > 1e-9)
-    {
+    if !same_frequency_grid(pre, post) || !same_frequency_grid(pre, target) {
         return Err(
             "correction acceptance requires explicitly aligned frequency grids".to_string(),
         );
     }
     Ok(())
-}
-
-fn rms(values: &[f64]) -> f64 {
-    (values.iter().map(|value| value * value).sum::<f64>() / values.len().max(1) as f64).sqrt()
 }
 
 fn runtime_epsilon(pre_rms: f64) -> f64 {
@@ -903,7 +891,10 @@ mod tests {
                 pre_ringing_energy_db: Some(-40.0),
                 latency_ms: Some(5.0),
                 available_headroom_db: Some(-4.0),
+                phase_evidence_available: true,
+                temporal_evidence_available: true,
             },
+            correction_band_hz: None,
             evaluated_band_hz: [20.0, 20_000.0],
             measurement_overlap_hz: [20.0, 20_000.0],
             finite: true,
@@ -1047,6 +1038,8 @@ mod tests {
             pre_ringing_energy_db: Some(-5.0),
             latency_ms: Some(500.0),
             available_headroom_db: Some(-20.0),
+            phase_evidence_available: true,
+            temporal_evidence_available: true,
         };
         let realization = RealizationQualityEvidence {
             evaluated_channels: 1,

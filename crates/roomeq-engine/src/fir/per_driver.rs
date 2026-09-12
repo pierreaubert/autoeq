@@ -136,6 +136,7 @@ pub fn generate_per_driver_firs(
     config: &OptimizerConfig,
     fs: f64,
 ) -> Result<PerDriverFir, String> {
+    let [active_min_freq, active_max_freq] = config.active_correction_band();
     let fir = config.fir.clone().unwrap_or_default();
     if branches.is_empty() || branches.len() != measurements.len() || !fs.is_finite() || fs <= 0.0 {
         return Err("invalid per-driver FIR inputs".into());
@@ -150,7 +151,7 @@ pub fn generate_per_driver_firs(
             return Err("per-driver FIR grids must match".into());
         }
     }
-    if config.min_freq <= 0.0 || config.max_freq <= config.min_freq || config.max_freq >= fs / 2.0 {
+    if active_min_freq <= 0.0 || active_max_freq <= active_min_freq || active_max_freq >= fs / 2.0 {
         return Err("invalid per-driver FIR correction band".into());
     }
     let phase_only = config.processing_mode == ProcessingMode::MixedPhase;
@@ -176,7 +177,7 @@ pub fn generate_per_driver_firs(
         let mut error = 0.0;
         let mut weight = 0.0;
         for i in 1..c.freq.len() {
-            if !combined_mask[i] && (config.min_freq..=config.max_freq).contains(&c.freq[i]) {
+            if !combined_mask[i] && (active_min_freq..=active_max_freq).contains(&c.freq[i]) {
                 let w = (c.freq[i] / c.freq[i - 1]).ln();
                 error += w * (c.spl[i] - target.spl[i]).powi(2);
                 weight += w;
@@ -227,7 +228,7 @@ pub fn generate_per_driver_firs(
                     let mut db = vec![0.0; target.freq.len()];
                     let mut phase = db.clone();
                     for i in 0..db.len() {
-                        let band = band_weight(target.freq[i], config.min_freq, config.max_freq);
+                        let band = band_weight(target.freq[i], active_min_freq, active_max_freq);
                         let protected = masks[driver][i] || combined_mask[i];
                         // Do not invert crossover stopbands or supply energy into
                         // a measured null. The group residual is the only target.
@@ -292,7 +293,7 @@ pub fn generate_per_driver_firs(
                     let db = 20.0 * h.norm().max(1e-15).log10();
                     let protected = masks[driver][i] || combined_mask[i];
                     let outside =
-                        target.freq[i] < config.min_freq || target.freq[i] > config.max_freq;
+                        target.freq[i] < active_min_freq || target.freq[i] > active_max_freq;
                     let retained_boost =
                         (branches[driver].spl[i] - measurements[driver].spl[i]).max(0.0);
                     db <= (if protected {

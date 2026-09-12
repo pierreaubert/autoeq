@@ -10,8 +10,9 @@ use std::f64::consts::PI;
 pub(super) fn allpass_frequency_bounds(
     config: &OptimizerConfig,
 ) -> Result<(f64, f64), Box<dyn Error>> {
-    let min_freq = config.min_freq.max(20.0);
-    let max_freq = config.max_freq.min(200.0);
+    let [active_min_freq, active_max_freq] = config.active_correction_band();
+    let min_freq = active_min_freq.max(20.0);
+    let max_freq = active_max_freq.min(200.0);
     if max_freq <= min_freq {
         return Err(format!(
             "Multi-sub all-pass optimization requires a non-zero frequency range after clamping to 20-200 Hz, got [{min_freq:.1}, {max_freq:.1}] Hz"

@@ -241,7 +241,10 @@ mod report_outcome_tests {
             (ReportOutcome::Keep, "\"keep\""),
             (ReportOutcome::CandidateRemoval, "\"candidate_removal\""),
             (ReportOutcome::AcceptedRemoval, "\"accepted_removal\""),
-            (ReportOutcome::RiskLimitedCorrection, "\"risk_limited_correction\""),
+            (
+                ReportOutcome::RiskLimitedCorrection,
+                "\"risk_limited_correction\"",
+            ),
             (
                 ReportOutcome::InsufficientEvidence,
                 "\"insufficient_evidence\"",
@@ -275,7 +278,8 @@ mod report_outcome_tests {
     #[test]
     fn partial_json_fills_honest_sentinels() {
         // Missing fields degrade to explicit unknowns, never to claims.
-        let provenance: AssessmentProvenance = serde_json::from_value(serde_json::json!({})).unwrap();
+        let provenance: AssessmentProvenance =
+            serde_json::from_value(serde_json::json!({})).unwrap();
         assert_eq!(provenance.model, "unspecified");
         assert_eq!(provenance.calibration, "unknown");
         let record: AssessmentRecord = serde_json::from_value(serde_json::json!({})).unwrap();
@@ -287,8 +291,9 @@ mod report_outcome_tests {
     fn schema_advertises_new_vocabulary() {
         // Guards schema drift for the additive contract (mirrors the
         // seat/search parity test style in validation_rules).
-        let outcome_schema =
-            serde_json::to_value(schemars::schema_for!(ReportOutcome)).unwrap().to_string();
+        let outcome_schema = serde_json::to_value(schemars::schema_for!(ReportOutcome))
+            .unwrap()
+            .to_string();
         for variant in [
             "keep",
             "candidate_removal",
@@ -298,11 +303,16 @@ mod report_outcome_tests {
         ] {
             assert!(outcome_schema.contains(variant), "{outcome_schema}");
         }
-        let budget_schema =
-            serde_json::to_value(schemars::schema_for!(PruningBudget)).unwrap().to_string();
-        assert!(budget_schema.contains("max_cumulative_delta"), "{budget_schema}");
-        let record_schema =
-            serde_json::to_value(schemars::schema_for!(AssessmentRecord)).unwrap().to_string();
+        let budget_schema = serde_json::to_value(schemars::schema_for!(PruningBudget))
+            .unwrap()
+            .to_string();
+        assert!(
+            budget_schema.contains("max_cumulative_delta"),
+            "{budget_schema}"
+        );
+        let record_schema = serde_json::to_value(schemars::schema_for!(AssessmentRecord))
+            .unwrap()
+            .to_string();
         for field in ["outcome", "confidence", "enforcement", "provenance"] {
             assert!(record_schema.contains(field), "{record_schema}");
         }

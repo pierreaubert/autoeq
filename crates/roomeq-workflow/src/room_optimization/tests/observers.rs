@@ -16,7 +16,8 @@ fn canonical_mso_seed151_output_loss_diagnostic() {
 fn canonical_mso_candidate_diagnostic() {
     let seed = std::env::var("ROOMEQ_DIAGNOSTIC_SEED")
         .expect("set ROOMEQ_DIAGNOSTIC_SEED for this diagnostic")
-        .parse().expect("diagnostic seed must be an unsigned integer");
+        .parse()
+        .expect("diagnostic seed must be an unsigned integer");
     capture_canonical_mso_output_loss(seed);
 }
 
@@ -24,8 +25,11 @@ fn capture_canonical_mso_output_loss(seed: u64) -> Option<String> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let (mut config, _) = crate::load_merged_config_strict(
         &root.join("data_tests/roomeq/generate/fem/small_stereo_2_2_mso/config.json"),
-        Some(&root.join("data_tests/roomeq/generate/optimiser-config/small_stereo_2_2_mso/optimiser-iir.json")),
-    ).unwrap();
+        Some(&root.join(
+            "data_tests/roomeq/generate/optimiser-config/small_stereo_2_2_mso/optimiser-iir.json",
+        )),
+    )
+    .unwrap();
     // Exact default coverage override for the first seed, not a reduced budget.
     config.optimizer.algorithm = "autoeq:cmaes".into();
     config.optimizer.population = 20;
@@ -40,28 +44,48 @@ fn capture_canonical_mso_output_loss(seed: u64) -> Option<String> {
     let store = autoeq_artifacts::FsArtifactStore::new();
     let captures = seat_replay::capture_training(&config).unwrap();
     let mut result = optimize_room_impl_with_frequency_samples(
-        &config, 48_000.0, Some(dir.path()), None, None, &store,
+        &config,
+        48_000.0,
+        Some(dir.path()),
+        None,
+        None,
+        &store,
         crate::DEFAULT_FREQUENCY_SAMPLES,
-    ).unwrap();
+    )
+    .unwrap();
     let pre_validation_graph = result.to_dsp_chain_output();
     let mut ablations = Vec::new();
-    for mode in ["without_post_eq", "without_sub_eq", "without_initial_sub_eq", "without_sub_post_eq", "without_main_post_eq",
-        "without_channel_matching", "without_sub_eq_and_channel_matching", "without_all_eq"] {
+    for mode in [
+        "without_post_eq",
+        "without_sub_eq",
+        "without_initial_sub_eq",
+        "without_sub_post_eq",
+        "without_main_post_eq",
+        "without_channel_matching",
+        "without_sub_eq_and_channel_matching",
+        "without_all_eq",
+    ] {
         let mut candidate = result.clone();
         let mut removed_stages = Vec::new();
         for (channel, chain) in &mut candidate.channels {
             let mut plugin_index = 0;
             chain.plugins.retain(|plugin| {
-                let post_eq = plugin.parameters.get("label").and_then(|v| v.as_str()) == Some("post_eq");
-                let channel_matching = plugin.parameters.get("label").and_then(|v| v.as_str()) == Some("channel_matching");
+                let post_eq =
+                    plugin.parameters.get("label").and_then(|v| v.as_str()) == Some("post_eq");
+                let channel_matching = plugin.parameters.get("label").and_then(|v| v.as_str())
+                    == Some("channel_matching");
                 let remove = match mode {
                     "without_post_eq" => post_eq,
                     "without_sub_eq" => channel == "LFE" && plugin.plugin_type == "eq",
-                    "without_initial_sub_eq" => channel == "LFE" && plugin.plugin_type == "eq" && !post_eq,
+                    "without_initial_sub_eq" => {
+                        channel == "LFE" && plugin.plugin_type == "eq" && !post_eq
+                    }
                     "without_sub_post_eq" => channel == "LFE" && post_eq,
                     "without_main_post_eq" => channel != "LFE" && post_eq,
                     "without_channel_matching" => channel_matching,
-                    "without_sub_eq_and_channel_matching" => channel_matching || (channel == "LFE" && plugin.plugin_type == "eq"),
+                    "without_sub_eq_and_channel_matching" => {
+                        channel_matching || (channel == "LFE" && plugin.plugin_type == "eq")
+                    }
                     _ => plugin.plugin_type == "eq",
                 };
                 if remove {
@@ -75,12 +99,19 @@ fn capture_canonical_mso_output_loss(seed: u64) -> Option<String> {
                 !remove
             });
         }
-        removed_stages.sort_by_key(|stage| (
-            stage["channel"].as_str().unwrap().to_owned(),
-            stage["original_plugin_index"].as_u64().unwrap(),
-        ));
+        removed_stages.sort_by_key(|stage| {
+            (
+                stage["channel"].as_str().unwrap().to_owned(),
+                stage["original_plugin_index"].as_u64().unwrap(),
+            )
+        });
         let check = seat_replay::validate_final_seats(
-            &mut candidate, &captures, &HashMap::new(), &config, 48_000.0, dir.path(),
+            &mut candidate,
+            &captures,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            dir.path(),
         );
         ablations.push(serde_json::json!({
             "mode": mode, "diagnostic_only": true,
@@ -96,8 +127,13 @@ fn capture_canonical_mso_output_loss(seed: u64) -> Option<String> {
         let mut filters_changed = 0;
         for chain in candidate.channels.values_mut() {
             for plugin in &mut chain.plugins {
-                if plugin.plugin_type != "eq" { continue; }
-                for filter in plugin.parameters["filters"].as_array_mut().expect("EQ filters") {
+                if plugin.plugin_type != "eq" {
+                    continue;
+                }
+                for filter in plugin.parameters["filters"]
+                    .as_array_mut()
+                    .expect("EQ filters")
+                {
                     let gain = filter["db_gain"].as_f64().expect("EQ gain");
                     filter["db_gain"] = serde_json::json!(gain * strength);
                     filters_changed += 1;
@@ -105,13 +141,26 @@ fn capture_canonical_mso_output_loss(seed: u64) -> Option<String> {
             }
         }
         let check = seat_replay::validate_final_seats(
-            &mut candidate, &captures, &HashMap::new(), &config, 48_000.0, dir.path(),
+            &mut candidate,
+            &captures,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            dir.path(),
         );
-        let bass = candidate.metadata.bass_management.as_ref().expect("MSO bass metadata");
+        let bass = candidate
+            .metadata
+            .bass_management
+            .as_ref()
+            .expect("MSO bass metadata");
         let graph = bass.routing_graph.as_ref().expect("MSO routing graph");
         let routed_check = crate::topology::reconstruct_deployed_source_curves(
-            &candidate.channels, &retained_fir_coeffs_by_channel(&candidate), graph,
-            bass.optimization.as_ref(), 48_000.0, dir.path(),
+            &candidate.channels,
+            &retained_fir_coeffs_by_channel(&candidate),
+            graph,
+            bass.optimization.as_ref(),
+            48_000.0,
+            dir.path(),
         );
         let mut safety_candidate = candidate.clone();
         for (name, channel) in &mut safety_candidate.channel_results {
@@ -120,29 +169,49 @@ fn capture_canonical_mso_output_loss(seed: u64) -> Option<String> {
             // Initial curves already contain the physical sub sum.
             logical.drivers = None;
             let realized = crate::ctc::apply_channel_dsp_chain_to_curve_with_sidecar_dir(
-                &logical, &channel.initial_curve, 48_000.0, dir.path(),
-            ).unwrap();
+                &logical,
+                &channel.initial_curve,
+                48_000.0,
+                dir.path(),
+            )
+            .unwrap();
             channel.final_curve = realized.clone();
             channel.biquads.clear();
-            for run in &mut channel.optimizer_evidence { run.selected_for_output = false; }
+            for run in &mut channel.optimizer_evidence {
+                run.selected_for_output = false;
+            }
             chain.final_curve = Some((&realized).into());
         }
         refresh_final_reports(&mut safety_candidate, &config, 48_000.0, dir.path());
         let safety_result = apply_final_correction_safety_gate_preserving_routed_crossover(
-            &mut safety_candidate, 48_000.0, config.optimizer.smooth_n,
-            (config.optimizer.min_freq, config.optimizer.max_freq), dir.path(),
-            config.optimizer.processing_mode.clone(), group_delay_budget_ms(&config),
+            &mut safety_candidate,
+            48_000.0,
+            config.optimizer.smooth_n,
+            (config.optimizer.min_freq, config.optimizer.max_freq),
+            dir.path(),
+            config.optimizer.processing_mode.clone(),
+            group_delay_budget_ms(&config),
         );
         let safety_report = safety_candidate.metadata.correction_acceptance.clone();
         let rechecked_seats = seat_replay::validate_final_seats(
-            &mut safety_candidate, &captures, &HashMap::new(), &config, 48_000.0, dir.path(),
+            &mut safety_candidate,
+            &captures,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            dir.path(),
         );
         let binding = crate::export::bind_final_convolution_artifacts(
-            &mut safety_candidate, dir.path(), &store, 48_000.0,
+            &mut safety_candidate,
+            dir.path(),
+            &store,
+            48_000.0,
         );
         let electrical = diagnostic_strength_electrical(&safety_candidate, 48_000.0, dir.path());
         let camilladsp = roomeq_export::render_dsp_graph(
-            &safety_candidate.to_dsp_chain_output(), roomeq_export::ExportFormat::CamillaDsp, 48_000.0,
+            &safety_candidate.to_dsp_chain_output(),
+            roomeq_export::ExportFormat::CamillaDsp,
+            48_000.0,
         );
         strength_trials.push(serde_json::json!({
             "peq_gain_scale": strength, "filters_changed": filters_changed,
@@ -168,7 +237,12 @@ fn capture_canonical_mso_output_loss(seed: u64) -> Option<String> {
         }));
     }
     let verdict = seat_replay::validate_final_seats(
-        &mut result, &captures, &HashMap::new(), &config, 48_000.0, dir.path(),
+        &mut result,
+        &captures,
+        &HashMap::new(),
+        &config,
+        48_000.0,
+        dir.path(),
     );
     let error = verdict.err().map(|error| error.to_string());
     let artifact = serde_json::json!({
@@ -182,10 +256,15 @@ fn capture_canonical_mso_output_loss(seed: u64) -> Option<String> {
     });
     let output = root.join(if seed == 42 {
         "target/qa/canonical-mso-output-loss.json".to_string()
-    } else { format!("target/qa/canonical-mso-output-loss-seed-{seed}.json") });
+    } else {
+        format!("target/qa/canonical-mso-output-loss-seed-{seed}.json")
+    });
     std::fs::create_dir_all(output.parent().unwrap()).unwrap();
     std::fs::write(&output, serde_json::to_vec_pretty(&artifact).unwrap()).unwrap();
-    eprintln!("canonical seed {seed}: error={error:?}; evidence={}", output.display());
+    eprintln!(
+        "canonical seed {seed}: error={error:?}; evidence={}",
+        output.display()
+    );
     error
 }
 
@@ -208,25 +287,42 @@ fn diagnostic_strength_electrical(
         expand_routed_electrical_paths(&graph.channels, routing)?
     } else {
         expand_independent_electrical_paths(
-            &graph.channels, &independent_graph_output_ports(&graph.channels),
+            &graph.channels,
+            &independent_graph_output_ports(&graph.channels),
         )?
     };
-    let stages: Vec<Vec<_>> = expanded.iter().map(|path| path.stages.iter().collect()).collect();
-    let paths: Vec<_> = expanded.iter().zip(&stages).map(|(path, stages)| {
-        SerializedElectricalPath { input: &path.input, output: &path.output, stages }
-    }).collect();
-    let limits = expanded.iter().map(|path| (path.input.clone(), 1.0)).collect();
+    let stages: Vec<Vec<_>> = expanded
+        .iter()
+        .map(|path| path.stages.iter().collect())
+        .collect();
+    let paths: Vec<_> = expanded
+        .iter()
+        .zip(&stages)
+        .map(|(path, stages)| SerializedElectricalPath {
+            input: &path.input,
+            output: &path.output,
+            stages,
+        })
+        .collect();
+    let limits = expanded
+        .iter()
+        .map(|path| (path.input.clone(), 1.0))
+        .collect();
     let mut frequencies: Vec<_> = (0..=8192)
-        .map(|i| sample_rate * 0.5 * i as f64 / 8192.0).collect();
+        .map(|i| sample_rate * 0.5 * i as f64 / 8192.0)
+        .collect();
     for path in &expanded {
         for stage in &path.stages {
             for plugin in &stage.plugins {
                 if plugin.plugin_type == "eq"
-                    && let Some(filters) = plugin.parameters.get("filters").and_then(|v| v.as_array())
+                    && let Some(filters) =
+                        plugin.parameters.get("filters").and_then(|v| v.as_array())
                 {
                     for filter in filters {
                         if let Some(frequency) = filter.get("freq").and_then(|v| v.as_f64())
-                            && frequency.is_finite() && frequency > 0.0 && frequency < sample_rate / 2.0
+                            && frequency.is_finite()
+                            && frequency > 0.0
+                            && frequency < sample_rate / 2.0
                         {
                             frequencies.push(frequency);
                         }
@@ -238,7 +334,12 @@ fn diagnostic_strength_electrical(
     frequencies.sort_by(f64::total_cmp);
     frequencies.dedup();
     let outputs = replay_sampled_electrical_headroom(
-        &paths, &frequencies, sample_rate, &limits, dir, &HashMap::new(),
+        &paths,
+        &frequencies,
+        sample_rate,
+        &limits,
+        dir,
+        &HashMap::new(),
     )?;
     Ok(serde_json::json!({
         "status": "evaluated",
@@ -253,7 +354,11 @@ fn diagnostic_strength_electrical(
 fn strength_electrical_diagnostic_keeps_serialized_centers_without_biquad_cache() {
     let mut result = crate::test_fixtures::single_channel_room_result("left");
     let peak = math_audio_iir_fir::Biquad::new(
-        math_audio_iir_fir::BiquadFilterType::Peak, 123.456, 48_000.0, 80.0, 6.0,
+        math_audio_iir_fir::BiquadFilterType::Peak,
+        123.456,
+        48_000.0,
+        80.0,
+        6.0,
     );
     result.channels.get_mut("left").unwrap().plugins = vec![
         roomeq_engine::output::create_eq_plugin(&[peak.clone(), peak]),
@@ -270,23 +375,41 @@ fn strength_electrical_diagnostic_keeps_serialized_centers_without_biquad_cache(
 #[test]
 fn reducing_eq_cuts_can_exceed_electrical_full_scale_with_fixed_gain() {
     let mut result = crate::test_fixtures::single_channel_room_result("left");
-    let shelves = |gain| roomeq_engine::output::create_eq_plugin(&[
-        math_audio_iir_fir::Biquad::new(
-            math_audio_iir_fir::BiquadFilterType::Lowshelf, 1000.0, 48_000.0, 0.7, gain,
-        ),
-        math_audio_iir_fir::Biquad::new(
-            math_audio_iir_fir::BiquadFilterType::Highshelf, 1000.0, 48_000.0, 0.7, gain,
-        ),
-    ]);
+    let shelves = |gain| {
+        roomeq_engine::output::create_eq_plugin(&[
+            math_audio_iir_fir::Biquad::new(
+                math_audio_iir_fir::BiquadFilterType::Lowshelf,
+                1000.0,
+                48_000.0,
+                0.7,
+                gain,
+            ),
+            math_audio_iir_fir::Biquad::new(
+                math_audio_iir_fir::BiquadFilterType::Highshelf,
+                1000.0,
+                48_000.0,
+                0.7,
+                gain,
+            ),
+        ])
+    };
     result.channels.get_mut("left").unwrap().plugins = vec![
-        roomeq_engine::output::create_gain_plugin(5.9), shelves(-6.0),
+        roomeq_engine::output::create_gain_plugin(5.9),
+        shelves(-6.0),
     ];
     let before = diagnostic_strength_electrical(&result, 48_000.0, Path::new(".")).unwrap();
     result.channels.get_mut("left").unwrap().plugins[1] = shelves(-3.0);
     let after = diagnostic_strength_electrical(&result, 48_000.0, Path::new(".")).unwrap();
     assert_eq!(before["all_outputs_within_full_scale"], true);
     assert_eq!(after["all_outputs_within_full_scale"], false);
-    assert!((after["outputs"][0]["required_attenuation_db"].as_f64().unwrap() - 2.9).abs() < 1e-6);
+    assert!(
+        (after["outputs"][0]["required_attenuation_db"]
+            .as_f64()
+            .unwrap()
+            - 2.9)
+            .abs()
+            < 1e-6
+    );
 }
 
 #[test]
@@ -297,31 +420,47 @@ fn validation_bundle_matches_final_pipeline_playback_evidence() {
     let dir = tempfile::tempdir().unwrap();
     let validation = HashMap::from([("left".to_string(), vec![flat_curve()])]);
     let context = crate::WorkflowContext {
-        output_dir: Some(dir.path()), artifact_store: &store,
+        output_dir: Some(dir.path()),
+        artifact_store: &store,
         validation_measurements: &validation,
     };
     let result = optimize_room_pipeline_impl_with_frequency_samples(
         roomeq_engine::EngineRequest {
-            config: &config, sample_rate: 44_100.0, probe_arrival_overrides: None,
+            config: &config,
+            sample_rate: 44_100.0,
+            probe_arrival_overrides: None,
         },
-        &context, None, crate::DEFAULT_FREQUENCY_SAMPLES,
-    ).unwrap();
-    let bytes = store.get(&dir.path().join("roomeq_validation_bundle.json")).unwrap();
+        &context,
+        None,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
+    let bytes = store
+        .get(&dir.path().join("roomeq_validation_bundle.json"))
+        .unwrap();
     let bundle: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(bundle["sample_rate"], 44_100.0);
-    assert_eq!(bundle["requested_optimizer"], serde_json::to_value(&config.optimizer).unwrap());
+    assert_eq!(
+        bundle["requested_optimizer"],
+        serde_json::to_value(&config.optimizer).unwrap()
+    );
     let mut graph = result.to_dsp_chain_output();
     // The bundle cannot contain its own just-created report pointer.
     graph.metadata.as_mut().unwrap().validation_bundle = None;
-    let expected: serde_json::Value = serde_json::from_slice(
-        &serde_json::to_vec(&graph).unwrap()
-    ).unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_slice(&serde_json::to_vec(&graph).unwrap()).unwrap();
     assert_eq!(bundle["final_playback"], expected);
     let stages = &result.metadata.stage_outcomes;
-    let electrical: Vec<_> = stages.iter().filter(|stage|
-        stage.stage == "final_graph_sampled_electrical_headroom").collect();
+    let electrical: Vec<_> = stages
+        .iter()
+        .filter(|stage| stage.stage == "final_graph_sampled_electrical_headroom")
+        .collect();
     assert_eq!(electrical.len(), 1);
-    assert!(electrical[0].advisories.contains(&"enforced_independently_phased_sinusoidal_input_peaks".into()));
+    assert!(
+        electrical[0]
+            .advisories
+            .contains(&"enforced_independently_phased_sinusoidal_input_peaks".into())
+    );
     assert_eq!(electrical[0].status, StageStatus::Applied);
     // This fixture is an identity electrical path; its accepted bundle must
     // retain the enforced unit-peak result, not the former advisory-only report.
@@ -341,23 +480,38 @@ fn rejected_final_seat_validation_does_not_publish_validation_bundle() {
     config.optimizer.validation_bundle = Some(roomeq_model::ValidationBundleConfig::default());
     let store = autoeq_artifacts::MemoryArtifactStore::new();
     let dir = tempfile::tempdir().unwrap();
-    let curve = crate::test_fixtures::single_channel_room_result("left")
-        .channel_results["left"].initial_curve.clone();
+    let curve = crate::test_fixtures::single_channel_room_result("left").channel_results["left"]
+        .initial_curve
+        .clone();
     let validation = HashMap::from([("unknown_physical_output".to_string(), vec![curve])]);
     let context = crate::WorkflowContext {
-        output_dir: Some(dir.path()), artifact_store: &store,
+        output_dir: Some(dir.path()),
+        artifact_store: &store,
         validation_measurements: &validation,
     };
     let result = optimize_room_pipeline_impl_with_frequency_samples(
         roomeq_engine::EngineRequest {
-            config: &config, sample_rate: 48_000.0, probe_arrival_overrides: None,
+            config: &config,
+            sample_rate: 48_000.0,
+            probe_arrival_overrides: None,
         },
-        &context, None, crate::DEFAULT_FREQUENCY_SAMPLES,
+        &context,
+        None,
+        crate::DEFAULT_FREQUENCY_SAMPLES,
     );
     let error = result.unwrap_err();
-    assert!(error.to_string().contains("unknown held-out physical output"), "{error}");
-    assert!(store.get(&dir.path().join("roomeq_validation_bundle.json")).is_none(),
-        "a workflow rejected by final-seat validation published a validation bundle");
+    assert!(
+        error
+            .to_string()
+            .contains("unknown held-out physical output"),
+        "{error}"
+    );
+    assert!(
+        store
+            .get(&dir.path().join("roomeq_validation_bundle.json"))
+            .is_none(),
+        "a workflow rejected by final-seat validation published a validation bundle"
+    );
 }
 
 #[test]
@@ -708,6 +862,8 @@ fn two_channel_generic_collection() -> GenericChannelCollection {
             biquads: Vec::new(),
             fir_coeffs: None,
             optimizer_evidence: Vec::new(),
+            audibility_veto: Vec::new(),
+            veto_adjudication: None,
         },
     );
     channel_results.insert(
@@ -721,6 +877,8 @@ fn two_channel_generic_collection() -> GenericChannelCollection {
             biquads: Vec::new(),
             fir_coeffs: None,
             optimizer_evidence: Vec::new(),
+            audibility_veto: Vec::new(),
+            veto_adjudication: None,
         },
     );
     let mut curves = HashMap::new();

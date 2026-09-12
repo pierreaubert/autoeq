@@ -61,6 +61,45 @@ pub struct CorpusRobustnessConfig {
     /// offset, keeping at least one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seat_dropout_fraction: Option<f64>,
+    /// Optional deterministic head-position perturbation used only for
+    /// robustness screening.  It is deliberately separate from measurement
+    /// noise: a moving listener changes the broad level/directivity envelope
+    /// and, when phase is measured, the apparent arrival time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_position: Option<HeadPositionPerturbationConfig>,
+}
+
+/// Bounded synthetic perturbation for head-position sensitivity checks.
+///
+/// This is not an HRTF model and must never be used as evidence of
+/// precedence, binaural audibility, or a listening preference.  It exists to
+/// make the absence/presence of a positional robustness experiment explicit in
+/// QA output.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct HeadPositionPerturbationConfig {
+    /// Peak broad-band level change applied above the transition region.
+    pub level_db: f64,
+    /// Apparent arrival-time change, applied to measured phase only.
+    pub timing_ms: f64,
+}
+
+impl HeadPositionPerturbationConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.level_db.is_finite()
+            || !self.timing_ms.is_finite()
+            || self.level_db < 0.0
+            || self.timing_ms < 0.0
+            || self.level_db > 12.0
+            || self.timing_ms > 5.0
+            || (self.level_db == 0.0 && self.timing_ms == 0.0)
+        {
+            return Err(
+                "head_position level_db/timing_ms must be bounded, non-negative, and non-zero"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -171,7 +210,11 @@ impl AcousticCorpusScenario {
                     .is_some_and(|value| !value.is_finite() || value < 0.0)
                 || robustness
                     .seat_dropout_fraction
-                    .is_some_and(|value| !value.is_finite() || !(0.0..1.0).contains(&value)))
+                    .is_some_and(|value| !value.is_finite() || !(0.0..1.0).contains(&value))
+                || robustness
+                    .head_position
+                    .as_ref()
+                    .is_some_and(|value| value.validate().is_err()))
         {
             return Err(format!(
                 "scenario '{}' has an invalid robustness configuration",
@@ -647,6 +690,7 @@ mod tests {
             coherence_floor: 0.8,
             level_calibration_error_db: Some(-1.0),
             seat_dropout_fraction: None,
+            head_position: None,
         });
         assert!(scenario.validate().is_err());
 
@@ -656,6 +700,7 @@ mod tests {
             coherence_floor: 0.8,
             level_calibration_error_db: Some(1.0),
             seat_dropout_fraction: Some(1.0),
+            head_position: None,
         });
         assert!(scenario.validate().is_err());
 
@@ -665,6 +710,7 @@ mod tests {
             coherence_floor: 0.8,
             level_calibration_error_db: Some(1.0),
             seat_dropout_fraction: Some(0.5),
+            head_position: None,
         });
         scenario
             .validate()
@@ -703,5 +749,30 @@ mod tests {
             Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("definitely-missing-candidate.json"));
 
         assert!(scenario.validate().is_err());
+    }
+
+    #[test]
+    fn head_position_perturbation_is_bounded_and_optional() {
+        let valid = HeadPositionPerturbationConfig {
+            level_db: 3.0,
+            timing_ms: 0.5,
+        };
+        assert!(valid.validate().is_ok());
+        for invalid in [
+            HeadPositionPerturbationConfig {
+                level_db: -0.1,
+                timing_ms: 0.5,
+            },
+            HeadPositionPerturbationConfig {
+                level_db: 3.0,
+                timing_ms: 5.1,
+            },
+            HeadPositionPerturbationConfig {
+                level_db: 0.0,
+                timing_ms: 0.0,
+            },
+        ] {
+            assert!(invalid.validate().is_err());
+        }
     }
 }

@@ -334,6 +334,8 @@ mod apply_tests {
             biquads: Vec::new(),
             fir_coeffs: None,
             optimizer_evidence: Vec::new(),
+            audibility_veto: Vec::new(),
+            veto_adjudication: None,
         }
     }
 
@@ -685,6 +687,8 @@ mod coverage_tests {
             biquads: Vec::new(),
             fir_coeffs: None,
             optimizer_evidence: Vec::new(),
+            audibility_veto: Vec::new(),
+            veto_adjudication: None,
         };
         let acceptance =
             all_channel_multiseat_acceptance(&config, "LFE", &source, &flat_curve(), &flat_curve());

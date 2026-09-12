@@ -21,7 +21,9 @@ pub mod x2peq {
     pub use autoeq_core::x2peq::*;
 }
 pub mod roomeq {
-    pub use crate::roomeq_types::{AudibilityDeadbandConfig, MultiMeasurementStrategy};
+    pub use crate::roomeq_types::{
+        AudibilityDeadbandConfig, ModeProximityEvidence, MultiMeasurementStrategy,
+    };
     pub mod phase_utils {
         pub use autoeq_core::phase_utils::*;
     }
@@ -45,7 +47,7 @@ pub use driver_optimization::{
 };
 pub use loss::{CrossoverType, HeadphoneLossData, LossType, SpeakerLossData};
 pub use math_audio_optimisation as de;
-pub use optim::params::OptimParams;
+pub use optim::params::{FrequencyQPolicy, OptimParams};
 pub use optim::run_descriptor::{
     OptimizationRunDescriptor, OptimizationRunResult, OptimizerExecutionPlatform, ParameterBounds,
 };

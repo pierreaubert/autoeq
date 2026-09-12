@@ -22,14 +22,28 @@ fn bass_only_alignment_uses_upper_level_not_bass_shelf_intercept() {
     let mut curves = HashMap::new();
     // Different modal responses below 200 Hz, identical upper-band shape.
     // Include the actual pre-alignment main trims from the paired-sub report.
-    curves.insert("L".to_string(), make_curve(|f| {
-        80.0 - 0.8999688409227122 - 8.0 * (f / 20.0).log10() / 3.0
-            + if f < 200.0 { 12.0 * (f / 20.0).ln().sin() } else { 0.0 }
-    }));
-    curves.insert("R".to_string(), make_curve(|f| {
-        86.0 - 8.0 * (f / 20.0).log10() / 3.0
-            + if f < 200.0 { -9.0 * (f / 20.0).ln().sin() } else { 0.0 }
-    }));
+    curves.insert(
+        "L".to_string(),
+        make_curve(|f| {
+            80.0 - 0.8999688409227122 - 8.0 * (f / 20.0).log10() / 3.0
+                + if f < 200.0 {
+                    12.0 * (f / 20.0).ln().sin()
+                } else {
+                    0.0
+                }
+        }),
+    );
+    curves.insert(
+        "R".to_string(),
+        make_curve(|f| {
+            86.0 - 8.0 * (f / 20.0).log10() / 3.0
+                + if f < 200.0 {
+                    -9.0 * (f / 20.0).ln().sin()
+                } else {
+                    0.0
+                }
+        }),
+    );
     let results = compute_spectral_alignment(&curves, SAMPLE_RATE, 20.0, 200.0);
     for result in results.values() {
         assert_eq!(result.lowshelf_gain_db, 0.0);
@@ -44,8 +58,8 @@ fn bass_only_alignment_uses_upper_level_not_bass_shelf_intercept() {
 #[test]
 fn upper_target_reference_preserves_bass_to_treble_target_relationship() {
     let target = make_curve(|f| -8.0 * (f / 20.0).log10() / 3.0);
-    let measured = make_curve(|f| 80.0 - 8.0 * (f / 20.0).log10() / 3.0
-        + if f < 190.0 { 10.0 } else { 0.0 });
+    let measured =
+        make_curve(|f| 80.0 - 8.0 * (f / 20.0).log10() / 3.0 + if f < 190.0 { 10.0 } else { 0.0 });
     let reference = super::compute::upper_band_target_reference(&measured, &target, 200.0).unwrap();
     assert!((reference - 80.0).abs() < 1e-9);
     // The bass excess remains a 10 dB correction demand, not a new zero.
@@ -313,12 +327,47 @@ fn channel_matching_correction_profile_sanitizes_negative_and_swapped_fields() {
         correction_weight: -0.5,
         min_freq_hz: 5_000.0,
         max_freq_hz: 100.0,
+        max_q: 8.0,
     };
     let s = bad.sanitized();
     assert_eq!(s.peak_tolerance_db, 0.0);
     assert_eq!(s.correction_weight, 0.0);
     assert_eq!(s.min_freq_hz, 100.0);
     assert_eq!(s.max_freq_hz, 5_000.0);
+    assert_eq!(s.max_q, 8.0);
+}
+
+#[test]
+fn channel_matching_default_profile_keeps_filters_broad() {
+    let mut curves = HashMap::new();
+    curves.insert(
+        "L".to_string(),
+        make_curve(|f| {
+            if (f / 1_000.0).ln().abs() < 0.12 {
+                10.0
+            } else {
+                0.0
+            }
+        }),
+    );
+    curves.insert("R".to_string(), make_curve(|_| 0.0));
+
+    let results = correct_inter_channel_deviation_with_profile(
+        &curves,
+        50.0,
+        4,
+        SAMPLE_RATE,
+        ChannelMatchingCorrectionProfile::default(),
+    );
+    let filters: Vec<_> = results
+        .iter()
+        .flat_map(|result| result.filters.iter())
+        .collect();
+    assert!(
+        !filters.is_empty(),
+        "narrow deviation should nominate a filter"
+    );
+    assert!(filters.iter().all(|filter| filter.q <= 1.0 + 1e-9));
 }
 
 #[test]
@@ -328,12 +377,14 @@ fn channel_matching_correction_profile_replaces_nonfinite_with_zero() {
         correction_weight: f64::INFINITY,
         min_freq_hz: f64::NEG_INFINITY,
         max_freq_hz: f64::NAN,
+        max_q: f64::NAN,
     };
     let s = bad.sanitized();
     assert_eq!(s.peak_tolerance_db, 0.0);
     assert_eq!(s.correction_weight, 0.0);
     assert_eq!(s.min_freq_hz, 0.0);
     assert_eq!(s.max_freq_hz, 0.0);
+    assert_eq!(s.max_q, 0.5);
     assert!(s.matching_band(50.0).0.is_finite());
     assert!(s.matching_band(50.0).1.is_finite());
 }
@@ -368,6 +419,7 @@ fn correct_inter_channel_deviation_with_profile_does_not_panic_on_bad_profile() 
         correction_weight: -1.0,
         min_freq_hz: 5_000.0,
         max_freq_hz: 100.0,
+        max_q: 8.0,
     };
     // Must not panic even with malformed profile fields.
     let results = correct_inter_channel_deviation_with_profile(&curves, 50.0, 4, SAMPLE_RATE, bad);

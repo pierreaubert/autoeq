@@ -419,9 +419,15 @@ mod tests {
         let main = curve_with_levels(|_| -6.0);
         let bass = main.clone();
         let combined = curve_with_levels(|frequency| if frequency == 117.0 { -18.0 } else { -6.0 });
-        assert_eq!(bass_management_crossover_cancellation_worst_bin(&main, &bass, &combined, 80.0), Some((117.0, 12.0)));
+        assert_eq!(
+            bass_management_crossover_cancellation_worst_bin(&main, &bass, &combined, 80.0),
+            Some((117.0, 12.0))
+        );
         let mut shifted = combined.clone();
         shifted.freq += 0.5;
-        assert_eq!(bass_management_crossover_cancellation_worst_bin(&main, &bass, &shifted, 80.0), None);
+        assert_eq!(
+            bass_management_crossover_cancellation_worst_bin(&main, &bass, &shifted, 80.0),
+            None
+        );
     }
 }

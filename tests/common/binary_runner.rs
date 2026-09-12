@@ -55,9 +55,21 @@ impl Default for ProcessBinaryRunner {
 
 impl BinaryRunner for ProcessBinaryRunner {
     fn run(&self, binary_name: &str, args: &[&str]) -> std::io::Result<Output> {
-        Command::new(self.bin_dir.join(binary_name))
-            .args(args)
-            .output()
+        // `CARGO_BIN_EXE_autoeq` points at the dependency directory of the
+        // integration-test binary. Cargo places sibling binaries in the
+        // profile directory itself (`target/{debug,release}/roomeq`), so do
+        // not assume every requested binary lives beside the test executable.
+        let path = self.bin_dir.join(binary_name);
+        let path = if path.is_file() {
+            path
+        } else {
+            self.bin_dir
+                .parent()
+                .map(|profile| profile.join(binary_name))
+                .filter(|candidate| candidate.is_file())
+                .unwrap_or(path)
+        };
+        Command::new(path).args(args).output()
     }
 }
 

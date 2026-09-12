@@ -29,9 +29,11 @@ fn response(channel_index: usize) -> roomeq_model::Curve {
             + (frequency.log10() * 13.0 - phase).cos() * 1.5
     });
     roomeq_model::Curve {
-        freq,
+        freq: freq.clone(),
         spl,
-        phase: None,
+        // This benchmark is synthetic; declare its deterministic branch phase
+        // so final coherent replay tests the workload rather than missing data.
+        phase: Some(Array1::from_elem(freq.len(), phase)),
         ..Default::default()
     }
 }
@@ -57,6 +59,9 @@ fn config_5_1_4(threads: usize) -> RoomConfig {
         system: Some(SystemConfig {
             model: SystemModel::HomeCinema,
             speakers: system_speakers,
+            // Keep the scaling fixture's LFE as an explicitly mapped output;
+            // crossover attenuation is tested by topology fixtures, not by
+            // this throughput benchmark.
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Single,
                 crossover: Some("main".to_string().into()),
@@ -71,7 +76,7 @@ fn config_5_1_4(threads: usize) -> RoomConfig {
                 "main".to_string(),
                 CrossoverConfig {
                     crossover_type: "LR24".to_string(),
-                    frequency: Some(80.0),
+                    frequency: Some(20.0),
                     frequencies: None,
                     frequency_range: None,
                 },

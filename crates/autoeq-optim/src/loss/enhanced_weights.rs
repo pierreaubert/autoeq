@@ -177,6 +177,30 @@ impl PreparedWeightedLoss {
         self.evaluate_weighted(error, erb_mix, band_mix, |_, _| 1.0)
     }
 
+    /// Evaluate the combined loss while de-weighting only negative residuals
+    /// at detected narrow nulls. In the RoomEQ convention a negative residual
+    /// is a measured dip that would require an input boost; positive residuals
+    /// (peaks/cuts) remain fully scored. The mask is validated against the
+    /// native frequency grid and evaluation stays allocation-free.
+    pub fn evaluate_with_dip_suppression(
+        &self,
+        error: &Array1<f64>,
+        erb_mix: f64,
+        band_mix: f64,
+        null_suppression: &[f64],
+    ) -> f64 {
+        if null_suppression.len() != error.len() {
+            return f64::INFINITY;
+        }
+        self.evaluate_weighted(error, erb_mix, band_mix, |active_index, value| {
+            if value < 0.0 {
+                null_suppression[self.indices[active_index]].clamp(0.0, 1.0)
+            } else {
+                1.0
+            }
+        })
+    }
+
     /// Evaluate with sign-dependent, precomputed per-sample multipliers.
     pub fn evaluate_asymmetric(
         &self,

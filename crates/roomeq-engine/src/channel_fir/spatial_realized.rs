@@ -3,10 +3,7 @@
 
 use super::*;
 use autoeq_core::Curve;
-use autoeq_optim::optim::{
-    compute_response_fitness,
-    scalar::ScalarOptimConfig,
-};
+use autoeq_optim::optim::{compute_response_fitness, scalar::ScalarOptimConfig};
 use num_complex::Complex64;
 
 pub(super) fn optimize(
@@ -76,6 +73,25 @@ pub(super) fn optimize(
         let mut residual = response::apply_complex_response(curve, &iir);
         if curve.phase.is_none() {
             residual.phase = None;
+        } else if request
+            .optimizer
+            .fir
+            .as_ref()
+            .is_some_and(|fir| fir.correct_excess_phase)
+        {
+            // A common arrival delay belongs to source alignment, not to the
+            // excess-phase inverse. Remove only the fitted linear trend before
+            // Kirkeby sees the reference phase; otherwise a short FIR spends
+            // its support trying to cancel an acoustic delay and leaves the
+            // position-dependent dispersion under-corrected.
+            if let Some(phase) = residual.phase.take() {
+                let unwrapped = autoeq_core::phase_utils::unwrap_phase_degrees(&phase);
+                let (_, delay_free) = autoeq_core::phase_utils::estimate_delay_from_excess_phase(
+                    &residual.freq,
+                    &unwrapped,
+                );
+                residual.phase = Some(delay_free);
+            }
         }
         residual
     } else {
@@ -85,8 +101,37 @@ pub(super) fn optimize(
             ..Default::default()
         }
     };
+    // A configured seat weight is a preference over the basis itself, not
+    // only a scalarisation weight applied after every candidate is realised.
+    // Keep zero-weight seats out of the generated target; otherwise the
+    // nonlinear search can choose a correction derived entirely from a seat
+    // the caller explicitly excluded.
+    let configured_weights = request
+        .optimizer
+        .multi_measurement
+        .as_ref()
+        .and_then(|config| config.weights.as_ref())
+        .map(|weights| {
+            let sum = weights.iter().sum::<f64>();
+            weights
+                .iter()
+                .map(|weight| *weight / sum)
+                .collect::<Vec<_>>()
+        });
     let realize = |weights: &[f64]| -> Option<Vec<f64>> {
-        let sum: f64 = weights.iter().sum();
+        let effective_weights: Vec<f64> = weights
+            .iter()
+            .enumerate()
+            .map(|(index, weight)| {
+                let multiplier = configured_weights
+                    .as_ref()
+                    .and_then(|configured| configured.get(index))
+                    .copied()
+                    .unwrap_or(1.0);
+                weight * multiplier
+            })
+            .collect();
+        let sum: f64 = effective_weights.iter().sum();
         if !sum.is_finite() || sum <= 0.0 {
             return None;
         }
@@ -95,15 +140,43 @@ pub(super) fn optimize(
             spl: Array1::from_iter((0..grid.len()).map(|bin| {
                 basis
                     .iter()
-                    .zip(weights)
+                    .zip(&effective_weights)
                     .map(|(target, weight)| target[bin] * (weight / sum))
                     .sum::<f64>()
                     + neutral.spl[bin]
             })),
             ..Default::default()
         };
-        crate::fir::generate_fir_correction_prepared(&neutral, &effective, &target, sample_rate)
-            .ok()
+        let coefficients = if kirkeby
+            && request
+                .optimizer
+                .fir
+                .as_ref()
+                .is_some_and(|fir| fir.correct_excess_phase)
+        {
+            // The Kirkeby implementation derives minimum phase from the
+            // measurement magnitude.  The IIR stage has already accounted for
+            // that magnitude, so use a flat phase reference here and pass the
+            // desired correction as a relative dB curve.  This keeps the
+            // measured (delay-free) excess phase without subtracting a second
+            // minimum-phase component from the residual.
+            let mut phase_measurement = neutral.clone();
+            phase_measurement.spl.fill(0.0);
+            let phase_target = Curve {
+                freq: grid.clone(),
+                spl: &target.spl - &neutral.spl,
+                ..Default::default()
+            };
+            crate::fir::generate_fir_correction_prepared(
+                &phase_measurement,
+                &effective,
+                &phase_target,
+                sample_rate,
+            )
+        } else {
+            crate::fir::generate_fir_correction_prepared(&neutral, &effective, &target, sample_rate)
+        };
+        coefficients.ok()
     };
     let evaluations = std::sync::atomic::AtomicUsize::new(0);
     let evaluate = |weights: &[f64]| {
@@ -138,7 +211,8 @@ pub(super) fn optimize(
         seed: effective.seed,
         ..Default::default()
     };
-    let result = progress.optimize(&vec![(0.0, 1.0); count], &best, &config, evaluate)
+    let result = progress
+        .optimize(&vec![(0.0, 1.0); count], &best, &config, evaluate)
         .map_err(|error| fail(format!("Minimum-phase FIR search: {error}")))?;
     let returned = evaluate(&result.x);
     let selected_search = returned.is_finite() && returned < loss;

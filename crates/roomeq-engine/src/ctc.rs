@@ -226,6 +226,10 @@ pub fn compute_binaural_diagnostics(
     let crosstalk_risk = delivered.worst_crosstalk_db > -12.0;
     let target_risk = delivered.worst_target_error > 1.0;
     let condition_risk = max_condition_number > CTC_CONDITION_WARNING_THRESHOLD;
+    let precedence_evidence = match spectrum.source.as_str() {
+        "measured" | "raw_sweep" | "hrtf" => "time_referenced_binaural_ir",
+        _ => "unverified",
+    };
     let externalization_risk = if driver_headroom_limited || condition_risk || target_risk {
         "high".to_string()
     } else if delivered.worst_crosstalk_db > -20.0 || delivered.mean_channel_balance_db > 2.0 {
@@ -249,6 +253,7 @@ pub fn compute_binaural_diagnostics(
             + delivered.mean_channel_balance_db / 20.0,
         externalization_risk,
         imaging_risk,
+        precedence_evidence: precedence_evidence.to_string(),
         hrtf_candidate_comparison: spectrum.source.contains("hrtf").then(|| {
             CtcHrtfCandidateComparison {
                 candidate_count: spectrum.positions.len().max(1),
@@ -491,6 +496,33 @@ mod crosstalk_metric_tests {
         };
 
         assert_eq!(delivered_crosstalk_residual_db(&metrics), -42.0);
+    }
+
+    #[test]
+    fn precedence_evidence_requires_time_referenced_matrix_source() {
+        let delivered = CtcDeliveredResponseMetrics {
+            mean_target_error: 0.1,
+            worst_target_error: 0.2,
+            mean_crosstalk_db: -40.0,
+            worst_crosstalk_db: -35.0,
+            mean_channel_balance_db: 0.1,
+        };
+        let mut matrix = PreparedCtcMatrix {
+            source: "test".to_string(),
+            speakers: vec!["left".to_string(), "right".to_string()],
+            ears: vec!["left".to_string(), "right".to_string()],
+            positions: vec!["primary".to_string()],
+            bins: Vec::new(),
+        };
+        assert_eq!(
+            compute_binaural_diagnostics(&matrix, &delivered, 1.0, false).precedence_evidence,
+            "unverified"
+        );
+        matrix.source = "raw_sweep".to_string();
+        assert_eq!(
+            compute_binaural_diagnostics(&matrix, &delivered, 1.0, false).precedence_evidence,
+            "time_referenced_binaural_ir"
+        );
     }
 
     #[test]

@@ -31,8 +31,9 @@ pub(super) fn evidence_response_to_complex(
                 .confidence
                 .get(sub_idx)
                 .ok_or_else(|| AutoeqError::InvalidMeasurement {
-                    message: "continuous_area interpolation evidence is missing confidence for a sub"
-                        .to_string(),
+                    message:
+                        "continuous_area interpolation evidence is missing confidence for a sub"
+                            .to_string(),
                 })?;
         for (freq_idx, &frequency) in freqs.iter().enumerate() {
             let resultant = interpolate_resultant(&curve.freq, confidence, frequency);
@@ -53,11 +54,7 @@ pub(super) fn evidence_response_to_complex(
 }
 
 /// Log-frequency interpolation of a phasor resultant onto one eval frequency.
-fn interpolate_resultant(
-    reference: &Array1<f64>,
-    confidence: &Array1<f64>,
-    frequency: f64,
-) -> f64 {
+fn interpolate_resultant(reference: &Array1<f64>, confidence: &Array1<f64>, frequency: f64) -> f64 {
     if reference.len() != confidence.len() || reference.is_empty() {
         return 0.0;
     }
@@ -175,9 +172,9 @@ mod tests {
         assert!(evidence.phase_ambiguous[0].iter().all(|&b| b));
 
         let legacy = &area.interpolate_at([0.5])[0];
-        let legacy_level =
-            interpolate_curve_to_grid(legacy, &Array1::from(vec![80.0])).expect("legacy grid")[0]
-                .norm();
+        let legacy_level = interpolate_curve_to_grid(legacy, &Array1::from(vec![80.0]))
+            .expect("legacy grid")[0]
+            .norm();
         assert!(
             (20.0 * legacy_level.log10() - 80.0).abs() < 1.0,
             "legacy path should return a full-level (~80 dB) phantom, got {} dB",
@@ -225,6 +222,9 @@ mod tests {
             "agreeing midpoint must be unattenuated, got {}",
             complex[0][0].norm()
         );
-        assert!(fraction.abs() < 1e-12, "no bins ambiguous, fraction={fraction}");
+        assert!(
+            fraction.abs() < 1e-12,
+            "no bins ambiguous, fraction={fraction}"
+        );
     }
 }

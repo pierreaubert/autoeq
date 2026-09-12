@@ -734,28 +734,43 @@ mod tests {
     #[test]
     fn physical_sub_outputs_are_not_promoted_to_logical_inputs() {
         let config = routed_home_cinema_config();
-        let outputs: Vec<_> = ["sub_a", "sub_b"].into_iter().map(|name| {
-            BassManagementSubOutputReport {
-                output_role: name.into(), gain_db: 0.0, delay_ms: 0.0,
-                polarity_inverted: false, strategy_source: "mso".into(),
-                headroom_contribution_db: 0.0, selected_low_pass_hz: None,
-            }
-        }).collect();
-        let optimization = crate::bass_management::joint_bass_management_report_from_parts(
-            &[], &[], &outputs,
-        );
+        let outputs: Vec<_> = ["sub_a", "sub_b"]
+            .into_iter()
+            .map(|name| BassManagementSubOutputReport {
+                output_role: name.into(),
+                gain_db: 0.0,
+                delay_ms: 0.0,
+                polarity_inverted: false,
+                strategy_source: "mso".into(),
+                headroom_contribution_db: 0.0,
+                selected_low_pass_hz: None,
+            })
+            .collect();
+        let optimization =
+            crate::bass_management::joint_bass_management_report_from_parts(&[], &[], &outputs);
         let graph = bass_management_routing_graph(&config, Some(&optimization)).unwrap();
         for name in ["sub_a", "sub_b"] {
             assert!(graph.output_channels.iter().any(|output| output == name));
-            assert!(!graph.input_channels.iter().any(|input| input == name),
-                "physical output {name} became a source with no playback branches");
+            assert!(
+                !graph.input_channels.iter().any(|input| input == name),
+                "physical output {name} became a source with no playback branches"
+            );
         }
         for route in &graph.routes {
-            assert_eq!(graph.input_channels[route.source_index], route.source_channel);
-            assert_eq!(graph.output_channels[route.destination_index], route.destination);
+            assert_eq!(
+                graph.input_channels[route.source_index],
+                route.source_channel
+            );
+            assert_eq!(
+                graph.output_channels[route.destination_index],
+                route.destination
+            );
         }
         assert!(graph.input_channels.iter().all(|input| {
-            graph.routes.iter().any(|route| &route.source_channel == input)
+            graph
+                .routes
+                .iter()
+                .any(|route| &route.source_channel == input)
         }));
     }
 

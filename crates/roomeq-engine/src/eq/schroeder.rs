@@ -4,7 +4,10 @@ use crate::{AutoeqError, Curve};
 use autoeq_core::{Result, response};
 use log::debug;
 use math_audio_iir_fir::Biquad;
-use roomeq_model::{LowFreqFilterConfig, OptimizerConfig, SchroederSplitConfig};
+use roomeq_model::{
+    FilterVetoVerdict, LowFreqFilterConfig, OptimizerConfig, SchroederSplitConfig,
+    VetoAdjudicationReport,
+};
 
 fn schroeder_filter_allocation(
     total_filters: usize,
@@ -27,6 +30,45 @@ pub struct SchroederOptimizationResult {
     pub low_filters: Vec<Biquad>,
     pub high_filters: Vec<Biquad>,
     pub optimizer_evidence: Vec<autoeq_optim::optim::OptimizerRunEvidence>,
+    /// Veto decisions from both split passes, with high-band indices offset
+    /// into the concatenated filter chain.
+    pub audibility_veto: Vec<FilterVetoVerdict>,
+    /// Aggregated adjudication evidence from the low/high passes.
+    pub veto_adjudication: Option<VetoAdjudicationReport>,
+}
+
+fn merge_veto_evidence(
+    low_filter_count: usize,
+    mut low_verdicts: Vec<FilterVetoVerdict>,
+    low_report: Option<VetoAdjudicationReport>,
+    mut high_verdicts: Vec<FilterVetoVerdict>,
+    high_report: Option<VetoAdjudicationReport>,
+) -> (Vec<FilterVetoVerdict>, Option<VetoAdjudicationReport>) {
+    for verdict in &mut high_verdicts {
+        verdict.index = verdict.index.saturating_add(low_filter_count);
+    }
+    low_verdicts.extend(high_verdicts);
+    let report = match (low_report, high_report) {
+        (None, None) => None,
+        (Some(report), None) | (None, Some(report)) => Some(report),
+        (Some(low), Some(high)) => Some(VetoAdjudicationReport {
+            f0_reference_id: format!("schroeder:{}+{}", low.f0_reference_id, high.f0_reference_id),
+            removed_filter_indices: low
+                .removed_filter_indices
+                .into_iter()
+                .chain(
+                    high.removed_filter_indices
+                        .into_iter()
+                        .map(|index| index.saturating_add(low_filter_count)),
+                )
+                .collect(),
+            cumulative_loudness_delta_sones: low.cumulative_loudness_delta_sones
+                + high.cumulative_loudness_delta_sones,
+            max_local_deviation_db: low.max_local_deviation_db.max(high.max_local_deviation_db),
+            enforced: low.enforced || high.enforced,
+        }),
+    };
+    (low_verdicts, report)
 }
 
 /// Optimize EQ with Schroeder frequency split
@@ -64,6 +106,7 @@ pub fn optimize_with_schroeder_split_detailed(
         });
     }
     let high_min_q = optimizer.min_q.max(0.3);
+    let [active_min_freq, active_max_freq] = optimizer.active_correction_band();
     if low_config.min_q > low_config.max_q {
         return Err(AutoeqError::InvalidConfiguration {
             message: format!(
@@ -87,9 +130,7 @@ pub fn optimize_with_schroeder_split_detailed(
         .freq
         .iter()
         .zip(curve.spl.iter())
-        .filter(|(frequency, _)| {
-            **frequency >= optimizer.min_freq && **frequency <= optimizer.max_freq
-        })
+        .filter(|(frequency, _)| **frequency >= active_min_freq && **frequency <= active_max_freq)
         .fold((0.0, 0usize), |(sum, count), (_, level)| {
             (sum + *level, count + 1)
         });
@@ -102,7 +143,7 @@ pub fn optimize_with_schroeder_split_detailed(
     // A split outside the configured optimization band has only one real
     // side. Do not manufacture an inverted second band (for example
     // [400, 80] Hz); optimize the available side with the full filter budget.
-    if schroeder_freq >= optimizer.max_freq {
+    if schroeder_freq >= active_max_freq {
         let (min_db, max_db) = low_freq_gain_bounds(optimizer, low_config);
         let low_optimizer = OptimizerConfig {
             min_q: low_config.min_q,
@@ -125,9 +166,11 @@ pub fn optimize_with_schroeder_split_detailed(
             low_filters: clamp_filter_q(result.filters, low_config.min_q, low_config.max_q),
             high_filters: Vec::new(),
             optimizer_evidence: result.optimizer_evidence,
+            audibility_veto: result.audibility_veto,
+            veto_adjudication: result.veto_adjudication.map(|report| report.to_report()),
         });
     }
-    if schroeder_freq <= optimizer.min_freq {
+    if schroeder_freq <= active_min_freq {
         let high_optimizer = OptimizerConfig {
             num_filters: if high_config.shelving_only {
                 optimizer.num_filters.min(2)
@@ -157,13 +200,15 @@ pub fn optimize_with_schroeder_split_detailed(
             low_filters: Vec::new(),
             high_filters: clamp_filter_q(result.filters, high_min_q, high_config.max_q),
             optimizer_evidence: result.optimizer_evidence,
+            audibility_veto: result.audibility_veto,
+            veto_adjudication: result.veto_adjudication.map(|report| report.to_report()),
         });
     }
 
     // Determine filter allocation (roughly proportional to frequency range)
     let total_filters = optimizer.num_filters;
-    let log_range_total = (optimizer.max_freq / optimizer.min_freq).log2();
-    let log_range_low = (schroeder_freq / optimizer.min_freq).max(1.0).log2();
+    let log_range_total = (active_max_freq / active_min_freq).log2();
+    let log_range_low = (schroeder_freq / active_min_freq).max(1.0).log2();
     let low_ratio = log_range_low / log_range_total;
 
     let proportional_low_filters = ((total_filters as f64 * low_ratio).round() as usize)
@@ -191,7 +236,7 @@ pub fn optimize_with_schroeder_split_detailed(
     let (low_min_db, low_max_db) = low_freq_gain_bounds(optimizer, low_config);
     let low_optimizer = OptimizerConfig {
         num_filters: low_filters,
-        min_freq: optimizer.min_freq,
+        min_freq: active_min_freq,
         max_freq: schroeder_freq,
         min_q: low_config.min_q,
         max_q: low_config.max_q,
@@ -216,7 +261,7 @@ pub fn optimize_with_schroeder_split_detailed(
     let high_optimizer = OptimizerConfig {
         num_filters: high_filters,
         min_freq: schroeder_freq,
-        max_freq: optimizer.max_freq,
+        max_freq: active_max_freq,
         min_q: high_min_q, // Ensure minimum Q for broad filters
         max_q: high_config.max_q,
         peq_model: if high_config.shelving_only {
@@ -252,10 +297,23 @@ pub fn optimize_with_schroeder_split_detailed(
 
     let mut optimizer_evidence = low_result.optimizer_evidence;
     optimizer_evidence.extend(high_result.optimizer_evidence);
+    let (audibility_veto, veto_adjudication) = merge_veto_evidence(
+        low_eq_filters.len(),
+        low_result.audibility_veto,
+        low_result
+            .veto_adjudication
+            .map(|report| report.to_report()),
+        high_result.audibility_veto,
+        high_result
+            .veto_adjudication
+            .map(|report| report.to_report()),
+    );
     Ok(SchroederOptimizationResult {
         low_filters: low_eq_filters,
         high_filters: high_eq_filters,
         optimizer_evidence,
+        audibility_veto,
+        veto_adjudication,
     })
 }
 
@@ -323,6 +381,53 @@ mod tests {
             phase: None,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn split_veto_evidence_offsets_high_band_indices() {
+        let verdict = |index| FilterVetoVerdict {
+            index,
+            center_hz: 100.0,
+            q: 1.0,
+            gain_db: 1.0,
+            peak_delta_db: 1.0,
+            affected_erb_width: 1.0,
+            loudness_delta_sones: 0.1,
+            decision: roomeq_model::VetoDecision::Remove,
+            reason: roomeq_model::VetoReason::SubJnd,
+            enforced: false,
+            acceptance: Default::default(),
+        };
+        let low_report = VetoAdjudicationReport {
+            f0_reference_id: "low".into(),
+            removed_filter_indices: vec![0],
+            cumulative_loudness_delta_sones: 0.1,
+            max_local_deviation_db: 0.2,
+            enforced: false,
+        };
+        let high_report = VetoAdjudicationReport {
+            f0_reference_id: "high".into(),
+            removed_filter_indices: vec![1],
+            cumulative_loudness_delta_sones: 0.3,
+            max_local_deviation_db: 0.4,
+            enforced: true,
+        };
+        let (verdicts, report) = merge_veto_evidence(
+            2,
+            vec![verdict(0)],
+            Some(low_report),
+            vec![verdict(1)],
+            Some(high_report),
+        );
+        assert_eq!(
+            verdicts.iter().map(|v| v.index).collect::<Vec<_>>(),
+            vec![0, 3]
+        );
+        let report = report.expect("merged report");
+        assert_eq!(report.removed_filter_indices, vec![0, 3]);
+        assert_eq!(report.cumulative_loudness_delta_sones, 0.4);
+        assert_eq!(report.max_local_deviation_db, 0.4);
+        assert!(report.enforced);
     }
 
     #[test]

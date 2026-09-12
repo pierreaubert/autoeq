@@ -28,6 +28,8 @@ pub(super) type SpeakerProcessResult = std::result::Result<
         Option<f64>,
         Option<Vec<f64>>,
         Vec<roomeq_engine::OptimizerRunEvidence>,
+        Vec<roomeq_model::FilterVetoVerdict>,
+        Option<roomeq_model::VetoAdjudicationReport>,
     ),
     AutoeqError,
 >;
@@ -55,6 +57,8 @@ pub(super) type MixedModeResult = (
     Option<f64>,
     Option<Vec<f64>>,
     Vec<roomeq_engine::OptimizerRunEvidence>,
+    Vec<roomeq_model::FilterVetoVerdict>,
+    Option<roomeq_model::VetoAdjudicationReport>,
 );
 
 /// Action to take after progress callback
@@ -131,6 +135,8 @@ pub(super) fn collect_generic_channel_results(
             arrival_time_ms,
             fir_coeffs,
             optimizer_evidence,
+            audibility_veto,
+            veto_adjudication,
         ) = res?;
 
         let physical_fir = config
@@ -184,32 +190,30 @@ pub(super) fn collect_generic_channel_results(
                     step_status: None,
                 },
             )?;
-            let generated = if matches!(
-                config.optimizer.processing_mode,
-                ProcessingMode::MixedPhase
-            ) {
-                match post_generate_mixed_phase_fir(
-                    &channel_name,
-                    &initial_curve,
-                    &config.optimizer,
-                    sample_rate,
-                    output_dir,
-                ) {
-                    Ok(generated) => generated,
-                    Err(MixedPhasePostError::Artifact(message)) => {
-                        return Err(AutoeqError::OptimizationFailed { message });
+            let generated =
+                if matches!(config.optimizer.processing_mode, ProcessingMode::MixedPhase) {
+                    match post_generate_mixed_phase_fir(
+                        &channel_name,
+                        &initial_curve,
+                        &config.optimizer,
+                        sample_rate,
+                        output_dir,
+                    ) {
+                        Ok(generated) => generated,
+                        Err(MixedPhasePostError::Artifact(message)) => {
+                            return Err(AutoeqError::OptimizationFailed { message });
+                        }
+                        Err(MixedPhasePostError::Candidate(error)) => {
+                            log::warn!(
+                                "Mixed-phase FIR candidate rejected for '{}': {}",
+                                channel_name,
+                                error
+                            );
+                            None
+                        }
                     }
-                    Err(MixedPhasePostError::Candidate(error)) => {
-                        log::warn!(
-                            "Mixed-phase FIR candidate rejected for '{}': {}",
-                            channel_name,
-                            error
-                        );
-                        None
-                    }
-                }
-            } else {
-                Some(
+                } else {
+                    Some(
                     post_generate_fir(
                         &channel_name,
                         &initial_curve,
@@ -226,7 +230,7 @@ pub(super) fn collect_generic_channel_results(
                         ),
                     })?,
                 )
-            };
+                };
             post_generated_fir = generated.clone();
             generated.map(|generated| generated.coeffs)
         } else {
@@ -244,6 +248,8 @@ pub(super) fn collect_generic_channel_results(
                 biquads,
                 fir_coeffs,
                 optimizer_evidence,
+                audibility_veto,
+                veto_adjudication,
             },
         );
 

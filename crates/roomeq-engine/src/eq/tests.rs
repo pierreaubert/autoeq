@@ -357,6 +357,10 @@ fn prepare_single_channel_eq_flat_loss_type() {
         prep.objective_data.loss_type,
         autoeq_optim::loss::LossType::SpeakerFlat
     ));
+    assert!(
+        prep.objective_data.null_suppression.is_some(),
+        "RoomEQ flat loss must carry the narrow-null dip mask"
+    );
 }
 
 #[test]

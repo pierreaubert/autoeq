@@ -410,19 +410,23 @@ impl OptimizerConfig {
     /// band when no explicit policy is selected.
     pub fn active_correction_band(&self) -> [f64; 2] {
         self.correction_band
-            .map(|policy| [policy.min_hz, policy.max_hz])
+            .map(|policy| {
+                [
+                    policy.min_hz.max(self.min_freq),
+                    policy.max_hz.min(self.max_freq),
+                ]
+            })
             .unwrap_or([self.min_freq, self.max_freq])
     }
 
     /// Clamp the active-correction band to a curve's native support without
     /// changing the observation band used by reporting and acceptance.
-    pub fn active_correction_band_for_data(
-        &self,
-        data_min_hz: f64,
-        data_max_hz: f64,
-    ) -> [f64; 2] {
+    pub fn active_correction_band_for_data(&self, data_min_hz: f64, data_max_hz: f64) -> [f64; 2] {
         let [configured_min, configured_max] = self.active_correction_band();
-        [configured_min.max(data_min_hz), configured_max.min(data_max_hz)]
+        [
+            configured_min.max(data_min_hz),
+            configured_max.min(data_max_hz),
+        ]
     }
 
     /// Resolve psychoacoustic smoothing settings, falling back to the historical

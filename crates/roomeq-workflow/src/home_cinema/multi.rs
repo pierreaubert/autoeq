@@ -517,6 +517,8 @@ mod multi_seat_branch_tests {
             biquads: Vec::new(),
             fir_coeffs: None,
             optimizer_evidence: Vec::new(),
+            audibility_veto: Vec::new(),
+            veto_adjudication: None,
         }
     }
 

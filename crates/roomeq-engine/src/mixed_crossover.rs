@@ -233,6 +233,11 @@ pub fn process_mixed_crossover(
     channel.final_curve = Some(final_data.clone());
     channel.eq_response = Some(output::compute_eq_response(&initial_data, &final_data));
 
+    let audibility_veto = eq_result.audibility_veto.clone();
+    let veto_adjudication = eq_result
+        .veto_adjudication
+        .as_ref()
+        .map(crate::eq::audibility_veto::VetoAdjudicationSummary::to_report);
     Ok(ChannelProcessingResult {
         channel,
         pre_score: request.pre_score,
@@ -248,6 +253,8 @@ pub fn process_mixed_crossover(
             required: true,
         }),
         optimizer_evidence: eq_result.optimizer_evidence,
+        audibility_veto,
+        veto_adjudication,
     })
 }
 

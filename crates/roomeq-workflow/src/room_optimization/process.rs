@@ -13,12 +13,45 @@ use crate::group_processing::{
     process_speaker_topology_with_callback_and_frequency_samples,
 };
 use log::info;
+use roomeq_engine::group_processing::GroupProcessingResult;
 use roomeq_engine::pipeline::{PipelineStepId, PipelineStepStatus};
 use roomeq_model::Result;
 use roomeq_model::{RoomConfig, SpeakerConfig};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+
+fn with_empty_veto(result: Result<GroupProcessingResult>) -> Result<MixedModeResult> {
+    result.map(
+        |(
+            chain,
+            pre_score,
+            post_score,
+            initial_curve,
+            final_curve,
+            biquads,
+            mean_spl,
+            arrival_time_ms,
+            fir_coeffs,
+            optimizer_evidence,
+        )| {
+            (
+                chain,
+                pre_score,
+                post_score,
+                initial_curve,
+                final_curve,
+                biquads,
+                mean_spl,
+                arrival_time_ms,
+                fir_coeffs,
+                optimizer_evidence,
+                Vec::new(),
+                None,
+            )
+        },
+    )
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn process_generic_channels(
@@ -143,6 +176,8 @@ pub(super) fn process_generic_channels(
                 arrival_time_ms,
                 fir_coeffs,
                 optimizer_evidence,
+                audibility_veto,
+                veto_adjudication,
             )) => {
                 send_progress(
                     observer_shared,
@@ -178,6 +213,8 @@ pub(super) fn process_generic_channels(
                     arrival_time_ms,
                     fir_coeffs,
                     optimizer_evidence,
+                    audibility_veto,
+                    veto_adjudication,
                 )));
             }
             Err(e) => {
@@ -246,16 +283,18 @@ pub(super) fn process_speaker_internal(
                 frequency_samples,
             )
         }
-        SpeakerConfig::Group(group) => process_speaker_group_with_callback_and_frequency_samples(
-            channel_name,
-            group,
-            room_config,
-            sample_rate,
-            output_dir,
-            callback,
-            frequency_samples,
-        ),
-        SpeakerConfig::Topology(topology) => {
+        SpeakerConfig::Group(group) => {
+            with_empty_veto(process_speaker_group_with_callback_and_frequency_samples(
+                channel_name,
+                group,
+                room_config,
+                sample_rate,
+                output_dir,
+                callback,
+                frequency_samples,
+            ))
+        }
+        SpeakerConfig::Topology(topology) => with_empty_veto(
             process_speaker_topology_with_callback_and_frequency_samples(
                 channel_name,
                 topology,
@@ -264,10 +303,10 @@ pub(super) fn process_speaker_internal(
                 output_dir,
                 callback,
                 frequency_samples,
-            )
-        }
+            ),
+        ),
         SpeakerConfig::MultiSub(group) => {
-            process_multisub_group_with_callback_and_frequency_samples(
+            with_empty_veto(process_multisub_group_with_callback_and_frequency_samples(
                 channel_name,
                 group,
                 room_config,
@@ -275,26 +314,30 @@ pub(super) fn process_speaker_internal(
                 output_dir,
                 callback,
                 frequency_samples,
-            )
+            ))
         }
-        SpeakerConfig::Dba(config) => process_dba_with_callback_and_frequency_samples(
-            channel_name,
-            config,
-            room_config,
-            sample_rate,
-            output_dir,
-            callback,
-            frequency_samples,
-        ),
-        SpeakerConfig::Cardioid(config) => process_cardioid_with_callback_and_frequency_samples(
-            channel_name,
-            config,
-            room_config,
-            sample_rate,
-            output_dir,
-            callback,
-            frequency_samples,
-        ),
+        SpeakerConfig::Dba(config) => {
+            with_empty_veto(process_dba_with_callback_and_frequency_samples(
+                channel_name,
+                config,
+                room_config,
+                sample_rate,
+                output_dir,
+                callback,
+                frequency_samples,
+            ))
+        }
+        SpeakerConfig::Cardioid(config) => {
+            with_empty_veto(process_cardioid_with_callback_and_frequency_samples(
+                channel_name,
+                config,
+                room_config,
+                sample_rate,
+                output_dir,
+                callback,
+                frequency_samples,
+            ))
+        }
         SpeakerConfig::SupportingSource(_group) => {
             Err(roomeq_model::AutoeqError::InvalidConfiguration {
                 message: format!(

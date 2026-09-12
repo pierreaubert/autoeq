@@ -61,3 +61,91 @@ impl CorrectionBandPolicy {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn full_observation_band_is_legacy_compatible() {
+        let policy = CorrectionBandPolicy {
+            min_hz: 20.0,
+            max_hz: 20_000.0,
+            allow_natural_rolloff: false,
+        };
+        assert!(policy.validate_against(20.0, 20_000.0).is_ok());
+    }
+
+    #[test]
+    fn narrowed_band_requires_explicit_natural_rolloff() {
+        let policy = CorrectionBandPolicy {
+            min_hz: 40.0,
+            max_hz: 16_000.0,
+            allow_natural_rolloff: false,
+        };
+        let error = policy.validate_against(20.0, 20_000.0).unwrap_err();
+        assert!(error.contains("allow_natural_rolloff"));
+
+        assert!(
+            CorrectionBandPolicy {
+                allow_natural_rolloff: true,
+                ..policy
+            }
+            .validate_against(20.0, 20_000.0)
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn policy_cannot_escape_observation_band() {
+        let policy = CorrectionBandPolicy {
+            min_hz: 10.0,
+            max_hz: 16_000.0,
+            allow_natural_rolloff: true,
+        };
+        assert!(policy.validate_against(20.0, 20_000.0).is_err());
+    }
+
+    #[test]
+    fn serde_round_trip_keeps_rolloff_opt_in() {
+        let config = crate::OptimizerConfig {
+            min_freq: 20.0,
+            max_freq: 20_000.0,
+            correction_band: Some(CorrectionBandPolicy {
+                min_hz: 40.0,
+                max_hz: 16_000.0,
+                allow_natural_rolloff: true,
+            }),
+            ..crate::OptimizerConfig::default()
+        };
+        let value = serde_json::to_value(&config).expect("optimizer config serializes");
+        assert_eq!(value["correction_band"]["min_hz"], 40.0);
+        assert_eq!(value["correction_band"]["allow_natural_rolloff"], true);
+        let decoded: crate::OptimizerConfig = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded.active_correction_band(), [40.0, 16_000.0]);
+    }
+
+    #[test]
+    fn room_validation_rejects_implicit_narrowing() {
+        let mut room = crate::RoomConfig::default();
+        room.speakers.insert(
+            "left".into(),
+            crate::SpeakerConfig::Single(crate::MeasurementSource::InMemory(crate::Curve {
+                freq: ndarray::arr1(&[20.0, 20_000.0]),
+                spl: ndarray::arr1(&[0.0, 0.0]),
+                ..Default::default()
+            })),
+        );
+        room.optimizer.correction_band = Some(CorrectionBandPolicy {
+            min_hz: 40.0,
+            max_hz: 16_000.0,
+            allow_natural_rolloff: false,
+        });
+        let report = crate::validation_rules::validate_room_config(&room);
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|error| error.contains("correction_band"))
+        );
+    }
+}

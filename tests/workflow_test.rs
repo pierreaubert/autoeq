@@ -17,7 +17,8 @@ mod tests {
         autoeq::Curve {
             freq: ndarray::Array1::from_vec(freq),
             spl: ndarray::Array1::from_vec(spl),
-            phase: None,
+            // Synthetic routing fixture with a known common phase.
+            phase: Some(ndarray::Array1::zeros(n)),
             ..Default::default()
         }
     }

@@ -80,11 +80,16 @@ fn reference(name: &str) -> ConvolutionSidecarReference {
 #[test]
 fn spatial_fir_native_stop_does_not_return_coefficients() {
     use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy};
-    use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
     let curve = curve(false);
     let prepared = PreparedChannelInput::new(
         PreparedChannelMeasurements::new(curve.clone(), vec![curve.clone(), curve.clone()], true),
-        None, PreparedCea2034::default(), EqResources::default(),
+        None,
+        PreparedCea2034::default(),
+        EqResources::default(),
     );
     for phase in ["linear", "minimum"] {
         for algorithm in ["autoeq:de", "autoeq:cmaes"] {
@@ -96,16 +101,24 @@ fn spatial_fir_native_stop_does_not_return_coefficients() {
             room_config.optimizer.fir.as_mut().unwrap().phase = phase.into();
             room_config.optimizer.multi_measurement = Some(MultiMeasurementConfig {
                 strategy: MultiMeasurementStrategy::WeightedSum,
-                weights: Some(vec![0.5, 0.5]), ..Default::default()
+                weights: Some(vec![0.5, 0.5]),
+                ..Default::default()
             });
             let target = build_target_context("left", &room_config, &curve, None);
             let features = preprocessed(&curve);
             let resources = EqResources::default();
             let request = FirChannelRequest {
-                mode: FirChannelMode::Hybrid, channel_name: "left", prepared: &prepared,
-                room_config: &room_config, sample_rate: 48_000.0, target: &target,
-                preprocessed: &features, optimizer: &room_config.optimizer,
-                eq_resources: &resources, sidecar_reference: reference("stop.wav"), callback: None,
+                mode: FirChannelMode::Hybrid,
+                channel_name: "left",
+                prepared: &prepared,
+                room_config: &room_config,
+                sample_rate: 48_000.0,
+                target: &target,
+                preprocessed: &features,
+                optimizer: &room_config.optimizer,
+                eq_resources: &resources,
+                sidecar_reference: reference("stop.wav"),
+                callback: None,
             };
             // Two seats plus neutral, and the additional representative in the
             // linear basis. Continue through every vertex, then stop natively.
@@ -127,7 +140,12 @@ fn spatial_fir_native_stop_does_not_return_coefficients() {
                 spatial_realized::optimize(&request, &curve, &[], &progress)
             };
             let error = result.expect_err("native Stop must not deliver FIR coefficients");
-            assert!(error.to_string().contains("scalar optimization stopped by user"), "{phase}/{algorithm}: {error}");
+            assert!(
+                error
+                    .to_string()
+                    .contains("scalar optimization stopped by user"),
+                "{phase}/{algorithm}: {error}"
+            );
             assert_eq!(calls.load(Ordering::Relaxed), vertices + 1);
         }
     }
@@ -139,7 +157,9 @@ fn hybrid_callback_survives_iir_into_spatial_fir() {
     let curve = curve(false);
     let prepared = PreparedChannelInput::new(
         PreparedChannelMeasurements::new(curve.clone(), vec![curve.clone(), curve.clone()], true),
-        None, PreparedCea2034::default(), EqResources::default(),
+        None,
+        PreparedCea2034::default(),
+        EqResources::default(),
     );
     for phase in ["linear", "minimum"] {
         let mut room_config = config();
@@ -150,27 +170,43 @@ fn hybrid_callback_survives_iir_into_spatial_fir() {
         room_config.optimizer.fir.as_mut().unwrap().phase = phase.into();
         room_config.optimizer.multi_measurement = Some(MultiMeasurementConfig {
             strategy: MultiMeasurementStrategy::WeightedSum,
-            weights: Some(vec![0.5, 0.5]), ..Default::default()
+            weights: Some(vec![0.5, 0.5]),
+            ..Default::default()
         });
         let target = build_target_context("left", &room_config, &curve, None);
         let features = preprocessed(&curve);
         let resources = EqResources::default();
         let mut previous = 0;
         let result = process_fir_channel(FirChannelRequest {
-            mode: FirChannelMode::Hybrid, channel_name: "left", prepared: &prepared,
-            room_config: &room_config, sample_rate: 48_000.0, target: &target,
-            preprocessed: &features, optimizer: &room_config.optimizer,
-            eq_resources: &resources, sidecar_reference: reference("stop_after_iir.wav"),
+            mode: FirChannelMode::Hybrid,
+            channel_name: "left",
+            prepared: &prepared,
+            room_config: &room_config,
+            sample_rate: 48_000.0,
+            target: &target,
+            preprocessed: &features,
+            optimizer: &room_config.optimizer,
+            eq_resources: &resources,
+            sidecar_reference: reference("stop_after_iir.wav"),
             callback: Some(Box::new(move |iteration, _, _| {
                 let action = if iteration < previous {
                     autoeq_optim::de::CallbackAction::Stop
-                } else { autoeq_optim::de::CallbackAction::Continue };
+                } else {
+                    autoeq_optim::de::CallbackAction::Continue
+                };
                 previous = iteration;
                 action
             })),
         });
-        let error = result.err().expect("Stop at the first FIR vertex must survive IIR dispatch");
-        assert!(error.to_string().contains("Hybrid FIR stopped by progress callback"), "{phase}: {error}");
+        let error = result
+            .err()
+            .expect("Stop at the first FIR vertex must survive IIR dispatch");
+        assert!(
+            error
+                .to_string()
+                .contains("Hybrid FIR stopped by progress callback"),
+            "{phase}: {error}"
+        );
     }
 }
 
@@ -532,117 +568,187 @@ fn hybrid_honours_multi_measurement_weights() {
 fn hybrid_complete_chain_preserves_seat_weight_choice() {
     use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy};
     let frequencies = Array1::logspace(10.0, 20.0_f64.log10(), 500.0_f64.log10(), 192);
-    let flat = Curve { freq: frequencies.clone(), spl: Array1::from_elem(192, 80.0), ..Curve::default() };
+    let flat = Curve {
+        freq: frequencies.clone(),
+        spl: Array1::from_elem(192, 80.0),
+        ..Curve::default()
+    };
     let mut peak = flat.clone();
     peak.spl = frequencies.mapv(|f| 80.0 + 6.0 * (-((f - 120.0) / 30.0).powi(2)).exp());
     let mut representative = flat.clone();
     representative.spl = (&peak.spl + &flat.spl) / 2.0;
     let prepared = PreparedChannelInput::new(
         PreparedChannelMeasurements::new(representative.clone(), vec![peak, flat], true),
-        None, PreparedCea2034::default(), EqResources::default(),
+        None,
+        PreparedCea2034::default(),
+        EqResources::default(),
     );
     let mut outcomes = Vec::new();
     for sample_rate in [44_100.0, 48_000.0, 96_000.0] {
-    for (strategy, weights) in [
-        (MultiMeasurementStrategy::WeightedSum, Some(vec![1.0, 0.0])),
-        (MultiMeasurementStrategy::WeightedSum, Some(vec![0.0, 1.0])),
-        (MultiMeasurementStrategy::Minimax, None),
-    ] {
-        let mut room_config = config();
-        room_config.optimizer.num_filters = 1;
-        room_config.optimizer.max_iter = 120;
-        room_config.optimizer.population = 12;
-        room_config.optimizer.seed = Some(42);
-        room_config.optimizer.fir.as_mut().unwrap().taps = 8192;
-        room_config.optimizer.multi_measurement = Some(MultiMeasurementConfig {
-            strategy, weights: weights.clone(), ..MultiMeasurementConfig::default()
-        });
-        let resources = EqResources::default();
-        let target = build_target_context("left", &room_config, &representative, None);
-        let features = preprocessed(&representative);
-        let result = process_fir_channel(FirChannelRequest {
-            mode: FirChannelMode::Hybrid, channel_name: "left", prepared: &prepared,
-            room_config: &room_config, sample_rate, target: &target,
-            preprocessed: &features, optimizer: &room_config.optimizer,
-            eq_resources: &resources, sidecar_reference: reference("spatial_residual.wav"),
-            callback: None,
-        }).unwrap();
-        let iir = response::compute_peq_complex_response(&result.filters, &Array1::from_vec(vec![120.0]), sample_rate)[0];
-        // Independent direct DTFT of the actual in-memory FIR coefficients.
-        let taps = result.fir_coeffs.as_ref().unwrap();
-        let fir = taps.iter().enumerate().fold(num_complex::Complex64::new(0.0, 0.0), |sum, (n, tap)| {
-            sum + num_complex::Complex64::from_polar(*tap, -std::f64::consts::TAU * 120.0 * n as f64 / sample_rate)
-        });
-        // Serialize the actual chain and round-trip the taps through a mono
-        // float WAV before canonical replay. Compare against an independent
-        // direct DTFT; this is not an external playback-backend test.
-        let chain = serde_json::from_slice(&serde_json::to_vec(&result.channel).unwrap()).unwrap();
-        let mut bytes = std::io::Cursor::new(Vec::new());
-        {
-            let mut wav = hound::WavWriter::new(&mut bytes, hound::WavSpec {
-                channels: 1, sample_rate: sample_rate as u32, bits_per_sample: 32,
-                sample_format: hound::SampleFormat::Float,
-            }).unwrap();
-            for tap in taps { wav.write_sample(*tap as f32).unwrap(); }
-            wav.finalize().unwrap();
-        }
-        let mut wav = hound::WavReader::new(std::io::Cursor::new(bytes.into_inner())).unwrap();
-        struct Sidecar(Vec<f64>, u32);
-        impl crate::dsp_realization::ConvolutionIrProvider for Sidecar {
-            fn taps(&mut self, name: &str, rate: u32) -> Result<&[f64]> {
-                assert_eq!(name, "spatial_residual.wav");
-                assert_eq!(rate, self.1);
-                Ok(&self.0)
+        for (strategy, weights) in [
+            (MultiMeasurementStrategy::WeightedSum, Some(vec![1.0, 0.0])),
+            (MultiMeasurementStrategy::WeightedSum, Some(vec![0.0, 1.0])),
+            (MultiMeasurementStrategy::Minimax, None),
+        ] {
+            let mut room_config = config();
+            room_config.optimizer.num_filters = 1;
+            room_config.optimizer.max_iter = 120;
+            room_config.optimizer.population = 12;
+            room_config.optimizer.seed = Some(42);
+            room_config.optimizer.fir.as_mut().unwrap().taps = 8192;
+            room_config.optimizer.multi_measurement = Some(MultiMeasurementConfig {
+                strategy,
+                weights: weights.clone(),
+                ..MultiMeasurementConfig::default()
+            });
+            let resources = EqResources::default();
+            let target = build_target_context("left", &room_config, &representative, None);
+            let features = preprocessed(&representative);
+            let result = process_fir_channel(FirChannelRequest {
+                mode: FirChannelMode::Hybrid,
+                channel_name: "left",
+                prepared: &prepared,
+                room_config: &room_config,
+                sample_rate,
+                target: &target,
+                preprocessed: &features,
+                optimizer: &room_config.optimizer,
+                eq_resources: &resources,
+                sidecar_reference: reference("spatial_residual.wav"),
+                callback: None,
+            })
+            .unwrap();
+            let iir = response::compute_peq_complex_response(
+                &result.filters,
+                &Array1::from_vec(vec![120.0]),
+                sample_rate,
+            )[0];
+            // Independent direct DTFT of the actual in-memory FIR coefficients.
+            let taps = result.fir_coeffs.as_ref().unwrap();
+            let fir = taps.iter().enumerate().fold(
+                num_complex::Complex64::new(0.0, 0.0),
+                |sum, (n, tap)| {
+                    sum + num_complex::Complex64::from_polar(
+                        *tap,
+                        -std::f64::consts::TAU * 120.0 * n as f64 / sample_rate,
+                    )
+                },
+            );
+            // Serialize the actual chain and round-trip the taps through a mono
+            // float WAV before canonical replay. Compare against an independent
+            // direct DTFT; this is not an external playback-backend test.
+            let chain =
+                serde_json::from_slice(&serde_json::to_vec(&result.channel).unwrap()).unwrap();
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            {
+                let mut wav = hound::WavWriter::new(
+                    &mut bytes,
+                    hound::WavSpec {
+                        channels: 1,
+                        sample_rate: sample_rate as u32,
+                        bits_per_sample: 32,
+                        sample_format: hound::SampleFormat::Float,
+                    },
+                )
+                .unwrap();
+                for tap in taps {
+                    wav.write_sample(*tap as f32).unwrap();
+                }
+                wav.finalize().unwrap();
             }
-        }
-        let mut sidecar = Sidecar(wav.samples::<f32>().map(|v| v.unwrap() as f64).collect(), sample_rate as u32);
-        let mut replay = crate::dsp_realization::RealizedDsp::new(&chain, sample_rate, &mut sidecar).unwrap();
-        let verification_grid = Array1::logspace(10.0, 20.0_f64.log10(), 500.0_f64.log10(), 257);
-        let iir_grid = response::compute_peq_complex_response(&result.filters, &verification_grid, sample_rate);
-        let mut maximum_roundtrip_error = 0.0_f64;
-        let mut maximum_fir_group_delay_error_samples = 0.0_f64;
-        let native_peak = &prepared.measurements().individual()[0];
-        let native_levels: Vec<_> = native_peak.freq.iter().zip(&native_peak.spl)
-            .filter(|(frequency, _)| **frequency >= 20.0 && **frequency <= 500.0)
-            .map(|(_, level)| *level - 80.0).collect();
-        let peak_reference = native_levels.iter().sum::<f64>() / native_levels.len() as f64;
-        let mut peak_errors = Vec::new();
-        let mut flat_errors = Vec::new();
-        for (bin, &frequency) in verification_grid.iter().enumerate() {
-            let reference_fir: num_complex::Complex64 = taps.iter().enumerate().map(|(n, tap)|
-                num_complex::Complex64::from_polar(*tap, -std::f64::consts::TAU * frequency * n as f64 / sample_rate)
-            ).sum();
-            let expected = iir_grid[bin] * reference_fir;
-            // Exact DTFT derivative, not differencing wrapped phase:
-            // group delay in samples = Re(sum n*h[n]*exp(-j*w*n) / H).
-            let moment: num_complex::Complex64 = taps.iter().enumerate().map(|(n, tap)|
-                num_complex::Complex64::from_polar(n as f64 * tap,
-                    -std::f64::consts::TAU * frequency * n as f64 / sample_rate)
-            ).sum();
-            assert!(reference_fir.norm() > 1e-8, "group delay needs nonzero transfer");
-            let delay_samples = (moment / reference_fir).re;
-            maximum_fir_group_delay_error_samples = maximum_fir_group_delay_error_samples
-                .max((delay_samples - (taps.len() / 2) as f64).abs());
-            let correction_db = 20.0 * expected.norm().log10();
-            peak_errors.push(6.0 * (-((frequency - 120.0) / 30.0).powi(2)).exp() - peak_reference + correction_db);
-            flat_errors.push(correction_db);
-            let error = (replay.response_at(frequency).unwrap() - expected).norm();
-            maximum_roundtrip_error = maximum_roundtrip_error.max(error);
-            assert!(error < 2e-6, "serialized Hybrid at {frequency} Hz: {error}");
-        }
-        // Independent log-frequency quadrature with the original native
-        // reference level fixed before correction, matching the declared
-        // normalized shape task without fitting away candidate gain changes.
-        let rms = |errors: &[f64]| {
-            let integral: f64 = (1..errors.len()).map(|i|
-                (verification_grid[i] / verification_grid[i - 1]).ln()
-                    * (errors[i - 1].powi(2) + errors[i].powi(2)) / 2.0
-            ).sum();
-            (integral / (500.0_f64 / 20.0).ln()).sqrt()
-        };
-        let peak_rms = rms(&peak_errors);
-        let flat_rms = rms(&flat_errors);
-        outcomes.push(serde_json::json!({
+            let mut wav = hound::WavReader::new(std::io::Cursor::new(bytes.into_inner())).unwrap();
+            struct Sidecar(Vec<f64>, u32);
+            impl crate::dsp_realization::ConvolutionIrProvider for Sidecar {
+                fn taps(&mut self, name: &str, rate: u32) -> Result<&[f64]> {
+                    assert_eq!(name, "spatial_residual.wav");
+                    assert_eq!(rate, self.1);
+                    Ok(&self.0)
+                }
+            }
+            let mut sidecar = Sidecar(
+                wav.samples::<f32>().map(|v| v.unwrap() as f64).collect(),
+                sample_rate as u32,
+            );
+            let mut replay =
+                crate::dsp_realization::RealizedDsp::new(&chain, sample_rate, &mut sidecar)
+                    .unwrap();
+            let verification_grid =
+                Array1::logspace(10.0, 20.0_f64.log10(), 500.0_f64.log10(), 257);
+            let iir_grid = response::compute_peq_complex_response(
+                &result.filters,
+                &verification_grid,
+                sample_rate,
+            );
+            let mut maximum_roundtrip_error = 0.0_f64;
+            let mut maximum_fir_group_delay_error_samples = 0.0_f64;
+            let native_peak = &prepared.measurements().individual()[0];
+            let native_levels: Vec<_> = native_peak
+                .freq
+                .iter()
+                .zip(&native_peak.spl)
+                .filter(|(frequency, _)| **frequency >= 20.0 && **frequency <= 500.0)
+                .map(|(_, level)| *level - 80.0)
+                .collect();
+            let peak_reference = native_levels.iter().sum::<f64>() / native_levels.len() as f64;
+            let mut peak_errors = Vec::new();
+            let mut flat_errors = Vec::new();
+            for (bin, &frequency) in verification_grid.iter().enumerate() {
+                let reference_fir: num_complex::Complex64 = taps
+                    .iter()
+                    .enumerate()
+                    .map(|(n, tap)| {
+                        num_complex::Complex64::from_polar(
+                            *tap,
+                            -std::f64::consts::TAU * frequency * n as f64 / sample_rate,
+                        )
+                    })
+                    .sum();
+                let expected = iir_grid[bin] * reference_fir;
+                // Exact DTFT derivative, not differencing wrapped phase:
+                // group delay in samples = Re(sum n*h[n]*exp(-j*w*n) / H).
+                let moment: num_complex::Complex64 = taps
+                    .iter()
+                    .enumerate()
+                    .map(|(n, tap)| {
+                        num_complex::Complex64::from_polar(
+                            n as f64 * tap,
+                            -std::f64::consts::TAU * frequency * n as f64 / sample_rate,
+                        )
+                    })
+                    .sum();
+                assert!(
+                    reference_fir.norm() > 1e-8,
+                    "group delay needs nonzero transfer"
+                );
+                let delay_samples = (moment / reference_fir).re;
+                maximum_fir_group_delay_error_samples = maximum_fir_group_delay_error_samples
+                    .max((delay_samples - (taps.len() / 2) as f64).abs());
+                let correction_db = 20.0 * expected.norm().log10();
+                peak_errors.push(
+                    6.0 * (-((frequency - 120.0) / 30.0).powi(2)).exp() - peak_reference
+                        + correction_db,
+                );
+                flat_errors.push(correction_db);
+                let error = (replay.response_at(frequency).unwrap() - expected).norm();
+                maximum_roundtrip_error = maximum_roundtrip_error.max(error);
+                assert!(error < 2e-6, "serialized Hybrid at {frequency} Hz: {error}");
+            }
+            // Independent log-frequency quadrature with the original native
+            // reference level fixed before correction, matching the declared
+            // normalized shape task without fitting away candidate gain changes.
+            let rms = |errors: &[f64]| {
+                let integral: f64 = (1..errors.len())
+                    .map(|i| {
+                        (verification_grid[i] / verification_grid[i - 1]).ln()
+                            * (errors[i - 1].powi(2) + errors[i].powi(2))
+                            / 2.0
+                    })
+                    .sum();
+                (integral / (500.0_f64 / 20.0).ln()).sqrt()
+            };
+            let peak_rms = rms(&peak_errors);
+            let flat_rms = rms(&flat_errors);
+            outcomes.push(serde_json::json!({
             "strategy": strategy, "weights": weights, "sample_rate_hz": sample_rate, "actual_fir_taps": taps.len(),
             "iir_db_at_120hz": 20.0 * iir.norm().log10(),
             "fir_db_at_120hz": 20.0 * fir.norm().log10(),
@@ -657,9 +763,10 @@ fn hybrid_complete_chain_preserves_seat_weight_choice() {
             "expected_fir_delay_samples": taps.len() / 2,
             "max_fir_group_delay_error_samples": maximum_fir_group_delay_error_samples,
         }));
+        }
     }
-    }
-    let evidence_directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/qa");
+    let evidence_directory =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/qa");
     std::fs::create_dir_all(&evidence_directory).unwrap();
     std::fs::write(evidence_directory.join("hybrid-spatial-complete-chain.json"), serde_json::to_vec_pretty(&serde_json::json!({
         "scope": "analytic_training_seat_in_memory_iir_plus_fir_not_workflow_acceptance_or_backend_render",
@@ -667,22 +774,31 @@ fn hybrid_complete_chain_preserves_seat_weight_choice() {
     })).unwrap()).unwrap();
     assert_eq!(outcomes.len(), 9);
     for pair in outcomes.chunks_exact(3) {
-    for outcome in pair {
-        assert!(outcome["max_fir_group_delay_error_samples"].as_f64().unwrap() < 0.05,
-            "linear FIR timing changed over supported band: {outcome}");
-    }
-    assert_eq!(pair[0]["actual_fir_taps"], 8192);
-    assert_eq!(pair[1]["actual_fir_taps"], 8192);
-    assert_eq!(pair[2]["actual_fir_taps"], 8192);
-    let peak_weighted = pair[0]["complete_chain_db_at_120hz"].as_f64().unwrap();
-    let flat_weighted = pair[1]["complete_chain_db_at_120hz"].as_f64().unwrap();
-    assert!(flat_weighted - peak_weighted > 2.0,
-        "complete hybrid erased seat-weight choice: peak {peak_weighted:.3} dB, flat {flat_weighted:.3} dB");
-    let minimax = pair[2]["worst_seat_shape_rms_db"].as_f64().unwrap();
-    for single_seat in &pair[..2] {
-        assert!(minimax + 0.05 < single_seat["worst_seat_shape_rms_db"].as_f64().unwrap(),
-            "minimax must improve worst-seat error over a single-seat choice: {pair:?}");
-    }
+        for outcome in pair {
+            assert!(
+                outcome["max_fir_group_delay_error_samples"]
+                    .as_f64()
+                    .unwrap()
+                    < 0.05,
+                "linear FIR timing changed over supported band: {outcome}"
+            );
+        }
+        assert_eq!(pair[0]["actual_fir_taps"], 8192);
+        assert_eq!(pair[1]["actual_fir_taps"], 8192);
+        assert_eq!(pair[2]["actual_fir_taps"], 8192);
+        let peak_weighted = pair[0]["complete_chain_db_at_120hz"].as_f64().unwrap();
+        let flat_weighted = pair[1]["complete_chain_db_at_120hz"].as_f64().unwrap();
+        assert!(
+            flat_weighted - peak_weighted > 2.0,
+            "complete hybrid erased seat-weight choice: peak {peak_weighted:.3} dB, flat {flat_weighted:.3} dB"
+        );
+        let minimax = pair[2]["worst_seat_shape_rms_db"].as_f64().unwrap();
+        for single_seat in &pair[..2] {
+            assert!(
+                minimax + 0.05 < single_seat["worst_seat_shape_rms_db"].as_f64().unwrap(),
+                "minimax must improve worst-seat error over a single-seat choice: {pair:?}"
+            );
+        }
     }
 }
 
@@ -746,6 +862,8 @@ fn fir_assembly_exports_every_preprocessing_and_preference_stage() {
         },
         Vec::new(),
         None,
+        Vec::new(),
+        None,
     )
     .unwrap();
 
@@ -806,23 +924,46 @@ fn kirkeby_hybrid_cannot_use_iir_phase_as_missing_acoustic_phase() {
     let target = build_target_context("left", &room_config, &measurement, None);
     let resources = EqResources::default();
     let result = process_fir_channel(FirChannelRequest {
-        mode: FirChannelMode::Hybrid, channel_name: "left", prepared: &prepared,
-        room_config: &room_config, sample_rate: 48_000.0, target: &target,
-        preprocessed: &features, optimizer: &room_config.optimizer, eq_resources: &resources,
-        sidecar_reference: reference("missing_phase.wav"), callback: None,
+        mode: FirChannelMode::Hybrid,
+        channel_name: "left",
+        prepared: &prepared,
+        room_config: &room_config,
+        sample_rate: 48_000.0,
+        target: &target,
+        preprocessed: &features,
+        optimizer: &room_config.optimizer,
+        eq_resources: &resources,
+        sidecar_reference: reference("missing_phase.wav"),
+        callback: None,
     });
-    assert!(result.err().expect("missing acoustic phase must fail before IIR generation")
-        .to_string().contains("requires acoustic phase"));
+    assert!(
+        result
+            .err()
+            .expect("missing acoustic phase must fail before IIR generation")
+            .to_string()
+            .contains("requires acoustic phase")
+    );
 }
 
 #[test]
 fn hybrid_complete_transfer_is_invariant_to_weighted_seat_permutation() {
     use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy};
     let frequencies = Array1::logspace(10.0, 20.0_f64.log10(), 500.0_f64.log10(), 96);
-    let flat = Curve { freq: frequencies.clone(), spl: Array1::from_elem(96, 80.0), ..Default::default() };
-    let peak = Curve { freq: frequencies.clone(),
-        spl: frequencies.mapv(|f| 80.0 + 6.0 * (-((f - 120.0) / 30.0).powi(2)).exp()), ..Default::default() };
-    let representative = Curve { freq: frequencies, spl: (&peak.spl + &flat.spl) / 2.0, ..Default::default() };
+    let flat = Curve {
+        freq: frequencies.clone(),
+        spl: Array1::from_elem(96, 80.0),
+        ..Default::default()
+    };
+    let peak = Curve {
+        freq: frequencies.clone(),
+        spl: frequencies.mapv(|f| 80.0 + 6.0 * (-((f - 120.0) / 30.0).powi(2)).exp()),
+        ..Default::default()
+    };
+    let representative = Curve {
+        freq: frequencies,
+        spl: (&peak.spl + &flat.spl) / 2.0,
+        ..Default::default()
+    };
     let replay_grid = Array1::logspace(10.0, 20.0_f64.log10(), 500.0_f64.log10(), 257);
     let mut records = Vec::new();
     let mut failures = Vec::new();
@@ -830,11 +971,22 @@ fn hybrid_complete_transfer_is_invariant_to_weighted_seat_permutation() {
         for sample_rate in [44_100.0, 48_000.0, 96_000.0] {
             let mut transfers = Vec::new();
             for reversed in [false, true] {
-                let seats = if reversed { vec![flat.clone(), peak.clone()] } else { vec![peak.clone(), flat.clone()] };
-                let weights = if reversed { vec![0.2, 0.8] } else { vec![0.8, 0.2] };
+                let seats = if reversed {
+                    vec![flat.clone(), peak.clone()]
+                } else {
+                    vec![peak.clone(), flat.clone()]
+                };
+                let weights = if reversed {
+                    vec![0.2, 0.8]
+                } else {
+                    vec![0.8, 0.2]
+                };
                 let prepared = PreparedChannelInput::new(
                     PreparedChannelMeasurements::new(representative.clone(), seats, true),
-                    None, PreparedCea2034::default(), EqResources::default());
+                    None,
+                    PreparedCea2034::default(),
+                    EqResources::default(),
+                );
                 let mut room_config = config();
                 room_config.optimizer.num_filters = 1;
                 room_config.optimizer.algorithm = "autoeq:cobyla".into();
@@ -844,25 +996,51 @@ fn hybrid_complete_transfer_is_invariant_to_weighted_seat_permutation() {
                 fir.phase = phase_kind.into();
                 fir.taps = 2048;
                 room_config.optimizer.multi_measurement = Some(MultiMeasurementConfig {
-                    strategy: MultiMeasurementStrategy::WeightedSum, weights: Some(weights), ..Default::default()
+                    strategy: MultiMeasurementStrategy::WeightedSum,
+                    weights: Some(weights),
+                    ..Default::default()
                 });
                 let target = build_target_context("left", &room_config, &representative, None);
                 let features = preprocessed(&representative);
                 let resources = EqResources::default();
                 let result = process_fir_channel(FirChannelRequest {
-                    mode: FirChannelMode::Hybrid, channel_name: "left", prepared: &prepared,
-                    room_config: &room_config, sample_rate, target: &target,
-                    preprocessed: &features, optimizer: &room_config.optimizer,
-                    eq_resources: &resources, sidecar_reference: reference("permuted.wav"), callback: None,
-                }).unwrap();
-                let iir = response::compute_peq_complex_response(&result.filters, &replay_grid, sample_rate);
+                    mode: FirChannelMode::Hybrid,
+                    channel_name: "left",
+                    prepared: &prepared,
+                    room_config: &room_config,
+                    sample_rate,
+                    target: &target,
+                    preprocessed: &features,
+                    optimizer: &room_config.optimizer,
+                    eq_resources: &resources,
+                    sidecar_reference: reference("permuted.wav"),
+                    callback: None,
+                })
+                .unwrap();
+                let iir = response::compute_peq_complex_response(
+                    &result.filters,
+                    &replay_grid,
+                    sample_rate,
+                );
                 let taps = result.fir_coeffs.as_ref().unwrap();
                 // H(exp(j*omega)) = sum_n h[n] exp(-j*omega*n), no FFT normalization.
-                let transfer: Vec<_> = replay_grid.iter().zip(iir.iter()).map(|(&f, &iir)| {
-                    let fir: num_complex::Complex64 = taps.iter().enumerate().map(|(n, &tap)|
-                        num_complex::Complex64::from_polar(tap, -std::f64::consts::TAU * f * n as f64 / sample_rate)).sum();
-                    iir * fir
-                }).collect();
+                let transfer: Vec<_> = replay_grid
+                    .iter()
+                    .zip(iir.iter())
+                    .map(|(&f, &iir)| {
+                        let fir: num_complex::Complex64 = taps
+                            .iter()
+                            .enumerate()
+                            .map(|(n, &tap)| {
+                                num_complex::Complex64::from_polar(
+                                    tap,
+                                    -std::f64::consts::TAU * f * n as f64 / sample_rate,
+                                )
+                            })
+                            .sum();
+                        iir * fir
+                    })
+                    .collect();
                 records.push(serde_json::json!({"phase": phase_kind, "rate": sample_rate,
                     "reversed": reversed, "optimizer": result.optimizer_evidence}));
                 transfers.push(transfer);
@@ -907,9 +1085,15 @@ fn fixed_budget_hybrid_stop_does_not_continue_into_fir() {
     let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed = calls.clone();
     let result = process_fir_channel(FirChannelRequest {
-        mode: FirChannelMode::Hybrid, channel_name: "left", prepared: &prepared,
-        room_config: &room_config, sample_rate: 48_000.0, target: &target,
-        preprocessed: &features, optimizer: &room_config.optimizer, eq_resources: &resources,
+        mode: FirChannelMode::Hybrid,
+        channel_name: "left",
+        prepared: &prepared,
+        room_config: &room_config,
+        sample_rate: 48_000.0,
+        target: &target,
+        preprocessed: &features,
+        optimizer: &room_config.optimizer,
+        eq_resources: &resources,
         sidecar_reference: reference("stopped.wav"),
         callback: Some(Box::new(move |_, _, _| {
             observed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -917,8 +1101,13 @@ fn fixed_budget_hybrid_stop_does_not_continue_into_fir() {
         })),
     });
     assert!(calls.load(std::sync::atomic::Ordering::Relaxed) > 0);
-    let error = result.err().expect("stopped IIR search must not produce a completed Hybrid artifact");
-    assert!(error.to_string().contains("stopped by progress callback"), "{error}");
+    let error = result
+        .err()
+        .expect("stopped IIR search must not produce a completed Hybrid artifact");
+    assert!(
+        error.to_string().contains("stopped by progress callback"),
+        "{error}"
+    );
 }
 
 fn nonlinear_spatial_weight_fixture(phase_kind: &str, correct_excess_phase: bool) {
@@ -927,16 +1116,39 @@ fn nonlinear_spatial_weight_fixture(phase_kind: &str, correct_excess_phase: bool
     // Stable first-order digital all-pass plus common arrival delay. The
     // all-pass creates dispersion that cannot be explained by delay alone.
     let allpass_pole = (-std::f64::consts::TAU * 150.0 / 48_000.0).exp();
-    let phase = (phase_kind == "kirkeby").then(|| frequencies.mapv(|f| {
-        let z = num_complex::Complex64::from_polar(1.0, -std::f64::consts::TAU * f / 48_000.0);
-        ((z - allpass_pole) / (1.0 - allpass_pole * z)).arg().to_degrees() - 360.0 * f * 0.01
-    }));
-    let flat = Curve { freq: frequencies.clone(), spl: Array1::from_elem(96, 80.0), phase: phase.clone(), ..Default::default() };
-    let peak = Curve { freq: frequencies.clone(),
-        spl: frequencies.mapv(|f| 80.0 + 6.0 * (-((f - 120.0) / 30.0).powi(2)).exp()), phase: phase.clone(), ..Default::default() };
-    let representative = Curve { freq: frequencies.clone(), spl: (&peak.spl + &flat.spl) / 2.0, phase, ..Default::default() };
-    let prepared = PreparedChannelInput::new(PreparedChannelMeasurements::new(
-        representative.clone(), vec![peak, flat], true), None, PreparedCea2034::default(), EqResources::default());
+    let phase = (phase_kind == "kirkeby").then(|| {
+        frequencies.mapv(|f| {
+            let z = num_complex::Complex64::from_polar(1.0, -std::f64::consts::TAU * f / 48_000.0);
+            ((z - allpass_pole) / (1.0 - allpass_pole * z))
+                .arg()
+                .to_degrees()
+                - 360.0 * f * 0.01
+        })
+    });
+    let flat = Curve {
+        freq: frequencies.clone(),
+        spl: Array1::from_elem(96, 80.0),
+        phase: phase.clone(),
+        ..Default::default()
+    };
+    let peak = Curve {
+        freq: frequencies.clone(),
+        spl: frequencies.mapv(|f| 80.0 + 6.0 * (-((f - 120.0) / 30.0).powi(2)).exp()),
+        phase: phase.clone(),
+        ..Default::default()
+    };
+    let representative = Curve {
+        freq: frequencies.clone(),
+        spl: (&peak.spl + &flat.spl) / 2.0,
+        phase,
+        ..Default::default()
+    };
+    let prepared = PreparedChannelInput::new(
+        PreparedChannelMeasurements::new(representative.clone(), vec![peak, flat], true),
+        None,
+        PreparedCea2034::default(),
+        EqResources::default(),
+    );
     let mut outcomes = Vec::new();
     for weights in [vec![1.0, 0.0], vec![0.0, 1.0]] {
         let mut room_config = config();
@@ -948,61 +1160,115 @@ fn nonlinear_spatial_weight_fixture(phase_kind: &str, correct_excess_phase: bool
         fir_config.correct_excess_phase = correct_excess_phase;
         fir_config.taps = 2048;
         room_config.optimizer.multi_measurement = Some(MultiMeasurementConfig {
-            strategy: MultiMeasurementStrategy::WeightedSum, weights: Some(weights.clone()), ..Default::default()
+            strategy: MultiMeasurementStrategy::WeightedSum,
+            weights: Some(weights.clone()),
+            ..Default::default()
         });
         let target = build_target_context("left", &room_config, &representative, None);
         let features = preprocessed(&representative);
         let resources = EqResources::default();
         let result = process_fir_channel(FirChannelRequest {
-            mode: FirChannelMode::Hybrid, channel_name: "left", prepared: &prepared,
-            room_config: &room_config, sample_rate: 48_000.0, target: &target,
-            preprocessed: &features, optimizer: &room_config.optimizer, eq_resources: &resources,
-            sidecar_reference: reference("minimum_spatial.wav"), callback: None,
-        }).unwrap();
+            mode: FirChannelMode::Hybrid,
+            channel_name: "left",
+            prepared: &prepared,
+            room_config: &room_config,
+            sample_rate: 48_000.0,
+            target: &target,
+            preprocessed: &features,
+            optimizer: &room_config.optimizer,
+            eq_resources: &resources,
+            sidecar_reference: reference("minimum_spatial.wav"),
+            callback: None,
+        })
+        .unwrap();
         let taps = result.fir_coeffs.as_ref().unwrap();
         assert_eq!(taps.len(), 2048);
-        let iir = response::compute_peq_complex_response(&result.filters, &Array1::from_vec(vec![120.0]), 48_000.0)[0];
-        let fir: num_complex::Complex64 = taps.iter().enumerate().map(|(n, tap)|
-            num_complex::Complex64::from_polar(*tap, -std::f64::consts::TAU * 120.0 * n as f64 / 48_000.0)).sum();
+        let iir = response::compute_peq_complex_response(
+            &result.filters,
+            &Array1::from_vec(vec![120.0]),
+            48_000.0,
+        )[0];
+        let fir: num_complex::Complex64 = taps
+            .iter()
+            .enumerate()
+            .map(|(n, tap)| {
+                num_complex::Complex64::from_polar(
+                    *tap,
+                    -std::f64::consts::TAU * 120.0 * n as f64 / 48_000.0,
+                )
+            })
+            .sum();
         let energy: f64 = taps.iter().map(|tap| tap * tap).sum();
-        let centroid = taps.iter().enumerate().map(|(n, tap)| n as f64 * tap * tap).sum::<f64>() / energy;
+        let centroid = taps
+            .iter()
+            .enumerate()
+            .map(|(n, tap)| n as f64 * tap * tap)
+            .sum::<f64>()
+            / energy;
         let mut pre_delays = Vec::new();
         let mut post_delays = Vec::new();
         let mut complete_delays = Vec::new();
         let mut iir_delays = Vec::new();
         for frequency in [40.0, 100.0, 200.0, 400.0] {
             let omega = std::f64::consts::TAU * frequency / 48_000.0;
-            let allpass_delay = (1.0 - allpass_pole.powi(2)) /
-                (1.0 + allpass_pole.powi(2) - 2.0 * allpass_pole * omega.cos());
-            let h: num_complex::Complex64 = taps.iter().enumerate().map(|(n, tap)|
-                num_complex::Complex64::from_polar(*tap, -omega * n as f64)).sum();
-            let moment: num_complex::Complex64 = taps.iter().enumerate().map(|(n, tap)|
-                num_complex::Complex64::from_polar(n as f64 * tap, -omega * n as f64)).sum();
+            let allpass_delay = (1.0 - allpass_pole.powi(2))
+                / (1.0 + allpass_pole.powi(2) - 2.0 * allpass_pole * omega.cos());
+            let h: num_complex::Complex64 = taps
+                .iter()
+                .enumerate()
+                .map(|(n, tap)| num_complex::Complex64::from_polar(*tap, -omega * n as f64))
+                .sum();
+            let moment: num_complex::Complex64 = taps
+                .iter()
+                .enumerate()
+                .map(|(n, tap)| {
+                    num_complex::Complex64::from_polar(n as f64 * tap, -omega * n as f64)
+                })
+                .sum();
             pre_delays.push(allpass_delay);
             post_delays.push(allpass_delay + (moment / h).re);
             // Differentiate the actual IIR transfer, not only the FIR. Check
             // two frequency steps so the numerical oracle is not step-sensitive.
             let iir_delay = |step: f64| {
                 let grid = Array1::from_vec(vec![frequency - step, frequency + step]);
-                let response = response::compute_peq_complex_response(&result.filters, &grid, 48_000.0);
-                -(response[1] / response[0]).arg() * 48_000.0
-                    / (std::f64::consts::TAU * 2.0 * step)
+                let response =
+                    response::compute_peq_complex_response(&result.filters, &grid, 48_000.0);
+                -(response[1] / response[0]).arg() * 48_000.0 / (std::f64::consts::TAU * 2.0 * step)
             };
             let delay = iir_delay(0.01);
-            assert!((delay - iir_delay(0.001)).abs() < 1e-3,
-                "IIR delay oracle is step-sensitive at {frequency} Hz");
+            assert!(
+                (delay - iir_delay(0.001)).abs() < 1e-3,
+                "IIR delay oracle is step-sensitive at {frequency} Hz"
+            );
             assert!(delay.is_finite() && (moment / h).re.is_finite());
             iir_delays.push(delay);
-            let acoustic_delay = if phase_kind == "kirkeby" { 480.0 + allpass_delay } else { 0.0 };
+            let acoustic_delay = if phase_kind == "kirkeby" {
+                480.0 + allpass_delay
+            } else {
+                0.0
+            };
             complete_delays.push(acoustic_delay + delay + (moment / h).re);
         }
-        let spread = |values: &[f64]| values.iter().copied().fold(f64::NEG_INFINITY, f64::max)
-            - values.iter().copied().fold(f64::INFINITY, f64::min);
+        let spread = |values: &[f64]| {
+            values.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+                - values.iter().copied().fold(f64::INFINITY, f64::min)
+        };
         if phase_kind == "minimum" {
-            assert!(centroid < 100.0, "minimum-phase design acquired linear-phase latency: {centroid}");
+            assert!(
+                centroid < 100.0,
+                "minimum-phase design acquired linear-phase latency: {centroid}"
+            );
         }
-        let expected_kind = if phase_kind == "minimum" { "minimum-phase" } else { "kirkeby reference-phase" };
-        assert!(result.optimizer_evidence.iter().any(|evidence| evidence.status.contains(&format!("{expected_kind} realized dB-basis"))));
+        let expected_kind = if phase_kind == "minimum" {
+            "minimum-phase"
+        } else {
+            "kirkeby reference-phase"
+        };
+        assert!(result.optimizer_evidence.iter().any(|evidence| {
+            evidence
+                .status
+                .contains(&format!("{expected_kind} realized dB-basis"))
+        }));
         outcomes.push(serde_json::json!({"weights": weights, "correction_db_at_120hz": 20.0 * (iir * fir).norm().log10(),
             "fir_taps": taps.len(), "energy_centroid_samples": centroid, "optimizer_evidence": result.optimizer_evidence,
             "analytic_allpass_delay_spread_samples": spread(&pre_delays),
@@ -1021,12 +1287,22 @@ fn nonlinear_spatial_weight_fixture(phase_kind: &str, correct_excess_phase: bool
     })).unwrap()).unwrap();
     let peak = outcomes[0]["correction_db_at_120hz"].as_f64().unwrap();
     let flat = outcomes[1]["correction_db_at_120hz"].as_f64().unwrap();
-    assert!(flat - peak > 2.0, "{phase_kind} Hybrid erased weight choice: {peak} vs {flat}");
+    assert!(
+        flat - peak > 2.0,
+        "{phase_kind} Hybrid erased weight choice: {peak} vs {flat}"
+    );
     if phase_kind == "kirkeby" && correct_excess_phase {
         let flat_case = &outcomes[1];
-        assert!(flat_case["complete_acoustic_iir_fir_delay_spread_samples"].as_f64().unwrap()
-            < 0.5 * flat_case["analytic_allpass_delay_spread_samples"].as_f64().unwrap(),
-            "Kirkeby did not correct reference all-pass dispersion: {flat_case}");
+        assert!(
+            flat_case["complete_acoustic_iir_fir_delay_spread_samples"]
+                .as_f64()
+                .unwrap()
+                < 0.5
+                    * flat_case["analytic_allpass_delay_spread_samples"]
+                        .as_f64()
+                        .unwrap(),
+            "Kirkeby did not correct reference all-pass dispersion: {flat_case}"
+        );
     }
 }
 
@@ -1072,6 +1348,8 @@ fn fir_post_score_does_not_count_intended_target_tilt() {
             coefficients: vec![1.0],
             sidecar_reference: request.sidecar_reference.clone(),
         },
+        Vec::new(),
+        None,
         Vec::new(),
         None,
     )

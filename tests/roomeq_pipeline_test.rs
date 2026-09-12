@@ -380,6 +380,13 @@ fn optimize_room_with_ctc_writes_metadata_and_artifact() {
 
     let result =
         optimize_room(&config, 48_000.0, None, Some(dir.path())).expect("room optimization");
+    assert!(result.metadata.stage_outcomes.iter().any(|stage| {
+        stage.stage == "final_correction_selection"
+            && stage
+                .advisories
+                .iter()
+                .any(|advisory| advisory == "final_seat_evidence=insufficient_evidence")
+    }));
     let ctc = result.metadata.ctc.expect("ctc metadata");
     assert_eq!(ctc.source, "measured");
     assert_eq!(ctc.speakers, vec!["L", "R"]);

@@ -51,6 +51,9 @@ pub struct VetoEvaluation<'a> {
     pub config: FilterAudibilityConfig,
     /// Resolved HF guard start in Hz.
     pub hf_guard_start_hz: f64,
+    /// Explicit measured modal evidence. An empty slice means the
+    /// mode-proximity rule is unclaimable and therefore never vetoes.
+    pub mode_proximity_evidence: &'a [autoeq_optim::roomeq::ModeProximityEvidence],
 }
 
 /// dB magnitude response of one filter on the grid.
@@ -238,6 +241,18 @@ pub fn evaluate_audibility_veto(evaluation: &VetoEvaluation<'_>) -> Vec<FilterVe
                 weights_ref,
                 evaluation.listening_phon,
             );
+            let mode_proximity_boost = filter.db_gain > 0.0
+                && config.mode_proximity_ban_erbs > 0.0
+                && evaluation.mode_proximity_evidence.iter().any(|mode| {
+                    mode.frequency_hz.is_finite()
+                        && mode.frequency_hz > 0.0
+                        && mode.q.is_finite()
+                        && mode.q > 0.0
+                        && mode.prominence_db.is_finite()
+                        && mode.prominence_db >= config.jnd_db
+                        && (erb_rate(filter.freq) - erb_rate(mode.frequency_hz)).abs()
+                            <= config.mode_proximity_ban_erbs
+                });
             let (decision, reason) = if peak_delta_db < config.jnd_db {
                 (VetoDecision::Remove, VetoReason::SubJnd)
             } else if width < config.min_audible_erb_width {
@@ -247,6 +262,8 @@ pub fn evaluate_audibility_veto(evaluation: &VetoEvaluation<'_>) -> Vec<FilterVe
                 && filter.q > config.hf_guard_max_q
             {
                 (VetoDecision::Remove, VetoReason::HighQAboveGuard)
+            } else if mode_proximity_boost {
+                (VetoDecision::Remove, VetoReason::ModeProximityBan)
             } else {
                 (VetoDecision::Keep, VetoReason::Audible)
             };
@@ -287,7 +304,11 @@ pub fn apply_audibility_veto(
         );
     }
     let verdicts = evaluate_audibility_veto(evaluation);
-    enforce_veto_verdicts(filters, verdicts, evaluation.config.enforcement_authorized())
+    enforce_veto_verdicts(
+        filters,
+        verdicts,
+        evaluation.config.enforcement_authorized(),
+    )
 }
 
 /// Enforce evaluated verdicts: drop `Remove` filters when `enforce` is true.
@@ -440,6 +461,19 @@ pub struct VetoAdjudicationSummary {
     pub enforced: bool,
 }
 
+impl VetoAdjudicationSummary {
+    /// Convert engine rollback state to the path-free report contract.
+    pub fn to_report(&self) -> roomeq_model::VetoAdjudicationReport {
+        roomeq_model::VetoAdjudicationReport {
+            f0_reference_id: self.f0_reference_id.clone(),
+            removed_filter_indices: self.removed.iter().map(|entry| entry.index).collect(),
+            cumulative_loudness_delta_sones: self.cumulative_loudness_delta_sones,
+            max_local_deviation_db: self.max_local_deviation_db,
+            enforced: self.enforced,
+        }
+    }
+}
+
 impl VetoAdjudication {
     /// Split off the storable summary; `kept` stays with the caller.
     pub fn summarize(&self) -> VetoAdjudicationSummary {
@@ -531,12 +565,13 @@ pub fn adjudicate_veto_removals(
     let erb = erb_positions(freqs);
     let weights = erb_weights(freqs);
     let weights_ref = weights.as_ref();
-    let f0_composite: Array1<f64> = responses
-        .iter()
-        .fold(Array1::zeros(freqs.len()), |mut sum, response| {
-            sum += response;
-            sum
-        });
+    let f0_composite: Array1<f64> =
+        responses
+            .iter()
+            .fold(Array1::zeros(freqs.len()), |mut sum, response| {
+                sum += response;
+                sum
+            });
     let f0_loudness =
         approximate_loudness_sones(&f0_composite, &erb, weights_ref, config.listening_phon);
     let f0_reference_id = fingerprint_f0(&f0_composite, filters.len());
@@ -602,8 +637,7 @@ pub fn adjudicate_veto_removals(
 
     while !stopped {
         // Least-impact candidate among those still present.
-        let current: Vec<Array1<f64>> =
-            remaining.iter().map(|&i| responses[i].clone()).collect();
+        let current: Vec<Array1<f64>> = remaining.iter().map(|&i| responses[i].clone()).collect();
         let current_total: Array1<f64> =
             current
                 .iter()
@@ -633,10 +667,13 @@ pub fn adjudicate_veto_removals(
         };
 
         let removal_composite = &current_total - &responses[candidate];
-        let candidate_cumulative_loudness =
-            (approximate_loudness_sones(&removal_composite, &erb, weights_ref, config.listening_phon)
-                - f0_loudness)
-                .abs();
+        let candidate_cumulative_loudness = (approximate_loudness_sones(
+            &removal_composite,
+            &erb,
+            weights_ref,
+            config.listening_phon,
+        ) - f0_loudness)
+            .abs();
         let candidate_max_local = f0_composite
             .iter()
             .zip(removal_composite.iter())
@@ -854,6 +891,7 @@ mod audibility_veto_tests {
             listening_phon: 75.0,
             config: config(),
             hf_guard_start_hz: 1600.0,
+            mode_proximity_evidence: &[],
         };
         evaluate_audibility_veto(&evaluation)
     }
@@ -880,6 +918,35 @@ mod audibility_veto_tests {
         assert_eq!(verdicts[0].reason, VetoReason::Audible);
         assert!(verdicts[0].peak_delta_db > 1.0);
         assert!(verdicts[0].loudness_delta_sones > 0.0);
+    }
+
+    #[test]
+    fn measured_mode_proximity_bans_audible_boost_but_not_cut() {
+        let freqs = grid();
+        let modes = [autoeq_optim::roomeq::ModeProximityEvidence {
+            frequency_hz: 500.0,
+            q: 8.0,
+            prominence_db: 8.0,
+            temporal_severity_db: None,
+        }];
+        let evaluation = VetoEvaluation {
+            filters: &[peak(3.0, 500.0, 1.0)],
+            freqs: &freqs,
+            listening_phon: 75.0,
+            config: config(),
+            hf_guard_start_hz: 1600.0,
+            mode_proximity_evidence: &modes,
+        };
+        let verdict = evaluate_audibility_veto(&evaluation);
+        assert_eq!(verdict[0].decision, VetoDecision::Remove);
+        assert_eq!(verdict[0].reason, VetoReason::ModeProximityBan);
+
+        let evaluation = VetoEvaluation {
+            filters: &[peak(-6.0, 500.0, 1.0)],
+            ..evaluation
+        };
+        let verdict = evaluate_audibility_veto(&evaluation);
+        assert_eq!(verdict[0].decision, VetoDecision::Keep);
     }
 
     #[test]
@@ -938,6 +1005,7 @@ mod audibility_veto_tests {
                 ..FilterAudibilityConfig::default()
             },
             hf_guard_start_hz: 1600.0,
+            mode_proximity_evidence: &[],
         };
         apply_audibility_veto(filters.clone(), &evaluation)
     }
@@ -967,7 +1035,11 @@ mod audibility_veto_tests {
         // alone must not remove filters.
         let filters = vec![peak(0.2, 500.0, 1.0), peak(3.0, 500.0, 1.0)];
         let (kept, verdicts) = apply(filters, false, false);
-        assert_eq!(kept.len(), 2, "unacknowledged enforcement must stay advisory");
+        assert_eq!(
+            kept.len(),
+            2,
+            "unacknowledged enforcement must stay advisory"
+        );
         assert!(verdicts.iter().all(|verdict| !verdict.enforced));
         assert_eq!(verdicts[0].decision, VetoDecision::Remove);
     }
@@ -985,6 +1057,7 @@ mod audibility_veto_tests {
                 ..FilterAudibilityConfig::default()
             },
             hf_guard_start_hz: 1600.0,
+            mode_proximity_evidence: &[],
         };
         // The clone is consumed while `evaluation` borrows the original;
         // the disabled path must return the set untouched with no verdicts.
@@ -1055,6 +1128,7 @@ mod audibility_veto_tests {
             listening_phon: 75.0,
             config: config(),
             hf_guard_start_hz: 1600.0,
+            mode_proximity_evidence: &[],
         };
         let verdicts = evaluate_audibility_veto(&evaluation);
         (freqs, verdicts)
@@ -1078,8 +1152,12 @@ mod audibility_veto_tests {
         let filters = vec![peak(0.2, 500.0, 1.0)];
         let (freqs, mut verdicts) = nominate(&filters);
         assert_eq!(verdicts[0].decision, VetoDecision::Remove);
-        let adjudication =
-            adjudicate_veto_removals(filters.clone(), &mut verdicts, &freqs, &adjudicate_config(true));
+        let adjudication = adjudicate_veto_removals(
+            filters.clone(),
+            &mut verdicts,
+            &freqs,
+            &adjudicate_config(true),
+        );
         assert!(adjudication.kept.is_empty(), "identity must be reachable");
         assert_eq!(adjudication.removed.len(), 1);
         assert_eq!(adjudication.removed[0].index, 0);
@@ -1152,8 +1230,12 @@ mod audibility_veto_tests {
         // keeps both. Joint removal is future work, not assumed safe.
         let filters = vec![peak(3.0, 500.0, 2.0), peak(-3.0, 500.0, 2.0)];
         let (freqs, mut verdicts) = nominate(&filters);
-        let adjudication =
-            adjudicate_veto_removals(filters.clone(), &mut verdicts, &freqs, &adjudicate_config(true));
+        let adjudication = adjudicate_veto_removals(
+            filters.clone(),
+            &mut verdicts,
+            &freqs,
+            &adjudicate_config(true),
+        );
         assert_eq!(adjudication.kept.len(), 2);
         assert!(adjudication.removed.is_empty());
         for verdict in &verdicts {
@@ -1183,8 +1265,7 @@ mod audibility_veto_tests {
         // move one region by ~1.5 dB, so the local guard stops the walk
         // with the rest unevaluated rather than assumed safe.
         let cluster = [400.0, 500.0, 630.0, 800.0];
-        let filters: Vec<Biquad> =
-            cluster.iter().map(|&f| peak(0.8, f, 1.0)).collect();
+        let filters: Vec<Biquad> = cluster.iter().map(|&f| peak(0.8, f, 1.0)).collect();
         let (freqs, mut verdicts) = nominate(&filters);
         assert!(
             verdicts.iter().all(|v| v.decision == VetoDecision::Remove),
@@ -1207,7 +1288,9 @@ mod audibility_veto_tests {
             adjudication.max_local_deviation_db
         );
         assert!(
-            verdicts.iter().any(|v| v.acceptance.reason.contains("local deviation")),
+            verdicts
+                .iter()
+                .any(|v| v.acceptance.reason.contains("local deviation")),
             "rejection must name the local guard"
         );
     }
@@ -1218,8 +1301,7 @@ mod audibility_veto_tests {
         // quantum accepts them all, while a declared 1e-5 cap stops the
         // walk partway — the budget, not the heuristics, is the difference.
         let freqs_spread = [100.0, 300.0, 700.0, 1500.0, 3000.0, 6000.0];
-        let filters: Vec<Biquad> =
-            freqs_spread.iter().map(|&f| peak(0.8, f, 2.0)).collect();
+        let filters: Vec<Biquad> = freqs_spread.iter().map(|&f| peak(0.8, f, 2.0)).collect();
         let (freqs, mut verdicts) = nominate(&filters);
         let all = adjudicate_veto_removals(
             filters.clone(),
@@ -1240,13 +1322,17 @@ mod audibility_veto_tests {
             adjudication.removed.len()
         );
         assert!(
-            verdicts.iter().any(|v| v.acceptance.reason.contains("cumulative")),
+            verdicts
+                .iter()
+                .any(|v| v.acceptance.reason.contains("cumulative")),
             "rejection must name the cumulative guard"
         );
         assert!(
-            verdicts
+            verdicts.iter().any(|v| v
+                .acceptance
+                .thresholds
                 .iter()
-                .any(|v| v.acceptance.thresholds.iter().any(|t| t.name == "pruning_budget_max_cumulative_delta")),
+                .any(|t| t.name == "pruning_budget_max_cumulative_delta")),
             "budget threshold must be recorded"
         );
     }
@@ -1261,8 +1347,12 @@ mod audibility_veto_tests {
             peak(-0.3, 2500.0, 1.5),
         ];
         let (freqs, mut verdicts) = nominate(&filters);
-        let adjudication =
-            adjudicate_veto_removals(filters.clone(), &mut verdicts, &freqs, &adjudicate_config(true));
+        let adjudication = adjudicate_veto_removals(
+            filters.clone(),
+            &mut verdicts,
+            &freqs,
+            &adjudicate_config(true),
+        );
         assert!(!adjudication.removed.is_empty());
         // Kept filters preserve original relative order, so they fill the
         // non-removed slots left to right.
@@ -1277,8 +1367,10 @@ mod audibility_veto_tests {
         for removed in &adjudication.removed {
             restored[removed.index] = Some(removed.filter.clone());
         }
-        let restored_filters: Vec<Biquad> =
-            restored.into_iter().map(|slot| slot.expect("every slot filled")).collect();
+        let restored_filters: Vec<Biquad> = restored
+            .into_iter()
+            .map(|slot| slot.expect("every slot filled"))
+            .collect();
         let f0 = composite_of(&filters, &freqs);
         let back = composite_of(&restored_filters, &freqs);
         let drift = f0

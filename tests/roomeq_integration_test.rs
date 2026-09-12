@@ -187,18 +187,32 @@ fn test_roomeq_multidriver_config() {
             && plugin["parameters"]["gain_db"]
                 .as_f64()
                 .is_some_and(f64::is_finite);
+        let safety_headroom = plugin["plugin_type"] == "gain"
+            && plugin["parameters"]["label"] == "final_electrical_headroom"
+            && plugin["parameters"]["room_eq_safety_gain"] == true
+            && plugin["parameters"]["gain_db"]
+                .as_f64()
+                .is_some_and(|gain| gain.is_finite() && gain <= 0.0);
         assert!(
-            combined_eq || level_alignment,
+            combined_eq || level_alignment || safety_headroom,
             "unexpected multi-driver channel-level processing: {plugin}"
         );
     }
     assert!(
         plugins
             .iter()
-            .filter(|plugin| plugin["plugin_type"] == "gain")
+            .filter(|plugin| plugin["parameters"]["label"] == "final_channel_level_alignment")
             .count()
             <= 1,
         "final channel-level alignment must not be applied more than once"
+    );
+    assert!(
+        plugins
+            .iter()
+            .filter(|plugin| { plugin["parameters"]["label"] == "final_electrical_headroom" })
+            .count()
+            <= 1,
+        "headroom attenuation must have a single channel-level owner"
     );
 
     let drivers = left_channel["drivers"]

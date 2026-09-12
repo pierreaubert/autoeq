@@ -28,8 +28,8 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-mod gd;
 mod finalization;
+mod gd;
 mod per_driver_fir;
 mod phase;
 mod reports;
@@ -43,7 +43,6 @@ pub mod seat_replay;
 #[cfg(test)]
 mod tests;
 mod types;
-#[cfg(test)]
 mod validation_scorecard;
 
 pub use room_optimization_progress::*;
@@ -147,6 +146,19 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
         context.artifact_store,
         frequency_samples,
     )?;
+    per_driver_fir::distribute_routed_firs(
+        &mut result,
+        request.config,
+        context.output_dir.unwrap_or_else(|| Path::new(".")),
+        context.artifact_store,
+    )?;
+    validation_scorecard::attach_validation_scorecard(
+        &mut result,
+        context.validation_measurements,
+        request.sample_rate,
+        roomeq_model::auto_tune::resolved_schroeder_hz(&request.config.optimizer),
+        request.config.optimizer.processing_mode.clone(),
+    )?;
     finalization::select(
         &mut result,
         &seat_captures,
@@ -157,7 +169,10 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
         context.artifact_store,
     )?;
     generate_validation_bundle_report(
-        &mut result, request.config, context.output_dir, context.artifact_store,
+        &mut result,
+        request.config,
+        context.output_dir,
+        context.artifact_store,
         request.sample_rate,
     )?;
     Ok(result)
@@ -1102,15 +1117,21 @@ fn apply_final_channel_level_alignment(
     // reported group response against its explicit shared target after ICD and
     // safety replay, which can change the upper-band level after initial alignment.
     if result.deployed_source_curves.is_empty() {
-        let trims: Vec<_> = result.channel_results.iter().filter_map(|(name, channel)| {
-            let chain = result.channels.get(name)?;
-            chain.drivers.as_ref()?;
-            let target: Curve = chain.target_curve.clone()?.into();
-            let residual = roomeq_engine::spectral_align::upper_band_target_reference(
-                &channel.final_curve, &target, config.optimizer.max_freq,
-            )?;
-            Some((name.clone(), residual))
-        }).collect();
+        let trims: Vec<_> = result
+            .channel_results
+            .iter()
+            .filter_map(|(name, channel)| {
+                let chain = result.channels.get(name)?;
+                chain.drivers.as_ref()?;
+                let target: Curve = chain.target_curve.clone()?.into();
+                let residual = roomeq_engine::spectral_align::upper_band_target_reference(
+                    &channel.final_curve,
+                    &target,
+                    config.optimizer.max_freq,
+                )?;
+                Some((name.clone(), residual))
+            })
+            .collect();
         if !trims.is_empty() {
             for (name, residual) in &trims {
                 let gain = (-residual).clamp(-12.0, 12.0);
@@ -1118,23 +1139,42 @@ fn apply_final_channel_level_alignment(
                     if let Some(chain) = result.channels.get_mut(name) {
                         insert_final_level_gain(chain, gain, false);
                     }
-                    sync_reported_gain_adjustment(name, &mut result.channel_results,
-                        &mut result.channels, gain, false, sample_rate);
+                    sync_reported_gain_adjustment(
+                        name,
+                        &mut result.channel_results,
+                        &mut result.channels,
+                        gain,
+                        false,
+                        sample_rate,
+                    );
                 }
             }
-            let worst_residual = trims.iter().map(|(name, _)| {
-                let target: Curve = result.channels[name].target_curve.clone().unwrap().into();
-                roomeq_engine::spectral_align::upper_band_target_reference(
-                    &result.channel_results[name].final_curve, &target, config.optimizer.max_freq,
-                ).map(f64::abs).unwrap_or(f64::INFINITY)
-            }).fold(0.0_f64, f64::max);
-            let mut check = StageCheck::pass("final_upper_band_target_error_db", StageCheckKind::Safety);
+            let worst_residual = trims
+                .iter()
+                .map(|(name, _)| {
+                    let target: Curve = result.channels[name].target_curve.clone().unwrap().into();
+                    roomeq_engine::spectral_align::upper_band_target_reference(
+                        &result.channel_results[name].final_curve,
+                        &target,
+                        config.optimizer.max_freq,
+                    )
+                    .map(f64::abs)
+                    .unwrap_or(f64::INFINITY)
+                })
+                .fold(0.0_f64, f64::max);
+            let mut check =
+                StageCheck::pass("final_upper_band_target_error_db", StageCheckKind::Safety);
             check.observed = Some(worst_residual);
             check.limit = Some(FINAL_CHANNEL_LEVEL_TOLERANCE_DB);
             check.passed = worst_residual <= FINAL_CHANNEL_LEVEL_TOLERANCE_DB;
             return Ok(StageOutcome {
-                checks: vec![check], stage: "final_channel_level_alignment".to_string(),
-                status: if worst_residual <= FINAL_CHANNEL_LEVEL_TOLERANCE_DB { StageStatus::Applied } else { StageStatus::Degraded },
+                checks: vec![check],
+                stage: "final_channel_level_alignment".to_string(),
+                status: if worst_residual <= FINAL_CHANNEL_LEVEL_TOLERANCE_DB {
+                    StageStatus::Applied
+                } else {
+                    StageStatus::Degraded
+                },
                 advisories: Vec::new(),
             });
         }
@@ -2013,12 +2053,21 @@ fn commit_or_restore_routed_safety_replay(
         Ok(deployed) => result.deployed_source_curves = deployed,
         Err(error) => {
             let playback = |state: &RoomOptimizationResult| {
-                let channels: std::collections::BTreeMap<_, _> = state.channels.iter().map(|(name, chain)| {
-                    let drivers = chain.drivers.as_ref().map(|drivers| drivers.iter().map(|driver| {
+                let channels: std::collections::BTreeMap<_, _> = state
+                    .channels
+                    .iter()
+                    .map(|(name, chain)| {
+                        let drivers = chain.drivers.as_ref().map(|drivers| {
+                            drivers.iter().map(|driver| {
                         serde_json::json!({"name": driver.name, "plugins": driver.plugins})
-                    }).collect::<Vec<_>>());
-                    (name, serde_json::json!({"plugins": chain.plugins, "drivers": drivers}))
-                }).collect();
+                    }).collect::<Vec<_>>()
+                        });
+                        (
+                            name,
+                            serde_json::json!({"plugins": chain.plugins, "drivers": drivers}),
+                        )
+                    })
+                    .collect();
                 serde_json::json!({
                     "channels": channels,
                     "fir": retained_fir_coeffs_by_channel(state),
@@ -2042,6 +2091,7 @@ fn commit_or_restore_routed_safety_replay(
                     .push("safety_replay_rejected_pre_gate_dsp_restored".to_string());
                 report.violations.sort();
                 report.violations.dedup();
+                report.refresh_outcome();
             }
             let pre_gate_outcomes = pre_safety_result.metadata.stage_outcomes.len();
             let mut gate_outcomes = std::mem::take(&mut result.metadata.stage_outcomes);
@@ -2086,8 +2136,13 @@ fn prepare_cumulative_correction(
     group_delay_budget_ms: Option<f64>,
 ) -> Result<()> {
     if let Err(error) = apply_final_correction_safety_gate_preserving_routed_crossover(
-        result, sample_rate, smoothing_n, evaluation_band, sidecar_dir,
-        processing_mode, group_delay_budget_ms,
+        result,
+        sample_rate,
+        smoothing_n,
+        evaluation_band,
+        sidecar_dir,
+        processing_mode,
+        group_delay_budget_ms,
     ) {
         result.metadata.stage_outcomes.push(StageOutcome {
             stage: "correction_candidate_requires_final_refinement".into(),
@@ -2105,13 +2160,14 @@ fn prepare_final_channel_level_alignment(
     sample_rate: f64,
     sidecar_dir: &Path,
 ) -> StageOutcome {
-    apply_final_channel_level_alignment(result, config, sample_rate, sidecar_dir)
-        .unwrap_or_else(|error| StageOutcome {
+    apply_final_channel_level_alignment(result, config, sample_rate, sidecar_dir).unwrap_or_else(
+        |error| StageOutcome {
             stage: "channel_level_candidate_requires_final_refinement".into(),
             status: StageStatus::Degraded,
             advisories: vec![error.to_string()],
             checks: Vec::new(),
-        })
+        },
+    )
 }
 
 fn apply_final_correction_safety_gate_preserving_routed_crossover(
@@ -2218,6 +2274,7 @@ fn record_missing_mixed_phase_fir_reversions(
         report.reverted_stages.dedup();
         report.violations.sort();
         report.violations.dedup();
+        report.refresh_outcome();
     }
 
     result
@@ -2754,9 +2811,16 @@ fn assemble_generic_result_with_frequency_samples(
     if spectral_curves.len() > 1 {
         // Group EQ has anchored each target to its measured upper band. Use
         // one shared absolute target when applying inter-channel level trims.
-        let targets: Option<Vec<Curve>> = spectral_curves.keys().map(|name| {
-            channel_chains.get(name)?.target_curve.clone().map(Curve::from)
-        }).collect();
+        let targets: Option<Vec<Curve>> = spectral_curves
+            .keys()
+            .map(|name| {
+                channel_chains
+                    .get(name)?
+                    .target_curve
+                    .clone()
+                    .map(Curve::from)
+            })
+            .collect();
         if let Some(targets) = targets {
             let mut shared = targets[0].clone();
             shared.spl.fill(0.0);
@@ -3631,7 +3695,7 @@ fn assemble_generic_result_with_frequency_samples(
         roomeq_engine::output::take_mixed_phase_reports(&mut channel_chains);
 
     let metadata = OptimizationMetadata {
-            final_convolution_sha256: None,
+        final_convolution_sha256: None,
         pre_score: avg_pre_score,
         post_score: avg_post_score,
         algorithm: config.optimizer.algorithm.clone(),
@@ -3655,6 +3719,8 @@ fn assemble_generic_result_with_frequency_samples(
         validation_bundle: None,
         supporting_source: None,
         correction_acceptance: None,
+        audibility_veto: None,
+        veto_adjudication: None,
         optimizer_evidence: None,
         stage_outcomes,
         qa_seed_distribution: None,
@@ -3813,6 +3879,8 @@ pub fn optimize_speaker(
         _arrival_time_ms,
         fir_coeffs,
         optimizer_evidence,
+        audibility_veto,
+        veto_adjudication,
     ) = process_speaker_internal(
         channel_name,
         speaker_config,
@@ -3834,5 +3902,7 @@ pub fn optimize_speaker(
         biquads,
         fir_coeffs,
         optimizer_evidence,
+        audibility_veto,
+        veto_adjudication,
     })
 }

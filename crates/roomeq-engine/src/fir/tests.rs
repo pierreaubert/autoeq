@@ -150,14 +150,10 @@ fn prepared_fir_rejects_unaligned_target_before_boost_capping() {
                 create_test_curve(&[20.0, 1000.0], &[80.0, 80.0]),
                 create_test_curve(&[20.0, 100.0, 1000.0], &[80.0, 80.0]),
             ] {
-                let error = generate_fir_correction_prepared(
-                    &measurement,
-                    &config,
-                    &target,
-                    48_000.0,
-                )
-                .err()
-                .expect("prepared target grid must be aligned before coefficient design");
+                let error =
+                    generate_fir_correction_prepared(&measurement, &config, &target, 48_000.0)
+                        .err()
+                        .expect("prepared target grid must be aligned before coefficient design");
                 assert!(
                     error.to_string().contains("measurement frequency grid"),
                     "{error}"
@@ -357,6 +353,45 @@ fn test_generate_fir_correction_basic() {
     );
     let coeffs = result.unwrap();
     assert_eq!(coeffs.len(), 1024);
+}
+
+#[test]
+fn explicit_correction_band_keeps_fir_outside_band_unshaped() {
+    let measurement = create_test_curve(
+        &[20.0, 40.0, 100.0, 1_000.0, 16_000.0, 20_000.0],
+        &[70.0, 80.0, 80.0, 80.0, 80.0, 70.0],
+    );
+    let mut config = OptimizerConfig::default();
+    config.min_freq = 20.0;
+    config.max_freq = 20_000.0;
+    config.correction_band = Some(roomeq_model::CorrectionBandPolicy {
+        min_hz: 40.0,
+        max_hz: 16_000.0,
+        allow_natural_rolloff: true,
+    });
+    config.fir = Some(FirConfig {
+        taps: 1024,
+        phase: "linear".to_string(),
+        ..FirConfig::default()
+    });
+
+    let coeffs = generate_fir_correction_prepared(
+        &measurement,
+        &config,
+        &flat_target_like(&measurement),
+        48_000.0,
+    )
+    .expect("bounded FIR design should succeed");
+    let low_response = fir_response_db(&coeffs, 20.0, 48_000.0);
+    let high_response = fir_response_db(&coeffs, 20_000.0, 48_000.0);
+    assert!(
+        low_response.abs() < 1.5,
+        "natural low-frequency response must not be inverted: {low_response:.2} dB"
+    );
+    assert!(
+        high_response.abs() < 1.5,
+        "natural high-frequency response must not be inverted: {high_response:.2} dB"
+    );
 }
 
 #[test]

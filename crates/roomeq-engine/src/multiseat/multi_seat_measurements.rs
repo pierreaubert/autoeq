@@ -27,6 +27,11 @@ impl MultiSeatMeasurements {
 
         let num_subs = measurements.len();
         let num_seats = measurements[0].len();
+        if num_seats == 0 {
+            return Err(AutoeqError::InvalidConfiguration {
+                message: "At least one listening seat required".to_string(),
+            });
+        }
 
         for (i, sub_measurements) in measurements.iter().enumerate() {
             if sub_measurements.len() != num_seats {

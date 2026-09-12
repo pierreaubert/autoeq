@@ -67,8 +67,7 @@ fn default_intent() -> ComparisonIntent {
 }
 
 /// Attribute words a preference-only comparison must not claim.
-const PREFERENCE_FORBIDDEN: [&str; 4] =
-    ["inaudib", "equivalen", "undetect", "transparent"];
+const PREFERENCE_FORBIDDEN: [&str; 4] = ["inaudib", "equivalen", "undetect", "transparent"];
 
 /// The auditory comparison under validation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -108,21 +107,33 @@ impl ComparisonSpec {
         if self.name.trim().is_empty() {
             return Err(String::from("comparison needs a name"));
         }
-        if self.attributes.iter().any(|attribute| attribute.trim().is_empty()) {
+        if self
+            .attributes
+            .iter()
+            .any(|attribute| attribute.trim().is_empty())
+        {
             return Err(String::from("comparison attributes must be non-blank"));
         }
         if self.intent == ComparisonIntent::Equivalence
-            && self.equivalence_bound.as_deref().is_none_or(|bound| bound.trim().is_empty())
+            && self
+                .equivalence_bound
+                .as_deref()
+                .is_none_or(|bound| bound.trim().is_empty())
         {
             return Err(String::from(
                 "equivalence needs a prespecified detection bound: a nonsignificant result alone is not proof of equivalence",
             ));
         }
         if self.intent == ComparisonIntent::Preference {
-            let lowered: Vec<String> =
-                self.attributes.iter().map(|attribute| attribute.to_lowercase()).collect();
+            let lowered: Vec<String> = self
+                .attributes
+                .iter()
+                .map(|attribute| attribute.to_lowercase())
+                .collect();
             if lowered.iter().any(|attribute| {
-                PREFERENCE_FORBIDDEN.iter().any(|word| attribute.contains(word))
+                PREFERENCE_FORBIDDEN
+                    .iter()
+                    .any(|word| attribute.contains(word))
             }) {
                 return Err(String::from(
                     "preference cannot claim inaudibility: stage detectability or equivalence separately",
@@ -225,7 +236,9 @@ impl BlindedProtocol {
             ));
         }
         if trials_per_condition > 5_000 {
-            return Err(String::from("trials_per_condition above exact-computation range"));
+            return Err(String::from(
+                "trials_per_condition above exact-computation range",
+            ));
         }
         let mut protocol = Self {
             design,
@@ -247,8 +260,7 @@ impl BlindedProtocol {
     fn canonical_json(&self) -> Result<String, String> {
         let mut clone = self.clone();
         clone.prereg_hash = String::new();
-        serde_json::to_string(&clone)
-            .map_err(|error| format!("protocol serialize error: {error}"))
+        serde_json::to_string(&clone).map_err(|error| format!("protocol serialize error: {error}"))
     }
 
     /// SHA-256 over the canonical JSON.
@@ -489,7 +501,14 @@ pub fn score_abx_condition(
 ) -> Result<ConditionOutcome, String> {
     // The loose scorer is not told alpha, so it records 0.0 (unknown) rather
     // than asserting one; the protocol-bound scorer records the real alpha.
-    score_abx_condition_with_alpha(condition, correct, trials, rule_min_correct, rule_trials, 0.0)
+    score_abx_condition_with_alpha(
+        condition,
+        correct,
+        trials,
+        rule_min_correct,
+        rule_trials,
+        0.0,
+    )
 }
 
 /// Score one ABX condition, recording the applied rule's alpha as well.
@@ -512,7 +531,11 @@ pub fn score_abx_condition_with_alpha(
         trials,
         correct,
         p_value,
-        decision: String::from(if correct >= rule_min_correct { "pass" } else { "fail" }),
+        decision: String::from(if correct >= rule_min_correct {
+            "pass"
+        } else {
+            "fail"
+        }),
         rule_min_correct,
         rule_trials,
         rule_alpha,
@@ -535,7 +558,11 @@ pub fn score_abx_condition_under_protocol(
 ) -> Result<ConditionOutcome, String> {
     protocol.verify_prereg()?;
     let (min_correct, rule_trials, alpha) = match &protocol.decision {
-        DecisionRule::Abx { min_correct, trials, alpha } => (*min_correct, *trials, *alpha),
+        DecisionRule::Abx {
+            min_correct,
+            trials,
+            alpha,
+        } => (*min_correct, *trials, *alpha),
         DecisionRule::Mushra { .. } => {
             return Err(String::from(
                 "protocol embeds a MUSHRA rule: ABX counts cannot be scored against it",
@@ -595,8 +622,7 @@ pub fn write_results_sidecar(dir: &Path, result: &ValidationResult) -> Result<Pa
             "results need the preregistration hash of the protocol scored",
         ));
     }
-    std::fs::create_dir_all(dir)
-        .map_err(|error| format!("cannot create results dir: {error}"))?;
+    std::fs::create_dir_all(dir).map_err(|error| format!("cannot create results dir: {error}"))?;
     let json = serde_json::to_string_pretty(result)
         .map_err(|error| format!("results serialize error: {error}"))?;
     let path = dir.join("validation-result.json");
@@ -656,7 +682,11 @@ mod protocol_tests {
             0.05,
             0.8,
             0.75,
-            DecisionRule::Abx { min_correct: 20, trials: 30, alpha: 0.05 },
+            DecisionRule::Abx {
+                min_correct: 20,
+                trials: 30,
+                alpha: 0.05,
+            },
             7,
         )
         .unwrap();
@@ -670,7 +700,11 @@ mod protocol_tests {
             0.05,
             0.8,
             0.75,
-            DecisionRule::Abx { min_correct: 20, trials: 30, alpha: 0.05 },
+            DecisionRule::Abx {
+                min_correct: 20,
+                trials: 30,
+                alpha: 0.05,
+            },
             7,
         )
         .unwrap();
@@ -749,7 +783,11 @@ mod protocol_tests {
             0.05,
             0.8,
             0.75,
-            DecisionRule::Abx { min_correct: 20, trials: 30, alpha: 0.05 },
+            DecisionRule::Abx {
+                min_correct: 20,
+                trials: 30,
+                alpha: 0.05,
+            },
             7,
         )
         .unwrap()
@@ -767,9 +805,7 @@ mod protocol_tests {
         assert_eq!(outcome.rule_trials, 30);
         assert_eq!(outcome.rule_alpha, 0.05);
         // Unknown condition.
-        assert!(
-            score_abx_condition_under_protocol(&protocol, "seat-9-vs-f0", 20, 30).is_err()
-        );
+        assert!(score_abx_condition_under_protocol(&protocol, "seat-9-vs-f0", 20, 30).is_err());
         // Trial-count drift.
         assert!(score_abx_condition_under_protocol(&protocol, "seat-1-vs-f0", 20, 31).is_err());
         // Tampered protocol (hash no longer matches canonical bytes).
@@ -778,12 +814,18 @@ mod protocol_tests {
         assert!(score_abx_condition_under_protocol(&tampered, "seat-1-vs-f0", 20, 30).is_err());
         // MUSHRA rule cannot score ABX counts.
         let mut mushra = protocol.clone();
-        mushra.decision = DecisionRule::Mushra { criterion: String::from("median >= 80") };
+        mushra.decision = DecisionRule::Mushra {
+            criterion: String::from("median >= 80"),
+        };
         mushra.prereg_hash = mushra.canonical_hash().unwrap();
         assert!(score_abx_condition_under_protocol(&mushra, "seat-1-vs-f0", 20, 30).is_err());
         // Unattainable embedded rule (1/1 at alpha 0.05, best p = 0.5).
         let mut weak = abx_protocol();
-        weak.decision = DecisionRule::Abx { min_correct: 1, trials: 1, alpha: 0.05 };
+        weak.decision = DecisionRule::Abx {
+            min_correct: 1,
+            trials: 1,
+            alpha: 0.05,
+        };
         weak.trials_per_condition = 1;
         weak.prereg_hash = weak.canonical_hash().unwrap();
         assert!(score_abx_condition_under_protocol(&weak, "seat-1-vs-f0", 1, 1).is_err());
@@ -821,8 +863,7 @@ mod protocol_tests {
         let mut wrong_comparison = result.clone();
         wrong_comparison.comparison = String::from("other-comparison");
         assert!(
-            write_results_sidecar_under_protocol(dir.path(), &wrong_comparison, &protocol)
-                .is_err()
+            write_results_sidecar_under_protocol(dir.path(), &wrong_comparison, &protocol).is_err()
         );
     }
 

@@ -211,6 +211,8 @@ pub(crate) fn run_channel_via_generic_path_with_frequency_samples(
         _arrival_ms,
         fir_coeffs,
         optimizer_evidence,
+        audibility_veto,
+        veto_adjudication,
     ) = processed;
 
     // Prepend the alignment gain plugin without touching the inner chain's
@@ -245,6 +247,8 @@ pub(crate) fn run_channel_via_generic_path_with_frequency_samples(
         biquads,
         fir_coeffs: fir_coeffs.clone(),
         optimizer_evidence,
+        audibility_veto,
+        veto_adjudication,
     };
 
     Ok((

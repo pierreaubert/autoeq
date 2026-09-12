@@ -1,6 +1,25 @@
 // Transfer-function metric evaluation.
 use super::types::{AcousticOracle, CandidateTransfer, ImpulseEvidence, ProhibitedBehavior};
 use num_complex::Complex64;
+
+/// Root-mean-square of a finite scalar sequence.
+///
+/// Acceptance and acoustic-quality paths intentionally share this unweighted
+/// helper. Frequency-weighted metrics remain explicit at their call sites.
+pub(crate) fn rms(values: &[f64]) -> f64 {
+    (values.iter().map(|value| value * value).sum::<f64>() / values.len().max(1) as f64).sqrt()
+}
+
+/// Return whether two curves share the same usable frequency grid.
+pub(super) fn same_frequency_grid(left: &autoeq_core::Curve, right: &autoeq_core::Curve) -> bool {
+    left.freq.len() >= 2
+        && left.freq.len() == right.freq.len()
+        && left
+            .freq
+            .iter()
+            .zip(right.freq.iter())
+            .all(|(a, b)| (a - b).abs() <= 1e-9)
+}
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
@@ -176,6 +195,23 @@ pub(super) fn log_frequency_weights(frequencies_hz: &[f64]) -> Vec<f64> {
     weights
 }
 
+pub(super) fn weighted_rms(frequencies_hz: &[f64], values: &[f64]) -> f64 {
+    values
+        .iter()
+        .zip(log_frequency_weights(frequencies_hz))
+        .map(|(value, weight)| value * value * weight)
+        .sum::<f64>()
+        .sqrt()
+}
+
+pub(super) fn weighted_mean(frequencies_hz: &[f64], values: &[f64]) -> f64 {
+    values
+        .iter()
+        .zip(log_frequency_weights(frequencies_hz))
+        .map(|(value, weight)| value * weight)
+        .sum()
+}
+
 fn unwrap_phase(values: &[Complex64]) -> Vec<f64> {
     let mut phases = values.iter().map(|value| value.arg()).collect::<Vec<_>>();
     for index in 1..phases.len() {
@@ -301,12 +337,7 @@ pub fn evaluate_oracle(
         .collect::<Vec<_>>();
     let frequencies = oracle.frequencies_hz.as_slice().unwrap_or(&[]);
     let weights = log_frequency_weights(frequencies);
-    let target_weighted_rms_db = residual_db
-        .iter()
-        .zip(weights.iter())
-        .map(|(residual, weight)| residual * residual * weight)
-        .sum::<f64>()
-        .sqrt();
+    let target_weighted_rms_db = weighted_rms(frequencies, &residual_db);
     // Measure-integrated quantile under ORACLE_FREQUENCY_MEASURE_VERSION: same
     // weights as the RMS above, so densifying a narrow band cannot move p95
     // without changing the physical response.
@@ -351,8 +382,7 @@ pub fn evaluate_oracle(
         if weight_total > 0.0 {
             (weighted_squares / weight_total).sqrt()
         } else {
-            (group_delay.iter().map(|value| value * value).sum::<f64>()
-                / group_delay.len() as f64)
+            (group_delay.iter().map(|value| value * value).sum::<f64>() / group_delay.len() as f64)
                 .sqrt()
         }
     };
@@ -656,8 +686,12 @@ pub fn aggregate_seat_bin(
     if values.is_empty()
         || bins == 0
         || values.iter().any(|row| row.len() != bins)
-        || values.iter().any(|row| row.iter().any(|value| !value.is_finite()))
-        || bin_weights.iter().any(|weight| !weight.is_finite() || *weight < 0.0)
+        || values
+            .iter()
+            .any(|row| row.iter().any(|value| !value.is_finite()))
+        || bin_weights
+            .iter()
+            .any(|weight| !weight.is_finite() || *weight < 0.0)
     {
         return None;
     }
@@ -682,9 +716,7 @@ pub fn aggregate_seat_bin(
         }
         AggregationOrder::SeatsThenBins => {
             let per_bin: Vec<f64> = (0..bins)
-                .map(|bin| {
-                    values.iter().map(|row| row[bin]).sum::<f64>() / values.len() as f64
-                })
+                .map(|bin| values.iter().map(|row| row[bin]).sum::<f64>() / values.len() as f64)
                 .collect();
             Some(weighted_bin_mean(&per_bin))
         }
@@ -708,10 +740,7 @@ pub struct SeatScore {
 /// absent from the report, never a zero or a guess. Ties resolve to the
 /// last maximum in slice order (`max_by` semantics; deterministic, so
 /// record the input order).
-pub fn worst_supported_seat(
-    scores: &[SeatScore],
-    min_support_bins: usize,
-) -> Option<&SeatScore> {
+pub fn worst_supported_seat(scores: &[SeatScore], min_support_bins: usize) -> Option<&SeatScore> {
     scores
         .iter()
         .filter(|score| score.support_bins >= min_support_bins && score.value_db.is_finite())
@@ -728,11 +757,7 @@ pub fn worst_supported_seat(
 /// the 2.5/97.5 percentiles of resampled means. Same seed, same interval:
 /// uncertainty itself is reproducible. Returns `None` on empty input or
 /// zero resamples.
-pub fn bootstrap_mean_ci95(
-    values: &[f64],
-    resamples: usize,
-    seed: u64,
-) -> Option<(f64, f64)> {
+pub fn bootstrap_mean_ci95(values: &[f64], resamples: usize, seed: u64) -> Option<(f64, f64)> {
     if values.is_empty() || resamples == 0 || values.iter().any(|v| !v.is_finite()) {
         return None;
     }
@@ -804,9 +829,7 @@ mod tests {
         fn candidate_for(frequencies: &[f64]) -> Vec<Complex64> {
             frequencies
                 .iter()
-                .map(|frequency| {
-                    Complex64::new(10.0_f64.powf(residual_db(*frequency) / 20.0), 0.0)
-                })
+                .map(|frequency| Complex64::new(10.0_f64.powf(residual_db(*frequency) / 20.0), 0.0))
                 .collect()
         }
         // Fine base grid so cell-width edge effects at the band boundary are
@@ -838,7 +861,10 @@ mod tests {
         };
         let base = report_for(base_grid.clone());
         let dense = report_for(dense_grid.clone());
-        assert_eq!(base.metrics.frequency_measure(), ORACLE_FREQUENCY_MEASURE_VERSION);
+        assert_eq!(
+            base.metrics.frequency_measure(),
+            ORACLE_FREQUENCY_MEASURE_VERSION
+        );
         assert!(
             (dense.metrics.target_weighted_rms_db - base.metrics.target_weighted_rms_db).abs()
                 < 0.1,
@@ -853,8 +879,7 @@ mod tests {
             dense.metrics.p95_abs_residual_db
         );
         assert!(
-            (dense.metrics.correction_energy_db2 - base.metrics.correction_energy_db2).abs()
-                < 0.5,
+            (dense.metrics.correction_energy_db2 - base.metrics.correction_energy_db2).abs() < 0.5,
             "weighted correction energy moved under densification"
         );
         // Documented grid artifact: the unweighted bin percentile jumps from
@@ -862,7 +887,9 @@ mod tests {
         // more than 5 % of the bins.
         let unweighted = |grid: &[f64]| {
             percentile(
-                grid.iter().map(|frequency| residual_db(*frequency)).collect(),
+                grid.iter()
+                    .map(|frequency| residual_db(*frequency))
+                    .collect(),
                 0.95,
             )
         };
@@ -957,10 +984,7 @@ mod tests {
         let candidate = grid
             .iter()
             .map(|frequency| {
-                Complex64::from_polar(
-                    1.0,
-                    -2.0 * std::f64::consts::PI * frequency * delay_seconds,
-                )
+                Complex64::from_polar(1.0, -2.0 * std::f64::consts::PI * frequency * delay_seconds)
             })
             .collect::<Vec<_>>();
         let thresholds = AcceptanceThresholds {
@@ -1018,8 +1042,14 @@ mod tests {
         assert!((bins_first - 5.0).abs() < 1e-12);
         // Seats-first: per-bin seat means (2.5, 7.0, 10.5), then (2.5*3+7+10.5)/5=5.0.
         assert!((seats_first - 5.0).abs() < 1e-12);
-        assert_eq!(AggregationOrder::BinsThenSeats.as_str(), "bins-then-seats-v1");
-        assert_eq!(AggregationOrder::SeatsThenBins.as_str(), "seats-then-bins-v1");
+        assert_eq!(
+            AggregationOrder::BinsThenSeats.as_str(),
+            "bins-then-seats-v1"
+        );
+        assert_eq!(
+            AggregationOrder::SeatsThenBins.as_str(),
+            "seats-then-bins-v1"
+        );
     }
 
     #[test]
@@ -1028,11 +1058,16 @@ mod tests {
         assert!(aggregate_seat_bin(&[], &[1.0], AggregationOrder::BinsThenSeats).is_none());
         assert!(aggregate_seat_bin(&values, &[], AggregationOrder::BinsThenSeats).is_none());
         assert!(
-            aggregate_seat_bin(&[vec![1.0]], &[1.0, 2.0], AggregationOrder::BinsThenSeats).is_none()
+            aggregate_seat_bin(&[vec![1.0]], &[1.0, 2.0], AggregationOrder::BinsThenSeats)
+                .is_none()
         );
         assert!(
-            aggregate_seat_bin(&[vec![f64::NAN, 1.0]], &[1.0, 1.0], AggregationOrder::BinsThenSeats)
-                .is_none()
+            aggregate_seat_bin(
+                &[vec![f64::NAN, 1.0]],
+                &[1.0, 1.0],
+                AggregationOrder::BinsThenSeats
+            )
+            .is_none()
         );
         assert!(
             aggregate_seat_bin(&values, &[0.0, 0.0], AggregationOrder::BinsThenSeats).is_none()
@@ -1042,9 +1077,21 @@ mod tests {
     #[test]
     fn worst_seat_needs_support() {
         let scores = [
-            SeatScore { seat: String::from("a"), value_db: 3.0, support_bins: 50 },
-            SeatScore { seat: String::from("b"), value_db: 5.0, support_bins: 4 },
-            SeatScore { seat: String::from("c"), value_db: 4.0, support_bins: 60 },
+            SeatScore {
+                seat: String::from("a"),
+                value_db: 3.0,
+                support_bins: 50,
+            },
+            SeatScore {
+                seat: String::from("b"),
+                value_db: 5.0,
+                support_bins: 4,
+            },
+            SeatScore {
+                seat: String::from("c"),
+                value_db: 4.0,
+                support_bins: 60,
+            },
         ];
         // "b" is worst but unsupported at min 10: "c" wins.
         assert_eq!(worst_supported_seat(&scores, 10).unwrap().seat, "c");
@@ -1066,6 +1113,24 @@ mod tests {
         assert!(first.0 < first.1);
         assert!(bootstrap_mean_ci95(&[], 100, 1).is_none());
         assert!(bootstrap_mean_ci95(&values, 0, 1).is_none());
+    }
+
+    #[test]
+    fn shared_grid_predicate_rejects_mismatched_or_short_curves() {
+        use ndarray::Array1;
+
+        let curve = |freq: &[f64]| autoeq_core::Curve {
+            freq: Array1::from(freq.to_vec()),
+            spl: Array1::from_elem(freq.len(), 0.0),
+            ..Default::default()
+        };
+        let reference = curve(&[20.0, 100.0, 1_000.0]);
+        assert!(same_frequency_grid(&reference, &reference));
+        assert!(!same_frequency_grid(
+            &reference,
+            &curve(&[20.0, 200.0, 1_000.0])
+        ));
+        assert!(!same_frequency_grid(&curve(&[20.0]), &curve(&[20.0])));
     }
 
     #[test]

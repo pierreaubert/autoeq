@@ -38,8 +38,9 @@ pub fn resolve_multi_measurement_auto_optimizer_config(
     let representative_curve = representative_multi_measurement_curve(curves);
     let data_min_freq = representative_curve.freq[0];
     let data_max_freq = representative_curve.freq[representative_curve.freq.len() - 1];
-    let effective_min_freq = config.min_freq.max(data_min_freq);
-    let effective_max_freq = config.max_freq.min(data_max_freq);
+    let [configured_min_freq, configured_max_freq] = config.active_correction_band();
+    let effective_min_freq = configured_min_freq.max(data_min_freq);
+    let effective_max_freq = configured_max_freq.min(data_max_freq);
     let detected_f3_hz = match crate::excursion::detect_f3_with_config(
         &representative_curve,
         None,

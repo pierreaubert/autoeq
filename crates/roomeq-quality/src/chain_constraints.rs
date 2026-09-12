@@ -72,10 +72,14 @@ impl PreRingingDefinition {
         if !(0.0 < self.band_hz[0] && self.band_hz[0] < self.band_hz[1])
             || !self.band_hz[1].is_finite()
         {
-            return Err(String::from("pre-ringing band_hz must be a finite ascending pair"));
+            return Err(String::from(
+                "pre-ringing band_hz must be a finite ascending pair",
+            ));
         }
         if !self.window_ms.is_finite() || self.window_ms <= 0.0 {
-            return Err(String::from("pre-ringing window_ms must be finite and positive"));
+            return Err(String::from(
+                "pre-ringing window_ms must be finite and positive",
+            ));
         }
         Ok(())
     }
@@ -126,7 +130,9 @@ impl TemporalGate {
         }
         match &self.basis {
             TemporalGateBasis::EngineeringLimit { rationale } if rationale.trim().is_empty() => {
-                Err(String::from("engineering-limit gates need a stated rationale"))
+                Err(String::from(
+                    "engineering-limit gates need a stated rationale",
+                ))
             }
             TemporalGateBasis::ValidatedPerceptual { protocol_hash }
                 if protocol_hash.trim().is_empty() =>
@@ -383,7 +389,11 @@ mod chain_constraints_tests {
 
     #[test]
     fn chain_within_limits_passes() {
-        assert!(evaluate_chain_constraints(&evidence(), &constraints()).unwrap().is_empty());
+        assert!(
+            evaluate_chain_constraints(&evidence(), &constraints())
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -407,6 +417,10 @@ mod chain_constraints_tests {
         };
         let violations = evaluate_chain_constraints(&missing, &constraints()).unwrap();
         assert_eq!(violations.len(), 4);
-        assert!(violations.iter().all(|violation| violation.ends_with("missing")));
+        assert!(
+            violations
+                .iter()
+                .all(|violation| violation.ends_with("missing"))
+        );
     }
 }

@@ -5,12 +5,12 @@ use super::home_cinema::HomeCinemaExecutor;
 use super::stereo::Stereo20Executor;
 use super::stereo_sub::Stereo21Executor;
 use super::types::{WorkflowAssembly, WorkflowExecutor};
-use ndarray::Array1;
 use math_audio_iir_fir::Biquad;
+use ndarray::Array1;
 use roomeq_model::{
     CardioidConfig, CrossoverConfig, DBAConfig, FilterAudibilityConfig, MeasurementSource,
-    MultiSubGroup, OptimizerConfig, ProcessingMode, RoomConfig, SpeakerConfig,
-    SubwooferStrategy, SubwooferSystemConfig, SystemConfig, SystemModel, default_config_version,
+    MultiSubGroup, OptimizerConfig, ProcessingMode, RoomConfig, SpeakerConfig, SubwooferStrategy,
+    SubwooferSystemConfig, SystemConfig, SystemModel, default_config_version,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -148,8 +148,7 @@ fn rippled_curve() -> roomeq_engine::Curve {
         .zip(curve.freq.iter())
         .map(|(&level, &freq)| {
             let octaves = (freq / 200.0).log2();
-            level + 0.4 * (-0.5 * (octaves * 3.0).powi(2)).exp()
-                + 0.15 * (freq / 37.0).sin()
+            level + 0.4 * (-0.5 * (octaves * 3.0).powi(2)).exp() + 0.15 * (freq / 37.0).sin()
         })
         .collect();
     curve
@@ -220,9 +219,15 @@ fn exported_eq_filters(chain: &roomeq_model::ChannelDspChain) -> Vec<(f64, f64, 
         let Some(filters) = filters else { continue };
         for filter in filters {
             out.push((
-                filter.get("freq").and_then(|v| v.as_f64()).unwrap_or(f64::NAN),
+                filter
+                    .get("freq")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(f64::NAN),
                 filter.get("q").and_then(|v| v.as_f64()).unwrap_or(f64::NAN),
-                filter.get("db_gain").and_then(|v| v.as_f64()).unwrap_or(f64::NAN),
+                filter
+                    .get("db_gain")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(f64::NAN),
             ));
         }
     }

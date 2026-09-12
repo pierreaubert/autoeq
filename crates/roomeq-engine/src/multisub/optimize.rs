@@ -36,6 +36,7 @@ fn optimize_multisub_gains_only(
     config: &OptimizerConfig,
     sample_rate: f64,
 ) -> Result<DriverOptimizationResult, Box<dyn Error>> {
+    let [min_freq, max_freq] = config.active_correction_band();
     let n_drivers = drivers_data.drivers.len();
     let delays = vec![0.0; n_drivers];
     let initial = vec![0.0_f64.clamp(config.min_db, config.max_db); n_drivers];
@@ -44,14 +45,12 @@ fn optimize_multisub_gains_only(
         &initial,
         &delays,
         sample_rate,
-        config.min_freq,
-        config.max_freq,
+        min_freq,
+        max_freq,
     );
     let bounds = vec![(config.min_db, config.max_db); n_drivers];
     let data = drivers_data.clone();
     let delays_for_loss = delays.clone();
-    let min_freq = config.min_freq;
-    let max_freq = config.max_freq;
     let report = optimize_bounded_scalar(
         &bounds,
         &initial,
@@ -110,6 +109,7 @@ pub fn optimize_multisub_detailed(
     config: &OptimizerConfig,
     sample_rate: f64,
 ) -> Result<MultiSubOptimizationResult, Box<dyn Error>> {
+    let [min_freq, max_freq] = config.active_correction_band();
     let mut driver_measurements = Vec::new();
     let mut missing_phase_count = 0;
 
@@ -143,8 +143,8 @@ pub fn optimize_multisub_detailed(
     let result = if missing_phase_count == 0 {
         autoeq_optim::optimize_multisub(
             drivers_data.clone(),
-            config.min_freq,
-            config.max_freq,
+            min_freq,
+            max_freq,
             sample_rate,
             &config.algorithm,
             config.max_iter,
@@ -216,6 +216,7 @@ pub fn optimize_multisub_with_allpass(
     config: &OptimizerConfig,
     sample_rate: f64,
 ) -> Result<MultiSubAllPassResult, Box<dyn Error>> {
+    let [min_freq, max_freq] = config.active_correction_band();
     let mut driver_measurements = Vec::new();
     let mut missing_phase_count = 0;
 
@@ -311,18 +312,10 @@ pub fn optimize_multisub_with_allpass(
     upper_bounds[n_drivers] = 0.0;
     let initial_x = x.clone();
     // Pre-objective
-    let pre_obj = multisub_allpass_loss(
-        &drivers_data,
-        &x,
-        sample_rate,
-        config.min_freq,
-        config.max_freq,
-    );
+    let pre_obj = multisub_allpass_loss(&drivers_data, &x, sample_rate, min_freq, max_freq);
 
     // Use DE optimizer (global search needed for all-pass parameters)
     let drivers_data_clone = drivers_data.clone();
-    let min_freq = config.min_freq;
-    let max_freq = config.max_freq;
 
     let objective_fn = move |params: &[f64]| -> f64 {
         multisub_allpass_loss(&drivers_data_clone, params, sample_rate, min_freq, max_freq)

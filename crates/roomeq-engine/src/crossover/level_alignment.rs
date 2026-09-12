@@ -125,14 +125,20 @@ pub(crate) fn align_two_band_target_levels(
             low = (best_half_difference - step).max(-radius);
             high = (best_half_difference + step).min(radius);
         }
-        (candidate_gains(best_half_difference), best_curve, best_score)
+        (
+            candidate_gains(best_half_difference),
+            best_curve,
+            best_score,
+        )
     };
     let (mut best_gains, mut best_curve, mut best_score) = search_gains(delays);
     let mut best_delays = [delays[0], delays[1]];
-    if let Some(phase) = config.phase_alignment.as_ref().filter(|phase|
-        phase.enabled && phase.max_delay_ms.is_finite() && phase.max_delay_ms > 0.0
-            && drivers.iter().all(|driver| driver.phase.is_some()))
-    {
+    if let Some(phase) = config.phase_alignment.as_ref().filter(|phase| {
+        phase.enabled
+            && phase.max_delay_ms.is_finite()
+            && phase.max_delay_ms > 0.0
+            && drivers.iter().all(|driver| driver.phase.is_some())
+    }) {
         // Level-only fitting can move two nearly opposite branches to equal
         // amplitude and create a new null. Recheck phase at each calibrated
         // level, before the common FIR is designed (it cannot undo cancellation).
@@ -141,10 +147,23 @@ pub(crate) fn align_two_band_target_levels(
             let evaluated = if let Some(response) = &correction_response {
                 corrected = crate::response::apply_complex_response(curve, response);
                 &corrected
-            } else { curve };
-            let target = crate::eq::group_upper_reference_target(evaluated, config, Some(resources)).unwrap();
-            let rms = crate::group::target_error_score(evaluated, &target, config.min_freq, config.max_freq);
-            rms + if correction_filters.is_some() { 10.0 * level_error } else { 0.0 }
+            } else {
+                curve
+            };
+            let target =
+                crate::eq::group_upper_reference_target(evaluated, config, Some(resources))
+                    .unwrap();
+            let rms = crate::group::target_error_score(
+                evaluated,
+                &target,
+                config.min_freq,
+                config.max_freq,
+            );
+            rms + if correction_filters.is_some() {
+                10.0 * level_error
+            } else {
+                0.0
+            }
         };
         let mut best_quality = quality(&best_curve, best_score);
         let center_delay = (delays[0] + delays[1]) * 0.5;
@@ -203,16 +222,28 @@ mod tests {
         // cancellation when the gain calibration equalizes the two branches.
         let mut delays = [6.25, 0.0];
         let config = OptimizerConfig {
-            min_freq: 20.0, max_freq: 200.0, max_db: 6.0,
+            min_freq: 20.0,
+            max_freq: 200.0,
+            max_db: 6.0,
             phase_alignment: Some(roomeq_model::PhaseAlignmentConfig {
-                max_delay_ms: 10.0, ..roomeq_model::PhaseAlignmentConfig::default()
+                max_delay_ms: 10.0,
+                ..roomeq_model::PhaseAlignmentConfig::default()
             }),
             ..OptimizerConfig::default()
         };
         let output = align_two_band_target_levels(
-            &[curve.clone(), curve], &mut gains, &mut delays, &[80.0], &[false, false],
-            CrossoverType::LinkwitzRiley4, &config, &EqResources::default(), 48_000.0, Some(&[]),
-        ).unwrap();
+            &[curve.clone(), curve],
+            &mut gains,
+            &mut delays,
+            &[80.0],
+            &[false, false],
+            CrossoverType::LinkwitzRiley4,
+            &config,
+            &EqResources::default(),
+            48_000.0,
+            Some(&[]),
+        )
+        .unwrap();
         let target = crate::eq::group_upper_reference_target(&output, &config, None).unwrap();
         assert!(crate::group::target_error_score(&output, &target, 20.0, 200.0) < 0.1);
         assert!((delays[0] - delays[1]).abs() < 0.1, "{delays:?}");

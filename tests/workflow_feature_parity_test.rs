@@ -47,7 +47,8 @@ fn log_sweep_curve(base_db: f64, bass_bump_db: f64) -> autoeq::Curve {
     autoeq::Curve {
         freq: ndarray::Array1::from_vec(freq),
         spl: ndarray::Array1::from_vec(spl),
-        phase: None,
+        // Synthetic fixture: relative phase is intentionally known and flat.
+        phase: Some(ndarray::Array1::zeros(n)),
         ..Default::default()
     }
 }

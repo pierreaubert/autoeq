@@ -14,6 +14,10 @@
 
 ## RoomEQ measured recovery
 
+- Declare the user-approved 18 dB finalization attenuation allowance for the
+  Genelec 5.1.4 measured fixture only; retain unit-peak inputs, the 0 dBFS output
+  ceiling, and the acoustic output-loss gates.
+
 - Support routed per-driver FIR placement using a transfer-equivalent common
   post-route kernel with unique physical-output artifacts; preserve pre-route
   source ownership and label the constrained shared-kernel design explicitly.

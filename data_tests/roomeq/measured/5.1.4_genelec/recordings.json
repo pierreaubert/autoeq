@@ -27,6 +27,9 @@
     }
   },
   "optimizer": {
+    "finalization": {
+      "max_attenuation_db": 18.0
+    },
     "algorithm": "autoeq:cmaes",
     "population": 21,
     "max_iter": 500000,

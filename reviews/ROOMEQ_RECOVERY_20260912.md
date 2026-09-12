@@ -102,23 +102,32 @@ Recovery follow-up:
   overwritten. Converter regressions: 12 passed, 1 skipped; artifact-audit
   regressions: 4 passed.
 
-The latest default measured run completed 44/48 cases before stopping at
+The pre-approval default measured run completed 44/48 cases before stopping at
 Genelec 5.1.4 IIR. Its correction-free structural graph requires 14.536 dB of
 additional attenuation under independently phased unit-peak inputs, exceeding
 `finalization.max_attenuation_db=12`. This is a real configured-policy conflict,
-not an acoustic acceptance failure that can safely be ignored. User approval
-has been requested for an explicit 18 dB allowance on this fixture only; no
-acoustic output-loss budget, input-peak assumption, or clipping ceiling would
-change. No allowance has been changed pending that choice. Existing 5.1.4
-artifacts from earlier provisional runs are not validated results of this run.
+not an acoustic acceptance failure that can safely be ignored. The user approved
+an explicit 18 dB allowance on this fixture only. That allowance is now declared
+in its `recordings.json`; the acoustic output-loss budget, input-peak assumption,
+and clipping ceiling are unchanged. All four guarded Genelec modes now complete
+and pass the artifact/electrical audit, each with an explicit rejected fallback.
+Actual additional attenuation is 14.536198 dB (IIR), 11.554653 dB (FIR),
+14.167860 dB (hybrid), and 13.985824 dB (mixed-phase).
+
+The final `./scripts/test_roomeq_measured.sh` run now exits successfully (code 0):
+all 48 cases completed on the guarded implementation. A separate inventory check
+of all 48 delivered policies confirms that only Genelec 5.1.4 uses the 18 dB
+allowance; all other fixtures retain 12 dB, and all retain unit-peak inputs and
+the 0 dBFS output ceiling. Earlier provisional artifacts are not used as evidence.
 
 The [machine-readable measured snapshot](ROOMEQ_MEASURED_RECOVERY_RESULTS.json)
-contains only the 44 cases completed by that run: 13 accepted, 9 unchanged,
-10 rejected, and 12 insufficient-evidence outcomes. Every included case passed
+contains all 48 cases from the final successful run: 13 accepted, 9 unchanged,
+14 rejected, and 12 insufficient-evidence outcomes. Every included case passed
 the native-manifest, electrical-stage, outcome-consistency, and FIR-byte audit.
 Supplementary `2.1_sigberg2` IIR and FIR runs also completed successfully on the
 guarded binary, completing this scenario's four-mode re-audit together with the
-earlier hybrid/mixed-phase runs. These checks do not override the 5.1.4 blocker.
+earlier hybrid/mixed-phase runs. The Genelec policy conflict was addressed
+separately through the user-approved fixture allowance above.
 
 - Provisional imported code: `cargo check --offline --locked -p roomeq-workflow
   -p roomeq-cli` passed (17.18 s), before recovery-specific fixes.
@@ -136,7 +145,7 @@ accepted, 5.210673 -> 4.564537 dB over the configured 20–1200 Hz band; paired
 2.2_sigberg3 IIR accepted, 8.893330 -> 3.578203 dB over 20–200 Hz; 5.0_genelec
 IIR accepted, 3.910919 -> 3.524082 dB over 20–400 Hz. Each had per-input final
 seat replay evidence. 2.1_sigberg2, shared-MSO 2.2_genelec, and 5.1.4_genelec
-fell back; these must be re-audited after electrical normalization was repaired.
+fell back; those provisional outcomes are superseded by the final re-audit above.
 2.2_sigberg2 requires missing subwoofer acoustic support above 199.951172 Hz
 to assess its requested 20–16000 Hz band; no upper-tail capability was invented.
 

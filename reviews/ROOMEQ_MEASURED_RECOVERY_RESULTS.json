@@ -2,15 +2,42 @@
   "date": "2026-09-12",
   "branch": "fix/roomeq-reorg-recovery",
   "baseline_commit": "5c58887",
+  "implementation_commit": "b1f9658",
   "command": "./scripts/test_roomeq_measured.sh",
-  "complete": false,
+  "complete": true,
+  "exit_code": 0,
+  "expected_cases": 48,
+  "completed_cases": 48,
+  "outcome_counts": {
+    "unchanged": 9,
+    "accepted": 13,
+    "rejected": 14,
+    "insufficient_evidence": 12
+  },
+  "fixture_policy_override": {
+    "scenario": "5.1.4_genelec",
+    "approval": "explicit user approval",
+    "max_attenuation_db": 18,
+    "default_max_attenuation_db": 12,
+    "default_input_peak": 1,
+    "input_peak_limits": {},
+    "output_ceiling_dbfs": 0,
+    "acoustic_output_loss_budget_changed": false,
+    "actual_safety_attenuation_db_by_mode": {
+      "fir": 11.554652556590124,
+      "iir": 14.536197564663112,
+      "mixed-phase": 13.985823854958607,
+      "mixed": 14.167860000269316
+    }
+  },
   "workspace_verification": {
     "command": "cargo nextest run --release --offline --locked --workspace --all-targets --all-features --no-fail-fast",
     "passed": 3185,
     "skipped": 27,
     "failed": 0
   },
-  "matrix_revision_note": "The 44-case run preceded the final routed hybrid-block guard; the guard has focused and full workspace coverage. Completing the guarded default matrix awaits the 5.1.4 policy decision.",
+  "matrix_revision_note": "The full default matrix completed on the guarded implementation with the approved fixture allowance. All 48 delivered policies were checked: only Genelec 5.1.4 uses 18 dB; all others retain 12 dB. Input peak assumptions and output ceilings are unchanged.",
+  "electrical_scope": "Sampled independently phased unit-peak logical inputs; not a full-band transient or hardware safety certificate.",
   "supplementary_cases": [
     {
       "result": "data_generated/roomeq/measured/2.1_sigberg2/fir/dsp-fir.json",
@@ -94,23 +121,6 @@
       ]
     }
   ],
-  "expected_cases": 48,
-  "completed_cases": 44,
-  "outcome_counts": {
-    "unchanged": 9,
-    "accepted": 13,
-    "rejected": 10,
-    "insufficient_evidence": 12
-  },
-  "blocker": {
-    "scenario": "5.1.4_genelec",
-    "mode": "iir",
-    "required_baseline_attenuation_db": 14.536,
-    "configured_max_attenuation_db": 12,
-    "proposed_fixture_allowance_db": 18,
-    "approval": "pending",
-    "note": "No input-peak assumption, clipping ceiling or acoustic output-loss budget has been changed."
-  },
   "cases": [
     {
       "result": "data_generated/roomeq/measured/2.0_8361a/fir/dsp-fir.json",
@@ -827,6 +837,90 @@
       "convolutions_verified": 0,
       "violations": [
         "audibility_regression_reverted"
+      ]
+    },
+    {
+      "result": "data_generated/roomeq/measured/5.1.4_genelec/fir/dsp-fir.json",
+      "outcome": "rejected",
+      "before_rms_db": 3.559266668055589,
+      "after_rms_db": 3.5592666680555896,
+      "final_seats": 10,
+      "observation_band_hz": [
+        20,
+        16000
+      ],
+      "requested_observation_band_hz": [
+        20,
+        16000
+      ],
+      "convolutions_verified": 0,
+      "violations": [
+        "baseline_requires_safety_attenuation",
+        "no_candidate_within_electrical_acoustic_limits",
+        "unexplained_useful_output_loss"
+      ]
+    },
+    {
+      "result": "data_generated/roomeq/measured/5.1.4_genelec/iir/dsp-iir.json",
+      "outcome": "rejected",
+      "before_rms_db": 4.615556980832702,
+      "after_rms_db": 4.615556980832702,
+      "final_seats": 10,
+      "observation_band_hz": [
+        20,
+        16000
+      ],
+      "requested_observation_band_hz": [
+        20,
+        16000
+      ],
+      "convolutions_verified": 0,
+      "violations": [
+        "baseline_requires_safety_attenuation",
+        "no_candidate_within_electrical_acoustic_limits",
+        "unexplained_useful_output_loss"
+      ]
+    },
+    {
+      "result": "data_generated/roomeq/measured/5.1.4_genelec/mixed-phase/dsp-mixed-phase.json",
+      "outcome": "rejected",
+      "before_rms_db": 3.957095132577387,
+      "after_rms_db": 3.9570951325773858,
+      "final_seats": 10,
+      "observation_band_hz": [
+        20,
+        16000
+      ],
+      "requested_observation_band_hz": [
+        20,
+        16000
+      ],
+      "convolutions_verified": 0,
+      "violations": [
+        "baseline_requires_safety_attenuation",
+        "no_candidate_within_electrical_acoustic_limits",
+        "unexplained_useful_output_loss"
+      ]
+    },
+    {
+      "result": "data_generated/roomeq/measured/5.1.4_genelec/mixed/dsp-mixed.json",
+      "outcome": "rejected",
+      "before_rms_db": 3.732317215603606,
+      "after_rms_db": 3.732317215603606,
+      "final_seats": 10,
+      "observation_band_hz": [
+        20,
+        16000
+      ],
+      "requested_observation_band_hz": [
+        20,
+        16000
+      ],
+      "convolutions_verified": 0,
+      "violations": [
+        "baseline_requires_safety_attenuation",
+        "no_candidate_within_electrical_acoustic_limits",
+        "unexplained_useful_output_loss"
       ]
     },
     {

@@ -3691,9 +3691,9 @@ dependencies = [
 
 [[package]]
 name = "sofa-reader"
-version = "0.1.6"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "100fa9983620cf1e17673dc8bb15c49f3860567a4313913d6d8d49bd2f2f6a64"
+checksum = "19a8b8cfa8b0017575adc7989abbc7299f2228cbd734a75242390e1505a7619d"
 dependencies = [
  "bincode",
  "flate2",

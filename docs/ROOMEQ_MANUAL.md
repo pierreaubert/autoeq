@@ -1172,7 +1172,17 @@ grids and uses the same bounded scalar backends. Kirkeby now uses the same
 realized dB-basis search for multi-seat magnitude selection, while retaining
 the representative residual as its acoustic phase reference. Requested
 excess-phase correction requires actual reference acoustic phase; electrical
-IIR phase cannot replace missing measurement evidence. The scratch-buffer and
+IIR phase cannot replace missing measurement evidence.
+
+Kirkeby FIR generation compares the actual windowed coefficients with a
+magnitude-only design using the same tap count, target and correction band.
+If excess-phase inversion worsens target error by more than 0.05 dB, RoomEQ
+keeps magnitude-only correction and logs the fallback. This also applies to
+standalone FIR and mixed-band FIR generation. Final electrical, acoustic-output
+and temporal acceptance limits remain unchanged; the fallback does not imply
+successful phase correction.
+
+The scratch-buffer and
 calibration-phase defects are repaired in integrated math-iir-fir 0.5.23, but
 Hybrid reference-phase correction still fails seat-weight separation and temporal
 requirements. A separate primitive diagnostic finds arrival-delay attenuation

@@ -77,20 +77,43 @@ pub fn compute_epa_multichannel(
         return None;
     }
 
-    if !entries.iter().all(|(_, initial, final_, _)| {
+    let grids_match = entries.iter().all(|(_, initial, final_, _)| {
         same_frequency_grid(freqs, &initial.freq) && same_frequency_grid(freqs, &final_.freq)
-    }) {
-        log::warn!("Skipping multichannel EPA aggregation: channel frequency grids do not match");
-        return None;
-    }
+    });
+    let aligned = if grids_match {
+        None
+    } else {
+        let curves: Vec<_> = entries
+            .iter()
+            .flat_map(|(_, initial, final_, _)| [*initial, *final_])
+            .collect();
+        Some(align_epa_curves(&curves)?)
+    };
+    let freqs = aligned.as_ref().map_or(freqs, |(grid, _)| grid.as_slice());
 
     let pre_channels: Vec<_> = entries
         .iter()
-        .map(|(_, initial, _, role)| (initial.spl.as_slice(), *role))
+        .enumerate()
+        .map(|(i, (_, initial, _, role))| {
+            (
+                aligned
+                    .as_ref()
+                    .map_or(initial.spl.as_slice(), |(_, spl)| spl[2 * i].as_slice()),
+                *role,
+            )
+        })
         .collect();
     let post_channels: Vec<_> = entries
         .iter()
-        .map(|(_, _, final_, role)| (final_.spl.as_slice(), *role))
+        .enumerate()
+        .map(|(i, (_, _, final_, role))| {
+            (
+                aligned
+                    .as_ref()
+                    .map_or(final_.spl.as_slice(), |(_, spl)| spl[2 * i + 1].as_slice()),
+                *role,
+            )
+        })
         .collect();
 
     let pre = crate::report_adapter::to_epa_score(compute_epa_multichannel_normalized(
@@ -109,6 +132,105 @@ pub fn compute_epa_multichannel(
         post,
         standard: "BS.1770-style channel energy aggregation over EPA spectra".to_string(),
     })
+}
+
+/// Align EPA magnitudes to the union of native bins within shared support.
+/// Never extrapolate a channel or change its SPL normalization.
+fn align_epa_curves(curves: &[&CurveData]) -> Option<(Vec<f64>, Vec<Vec<f64>>)> {
+    if curves.is_empty()
+        || curves.iter().any(|curve| {
+            curve.freq.len() < 2
+                || curve.freq.len() != curve.spl.len()
+                || curve.freq.iter().any(|f| !f.is_finite() || *f <= 0.0)
+                || curve.freq.windows(2).any(|pair| pair[0] >= pair[1])
+                || curve.spl.iter().any(|spl| !spl.is_finite())
+        })
+    {
+        return None;
+    }
+    let low = curves
+        .iter()
+        .map(|c| c.freq[0])
+        .fold(f64::NEG_INFINITY, f64::max);
+    let high = curves
+        .iter()
+        .map(|c| c.freq[c.freq.len() - 1])
+        .fold(f64::INFINITY, f64::min);
+    if low >= high {
+        return None;
+    }
+    let mut grid: Vec<_> = curves
+        .iter()
+        .flat_map(|c| c.freq.iter().copied())
+        .filter(|f| *f >= low && *f <= high)
+        .collect();
+    grid.sort_by(f64::total_cmp);
+    grid.dedup();
+    let frequencies = ndarray::Array1::from(grid.clone());
+    let levels = curves
+        .iter()
+        .map(|curve| {
+            let source = crate::Curve {
+                freq: ndarray::Array1::from(curve.freq.clone()),
+                spl: ndarray::Array1::from(curve.spl.clone()),
+                ..Default::default()
+            };
+            autoeq_core::interpolate_log_space(&frequencies, &source)
+                .spl
+                .to_vec()
+        })
+        .collect();
+    Some((grid, levels))
+}
+
+#[cfg(test)]
+mod alignment_tests {
+    use super::*;
+
+    fn curve(freq: Vec<f64>) -> CurveData {
+        CurveData {
+            spl: freq.iter().map(|f| 3.0 * f.log2()).collect(),
+            freq,
+            phase: None,
+            norm_range: None,
+        }
+    }
+
+    #[test]
+    fn alignment_interpolates_log_frequency_only_inside_shared_support() {
+        let a = curve(vec![20.0, 40.0, 80.0, 160.0]);
+        let b = curve(vec![30.0, 60.0, 120.0, 240.0]);
+        let (grid, levels) = align_epa_curves(&[&a, &b]).unwrap();
+        assert_eq!(grid, vec![30.0, 40.0, 60.0, 80.0, 120.0, 160.0]);
+        for spl in levels {
+            for (f, value) in grid.iter().zip(spl) {
+                assert!((value - 3.0 * f.log2()).abs() < 1e-10);
+            }
+        }
+    }
+
+    #[test]
+    fn alignment_rejects_disjoint_or_invalid_data() {
+        let a = curve(vec![20.0, 40.0]);
+        assert!(align_epa_curves(&[&a, &curve(vec![80.0, 160.0])]).is_none());
+        assert!(align_epa_curves(&[&a, &curve(vec![40.0, 80.0])]).is_none());
+        for freq in [
+            vec![],
+            vec![20.0],
+            vec![40.0, 20.0],
+            vec![20.0, 20.0],
+            vec![0.0, 40.0],
+            vec![20.0, f64::NAN],
+        ] {
+            assert!(align_epa_curves(&[&a, &curve(freq)]).is_none());
+        }
+        let mut bad = a.clone();
+        bad.spl.pop();
+        assert!(align_epa_curves(&[&a, &bad]).is_none());
+        bad = a.clone();
+        bad.spl[0] = f64::NAN;
+        assert!(align_epa_curves(&[&a, &bad]).is_none());
+    }
 }
 
 /// Compute the EQ filter response curve from initial and final curves.

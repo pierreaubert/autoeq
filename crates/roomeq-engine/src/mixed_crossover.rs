@@ -176,6 +176,19 @@ pub fn process_mixed_crossover(
         fir_bulk_delay_ms,
         None,
     );
+    // Kirkeby centers its inverse IFFT at taps/2, regardless of requested
+    // excess phase. Preserve that reference for correction-strength blending.
+    if let Some(fir) = fir_config.fir.as_ref()
+        && fir.phase.eq_ignore_ascii_case("kirkeby")
+        && fir.pre_ringing.is_none()
+    {
+        for plugin in &mut channel.plugins {
+            if plugin.plugin_type == "convolution" {
+                plugin.parameters["correction_design_delay_ms"] =
+                    serde_json::json!((fir.taps / 2) as f64 * 1000.0 / request.sample_rate);
+            }
+        }
+    }
     let neutral_output_curve = apply_crossover_response(
         request.curve,
         &eq_filters,
@@ -387,80 +400,97 @@ mod tests {
 
     #[test]
     fn mixed_crossover_returns_required_path_free_sidecar() {
-        let curve = curve();
-        let mixed_config = MixedModeConfig {
-            crossover_freq: 500.0,
-            fir_band: "low".to_string(),
-            ..MixedModeConfig::default()
-        };
-        let optimizer = OptimizerConfig {
-            min_freq: 100.0,
-            max_freq: 1_600.0,
-            num_filters: 1,
-            max_iter: 3,
-            population: 4,
-            seed: Some(2),
-            refine: false,
-            fir: Some(FirConfig {
-                taps: 64,
-                ..FirConfig::default()
-            }),
-            ..OptimizerConfig::default()
-        };
-        let target = TargetContext {
-            target_tilt_curve: None,
-            min_freq: 100.0,
-            max_freq: 1_600.0,
-            pre_score: 1.0,
-            mean_spl: 80.0,
-            cea2034_active: false,
-        };
-        let result = process_mixed_crossover(MixedCrossoverRequest {
-            channel_name: "left",
-            curve: &curve,
-            target: &target,
-            preference_filters: &[],
-            mixed_config: &mixed_config,
-            optimizer: &optimizer,
-            eq_resources: &EqResources::default(),
-            sample_rate: 48_000.0,
-            min_freq: 100.0,
-            max_freq: 1_600.0,
-            mean_spl: 80.0,
-            pre_score: 1.0,
-            arrival_time_ms: Some(2.5),
-            sidecar_reference: ConvolutionSidecarReference::new("left_band_fir_48000hz.wav")
-                .unwrap(),
-            callback: None,
-        })
-        .unwrap();
+        for phase in ["linear", "kirkeby"] {
+            let curve = curve();
+            let mixed_config = MixedModeConfig {
+                crossover_freq: 500.0,
+                fir_band: "low".to_string(),
+                ..MixedModeConfig::default()
+            };
+            let optimizer = OptimizerConfig {
+                min_freq: 100.0,
+                max_freq: 1_600.0,
+                num_filters: 1,
+                max_iter: 3,
+                population: 4,
+                seed: Some(2),
+                refine: false,
+                fir: Some(FirConfig {
+                    taps: 64,
+                    phase: phase.into(),
+                    correct_excess_phase: true,
+                    ..FirConfig::default()
+                }),
+                ..OptimizerConfig::default()
+            };
+            let target = TargetContext {
+                target_tilt_curve: None,
+                min_freq: 100.0,
+                max_freq: 1_600.0,
+                pre_score: 1.0,
+                mean_spl: 80.0,
+                cea2034_active: false,
+            };
+            let result = process_mixed_crossover(MixedCrossoverRequest {
+                channel_name: "left",
+                curve: &curve,
+                target: &target,
+                preference_filters: &[],
+                mixed_config: &mixed_config,
+                optimizer: &optimizer,
+                eq_resources: &EqResources::default(),
+                sample_rate: 48_000.0,
+                min_freq: 100.0,
+                max_freq: 1_600.0,
+                mean_spl: 80.0,
+                pre_score: 1.0,
+                arrival_time_ms: Some(2.5),
+                sidecar_reference: ConvolutionSidecarReference::new("left_band_fir_48000hz.wav")
+                    .unwrap(),
+                callback: None,
+            })
+            .unwrap();
 
-        assert_eq!(result.arrival_time_ms, Some(2.5));
-        assert_eq!(result.fir_coeffs.as_ref().unwrap().len(), 64);
-        let generated = result.convolution_sidecar.unwrap();
-        assert!(generated.required);
-        assert_eq!(generated.reference.filename(), "left_band_fir_48000hz.wav");
-        assert_eq!(result.channel.plugins[0].plugin_type, "band_split");
-        assert!(result.channel.plugins.iter().any(|plugin| {
-            plugin.plugin_type == "convolution"
-                && plugin.parameters["ir_file"] == "left_band_fir_48000hz.wav"
-        }));
-        let alignment = result
-            .channel
-            .plugins
-            .iter()
-            .find(|plugin| plugin.parameters["label"] == "hybrid_fir_latency_alignment")
-            .expect("hybrid branch alignment delay");
-        assert_eq!(alignment.plugin_type, "delay");
-        assert_eq!(alignment.parameters["channels"], serde_json::json!([2, 3]));
-        assert_eq!(
-            alignment.parameters["delay_ms"].as_f64().unwrap(),
-            fir_bulk_delay_ms(result.fir_coeffs.as_ref().unwrap(), 48_000.0, 500.0)
-        );
-        assert_eq!(
-            result.channel.plugins.last().unwrap().plugin_type,
-            "band_merge"
-        );
+            assert_eq!(result.arrival_time_ms, Some(2.5));
+            assert_eq!(result.fir_coeffs.as_ref().unwrap().len(), 64);
+            let generated = result.convolution_sidecar.unwrap();
+            assert!(generated.required);
+            assert_eq!(generated.reference.filename(), "left_band_fir_48000hz.wav");
+            assert_eq!(result.channel.plugins[0].plugin_type, "band_split");
+            assert!(result.channel.plugins.iter().any(|plugin| {
+                plugin.plugin_type == "convolution"
+                    && plugin.parameters["ir_file"] == "left_band_fir_48000hz.wav"
+            }));
+            let alignment = result
+                .channel
+                .plugins
+                .iter()
+                .find(|plugin| plugin.parameters["label"] == "hybrid_fir_latency_alignment")
+                .expect("hybrid branch alignment delay");
+            assert_eq!(alignment.plugin_type, "delay");
+            assert_eq!(alignment.parameters["channels"], serde_json::json!([2, 3]));
+            assert_eq!(
+                alignment.parameters["delay_ms"].as_f64().unwrap(),
+                fir_bulk_delay_ms(result.fir_coeffs.as_ref().unwrap(), 48_000.0, 500.0)
+            );
+            assert_eq!(
+                result.channel.plugins.last().unwrap().plugin_type,
+                "band_merge"
+            );
+
+            if phase == "kirkeby" {
+                let plugin = result
+                    .channel
+                    .plugins
+                    .iter()
+                    .find(|p| p.plugin_type == "convolution")
+                    .unwrap();
+                assert_eq!(
+                    plugin.parameters["correction_design_delay_ms"],
+                    serde_json::json!(32.0 * 1000.0 / 48000.0)
+                );
+            }
+        }
     }
 
     #[test]

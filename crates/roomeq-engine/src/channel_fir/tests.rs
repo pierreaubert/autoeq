@@ -78,6 +78,41 @@ fn reference(name: &str) -> ConvolutionSidecarReference {
 }
 
 #[test]
+fn kirkeby_excess_phase_request_exports_causal_design_delay() {
+    let curve = curve(true);
+    let prepared = prepared(curve.clone());
+    let mut room = config();
+    room.optimizer.fir.as_mut().unwrap().phase = "kirkeby".into();
+    room.optimizer.fir.as_mut().unwrap().correct_excess_phase = true;
+    let target = build_target_context("left", &room, &curve, None);
+    let features = preprocessed(&curve);
+    let result = process_fir_channel(FirChannelRequest {
+        mode: FirChannelMode::PhaseLinear,
+        channel_name: "left",
+        prepared: &prepared,
+        room_config: &room,
+        sample_rate: 48000.0,
+        target: &target,
+        preprocessed: &features,
+        optimizer: &room.optimizer,
+        eq_resources: &EqResources::default(),
+        sidecar_reference: reference("left.wav"),
+        callback: None,
+    })
+    .unwrap();
+    let convolution = result
+        .channel
+        .plugins
+        .iter()
+        .find(|p| p.plugin_type == "convolution")
+        .unwrap();
+    assert_eq!(
+        convolution.parameters["correction_design_delay_ms"],
+        serde_json::json!(32.0 * 1000.0 / 48000.0)
+    );
+}
+
+#[test]
 fn spatial_fir_native_stop_does_not_return_coefficients() {
     use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy};
     use std::sync::{

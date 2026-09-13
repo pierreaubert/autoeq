@@ -1,5 +1,14 @@
 # Unreleased
 
+- Preserve FIR magnitude correction when finite-tap excess-phase inversion
+  regresses its realized target response. FIR and mixed processing retain the
+  magnitude-only candidate in that case, without relaxing final acceptance limits.
+  Export Kirkeby's causal design delay for standalone and mixed FIRs so final
+  headroom selection can reduce correction strength instead of rejecting it.
+
+- Align mismatched multichannel EPA frequency grids in log-frequency over shared
+  support instead of skipping aggregation; preserve channel levels without extrapolation.
+
 ## RoomEQ channel-matching safety
 
 - Constrain channel-matching PEQs to a broad Q≤1 default because matching lacks

@@ -1,8 +1,6 @@
 {
-  "target_curve": "target-10db-downward-tilt.csv",
   "optimizer": {
     "processing_mode": "mixed_phase",
-    "seed": 42,
     "fir": {
       "taps": 512,
       "phase": "kirkeby",

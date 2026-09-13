@@ -1,19 +1,2 @@
 {
-  "target_curve": "target-7db-downward-tilt.csv",
-  "optimizer": {
-    "seed": 42,
-    "algorithm": "autoeq:cmaes",
-    "population": 21,
-    "max_iter": 500000,
-    "loss_type": "flat",
-    "min_freq": 20.0,
-    "max_freq": 200.0,
-    "num_filters": 7,
-    "min_q": 0.5,
-    "max_q": 6.0,
-    "min_db": -30.0,
-    "max_db": 6.0,
-    "psychoacoustic": true,
-    "asymmetric_loss": true
-  }
 }

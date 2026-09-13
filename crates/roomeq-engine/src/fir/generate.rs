@@ -208,6 +208,63 @@ pub fn generate_fir_correction_prepared(
     target_curve: &Curve,
     sample_rate: f64,
 ) -> Result<Vec<f64>, Box<dyn Error>> {
+    let requested =
+        generate_fir_correction_prepared_raw(measurement, config, target_curve, sample_rate)?;
+    if !config
+        .fir
+        .as_ref()
+        .is_some_and(|fir| fir.phase.eq_ignore_ascii_case("kirkeby") && fir.correct_excess_phase)
+        || measurement.phase.is_none()
+    {
+        return Ok(requested);
+    }
+
+    // A complex inverse has the desired magnitude before truncation/windowing,
+    // not necessarily afterwards. In particular, long acoustic delays can put
+    // its energy outside the available taps. Do not sacrifice magnitude EQ to
+    // an unrealizable excess-phase request.
+    let mut magnitude_config = config.clone();
+    magnitude_config.fir.as_mut().unwrap().correct_excess_phase = false;
+    let magnitude = generate_fir_correction_prepared_raw(
+        measurement,
+        &magnitude_config,
+        target_curve,
+        sample_rate,
+    )?;
+    let [low, high] = config.active_correction_band();
+    let score = |coefficients: &[f64]| {
+        let transfer = crate::response::compute_fir_complex_response(
+            coefficients,
+            &measurement.freq,
+            sample_rate,
+        );
+        let realized = crate::response::apply_complex_response(measurement, &transfer);
+        crate::group::target_error_score(&realized, target_curve, low, high)
+    };
+    let requested_error = score(&requested);
+    let magnitude_error = score(&magnitude);
+    // Keep feasible phase correction, allowing only negligible realization
+    // differences. Runtime electrical/acoustic acceptance still applies later.
+    if magnitude_error.is_finite()
+        && (!requested_error.is_finite() || requested_error > magnitude_error + 0.05)
+    {
+        log::warn!(
+            "Excess-phase FIR magnitude regression after realization ({requested_error:.3} dB vs \
+             {magnitude_error:.3} dB magnitude-only over {low:.1}-{high:.1} Hz); \
+             retaining magnitude correction without excess-phase inversion"
+        );
+        Ok(magnitude)
+    } else {
+        Ok(requested)
+    }
+}
+
+fn generate_fir_correction_prepared_raw(
+    measurement: &Curve,
+    config: &OptimizerConfig,
+    target_curve: &Curve,
+    sample_rate: f64,
+) -> Result<Vec<f64>, Box<dyn Error>> {
     let [active_min_freq, active_max_freq] = config.active_correction_band();
     let fir_config = config.fir.as_ref().ok_or("FIR configuration missing")?;
     let n_taps = fir_config.taps;

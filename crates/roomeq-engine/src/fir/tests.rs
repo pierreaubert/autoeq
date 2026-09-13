@@ -53,6 +53,87 @@ fn flat_target_like(measurement: &Curve) -> Curve {
 }
 
 #[test]
+fn excess_phase_fir_preserves_realized_magnitude_quality() {
+    // A long acoustic arrival cannot be inverted inside a short FIR simply by
+    // truncating its complex inverse. Magnitude correction must survive.
+    let freq = Array1::logspace(10.0, 20.0_f64.log10(), 20000.0_f64.log10(), 800);
+    let measurement = Curve {
+        spl: freq.mapv(|f| 80.0 + 10.0 * (-((f / 65.0).ln() / 0.35).powi(2)).exp()),
+        phase: Some(freq.mapv(|f| -360.0 * f * 0.1)),
+        freq,
+        ..Default::default()
+    };
+    let target = flat_target_like(&measurement);
+    let mut config = OptimizerConfig {
+        min_freq: 20.0,
+        max_freq: 200.0,
+        fir: Some(FirConfig {
+            taps: 4096,
+            phase: "kirkeby".into(),
+            correct_excess_phase: false,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let score = |coefficients: &[f64]| {
+        let response =
+            crate::response::compute_fir_complex_response(coefficients, &measurement.freq, 48000.0);
+        let realized = crate::response::apply_complex_response(&measurement, &response);
+        crate::group::target_error_score(&realized, &target, 20.0, 200.0)
+    };
+    let magnitude =
+        generate_fir_correction_prepared(&measurement, &config, &target, 48000.0).unwrap();
+    config.fir.as_mut().unwrap().correct_excess_phase = true;
+    let phase = generate_fir_correction_prepared(&measurement, &config, &target, 48000.0).unwrap();
+    assert!(
+        score(&phase) <= score(&magnitude) + 0.05,
+        "phase FIR RMS {} exceeds magnitude-only RMS {}",
+        score(&phase),
+        score(&magnitude)
+    );
+}
+
+#[test]
+fn feasible_excess_phase_fir_is_not_replaced_by_magnitude_only() {
+    let freq = Array1::logspace(10.0, 20.0_f64.log10(), 20000.0_f64.log10(), 800);
+    let measurement = Curve {
+        spl: Array1::from_elem(freq.len(), 80.0),
+        phase: Some(freq.mapv(|f| -360.0 * f * 0.001)),
+        freq,
+        ..Default::default()
+    };
+    let target = flat_target_like(&measurement);
+    let mut config = OptimizerConfig {
+        min_freq: 20.0,
+        max_freq: 20000.0,
+        fir: Some(FirConfig {
+            taps: 4096,
+            phase: "kirkeby".into(),
+            correct_excess_phase: true,
+            phase_smoothing: 0.0,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let phase = generate_fir_correction_prepared(&measurement, &config, &target, 48000.0).unwrap();
+    config.fir.as_mut().unwrap().correct_excess_phase = false;
+    let magnitude =
+        generate_fir_correction_prepared(&measurement, &config, &target, 48000.0).unwrap();
+    let peak = |h: &[f64]| {
+        h.iter()
+            .enumerate()
+            .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+            .unwrap()
+            .0
+    };
+    assert_eq!(
+        peak(&magnitude) - peak(&phase),
+        48,
+        "a feasible 1 ms phase advance must be retained"
+    );
+}
+
+#[test]
 fn phase_linear_gd_target_applies_polarity_without_delay() {
     let measurement = create_test_curve(
         &[20.0, 100.0, 1_000.0, 10_000.0, 20_000.0],

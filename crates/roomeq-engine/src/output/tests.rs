@@ -922,6 +922,53 @@ fn test_compute_eq_response() {
 }
 
 #[test]
+fn multichannel_epa_aligns_initial_and_final_channel_grids() {
+    let curve = |freq: Vec<f64>| crate::Curve {
+        spl: Array1::zeros(freq.len()),
+        freq: Array1::from(freq),
+        ..Default::default()
+    };
+    let left = curve(vec![20.0, 100.0, 1000.0, 5000.0, 20000.0]);
+    let right = curve(vec![20.0, 80.0, 800.0, 8000.0, 20000.0]);
+    let right_post = curve(vec![20.0, 60.0, 600.0, 6000.0, 20000.0]);
+    let mut channels = HashMap::new();
+    channels.insert(
+        "Left".into(),
+        build_channel_dsp_chain_with_curves("Left", None, vec![], &[], Some(&left), Some(&left)),
+    );
+    channels.insert(
+        "Right".into(),
+        build_channel_dsp_chain_with_curves(
+            "Right",
+            None,
+            vec![],
+            &[],
+            Some(&right),
+            Some(&right_post),
+        ),
+    );
+    let aligned = super::compute::compute_epa_multichannel(&channels, &Default::default()).unwrap();
+    let common = curve(vec![
+        20.0, 60.0, 80.0, 100.0, 600.0, 800.0, 1000.0, 5000.0, 6000.0, 8000.0, 20000.0,
+    ]);
+    for chain in channels.values_mut() {
+        chain.initial_curve = Some(roomeq_model::CurveData {
+            freq: common.freq.to_vec(),
+            spl: common.spl.to_vec(),
+            phase: None,
+            norm_range: None,
+        });
+        chain.final_curve = chain.initial_curve.clone();
+    }
+    let reference =
+        super::compute::compute_epa_multichannel(&channels, &Default::default()).unwrap();
+    assert_eq!(
+        serde_json::to_value(aligned).unwrap(),
+        serde_json::to_value(reference).unwrap()
+    );
+}
+
+#[test]
 fn multichannel_epa_ignores_mismatched_zero_weight_lfe_grid() {
     let main = crate::Curve {
         freq: Array1::from(vec![20.0, 100.0, 1000.0, 5000.0, 20000.0]),

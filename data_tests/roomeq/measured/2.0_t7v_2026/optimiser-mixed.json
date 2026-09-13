@@ -1,10 +1,8 @@
 {
-  "target_curve": "target-10db-downward-tilt.csv",
   "optimizer": {
     "processing_mode": "hybrid",
-    "seed": 42,
     "mixed_config": {
-      "crossover_freq": 300.0,
+      "crossover_freq": 80.0,
       "crossover_type": "LR24",
       "fir_band": "low"
     },

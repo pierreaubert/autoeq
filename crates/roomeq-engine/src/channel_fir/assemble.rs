@@ -167,13 +167,12 @@ fn assemble_dsp_chain(
             }
         }
     }
-    // Magnitude-only Kirkeby design explicitly centers the zero-phase IFFT
-    // at taps/2. Keep that known scheduling delay separate from correction
+    // Kirkeby centers its inverse IFFT at taps/2 regardless of excess phase.
+    // Keep that known scheduling delay separate from correction
     // so a routed rollback does not move only one branch in time.
     if !matches!(optimizer_output, FirOptimizerOutput::MixedPhase { .. })
         && let Some(fir) = request.optimizer.fir.as_ref()
         && fir.phase.eq_ignore_ascii_case("kirkeby")
-        && !fir.correct_excess_phase
         && fir.pre_ringing.is_none()
     {
         for plugin in &mut plugins {

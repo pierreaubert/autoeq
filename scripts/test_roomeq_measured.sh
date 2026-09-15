@@ -8,8 +8,7 @@ IN=${IN:-./data_tests/roomeq/measured}
 OUT=${OUT:-./data_generated/roomeq/measured}
 LOG=${LOG:-warn}
 # Space-separated subsets support the plan's one-case-at-a-time audit.
-# SCENARIOS=${SCENARIOS:-'2.2_unknown 2.2_sigberg1 2.2_sigberg2 2.2_sigberg3 2.2_genelec 2.0_8361a 2.0_d3v 2.0_fidelia 2.0_t7v_2024 2.0_t7v_2026  5.0_genelec 5.1_kef 5.1.4_genelec'}
-SCENARIOS=${SCENARIOS:-'2.0_t7v_2026'}
+SCENARIOS=${SCENARIOS:-'2.2_unknown 2.2_sigberg1 2.2_sigberg2 2.2_sigberg3 2.2_genelec 2.0_8361a 2.0_d3v 2.0_fidelia 2.0_t7v_2024 2.0_t7v_2026  5.0_genelec 5.1_kef 5.1.4_genelec'}
 MODES=${MODES:-'iir fir mixed mixed-phase'}
 read -r -a scenarios <<< "$SCENARIOS"
 read -r -a modes <<< "$MODES"

@@ -1,0 +1,13 @@
+{
+  "version": "2.1.0",
+  "speakers": {
+    "L": {
+      "path": "L C8C-BX8C-P2-No EQ Aug 12.txt",
+      "name": "L"
+    },
+    "R": {
+      "path": "R C8C-BX8C-P2-No EQ Aug 12.txt",
+      "name": "R"
+    }
+  }
+}

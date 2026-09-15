@@ -204,12 +204,68 @@ fn align_acceptance_metrics_with_scorecard(
 pub(super) fn align_report_metrics_to_scorecard(report: &mut CorrectionAcceptanceReport) {
     if let Some(scorecard) = report.acoustic_quality.clone() {
         align_acceptance_metrics_with_scorecard(report, &scorecard);
+        // Acceptance evaluators can recommend identity without actually
+        // replacing the delivered graph. Final-seat replay is authoritative:
+        // partial channel rollback must not label retained corrections identity.
+        report.decision = reconcile_identity_decision(
+            report.decision,
+            !report.reverted_stages.is_empty(),
+            scorecard.final_seats.iter().map(|seat| seat.improvement_db),
+        );
+        report.refresh_outcome();
+    }
+}
+
+fn reconcile_identity_decision(
+    decision: roomeq_model::CorrectionDecision,
+    has_reverted_stages: bool,
+    improvements: impl Iterator<Item = f64>,
+) -> roomeq_model::CorrectionDecision {
+    use roomeq_model::CorrectionDecision;
+    if decision == CorrectionDecision::IdentityFallback
+        && improvements
+            .into_iter()
+            .any(|improvement| improvement.abs() > 1e-6)
+    {
+        if has_reverted_stages {
+            CorrectionDecision::RevertedStage
+        } else {
+            CorrectionDecision::Rejected
+        }
+    } else {
+        decision
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn partial_channel_rollback_is_not_whole_graph_identity() {
+        use roomeq_model::CorrectionDecision::*;
+        assert_eq!(
+            reconcile_identity_decision(
+                IdentityFallback,
+                true,
+                [1.094, 0.530, 0.530, 0.0, 0.0].into_iter()
+            ),
+            RevertedStage
+        );
+        // Inspect every seat, not the median or aggregate improvement.
+        assert_eq!(
+            reconcile_identity_decision(IdentityFallback, true, [1.0, -1.0, 0.0].into_iter()),
+            RevertedStage
+        );
+        assert_eq!(
+            reconcile_identity_decision(IdentityFallback, true, [0.0, 0.0].into_iter()),
+            IdentityFallback
+        );
+        assert_eq!(
+            reconcile_identity_decision(IdentityFallback, false, [1.0].into_iter()),
+            Rejected
+        );
+    }
 
     #[test]
     fn runtime_policy_follows_processing_mode() {

@@ -431,6 +431,35 @@ pub fn replay_final_physical_seat(
     })
 }
 
+/// Standalone subwoofer groups are assessed over their common measured band,
+/// not the full-range optimizer ceiling. Do not apply this to routed main/sub
+/// sums: their acoustic tails still need evidence across the main's band.
+fn standalone_summation_max_hz(
+    config: &RoomConfig,
+    input: &str,
+    branches: &[bounded_sum::Branch],
+) -> f64 {
+    let key = config
+        .system
+        .as_ref()
+        .and_then(|system| system.speakers.get(input))
+        .map(String::as_str)
+        .unwrap_or(input);
+    let subwoofer = matches!(
+        config.speakers.get(key),
+        Some(SpeakerConfig::MultiSub(_) | SpeakerConfig::Dba(_) | SpeakerConfig::Cardioid(_))
+    ) || super::misc::is_subwoofer_channel(config, input);
+    if subwoofer {
+        branches
+            .iter()
+            .fold(config.optimizer.max_freq, |high, branch| {
+                high.min(branch.measured.freq.last().copied().unwrap_or(high))
+            })
+    } else {
+        config.optimizer.max_freq
+    }
+}
+
 fn replay(
     result: &RoomOptimizationResult,
     physical: &BTreeMap<String, Vec<Curve>>,
@@ -607,12 +636,9 @@ fn replay(
             )?);
             outputs.push(driver.name.clone());
         }
+        let max_hz = standalone_summation_max_hz(config, input, &branches);
         return Ok((
-            sum_branches(
-                &branches,
-                config.optimizer.min_freq,
-                config.optimizer.max_freq,
-            )?,
+            sum_branches(&branches, config.optimizer.min_freq, max_hz)?,
             outputs,
         ));
     }
@@ -1057,6 +1083,89 @@ fn validate_final_seats_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn standalone_subwoofer_replay_uses_measured_band_not_full_range_limit() {
+        let input = "Two subs";
+        let mut result = crate::test_fixtures::single_channel_room_result(input);
+        let chain = result.channels.get_mut(input).unwrap();
+        chain.plugins.clear();
+        chain.drivers = Some(
+            (0..2)
+                .map(|index| roomeq_model::DriverDspChain {
+                    name: format!("Two subs_{}", index + 1),
+                    index,
+                    plugins: vec![],
+                    initial_curve: None,
+                    measured_band_hz: None,
+                })
+                .collect(),
+        );
+        let physical = (0..2)
+            .map(|index| {
+                let high = if index == 0 { 199.951172 } else { 200.0 };
+                let curve = Curve {
+                    freq: ndarray::Array1::from_vec(vec![20.0, 40.0, 80.0, 120.0, high]),
+                    spl: ndarray::Array1::from_elem(5, 70.0),
+                    phase: Some(ndarray::Array1::zeros(5)),
+                    ..Default::default()
+                };
+                (format!("Two subs_{}", index + 1), vec![curve])
+            })
+            .collect();
+        let mut config = RoomConfig::default();
+        config.optimizer.min_freq = 20.0;
+        config.optimizer.max_freq = 16_000.0;
+        config.speakers.insert(
+            input.into(),
+            SpeakerConfig::MultiSub(roomeq_model::MultiSubGroup {
+                name: input.into(),
+                speaker_name: None,
+                subwoofers: vec![],
+                allpass_optimization: false,
+            }),
+        );
+        let playback = replay_final_physical_seat(
+            &result,
+            &physical,
+            input,
+            0,
+            &config,
+            48_000.0,
+            Path::new("."),
+            "training",
+        )
+        .expect("a standalone subwoofer needs evidence only in its measured band");
+        assert_eq!(*playback.baseline.freq.last().unwrap(), 199.951172);
+        assert_eq!(playback.baseline.freq, playback.delivered.freq);
+        assert!(
+            playback
+                .baseline
+                .spl
+                .iter()
+                .all(|spl| (*spl - 76.0206).abs() < 0.001)
+        );
+
+        // The same short captures must not silently narrow a full-range sum.
+        config.speakers.clear();
+        let error = replay_final_physical_seat(
+            &result,
+            &physical,
+            input,
+            0,
+            &config,
+            48_000.0,
+            Path::new("."),
+            "training",
+        )
+        .err()
+        .expect("full-range driver sums still require full-band evidence");
+        assert!(
+            error
+                .to_string()
+                .contains("insufficient summation evidence")
+        );
+    }
     #[test]
     fn training_labels_follow_source_and_original_index_without_inference() {
         let captures = vec![

@@ -1,5 +1,13 @@
 # Unreleased
 
+- Assess standalone subwoofer-group sums within their common measured band,
+  rather than requiring measurements up to the full-range optimizer ceiling.
+  Keep full-band acoustic-support checks for routed main/subwoofer sums.
+
+- Report partial channel rollback as `reverted_stage`, not whole-graph
+  `identity_fallback`, when final-seat replay retains nonzero correction benefit.
+  Keep insufficient-evidence outcomes and the strict identity artifact audit.
+
 - Preserve FIR magnitude correction when finite-tap excess-phase inversion
   regresses its realized target response. FIR and mixed processing retain the
   magnitude-only candidate in that case, without relaxing final acceptance limits.

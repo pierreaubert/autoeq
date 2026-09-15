@@ -353,6 +353,7 @@ fn select_inner(
                 .correction_acceptance
                 .as_mut()
                 .ok_or_else(|| failed("final correction acceptance unavailable"))?;
+            super::validation_scorecard::align_report_metrics_to_scorecard(report);
             let accepted_via_safe_reversion = matches!(
                 report.decision,
                 roomeq_model::CorrectionDecision::RevertedStage
@@ -364,7 +365,6 @@ fn select_inner(
                     report.violations
                 )));
             }
-            super::validation_scorecard::align_report_metrics_to_scorecard(report);
             // Passing vetoes is necessary but does not establish improvement.
             // A realized identity is unchanged; a nonidentity candidate must
             // improve the declared primary metric to be selected.

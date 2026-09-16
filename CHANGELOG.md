@@ -1,5 +1,15 @@
 # Unreleased
 
+- Preserve role-pair level balance through RoomEQ finalization by refreshing
+  realized non-routed curves and applying attenuation-only upper-band alignment
+  after per-output headroom gains, without extending the PEQ correction band.
+
+- Add nightly report-only `measured_stereo_ascilab1/2/3` scenarios to the
+  acoustic corpus for the three single-position AsciLab 2.0 captures.
+  They stay report-only until a second seat exists for held-out data.
+  Also fix the `measured_stereo_t7v` corpus paths after the
+  `2.0_t7v` → `2.0_t7v_2024` measurement rename.
+
 - Assess standalone subwoofer-group sums within their common measured band,
   rather than requiring measurements up to the full-range optimizer ceiling.
   Keep full-band acoustic-support checks for routed main/subwoofer sums.

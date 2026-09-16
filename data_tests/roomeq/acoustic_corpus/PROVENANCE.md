@@ -14,6 +14,9 @@ embedded location metadata.
 | measured_stereo_d3v | Contributor-supplied stereo room capture under ../measured/2.0_d3v/ | LicenseRef-SOTF-Project-Test-Data | Opaque device-family ID; CSV/WAV and channel names only |
 | measured_stereo_t7v | Contributor-supplied stereo room capture under ../measured/2.0_t7v_2024/ | LicenseRef-SOTF-Project-Test-Data | Opaque device-family ID; CSV/WAV and channel names only |
 | measured_stereo_fidelia | Public third-party stereo room capture under ../measured/2.0_fidelia/ (see README.md) | LicenseRef-SOTF-Project-Test-Data | Opaque scenario ID; CSV and channel names only |
+| measured_stereo_ascilab1 | Contributor-supplied stereo room capture under ../measured/2.0_ascilab1/ | LicenseRef-SOTF-Project-Test-Data | Opaque device-family ID; REW TXT and channel names only |
+| measured_stereo_ascilab2 | Contributor-supplied stereo room capture under ../measured/2.0_ascilab2/ | LicenseRef-SOTF-Project-Test-Data | Opaque device-family ID; REW TXT and channel names only |
+| measured_stereo_ascilab3 | Contributor-supplied stereo room capture under ../measured/2.0_ascilab3/ | LicenseRef-SOTF-Project-Test-Data | Opaque device-family ID; REW TXT and channel names only |
 
 LicenseRef-SOTF-Project-Test-Data means the files are retained and exercised
 as part of this repository's test suite. It is not a grant to extract and

@@ -283,14 +283,15 @@ fn final_role_level_alignment_corrects_broadband_lr_offset_down_only() {
         ("LFE".to_string(), curve(80.0)),
     ]);
 
-    let (gains, spread_db) = final_role_level_alignment_gains(&config, &curves);
+    let (gains, spread_db, band) = final_role_level_alignment_gains(&config, &curves);
+    assert_eq!(band, (100.0, 1_000.0));
 
     assert!((spread_db - 3.5).abs() < 1.0e-9);
     assert!((gains["L"] + 3.5).abs() < 1.0e-9);
     assert!(!gains.contains_key("R"));
     assert!(!gains.contains_key("LFE"));
 
-    let mut aligned = curves;
+    let mut aligned = curves.clone();
     for (name, gain_db) in gains {
         aligned
             .get_mut(&name)
@@ -298,10 +299,103 @@ fn final_role_level_alignment_corrects_broadband_lr_offset_down_only() {
             .spl
             .mapv_inplace(|value| value + gain_db);
     }
-    let (remaining_gains, remaining_spread_db) =
+    let (remaining_gains, remaining_spread_db, _) =
         final_role_level_alignment_gains(&config, &aligned);
     assert!(remaining_gains.is_empty());
     assert!(remaining_spread_db <= FINAL_CHANNEL_LEVEL_TOLERANCE_DB);
+}
+
+#[test]
+fn final_channel_level_uses_upper_band_after_unequal_headroom_gains() {
+    let mut config = minimal_room_config(ProcessingMode::LowLatency);
+    config.optimizer.min_freq = 20.0;
+    config.optimizer.max_freq = 200.0;
+    let curve = |level| Curve {
+        freq: ndarray::Array1::logspace(10.0, f64::log10(20.0), f64::log10(20_000.0), 96),
+        spl: ndarray::Array1::from_elem(96, level),
+        phase: Some(ndarray::Array1::zeros(96)),
+        ..Curve::default()
+    };
+    // The correction band remains bass-only. These realized curves model an
+    // unequal final per-output headroom attenuation after initially matched
+    // upper-band responses.
+    let curves = HashMap::from([
+        ("L".to_string(), curve(80.0)),
+        ("R".to_string(), curve(77.65)),
+    ]);
+
+    let (gains, spread_before_db, band) = final_role_level_alignment_gains(&config, &curves);
+    assert_eq!(band, (200.0, 20_000.0));
+    assert!((spread_before_db - 2.35).abs() < 1.0e-9);
+    assert!((gains["L"] + 2.35).abs() < 1.0e-9);
+    assert!(!gains.contains_key("R"));
+
+    let mut aligned = curves.clone();
+    for (name, gain_db) in gains {
+        aligned
+            .get_mut(&name)
+            .unwrap()
+            .spl
+            .mapv_inplace(|value| value + gain_db);
+    }
+    let (_, spread_after_db, _) = final_role_level_alignment_gains(&config, &aligned);
+    assert!(spread_after_db <= FINAL_CHANNEL_LEVEL_TOLERANCE_DB);
+
+    let mut result = crate::test_fixtures::single_channel_room_result("L");
+    let mut right_chain = result.channels["L"].clone();
+    right_chain.channel = "R".to_string();
+    result.channels.insert("R".to_string(), right_chain);
+    let mut right_result = result.channel_results["L"].clone();
+    right_result.name = "R".to_string();
+    result.channel_results.insert("R".to_string(), right_result);
+    for (name, realized) in &curves {
+        result.channel_results.get_mut(name).unwrap().final_curve = realized.clone();
+    }
+    result.deployed_source_curves = curves;
+
+    let outcome =
+        apply_final_channel_level_alignment(&mut result, &config, 48_000.0, Path::new("."))
+            .unwrap();
+    assert_eq!(outcome.status, StageStatus::Applied);
+    assert!(outcome.advisories[0].contains("spread_before_db=2.350"));
+    assert!(outcome.advisories[0].contains("spread_after_db=0.000"));
+    assert!(result.channels["L"].plugins.iter().any(|plugin| {
+        plugin.parameters["label"] == "final_channel_level_alignment"
+            && (plugin.parameters["gain_db"].as_f64().unwrap() + 2.35).abs() < 1.0e-9
+    }));
+    assert!(
+        !result.channels["R"]
+            .plugins
+            .iter()
+            .any(|plugin| { plugin.parameters["label"] == "final_channel_level_alignment" })
+    );
+}
+
+#[test]
+fn final_channel_level_refreshes_non_routed_curves_but_preserves_generic_sentinel() {
+    let mut result = crate::test_fixtures::single_channel_room_result("L");
+    let stale = result.channel_results["L"].final_curve.clone();
+    result.deployed_source_curves = HashMap::from([("L".to_string(), stale)]);
+    result
+        .channels
+        .get_mut("L")
+        .unwrap()
+        .plugins
+        .push(output::create_gain_plugin(3.0));
+    refresh_non_routed_deployed_source_curves(&mut result, 48_000.0, Path::new(".")).unwrap();
+    for (realized, initial) in result.deployed_source_curves["L"]
+        .spl
+        .iter()
+        .zip(result.channel_results["L"].initial_curve.spl.iter())
+    {
+        assert!((realized - initial - 3.0).abs() < 1.0e-9);
+    }
+
+    let mut generic = crate::test_fixtures::single_channel_room_result("L");
+    generic.channels.get_mut("L").unwrap().drivers = Some(Vec::new());
+    assert!(generic.deployed_source_curves.is_empty());
+    refresh_non_routed_deployed_source_curves(&mut generic, 48_000.0, Path::new(".")).unwrap();
+    assert!(generic.deployed_source_curves.is_empty());
 }
 
 #[test]

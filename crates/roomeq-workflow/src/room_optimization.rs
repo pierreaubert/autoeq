@@ -1002,7 +1002,7 @@ const FINAL_CHANNEL_LEVEL_MAX_HZ: f64 = 1_000.0;
 fn final_role_level_alignment_gains(
     config: &RoomConfig,
     curves: &HashMap<String, Curve>,
-) -> (HashMap<String, f64>, f64) {
+) -> (HashMap<String, f64>, f64, (f64, f64)) {
     let matching_enabled = config
         .optimizer
         .channel_matching
@@ -1010,25 +1010,82 @@ fn final_role_level_alignment_gains(
         .unwrap_or_default()
         .enabled;
     if !matching_enabled {
-        return (HashMap::new(), 0.0);
+        return (HashMap::new(), 0.0, (0.0, 0.0));
     }
 
-    let band_max = config.optimizer.max_freq.min(FINAL_CHANNEL_LEVEL_MAX_HZ);
-    let band_min = config
+    let fallback_max = config.optimizer.max_freq.min(FINAL_CHANNEL_LEVEL_MAX_HZ);
+    let fallback_min = config
         .optimizer
         .min_freq
         .max(FINAL_CHANNEL_LEVEL_MIN_HZ)
-        .min(band_max);
+        .min(fallback_max);
+    let upper_min = config.optimizer.max_freq;
+    let upper_max = curves
+        .values()
+        .filter_map(|curve| curve.freq.last().copied())
+        .fold(20_000.0_f64, f64::min)
+        .min(20_000.0);
+    let use_upper_band = upper_min.is_finite()
+        && upper_min > 0.0
+        && upper_max.is_finite()
+        && upper_max >= 2.0 * upper_min;
+    let band = if use_upper_band {
+        (upper_min, upper_max)
+    } else {
+        (fallback_min, fallback_max)
+    };
     let mut gains = HashMap::new();
     let mut max_spread_db = 0.0_f64;
 
     for group in role_aware_channel_matching_groups_with_keys(curves) {
-        let ranges = group
-            .curves
-            .keys()
-            .map(|name| (name.clone(), (band_min, band_max)))
-            .collect::<HashMap<_, _>>();
-        let group_gains = roomeq_engine::topology::align_channels_to_lowest(&group.curves, &ranges);
+        let group_gains = if use_upper_band {
+            let zero_targets = group
+                .curves
+                .iter()
+                .map(|(name, curve)| {
+                    (
+                        name.clone(),
+                        Curve {
+                            freq: curve.freq.clone(),
+                            spl: ndarray::Array1::zeros(curve.freq.len()),
+                            ..Curve::default()
+                        },
+                    )
+                })
+                .collect::<HashMap<_, _>>();
+            let levels = group
+                .curves
+                .iter()
+                .map(|(name, curve)| {
+                    roomeq_engine::spectral_align::upper_band_target_reference(
+                        curve,
+                        &zero_targets[name],
+                        config.optimizer.max_freq,
+                    )
+                    .map(|level| (name.clone(), level))
+                })
+                .collect::<Option<Vec<_>>>();
+            if let Some(levels) = levels {
+                let quietest = levels
+                    .iter()
+                    .map(|(_, level)| *level)
+                    .fold(f64::INFINITY, f64::min);
+                levels
+                    .into_iter()
+                    .map(|(name, level)| (name, quietest - level))
+                    .collect()
+            } else {
+                max_spread_db = f64::NAN;
+                HashMap::new()
+            }
+        } else {
+            let ranges = group
+                .curves
+                .keys()
+                .map(|name| (name.clone(), band))
+                .collect::<HashMap<_, _>>();
+            roomeq_engine::topology::align_channels_to_lowest(&group.curves, &ranges)
+        };
         let spread_db = group_gains
             .values()
             .map(|gain_db| (-gain_db).max(0.0))
@@ -1044,7 +1101,7 @@ fn final_role_level_alignment_gains(
         }
     }
 
-    (gains, max_spread_db)
+    (gains, max_spread_db, band)
 }
 
 fn insert_final_level_gain(chain: &mut ChannelDspChain, gain_db: f64, routed_logical_input: bool) {
@@ -1185,7 +1242,14 @@ fn apply_final_channel_level_alignment(
         .filter(|(name, _)| !is_subwoofer_channel(config, name))
         .map(|(name, curve)| (name.clone(), curve.clone()))
         .collect::<HashMap<_, _>>();
-    let (gains, spread_before_db) = final_role_level_alignment_gains(config, &curves);
+    let (gains, spread_before_db, alignment_band) =
+        final_role_level_alignment_gains(config, &curves);
+
+    if !spread_before_db.is_finite() {
+        return Err(AutoeqError::OptimizationFailed {
+            message: "final channel level spread is non-finite".to_string(),
+        });
+    }
 
     if gains.is_empty() {
         let mut check = StageCheck::pass("final_channel_level_spread_db", StageCheckKind::Safety);
@@ -1195,7 +1259,10 @@ fn apply_final_channel_level_alignment(
             checks: vec![check],
             stage: "final_channel_level_alignment".to_string(),
             status: StageStatus::Skipped,
-            advisories: Vec::new(),
+            advisories: vec![format!(
+                "alignment_band_hz={:.1}-{:.1}; spread_before_db={spread_before_db:.3}; spread_after_db={spread_before_db:.3}",
+                alignment_band.0, alignment_band.1
+            )],
         });
     }
 
@@ -1278,7 +1345,7 @@ fn apply_final_channel_level_alignment(
         .filter(|(name, _)| !is_subwoofer_channel(config, name))
         .map(|(name, curve)| (name.clone(), curve.clone()))
         .collect::<HashMap<_, _>>();
-    let (_, spread_after_db) = final_role_level_alignment_gains(config, &verification_curves);
+    let (_, spread_after_db, _) = final_role_level_alignment_gains(config, &verification_curves);
     if !spread_after_db.is_finite() || spread_after_db > FINAL_CHANNEL_LEVEL_TOLERANCE_DB {
         *result = snapshot;
         return Err(AutoeqError::OptimizationFailed {
@@ -1297,10 +1364,16 @@ fn apply_final_channel_level_alignment(
         checks: vec![check],
         stage: "final_channel_level_alignment".to_string(),
         status: StageStatus::Applied,
-        advisories: applied
-            .into_iter()
-            .map(|(name, gain_db)| format!("{name}:{gain_db:.3}dB"))
-            .collect(),
+        advisories: std::iter::once(format!(
+            "alignment_band_hz={:.1}-{:.1}; spread_before_db={spread_before_db:.3}; spread_after_db={spread_after_db:.3}",
+            alignment_band.0, alignment_band.1
+        ))
+        .chain(
+            applied
+                .into_iter()
+                .map(|(name, gain_db)| format!("{name}:{gain_db:.3}dB")),
+        )
+        .collect(),
     })
 }
 
@@ -2170,6 +2243,48 @@ fn prepare_final_channel_level_alignment(
     )
 }
 
+fn refresh_non_routed_deployed_source_curves(
+    result: &mut RoomOptimizationResult,
+    sample_rate: f64,
+    sidecar_dir: &Path,
+) -> Result<()> {
+    // Generic driver groups use an empty deployed map to signal that their
+    // reported aggregate/target response, rather than a logical source replay,
+    // owns final level validation.
+    if result.deployed_source_curves.is_empty()
+        && result
+            .channels
+            .values()
+            .any(|chain| chain.drivers.is_some())
+    {
+        return Ok(());
+    }
+    let embedded_irs = retained_fir_coeffs_by_channel(result);
+    let realized = result
+        .channel_results
+        .iter()
+        .map(|(name, channel)| {
+            let chain =
+                result
+                    .channels
+                    .get(name)
+                    .ok_or_else(|| AutoeqError::OptimizationFailed {
+                        message: format!("missing serialized DSP chain for channel '{name}'"),
+                    })?;
+            let curve = crate::ctc::apply_channel_dsp_chain_to_curve_with_embedded_irs(
+                chain,
+                &channel.initial_curve,
+                sample_rate,
+                sidecar_dir,
+                &embedded_irs,
+            )?;
+            Ok((name.clone(), curve))
+        })
+        .collect::<Result<HashMap<_, _>>>()?;
+    result.deployed_source_curves = realized;
+    Ok(())
+}
+
 fn apply_final_correction_safety_gate_preserving_routed_crossover(
     result: &mut RoomOptimizationResult,
     sample_rate: f64,
@@ -2219,6 +2334,14 @@ fn apply_final_correction_safety_gate_preserving_routed_crossover(
         processing_mode,
         group_delay_budget_ms,
     );
+
+    // The safety gate may serialize per-output gain changes after the deployed
+    // curves were captured. For non-routed results, publish the newly realized
+    // channel curves before final role-pair alignment. An empty map is the
+    // intentional sentinel for generic driver groups and must remain empty.
+    if routed_snapshot.is_none() {
+        refresh_non_routed_deployed_source_curves(result, sample_rate, sidecar_dir)?;
+    }
 
     if let Some((pre_safety_result, pre_safety_deployed, graph, optimization)) = routed_snapshot {
         let fir_coeffs = retained_fir_coeffs_by_channel(result);

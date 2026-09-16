@@ -1010,7 +1010,7 @@ def create_html_report(
         "<head>\n"
         '    <meta charset="utf-8">\n'
         f"    <title>{page_title}</title>\n"
-        '    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>\n'
+        '    <script src="https://cdn.plot.ly/plotly-4.0.0.min.js" charset="utf-8"></script>\n'
         """    <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -1708,7 +1708,7 @@ def create_comparison_html_report(
         "<!DOCTYPE html>\n<html>\n<head>\n"
         '    <meta charset="utf-8">\n'
         f"    <title>{page_title}</title>\n"
-        '    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>\n'
+        '    <script src="https://cdn.plot.ly/plotly-4.0.0.min.js" charset="utf-8"></script>\n'
         """    <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                margin: 0; padding: 20px; background: #f5f5f5; }

@@ -245,12 +245,7 @@ mod tests {
             spl: sub_spl,
             phase: Some(ndarray::Array1::zeros(sub_len)),
         };
-        let main_freq = ndarray::Array1::logspace(
-            10.0,
-            10.0_f64.log10(),
-            20_000.0_f64.log10(),
-            64,
-        );
+        let main_freq = ndarray::Array1::logspace(10.0, 10.0_f64.log10(), 20_000.0_f64.log10(), 64);
         let main = DriverMeasurement {
             freq: main_freq,
             spl: ndarray::Array1::from_elem(64, 65.0),

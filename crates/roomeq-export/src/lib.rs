@@ -21,8 +21,8 @@ use std::path::Path;
 
 mod channel;
 mod collect;
-mod delay;
 mod conformance;
+mod delay;
 mod export_format;
 mod extract;
 mod hash;
@@ -36,13 +36,16 @@ mod tests;
 mod types;
 mod write;
 
+pub use delay::CamillaDspDelayRealization;
 pub use export_format::*;
 pub use package::*;
-pub use delay::CamillaDspDelayRealization;
 
 /// Backend-specific added latency and validity, derived from the same stage
 /// plan used to render the artifact. Canonical acoustic timing is not mutated.
-pub fn camilladsp_delay_realization(graph: &DspGraph, sample_rate: f64) -> anyhow::Result<CamillaDspDelayRealization> {
+pub fn camilladsp_delay_realization(
+    graph: &DspGraph,
+    sample_rate: f64,
+) -> anyhow::Result<CamillaDspDelayRealization> {
     graph.validate().map_err(anyhow::Error::msg)?;
     ensure_external_export_supported(graph, ExportFormat::CamillaDsp)?;
     validate_camilladsp_input(graph, Some(sample_rate))?;
@@ -293,13 +296,27 @@ fn export_camilladsp(output: &DspGraph, sample_rate: f64) -> anyhow::Result<Stri
     let mut channel_filter_names = Vec::with_capacity(channels.len());
     let delay_report = delay::report(output, sample_rate);
     let padding = delay_report.serial_padding_samples;
-    writeln!(out, "# roomeq_delay_realization: {}", serde_json::to_string(&delay_report)?)?;
+    writeln!(
+        out,
+        "# roomeq_delay_realization: {}",
+        serde_json::to_string(&delay_report)?
+    )?;
     writeln!(out, "# roomeq_common_delay_padding_samples: {padding}")?;
-    writeln!(out, "# roomeq_delay_usable_band_hz: 0..{}", delay_report.usable_band_upper_hz)?;
+    writeln!(
+        out,
+        "# roomeq_delay_usable_band_hz: 0..{}",
+        delay_report.usable_band_upper_hz
+    )?;
     for (ch_name, chain) in &channels {
         let prefix = normalize_export_identifier(ch_name);
-        let filter_names =
-            delay::write_stage(&mut out, &mut manifest, &prefix, &chain.plugins, sample_rate, padding)?;
+        let filter_names = delay::write_stage(
+            &mut out,
+            &mut manifest,
+            &prefix,
+            &chain.plugins,
+            sample_rate,
+            padding,
+        )?;
         channel_filter_names.push(filter_names);
     }
     writeln!(out)?;
@@ -343,9 +360,21 @@ fn export_camilladsp_routed(
     let pre_padding = delay_report.pre_route_padding_samples;
     let post_padding = delay_report.post_route_padding_samples;
     let route_padding = delay_report.route_padding_samples;
-    writeln!(out, "# roomeq_delay_realization: {}", serde_json::to_string(&delay_report)?)?;
-    writeln!(out, "# roomeq_common_delay_padding_samples: {}", pre_padding + route_padding + post_padding)?;
-    writeln!(out, "# roomeq_delay_usable_band_hz: 0..{}", delay_report.usable_band_upper_hz)?;
+    writeln!(
+        out,
+        "# roomeq_delay_realization: {}",
+        serde_json::to_string(&delay_report)?
+    )?;
+    writeln!(
+        out,
+        "# roomeq_common_delay_padding_samples: {}",
+        pre_padding + route_padding + post_padding
+    )?;
+    writeln!(
+        out,
+        "# roomeq_delay_usable_band_hz: 0..{}",
+        delay_report.usable_band_upper_hz
+    )?;
 
     writeln!(out, "devices:")?;
     writeln!(out, "  samplerate: {}", sample_rate as u32)?;

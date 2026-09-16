@@ -427,7 +427,7 @@ fn axis_title(axis: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{grid_dimensions, parse_traces, render_axis_panel, AxisConfig, StaticTrace};
+    use super::{AxisConfig, StaticTrace, grid_dimensions, parse_traces, render_axis_panel};
     use serde_json::json;
 
     #[test]
@@ -509,21 +509,27 @@ mod tests {
             axis_index: 0,
             connect_gaps: false,
         };
-        let panel =
-            render_axis_panel(&[&gapped], &axis, 0.0, 0.0, 400.0, 300.0, 0).unwrap();
+        let panel = render_axis_panel(&[&gapped], &axis, 0.0, 0.0, 400.0, 300.0, 0).unwrap();
         let path = panel.split("<path d=\"").nth(1).unwrap();
         let path = &path[..path.find('"').unwrap()];
-        assert_eq!(path.matches('M').count(), 2, "gap must start a new subpath: {path}");
+        assert_eq!(
+            path.matches('M').count(),
+            2,
+            "gap must start a new subpath: {path}"
+        );
 
         let connected = StaticTrace {
             connect_gaps: true,
             ..gapped
         };
-        let panel =
-            render_axis_panel(&[&connected], &axis, 0.0, 0.0, 400.0, 300.0, 0).unwrap();
+        let panel = render_axis_panel(&[&connected], &axis, 0.0, 0.0, 400.0, 300.0, 0).unwrap();
         let path = panel.split("<path d=\"").nth(1).unwrap();
         let path = &path[..path.find('"').unwrap()];
-        assert_eq!(path.matches('M').count(), 1, "connectgaps must join segments: {path}");
+        assert_eq!(
+            path.matches('M').count(),
+            1,
+            "connectgaps must join segments: {path}"
+        );
     }
 
     #[test]

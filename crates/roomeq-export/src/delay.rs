@@ -24,11 +24,31 @@ pub(super) fn report(graph: &roomeq_model::DspGraph, rate: f64) -> CamillaDspDel
     let mut groups = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
     if let Some(routing) = super::camilladsp_routing_graph(graph).filter(|r| !r.routes.is_empty()) {
         let (inputs, outputs) = super::routed_channel_names(graph, &routing);
-        groups[1] = inputs.iter().map(|name| total_delay(&super::plugins_for_stage(&graph.channels[name], "pre_route"))).collect();
+        groups[1] = inputs
+            .iter()
+            .map(|name| {
+                total_delay(&super::plugins_for_stage(
+                    &graph.channels[name],
+                    "pre_route",
+                ))
+            })
+            .collect();
         groups[2] = routing.routes.iter().map(|route| route.delay_ms).collect();
-        groups[3] = outputs.iter().map(|name| total_delay(&super::plugins_for_stage(&graph.channels[name], "post_route"))).collect();
+        groups[3] = outputs
+            .iter()
+            .map(|name| {
+                total_delay(&super::plugins_for_stage(
+                    &graph.channels[name],
+                    "post_route",
+                ))
+            })
+            .collect();
     } else {
-        groups[0] = graph.channels.values().map(|chain| total_delay(&chain.plugins)).collect();
+        groups[0] = graph
+            .channels
+            .values()
+            .map(|chain| total_delay(&chain.plugins))
+            .collect();
     }
     let fractional = groups.iter().flatten().any(|ms| {
         let samples = ms * rate / 1000.0;
@@ -38,18 +58,30 @@ pub(super) fn report(graph: &roomeq_model::DspGraph, rate: f64) -> CamillaDspDel
     let common_padding_samples = pads.iter().sum();
     CamillaDspDelayRealization {
         sample_rate_hz: rate as u32,
-        serial_padding_samples: pads[0], pre_route_padding_samples: pads[1],
-        route_padding_samples: pads[2], post_route_padding_samples: pads[3],
+        serial_padding_samples: pads[0],
+        pre_route_padding_samples: pads[1],
+        route_padding_samples: pads[2],
+        post_route_padding_samples: pads[3],
         common_padding_samples,
         additional_latency_ms: common_padding_samples as f64 * 1000.0 / rate,
         fractional_delay_present: fractional,
-        usable_band_upper_hz: if fractional { roomeq_engine::fir::GD_DELAY_MAX_NORMALIZED_FREQUENCY * rate } else { rate / 2.0 },
-        magnitude_tolerance_db: if fractional { roomeq_engine::fir::GD_DELAY_MAGNITUDE_TOLERANCE_DB } else { 0.0 },
+        usable_band_upper_hz: if fractional {
+            roomeq_engine::fir::GD_DELAY_MAX_NORMALIZED_FREQUENCY * rate
+        } else {
+            rate / 2.0
+        },
+        magnitude_tolerance_db: if fractional {
+            roomeq_engine::fir::GD_DELAY_MAGNITUDE_TOLERANCE_DB
+        } else {
+            0.0
+        },
     }
 }
 
 pub(super) fn total_delay(plugins: &[PluginConfigWrapper]) -> f64 {
-    plugins.iter().filter(|p| p.plugin_type == "delay")
+    plugins
+        .iter()
+        .filter(|p| p.plugin_type == "delay")
         .map(|p| p.parameters["delay_ms"].as_f64().expect("validated delay"))
         .sum()
 }
@@ -59,17 +91,28 @@ pub(super) fn padding(delays: impl IntoIterator<Item = f64>, rate: f64) -> usize
 }
 
 pub(super) fn write_delay(
-    out: &mut String, manifest: &mut ExportArtifactManifest, name: &str,
-    delay_ms: f64, rate: f64, padding: usize,
+    out: &mut String,
+    manifest: &mut ExportArtifactManifest,
+    name: &str,
+    delay_ms: f64,
+    rate: f64,
+    padding: usize,
 ) -> anyhow::Result<()> {
     manifest.define_node(ExportNodeKind::Processor, name)?;
     let samples = delay_ms * rate / 1000.0 + padding as f64;
     if (samples - samples.round()).abs() <= 1e-9 {
-        writeln!(out, "  {name}:\n    type: Delay\n    parameters:\n      delay: {:.0}\n      unit: samples", samples.round())?;
+        writeln!(
+            out,
+            "  {name}:\n    type: Delay\n    parameters:\n      delay: {:.0}\n      unit: samples",
+            samples.round()
+        )?;
     } else {
         let realized = roomeq_engine::fir::realize_gd_fir_delay(&[1.0], delay_ms, rate, padding)
             .map_err(anyhow::Error::msg)?;
-        writeln!(out, "  {name}:\n    type: Conv\n    parameters:\n      type: Values\n      values:")?;
+        writeln!(
+            out,
+            "  {name}:\n    type: Conv\n    parameters:\n      type: Values\n      values:"
+        )?;
         for coefficient in realized.coefficients {
             writeln!(out, "      - {coefficient:.17e}")?;
         }
@@ -78,14 +121,23 @@ pub(super) fn write_delay(
 }
 
 pub(super) fn write_stage(
-    out: &mut String, manifest: &mut ExportArtifactManifest, prefix: &str,
-    plugins: &[PluginConfigWrapper], rate: f64, padding: usize,
+    out: &mut String,
+    manifest: &mut ExportArtifactManifest,
+    prefix: &str,
+    plugins: &[PluginConfigWrapper],
+    rate: f64,
+    padding: usize,
 ) -> anyhow::Result<Vec<String>> {
     let delay = total_delay(plugins);
     // All supported scalar LTI processors commute with a pure delay. Collapse
     // repeated delay ownership before realizing its fractional component.
-    let others: Vec<_> = plugins.iter().filter(|p| p.plugin_type != "delay").cloned().collect();
-    let mut names = super::write::write_camilladsp_filters_for_plugins(out, manifest, prefix, &others)?;
+    let others: Vec<_> = plugins
+        .iter()
+        .filter(|p| p.plugin_type != "delay")
+        .cloned()
+        .collect();
+    let mut names =
+        super::write::write_camilladsp_filters_for_plugins(out, manifest, prefix, &others)?;
     if plugins.iter().any(|p| p.plugin_type == "delay") || padding != 0 {
         let name = format!("{prefix}_delay");
         write_delay(out, manifest, &name, delay, rate, padding)?;
@@ -95,8 +147,15 @@ pub(super) fn write_stage(
             let mut scratch = String::new();
             let mut scratch_manifest = ExportArtifactManifest::new(crate::ExportFormat::CamillaDsp);
             super::write::write_camilladsp_filters_for_plugins(
-                &mut scratch, &mut scratch_manifest, prefix, &plugins[..first])?.len()
-        } else { names.len() };
+                &mut scratch,
+                &mut scratch_manifest,
+                prefix,
+                &plugins[..first],
+            )?
+            .len()
+        } else {
+            names.len()
+        };
         names.insert(index, name);
     }
     Ok(names)
@@ -115,13 +174,16 @@ mod tests {
         assert_eq!(common, 59);
         let mut manifest = ExportArtifactManifest::new(crate::ExportFormat::CamillaDsp);
         let mut out = String::new();
-        let reference = write_stage(&mut out, &mut manifest, "reference", &[], rate, common).unwrap();
+        let reference =
+            write_stage(&mut out, &mut manifest, "reference", &[], rate, common).unwrap();
         assert_eq!(reference, ["reference_delay"]);
         assert!(out.contains("delay: 59\n      unit: samples"));
         let plugins = [PluginConfigWrapper {
-            plugin_type: "delay".into(), parameters: json!({"delay_ms": delay}),
+            plugin_type: "delay".into(),
+            parameters: json!({"delay_ms": delay}),
         }];
-        let delayed = write_stage(&mut out, &mut manifest, "delayed", &plugins, rate, common).unwrap();
+        let delayed =
+            write_stage(&mut out, &mut manifest, "delayed", &plugins, rate, common).unwrap();
         assert_eq!(delayed, ["delayed_delay"]);
         assert!(out.contains("type: Values"));
     }
@@ -132,7 +194,15 @@ mod tests {
             assert_eq!(padding([0.0, 5.0 * 1000.0 / rate], rate), 0);
             let mut manifest = ExportArtifactManifest::new(crate::ExportFormat::CamillaDsp);
             let mut out = String::new();
-            write_delay(&mut out, &mut manifest, "delay", 5.0 * 1000.0 / rate, rate, 0).unwrap();
+            write_delay(
+                &mut out,
+                &mut manifest,
+                "delay",
+                5.0 * 1000.0 / rate,
+                rate,
+                0,
+            )
+            .unwrap();
             assert!(out.contains("delay: 5\n      unit: samples"));
         }
     }

@@ -256,7 +256,7 @@
         "R"
       ],
       "sample_rate": 48000.0,
-      "config": "../measured/2.0_t7v/recordings.json",
+      "config": "../measured/2.0_t7v_2024/recordings.json",
       "override_config": "qa_optimizer.json",
       "candidate_override_config": "qa_optimizer_alternate_de.json",
       "evaluation_band_hz": [
@@ -268,19 +268,19 @@
       "held_out": [
         {
           "channel": "L",
-          "path": "../measured/2.0_t7v/L_heldout_1.csv"
+          "path": "../measured/2.0_t7v_2024/L_heldout_1.csv"
         },
         {
           "channel": "L",
-          "path": "../measured/2.0_t7v/L_heldout_2.csv"
+          "path": "../measured/2.0_t7v_2024/L_heldout_2.csv"
         },
         {
           "channel": "R",
-          "path": "../measured/2.0_t7v/R_heldout_1.csv"
+          "path": "../measured/2.0_t7v_2024/R_heldout_1.csv"
         },
         {
           "channel": "R",
-          "path": "../measured/2.0_t7v/R_heldout_2.csv"
+          "path": "../measured/2.0_t7v_2024/R_heldout_2.csv"
         }
       ],
       "robustness": {

@@ -119,8 +119,8 @@ mod tests {
         assert!(erb_rate_weighted_rms(&nan_axis, &[1.0, 1.0, 1.0]).is_none());
 
         let invalid_axes = vec![
-            Array1::from(vec![100.0, 50.0, 1000.0]), // unsorted
-            Array1::from(vec![1000.0, 100.0, 10.0]), // descending
+            Array1::from(vec![100.0, 50.0, 1000.0]),  // unsorted
+            Array1::from(vec![1000.0, 100.0, 10.0]),  // descending
             Array1::from(vec![100.0, 100.0, 1000.0]), // duplicated -> zero cell
             Array1::from(vec![100.0, f64::INFINITY, 1000.0]),
             Array1::from(vec![100.0, -50.0, 1000.0]),
@@ -131,10 +131,7 @@ mod tests {
         for axis in &invalid_axes {
             assert!(try_erb_rate_cell_widths(axis).is_none(), "{axis:?}");
             let values = vec![1.0; axis.len()];
-            assert!(
-                erb_rate_weighted_rms(axis, &values).is_none(),
-                "{axis:?}"
-            );
+            assert!(erb_rate_weighted_rms(axis, &values).is_none(), "{axis:?}");
         }
     }
 
@@ -159,16 +156,13 @@ mod tests {
     fn nonconstant_residual_is_density_invariant() {
         // Residual varies with ERB rate; dense vs coarse log grids must agree.
         let residual = |frequency: f64| erb_rate(frequency) - erb_rate(1000.0);
-        let dense = Array1::from_iter(
-            (0..2000).map(|i| 20.0 * 1000.0_f64.powf(i as f64 / 1999.0)),
-        );
-        let coarse = Array1::from_iter(
-            (0..25).map(|i| 20.0 * 1000.0_f64.powf(i as f64 / 24.0)),
-        );
-        let dense_values: Vec<f64> =
-            dense.iter().map(|frequency| residual(*frequency)).collect();
-        let coarse_values: Vec<f64> =
-            coarse.iter().map(|frequency| residual(*frequency)).collect();
+        let dense = Array1::from_iter((0..2000).map(|i| 20.0 * 1000.0_f64.powf(i as f64 / 1999.0)));
+        let coarse = Array1::from_iter((0..25).map(|i| 20.0 * 1000.0_f64.powf(i as f64 / 24.0)));
+        let dense_values: Vec<f64> = dense.iter().map(|frequency| residual(*frequency)).collect();
+        let coarse_values: Vec<f64> = coarse
+            .iter()
+            .map(|frequency| residual(*frequency))
+            .collect();
         let dense_rms = erb_rate_weighted_rms(&dense, &dense_values).unwrap();
         let coarse_rms = erb_rate_weighted_rms(&coarse, &coarse_values).unwrap();
         let relative = ((coarse_rms - dense_rms) / dense_rms).abs();
@@ -177,11 +171,9 @@ mod tests {
 
     #[test]
     fn shuffled_grid_is_rejected_and_shifted_grid_is_stable() {
-        let base =
-            Array1::from_iter((0..50).map(|i| 20.0 * 1000.0_f64.powf(i as f64 / 49.0)));
+        let base = Array1::from_iter((0..50).map(|i| 20.0 * 1000.0_f64.powf(i as f64 / 49.0)));
         let residual = |frequency: f64| (erb_rate(frequency) * 0.5).sin();
-        let base_values: Vec<f64> =
-            base.iter().map(|frequency| residual(*frequency)).collect();
+        let base_values: Vec<f64> = base.iter().map(|frequency| residual(*frequency)).collect();
         let base_rms = erb_rate_weighted_rms(&base, &base_values).unwrap();
 
         // Shuffled (reversed) axis has equal length but is not a valid grid.
@@ -189,16 +181,15 @@ mod tests {
         shuffled.reverse();
         let shuffled_axis = Array1::from(shuffled);
         assert!(try_erb_rate_cell_widths(&shuffled_axis).is_none());
-        assert!(
-            erb_rate_weighted_rms(&shuffled_axis, &base_values).is_none()
-        );
+        assert!(erb_rate_weighted_rms(&shuffled_axis, &base_values).is_none());
 
         // Equal-length but slightly shifted grid must give a nearby RMS for a
         // smooth residual.
-        let shifted =
-            Array1::from_iter(base.iter().map(|frequency| frequency * 1.001));
-        let shifted_values: Vec<f64> =
-            shifted.iter().map(|frequency| residual(*frequency)).collect();
+        let shifted = Array1::from_iter(base.iter().map(|frequency| frequency * 1.001));
+        let shifted_values: Vec<f64> = shifted
+            .iter()
+            .map(|frequency| residual(*frequency))
+            .collect();
         let shifted_rms = erb_rate_weighted_rms(&shifted, &shifted_values).unwrap();
         let relative = ((shifted_rms - base_rms) / base_rms).abs();
         assert!(relative < 0.05, "base={base_rms} shifted={shifted_rms}");

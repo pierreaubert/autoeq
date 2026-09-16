@@ -180,10 +180,7 @@ mod pareto_front_tests {
 
     #[test]
     fn nan_failed_candidate_does_not_survive_valid_converged() {
-        let filters = vec![
-            entry(5.0, 2, true),
-            entry(f64::NAN, 1, false),
-        ];
+        let filters = vec![entry(5.0, 2, true), entry(f64::NAN, 1, false)];
         let front = extract_non_dominated(&filters);
         assert_eq!(front.len(), 1);
         assert!(front[0].converged);
@@ -204,10 +201,7 @@ mod pareto_front_tests {
 
     #[test]
     fn all_failed_front_is_empty() {
-        let filters = vec![
-            entry(f64::NAN, 1, false),
-            entry(f64::INFINITY, 2, false),
-        ];
+        let filters = vec![entry(f64::NAN, 1, false), entry(f64::INFINITY, 2, false)];
         assert!(extract_non_dominated(&filters).is_empty());
         assert!(extract_non_dominated(&[]).is_empty());
     }
@@ -216,10 +210,7 @@ mod pareto_front_tests {
     fn finite_best_effort_is_kept_and_ranked() {
         // A failed run with a finite best-effort loss must still participate:
         // here it strictly beats the converged entry on loss.
-        let filters = vec![
-            entry(8.0, 2, true),
-            entry(5.0, 2, false),
-        ];
+        let filters = vec![entry(8.0, 2, true), entry(5.0, 2, false)];
         let front = extract_non_dominated(&filters);
         assert_eq!(front.len(), 1);
         assert_eq!(front[0].flatness_loss, 5.0);
@@ -228,10 +219,7 @@ mod pareto_front_tests {
 
     #[test]
     fn exact_tie_prefers_converged_entry() {
-        let filters = vec![
-            entry(5.0, 2, false),
-            entry(5.0, 2, true),
-        ];
+        let filters = vec![entry(5.0, 2, false), entry(5.0, 2, true)];
         let front = extract_non_dominated(&filters);
         assert_eq!(front.len(), 1);
         assert!(front[0].converged);

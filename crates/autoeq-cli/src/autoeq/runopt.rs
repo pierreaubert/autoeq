@@ -181,8 +181,8 @@ pub(super) fn perform_optimization_with_backend(
         // roomeq-engine `eq::optimize`): accept only a usable (finite and
         // in-bounds, i.e. confidence better than `Unusable`) refinement
         // that strictly improves the chosen scalar objective.
-        let use_local = local_evidence.confidence != OptimizerConfidence::Unusable
-            && local_loss < global_loss;
+        let use_local =
+            local_evidence.confidence != OptimizerConfidence::Unusable && local_loss < global_loss;
         local_evidence.selected_for_output = use_local;
         if use_local {
             if !params.quiet {
@@ -218,19 +218,18 @@ pub(super) fn perform_optimization_with_backend(
     // Measure how far the integer-Hz APO serialization drifts from the
     // optimizer response. Non-PEQ layouts (driver gains/delays) have no
     // frequency serialization, so no gap applies.
-    let apo_roundtrip_gap =
-        if objective_data.loss_type == autoeq::LossType::DriversFlat
-            || objective_data.loss_type == autoeq::LossType::MultiSubFlat
-        {
-            None
-        } else {
-            super::save::apo_roundtrip_objective_gap(
-                &x,
-                params.sample_rate,
-                params.peq_model,
-                objective_data,
-            )
-        };
+    let apo_roundtrip_gap = if objective_data.loss_type == autoeq::LossType::DriversFlat
+        || objective_data.loss_type == autoeq::LossType::MultiSubFlat
+    {
+        None
+    } else {
+        super::save::apo_roundtrip_objective_gap(
+            &x,
+            params.sample_rate,
+            params.peq_model,
+            objective_data,
+        )
+    };
 
     Ok(OptimizationResult {
         params: x,

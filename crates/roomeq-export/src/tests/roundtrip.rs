@@ -1,11 +1,11 @@
 //! Round-trip verification tests (Stage 5): exported artifacts read back
 //! against the canonical graph.
 
-use super::make::make_test_output;
 use super::super::roundtrip::{
     encode_mono_f32_wav, verify_biquad_json_roundtrip, verify_convolution_wav_roundtrip,
     wav_resource,
 };
+use super::make::make_test_output;
 use roomeq_model::PluginConfigWrapper;
 use serde_json::json;
 

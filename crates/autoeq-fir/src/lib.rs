@@ -34,17 +34,11 @@ pub const MAX_CHECKED_SAMPLE_RATE: f64 = 8_000_000.0;
 #[derive(Debug, Clone, PartialEq)]
 pub enum FirDesignError {
     /// Sample rate is non-finite, non-positive, or implausibly large.
-    InvalidSampleRate {
-        value: f64,
-    },
+    InvalidSampleRate { value: f64 },
     /// Tap count outside `[MIN_CHECKED_TAPS, MAX_CHECKED_TAPS]`.
-    InvalidTapCount {
-        n_taps: usize,
-    },
+    InvalidTapCount { n_taps: usize },
     /// Curve has fewer than two points.
-    EmptyCurve {
-        which: &'static str,
-    },
+    EmptyCurve { which: &'static str },
     /// `freq`/`spl` (or phase) array lengths disagree.
     LengthMismatch {
         which: &'static str,
@@ -53,15 +47,9 @@ pub enum FirDesignError {
         other: &'static str,
     },
     /// Non-finite magnitude or frequency value.
-    NonFiniteValue {
-        which: &'static str,
-        index: usize,
-    },
+    NonFiniteValue { which: &'static str, index: usize },
     /// Frequency grid is not strictly increasing or not positive.
-    InvalidFrequencyGrid {
-        which: &'static str,
-        index: usize,
-    },
+    InvalidFrequencyGrid { which: &'static str, index: usize },
     /// Correction band is empty, inverted, or outside `(0, Nyquist]`.
     UnsupportedFrequencySpan {
         min_freq: f64,
@@ -71,9 +59,7 @@ pub enum FirDesignError {
     /// Excess-phase correction requested without measurement phase data.
     MissingPhase,
     /// Measurement phase contains a non-finite value.
-    NonFinitePhase {
-        index: usize,
-    },
+    NonFinitePhase { index: usize },
 }
 
 impl std::fmt::Display for FirDesignError {
@@ -116,7 +102,10 @@ impl std::fmt::Display for FirDesignError {
                 "excess-phase correction requested but measurement has no phase data"
             ),
             Self::NonFinitePhase { index } => {
-                write!(f, "measurement phase has a non-finite value at index {index}")
+                write!(
+                    f,
+                    "measurement phase has a non-finite value at index {index}"
+                )
             }
         }
     }
@@ -852,8 +841,7 @@ mod tests {
                 let mut re = 0.0;
                 let mut im = 0.0;
                 for (n, &c) in coeffs.iter().enumerate() {
-                    let p =
-                        2.0 * std::f64::consts::PI * freq * n as f64 / sample_rate;
+                    let p = 2.0 * std::f64::consts::PI * freq * n as f64 / sample_rate;
                     re += c * p.cos();
                     im -= c * p.sin();
                 }
@@ -865,9 +853,12 @@ mod tests {
     /// Max absolute deviation after removing the overall gain offset
     /// (amplitude normalization).
     fn normalized_max_dev(realized: &[f64], expected: &[f64]) -> f64 {
-        let offset: f64 =
-            realized.iter().zip(expected.iter()).map(|(r, e)| r - e).sum::<f64>()
-                / realized.len() as f64;
+        let offset: f64 = realized
+            .iter()
+            .zip(expected.iter())
+            .map(|(r, e)| r - e)
+            .sum::<f64>()
+            / realized.len() as f64;
         realized
             .iter()
             .zip(expected.iter())
@@ -928,8 +919,7 @@ mod tests {
         assert!(
             generate_fir_from_response_checked(&one_point, 48_000.0, 64, FirPhase::Linear).is_err()
         );
-        let backwards =
-            create_test_curve(&[1000.0, 100.0, 10_000.0], &[0.0, 0.0, 0.0]);
+        let backwards = create_test_curve(&[1000.0, 100.0, 10_000.0], &[0.0, 0.0, 0.0]);
         assert!(matches!(
             generate_fir_from_response_checked(&backwards, 48_000.0, 64, FirPhase::Linear),
             Err(FirDesignError::InvalidFrequencyGrid { .. })
@@ -954,16 +944,21 @@ mod tests {
 
         // Unsupported frequency spans.
         for (min_f, max_f) in [
-            (1000.0, 20.0),   // inverted
-            (500.0, 500.0),   // empty
-            (-20.0, 1000.0),  // negative
-            (20.0, 30_000.0), // above Nyquist at 48 kHz
+            (1000.0, 20.0),       // inverted
+            (500.0, 500.0),       // empty
+            (-20.0, 1000.0),      // negative
+            (20.0, 30_000.0),     // above Nyquist at 48 kHz
             (25_000.0, 26_000.0), // entirely above Nyquist
         ] {
             assert!(
                 matches!(
                     generate_kirkeby_correction_checked(
-                        &measurement, &target, 48_000.0, 512, min_f, max_f
+                        &measurement,
+                        &target,
+                        48_000.0,
+                        512,
+                        min_f,
+                        max_f
                     ),
                     Err(FirDesignError::UnsupportedFrequencySpan { .. })
                 ),
@@ -974,7 +969,13 @@ mod tests {
         // Missing phase when excess-phase correction is requested.
         assert!(matches!(
             generate_kirkeby_correction_with_phase_checked(
-                &measurement, &target, 48_000.0, 512, 20.0, 1000.0, true
+                &measurement,
+                &target,
+                48_000.0,
+                512,
+                20.0,
+                1000.0,
+                true
             ),
             Err(FirDesignError::MissingPhase)
         ));
@@ -987,7 +988,13 @@ mod tests {
         let phased_target = create_flat_curve(20.0, 20_000.0, 50, 80.0);
         assert!(
             generate_kirkeby_correction_with_phase_checked(
-                &phased, &phased_target, 48_000.0, 256, 20.0, 1000.0, true
+                &phased,
+                &phased_target,
+                48_000.0,
+                256,
+                20.0,
+                1000.0,
+                true
             )
             .is_ok()
         );
@@ -996,7 +1003,13 @@ mod tests {
         bad_phase.phase.as_mut().unwrap()[2] = f64::INFINITY;
         assert!(matches!(
             generate_kirkeby_correction_with_phase_checked(
-                &bad_phase, &phased_target, 48_000.0, 256, 20.0, 1000.0, true
+                &bad_phase,
+                &phased_target,
+                48_000.0,
+                256,
+                20.0,
+                1000.0,
+                true
             ),
             Err(FirDesignError::NonFinitePhase { .. })
         ));
@@ -1038,15 +1051,13 @@ mod tests {
         let target = create_test_curve(&target_freqs, &target_spl);
         for sample_rate in [44_100.0, 48_000.0, 96_000.0] {
             for (phase, limit) in [(FirPhase::Linear, 6.0), (FirPhase::Minimum, 6.0)] {
-                let coeffs =
-                    generate_fir_from_response_checked(&target, sample_rate, 256, phase)
-                        .expect("design should succeed");
+                let coeffs = generate_fir_from_response_checked(&target, sample_rate, 256, phase)
+                    .expect("design should succeed");
                 let probes = log_grid(100.0, 10_000.0, 25);
-                let expected: Vec<f64> = probes
-                    .iter()
-                    .map(|f| 4.0 * (1000.0 / f).log10())
-                    .collect();
-                let dev = normalized_max_dev(&realized_db(&coeffs, sample_rate, &probes), &expected);
+                let expected: Vec<f64> =
+                    probes.iter().map(|f| 4.0 * (1000.0 / f).log10()).collect();
+                let dev =
+                    normalized_max_dev(&realized_db(&coeffs, sample_rate, &probes), &expected);
                 assert!(
                     dev < limit,
                     "{phase:?} @{sample_rate} Hz realized shape deviates by {dev:.2} dB"
@@ -1066,9 +1077,15 @@ mod tests {
             .collect();
         let measurement = create_test_curve(&grid, &meas_spl);
         let target = create_flat_curve(20.0, 20_000.0, 40, 80.0);
-        let coeffs =
-            generate_kirkeby_correction_checked(&measurement, &target, 48_000.0, 1024, 30.0, 12_000.0)
-                .expect("design should succeed");
+        let coeffs = generate_kirkeby_correction_checked(
+            &measurement,
+            &target,
+            48_000.0,
+            1024,
+            30.0,
+            12_000.0,
+        )
+        .expect("design should succeed");
         assert_all_finite(&coeffs);
         let probes: Vec<f64> = log_grid(60.0, 8000.0, 25);
         let expected: Vec<f64> = probes
@@ -1090,9 +1107,8 @@ mod tests {
         );
         for &taps in &[16, 32] {
             for phase in [FirPhase::Linear, FirPhase::Minimum] {
-                let coeffs =
-                    generate_fir_from_response_checked(&target, 48_000.0, taps, phase)
-                        .expect("low tap count should succeed");
+                let coeffs = generate_fir_from_response_checked(&target, 48_000.0, taps, phase)
+                    .expect("low tap count should succeed");
                 assert_eq!(coeffs.len(), taps);
                 assert_all_finite(&coeffs);
             }
@@ -1109,7 +1125,12 @@ mod tests {
         let shifted_freqs = [25.0, 150.0, 1500.0, 15_000.0, 19_000.0];
         let shifted_target = create_test_curve(&shifted_freqs, &[80.0; 5]);
         let coeffs = generate_kirkeby_correction_checked(
-            &measurement, &shifted_target, 48_000.0, 512, 20.0, 10_000.0,
+            &measurement,
+            &shifted_target,
+            48_000.0,
+            512,
+            20.0,
+            10_000.0,
         )
         .expect("shifted-grid design should succeed");
         assert_all_finite(&coeffs);
@@ -1140,9 +1161,15 @@ mod tests {
             .collect();
         let measurement = create_test_curve(&grid, &mean);
         let target = create_flat_curve(20.0, 20_000.0, 40, 80.0);
-        let coeffs =
-            generate_kirkeby_correction_checked(&measurement, &target, 48_000.0, 1024, 30.0, 12_000.0)
-                .expect("design should succeed");
+        let coeffs = generate_kirkeby_correction_checked(
+            &measurement,
+            &target,
+            48_000.0,
+            1024,
+            30.0,
+            12_000.0,
+        )
+        .expect("design should succeed");
         assert_all_finite(&coeffs);
 
         let probes: Vec<f64> = log_grid(60.0, 8000.0, 25);
@@ -1203,8 +1230,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, f)| {
-                -20.0 * (f / 1000.0).log10()
-                    + 6.0 * (((i * 2654435761) % 100) as f64 / 50.0 - 1.0)
+                -20.0 * (f / 1000.0).log10() + 6.0 * (((i * 2654435761) % 100) as f64 / 50.0 - 1.0)
             })
             .collect();
         let noisy = create_test_curve_with_phase(&dense_freqs, &dense_spl, &noisy_phase);
@@ -1224,9 +1250,15 @@ mod tests {
         let spl: Vec<f64> = grid.iter().map(|f| 80.0 + (f / 1000.0).log10()).collect();
         let measurement = create_test_curve(&grid, &spl);
         let target = create_flat_curve(20.0, 20_000.0, 40, 80.0);
-        let coeffs =
-            generate_kirkeby_correction_checked(&measurement, &target, 48_000.0, 512, 20.0, 10_000.0)
-                .expect("design should succeed despite missing low-frequency support");
+        let coeffs = generate_kirkeby_correction_checked(
+            &measurement,
+            &target,
+            48_000.0,
+            512,
+            20.0,
+            10_000.0,
+        )
+        .expect("design should succeed despite missing low-frequency support");
         assert_all_finite(&coeffs);
     }
 }

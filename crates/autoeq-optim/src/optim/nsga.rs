@@ -189,7 +189,11 @@ struct CompromiseFrame {
     nadir: Vec<f64>,
 }
 
-fn compromise_frame(front: &[ParetoSolution], objective: &ObjectiveData, m: usize) -> CompromiseFrame {
+fn compromise_frame(
+    front: &[ParetoSolution],
+    objective: &ObjectiveData,
+    m: usize,
+) -> CompromiseFrame {
     let weights = pareto_weights(objective, m);
     let mut ideal = vec![f64::INFINITY; m];
     let mut nadir = vec![f64::NEG_INFINITY; m];
@@ -407,8 +411,13 @@ fn scalar_baseline_rule(objective: &ObjectiveData) -> String {
 fn constraint_evidence(x: &[f64], objective: &ObjectiveData) -> NsgaConstraintEvidence {
     let base_scalar = compute_base_fitness(x, objective);
     let scalar_loss = compute_fitness_penalties_ref(x, objective);
-    let ceiling_violation =
-        compute_ceiling_violation_into(&objective.freqs, x, objective.srate, objective.peq_model, objective.max_db);
+    let ceiling_violation = compute_ceiling_violation_into(
+        &objective.freqs,
+        x,
+        objective.srate,
+        objective.peq_model,
+        objective.max_db,
+    );
     let spacing_violation = viol_spacing_from_xs(x, objective.peq_model, objective.min_spacing_oct);
     let min_gain_violation = viol_min_gain_from_xs(x, objective.peq_model, objective.min_db);
     NsgaConstraintEvidence {
@@ -418,9 +427,7 @@ fn constraint_evidence(x: &[f64], objective: &ObjectiveData) -> NsgaConstraintEv
         ceiling_violation,
         spacing_violation,
         min_gain_violation,
-        feasible: ceiling_violation == 0.0
-            && spacing_violation == 0.0
-            && min_gain_violation == 0.0,
+        feasible: ceiling_violation == 0.0 && spacing_violation == 0.0 && min_gain_violation == 0.0,
     }
 }
 
@@ -458,9 +465,7 @@ pub fn build_nsga_front_report(
     let selected_index = points
         .iter()
         .enumerate()
-        .min_by(|(_, a), (_, b)| {
-            a.compromise_distance.total_cmp(&b.compromise_distance)
-        })
+        .min_by(|(_, a), (_, b)| a.compromise_distance.total_cmp(&b.compromise_distance))
         .map(|(i, _)| i)
         .unwrap_or(0);
     let scalar_best_index = points

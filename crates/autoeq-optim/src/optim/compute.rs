@@ -147,17 +147,15 @@ fn scalarise_losses(losses: &[f64], mo: &MultiObjectiveData) -> f64 {
     use crate::roomeq::MultiMeasurementStrategy;
 
     match mo.strategy {
-        MultiMeasurementStrategy::Average => {
-            losses.iter().sum::<f64>() / losses.len() as f64
-        }
+        MultiMeasurementStrategy::Average => losses.iter().sum::<f64>() / losses.len() as f64,
         MultiMeasurementStrategy::WeightedSum => losses
             .iter()
             .zip(&mo.weights)
             .map(|(loss, weight)| loss * weight)
             .sum(),
-        MultiMeasurementStrategy::Minimax => {
-            losses.iter().fold(f64::NEG_INFINITY, |a, &b| f64::max(a, b))
-        }
+        MultiMeasurementStrategy::Minimax => losses
+            .iter()
+            .fold(f64::NEG_INFINITY, |a, &b| f64::max(a, b)),
         MultiMeasurementStrategy::VariancePenalized => variance_penalized_loss(
             losses
                 .iter()
@@ -175,7 +173,9 @@ fn scalarise_losses(losses: &[f64], mo: &MultiObjectiveData) -> f64 {
             // into `mo.objectives` at setup time. Either take the max (pure
             // worst-case) or the fractional-tail mean (CVaR).
             match mo.uncertainty_cvar_alpha {
-                None => losses.iter().fold(f64::NEG_INFINITY, |a, &b| f64::max(a, b)),
+                None => losses
+                    .iter()
+                    .fold(f64::NEG_INFINITY, |a, &b| f64::max(a, b)),
                 Some(alpha) => {
                     let alpha = alpha.clamp(f64::MIN_POSITIVE, 1.0);
                     // Dedicated sort buffer: the caller
@@ -199,10 +199,14 @@ fn scalarise_losses(losses: &[f64], mo: &MultiObjectiveData) -> f64 {
 }
 
 fn compute_multi_objective_fitness(x: &[f64], mo: &MultiObjectiveData) -> f64 {
-    let mut losses = EVALUATION_SCRATCH
-        .with(|slot| std::mem::take(&mut slot.borrow_mut().multi_losses));
+    let mut losses =
+        EVALUATION_SCRATCH.with(|slot| std::mem::take(&mut slot.borrow_mut().multi_losses));
     losses.clear();
-    losses.extend(mo.objectives.iter().map(|objective| compute_base_fitness_single(x, objective)));
+    losses.extend(
+        mo.objectives
+            .iter()
+            .map(|objective| compute_base_fitness_single(x, objective)),
+    );
     let result = scalarise_losses(&losses, mo);
     EVALUATION_SCRATCH.with(|slot| {
         slot.borrow_mut().multi_losses = losses;
@@ -216,18 +220,21 @@ fn compute_multi_objective_fitness(x: &[f64], mo: &MultiObjectiveData) -> f64 {
 /// does not apply PEQ parameter constraints: the caller owns delivered-chain
 /// gain, support, temporal and resource validation. `None` means the objective
 /// needs a richer physical transfer than this scalar response interface.
-pub fn compute_response_fitness(
-    responses: &[Array1<f64>],
-    data: &ObjectiveData,
-) -> Option<f64> {
+pub fn compute_response_fitness(responses: &[Array1<f64>], data: &ObjectiveData) -> Option<f64> {
     let evaluate = |response: &Array1<f64>, objective_data: &ObjectiveData| {
-        let objective = objective_data.objective.clone()
+        let objective = objective_data
+            .objective
+            .clone()
             .unwrap_or_else(|| objective_data.build_objective());
         let ctx = ObjectiveContext {
-            freqs: &objective_data.freqs, target: &objective_data.target,
-            deviation: &objective_data.deviation, srate: objective_data.srate,
-            peq_model: objective_data.peq_model, min_freq: objective_data.min_freq,
-            max_freq: objective_data.max_freq, smooth: objective_data.smooth,
+            freqs: &objective_data.freqs,
+            target: &objective_data.target,
+            deviation: &objective_data.deviation,
+            srate: objective_data.srate,
+            peq_model: objective_data.peq_model,
+            min_freq: objective_data.min_freq,
+            max_freq: objective_data.max_freq,
+            smooth: objective_data.smooth,
             smooth_n: objective_data.smooth_n,
             audibility_deadband: objective_data.audibility_deadband.as_ref(),
             smoothness_penalty: objective_data.smoothness_penalty.as_ref(),
@@ -238,8 +245,11 @@ pub fn compute_response_fitness(
         if responses.len() != multi.objectives.len() || responses.is_empty() {
             return Some(f64::INFINITY);
         }
-        let losses: Option<Vec<f64>> = responses.iter().zip(&multi.objectives)
-            .map(|(response, objective)| evaluate(response, objective)).collect();
+        let losses: Option<Vec<f64>> = responses
+            .iter()
+            .zip(&multi.objectives)
+            .map(|(response, objective)| evaluate(response, objective))
+            .collect();
         losses.map(|losses| {
             if losses.iter().any(|loss| !loss.is_finite()) {
                 f64::INFINITY
@@ -276,7 +286,10 @@ pub fn compute_pareto_objectives(x: &[f64], data: &ObjectiveData) -> Vec<f64> {
             penalized_scalar += term;
         }
         let shared_penalty = (penalized_scalar - base_scalar).max(0.0);
-        return losses.into_iter().map(|loss| loss + shared_penalty).collect();
+        return losses
+            .into_iter()
+            .map(|loss| loss + shared_penalty)
+            .collect();
     }
 
     vec![compute_fitness_penalties_ref(x, data)]
@@ -830,15 +843,23 @@ mod multi_objective_and_base_fitness_tests {
     #[test]
     fn realized_response_matches_existing_peq_objectives() {
         let parameters = vec![500.0_f64.log10(), 1.0, 3.0];
-        for loss in [LossType::SpeakerFlat, LossType::HeadphoneFlat,
-            LossType::SpeakerFlatAsymmetric, LossType::Epa] {
+        for loss in [
+            LossType::SpeakerFlat,
+            LossType::HeadphoneFlat,
+            LossType::SpeakerFlatAsymmetric,
+            LossType::Epa,
+        ] {
             let data = base_objective(loss);
-            let response = crate::x2peq::x2spl(&data.freqs, &parameters, data.srate, data.peq_model);
+            let response =
+                crate::x2peq::x2spl(&data.freqs, &parameters, data.srate, data.peq_model);
             let actual = super::compute_response_fitness(&[response], &data)
                 .expect("single-curve objective supports realized magnitude");
             let existing = compute_base_fitness(&parameters, &data);
             assert!(actual.is_finite() && existing.is_finite());
-            assert!((actual - existing).abs() < 1e-10, "{loss:?}: {actual} versus {existing}");
+            assert!(
+                (actual - existing).abs() < 1e-10,
+                "{loss:?}: {actual} versus {existing}"
+            );
         }
     }
 
@@ -858,15 +879,26 @@ mod multi_objective_and_base_fitness_tests {
         ] {
             let mut data = first.clone();
             data.multi_objective = Some(MultiObjectiveData {
-                objectives: vec![first.clone(), second.clone()], strategy,
-                weights: vec![0.9, 0.1], variance_lambda: 1.0,
+                objectives: vec![first.clone(), second.clone()],
+                strategy,
+                weights: vec![0.9, 0.1],
+                variance_lambda: 1.0,
                 uncertainty_cvar_alpha: None,
             });
             let actual = super::compute_response_fitness(&responses, &data).unwrap();
-            assert!((actual - expected).abs() < 1e-10, "{strategy:?}: {actual} versus {expected}");
-            assert_eq!(super::compute_response_fitness(&responses[..1], &data), Some(f64::INFINITY));
+            assert!(
+                (actual - expected).abs() < 1e-10,
+                "{strategy:?}: {actual} versus {expected}"
+            );
+            assert_eq!(
+                super::compute_response_fitness(&responses[..1], &data),
+                Some(f64::INFINITY)
+            );
             let invalid = [Array1::zeros(5), Array1::from_elem(5, f64::NAN)];
-            assert_eq!(super::compute_response_fitness(&invalid, &data), Some(f64::INFINITY));
+            assert_eq!(
+                super::compute_response_fitness(&invalid, &data),
+                Some(f64::INFINITY)
+            );
         }
     }
 
@@ -1078,7 +1110,12 @@ mod multi_objective_and_base_fitness_tests {
         .expect("valid speaker-score objective");
         assert!(compute_base_fitness_single(&x, &speaker).is_finite());
         let parameters = vec![500.0_f64.log10(), 1.0, 3.0];
-        let realized = crate::x2peq::x2spl(&speaker.freqs, &parameters, speaker.srate, speaker.peq_model);
+        let realized = crate::x2peq::x2spl(
+            &speaker.freqs,
+            &parameters,
+            speaker.srate,
+            speaker.peq_model,
+        );
         let actual = super::compute_response_fitness(&[realized], &speaker).unwrap();
         assert!((actual - compute_base_fitness(&parameters, &speaker)).abs() < 1e-10);
 

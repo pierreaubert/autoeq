@@ -38,10 +38,7 @@ fn published_package_excludes_qa_scripts_backups_and_mdat() {
         !files.is_empty(),
         "expected a non-empty `cargo package --list` output"
     );
-    let leaked: Vec<&String> = files
-        .iter()
-        .filter(|p| is_excluded_path(p))
-        .collect();
+    let leaked: Vec<&String> = files.iter().filter(|p| is_excluded_path(p)).collect();
     assert!(
         leaked.is_empty(),
         "published package must not contain QA/script/backup/mdat files, leaked: {leaked:?}"

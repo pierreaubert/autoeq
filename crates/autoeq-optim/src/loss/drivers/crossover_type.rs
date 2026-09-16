@@ -90,25 +90,31 @@ impl std::fmt::Display for CrossoverType {
 /// relationship between subs before interference is computed (a flat 80 dB
 /// sub and a flat 70 dB sub must still sum to ~82.4 dB in phase, not 6 dB).
 /// Flatness normalization belongs to the combined-sum loss, not the inputs.
-pub(super) fn prepare_driver_curves(data: &DriversLossData, _crossover_freqs: &[f64]) -> Vec<Curve> {
-    data.drivers.iter().map(|driver| {
-        let curve = Curve {
-            freq: driver.freq.clone(),
-            spl: driver.spl.clone(),
-            phase: driver.phase.clone(),
-            ..Default::default()
-        };
-        // Crossover DSP acts on calibrated measurements. Independent passband
-        // normalization changes relative source levels without exporting those
-        // hidden trims, so the predicted response no longer matches playback.
-        //
-        // Edges hold instead of slope-extrapolating: a band-limited driver
-        // (e.g. a subwoofer measured to 200 Hz on a grid spanning to 20 kHz)
-        // must not invent hundreds of dB from one noisy edge bin. The held
-        // level is then shaped by that driver's crossover low-pass, which
-        // attenuates it to negligibility outside its passband.
-        autoeq_core::interpolate_log_space_hold_edges(&data.freq_grid, &curve)
-    }).collect()
+pub(super) fn prepare_driver_curves(
+    data: &DriversLossData,
+    _crossover_freqs: &[f64],
+) -> Vec<Curve> {
+    data.drivers
+        .iter()
+        .map(|driver| {
+            let curve = Curve {
+                freq: driver.freq.clone(),
+                spl: driver.spl.clone(),
+                phase: driver.phase.clone(),
+                ..Default::default()
+            };
+            // Crossover DSP acts on calibrated measurements. Independent passband
+            // normalization changes relative source levels without exporting those
+            // hidden trims, so the predicted response no longer matches playback.
+            //
+            // Edges hold instead of slope-extrapolating: a band-limited driver
+            // (e.g. a subwoofer measured to 200 Hz on a grid spanning to 20 kHz)
+            // must not invent hundreds of dB from one noisy edge bin. The held
+            // level is then shaped by that driver's crossover low-pass, which
+            // attenuates it to negligibility outside its passband.
+            autoeq_core::interpolate_log_space_hold_edges(&data.freq_grid, &curve)
+        })
+        .collect()
 }
 
 /// Validate driver arguments (shared by combined and per-driver functions)
@@ -146,13 +152,27 @@ mod tests {
         use super::super::driver_measurement::DriverMeasurement;
         use super::super::drivers_loss_data::DriversLossData;
         let freq = ndarray::Array1::from_vec(vec![20.0, 80.0, 20_000.0]);
-        let sub = DriverMeasurement { freq: freq.clone(), spl: ndarray::Array1::from_elem(3, 80.0), phase: None };
-        let main = DriverMeasurement { freq, spl: ndarray::Array1::from_elem(3, 70.0), phase: None };
+        let sub = DriverMeasurement {
+            freq: freq.clone(),
+            spl: ndarray::Array1::from_elem(3, 80.0),
+            phase: None,
+        };
+        let main = DriverMeasurement {
+            freq,
+            spl: ndarray::Array1::from_elem(3, 70.0),
+            phase: None,
+        };
         let data = DriversLossData::new_ordered(vec![sub, main], CrossoverType::LinkwitzRiley4);
         for gain in [0.0, 6.0] {
-            let combined = compute_drivers_combined_response(&data, &[gain, gain], &[80.0], Some(&[0.0, 0.0]), 48_000.0);
+            let combined = compute_drivers_combined_response(
+                &data,
+                &[gain, gain],
+                &[80.0],
+                Some(&[0.0, 0.0]),
+                48_000.0,
+            );
             assert!((combined[0] - 80.0 - gain).abs() < 0.1);
-            assert!((combined[combined.len()-1] - 70.0 - gain).abs() < 0.1);
+            assert!((combined[combined.len() - 1] - 70.0 - gain).abs() < 0.1);
         }
     }
 
@@ -176,8 +196,7 @@ mod tests {
         let data = DriversLossData::new_ordered(vec![hot, quiet], CrossoverType::None);
         let combined =
             compute_drivers_combined_response(&data, &[0.0, 0.0], &[], Some(&[0.0, 0.0]), 48_000.0);
-        let expected =
-            20.0 * (10.0_f64.powf(80.0 / 20.0) + 10.0_f64.powf(70.0 / 20.0)).log10();
+        let expected = 20.0 * (10.0_f64.powf(80.0 / 20.0) + 10.0_f64.powf(70.0 / 20.0)).log10();
         for &level in combined.iter() {
             assert!(
                 (level - expected).abs() < 0.35,

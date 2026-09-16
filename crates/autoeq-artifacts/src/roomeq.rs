@@ -442,10 +442,7 @@ mod tests {
                 })
             })
             .collect();
-        let reservations: Vec<_> = handles
-            .into_iter()
-            .map(|h| h.join().unwrap())
-            .collect();
+        let reservations: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
         let mut paths: Vec<_> = reservations
             .iter()
             .map(|r| r.path().to_path_buf())

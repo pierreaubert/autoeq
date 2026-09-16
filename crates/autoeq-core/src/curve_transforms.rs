@@ -296,7 +296,10 @@ pub fn interpolate_log_space_hold_edges(output_frequencies: &Array1<f64>, curve:
     }
     let first_spl = curve.spl[0];
     let last_spl = curve.spl[curve.spl.len() - 1];
-    let first_phase = curve.phase.as_ref().and_then(|phase| phase.first().copied());
+    let first_phase = curve
+        .phase
+        .as_ref()
+        .and_then(|phase| phase.first().copied());
     let last_phase = curve.phase.as_ref().and_then(|phase| phase.last().copied());
     let first_coherence = curve
         .coherence
@@ -317,14 +320,10 @@ pub fn interpolate_log_space_hold_edges(output_frequencies: &Array1<f64>, curve:
     for (index, &frequency) in output_frequencies.iter().enumerate() {
         if frequency < first_freq {
             interpolated.spl[index] = first_spl;
-            if let (Some(phase), Some(edge)) =
-                (interpolated.phase.as_mut(), first_phase)
-            {
+            if let (Some(phase), Some(edge)) = (interpolated.phase.as_mut(), first_phase) {
                 phase[index] = edge;
             }
-            if let (Some(values), Some(edge)) =
-                (interpolated.coherence.as_mut(), first_coherence)
-            {
+            if let (Some(values), Some(edge)) = (interpolated.coherence.as_mut(), first_coherence) {
                 values[index] = edge;
             }
             if let (Some(values), Some(edge)) = (interpolated.noise_floor_db.as_mut(), first_noise)
@@ -336,13 +335,10 @@ pub fn interpolate_log_space_hold_edges(output_frequencies: &Array1<f64>, curve:
             if let (Some(phase), Some(edge)) = (interpolated.phase.as_mut(), last_phase) {
                 phase[index] = edge;
             }
-            if let (Some(values), Some(edge)) =
-                (interpolated.coherence.as_mut(), last_coherence)
-            {
+            if let (Some(values), Some(edge)) = (interpolated.coherence.as_mut(), last_coherence) {
                 values[index] = edge;
             }
-            if let (Some(values), Some(edge)) = (interpolated.noise_floor_db.as_mut(), last_noise)
-            {
+            if let (Some(values), Some(edge)) = (interpolated.noise_floor_db.as_mut(), last_noise) {
                 values[index] = edge;
             }
         }
@@ -352,10 +348,7 @@ pub fn interpolate_log_space_hold_edges(output_frequencies: &Array1<f64>, curve:
 
 /// Interpolate without changing absolute SPL levels and without inventing
 /// data outside the measured band (see [`interpolate_log_space_hold_edges`]).
-pub fn interpolate_response_hold_edges(
-    output_frequencies: &Array1<f64>,
-    curve: &Curve,
-) -> Curve {
+pub fn interpolate_response_hold_edges(output_frequencies: &Array1<f64>, curve: &Curve) -> Curve {
     interpolate_log_space_hold_edges(output_frequencies, curve)
 }
 

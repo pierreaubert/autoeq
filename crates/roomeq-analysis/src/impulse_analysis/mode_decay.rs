@@ -28,8 +28,10 @@ pub fn measured_temporal_severity_db(
     if estimate.confidence < MIN_MODE_DECAY_CONFIDENCE {
         return None;
     }
-    let threshold =
-        crate::temporal_targets::max_acceptable_decay_time_checked(mode_frequency_hz, use_music_threshold)?;
+    let threshold = crate::temporal_targets::max_acceptable_decay_time_checked(
+        mode_frequency_hz,
+        use_music_threshold,
+    )?;
     Some(if estimate.rt60_seconds > threshold {
         20.0 * (estimate.rt60_seconds / threshold).log10()
     } else {
@@ -302,7 +304,10 @@ mod tests {
         };
         assert!(measured_temporal_severity_db(300.0, &estimate, false).is_none());
         assert!(measured_temporal_severity_db(20.0, &estimate, false).is_none());
-        let in_domain = ModeDecayEstimate { frequency_hz: 80.0, ..estimate };
+        let in_domain = ModeDecayEstimate {
+            frequency_hz: 80.0,
+            ..estimate
+        };
         assert!(measured_temporal_severity_db(80.0, &in_domain, false).is_some());
     }
 

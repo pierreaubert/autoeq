@@ -81,7 +81,8 @@ pub fn verify_biquad_json_roundtrip(
     );
     let mut sections = 0usize;
     let mut max_error = 0.0_f64;
-    for ((channel_name, chain), rendered) in expected_channels.iter().zip(rendered_channels.iter()) {
+    for ((channel_name, chain), rendered) in expected_channels.iter().zip(rendered_channels.iter())
+    {
         let short = super::channel::channel_short_name(channel_name);
         let rendered_channel = rendered
             .get("channel")
@@ -147,13 +148,7 @@ pub fn verify_biquad_json_roundtrip(
                 filter.gain_db,
             );
             let (a1, a2, b0, b1, b2) = biquad.constants();
-            for (key, expected) in [
-                ("a1", a1),
-                ("a2", a2),
-                ("b0", b0),
-                ("b1", b1),
-                ("b2", b2),
-            ] {
+            for (key, expected) in [("a1", a1), ("a2", a2), ("b0", b0), ("b1", b1), ("b2", b2)] {
                 let rendered_value = as_f64(key)?;
                 let error = (rendered_value - expected).abs();
                 max_error = max_error.max(error);
@@ -228,8 +223,7 @@ pub fn verify_convolution_wav_roundtrip(
                     resource_samples.len() == expected.len(),
                     "sidecar '{name}' frame count changed"
                 );
-                for (index, (got, want)) in
-                    expected.iter().zip(resource_samples.iter()).enumerate()
+                for (index, (got, want)) in expected.iter().zip(resource_samples.iter()).enumerate()
                 {
                     let error = (got - want).abs();
                     max_error = max_error.max(error);
@@ -247,14 +241,18 @@ pub fn verify_convolution_wav_roundtrip(
         frames += expected.len();
     }
     anyhow::ensure!(sidecars > 0, "no WAV sidecars found to verify");
-    Ok(ConvolutionRoundtripReport { sidecars, frames, max_abs_sample_error: max_error })
+    Ok(ConvolutionRoundtripReport {
+        sidecars,
+        frames,
+        max_abs_sample_error: max_error,
+    })
 }
 
 /// Decode a mono f32 sample vector from WAV bytes (any channel layout is
 /// rejected: packaged IRs are mono by construction).
 fn decode_mono_f32(bytes: &[u8]) -> anyhow::Result<Vec<f32>> {
-    let mut reader = hound::WavReader::new(std::io::Cursor::new(bytes))
-        .context("WAV header unreadable")?;
+    let mut reader =
+        hound::WavReader::new(std::io::Cursor::new(bytes)).context("WAV header unreadable")?;
     let spec = reader.spec();
     anyhow::ensure!(
         spec.channels == 1,
@@ -268,7 +266,10 @@ fn decode_mono_f32(bytes: &[u8]) -> anyhow::Result<Vec<f32>> {
             .context("float samples unreadable"),
         hound::SampleFormat::Int => {
             let bits = spec.bits_per_sample;
-            anyhow::ensure!(bits == 16 || bits == 24 || bits == 32, "unsupported bit depth {bits}");
+            anyhow::ensure!(
+                bits == 16 || bits == 24 || bits == 32,
+                "unsupported bit depth {bits}"
+            );
             let scale = (1u64 << (bits - 1)) as f32;
             reader
                 .samples::<i32>()

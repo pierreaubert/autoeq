@@ -12,12 +12,19 @@ pub struct AsymmetricStrategy {
 
 impl Objective for AsymmetricStrategy {
     fn compute(&self, x: &[f64], ctx: &ObjectiveContext) -> f64 {
-        self.compute_response(&ctx.peq_spl(x), ctx).expect("scalar response objective")
+        self.compute_response(&ctx.peq_spl(x), ctx)
+            .expect("scalar response objective")
     }
 
-    fn compute_response(&self, peq_spl: &ndarray::Array1<f64>, ctx: &ObjectiveContext) -> Option<f64> {
-        if peq_spl.len() != ctx.freqs.len() || peq_spl.len() != ctx.deviation.len()
-            || peq_spl.iter().any(|value| !value.is_finite()) {
+    fn compute_response(
+        &self,
+        peq_spl: &ndarray::Array1<f64>,
+        ctx: &ObjectiveContext,
+    ) -> Option<f64> {
+        if peq_spl.len() != ctx.freqs.len()
+            || peq_spl.len() != ctx.deviation.len()
+            || peq_spl.iter().any(|value| !value.is_finite())
+        {
             return Some(f64::INFINITY);
         }
         let error = peq_spl - ctx.deviation;

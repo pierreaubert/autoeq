@@ -480,18 +480,17 @@ mod tests {
         for model in models {
             let ppf = model.params_per_filter();
             let layout = model.layout();
-            let max_idx = layout.freq_idx.max(layout.q_idx).max(layout.gain_idx).max(
-                layout.type_idx.unwrap_or(0),
-            );
+            let max_idx = layout
+                .freq_idx
+                .max(layout.q_idx)
+                .max(layout.gain_idx)
+                .max(layout.type_idx.unwrap_or(0));
             assert_eq!(max_idx + 1, ppf, "{model:?}");
             let filters = 3;
             let mut x = vec![0.0; ppf * filters];
             for i in 0..filters {
                 let params = FilterParams {
-                    filter_type: model
-                        .layout()
-                        .type_idx
-                        .map(|_| (i as f64) % 12.0),
+                    filter_type: model.layout().type_idx.map(|_| (i as f64) % 12.0),
                     freq: 2.0 + i as f64 * 0.25,
                     q: 1.0 + i as f64 * 0.5,
                     gain: -2.0 + i as f64,

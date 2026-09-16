@@ -138,11 +138,8 @@ fn broadband_mean_db(curve: &Curve) -> Option<f64> {
 /// so seat order cannot affect the mode list (only the excitation order).
 pub fn build_mode_inventory(input: &ModeInventoryInput<'_>) -> ModeInventory {
     let reference_mean_db = broadband_mean_db(input.reference).unwrap_or(0.0);
-    let room_modes = detect_room_modes(
-        &input.reference.freq,
-        &input.reference.spl,
-        input.detection,
-    );
+    let room_modes =
+        detect_room_modes(&input.reference.freq, &input.reference.spl, input.detection);
     let decays = match input.impulse_response {
         Some((impulse, sample_rate)) => estimate_mode_decays(&room_modes, impulse, sample_rate),
         None => vec![None; room_modes.len()],
@@ -233,9 +230,7 @@ mod inventory_tests {
         let bw = center_hz / q;
         let spl = Array1::from_vec(
             freq.iter()
-                .map(|f| {
-                    80.0 + height_db / (1.0 + ((f - center_hz) / (bw / 2.0)).powi(2))
-                })
+                .map(|f| 80.0 + height_db / (1.0 + ((f - center_hz) / (bw / 2.0)).powi(2)))
                 .collect(),
         );
         Curve {
@@ -288,7 +283,8 @@ mod inventory_tests {
         let reference = lorentzian_curve(60.0, 10.0, 10.0);
         let detection = detection();
         let null_detection = null_detection();
-        let inventory = build_mode_inventory(&input(&reference, &[], None, &detection, &null_detection));
+        let inventory =
+            build_mode_inventory(&input(&reference, &[], None, &detection, &null_detection));
         let mode = nearest_mode(&inventory, 60.0);
         assert!(
             (mode.frequency - 60.0).abs() < 5.0,
@@ -359,11 +355,19 @@ mod inventory_tests {
         let reference = lorentzian_curve(60.0, 9.0, 10.0);
         let detection = detection();
         let null_detection = null_detection();
-        let inventory =
-            build_mode_inventory(&input(&reference, &seats, None, &detection, &null_detection));
+        let inventory = build_mode_inventory(&input(
+            &reference,
+            &seats,
+            None,
+            &detection,
+            &null_detection,
+        ));
         let mode = nearest_mode(&inventory, 60.0);
         let spread = mode.seat_spread.expect("two seats must yield a spread");
-        assert!(spread < 0.5, "similar excitation must be consistent: {spread:.3}");
+        assert!(
+            spread < 0.5,
+            "similar excitation must be consistent: {spread:.3}"
+        );
         assert!(mode.seat_consistent);
         assert_eq!(mode.seat_excitation_db.len(), 2);
 
@@ -375,11 +379,19 @@ mod inventory_tests {
             ..Default::default()
         };
         let seats = vec![lorentzian_curve(60.0, 10.0, 10.0), flat];
-        let inventory =
-            build_mode_inventory(&input(&reference, &seats, None, &detection, &null_detection));
+        let inventory = build_mode_inventory(&input(
+            &reference,
+            &seats,
+            None,
+            &detection,
+            &null_detection,
+        ));
         let mode = nearest_mode(&inventory, 60.0);
         let spread = mode.seat_spread.expect("two seats must yield a spread");
-        assert!(spread >= 0.5, "missing excitation must break consistency: {spread:.3}");
+        assert!(
+            spread >= 0.5,
+            "missing excitation must break consistency: {spread:.3}"
+        );
         assert!(!mode.seat_consistent);
     }
 

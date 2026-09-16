@@ -52,10 +52,7 @@ pub fn decay_threshold_domain_contains(freq_hz: f64) -> bool {
 ///
 /// Prefer this over [`max_acceptable_decay_time`]: unknown audibility must
 /// not become a numeric limit.
-pub fn max_acceptable_decay_time_checked(
-    freq_hz: f64,
-    use_music_thresholds: bool,
-) -> Option<f64> {
+pub fn max_acceptable_decay_time_checked(freq_hz: f64, use_music_thresholds: bool) -> Option<f64> {
     decay_threshold_domain_contains(freq_hz)
         .then(|| max_acceptable_decay_time(freq_hz, use_music_thresholds))
 }

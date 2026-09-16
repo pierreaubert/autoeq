@@ -12,7 +12,7 @@ embedded location metadata.
 | fem_* | Deterministic finite-element fixtures under ../generate/fem/ | Generated project test data; covered by the repository license | Contains numeric curves/configuration only; no personal data |
 | measured_stereo_8361a | Contributor-supplied stereo room capture under ../measured/2.0_8361a/ | LicenseRef-SOTF-Project-Test-Data | Opaque room ID; CSV/WAV and channel names only |
 | measured_stereo_d3v | Contributor-supplied stereo room capture under ../measured/2.0_d3v/ | LicenseRef-SOTF-Project-Test-Data | Opaque device-family ID; CSV/WAV and channel names only |
-| measured_stereo_t7v | Contributor-supplied stereo room capture under ../measured/2.0_t7v/ | LicenseRef-SOTF-Project-Test-Data | Opaque device-family ID; CSV/WAV and channel names only |
+| measured_stereo_t7v | Contributor-supplied stereo room capture under ../measured/2.0_t7v_2024/ | LicenseRef-SOTF-Project-Test-Data | Opaque device-family ID; CSV/WAV and channel names only |
 | measured_stereo_fidelia | Public third-party stereo room capture under ../measured/2.0_fidelia/ (see README.md) | LicenseRef-SOTF-Project-Test-Data | Opaque scenario ID; CSV and channel names only |
 
 LicenseRef-SOTF-Project-Test-Data means the files are retained and exercised

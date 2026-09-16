@@ -115,23 +115,36 @@ pub fn build_shortlist(
             return Err(String::from("shortlist candidate needs an id"));
         }
         if !seen.insert(candidate.id.clone()) {
-            return Err(format!("duplicate shortlist candidate id '{}'", candidate.id));
+            return Err(format!(
+                "duplicate shortlist candidate id '{}'",
+                candidate.id
+            ));
         }
         if !candidate.fast_value.is_finite() {
-            return Err(format!("candidate '{}' has a non-finite fast value", candidate.id));
+            return Err(format!(
+                "candidate '{}' has a non-finite fast value",
+                candidate.id
+            ));
         }
-        candidate.loss_pin.validate().map_err(|error| {
-            format!("candidate '{}': {error}", candidate.id)
-        })?;
+        candidate
+            .loss_pin
+            .validate()
+            .map_err(|error| format!("candidate '{}': {error}", candidate.id))?;
     }
     if identity_required
-        && !candidates.iter().any(|candidate| candidate.source == NominationSource::Identity)
+        && !candidates
+            .iter()
+            .any(|candidate| candidate.source == NominationSource::Identity)
     {
         return Err(String::from(
             "shortlist requires the identity candidate and none was nominated",
         ));
     }
-    Ok(Shortlist { candidates, max_size, identity_required })
+    Ok(Shortlist {
+        candidates,
+        max_size,
+        identity_required,
+    })
 }
 
 /// Basis of the auditory evaluator used for reranking.
@@ -177,7 +190,10 @@ impl AuditoryEvaluator {
             EvaluatorBasis::StagedMetric { metric } if metric.trim().is_empty() => {
                 Err(String::from("staged-metric basis needs a metric name"))
             }
-            EvaluatorBasis::ListeningProtocol { protocol_hash, outcomes_recorded } => {
+            EvaluatorBasis::ListeningProtocol {
+                protocol_hash,
+                outcomes_recorded,
+            } => {
                 if protocol_hash.trim().is_empty() {
                     return Err(String::from("listening basis needs the protocol hash"));
                 }
@@ -287,7 +303,10 @@ impl RerankCache {
     /// Hash opaque transform bytes (measurement/probe transforms,
     /// full-chain reference) to a cache namespace.
     pub fn hash_transforms(bytes: &[u8]) -> String {
-        Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect()
+        Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
     }
 
     /// Look up a cached score.
@@ -381,7 +400,10 @@ pub fn rerank(
         ledger.consume_evaluation()?;
         let score = scorer(candidate)?;
         if !score.is_finite() {
-            return Err(format!("evaluator score for '{}' is non-finite", candidate.id));
+            return Err(format!(
+                "evaluator score for '{}' is non-finite",
+                candidate.id
+            ));
         }
         cache.put(key, score);
         scored.push((candidate.id.clone(), score, false));
@@ -534,7 +556,9 @@ pub fn compare_to_baselines(
         return Err(String::from("winner held-out value must be finite"));
     }
     if baselines.is_empty() {
-        return Err(String::from("baseline comparison needs at least one baseline"));
+        return Err(String::from(
+            "baseline comparison needs at least one baseline",
+        ));
     }
     if !min_margin.is_finite() || min_margin < 0.0 {
         return Err(String::from("min_margin must be finite and non-negative"));
@@ -546,7 +570,10 @@ pub fn compare_to_baselines(
             return Err(String::from("baseline entry needs a name"));
         }
         if !baseline.held_out_value.is_finite() {
-            return Err(format!("baseline '{}' held-out value must be finite", baseline.name));
+            return Err(format!(
+                "baseline '{}' held-out value must be finite",
+                baseline.name
+            ));
         }
         if baseline.held_out_id != *held_out_id {
             return Err(format!(
@@ -696,7 +723,10 @@ mod rerank_tests {
     use super::*;
 
     fn pin() -> LossPin {
-        LossPin { loss: String::from("speaker-flat"), version: String::from("v3") }
+        LossPin {
+            loss: String::from("speaker-flat"),
+            version: String::from("v3"),
+        }
     }
 
     fn candidate(id: &str, value: f64, source: NominationSource) -> ShortlistCandidate {
@@ -738,7 +768,13 @@ mod rerank_tests {
         assert_eq!(shortlist().candidates.len(), 3);
         // Over the bound fails.
         let many: Vec<ShortlistCandidate> = (0..9)
-            .map(|index| candidate(&format!("c{index}"), index as f64, NominationSource::OptimizerRun))
+            .map(|index| {
+                candidate(
+                    &format!("c{index}"),
+                    index as f64,
+                    NominationSource::OptimizerRun,
+                )
+            })
             .collect();
         assert!(build_shortlist(many, 8, false).is_err());
         // Missing identity fails when required, passes when not.
@@ -779,13 +815,21 @@ mod rerank_tests {
         });
         let transform = RerankCache::hash_transforms(b"measurement-v1");
         // Identity scores best here: the rerank can prefer doing nothing.
-        let report = rerank(&list, &evaluator(), &pin(), &transform, &mut cache, &mut ledger, |candidate| {
-            Ok(match candidate.id.as_str() {
-                "identity" => 1.0,
-                "opt-a" => 2.5,
-                _ => 4.0,
-            })
-        })
+        let report = rerank(
+            &list,
+            &evaluator(),
+            &pin(),
+            &transform,
+            &mut cache,
+            &mut ledger,
+            |candidate| {
+                Ok(match candidate.id.as_str() {
+                    "identity" => 1.0,
+                    "opt-a" => 2.5,
+                    _ => 4.0,
+                })
+            },
+        )
         .unwrap();
         assert_eq!(report.ranked[0].id, "identity");
         assert_eq!(report.ranked[0].rank, 0);
@@ -793,9 +837,17 @@ mod rerank_tests {
         assert_eq!(ledger.cache_hits, 0);
         // A rerun under the same transforms hits the cache: no fresh
         // evaluations, same order.
-        let rerun = rerank(&list, &evaluator(), &pin(), &transform, &mut cache, &mut ledger, |_| {
-            panic!("cache hit must not rescore");
-        })
+        let rerun = rerank(
+            &list,
+            &evaluator(),
+            &pin(),
+            &transform,
+            &mut cache,
+            &mut ledger,
+            |_| {
+                panic!("cache hit must not rescore");
+            },
+        )
         .unwrap();
         assert_eq!(rerun.ranked[0].id, "identity");
         assert_eq!(ledger.evaluations, 3);
@@ -803,9 +855,15 @@ mod rerank_tests {
         // Changed transforms miss: ablation recomputes only what changed.
         let other = RerankCache::hash_transforms(b"measurement-v2");
         let mut ledger2 = BudgetLedger::default();
-        let report2 = rerank(&list, &evaluator(), &pin(), &other, &mut cache, &mut ledger2, |candidate| {
-            Ok(candidate.fast_value)
-        })
+        let report2 = rerank(
+            &list,
+            &evaluator(),
+            &pin(),
+            &other,
+            &mut cache,
+            &mut ledger2,
+            |candidate| Ok(candidate.fast_value),
+        )
         .unwrap();
         assert_eq!(ledger2.evaluations, 3);
         assert!(report2.ranked.iter().all(|ranked| !ranked.cached));
@@ -821,9 +879,15 @@ mod rerank_tests {
         let mut switched = list.clone();
         switched.candidates[0].loss_pin.loss = String::from("epa");
         assert!(
-            rerank(&switched, &evaluator(), &pin(), &transform, &mut cache, &mut ledger, |candidate| {
-                Ok(candidate.fast_value)
-            })
+            rerank(
+                &switched,
+                &evaluator(),
+                &pin(),
+                &transform,
+                &mut cache,
+                &mut ledger,
+                |candidate| { Ok(candidate.fast_value) }
+            )
             .is_err()
         );
         // Evaluation budget of zero still scores nothing.
@@ -833,25 +897,45 @@ mod rerank_tests {
             max_memory_bytes: u64::MAX,
         });
         assert!(
-            rerank(&list, &evaluator(), &pin(), &transform, &mut cache, &mut tight, |candidate| {
-                Ok(candidate.fast_value)
-            })
+            rerank(
+                &list,
+                &evaluator(),
+                &pin(),
+                &transform,
+                &mut cache,
+                &mut tight,
+                |candidate| { Ok(candidate.fast_value) }
+            )
             .is_err()
         );
         // Non-finite scores abort instead of ranking garbage.
         let mut fresh = RerankCache::default();
         let mut ledger3 = BudgetLedger::default();
         assert!(
-            rerank(&list, &evaluator(), &pin(), &transform, &mut fresh, &mut ledger3, |_| Ok(f64::NAN))
-                .is_err()
+            rerank(
+                &list,
+                &evaluator(),
+                &pin(),
+                &transform,
+                &mut fresh,
+                &mut ledger3,
+                |_| Ok(f64::NAN)
+            )
+            .is_err()
         );
         // Cancellation aborts at the next candidate boundary.
         let mut cancelled = BudgetLedger::default();
         cancelled.cancel();
         assert!(
-            rerank(&list, &evaluator(), &pin(), &transform, &mut fresh, &mut cancelled, |candidate| {
-                Ok(candidate.fast_value)
-            })
+            rerank(
+                &list,
+                &evaluator(),
+                &pin(),
+                &transform,
+                &mut fresh,
+                &mut cancelled,
+                |candidate| { Ok(candidate.fast_value) }
+            )
             .is_err()
         );
     }
@@ -880,7 +964,10 @@ mod rerank_tests {
     fn refinement_carries_the_pin_unchanged() {
         let refined = record_refinement("opt-a", &pin(), &pin(), 5, vec![1.5], 1.5).unwrap();
         assert_eq!(refined.base_candidate_id, "opt-a");
-        let other = LossPin { loss: String::from("epa"), version: String::from("v1") };
+        let other = LossPin {
+            loss: String::from("epa"),
+            version: String::from("v1"),
+        };
         assert!(record_refinement("opt-a", &other, &pin(), 5, vec![1.5], 1.5).is_err());
     }
 
@@ -928,21 +1015,13 @@ mod rerank_tests {
 
     #[test]
     fn final_resolution_discipline_holds() {
-        assert!(
-            check_final_resolution(200, 400, GridResolution::Validated, 256).is_ok()
-        );
+        assert!(check_final_resolution(200, 400, GridResolution::Validated, 256).is_ok());
         // Coarse finals are refused, however fine.
-        assert!(
-            check_final_resolution(200, 800, GridResolution::Coarse, 256).is_err()
-        );
+        assert!(check_final_resolution(200, 800, GridResolution::Coarse, 256).is_err());
         // Finals coarser than nominations lose evaluator resolution.
-        assert!(
-            check_final_resolution(400, 200, GridResolution::Validated, 128).is_err()
-        );
+        assert!(check_final_resolution(400, 200, GridResolution::Validated, 128).is_err());
         // Below the validated minimum is refused.
-        assert!(
-            check_final_resolution(100, 200, GridResolution::Validated, 256).is_err()
-        );
+        assert!(check_final_resolution(100, 200, GridResolution::Validated, 256).is_err());
     }
 
     #[test]

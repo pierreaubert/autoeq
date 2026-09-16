@@ -75,10 +75,7 @@ fn manifest_path_for(output_path: &std::path::Path) -> PathBuf {
 }
 
 /// Persist a run manifest; returns the path written.
-fn write_run_manifest(
-    output_path: &std::path::Path,
-    manifest: &RunManifest,
-) -> Result<PathBuf> {
+fn write_run_manifest(output_path: &std::path::Path, manifest: &RunManifest) -> Result<PathBuf> {
     let path = manifest_path_for(output_path);
     let json = serde_json::to_string_pretty(manifest)?;
     std::fs::write(&path, json)
@@ -518,13 +515,16 @@ fn execute_optimization(
                         export_path: Some(path.clone()),
                         export_status: Some("saved".to_string()),
                         export_error: None,
-                        assets_owned: vec![output_path.clone(), manifest_path_for(&output_path), path],
+                        assets_owned: vec![
+                            output_path.clone(),
+                            manifest_path_for(&output_path),
+                            path,
+                        ],
                     },
                 );
             }
             Err(error) => {
-                let diagnostic =
-                    partial_export_diagnostic(&output_path, format, &path, &error);
+                let diagnostic = partial_export_diagnostic(&output_path, format, &path, &error);
                 // Record the partial run: the native graph is owned and valid,
                 // the export path is deliberately absent from asset ownership.
                 persist_run_manifest_best_effort(
@@ -538,10 +538,7 @@ fn execute_optimization(
                         export_path: Some(path),
                         export_status: Some("failed".to_string()),
                         export_error: Some(format!("{error:#}")),
-                        assets_owned: vec![
-                            output_path.clone(),
-                            manifest_path_for(&output_path),
-                        ],
+                        assets_owned: vec![output_path.clone(), manifest_path_for(&output_path)],
                     },
                 );
                 warn!("{}", diagnostic);
@@ -705,7 +702,12 @@ fn resolve_seat_sources(speaker_name: &str, config: &SpeakerConfig) -> Vec<SeatS
                 );
             }
             for (index, source) in dba.rear.iter().enumerate() {
-                describe_source(speaker_name, format!("rear {}", index + 1), source, &mut out);
+                describe_source(
+                    speaker_name,
+                    format!("rear {}", index + 1),
+                    source,
+                    &mut out,
+                );
             }
         }
         SpeakerConfig::Cardioid(cardioid) => {
@@ -713,8 +715,18 @@ fn resolve_seat_sources(speaker_name: &str, config: &SpeakerConfig) -> Vec<SeatS
             describe_source(speaker_name, "rear".to_string(), &cardioid.rear, &mut out);
         }
         SpeakerConfig::SupportingSource(group) => {
-            describe_source(speaker_name, "primary".to_string(), &group.primary, &mut out);
-            describe_source(speaker_name, "support".to_string(), &group.support, &mut out);
+            describe_source(
+                speaker_name,
+                "primary".to_string(),
+                &group.primary,
+                &mut out,
+            );
+            describe_source(
+                speaker_name,
+                "support".to_string(),
+                &group.support,
+                &mut out,
+            );
         }
     }
     out
@@ -884,10 +896,12 @@ fn validate_optimizer_resources(opt: &roomeq_model::OptimizerConfig) -> Vec<Stri
         errors.push("optimizer.max_iter is 0: no optimization pass can run".to_string());
     }
     if opt.population == 0 {
-        errors.push("optimizer.population is 0: population-based optimizers cannot run".to_string());
+        errors
+            .push("optimizer.population is 0: population-based optimizers cannot run".to_string());
     }
     if opt.num_filters == 0 {
-        errors.push("optimizer.num_filters is 0: no correction filter can be allocated".to_string());
+        errors
+            .push("optimizer.num_filters is 0: no correction filter can be allocated".to_string());
     }
     if opt.min_freq >= opt.max_freq {
         errors.push(format!(
@@ -1081,12 +1095,17 @@ check for swapped or duplicated seat names"
         for (slot, fmin, fmax) in &probed_spans {
             println!("  {slot}: {fmin:.1}..{fmax:.1} Hz");
         }
-        let spans: Vec<(f64, f64)> =
-            probed_spans.iter().map(|(_, fmin, fmax)| (*fmin, *fmax)).collect();
+        let spans: Vec<(f64, f64)> = probed_spans
+            .iter()
+            .map(|(_, fmin, fmax)| (*fmin, *fmax))
+            .collect();
         match intersect_spans(&spans) {
             Some((fmin, fmax)) => {
                 println!("  Intersection: {fmin:.1}..{fmax:.1} Hz");
-                let band = (room_config.optimizer.min_freq, room_config.optimizer.max_freq);
+                let band = (
+                    room_config.optimizer.min_freq,
+                    room_config.optimizer.max_freq,
+                );
                 if fmin > band.0 || fmax < band.1 {
                     warnings.push(format!(
                         "measurement support {fmin:.1}..{fmax:.1} Hz does not cover the \
@@ -1144,11 +1163,8 @@ cannot be recovered by the exporter",
     } else {
         println!("  Enabled: {}", controls.join(", "));
     }
-    println!(
-        "  Measurements carrying phase: {with_phase}; without phase: {without_phase}"
-    );
-    if !controls.is_empty() && with_phase == 0 && (without_phase > 0 || !probed_spans.is_empty())
-    {
+    println!("  Measurements carrying phase: {with_phase}; without phase: {without_phase}");
+    if !controls.is_empty() && with_phase == 0 && (without_phase > 0 || !probed_spans.is_empty()) {
         warnings.push(
             "phase control is enabled but no measurement carries phase data; \
 phase stages will have nothing to align (missing phase)"
@@ -1297,10 +1313,9 @@ mod tests {
 
     use super::{
         Args, RunManifest, duplicate_seats, enabled_phase_controls, export_preflight_warnings,
-        intersect_spans, is_known_algorithm, manifest_path_for, partial_export_diagnostic,
-        multisub_seat_order_mismatch, probe_span, resolve_seat_sources, run_dry_run,
-        strict_input_schema,
-        validate_optimizer_resources, write_run_manifest,
+        intersect_spans, is_known_algorithm, manifest_path_for, multisub_seat_order_mismatch,
+        partial_export_diagnostic, probe_span, resolve_seat_sources, run_dry_run,
+        strict_input_schema, validate_optimizer_resources, write_run_manifest,
     };
 
     #[test]
@@ -1398,7 +1413,10 @@ mod tests {
         };
         let written = write_run_manifest(&output, &manifest).expect("write manifest");
         // The good native graph is still on disk; only ownership is narrowed.
-        assert!(output.is_file(), "native graph must survive a failed export");
+        assert!(
+            output.is_file(),
+            "native graph must survive a failed export"
+        );
         let roundtrip: RunManifest =
             serde_json::from_str(&std::fs::read_to_string(&written).expect("read manifest"))
                 .expect("parse manifest");
@@ -1455,7 +1473,10 @@ mod tests {
         }))
     }
 
-    fn write_dry_run_config(dir: &tempfile::TempDir, config: &roomeq_model::RoomConfig) -> std::path::PathBuf {
+    fn write_dry_run_config(
+        dir: &tempfile::TempDir,
+        config: &roomeq_model::RoomConfig,
+    ) -> std::path::PathBuf {
         let path = dir.path().join("room.json");
         std::fs::write(
             &path,
@@ -1465,10 +1486,7 @@ mod tests {
         path
     }
 
-    fn two_speaker_config(
-        a_span: (f64, f64),
-        b_span: (f64, f64),
-    ) -> roomeq_model::RoomConfig {
+    fn two_speaker_config(a_span: (f64, f64), b_span: (f64, f64)) -> roomeq_model::RoomConfig {
         let mut config = roomeq_model::RoomConfig::default();
         config.speakers.insert(
             "A".to_string(),
@@ -1520,9 +1538,7 @@ mod tests {
 
     #[test]
     fn seat_mapping_exposes_named_seats_in_order() {
-        use roomeq_model::{
-            MeasurementMultiple, MeasurementRef, MeasurementSource, SpeakerConfig,
-        };
+        use roomeq_model::{MeasurementMultiple, MeasurementRef, MeasurementSource, SpeakerConfig};
         let source = MeasurementSource::Multiple(MeasurementMultiple {
             measurements: vec![
                 MeasurementRef::Named {
@@ -1667,7 +1683,7 @@ mod tests {
 
     #[test]
     fn multisub_export_preflight_flags_routing_limitation() {
-        use roomeq_model::{config::MultiSubGroup, MeasurementSource, SpeakerConfig};
+        use roomeq_model::{MeasurementSource, SpeakerConfig, config::MultiSubGroup};
         let sub = || {
             MeasurementSource::Single(roomeq_model::MeasurementSingle {
                 measurement: roomeq_model::MeasurementRef::Inline(
@@ -1723,8 +1739,14 @@ mod tests {
     fn schema_and_defaults_cover_continuous_area_and_bootstrap() {
         let schema = strict_input_schema();
         let text = serde_json::to_string(&schema).expect("serialize schema");
-        assert!(text.contains("continuous_area"), "multi-seat continuous area in schema");
-        assert!(text.contains("num_resamples"), "bootstrap resamples in schema");
+        assert!(
+            text.contains("continuous_area"),
+            "multi-seat continuous area in schema"
+        );
+        assert!(
+            text.contains("num_resamples"),
+            "bootstrap resamples in schema"
+        );
         let defaults = roomeq_model::RoomConfig::default();
         assert_eq!(defaults.optimizer.strategy, "lshade");
         assert_eq!(defaults.optimizer.algorithm, "autoeq:cmaes");

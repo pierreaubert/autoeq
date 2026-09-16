@@ -179,15 +179,24 @@ mod tests {
             ],
         );
 
-        save_peq_to_file(&args, &x, &output_path, &LossType::SpeakerFlat, Some(&export))
-            .await
-            .expect("preset with pareto export should save");
+        save_peq_to_file(
+            &args,
+            &x,
+            &output_path,
+            &LossType::SpeakerFlat,
+            Some(&export),
+        )
+        .await
+        .expect("preset with pareto export should save");
 
         let sidecar = output_path
             .parent()
             .unwrap()
             .join("iir-autoeq-flat-pareto.json");
-        assert!(sidecar.exists(), "pareto sidecar must sit next to the preset");
+        assert!(
+            sidecar.exists(),
+            "pareto sidecar must sit next to the preset"
+        );
         let parsed: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&sidecar).unwrap()).unwrap();
         assert_eq!(
@@ -199,11 +208,14 @@ mod tests {
             serde_json::json!("fewest filters within tolerance")
         );
         assert_eq!(parsed["selected_index"], serde_json::json!(0));
-        assert_eq!(parsed["candidates"][0]["objectives"], serde_json::json!([1.5, 0.7]));
+        assert_eq!(
+            parsed["candidates"][0]["objectives"],
+            serde_json::json!([1.5, 0.7])
+        );
         assert!(parsed["candidates"][1]["objectives"][1].is_null());
         assert_eq!(
             parsed["candidates"][0]["per_measurement_losses"],
-            serde_json::json!([[ "mic-1", 1.4 ], [ "mic-2", 1.6 ]])
+            serde_json::json!([["mic-1", 1.4], ["mic-2", 1.6]])
         );
         assert_eq!(parsed["candidates"][1]["num_filters"], serde_json::json!(2));
     }
@@ -232,7 +244,9 @@ mod tests {
 
     #[test]
     fn test_apo_roundtrip_gap_small_for_integer_hz_filters() {
-        use crate::autoeq_command::save::{APO_ROUNDTRIP_WARN_THRESHOLD, apo_roundtrip_objective_gap};
+        use crate::autoeq_command::save::{
+            APO_ROUNDTRIP_WARN_THRESHOLD, apo_roundtrip_objective_gap,
+        };
         use autoeq::PeqModel;
         use autoeq::optim::{ObjectiveData, ObjectiveDataBuilder};
         use ndarray::Array1;
@@ -240,25 +254,24 @@ mod tests {
         let freqs = Array1::from_vec(vec![100.0, 500.0, 1000.0, 5000.0, 10000.0]);
         let deviation = Array1::from_vec(vec![2.0, 1.5, 1.0, 1.2, 0.8]);
         let target = Array1::zeros(freqs.len());
-        let objective: ObjectiveData =
-            ObjectiveDataBuilder::new(freqs, target, deviation, 48000.0, PeqModel::Pk, LossType::SpeakerFlat)
-                .min_spacing_oct(0.1)
-                .max_db(10.0)
-                .min_db(-10.0)
-                .freq_range(20.0, 20000.0)
-                .smoothing(false, 3)
-                .build()
-                .expect("valid test objective data");
+        let objective: ObjectiveData = ObjectiveDataBuilder::new(
+            freqs,
+            target,
+            deviation,
+            48000.0,
+            PeqModel::Pk,
+            LossType::SpeakerFlat,
+        )
+        .min_spacing_oct(0.1)
+        .max_db(10.0)
+        .min_db(-10.0)
+        .freq_range(20.0, 20000.0)
+        .smoothing(false, 3)
+        .build()
+        .expect("valid test objective data");
 
         // Exact integer-Hz centers: serialization is (near-)lossless.
-        let x = vec![
-            500.0f64.log10(),
-            2.0,
-            -3.0,
-            1000.0f64.log10(),
-            5.0,
-            2.0,
-        ];
+        let x = vec![500.0f64.log10(), 2.0, -3.0, 1000.0f64.log10(), 5.0, 2.0];
         let gap = apo_roundtrip_objective_gap(&x, 48000.0, PeqModel::Pk, &objective)
             .expect("finite objectives must produce a gap");
         assert!(
@@ -277,15 +290,21 @@ mod tests {
         let freqs = Array1::from_vec(vec![20.0, 30.0, 45.0, 60.0, 90.0, 120.0]);
         let deviation = Array1::from_vec(vec![3.0, 2.5, 2.0, 1.5, 1.0, 0.8]);
         let target = Array1::zeros(freqs.len());
-        let objective: ObjectiveData =
-            ObjectiveDataBuilder::new(freqs, target, deviation, 48000.0, PeqModel::Pk, LossType::SpeakerFlat)
-                .min_spacing_oct(0.01)
-                .max_db(10.0)
-                .min_db(-10.0)
-                .freq_range(20.0, 20000.0)
-                .smoothing(false, 3)
-                .build()
-                .expect("valid test objective data");
+        let objective: ObjectiveData = ObjectiveDataBuilder::new(
+            freqs,
+            target,
+            deviation,
+            48000.0,
+            PeqModel::Pk,
+            LossType::SpeakerFlat,
+        )
+        .min_spacing_oct(0.01)
+        .max_db(10.0)
+        .min_db(-10.0)
+        .freq_range(20.0, 20000.0)
+        .smoothing(false, 3)
+        .build()
+        .expect("valid test objective data");
 
         // Fractional center with high Q: worst case for integer-Hz rounding.
         let x = vec![31.7f64.log10(), 12.0, -6.0];

@@ -34,14 +34,21 @@ mod tests {
         let deviation = Array1::from_vec(vec![2.0, 1.5, 1.0, 1.2, 0.8]);
         let target = Array1::zeros(freqs.len());
 
-        ObjectiveDataBuilder::new(freqs, target, deviation, 48000.0, PeqModel::Pk, LossType::SpeakerFlat)
-            .min_spacing_oct(0.1)
-            .max_db(10.0)
-            .min_db(-10.0)
-            .freq_range(20.0, 20000.0)
-            .smoothing(false, 3)
-            .build()
-            .expect("valid test objective data")
+        ObjectiveDataBuilder::new(
+            freqs,
+            target,
+            deviation,
+            48000.0,
+            PeqModel::Pk,
+            LossType::SpeakerFlat,
+        )
+        .min_spacing_oct(0.1)
+        .max_db(10.0)
+        .min_db(-10.0)
+        .freq_range(20.0, 20000.0)
+        .smoothing(false, 3)
+        .build()
+        .expect("valid test objective data")
     }
 
     /// Backend that mutates the parameter vector during refinement so the

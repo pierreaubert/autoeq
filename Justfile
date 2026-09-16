@@ -2,7 +2,7 @@
 # How to install Just?
 # cargo install just
 # ----------------------------------------------------------------------
-import 'builds/cross.just'
+import 'builds/cross-autoeq.just'
 import 'builds/qa/qa-autoeq.just'
 import 'builds/qa/qa-roomeq.just'
 import 'builds/qa/qa-export.just'

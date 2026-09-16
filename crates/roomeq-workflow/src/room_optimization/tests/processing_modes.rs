@@ -48,8 +48,8 @@ fn stereo_config_for_mode(processing_mode: ProcessingMode) -> RoomConfig {
         system: Some(SystemConfig {
             model: SystemModel::Stereo,
             speakers: HashMap::from([
-                ("Left".to_string(), "left".to_string()),
-                ("Right".to_string(), "right".to_string()),
+                ("L".to_string(), "left".to_string()),
+                ("R".to_string(), "right".to_string()),
             ]),
             subwoofers: None,
             bass_management: None,
@@ -233,8 +233,8 @@ fn optimize_room_impl_home_cinema_workflow_succeeds() {
     let system = SystemConfig {
         model: SystemModel::HomeCinema,
         speakers: HashMap::from([
-            ("Left".to_string(), "left".to_string()),
-            ("Right".to_string(), "right".to_string()),
+            ("L".to_string(), "left".to_string()),
+            ("R".to_string(), "right".to_string()),
             ("Center".to_string(), "center".to_string()),
         ]),
         subwoofers: None,

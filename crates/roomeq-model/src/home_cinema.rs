@@ -104,9 +104,21 @@ pub fn matching_group_key_for_role(role: HomeCinemaRole) -> Option<&'static str>
 /// Determine the logical channels that a RoomEQ configuration exposes.
 pub fn logical_channel_names(config: &RoomConfig) -> Vec<String> {
     if let Some(system) = config.system.as_ref() {
-        let mut pairs: Vec<_> = system.speakers.keys().cloned().collect();
-        pairs.sort();
-        pairs
+        match system.model {
+            crate::SystemModel::Stereo => vec!["L".to_string(), "R".to_string()],
+            crate::SystemModel::HomeCinema => {
+                let mut channels: Vec<_> = system.speakers.keys().cloned().collect();
+                channels.retain(|channel| !channel.eq_ignore_ascii_case("LFE"));
+                channels.sort();
+                channels.push("LFE".to_string());
+                channels
+            }
+            crate::SystemModel::Custom => {
+                let mut channels: Vec<_> = system.speakers.keys().cloned().collect();
+                channels.sort();
+                channels
+            }
+        }
     } else if let Some(recording) = config.recording_config.as_ref()
         && let Some(names) = recording.channel_names.as_ref()
         && !names.is_empty()
@@ -122,7 +134,7 @@ pub fn logical_channel_names(config: &RoomConfig) -> Vec<String> {
 /// Resolve physical speaker configurations into their logical channel names.
 pub fn logical_speaker_configs(config: &RoomConfig) -> HashMap<String, SpeakerConfig> {
     if let Some(system) = config.system.as_ref() {
-        system
+        let mut resolved: HashMap<String, SpeakerConfig> = system
             .speakers
             .iter()
             .filter_map(|(role, key)| {
@@ -132,7 +144,15 @@ pub fn logical_speaker_configs(config: &RoomConfig) -> HashMap<String, SpeakerCo
                     .cloned()
                     .map(|speaker| (role.clone(), speaker))
             })
-            .collect()
+            .collect();
+        if let Some(subwoofers) = system.subwoofers.as_ref() {
+            for output in &subwoofers.outputs {
+                if let Some(speaker) = config.speakers.get(&output.speaker) {
+                    resolved.insert(output.id.clone(), speaker.clone());
+                }
+            }
+        }
+        resolved
     } else {
         config.speakers.clone()
     }
@@ -408,20 +428,20 @@ pub struct AllChannelMultiSeatAcceptance {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct BassManagementReport {
+    pub routing_title: String,
     pub enabled: bool,
     pub crossover_type: String,
     pub crossover_frequency_hz: Option<f64>,
     pub redirected_bass_enabled: bool,
-    pub lfe_channel: String,
-    pub lfe_playback_gain_db: f64,
-    pub lfe_low_pass_hz: f64,
-    pub lfe_gain_applied_to_chain: bool,
+    /// Home-cinema-only LFE programme-input policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lfe: Option<LfeBassManagementReport>,
     pub sub_trim_db: f64,
     pub max_sub_boost_db: f64,
     pub headroom_margin_db: f64,
     pub applied_sub_gain_db: Option<f64>,
     pub gain_limited: bool,
-    pub physical_sub_output: String,
+    pub physical_sub_outputs: Vec<String>,
     pub redirected_bass_channel_count: usize,
     pub main_high_pass_hz: Option<f64>,
     pub sub_low_pass_hz: Option<f64>,
@@ -439,6 +459,15 @@ pub struct BassManagementReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub headroom_simulation: Option<BassBusHeadroomSimulationReport>,
     pub advisory: String,
+}
+
+/// Canonical home-cinema LFE programme-input policy.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LfeBassManagementReport {
+    pub input_channel: String,
+    pub playback_gain_db: f64,
+    pub low_pass_hz: f64,
+    pub gain_applied_to_chain: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -471,6 +500,9 @@ pub struct BassManagementOptimizationReport {
     pub source_results: Vec<BassManagementSourceReport>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sub_output_results: Vec<BassManagementSubOutputReport>,
+    /// Stereo-only independently optimized input-to-physical-output routing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stereo_routing: Option<StereoBassRoutingReport>,
     pub advisories: Vec<String>,
 }
 
@@ -487,7 +519,14 @@ pub struct BassManagementSignalFlowEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct BassManagementRoutingGraph {
+    /// Internal primary-output compatibility accessor. Serialized metadata uses
+    /// `physical_sub_outputs` exclusively.
+    #[serde(skip)]
+    #[schemars(skip)]
     pub physical_sub_output: String,
+    /// Ordered physical subwoofer output identities.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub physical_sub_outputs: Vec<String>,
     pub input_channels: Vec<String>,
     pub output_channels: Vec<String>,
     pub routes: Vec<BassManagementRoute>,
@@ -496,7 +535,40 @@ pub struct BassManagementRoutingGraph {
     /// Final down-only calibration trims per logical input channel.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub input_trim_db: HashMap<String, f64>,
+    /// Stereo-only topology diagnostics. Home cinema always leaves this unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stereo_routing: Option<StereoBassRoutingReport>,
     pub advisories: Vec<String>,
+}
+
+/// Supported stereo input-to-subwoofer matrices.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StereoBassTopology {
+    DirectPair,
+    CrossedPair,
+    DualMono,
+}
+
+/// One evaluated stereo routing candidate.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct StereoBassRoutingCandidateReport {
+    pub topology: StereoBassTopology,
+    pub objective: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rejection_reason: Option<String>,
+    pub headroom_margin_db: f64,
+    /// Row-major `[physical output][L, R]` coefficients.
+    pub matrix: Vec<Vec<f64>>,
+}
+
+/// Selected stereo topology plus evidence for every evaluated candidate.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct StereoBassRoutingReport {
+    pub selected_topology: StereoBassTopology,
+    pub matrix: Vec<Vec<f64>>,
+    pub candidates: Vec<StereoBassRoutingCandidateReport>,
+    pub selection_basis: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -557,8 +629,9 @@ mod tests {
                 }),
                 subwoofers: Some(SubwooferSystemConfig {
                     config: crate::SubwooferStrategy::default(),
+                    routing: Default::default(),
+                    outputs: Vec::new(),
                     crossover: Some("main".into()),
-                    mapping: HashMap::new(),
                 }),
                 ..SystemConfig::default()
             }),

@@ -562,16 +562,34 @@ fn camilladsp_routing_graph(output: &DspGraph) -> Option<BassManagementRoutingGr
                     |route| &route.destination,
                 );
                 Some(BassManagementRoutingGraph {
-                    physical_sub_output: metadata
-                        .get("physical_sub_output")
-                        .and_then(|value| value.as_str())
-                        .unwrap_or("")
-                        .to_string(),
+                    physical_sub_outputs: serde_json::from_value(
+                        metadata
+                            .get("physical_sub_outputs")
+                            .cloned()
+                            .unwrap_or_else(|| serde_json::json!([])),
+                    )
+                    .unwrap_or_default(),
+                    physical_sub_output: serde_json::from_value::<Vec<String>>(
+                        metadata
+                            .get("physical_sub_outputs")
+                            .cloned()
+                            .unwrap_or_else(|| serde_json::json!([])),
+                    )
+                    .ok()
+                    .and_then(|outputs| outputs.into_iter().next())
+                    .unwrap_or_default(),
                     input_channels,
                     output_channels,
                     routes,
                     matrix,
                     input_trim_db: Default::default(),
+                    stereo_routing: serde_json::from_value(
+                        metadata
+                            .get("stereo_routing")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null),
+                    )
+                    .ok(),
                     advisories: serde_json::from_value(
                         metadata
                             .get("advisories")

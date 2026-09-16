@@ -1,12 +1,12 @@
 #[test]
 fn room_config_version_policy_accepts_supported_generations_and_rejects_unknown_versions() {
-    for version in ["1.0.0", "1.2.7", "2.0.0", "2.1.0", "2.2.0", "2.2.7"] {
+    for version in ["3.0.0", "3.0.7"] {
         assert!(
             validate_config_version(version).is_ok(),
             "known compatible version {version} should be accepted"
         );
     }
-    for version in ["", "2", "2.1", "0.9.0", "1.3.0", "2.3.0", "3.0.0"] {
+    for version in ["", "2", "2.1", "0.9.0", "1.3.0", "2.2.0", "3.1.0"] {
         assert!(
             validate_config_version(version).is_err(),
             "unknown version {version:?} should be rejected"
@@ -608,9 +608,9 @@ fn per_driver_placement_validates_version_mode_and_independent_routing() {
         "{:?}",
         config.validate_structure()
     );
-    config.version = "2.1.0".into();
-    assert!(config.validate_structure().unwrap_err().contains("2.2"));
     config.version = "2.2.0".into();
+    assert!(config.validate_structure().unwrap_err().contains("3.0"));
+    config.version = "3.0.0".into();
     config.optimizer.processing_mode = crate::ProcessingMode::LowLatency;
     assert!(
         config
@@ -626,7 +626,7 @@ fn per_driver_placement_validates_version_mode_and_independent_routing() {
         "/../../data_tests/roomeq/measured/2.2_sigberg2/recordings.json"
     )))
     .unwrap();
-    shared.version = "2.2.0".into();
+    shared.version = "3.0.0".into();
     shared.optimizer = config.optimizer;
     assert!(shared.validate_structure().is_ok());
 }

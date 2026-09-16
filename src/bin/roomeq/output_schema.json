@@ -39,7 +39,7 @@
     "version": {
       "description": "Output version",
       "type": "string",
-      "default": "2.2.0"
+      "default": "3.0.0"
     }
   },
   "required": [
@@ -849,11 +849,6 @@
             "surround_height_correlation": 0.35
           }
         },
-        "lfe_channel": {
-          "description": "Logical LFE programme channel name.",
-          "type": "string",
-          "default": "LFE"
-        },
         "lfe_low_pass_hz": {
           "description": "LFE programme-channel low-pass cutoff. This is independent of the\nspeaker crossover used to redirect bass from the main channels.",
           "type": "number",
@@ -888,7 +883,8 @@
           "format": "double",
           "default": 0.0
         }
-      }
+      },
+      "additionalProperties": false
     },
     "BassManagementGroupReport": {
       "type": "object",
@@ -1119,6 +1115,17 @@
             "$ref": "#/$defs/BassManagementSourceReport"
           }
         },
+        "stereo_routing": {
+          "description": "Stereo-only independently optimized input-to-physical-output routing.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StereoBassRoutingReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "sub_delay_ms": {
           "type": "number",
           "format": "double"
@@ -1197,21 +1204,18 @@
             }
           ]
         },
-        "lfe_channel": {
-          "type": "string"
-        },
-        "lfe_gain_applied_to_chain": {
-          "type": "boolean"
+        "lfe": {
+          "description": "Home-cinema-only LFE programme-input policy.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LfeBassManagementReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "lfe_headroom_required_db": {
-          "type": "number",
-          "format": "double"
-        },
-        "lfe_low_pass_hz": {
-          "type": "number",
-          "format": "double"
-        },
-        "lfe_playback_gain_db": {
           "type": "number",
           "format": "double"
         },
@@ -1236,8 +1240,11 @@
             }
           ]
         },
-        "physical_sub_output": {
-          "type": "string"
+        "physical_sub_outputs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "redirected_bass_channel_count": {
           "type": "integer",
@@ -1256,6 +1263,9 @@
               "type": "null"
             }
           ]
+        },
+        "routing_title": {
+          "type": "string"
         },
         "signal_flow": {
           "type": "array",
@@ -1288,18 +1298,15 @@
         }
       },
       "required": [
+        "routing_title",
         "enabled",
         "crossover_type",
         "redirected_bass_enabled",
-        "lfe_channel",
-        "lfe_playback_gain_db",
-        "lfe_low_pass_hz",
-        "lfe_gain_applied_to_chain",
         "sub_trim_db",
         "max_sub_boost_db",
         "headroom_margin_db",
         "gain_limited",
-        "physical_sub_output",
+        "physical_sub_outputs",
         "redirected_bass_channel_count",
         "lfe_headroom_required_db",
         "signal_flow",
@@ -1437,18 +1444,32 @@
             "type": "string"
           }
         },
-        "physical_sub_output": {
-          "type": "string"
+        "physical_sub_outputs": {
+          "description": "Ordered physical subwoofer output identities.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "routes": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/BassManagementRoute"
           }
+        },
+        "stereo_routing": {
+          "description": "Stereo-only topology diagnostics. Home cinema always leaves this unset.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StereoBassRoutingReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
-        "physical_sub_output",
         "input_channels",
         "output_channels",
         "routes",
@@ -4579,6 +4600,32 @@
       "required": [
         "time_ms",
         "amplitude"
+      ]
+    },
+    "LfeBassManagementReport": {
+      "description": "Canonical home-cinema LFE programme-input policy.",
+      "type": "object",
+      "properties": {
+        "gain_applied_to_chain": {
+          "type": "boolean"
+        },
+        "input_channel": {
+          "type": "string"
+        },
+        "low_pass_hz": {
+          "type": "number",
+          "format": "double"
+        },
+        "playback_gain_db": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "input_channel",
+        "playback_gain_db",
+        "low_pass_hz",
+        "gain_applied_to_chain"
       ]
     },
     "LowFreqFilterConfig": {
@@ -7932,7 +7979,7 @@
           }
         },
         "system": {
-          "description": "System configuration (v2.1) - Decouples logical roles from measurements",
+          "description": "System configuration (v3) separating logical inputs from physical outputs.",
           "anyOf": [
             {
               "$ref": "#/$defs/SystemConfig"
@@ -7954,9 +8001,9 @@
           ]
         },
         "version": {
-          "description": "Configuration schema version. Supported lines are 1.0.x–1.2.x and\n2.0.x–2.2.x; the current version is 2.2.0.",
+          "description": "Configuration schema version. Version 3.0.x intentionally rejects the\nlegacy stereo-LFE representation.",
           "type": "string",
-          "default": "2.2.0"
+          "default": "3.0.0"
         }
       },
       "required": [
@@ -8531,6 +8578,91 @@
         "std"
       ]
     },
+    "StereoBassRoutingCandidateReport": {
+      "description": "One evaluated stereo routing candidate.",
+      "type": "object",
+      "properties": {
+        "headroom_margin_db": {
+          "type": "number",
+          "format": "double"
+        },
+        "matrix": {
+          "description": "Row-major `[physical output][L, R]` coefficients.",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          }
+        },
+        "objective": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "rejection_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "topology": {
+          "$ref": "#/$defs/StereoBassTopology"
+        }
+      },
+      "required": [
+        "topology",
+        "headroom_margin_db",
+        "matrix"
+      ]
+    },
+    "StereoBassRoutingReport": {
+      "description": "Selected stereo topology plus evidence for every evaluated candidate.",
+      "type": "object",
+      "properties": {
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StereoBassRoutingCandidateReport"
+          }
+        },
+        "matrix": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          }
+        },
+        "selected_topology": {
+          "$ref": "#/$defs/StereoBassTopology"
+        },
+        "selection_basis": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "selected_topology",
+        "matrix",
+        "candidates",
+        "selection_basis"
+      ]
+    },
+    "StereoBassTopology": {
+      "description": "Supported stereo input-to-subwoofer matrices.",
+      "type": "string",
+      "enum": [
+        "direct_pair",
+        "crossed_pair",
+        "dual_mono"
+      ]
+    },
     "SubOptimizerConfig": {
       "description": "Subwoofer-specific optimizer overrides",
       "type": "object",
@@ -8568,19 +8700,31 @@
         }
       }
     },
-    "SubwooferCrossoverRef": {
-      "description": "Crossover reference(s) for the subwoofer system.\n\nHistorically a single key shared by every sub. It also accepts a\npositional list whose entry `i` applies to sub `i` in\n`speakers.<sub-key>.subwoofers` order (foundation for per-sub splice).\nA one-element list behaves exactly like the shared form.",
-      "anyOf": [
-        {
-          "description": "Single crossover key shared by every subwoofer.",
+    "SubwooferOutput": {
+      "description": "A measured physical subwoofer output.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Stable physical output identifier used by routing and exporters.",
           "type": "string"
         },
+        "speaker": {
+          "description": "Key of the measurement in the top-level `speakers` map.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "speaker"
+      ]
+    },
+    "SubwooferRouting": {
+      "description": "How RoomEQ chooses the stereo input-to-subwoofer routing matrix.",
+      "oneOf": [
         {
-          "description": "Positional per-sub crossover keys, one entry per subwoofer.",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
+          "description": "Evaluate every supported topology and select the best valid result.",
+          "type": "string",
+          "const": "optimize"
         }
       ]
     },
@@ -8608,26 +8752,38 @@
       "description": "Subwoofer system configuration (part of SystemConfig)",
       "type": "object",
       "properties": {
-        "config": {
+        "crossover": {
+          "description": "Crossover reference key(s) (each points to an entry in `crossovers`):\neither one key shared by every sub, or a positional list with one\nentry per subwoofer (see [`SubwooferCrossoverRef`]).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "outputs": {
+          "description": "Ordered measured physical subwoofer outputs.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SubwooferOutput"
+          }
+        },
+        "routing": {
+          "description": "Stereo routing topology selection policy.",
+          "$ref": "#/$defs/SubwooferRouting",
+          "default": "optimize"
+        },
+        "strategy": {
           "description": "Strategy for subwoofer optimization",
           "$ref": "#/$defs/SubwooferStrategy",
           "default": "single"
-        },
-        "crossover": {
-          "description": "Crossover reference key(s) (each points to an entry in `crossovers`):\neither one key shared by every sub, or a positional list with one\nentry per subwoofer (see [`SubwooferCrossoverRef`]).",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SubwooferCrossoverRef"
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       },
-      "additionalProperties": {
-        "type": "string"
-      }
+      "additionalProperties": false,
+      "required": [
+        "outputs"
+      ]
     },
     "SummationSupportEvidence": {
       "description": "Bound retained when a physical branch is omitted outside measured support.",

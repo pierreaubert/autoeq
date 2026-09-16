@@ -506,6 +506,8 @@ fn bass_route_upper_frequency_hz_with_graph() {
 
     let mut graph = BassManagementRoutingGraph {
         physical_sub_output: "LFE".to_string(),
+        physical_sub_outputs: Vec::new(),
+        stereo_routing: None,
         input_channels: vec!["L".to_string()],
         output_channels: vec!["L".to_string(), "LFE".to_string()],
         routes: vec![

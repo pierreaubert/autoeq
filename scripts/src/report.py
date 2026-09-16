@@ -1927,8 +1927,27 @@ def create_comparison_html_report(
             html_parts.append("<p>No data for this channel.</p>\n</div>\n")
             continue
 
+        # Shared design target: first mode carrying a serialized absolute
+        # target wins (compared modes normally share one fixture target).
+        # No fallback flat line — it would misstate the design slope.
+        comparison_target = None
+        for _, ch_data in mode_data:
+            candidate = (ch_data or {}).get("target_curve")
+            if (
+                isinstance(candidate, dict)
+                and candidate.get("freq")
+                and candidate.get("spl")
+            ):
+                comparison_target = {
+                    "freq": list(candidate["freq"]),
+                    "spl": list(candidate["spl"]),
+                }
+                break
+
         # 1. Overlay plot (full range) + Zoomed (bass)
-        fig_overlay = create_comparison_overlay_figure(source_label, mode_data)
+        fig_overlay = create_comparison_overlay_figure(
+            source_label, mode_data, target_curve=comparison_target
+        )
         fig_zoom = create_comparison_zoomed_figure(source_label, mode_data)
         html_parts.append('<div class="plot-row">\n')
         html_parts.append(f'<div class="plot-container">{fig_overlay.to_html(full_html=False, include_plotlyjs=False)}</div>\n')
@@ -1951,7 +1970,9 @@ def create_comparison_html_report(
             html_parts.append(f'<div class="plot-container">{fig_ir.to_html(full_html=False, include_plotlyjs=False)}</div>\n')
 
         # 5. Per-mode subplots
-        fig_subplots = create_mode_subplots_figure(ch_name, mode_data)
+        fig_subplots = create_mode_subplots_figure(
+            ch_name, mode_data, target_curve=comparison_target
+        )
         html_parts.append(f'<div class="plot-container">{fig_subplots.to_html(full_html=False, include_plotlyjs=False)}</div>\n')
 
         # 6. EQ response overlay

@@ -1,6 +1,5 @@
 use super::bass_headroom_model_config::BassHeadroomModelConfig;
 use super::default::default_bass_management_enabled;
-use super::default::default_lfe_channel;
 use super::default::default_lfe_low_pass_hz;
 use super::default::default_lfe_playback_gain_db;
 use super::default::default_max_sub_boost_db;
@@ -19,6 +18,7 @@ use std::collections::HashMap;
 /// is reported but not inserted by default: applying it to the physical sub
 /// chain would also boost redirected bass.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct BassManagementConfig {
     /// Enable bass-management semantics for home-cinema workflows.
     #[serde(default = "default_bass_management_enabled")]
@@ -26,9 +26,6 @@ pub struct BassManagementConfig {
     /// Whether small-speaker bass is redirected to the subwoofer output.
     #[serde(default = "default_redirect_bass")]
     pub redirect_bass: bool,
-    /// Logical LFE programme channel name.
-    #[serde(default = "default_lfe_channel")]
-    pub lfe_channel: String,
     /// Cinema LFE playback calibration gain. Reported in metadata; not applied
     /// to the sub correction chain unless `apply_lfe_gain_to_chain` is set.
     #[serde(default = "default_lfe_playback_gain_db")]
@@ -68,7 +65,6 @@ impl Default for BassManagementConfig {
         Self {
             enabled: true,
             redirect_bass: true,
-            lfe_channel: default_lfe_channel(),
             lfe_playback_gain_db: default_lfe_playback_gain_db(),
             lfe_low_pass_hz: default_lfe_low_pass_hz(),
             apply_lfe_gain_to_chain: false,

@@ -5,20 +5,76 @@
 
 ## Introduction
 
-AutoEQ and RoomEQ are Rust CLIs for computing corrections.
+AutoEQ and RoomEQ are CLIs for computing corrections that make the speakers or headphones sound better (aka more neutral).
 
-- AutoEQ does parametric EQ corrections for headphones and anechoic measurements of speakers (Spinorama or CEA2034).
-- RoomEQ is the room-correction engine for stereo, multi-channel, multi-driver,
-  and multi-subwoofer systems. It combines magnitude, phase, timing,
+- AutoEQ does parametric EQ corrections for headphones and anechoic measurements
+  of speakers made popular by [ASR](https://www.audiosciencereviews.com).
+- RoomEQ is the room-correction engine for stereo, multi-channels, multi-drivers,
+  and multi-subwoofers systems. It combines magnitude, phase, timing,
   psychoacoustic, routing, and export optimization in one reproducible JSON
-  workflow.
+  workflow. It can export a DSP configuration to the [SotF engine](https://github.com/pierreaubert/sotf/tree/master/crates/sotf-engine)
+  but also to other DSP systems like [CamillaDSP](https://github.com/HEnquist/camilladsp), [EQ APO](https://sourceforge.net/projects/equalizerapo/),
+  or [Roon](https://roon.app/en/).
 
-**Note:** A graphical desktop application is available in a separate repository: [SotF](https://github.com/pierreaubert/sotf)
+**Note:** A graphical desktop application is available in a separate repository: [SotF](https://github.com/pierreaubert/sotf) that allows to record and then process easily your room.
+
+## RoomEQ Highlights
+
+| Area | Capabilities |
+|------|--------------|
+| Systems | Stereo 2.0/2.1, home cinema, multi-way speakers, parallel drivers, multi-sub arrays, DBA, and supporting-source room compensation (beta)|
+| Listening area | Single or multiple measurements, weighted/minimax/variance strategies, continuous listening-area priors, modal-basis optimization, and distance/directivity-weighted RIR prototypes |
+| Correction | Parametric IIR, FIR, mixed/hybrid phase, warped IIR, decomposed correction, frequency-dependent windowing, and TV² smoothness control |
+| Time and phase | Driver alignment, sub/main phase alignment, polarity and delay search, all-pass optimization, group-delay correction, and phase-confidence safety gates |
+| Perceptual quality | EPA loudness/sharpness/roughness scoring, audibility deadbands, role-aware targets, inter-channel timbre matching, and height-channel alignment |
+| Home cinema | Role-aware bass management, crossover optimization, physical sub routing, headroom simulation, and topology-aware reporting |
+| Safety | Measurement-grid validation, bounded filters, null and headroom protection, do-no-harm acceptance gates, and structured applied/skipped/degraded/failed outcomes |
+| Export | SotF DSP graphs, CamillaDSP, Equalizer APO, PipeWire, Roon, REW Generic EQ, normalized biquad coefficients, Wavelet, EasyEffects, convolution WAV sidecars, and explicit rejection when a target format cannot preserve the routing graph |
+
+RoomEQ keeps the full DSP chain and its evidence together: corrected responses,
+filter stages, routing graphs, perceptual scores, timing diagnostics, advisories,
+and export artifacts are represented in the output rather than hidden behind a
+single aggregate score.
+
+## User Documentation
+
+### AutoEQ
+
+- [AutoEQ Manual](docs/AUTOEQ_MANUAL.md) — user guide for anechoic measurements of speakers and headphones EQ
+
+### RoomEQ
+
+- [RoomEQ 101](docs/ROOMEQ_101.md) — architecture, signal flow, topology
+  workflows, and the acoustic rationale behind each correction stage
+- [RoomEQ manual](docs/ROOMEQ_MANUAL.md) — installation, configuration,
+  algorithms, correction modes, API usage, and complete examples
+- [RoomEQ input configuration guide](docs/ROOMEQ_INPUT_FORMAT.md) — detailed
+  field-by-field reference and complete system examples
+- [RoomEQ output DSP-chain guide](docs/ROOMEQ_OUTPUT_FORMAT.md) — filters,
+  per-driver chains, routing, curves, metadata, and export examples
+- [Focused configuration examples](src/bin/roomeq/INPUT_FORMAT.md) — timbre
+  matching, height alignment, and RIR prototypes
+- [RoomEQ input schema](src/bin/roomeq/input_schema.json) — complete
+  machine-readable configuration contract
+- [RoomEQ output schema](src/bin/roomeq/output_schema.json) — generated filters,
+  routing, reports, and metadata contract
+- [RIR prototype design](docs/superpowers/specs/2026-07-10-roomeq-rir-prototype-design.md)
+  — distance/directivity weighting model and validation rules
+
+## Research and references
+
+- [References](docs/REFERENCES.md) — standards, papers, algorithms, and
+  measurement resources used by AutoEQ and RoomEQ
+- [ASR 2026 research notes](docs/asr-202604.md) — annotated research survey
+  and implementation ideas
 
 ## Workspace crates
 
 `autoeq` is now a compatibility facade and thin-launcher package; canonical
-implementation lives in focused crates. The current library layers are:
+implementation lives in focused crates. Note that this thin-layer will go away
+before the first stable release.
+
+The current library layers are:
 
 - `autoeq-core` — curves, PEQ models, response math, and parameter layouts
 - `autoeq-measurements` — loading and preprocessing measurement data
@@ -41,66 +97,6 @@ Existing `autoeq::*` public paths remain available as compatibility re-exports.
 Production RoomEQ now runs through `roomeq-cli -> roomeq-workflow ->
 roomeq-engine`; no workspace crate depends on the root facade.
 
-The authoritative extraction sequence, target dependency graph, ownership
-rules, and completion gates are documented in the
-[Crate Partition Migration Plan](docs/CRATE_PARTITION_PLAN.md).
-Focused verification commands for every current workspace package are listed
-in the [Crate Test Matrix](docs/CRATE_TEST_MATRIX.md).
-
-The authoritative extraction sequence, target dependency graph, ownership
-rules, and completion gates are documented in the
-[Crate Partition Migration Plan](docs/CRATE_PARTITION_PLAN.md).
-
-## Documentation
-
-### AutoEQ
-
-- [AutoEQ Manual](docs/AUTOEQ_MANUAL.md) — user guide for speaker and headphone EQ
-
-### RoomEQ
-
-- [RoomEQ 101](docs/ROOMEQ_101.md) — architecture, signal flow, topology
-  workflows, and the acoustic rationale behind each correction stage
-- [RoomEQ manual](docs/ROOMEQ_MANUAL.md) — installation, configuration,
-  algorithms, correction modes, API usage, and complete examples
-- [RoomEQ input configuration guide](docs/ROOMEQ_INPUT_FORMAT.md) — detailed
-  field-by-field reference and complete system examples
-- [RoomEQ output DSP-chain guide](docs/ROOMEQ_OUTPUT_FORMAT.md) — filters,
-  per-driver chains, routing, curves, metadata, and export examples
-- [Focused configuration examples](src/bin/roomeq/INPUT_FORMAT.md) — timbre
-  matching, height alignment, and RIR prototypes
-- [RoomEQ input schema](src/bin/roomeq/input_schema.json) — complete
-  machine-readable configuration contract
-- [RoomEQ output schema](src/bin/roomeq/output_schema.json) — generated filters,
-  routing, reports, and metadata contract
-- [RIR prototype design](docs/superpowers/specs/2026-07-10-roomeq-rir-prototype-design.md)
-  — distance/directivity weighting model and validation rules
-
-### Research and references
-
-- [References](docs/REFERENCES.md) — standards, papers, algorithms, and
-  measurement resources used by AutoEQ and RoomEQ
-- [ASR 2026 research notes](docs/asr-202604.md) — annotated research survey
-  and implementation ideas
-
-## RoomEQ Highlights
-
-| Area | Capabilities |
-|------|--------------|
-| Systems | Stereo 2.0/2.1, home cinema, multi-way speakers, parallel drivers, multi-sub arrays, DBA, and supporting-source room compensation |
-| Listening area | Single or multiple measurements, weighted/minimax/variance strategies, continuous listening-area priors, modal-basis optimization, and distance/directivity-weighted RIR prototypes |
-| Correction | Parametric IIR, FIR, mixed/hybrid phase, warped IIR, decomposed correction, frequency-dependent windowing, and TV² smoothness control |
-| Time and phase | Driver alignment, sub/main phase alignment, polarity and delay search, all-pass optimization, group-delay correction, and phase-confidence safety gates |
-| Perceptual quality | EPA loudness/sharpness/roughness scoring, audibility deadbands, role-aware targets, inter-channel timbre matching, and height-channel alignment |
-| Home cinema | Role-aware bass management, crossover optimization, physical sub routing, headroom simulation, and topology-aware reporting |
-| Safety | Measurement-grid validation, bounded filters, null and headroom protection, do-no-harm acceptance gates, and structured applied/skipped/degraded/failed outcomes |
-| Export | SotF DSP graphs, CamillaDSP, Equalizer APO, PipeWire, Roon, REW Generic EQ, normalized biquad coefficients, Wavelet, EasyEffects, convolution WAV sidecars, and explicit rejection when a target format cannot preserve the routing graph |
-
-RoomEQ keeps the full DSP chain and its evidence together: corrected responses,
-filter stages, routing graphs, perceptual scores, timing diagnostics, advisories,
-and export artifacts are represented in the output rather than hidden behind a
-single aggregate score.
-
 ## Capabilities
 
 ### Supported Use Cases
@@ -111,7 +107,6 @@ single aggregate score.
   multi-driver configurations with crossover and role-aware channel management
 - **Room Correction:** Optimize single-seat or listening-area responses,
   multi-subwoofer alignment, and Double Bass Array (DBA) behavior
-- **Supporting-Source Room Compensation:** Use a delayed, decorrelated supporting loudspeaker to fill reverberant energy without altering the primary source's direct sound (Brooks-Park room compensation)
 
 ### Optimization Algorithms
 

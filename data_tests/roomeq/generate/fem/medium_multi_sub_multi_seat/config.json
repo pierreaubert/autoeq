@@ -1,37 +1,31 @@
 {
-  "version": "1.2.0",
+  "version": "3.0.0",
   "system": {
     "model": "stereo",
     "speakers": {
       "R": "right",
-      "L": "left",
-      "LFE": "lfe"
+      "L": "left"
     },
     "subwoofers": {
-      "config": "mso",
-      "crossover": "first",
-      "lfe": "L"
+      "strategy": "mso",
+      "routing": "optimize",
+      "outputs": [
+        {
+          "id": "Sub1",
+          "speaker": "lfe_1"
+        },
+        {
+          "id": "Sub2",
+          "speaker": "lfe_2"
+        }
+      ],
+      "crossover": [
+        "first",
+        "first"
+      ]
     }
   },
   "speakers": {
-    "lfe": {
-      "name": "subs",
-      "subwoofers": [
-        {
-          "measurements": [
-            "sub1_lp0.csv",
-            "sub1_lp1.csv"
-          ]
-        },
-        {
-          "measurements": [
-            "sub2_lp0.csv",
-            "sub2_lp1.csv"
-          ]
-        }
-      ],
-      "allpass_optimization": false
-    },
     "left": {
       "measurements": [
         "left_lp0.csv",
@@ -42,6 +36,18 @@
       "measurements": [
         "right_lp0.csv",
         "right_lp1.csv"
+      ]
+    },
+    "lfe_1": {
+      "measurements": [
+        "sub1_lp0.csv",
+        "sub1_lp1.csv"
+      ]
+    },
+    "lfe_2": {
+      "measurements": [
+        "sub2_lp0.csv",
+        "sub2_lp1.csv"
       ]
     }
   },

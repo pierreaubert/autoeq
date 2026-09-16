@@ -55,11 +55,22 @@ fn invalid(message: impl Into<String>) -> AutoeqError {
 
 pub fn capture_training(config: &RoomConfig) -> Result<Vec<Capture>> {
     let roles: BTreeMap<String, String> = match &config.system {
-        Some(system) => system
-            .speakers
-            .iter()
-            .map(|(a, b)| (a.clone(), b.clone()))
-            .collect(),
+        Some(system) => {
+            let mut roles: BTreeMap<String, String> = system
+                .speakers
+                .iter()
+                .map(|(a, b)| (a.clone(), b.clone()))
+                .collect();
+            if let Some(subwoofers) = system.subwoofers.as_ref() {
+                roles.extend(
+                    subwoofers
+                        .outputs
+                        .iter()
+                        .map(|output| (output.id.clone(), output.speaker.clone())),
+                );
+            }
+            roles
+        }
         None => config
             .speakers
             .keys()
@@ -495,10 +506,15 @@ fn replay(
             let raw = measured(physical, &route.destination, seat)?;
             // Match serialized routed export: input pre-route -> route matrix
             // gain/polarity, crossover/delay -> destination post-route.
-            let pre = result
-                .channels
-                .get(input)
-                .ok_or_else(|| invalid("missing route input"))?;
+            let pre_route_plugins = match result.channels.get(input) {
+                Some(chain) => stage(chain, "pre_route"),
+                None if roomeq_model::home_cinema::role_for_channel(input)
+                    == roomeq_model::HomeCinemaRole::Lfe =>
+                {
+                    Vec::new()
+                }
+                None => return Err(invalid("missing route input")),
+            };
             let (post_owner, post) = result
                 .channels
                 .get_key_value(&route.destination)
@@ -541,17 +557,28 @@ fn replay(
                 seat,
                 &grid,
                 |curve| {
+                    let curve = if pre_route_plugins.is_empty() {
+                        curve.clone()
+                    } else {
+                        apply(
+                            result,
+                            input,
+                            pre_route_plugins.clone(),
+                            curve,
+                            baseline,
+                            fs,
+                            dir,
+                        )?
+                    };
                     let curve = apply(
                         result,
-                        input,
-                        stage(pre, "pre_route"),
-                        curve,
-                        baseline,
+                        post_owner,
+                        route_plugins.clone(),
+                        &curve,
+                        false,
                         fs,
                         dir,
                     )?;
-                    let curve =
-                        apply(result, input, route_plugins.clone(), &curve, false, fs, dir)?;
                     let mut curve = apply(
                         result,
                         post_owner,
@@ -1591,7 +1618,8 @@ mod tests {
                 subwoofers: Some(roomeq_model::SubwooferSystemConfig {
                     config: Default::default(),
                     crossover: None,
-                    mapping: HashMap::new(),
+                    routing: Default::default(),
+                    outputs: Vec::new(),
                 }),
                 bass_management: Some(roomeq_model::BassManagementConfig {
                     enabled: true,
@@ -1628,6 +1656,8 @@ mod tests {
         };
         report.routing_graph = Some(BassManagementRoutingGraph {
             physical_sub_output: "sub".into(),
+            physical_sub_outputs: Vec::new(),
+            stereo_routing: None,
             input_channels: vec!["left".into()],
             output_channels: vec!["left".into(), "sub".into()],
             routes: vec![route("left", 0.0, 0.0), route("sub", -6.0, 2.0)],

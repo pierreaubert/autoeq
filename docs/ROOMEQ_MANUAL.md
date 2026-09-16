@@ -259,24 +259,24 @@ was silently preserved.
 }
 ```
 
-### 2.1 System with Explicit Topology (v2.1)
+### Stereo bass routing with physical outputs (v3)
 
 ```json
 {
+  "version": "3.0.0",
   "system": {
     "model": "stereo",
     "speakers": {
       "L": "left_meas",
-      "R": "right_meas",
-      "LFE": "sub_meas"
+      "R": "right_meas"
     },
     "subwoofers": {
-      "config": "single",
-      "crossover": "bass_xo",
-      "sub_meas": "L"
-    },
-    "bass_management": {
-      "lfe_low_pass_hz": 120.0
+      "strategy": "single",
+      "routing": "optimize",
+      "outputs": [
+        { "id": "Sub1", "speaker": "sub_meas" }
+      ],
+      "crossover": ["bass_xo"]
     }
   },
   "crossovers": {
@@ -296,6 +296,20 @@ was silently preserved.
   }
 }
 ```
+
+Stereo always exposes exactly two programme inputs, `L` and `R`. The `.1`
+or `.2` suffix describes measured physical subwoofer outputs and never creates
+an LFE input. A 2.1 route uses the correlated-peak-safe `0.5L + 0.5R` fold.
+For 2.2, RoomEQ evaluates direct-pair, crossed-pair, and dual-mono matrices,
+running the continuous optimizer independently for each. Every candidate is
+round-tripped through the serialized routing graph and must pass the acoustic
+splice and electrical-headroom gates before robust-objective comparison;
+reports retain each rejection reason and the selected coefficients.
+
+Home cinema uses the same `subwoofers.outputs` shape, but adds the logical
+`LFE` programme input implicitly. Do not put `LFE` in `system.speakers`;
+that map contains measured main, surround, and height outputs only. LFE gain
+and low-pass policy remain under the home-cinema-only `bass_management` object.
 
 The LFE programme cutoff is a separate bass-management control: changing or
 optimizing `bass_xo` redirects main-channel bass without narrowing the LFE
@@ -317,7 +331,12 @@ string:
 
 ```json
 "subwoofers": {
-  "config": "mso",
+  "strategy": "mso",
+  "routing": "optimize",
+  "outputs": [
+    { "id": "Sub1", "speaker": "sub_left" },
+    { "id": "Sub2", "speaker": "sub_right" }
+  ],
   "crossover": ["bass_xover1", "bass_xover2"]
 }
 ```
@@ -328,8 +347,8 @@ including the actual main high-pass and each driver's
 low-pass. The selected filters are included before route delay, polarity,
 and trim optimization. A crossover list does not create L-to-left-sub or
 R-to-right-sub routing. Each selected frequency stays inside its own range.
-Every key must exist, and the list must contain either one shared entry or
-one entry per physical sub.
+Every key must exist, and the list must contain exactly one entry per physical
+sub output.
 
 Deployment: `LP_i` is a low-pass `crossover` plugin on each physical sub
 (`channels.<SUB>.drivers[i].plugins`, staged `post_route`). Redirected-bass
@@ -338,8 +357,8 @@ frequency remains optimized for the shared main group; the LFE programme keeps
 its independent low-pass. The optimizer, replay and export use this same graph.
 Reports retain `bass_management.groups[].selected_sub_low_pass_hz`,
 `bass_management.optimization.sub_output_results[].selected_low_pass_hz`, and
-the `per_sub_lp_deployed_to_drivers:N` advisory. Legacy shared crossover
-configurations keep their route low-pass and have no per-driver low-pass.
+the `per_sub_lp_deployed_to_drivers:N` advisory. Legacy shared-string
+crossover configurations are rejected by the v3 loader.
 
 
 ### Multi-driver Speaker (2-way)

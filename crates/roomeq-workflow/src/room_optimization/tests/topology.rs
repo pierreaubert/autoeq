@@ -4,8 +4,8 @@ fn select_topology_route_stereo_2_0() {
     let system = SystemConfig {
         model: SystemModel::Stereo,
         speakers: HashMap::from([
-            ("Left".to_string(), "left".to_string()),
-            ("Right".to_string(), "right".to_string()),
+            ("L".to_string(), "left".to_string()),
+            ("R".to_string(), "right".to_string()),
         ]),
         subwoofers: None,
         bass_management: None,
@@ -26,14 +26,15 @@ fn select_topology_route_stereo_2_1() {
     let system = SystemConfig {
         model: SystemModel::Stereo,
         speakers: HashMap::from([
-            ("Left".to_string(), "left".to_string()),
-            ("Right".to_string(), "right".to_string()),
+            ("L".to_string(), "left".to_string()),
+            ("R".to_string(), "right".to_string()),
             ("Sub".to_string(), "sub".to_string()),
         ]),
         subwoofers: Some(SubwooferSystemConfig {
             config: SubwooferStrategy::Single,
             crossover: None,
-            mapping: [("sub".to_string(), "Left".to_string())].into(),
+            routing: Default::default(),
+                    outputs: vec![roomeq_model::SubwooferOutput { id: "sub".to_string(), speaker: "sub".to_string() }],
         }),
         bass_management: None,
         ..Default::default()
@@ -57,15 +58,15 @@ fn select_topology_route_home_cinema_with_sub() {
     let system = SystemConfig {
         model: SystemModel::HomeCinema,
         speakers: HashMap::from([
-            ("Left".to_string(), "left".to_string()),
-            ("Right".to_string(), "right".to_string()),
+            ("L".to_string(), "left".to_string()),
+            ("R".to_string(), "right".to_string()),
             ("Center".to_string(), "center".to_string()),
-            ("LFE".to_string(), "lfe".to_string()),
         ]),
         subwoofers: Some(SubwooferSystemConfig {
             config: SubwooferStrategy::Single,
             crossover: None,
-            mapping: [("lfe".to_string(), "Center".to_string())].into(),
+            routing: Default::default(),
+                    outputs: vec![roomeq_model::SubwooferOutput { id: "lfe".to_string(), speaker: "lfe".to_string() }],
         }),
         bass_management: None,
         ..Default::default()
@@ -97,15 +98,15 @@ fn select_topology_route_home_cinema_keeps_mso_bass_output_on_routed_path() {
     let system = SystemConfig {
         model: SystemModel::HomeCinema,
         speakers: HashMap::from([
-            ("Left".to_string(), "left".to_string()),
-            ("Right".to_string(), "right".to_string()),
+            ("L".to_string(), "left".to_string()),
+            ("R".to_string(), "right".to_string()),
             ("Center".to_string(), "center".to_string()),
-            ("LFE".to_string(), "lfe".to_string()),
         ]),
         subwoofers: Some(SubwooferSystemConfig {
             config: SubwooferStrategy::Mso,
             crossover: None,
-            mapping: [("lfe".to_string(), "Center".to_string())].into(),
+            routing: Default::default(),
+                    outputs: vec![roomeq_model::SubwooferOutput { id: "lfe".to_string(), speaker: "lfe".to_string() }],
         }),
         bass_management: None,
         ..Default::default()
@@ -142,8 +143,8 @@ fn select_topology_route_home_cinema_without_sub() {
     let system = SystemConfig {
         model: SystemModel::HomeCinema,
         speakers: HashMap::from([
-            ("Left".to_string(), "left".to_string()),
-            ("Right".to_string(), "right".to_string()),
+            ("L".to_string(), "left".to_string()),
+            ("R".to_string(), "right".to_string()),
             ("Center".to_string(), "center".to_string()),
         ]),
         subwoofers: None,
@@ -161,8 +162,8 @@ fn select_topology_route_custom_is_generic() {
     let system = SystemConfig {
         model: SystemModel::Custom,
         speakers: HashMap::from([
-            ("Left".to_string(), "left".to_string()),
-            ("Right".to_string(), "right".to_string()),
+            ("L".to_string(), "left".to_string()),
+            ("R".to_string(), "right".to_string()),
         ]),
         subwoofers: None,
         bass_management: None,
@@ -201,7 +202,7 @@ fn select_topology_route_speaker_group_falls_back_to_generic() {
         model: SystemModel::Stereo,
         speakers: HashMap::from([
             ("Left".to_string(), "left_group".to_string()),
-            ("Right".to_string(), "right".to_string()),
+            ("R".to_string(), "right".to_string()),
         ]),
         subwoofers: None,
         bass_management: None,
@@ -285,12 +286,12 @@ fn select_topology_route_stereo_mso_sub_reaches_stereo_2_1() {
         speakers: HashMap::from([
             ("L".to_string(), "left".to_string()),
             ("R".to_string(), "right".to_string()),
-            ("LFE".to_string(), "subs".to_string()),
         ]),
         subwoofers: Some(SubwooferSystemConfig {
             config: SubwooferStrategy::Mso,
             crossover: None,
-            mapping: [("subs".to_string(), "L".to_string())].into(),
+            routing: Default::default(),
+                    outputs: vec![roomeq_model::SubwooferOutput { id: "subs".to_string(), speaker: "subs".to_string() }],
         }),
         bass_management: None,
         ..Default::default()
@@ -320,12 +321,12 @@ fn select_topology_route_stereo_group_sub_stays_generic() {
         speakers: HashMap::from([
             ("L".to_string(), "left".to_string()),
             ("R".to_string(), "right".to_string()),
-            ("LFE".to_string(), "subs".to_string()),
         ]),
         subwoofers: Some(SubwooferSystemConfig {
             config: SubwooferStrategy::Single,
             crossover: None,
-            mapping: [("subs".to_string(), "L".to_string())].into(),
+            routing: Default::default(),
+                    outputs: vec![roomeq_model::SubwooferOutput { id: "subs".to_string(), speaker: "subs".to_string() }],
         }),
         bass_management: None,
         ..Default::default()
@@ -377,8 +378,8 @@ fn stereo_2_0_config() -> RoomConfig {
         system: Some(SystemConfig {
             model: SystemModel::Stereo,
             speakers: HashMap::from([
-                ("Left".to_string(), "left".to_string()),
-                ("Right".to_string(), "right".to_string()),
+                ("L".to_string(), "left".to_string()),
+                ("R".to_string(), "right".to_string()),
             ]),
             subwoofers: None,
             bass_management: None,
@@ -595,14 +596,16 @@ fn home_cinema_5_1_4_config() -> RoomConfig {
         version: roomeq_model::default_config_version(),
         system: Some(SystemConfig {
             model: SystemModel::HomeCinema,
-            speakers: roles
-                .iter()
-                .map(|(role, channel)| ((*role).to_string(), (*channel).to_string()))
+                speakers: roles
+                    .iter()
+                    .filter(|(role, _)| *role != "LFE")
+                    .map(|(role, channel)| ((*role).to_string(), (*channel).to_string()))
                 .collect(),
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Single,
-                crossover: Some("main".to_string().into()),
-                mapping: [("lfe".to_string(), "L".to_string())].into(),
+                crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec!["main".to_string()])),
+                routing: Default::default(),
+                    outputs: vec![roomeq_model::SubwooferOutput { id: "lfe".to_string(), speaker: "lfe".to_string() }],
             }),
             bass_management: None,
             ..Default::default()
@@ -724,8 +727,8 @@ fn execute_topology_workflow_home_cinema_without_sub() {
         system: Some(SystemConfig {
             model: SystemModel::HomeCinema,
             speakers: HashMap::from([
-                ("Left".to_string(), "left".to_string()),
-                ("Right".to_string(), "right".to_string()),
+                ("L".to_string(), "left".to_string()),
+                ("R".to_string(), "right".to_string()),
                 ("Center".to_string(), "center".to_string()),
             ]),
             subwoofers: None,
@@ -784,8 +787,8 @@ fn assemble_workflow_result_persists_channels() {
     let system = SystemConfig {
         model: SystemModel::Stereo,
         speakers: HashMap::from([
-            ("Left".to_string(), "left".to_string()),
-            ("Right".to_string(), "right".to_string()),
+            ("L".to_string(), "left".to_string()),
+            ("R".to_string(), "right".to_string()),
         ]),
         subwoofers: None,
         bass_management: None,
@@ -905,14 +908,14 @@ fn crossover_reconstruction_config(
     let system = SystemConfig {
         model: SystemModel::HomeCinema,
         speakers: HashMap::from([
-            ("Left".to_string(), "left".to_string()),
-            ("Right".to_string(), "right".to_string()),
-            ("LFE".to_string(), "sub".to_string()),
+            ("L".to_string(), "left".to_string()),
+            ("R".to_string(), "right".to_string()),
         ]),
         subwoofers: Some(SubwooferSystemConfig {
             config: SubwooferStrategy::Single,
-            crossover: Some("bass_xo".to_string().into()),
-            mapping: HashMap::from([("sub".to_string(), "Left".to_string())]),
+            crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec!["bass_xo".to_string()])),
+            routing: Default::default(),
+                    outputs: vec![roomeq_model::SubwooferOutput { id: "sub".to_string(), speaker: "sub".to_string() }],
         }),
         bass_management: Some(roomeq_model::BassManagementConfig {
             enabled: true,
@@ -987,7 +990,7 @@ fn crossover_reconstruction_config(
 }
 
 fn assert_crossover_reconstruction(result: &RoomOptimizationResult, case: &str, crossover_hz: f64) {
-    for channel in ["Left", "Right"] {
+    for channel in ["L", "R"] {
         let curve = result
             .deployed_source_curves
             .get(channel)

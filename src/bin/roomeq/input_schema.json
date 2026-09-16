@@ -496,11 +496,6 @@
           },
           "description": "Programme-correlation model used for bass-bus headroom simulation."
         },
-        "lfe_channel": {
-          "default": "LFE",
-          "description": "Logical LFE programme channel name.",
-          "type": "string"
-        },
         "lfe_low_pass_hz": {
           "default": 120.0,
           "description": "LFE programme-channel low-pass cutoff. This is independent of the\nspeaker crossover used to redirect bass from the main channels.",
@@ -4544,21 +4539,34 @@
       },
       "type": "object"
     },
-    "SubwooferCrossoverRef": {
-      "anyOf": [
-        {
-          "description": "Single crossover key shared by every subwoofer.",
+    "SubwooferOutput": {
+      "additionalProperties": false,
+      "description": "A measured physical subwoofer output.",
+      "properties": {
+        "id": {
+          "description": "Stable physical output identifier used by routing and exporters.",
           "type": "string"
         },
-        {
-          "description": "Positional per-sub crossover keys, one entry per subwoofer.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+        "speaker": {
+          "description": "Key of the measurement in the top-level `speakers` map.",
+          "type": "string"
         }
+      },
+      "required": [
+        "id",
+        "speaker"
       ],
-      "description": "Crossover reference(s) for the subwoofer system.\n\nHistorically a single key shared by every sub. It also accepts a\npositional list whose entry `i` applies to sub `i` in\n`speakers.<sub-key>.subwoofers` order (foundation for per-sub splice).\nA one-element list behaves exactly like the shared form."
+      "type": "object"
+    },
+    "SubwooferRouting": {
+      "description": "How RoomEQ chooses the stereo input-to-subwoofer routing matrix.",
+      "oneOf": [
+        {
+          "const": "optimize",
+          "description": "Evaluate every supported topology and select the best valid result.",
+          "type": "string"
+        }
+      ]
     },
     "SubwooferStrategy": {
       "description": "Strategy for subwoofer optimization",
@@ -4581,28 +4589,40 @@
       ]
     },
     "SubwooferSystemConfig": {
-      "additionalProperties": {
-        "type": "string"
-      },
+      "additionalProperties": false,
       "description": "Subwoofer system configuration (part of SystemConfig)",
       "properties": {
-        "config": {
+        "crossover": {
+          "description": "Crossover reference key(s) (each points to an entry in `crossovers`):\neither one key shared by every sub, or a positional list with one\nentry per subwoofer (see [`SubwooferCrossoverRef`]).",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "outputs": {
+          "description": "Ordered measured physical subwoofer outputs.",
+          "items": {
+            "$ref": "#/$defs/SubwooferOutput"
+          },
+          "type": "array"
+        },
+        "routing": {
+          "$ref": "#/$defs/SubwooferRouting",
+          "default": "optimize",
+          "description": "Stereo routing topology selection policy."
+        },
+        "strategy": {
           "$ref": "#/$defs/SubwooferStrategy",
           "default": "single",
           "description": "Strategy for subwoofer optimization"
-        },
-        "crossover": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SubwooferCrossoverRef"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Crossover reference key(s) (each points to an entry in `crossovers`):\neither one key shared by every sub, or a positional list with one\nentry per subwoofer (see [`SubwooferCrossoverRef`])."
         }
       },
+      "required": [
+        "outputs"
+      ],
       "type": "object"
     },
     "SupportingSourceConfig": {
@@ -5231,7 +5251,7 @@
           "type": "null"
         }
       ],
-      "description": "System configuration (v2.1) - Decouples logical roles from measurements"
+      "description": "System configuration (v3) separating logical inputs from physical outputs."
     },
     "target_curve": {
       "anyOf": [
@@ -5245,8 +5265,8 @@
       "description": "Optional target curve (freq, spl)"
     },
     "version": {
-      "default": "2.2.0",
-      "description": "Configuration schema version. Supported lines are 1.0.x–1.2.x and\n2.0.x–2.2.x; the current version is 2.2.0.",
+      "default": "3.0.0",
+      "description": "Configuration schema version. Version 3.0.x intentionally rejects the\nlegacy stereo-LFE representation.",
       "type": "string"
     }
   },

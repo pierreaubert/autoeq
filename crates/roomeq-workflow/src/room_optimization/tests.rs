@@ -205,7 +205,8 @@ fn home_cinema_input_alignment_delay_is_staged_before_routing() {
         subwoofers: Some(SubwooferSystemConfig {
             config: SubwooferStrategy::Single,
             crossover: None,
-            mapping: HashMap::new(),
+            routing: Default::default(),
+            outputs: Vec::new(),
         }),
         ..SystemConfig::default()
     });
@@ -242,14 +243,16 @@ fn shared_alignment_fit_band_excludes_subwoofer_and_crossover_rolloff() {
     config.system = Some(SystemConfig {
         model: SystemModel::HomeCinema,
         speakers: HashMap::from([
-            ("Left".to_string(), "left".to_string()),
+            ("L".to_string(), "left".to_string()),
             ("TopFrontLeft".to_string(), "TFL".to_string()),
-            ("LFE".to_string(), "sub".to_string()),
         ]),
         subwoofers: Some(SubwooferSystemConfig {
             config: SubwooferStrategy::Single,
-            crossover: Some("main_sub".to_string().into()),
-            mapping: HashMap::new(),
+            crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec![
+                "main_sub".to_string(),
+            ])),
+            routing: Default::default(),
+            outputs: Vec::new(),
         }),
         bass_management: None,
         ..SystemConfig::default()
@@ -932,12 +935,12 @@ fn topology_stereo_route_records_probe_arrival_overrides() {
     config.system = Some(SystemConfig {
         model: SystemModel::Stereo,
         speakers: HashMap::from([
-            ("Left".to_string(), "left".to_string()),
-            ("Right".to_string(), "right".to_string()),
+            ("L".to_string(), "left".to_string()),
+            ("R".to_string(), "right".to_string()),
         ]),
         ..Default::default()
     });
-    let arrivals = HashMap::from([("Left".to_string(), 5.0), ("Right".to_string(), 8.0)]);
+    let arrivals = HashMap::from([("L".to_string(), 5.0), ("R".to_string(), 8.0)]);
 
     let result =
         optimize_room_with_probe_arrivals(&config, 48_000.0, None, None, &arrivals).unwrap();
@@ -947,10 +950,10 @@ fn topology_stereo_route_records_probe_arrival_overrides() {
         .expect("topology route must retain supplied probe arrivals");
     assert_eq!(timing.channels.len(), 2);
     assert!(timing.channels.iter().any(|channel| {
-        channel.name == "Left" && (channel.measured_arrival_ms - 5.0).abs() < 1e-9
+        channel.name == "L" && (channel.measured_arrival_ms - 5.0).abs() < 1e-9
     }));
     assert!(timing.channels.iter().any(|channel| {
-        channel.name == "Right" && (channel.measured_arrival_ms - 8.0).abs() < 1e-9
+        channel.name == "R" && (channel.measured_arrival_ms - 8.0).abs() < 1e-9
     }));
     assert!(
         result.channels.values().all(|chain| {
@@ -1063,8 +1066,8 @@ fn optimize_room_stereo_2_0_workflow() {
         system: Some(SystemConfig {
             model: SystemModel::Stereo,
             speakers: HashMap::from([
-                ("Left".to_string(), "left".to_string()),
-                ("Right".to_string(), "right".to_string()),
+                ("L".to_string(), "left".to_string()),
+                ("R".to_string(), "right".to_string()),
             ]),
             subwoofers: None,
             bass_management: None,

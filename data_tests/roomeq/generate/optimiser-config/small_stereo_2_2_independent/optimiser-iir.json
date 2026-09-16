@@ -2,14 +2,21 @@
   "system": {
     "model": "stereo",
     "speakers": {
-      "LFE": "lfe",
       "L": "left",
       "R": "right"
     },
     "subwoofers": {
-      "config": "single",
-      "crossover": "first",
-      "lfe": "L"
+      "strategy": "single",
+      "routing": "optimize",
+      "outputs": [
+        {
+          "id": "Sub1",
+          "speaker": "lfe"
+        }
+      ],
+      "crossover": [
+        "first"
+      ]
     }
   },
   "optimizer": {

@@ -17,7 +17,7 @@ check-jsonschema --schemafile input_schema.json your_config.json
 
 ```json
 {
-  "version": "2.1.0",
+  "version": "3.0.0",
   "system": { ... },
   "speakers": { ... },
   "crossovers": { ... },
@@ -131,24 +131,22 @@ Raw sweep CTC input can deconvolve and align takes inside roomEQ. Use `matrix_so
 
 ## System Configuration
 
-The `system` section decouples logical channel roles (e.g., "L", "R", "LFE") from physical measurement files. This allows for explicit topology definitions and automatic subwoofer alignment strategies.
+Input format `3.0.0` separates logical programme inputs from measured physical outputs. Stereo always has exactly `L` and `R`; home cinema adds the canonical `LFE` programme input implicitly.
 
 ```json
 {
+  "version": "3.0.0",
   "system": {
     "model": "stereo",
     "speakers": {
       "L": "left_meas",
-      "R": "right_meas",
-      "LFE": "sub_meas"
+      "R": "right_meas"
     },
     "subwoofers": {
-      "config": "single",
-      "crossover": "bass_xover",
-      "sub_meas": "L"
-    },
-    "bass_management": {
-      "lfe_low_pass_hz": 120.0
+      "strategy": "single",
+      "routing": "optimize",
+      "outputs": [{ "id": "Sub1", "speaker": "sub_meas" }],
+      "crossover": ["bass_xover"]
     }
   },
   "crossovers": {
@@ -165,8 +163,8 @@ The `system` section decouples logical channel roles (e.g., "L", "R", "LFE") fro
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `model` | string | No | `"custom"` | Topology model: `"stereo"`, `"home_cinema"`, `"custom"` |
-| `speakers` | map | **Yes** | - | Map of Logical Role → Measurement Key. The key must exist in the root `speakers` object. |
-| `subwoofers` | object | No | - | Subwoofer configuration and alignment mapping |
+| `speakers` | map | **Yes** | - | Measured main/surround/height outputs. Stereo must contain exactly `L` and `R`; home cinema must not contain `LFE`. |
+| `subwoofers` | object | No | - | Physical subwoofer output definitions and routing policy |
 | `bass_management` | object | No | cinema defaults | Bass routing policy. `lfe_low_pass_hz` defaults to 120 Hz and is independent of the main-speaker crossover. |
 | `supporting_source_outputs` | object | No | `{"suffix": "_support"}` | Naming convention for supporting-source physical outputs |
 
@@ -174,9 +172,10 @@ The `system` section decouples logical channel roles (e.g., "L", "R", "LFE") fro
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `config` | string | No | `"single"` | Strategy: `"single"`, `"mso"`, `"dba"` |
-| `crossover` | string | No | - | Reference to a crossover definition in the `crossovers` map |
-| `*` | string | - | - | Any other key is treated as: `Subwoofer Measurement Key` → `Main Speaker Logical Role` (for alignment) |
+| `strategy` | string | No | `"single"` | Strategy: `"single"`, `"mso"`, `"dba"` |
+| `routing` | string | No | `"optimize"` | Stereo routing topology selection policy |
+| `outputs` | array | **Yes** | - | Ordered `{id, speaker}` physical outputs; `speaker` references the root `speakers` map |
+| `crossover` | array | **Yes** | - | One crossover key per physical output; each key must exist in `crossovers` |
 
 ---
 
@@ -1698,18 +1697,18 @@ freq,spl,phase
 
 ```json
 {
-  "version": "2.1.0",
+  "version": "3.0.0",
   "system": {
     "model": "stereo",
     "speakers": {
       "L": "left",
-      "R": "right",
-      "LFE": "sub"
+      "R": "right"
     },
     "subwoofers": {
-      "config": "single",
-      "crossover": "bass_xover",
-      "sub": "L"
+      "strategy": "single",
+      "routing": "optimize",
+      "outputs": [{ "id": "Sub1", "speaker": "sub" }],
+      "crossover": ["bass_xover"]
     }
   },
   "speakers": {
@@ -1732,6 +1731,12 @@ freq,spl,phase
   }
 }
 ```
+
+Stereo `.1`/`.2` counts physical subwoofer outputs; it never adds an `LFE`
+programme input. A stereo 2.1 route uses `0.5L + 0.5R`. For 2.2, RoomEQ
+independently evaluates direct-pair, crossed-pair, and dual-mono routing and
+reports the selected matrix. Home cinema implicitly adds the canonical `LFE`
+programme input while keeping physical sub measurements under `outputs`.
 
 ### Example 3: 2-Way Active Speaker
 

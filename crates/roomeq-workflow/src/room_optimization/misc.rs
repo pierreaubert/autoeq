@@ -37,9 +37,15 @@ pub(super) fn is_subwoofer_channel(config: &RoomConfig, channel_name: &str) -> b
         if channel_name.eq_ignore_ascii_case("lfe") {
             return true;
         }
+        if subs.outputs.iter().any(|output| {
+            output.id.eq_ignore_ascii_case(channel_name)
+                || output.speaker.eq_ignore_ascii_case(channel_name)
+        }) {
+            return true;
+        }
 
         if let Some(measurement_key) = sys.speakers.get(channel_name) {
-            return subs.mapping.contains_key(measurement_key);
+            return subs.contains_measurement(measurement_key);
         }
     }
 
@@ -60,18 +66,20 @@ pub(super) fn find_sub_main_pairings(
     if let Some(sys) = &config.system {
         // Use explicit system configuration
         if let Some(subs) = &sys.subwoofers {
-            // Invert speakers map to find roles from measurement keys
-            // measurement_key -> role
-            let meas_to_role: HashMap<&String, &String> =
-                sys.speakers.iter().map(|(r, m)| (m, r)).collect();
+            let mut main_roles = sys.speakers.keys().cloned().collect::<Vec<_>>();
+            main_roles.sort();
+            let main_role = main_roles
+                .iter()
+                .find(|role| role.as_str() == "L")
+                .or_else(|| main_roles.first());
 
-            for (sub_meas_key, main_role) in &subs.mapping {
-                if let Some(sub_role) = meas_to_role.get(sub_meas_key) {
-                    pairings.push((sub_role.to_string(), main_role.clone()));
+            for output in &subs.outputs {
+                if let Some(main_role) = main_role {
+                    pairings.push((output.id.clone(), main_role.clone()));
                 } else {
                     warn!(
-                        "Subwoofer measurement '{}' not mapped to any output channel",
-                        sub_meas_key
+                        "Physical subwoofer output '{}' has no logical main channel to pair with",
+                        output.id
                     );
                 }
             }
@@ -587,25 +595,27 @@ mod tests {
     fn is_subwoofer_channel_by_system_mapping() {
         let mut speakers = HashMap::new();
         speakers.insert("left".to_string(), SpeakerConfig::Single(single_source()));
-        speakers.insert("lfe".to_string(), SpeakerConfig::Single(single_source()));
+        speakers.insert("sub".to_string(), SpeakerConfig::Single(single_source()));
         let config = RoomConfig {
             system: Some(SystemConfig {
                 model: roomeq_model::SystemModel::HomeCinema,
-                speakers: HashMap::from([
-                    ("Left".to_string(), "left".to_string()),
-                    ("LFE".to_string(), "lfe".to_string()),
-                ]),
+                speakers: HashMap::from([("L".to_string(), "left".to_string())]),
                 subwoofers: Some(SubwooferSystemConfig {
                     config: SubwooferStrategy::Single,
                     crossover: None,
-                    mapping: [("lfe".to_string(), "Left".to_string())].into(),
+                    routing: Default::default(),
+                    outputs: vec![roomeq_model::SubwooferOutput {
+                        id: "Sub1".to_string(),
+                        speaker: "sub".to_string(),
+                    }],
                 }),
                 bass_management: None,
                 ..Default::default()
             }),
             ..room_config_with_speakers(speakers)
         };
-        assert!(is_subwoofer_channel(&config, "lfe"));
+        assert!(is_subwoofer_channel(&config, "Sub1"));
+        assert!(is_subwoofer_channel(&config, "sub"));
         assert!(!is_subwoofer_channel(&config, "left"));
     }
 
@@ -613,18 +623,19 @@ mod tests {
     fn find_sub_main_pairings_explicit_system() {
         let mut speakers = HashMap::new();
         speakers.insert("left".to_string(), SpeakerConfig::Single(single_source()));
-        speakers.insert("lfe".to_string(), SpeakerConfig::Single(single_source()));
+        speakers.insert("sub".to_string(), SpeakerConfig::Single(single_source()));
         let config = RoomConfig {
             system: Some(SystemConfig {
                 model: roomeq_model::SystemModel::HomeCinema,
-                speakers: HashMap::from([
-                    ("Left".to_string(), "left".to_string()),
-                    ("LFE".to_string(), "lfe".to_string()),
-                ]),
+                speakers: HashMap::from([("L".to_string(), "left".to_string())]),
                 subwoofers: Some(SubwooferSystemConfig {
                     config: SubwooferStrategy::Single,
                     crossover: None,
-                    mapping: [("lfe".to_string(), "Left".to_string())].into(),
+                    routing: Default::default(),
+                    outputs: vec![roomeq_model::SubwooferOutput {
+                        id: "Sub1".to_string(),
+                        speaker: "sub".to_string(),
+                    }],
                 }),
                 bass_management: None,
                 ..Default::default()
@@ -633,10 +644,10 @@ mod tests {
         };
         let curves = HashMap::from([
             ("left".to_string(), small_curve()),
-            ("lfe".to_string(), small_curve()),
+            ("Sub1".to_string(), small_curve()),
         ]);
         let pairings = find_sub_main_pairings(&config, &curves);
-        assert_eq!(pairings, vec![("LFE".to_string(), "Left".to_string())]);
+        assert_eq!(pairings, vec![("Sub1".to_string(), "L".to_string())]);
     }
 
     #[test]

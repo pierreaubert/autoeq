@@ -698,9 +698,12 @@ pub fn verify_config_claims(config: &RoomConfig, claims: &[String]) -> Vec<Strin
                 || system
                     .and_then(|value| value.subwoofers.as_ref())
                     .is_some_and(|value| value.config == SubwooferStrategy::Mso),
-            "four_subwoofers" => config.speakers.values().any(|speaker| {
-                matches!(speaker, SpeakerConfig::MultiSub(group) if group.subwoofers.len() >= 4)
-            }),
+            "four_subwoofers" => system
+                .and_then(|value| value.subwoofers.as_ref())
+                .is_some_and(|subwoofers| subwoofers.outputs.len() >= 4)
+                || config.speakers.values().any(|speaker| {
+                    matches!(speaker, SpeakerConfig::MultiSub(group) if group.subwoofers.len() >= 4)
+                }),
             "speaker_group" => config.speakers.values().any(|speaker| {
                 matches!(speaker, SpeakerConfig::Group(_) | SpeakerConfig::Topology(_))
             }),

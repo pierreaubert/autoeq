@@ -549,7 +549,7 @@ fn system_has_subwoofer(room_config: &RoomConfig) -> bool {
             system
                 .subwoofers
                 .as_ref()
-                .is_some_and(|subwoofers| !subwoofers.mapping.is_empty())
+                .is_some_and(|subwoofers| !subwoofers.outputs.is_empty())
         })
         .unwrap_or_else(|| {
             room_config.speakers.keys().any(|name| {

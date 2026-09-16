@@ -17,7 +17,7 @@ check-jsonschema --schemafile output_schema.json dsp_chain.json
 
 ```json
 {
-  "version": "2.1.0",
+  "version": "3.0.0",
   "global_plugins": [ ... ],
   "channels": { ... },
   "metadata": { ... }
@@ -61,6 +61,13 @@ Bass-management output can expose the same route graph in two places:
   report, alongside selected crossover, delay, trim, polarity, and headroom
   decisions.
 
+Stereo graphs expose `physical_sub_outputs` plus `stereo_routing`, whose
+`candidates` record the objective, serialized-graph rejection reason, headroom
+margin, and exact matrix for direct-pair, crossed-pair, and dual-mono trials.
+`selected_topology`, `matrix`, and `selection_basis` describe the deployed
+route. Home-cinema graphs omit `stereo_routing` and expose canonical `LFE` only
+as a logical programme input.
+
 Each route describes one logical branch of the graph. It is not an instruction
 to add another physical crossover plugin for every route object. The
 executable stages are the ordered `global_plugins` and `channels.*.plugins`;
@@ -73,7 +80,7 @@ is an annotation, not an additional processing stage.
 |-------|---------|
 | `group_id` | Optimization group that selected the route parameters, such as `lcr` or `surround`; it is not a new audio channel. |
 | `source_channel` / `source_index` | Logical input channel and its graph index. |
-| `destination` / `destination_index` | Logical output channel and its graph index. Bass-managed low-frequency branches normally target the physical `LFE`/sub output. |
+| `destination` / `destination_index` | Physical output channel and its graph index. Bass-managed low-frequency branches target a named physical sub output such as `Sub1`; `LFE` is a home-cinema programme input, not a measurement/output identity. |
 | `pre_chain_channel` / `post_chain_channel` | Channel identity on either side of the route-owned stage. These preserve chain ownership when a route crosses a matrix boundary. |
 | `route_kind` | `main_highpass_to_self` keeps the main band on the source channel; `redirected_bass_lowpass_to_sub` sends a bass-managed speaker’s low band to the sub output; `lfe_lowpass_to_sub` sends the LFE programme band using its independent `lfe_low_pass_hz` cutoff (120 Hz by default). |
 | `high_pass_hz` / `low_pass_hz` | Band boundary for this logical branch. Only one is normally populated for a high-pass or low-pass branch. |
@@ -774,7 +781,7 @@ Output for a basic stereo system with EQ filters only.
 
 ```json
 {
-  "version": "2.1.0",
+  "version": "3.0.0",
   "channels": {
     "left": {
       "channel": "left",
@@ -839,7 +846,7 @@ Output for a 2-way speaker with crossover and per-driver processing.
 
 ```json
 {
-  "version": "2.1.0",
+  "version": "3.0.0",
   "channels": {
     "left": {
       "channel": "left",
@@ -926,7 +933,7 @@ Output for FIR mode, where each channel gets a WAV impulse response file.
 
 ```json
 {
-  "version": "2.1.0",
+  "version": "3.0.0",
   "channels": {
     "left": {
       "channel": "left",
@@ -967,7 +974,7 @@ Output for mixed mode where FIR handles low frequencies and IIR handles high fre
 
 ```json
 {
-  "version": "2.1.0",
+  "version": "3.0.0",
   "channels": {
     "left": {
       "channel": "left",

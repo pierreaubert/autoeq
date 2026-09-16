@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Introduce the breaking RoomEQ 3.0.0 configuration contract: derive logical
+  stereo inputs from `L`/`R`, add canonical implicit home-cinema `LFE`, and
+  describe measured subwoofers as ordered physical `subwoofers.outputs` with a
+  `strategy`. Reject legacy stereo `LFE` mappings, invalid output references,
+  duplicate output IDs, and crossover/output count mismatches.
+
 - Record the crossover-safety-restoration basis on accepted bass source routes (`BassManagementSourceReport.safety_restored`).
 
 - Add backward-compatible classified stage checks to RoomEQ stage outcomes and output metadata.

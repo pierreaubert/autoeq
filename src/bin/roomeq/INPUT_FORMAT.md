@@ -270,11 +270,18 @@ keyed by a height channel name or by `top_front`, `top_middle`, or `top_rear`.
 
 ## Configuration schema version
 
+Schema **3.0.0** separates logical programme inputs from measured physical
+outputs. Stereo declares exactly `L` and `R`; one or two sub measurements are
+listed under `system.subwoofers.outputs`. Home cinema adds `LFE` implicitly.
+Legacy v2 configurations, stereo `system.speakers.LFE`, configurable
+`bass_management.lfe_channel`, flattened sub mappings, and shared-string
+subwoofer crossovers are rejected with a migration example.
+
 Schema **2.2.0** adds `optimizer.fir.placement`:
 
 ```json
 {
-  "version": "2.2.0",
+  "version": "3.0.0",
   "optimizer": {
     "processing_mode": "phase_linear",
     "min_freq": 20.0,
@@ -333,10 +340,9 @@ convolution is descriptive: do not add that delay a second time in the host.
 Placement is not automatic: the engine does not compare shared/per-driver modes.
 
 The top-level `version` is validated before paths are resolved or optimization
-starts. RoomEQ accepts the historical `1.0.x` through `1.2.x` schema lines and
-the `2.0.x` through `2.2.x` lines. The current default is `2.2.0`. Malformed
-versions and unknown minor or major versions fail closed instead of being
-interpreted with current defaults.
+starts. RoomEQ accepts only the `3.0.x` schema line. The current default is
+`3.0.0`. Malformed versions and unknown minor or major versions fail closed
+instead of being interpreted with current defaults.
 
 RoomEQ loads canonical configuration and override files with recursive strict
 deserialization. Unknown, misspelled, or misplaced fields are errors rather
@@ -350,14 +356,9 @@ For home-cinema bass management, `system.bass_management.lfe_low_pass_hz`
 controls the LFE programme path independently of the redirected-bass speaker
 crossover and defaults to 120 Hz.
 
-`system.subwoofers.crossover` accepts either a single crossover key (legacy
-shared behavior, wire-compatible) or a positional list of keys for per-sub
-crossovers: entry `i` applies to sub `i` in driver order. Selection scores
-the complete shared array against every logical main input; the list does not
-create isolated sub-to-main routing. Every listed key must
-exist in `crossovers`; the list must hold exactly 1 entry or exactly one entry
-per sub, else validation fails. A one-element list behaves exactly like the
-shared string. Each selected per-sub low-pass `LP_i` deploys as a low-pass
+`system.subwoofers.crossover` is a positional list with exactly one key per
+entry in `system.subwoofers.outputs`. Every listed key must exist in
+`crossovers`. Each selected per-sub low-pass `LP_i` deploys as a low-pass
 `crossover` plugin on `channels.<SUB>.drivers[i].plugins` (pre-sum; the
 redirected-bass routes omit a duplicate group low-pass) and is reported in
 `bass_management.groups[].selected_sub_low_pass_hz` and
@@ -426,7 +427,7 @@ Enable the prototype by adding a `rir_prototype` block inside the speaker's
 
 ```json
 {
-  "version": "2.1.0",
+  "version": "3.0.0",
   "speakers": {
     "left": {
       "measurements": [

@@ -380,7 +380,7 @@ pub fn process_supporting_source_channel_with_frequency_samples(
             || system
                 .subwoofers
                 .as_ref()
-                .is_some_and(|subwoofers| subwoofers.mapping.contains_key(&support_name))
+                .is_some_and(|subwoofers| subwoofers.output(&support_name).is_some())
     });
     if support_name == logical_role || collides_with_logical_channel {
         return Err(AutoeqError::InvalidConfiguration {

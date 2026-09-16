@@ -222,6 +222,7 @@ fn validate_bass_management(
         failures.push("LFE-only case unexpectedly redirects main-channel bass".to_string());
     }
 
+    let lfe_low_pass_hz = report.lfe.as_ref().map(|lfe| lfe.low_pass_hz);
     match report.routing_graph.as_ref() {
         Some(graph) => {
             let has_lfe_route = graph
@@ -240,13 +241,14 @@ fn validate_bass_management(
                 .iter()
                 .filter(|route| route.route_kind == "lfe_lowpass_to_sub")
             {
-                if route
-                    .low_pass_hz
-                    .is_none_or(|frequency| (frequency - report.lfe_low_pass_hz).abs() > 1.0e-6)
-                {
+                if route.low_pass_hz.is_none_or(|frequency| {
+                    lfe_low_pass_hz.is_none_or(|expected| (frequency - expected).abs() > 1.0e-6)
+                }) {
                     failures.push(format!(
                         "LFE route '{}' uses {:?} Hz instead of the configured {:.3} Hz programme cutoff",
-                        route.source_channel, route.low_pass_hz, report.lfe_low_pass_hz
+                        route.source_channel,
+                        route.low_pass_hz,
+                        lfe_low_pass_hz.unwrap_or_default()
                     ));
                 }
             }
@@ -1019,6 +1021,7 @@ mod tests {
         route_reconstructs_optimizer_metadata, validate_bass_management, validate_stage_outcomes,
     };
     use crate::registry::QaTier;
+    use roomeq_model::home_cinema::logical_channel_names;
     use roomeq_model::{SpeakerConfig, StageOutcome, StageStatus};
 
     #[test]
@@ -1129,7 +1132,7 @@ mod tests {
                 .unwrap_or_else(|error| panic!("{} failed to load: {error:#}", test_case.name()));
             let expectations = test_case.home_cinema_expectations.unwrap();
             assert_eq!(
-                config.system.as_ref().unwrap().speakers.len(),
+                logical_channel_names(&config).len(),
                 expectations.channel_count.unwrap()
             );
         }

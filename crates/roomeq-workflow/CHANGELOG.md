@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Optimize stereo 2.1/2.2 bass routing independently from home-cinema bass
+  management: evaluate dual-mono, direct-pair, and crossed-pair matrices, reject
+  candidates that fail serialized-graph splice or electrical-headroom replay,
+  apply deterministic robust tie-breaking, and report every candidate plus the
+  selected topology, coefficients, physical outputs, and selection evidence.
+
 - Replay the serialized routed graph until every mains splice sums safely, reverting splice-breaking post-route correction stages role by role (mains-only FIR first, then post-route correction EQ) instead of failing the whole run; unfixable splices keep the hard error, and reverts are recorded as degraded stage outcomes.
 - Drop home-cinema Post-EQ candidates that improve the predicted splice sum while regressing the mains published channel score, preserving the main correction the final safety gate would otherwise revert wholesale.
 - Carry the correction-acceptance report and gate-added stage outcomes across routed-safety restores, marked as restored rather than blessed.

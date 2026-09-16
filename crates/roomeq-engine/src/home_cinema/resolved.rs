@@ -116,6 +116,7 @@ pub fn resolved_source_route_settings(
 }
 
 pub fn resolved_bass_sub_outputs(
+    config: &RoomConfig,
     fallback_role: &str,
     optimization: Option<&BassManagementOptimizationReport>,
 ) -> Vec<BassManagementSubOutputReport> {
@@ -124,6 +125,27 @@ pub fn resolved_bass_sub_outputs(
         .filter(|outputs| !outputs.is_empty())
     {
         return outputs;
+    }
+
+    if let Some(outputs) = config
+        .system
+        .as_ref()
+        .and_then(|system| system.subwoofers.as_ref())
+        .map(|subwoofers| &subwoofers.outputs)
+        .filter(|outputs| !outputs.is_empty())
+    {
+        return outputs
+            .iter()
+            .map(|output| BassManagementSubOutputReport {
+                output_role: output.id.clone(),
+                gain_db: 0.0,
+                delay_ms: 0.0,
+                polarity_inverted: false,
+                strategy_source: "configured_physical_output".to_string(),
+                headroom_contribution_db: 0.0,
+                selected_low_pass_hz: None,
+            })
+            .collect();
     }
 
     vec![BassManagementSubOutputReport {

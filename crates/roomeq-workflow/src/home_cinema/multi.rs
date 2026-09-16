@@ -479,8 +479,11 @@ mod multi_seat_branch_tests {
                 ]),
                 subwoofers: Some(SubwooferSystemConfig {
                     config: Default::default(),
-                    crossover: Some("sub".to_string().into()),
-                    mapping: HashMap::new(),
+                    crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec![
+                        "sub".to_string(),
+                    ])),
+                    routing: Default::default(),
+                    outputs: Vec::new(),
                 }),
                 bass_management: Some(BassManagementConfig::default()),
                 supporting_source_outputs: None,

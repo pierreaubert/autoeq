@@ -2,8 +2,8 @@ use super::types::BassHeadroomModelKind;
 use super::types::MultiMeasurementStrategy;
 
 /// Current configuration version.
-// 2.2 adds opt-in physical-driver FIR deployment; older inputs remain shared.
-pub const CURRENT_CONFIG_VERSION: &str = "2.2.0";
+// 3.0 separates logical programme inputs from measured physical outputs.
+pub const CURRENT_CONFIG_VERSION: &str = "3.0.0";
 
 /// Configuration version (semantic versioning).
 pub fn default_config_version() -> String {
@@ -32,11 +32,11 @@ pub fn validate_config_version(version: &str) -> Result<(), String> {
     let minor = parse(parts[1])?;
     let _patch = parse(parts[2])?;
 
-    if matches!((major, minor), (1, 0..=2) | (2, 0..=2)) {
+    if (major, minor) == (3, 0) {
         Ok(())
     } else {
         Err(format!(
-            "unsupported RoomEQ config version '{version}'; supported schema lines are 1.0.x–1.2.x and 2.0.x–2.2.x (current {CURRENT_CONFIG_VERSION})"
+            "unsupported RoomEQ config version '{version}'; version 3.0.x is required (current {CURRENT_CONFIG_VERSION}). Replace the v2 stereo LFE mapping with: \"system\":{{\"model\":\"stereo\",\"speakers\":{{\"L\":\"left\",\"R\":\"right\"}},\"subwoofers\":{{\"strategy\":\"single\",\"routing\":\"optimize\",\"outputs\":[{{\"id\":\"Sub1\",\"speaker\":\"sub\"}}],\"crossover\":[\"bass_xover\"]}}}}"
         ))
     }
 }
@@ -47,10 +47,6 @@ pub(super) fn default_bass_management_enabled() -> bool {
 
 pub(super) fn default_redirect_bass() -> bool {
     true
-}
-
-pub(super) fn default_lfe_channel() -> String {
-    "LFE".to_string()
 }
 
 pub(super) fn default_lfe_playback_gain_db() -> f64 {

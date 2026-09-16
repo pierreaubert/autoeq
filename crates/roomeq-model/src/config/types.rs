@@ -324,6 +324,24 @@ pub enum SubwooferStrategy {
     Dba,
 }
 
+/// How RoomEQ chooses the stereo input-to-subwoofer routing matrix.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SubwooferRouting {
+    /// Evaluate every supported topology and select the best valid result.
+    #[default]
+    Optimize,
+}
+
+/// A measured physical subwoofer output.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct SubwooferOutput {
+    /// Stable physical output identifier used by routing and exporters.
+    pub id: String,
+    /// Key of the measurement in the top-level `speakers` map.
+    pub speaker: String,
+}
+
 /// System topology model
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -458,18 +476,36 @@ impl From<&str> for SubwooferCrossoverRef {
 
 /// Subwoofer system configuration (part of SystemConfig)
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SubwooferSystemConfig {
     /// Strategy for subwoofer optimization
-    #[serde(default)]
+    #[serde(default, rename = "strategy")]
     pub config: SubwooferStrategy,
+    /// Stereo routing topology selection policy.
+    #[serde(default)]
+    pub routing: SubwooferRouting,
+    /// Ordered measured physical subwoofer outputs.
+    pub outputs: Vec<SubwooferOutput>,
     /// Crossover reference key(s) (each points to an entry in `crossovers`):
     /// either one key shared by every sub, or a positional list with one
     /// entry per subwoofer (see [`SubwooferCrossoverRef`]).
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<Vec<String>>")]
     pub crossover: Option<SubwooferCrossoverRef>,
-    /// Mapping of subwoofer measurement key to main speaker logical role
-    #[serde(flatten)]
-    pub mapping: HashMap<String, String>,
+}
+
+impl SubwooferSystemConfig {
+    /// True when `measurement_key` belongs to a physical sub output.
+    pub fn contains_measurement(&self, measurement_key: &str) -> bool {
+        self.outputs
+            .iter()
+            .any(|output| output.speaker == measurement_key)
+    }
+
+    /// Resolve a physical output by its stable identifier.
+    pub fn output(&self, id: &str) -> Option<&SubwooferOutput> {
+        self.outputs.iter().find(|output| output.id == id)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]

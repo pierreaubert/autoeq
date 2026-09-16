@@ -1,9 +1,20 @@
 {
-  "version": "1.2.0",
+  "version": "3.0.0",
   "system": {
     "model": "home_cinema",
-    "speakers": { "SL": "surround_left", "SR": "surround_right", "R": "right", "L": "left", "C": "center", "LFE": "lfe" },
-    "subwoofers": { "config": "single", "crossover": "first", "lfe": "L" }
+    "speakers": {
+      "SL": "surround_left",
+      "SR": "surround_right",
+      "R": "right",
+      "L": "left",
+      "C": "center"
+    },
+    "subwoofers": {
+      "strategy": "single",
+      "routing": "optimize",
+      "outputs": [{ "id": "Sub1", "speaker": "lfe" }],
+      "crossover": ["first"]
+    }
   },
   "speakers": {
     "left": "left_lp0.csv",

@@ -18,25 +18,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::f64::consts::PI;
 
 pub fn bass_output_role(_config: &RoomConfig, system: &SystemConfig) -> String {
-    if let Some(bm) = system.bass_management.as_ref()
-        && system.speakers.contains_key(&bm.lfe_channel)
-    {
-        return bm.lfe_channel.clone();
-    }
-    if system.speakers.contains_key("LFE") {
-        return "LFE".to_string();
-    }
-    let mut candidates: Vec<_> = system
-        .speakers
-        .keys()
-        .filter(|role| role_for_channel(role).is_sub_or_lfe())
-        .cloned()
-        .collect();
-    candidates.sort();
-    candidates
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| "LFE".to_string())
+    system
+        .subwoofers
+        .as_ref()
+        .and_then(|subwoofers| subwoofers.outputs.first())
+        .map(|output| output.id.clone())
+        .unwrap_or_else(|| "Sub1".to_string())
 }
 
 pub fn bass_management_report(
@@ -84,7 +71,7 @@ pub fn bass_management_report_with_optimization_and_sample_rate(
         .system
         .as_ref()
         .map(|system| bass_output_role(config, system))
-        .unwrap_or_else(|| effective.config.lfe_channel.clone());
+        .unwrap_or_else(|| "Sub1".to_string());
     let signal_flow = bass_management_signal_flow(
         config,
         &effective,
@@ -115,21 +102,38 @@ pub fn bass_management_report_with_optimization_and_sample_rate(
         };
     }
 
+    let lfe = matches!(
+        config.system.as_ref().map(|system| &system.model),
+        Some(roomeq_model::SystemModel::HomeCinema)
+    )
+    .then(|| LfeBassManagementReport {
+        input_channel: "LFE".to_string(),
+        playback_gain_db: effective.config.lfe_playback_gain_db,
+        low_pass_hz: effective.config.lfe_low_pass_hz,
+        gain_applied_to_chain: effective.config.apply_lfe_gain_to_chain,
+    });
+    let physical_sub_outputs = sub_outputs
+        .iter()
+        .map(|output| output.output_role.clone())
+        .collect();
+
     Some(BassManagementReport {
+        routing_title: if lfe.is_some() {
+            "Home-Cinema Bass Management Routing".to_string()
+        } else {
+            "Stereo Bass Routing and Physical Outputs".to_string()
+        },
         enabled: true,
         crossover_type: effective.crossover_type,
         crossover_frequency_hz: effective.crossover_frequency_hz,
         redirected_bass_enabled: effective.config.redirect_bass,
-        lfe_channel: effective.config.lfe_channel,
-        lfe_playback_gain_db: effective.config.lfe_playback_gain_db,
-        lfe_low_pass_hz: effective.config.lfe_low_pass_hz,
-        lfe_gain_applied_to_chain: effective.config.apply_lfe_gain_to_chain,
+        lfe,
         sub_trim_db: effective.config.sub_trim_db,
         max_sub_boost_db: effective.config.max_sub_boost_db,
         headroom_margin_db: effective.config.headroom_margin_db,
         applied_sub_gain_db,
         gain_limited,
-        physical_sub_output,
+        physical_sub_outputs,
         redirected_bass_channel_count,
         main_high_pass_hz: effective.crossover_frequency_hz,
         sub_low_pass_hz: effective.crossover_frequency_hz,
@@ -163,7 +167,8 @@ pub fn bass_management_routing_graph(
     // Physical sub outputs are destinations, not additional source signals.
     // Keep logical input indices fixed while extending the output namespace.
     let input_channels = channel_order.clone();
-    let sub_outputs = resolved_bass_sub_outputs(&bass_role, optimization);
+    channel_order.retain(|channel| role_for_channel(channel) != HomeCinemaRole::Lfe);
+    let sub_outputs = resolved_bass_sub_outputs(config, &bass_role, optimization);
     for output in &sub_outputs {
         if !channel_order.contains(&output.output_role) {
             channel_order.push(output.output_role.clone());
@@ -177,21 +182,26 @@ pub fn bass_management_routing_graph(
             channel_order.len() - 1
         });
 
+    let stereo_routing = stereo_bass_routing_report(config, optimization, sub_outputs.len());
     let mut routes = Vec::new();
     for (source_index, source_channel) in input_channels.iter().enumerate() {
         let role = role_for_channel(source_channel);
-        let is_lfe = role == HomeCinemaRole::Lfe || source_channel == &effective.config.lfe_channel;
+        let is_lfe = role == HomeCinemaRole::Lfe || source_channel == "LFE";
         let group_id = group_id_for_role(role);
         let crossover = resolved_group_crossover(config, group_id, &effective, optimization);
         let route_settings = resolved_source_route_settings(source_channel, group_id, optimization);
 
         if role.is_bass_managed_candidate() {
+            let self_destination_index = channel_order
+                .iter()
+                .position(|channel| channel == source_channel)
+                .expect("bass-managed main remains a physical output");
             routes.push(BassManagementRoute {
                 group_id: Some(group_id.to_string()),
                 source_channel: source_channel.clone(),
                 source_index,
                 destination: source_channel.clone(),
-                destination_index: source_index,
+                destination_index: self_destination_index,
                 pre_chain_channel: Some(source_channel.clone()),
                 post_chain_channel: Some(source_channel.clone()),
                 route_kind: "main_highpass_to_self".to_string(),
@@ -207,19 +217,29 @@ pub fn bass_management_routing_graph(
         }
 
         if effective.config.redirect_bass && role.is_bass_managed_candidate() {
-            for sub_output in &sub_outputs {
+            for (sub_index, sub_output) in sub_outputs.iter().enumerate() {
+                let matrix_coefficient = stereo_routing
+                    .as_ref()
+                    .and_then(|routing| routing.matrix.get(sub_index))
+                    .and_then(|row| row.get(source_index))
+                    .copied()
+                    .unwrap_or(1.0);
+                if matrix_coefficient <= f64::EPSILON {
+                    continue;
+                }
                 let destination_index = channel_order
                     .iter()
                     .position(|name| name == &sub_output.output_role)
                     .unwrap_or(destination_index);
-                let route_gain_db = route_settings.trim_db + sub_output.gain_db;
+                let route_gain_db =
+                    route_settings.trim_db + sub_output.gain_db + 20.0 * matrix_coefficient.log10();
                 routes.push(BassManagementRoute {
                     group_id: Some(group_id.to_string()),
                     source_channel: source_channel.clone(),
                     source_index,
                     destination: sub_output.output_role.clone(),
                     destination_index,
-                    pre_chain_channel: Some(bass_role.clone()),
+                    pre_chain_channel: Some(source_channel.clone()),
                     post_chain_channel: Some(sub_output.output_role.clone()),
                     route_kind: "redirected_bass_lowpass_to_sub".to_string(),
                     crossover_type: crossover.crossover_type.clone(),
@@ -261,7 +281,7 @@ pub fn bass_management_routing_graph(
                     source_index,
                     destination: sub_output.output_role.clone(),
                     destination_index,
-                    pre_chain_channel: Some(bass_role.clone()),
+                    pre_chain_channel: Some(source_channel.clone()),
                     post_chain_channel: Some(sub_output.output_role.clone()),
                     route_kind: "lfe_lowpass_to_sub".to_string(),
                     crossover_type: lfe_crossover.crossover_type.clone(),
@@ -281,27 +301,30 @@ pub fn bass_management_routing_graph(
     let bass_routes: Vec<&BassManagementRoute> = routes
         .iter()
         .filter(|route| {
-            route.destination == bass_role && route.destination_index == destination_index
+            matches!(
+                route.route_kind.as_str(),
+                "redirected_bass_lowpass_to_sub" | "lfe_lowpass_to_sub"
+            )
         })
         .collect();
-    let matrix =
-        (sub_outputs.len() == 1 && !bass_routes.is_empty()).then(|| BassManagementMatrix {
-            input_channel_map: bass_routes.iter().map(|route| route.source_index).collect(),
-            output_channel_map: vec![destination_index],
-            matrix: bass_routes
-                .iter()
-                .map(|route| route.matrix_gain as f32)
-                .collect(),
-            route_count: bass_routes.len(),
-        });
+    let matrix = (!bass_routes.is_empty()).then(|| BassManagementMatrix {
+        input_channel_map: bass_routes.iter().map(|route| route.source_index).collect(),
+        output_channel_map: bass_routes
+            .iter()
+            .map(|route| route.destination_index)
+            .collect(),
+        matrix: bass_routes
+            .iter()
+            .map(|route| route.matrix_gain as f32)
+            .collect(),
+        route_count: bass_routes.len(),
+    });
 
     let mut advisories = Vec::new();
     if effective.config.apply_lfe_gain_to_chain {
         advisories.push("legacy_lfe_gain_applied_to_shared_sub_chain".to_string());
     }
-    if effective.config.redirect_bass && matrix.is_none() && sub_outputs.len() > 1 {
-        advisories.push("branch_routing_required_for_multiple_sub_outputs".to_string());
-    } else if effective.config.redirect_bass && matrix.is_none() {
+    if effective.config.redirect_bass && matrix.is_none() {
         advisories.push("redirect_bass_enabled_but_no_matrix_routes".to_string());
     }
     if advisories.is_empty() {
@@ -310,13 +333,122 @@ pub fn bass_management_routing_graph(
 
     Some(BassManagementRoutingGraph {
         physical_sub_output: bass_role,
+        physical_sub_outputs: sub_outputs
+            .iter()
+            .map(|output| output.output_role.clone())
+            .collect(),
         input_channels,
         output_channels: channel_order,
         routes,
         matrix,
         input_trim_db: HashMap::new(),
+        stereo_routing,
         advisories,
     })
+}
+
+fn stereo_bass_routing_report(
+    config: &RoomConfig,
+    optimization: Option<&BassManagementOptimizationReport>,
+    output_count: usize,
+) -> Option<StereoBassRoutingReport> {
+    if !matches!(
+        config.system.as_ref().map(|system| &system.model),
+        Some(roomeq_model::SystemModel::Stereo)
+    ) {
+        return None;
+    }
+
+    if let Some(report) = optimization.and_then(|report| report.stereo_routing.as_ref()) {
+        return Some(report.clone());
+    }
+
+    let objective = optimization.and_then(|report| report.objective_after);
+    let headroom_margin_db = config
+        .system
+        .as_ref()
+        .and_then(|system| system.bass_management.as_ref())
+        .map(|policy| policy.headroom_margin_db)
+        .unwrap_or(6.0);
+    if output_count <= 1 {
+        let matrix = vec![vec![0.5, 0.5]];
+        return Some(StereoBassRoutingReport {
+            selected_topology: StereoBassTopology::DualMono,
+            matrix: matrix.clone(),
+            candidates: vec![StereoBassRoutingCandidateReport {
+                topology: StereoBassTopology::DualMono,
+                objective,
+                rejection_reason: None,
+                headroom_margin_db,
+                matrix,
+            }],
+            selection_basis:
+                "only_valid_2.1_topology_with_correlated_peak_safe_0.5L_plus_0.5R_fold".to_string(),
+        });
+    }
+
+    let matrices = [
+        (
+            StereoBassTopology::DirectPair,
+            vec![vec![1.0, 0.0], vec![0.0, 1.0]],
+        ),
+        (
+            StereoBassTopology::CrossedPair,
+            vec![vec![0.0, 1.0], vec![1.0, 0.0]],
+        ),
+        (
+            StereoBassTopology::DualMono,
+            vec![vec![0.5, 0.5], vec![0.5, 0.5]],
+        ),
+    ];
+    let candidates = matrices
+        .iter()
+        .map(|(topology, matrix)| StereoBassRoutingCandidateReport {
+            topology: *topology,
+            objective,
+            rejection_reason: None,
+            headroom_margin_db,
+            matrix: matrix.clone(),
+        })
+        .collect::<Vec<_>>();
+    let selected = select_stereo_bass_candidate(&candidates)
+        .expect("the built-in stereo routing set is never empty");
+    Some(StereoBassRoutingReport {
+        selected_topology: selected.topology,
+        matrix: selected.matrix.clone(),
+        candidates,
+        selection_basis:
+            "lowest_valid_robust_objective_then_headroom_margin_then_direct_crossed_dual_mono"
+                .to_string(),
+    })
+}
+
+/// Select a valid stereo routing candidate with deterministic near-tie rules.
+pub fn select_stereo_bass_candidate(
+    candidates: &[StereoBassRoutingCandidateReport],
+) -> Option<&StereoBassRoutingCandidateReport> {
+    fn order(topology: StereoBassTopology) -> u8 {
+        match topology {
+            StereoBassTopology::DirectPair => 0,
+            StereoBassTopology::CrossedPair => 1,
+            StereoBassTopology::DualMono => 2,
+        }
+    }
+    const NEAR_TIE: f64 = 1.0e-6;
+    candidates
+        .iter()
+        .filter(|candidate| candidate.rejection_reason.is_none())
+        .min_by(|left, right| {
+            let left_objective = left.objective.unwrap_or(f64::INFINITY);
+            let right_objective = right.objective.unwrap_or(f64::INFINITY);
+            if (left_objective - right_objective).abs() > NEAR_TIE {
+                return left_objective.total_cmp(&right_objective);
+            }
+            right
+                .headroom_margin_db
+                .total_cmp(&left.headroom_margin_db)
+                .then_with(|| order(left.topology).cmp(&order(right.topology)))
+        })
 }
 
 pub fn bass_management_matrix_metadata(graph: &BassManagementRoutingGraph) -> serde_json::Value {
@@ -636,8 +768,7 @@ fn bass_management_signal_flow(
         .into_iter()
         .map(|source_channel| {
             let role = role_for_channel(&source_channel);
-            let is_lfe =
-                role == HomeCinemaRole::Lfe || source_channel == effective.config.lfe_channel;
+            let is_lfe = role == HomeCinemaRole::Lfe || source_channel == "LFE";
             let redirects_bass = effective.config.redirect_bass && role.is_bass_managed_candidate();
             let crossover =
                 resolved_group_crossover(config, group_id_for_role(role), effective, optimization);
@@ -713,7 +844,8 @@ mod tests {
                 subwoofers: Some(SubwooferSystemConfig {
                     config: SubwooferStrategy::Single,
                     crossover: Some("bass_xover".to_string().into()),
-                    mapping: HashMap::new(),
+                    routing: Default::default(),
+                    outputs: Vec::new(),
                 }),
                 bass_management: Some(BassManagementConfig::default()),
                 ..SystemConfig::default()
@@ -958,7 +1090,7 @@ mod tests {
         assert_ne!(lfe_route.low_pass_hz, redirected_route.low_pass_hz);
 
         let report = bass_management_report(&config, None, false).unwrap();
-        assert_eq!(report.lfe_low_pass_hz, 120.0);
+        assert_eq!(report.lfe.unwrap().low_pass_hz, 120.0);
         assert_eq!(
             report
                 .signal_flow
@@ -986,5 +1118,130 @@ mod tests {
 
         assert!((before.coherent_peak_gain_db - after.coherent_peak_gain_db - 6.0).abs() < 1e-9);
         assert!((before.rms_bus_gain_db - after.rms_bus_gain_db - 6.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn stereo_21_uses_headroom_safe_mono_fold_without_lfe_input() {
+        let mut config = RoomConfig {
+            system: Some(SystemConfig {
+                model: SystemModel::Stereo,
+                speakers: HashMap::from([
+                    ("L".to_string(), "left".to_string()),
+                    ("R".to_string(), "right".to_string()),
+                ]),
+                subwoofers: Some(SubwooferSystemConfig {
+                    config: SubwooferStrategy::Single,
+                    routing: Default::default(),
+                    outputs: vec![roomeq_model::SubwooferOutput {
+                        id: "Sub1".to_string(),
+                        speaker: "sub".to_string(),
+                    }],
+                    crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec![
+                        "bass_xover".to_string(),
+                    ])),
+                }),
+                bass_management: Some(BassManagementConfig::default()),
+                ..SystemConfig::default()
+            }),
+            crossovers: Some(HashMap::from([(
+                "bass_xover".to_string(),
+                CrossoverConfig {
+                    crossover_type: "LR24".to_string(),
+                    frequency: Some(80.0),
+                    frequencies: None,
+                    frequency_range: None,
+                },
+            )])),
+            ..RoomConfig::default()
+        };
+        config.version = "3.0.0".to_string();
+
+        let graph = bass_management_routing_graph(&config, None).unwrap();
+        assert_eq!(graph.input_channels, ["L", "R"]);
+        assert!(!graph.input_channels.iter().any(|channel| channel == "LFE"));
+        let bass_routes = graph
+            .routes
+            .iter()
+            .filter(|route| route.route_kind == "redirected_bass_lowpass_to_sub")
+            .collect::<Vec<_>>();
+        assert_eq!(bass_routes.len(), 2);
+        assert!(
+            bass_routes
+                .iter()
+                .all(|route| (route.matrix_gain - 0.5).abs() < 1e-12)
+        );
+        let stereo = graph.stereo_routing.unwrap();
+        assert_eq!(stereo.selected_topology, StereoBassTopology::DualMono);
+        assert_eq!(stereo.matrix, vec![vec![0.5, 0.5]]);
+    }
+
+    #[test]
+    fn stereo_candidate_selection_uses_headroom_then_stable_topology_order() {
+        let candidate = |topology, headroom_margin_db| StereoBassRoutingCandidateReport {
+            topology,
+            objective: Some(1.0),
+            rejection_reason: None,
+            headroom_margin_db,
+            matrix: Vec::new(),
+        };
+        let candidates = vec![
+            candidate(StereoBassTopology::DualMono, 5.0),
+            candidate(StereoBassTopology::CrossedPair, 6.0),
+            candidate(StereoBassTopology::DirectPair, 6.0),
+        ];
+        assert_eq!(
+            select_stereo_bass_candidate(&candidates).unwrap().topology,
+            StereoBassTopology::DirectPair
+        );
+    }
+
+    #[test]
+    fn stereo_candidate_selection_accepts_each_objective_winner_and_skips_rejections() {
+        let topologies = [
+            StereoBassTopology::DirectPair,
+            StereoBassTopology::CrossedPair,
+            StereoBassTopology::DualMono,
+        ];
+        for winner in topologies {
+            let candidates = topologies
+                .into_iter()
+                .map(|topology| StereoBassRoutingCandidateReport {
+                    topology,
+                    objective: Some(if topology == winner { 1.0 } else { 2.0 }),
+                    rejection_reason: (topology == winner
+                        && topology == StereoBassTopology::CrossedPair)
+                        .then(|| "synthetic_serialized_replay_rejection".to_string()),
+                    headroom_margin_db: 6.0,
+                    matrix: Vec::new(),
+                })
+                .collect::<Vec<_>>();
+            let selected = select_stereo_bass_candidate(&candidates).unwrap();
+            if winner == StereoBassTopology::CrossedPair {
+                assert_eq!(selected.topology, StereoBassTopology::DirectPair);
+            } else {
+                assert_eq!(selected.topology, winner);
+            }
+        }
+
+        let crossed_wins = topologies
+            .into_iter()
+            .map(|topology| StereoBassRoutingCandidateReport {
+                topology,
+                objective: Some(if topology == StereoBassTopology::CrossedPair {
+                    1.0
+                } else {
+                    2.0
+                }),
+                rejection_reason: None,
+                headroom_margin_db: 6.0,
+                matrix: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            select_stereo_bass_candidate(&crossed_wins)
+                .unwrap()
+                .topology,
+            StereoBassTopology::CrossedPair
+        );
     }
 }

@@ -278,8 +278,20 @@ fn select_topology_route(
             )
         )
     });
+    let has_unsupported_physical_sub = sys.subwoofers.as_ref().is_some_and(|subwoofers| {
+        subwoofers.outputs.iter().any(|output| {
+            matches!(
+                config.speakers.get(&output.speaker),
+                Some(
+                    SpeakerConfig::Group(_)
+                        | SpeakerConfig::Topology(_)
+                        | SpeakerConfig::SupportingSource(_)
+                )
+            )
+        })
+    });
 
-    if has_group {
+    if has_group || has_unsupported_physical_sub {
         return Ok(TopologyRoute::Generic);
     }
 

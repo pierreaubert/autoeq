@@ -382,6 +382,8 @@ fn electrical_qa_expands_canonical_global_bass_routes_once() {
     }
     let routing = roomeq_model::BassManagementRoutingGraph {
         physical_sub_output: "sub".into(),
+        physical_sub_outputs: Vec::new(),
+        stereo_routing: None,
         input_channels: vec!["L".into(), "R".into()],
         output_channels: vec!["sub".into()],
         routes: ["L", "R"]
@@ -416,20 +418,23 @@ fn electrical_qa_expands_canonical_global_bass_routes_once() {
         advisories: Vec::new(),
     };
     result.metadata.bass_management = Some(roomeq_model::BassManagementReport {
+        routing_title: "Home-Cinema Bass Management Routing".to_string(),
         enabled: true,
         crossover_type: "LR24".into(),
         crossover_frequency_hz: None,
         redirected_bass_enabled: true,
-        lfe_channel: "LFE".into(),
-        lfe_playback_gain_db: 0.0,
-        lfe_low_pass_hz: 120.0,
-        lfe_gain_applied_to_chain: false,
+        lfe: Some(roomeq_model::LfeBassManagementReport {
+            input_channel: "LFE".into(),
+            playback_gain_db: 0.0,
+            low_pass_hz: 120.0,
+            gain_applied_to_chain: false,
+        }),
         sub_trim_db: 0.0,
         max_sub_boost_db: 12.0,
         headroom_margin_db: 0.0,
         applied_sub_gain_db: None,
         gain_limited: false,
-        physical_sub_output: "sub".into(),
+        physical_sub_outputs: vec!["sub".into()],
         redirected_bass_channel_count: 2,
         main_high_pass_hz: None,
         sub_low_pass_hz: None,

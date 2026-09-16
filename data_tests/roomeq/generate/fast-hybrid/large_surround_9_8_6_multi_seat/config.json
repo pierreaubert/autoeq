@@ -1,10 +1,9 @@
 {
-  "version": "1.2.0",
+  "version": "3.0.0",
   "system": {
     "model": "home_cinema",
     "speakers": {
       "SL": "surround_left",
-      "LFE": "lfe",
       "WR": "wide_right",
       "L": "left",
       "TMR": "top_middle_right",
@@ -21,9 +20,52 @@
       "TFL": "top_front_left"
     },
     "subwoofers": {
-      "config": "mso",
-      "crossover": "first",
-      "lfe": "L"
+      "strategy": "mso",
+      "routing": "optimize",
+      "outputs": [
+        {
+          "id": "Sub1",
+          "speaker": "lfe_1"
+        },
+        {
+          "id": "Sub2",
+          "speaker": "lfe_2"
+        },
+        {
+          "id": "Sub3",
+          "speaker": "lfe_3"
+        },
+        {
+          "id": "Sub4",
+          "speaker": "lfe_4"
+        },
+        {
+          "id": "Sub5",
+          "speaker": "lfe_5"
+        },
+        {
+          "id": "Sub6",
+          "speaker": "lfe_6"
+        },
+        {
+          "id": "Sub7",
+          "speaker": "lfe_7"
+        },
+        {
+          "id": "Sub8",
+          "speaker": "lfe_8"
+        }
+      ],
+      "crossover": [
+        "first",
+        "first",
+        "first",
+        "first",
+        "first",
+        "first",
+        "first",
+        "first"
+      ]
     }
   },
   "speakers": {
@@ -126,84 +168,6 @@
         "top_front_left_lp4.csv"
       ]
     },
-    "lfe": {
-      "name": "subs",
-      "subwoofers": [
-        {
-          "measurements": [
-            "sub1_lp0.csv",
-            "sub1_lp1.csv",
-            "sub1_lp2.csv",
-            "sub1_lp3.csv",
-            "sub1_lp4.csv"
-          ]
-        },
-        {
-          "measurements": [
-            "sub2_lp0.csv",
-            "sub2_lp1.csv",
-            "sub2_lp2.csv",
-            "sub2_lp3.csv",
-            "sub2_lp4.csv"
-          ]
-        },
-        {
-          "measurements": [
-            "sub3_lp0.csv",
-            "sub3_lp1.csv",
-            "sub3_lp2.csv",
-            "sub3_lp3.csv",
-            "sub3_lp4.csv"
-          ]
-        },
-        {
-          "measurements": [
-            "sub4_lp0.csv",
-            "sub4_lp1.csv",
-            "sub4_lp2.csv",
-            "sub4_lp3.csv",
-            "sub4_lp4.csv"
-          ]
-        },
-        {
-          "measurements": [
-            "sub5_lp0.csv",
-            "sub5_lp1.csv",
-            "sub5_lp2.csv",
-            "sub5_lp3.csv",
-            "sub5_lp4.csv"
-          ]
-        },
-        {
-          "measurements": [
-            "sub6_lp0.csv",
-            "sub6_lp1.csv",
-            "sub6_lp2.csv",
-            "sub6_lp3.csv",
-            "sub6_lp4.csv"
-          ]
-        },
-        {
-          "measurements": [
-            "sub7_lp0.csv",
-            "sub7_lp1.csv",
-            "sub7_lp2.csv",
-            "sub7_lp3.csv",
-            "sub7_lp4.csv"
-          ]
-        },
-        {
-          "measurements": [
-            "sub8_lp0.csv",
-            "sub8_lp1.csv",
-            "sub8_lp2.csv",
-            "sub8_lp3.csv",
-            "sub8_lp4.csv"
-          ]
-        }
-      ],
-      "allpass_optimization": false
-    },
     "top_front_right": {
       "measurements": [
         "top_front_right_lp0.csv",
@@ -238,6 +202,78 @@
         "surround_back_left_lp2.csv",
         "surround_back_left_lp3.csv",
         "surround_back_left_lp4.csv"
+      ]
+    },
+    "lfe_1": {
+      "measurements": [
+        "sub1_lp0.csv",
+        "sub1_lp1.csv",
+        "sub1_lp2.csv",
+        "sub1_lp3.csv",
+        "sub1_lp4.csv"
+      ]
+    },
+    "lfe_2": {
+      "measurements": [
+        "sub2_lp0.csv",
+        "sub2_lp1.csv",
+        "sub2_lp2.csv",
+        "sub2_lp3.csv",
+        "sub2_lp4.csv"
+      ]
+    },
+    "lfe_3": {
+      "measurements": [
+        "sub3_lp0.csv",
+        "sub3_lp1.csv",
+        "sub3_lp2.csv",
+        "sub3_lp3.csv",
+        "sub3_lp4.csv"
+      ]
+    },
+    "lfe_4": {
+      "measurements": [
+        "sub4_lp0.csv",
+        "sub4_lp1.csv",
+        "sub4_lp2.csv",
+        "sub4_lp3.csv",
+        "sub4_lp4.csv"
+      ]
+    },
+    "lfe_5": {
+      "measurements": [
+        "sub5_lp0.csv",
+        "sub5_lp1.csv",
+        "sub5_lp2.csv",
+        "sub5_lp3.csv",
+        "sub5_lp4.csv"
+      ]
+    },
+    "lfe_6": {
+      "measurements": [
+        "sub6_lp0.csv",
+        "sub6_lp1.csv",
+        "sub6_lp2.csv",
+        "sub6_lp3.csv",
+        "sub6_lp4.csv"
+      ]
+    },
+    "lfe_7": {
+      "measurements": [
+        "sub7_lp0.csv",
+        "sub7_lp1.csv",
+        "sub7_lp2.csv",
+        "sub7_lp3.csv",
+        "sub7_lp4.csv"
+      ]
+    },
+    "lfe_8": {
+      "measurements": [
+        "sub8_lp0.csv",
+        "sub8_lp1.csv",
+        "sub8_lp2.csv",
+        "sub8_lp3.csv",
+        "sub8_lp4.csv"
       ]
     }
   },

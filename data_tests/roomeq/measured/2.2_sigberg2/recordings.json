@@ -1,16 +1,19 @@
 {
-  "version": "2.1.0",
+  "version": "3.0.0",
   "system": {
     "model": "stereo",
     "speakers": {
       "L": "L",
-      "R": "R",
-      "LFE": "subs"
+      "R": "R"
     },
     "subwoofers": {
-      "config": "mso",
+      "strategy": "mso",
+      "routing": "optimize",
       "crossover": ["bass_xover1", "bass_xover2"],
-      "subs": "L"
+      "outputs": [
+        { "id": "Sub1", "speaker": "sub_left" },
+        { "id": "Sub2", "speaker": "sub_right" }
+      ]
     }
   },
   "speakers": {
@@ -22,20 +25,8 @@
       "path": "right.csv",
       "name": "Right"
     },
-    "subs": {
-      "name": "Two subs",
-      "subwoofers": [
-        {
-          "path": "left_sub.csv",
-          "name": "Left Sub"
-        },
-        {
-          "path": "right_sub.csv",
-          "name": "Right Sub"
-        }
-      ],
-      "allpass_optimization": false
-    }
+    "sub_left": { "path": "left_sub.csv", "name": "Left Sub" },
+    "sub_right": { "path": "right_sub.csv", "name": "Right Sub" }
   },
   "crossovers": {
     "bass_xover1": {

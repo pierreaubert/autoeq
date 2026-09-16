@@ -1,16 +1,23 @@
 {
-  "version": "2.1.0",
+  "version": "3.0.0",
   "system": {
     "model": "stereo",
     "speakers": {
       "L": "L",
-      "R": "R",
-      "LFE": "subs"
+      "R": "R"
     },
     "subwoofers": {
-      "config": "single",
-      "crossover": "bass_xover",
-      "subs": "L"
+      "strategy": "single",
+      "routing": "optimize",
+      "outputs": [
+        {
+          "id": "Sub1",
+          "speaker": "subs"
+        }
+      ],
+      "crossover": [
+        "bass_xover"
+      ]
     }
   },
   "speakers": {
@@ -30,7 +37,10 @@
   "crossovers": {
     "bass_xover": {
       "type": "LR24",
-      "frequency_range": [40.0, 130.0]
+      "frequency_range": [
+        40.0,
+        130.0
+      ]
     }
   },
   "optimizer": {

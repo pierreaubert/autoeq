@@ -248,7 +248,7 @@ fn is_subwoofer_measurement_channel(channel_name: &str, room_config: &RoomConfig
             .and_then(|system| {
                 let subwoofers = system.subwoofers.as_ref()?;
                 let measurement_key = system.speakers.get(channel_name)?;
-                Some(subwoofers.mapping.contains_key(measurement_key))
+                Some(subwoofers.contains_measurement(measurement_key))
             })
             .unwrap_or(false)
 }

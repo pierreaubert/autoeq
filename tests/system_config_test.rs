@@ -57,7 +57,7 @@ mod tests {
         system_speakers.insert("R".to_string(), "right_meas".to_string());
 
         let config = RoomConfig {
-            version: "1.2.0".to_string(),
+            version: "3.0.0".to_string(),
             system: Some(SystemConfig {
                 model: SystemModel::Stereo,
                 speakers: system_speakers,
@@ -82,8 +82,8 @@ mod tests {
     }
 
     #[test]
-    fn test_v2_1_system_config_2_1() {
-        // Test 2.1 mapping: L/R/LFE
+    fn test_v3_system_config_2_1() {
+        // Stereo 2.1 has L/R programme inputs and one physical sub output.
         let mut speakers = HashMap::new();
         speakers.insert(
             "left_meas".to_string(),
@@ -101,10 +101,6 @@ mod tests {
         let mut system_speakers = HashMap::new();
         system_speakers.insert("L".to_string(), "left_meas".to_string());
         system_speakers.insert("R".to_string(), "right_meas".to_string());
-        system_speakers.insert("LFE".to_string(), "sub_meas".to_string());
-
-        let mut sub_mapping = HashMap::new();
-        sub_mapping.insert("sub_meas".to_string(), "L".to_string()); // Align sub to L
 
         let mut crossovers = HashMap::new();
         crossovers.insert(
@@ -118,14 +114,20 @@ mod tests {
         );
 
         let config = RoomConfig {
-            version: "1.2.0".to_string(),
+            version: "3.0.0".to_string(),
             system: Some(SystemConfig {
                 model: SystemModel::Stereo, // 2.1 is stereo base
                 speakers: system_speakers,
                 subwoofers: Some(autoeq::roomeq::SubwooferSystemConfig {
                     config: SubwooferStrategy::Single,
-                    crossover: Some("sub_xo".to_string().into()),
-                    mapping: sub_mapping,
+                    crossover: Some(autoeq::roomeq::SubwooferCrossoverRef::PerSub(vec![
+                        "sub_xo".to_string(),
+                    ])),
+                    routing: Default::default(),
+                    outputs: vec![autoeq::roomeq::SubwooferOutput {
+                        id: "Sub1".to_string(),
+                        speaker: "sub_meas".to_string(),
+                    }],
                 }),
                 bass_management: None,
                 supporting_source_outputs: None,
@@ -143,13 +145,13 @@ mod tests {
         let result = optimize_room(&config, 48000.0, None, None).expect("Optimization failed");
 
         let channel_names: HashSet<&str> = result.channels.keys().map(String::as_str).collect();
-        assert_eq!(channel_names, HashSet::from(["L", "R", "LFE"]));
+        assert_eq!(channel_names, HashSet::from(["L", "R", "Sub1"]));
     }
 
     #[test]
     fn optimize_room_rejects_invalid_sample_rates() {
         let config = RoomConfig {
-            version: "1.2.0".to_string(),
+            version: "3.0.0".to_string(),
             system: None,
             speakers: HashMap::from([(
                 "left".to_string(),

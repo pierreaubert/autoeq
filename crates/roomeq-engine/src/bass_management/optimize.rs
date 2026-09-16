@@ -2,7 +2,9 @@ use super::misc::differential_evolution_minimize;
 use super::misc::grouped_home_cinema_roles;
 use super::misc::joint_bass_management_report_from_parts;
 use super::predict::apply_source_pre_route_transfer;
-use super::sub_driver_info::sum_sub_output_responses_on_grid;
+use super::sub_driver_info::{
+    sum_sub_output_responses_on_grid, sum_weighted_sub_output_responses_on_grid,
+};
 use super::types::BassManagementJointGroupInput;
 use super::types::SubDriverInfo;
 use super::types::group_crossover_plan;
@@ -1401,6 +1403,39 @@ pub fn optimize_bass_management_joint_solution(
     sub_role: &str,
     sample_rate: f64,
 ) -> Vec<String> {
+    optimize_bass_management_joint_solution_with_matrix(
+        config,
+        main_roles,
+        aligned_measurement_curves,
+        aligned_pre_eq_curves,
+        source_pre_route_transfers,
+        target_curves,
+        group_results,
+        source_results,
+        sub_outputs,
+        drivers,
+        sub_role,
+        sample_rate,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn optimize_bass_management_joint_solution_with_matrix(
+    config: &RoomConfig,
+    main_roles: &[String],
+    aligned_measurement_curves: &HashMap<String, Curve>,
+    aligned_pre_eq_curves: &HashMap<String, Curve>,
+    source_pre_route_transfers: Option<&HashMap<String, Curve>>,
+    target_curves: Option<&HashMap<String, Curve>>,
+    group_results: &mut BTreeMap<String, home_cinema::BassManagementGroupReport>,
+    source_results: &mut Vec<home_cinema::BassManagementSourceReport>,
+    sub_outputs: &mut [home_cinema::BassManagementSubOutputReport],
+    drivers: Option<&[SubDriverInfo]>,
+    sub_role: &str,
+    sample_rate: f64,
+    routing_matrix: Option<&[Vec<f64>]>,
+) -> Vec<String> {
     let driver_responses_need_common_correction = drivers.is_some();
     let driver_inputs = if let Some(drivers) = drivers {
         drivers.to_vec()
@@ -1491,8 +1526,30 @@ pub fn optimize_bass_management_joint_solution(
 
         let mut sub_curves = Vec::with_capacity(sources.len());
         for (source_channel, source_curve) in &sources {
+            let routed_sub_curve = routing_matrix.and_then(|matrix| {
+                let source_index = main_roles.iter().position(|role| role == source_channel)?;
+                if matrix.len() != driver_inputs.len() {
+                    return None;
+                }
+                let weights = matrix
+                    .iter()
+                    .map(|row| row.get(source_index).copied())
+                    .collect::<Option<Vec<_>>>()?;
+                sum_weighted_sub_output_responses_on_grid(
+                    &source_curve.freq,
+                    &driver_inputs,
+                    sub_outputs,
+                    &weights,
+                )
+            });
             let Some(mut sub_curve) =
-                sum_sub_output_responses_on_grid(&source_curve.freq, &driver_inputs, sub_outputs)
+                routing_matrix.map(|_| routed_sub_curve).unwrap_or_else(|| {
+                    sum_sub_output_responses_on_grid(
+                        &source_curve.freq,
+                        &driver_inputs,
+                        sub_outputs,
+                    )
+                })
             else {
                 overall_advisories.push(format!(
                     "source_route_optimizer_skipped_sub_grid:{group_id}"
@@ -2054,7 +2111,8 @@ mod tests {
                 subwoofers: Some(SubwooferSystemConfig {
                     config: SubwooferStrategy::Single,
                     crossover: Some("bass_xover".to_string().into()),
-                    mapping: HashMap::new(),
+                    routing: Default::default(),
+                    outputs: Vec::new(),
                 }),
                 bass_management: Some(BassManagementConfig::default()),
                 ..SystemConfig::default()
@@ -2639,7 +2697,8 @@ mod tests {
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::default(),
                 crossover: Some("bass".to_string().into()),
-                mapping: HashMap::new(),
+                routing: Default::default(),
+                outputs: Vec::new(),
             }),
             ..SystemConfig::default()
         });
@@ -2866,7 +2925,8 @@ mod tests {
                 subwoofers: Some(SubwooferSystemConfig {
                     config: SubwooferStrategy::Mso,
                     crossover: Some(crossover),
-                    mapping: HashMap::new(),
+                    routing: Default::default(),
+                    outputs: Vec::new(),
                 }),
                 bass_management: Some(BassManagementConfig::default()),
                 ..SystemConfig::default()

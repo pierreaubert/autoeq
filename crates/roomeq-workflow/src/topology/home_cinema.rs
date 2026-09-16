@@ -28,9 +28,11 @@ use roomeq_engine::{
     output, response,
 };
 use roomeq_model::{
-    BassManagementRoutingGraph, ChannelDspChain, CurveData, DriverDspChain, MeasurementSource,
-    OptimizationMetadata, PluginConfigWrapper, RoomConfig, SpeakerConfig, StageOutcome,
-    StageStatus, SystemConfig,
+    BassManagementMatrix, BassManagementRoute, BassManagementRoutingGraph,
+    BassManagementSourceReport, BassManagementSubOutputReport, ChannelDspChain, CurveData,
+    DriverDspChain, MeasurementSource, MultiSubGroup, OptimizationMetadata, PluginConfigWrapper,
+    RoomConfig, SpeakerConfig, StageOutcome, StageStatus, StereoBassRoutingCandidateReport,
+    StereoBassRoutingReport, StereoBassTopology, SystemConfig, SystemModel,
 };
 use std::collections::HashMap;
 
@@ -393,11 +395,23 @@ fn source_pre_route_transfers(
     source_roles
         .into_iter()
         .map(|role| {
-            let chain = channels
-                .get(&role)
-                .ok_or_else(|| AutoeqError::InvalidConfiguration {
+            let Some(chain) = channels.get(&role) else {
+                if engine_home_cinema::role_for_channel(&role) == roomeq_model::HomeCinemaRole::Lfe
+                {
+                    let transfer = realize_source_pre_route_transfer(
+                        &role,
+                        std::iter::empty(),
+                        reference,
+                        sample_rate,
+                        sidecar_dir,
+                        &HashMap::new(),
+                    )?;
+                    return Ok((role, transfer));
+                }
+                return Err(AutoeqError::InvalidConfiguration {
                     message: format!("missing source chain '{role}' for pre-route realization"),
-                })?;
+                });
+            };
             let embedded_irs = embedded_convolution_irs(
                 &chain.plugins,
                 fir_coeffs_by_channel.get(&role).map(Vec::as_slice),
@@ -653,6 +667,92 @@ fn reconstruct_deployed_source_curves_impl(
             common_sub_curve.clone()
         })
     };
+    let realize_sub_outputs_on_grid =
+        |frequencies: &ndarray::Array1<f64>| -> Result<(HashMap<String, Curve>, Curve)> {
+            let single_output_fallback = (graph.physical_sub_outputs.len() <= 1)
+                .then(|| realize_sub_on_grid(frequencies))
+                .transpose()?;
+            let input =
+                roomeq_engine::topology::interpolate_bass_response(frequencies, &sub_initial);
+            let common = crate::ctc::apply_channel_dsp_chain_to_curve_with_embedded_irs(
+                &common_sub_chain,
+                &input,
+                sample_rate,
+                sidecar_dir,
+                &common_sub_embedded_irs,
+            )?;
+            let Some(drivers) = sub_driver_chains.as_ref() else {
+                return Ok((HashMap::new(), single_output_fallback.unwrap_or(common)));
+            };
+            let mut outputs = HashMap::with_capacity(drivers.len());
+            for driver in drivers {
+                let initial = driver.initial_curve.clone().ok_or_else(|| {
+                    AutoeqError::InvalidMeasurement {
+                        message: format!(
+                            "multi-sub driver '{}' has no initial curve for deployed reconstruction",
+                            driver.name
+                        ),
+                    }
+                })?;
+                let mut curve = roomeq_engine::topology::interpolate_bass_response(
+                    &common.freq,
+                    &Curve::from(initial),
+                );
+                let mut filter_chain = common_sub_chain.clone();
+                filter_chain.drivers = None;
+                filter_chain.plugins = driver
+                    .plugins
+                    .iter()
+                    .filter(|plugin| {
+                        (plugin.plugin_type != "gain"
+                            || plugin
+                                .parameters
+                                .get("room_eq_correction_gain")
+                                .and_then(|value| value.as_bool())
+                                == Some(true))
+                            && plugin.plugin_type != "delay"
+                            && plugin.plugin_type != "crossover"
+                    })
+                    .cloned()
+                    .collect();
+                curve = crate::ctc::apply_channel_dsp_chain_to_curve_with_sidecar_dir(
+                    &filter_chain,
+                    &curve,
+                    sample_rate,
+                    sidecar_dir,
+                )?;
+                if let Some((frequency, crossover_type)) = output::driver_low_pass(driver) {
+                    curve = apply_crossover_response_to_curve(
+                        &curve,
+                        &crossover_type,
+                        frequency,
+                        sample_rate,
+                        true,
+                    );
+                }
+                if !curve_has_usable_phase(&curve) {
+                    return Err(AutoeqError::InvalidMeasurement {
+                        message: format!(
+                            "multi-sub driver '{}' has no usable phase for deployed reconstruction",
+                            driver.name
+                        ),
+                    });
+                }
+                // The common post-route transfer belongs to every physical
+                // output, but route gain/delay/polarity remain owned by the
+                // matrix edge and are applied by the replay function below.
+                curve.spl = &curve.spl + &common.spl - &input.spl;
+                if let (Some(phase), Some(common_phase), Some(input_phase)) = (
+                    curve.phase.as_mut(),
+                    common.phase.as_ref(),
+                    input.phase.as_ref(),
+                ) {
+                    *phase = &*phase + common_phase - input_phase;
+                }
+                outputs.insert(driver.name.clone(), curve);
+            }
+            Ok((outputs, single_output_fallback.unwrap_or(common)))
+        };
     let source_roles = graph
         .routes
         .iter()
@@ -667,59 +767,10 @@ fn reconstruct_deployed_source_curves_impl(
     source_roles
         .into_iter()
         .map(|role| {
-            let redirected_route_count = graph
-                .routes
-                .iter()
-                .filter(|route| {
-                    route.source_channel == role
-                        && route.route_kind == "redirected_bass_lowpass_to_sub"
-                })
-                .count();
-            let collapsed_graph;
-            let source_graph = if redirected_route_count > 1 {
-                let source = optimization
-                    .and_then(|report| {
-                        report
-                            .source_results
-                            .iter()
-                            .find(|source| source.source_channel == role)
-                    })
-                    .ok_or_else(|| AutoeqError::InvalidConfiguration {
-                        message: format!(
-                            "missing accepted source-route metadata for multi-sub reconstruction '{role}'"
-                        ),
-                    })?;
-                let mut kept_redirected_route = false;
-                let mut routes = Vec::with_capacity(graph.routes.len());
-                for route in &graph.routes {
-                    if route.source_channel == role
-                        && route.route_kind == "redirected_bass_lowpass_to_sub"
-                    {
-                        if kept_redirected_route {
-                            continue;
-                        }
-                        kept_redirected_route = true;
-                        let mut route = route.clone();
-                        route.destination = graph.physical_sub_output.clone();
-                        route.gain_db = source.trim_db;
-                        route.gain_linear = 10.0_f64.powf(source.trim_db / 20.0);
-                        route.matrix_gain = route.gain_linear;
-                        route.delay_ms = source.bass_route_delay_ms;
-                        route.polarity_inverted = source.polarity_inverted;
-                        routes.push(route);
-                    } else {
-                        routes.push(route.clone());
-                    }
-                }
-                collapsed_graph = BassManagementRoutingGraph {
-                    routes,
-                    ..graph.clone()
-                };
-                &collapsed_graph
-            } else {
-                graph
-            };
-            let main_curve = if role == *lfe_role {
+            let main_curve = if role == *lfe_role
+            || engine_home_cinema::role_for_channel(&role)
+                == roomeq_model::HomeCinemaRole::Lfe
+        {
                 None
             } else {
                 let chain =
@@ -750,33 +801,29 @@ fn reconstruct_deployed_source_curves_impl(
                 )
             };
             let frequencies = main_curve.as_ref().map(|main| &main.freq).unwrap_or(&common_sub_curve.freq);
-            let routed_common_sub_curve = realize_sub_on_grid(frequencies)?;
+            let (sub_output_curves, routed_common_sub_curve) =
+                realize_sub_outputs_on_grid(frequencies)?;
             let source_transfers = source_pre_route_transfers(
                 channels, fir_coeffs_by_channel, [role.clone()], &routed_common_sub_curve,
                 sample_rate, sidecar_dir,
             )?;
-            let deployed = engine_bass_management::predict_deployed_source_curve_from_routes(
-                main_curve.as_ref(),
+            let bass = engine_bass_management::predict_bass_source_curve_from_output_routes(
+                &routed_common_sub_curve,
+                &sub_output_curves,
                 &routed_common_sub_curve,
                 source_transfers.get(&role),
-                source_graph,
+                graph,
                 &role,
                 sample_rate,
             )
             .ok_or_else(|| AutoeqError::InvalidMeasurement {
-                message: format!("could not reconstruct deployed source curve '{role}'"),
+                message: format!("could not reconstruct routed bass branch '{role}'"),
             })?;
+            let deployed = main_curve
+                .as_ref()
+                .map(|main| complex_sum_mains(&[main, &bass]))
+                .unwrap_or_else(|| bass.clone());
             if let Some(main) = main_curve.as_ref() && splice_safety.enforces(&role) {
-                let bass = engine_bass_management::predict_bass_source_curve_from_routes(
-                    &routed_common_sub_curve,
-                    source_transfers.get(&role),
-                    source_graph,
-                    &role,
-                    sample_rate,
-                )
-                .ok_or_else(|| AutoeqError::InvalidMeasurement {
-                    message: format!("could not reconstruct routed bass branch '{role}'"),
-                })?;
                 let crossover_hz = graph
                     .routes
                     .iter()
@@ -968,6 +1015,307 @@ fn calibrate_post_dsp_input_levels(
     Ok((trims, deployed_source_curves))
 }
 
+fn stereo_route_objective(sources: &[BassManagementSourceReport]) -> Option<f64> {
+    let values = sources
+        .iter()
+        .map(|source| source.objective_after.or(source.objective_before))
+        .collect::<Option<Vec<_>>>()?;
+    (!values.is_empty()).then(|| values.into_iter().sum())
+}
+
+fn stereo_route_headroom_margin_db(
+    config: &RoomConfig,
+    matrix: &[Vec<f64>],
+    outputs: &[BassManagementSubOutputReport],
+) -> f64 {
+    let configured_margin = config
+        .system
+        .as_ref()
+        .and_then(|system| system.bass_management.as_ref())
+        .map(|policy| policy.headroom_margin_db)
+        .unwrap_or(6.0);
+    let coherent_peak = matrix
+        .iter()
+        .zip(outputs)
+        .map(|(row, output)| {
+            row.iter().map(|coefficient| coefficient.abs()).sum::<f64>()
+                * 10.0_f64.powf(output.gain_db.max(0.0) / 20.0)
+        })
+        .fold(0.0_f64, f64::max);
+    let peak_gain_db = if coherent_peak > 0.0 {
+        20.0 * coherent_peak.log10()
+    } else {
+        0.0
+    };
+    configured_margin - peak_gain_db
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stereo_candidate_serialized_replay_rejection(
+    main_roles: &[String],
+    aligned_pre_eq_curves: &HashMap<String, Curve>,
+    source_pre_route_transfers: &HashMap<String, Curve>,
+    groups: &std::collections::BTreeMap<String, roomeq_model::BassManagementGroupReport>,
+    sources: &[BassManagementSourceReport],
+    outputs: &[BassManagementSubOutputReport],
+    drivers: &[engine_bass_management::SubDriverInfo],
+    matrix: &[Vec<f64>],
+    sample_rate: f64,
+) -> std::result::Result<(), String> {
+    if main_roles.len() != 2
+        || outputs.len() != 2
+        || drivers.len() != outputs.len()
+        || matrix.len() != outputs.len()
+        || matrix.iter().any(|row| row.len() != main_roles.len())
+    {
+        return Err("serialized_replay_shape_mismatch".to_string());
+    }
+
+    let representative_group = sources
+        .first()
+        .and_then(|source| groups.get(&source.group_id))
+        .ok_or_else(|| "serialized_replay_missing_group".to_string())?;
+    let mut output_curves = HashMap::with_capacity(outputs.len());
+    for (driver, output) in drivers.iter().zip(outputs) {
+        if driver.name != output.output_role {
+            return Err(format!(
+                "serialized_replay_output_identity_mismatch:{}:{}",
+                driver.name, output.output_role
+            ));
+        }
+        let mut curve = driver
+            .processing
+            .as_ref()
+            .map(|processing| processing.curve.clone())
+            .or_else(|| driver.initial_curve.clone())
+            .ok_or_else(|| {
+                format!(
+                    "serialized_replay_missing_output_measurement:{}",
+                    driver.name
+                )
+            })?;
+        if let Some(low_pass_hz) = output.selected_low_pass_hz {
+            curve = apply_crossover_response_to_curve(
+                &curve,
+                &representative_group.crossover_type,
+                low_pass_hz,
+                sample_rate,
+                true,
+            );
+        }
+        output_curves.insert(output.output_role.clone(), curve);
+    }
+
+    let mut output_channels = main_roles.to_vec();
+    output_channels.extend(outputs.iter().map(|output| output.output_role.clone()));
+    let mut routes = Vec::new();
+    let mut input_channel_map = Vec::new();
+    let mut output_channel_map = Vec::new();
+    let mut serialized_matrix = Vec::new();
+    for (source_index, role) in main_roles.iter().enumerate() {
+        let source = sources
+            .iter()
+            .find(|source| source.source_channel == *role)
+            .ok_or_else(|| format!("serialized_replay_missing_source:{role}"))?;
+        let group = groups
+            .get(&source.group_id)
+            .ok_or_else(|| format!("serialized_replay_missing_group:{}", source.group_id))?;
+        let crossover_hz = group
+            .selected_crossover_hz
+            .ok_or_else(|| format!("serialized_replay_missing_crossover:{}", group.group_id))?;
+        routes.push(BassManagementRoute {
+            group_id: Some(group.group_id.clone()),
+            source_channel: role.clone(),
+            source_index,
+            destination: role.clone(),
+            destination_index: source_index,
+            pre_chain_channel: Some(role.clone()),
+            post_chain_channel: Some(role.clone()),
+            route_kind: "main_highpass_to_self".to_string(),
+            crossover_type: group.crossover_type.clone(),
+            high_pass_hz: Some(crossover_hz),
+            low_pass_hz: None,
+            gain_db: 0.0,
+            gain_linear: 1.0,
+            matrix_gain: 1.0,
+            delay_ms: source.main_delay_ms,
+            polarity_inverted: false,
+        });
+        for (output_index, output) in outputs.iter().enumerate() {
+            let coefficient = matrix[output_index][source_index];
+            if coefficient <= f64::EPSILON {
+                continue;
+            }
+            let gain_db = source.trim_db + output.gain_db + 20.0 * coefficient.log10();
+            let gain_linear = 10.0_f64.powf(gain_db / 20.0);
+            let destination_index = main_roles.len() + output_index;
+            routes.push(BassManagementRoute {
+                group_id: Some(group.group_id.clone()),
+                source_channel: role.clone(),
+                source_index,
+                destination: output.output_role.clone(),
+                destination_index,
+                pre_chain_channel: Some(role.clone()),
+                post_chain_channel: Some(output.output_role.clone()),
+                route_kind: "redirected_bass_lowpass_to_sub".to_string(),
+                crossover_type: group.crossover_type.clone(),
+                high_pass_hz: None,
+                low_pass_hz: output
+                    .selected_low_pass_hz
+                    .is_none()
+                    .then_some(crossover_hz),
+                gain_db,
+                gain_linear,
+                matrix_gain: gain_linear,
+                delay_ms: source.bass_route_delay_ms + output.delay_ms,
+                polarity_inverted: source.polarity_inverted ^ output.polarity_inverted,
+            });
+            input_channel_map.push(source_index);
+            output_channel_map.push(destination_index);
+            serialized_matrix.push(gain_linear as f32);
+        }
+    }
+    let graph = BassManagementRoutingGraph {
+        physical_sub_output: outputs[0].output_role.clone(),
+        physical_sub_outputs: outputs
+            .iter()
+            .map(|output| output.output_role.clone())
+            .collect(),
+        input_channels: main_roles.to_vec(),
+        output_channels,
+        routes,
+        matrix: Some(BassManagementMatrix {
+            input_channel_map,
+            output_channel_map,
+            matrix: serialized_matrix,
+            route_count: outputs
+                .iter()
+                .enumerate()
+                .map(|(output_index, _)| {
+                    (0..main_roles.len())
+                        .filter(|source_index| matrix[output_index][*source_index] > f64::EPSILON)
+                        .count()
+                })
+                .sum(),
+        }),
+        input_trim_db: HashMap::new(),
+        stereo_routing: None,
+        advisories: Vec::new(),
+    };
+    let serialized = serde_json::to_vec(&graph)
+        .map_err(|error| format!("serialized_replay_encode_failed:{error}"))?;
+    let graph: BassManagementRoutingGraph = serde_json::from_slice(&serialized)
+        .map_err(|error| format!("serialized_replay_decode_failed:{error}"))?;
+    let fallback = output_curves
+        .get(&outputs[0].output_role)
+        .ok_or_else(|| "serialized_replay_missing_fallback_output".to_string())?;
+
+    for role in main_roles {
+        let source = sources
+            .iter()
+            .find(|source| source.source_channel == *role)
+            .ok_or_else(|| format!("serialized_replay_missing_source:{role}"))?;
+        let group = groups
+            .get(&source.group_id)
+            .ok_or_else(|| format!("serialized_replay_missing_group:{}", source.group_id))?;
+        let crossover_hz = group
+            .selected_crossover_hz
+            .ok_or_else(|| format!("serialized_replay_missing_crossover:{}", group.group_id))?;
+        let main = aligned_pre_eq_curves
+            .get(role)
+            .ok_or_else(|| format!("serialized_replay_missing_main:{role}"))?;
+        let main_branch = apply_delay_and_polarity_to_curve(
+            &apply_crossover_response_to_curve(
+                main,
+                &group.crossover_type,
+                crossover_hz,
+                sample_rate,
+                false,
+            ),
+            source.main_delay_ms,
+            false,
+        );
+        let bass_branch = engine_bass_management::predict_bass_source_curve_from_output_routes(
+            &main_branch,
+            &output_curves,
+            fallback,
+            source_pre_route_transfers.get(role),
+            &graph,
+            role,
+            sample_rate,
+        )
+        .ok_or_else(|| format!("serialized_replay_failed_bass_branch:{role}"))?;
+        let combined = complex_sum_mains(&[&main_branch, &bass_branch]);
+        let underfill =
+            roomeq_engine::topology::bass_management_crossover_cancellation_underfill_db(
+                &main_branch,
+                &bass_branch,
+                &combined,
+                crossover_hz,
+            )
+            .ok_or_else(|| format!("serialized_replay_failed_splice_metric:{role}"))?;
+        if !roomeq_engine::topology::bass_management_underfill_is_acceptable(underfill) {
+            return Err(format!(
+                "serialized_graph_acoustic_splice_underfill:{role}:{underfill:.3}db"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn physical_sub_speaker_config(
+    config: &RoomConfig,
+    sys: &SystemConfig,
+) -> Result<Option<SpeakerConfig>> {
+    let Some(subwoofers) = sys.subwoofers.as_ref() else {
+        return Ok(None);
+    };
+    if subwoofers.outputs.is_empty() {
+        return Ok(None);
+    }
+
+    let mut configs = subwoofers
+        .outputs
+        .iter()
+        .map(|output| {
+            config
+                .speakers
+                .get(&output.speaker)
+                .cloned()
+                .ok_or_else(|| AutoeqError::InvalidConfiguration {
+                    message: format!(
+                        "Physical sub output '{}' references missing speaker config '{}'",
+                        output.id, output.speaker
+                    ),
+                })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    if configs.len() == 1 {
+        return Ok(configs.pop());
+    }
+
+    let mut measurements = Vec::with_capacity(configs.len());
+    for (output, speaker) in subwoofers.outputs.iter().zip(configs) {
+        let SpeakerConfig::Single(source) = speaker else {
+            return Err(AutoeqError::InvalidConfiguration {
+                message: format!(
+                    "Physical sub output '{}' must reference a single measurement when multiple outputs are configured",
+                    output.id
+                ),
+            });
+        };
+        measurements.push(source);
+    }
+
+    Ok(Some(SpeakerConfig::MultiSub(MultiSubGroup {
+        name: "physical_sub_outputs".to_string(),
+        speaker_name: None,
+        subwoofers: measurements,
+        allpass_optimization: false,
+    })))
+}
+
 impl WorkflowExecutor for HomeCinemaExecutor {
     fn execute<'cfg, 'p, 's>(
         &self,
@@ -979,7 +1327,8 @@ impl WorkflowExecutor for HomeCinemaExecutor {
         let output_dir = assembly.output_dir;
 
         let sub_role = engine_home_cinema::bass_output_role(config, sys);
-        let has_sub = sys.speakers.contains_key(&sub_role);
+        let physical_sub_config = physical_sub_speaker_config(config, sys)?;
+        let has_sub = physical_sub_config.is_some();
 
         // Classify channels into main and sub
         let main_roles = canonical_main_roles(sys, &sub_role);
@@ -1065,26 +1414,20 @@ impl WorkflowExecutor for HomeCinemaExecutor {
                         sub_role
                     ),
                 })?;
-            let lfe_meas_key =
-                sys.speakers
-                    .get(&sub_role)
-                    .ok_or(AutoeqError::InvalidConfiguration {
-                        message: format!("Missing speaker mapping for '{}'", sub_role),
-                    })?;
-            let lfe_speaker_config =
-                config
-                    .speakers
-                    .get(lfe_meas_key)
-                    .ok_or(AutoeqError::InvalidConfiguration {
-                        message: format!("Missing speaker config for key '{}'", lfe_meas_key),
-                    })?;
-            let sp = preprocess_sub_with_frequency_samples(
-                lfe_speaker_config,
+            let mut sp = preprocess_sub_with_frequency_samples(
+                physical_sub_config
+                    .as_ref()
+                    .expect("has_sub proves physical sub configuration exists"),
                 &sub_sys.config,
                 &config.optimizer,
                 sample_rate,
                 assembly.frequency_samples,
             )?;
+            if let Some(drivers) = sp.drivers.as_mut() {
+                for (driver, output) in drivers.iter_mut().zip(&sub_sys.outputs) {
+                    driver.name = output.id.clone();
+                }
+            }
             curves.insert(sub_role.clone(), sp.combined_curve.clone());
             Some(sp)
         } else {
@@ -2254,7 +2597,125 @@ fn optimize_home_cinema_with_sub(
             })
             .collect::<HashMap<_, _>>()
     });
-    let sub_output_advisories = if optimize_source_routes {
+    let mut stereo_routing = None;
+    let is_stereo_pair = matches!(sys.model, SystemModel::Stereo)
+        && main_roles == ["L", "R"]
+        && sub_output_results.len() == 2
+        && sub_preprocess
+            .drivers
+            .as_ref()
+            .is_some_and(|drivers| drivers.len() == 2);
+    let sub_output_advisories = if optimize_source_routes && is_stereo_pair {
+        let candidate_specs = [
+            (
+                StereoBassTopology::DirectPair,
+                vec![vec![1.0, 0.0], vec![0.0, 1.0]],
+            ),
+            (
+                StereoBassTopology::CrossedPair,
+                vec![vec![0.0, 1.0], vec![1.0, 0.0]],
+            ),
+            (
+                StereoBassTopology::DualMono,
+                vec![vec![0.5, 0.5], vec![0.5, 0.5]],
+            ),
+        ];
+        let mut candidate_runs = Vec::with_capacity(candidate_specs.len());
+        for (topology, matrix) in candidate_specs {
+            let mut candidate_groups = group_results_by_id.clone();
+            let mut candidate_sources = source_results.clone();
+            let mut candidate_outputs = sub_output_results.clone();
+            let advisories = optimize_bass_management_joint_solution_with_matrix(
+                config,
+                main_roles,
+                &aligned_curves,
+                &aligned_pre_eq_curves,
+                Some(&optimizer_source_pre_route_transfers),
+                bass_management_target_curves.as_ref(),
+                &mut candidate_groups,
+                &mut candidate_sources,
+                &mut candidate_outputs,
+                sub_preprocess.drivers.as_deref(),
+                &sub_role,
+                sample_rate,
+                Some(&matrix),
+            );
+            let objective = stereo_route_objective(&candidate_sources);
+            let headroom_margin_db =
+                stereo_route_headroom_margin_db(config, &matrix, &candidate_outputs);
+            let replay_rejection = sub_preprocess.drivers.as_deref().map_or_else(
+                || Some("serialized_replay_missing_physical_outputs".to_string()),
+                |drivers| {
+                    stereo_candidate_serialized_replay_rejection(
+                        main_roles,
+                        &aligned_pre_eq_curves,
+                        &optimizer_source_pre_route_transfers,
+                        &candidate_groups,
+                        &candidate_sources,
+                        &candidate_outputs,
+                        drivers,
+                        &matrix,
+                        sample_rate,
+                    )
+                    .err()
+                },
+            );
+            let rejection_reason = if objective.is_none_or(|value| !value.is_finite()) {
+                Some("candidate_objective_unavailable_after_serialized_route_replay".to_string())
+            } else if headroom_margin_db < 0.0 {
+                Some(format!(
+                    "electrical_headroom_margin_exceeded:{headroom_margin_db:.3}db"
+                ))
+            } else if replay_rejection.is_some() {
+                replay_rejection
+            } else {
+                None
+            };
+            let report = StereoBassRoutingCandidateReport {
+                topology,
+                objective,
+                rejection_reason,
+                headroom_margin_db,
+                matrix,
+            };
+            candidate_runs.push((
+                report,
+                candidate_groups,
+                candidate_sources,
+                candidate_outputs,
+                advisories,
+            ));
+        }
+
+        let reports = candidate_runs
+            .iter()
+            .map(|(report, ..)| report.clone())
+            .collect::<Vec<_>>();
+        let selected = engine_home_cinema::select_stereo_bass_candidate(&reports)
+            .cloned()
+            .ok_or_else(|| AutoeqError::OptimizationFailed {
+                message: "all stereo bass routing candidates failed acoustic or electrical safety"
+                    .to_string(),
+            })?;
+        let selected_index = candidate_runs
+            .iter()
+            .position(|(report, ..)| report.topology == selected.topology)
+            .expect("selected stereo routing candidate belongs to evaluated set");
+        let (_, selected_groups, selected_sources, selected_outputs, advisories) =
+            candidate_runs.swap_remove(selected_index);
+        group_results_by_id = selected_groups;
+        source_results = selected_sources;
+        sub_output_results = selected_outputs;
+        stereo_routing = Some(StereoBassRoutingReport {
+            selected_topology: selected.topology,
+            matrix: selected.matrix.clone(),
+            candidates: reports,
+            selection_basis:
+                "serialized_graph_splice_and_headroom_pass_then_lowest_robust_objective_then_headroom_margin_then_direct_crossed_dual_mono"
+                    .to_string(),
+        });
+        advisories
+    } else if optimize_source_routes {
         optimize_bass_management_joint_solution(
             config,
             main_roles,
@@ -2406,6 +2867,7 @@ fn optimize_home_cinema_with_sub(
         group_results: group_results_by_id.values().cloned().collect(),
         source_results,
         sub_output_results,
+        stereo_routing,
         advisories: optimization_advisories,
     };
     let mut bass_routing_graph = engine_home_cinema::bass_management_routing_graph(
@@ -3699,6 +4161,9 @@ mod post_dsp_level_tests {
             let mut route = low_route("L", 0);
             route.destination = name;
             route.destination_index = index + 2;
+            route.gain_db = 6.0;
+            route.gain_linear = 10.0_f64.powf(6.0 / 20.0);
+            route.matrix_gain = route.gain_linear;
             route.delay_ms = delay;
             routes.push(route);
         }
@@ -3719,6 +4184,8 @@ mod post_dsp_level_tests {
         let optimization = super::joint_bass_management_report_from_parts(&[], &[source], &outputs);
         let graph = BassManagementRoutingGraph {
             physical_sub_output: "LFE".into(),
+            physical_sub_outputs: vec!["sub0".into(), "sub1".into()],
+            stereo_routing: None,
             input_channels: vec!["L".into()],
             output_channels: vec!["L".into(), "LFE".into(), "sub0".into(), "sub1".into()],
             routes,
@@ -3769,6 +4236,117 @@ mod post_dsp_level_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn stereo_candidate_serialized_replay_rejects_acoustic_splice_cancellation() {
+        let main_roles = vec!["L".to_string(), "R".to_string()];
+        let measured = Curve {
+            freq: ndarray::array![20.0, 40.0, 80.0, 160.0, 320.0],
+            spl: ndarray::Array1::from_elem(5, 80.0),
+            phase: Some(ndarray::Array1::zeros(5)),
+            ..Default::default()
+        };
+        let transfer = Curve {
+            freq: measured.freq.clone(),
+            spl: ndarray::Array1::zeros(5),
+            phase: Some(ndarray::Array1::zeros(5)),
+            ..Default::default()
+        };
+        let mains = HashMap::from([
+            ("L".to_string(), measured.clone()),
+            ("R".to_string(), measured.clone()),
+        ]);
+        let transfers = HashMap::from([
+            ("L".to_string(), transfer.clone()),
+            ("R".to_string(), transfer),
+        ]);
+        let groups = std::collections::BTreeMap::from([(
+            "lcr".to_string(),
+            roomeq_model::BassManagementGroupReport {
+                group_id: "lcr".to_string(),
+                roles: main_roles.clone(),
+                crossover_type: "LR24".to_string(),
+                selected_crossover_hz: Some(80.0),
+                configured_crossover_hz: Some(80.0),
+                main_delay_ms: 0.0,
+                bass_route_delay_ms: 0.0,
+                polarity_inverted: false,
+                trim_db: 0.0,
+                objective_before: None,
+                objective_after: None,
+                selected_sub_low_pass_hz: Vec::new(),
+                advisories: Vec::new(),
+            },
+        )]);
+        let source = |role: &str| roomeq_model::BassManagementSourceReport {
+            source_channel: role.to_string(),
+            group_id: "lcr".to_string(),
+            main_delay_ms: 0.0,
+            bass_route_delay_ms: 0.0,
+            polarity_inverted: false,
+            trim_db: 0.0,
+            objective_before: Some(1.0),
+            objective_after: Some(0.5),
+            accepted: true,
+            safety_restored: false,
+            advisories: Vec::new(),
+        };
+        let mut sources = vec![source("L"), source("R")];
+        let outputs = ["Sub1", "Sub2"]
+            .into_iter()
+            .map(|role| roomeq_model::BassManagementSubOutputReport {
+                output_role: role.to_string(),
+                gain_db: 0.0,
+                delay_ms: 0.0,
+                polarity_inverted: false,
+                strategy_source: "mso".to_string(),
+                headroom_contribution_db: 0.0,
+                selected_low_pass_hz: None,
+            })
+            .collect::<Vec<_>>();
+        let drivers = ["Sub1", "Sub2"]
+            .into_iter()
+            .map(|name| roomeq_engine::bass_management::SubDriverInfo {
+                name: name.to_string(),
+                gain: 0.0,
+                delay: 0.0,
+                inverted: false,
+                processing: None,
+                initial_curve: Some(measured.clone()),
+            })
+            .collect::<Vec<_>>();
+        let direct = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+
+        assert!(
+            super::stereo_candidate_serialized_replay_rejection(
+                &main_roles,
+                &mains,
+                &transfers,
+                &groups,
+                &sources,
+                &outputs,
+                &drivers,
+                &direct,
+                48_000.0,
+            )
+            .is_ok()
+        );
+
+        sources[0].polarity_inverted = true;
+        let rejection = super::stereo_candidate_serialized_replay_rejection(
+            &main_roles,
+            &mains,
+            &transfers,
+            &groups,
+            &sources,
+            &outputs,
+            &drivers,
+            &direct,
+            48_000.0,
+        )
+        .expect_err("inverting one LR24 bass branch must fail serialized splice replay");
+        assert!(rejection.contains("serialized_graph_acoustic_splice_underfill:L"));
     }
 
     #[test]
@@ -3862,6 +4440,8 @@ mod post_dsp_level_tests {
         ];
         let graph = BassManagementRoutingGraph {
             physical_sub_output: "LFE".to_string(),
+            physical_sub_outputs: Vec::new(),
+            stereo_routing: None,
             input_channels: vec!["LFE".to_string()],
             output_channels: vec!["LFE".to_string()],
             routes: vec![low_route("LFE", 0)],
@@ -3922,6 +4502,8 @@ mod post_dsp_level_tests {
         ));
         let graph = BassManagementRoutingGraph {
             physical_sub_output: "LFE".to_string(),
+            physical_sub_outputs: Vec::new(),
+            stereo_routing: None,
             input_channels: vec!["L".to_string(), "LFE".to_string()],
             output_channels: vec!["L".to_string(), "LFE".to_string()],
             routes: vec![low_route("L", 0)],
@@ -3966,6 +4548,8 @@ mod post_dsp_level_tests {
         let initial = curve(60.0);
         let graph = BassManagementRoutingGraph {
             physical_sub_output: "LFE".to_string(),
+            physical_sub_outputs: Vec::new(),
+            stereo_routing: None,
             input_channels: vec!["L".to_string(), "LFE".to_string()],
             output_channels: vec!["L".to_string(), "LFE".to_string()],
             routes: vec![low_route("L", 0)],
@@ -4014,6 +4598,8 @@ mod post_dsp_level_tests {
         let initial = curve(60.0);
         let graph = BassManagementRoutingGraph {
             physical_sub_output: "LFE".to_string(),
+            physical_sub_outputs: Vec::new(),
+            stereo_routing: None,
             input_channels: vec!["L".to_string(), "LFE".to_string()],
             output_channels: vec!["L".to_string(), "LFE".to_string()],
             routes: vec![low_route("L", 0)],
@@ -4335,6 +4921,8 @@ mod post_dsp_level_tests {
         main.target_curve = Some(CurveData::from(&curve(90.0)));
         let graph = BassManagementRoutingGraph {
             physical_sub_output: "LFE".to_string(),
+            physical_sub_outputs: Vec::new(),
+            stereo_routing: None,
             input_channels: vec!["L".to_string(), "LFE".to_string()],
             output_channels: vec!["L".to_string(), "LFE".to_string()],
             routes: vec![low_route("L", 0)],
@@ -4411,6 +4999,8 @@ mod post_dsp_level_tests {
         ]);
         let mut graph = BassManagementRoutingGraph {
             physical_sub_output: "LFE".to_string(),
+            physical_sub_outputs: Vec::new(),
+            stereo_routing: None,
             input_channels: vec!["L".to_string(), "R".to_string(), "LFE".to_string()],
             output_channels: vec!["L".to_string(), "R".to_string(), "LFE".to_string()],
             routes: vec![low_route("L", 0), low_route("R", 1), low_route("LFE", 2)],
@@ -4621,12 +5211,17 @@ mod tests {
             speakers: HashMap::from([
                 ("Left".to_string(), "left".to_string()),
                 ("Right".to_string(), "right".to_string()),
-                ("LFE".to_string(), "sub".to_string()),
             ]),
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Single,
-                crossover: Some("bass_xo".to_string().into()),
-                mapping: HashMap::from([("sub".to_string(), "Left".to_string())]),
+                crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec![
+                    "bass_xo".to_string(),
+                ])),
+                routing: Default::default(),
+                outputs: vec![roomeq_model::SubwooferOutput {
+                    id: "sub".to_string(),
+                    speaker: "sub".to_string(),
+                }],
             }),
             bass_management: None,
             ..Default::default()
@@ -4931,7 +5526,7 @@ mod tests {
     #[test]
     fn home_cinema_supporting_only_with_sub_returns_configuration_error() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let speakers = HashMap::from([(
+        let mut speakers = HashMap::from([(
             "wide".to_string(),
             SpeakerConfig::SupportingSource(SupportingSourceGroup {
                 name: "Wide".to_string(),
@@ -4947,16 +5542,21 @@ mod tests {
                 },
             }),
         )]);
+        speakers.insert(
+            "sub".to_string(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve())),
+        );
         let sys = SystemConfig {
             model: SystemModel::HomeCinema,
-            speakers: HashMap::from([
-                ("WideLeft".to_string(), "wide".to_string()),
-                ("LFE".to_string(), "missing_sub".to_string()),
-            ]),
+            speakers: HashMap::from([("WideLeft".to_string(), "wide".to_string())]),
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Single,
                 crossover: None,
-                mapping: HashMap::new(),
+                routing: Default::default(),
+                outputs: vec![roomeq_model::SubwooferOutput {
+                    id: "Sub1".to_string(),
+                    speaker: "sub".to_string(),
+                }],
             }),
             bass_management: None,
             ..Default::default()
@@ -5026,7 +5626,7 @@ mod tests {
             .metadata
             .bass_management
             .expect("bass management report");
-        assert!(bass_report.lfe_gain_applied_to_chain);
+        assert!(bass_report.lfe.unwrap().gain_applied_to_chain);
     }
 
     #[test]
@@ -5273,7 +5873,7 @@ mod tests {
             .execute(&mut assembly)
             .expect("home cinema with a sub and prepared target should run");
 
-        for channel_name in ["Left", "Right", "LFE"] {
+        for channel_name in ["Left", "Right", "sub"] {
             assert!(
                 result.channels[channel_name].target_curve.is_some(),
                 "{channel_name} output chain must retain its prepared target"

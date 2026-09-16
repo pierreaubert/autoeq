@@ -639,7 +639,7 @@ fn validate_camilladsp_sub_output_scope(output: &DspGraph) -> anyhow::Result<()>
             "CamillaDsp export supports a single physical sub output ('{}') but the graph \
              declares {} sub outputs ({}) with per-output alignment the preset cannot \
              represent; downmix to one sub output or use Apply as Graph for this output",
-            report.physical_sub_output,
+            report.physical_sub_outputs.join(", "),
             report.sub_outputs.len(),
             roles
         );

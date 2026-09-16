@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Migrate generated and measured RoomEQ fixtures to input format 3.0.0 and add
+  coverage for stereo physical-subwoofer outputs, implicit home-cinema `LFE`,
+  topology diagnostics, serialized candidate replay, and matrix-aware acoustic
+  and electrical-headroom checks.
+
 - Exempt documented safety-restoring bass acceptances from the per-source regression gate and accept legitimately EQ-less hybrid correction blocks.
 
 - Add stage-contract, pairwise-parameter, escaped-defect, generated-fixture, and independent serialized-replay gates, plus blocking four-mode KEF, Genelec, and Fidelia measured canaries.

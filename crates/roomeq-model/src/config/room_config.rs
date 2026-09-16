@@ -15,11 +15,11 @@ use std::collections::HashMap;
 /// Complete room configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RoomConfig {
-    /// Configuration schema version. Supported lines are 1.0.x–1.2.x and
-    /// 2.0.x–2.2.x; the current version is 2.2.0.
+    /// Configuration schema version. Version 3.0.x intentionally rejects the
+    /// legacy stereo-LFE representation.
     #[serde(default = "default_config_version")]
     pub version: String,
-    /// System configuration (v2.1) - Decouples logical roles from measurements
+    /// System configuration (v3) separating logical inputs from physical outputs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system: Option<SystemConfig>,
     /// Map of channel name to speaker configuration
@@ -105,8 +105,8 @@ impl RoomConfig {
             .as_ref()
             .is_some_and(|fir| fir.placement == super::FirPlacement::PerDriver)
         {
-            if !self.version.starts_with("2.2.") {
-                errors.push("fir.placement=per_driver requires config version 2.2.x".into());
+            if !self.version.starts_with("3.0.") {
+                errors.push("fir.placement=per_driver requires config version 3.0.x".into());
             }
             if !matches!(
                 self.optimizer.processing_mode,
@@ -153,6 +153,78 @@ impl RoomConfig {
                 if !self.speakers.contains_key(measurement_key) {
                     errors.push(format!(
                         "system.speakers role '{role}' references missing speaker measurement '{measurement_key}'"
+                    ));
+                }
+            }
+            match system.model {
+                crate::SystemModel::Stereo => {
+                    let has_exact_lr = system.speakers.len() == 2
+                        && system.speakers.contains_key("L")
+                        && system.speakers.contains_key("R");
+                    if !has_exact_lr {
+                        errors.push(
+                            "stereo system.speakers must contain exactly logical inputs 'L' and 'R'; system.speakers.LFE is invalid in v3. Replace it with system.subwoofers.outputs: [{\"id\":\"Sub1\",\"speaker\":\"sub\"}]"
+                                .to_string(),
+                        );
+                    }
+                }
+                crate::SystemModel::HomeCinema => {
+                    if system
+                        .speakers
+                        .keys()
+                        .any(|role| role.eq_ignore_ascii_case("LFE"))
+                    {
+                        errors.push(
+                            "home_cinema system.speakers must not map an LFE measurement in v3; the logical LFE programme input is implicit and physical measurements belong in system.subwoofers.outputs"
+                                .to_string(),
+                        );
+                    }
+                }
+                crate::SystemModel::Custom => {}
+            }
+            if let Some(subwoofers) = system.subwoofers.as_ref() {
+                let expected = match system.model {
+                    crate::SystemModel::Stereo => 1..=2,
+                    _ => 1..=usize::MAX,
+                };
+                if !expected.contains(&subwoofers.outputs.len()) {
+                    errors.push(format!(
+                        "system.subwoofers.outputs has {} entries; {} requires {}",
+                        subwoofers.outputs.len(),
+                        match system.model {
+                            crate::SystemModel::Stereo => "stereo",
+                            crate::SystemModel::HomeCinema => "home_cinema",
+                            crate::SystemModel::Custom => "custom",
+                        },
+                        if matches!(system.model, crate::SystemModel::Stereo) {
+                            "one or two physical sub outputs"
+                        } else {
+                            "at least one physical sub output"
+                        }
+                    ));
+                }
+                let mut output_ids = std::collections::HashSet::new();
+                for output in &subwoofers.outputs {
+                    if output.id.trim().is_empty() || !output_ids.insert(output.id.as_str()) {
+                        errors.push(format!(
+                            "system.subwoofers.outputs contains an empty or duplicate output id '{}'",
+                            output.id
+                        ));
+                    }
+                    if !self.speakers.contains_key(&output.speaker) {
+                        errors.push(format!(
+                            "physical sub output '{}' references missing speaker measurement '{}'",
+                            output.id, output.speaker
+                        ));
+                    }
+                }
+                if let Some(crossover) = subwoofers.crossover.as_ref()
+                    && crossover.as_list().len() != subwoofers.outputs.len()
+                {
+                    errors.push(format!(
+                        "system.subwoofers.crossover has {} entries but system.subwoofers.outputs has {}; v3 requires one crossover per physical output",
+                        crossover.as_list().len(),
+                        subwoofers.outputs.len()
                     ));
                 }
             }

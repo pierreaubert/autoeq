@@ -64,8 +64,14 @@ fn config_5_1_4(threads: usize) -> RoomConfig {
             // this throughput benchmark.
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Single,
-                crossover: Some("main".to_string().into()),
-                mapping: [("lfe".to_string(), "L".to_string())].into(),
+                crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec![
+                    "main".to_string(),
+                ])),
+                routing: Default::default(),
+                outputs: vec![roomeq_model::SubwooferOutput {
+                    id: "lfe".to_string(),
+                    speaker: "lfe".to_string(),
+                }],
             }),
             bass_management: None,
             ..Default::default()

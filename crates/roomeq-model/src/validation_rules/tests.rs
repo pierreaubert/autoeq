@@ -358,8 +358,9 @@ fn validate_bass_management_rejects_negative_headroom_and_boost() {
             speakers: HashMap::from([("Sub".to_string(), "sub".to_string())]),
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Single,
+                routing: Default::default(),
+                outputs: Vec::new(),
                 crossover: Some("xo".into()),
-                mapping: HashMap::new(),
             }),
             bass_management: Some(BassManagementConfig {
                 max_sub_boost_db: -1.0,
@@ -496,12 +497,21 @@ fn mso_two_sub_config(crossover: Option<SubwooferCrossoverRef>) -> RoomConfig {
             speakers: HashMap::from([
                 ("L".to_string(), "L".to_string()),
                 ("R".to_string(), "R".to_string()),
-                ("LFE".to_string(), "subs".to_string()),
             ]),
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Mso,
+                routing: Default::default(),
+                outputs: vec![
+                    crate::SubwooferOutput {
+                        id: "Sub1".to_string(),
+                        speaker: "subs".to_string(),
+                    },
+                    crate::SubwooferOutput {
+                        id: "Sub2".to_string(),
+                        speaker: "subs".to_string(),
+                    },
+                ],
                 crossover,
-                mapping: HashMap::from([("subs".to_string(), "L".to_string())]),
             }),
             bass_management: None,
             supporting_source_outputs: None,
@@ -535,16 +545,15 @@ fn subwoofer_crossover_list_matching_sub_count_is_valid() {
 }
 
 #[test]
-fn subwoofer_crossover_shared_and_single_entry_forms_stay_valid() {
+fn subwoofer_crossover_shared_and_single_entry_forms_are_rejected_in_v3() {
     for crossover in [
         SubwooferCrossoverRef::Shared("bass_xover1".to_string()),
         SubwooferCrossoverRef::PerSub(vec!["bass_xover1".to_string()]),
     ] {
         let result = validate_room_config(&mso_two_sub_config(Some(crossover.clone())));
         assert!(
-            result.is_valid,
-            "shared/single-entry crossover {crossover:?} must validate: {:?}",
-            result.errors
+            !result.is_valid,
+            "unexpected valid crossover: {crossover:?}"
         );
     }
 }
@@ -595,7 +604,7 @@ fn subwoofer_crossover_rejects_arity_mismatch() {
         result
             .errors
             .iter()
-            .any(|e| e.contains("has 3 entries") && e.contains("expected 1 or 2")),
+            .any(|e| e.contains("3 entries") && e.contains("expected 2")),
         "unexpected errors: {:?}",
         result.errors
     );

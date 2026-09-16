@@ -296,7 +296,7 @@ fn rir_prototype_config_dry_run_succeeds() {
     let tweeter = manifest_dir.join("tests/data/roomeq/test_tweeter.csv");
 
     let config = serde_json::json!({
-        "version": "2.1.0",
+        "version": "3.0.0",
         "speakers": {
             "left": {
                 "measurements": [

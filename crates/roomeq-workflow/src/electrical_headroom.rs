@@ -335,7 +335,10 @@ pub fn expand_routed_electrical_paths(
             // The electrical evaluator consumes linear per-path transfers. The native
             // adapter must retain output processing after summation, not duplicate
             // arbitrary nonlinear output plugins on each incoming branch.
-            let template = &channels[&input.name];
+            let template = channels
+                .get(&input.name)
+                .or_else(|| channels.get(&output.name))
+                .expect("physical route input or output owns a DSP chain");
             let stages = [
                 input.plugins.clone(),
                 roomeq_engine::physical_routing::physical_route_plugins(route),
@@ -757,6 +760,8 @@ mod tests {
             .collect();
         let mut graph = roomeq_model::BassManagementRoutingGraph {
             physical_sub_output: "sub".into(),
+            physical_sub_outputs: Vec::new(),
+            stereo_routing: None,
             input_channels: vec!["L".into(), "R".into()],
             output_channels: vec!["sub".into()],
             routes,

@@ -90,6 +90,8 @@ pub fn resolve_physical_routing(
         .map(|name| {
             let chain = channels.get(name);
             if chain.is_none()
+                && roomeq_model::home_cinema::role_for_channel(name)
+                    != roomeq_model::HomeCinemaRole::Lfe
                 && (graph
                     .routes
                     .iter()
@@ -180,9 +182,15 @@ pub fn resolve_physical_routing(
                     c != &route.source_channel && !(is_sub && c == &graph.physical_sub_output)
                 })
             {
-                return Err(invalid(
-                    "physical route has inconsistent endpoint chain ownership",
-                ));
+                return Err(invalid(format!(
+                    "physical route has inconsistent endpoint chain ownership: source='{}' source_index={} destination='{}' destination_index={} pre={:?} post={:?}",
+                    route.source_channel,
+                    route.source_index,
+                    route.destination,
+                    route.destination_index,
+                    route.pre_chain_channel,
+                    route.post_chain_channel
+                )));
             }
             if hierarchical && driver_names.contains(&route.destination) && !is_sub {
                 return Err(invalid(
@@ -361,6 +369,8 @@ mod tests {
         ]);
         let mut graph = BassManagementRoutingGraph {
             physical_sub_output: "LFE".into(),
+            physical_sub_outputs: Vec::new(),
+            stereo_routing: None,
             input_channels: vec!["L".into(), "R".into(), "LFE".into()],
             output_channels: vec![
                 "L".into(),

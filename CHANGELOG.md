@@ -1,5 +1,16 @@
 # Unreleased
 
+- Document the workspace architecture: per-crate `ARCHITECTURE.md` files plus
+  a high-level `docs/ARCHITECTURE.md` with crate map, RoomEQ/AutoEQ/QA data
+  flows, and pipeline stage order.
+
+- Introduce breaking RoomEQ input format 3.0.0: stereo exposes only `L`/`R`
+  programme inputs, home cinema gains an implicit canonical `LFE` input, and
+  measured physical subwoofers move to ordered `system.subwoofers.outputs`.
+  Routed stereo bass now records the evaluated matrix topology, coefficients,
+  objective evidence, correlated-peak-safe 2.1 mono fold, and candidate-level
+  serialized-graph acoustic-splice and electrical-headroom validation.
+
 - Preserve role-pair level balance through RoomEQ finalization by refreshing
   realized non-routed curves and applying attenuation-only upper-band alignment
   after per-output headroom gains, without extending the PEQ correction band.

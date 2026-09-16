@@ -200,14 +200,21 @@ mod tests {
             return;
         }
         let (config, _, _) = crate::config_loader::load_config(&path, None).unwrap();
-        let SpeakerConfig::MultiSub(group) = config.speakers.get("subs").unwrap() else {
-            panic!("expected measured subs speaker to deserialize as MultiSub");
-        };
-        let loaded = load_multisub_seat_measurements(group).unwrap();
-        assert!(
-            loaded.is_none(),
-            "single-position subs must not require shared seat IDs"
-        );
+        let outputs = &config
+            .system
+            .as_ref()
+            .unwrap()
+            .subwoofers
+            .as_ref()
+            .unwrap()
+            .outputs;
+        assert_eq!(outputs.len(), 2);
+        assert!(outputs.iter().all(|output| {
+            matches!(
+                config.speakers.get(&output.speaker),
+                Some(SpeakerConfig::Single(_))
+            )
+        }));
     }
 
     #[test]

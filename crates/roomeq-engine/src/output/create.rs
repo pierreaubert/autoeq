@@ -288,9 +288,14 @@ pub fn bass_management_matrix_metadata(
     graph: &roomeq_model::BassManagementRoutingGraph,
 ) -> serde_json::Value {
     json!({
-        "purpose": "home_cinema_bass_management",
-        "physical_sub_output": graph.physical_sub_output,
+        "purpose": if graph.stereo_routing.is_some() {
+            "stereo_bass_routing"
+        } else {
+            "home_cinema_bass_management"
+        },
+        "physical_sub_outputs": graph.physical_sub_outputs,
         "routes": graph.routes,
+        "stereo_routing": graph.stereo_routing,
         "advisories": graph.advisories,
     })
 }

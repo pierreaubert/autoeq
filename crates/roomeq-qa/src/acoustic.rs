@@ -1441,7 +1441,8 @@ mod tests {
                 subwoofers: Some(roomeq_model::SubwooferSystemConfig {
                     config: Default::default(),
                     crossover: None,
-                    mapping: HashMap::new(),
+                    routing: Default::default(),
+                    outputs: Vec::new(),
                 }),
                 bass_management: Some(roomeq_model::BassManagementConfig {
                     enabled: true,
@@ -1479,6 +1480,8 @@ mod tests {
         };
         bass.routing_graph = Some(BassManagementRoutingGraph {
             physical_sub_output: "sub".into(),
+            physical_sub_outputs: Vec::new(),
+            stereo_routing: None,
             input_channels: vec!["left".into()],
             output_channels: vec!["left".into(), "sub".into()],
             routes: vec![route("left", false), route("sub", true)],

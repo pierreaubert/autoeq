@@ -9,7 +9,7 @@ pub(super) fn is_subwoofer_channel(config: &RoomConfig, channel_name: &str) -> b
             return true;
         }
         if let Some(measurement_key) = system.speakers.get(channel_name) {
-            return subwoofers.mapping.contains_key(measurement_key);
+            return subwoofers.contains_measurement(measurement_key);
         }
     }
 

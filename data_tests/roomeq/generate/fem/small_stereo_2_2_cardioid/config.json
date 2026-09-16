@@ -1,21 +1,57 @@
 {
-  "version": "1.2.0",
+  "version": "3.0.0",
   "system": {
     "model": "stereo",
-    "speakers": { "L": "left", "R": "right", "LFE": "lfe" },
-    "subwoofers": { "config": "single", "crossover": "first", "lfe": "L" }
+    "speakers": {
+      "L": "left",
+      "R": "right"
+    },
+    "subwoofers": {
+      "strategy": "single",
+      "routing": "optimize",
+      "outputs": [
+        {
+          "id": "Sub1",
+          "speaker": "lfe"
+        }
+      ],
+      "crossover": [
+        "first"
+      ]
+    }
   },
   "speakers": {
-    "left": { "measurements": ["left_lp0.csv", "left_lp1.csv", "left_lp2.csv", "left_lp3.csv", "left_lp4.csv"] },
+    "left": {
+      "measurements": [
+        "left_lp0.csv",
+        "left_lp1.csv",
+        "left_lp2.csv",
+        "left_lp3.csv",
+        "left_lp4.csv"
+      ]
+    },
     "lfe": {
       "name": "cardioid_subs",
       "front": "sub_top_lp0.csv",
       "rear": "sub_bottom_lp0.csv",
       "separation_meters": 0.5
     },
-    "right": { "measurements": ["right_lp0.csv", "right_lp1.csv", "right_lp2.csv", "right_lp3.csv", "right_lp4.csv"] }
+    "right": {
+      "measurements": [
+        "right_lp0.csv",
+        "right_lp1.csv",
+        "right_lp2.csv",
+        "right_lp3.csv",
+        "right_lp4.csv"
+      ]
+    }
   },
-  "crossovers": { "first": { "type": "LR24", "frequency": 80.0 } },
+  "crossovers": {
+    "first": {
+      "type": "LR24",
+      "frequency": 80.0
+    }
+  },
   "optimizer": {
     "processing_mode": "low_latency",
     "loss_type": "flat",
@@ -37,6 +73,9 @@
     "refine": true,
     "asymmetric_loss": true,
     "smooth_n": 3,
-    "multi_measurement": { "strategy": "minimax", "variance_lambda": 1.0 }
+    "multi_measurement": {
+      "strategy": "minimax",
+      "variance_lambda": 1.0
+    }
   }
 }

@@ -69,7 +69,7 @@ fn make_stereo_config(optimizer: OptimizerConfig) -> RoomConfig {
     system_speakers.insert("R".to_string(), "right_meas".to_string());
 
     RoomConfig {
-        version: "1.2.0".to_string(),
+        version: "3.0.0".to_string(),
         system: Some(SystemConfig {
             model: SystemModel::Stereo,
             speakers: system_speakers,
@@ -280,10 +280,6 @@ fn make_stereo_2_1_config(optimizer: OptimizerConfig) -> RoomConfig {
     let mut sys_spk = HashMap::new();
     sys_spk.insert("L".to_string(), "l".to_string());
     sys_spk.insert("R".to_string(), "r".to_string());
-    sys_spk.insert("LFE".to_string(), "sub".to_string());
-
-    let mut sub_map = HashMap::new();
-    sub_map.insert("sub".to_string(), "L".to_string());
 
     let mut crossovers = HashMap::new();
     crossovers.insert(
@@ -297,14 +293,20 @@ fn make_stereo_2_1_config(optimizer: OptimizerConfig) -> RoomConfig {
     );
 
     RoomConfig {
-        version: "1.2.0".to_string(),
+        version: "3.0.0".to_string(),
         system: Some(SystemConfig {
             model: SystemModel::Stereo,
             speakers: sys_spk,
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Single,
-                crossover: Some("sub_xover".to_string().into()),
-                mapping: sub_map,
+                crossover: Some(autoeq::roomeq::SubwooferCrossoverRef::PerSub(vec![
+                    "sub_xover".to_string(),
+                ])),
+                routing: Default::default(),
+                outputs: vec![autoeq::roomeq::SubwooferOutput {
+                    id: "Sub1".to_string(),
+                    speaker: "sub".to_string(),
+                }],
             }),
             bass_management: None,
             supporting_source_outputs: None,
@@ -345,7 +347,7 @@ fn stereo_2_1_honours_excursion_protection() {
     let result = autoeq::roomeq::optimize_room(&config, 48000.0, None, None)
         .expect("stereo 2.1 with excursion_protection should succeed");
 
-    for role in ["L", "R", "LFE"] {
+    for role in ["L", "R", "Sub1"] {
         let hp_count = highpass_count_in_chain(&result.channels[role]);
         assert!(
             hp_count >= 1,

@@ -1644,8 +1644,14 @@ def create_comparison_overlay_figure(
     channel_name: str,
     mode_data: list[tuple[str, dict]],
     title_suffix: str = "",
+    target_curve: dict | None = None,
 ) -> go.Figure:
-    """Overlay final curves from multiple modes on the same plot."""
+    """Overlay final curves from multiple modes on the same plot.
+
+    ``target_curve`` is the shared design target (freq/spl); compared modes
+    normally share one fixture target. When absent no target is drawn —
+    a fabricated flat line would misstate the design slope.
+    """
     fig = go.Figure()
 
     initial_curve = None
@@ -1679,13 +1685,13 @@ def create_comparison_overlay_figure(
                 line=dict(color=_mode_color(mode_name), width=2),
             ))
 
-    if initial_curve:
-        freq = initial_curve["freq"]
+    if target_curve and target_curve.get("freq") and target_curve.get("spl"):
         fig.add_trace(go.Scatter(
-            x=[freq[0], freq[-1]], y=[0, 0], mode="lines",
-            name="Target (0 dB)",
-            line=dict(color="rgba(150, 150, 150, 0.5)", width=1, dash="dash"),
+            x=target_curve["freq"], y=target_curve["spl"], mode="lines",
+            name="Target",
+            line=dict(color="rgba(40, 40, 40, 0.9)", width=2, dash="dot"),
         ))
+        all_curves.append(target_curve)
 
     y_min, y_max = compute_y_range(all_curves)
     freq_axis = get_freq_axis_config()
@@ -1823,8 +1829,13 @@ def create_comparison_eq_overlay_figure(
 def create_mode_subplots_figure(
     channel_name: str,
     mode_data: list[tuple[str, dict]],
+    target_curve: dict | None = None,
 ) -> go.Figure:
-    """Create an MxN subplot grid with one before/after plot per mode."""
+    """Create an MxN subplot grid with one before/after plot per mode.
+
+    ``target_curve`` is drawn dotted in every cell when given; otherwise no
+    reference line is drawn (a flat placeholder would misstate the slope).
+    """
     n_modes = len(mode_data)
     titles = [_mode_label(name) for name, _ in mode_data]
     n_rows, n_cols = _grid_dims(n_modes)
@@ -1841,6 +1852,8 @@ def create_mode_subplots_figure(
     for _, ch_data in mode_data:
         all_curves.append(ch_data.get("initial_curve"))
         all_curves.append(ch_data.get("final_curve"))
+    if target_curve:
+        all_curves.append(target_curve)
     y_min, y_max = compute_y_range(all_curves)
 
     for idx, (mode_name, ch_data) in enumerate(mode_data):
@@ -1866,12 +1879,12 @@ def create_mode_subplots_figure(
                 showlegend=False, legendgroup=mode_name,
             ), row=row, col=col)
 
-        if initial_curve:
-            freq = initial_curve["freq"]
+        if target_curve and target_curve.get("freq") and target_curve.get("spl"):
             fig.add_trace(go.Scatter(
-                x=[freq[0], freq[-1]], y=[0, 0], mode="lines",
-                line=dict(color="rgba(150, 150, 150, 0.3)", width=1, dash="dash"),
-                showlegend=False,
+                x=target_curve["freq"], y=target_curve["spl"], mode="lines",
+                name="Target",
+                line=dict(color="rgba(40, 40, 40, 0.9)", width=1.5, dash="dot"),
+                showlegend=first_cell, legendgroup="target",
             ), row=row, col=col)
 
         fig.update_xaxes(

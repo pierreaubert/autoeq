@@ -1,16 +1,28 @@
 {
-  "version": "2.1.0",
+  "version": "3.0.0",
   "system": {
     "model": "stereo",
     "speakers": {
       "L": "L",
-      "R": "R",
-      "LFE": "subs"
+      "R": "R"
     },
     "subwoofers": {
-      "config": "mso",
-      "crossover": ["bass_xover1", "bass_xover2"],
-      "subs": "L"
+      "strategy": "mso",
+      "routing": "optimize",
+      "outputs": [
+        {
+          "id": "Sub1",
+          "speaker": "subs_1"
+        },
+        {
+          "id": "Sub2",
+          "speaker": "subs_2"
+        }
+      ],
+      "crossover": [
+        "bass_xover1",
+        "bass_xover2"
+      ]
     }
   },
   "speakers": {
@@ -22,29 +34,29 @@
       "path": "r.csv",
       "name": "Right No EQ Sep 1"
     },
-    "subs": {
-      "name": "Two subs",
-      "subwoofers": [
-        {
-          "path": "l_sub.csv",
-          "name": "Left Sub"
-        },
-        {
-          "path": "r_sub.csv",
-          "name": "Right Sub"
-        }
-      ],
-      "allpass_optimization": true
+    "subs_1": {
+      "path": "l_sub.csv",
+      "name": "Left Sub"
+    },
+    "subs_2": {
+      "path": "r_sub.csv",
+      "name": "Right Sub"
     }
   },
   "crossovers": {
     "bass_xover1": {
       "type": "LR24",
-      "frequency_range": [40.0, 130.0]
+      "frequency_range": [
+        40.0,
+        130.0
+      ]
     },
     "bass_xover2": {
       "type": "LR24",
-      "frequency_range": [40.0, 130.0]
+      "frequency_range": [
+        40.0,
+        130.0
+      ]
     }
   },
   "optimizer": {

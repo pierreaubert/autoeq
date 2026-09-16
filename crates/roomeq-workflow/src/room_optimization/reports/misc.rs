@@ -1161,14 +1161,17 @@ mod tests {
         let mut config = room_config_default();
         config.system = Some(roomeq_model::SystemConfig {
             model: roomeq_model::SystemModel::Stereo,
-            speakers: HashMap::from([
-                ("L".to_string(), "left".to_string()),
-                ("LFE".to_string(), "sub".to_string()),
-            ]),
+            speakers: HashMap::from([("L".to_string(), "left".to_string())]),
             subwoofers: Some(roomeq_model::SubwooferSystemConfig {
                 config: roomeq_model::SubwooferStrategy::Single,
-                crossover: Some("first".to_string().into()),
-                mapping: HashMap::from([("sub".to_string(), "L".to_string())]),
+                crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec![
+                    "first".to_string(),
+                ])),
+                routing: Default::default(),
+                outputs: vec![roomeq_model::SubwooferOutput {
+                    id: "sub".to_string(),
+                    speaker: "sub".to_string(),
+                }],
             }),
             ..Default::default()
         });
@@ -1242,6 +1245,7 @@ mod tests {
             group_results: Vec::new(),
             source_results: Vec::new(),
             sub_output_results: Vec::new(),
+            stereo_routing: None,
             advisories: Vec::new(),
         }
     }
@@ -1250,20 +1254,23 @@ mod tests {
         optimization: Option<roomeq_model::BassManagementOptimizationReport>,
     ) -> roomeq_model::BassManagementReport {
         roomeq_model::BassManagementReport {
+            routing_title: "Home-Cinema Bass Management Routing".to_string(),
             enabled: true,
             crossover_type: "LR48".to_string(),
             crossover_frequency_hz: None,
             redirected_bass_enabled: true,
-            lfe_channel: "LFE".to_string(),
-            lfe_playback_gain_db: 0.0,
-            lfe_low_pass_hz: 120.0,
-            lfe_gain_applied_to_chain: false,
+            lfe: Some(roomeq_model::LfeBassManagementReport {
+                input_channel: "LFE".to_string(),
+                playback_gain_db: 0.0,
+                low_pass_hz: 120.0,
+                gain_applied_to_chain: false,
+            }),
             sub_trim_db: 0.0,
             max_sub_boost_db: 0.0,
             headroom_margin_db: 0.0,
             applied_sub_gain_db: None,
             gain_limited: false,
-            physical_sub_output: "LFE".to_string(),
+            physical_sub_outputs: vec!["LFE".to_string()],
             redirected_bass_channel_count: 1,
             main_high_pass_hz: None,
             sub_low_pass_hz: None,

@@ -10,18 +10,24 @@
       "TFL": "top_front_left",
       "TFR": "top_front_right",
       "TRL": "top_rear_left",
-      "TRR": "top_rear_right",
-      "LFE": "lfe"
+      "TRR": "top_rear_right"
     },
     "subwoofers": {
-      "config": "mso",
-      "crossover": "first",
-      "lfe": "L"
+      "strategy": "mso",
+      "routing": "optimize",
+      "outputs": [
+        {
+          "id": "Sub1",
+          "speaker": "lfe"
+        }
+      ],
+      "crossover": [
+        "first"
+      ]
     },
     "bass_management": {
       "enabled": true,
       "redirect_bass": true,
-      "lfe_channel": "LFE",
       "lfe_playback_gain_db": 10.0,
       "apply_lfe_gain_to_chain": false,
       "sub_trim_db": -7.0,

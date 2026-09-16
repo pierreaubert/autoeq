@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Render the selected logical-input-to-physical-output bass matrix in
+  CamillaDSP and Equalizer APO exports, preserving named subwoofer identities,
+  exposing only `L`/`R` for stereo and canonical `LFE` for home cinema, and
+  applying each route, gain, and crossover exactly once.
+
 - Reuse content-identical convolution resources and existing sidecars, share
   immutable package buffers, and hash with bounded scratch memory.
 - Inherited the workspace policy forbidding unsafe Rust code.

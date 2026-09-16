@@ -335,7 +335,8 @@ pub(super) fn build_multichannel_config(
                 Some(SubwooferSystemConfig {
                     config: SubwooferStrategy::Single,
                     crossover: None,
-                    mapping: HashMap::new(),
+                    routing: Default::default(),
+                    outputs: Vec::new(),
                 })
             }
             "mso_2sub" | "mso_2sub_allpass" => {
@@ -368,7 +369,8 @@ pub(super) fn build_multichannel_config(
                 Some(SubwooferSystemConfig {
                     config: SubwooferStrategy::Mso,
                     crossover: None,
-                    mapping: HashMap::new(),
+                    routing: Default::default(),
+                    outputs: Vec::new(),
                 })
             }
             "mso_4sub" | "mso_8sub" => {
@@ -401,7 +403,8 @@ pub(super) fn build_multichannel_config(
                 Some(SubwooferSystemConfig {
                     config: SubwooferStrategy::Mso,
                     crossover: None,
-                    mapping: HashMap::new(),
+                    routing: Default::default(),
+                    outputs: Vec::new(),
                 })
             }
             "cardioid" => {
@@ -427,7 +430,8 @@ pub(super) fn build_multichannel_config(
                 Some(SubwooferSystemConfig {
                     config: SubwooferStrategy::Single, // cardioid routes via SpeakerConfig dispatch
                     crossover: None,
-                    mapping: HashMap::new(),
+                    routing: Default::default(),
+                    outputs: Vec::new(),
                 })
             }
             "dba" => {
@@ -464,7 +468,8 @@ pub(super) fn build_multichannel_config(
                 Some(SubwooferSystemConfig {
                     config: SubwooferStrategy::Dba,
                     crossover: None,
-                    mapping: HashMap::new(),
+                    routing: Default::default(),
+                    outputs: Vec::new(),
                 })
             }
             _ => panic!("Unknown sub topology: {}", sub_topo.name),

@@ -228,13 +228,28 @@ pub fn sum_sub_output_responses_on_grid(
     drivers: &[SubDriverInfo],
     outputs: &[home_cinema::BassManagementSubOutputReport],
 ) -> Option<Curve> {
+    let weights = vec![1.0; drivers.len()];
+    sum_weighted_sub_output_responses_on_grid(target_freq, drivers, outputs, &weights)
+}
+
+/// Coherently sum physical subwoofer outputs with an explicit routing
+/// coefficient for each output.
+pub fn sum_weighted_sub_output_responses_on_grid(
+    target_freq: &ndarray::Array1<f64>,
+    drivers: &[SubDriverInfo],
+    outputs: &[home_cinema::BassManagementSubOutputReport],
+    weights: &[f64],
+) -> Option<Curve> {
     use num_complex::Complex;
-    if drivers.len() != outputs.len() || drivers.is_empty() {
+    if drivers.len() != outputs.len() || drivers.len() != weights.len() || drivers.is_empty() {
         return None;
     }
 
     let mut complex_sum = vec![Complex::new(0.0, 0.0); target_freq.len()];
-    for (driver, output) in drivers.iter().zip(outputs.iter()) {
+    for ((driver, output), weight) in drivers.iter().zip(outputs.iter()).zip(weights.iter()) {
+        if weight.abs() <= f64::EPSILON {
+            continue;
+        }
         let curve = driver
             .processing
             .as_ref()
@@ -247,9 +262,13 @@ pub fn sum_sub_output_responses_on_grid(
         let phase = interpolated.phase.as_ref()?;
         for idx in 0..target_freq.len() {
             let freq_hz = target_freq[idx];
-            let gain_db = output.gain_db;
+            let gain_db = output.gain_db + 20.0 * weight.abs().log10();
             let delay_phase = -360.0 * freq_hz * output.delay_ms / 1000.0;
-            let polarity_phase = if output.polarity_inverted { 180.0 } else { 0.0 };
+            let polarity_phase = if output.polarity_inverted ^ weight.is_sign_negative() {
+                180.0
+            } else {
+                0.0
+            };
             let mag = 10.0_f64.powf((interpolated.spl[idx] + gain_db) / 20.0);
             let phase_rad = (phase[idx] + delay_phase + polarity_phase).to_radians();
             complex_sum[idx] += Complex::from_polar(mag, phase_rad);
@@ -407,6 +426,35 @@ mod tests {
         assert!(sum.phase.is_some());
         // Two identical in-phase 80 dB sources sum to ~86 dB.
         assert!((sum.spl[0] - 86.02).abs() < 0.1);
+    }
+
+    #[test]
+    fn weighted_sub_output_sum_applies_stereo_matrix_coefficients_once() {
+        let freq = Array1::logspace(10.0, f64::log10(20.0), f64::log10(200.0), 8);
+        let mut quieter_sub = flat_curve_with_phase();
+        quieter_sub.spl.fill(60.0);
+        let drivers = vec![
+            driver("sub1", Some(flat_curve_with_phase()), false),
+            driver("sub2", Some(quieter_sub), false),
+        ];
+        let outputs = vec![
+            output("sub1", 0.0, 0.0, false, "default"),
+            output("sub2", 0.0, 0.0, false, "default"),
+        ];
+
+        let direct =
+            sum_weighted_sub_output_responses_on_grid(&freq, &drivers, &outputs, &[1.0, 0.0])
+                .unwrap();
+        let crossed =
+            sum_weighted_sub_output_responses_on_grid(&freq, &drivers, &outputs, &[0.0, 1.0])
+                .unwrap();
+        let dual_mono =
+            sum_weighted_sub_output_responses_on_grid(&freq, &drivers, &outputs, &[0.5, 0.5])
+                .unwrap();
+
+        assert!((direct.spl[0] - 80.0).abs() < 0.01);
+        assert!((crossed.spl[0] - 60.0).abs() < 0.01);
+        assert!((dual_mono.spl[0] - 74.81).abs() < 0.02);
     }
 
     #[test]

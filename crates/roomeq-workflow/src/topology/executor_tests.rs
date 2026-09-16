@@ -93,12 +93,17 @@ fn stereo_21_sub_sys(sub_strategy: SubwooferStrategy) -> SystemConfig {
         speakers: HashMap::from([
             ("L".to_string(), "left".to_string()),
             ("R".to_string(), "right".to_string()),
-            ("LFE".to_string(), "sub".to_string()),
         ]),
         subwoofers: Some(SubwooferSystemConfig {
             config: sub_strategy,
-            crossover: Some("bass_xo".to_string().into()),
-            mapping: HashMap::from([("sub".to_string(), "L".to_string())]),
+            crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec![
+                "bass_xo".to_string(),
+            ])),
+            routing: Default::default(),
+            outputs: vec![roomeq_model::SubwooferOutput {
+                id: "sub".to_string(),
+                speaker: "sub".to_string(),
+            }],
         }),
         bass_management: None,
         ..Default::default()
@@ -430,12 +435,17 @@ fn home_cinema_executor_with_sub_runs() {
             ("Left".to_string(), "left".to_string()),
             ("Right".to_string(), "right".to_string()),
             ("Center".to_string(), "center".to_string()),
-            ("LFE".to_string(), "sub".to_string()),
         ]),
         subwoofers: Some(SubwooferSystemConfig {
             config: SubwooferStrategy::Single,
-            crossover: Some("bass_xo".to_string().into()),
-            mapping: HashMap::from([("sub".to_string(), "Left".to_string())]),
+            crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec![
+                "bass_xo".to_string(),
+            ])),
+            routing: Default::default(),
+            outputs: vec![roomeq_model::SubwooferOutput {
+                id: "sub".to_string(),
+                speaker: "sub".to_string(),
+            }],
         }),
         bass_management: None,
         ..Default::default()
@@ -477,7 +487,7 @@ fn home_cinema_executor_with_sub_runs() {
     assert!(result.channel_results.contains_key("Left"));
     assert!(result.channel_results.contains_key("Right"));
     assert!(result.channel_results.contains_key("Center"));
-    assert!(result.channel_results.contains_key("LFE"));
+    assert!(result.channel_results.contains_key("sub"));
 }
 
 #[test]
@@ -492,12 +502,17 @@ fn stereo_2_1_executor_runs() {
         speakers: HashMap::from([
             ("L".to_string(), "left".to_string()),
             ("R".to_string(), "right".to_string()),
-            ("LFE".to_string(), "sub".to_string()),
         ]),
         subwoofers: Some(SubwooferSystemConfig {
             config: SubwooferStrategy::Single,
-            crossover: Some("bass_xo".to_string().into()),
-            mapping: HashMap::from([("sub".to_string(), "L".to_string())]),
+            crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec![
+                "bass_xo".to_string(),
+            ])),
+            routing: Default::default(),
+            outputs: vec![roomeq_model::SubwooferOutput {
+                id: "sub".to_string(),
+                speaker: "sub".to_string(),
+            }],
         }),
         bass_management: None,
         ..Default::default()
@@ -538,7 +553,7 @@ fn stereo_2_1_executor_runs() {
     assert_eq!(result.channels.len(), 3);
     assert!(result.channel_results.contains_key("L"));
     assert!(result.channel_results.contains_key("R"));
-    assert!(result.channel_results.contains_key("LFE"));
+    assert!(result.channel_results.contains_key("sub"));
 }
 
 #[test]
@@ -564,7 +579,7 @@ fn stereo_21_happy_path_with_phase() {
     assert_eq!(result.channels.len(), 3);
     assert!(result.channel_results.contains_key("L"));
     assert!(result.channel_results.contains_key("R"));
-    assert!(result.channel_results.contains_key("LFE"));
+    assert!(result.channel_results.contains_key("sub"));
 }
 
 #[test]
@@ -639,30 +654,30 @@ fn stereo_21_missing_subwoofers_config_errs() {
     assert!(result.is_err(), "missing subwoofers config should error");
     let msg = result.unwrap_err().to_string();
     assert!(
-        msg.contains("Missing subwoofers configuration"),
+        msg.contains("system.subwoofers.outputs"),
         "unexpected error: {msg}"
     );
 }
 
 #[test]
-fn stereo_21_missing_lfe_mapping_errs() {
+fn stereo_21_missing_physical_output_errs() {
     let mut speakers = stereo_speakers_with_phase();
     speakers.insert(
         "sub".to_string(),
         SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve_with_phase())),
     );
     let mut sys = stereo_21_sub_sys(SubwooferStrategy::Single);
-    sys.speakers.remove("LFE");
+    sys.subwoofers.as_mut().unwrap().outputs.clear();
     let mut optimizer = base_optimizer();
     optimizer.max_freq = 2000.0;
     let config = stereo_21_room_config(speakers, &sys, stereo_21_crossover_fixed(), optimizer);
 
     let mut assembly = make_assembly(&config, &sys);
     let result = Stereo21Executor.execute(&mut assembly);
-    assert!(result.is_err(), "missing LFE mapping should error");
+    assert!(result.is_err(), "missing physical output should error");
     let msg = result.unwrap_err().to_string();
     assert!(
-        msg.contains("Missing speaker mapping for 'LFE'"),
+        msg.contains("system.subwoofers.outputs"),
         "unexpected error: {msg}"
     );
 }
@@ -750,7 +765,7 @@ fn stereo_21_multisub_mso_runs() {
     );
     let result = result.unwrap();
     assert_eq!(result.channels.len(), 3);
-    assert!(result.channel_results.contains_key("LFE"));
+    assert!(result.channel_results.contains_key("sub"));
 }
 
 #[test]
@@ -776,7 +791,7 @@ fn stereo_21_cardioid_runs() {
     assert!(result.is_ok(), "Cardioid config failed: {:?}", result.err());
     let result = result.unwrap();
     assert_eq!(result.channels.len(), 3);
-    assert!(result.channel_results.contains_key("LFE"));
+    assert!(result.channel_results.contains_key("sub"));
 }
 
 #[test]
@@ -801,7 +816,7 @@ fn stereo_21_dba_runs() {
     assert!(result.is_ok(), "DBA config failed: {:?}", result.err());
     let result = result.unwrap();
     assert_eq!(result.channels.len(), 3);
-    assert!(result.channel_results.contains_key("LFE"));
+    assert!(result.channel_results.contains_key("sub"));
 }
 
 #[test]

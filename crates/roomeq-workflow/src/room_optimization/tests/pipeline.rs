@@ -66,7 +66,7 @@ fn prepare_room_optimization_with_system_and_bass_management_succeeds() {
     );
     let system = SystemConfig {
         model: SystemModel::HomeCinema,
-        speakers: HashMap::from([("Left".to_string(), "left".to_string())]),
+        speakers: HashMap::from([("L".to_string(), "left".to_string())]),
         subwoofers: None,
         bass_management: Some(BassManagementConfig {
             enabled: true,
@@ -207,12 +207,12 @@ fn stereo_2_1_config() -> RoomConfig {
             speakers: HashMap::from([
                 ("L".to_string(), "left".to_string()),
                 ("R".to_string(), "right".to_string()),
-                ("Sub".to_string(), "sub".to_string()),
             ]),
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Single,
-                crossover: Some("xo".to_string().into()),
-                mapping: [("sub".to_string(), "L".to_string())].into(),
+                crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec!["xo".to_string()])),
+                routing: Default::default(),
+                    outputs: vec![roomeq_model::SubwooferOutput { id: "sub".to_string(), speaker: "sub".to_string() }],
             }),
             bass_management: None,
             ..Default::default()
@@ -304,8 +304,8 @@ fn assemble_workflow_result_empty_channels_succeeds() {
     let system = SystemConfig {
         model: SystemModel::Stereo,
         speakers: HashMap::from([
-            ("Left".to_string(), "left".to_string()),
-            ("Right".to_string(), "right".to_string()),
+            ("L".to_string(), "left".to_string()),
+            ("R".to_string(), "right".to_string()),
         ]),
         subwoofers: None,
         bass_management: None,

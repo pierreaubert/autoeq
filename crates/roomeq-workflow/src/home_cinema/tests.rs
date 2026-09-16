@@ -476,8 +476,11 @@ mod coverage_tests {
                 ]),
                 subwoofers: Some(SubwooferSystemConfig {
                     config: Default::default(),
-                    crossover: Some("sub".to_string().into()),
-                    mapping: HashMap::new(),
+                    crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec![
+                        "sub".to_string(),
+                    ])),
+                    routing: Default::default(),
+                    outputs: Vec::new(),
                 }),
                 bass_management: Some(BassManagementConfig::default()),
                 supporting_source_outputs: None,
@@ -728,7 +731,7 @@ mod coverage_tests {
         assert_eq!(resolved.crossover_type, "LR24");
         let routes = resolved_group_route_settings("lcr", None);
         assert_eq!(routes.main_delay_ms, 0.0);
-        let outputs = resolved_bass_sub_outputs("sub", None);
+        let outputs = resolved_bass_sub_outputs(&config, "sub", None);
         assert_eq!(outputs.len(), 1);
     }
 
@@ -769,6 +772,7 @@ mod coverage_tests {
             }],
             source_results: Vec::new(),
             sub_output_results: Vec::new(),
+            stereo_routing: None,
             advisories: Vec::new(),
         };
         let config = home_cinema_config();
@@ -782,7 +786,7 @@ mod coverage_tests {
         let config = home_cinema_config();
         let report = analyze_layout(&config);
         assert_eq!(report.bed_channels, 3);
-        assert_eq!(report.lfe_channels, 0);
+        assert_eq!(report.lfe_channels, 1);
     }
 
     #[test]
@@ -840,6 +844,8 @@ mod coverage_tests {
     fn estimated_bass_bus_peak_gain() {
         let graph = BassManagementRoutingGraph {
             physical_sub_output: "sub".to_string(),
+            physical_sub_outputs: Vec::new(),
+            stereo_routing: None,
             input_channels: vec!["L".to_string()],
             output_channels: vec!["sub".to_string()],
             routes: vec![BassManagementRoute {

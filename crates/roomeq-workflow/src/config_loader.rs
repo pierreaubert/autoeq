@@ -78,6 +78,9 @@ fn migrate_legacy_optimizer_mode(config: &mut serde_json::Value) {
 /// files the desired typo protection without changing programmatic model
 /// construction or the representation of those compatibility types.
 pub fn deserialize_room_config_strict(config: serde_json::Value) -> Result<RoomConfig> {
+    if let Some(version) = config.get("version").and_then(serde_json::Value::as_str) {
+        roomeq_model::validate_config_version(version).map_err(anyhow::Error::msg)?;
+    }
     let encoded = serde_json::to_vec(&config).context("Failed to encode merged config JSON")?;
     let mut deserializer = serde_json::Deserializer::from_slice(&encoded);
     let mut unknown_fields = Vec::new();
@@ -379,7 +382,7 @@ mod tests {
     #[test]
     fn strict_deserializer_rejects_unknown_root_and_nested_fields() {
         let root_error = deserialize_room_config_strict(serde_json::json!({
-            "version": "1.0.0",
+            "version": "3.0.0",
             "speakers": {},
             "optimizer": {},
             "optimiser": {}
@@ -388,7 +391,7 @@ mod tests {
         assert!(root_error.to_string().contains("optimiser"));
 
         let nested_error = deserialize_room_config_strict(serde_json::json!({
-            "version": "1.0.0",
+            "version": "3.0.0",
             "speakers": {},
             "optimizer": { "target_tilt": { "slope": -0.8 } }
         }))
@@ -402,7 +405,7 @@ mod tests {
         let base = write_config(
             &dir,
             "base.json",
-            r#"{"version":"1.0.0","speakers":{},"optimizer":{"min_freq":20.0,"max_freq":20000.0}}"#,
+            r#"{"version":"3.0.0","speakers":{},"optimizer":{"min_freq":20.0,"max_freq":20000.0}}"#,
         );
         let override_path = write_config(
             &dir,
@@ -438,7 +441,7 @@ mod tests {
         let path = write_config(
             &dir,
             "room.json",
-            r#"{"version":"1.0.0","speakers":{"left":"broken.csv"},"optimizer":{}}"#,
+            r#"{"version":"3.0.0","speakers":{"left":"broken.csv"},"optimizer":{}}"#,
         );
 
         let (_, _, validation) = load_config(&path, None).expect("deserialize config");
@@ -515,7 +518,7 @@ mod tests {
         let path = write_config(
             &dir,
             "future.json",
-            r#"{"version":"3.0.0","speakers":{},"optimizer":{}}"#,
+            r#"{"version":"4.0.0","speakers":{},"optimizer":{}}"#,
         );
 
         let error = load_config(&path, None).expect_err("future config must be rejected");

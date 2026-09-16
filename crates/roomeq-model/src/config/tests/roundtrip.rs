@@ -668,8 +668,12 @@ fn subwoofer_crossover_ref_shared_serializes_as_plain_string() {
 
     let system = SubwooferSystemConfig {
         config: SubwooferStrategy::Mso,
+        routing: Default::default(),
+        outputs: vec![crate::SubwooferOutput {
+            id: "Sub1".to_string(),
+            speaker: "subs".to_string(),
+        }],
         crossover: Some(shared),
-        mapping: HashMap::from([("subs".to_string(), "L".to_string())]),
     };
     let value = serde_json::to_value(&system).unwrap();
     assert_eq!(value["crossover"], serde_json::json!("bass_xover"));
@@ -704,8 +708,12 @@ fn subwoofer_crossover_ref_per_sub_roundtrip_and_legacy_accessors() {
     // Legacy single-key consumers resolve the primary key through deref.
     let system = SubwooferSystemConfig {
         config: SubwooferStrategy::Mso,
+        routing: Default::default(),
+        outputs: vec![crate::SubwooferOutput {
+            id: "Sub1".to_string(),
+            speaker: "subs".to_string(),
+        }],
         crossover: Some(per_sub),
-        mapping: HashMap::from([("subs".to_string(), "L".to_string())]),
     };
     assert_eq!(system.crossover.as_deref(), Some("bass_xover1"));
 }

@@ -172,7 +172,7 @@ fn validate_room_config_rules(config: &RoomConfig) -> ValidationResult {
                 let collides_with_subwoofer = system
                     .subwoofers
                     .as_ref()
-                    .is_some_and(|subwoofers| subwoofers.mapping.contains_key(&support_name));
+                    .is_some_and(|subwoofers| subwoofers.output(&support_name).is_some());
                 if system.speakers.contains_key(&support_name) || collides_with_subwoofer {
                     result.add_error(format!(
                         "supporting-source output '{support_name}' collides with an existing logical channel"
@@ -181,14 +181,6 @@ fn validate_room_config_rules(config: &RoomConfig) -> ValidationResult {
             }
         }
         if let Some(subwoofers) = system.subwoofers.as_ref() {
-            let mut main_to_sub = HashMap::<&str, &str>::new();
-            for (sub, main) in &subwoofers.mapping {
-                if let Some(previous_sub) = main_to_sub.insert(main.as_str(), sub.as_str()) {
-                    result.add_error(format!(
-                        "subwoofers '{previous_sub}' and '{sub}' both map to main '{main}'; multiple phase-alignment constraints per main are not supported"
-                    ));
-                }
-            }
             validate_subwoofer_crossovers(subwoofers, config, &mut result);
         }
     }
@@ -726,6 +718,11 @@ fn validate_subwoofer_crossovers(
     let Some(crossover) = subwoofers.crossover.as_ref() else {
         return;
     };
+    if matches!(crossover, crate::config::SubwooferCrossoverRef::Shared(_)) {
+        result.add_error(
+            "system.subwoofers.crossover must be an array in config version 3.0.x".to_string(),
+        );
+    }
     let keys = crossover.as_list();
     let Some(crossovers) = config.crossovers.as_ref() else {
         result.add_error(format!(
@@ -742,9 +739,9 @@ fn validate_subwoofer_crossovers(
         }
     }
     let sub_count = subwoofer_count(subwoofers, &config.speakers);
-    if keys.len() != 1 && keys.len() != sub_count {
+    if keys.len() != sub_count {
         result.add_error(format!(
-            "subwoofers crossover list has {} entries but {} subwoofer(s) configured; expected 1 or {}",
+            "subwoofers crossover list has {} entries but {} physical sub output(s) configured; expected {}",
             keys.len(),
             sub_count,
             sub_count
@@ -752,21 +749,12 @@ fn validate_subwoofer_crossovers(
     }
 }
 
-/// Number of physical subwoofers behind the MSO mapping: each mapped
-/// speaker key contributes its multi-sub driver count (1 otherwise, so
-/// unresolved keys still count as a single sub).
+/// Number of explicitly declared physical subwoofer outputs.
 fn subwoofer_count(
     subwoofers: &crate::config::SubwooferSystemConfig,
-    speakers: &HashMap<String, SpeakerConfig>,
+    _speakers: &HashMap<String, SpeakerConfig>,
 ) -> usize {
-    subwoofers
-        .mapping
-        .keys()
-        .map(|key| match speakers.get(key) {
-            Some(SpeakerConfig::MultiSub(group)) => group.subwoofers.len().max(1),
-            _ => 1,
-        })
-        .sum()
+    subwoofers.outputs.len()
 }
 
 /// Validate interactions between optimizer options and the resolved speaker map.
@@ -1734,7 +1722,7 @@ mod room_config_validation_tests {
     #[test]
     fn unsupported_config_version_is_a_validation_error() {
         let mut config = default_room();
-        config.version = "3.0.0".to_string();
+        config.version = "4.0.0".to_string();
         config.speakers.insert(
             "L".to_string(),
             SpeakerConfig::Single(single_source("l.csv", None)),
@@ -3152,7 +3140,7 @@ mod room_config_validation_tests {
     }
 
     #[test]
-    fn duplicate_subwoofer_phase_alignment_mapping_is_rejected() {
+    fn duplicate_physical_sub_output_ids_are_rejected() {
         let mut config = default_room();
         config.speakers.insert(
             "Left".to_string(),
@@ -3163,22 +3151,30 @@ mod room_config_validation_tests {
             speakers: HashMap::from([("L".to_string(), "Left".to_string())]),
             subwoofers: Some(crate::roomeq::types::SubwooferSystemConfig {
                 config: Default::default(),
+                routing: Default::default(),
+                outputs: vec![
+                    crate::SubwooferOutput {
+                        id: "Sub1".to_string(),
+                        speaker: "Left".to_string(),
+                    },
+                    crate::SubwooferOutput {
+                        id: "Sub1".to_string(),
+                        speaker: "Left".to_string(),
+                    },
+                ],
                 crossover: None,
-                mapping: HashMap::from([
-                    ("Sub1".to_string(), "L".to_string()),
-                    ("Sub2".to_string(), "L".to_string()),
-                ]),
             }),
             bass_management: None,
             supporting_source_outputs: None,
         });
 
         let result = validate_room_config(&config);
-        assert!(result.errors.iter().any(|error| {
-            error.contains("Sub1")
-                && error.contains("Sub2")
-                && error.contains("both map to main 'L'")
-        }));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.contains("duplicate output id 'Sub1'"))
+        );
     }
 
     #[test]

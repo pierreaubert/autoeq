@@ -4,7 +4,7 @@
     "processing_mode": "hybrid",
     "seed": 42,
     "mixed_config": {
-      "crossover_freq": 300.0,
+      "crossover_freq": 160.0,
       "crossover_type": "LR24",
       "fir_band": "low"
     },

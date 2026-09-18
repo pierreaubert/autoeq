@@ -1062,6 +1062,7 @@ fn stereo_candidate_serialized_replay_rejection(
     sources: &[BassManagementSourceReport],
     outputs: &[BassManagementSubOutputReport],
     drivers: &[engine_bass_management::SubDriverInfo],
+    common_sub_correction: Option<(&Curve, &Curve)>,
     matrix: &[Vec<f64>],
     sample_rate: f64,
 ) -> std::result::Result<(), String> {
@@ -1097,6 +1098,11 @@ fn stereo_candidate_serialized_replay_rejection(
                     driver.name
                 )
             })?;
+        if let Some((measured, corrected)) = common_sub_correction {
+            curve =
+                engine_bass_management::apply_common_sub_correction(&curve, measured, corrected)
+                    .ok_or_else(|| "serialized_replay_invalid_common_sub_correction".to_string())?;
+        }
         if let Some(low_pass_hz) = output.selected_low_pass_hz {
             curve = apply_crossover_response_to_curve(
                 &curve,
@@ -2815,6 +2821,9 @@ fn optimize_home_cinema_with_sub(
                         &candidate_sources,
                         &candidate_outputs,
                         drivers,
+                        aligned_curves
+                            .get(&sub_role)
+                            .zip(aligned_pre_eq_curves.get(&sub_role)),
                         &matrix,
                         sample_rate,
                     )
@@ -2855,8 +2864,21 @@ fn optimize_home_cinema_with_sub(
         let selected = engine_home_cinema::select_stereo_bass_candidate(&reports)
             .cloned()
             .ok_or_else(|| AutoeqError::OptimizationFailed {
-                message: "all stereo bass routing candidates failed acoustic or electrical safety"
-                    .to_string(),
+                message: format!(
+                    "all stereo bass routing candidates failed acoustic or electrical safety: {}",
+                    reports
+                        .iter()
+                        .map(|report| format!(
+                            "{:?}: {}",
+                            report.topology,
+                            report
+                                .rejection_reason
+                                .as_deref()
+                                .unwrap_or("objective unavailable")
+                        ))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                ),
             })?;
         let selected_index = candidate_runs
             .iter()
@@ -4500,6 +4522,7 @@ mod post_dsp_level_tests {
                 &sources,
                 &outputs,
                 &drivers,
+                None,
                 &direct,
                 48_000.0,
             )
@@ -4516,11 +4539,33 @@ mod post_dsp_level_tests {
             &sources,
             &outputs,
             &drivers,
+            None,
             &direct,
             48_000.0,
         )
         .expect_err("inverting one LR24 bass branch must fail serialized splice replay");
         assert!(rejection.contains("serialized_graph_acoustic_splice_underfill:L"));
+        sources[1].polarity_inverted = true;
+        let mut corrected_sub = measured.clone();
+        corrected_sub
+            .phase
+            .as_mut()
+            .unwrap()
+            .mapv_inplace(|phase| phase + 180.0);
+        super::stereo_candidate_serialized_replay_rejection(
+            &roomeq_model::RoomConfig::default(),
+            &main_roles,
+            &mains,
+            &transfers,
+            &groups,
+            &sources,
+            &outputs,
+            &drivers,
+            Some((&measured, &corrected_sub)),
+            &direct,
+            48_000.0,
+        )
+        .expect("shared sub correction must participate in serialized phase replay");
     }
 
     #[test]

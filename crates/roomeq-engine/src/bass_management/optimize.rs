@@ -1058,7 +1058,11 @@ fn measured_source_route_trim_db(
 /// correction designed from `measured_sub_curve` to
 /// `corrected_sub_curve`.  Route optimization must include the same transfer
 /// or it evaluates a different low branch than the exported DSP graph.
-fn apply_common_sub_correction(
+/// Apply the shared subwoofer correction to a physical driver response.
+///
+/// Only the electrical correction is extended outside common measurement support.
+/// Returns `None` when overlapping support or coherent phase is unavailable.
+pub fn apply_common_sub_correction(
     driver_sum: &Curve,
     measured_sub_curve: &Curve,
     corrected_sub_curve: &Curve,

@@ -549,6 +549,29 @@ fn replay(
             if route.delay_ms.abs() > 0.001 {
                 route_plugins.push(roomeq_engine::output::create_delay_plugin(route.delay_ms));
             }
+            let subwoofer_low_pass_hz = matches!(
+                route.route_kind.as_str(),
+                "redirected_bass_lowpass_to_sub" | "lfe_lowpass_to_sub"
+            )
+            .then(|| {
+                route.low_pass_hz.or_else(|| {
+                    post.drivers
+                        .as_ref()?
+                        .iter()
+                        .find(|driver| driver.name == route.destination)?
+                        .plugins
+                        .iter()
+                        .filter(|plugin| {
+                            plugin.plugin_type == "crossover"
+                                && plugin.parameters["output"] == "low"
+                                && plugin.parameters["room_eq_stage"] == "post_route"
+                        })
+                        .filter_map(|plugin| plugin.parameters["frequency"].as_f64())
+                        .filter(|frequency| frequency.is_finite() && *frequency > 0.0)
+                        .min_by(f64::total_cmp)
+                })
+            })
+            .flatten();
             let branch = process_branch(
                 &route.destination,
                 raw,
@@ -556,6 +579,7 @@ fn replay(
                 partition,
                 seat,
                 &grid,
+                subwoofer_low_pass_hz,
                 |curve| {
                     let curve = if pre_route_plugins.is_empty() {
                         curve.clone()
@@ -640,6 +664,7 @@ fn replay(
                 partition,
                 seat,
                 &grid,
+                None,
                 |curve| {
                     let curve = apply(
                         result,
@@ -1780,6 +1805,80 @@ mod tests {
             maximum_error < 1e-8,
             "routed matching transfer differs by {maximum_error} dB"
         );
+    }
+
+    #[test]
+    fn routed_subwoofer_stopband_replays_full_main_band_without_declaration() {
+        for per_driver in [false, true] {
+            let (mut result, mut config, _) = routed_fixture();
+            config.optimizer.min_freq = 20.0;
+            config.optimizer.max_freq = 16_000.0;
+            if per_driver {
+                let mut low_pass =
+                    roomeq_engine::output::create_crossover_plugin("LR24", 80.0, "low");
+                low_pass.parameters["room_eq_stage"] = serde_json::json!("post_route");
+                result.channels.get_mut("sub").unwrap().drivers =
+                    Some(vec![roomeq_model::DriverDspChain {
+                        name: "sub".into(),
+                        index: 0,
+                        initial_curve: None,
+                        measured_band_hz: None,
+                        plugins: vec![low_pass],
+                    }]);
+            } else {
+                result
+                    .metadata
+                    .bass_management
+                    .as_mut()
+                    .unwrap()
+                    .routing_graph
+                    .as_mut()
+                    .unwrap()
+                    .routes[1]
+                    .low_pass_hz = Some(80.0);
+            }
+            let curve = |frequencies: Vec<f64>, level| {
+                let len = frequencies.len();
+                Curve {
+                    freq: frequencies.into(),
+                    spl: ndarray::Array1::from_elem(len, level),
+                    phase: Some(ndarray::Array1::zeros(len)),
+                    ..Default::default()
+                }
+            };
+            let physical = BTreeMap::from([
+                (
+                    "left".into(),
+                    vec![curve(vec![20.0, 100.0, 250.0, 1000.0, 16_000.0], 80.0)],
+                ),
+                ("sub".into(), vec![curve(vec![20.0, 100.0, 250.0], 50.0)]),
+            ]);
+            for partition in ["training", "held_out"] {
+                for baseline in [false, true] {
+                    let (sum, _) = replay(
+                        &result,
+                        &physical,
+                        "left",
+                        0,
+                        baseline,
+                        &ReplayContext {
+                            config: &config,
+                            partition,
+                            fs: 48_000.0,
+                            dir: Path::new("."),
+                        },
+                    )
+                    .unwrap();
+                    assert_eq!(*sum.curve.freq.last().unwrap(), 16_000.0);
+                    assert_eq!(sum.support.len(), 1);
+                    assert!(
+                        serde_json::to_string(&sum.support)
+                            .unwrap()
+                            .contains("assumed_subwoofer_stopband_below_measured_tail")
+                    );
+                }
+            }
+        }
     }
 
     #[test]

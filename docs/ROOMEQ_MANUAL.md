@@ -1144,16 +1144,20 @@ attenuation search limit does not grant an acoustic gain allowance. See
 covers the reported frequency grid; continuous-frequency, transient, true-peak
 and physical-device certification remain separate work.
 
-Final-seat replay preserves a full-range main when a shorter sub capture has an
-explicit calibrated `optimizer.upper_band_acoustic_bounds` declaration for that
-physical output, partition, and seat. A falling measured tail is not sufficient.
-The bound is processed through the actual branch DSP; aggregate omission must
-stay within 0.1 dB magnitude uncertainty. Reports retain magnitude and phase
-uncertainty without inventing unmeasured phase, and use a conservative improvement
-lower bound. Missing upper-band evidence publishes the correction-free structural
-baseline with `insufficient_evidence`, instead of inventing acoustic support or
-truncating the main assessment. An electrical low-pass alone supplies no acoustic
-capability bound. See `src/bin/roomeq/INPUT_FORMAT.md` for the
+Final-seat replay preserves the full-range main assessment without requiring
+subwoofer measurements through the treble. A routed subwoofer measured through
+twice its deployed low-pass frequency uses an automatic stopband assumption:
+the unmeasured acoustic tail stays below the peak of the final measured
+half-octave. Actual branch DSP is applied to that envelope, and aggregate
+omission must stay within 0.1 dB magnitude uncertainty. The report labels this
+assumption `assumed_subwoofer_stopband_below_measured_tail`; no subwoofer phase
+is extrapolated. Mains and missing crossover-band measurements are not exempt.
+
+Explicit calibrated `optimizer.upper_band_acoustic_bounds` declarations take
+precedence for their physical output, partition, and seat. Reports retain
+magnitude and phase uncertainty and use a conservative improvement lower bound.
+If neither measured support nor an adequate bound is available, replay retains
+the insufficient-evidence outcome. See `src/bin/roomeq/INPUT_FORMAT.md` for the
 configuration and calibration contract.
 
 `optimizer.correction_band` is an optional explicit active-correction range.

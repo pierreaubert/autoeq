@@ -1,5 +1,7 @@
 # Unreleased
 
+- Allow routed subwoofer replay beyond measured stopband support using a recorded tail-envelope assumption and the deployed low-pass, while retaining full-band main assessment and the 0.1 dB omission uncertainty limit.
+
 - Fix multi-sub physical routing when the shared processing channel uses its first driver's output name, while still rejecting separate channels that duplicate driver ownership.
 
 - Make coherent main/sub cancellation configurable through

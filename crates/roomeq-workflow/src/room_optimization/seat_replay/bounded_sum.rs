@@ -41,6 +41,7 @@ pub(super) fn process_branch(
     partition: &str,
     seat: usize,
     grid: &ndarray::Array1<f64>,
+    subwoofer_low_pass_hz: Option<f64>,
     mut process: impl FnMut(&Curve) -> Result<Curve>,
 ) -> Result<Branch> {
     raw.validate("bounded replay capture")?;
@@ -64,10 +65,29 @@ pub(super) fn process_branch(
         .freq
         .last()
         .ok_or_else(|| invalid("empty bounded capture"))?;
-    // An electrical low-pass does not bound the unknown acoustic response.
-    // Only a caller-supplied source-capability declaration can establish the
-    // omitted tail; it is then processed through the actual branch DSP.
-    let bound = matches.first().copied();
+    // For subwoofers measured through the crossover region, assume the
+    // unmeasured stopband never exceeds the last measured half-octave's peak. This is
+    // a source-capability assumption, not extrapolated magnitude or phase.
+    // Requiring an octave beyond the low-pass preserves crossover evidence;
+    // the actual DSP and omission budget must still make the tail negligible.
+    let inferred = subwoofer_low_pass_hz
+        .filter(|cutoff| cutoff.is_finite() && *cutoff > 0.0 && endpoint >= 2.0 * cutoff)
+        .filter(|_| grid[grid.len() - 1] > endpoint)
+        .map(|_| UpperBandAcousticBound {
+            partition: partition.into(),
+            seat_index: seat,
+            band_hz: [endpoint, grid[grid.len() - 1]],
+            max_spl_db: raw
+                .freq
+                .iter()
+                .zip(&raw.spl)
+                .filter(|(frequency, _)| **frequency >= endpoint / std::f64::consts::SQRT_2)
+                .map(|(_, spl)| *spl)
+                .fold(f64::NEG_INFINITY, f64::max),
+            evidence_id: "assumed_subwoofer_stopband_below_measured_tail".into(),
+        });
+    // An explicit declaration always takes precedence over the assumption.
+    let bound = matches.first().copied().or(inferred.as_ref());
     let upper = if let Some(bound) = bound {
         let [low, high] = bound.band_hz;
         if !low.is_finite()
@@ -431,6 +451,7 @@ mod tests {
             "training",
             0,
             &grid,
+            None,
             |curve| {
                 // Model the deployed low-pass attenuation on the inferred
                 // bound.  The measured path itself stays unchanged.
@@ -461,6 +482,64 @@ mod tests {
                 .to_string()
                 .contains("insufficient summation evidence")
         );
+    }
+
+    #[test]
+    fn subwoofer_tail_assumption_requires_crossover_coverage_and_negligible_output() {
+        let grid = ndarray::Array1::from_vec(vec![20.0, 100.0, 250.0, 1000.0, 16000.0]);
+        let raw = Curve {
+            freq: ndarray::Array1::from_vec(vec![20.0, 100.0, 250.0]),
+            spl: ndarray::Array1::from_elem(3, 70.0),
+            phase: Some(ndarray::Array1::zeros(3)),
+            ..Default::default()
+        };
+        let main = || Branch {
+            output: "main".into(),
+            measured: Curve {
+                freq: grid.clone(),
+                spl: ndarray::Array1::from_elem(grid.len(), 80.0),
+                phase: Some(ndarray::Array1::zeros(grid.len())),
+                ..Default::default()
+            },
+            upper: None,
+        };
+        for (cutoff, attenuation, accepted) in [
+            (Some(80.0), 60.0, true),
+            (None, 60.0, false),
+            (Some(150.0), 60.0, false),
+            (Some(80.0), 0.0, false),
+        ] {
+            let branch = process_branch(
+                "sub",
+                &raw,
+                &HashMap::new(),
+                "training",
+                0,
+                &grid,
+                cutoff,
+                |curve| {
+                    let mut processed = curve.clone();
+                    for (frequency, spl) in processed.freq.iter().zip(&mut processed.spl) {
+                        if *frequency > 250.0 {
+                            *spl -= attenuation;
+                        }
+                    }
+                    Ok(processed)
+                },
+            )
+            .unwrap();
+            let summed = sum_branches(&[main(), branch], 20.0, 16000.0);
+            assert_eq!(
+                summed.is_ok(),
+                accepted,
+                "cutoff={cutoff:?}, cut={attenuation}"
+            );
+            if let Ok(summed) = summed {
+                assert_eq!(*summed.curve.freq.last().unwrap(), 16000.0);
+                assert!(summed.uncertainty_db() < MAX_OMISSION_ERROR_DB);
+                assert_eq!(summed.support.len(), 1);
+            }
+        }
     }
 
     #[test]

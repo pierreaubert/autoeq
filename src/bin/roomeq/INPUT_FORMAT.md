@@ -149,10 +149,18 @@ fixed evaluated band and the requested correction band separately.
 
 ### Unequal upper-band measurement support
 
-Final coherent replay does not extrapolate a short subwoofer capture or silently
-truncate a full-range main. An omitted upper-band branch requires an explicit
-calibrated acoustic upper bound, identified separately for each physical output,
-partition (`training` or `held_out`), and seat index:
+Final coherent replay does not extrapolate subwoofer phase or silently truncate
+a full-range main. For a routed subwoofer measured through twice its deployed
+low-pass frequency, replay assumes the unmeasured stopband stays below the peak
+of the capture's final half-octave. The actual branch DSP is applied to this
+envelope; omission still requires at most 0.1 dB aggregate magnitude uncertainty.
+This assumption is recorded as `assumed_subwoofer_stopband_below_measured_tail`
+in final-seat summation support. It applies to route-owned and per-driver
+low-passes, not to mains or missing crossover-band measurements.
+
+An explicit calibrated acoustic upper bound overrides this assumption. It is
+identified separately for each physical output, partition (`training` or
+`held_out`), and seat index:
 
 ```json
 "optimizer": {
@@ -168,18 +176,15 @@ partition (`training` or `held_out`), and seat index:
 }
 ```
 
-This example is illustrative, not a default acoustic assumption. The bound must
-use the original capture calibration and input reference, overlap its measured
-endpoint, and cover the assessment band. A decreasing measured tail alone does
-not establish a bound. Bounds cannot be broadcast across seats. Replay applies
-the actual branch DSP to the bound and allows omission only when aggregate
-magnitude uncertainty is at most 0.1 dB. It does not invent unmeasured phase.
-Final-seat support evidence records magnitude and phase uncertainty, and the
-improvement lower bound includes both baseline and candidate uncertainty.
-Missing bounds prevent an accepted correction: RoomEQ publishes the structural
-baseline and reports `insufficient_evidence`. Contradictory declarations remain
-configuration errors. Electrical crossover settings do not establish an acoustic
-bound for unmeasured response.
+An explicit bound must use the original capture calibration and input reference,
+overlap its measured endpoint, and cover the assessment band. Bounds cannot be
+broadcast across seats. Replay applies the actual branch DSP to the bound and
+allows omission only when aggregate magnitude uncertainty is at most 0.1 dB.
+It does not invent unmeasured phase. Final-seat support evidence records both
+magnitude and phase uncertainty, and the improvement lower bound includes
+baseline and candidate uncertainty. Missing bounds outside the automatic
+subwoofer case prevent an accepted correction. Contradictory declarations
+remain configuration errors.
 
 Final coherent replay also checks lower measurement support. A driver or routed
 output starting above another branch's measured bass is insufficient evidence

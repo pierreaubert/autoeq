@@ -111,7 +111,9 @@ pub fn resolve_physical_routing(
         .iter()
         .map(|name| {
             let plugins = if let Some(driver) = shared_drivers.iter().find(|d| &d.name == name) {
-                if channels.contains_key(name) {
+                // The shared parent may use its first driver's output name.
+                // It owns common processing, not a second physical output.
+                if channels.contains_key(name) && name != &graph.physical_sub_output {
                     return Err(invalid(
                         "physical output has both driver and channel ownership",
                     ));
@@ -549,6 +551,60 @@ mod tests {
         );
         assert_eq!(plugins.last().unwrap().parameters["delay_ms"], 0.0001);
         assert_eq!(plugins[1].parameters["type"], "LR48");
+    }
+
+    #[test]
+    fn physical_routing_allows_shared_parent_named_after_driver() {
+        let (mut channels, mut graph) = fixture();
+        // Keep LFE as a program input, without the legacy unused output slot.
+        graph.output_channels.remove(2);
+        for route in &mut graph.routes {
+            if route.destination_index > 2 {
+                route.destination_index -= 1;
+            }
+        }
+        channels.get_mut("LFE").unwrap().drivers.as_mut().unwrap()[0]
+            .plugins
+            .push(tagged("eq", json!({"filters": []}), "post_route"));
+        let expected = resolve_physical_routing(&channels, &graph).unwrap();
+
+        let mut shared = channels.remove("LFE").unwrap();
+        let mut input_only = shared.clone();
+        input_only.plugins = selected(&shared, "pre_route");
+        input_only.drivers = None;
+        channels.insert("LFE".into(), input_only);
+        shared.channel = "subs_1".into();
+        channels.insert("subs_1".into(), shared);
+        graph.physical_sub_output = "subs_1".into();
+        for route in &mut graph.routes {
+            if route.pre_chain_channel.as_deref() == Some("LFE") {
+                route.pre_chain_channel = Some("subs_1".into());
+            }
+        }
+
+        let actual = resolve_physical_routing(&channels, &graph).unwrap();
+        // Shared and driver processing, plus route controls, remain identical:
+        // no output loses processing or receives the shared chain twice.
+        assert_eq!(
+            serde_json::to_value(actual).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+    }
+
+    #[test]
+    fn physical_routing_rejects_separate_channel_named_after_driver() {
+        let (mut channels, graph) = fixture();
+        let chain = serde_json::from_value(json!({
+            "channel": "subs_2", "plugins": []
+        }))
+        .unwrap();
+        channels.insert("subs_2".into(), chain);
+        let error = resolve_physical_routing(&channels, &graph).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("both driver and channel ownership")
+        );
     }
 
     #[test]

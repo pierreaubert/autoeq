@@ -1,5 +1,7 @@
 # Unreleased
 
+- Fix multi-sub physical routing when the shared processing channel uses its first driver's output name, while still rejecting separate channels that duplicate driver ownership.
+
 - Make coherent main/sub cancellation configurable through
   `optimizer.max_crossover_cancellation_db` (default 3 dB). Accept above-limit
   residuals only when they improve over the frozen pre-optimization baseline by

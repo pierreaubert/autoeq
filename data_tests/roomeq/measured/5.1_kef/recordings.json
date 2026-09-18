@@ -64,5 +64,10 @@
       "path": "260706a_1800_cdsp_straightthru_baseline_csv/L_R_r3m_ported_48k_FL_R_260706a_direct_Jul_6_-20_dBFS.csv",
       "name": "L+R r3m_ported_48k_FL&R_260706a_direct"
     }
+  },
+  "optimizer": {
+    "finalization": {
+      "max_attenuation_db": 16.0
+    }
   }
 }

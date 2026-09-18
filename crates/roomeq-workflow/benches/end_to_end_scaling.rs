@@ -51,6 +51,7 @@ fn config_5_1_4(threads: usize) -> RoomConfig {
         .collect();
     let system_speakers = CHANNELS_5_1_4
         .iter()
+        .filter(|(role, _)| *role != "LFE")
         .map(|(role, channel)| ((*role).to_string(), (*channel).to_string()))
         .collect();
 
@@ -117,7 +118,6 @@ fn config_5_0_4(threads: usize) -> RoomConfig {
     config.speakers.remove("lfe");
     config.crossovers = None;
     if let Some(system) = config.system.as_mut() {
-        system.speakers.remove("LFE");
         system.subwoofers = None;
     }
     config

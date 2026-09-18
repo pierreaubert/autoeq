@@ -20,7 +20,9 @@ pub mod roomeq {
 pub mod auto_tune;
 pub mod config;
 pub mod contracts;
+pub mod crossover_cancellation;
 pub mod home_cinema;
+pub use crossover_cancellation::*;
 pub mod home_cinema_resolution;
 pub mod ir_waveform;
 pub mod optimizer_settings;

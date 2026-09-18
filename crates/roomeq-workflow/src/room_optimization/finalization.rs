@@ -313,8 +313,8 @@ fn select_inner(
             if let Some(bass) = &candidate.metadata.bass_management
                 && let Some(graph) = &bass.routing_graph
             {
-                candidate.deployed_source_curves =
-                    crate::topology::reconstruct_deployed_source_curves(
+                let (curves, cancellation) =
+                    crate::topology::reconstruct_deployed_source_curves_with_evidence(
                         &candidate.channels,
                         &retained_fir_coeffs_by_channel(&candidate),
                         graph,
@@ -322,6 +322,13 @@ fn select_inner(
                         fs,
                         dir,
                     )?;
+                candidate.deployed_source_curves = curves;
+                candidate
+                    .metadata
+                    .bass_management
+                    .as_mut()
+                    .unwrap()
+                    .crossover_cancellation = cancellation;
             }
             let outputs = crate::electrical_headroom::assess_final_graph(
                 &candidate.to_dsp_chain_output(),
@@ -964,10 +971,7 @@ fn install_spectral_attenuation(
             plugin.parameters["room_eq_stage"] = serde_json::json!("pre_route");
         }
         for input in &inputs {
-            result
-                .channels
-                .get_mut(input)
-                .ok_or_else(|| failed("missing spectral headroom input owner"))?
+            headroom_input_chain(result, input, is_routed)?
                 .plugins
                 .insert(0, plugin.clone());
         }
@@ -975,6 +979,40 @@ fn install_spectral_attenuation(
     Err(failed(
         "frequency-selective headroom correction did not converge within 12 sections",
     ))
+}
+
+fn headroom_input_chain<'a>(
+    result: &'a mut RoomOptimizationResult,
+    input: &str,
+    is_routed: bool,
+) -> Result<&'a mut roomeq_model::ChannelDspChain> {
+    // V3 LFE is a logical programme input, not a measured physical output.
+    // Routing treats its absent chain as identity; materialize that owner when
+    // safety processing needs to be installed before all of its routes.
+    if is_routed
+        && roomeq_model::home_cinema::role_for_channel(input) == roomeq_model::HomeCinemaRole::Lfe
+    {
+        result
+            .channels
+            .entry(input.to_string())
+            .or_insert_with(|| roomeq_model::ChannelDspChain {
+                channel: input.to_string(),
+                plugins: Vec::new(),
+                drivers: None,
+                initial_curve: None,
+                final_curve: None,
+                eq_response: None,
+                target_curve: None,
+                pre_ir: None,
+                post_ir: None,
+                fir_temporal_masking: None,
+                direct_early_late_correction: None,
+            });
+    }
+    result
+        .channels
+        .get_mut(input)
+        .ok_or_else(|| failed(format!("missing headroom input owner '{input}'")))
 }
 
 fn install_attenuation(result: &mut RoomOptimizationResult, attenuation: f64) -> Result<()> {
@@ -988,10 +1026,7 @@ fn install_attenuation(result: &mut RoomOptimizationResult, attenuation: f64) ->
         .clone()
         .unwrap_or_else(|| result.channels.keys().cloned().collect());
     for input in inputs {
-        let chain = result
-            .channels
-            .get_mut(&input)
-            .ok_or_else(|| failed("missing headroom input owner"))?;
+        let chain = headroom_input_chain(result, &input, routed_inputs.is_some())?;
         let mut gain = roomeq_engine::output::create_gain_plugin(-attenuation);
         gain.parameters["room_eq_correction_gain"] = serde_json::json!(true);
         gain.parameters["room_eq_safety_gain"] = serde_json::json!(true);
@@ -1521,6 +1556,108 @@ mod tests {
             SpeakerConfig::Single(MeasurementSource::InMemory(curve)),
         );
         (result, config)
+    }
+
+    fn implicit_lfe_fixture() -> (RoomOptimizationResult, RoomConfig) {
+        let (mut result, mut config) = fixture();
+        result.channels.get_mut("L").unwrap().plugins.clear();
+        let mut sub = result.channels["L"].clone();
+        sub.channel = "Sub1".into();
+        result.channels.insert("Sub1".into(), sub);
+        config
+            .speakers
+            .insert("sub".into(), config.speakers["L"].clone());
+        config.system = Some(roomeq_model::SystemConfig {
+            model: roomeq_model::SystemModel::HomeCinema,
+            speakers: HashMap::from([("L".into(), "L".into())]),
+            subwoofers: Some(roomeq_model::SubwooferSystemConfig {
+                config: roomeq_model::SubwooferStrategy::Single,
+                routing: Default::default(),
+                outputs: vec![roomeq_model::SubwooferOutput {
+                    id: "Sub1".into(),
+                    speaker: "sub".into(),
+                }],
+                crossover: Some("bass".to_string().into()),
+            }),
+            bass_management: Some(roomeq_model::BassManagementConfig::default()),
+            ..Default::default()
+        });
+        config.crossovers = Some(HashMap::from([(
+            "bass".into(),
+            roomeq_model::CrossoverConfig {
+                crossover_type: "LR24".into(),
+                frequency: Some(80.0),
+                frequencies: None,
+                frequency_range: None,
+            },
+        )]));
+        result.metadata.bass_management =
+            roomeq_engine::home_cinema::bass_management_report(&config, None, false);
+        assert!(result.metadata.bass_management.is_some());
+        assert!(!result.channels.contains_key("LFE"));
+        (result, config)
+    }
+
+    #[test]
+    fn headroom_attenuation_reaches_implicit_lfe_routes() {
+        let (mut result, config) = implicit_lfe_fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let assess = |result: &RoomOptimizationResult| {
+            crate::electrical_headroom::assess_final_graph(
+                &result.to_dsp_chain_output(),
+                48000.0,
+                dir.path(),
+                &config.optimizer.finalization,
+            )
+            .unwrap()
+        };
+        let before = assess(&result);
+        install_attenuation(&mut result, 20.0).unwrap();
+        let after = assess(&result);
+        assert!(result.channels["LFE"].initial_curve.is_none());
+        assert!(result.channels["Sub1"].plugins.is_empty());
+        for (before, after) in before.iter().zip(&after) {
+            assert_eq!(before.output, after.output);
+            assert!((before.peak_dbfs.unwrap() - after.peak_dbfs.unwrap() - 20.0).abs() < 1e-6);
+        }
+        assert!(after.iter().all(|output| output.peak_amplitude <= 1.0));
+    }
+
+    #[test]
+    fn spectral_headroom_attenuation_handles_implicit_lfe() {
+        let (mut result, mut config) = implicit_lfe_fixture();
+        config.optimizer.processing_mode = ProcessingMode::LowLatency;
+        // A modest programme gain needs spectral correction without exhausting
+        // the attenuation budget on the fixture's uncorrected redirected bass.
+        config.system.as_mut().unwrap().bass_management =
+            Some(roomeq_model::BassManagementConfig {
+                lfe_playback_gain_db: 1.0,
+                redirect_bass: false,
+                ..Default::default()
+            });
+        result.metadata.bass_management =
+            roomeq_engine::home_cinema::bass_management_report(&config, None, false);
+        let dir = tempfile::tempdir().unwrap();
+        install_spectral_attenuation(&mut result, &config, 48000.0, dir.path()).unwrap();
+        assert!(!result.channels["LFE"].plugins.is_empty());
+        let outputs = crate::electrical_headroom::assess_final_graph(
+            &result.to_dsp_chain_output(),
+            48000.0,
+            dir.path(),
+            &config.optimizer.finalization,
+        )
+        .unwrap();
+        assert!(outputs.iter().all(|output| {
+            output.peak_dbfs.unwrap() <= config.optimizer.finalization.output_ceiling_dbfs + 1e-6
+        }));
+    }
+
+    #[test]
+    fn headroom_attenuation_still_rejects_missing_main_input() {
+        let (mut result, _) = implicit_lfe_fixture();
+        result.channels.remove("L");
+        assert!(install_attenuation(&mut result, 6.0).is_err());
+        assert!(!result.channels.contains_key("L"));
     }
 
     #[test]

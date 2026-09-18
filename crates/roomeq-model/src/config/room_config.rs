@@ -96,6 +96,13 @@ impl RoomConfig {
 
     fn structural_errors(&self) -> Vec<String> {
         let mut errors = Vec::new();
+        if !self.optimizer.max_crossover_cancellation_db.is_finite()
+            || self.optimizer.max_crossover_cancellation_db < 0.0
+        {
+            errors.push(
+                "optimizer.max_crossover_cancellation_db must be finite and nonnegative".into(),
+            );
+        }
         if let Err(error) = self.optimizer.finalization.validate() {
             errors.push(error);
         }

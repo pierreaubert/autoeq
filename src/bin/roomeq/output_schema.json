@@ -1138,6 +1138,16 @@
         },
         "sub_polarity_inverted": {
           "type": "boolean"
+        },
+        "crossover_cancellation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CrossoverCancellationContext"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1295,6 +1305,12 @@
         "sub_trim_db": {
           "type": "number",
           "format": "double"
+        },
+        "crossover_cancellation": {
+          "items": {
+            "$ref": "#/$defs/CrossoverCancellationEvidence"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -4193,7 +4209,7 @@
           "description": "DE convergence tolerance.",
           "type": "number",
           "format": "double",
-          "default": 1e-8
+          "default": 0.00000001
         }
       }
     },
@@ -6381,6 +6397,12 @@
               "type": "null"
             }
           ]
+        },
+        "max_crossover_cancellation_db": {
+          "default": 3.0,
+          "description": "Maximum coherent crossover cancellation without baseline improvement, in dB.",
+          "format": "double",
+          "type": "number"
         }
       }
     },
@@ -7953,7 +7975,8 @@
             "refine": true,
             "smooth_n": 2,
             "strategy": "lshade",
-            "tolerance": 0.00001
+            "tolerance": 0.00001,
+            "max_crossover_cancellation_db": 3.0
           }
         },
         "provenance": {
@@ -9846,6 +9869,119 @@
           "const": "Audible"
         }
       ]
+    },
+    "CrossoverCancellationBaseline": {
+      "description": "Frozen measured cancellation spectrum of the configured, unoptimized route.",
+      "properties": {
+        "cancellation_db": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "crossover_hz": {
+          "format": "double",
+          "type": "number"
+        },
+        "frequencies_hz": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "crossover_hz",
+        "frequencies_hz",
+        "cancellation_db"
+      ],
+      "type": "object"
+    },
+    "CrossoverCancellationContext": {
+      "properties": {
+        "limit_db": {
+          "format": "double",
+          "type": "number"
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/$defs/CrossoverCancellationBaseline"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "limit_db",
+        "sources"
+      ],
+      "type": "object"
+    },
+    "CrossoverCancellationEvidence": {
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "baseline_db": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "baseline_worst_frequency_hz": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "comparison_band_hz": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "final_db": {
+          "format": "double",
+          "type": "number"
+        },
+        "final_worst_frequency_hz": {
+          "format": "double",
+          "type": "number"
+        },
+        "improvement_db": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "limit_db": {
+          "format": "double",
+          "type": "number"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "source_channel": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_channel",
+        "final_db",
+        "final_worst_frequency_hz",
+        "comparison_band_hz",
+        "limit_db",
+        "accepted",
+        "reason"
+      ],
+      "type": "object"
     }
   }
 }

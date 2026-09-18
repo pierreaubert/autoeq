@@ -428,6 +428,8 @@ pub struct AllChannelMultiSeatAcceptance {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct BassManagementReport {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub crossover_cancellation: Vec<crate::CrossoverCancellationEvidence>,
     pub routing_title: String,
     pub enabled: bool,
     pub crossover_type: String,
@@ -472,6 +474,8 @@ pub struct LfeBassManagementReport {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct BassManagementOptimizationReport {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crossover_cancellation: Option<crate::CrossoverCancellationContext>,
     pub applied: bool,
     pub phase_required: bool,
     pub phase_available: bool,

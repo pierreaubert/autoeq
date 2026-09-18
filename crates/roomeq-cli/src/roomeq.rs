@@ -1760,9 +1760,10 @@ mod tests {
             schema["$defs"]["OptimizerConfig"]["additionalProperties"],
             serde_json::json!(false)
         );
-        assert!(
-            schema["$defs"]["SubwooferSystemConfig"]["additionalProperties"].is_object(),
-            "flattened subwoofer-role map must retain its typed additional-properties schema"
+        assert_eq!(
+            schema["$defs"]["SubwooferSystemConfig"]["additionalProperties"],
+            serde_json::json!(false),
+            "v3 subwoofer configuration uses explicit outputs and rejects unknown properties"
         );
     }
 }

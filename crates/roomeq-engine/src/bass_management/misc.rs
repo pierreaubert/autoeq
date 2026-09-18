@@ -159,6 +159,7 @@ pub fn joint_bass_management_report_from_parts(
         0.0
     };
     home_cinema::BassManagementOptimizationReport {
+        crossover_cancellation: None,
         applied: true,
         phase_required: true,
         phase_available: true,

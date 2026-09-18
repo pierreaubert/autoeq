@@ -738,6 +738,7 @@ mod coverage_tests {
     #[test]
     fn resolved_group_crossover_uses_optimization_result() {
         let optimization = BassManagementOptimizationReport {
+            crossover_cancellation: None,
             applied: true,
             phase_required: false,
             phase_available: false,

@@ -2,6 +2,8 @@
 # How to install Just?
 # cargo install just
 # ----------------------------------------------------------------------
+cargo := "mbx"
+
 import 'builds/cross-autoeq.just'
 import 'builds/qa/qa-autoeq.just'
 import 'builds/qa/qa-roomeq.just'
@@ -21,25 +23,25 @@ prod: prod-autoeq prod-roomeq
 
 [group('build')]
 prod-autoeq:
-	cargo build --release --features cli --bin autoeq
-	cargo build --release --features cli --bin benchmark-autoeq-speaker
-	cargo build --release --features cli --bin autoeq-download-speakers
+	{{cargo}} build --release --features cli --bin autoeq
+	{{cargo}} build --release --features cli --bin benchmark-autoeq-speaker
+	{{cargo}} build --release --features cli --bin autoeq-download-speakers
 
 [group('build')]
 roomeq:
-	cargo build --release --features cli --bin roomeq
+	{{cargo}} build --release --features cli --bin roomeq
 
 [group('build')]
 prod-roomeq: roomeq
-	cargo build --release --features qa --bin roomeq-qa-quality
-	cargo build --release --features qa --bin roomeq-qa-coverage
-	cargo build --release --features qa --bin roomeq-qa-features
-	cargo build --release --features qa --bin roomeq-qa-synthetic
-	cargo build --release --features cli --bin convert-recording
+	{{cargo}} build --release --features qa --bin roomeq-qa-quality
+	{{cargo}} build --release --features qa --bin roomeq-qa-coverage
+	{{cargo}} build --release --features qa --bin roomeq-qa-features
+	{{cargo}} build --release --features qa --bin roomeq-qa-synthetic
+	{{cargo}} build --release --features cli --bin convert-recording
 
 [group('build')]
 dev:
-	cargo build --bins --all-features
+	{{cargo}} build --bins --all-features
 
 # ----------------------------------------------------------------------
 # TEST
@@ -48,11 +50,11 @@ dev:
 
 [group('test')]
 check:
-	cargo check --workspace --all-targets --all-features
+	{{cargo}} check --workspace --all-targets --all-features
 
 [group('test')]
 test:
-	cargo test --workspace --all-targets --all-features --release
+	{{cargo}} test --workspace --all-targets --all-features --release
 
 # Each optimizer internally forks rayon evaluators over all
 # cores, so the effective thread count is num_cpus × num_cpus. On small-
@@ -61,11 +63,11 @@ test:
 # `just test-autoeq threads=N`.
 [group('test')]
 test-autoeq threads="2":
-	RUST_TEST_THREADS={{threads}} cargo test --tests --release
+	RUST_TEST_THREADS={{threads}} {{cargo}} test --tests --release
 
 [group('test')]
 ntest:
-	cargo nextest run --release --no-fail-fast --lib --bins --examples --tests --workspace --all-targets --all-features
+	{{cargo}} nextest run --release --no-fail-fast --lib --bins --examples --tests --workspace --all-targets --all-features
 
 # WP0 crate-partition gates. Keep the fast checker tests and graph/ownership
 # report independently runnable; the umbrella also regenerates both schemas.
@@ -101,13 +103,13 @@ lint:
 	# The optional plotly dependency embeds templates from an external cache path
 	# that is not available in all checkout environments. Keep lint hermetic and
 	# lint the default production surface; plotly builds remain covered by CI.
-	cargo clippy --all -- -D warnings
+	{{cargo}} clippy --all -- -D warnings
 
 alias format := fmt
 
 [group('lint')]
 fmt:
-	cargo fmt --all
+	{{cargo}} fmt --all
 
 # ----------------------------------------------------------------------
 # DIST — release-cut profile (fat LTO + codegen-units = 1)
@@ -121,25 +123,25 @@ dist: dist-autoeq dist-roomeq dist-plot-bins
 
 [group('dist')]
 dist-autoeq:
-	cargo build --profile dist --features cli --bin autoeq
-	cargo build --profile dist --features cli --bin benchmark-autoeq-speaker
-	cargo build --profile dist --features cli --bin autoeq-download-speakers
+	{{cargo}} build --profile dist --features cli --bin autoeq
+	{{cargo}} build --profile dist --features cli --bin benchmark-autoeq-speaker
+	{{cargo}} build --profile dist --features cli --bin autoeq-download-speakers
 
 [group('dist')]
 dist-roomeq:
-	cargo build --profile dist --features cli --bin roomeq
+	{{cargo}} build --profile dist --features cli --bin roomeq
 
 # Plotly-gated bins (skipped by `--workspace` because of required-features).
 [group('dist')]
 dist-plot-bins:
-	cargo build --profile dist --bin roomeq-fuzzer --features qa,plotly
+	{{cargo}} build --profile dist --bin roomeq-fuzzer --features qa,plotly
 
 # ----------------------------------------------------------------------
 # CLEAN
 # ----------------------------------------------------------------------
 
 clean:
-	cargo clean
+	{{cargo}} clean
 	find . -name '*~' -exec rm {} \; -print
 	rm -f *.wav *.log TAGS ETAGS
 	rm -fr fuzzer_output mutants.out
@@ -152,7 +154,7 @@ clean:
 
 [group('download')]
 download-speakers:
-	cargo run --features cli --bin autoeq-download-speakers --release
+	{{cargo}} run --features cli --bin autoeq-download-speakers --release
 
 # ----------------------------------------------------------------------
 # BENCH
@@ -165,7 +167,7 @@ bench-autoeq: bench-autoeq-speaker
 bench-autoeq-speaker:
 	# either jobs=1 or --no-parallel ; or a mix if you have a lot of
 	# CPU cores
-	cargo run --release --features cli --bin benchmark-autoeq-speaker -- --qa --jobs 1
+	{{cargo}} run --release --features cli --bin benchmark-autoeq-speaker -- --qa --jobs 1
 
 # ----------------------------------------------------------------------
 # EXAMPLES
@@ -173,7 +175,7 @@ bench-autoeq-speaker:
 
 [group('examples')]
 examples-autoeq:
-	cargo run --release --example headphone_loss_validation
+	{{cargo}} run --release --example headphone_loss_validation
 
 # ----------------------------------------------------------------------
 # PUBLISH
@@ -181,7 +183,7 @@ examples-autoeq:
 
 [group('publish')]
 publish-autoeq:
-	cargo publish
+	{{cargo}} publish
 
 # ----------------------------------------------------------------------
 # DEMO
@@ -189,7 +191,7 @@ publish-autoeq:
 
 [group('demo')]
 demo-headphone-loss:
-	cargo run --release --example headphone_loss_demo --features="plotly" -- \
+	{{cargo}} run --release --example headphone_loss_demo --features="plotly" -- \
 	--spl "./data_tests/headphones/asr/bowerwilkins_p7/Bowers & Wilkins P7.csv" \
 	--target "./data_tests/targets/harman-over-ear-2018.csv"
 

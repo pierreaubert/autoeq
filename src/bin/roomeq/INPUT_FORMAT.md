@@ -5,6 +5,38 @@ measurements, and optimizer settings. The top-level object is a `RoomConfig`.
 
 ## Final multi-position validation
 
+### Crossover cancellation
+
+`optimizer.max_crossover_cancellation_db` is a finite, nonnegative dB value
+(default `3.0`). It measures coherent main/sub cancellation below the louder
+realized branch, not error below the target curve. No input-version change is
+required; existing configurations use the default.
+
+```json
+{"optimizer": {"max_crossover_cancellation_db": 3.0}}
+```
+
+Cancellation within the limit plus 0.05 dB numerical tolerance passes this check.
+Above the limit, each logical input must improve by more than 0.05 dB relative to
+its fixed pre-optimization routing baseline: 10→4 dB passes with an
+`improved_residual_cancellation` advisory; 10→10 and 10→11 dB fail. Passing this
+check does not bypass electrical headroom, target-quality, or multi-seat checks.
+
+The baseline is captured from the measurements before automatic array alignment,
+route optimization, level alignment, and EQ. Configured crossover ranges use
+their geometric centre and automatic filter types use the first search candidate;
+DBA uses its initial -3 dB rear gain (bounded by `min_db`), 10 ms delay, and inverted
+rear polarity. These initial controls are frozen rather than replaced by later
+optimized controls. Cardioid geometry remains structural.
+
+Comparisons use matching frequency grids and the union of the baseline and final
+half-to-twice-crossover windows, bounded by measured support and 20–2000 Hz.
+Unavailable baseline or phase evidence cannot authorize an above-limit exception.
+Per-input baseline/final deficits, worst frequencies, comparison band, limit,
+improvement, and acceptance reason appear in
+`metadata.bass_management.crossover_cancellation`; frozen baseline spectra are
+retained under `metadata.bass_management.optimization.crossover_cancellation`.
+
 ### Final electrical limits and cumulative correction selection
 
 `optimizer.finalization` defines the electrical assumptions used after all

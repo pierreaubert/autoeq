@@ -1225,6 +1225,7 @@ mod tests {
         optimized_crossover_hz: Option<f64>,
     ) -> roomeq_model::BassManagementOptimizationReport {
         roomeq_model::BassManagementOptimizationReport {
+            crossover_cancellation: None,
             applied: true,
             phase_required: true,
             phase_available: true,
@@ -1254,6 +1255,7 @@ mod tests {
         optimization: Option<roomeq_model::BassManagementOptimizationReport>,
     ) -> roomeq_model::BassManagementReport {
         roomeq_model::BassManagementReport {
+            crossover_cancellation: Vec::new(),
             routing_title: "Home-Cinema Bass Management Routing".to_string(),
             enabled: true,
             crossover_type: "LR48".to_string(),

@@ -118,6 +118,7 @@ pub fn bass_management_report_with_optimization_and_sample_rate(
         .collect();
 
     Some(BassManagementReport {
+        crossover_cancellation: Vec::new(),
         routing_title: if lfe.is_some() {
             "Home-Cinema Bass Management Routing".to_string()
         } else {

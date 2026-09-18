@@ -14,11 +14,10 @@ use crate::error::{AutoeqError, Result};
 use crate::topology::{
     all_curves_have_usable_phase, all_curves_share_frequency_grid,
     apply_crossover_response_to_curve, apply_delay_and_polarity_to_curve, average_mains_magnitude,
-    bass_management_crossover_cancellation_underfill_db, bass_management_crossover_type_candidates,
-    bass_management_max_underfill_db_with_target, bass_management_objective,
-    bass_management_objective_with_target, bass_management_underfill_is_acceptable,
-    complex_sum_mains, curve_has_usable_phase, normalize_crossover_delays,
-    predict_bass_management_sum, select_bass_management_crossover_type,
+    bass_management_crossover_type_candidates, bass_management_max_underfill_db_with_target,
+    bass_management_objective, bass_management_objective_with_target, complex_sum_mains,
+    curve_has_usable_phase, normalize_crossover_delays, predict_bass_management_sum,
+    select_bass_management_crossover_type,
 };
 use crate::{Curve, crossover, home_cinema};
 use math_audio_dsp::analysis::compute_average_response;
@@ -26,53 +25,38 @@ use roomeq_model::{CrossoverConfig, RoomConfig};
 use std::collections::{BTreeMap, HashMap};
 
 // Leave room for serialized-chain interpolation and final grid replay. The
-// production hard gate remains MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB.
+// Acceptance separately compares cancellation against the frozen run baseline.
 const ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB: f64 = 1.0;
 
-fn worsens_excessive_underfill(candidate: &[f64], baseline: &[f64]) -> bool {
-    candidate.iter().zip(baseline).any(|(after, before)| {
-        !bass_management_underfill_is_acceptable(*after) && *after > *before + 1.0e-3
-    })
-}
-
-fn improves_but_remains_excessive(candidate: &[f64], baseline: &[f64]) -> bool {
-    candidate.iter().zip(baseline).any(|(after, before)| {
-        !bass_management_underfill_is_acceptable(*after) && *after + 1.0e-3 < *before
-    })
-}
-
-fn has_excessive_underfill(underfills: &[f64]) -> bool {
-    underfills
-        .iter()
-        .any(|underfill| !bass_management_underfill_is_acceptable(*underfill))
-}
-
-/// True when the candidate restores hard crossover safety: the baseline
-/// has excessive underfill while every candidate underfill is fully
-/// acceptable. Recorded on accepted source reports so QA gates can exempt
-/// exactly this documented tradeoff — and nothing else — from per-source
-/// regression limits.
 fn candidate_restores_hard_safety(
-    candidate_underfills: &[f64],
-    baseline_underfills: &[f64],
+    evidence: &[roomeq_model::CrossoverCancellationEvidence],
 ) -> bool {
-    has_excessive_underfill(baseline_underfills) && !has_excessive_underfill(candidate_underfills)
+    !evidence.is_empty()
+        && evidence
+            .iter()
+            .all(|e| e.final_db <= e.limit_db + roomeq_model::CROSSOVER_CANCELLATION_TOLERANCE_DB)
+        && evidence.iter().any(|e| {
+            e.baseline_db
+                .is_some_and(|d| d > e.limit_db + roomeq_model::CROSSOVER_CANCELLATION_TOLERANCE_DB)
+        })
 }
 
 fn should_accept_route_candidate(
     candidate_score: f64,
     baseline_score: f64,
     regressed_source: bool,
-    candidate_underfills: &[f64],
-    baseline_underfills: &[f64],
+    evidence: &[roomeq_model::CrossoverCancellationEvidence],
 ) -> bool {
-    let baseline_is_unsafe = has_excessive_underfill(baseline_underfills);
-    let candidate_restores_safety =
-        candidate_restores_hard_safety(candidate_underfills, baseline_underfills);
-    let improves_quality = candidate_score < baseline_score - 1.0e-6;
-
-    (candidate_restores_safety || (improves_quality && (!regressed_source || baseline_is_unsafe)))
-        && !worsens_excessive_underfill(candidate_underfills, baseline_underfills)
+    !evidence.is_empty()
+        && evidence.iter().all(|e| e.accepted)
+        && (candidate_restores_hard_safety(evidence)
+            || (candidate_score < baseline_score - 1e-6
+                && (!regressed_source
+                    || evidence.iter().any(|e| {
+                        e.baseline_db.is_some_and(|d| {
+                            d > e.limit_db + roomeq_model::CROSSOVER_CANCELLATION_TOLERANCE_DB
+                        })
+                    }))))
 }
 
 /// Keep target tracking in the optimization constraint, but reserve the
@@ -1663,7 +1647,12 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
             ]);
         }
 
-        let evaluate = |params: &[f64]| -> Option<(f64, Vec<f64>, Vec<f64>)> {
+        let evaluate = |params: &[f64]| -> Option<(
+            f64,
+            Vec<f64>,
+            Vec<f64>,
+            Vec<roomeq_model::CrossoverCancellationEvidence>,
+        )> {
             let frequency = params[0].clamp(minimum_frequency, maximum_frequency);
             let type_index = params[1]
                 .round()
@@ -1672,6 +1661,7 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
             let crossover_type = &type_candidates[type_index];
             let mut losses = Vec::with_capacity(sources.len());
             let mut cancellation_underfills = Vec::with_capacity(sources.len());
+            let mut cancellation_evidence = Vec::with_capacity(sources.len());
             let mut constrained_underfills = Vec::with_capacity(sources.len());
             for (source_index, (source_channel, source_curve)) in sources.iter().enumerate() {
                 let base = 2 + source_index * 4;
@@ -1715,13 +1705,16 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
                     target,
                     frequency,
                 )?);
-                let cancellation_underfill = bass_management_crossover_cancellation_underfill_db(
+                let evidence = crate::topology::assess_configured_crossover_cancellation(
+                    config,
+                    source_channel,
                     &main_branch,
                     &bass_branch,
                     &predicted,
                     frequency,
-                )
-                .unwrap_or(0.0);
+                )?;
+                let cancellation_underfill = evidence.final_db;
+                cancellation_evidence.push(evidence);
                 let target_underfill = bass_management_max_underfill_db_with_target(
                     Some(&predicted),
                     target,
@@ -1739,8 +1732,10 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
                 .zip(&cancellation_underfills)
                 .map(|((loss, underfill), cancellation)| {
                     let excess = (underfill - ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB).max(0.0);
-                    let unsafe_excess =
-                        (cancellation - ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB).max(0.0);
+                    let unsafe_excess = (cancellation
+                        - ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB
+                            .min(config.optimizer.max_crossover_cancellation_db))
+                    .max(0.0);
                     // A large target deficit must not hide unsafe cancellation
                     // inside max(target_deficit, cancellation_deficit).
                     loss + 1_000.0 * excess * excess + 1_000_000.0 * unsafe_excess * unsafe_excess
@@ -1751,11 +1746,19 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
                 .iter()
                 .copied()
                 .fold(f64::NEG_INFINITY, f64::max);
-            Some((0.5 * mean + 0.5 * worst, losses, cancellation_underfills))
+            Some((
+                0.5 * mean + 0.5 * worst,
+                losses,
+                cancellation_underfills,
+                cancellation_evidence,
+            ))
         };
-        let objective =
-            |params: &[f64]| evaluate(params).map(|(loss, _, _)| loss).unwrap_or(1.0e12);
-        let Some((baseline_score, baseline_losses, baseline_underfills)) = evaluate(&initial)
+        let objective = |params: &[f64]| {
+            evaluate(params)
+                .map(|(loss, _, _, _)| loss)
+                .unwrap_or(1.0e12)
+        };
+        let Some((baseline_score, baseline_losses, baseline_underfills, _)) = evaluate(&initial)
         else {
             overall_advisories.push(format!(
                 "source_route_optimizer_skipped_invalid_baseline:{group_id}"
@@ -1823,10 +1826,13 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
                 let mut params = refined.clone();
                 params[base..base + 4].copy_from_slice(route);
                 evaluate(&params)
-                    .and_then(|(_, losses, underfills)| {
+                    .and_then(|(_, losses, underfills, _)| {
                         let loss = *losses.get(source_index)?;
                         let underfill = *underfills.get(source_index)?;
-                        let excess = (underfill - ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB).max(0.0);
+                        let excess = (underfill
+                            - ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB
+                                .min(config.optimizer.max_crossover_cancellation_db))
+                        .max(0.0);
                         Some(loss + 1_000.0 * excess * excess)
                     })
                     .unwrap_or(1.0e12)
@@ -1847,18 +1853,20 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
         }
 
         let candidate = evaluate(&refined);
-        let regressed_source = candidate.as_ref().is_some_and(|(_, candidate_losses, _)| {
-            candidate_losses
-                .iter()
-                .zip(&baseline_losses)
-                .any(|(after, before)| *after > *before + (before.abs() * 0.01).max(1.0e-9))
-        });
+        let regressed_source = candidate
+            .as_ref()
+            .is_some_and(|(_, candidate_losses, _, _)| {
+                candidate_losses
+                    .iter()
+                    .zip(&baseline_losses)
+                    .any(|(after, before)| *after > *before + (before.abs() * 0.01).max(1.0e-9))
+            });
         let candidate_underfill_db = candidate
             .as_ref()
-            .and_then(|(_, _, underfills)| underfills.iter().copied().reduce(f64::max));
+            .and_then(|(_, _, underfills, _)| underfills.iter().copied().reduce(f64::max));
         log::debug!(
             "source route group '{group_id}' crossover underfill: baseline={baseline_underfills:?}, candidate={:?}",
-            candidate.as_ref().map(|(_, _, underfills)| underfills)
+            candidate.as_ref().map(|(_, _, underfills, _)| underfills)
         );
         // The route pass runs before the narrow-band corrective EQ pass.  A
         // measured response can therefore already exceed the final absolute
@@ -1866,35 +1874,27 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
         // excessive dip, but allow a strictly improving candidate to reach
         // the corrective pass instead of restoring a demonstrably worse
         // baseline route.
-        let worsened_excessive_underfill =
-            candidate
-                .as_ref()
-                .is_some_and(|(_, _, candidate_underfills)| {
-                    worsens_excessive_underfill(candidate_underfills, &baseline_underfills)
-                });
+        let limit = config.optimizer.max_crossover_cancellation_db;
+        let tolerance = roomeq_model::CROSSOVER_CANCELLATION_TOLERANCE_DB;
+        let worsened_excessive_underfill = candidate
+            .as_ref()
+            .is_some_and(|(_, _, _, evidence)| evidence.iter().any(|e| !e.accepted));
         let improving_but_still_excessive =
-            candidate
+            candidate.as_ref().is_some_and(|(_, _, _, evidence)| {
+                evidence
+                    .iter()
+                    .any(|e| e.accepted && e.final_db > limit + tolerance)
+            });
+        let accepted = candidate.as_ref().is_some_and(|(score, _, _, evidence)| {
+            should_accept_route_candidate(*score, baseline_score, regressed_source, evidence)
+        });
+        let safety_restored = accepted
+            && candidate
                 .as_ref()
-                .is_some_and(|(_, _, candidate_underfills)| {
-                    improves_but_remains_excessive(candidate_underfills, &baseline_underfills)
-                });
-        let accepted = candidate.as_ref().is_some_and(|(score, _, underfills)| {
-            should_accept_route_candidate(
-                *score,
-                baseline_score,
-                regressed_source,
-                underfills,
-                &baseline_underfills,
-            )
-        });
-        // Acceptance basis for the report: restoration always implies
-        // acceptance (it satisfies the first disjunct outright), so this
-        // flag marks exactly the documented safety tradeoff.
-        let safety_restored = candidate.as_ref().is_some_and(|(_, _, underfills)| {
-            candidate_restores_hard_safety(underfills, &baseline_underfills)
-        });
+                .is_some_and(|(_, _, _, evidence)| candidate_restores_hard_safety(evidence));
         let chosen = if accepted { refined } else { initial.clone() };
-        let (_, chosen_losses, _) = evaluate(&chosen).expect("validated source route parameters");
+        let (_, chosen_losses, _, _) =
+            evaluate(&chosen).expect("validated source route parameters");
         let chosen_frequency = chosen[0].clamp(minimum_frequency, maximum_frequency);
         let chosen_type_index = chosen[1]
             .round()
@@ -1954,7 +1954,7 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
         updated_group.objective_before = Some(baseline_score);
         updated_group.objective_after = Some(if accepted {
             candidate
-                .map(|(score, _, _)| score)
+                .map(|(score, _, _, _)| score)
                 .unwrap_or(baseline_score)
         } else {
             baseline_score
@@ -2041,51 +2041,45 @@ mod tests {
     }
 
     #[test]
-    fn staged_underfill_gate_never_restores_a_worse_baseline() {
-        assert!(worsens_excessive_underfill(&[4.1], &[2.5]));
-        assert!(worsens_excessive_underfill(&[5.0], &[4.0]));
-        assert!(!worsens_excessive_underfill(&[4.0], &[5.0]));
-        assert!(improves_but_remains_excessive(&[4.0], &[5.0]));
-        assert!(!improves_but_remains_excessive(&[2.5], &[5.0]));
-        assert!(has_excessive_underfill(&[2.5, 3.1]));
-        assert!(!has_excessive_underfill(&[2.5, 3.0]));
-        assert!(!has_excessive_underfill(&[2.5, 3.04]));
-    }
-
-    #[test]
-    fn route_candidate_that_restores_hard_underfill_safety_beats_quality_score() {
+    fn route_acceptance_uses_numeric_baseline_for_every_source() {
+        let evidence = |after: f64, before: f64| roomeq_model::CrossoverCancellationEvidence {
+            source_channel: "L".into(),
+            baseline_db: Some(before),
+            baseline_worst_frequency_hz: Some(80.0),
+            final_db: after,
+            final_worst_frequency_hz: 80.0,
+            comparison_band_hz: [40.0, 160.0],
+            limit_db: 3.0,
+            improvement_db: Some(before - after),
+            accepted: roomeq_model::crossover_cancellation_accepted(after, Some(before), 3.0),
+            reason: String::new(),
+        };
         assert!(should_accept_route_candidate(
-            12.0,
+            9.0,
             10.0,
-            true,
-            &[1.1, 1.3, 1.0, 1.1],
-            &[1.8, 1.5, 7.7, 8.7],
+            false,
+            &[evidence(4.0, 10.0)]
         ));
         assert!(!should_accept_route_candidate(
             9.0,
             10.0,
             false,
-            &[1.1, 1.3, 4.0, 1.1],
-            &[1.8, 1.5, 3.5, 8.7],
+            &[evidence(10.0, 10.0)]
         ));
-    }
-
-    #[test]
-    fn safety_restoration_basis_marks_exactly_the_documented_tradeoff() {
-        // Baseline excessive, candidate fully acceptable: the recorded
-        // basis for the QA exemption.
-        assert!(candidate_restores_hard_safety(
-            &[1.1, 1.3, 1.0, 1.1],
-            &[1.8, 1.5, 7.7, 8.7],
+        assert!(!should_accept_route_candidate(
+            9.0,
+            10.0,
+            false,
+            &[evidence(4.0, 10.0), evidence(4.0, 3.5)]
         ));
-        // Safe baselines never mark, however good the candidate is.
-        assert!(!candidate_restores_hard_safety(&[0.5, 0.4], &[0.9, 0.8],));
-        // A candidate that stays excessive is not a restoration, even
-        // when it improves on the baseline.
-        assert!(!candidate_restores_hard_safety(
-            &[1.1, 1.3, 4.0, 1.1],
-            &[1.8, 1.5, 7.7, 8.7],
+        assert!(should_accept_route_candidate(
+            12.0,
+            10.0,
+            true,
+            &[evidence(1.0, 10.0)]
         ));
+        assert!(candidate_restores_hard_safety(&[evidence(1.0, 10.0)]));
+        assert!(!candidate_restores_hard_safety(&[evidence(4.0, 10.0)]));
     }
 
     #[test]

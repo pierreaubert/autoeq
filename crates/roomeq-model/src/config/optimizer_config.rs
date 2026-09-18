@@ -69,9 +69,19 @@ where
     ))
 }
 
+fn default_max_crossover_cancellation_db() -> f64 {
+    crate::DEFAULT_MAX_CROSSOVER_CANCELLATION_DB
+}
+
 /// Optimizer configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct OptimizerConfig {
+    /// Maximum coherent crossover cancellation without baseline improvement, in dB.
+    #[serde(default = "default_max_crossover_cancellation_db")]
+    pub max_crossover_cancellation_db: f64,
+    /// Immutable run evidence, captured before automatic routing and EQ.
+    #[serde(skip)]
+    pub crossover_cancellation_baseline: Option<crate::CrossoverCancellationContext>,
     /// Final graph electrical limits and cumulative correction selection.
     #[serde(default)]
     pub finalization: super::FinalizationConfig,
@@ -332,6 +342,8 @@ pub struct OptimizerConfig {
 impl Default for OptimizerConfig {
     fn default() -> Self {
         Self {
+            max_crossover_cancellation_db: default_max_crossover_cancellation_db(),
+            crossover_cancellation_baseline: None,
             finalization: super::FinalizationConfig::default(),
             upper_band_acoustic_bounds: std::collections::HashMap::new(),
             correction_band: None,

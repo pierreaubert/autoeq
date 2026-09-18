@@ -1,5 +1,19 @@
 # Unreleased
 
+- Make coherent main/sub cancellation configurable through
+  `optimizer.max_crossover_cancellation_db` (default 3 dB). Accept above-limit
+  residuals only when they improve over the frozen pre-optimization baseline by
+  more than 0.05 dB, consistently through route optimization and final replay.
+  Report baseline/final cancellation evidence separately from target shortfall
+  and electrical headroom; advisory strings no longer authorize residual dips.
+
+- Fix final electrical headroom attenuation for the implicit RoomEQ v3 LFE input,
+  including frequency-selective safety correction, by creating its pre-route DSP
+  owner when needed instead of failing with "missing headroom input owner".
+- Update supporting-source stereo fixtures, home-cinema scaling benchmarks, and
+  strict-schema assertions to the RoomEQ v3 input contract so `just ntest` exercises
+  the current topology instead of failing on obsolete configuration assumptions.
+
 - Document the workspace architecture: per-crate `ARCHITECTURE.md` files plus
   a high-level `docs/ARCHITECTURE.md` with crate map, RoomEQ/AutoEQ/QA data
   flows, and pipeline stage order.

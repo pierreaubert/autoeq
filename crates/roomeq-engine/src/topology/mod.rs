@@ -2,6 +2,8 @@
 
 mod apply;
 mod bass;
+mod cancellation;
+pub use cancellation::*;
 mod compute;
 mod mark;
 mod misc;

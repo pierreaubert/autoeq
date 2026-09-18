@@ -2,13 +2,31 @@
 
 `roomeq` is a command-line tool for optimizing multi-channel speaker systems. It analyzes frequency response measurements and generates optimal DSP chains (EQ, crossovers, gains) for each channel.
 
-## Final convolution resource integrity
+## Crossover cancellation and baseline acceptance
 
-Best-effort routed snapshots and correction replay treat a reviewed residual
-splice dip as a source-specific exception. They continue checking other logical
-inputs and record each retained residual separately. One reviewed source never
-exempts the remaining mains from validation. These intermediate exceptions do
-not relax the strict final crossover-safety gate or establish final acceptance.
+Routed snapshots, correction replay, and final crossover validation share one
+numeric cancellation policy. `optimizer.max_crossover_cancellation_db` defaults
+to 3 dB and accepts any finite nonnegative value. This measures cancellation below
+the louder main/sub branch, not deviation below the target curve or clipping.
+
+Within the configured limit plus 0.05 dB numerical tolerance, cancellation passes.
+Above it, cancellation must improve by more than 0.05 dB relative to the fixed
+configured routing before automatic array/route optimization and EQ. For example,
+10→4 dB passes with an `improved_residual_cancellation` advisory, whereas 10→10
+and 10→11 dB fail. Each logical input is checked independently. The original
+baseline persists through every correction and safety stage; intermediate
+improvements never become a new baseline.
+
+When crossover frequency changes, both responses are compared on the same grid
+over the union of their half-to-twice-crossover windows within measured support
+and 20–2000 Hz. Missing baseline evidence cannot authorize an above-limit result.
+`metadata.bass_management.crossover_cancellation` records per-source baseline and
+final deficits, worst frequencies, evaluated band, configured limit, improvement,
+and acceptance reason. Above-limit acceptance still requires all other acoustic
+and electrical checks. See `src/bin/roomeq/INPUT_FORMAT.md` for initialization of
+automatic crossover ranges and structured array baselines.
+
+## Final convolution resource integrity
 
 When combined-boost limiting changes a channel's PEQs, its original optimizer
 run remains recorded but is no longer marked selected for output. The applied

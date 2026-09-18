@@ -68,7 +68,11 @@ fn stereo_workflow_emits_supporting_source_channels_and_metadata() {
 
     let sys = SystemConfig {
         model: SystemModel::Stereo,
-        speakers: HashMap::from([("L".to_string(), "left".to_string())]),
+        speakers: HashMap::from([
+            ("L".to_string(), "left".to_string()),
+            // Reuse the synthetic response for a symmetric stereo fixture.
+            ("R".to_string(), "left".to_string()),
+        ]),
         ..Default::default()
     };
 
@@ -232,7 +236,11 @@ fn spatial_robustness_advisories_raised_for_multiple_measurements() {
 
     let sys = SystemConfig {
         model: SystemModel::Stereo,
-        speakers: HashMap::from([("L".to_string(), "left".to_string())]),
+        speakers: HashMap::from([
+            ("L".to_string(), "left".to_string()),
+            // Reuse the synthetic response for a symmetric stereo fixture.
+            ("R".to_string(), "left".to_string()),
+        ]),
         ..Default::default()
     };
 

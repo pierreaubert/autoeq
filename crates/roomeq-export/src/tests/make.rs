@@ -361,6 +361,7 @@ pub(super) fn make_routed_bass_output() -> DspGraph {
             multi_seat_coverage: None,
             multi_seat_correction: None,
             bass_management: Some(BassManagementReport {
+                crossover_cancellation: Vec::new(),
                 routing_title: "Home-Cinema Bass Management Routing".to_string(),
                 enabled: true,
                 crossover_type: "LR24".to_string(),

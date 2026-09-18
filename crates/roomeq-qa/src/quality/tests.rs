@@ -418,6 +418,7 @@ fn electrical_qa_expands_canonical_global_bass_routes_once() {
         advisories: Vec::new(),
     };
     result.metadata.bass_management = Some(roomeq_model::BassManagementReport {
+        crossover_cancellation: Vec::new(),
         routing_title: "Home-Cinema Bass Management Routing".to_string(),
         enabled: true,
         crossover_type: "LR24".into(),

@@ -33,8 +33,13 @@ pub fn detect_passband_and_mean(curve: &Curve) -> (Option<(f64, f64)>, f64) {
 
     let smoothed = autoeq_core::smooth_one_over_n_octave(curve, 1);
     let smoothed_levels: Vec<f32> = smoothed.spl.iter().map(|&level| level as f32).collect();
-    let reference_level = compute_average_response(&frequencies, &smoothed_levels, None);
-    if !reference_level.is_finite() || reference_level < -100.0 {
+    // A measured stopband must not lower the passband threshold. Use the
+    // octave-smoothed peak so narrow room modes do not set the reference.
+    let reference_level = smoothed_levels
+        .iter()
+        .copied()
+        .fold(f32::NEG_INFINITY, f32::max);
+    if !reference_level.is_finite() {
         return (None, 0.0);
     }
     let threshold = reference_level - 10.0;
@@ -219,6 +224,24 @@ mod tests {
         assert!(low < 100.0);
         assert!(high > 200.0);
         assert!(mean.is_finite());
+    }
+
+    #[test]
+    fn passband_excludes_subwoofer_stopband_independently_of_level() {
+        for offset in [0.0, 80.0, -120.0] {
+            let freq = Array1::from_iter((0..241).map(|i| 20.0 * 800.0_f64.powf(i as f64 / 240.0)));
+            let spl = freq.mapv(|f| offset - 24.0 * (f / 200.0).log2().max(0.0));
+            let curve = Curve {
+                freq,
+                spl,
+                ..Curve::default()
+            };
+            let (band, mean) = detect_passband_and_mean(&curve);
+            let (low, high) = band.expect("measured bass passband");
+            assert!((low - 20.0).abs() < 0.01);
+            assert!((200.0..400.0).contains(&high), "stopband included: {high}");
+            assert!((mean - offset).abs() < 2.0, "stopband dragged mean: {mean}");
+        }
     }
 
     #[test]

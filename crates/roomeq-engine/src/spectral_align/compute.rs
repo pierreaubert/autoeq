@@ -31,6 +31,83 @@ pub fn upper_band_target_reference(
     if upper < 2.0 * lower {
         return None;
     }
+    target_reference_in_band(curve, target, lower, upper)
+}
+
+/// Reference a relative target to the speaker's measured usable passband.
+///
+/// The reference must not depend on where EQ filters are allowed. Otherwise a
+/// bass-only request normalizes away a bass excess and gives each speaker a
+/// different broadband target. The passband also excludes subwoofer stopbands.
+pub fn measured_target_reference(curve: &Curve, target: &Curve) -> Option<f64> {
+    if curve.freq != target.freq
+        || curve.freq.len() != curve.spl.len()
+        || target.spl.len() != curve.freq.len()
+        || !roomeq_analysis::frequency_grid::is_valid_frequency_grid(&curve.freq)
+    {
+        return None;
+    }
+    // A requested target slope is not speaker rolloff. Detect support after
+    // removing that shape so a bass rise plus a downward target tilt does not
+    // incorrectly classify a main speaker as a subwoofer.
+    let neutral = Curve {
+        freq: curve.freq.clone(),
+        spl: &curve.spl - &target.spl,
+        ..Curve::default()
+    };
+    let (band, _) = roomeq_analysis::response_metrics::detect_passband_and_mean(&neutral);
+    let (mut lower, mut upper) = band?;
+    // Use the same midrange reference as speaker calibration when supported.
+    // Moving the correction ceiling must not move this reference into treble
+    // rolloff. Band-limited bass sources instead use their measured passband.
+    let reference_low = lower.max(500.0);
+    let reference_high = upper.min(2_000.0);
+    if reference_high >= 2.0 * reference_low {
+        lower = reference_low;
+        upper = reference_high;
+    }
+    target_reference_in_band(curve, target, lower, upper)
+}
+
+/// Use an unaffected midband reference for bass-limited correction.
+///
+/// Full-band EQ retains its ordinary in-band normalization. Bass-only EQ can
+/// instead anchor to the common 500–2,000 Hz calibration band, provided the
+/// measured speaker supports at least one octave there. Band-limited speakers
+/// instead use their usable passband when it extends beyond correction.
+pub fn limited_correction_target_reference(
+    curve: &Curve,
+    target: &Curve,
+    correction_max: f64,
+) -> Option<f64> {
+    if !correction_max.is_finite()
+        || correction_max >= 500.0
+        || curve.freq != target.freq
+        || curve.spl.len() != target.spl.len()
+        || curve.freq.len() != curve.spl.len()
+        || !roomeq_analysis::frequency_grid::is_valid_frequency_grid(&curve.freq)
+    {
+        return None;
+    }
+    let neutral = Curve {
+        freq: curve.freq.clone(),
+        spl: &curve.spl - &target.spl,
+        ..Curve::default()
+    };
+    let (band, _) = roomeq_analysis::response_metrics::detect_passband_and_mean(&neutral);
+    let (low, high) = band?;
+    let reference_low = low.max(500.0);
+    let reference_high = high.min(2_000.0);
+    if reference_high >= 2.0 * reference_low {
+        target_reference_in_band(curve, target, reference_low, reference_high)
+    } else if correction_max < high {
+        target_reference_in_band(curve, target, low, high)
+    } else {
+        None
+    }
+}
+
+fn target_reference_in_band(curve: &Curve, target: &Curve, lower: f64, upper: f64) -> Option<f64> {
     let mut area = 0.0;
     let mut span = 0.0;
     for i in 1..curve.freq.len() {

@@ -134,11 +134,19 @@ pub fn optimize_with_schroeder_split_detailed(
         .fold((0.0, 0usize), |(sum, count), (_, level)| {
             (sum + *level, count + 1)
         });
-    let normalization_mean_spl = if normalization_count > 0 {
-        normalization_sum / normalization_count as f64
-    } else {
-        0.0
-    };
+    let reference_target = super::resources::target_curve(curve, resources);
+    let normalization_mean_spl = crate::spectral_align::limited_correction_target_reference(
+        curve,
+        &reference_target,
+        active_max_freq,
+    )
+    .unwrap_or_else(|| {
+        if normalization_count > 0 {
+            normalization_sum / normalization_count as f64
+        } else {
+            0.0
+        }
+    });
 
     // A split outside the configured optimization band has only one real
     // side. Do not manufacture an inverted second band (for example

@@ -1776,11 +1776,22 @@
           "format": "double",
           "type": "number"
         },
+        "max_useful_output_loss_db": {
+          "default": 3.0,
+          "description": "Maximum unexplained useful-output loss for mains, surrounds, and heights, in dB.\nSubwoofers are exempt. This is not input attenuation or PEQ boost.",
+          "format": "double",
+          "type": "number"
+        },
         "output_ceiling_dbfs": {
           "default": 0.0,
           "description": "Maximum sampled physical-output level, in dBFS (must be <= 0).",
           "format": "double",
           "type": "number"
+        },
+        "subwoofer_limiter": {
+          "default": false,
+          "description": "Protect summed physical sub outputs with a runtime limiter instead of static cuts.\nRequires native playback to preserve the limiter and matching output delays.",
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -2890,7 +2901,9 @@
             "default_input_peak": 1.0,
             "input_peak_limits": {},
             "max_attenuation_db": 12.0,
-            "output_ceiling_dbfs": 0.0
+            "max_useful_output_loss_db": 3.0,
+            "output_ceiling_dbfs": 0.0,
+            "subwoofer_limiter": false
           },
           "description": "Final graph electrical limits and cumulative correction selection."
         },
@@ -5202,7 +5215,9 @@
           "default_input_peak": 1.0,
           "input_peak_limits": {},
           "max_attenuation_db": 12.0,
-          "output_ceiling_dbfs": 0.0
+          "max_useful_output_loss_db": 3.0,
+          "output_ceiling_dbfs": 0.0,
+          "subwoofer_limiter": false
         },
         "local_algo": "cobyla",
         "loss_type": "flat",

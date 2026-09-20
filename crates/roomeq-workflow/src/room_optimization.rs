@@ -726,10 +726,41 @@ fn optimize_room_impl_with_frequency_samples(
     Ok(result)
 }
 
+fn broadband_matching_within_correction_band(config: &RoomConfig) -> bool {
+    let [low, high] = config.optimizer.active_correction_band();
+    broadband_shelves_supported_by_band((low, high))
+}
+
+fn broadband_shelves_supported_by_band((low, high): (f64, f64)) -> bool {
+    low <= roomeq_engine::spectral_align::LOWSHELF_FREQ
+        && high >= roomeq_engine::spectral_align::HIGHSHELF_FREQ
+}
+
 fn shared_alignment_fit_band(
     config: &RoomConfig,
     corrected_curves: &HashMap<String, Curve>,
 ) -> (f64, f64) {
+    if !broadband_matching_within_correction_band(config) {
+        // Level alignment needs an observation band, not the bass correction
+        // band. Callers doing height alignment supply original measurements.
+        let names = corrected_curves
+            .keys()
+            .filter(|name| !is_subwoofer_channel(config, name))
+            .cloned()
+            .collect::<Vec<_>>();
+        let crossover = config.crossovers.as_ref().map_or(80.0, |crossovers| {
+            crossovers
+                .values()
+                .filter_map(|crossover| {
+                    crossover
+                        .frequency
+                        .or_else(|| crossover.frequency_range.map(|range| range.1))
+                })
+                .fold(80.0_f64, f64::max)
+        });
+        return crate::topology::main_level_alignment_band(corrected_curves, &names, crossover)
+            .unwrap_or((f64::NAN, f64::NAN));
+    }
     // Height/timbre fitting compares full-range channels. Including the routed
     // subwoofer band makes the intersection collapse at the crossover, which
     // triggers the full-band fallback and reintroduces intentional rolloff.
@@ -741,14 +772,24 @@ fn shared_alignment_fit_band(
             |(shared_min, shared_max), channel_name| {
                 let (channel_min, channel_max) =
                     final_score_band_for_channel(config, channel_name, None);
-                (shared_min.max(channel_min), shared_max.min(channel_max))
+                let (passband, _) =
+                    roomeq_engine::analysis::response_metrics::detect_passband_and_mean(
+                        &corrected_curves[channel_name],
+                    );
+                let Some((pass_low, pass_high)) = passband else {
+                    return (f64::INFINITY, f64::NEG_INFINITY);
+                };
+                (
+                    shared_min.max(channel_min).max(pass_low),
+                    shared_max.min(channel_max).min(pass_high),
+                )
             },
         );
 
     if max_freq > min_freq {
         (min_freq, max_freq)
     } else {
-        (config.optimizer.min_freq, config.optimizer.max_freq)
+        (f64::NAN, f64::NAN)
     }
 }
 
@@ -842,6 +883,14 @@ fn apply_inter_channel_timbre_matching_stage(
         .inter_channel_timbre_matching
         .as_ref()
         .filter(|config| config.enabled)?;
+    if !broadband_matching_within_correction_band(config) {
+        return Some(StageOutcome {
+            stage: "inter_channel_timbre_matching".into(),
+            status: StageStatus::Skipped,
+            advisories: vec!["broadband_shelves_outside_correction_band".into()],
+            checks: Vec::new(),
+        });
+    }
     let corrected_curves: HashMap<String, Curve> = channel_results
         .iter()
         .filter(|(name, _)| !is_subwoofer_channel(config, name))
@@ -855,7 +904,19 @@ fn apply_inter_channel_timbre_matching_stage(
             )
         })
         .collect();
-    let (fit_min_freq, fit_max_freq) = shared_alignment_fit_band(config, &corrected_curves);
+    let reference_curves = channel_results
+        .iter()
+        .map(|(name, channel)| (name.clone(), channel.initial_curve.clone()))
+        .collect();
+    let (fit_min_freq, fit_max_freq) = shared_alignment_fit_band(config, &reference_curves);
+    if !broadband_shelves_supported_by_band((fit_min_freq, fit_max_freq)) {
+        return Some(StageOutcome {
+            stage: "inter_channel_timbre_matching".into(),
+            status: StageStatus::Skipped,
+            advisories: vec!["broadband_shelves_outside_measured_passband".into()],
+            checks: Vec::new(),
+        });
+    }
 
     Some(
         match roomeq_engine::inter_channel_timbre_matching::compute_inter_channel_timbre_matching_with_threshold(
@@ -1014,6 +1075,7 @@ const FINAL_CHANNEL_LEVEL_MAX_HZ: f64 = 1_000.0;
 fn final_role_level_alignment_gains(
     config: &RoomConfig,
     curves: &HashMap<String, Curve>,
+    reference_curves: &HashMap<String, Curve>,
 ) -> (HashMap<String, f64>, f64, (f64, f64)) {
     let matching_enabled = config
         .optimizer
@@ -1025,6 +1087,46 @@ fn final_role_level_alignment_gains(
         return (HashMap::new(), 0.0, (0.0, 0.0));
     }
 
+    if uses_routed_home_cinema_inputs(config) {
+        // Cinema calibration is shared by every main, not just left/right
+        // pairs. A pair-only check misses whole groups shifted by 10 dB.
+        let mains: HashMap<_, _> = curves
+            .iter()
+            .filter(|(name, _)| !is_subwoofer_channel(config, name))
+            .map(|(name, curve)| (name.clone(), curve.clone()))
+            .collect();
+        if mains.len() < 2 {
+            return (HashMap::new(), 0.0, (0.0, 0.0));
+        }
+        let crossover = config.crossovers.as_ref().map_or(80.0, |crossovers| {
+            crossovers
+                .values()
+                .filter_map(|crossover| {
+                    crossover
+                        .frequency
+                        .or_else(|| crossover.frequency_range.map(|range| range.1))
+                })
+                .fold(80.0_f64, f64::max)
+        });
+        let names = mains.keys().cloned().collect::<Vec<_>>();
+        let Ok(band) =
+            crate::topology::main_level_alignment_band(reference_curves, &names, crossover)
+        else {
+            return (HashMap::new(), f64::NAN, (0.0, 0.0));
+        };
+        let ranges = names.into_iter().map(|name| (name, band)).collect();
+        let gains = roomeq_engine::topology::align_channels_to_lowest(&mains, &ranges);
+        let spread = gains.values().map(|gain| -gain).fold(0.0_f64, f64::max);
+        let gains = if spread > FINAL_CHANNEL_LEVEL_TOLERANCE_DB {
+            gains
+                .into_iter()
+                .filter(|(_, gain)| *gain < -0.01)
+                .collect()
+        } else {
+            HashMap::new()
+        };
+        return (gains, spread, band);
+    }
     let fallback_max = config.optimizer.max_freq.min(FINAL_CHANNEL_LEVEL_MAX_HZ);
     let fallback_min = config
         .optimizer
@@ -1254,8 +1356,15 @@ fn apply_final_channel_level_alignment(
         .filter(|(name, _)| !is_subwoofer_channel(config, name))
         .map(|(name, curve)| (name.clone(), curve.clone()))
         .collect::<HashMap<_, _>>();
+    // Freeze support from measurements, not the candidate being judged.
+    // Otherwise a spectral correction can shrink the calibration band.
+    let reference_curves = result
+        .channel_results
+        .iter()
+        .map(|(name, channel)| (name.clone(), channel.initial_curve.clone()))
+        .collect::<HashMap<_, _>>();
     let (gains, spread_before_db, alignment_band) =
-        final_role_level_alignment_gains(config, &curves);
+        final_role_level_alignment_gains(config, &curves, &reference_curves);
 
     if !spread_before_db.is_finite() {
         return Err(AutoeqError::OptimizationFailed {
@@ -1357,7 +1466,8 @@ fn apply_final_channel_level_alignment(
         .filter(|(name, _)| !is_subwoofer_channel(config, name))
         .map(|(name, curve)| (name.clone(), curve.clone()))
         .collect::<HashMap<_, _>>();
-    let (_, spread_after_db, _) = final_role_level_alignment_gains(config, &verification_curves);
+    let (_, spread_after_db, _) =
+        final_role_level_alignment_gains(config, &verification_curves, &reference_curves);
     if !spread_after_db.is_finite() || spread_after_db > FINAL_CHANNEL_LEVEL_TOLERANCE_DB {
         *result = snapshot;
         return Err(AutoeqError::OptimizationFailed {
@@ -2602,6 +2712,12 @@ fn apply_topology_height_alignment_with_frequency_samples(
     sample_rate: f64,
     frequency_samples: usize,
 ) -> StageOutcome {
+    let mut timbre_outside_band =
+        height_config.match_timbre && !broadband_matching_within_correction_band(config);
+    let mut height_config = height_config.clone();
+    if timbre_outside_band {
+        height_config.match_timbre = false;
+    }
     let mut channel_arrivals = phase_arrivals_for_channels_with_frequency_samples(
         config,
         &result.channel_results,
@@ -2614,12 +2730,23 @@ fn apply_topology_height_alignment_with_frequency_samples(
         }
     }
     let corrected_curves = collect_current_final_curves(&result.channel_results);
-    let (fit_min_freq, fit_max_freq) = shared_alignment_fit_band(config, &corrected_curves);
+    let reference_curves = result
+        .channel_results
+        .iter()
+        .map(|(name, channel)| (name.clone(), channel.initial_curve.clone()))
+        .collect();
+    let (fit_min_freq, fit_max_freq) = shared_alignment_fit_band(config, &reference_curves);
+    if height_config.match_timbre
+        && !broadband_shelves_supported_by_band((fit_min_freq, fit_max_freq))
+    {
+        timbre_outside_band = true;
+        height_config.match_timbre = false;
+    }
     let mut height_results =
         match roomeq_engine::height_channel_alignment::compute_height_channel_alignment_with_coherence_threshold(
             &corrected_curves,
             &channel_arrivals,
-            height_config,
+        &height_config,
             sample_rate,
             fit_min_freq,
             fit_max_freq,
@@ -2729,6 +2856,9 @@ fn apply_topology_height_alignment_with_frequency_samples(
         .collect::<Vec<_>>();
     if height_results.is_empty() {
         advisories.push("no_height_channels".to_string());
+    }
+    if timbre_outside_band {
+        advisories.push("broadband_shelves_outside_correction_band".into());
     }
     advisories.sort();
     advisories.dedup();
@@ -2943,7 +3073,14 @@ fn assemble_generic_result_with_frequency_samples(
         .filter(|(name, _)| !is_subwoofer_channel(config, name))
         .map(|(name, curve)| (name.clone(), curve.clone()))
         .collect();
-    if spectral_curves.len() > 1 {
+    let spectral_reference_curves = channel_results
+        .iter()
+        .map(|(name, channel)| (name.clone(), channel.initial_curve.clone()))
+        .collect();
+    let spectral_band = shared_alignment_fit_band(config, &spectral_reference_curves);
+    let broadband_timbre_supported = broadband_matching_within_correction_band(config)
+        && broadband_shelves_supported_by_band(spectral_band);
+    if spectral_curves.len() > 1 && broadband_timbre_supported {
         // Group EQ has anchored each target to its measured upper band. Use
         // one shared absolute target when applying inter-channel level trims.
         let targets: Option<Vec<Curve>> = spectral_curves
@@ -2987,8 +3124,7 @@ fn assemble_generic_result_with_frequency_samples(
                 step_status: None,
             },
         )?;
-        let min_freq = config.optimizer.min_freq;
-        let max_freq = config.optimizer.max_freq;
+        let (min_freq, max_freq) = spectral_band;
         // Compute post-EQ mean SPL per channel for the level spread warning
         let mut post_eq_means: HashMap<String, f64> = HashMap::new();
         for (channel_name, final_curve) in &spectral_curves {
@@ -3124,6 +3260,7 @@ fn assemble_generic_result_with_frequency_samples(
     let timbre_config = config.optimizer.inter_channel_timbre_matching.as_ref();
     if let Some(timbre_config) = timbre_config
         && timbre_config.enabled
+        && broadband_timbre_supported
     {
         send_progress(
             observer_shared,
@@ -3157,7 +3294,7 @@ fn assemble_generic_result_with_frequency_samples(
             .filter(|(name, _)| !is_subwoofer_channel(config, name))
             .map(|(name, result)| (name.clone(), result.final_curve.clone()))
             .collect();
-        let (fit_min_freq, fit_max_freq) = shared_alignment_fit_band(config, &corrected_curves);
+        let (fit_min_freq, fit_max_freq) = spectral_band;
 
         let stage_outcome = match roomeq_engine::inter_channel_timbre_matching::compute_inter_channel_timbre_matching_with_threshold(
             &corrected_curves,
@@ -3261,12 +3398,20 @@ fn assemble_generic_result_with_frequency_samples(
         emit_pipeline_event(observer_shared, event)?;
         stage_outcomes.push(stage_outcome);
     }
-    if !timbre_config.is_some_and(|config| config.enabled) {
+    if !timbre_config.is_some_and(|config| config.enabled) || !broadband_timbre_supported {
+        if timbre_config.is_some_and(|config| config.enabled) {
+            stage_outcomes.push(StageOutcome {
+                stage: "inter_channel_timbre_matching".into(),
+                status: StageStatus::Skipped,
+                advisories: vec!["broadband_shelves_outside_supported_band".into()],
+                checks: Vec::new(),
+            });
+        }
         emit_pipeline_event(
             observer_shared,
             PipelineEvent::skipped(
                 PipelineStepId::InterChannelTimbreMatching,
-                "Inter-channel timbre matching not enabled",
+                "Inter-channel timbre matching disabled or outside correction band",
             ),
         )?;
     }
@@ -3298,13 +3443,19 @@ fn assemble_generic_result_with_frequency_samples(
                 step_status: None,
             },
         )?;
+        let mut height_config = height_config.clone();
+        height_config.match_timbre &= broadband_timbre_supported;
         let corrected_curves = collect_current_final_curves(&channel_results);
-        let (fit_min_freq, fit_max_freq) = shared_alignment_fit_band(config, &corrected_curves);
+        let reference_curves = channel_results
+            .iter()
+            .map(|(name, channel)| (name.clone(), channel.initial_curve.clone()))
+            .collect();
+        let (fit_min_freq, fit_max_freq) = shared_alignment_fit_band(config, &reference_curves);
         let stage_outcome =
             match roomeq_engine::height_channel_alignment::compute_height_channel_alignment_with_coherence_threshold(
                 &corrected_curves,
                 &channel_arrivals,
-            height_config,
+            &height_config,
             sample_rate,
             fit_min_freq,
             fit_max_freq,

@@ -169,6 +169,23 @@ class BiquadParityTests(unittest.TestCase):
 
 
 class TemporalResponseTests(unittest.TestCase):
+    def test_limiter_small_signal_response_preserves_level_and_integer_latency(self):
+        limiter = {"plugin_type": "limiter", "parameters": {
+            "threshold_db": -1.0, "release_ms": 100.0, "lookahead_ms": 5.0,
+            "soft": False, "true_peak": False, "isp_mode": False, "dual_release": False,
+            "mix": 1.0, "feed_forward": True, "link_amount": 1.0,
+            "label": "room_eq_sub_output_limiter", "room_eq_stage": "post_route"}}
+        curve = {"freq": [40.0, 80.0], "spl": [-40.0, -40.0], "phase": [0.0, 0.0]}
+        for rate in [44_100, 48_000, 96_000]:
+            result = apply_plugins_to_curve(curve, [limiter], rate)
+            for index, frequency in enumerate(curve["freq"]):
+                self.assertAlmostEqual(result["spl"][index], -40.0)
+                phase = -360.0 * frequency * int(0.005 * rate) / rate
+                self.assertAlmostEqual(wrap_phase([result["phase"][index] - phase])[0], 0.0)
+        limiter["parameters"]["mix"] = 0.5
+        with self.assertRaisesRegex(ValueError, "limiter contract"):
+            apply_plugins_to_curve(curve, [limiter])
+
     def test_phase_wrap_uses_report_range(self):
         self.assertEqual(
             wrap_phase([-540.0, -181.0, 180.0, 181.0, 540.0]),

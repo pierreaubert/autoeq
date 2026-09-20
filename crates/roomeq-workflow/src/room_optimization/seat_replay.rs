@@ -47,6 +47,46 @@ pub fn training_seat_label(
         .cloned()
 }
 
+/// Validate raw quality evidence before crossover optimization or seat replay.
+/// Unknown quality is reported separately from explicitly unreliable evidence.
+pub(crate) fn crossover_phase_advisories(
+    config: &RoomConfig,
+    band: (f64, f64),
+) -> Result<Vec<String>> {
+    let captures = capture_training(config)?;
+    let mut advisories = std::collections::BTreeSet::new();
+    let mut seat_order = None;
+    for capture in &captures {
+        if let Some(labels) = capture
+            .seat_labels
+            .as_ref()
+            .filter(|labels| labels.len() > 1)
+        {
+            if seat_order.is_some_and(|previous| previous != labels) {
+                return Err(invalid(
+                    "crossover phase captures must use identical seat order",
+                ));
+            }
+            seat_order = Some(labels);
+        }
+        for (seat, curve) in capture.curves.iter().enumerate() {
+            let evidence = roomeq_engine::bass_phase_confidence::crossover_phase_advisories(
+                curve,
+                band,
+                config.recording_config.as_ref(),
+            )
+            .map_err(|error| {
+                invalid(format!(
+                    "channel '{}' seat {seat}: {error}",
+                    capture.channel
+                ))
+            })?;
+            advisories.extend(evidence.into_iter().map(str::to_owned));
+        }
+    }
+    Ok(advisories.into_iter().collect())
+}
+
 fn invalid(message: impl Into<String>) -> AutoeqError {
     AutoeqError::InvalidMeasurement {
         message: message.into(),
@@ -471,6 +511,75 @@ fn standalone_summation_max_hz(
     }
 }
 
+/// Observe routed playback over measured support, independently of EQ bounds.
+fn passband_observation_config(
+    config: &RoomConfig,
+    result: &RoomOptimizationResult,
+    physical: &BTreeMap<String, Vec<Curve>>,
+    input: &str,
+    seat: usize,
+) -> Result<RoomConfig> {
+    let mut observation = config.clone();
+    let Some(graph) = result
+        .metadata
+        .bass_management
+        .as_ref()
+        .and_then(|bass| bass.routing_graph.as_ref())
+    else {
+        // Independent stereo speakers have the same distinction between EQ
+        // bounds and playback observation as routed home-cinema speakers.
+        // Driver groups retain their separate common-support calculation.
+        if let Some(raw) = physical.get(input).and_then(|curves| curves.get(seat)) {
+            let (passband, _) =
+                roomeq_engine::analysis::response_metrics::detect_passband_and_mean(raw);
+            let (low, high) = passband.ok_or_else(|| {
+                invalid(format!("no measured passband for '{input}' seat {seat}"))
+            })?;
+            observation.optimizer.min_freq = low;
+            observation.optimizer.max_freq = high;
+        }
+        return Ok(observation);
+    };
+    let routes: Vec<_> = graph
+        .routes
+        .iter()
+        .filter(|route| route.source_channel == input)
+        .collect();
+    let main = routes
+        .iter()
+        .find(|route| route.high_pass_hz.is_some() || route.destination == input);
+    let mut lower = f64::INFINITY;
+    let mut upper = 0.0_f64;
+    for route in &routes {
+        let raw = measured(physical, &route.destination, seat)?;
+        let (passband, _) =
+            roomeq_engine::analysis::response_metrics::detect_passband_and_mean(raw);
+        let (lo, hi) = passband.ok_or_else(|| {
+            invalid(format!(
+                "no measured passband for '{}' seat {seat}",
+                route.destination
+            ))
+        })?;
+        lower = lower.min(lo);
+        if main.is_some_and(|main| main.destination == route.destination) {
+            upper = hi;
+        } else if main.is_none() {
+            // A native LFE input is assessed in its actual low-pass band, not
+            // through the treble merely because the optimizer allows it.
+            upper = upper.max(hi.min(route.low_pass_hz.unwrap_or(hi)));
+        }
+    }
+    if lower.is_finite() && upper > lower {
+        observation.optimizer.min_freq = lower;
+        observation.optimizer.max_freq = upper;
+    } else {
+        return Err(invalid(format!(
+            "no supported playback band for '{input}' seat {seat}"
+        )));
+    }
+    Ok(observation)
+}
+
 fn replay(
     result: &RoomOptimizationResult,
     physical: &BTreeMap<String, Vec<Curve>>,
@@ -478,6 +587,19 @@ fn replay(
     seat: usize,
     baseline: bool,
     context: &ReplayContext<'_>,
+) -> Result<(Summed, Vec<String>)> {
+    replay_output(result, physical, input, seat, baseline, context, None)
+}
+
+/// Replay the same serialized graph, optionally selecting one physical output.
+fn replay_output(
+    result: &RoomOptimizationResult,
+    physical: &BTreeMap<String, Vec<Curve>>,
+    input: &str,
+    seat: usize,
+    baseline: bool,
+    context: &ReplayContext<'_>,
+    destination: Option<&str>,
 ) -> Result<(Summed, Vec<String>)> {
     let ReplayContext {
         config,
@@ -502,7 +624,9 @@ fn replay(
     {
         let mut branches = Vec::new();
         let mut outputs = Vec::new();
-        for route in graph.routes.iter().filter(|r| r.source_channel == input) {
+        for route in graph.routes.iter().filter(|r| {
+            r.source_channel == input && destination.is_none_or(|output| r.destination == output)
+        }) {
             let raw = measured(physical, &route.destination, seat)?;
             // Match serialized routed export: input pre-route -> route matrix
             // gain/polarity, crossover/delay -> destination post-route.
@@ -756,6 +880,90 @@ fn excursion_supported_min_frequency(config: &RoomConfig) -> Option<f64> {
     Some(f3 * 2.0_f64.powf(-protection.margin_octaves))
 }
 
+/// Separate physical-main SPL evidence from the combined source's bass quality.
+fn physical_main_quality(
+    result: &RoomOptimizationResult,
+    baseline: &RoomOptimizationResult,
+    physical: &BTreeMap<String, Vec<Curve>>,
+    input: &str,
+    seat: usize,
+    context: &ReplayContext<'_>,
+    target: Option<&Curve>,
+) -> Result<Option<roomeq_model::AcousticQualityScorecard>> {
+    let main = baseline
+        .metadata
+        .bass_management
+        .as_ref()
+        .and_then(|bass| bass.routing_graph.as_ref())
+        .and_then(|graph| {
+            graph.routes.iter().find(|route| {
+                route.source_channel == input
+                    && (route.high_pass_hz.is_some() || route.destination == input)
+            })
+        });
+    let Some(main) = main else {
+        return Ok(None);
+    };
+    let raw = measured(physical, &main.destination, seat)?;
+    let (passband, _) = roomeq_engine::analysis::response_metrics::detect_passband_and_mean(raw);
+    let (low, high) = passband.ok_or_else(|| invalid("physical main has no measured passband"))?;
+    // Freeze the supported band from the measurement and structural baseline;
+    // a candidate may not hide damage by changing its own cutoff or response.
+    let low = low
+        .max(main.high_pass_hz.unwrap_or(low))
+        .max(excursion_supported_min_frequency(context.config).unwrap_or(0.0));
+    if low >= high {
+        return Err(invalid("physical main has no supported playback band"));
+    }
+    let mut observation = context.config.clone();
+    observation.optimizer.min_freq = low;
+    observation.optimizer.max_freq = high;
+    let main_context = ReplayContext {
+        config: &observation,
+        ..*context
+    };
+    let (pre, _) = replay_output(
+        baseline,
+        physical,
+        input,
+        seat,
+        true,
+        &main_context,
+        Some(&main.destination),
+    )?;
+    let (post, _) = replay_output(
+        result,
+        physical,
+        input,
+        seat,
+        false,
+        &main_context,
+        Some(&main.destination),
+    )?;
+    roomeq_engine::quality::evaluate_acoustic_quality_with_permitted_gain(
+        &[pre.curve],
+        &[post.curve],
+        &[],
+        &[],
+        target,
+        roomeq_engine::quality::QualityEvaluationConfig {
+            min_freq_hz: low,
+            max_freq_hz: high,
+            schroeder_hz: roomeq_model::auto_tune::resolved_schroeder_hz(&observation.optimizer),
+            normalize_level: true,
+        },
+        Default::default(),
+        observation
+            .optimizer
+            .permitted_output_gain_db
+            .get(input)
+            .copied()
+            .unwrap_or(0.0),
+    )
+    .map(Some)
+    .map_err(invalid)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn validate_final_seats_impl(
     result: &mut RoomOptimizationResult,
@@ -911,6 +1119,17 @@ fn validate_final_seats_impl(
                 return Err(invalid(format!("no final-seat evidence for '{input}'")));
             }
             for seat in 0..seats {
+                // Filter placement and playback validation have different
+                // domains. Bass-only optimization must still catch an upper-
+                // passband gain or filter regression on the delivered graph.
+                let correction_band = config
+                    .optimizer
+                    .correction_band
+                    .map(|policy| [policy.min_hz, policy.max_hz])
+                    .unwrap_or([config.optimizer.min_freq, config.optimizer.max_freq]);
+                let observation =
+                    passband_observation_config(config, result, physical, input, seat)?;
+                let config = &observation;
                 let context = ReplayContext {
                     config,
                     partition,
@@ -971,10 +1190,20 @@ fn validate_final_seats_impl(
                             .unwrap_or(0.0),
                     )
                     .map_err(invalid)?;
-                score.correction_band_hz = config
-                    .optimizer
-                    .correction_band
-                    .map(|policy| [policy.min_hz, policy.max_hz]);
+                score.correction_band_hz = Some(correction_band);
+                if let Some(main_score) = physical_main_quality(
+                    result,
+                    baseline.unwrap_or(result),
+                    physical,
+                    input,
+                    seat,
+                    &context,
+                    target.as_ref(),
+                )? {
+                    // Only replace the SPL-loss evidence. Combined-source
+                    // shape, uncertainty, and crossover quality stay intact.
+                    score.useful_output = main_score.useful_output;
+                }
                 // Each evaluator invocation contains one seat, so its local index
                 // is zero. Restore physical capture identity before aggregation.
                 for output in &mut score.useful_output {
@@ -1081,10 +1310,10 @@ fn validate_final_seats_impl(
         .as_ref()
         .ok_or_else(|| invalid("final-seat runtime budget unavailable"))?
         .max_worst_position_regression_db;
-    let failed = score
+    let failed: Vec<_> = score
         .final_seats
         .iter()
-        .find(|s| {
+        .filter(|s| {
             !s.improvement_lower_bound_db.is_finite() || s.improvement_lower_bound_db < -budget
         })
         .map(|s| {
@@ -1092,30 +1321,41 @@ fn validate_final_seats_impl(
                 "{} '{}' seat {} regressed {:.3} dB beyond {:.3} dB budget",
                 s.partition, s.logical_input, s.seat_index, -s.improvement_lower_bound_db, budget
             )
-        });
-    let output_budget =
-        roomeq_engine::quality::QualityGatePolicy::default().max_unexplained_output_loss_db;
-    let output_failed = score.useful_output.iter().find_map(|output| {
+        })
+        .collect();
+    let output_budget = config.optimizer.finalization.max_useful_output_loss_db;
+    let output_failed: Vec<_> = score.useful_output.iter().filter_map(|output| {
         // f64::max masks a NaN if its other operand is finite.
         let finite = output.unexplained_loss_rms_db.is_finite()
             && output.bass_unexplained_loss_rms_db.is_none_or(f64::is_finite);
         let loss = output.unexplained_loss_rms_db
             .max(output.bass_unexplained_loss_rms_db.unwrap_or(0.0));
-        (!finite || !loss.is_finite() || loss > output_budget).then(|| {
+        // Subwoofer peak cuts are not constrained by the main-speaker SPL
+        // allowance. Keep their evidence and finite checks; electrical safety
+        // and response-shape/crossover acceptance remain independent gates.
+        let subwoofer = output.logical_input.as_deref().is_some_and(|input| {
+            let key = config.system.as_ref()
+                .and_then(|system| system.speakers.get(input))
+                .map(String::as_str).unwrap_or(input);
+            super::misc::is_subwoofer_channel(config, input)
+                || matches!(config.speakers.get(key),
+                    Some(SpeakerConfig::MultiSub(_) | SpeakerConfig::Dba(_) | SpeakerConfig::Cardioid(_)))
+        });
+        (!finite || !loss.is_finite() || (!subwoofer && loss > output_budget)).then(|| {
             format!(
                 "{} '{}' seat {} lost {:.3} dB useful output beyond {:.3} dB budget (permitted gain {:.3} dB)",
                 output.partition, output.logical_input.as_deref().unwrap_or("unknown"),
                 output.seat_index, loss, output_budget, output.permitted_gain_db
             )
         })
-    });
+    }).collect();
     report.acoustic_quality = Some(score);
-    if output_failed.is_some() {
+    if !output_failed.is_empty() {
         report
             .violations
             .push("unexplained_useful_output_loss".into());
     }
-    if failed.is_some() {
+    if !failed.is_empty() {
         report.violations.push("worst_position_regressed".into());
     }
     let failures: Vec<_> = failed.into_iter().chain(output_failed).collect();
@@ -1351,6 +1591,8 @@ mod tests {
         }
         assert!(error.to_string().contains("regressed"));
         assert!(error.to_string().contains("useful output"));
+        assert!(error.to_string().contains("seat 0"));
+        assert!(error.to_string().contains("seat 1"));
         assert_eq!(report.decision, roomeq_model::CorrectionDecision::Rejected);
     }
 
@@ -1479,6 +1721,133 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn configured_useful_output_budget_accepts_only_the_authorized_loss() {
+        for (budget, accepted) in [(3.0, false), (5.0, true)] {
+            let (mut result, _, flat) = fixture();
+            result.channels.get_mut("left").unwrap().plugins =
+                vec![roomeq_engine::output::create_convolution_plugin(
+                    "output-budget.wav",
+                )];
+            result.channel_results.get_mut("left").unwrap().fir_coeffs =
+                Some(vec![10.0_f64.powf(-4.0 / 20.0)]);
+            let captures = vec![Capture {
+                channel: "left".into(),
+                driver: None,
+                seat_labels: None,
+                curves: vec![flat.clone(), flat],
+            }];
+            let mut config = RoomConfig::default();
+            config.optimizer.finalization.max_useful_output_loss_db = budget;
+            let outcome = validate_final_seats(
+                &mut result,
+                &captures,
+                &HashMap::new(),
+                &config,
+                48_000.0,
+                Path::new("."),
+            );
+            assert_eq!(outcome.is_ok(), accepted, "budget={budget}: {outcome:?}");
+            assert_eq!(config.optimizer.finalization.default_input_peak, 1.0);
+        }
+    }
+
+    #[test]
+    fn subwoofer_loss_is_exempt_but_main_surround_and_height_loss_is_not() {
+        for name in ["LFE", "Sub1", "L", "R", "SL", "TFL"] {
+            let (mut result, _, flat) = fixture();
+            let mut channel = result.channels.remove("left").unwrap();
+            channel.channel = name.into();
+            channel.plugins = vec![roomeq_engine::output::create_convolution_plugin("loss.wav")];
+            result.channels.insert(name.into(), channel);
+            let mut channel_result = result.channel_results.remove("left").unwrap();
+            channel_result.name = name.into();
+            channel_result.fir_coeffs = Some(vec![10.0_f64.powf(-10.0 / 20.0)]);
+            result.channel_results.insert(name.into(), channel_result);
+            let captures = vec![Capture {
+                channel: name.into(),
+                driver: None,
+                seat_labels: None,
+                curves: vec![flat.clone(), flat],
+            }];
+            let outcome = validate_final_seats(
+                &mut result,
+                &captures,
+                &HashMap::new(),
+                &RoomConfig::default(),
+                48_000.0,
+                Path::new("."),
+            );
+            assert_eq!(
+                outcome.is_ok(),
+                matches!(name, "LFE" | "Sub1"),
+                "{name}: {outcome:?}"
+            );
+            let evidence = result
+                .metadata
+                .correction_acceptance
+                .as_ref()
+                .unwrap()
+                .acoustic_quality
+                .as_ref()
+                .unwrap();
+            assert_eq!(evidence.useful_output.len(), 2);
+            assert!(
+                evidence
+                    .useful_output
+                    .iter()
+                    .all(|seat| (seat.unexplained_loss_rms_db - 10.0).abs() < 1e-5)
+            );
+        }
+    }
+
+    #[test]
+    fn independent_bass_only_correction_still_checks_the_speaker_passband() {
+        let (mut result, _, flat) = fixture();
+        let mut config = RoomConfig::default();
+        config.optimizer.min_freq = 40.0;
+        config.optimizer.max_freq = 200.0;
+        let cut = math_audio_iir_fir::Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Highshelf,
+            1_000.0,
+            48_000.0,
+            0.7,
+            -12.0,
+        );
+        result.channels.get_mut("left").unwrap().plugins =
+            vec![roomeq_engine::output::create_eq_plugin(&[cut])];
+        let captures = vec![Capture {
+            channel: "left".into(),
+            driver: None,
+            seat_labels: None,
+            curves: vec![flat.clone(), flat],
+        }];
+        validate_final_seats(
+            &mut result,
+            &captures,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            Path::new("."),
+        )
+        .expect_err("a bass-only request must not hide treble loss");
+        let report = result.metadata.correction_acceptance.as_ref().unwrap();
+        let quality = report.acoustic_quality.as_ref().unwrap();
+        assert!(
+            quality
+                .final_seats
+                .iter()
+                .all(|seat| seat.evaluated_band_hz[1] > 1_000.0)
+        );
+        assert_eq!(quality.correction_band_hz, Some([40.0, 200.0]));
+        assert!(
+            report
+                .violations
+                .iter()
+                .any(|v| v == "unexplained_useful_output_loss")
+        );
     }
 
     #[test]
@@ -1695,6 +2064,85 @@ mod tests {
     }
 
     #[test]
+    fn routed_spl_budget_measures_main_output_not_redirected_sub_loss() {
+        for main_loss in [0.0, 10.0] {
+            let (mut result, mut config, flat) = routed_fixture();
+            config.optimizer.min_freq = 40.0;
+            config.optimizer.max_freq = 200.0;
+            let graph = result
+                .metadata
+                .bass_management
+                .as_mut()
+                .unwrap()
+                .routing_graph
+                .as_mut()
+                .unwrap();
+            graph.routes[0].high_pass_hz = Some(80.0);
+            graph.routes[1].low_pass_hz = Some(80.0);
+            graph.routes[1].gain_db = 0.0;
+            graph.routes[1].gain_linear = 1.0;
+            graph.routes[1].matrix_gain = 1.0;
+            graph.routes[1].delay_ms = 0.0;
+            result.channels.get_mut("sub").unwrap().plugins.clear();
+            for (output, loss) in [("sub", 18.0), ("left", main_loss)] {
+                let mut gain = roomeq_engine::output::create_gain_plugin(-loss);
+                gain.parameters["room_eq_stage"] = serde_json::json!("post_route");
+                gain.parameters["room_eq_correction_gain"] = serde_json::json!(true);
+                result.channels.get_mut(output).unwrap().plugins.push(gain);
+            }
+            let captures: Vec<_> = ["left", "sub"]
+                .into_iter()
+                .map(|channel| Capture {
+                    channel: channel.into(),
+                    driver: None,
+                    seat_labels: None,
+                    curves: vec![flat.clone(), flat.clone()],
+                })
+                .collect();
+            let error = validate_final_seats(
+                &mut result,
+                &captures,
+                &HashMap::new(),
+                &config,
+                48_000.0,
+                Path::new("."),
+            )
+            .unwrap_err();
+            let report = result.metadata.correction_acceptance.as_ref().unwrap();
+            let quality = report.acoustic_quality.as_ref().unwrap();
+            assert_eq!(quality.useful_output.len(), 2);
+            for output in &quality.useful_output {
+                assert_eq!(output.logical_input.as_deref(), Some("left"));
+                assert!(output.evaluated_band_hz[0] >= 80.0, "{output:?}");
+                assert!(output.evaluated_band_hz[1] > 1000.0);
+                assert!((output.unexplained_loss_rms_db - main_loss).abs() < 1e-6);
+            }
+            assert_eq!(
+                report
+                    .violations
+                    .iter()
+                    .any(|v| v == "unexplained_useful_output_loss"),
+                main_loss > 3.0,
+                "{error}"
+            );
+            // Exempting sub SPL loss must not authorize a damaged bass response.
+            assert!(
+                report
+                    .violations
+                    .iter()
+                    .any(|v| v == "worst_position_regressed"),
+                "{error}"
+            );
+            assert!(
+                quality
+                    .final_seats
+                    .iter()
+                    .all(|seat| seat.evaluated_band_hz[0] < 80.0)
+            );
+        }
+    }
+
+    #[test]
     fn routed_finalization_and_replay_reject_unowned_channel_stages() {
         for tag in [
             None,
@@ -1805,6 +2253,136 @@ mod tests {
             maximum_error < 1e-8,
             "routed matching transfer differs by {maximum_error} dB"
         );
+    }
+
+    #[test]
+    fn routed_observation_respects_limited_main_and_lfe_passbands() {
+        let (mut result, mut config, _) = routed_fixture();
+        config.optimizer.min_freq = 40.0;
+        config.optimizer.max_freq = 200.0;
+        let mut main = Curve {
+            freq: ndarray::Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), 192),
+            spl: ndarray::Array1::from_elem(192, 80.0),
+            ..Curve::default()
+        };
+        for (frequency, spl) in main.freq.iter().zip(main.spl.iter_mut()) {
+            if *frequency > 4_000.0 {
+                *spl -= 50.0;
+            }
+        }
+        let sub = Curve {
+            freq: ndarray::array![20.0, 40.0, 80.0, 160.0, 250.0],
+            spl: ndarray::Array1::from_elem(5, 80.0),
+            ..Curve::default()
+        };
+        let graph = result
+            .metadata
+            .bass_management
+            .as_mut()
+            .unwrap()
+            .routing_graph
+            .as_mut()
+            .unwrap();
+        graph.routes[1].low_pass_hz = Some(80.0);
+        let mut lfe = graph.routes[1].clone();
+        lfe.source_channel = "LFE".into();
+        graph.routes.push(lfe);
+        let physical = BTreeMap::from([("left".into(), vec![main]), ("sub".into(), vec![sub])]);
+        let observation =
+            passband_observation_config(&config, &result, &physical, "left", 0).unwrap();
+        assert!(observation.optimizer.max_freq > 2_000.0);
+        assert!(
+            observation.optimizer.max_freq < 10_000.0,
+            "a measured main stopband is not useful playback support"
+        );
+        let lfe = passband_observation_config(&config, &result, &physical, "LFE", 0).unwrap();
+        assert_eq!(lfe.optimizer.max_freq, 80.0);
+        assert_eq!(
+            config.optimizer.max_freq, 200.0,
+            "observation must not change correction bounds"
+        );
+    }
+
+    #[test]
+    fn bass_only_optimization_detects_out_of_band_damage_in_routed_playback() {
+        let (mut result, mut config, _) = routed_fixture();
+        config.optimizer.min_freq = 40.0;
+        config.optimizer.max_freq = 200.0;
+        let main = Curve {
+            freq: ndarray::Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), 192),
+            spl: ndarray::Array1::from_elem(192, 80.0),
+            phase: Some(ndarray::Array1::zeros(192)),
+            ..Curve::default()
+        };
+        let sub = Curve {
+            freq: ndarray::array![20.0, 40.0, 80.0, 160.0, 250.0],
+            spl: ndarray::Array1::from_elem(5, 50.0),
+            phase: Some(ndarray::Array1::zeros(5)),
+            ..Curve::default()
+        };
+        result
+            .metadata
+            .bass_management
+            .as_mut()
+            .unwrap()
+            .routing_graph
+            .as_mut()
+            .unwrap()
+            .routes[1]
+            .low_pass_hz = Some(80.0);
+        let captures = vec![
+            Capture {
+                channel: "left".into(),
+                driver: None,
+                curves: vec![main.clone(), main],
+                seat_labels: None,
+            },
+            Capture {
+                channel: "sub".into(),
+                driver: None,
+                curves: vec![sub.clone(), sub],
+                seat_labels: None,
+            },
+        ];
+        let harmful = math_audio_iir_fir::Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Highshelf,
+            1_000.0,
+            48_000.0,
+            0.7,
+            -12.0,
+        );
+        let mut plugin = roomeq_engine::output::create_eq_plugin(&[harmful]);
+        plugin.parameters["room_eq_stage"] = serde_json::json!("post_route");
+        result
+            .channels
+            .get_mut("left")
+            .unwrap()
+            .plugins
+            .push(plugin);
+
+        let error = validate_final_seats(
+            &mut result,
+            &captures,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            Path::new("."),
+        )
+        .expect_err("a bass-only EQ request must not hide treble damage");
+        assert!(
+            error.to_string().contains("regressed") || error.to_string().contains("useful output"),
+            "{error}"
+        );
+        let score = result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .unwrap()
+            .acoustic_quality
+            .as_ref()
+            .unwrap();
+        assert!(score.final_seats[0].evaluated_band_hz[1] > 10_000.0);
+        assert_eq!(score.correction_band_hz, Some([40.0, 200.0]));
     }
 
     #[test]

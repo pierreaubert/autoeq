@@ -103,6 +103,7 @@ pub mod provenance;
 pub mod report_adapter;
 /// Shared in-memory results returned by RoomEQ execution workflows.
 pub mod room_result;
+pub mod runtime_limiter;
 /// Broadband spectral inter-channel response alignment.
 pub mod spectral_align;
 pub use roomeq_analysis::spatial_robustness;

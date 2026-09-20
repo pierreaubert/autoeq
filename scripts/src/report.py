@@ -1,6 +1,7 @@
 """HTML report generation for roomeq visualization."""
 
 from html import escape
+import math
 from pathlib import Path
 
 from .figures import (
@@ -322,6 +323,42 @@ def _eq_filter_table_html(passes: list[dict]) -> str:
             )
         parts.append("                </tbody>\n            </table>\n")
     return "".join(parts)
+
+
+def _gain_plugins_html(data: dict) -> str:
+    """Expose level trims that are not visible in the EQ-only overview."""
+    owners = [("Global", data.get("global_plugins") or [])]
+    channels = data.get("channels") or {}
+    for name in sorted(channels, key=get_channel_sort_key):
+        channel = channels[name] or {}
+        owners.append((f"Channel {name}", channel.get("plugins") or []))
+        for index, driver in enumerate(channel.get("drivers") or []):
+            label = driver.get("name") or str(index)
+            owners.append((f"Channel {name} / driver {label}", driver.get("plugins") or []))
+    rows = []
+    for owner, plugins in owners:
+        for index, plugin in enumerate(plugins):
+            if plugin.get("plugin_type") != "gain":
+                continue
+            params = plugin.get("parameters") or {}
+            gain = params.get("gain_db", 0.0)
+            gain_label = f"{gain:+.3f} dB" if isinstance(gain, (int, float)) else "invalid"
+            values = [owner, str(index + 1), str(params.get("room_eq_stage", "unspecified")),
+                      str(params.get("label", "unlabelled gain")), gain_label]
+            rows.append("<tr>" + "".join(f"<td>{escape(value)}</td>" for value in values) + "</tr>")
+    if not rows:
+        return ""
+    return (
+        '<div class="plot-container"><h2>Level Gains and Safety Attenuation</h2>'
+        '<p class="epa-footer">The EQ-only overview does not show these gain plugins. '
+        'They affect the post-DSP response even when the EQ trace is flat. '
+        'Entries are listed in plugin order within each owner; they are not a summed '
+        'input-to-output gain. Routing gains and crossover responses also affect playback. '
+        'Route-owned entries describe routing and must not be counted twice.</p>'
+        '<table class="bm-table"><thead><tr><th>Owner</th><th>Plugin #</th>'
+        '<th>Stage</th><th>Purpose</th><th>Gain</th></tr></thead><tbody>'
+        + "".join(rows) + '</tbody></table></div>'
+    )
 
 
 def _all_eq_filters_html(data: dict) -> str:
@@ -976,6 +1013,48 @@ def _bass_management_sub_outputs_table_html(report: dict) -> str:
     )
 
 
+def _playback_status_html(metadata: dict, label: str = "") -> str:
+    """Expose recorded playback eligibility and conditional input assumptions."""
+    acceptance = metadata.get("correction_acceptance") or {}
+    outcome = acceptance.get("outcome")
+    approved = outcome == "unchanged" or (
+        outcome == "accepted" and acceptance.get("accepted") is True
+        and acceptance.get("decision") == "accepted"
+    )
+    title = "Recorded playback validation: " + str(outcome or "unverified")
+    if label:
+        title = label + " — " + title
+    details = []
+    if not approved:
+        details.append("Not approved for playback. These curves are diagnostic only.")
+    policy = ((metadata.get("effective_config") or {}).get("optimizer") or {}).get("finalization") or {}
+    peaks = {"default": policy.get("default_input_peak", 1.0),
+             **(policy.get("input_peak_limits") or {})}
+    reduced = {name: peak for name, peak in peaks.items()
+               if isinstance(peak, (int, float)) and math.isfinite(peak) and 0 < peak < 1}
+    if reduced:
+        values = ", ".join(f"{name}: {20 * math.log10(peak):.2f} dBFS"
+                           for name, peak in sorted(reduced.items()))
+        details.append("Conditional on enforced input-peak ceilings (" + values + "). "
+                       "This report does not enforce them; full-scale input safety is not established.")
+    if approved:
+        details.append("Recorded validation is evidence for the saved graph and its declared playback contract, "
+                       "not an independent replay by this report.")
+    limited = [check["id"].split(":", 1)[1]
+               for stage in metadata.get("stage_outcomes", [])
+               for check in stage.get("checks", [])
+               if check.get("id", "").startswith("runtime_limiter_physical_output:")]
+    if limited:
+        details.append("Runtime limiter required on physical outputs: " + ", ".join(limited) + ". "
+                       "Response curves describe small-signal playback below limiting. Loud bass peaks "
+                       "may be reduced dynamically. Protection is sample-peak, not a true-peak or "
+                       "loudspeaker-excursion guarantee. Do not bypass the limiter or add downstream gain.")
+    color = "#e74c3c" if not approved else ("#f1c40f" if reduced or limited else "#2ecc71")
+    return (f'<section class="playback-status" role="note" style="border:2px solid {color};padding:16px;margin:16px 0">'
+            f'<h2>{escape(title)}</h2>'
+            + "".join(f"<p>{escape(detail)}</p>" for detail in details) + "</section>\n")
+
+
 def create_html_report(
     data: dict,
     output_path: Path,
@@ -1286,6 +1365,8 @@ def create_html_report(
         f"        <h1>{page_title}</h1>\n"
     ]
 
+    html_parts.append(_playback_status_html(metadata))
+
     # Metadata section
     if metadata:
         pre_score = metadata.get("pre_score", 0)
@@ -1366,6 +1447,7 @@ def create_html_report(
 
     # Single-screen summaries: the full PEQ listing and the crossover
     # configuration, so nothing requires switching per-channel tabs.
+    html_parts.append(_gain_plugins_html(data))
     html_parts.append(_all_eq_filters_html(data))
     html_parts.append(_crossover_config_html(data))
 
@@ -1760,6 +1842,9 @@ def create_comparison_html_report(
 """
         f"        <h1>{page_title}</h1>\n"
     ]
+
+    for mode_name, data in mode_datasets:
+        html_parts.append(_playback_status_html(data.get("metadata") or {}, mode_name))
 
     # --- Summary table ---
     html_parts.append('<div class="plot-container">\n<h2>Summary</h2>\n')

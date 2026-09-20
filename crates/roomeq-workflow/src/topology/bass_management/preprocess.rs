@@ -29,14 +29,30 @@ pub(in super::super) fn preprocess_sub_with_frequency_samples(
 ) -> Result<SubPreprocessResult> {
     match lfe_config {
         SpeakerConfig::Single(source) => {
-            let curve =
-                load_source_with_frequency_samples(source, frequency_samples).map_err(|e| {
-                    AutoeqError::InvalidMeasurement {
-                        message: e.to_string(),
-                    }
-                })?;
+            let seats = crate::measurement::load_source_individual_with_frequency_samples(
+                source,
+                frequency_samples,
+            )
+            .map_err(|e| AutoeqError::InvalidMeasurement {
+                message: e.to_string(),
+            })?;
+            let primary_seat = if seats.len() == 1 {
+                0
+            } else {
+                optimizer
+                    .multi_seat
+                    .as_ref()
+                    .map_or(0, |config| config.primary_seat)
+            };
+            let curve = seats.get(primary_seat).cloned().ok_or_else(|| {
+                AutoeqError::InvalidMeasurement {
+                    message: format!("primary seat {primary_seat} unavailable for single subwoofer with {} measurement(s)", seats.len()),
+                }
+            })?;
             Ok(SubPreprocessResult {
-                shared_eq_seats: None,
+                // Spatial magnitude EQ needs every seat; crossover timing needs
+                // the same measured primary seat as the mains, never their RMS.
+                shared_eq_seats: (seats.len() > 1).then_some(seats),
                 common_eq_complete: false,
                 optimizer_evidence: Vec::new(),
                 advisories: Vec::new(),
@@ -817,6 +833,58 @@ mod tests {
         let result = result.unwrap();
         assert!(result.drivers.is_none());
         assert!(result.combined_curve.spl.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn single_sub_keeps_spatial_eq_separate_from_primary_phase() {
+        let first = make_curve(16, 80.0, Some(37.0));
+        let second = make_curve(16, 90.0, Some(-89.0));
+        let speaker =
+            SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(vec![first, second]));
+        let mut optimizer = tiny_optimizer();
+        optimizer.multi_seat = Some(roomeq_model::MultiSeatConfig {
+            primary_seat: 1,
+            ..Default::default()
+        });
+        let result = preprocess_sub_with_frequency_samples(
+            &speaker,
+            &SubwooferStrategy::Single,
+            &optimizer,
+            48000.0,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+        )
+        .unwrap();
+        assert_eq!(result.shared_eq_seats.as_ref().unwrap().len(), 2);
+        assert!(
+            result
+                .combined_curve
+                .spl
+                .iter()
+                .all(|v| (*v - 90.0).abs() < 1e-8)
+        );
+        assert!(
+            result
+                .combined_curve
+                .phase
+                .unwrap()
+                .iter()
+                .all(|v| (*v + 89.0).abs() < 1e-8)
+        );
+
+        optimizer.multi_seat.as_mut().unwrap().primary_seat = 2;
+        assert!(
+            preprocess_sub_with_frequency_samples(
+                &speaker,
+                &SubwooferStrategy::Single,
+                &optimizer,
+                48000.0,
+                crate::DEFAULT_FREQUENCY_SAMPLES,
+            )
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("primary seat 2 unavailable")
+        );
     }
 
     #[test]

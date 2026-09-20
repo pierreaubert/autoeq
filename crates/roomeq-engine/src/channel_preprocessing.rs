@@ -113,11 +113,25 @@ pub fn preprocess_channel(
     });
     let score_curve = crate::channel_result::subtract_target_tilt(&curve, target);
     let pre_score = flatness_score_in_range(&score_curve, score_min_freq, target.max_freq);
-    let channel_mean_spl = roomeq_analysis::response_metrics::mean_response_in_range(
+    let reference_target = target
+        .target_tilt_curve
+        .as_ref()
+        .map(|tilt| autoeq_core::interpolate_log_space(&curve.freq, tilt))
+        .unwrap_or_else(|| {
+            crate::eq::resources::target_curve(&curve, Some(prepared.eq_resources()))
+        });
+    let channel_mean_spl = spectral_align::limited_correction_target_reference(
         &curve,
-        target.min_freq,
+        &reference_target,
         target.max_freq,
-    );
+    )
+    .unwrap_or_else(|| {
+        roomeq_analysis::response_metrics::mean_response_in_range(
+            &curve,
+            target.min_freq,
+            target.max_freq,
+        )
+    });
     let mean_spl = target_mean_spl(channel_name, channel_mean_spl, shared_mean_spl);
     let broadband_enabled = room_config
         .optimizer

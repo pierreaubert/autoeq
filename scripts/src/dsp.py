@@ -355,8 +355,21 @@ def apply_plugins_to_curve(
             if parameters.get("invert", False):
                 gain = -gain
             transfer = [value * gain for value in transfer]
-        elif plugin_type == "delay":
-            delay_seconds = float(parameters.get("delay_ms", 0.0)) / 1000.0
+        elif plugin_type in {"delay", "limiter"}:
+            if plugin_type == "limiter":
+                ceiling = parameters.get("threshold_db")
+                expected = {"threshold_db": ceiling, "release_ms": 100.0, "lookahead_ms": 5.0,
+                            "soft": False, "true_peak": False, "isp_mode": False,
+                            "dual_release": False, "mix": 1.0, "feed_forward": True,
+                            "link_amount": 1.0, "label": "room_eq_sub_output_limiter",
+                            "room_eq_stage": "post_route"}
+                if (not isinstance(ceiling, (int, float)) or not -20.0 <= ceiling <= -1.0
+                        or parameters != expected):
+                    raise ValueError("unsupported small-signal limiter contract")
+                # Only below-threshold response is representable by a curve.
+                delay_seconds = int(0.005 * sample_rate) / sample_rate
+            else:
+                delay_seconds = float(parameters.get("delay_ms", 0.0)) / 1000.0
             transfer = [
                 value
                 * complex(

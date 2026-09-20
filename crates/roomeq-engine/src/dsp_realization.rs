@@ -207,6 +207,16 @@ fn plugin_response<P: ConvolutionIrProvider>(
     convolution: &mut P,
 ) -> Result<Complex64> {
     match plugin.plugin_type.as_str() {
+        "limiter" => {
+            // Small-signal response only; electrical acceptance must separately
+            // verify this mandatory nonlinear processor at the physical output.
+            crate::runtime_limiter::ceiling(plugin)?;
+            let samples = crate::runtime_limiter::latency_samples(sample_rate);
+            Ok(Complex64::from_polar(
+                1.0,
+                -2.0 * PI * frequency_hz * samples as f64 / sample_rate,
+            ))
+        }
         "gain" => {
             let gain_db = required_finite_number(&plugin.parameters, "gain_db", "gain plugin")?;
             let sign = if optional_bool(&plugin.parameters, "invert", false, "gain plugin")? {

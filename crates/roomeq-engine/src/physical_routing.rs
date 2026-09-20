@@ -139,7 +139,9 @@ pub fn resolve_physical_routing(
                         }
                         "gain" | "delay" => (),
                         // Linear residual processing stays after the common sub correction.
-                        "eq" | "convolution" | "crossover" => plugins.push(plugin.clone()),
+                        "eq" | "convolution" | "crossover" | "limiter" => {
+                            plugins.push(plugin.clone())
+                        }
                         _ => return Err(invalid("unsupported physical sub driver processing")),
                     }
                 }

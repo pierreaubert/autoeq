@@ -126,6 +126,8 @@ pub fn average_mains_magnitude(curves: &[&Curve]) -> Curve {
     }
 }
 
+/// Check numerical phase availability, not measurement confidence or timing.
+/// Band-specific coherent processing must also assess the raw quality evidence.
 pub fn curve_has_usable_phase(curve: &Curve) -> bool {
     curve
         .phase

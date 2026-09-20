@@ -27,7 +27,11 @@ pub struct ExpandedElectricalPath {
     pub stages: Vec<ChannelDspChain>,
 }
 
-/// Evaluate the exact final graph under explicitly configured input peaks.
+/// Evaluate the small-signal final graph under explicitly configured input peaks.
+///
+/// A recognized runtime limiter contributes its lookahead delay, not a linear
+/// gain cap. Returned peaks therefore retain pre-limiter overload evidence;
+/// finalization separately validates terminal physical-output protection.
 /// Returns errors for unavailable evidence; no acoustic cancellation is used.
 pub fn assess_final_graph(
     graph: &roomeq_model::DspGraph,

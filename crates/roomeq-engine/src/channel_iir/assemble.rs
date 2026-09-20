@@ -2,7 +2,6 @@ use autoeq_core::{Curve, Result, interpolate_log_space, response};
 use autoeq_optim::optim::OptimizerRunEvidence;
 use log::info;
 use math_audio_iir_fir::Biquad;
-use ndarray::Array1;
 use roomeq_model::{ChannelDspChain, CurveData, PluginConfigWrapper};
 
 use super::{IirChannelRequest, IirChannelResult, IirOptimizerOutput};
@@ -206,7 +205,8 @@ fn display_target_curve(
         let display_tilt = interpolate_log_space(&display_initial.freq, tilt_curve);
         &display_tilt.spl + request.target.mean_spl
     } else {
-        Array1::from_elem(display_initial.freq.len(), request.target.mean_spl)
+        crate::eq::resources::target_curve(display_initial, Some(request.eq_resources)).spl
+            + request.target.mean_spl
     };
     CurveData {
         freq: display_initial.freq.to_vec(),

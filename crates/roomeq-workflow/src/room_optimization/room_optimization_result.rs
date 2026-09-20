@@ -2085,6 +2085,16 @@ pub(super) fn is_baseline_correction(plugin: &roomeq_model::PluginConfigWrapper)
             .get("room_eq_correction_gain")
             .and_then(serde_json::Value::as_bool)
             == Some(true)
+        // These gains were calculated from corrected playback. They are not
+        // physical speaker calibration and must be recomputed after rollback.
+        || matches!(
+            plugin.parameters.get("label").and_then(serde_json::Value::as_str),
+            Some(
+                "post_dsp_input_level_alignment"
+                    | "final_channel_level_alignment"
+                    | "post_dsp_output_headroom_safety"
+            )
+        )
 }
 
 fn remove_correction_stage(chain: &mut ChannelDspChain, stage: CorrectionStage) {

@@ -17,6 +17,12 @@ pub struct FinalizationConfig {
     /// Maximum additional attenuation the selector may install. It does not
     /// authorize acoustic output loss: the final acoustic gate still applies.
     pub max_attenuation_db: f64,
+    /// Maximum unexplained useful-output loss for mains, surrounds, and heights, in dB.
+    /// Subwoofers are exempt. This is not input attenuation or PEQ boost.
+    pub max_useful_output_loss_db: f64,
+    /// Protect summed physical sub outputs with a runtime limiter instead of static cuts.
+    /// Requires native playback to preserve the limiter and matching output delays.
+    pub subwoofer_limiter: bool,
 }
 
 impl Default for FinalizationConfig {
@@ -26,12 +32,17 @@ impl Default for FinalizationConfig {
             input_peak_limits: BTreeMap::new(),
             output_ceiling_dbfs: 0.0,
             max_attenuation_db: 12.0,
+            max_useful_output_loss_db: 3.0,
+            subwoofer_limiter: false,
         }
     }
 }
 
 impl FinalizationConfig {
     pub fn validate(&self) -> Result<(), String> {
+        if self.subwoofer_limiter && self.output_ceiling_dbfs < -20.0 {
+            return Err("subwoofer limiter supports output ceilings from -20 to 0 dBFS".into());
+        }
         if !self.default_input_peak.is_finite()
             || self.default_input_peak <= 0.0
             || self.default_input_peak > 1.0
@@ -45,6 +56,11 @@ impl FinalizationConfig {
         {
             return Err("finalization.max_attenuation_db must be in 0..=60".into());
         }
+        if !self.max_useful_output_loss_db.is_finite()
+            || !(0.0..=60.0).contains(&self.max_useful_output_loss_db)
+        {
+            return Err("finalization.max_useful_output_loss_db must be in 0..=60".into());
+        }
         if self
             .input_peak_limits
             .iter()
@@ -56,5 +72,30 @@ impl FinalizationConfig {
             );
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FinalizationConfig;
+
+    #[test]
+    fn useful_output_budget_is_independent_and_validated() {
+        let mut config: FinalizationConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(config.max_useful_output_loss_db, 3.0);
+        config.max_useful_output_loss_db = 5.0;
+        assert!(config.validate().is_ok());
+        assert_eq!(config.default_input_peak, 1.0);
+        assert_eq!(config.max_attenuation_db, 12.0);
+        assert!(!config.subwoofer_limiter);
+        config.subwoofer_limiter = true;
+        config.output_ceiling_dbfs = -21.0;
+        assert!(config.validate().is_err());
+        config.output_ceiling_dbfs = 0.0;
+        assert!(config.validate().is_ok());
+        for value in [-1.0, f64::NAN, f64::INFINITY, 61.0] {
+            config.max_useful_output_loss_db = value;
+            assert!(config.validate().is_err());
+        }
     }
 }

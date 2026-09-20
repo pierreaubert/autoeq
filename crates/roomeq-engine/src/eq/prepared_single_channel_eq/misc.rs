@@ -60,28 +60,30 @@ mod level_reference_tests {
         assert!(after < 1e-6, "an aligned response must not be rejected");
         let reference =
             crate::spectral_align::upper_band_target_reference(&curve, &target, config.max_freq);
-        let prepared = prepare_single_channel_eq_with_normalization(
-            &curve,
-            &config,
-            Some(&resources),
-            48_000.0,
-            reference,
-        )
-        .unwrap();
-        let data = &prepared.objective_data;
-        let bass: Vec<_> = data
-            .freqs
-            .iter()
-            .zip(data.deviation.iter())
-            .filter(|(f, _)| **f >= 30.0 && **f <= 150.0)
-            .map(|(_, d)| *d)
-            .collect();
-        assert!(!bass.is_empty());
-        let mean = bass.iter().sum::<f64>() / bass.len() as f64;
-        assert!(
-            (mean + 10.0).abs() < 0.1,
-            "bass must demand -10 dB, got {mean}"
-        );
+        for reference in [reference, None] {
+            let prepared = prepare_single_channel_eq_with_normalization(
+                &curve,
+                &config,
+                Some(&resources),
+                48_000.0,
+                reference,
+            )
+            .unwrap();
+            let data = &prepared.objective_data;
+            let bass: Vec<_> = data
+                .freqs
+                .iter()
+                .zip(data.deviation.iter())
+                .filter(|(f, _)| **f >= 30.0 && **f <= 150.0)
+                .map(|(_, d)| *d)
+                .collect();
+            assert!(!bass.is_empty());
+            let mean = bass.iter().sum::<f64>() / bass.len() as f64;
+            assert!(
+                (mean + 10.0).abs() < 0.1,
+                "bass must demand -10 dB, got {mean}"
+            );
+        }
     }
 }
 
@@ -193,8 +195,16 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
         .fold((0.0, 0usize), |(sum, count), (_, level)| {
             (sum + *level, count + 1)
         });
-    let mean_spl =
-        normalization_mean_spl.unwrap_or_else(|| if count > 0 { sum / count as f64 } else { 0.0 });
+    let reference_target = resources::target_curve(curve, resources);
+    let mean_spl = normalization_mean_spl
+        .or_else(|| {
+            crate::spectral_align::limited_correction_target_reference(
+                curve,
+                &reference_target,
+                effective_max_freq,
+            )
+        })
+        .unwrap_or_else(|| if count > 0 { sum / count as f64 } else { 0.0 });
     let normalized_curve_unsmoothed = Curve {
         freq: curve.freq.clone(),
         spl: &curve.spl - mean_spl,

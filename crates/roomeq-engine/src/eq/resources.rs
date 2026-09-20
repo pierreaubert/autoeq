@@ -25,7 +25,7 @@ pub struct EqResources {
     pub impulse_response: Option<PreparedImpulseResponse>,
 }
 
-pub(super) fn target_curve(normalized_curve: &Curve, resources: Option<&EqResources>) -> Curve {
+pub(crate) fn target_curve(normalized_curve: &Curve, resources: Option<&EqResources>) -> Curve {
     match resources.and_then(|resources| resources.target.as_ref()) {
         Some(PreparedEqTarget::Curve(target)) => {
             autoeq_core::normalize_and_interpolate_response(&normalized_curve.freq, target)

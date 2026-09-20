@@ -9,6 +9,7 @@ from scripts.src.data_extract import display_channel_entries
 from scripts.src.dsp import split_driver_eq_plugins
 from scripts.src.report import (
     _all_eq_filters_html,
+    _gain_plugins_html,
     _channel_display_final_curve,
     _comparison_source_label,
     _crossover_config_html,
@@ -16,6 +17,8 @@ from scripts.src.report import (
     _driver_shaping_summary_html,
     _has_redirected_bass_route,
     _mixed_phase_summary_html,
+    _playback_status_html,
+    create_comparison_html_report,
     create_html_report,
 )
 from scripts.test_figures import two_sub_overview_data
@@ -307,6 +310,78 @@ class DriverEqFilterSplitTests(unittest.TestCase):
 
 
 class SummarySectionTests(unittest.TestCase):
+    def test_runtime_limiter_status_discloses_small_signal_response(self):
+        html = _playback_status_html({
+            "correction_acceptance": {"outcome": "accepted", "accepted": True, "decision": "accepted"},
+            "stage_outcomes": [{"checks": [{"id": "runtime_limiter_physical_output:Sub1"}]}],
+        })
+        self.assertIn("Runtime limiter required", html)
+        self.assertIn("small-signal", html)
+        self.assertIn("Do not bypass", html)
+        self.assertIn("Sub1", html)
+
+    def test_gain_summary_exposes_safety_and_driver_trims_without_eq(self):
+        def gain(value, stage, label):
+            return {"plugin_type": "gain", "parameters": {
+                "gain_db": value, "room_eq_stage": stage, "label": label}}
+
+        data = {"global_plugins": [gain(-1.0, "pre_route", "global trim")], "channels": {
+            "L": {"plugins": [gain(-13.11163, "pre_route", "final_electrical_headroom"),
+                              gain(-9.42897, "post_route", "level alignment")]},
+            "LFE": {"drivers": [{"name": "woofer<script>", "plugins": [
+                gain(-3.56015, "post_route", "safety<script>")]}]},
+        }}
+        html = _gain_plugins_html(data)
+        for expected in ["Global", "Channel L", "-13.112 dB", "-9.429 dB", "-3.560 dB",
+                         "pre_route", "post_route", "final_electrical_headroom",
+                         "woofer&lt;script&gt;", "safety&lt;script&gt;", "not a summed"]:
+            self.assertIn(expected, html)
+        self.assertNotIn("<script>", html)
+        self.assertLess(html.index("-13.112 dB"), html.index("-9.429 dB"))
+
+    def test_gain_summary_empty_without_gain_plugins(self):
+        self.assertEqual(_gain_plugins_html({"channels": {"L": {"plugins": []}}}), "")
+
+    def test_comparison_report_discloses_each_playback_verdict(self):
+        rejected = _driver_eq_split_data()
+        rejected.setdefault("metadata", {})["correction_acceptance"] = {"outcome": "rejected"}
+        conditional = copy.deepcopy(rejected)
+        conditional["metadata"]["correction_acceptance"] = {
+            "outcome": "accepted", "accepted": True, "decision": "accepted",
+        }
+        conditional["metadata"]["effective_config"] = {
+            "optimizer": {"finalization": {"default_input_peak": 0.125}}
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "comparison.html"
+            create_comparison_html_report([("strict", rejected), ("conditional", conditional)], output)
+            html = output.read_text(encoding="utf-8")
+        self.assertIn("strict — Recorded playback validation: rejected", html)
+        self.assertIn("conditional — Recorded playback validation: accepted", html)
+        self.assertIn("Not approved for playback", html)
+        self.assertIn("Conditional on enforced input-peak ceilings", html)
+
+    def test_playback_status_rejects_missing_or_failed_verdicts(self):
+        for outcome in [None, "rejected", "insufficient_evidence", "accepted"]:
+            with self.subTest(outcome=outcome):
+                html = _playback_status_html({"correction_acceptance": {"outcome": outcome}})
+                self.assertIn("Not approved for playback", html)
+
+    def test_playback_status_discloses_reduced_input_contract(self):
+        html = _playback_status_html({
+            "correction_acceptance": {"outcome": "accepted", "accepted": True, "decision": "accepted"},
+            "effective_config": {"optimizer": {"finalization": {
+                "default_input_peak": 10 ** (-18 / 20),
+                "input_peak_limits": {"L<script>": 0.5},
+            }}},
+        }, "IIR<script>")
+        self.assertIn("default: -18.00 dBFS", html)
+        self.assertIn("L&lt;script&gt;: -6.02 dBFS", html)
+        self.assertIn("IIR&lt;script&gt;", html)
+        self.assertNotIn("<script>", html)
+        self.assertIn("full-scale input safety is not established", html)
+        self.assertNotIn("Not approved for playback", html)
+
     def test_all_eq_filters_lists_every_origin(self):
         html = _all_eq_filters_html(_driver_eq_split_data())
 
@@ -348,6 +423,7 @@ class SummarySectionTests(unittest.TestCase):
 
         self.assertIn("<h2>All EQ Filters</h2>", html)
         self.assertIn("<h2>Crossover Configuration</h2>", html)
+        self.assertIn("Not approved for playback", html)
         # Summaries precede the per-channel tabs.
         self.assertLess(
             html.index("<h2>All EQ Filters</h2>"),

@@ -3,7 +3,52 @@
 RoomEQ consumes a JSON configuration file describing the room, speakers,
 measurements, and optimizer settings. The top-level object is a `RoomConfig`.
 
+## Processing mode names
+
+The preset names FIR, MIXED, and MIXED-PHASE are not interchangeable:
+
+| Preset name | JSON `optimizer.processing_mode` | Correction structure |
+|---|---|---|
+| IIR | `low_latency` (alias `iir`) | IIR magnitude EQ. |
+| FIR | `phase_linear` (alias `fir`) | FIR correction; `fir.phase` selects linear, minimum-phase, or Kirkeby design. The mode name alone does not guarantee linear phase. |
+| MIXED | `hybrid` (alias `mixed`) | With `mixed_config`: frequency-split FIR/IIR. Without it: IIR followed by residual FIR magnitude correction. |
+| MIXED-PHASE | `mixed_phase` | IIR magnitude EQ plus a short excess-phase FIR; may fall back to IIR-only if phase is unavailable or the phase FIR is rejected. |
+
+For frequency-split hybrid, `mixed_config.fir_band: "low"` assigns the lower band
+to FIR and the upper band to IIR; `"high"` reverses them. Its `crossover_freq`
+must lie strictly inside the usable correction range so both bands exist.
+A 300 Hz split is not valid for a 40–200 Hz correction range; 100 Hz is an
+example of an in-range split. Do not extend correction bandwidth just to make
+an old split setting pass validation.
+
+This processing split is **not** the speaker/subwoofer crossover configured in
+`crossovers` and referenced by bass management. It is also not the full speaker
+passband used to assess corrected playback.
+
+Use `fir.taps` for FIR/hybrid FIR length and
+`mixed_phase.max_fir_length_ms` for the MIXED-PHASE excess-phase stage.
+`fir.phase: "kirkeby"` with `correct_excess_phase: true` requires measured phase;
+this differs from the MIXED-PHASE path's IIR-only fallback. Length limits are not
+guarantees of total playback latency. See the manual's
+[mode comparison and examples](../../../docs/ROOMEQ_MANUAL.md#fir-mixed-and-mixed-phase-which-mode-should-i-use)
+for phase behaviour, latency, and choosing a mode.
+
 ## Final multi-position validation
+
+Bass-managed crossover alignment uses the configured primary seat's measured
+complex response for both mains and a single subwoofer, while retaining all
+subwoofer seats for spatial magnitude EQ. Use identical seat ordering and a
+shared timing reference across speakers. Spatial magnitude averages are not
+valid complex transfers.
+
+Raw captures are checked before phase-sensitive bass processing over the
+configured crossover overlap (half the lowest to twice the highest candidate
+frequency, including group/sub overrides). Declared coherence below
+`recording_config.coherence_threshold` (default 0.9), declared SNR below 10 dB,
+or malformed confidence evidence causes an explicit measurement error.
+Absent coherence/noise-floor metadata remains supported with unverified
+advisories; it does not establish measurement confidence or timing compatibility.
+Subwoofer treble data is not required by this check.
 
 ### Crossover cancellation
 
@@ -39,8 +84,49 @@ retained under `metadata.bass_management.optimization.crossover_cancellation`.
 
 ### Final electrical limits and cumulative correction selection
 
+`optimizer.finalization.subwoofer_limiter` (default `false`) opts into native
+runtime limiting after each physical sub output's sum and EQ, instead of permanent
+sub attenuation. The fully wet hard limiter uses a ceiling of
+`min(output_ceiling_dbfs, -1)` dBFS, 5 ms lookahead, and 100 ms release. Limiter
+mode supports ceiling values in −20..0 dBFS. Other outputs receive matching
+latency; the native host supplies compensation without duplicating replay delays.
+Reported acoustic curves are small-signal responses, not predictions of gain
+reduction during loud programme material. This is sample-peak protection, not a
+true-peak or driver-excursion guarantee. Updated native playback is required;
+unsupported external exports fail rather than dropping the limiter.
+
+`optimizer.finalization.max_useful_output_loss_db` sets the permitted unexplained
+acoustic output loss for mains, surrounds, and heights over the usable playback
+band, with a default of 3 dB. Subwoofers are exempt from this SPL-loss allowance;
+their electrical safety and crossover/response-quality checks remain active.
+For routed mains, SPL-loss evidence uses the physical main branch above its
+structural crossover, not its sum with redirected subwoofer bass. Combined
+response quality is checked separately. Independent stereo speakers are
+observed over their measured passbands even for bass-only correction requests.
+For example, `"max_useful_output_loss_db": 5.0` permits a 5 dB tradeoff while
+retaining the other quality gates. It is independent of PEQ boost/headroom,
+electrical `max_attenuation_db`, and `default_input_peak` assumptions. Never
+derive an input-peak budget from a PEQ headroom reserve.
+
 `optimizer.finalization` defines the electrical assumptions used after all
 processing and artifact assembly:
+
+Home-cinema level calibration does not use the requested correction bounds.
+It uses the shared measured main-speaker passband above crossover transitions,
+preferring 500–2,000 Hz and requiring at least one supported octave. Subwoofer
+and LFE stopbands are not included in main-speaker level matching. All main
+channels share that calibration reference, including surround and height groups.
+
+If final acceptance is rejected or lacks evidence, the CLI exits nonzero. Any
+native JSON written in that case is diagnostic only: its manifest has status
+`rejected`, and external playback export is not attempted. Artifact existence
+alone is not evidence of a successful correction.
+
+Final routed-seat quality is evaluated over measured playback support, not
+only `optimizer.min_freq..max_freq`. The correction band remains separately
+reported: a bass-only request must not conceal upper-passband damage. Native
+LFE assessment stops at its low-pass cutoff; redirected main inputs include the
+combined main/sub response through the main speaker's measured passband.
 
 ```json
 {

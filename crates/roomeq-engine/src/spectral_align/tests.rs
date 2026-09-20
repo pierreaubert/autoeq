@@ -18,6 +18,45 @@ use make::make_narrow_curve;
 use misc::SAMPLE_RATE;
 
 #[test]
+fn target_reference_does_not_require_full_band_subwoofer_measurement() {
+    let curve = Curve {
+        freq: ndarray::array![20.0, 40.0, 80.0, 120.0, 160.0, 250.0],
+        spl: ndarray::Array1::from_elem(6, 80.0),
+        ..Curve::default()
+    };
+    let target = Curve {
+        freq: curve.freq.clone(),
+        spl: ndarray::Array1::zeros(6),
+        ..Curve::default()
+    };
+    let reference = super::measured_target_reference(&curve, &target).unwrap();
+    assert!((reference - 80.0).abs() < 1e-9);
+}
+
+#[test]
+fn target_reference_ignores_bass_excess_and_treble_rolloff_outside_calibration_band() {
+    let curve = make_curve(|frequency| {
+        if frequency < 200.0 {
+            90.0
+        } else if frequency > 4_000.0 {
+            60.0
+        } else {
+            80.0
+        }
+    });
+    let target = Curve {
+        freq: curve.freq.clone(),
+        spl: ndarray::Array1::zeros(curve.freq.len()),
+        ..Curve::default()
+    };
+    let reference = super::measured_target_reference(&curve, &target).unwrap();
+    assert!(
+        (reference - 80.0).abs() < 1e-9,
+        "reference was pulled to {reference} dB"
+    );
+}
+
+#[test]
 fn bass_only_alignment_uses_upper_level_not_bass_shelf_intercept() {
     let mut curves = HashMap::new();
     // Different modal responses below 200 Hz, identical upper-band shape.

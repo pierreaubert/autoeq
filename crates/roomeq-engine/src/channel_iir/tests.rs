@@ -172,6 +172,69 @@ fn plugin_label(plugin: &roomeq_model::PluginConfigWrapper) -> Option<&str> {
 }
 
 #[test]
+fn limited_band_iir_report_preserves_prepared_target_shape_and_passband_level() {
+    let curve = flat_curve();
+    let target_curve = Curve {
+        freq: curve.freq.clone(),
+        spl: curve.freq.mapv(|f| if f < 200.0 { 6.0 } else { 0.0 }),
+        ..Curve::default()
+    };
+    let resources = EqResources {
+        target: Some(crate::eq::PreparedEqTarget::Curve(Box::new(target_curve))),
+        ..EqResources::default()
+    };
+    let prepared = PreparedChannelInput::new(
+        PreparedChannelMeasurements::new(curve.clone(), vec![curve.clone()], false),
+        None,
+        PreparedCea2034::default(),
+        resources.clone(),
+    );
+    let mut config = RoomConfig::default();
+    config.optimizer.min_freq = 40.0;
+    config.optimizer.max_freq = 200.0;
+    let mut target = build_target_context("L", &config, &curve, None);
+    let features = crate::channel_preprocessing::preprocess_channel(
+        "L",
+        &prepared,
+        &config,
+        48_000.0,
+        None,
+        &mut target,
+    );
+    let request = IirChannelRequest {
+        mode: IirChannelMode::LowLatency,
+        channel_name: "L",
+        prepared: &prepared,
+        room_config: &config,
+        sample_rate: 48_000.0,
+        target: &target,
+        preprocessed: &features,
+        optimizer: &config.optimizer,
+        eq_resources: &resources,
+        callback: None,
+    };
+    let result = super::assemble::assemble_iir_result(
+        &request,
+        IirOptimizerOutput::LowLatency {
+            eq_filters: Vec::new(),
+            preference_filters: Vec::new(),
+        },
+        Vec::new(),
+        Vec::new(),
+        None,
+    )
+    .unwrap();
+    let published = result.channel.target_curve.unwrap();
+    for (&f, &spl) in published.freq.iter().zip(&published.spl) {
+        if (40.0..150.0).contains(&f) {
+            assert!((spl - 86.0).abs() < 0.01, "bass target: {spl}");
+        } else if (500.0..2_000.0).contains(&f) {
+            assert!((spl - 80.0).abs() < 0.01, "passband reference: {spl}");
+        }
+    }
+}
+
+#[test]
 fn low_latency_assembly_orders_passes_and_builds_report() {
     let curve = flat_curve();
     let prepared = prepared(curve.clone());

@@ -42,31 +42,43 @@ const DESIRED_CROSSOVER_TARGET_UNDERFILL_DB: f64 = 1.0;
 
 /// Common acoustic calibration band for home-cinema main channels.
 ///
-/// Level trims must use the same band as the main-channel correction target;
-/// otherwise independently flattened channels retain the difference between
-/// their broad-band and correction-band means.
-fn main_level_alignment_band(config: &RoomConfig) -> (f64, f64) {
-    let high = config.optimizer.max_freq.max(config.optimizer.min_freq);
-    let low = config.optimizer.min_freq.max(100.0).min(high);
-    (low, high)
+/// Calibration is independent of the requested EQ range. Prefer the shared
+/// midrange, avoiding bass crossover transitions and measured stopbands.
+pub(crate) fn main_level_alignment_band(
+    curves: &HashMap<String, Curve>,
+    main_roles: &[String],
+    crossover_hz: f64,
+) -> Result<(f64, f64)> {
+    // A two-octave midrange reference avoids room-bass peaks and treble rolloff.
+    // Limited-band speakers may narrow it, but must share at least one octave.
+    let mut low = (2.0 * crossover_hz).max(100.0);
+    let mut high = 2_000.0_f64;
+    for role in main_roles {
+        let curve = curves
+            .get(role)
+            .ok_or_else(|| AutoeqError::InvalidMeasurement {
+                message: format!("missing main-channel calibration measurement '{role}'"),
+            })?;
+        let (passband, _) =
+            roomeq_engine::analysis::response_metrics::detect_passband_and_mean(curve);
+        let (pass_low, pass_high) = passband.ok_or_else(|| AutoeqError::InvalidMeasurement {
+            message: format!("no usable calibration passband for '{role}'"),
+        })?;
+        low = low.max(pass_low);
+        high = high.min(pass_high);
+    }
+    low = low.max(500.0_f64.min(high / 2.0));
+    if main_roles.is_empty() || !low.is_finite() || !high.is_finite() || high < 2.0 * low {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: "main speakers have no shared calibration octave above their crossovers"
+                .into(),
+        });
+    }
+    Ok((low, high))
 }
 
 fn average_spl(curve: &Curve, band: (f64, f64)) -> f64 {
-    let (sum, count) = curve
-        .freq
-        .iter()
-        .zip(curve.spl.iter())
-        .filter(|(frequency, spl)| {
-            **frequency >= band.0 && **frequency <= band.1 && spl.is_finite()
-        })
-        .fold((0.0, 0_usize), |(sum, count), (_, spl)| {
-            (sum + *spl, count + 1)
-        });
-    if count == 0 {
-        f64::NAN
-    } else {
-        sum / count as f64
-    }
+    roomeq_engine::analysis::response_metrics::mean_response_in_range(curve, band.0, band.1)
 }
 
 fn shift_curve_level(curve: &mut Curve, gain_db: f64) {
@@ -160,6 +172,29 @@ fn physical_sub_tonal_objective_curve(curve: &Curve, common_gain_db: f64) -> Cur
         *spl += common_gain_db;
     }
     objective
+}
+
+/// Assess Post-EQ cancellation on the receiving main's measurement grid.
+fn post_eq_crossover_cancellation(
+    config: &RoomConfig,
+    role: &str,
+    main: &Curve,
+    bass: &Curve,
+    crossover_hz: f64,
+) -> Option<roomeq_model::CrossoverCancellationEvidence> {
+    if !curve_has_usable_phase(main) || !curve_has_usable_phase(bass) {
+        return None;
+    }
+    let bass = roomeq_engine::topology::interpolate_bass_response(&main.freq, bass);
+    let combined = complex_sum_mains(&[main, &bass]);
+    roomeq_engine::topology::assess_configured_crossover_cancellation(
+        config,
+        role,
+        main,
+        &bass,
+        &combined,
+        crossover_hz,
+    )
 }
 
 fn is_source_pre_route_plugin(plugin: &PluginConfigWrapper) -> bool {
@@ -1595,6 +1630,14 @@ impl WorkflowExecutor for HomeCinemaExecutor {
             return Ok(result);
         }
 
+        // Check raw evidence before any phase-sensitive sub-array optimization
+        // or baseline prediction, not only before the final crossover search.
+        let phase_quality_advisories = if has_sub {
+            configured_crossover_phase_advisories(config, sys)?
+        } else {
+            Vec::new()
+        };
+
         // Freeze raw configured routing before sub-array optimization or EQ.
         let mut routed_config = config.clone();
         routed_config.optimizer.crossover_cancellation_baseline =
@@ -1644,6 +1687,7 @@ impl WorkflowExecutor for HomeCinemaExecutor {
                 &single_roles,
                 &curves,
                 sub_preprocess.unwrap(),
+                phase_quality_advisories,
                 sample_rate,
                 output_dir,
                 assembly,
@@ -2056,13 +2100,58 @@ fn per_driver_low_pass_plan(
     plan.is_deployable().then_some(plan)
 }
 
-#[allow(clippy::too_many_arguments)]
+fn configured_crossover_phase_advisories(
+    config: &RoomConfig,
+    sys: &SystemConfig,
+) -> Result<Vec<String>> {
+    let mut keys = sys
+        .subwoofers
+        .as_ref()
+        .and_then(|sub| sub.crossover.as_ref())
+        .map(|reference| reference.as_list())
+        .unwrap_or_default();
+    if let Some(bass) = &sys.bass_management {
+        keys.extend(bass.group_crossovers.values().map(String::as_str));
+    }
+    let mut low = f64::INFINITY;
+    let mut high = 0.0_f64;
+    for key in keys {
+        let crossover = config
+            .crossovers
+            .as_ref()
+            .and_then(|values| values.get(key))
+            .ok_or_else(|| AutoeqError::InvalidConfiguration {
+                message: format!("missing crossover '{key}' for phase assessment"),
+            })?;
+        let (lo, hi) = crossover
+            .frequency
+            .map(|hz| (hz, hz))
+            .or(crossover.frequency_range)
+            .ok_or_else(|| AutoeqError::InvalidConfiguration {
+                message: format!("crossover '{key}' needs a frequency or range"),
+            })?;
+        low = low.min(lo);
+        high = high.max(hi);
+    }
+    // One octave either side covers the configured candidate overlap,
+    // including per-group/per-sub overrides, without requiring treble data.
+    crate::room_optimization::seat_replay::crossover_phase_advisories(
+        config,
+        (low / 2.0, high * 2.0),
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "workflow stage carries the prepared routing context"
+)]
 fn optimize_home_cinema_with_sub(
     config: &RoomConfig,
     sys: &SystemConfig,
     main_roles: &[String],
     curves: &HashMap<String, Curve>,
     sub_preprocess: SubPreprocessResult,
+    phase_quality_advisories: Vec<String>,
     sample_rate: f64,
     output_dir: &std::path::Path,
     assembly: &mut WorkflowAssembly<'_, '_, '_>,
@@ -2106,7 +2195,7 @@ fn optimize_home_cinema_with_sub(
 
     // 1. Level alignment
     let mut ranges = HashMap::new();
-    let main_alignment_band = main_level_alignment_band(config);
+    let main_alignment_band = main_level_alignment_band(curves, main_roles, max_xo)?;
     for role in main_roles {
         ranges.insert(role.clone(), main_alignment_band);
     }
@@ -2228,7 +2317,13 @@ fn optimize_home_cinema_with_sub(
         if let Some(advisories) = multiseat_rejection {
             multi_seat_rejections.insert(role.clone(), advisories);
         }
-        if let Some(target) = chain.target_curve.clone() {
+        if let Some(mut target) = chain.target_curve.clone() {
+            // The generic solve uses raw measurements. Its target must follow
+            // the same physical calibration gain applied when routing the main.
+            let align_gain = gains.get(&role).copied().unwrap_or(0.0);
+            for level in &mut target.spl {
+                *level += align_gain;
+            }
             pre_eq_target_curves.insert(role.clone(), target);
         }
         if let Some(fir_coeffs) = ch_result.fir_coeffs.clone() {
@@ -2459,6 +2554,7 @@ fn optimize_home_cinema_with_sub(
     let phase_available =
         measured_phase_available && processed_phase_available && shared_grid_available;
     let mut optimization_advisories = sub_preprocess.advisories.clone();
+    optimization_advisories.extend(phase_quality_advisories);
     if !measured_phase_available || !processed_phase_available {
         optimization_advisories.push("missing_phase_crossover_alignment_skipped".to_string());
         let mut missing_roles: Vec<_> = main_roles
@@ -3231,14 +3327,7 @@ fn optimize_home_cinema_with_sub(
             compute_flat_loss(&post_curve_after, role_xover_freq, main_post_max_freq)
         });
         let cancellation_evidence = bass_branch.as_ref().and_then(|bass| {
-            roomeq_engine::topology::assess_configured_crossover_cancellation(
-                config,
-                role,
-                &main_curve_after,
-                bass,
-                &post_curve_after,
-                role_xover_freq,
-            )
+            post_eq_crossover_cancellation(config, role, &main_curve_after, bass, role_xover_freq)
         });
         let cancellation_underfill_db = cancellation_evidence.as_ref().map(|e| e.final_db);
         let target_underfill_db =
@@ -3254,7 +3343,7 @@ fn optimize_home_cinema_with_sub(
         log::debug!(
             "  {role} Post-EQ underfill: cancellation={cancellation_underfill_db:?} dB, target={target_underfill_db:?} dB"
         );
-        let underfill_accepted = cancellation_evidence.as_ref().is_none_or(|e| e.accepted)
+        let underfill_accepted = cancellation_evidence.as_ref().is_some_and(|e| e.accepted)
             && target_underfill_db
                 .is_none_or(roomeq_engine::topology::bass_management_underfill_is_acceptable);
         // The splice objective above scores the predicted mains+bass sum, but
@@ -3274,8 +3363,8 @@ fn optimize_home_cinema_with_sub(
             config.optimizer.min_freq,
             main_post_max_freq,
         )?;
-        let output_preserved = output_loss
-            <= roomeq_engine::quality::QualityGatePolicy::default().max_unexplained_output_loss_db;
+        let output_preserved =
+            output_loss <= config.optimizer.finalization.max_useful_output_loss_db;
         if !output_preserved {
             post_eq_output_rejections.push((role.clone(), output_loss));
         }
@@ -3370,7 +3459,7 @@ fn optimize_home_cinema_with_sub(
         let routed_underfill = bass_routing_graph.as_ref().and_then(|graph| {
             main_roles
                 .iter()
-                .filter_map(|role| {
+                .map(|role| {
                     let group_id = engine_home_cinema::group_id_for_role(
                         engine_home_cinema::role_for_channel(role),
                     );
@@ -3403,17 +3492,11 @@ fn optimize_home_cinema_with_sub(
                         );
                         bass = response::apply_complex_response(&bass, &bass_response);
                     }
-                    let combined = complex_sum_mains(&[&main, &bass]);
-                    roomeq_engine::topology::assess_configured_crossover_cancellation(
-                        config,
-                        role,
-                        &main,
-                        &bass,
-                        &combined,
-                        role_xover_freq,
-                    )
-                    .map(|evidence| (role.as_str(), evidence))
+                    post_eq_crossover_cancellation(config, role, &main, &bass, role_xover_freq)
+                        .map(|evidence| (role.as_str(), evidence))
                 })
+                .collect::<Option<Vec<_>>>()?
+                .into_iter()
                 .max_by(|left, right| {
                     (!left.1.accepted)
                         .cmp(&!right.1.accepted)
@@ -3422,22 +3505,13 @@ fn optimize_home_cinema_with_sub(
         });
         let routed_underfill_accepted = routed_underfill
             .as_ref()
-            .is_none_or(|(_, evidence)| evidence.accepted);
-        let output_loss = post_eq_useful_output_loss(
-            &sub_post,
-            &sub_after_eq,
-            None,
-            sub_min_score,
-            bass_route_upper_hz,
-        )?;
-        let output_preserved = output_loss
-            <= roomeq_engine::quality::QualityGatePolicy::default().max_unexplained_output_loss_db;
-        if !output_preserved {
-            post_eq_output_rejections.push((sub_role.clone(), output_loss));
-        }
+            .is_some_and(|(_, evidence)| evidence.accepted);
+        // The SPL-loss allowance belongs to mains/surrounds/heights, not
+        // subwoofer peak reduction. Sub EQ must still improve its response
+        // and preserve every receiving main's crossover integration.
         if sub_post_eq_band_empty {
             post_eq_filters.insert(sub_role.clone(), Vec::new());
-        } else if post < pre && routed_underfill_accepted && output_preserved {
+        } else if post < pre && routed_underfill_accepted {
             optimizer_evidence_by_channel
                 .entry(sub_role.clone())
                 .or_default()
@@ -4162,7 +4236,7 @@ fn optimize_home_cinema_with_sub(
                         checks: Vec::new(),
                         advisories: vec![format!(
                             "candidate_discarded; representative_stage_unexplained_loss_db={loss}; limit_db={}; final_native_seat_validation_still_required",
-                            roomeq_engine::quality::QualityGatePolicy::default().max_unexplained_output_loss_db
+                            config.optimizer.finalization.max_useful_output_loss_db
                         )],
                     });
                 }
@@ -4229,6 +4303,74 @@ mod post_dsp_level_tests {
             freq: frequencies,
             ..Curve::default()
         }
+    }
+
+    #[test]
+    fn post_eq_cancellation_checks_mismatched_grids_and_missing_phase() {
+        let config = roomeq_model::RoomConfig::default();
+        let main = curve(0.0);
+        let mut bass = Curve {
+            freq: ndarray::array![20.0, 80.0, 200.0, 400.0],
+            spl: ndarray::Array1::from_elem(4, -12.0),
+            phase: Some(ndarray::Array1::from_elem(4, 180.0)),
+            ..Curve::default()
+        };
+        let before = super::post_eq_crossover_cancellation(&config, "L", &main, &bass, 80.0)
+            .expect("different grids still provide cancellation evidence");
+        assert!(before.accepted);
+        // A sub boost brings the opposite-phase branches closer in level.
+        // The old Post-EQ screening silently lost this evidence on unequal grids.
+        bass.spl.fill(-6.0);
+        let after = super::post_eq_crossover_cancellation(&config, "L", &main, &bass, 80.0)
+            .expect("boosted sub must also be assessed");
+        assert!(!after.accepted);
+        assert!(after.final_db > 6.0);
+        bass.phase = None;
+        assert!(super::post_eq_crossover_cancellation(&config, "L", &main, &bass, 80.0).is_none());
+    }
+
+    #[test]
+    fn calibration_uses_shared_passband_not_bass_correction_bounds() {
+        let mut left = Curve {
+            freq: ndarray::Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), 192),
+            spl: ndarray::Array1::from_elem(192, 80.0),
+            ..Curve::default()
+        };
+        let mut right = left.clone();
+        for ((frequency, left_level), right_level) in left
+            .freq
+            .iter()
+            .zip(left.spl.iter_mut())
+            .zip(right.spl.iter_mut())
+        {
+            // Different room bass must not turn into broadband level trims.
+            if *frequency < 200.0 {
+                *left_level += 10.0;
+                *right_level -= 10.0;
+            }
+            // A limited-band surround need not extend to 16 or 20 kHz.
+            if *frequency > 4_000.0 {
+                *right_level -= 50.0;
+            }
+        }
+        let roles = vec!["L".to_string(), "R".to_string()];
+        let curves = HashMap::from([("L".into(), left), ("R".into(), right)]);
+        let band = super::main_level_alignment_band(&curves, &roles, 120.0).unwrap();
+        assert!(band.0 >= 240.0 && band.1 <= 2_000.0);
+        assert!(band.1 >= 2.0 * band.0);
+        assert!((average_spl(&curves["L"], band) - average_spl(&curves["R"], band)).abs() < 0.01);
+    }
+
+    #[test]
+    fn calibration_refuses_disjoint_passbands_instead_of_using_eq_bounds() {
+        let mut low = curve(80.0);
+        low.freq = ndarray::array![20.0, 40.0, 60.0, 80.0, 100.0, 120.0];
+        let mut high = curve(80.0);
+        high.freq = ndarray::array![500.0, 800.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0];
+        let curves = HashMap::from([("L".into(), low), ("R".into(), high)]);
+        assert!(
+            super::main_level_alignment_band(&curves, &["L".into(), "R".into()], 80.0).is_err()
+        );
     }
 
     #[test]
@@ -4851,6 +4993,65 @@ mod post_dsp_level_tests {
 
     fn accepted_source(accepted: bool) -> roomeq_model::BassManagementSourceReport {
         accepted_source_with_advisory(accepted, "source_route_de_optimized")
+    }
+
+    #[test]
+    fn post_eq_screening_matches_serialized_graph_with_different_sub_grid() {
+        let config = roomeq_model::RoomConfig::default();
+        let (_, mut graph) = cancelling_setup();
+        graph.physical_sub_outputs = vec!["LFE".to_string()];
+        let full_sub = curve(60.0);
+        let mut main = super::engine_bass_management::predict_bass_source_curve_from_routes(
+            &full_sub, None, &graph, "L", 48_000.0,
+        )
+        .unwrap();
+        main.spl.mapv_inplace(|level| level + 12.0);
+        main.phase
+            .as_mut()
+            .unwrap()
+            .mapv_inplace(|phase| phase + 180.0);
+        let sub = Curve {
+            freq: ndarray::array![20.0, 80.0, 400.0],
+            spl: ndarray::Array1::from_elem(3, 60.0),
+            phase: Some(ndarray::Array1::zeros(3)),
+            ..Curve::default()
+        };
+        for (boost, accepted) in [(0.0, true), (6.0, false)] {
+            let mut corrected_sub = sub.clone();
+            corrected_sub.spl.mapv_inplace(|level| level + boost);
+            let bass = super::engine_bass_management::predict_bass_source_curve_from_routes(
+                &corrected_sub,
+                None,
+                &graph,
+                "L",
+                48_000.0,
+            )
+            .unwrap();
+            let screening = super::post_eq_crossover_cancellation(&config, "L", &main, &bass, 80.0)
+                .expect("mismatched grids must not erase screening evidence");
+            assert_eq!(screening.accepted, accepted);
+            let mut sub_chain = chain("LFE", sub.clone(), None);
+            sub_chain.plugins.push(mark_plugin_stage(
+                roomeq_engine::output::create_gain_plugin(boost),
+                "post_route",
+            ));
+            let channels = HashMap::from([
+                ("L".to_string(), chain("L", main.clone(), None)),
+                ("LFE".to_string(), sub_chain),
+            ]);
+            let serialized = serde_json::to_string(&(channels, &graph)).unwrap();
+            let (channels, graph): (HashMap<String, ChannelDspChain>, BassManagementRoutingGraph) =
+                serde_json::from_str(&serialized).unwrap();
+            let replay = reconstruct_deployed_source_curves(
+                &channels,
+                &HashMap::new(),
+                &graph,
+                None,
+                48_000.0,
+                std::path::Path::new("."),
+            );
+            assert_eq!(replay.is_ok(), accepted, "serialized playback: {replay:?}");
+        }
     }
 
     #[test]
@@ -6233,7 +6434,7 @@ mod tests {
     }
 
     #[test]
-    fn home_cinema_routing_retains_primary_main_capture() {
+    fn home_cinema_routing_retains_same_primary_main_and_sub_capture() {
         let sys = home_cinema_sys_with_sub();
         let mut speakers = stereo_speakers_with_phase();
         let mut first = flat_curve_with_phase();
@@ -6242,7 +6443,7 @@ mod tests {
         let mut second = first.clone();
         second.spl.fill(90.0);
         second.phase.as_mut().unwrap().fill(-89.0);
-        for name in ["left", "right"] {
+        for name in ["left", "right", "sub"] {
             speakers.insert(
                 name.into(),
                 SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(vec![
@@ -6251,28 +6452,117 @@ mod tests {
                 ])),
             );
         }
-        speakers.insert(
-            "sub".into(),
-            SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve_with_phase())),
-        );
         let mut optimizer = tiny_optimizer();
         optimizer.max_freq = 2000.0;
+        optimizer.multi_seat = Some(MultiSeatConfig {
+            primary_seat: 1,
+            ..Default::default()
+        });
         let config = room_config(speakers, &sys, optimizer, Some(crossovers_fixed()), None);
         let mut assembly = make_assembly(&config, &sys);
         let result = HomeCinemaExecutor.execute(&mut assembly).unwrap();
-        for name in ["Left", "Right"] {
+        for name in ["Left", "Right", "sub"] {
             let initial: roomeq_engine::Curve =
                 result.channels[name].initial_curve.clone().unwrap().into();
-            assert!(initial.spl.iter().all(|spl| (*spl - 80.0).abs() < 1e-8));
+            assert!(initial.spl.iter().all(|spl| (*spl - 90.0).abs() < 1e-8));
             assert!(
                 initial
                     .phase
                     .as_ref()
                     .expect("routing lost measured primary phase")
                     .iter()
-                    .all(|phase| (*phase - 37.0).abs() < 1e-8)
+                    .all(|phase| (*phase + 89.0).abs() < 1e-8)
             );
         }
+        let optimization = result
+            .metadata
+            .bass_management
+            .unwrap()
+            .optimization
+            .unwrap();
+        assert!(optimization.phase_available);
+        assert!(
+            optimization
+                .advisories
+                .iter()
+                .any(|value| value == "crossover_phase_coherence_unverified")
+        );
+        assert!(
+            !optimization
+                .advisories
+                .iter()
+                .any(|value| value.contains("missing_phase"))
+        );
+    }
+
+    #[test]
+    fn home_cinema_rejects_bad_phase_quality_even_on_nonprimary_seat() {
+        let sys = home_cinema_sys_with_sub();
+        let mut speakers = stereo_speakers_with_phase();
+        let mut good = flat_curve_with_phase();
+        good.coherence = Some(ndarray::Array1::ones(good.freq.len()));
+        let mut bad = good.clone();
+        bad.coherence.as_mut().unwrap().fill(0.1);
+        speakers.insert(
+            "sub".into(),
+            SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(vec![good, bad])),
+        );
+        let config = room_config(
+            speakers,
+            &sys,
+            tiny_optimizer(),
+            Some(crossovers_fixed()),
+            None,
+        );
+        let mut assembly = make_assembly(&config, &sys);
+        let error = HomeCinemaExecutor
+            .execute(&mut assembly)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("channel 'sub' seat 1"), "{error}");
+        assert!(error.contains("unreliable coherence"), "{error}");
+    }
+
+    #[test]
+    fn crossover_quality_gate_includes_group_frequency_overrides() {
+        let mut sys = home_cinema_sys_with_sub();
+        let mut speakers = stereo_speakers_with_phase();
+        let mut sub = flat_curve_with_phase();
+        sub.coherence = Some(sub.freq.mapv(|hz| {
+            if (200.0..600.0).contains(&hz) {
+                0.1
+            } else {
+                1.0
+            }
+        }));
+        speakers.insert(
+            "sub".into(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(sub)),
+        );
+        let mut config = room_config(
+            speakers,
+            &sys,
+            tiny_optimizer(),
+            Some(crossovers_fixed()),
+            None,
+        );
+        assert!(super::configured_crossover_phase_advisories(&config, &sys).is_ok());
+        let mut higher = config.crossovers.as_ref().unwrap()["bass_xo"].clone();
+        higher.frequency = Some(300.0);
+        config
+            .crossovers
+            .as_mut()
+            .unwrap()
+            .insert("higher".into(), higher);
+        sys.bass_management
+            .get_or_insert_with(Default::default)
+            .group_crossovers
+            .insert("lcr".into(), "higher".into());
+        let error = super::configured_crossover_phase_advisories(&config, &sys).unwrap_err();
+        assert!(
+            error.to_string().contains("unreliable coherence"),
+            "{error}"
+        );
     }
 
     #[test]

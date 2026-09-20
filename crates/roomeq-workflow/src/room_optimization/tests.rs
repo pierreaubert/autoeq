@@ -270,6 +270,119 @@ fn shared_alignment_fit_band_excludes_subwoofer_and_crossover_rolloff() {
 }
 
 #[test]
+fn bass_only_matching_preserves_upper_band_and_skips_broadband_shelves() {
+    let mut config = minimal_room_config(ProcessingMode::LowLatency);
+    config.optimizer.max_freq = 200.0;
+    config.optimizer.inter_channel_timbre_matching =
+        Some(roomeq_model::InterChannelTimbreMatchingConfig {
+            enabled: true,
+            reference_channel: "L".into(),
+            ..Default::default()
+        });
+    let mut result = crate::test_fixtures::single_channel_room_result("L");
+    let main = flat_curve();
+    let mut height = main.clone();
+    for (&f, spl) in height.freq.iter().zip(height.spl.iter_mut()) {
+        if f < 200.0 {
+            *spl += 10.0;
+        }
+    }
+    for (name, curve) in [("L", main), ("TFL", height)] {
+        config.speakers.insert(
+            name.into(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(curve.clone())),
+        );
+        let mut channel = result.channel_results["L"].clone();
+        channel.initial_curve = curve.clone();
+        channel.final_curve = curve.clone();
+        result.channel_results.insert(name.into(), channel);
+        let mut chain = result.channels["L"].clone();
+        chain.channel = name.into();
+        chain.plugins.clear();
+        chain.initial_curve = Some((&curve).into());
+        chain.final_curve = Some((&curve).into());
+        result.channels.insert(name.into(), chain);
+        result.deployed_source_curves.insert(name.into(), curve);
+    }
+    let stage = apply_inter_channel_timbre_matching_stage(
+        &config,
+        48_000.0,
+        &result.deployed_source_curves,
+        &mut result.channel_results,
+        &mut result.channels,
+    )
+    .unwrap();
+    assert_eq!(stage.status, StageStatus::Skipped);
+    assert!(
+        stage
+            .advisories
+            .contains(&"broadband_shelves_outside_correction_band".into())
+    );
+    let height_config = roomeq_model::HeightChannelAlignmentConfig {
+        enabled: true,
+        match_arrival_time: false,
+        reference_channels: HashMap::from([("TFL".into(), "L".into())]),
+        ..Default::default()
+    };
+    let stage = apply_topology_height_alignment_with_frequency_samples(
+        &mut result,
+        &height_config,
+        &config,
+        None,
+        48_000.0,
+        256,
+    );
+    assert_ne!(stage.status, StageStatus::Failed, "{:?}", stage.advisories);
+    assert!(
+        result.channels["TFL"].plugins.is_empty(),
+        "bass mismatch must not cause broadband gain or shelves"
+    );
+}
+
+#[test]
+fn cinema_alignment_detects_whole_group_offsets_outside_bass_eq_band() {
+    let mut config = minimal_room_config(ProcessingMode::LowLatency);
+    config.optimizer.max_freq = 200.0;
+    config.system = Some(SystemConfig {
+        model: SystemModel::HomeCinema,
+        subwoofers: Some(SubwooferSystemConfig {
+            config: SubwooferStrategy::Single,
+            crossover: None,
+            routing: Default::default(),
+            outputs: Vec::new(),
+        }),
+        ..SystemConfig::default()
+    });
+    let mut quiet_surround = flat_curve();
+    quiet_surround.spl -= 10.0;
+    let curves = HashMap::from([
+        ("L".into(), flat_curve()),
+        ("R".into(), flat_curve()),
+        ("SL".into(), quiet_surround.clone()),
+        ("SR".into(), quiet_surround),
+    ]);
+    let (gains, spread, band) = final_role_level_alignment_gains(&config, &curves, &curves);
+    assert!(
+        (spread - 10.0).abs() < 0.01,
+        "equal L/R pairs are not equal cinema levels"
+    );
+    assert_eq!(band, (500.0, 2_000.0));
+    assert!((gains["L"] + 10.0).abs() < 0.01);
+    assert!((gains["R"] + 10.0).abs() < 0.01);
+    assert!(!gains.contains_key("SL"));
+
+    let mut damaged = curves.clone();
+    let left = damaged.get_mut("L").unwrap();
+    for (&frequency, level) in left.freq.iter().zip(left.spl.iter_mut()) {
+        *level += if frequency < 200.0 { 30.0 } else { -30.0 };
+    }
+    let (_, damaged_spread, frozen_band) =
+        final_role_level_alignment_gains(&config, &damaged, &curves);
+    assert_eq!(frozen_band, band, "candidate EQ must not redefine support");
+    assert!((damaged_spread - 30.0).abs() < 0.01);
+}
+
+#[test]
 fn final_role_level_alignment_corrects_broadband_lr_offset_down_only() {
     let mut config = minimal_room_config(ProcessingMode::LowLatency);
     config.optimizer.min_freq = 20.0;
@@ -286,7 +399,7 @@ fn final_role_level_alignment_corrects_broadband_lr_offset_down_only() {
         ("LFE".to_string(), curve(80.0)),
     ]);
 
-    let (gains, spread_db, band) = final_role_level_alignment_gains(&config, &curves);
+    let (gains, spread_db, band) = final_role_level_alignment_gains(&config, &curves, &curves);
     assert_eq!(band, (100.0, 1_000.0));
 
     assert!((spread_db - 3.5).abs() < 1.0e-9);
@@ -303,7 +416,7 @@ fn final_role_level_alignment_corrects_broadband_lr_offset_down_only() {
             .mapv_inplace(|value| value + gain_db);
     }
     let (remaining_gains, remaining_spread_db, _) =
-        final_role_level_alignment_gains(&config, &aligned);
+        final_role_level_alignment_gains(&config, &aligned, &curves);
     assert!(remaining_gains.is_empty());
     assert!(remaining_spread_db <= FINAL_CHANNEL_LEVEL_TOLERANCE_DB);
 }
@@ -327,7 +440,8 @@ fn final_channel_level_uses_upper_band_after_unequal_headroom_gains() {
         ("R".to_string(), curve(77.65)),
     ]);
 
-    let (gains, spread_before_db, band) = final_role_level_alignment_gains(&config, &curves);
+    let (gains, spread_before_db, band) =
+        final_role_level_alignment_gains(&config, &curves, &curves);
     assert_eq!(band, (200.0, 20_000.0));
     assert!((spread_before_db - 2.35).abs() < 1.0e-9);
     assert!((gains["L"] + 2.35).abs() < 1.0e-9);
@@ -341,7 +455,7 @@ fn final_channel_level_uses_upper_band_after_unequal_headroom_gains() {
             .spl
             .mapv_inplace(|value| value + gain_db);
     }
-    let (_, spread_after_db, _) = final_role_level_alignment_gains(&config, &aligned);
+    let (_, spread_after_db, _) = final_role_level_alignment_gains(&config, &aligned, &curves);
     assert!(spread_after_db <= FINAL_CHANNEL_LEVEL_TOLERANCE_DB);
 
     let mut result = crate::test_fixtures::single_channel_room_result("L");

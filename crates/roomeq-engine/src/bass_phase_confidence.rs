@@ -83,6 +83,100 @@ pub const MIN_BASS_OCTAVE_DURATION_S: f32 = 2.0;
 /// meaningful. Enforces part of `"insufficient_bass_duration"`.
 pub const MIN_NUM_SWEEPS: u8 = 4;
 
+/// Check declared measurement quality before coherent crossover processing.
+///
+/// Unlike the GD-Opt gate, legacy measurements without coherence or noise
+/// metadata remain usable, but explicitly unverified. Known-bad bins in the
+/// crossover overlap must not be hidden by averaging other frequencies or
+/// other speakers. This checks measurement quality, not a shared timing
+/// reference: callers must retain synchronously measured seat identities.
+///
+/// # Errors
+/// Returns an error for invalid bounds, malformed evidence, or unreliable
+/// measured phase in the requested overlap band.
+pub fn crossover_phase_advisories(
+    curve: &Curve,
+    band: (f64, f64),
+    recording: Option<&RecordingConfiguration>,
+) -> roomeq_model::Result<Vec<&'static str>> {
+    let invalid = |reason: &str| roomeq_model::AutoeqError::InvalidMeasurement {
+        message: format!("crossover phase confidence: {reason}"),
+    };
+    let threshold = recording
+        .and_then(|config| config.coherence_threshold)
+        .map(f64::from)
+        .unwrap_or(DEFAULT_COHERENCE_THRESHOLD);
+    if !band.0.is_finite()
+        || !band.1.is_finite()
+        || band.0 < 0.0
+        || band.1 <= band.0
+        || !threshold.is_finite()
+        || !(0.0..=1.0).contains(&threshold)
+    {
+        return Err(invalid("invalid band or coherence threshold"));
+    }
+    let mut advisories = Vec::new();
+    for (values, missing) in [
+        (curve.phase.as_ref(), "crossover_phase_unavailable"),
+        (
+            curve.coherence.as_ref(),
+            "crossover_phase_coherence_unverified",
+        ),
+        (
+            curve.noise_floor_db.as_ref(),
+            "crossover_phase_snr_unverified",
+        ),
+    ] {
+        if let Some(values) = values {
+            if values.len() != curve.freq.len() {
+                return Err(invalid("measurement quality array length mismatch"));
+            }
+        } else {
+            advisories.push(missing);
+        }
+    }
+    if curve.spl.len() != curve.freq.len() {
+        return Err(invalid("SPL array length mismatch"));
+    }
+    let mut bins = 0;
+    for (index, &frequency) in curve.freq.iter().enumerate() {
+        if !frequency.is_finite() {
+            return Err(invalid("non-finite frequency"));
+        }
+        if frequency < band.0 || frequency > band.1 {
+            continue;
+        }
+        bins += 1;
+        if curve
+            .phase
+            .as_ref()
+            .is_some_and(|phase| !phase[index].is_finite())
+        {
+            return Err(invalid("non-finite phase in crossover band"));
+        }
+        if let Some(coherence) = &curve.coherence {
+            let value = coherence[index];
+            if !value.is_finite() || !(0.0..=1.0).contains(&value) || value < threshold {
+                return Err(invalid(&format!(
+                    "unreliable coherence at {frequency:.1} Hz ({value:.3}, required {threshold:.3})"
+                )));
+            }
+        }
+        if let Some(noise) = &curve.noise_floor_db {
+            let snr = curve.spl[index] - noise[index];
+            if !snr.is_finite() || snr < MIN_SNR_DB {
+                return Err(invalid(&format!(
+                    "unreliable SNR at {frequency:.1} Hz ({snr:.1} dB, required {MIN_SNR_DB:.1} dB)"
+                )));
+            }
+        }
+    }
+    if bins == 0 {
+        return Err(invalid("no measured bins in crossover band"));
+    }
+    Ok(advisories)
+}
+
 /// Run the bass phase confidence gate.
 ///
 /// # Arguments
@@ -215,6 +309,52 @@ fn snr_above_threshold(curves: &[Curve], band_lo: f64, band_hi: f64, min_snr_db:
 mod tests {
     use super::*;
     use ndarray::Array1;
+
+    #[test]
+    fn crossover_quality_distinguishes_unknown_from_bad_evidence() {
+        let mut curve = Curve {
+            freq: ndarray::array![20.0, 40.0, 80.0, 160.0, 1000.0],
+            spl: Array1::from_elem(5, 80.0),
+            phase: Some(Array1::zeros(5)),
+            ..Default::default()
+        };
+        let band = (40.0, 160.0);
+        let unknown = crossover_phase_advisories(&curve, band, None).unwrap();
+        assert!(unknown.contains(&"crossover_phase_coherence_unverified"));
+        curve.coherence = Some(ndarray::array![0.0, 1.0, 1.0, 1.0, 0.0]);
+        curve.noise_floor_db = Some(ndarray::array![80.0, 60.0, 60.0, 60.0, 80.0]);
+        assert!(
+            crossover_phase_advisories(&curve, band, None)
+                .unwrap()
+                .is_empty()
+        );
+        // One unreliable crossover bin cannot be masked by the other bins.
+        curve.coherence.as_mut().unwrap()[2] = 0.8;
+        assert!(
+            crossover_phase_advisories(&curve, band, None)
+                .unwrap_err()
+                .to_string()
+                .contains("coherence at 80.0")
+        );
+        let recording = RecordingConfiguration {
+            coherence_threshold: Some(0.75),
+            ..Default::default()
+        };
+        assert!(crossover_phase_advisories(&curve, band, Some(&recording)).is_ok());
+        curve.coherence = None;
+        curve.noise_floor_db.as_mut().unwrap()[2] = 75.0;
+        assert!(
+            crossover_phase_advisories(&curve, band, None)
+                .unwrap_err()
+                .to_string()
+                .contains("SNR at 80.0")
+        );
+        curve.noise_floor_db = None;
+        curve.coherence = Some(ndarray::array![1.0]);
+        assert!(crossover_phase_advisories(&curve, band, None).is_err());
+        curve.coherence = Some(Array1::from_elem(5, f64::NAN));
+        assert!(crossover_phase_advisories(&curve, band, None).is_err());
+    }
 
     fn log_freqs(n: usize, lo: f64, hi: f64) -> Array1<f64> {
         Array1::from_vec(

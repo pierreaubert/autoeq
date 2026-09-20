@@ -24,9 +24,41 @@ use math_audio_dsp::analysis::compute_average_response;
 use roomeq_model::{CrossoverConfig, RoomConfig};
 use std::collections::{BTreeMap, HashMap};
 
-// Leave room for serialized-chain interpolation and final grid replay. The
-// Acceptance separately compares cancellation against the frozen run baseline.
+// Soft target-tracking preference, not a hard cancellation acceptance limit.
+// Electrical and baseline-aware acoustic safety are assessed separately.
 const ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB: f64 = 1.0;
+
+fn cancellation_penalty_excess(evidence: &roomeq_model::CrossoverCancellationEvidence) -> f64 {
+    if !evidence.final_db.is_finite() || !evidence.limit_db.is_finite() {
+        return f64::INFINITY;
+    }
+    // Reserve one extra comparison tolerance for serialized replay while
+    // allowing useful residuals above the absolute limit when the measured
+    // baseline was worse. A fixed 1 dB safety hinge can silence bass merely
+    // to remove cancellation that the configured policy already accepts.
+    let ceiling = evidence.baseline_db.filter(|value| value.is_finite()).map_or(
+        evidence.limit_db,
+        |baseline| {
+            evidence.limit_db.max(
+                baseline - 2.0 * roomeq_model::CROSSOVER_CANCELLATION_TOLERANCE_DB,
+            )
+        },
+    );
+    (evidence.final_db - ceiling).max(0.0)
+}
+
+fn constrained_route_loss(
+    loss: f64,
+    underfill: f64,
+    evidence: &roomeq_model::CrossoverCancellationEvidence,
+) -> f64 {
+    let excess = (underfill - ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB).max(0.0);
+    let unsafe_excess = cancellation_penalty_excess(evidence);
+    // Preserve the established separation of scales: target deficits dominate
+    // flatness, and policy violations dominate target fitting. Accepted measured
+    // residuals must not receive the latter penalty.
+    loss + 1_000.0 * excess * excess + 1_000_000.0 * unsafe_excess * unsafe_excess
+}
 
 fn candidate_restores_hard_safety(
     evidence: &[roomeq_model::CrossoverCancellationEvidence],
@@ -1733,16 +1765,9 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
             let constrained_losses = losses
                 .iter()
                 .zip(&constrained_underfills)
-                .zip(&cancellation_underfills)
-                .map(|((loss, underfill), cancellation)| {
-                    let excess = (underfill - ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB).max(0.0);
-                    let unsafe_excess = (cancellation
-                        - ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB
-                            .min(config.optimizer.max_crossover_cancellation_db))
-                    .max(0.0);
-                    // A large target deficit must not hide unsafe cancellation
-                    // inside max(target_deficit, cancellation_deficit).
-                    loss + 1_000.0 * excess * excess + 1_000_000.0 * unsafe_excess * unsafe_excess
+                .zip(&cancellation_evidence)
+                .map(|((loss, underfill), evidence)| {
+                    constrained_route_loss(*loss, *underfill, evidence)
                 })
                 .collect::<Vec<_>>();
             let mean = constrained_losses.iter().sum::<f64>() / constrained_losses.len() as f64;
@@ -2084,6 +2109,21 @@ mod tests {
         ));
         assert!(candidate_restores_hard_safety(&[evidence(1.0, 10.0)]));
         assert!(!candidate_restores_hard_safety(&[evidence(4.0, 10.0)]));
+        assert_eq!(cancellation_penalty_excess(&evidence(4.0, 10.0)), 0.0);
+        assert!(
+            constrained_route_loss(1.0, 4.0, &evidence(4.0, 10.0))
+                < constrained_route_loss(1.0, 10.0, &evidence(0.0, 10.0)),
+            "turning bass down must not beat a useful baseline-improving residual"
+        );
+        assert!(cancellation_penalty_excess(&evidence(10.0, 10.0)) > 0.0);
+        assert!(cancellation_penalty_excess(&evidence(4.0, 3.5)) > 0.0);
+        let mut configured = evidence(4.0, 3.5);
+        configured.baseline_db = None;
+        assert!((cancellation_penalty_excess(&configured) - 1.0).abs() < 1e-12);
+        configured.limit_db = 5.0;
+        assert_eq!(cancellation_penalty_excess(&configured), 0.0);
+        configured.final_db = f64::NAN;
+        assert!(cancellation_penalty_excess(&configured).is_infinite());
     }
 
     #[test]

@@ -521,7 +521,7 @@ pub struct BassManagementSignalFlowEntry {
     pub redirects_bass: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct BassManagementRoutingGraph {
     /// Internal primary-output compatibility accessor. Serialized metadata uses
     /// `physical_sub_outputs` exclusively.
@@ -543,6 +543,44 @@ pub struct BassManagementRoutingGraph {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stereo_routing: Option<StereoBassRoutingReport>,
     pub advisories: Vec<String>,
+}
+
+impl<'de> Deserialize<'de> for BassManagementRoutingGraph {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // The v3 wire format has one ordered output list, not a second legacy
+        // primary identity. Restore the internal accessor after a JSON round trip.
+        #[derive(Deserialize)]
+        struct Fields {
+            #[serde(default)]
+            physical_sub_outputs: Vec<String>,
+            input_channels: Vec<String>,
+            output_channels: Vec<String>,
+            routes: Vec<BassManagementRoute>,
+            #[serde(default)]
+            matrix: Option<BassManagementMatrix>,
+            #[serde(default)]
+            input_trim_db: HashMap<String, f64>,
+            #[serde(default)]
+            stereo_routing: Option<StereoBassRoutingReport>,
+            advisories: Vec<String>,
+        }
+        let fields = Fields::deserialize(deserializer)?;
+        Ok(Self {
+            physical_sub_output: fields
+                .physical_sub_outputs
+                .first()
+                .cloned()
+                .unwrap_or_default(),
+            physical_sub_outputs: fields.physical_sub_outputs,
+            input_channels: fields.input_channels,
+            output_channels: fields.output_channels,
+            routes: fields.routes,
+            matrix: fields.matrix,
+            input_trim_db: fields.input_trim_db,
+            stereo_routing: fields.stereo_routing,
+            advisories: fields.advisories,
+        })
+    }
 }
 
 /// Supported stereo input-to-subwoofer matrices.
@@ -607,6 +645,27 @@ fn default_route_matrix_gain() -> f64 {
 mod tests {
     use super::*;
     use crate::{CrossoverConfig, SubwooferSystemConfig, SystemConfig};
+
+    #[test]
+    fn routing_graph_restores_primary_output_from_v3_order() {
+        let wire = serde_json::json!({
+            "physical_sub_outputs": ["Sub2", "Sub1"],
+            "input_channels": ["L", "LFE"],
+            "output_channels": ["L", "Sub2", "Sub1"],
+            "routes": [],
+            "advisories": []
+        });
+        let graph: super::BassManagementRoutingGraph = serde_json::from_value(wire).unwrap();
+        assert_eq!(graph.physical_sub_output, "Sub2");
+        let saved = serde_json::to_value(&graph).unwrap();
+        assert!(saved.get("physical_sub_output").is_none());
+        assert_eq!(
+            saved["physical_sub_outputs"],
+            serde_json::json!(["Sub2", "Sub1"])
+        );
+        let restored: super::BassManagementRoutingGraph = serde_json::from_value(saved).unwrap();
+        assert_eq!(restored.physical_sub_output, "Sub2");
+    }
 
     #[test]
     fn default_route_matrix_gain_is_unity() {

@@ -117,8 +117,16 @@ pub fn prepared_fir_target_curve(
         active_min_freq,
         active_max_freq,
     );
-    if measurement_mean.is_finite() && target_mean.is_finite() {
-        target.spl += measurement_mean - target_mean;
+    // IIR and FIR stages must share the same immutable measured reference.
+    // In particular, a bass-only correction band is not a level-reference band.
+    let reference = crate::spectral_align::limited_correction_target_reference(
+        measurement,
+        &target,
+        active_max_freq,
+    )
+    .unwrap_or(measurement_mean - target_mean);
+    if reference.is_finite() {
+        target.spl += reference;
     }
     target
 }

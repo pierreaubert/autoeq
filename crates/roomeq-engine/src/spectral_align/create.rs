@@ -41,8 +41,15 @@ pub fn create_alignment_plugins(
     let shelf_filters = create_alignment_filters(result, sample_rate);
     let eq_plugin = (!shelf_filters.is_empty())
         .then(|| crate::output::create_labeled_eq_plugin(&shelf_filters, "broadband"));
-    let gain_plugin = (result.flat_gain_db.abs() >= MIN_CORRECTION_DB)
-        .then(|| crate::output::create_gain_plugin(result.flat_gain_db));
+    let gain_plugin = (result.flat_gain_db.abs() >= MIN_CORRECTION_DB).then(|| {
+        let mut gain = crate::output::create_gain_plugin(result.flat_gain_db);
+        // This gain is fitted together with the correction, not measured speaker
+        // calibration. Keeping it after removing the shelves changes playback
+        // level even though the correction has supposedly been rolled back.
+        gain.parameters["label"] = serde_json::json!("spectral_alignment");
+        gain.parameters["room_eq_correction_gain"] = serde_json::json!(true);
+        gain
+    });
     (eq_plugin, gain_plugin)
 }
 
@@ -60,6 +67,9 @@ mod plugin_tests {
         };
         let (eq, gain) = create_alignment_plugins(&result, 48_000.0);
         assert_eq!(eq.expect("shelf plugin").plugin_type, "eq");
-        assert_eq!(gain.expect("gain plugin").plugin_type, "gain");
+        let gain = gain.expect("gain plugin");
+        assert_eq!(gain.plugin_type, "gain");
+        assert_eq!(gain.parameters["room_eq_correction_gain"], true);
+        assert_eq!(gain.parameters["gain_db"], -1.0);
     }
 }

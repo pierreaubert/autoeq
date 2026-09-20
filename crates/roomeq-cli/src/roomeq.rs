@@ -38,6 +38,17 @@ const RUN_MANIFEST_VERSION: u32 = 1;
 const RUN_STATUS_COMPLETE: &str = "complete";
 /// Completion status when the native graph is valid but a secondary step failed.
 const RUN_STATUS_PARTIAL: &str = "partial";
+/// Diagnostics were saved, but the graph is not approved for playback.
+const RUN_STATUS_REJECTED: &str = "rejected";
+
+fn require_playback_outcome(outcome: Option<roomeq_model::RoomEqOutcome>) -> Result<()> {
+    match outcome {
+        Some(roomeq_model::RoomEqOutcome::Accepted | roomeq_model::RoomEqOutcome::Unchanged) => {
+            Ok(())
+        }
+        other => Err(anyhow!("RoomEQ has no approved playback result: {other:?}")),
+    }
+}
 
 /// Transactional completion marker for one CLI pipeline run.
 ///
@@ -49,11 +60,11 @@ const RUN_STATUS_PARTIAL: &str = "partial";
 struct RunManifest {
     /// Schema version ([`RUN_MANIFEST_VERSION`]).
     version: u32,
-    /// `"complete"` or `"partial"` (see [`RUN_STATUS_COMPLETE`]).
+    /// `"complete"`, `"partial"`, or `"rejected"` (diagnostics only).
     status: String,
     /// Sample rate the filters were designed for.
     sample_rate: f64,
-    /// Native DSP graph asset; always valid once this manifest exists.
+    /// Native graph asset; playback approval requires a non-rejected status.
     native_graph: PathBuf,
     /// Requested external export format, if any.
     export_format: Option<String>,
@@ -477,6 +488,35 @@ fn execute_optimization(
     save_dsp_chain(&dsp_output, &output_path)
         .map_err(|e| anyhow!("{}", e))
         .with_context(|| format!("Failed to save DSP chain to {:?}", output_path))?;
+
+    if let Err(error) = require_playback_outcome(
+        result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .map(|report| report.outcome),
+    ) {
+        persist_run_manifest_best_effort(
+            &output_path,
+            &RunManifest {
+                version: RUN_MANIFEST_VERSION,
+                status: RUN_STATUS_REJECTED.to_string(),
+                sample_rate,
+                native_graph: output_path.clone(),
+                export_format: export_format.map(|format| format!("{format:?}")),
+                export_path,
+                export_status: Some("not_attempted".to_string()),
+                export_error: Some(error.to_string()),
+                assets_owned: vec![output_path.clone(), manifest_path_for(&output_path)],
+            },
+        );
+        return Err(error).with_context(|| {
+            format!(
+                "Diagnostic DSP saved to {}; not approved for playback; external export skipped",
+                output_path.display()
+            )
+        });
+    }
 
     // Export to external format if requested. The native graph above stays
     // valid whatever happens below: it is never deleted on export failure.
@@ -1317,6 +1357,18 @@ mod tests {
         partial_export_diagnostic, probe_span, resolve_seat_sources, run_dry_run,
         strict_input_schema, validate_optimizer_resources, write_run_manifest,
     };
+
+    #[test]
+    fn playback_publication_rejects_failed_or_missing_acoustic_evidence() {
+        use roomeq_model::RoomEqOutcome;
+        assert!(super::require_playback_outcome(Some(RoomEqOutcome::Accepted)).is_ok());
+        assert!(super::require_playback_outcome(Some(RoomEqOutcome::Unchanged)).is_ok());
+        assert!(super::require_playback_outcome(Some(RoomEqOutcome::Rejected)).is_err());
+        assert!(
+            super::require_playback_outcome(Some(RoomEqOutcome::InsufficientEvidence)).is_err()
+        );
+        assert!(super::require_playback_outcome(None).is_err());
+    }
 
     #[test]
     fn schema_input_succeeds() {

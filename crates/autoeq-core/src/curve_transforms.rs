@@ -125,6 +125,70 @@ pub fn mean_over_log_frequency(
     (width > 0.0).then_some(integral / width)
 }
 
+/// Reuse exact piecewise-linear log-frequency integrals for smoothing windows.
+struct LogFrequencyIntegral<'a> {
+    axis: Vec<f64>,
+    values: &'a Array1<f64>,
+    integral: Vec<f64>,
+}
+
+impl<'a> LogFrequencyIntegral<'a> {
+    fn new(frequencies: &Array1<f64>, values: &'a Array1<f64>) -> Option<Self> {
+        if frequencies.len() != values.len()
+            || frequencies.len() < 2
+            || frequencies.iter().any(|f| !f.is_finite() || *f <= 0.0)
+            || values.iter().any(|v| !v.is_finite())
+        {
+            return None;
+        }
+        let axis: Vec<_> = frequencies.iter().map(|f| f.ln()).collect();
+        if axis.windows(2).any(|pair| pair[1] <= pair[0]) {
+            return None;
+        }
+        let mut integral = Vec::with_capacity(axis.len());
+        integral.push(0.0);
+        let mut sum = 0.0;
+        let mut compensation = 0.0;
+        // Remove the common level before accumulating, preserving flat curves
+        // exactly and reducing cancellation when subtracting nearby prefixes.
+        for index in 0..axis.len() - 1 {
+            let area = 0.5
+                * ((values[index] - values[0]) + (values[index + 1] - values[0]))
+                * (axis[index + 1] - axis[index]);
+            let corrected = area - compensation;
+            let next = sum + corrected;
+            compensation = (next - sum) - corrected;
+            sum = next;
+            integral.push(sum);
+        }
+        Some(Self {
+            axis,
+            values,
+            integral,
+        })
+    }
+
+    fn at(&self, x: f64) -> f64 {
+        let index = self
+            .axis
+            .partition_point(|value| *value <= x)
+            .saturating_sub(1)
+            .min(self.axis.len() - 2);
+        let width = x - self.axis[index];
+        let start = self.values[index] - self.values[0];
+        let slope = (self.values[index + 1] - self.values[index])
+            / (self.axis[index + 1] - self.axis[index]);
+        self.integral[index] + width * (start + 0.5 * slope * width)
+    }
+
+    fn mean(&self, lower: f64, upper: f64) -> Option<f64> {
+        let lower = lower.ln().max(self.axis[0]);
+        let upper = upper.ln().min(self.axis[self.axis.len() - 1]);
+        (upper > lower)
+            .then(|| self.values[0] + (self.at(upper) - self.at(lower)) / (upper - lower))
+    }
+}
+
 /// Interpolate all measured curve fields in logarithmic frequency space.
 pub fn interpolate_log_space(output_frequencies: &Array1<f64>, curve: &Curve) -> Curve {
     debug_assert!(
@@ -402,16 +466,17 @@ pub fn calculate_variable_n(frequency: f64, config: &PsychoacousticSmoothingConf
 /// Apply frequency-dependent psychoacoustic smoothing.
 pub fn smooth_psychoacoustic(curve: &Curve, config: &PsychoacousticSmoothingConfig) -> Curve {
     let mut spl = Array1::zeros(curve.spl.len());
+    let integral = LogFrequencyIntegral::new(&curve.freq, &curve.spl);
     for index in 0..curve.freq.len() {
         let frequency = curve.freq[index].max(1e-12);
         let bands_per_octave = calculate_variable_n(frequency, config);
         let half_window = 2.0_f64.powf(1.0 / (2.0 * bands_per_octave));
-        spl[index] = mean_over_log_frequency(
-            &curve.freq,
-            &curve.spl,
-            frequency / half_window,
-            frequency * half_window,
-        )
+        let lower = frequency / half_window;
+        let upper = frequency * half_window;
+        spl[index] = match &integral {
+            Some(integral) => integral.mean(lower, upper),
+            None => mean_over_log_frequency(&curve.freq, &curve.spl, lower, upper),
+        }
         .unwrap_or(curve.spl[index]);
     }
     Curve {
@@ -429,14 +494,15 @@ pub fn smooth_one_over_n_octave(curve: &Curve, bands_per_octave: usize) -> Curve
     let bands_per_octave = bands_per_octave.max(1);
     let half_window = 2.0_f64.powf(1.0 / (2.0 * bands_per_octave as f64));
     let mut spl = Array1::zeros(curve.spl.len());
+    let integral = LogFrequencyIntegral::new(&curve.freq, &curve.spl);
     for index in 0..curve.freq.len() {
         let frequency = curve.freq[index].max(1e-12);
-        spl[index] = mean_over_log_frequency(
-            &curve.freq,
-            &curve.spl,
-            frequency / half_window,
-            frequency * half_window,
-        )
+        let lower = frequency / half_window;
+        let upper = frequency * half_window;
+        spl[index] = match &integral {
+            Some(integral) => integral.mean(lower, upper),
+            None => mean_over_log_frequency(&curve.freq, &curve.spl, lower, upper),
+        }
         .unwrap_or(curve.spl[index]);
     }
     Curve {

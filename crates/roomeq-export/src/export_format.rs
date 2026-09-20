@@ -4,6 +4,46 @@ use super::conformance::{
 use roomeq_model::DspGraph;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+mod limiter_tests {
+    use super::*;
+
+    #[test]
+    fn external_formats_cannot_drop_runtime_sub_protection() {
+        let output = DspGraph {
+            version: "1.3.0".into(),
+            global_plugins: vec![],
+            metadata: None,
+            deployed_source_curves: Default::default(),
+            channels: std::collections::HashMap::from([(
+                "Sub1".into(),
+                serde_json::from_value(serde_json::json!({"channel": "Sub1", "plugins": [
+                    roomeq_engine::runtime_limiter::plugin(0.0)
+                ]}))
+                .unwrap(),
+            )]),
+        };
+        for format in [
+            ExportFormat::CamillaDsp,
+            ExportFormat::EqualizerApo,
+            ExportFormat::EasyEffects,
+            ExportFormat::Wavelet,
+            ExportFormat::PipeWire,
+            ExportFormat::RoonDsp,
+            ExportFormat::Rew,
+            ExportFormat::BiquadCoefficients,
+        ] {
+            let error = ensure_external_export_supported(&output, format).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("mandatory runtime sub-output limiter"),
+                "{error}"
+            );
+        }
+    }
+}
+
 /// Supported export formats for DSP chain output
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum ExportFormat {
@@ -81,6 +121,24 @@ pub(super) fn ensure_external_export_supported(
     output: &DspGraph,
     format: ExportFormat,
 ) -> anyhow::Result<()> {
+    if output
+        .global_plugins
+        .iter()
+        .chain(output.channels.values().flat_map(|chain| {
+            chain.plugins.iter().chain(
+                chain
+                    .drivers
+                    .iter()
+                    .flatten()
+                    .flat_map(|driver| driver.plugins.iter()),
+            )
+        }))
+        .any(|plugin| plugin.plugin_type == "limiter")
+    {
+        anyhow::bail!(
+            "{format:?} export cannot preserve the mandatory runtime sub-output limiter; use native playback"
+        );
+    }
     let has_routed_bass_management = has_routed_bass_management(output);
     let has_global_plugins = !output.global_plugins.is_empty();
 

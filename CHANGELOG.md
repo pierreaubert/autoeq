@@ -1,6 +1,77 @@
 # Unreleased
 
+- Clarify RoomEQ FIR, MIXED/hybrid, and MIXED-PHASE mode names, phase and length controls, latency, and the distinction between correction bounds and processing/speaker crossovers.
+
+# 0.5.74
+
+## Package versions
+
+- autoeq 0.5.74, autoeq-core 0.5.12, roomeq-analysis 0.5.10, roomeq-cli 0.5.8, roomeq-engine 0.5.82, roomeq-export 0.5.8, roomeq-model 0.5.13, roomeq-workflow 0.5.33.
+
+## RoomEQ correctness and playback safety
+
+- Keep main/sub crossover alignment on the same configured primary seat while preserving all single-sub seats for spatial magnitude EQ. Check raw phase-quality evidence before sub-array processing, including per-group and per-sub crossover overrides. Reject known-bad coherence/SNR and report missing confidence metadata as unverified.
+
+
+- Add opt-in `optimizer.finalization.subwoofer_limiter` for native, post-sum
+  subwoofer limiting instead of static bass attenuation. Preserve main/sub
+  timing, disclose small-signal scoring and dynamic protection, and reject
+  external exports that cannot preserve the limiter. Enable it for Genelec/KEF IIR.
+- Expose channel, driver, and global gain plugins in HTML reports so safety cuts
+  and level trims remain visible even when the EQ-only response is flat. Match
+  named subwoofer-group SPL-budget exemptions in the independent artifact audit.
+- Measure routed main-speaker SPL loss on the physical main branch above its
+  structural crossover, separately from combined main/sub response quality.
+  Observe independent stereo speakers over their measured passbands so bass-only
+  correction bounds cannot hide an upper-band regression.
+
+- Exempt subwoofers from the main/surround/height SPL-loss allowance while retaining
+  their loss diagnostics and electrical/acoustic safety checks. Apply structural
+  fallback headroom attenuation per physical output instead of to every input.
+
+- Show playback verdicts and reduced input-peak conditions before HTML report
+  scores, including mode comparisons. Reject missing or excessive per-seat
+  useful-output evidence in the measured-result audit, and label requested
+  correction bounds separately from evaluated observation bounds.
+
+- Reuse cumulative log-frequency integrals for octave and psychoacoustic
+  smoothing, preserving native measurement grids and smoothing windows while
+  avoiding quadratic work during dense-measurement final-seat replay.
+
+- Make the useful-output-loss allowance configurable through
+  `optimizer.finalization.max_useful_output_loss_db` (default 3 dB), consistently
+  in home-cinema Post-EQ screening and final-seat replay. Keep it separate from
+  input-peak assumptions and electrical attenuation limits.
+
+- Keep home-cinema level calibration independent of bass-only correction bounds,
+  using a shared measured passband above crossover transitions. Check all main
+  channels together rather than only matching left/right pairs.
+- Use a common passband-aware target-reference rule for channel preprocessing,
+  ordinary IIR preparation, FIR targets, and Schroeder-split normalization so a bass-only
+  request does not normalize away the bass error or misreport target levels.
+- Detect measured passbands relative to the octave-smoothed peak rather than a
+  stopband-dominated average. Preserve prepared IIR target shapes in reports and
+  apply mains' physical calibration gains to their displayed targets.
+- Remove correction-derived spectral, alignment, and headroom trims on fallback,
+  and rebuild its channel-alignment evidence from the delivered graph.
+- Make the RoomEQ CLI return failure for rejected or unverified playback results;
+  retain native diagnostics with a rejected manifest and skip external export.
+- Validate routed playback over measured speaker passbands independently of
+  correction bounds, including damage outside a bass-only EQ band. Keep LFE
+  evaluation within its deployed low-pass band and verify final channel levels
+  by replaying the delivered graph rather than trusting cached alignment.
+
 - Include shared subwoofer correction in stereo routing candidate replay, matching the optimizer's phase model and preserving detailed rejection reasons when all candidates fail.
+
+- Align Post-EQ crossover screening to the receiving main's measurement grid
+  and require evidence for every source before accepting shared sub EQ. Missing
+  cancellation evidence no longer silently authorizes a harmful correction.
+- Restore the internal primary-subwoofer accessor from the canonical output
+  list when loading routing JSON, preserving physical ownership across save/load.
+- Use the configured baseline-aware cancellation policy in the route optimizer's
+  safety penalty, rather than penalizing every residual above 1 dB as unsafe.
+- Report all failing final-seat channels, and let a successful final graph replay
+  supersede historical stage-reversion verdicts while retaining their diagnostics.
 
 - Allow routed subwoofer replay beyond measured stopband support using a recorded tail-envelope assumption and the deployed low-pass, while retaining full-band main assessment and the 0.1 dB omission uncertainty limit.
 

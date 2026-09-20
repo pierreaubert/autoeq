@@ -3,6 +3,66 @@ use crate::curve_transforms::*;
 use ndarray::Array1;
 
 #[test]
+fn cumulative_smoothing_matches_direct_integrals_on_irregular_grids() {
+    for frequency in [
+        Array1::linspace(20.0_f64, 20000.0, 513),
+        Array1::logspace(10.0, 20.0_f64.log10(), 20000.0_f64.log10(), 513),
+        Array1::from_iter((0..513).map(|i| 20.0 + 19980.0 * (i as f64 / 512.0).powi(3))),
+        ndarray::array![20.0, 40.0, 40.0, 80.0, 160.0],
+    ] {
+        let curve = Curve {
+            spl: frequency.mapv(|f| 80.0 + 12.0 * (f.ln() * 7.0).sin()),
+            freq: frequency,
+            ..Curve::default()
+        };
+        for n in [1, 3, 24, 48] {
+            let actual = smooth_one_over_n_octave(&curve, n);
+            let half = 2.0_f64.powf(1.0 / (2.0 * n as f64));
+            for (index, &f) in curve.freq.iter().enumerate() {
+                let expected = mean_over_log_frequency(&curve.freq, &curve.spl, f / half, f * half)
+                    .unwrap_or(curve.spl[index]);
+                assert!(
+                    (actual.spl[index] - expected).abs() < 1e-9,
+                    "n={n}, f={f}: {} vs {expected}",
+                    actual.spl[index]
+                );
+            }
+        }
+        let config = PsychoacousticSmoothingConfig::default();
+        let actual = smooth_psychoacoustic(&curve, &config);
+        for (index, &f) in curve.freq.iter().enumerate() {
+            let half = 2.0_f64.powf(1.0 / (2.0 * calculate_variable_n(f, &config)));
+            let expected = mean_over_log_frequency(&curve.freq, &curve.spl, f / half, f * half)
+                .unwrap_or(curve.spl[index]);
+            assert!((actual.spl[index] - expected).abs() < 1e-9);
+        }
+    }
+}
+
+#[test]
+fn native_dense_smoothing_preserves_every_sample() {
+    let frequency = Array1::linspace(20.0_f64, 20000.0, 200_000);
+    let curve = Curve {
+        spl: frequency.mapv(|f| 80.0 + 8.0 * (f.ln() * 3.0).sin()),
+        freq: frequency,
+        ..Curve::default()
+    };
+    let actual = smooth_one_over_n_octave(&curve, 1);
+    assert_eq!(actual.freq, curve.freq);
+    for index in [0, 1, 10_000, 100_000, 199_998, 199_999] {
+        let f = curve.freq[index];
+        let expected = mean_over_log_frequency(
+            &curve.freq,
+            &curve.spl,
+            f / 2.0_f64.sqrt(),
+            f * 2.0_f64.sqrt(),
+        )
+        .unwrap();
+        assert!((actual.spl[index] - expected).abs() < 1e-9);
+    }
+}
+
+#[test]
 fn smooth_one_over_n_octave_basic_monotonic() {
     use crate::Curve;
     // Simple check: with N large, window small -> output close to input

@@ -138,7 +138,7 @@ not new checked-in golden baselines.
 | `cargo clippy -p autoeq --features cli --no-deps` | Pass on checkpoint; `clippy-final`. | Direct workflow/QA clippy also passed with existing warnings. |
 | `cargo test -p autoeq --lib` | Pass, zero root library tests. | Included in combined library invocation. |
 | `cargo test -p roomeq-model -p roomeq-analysis -p roomeq-engine -p roomeq-quality -p roomeq-workflow -p roomeq-export -p autoeq-optim --lib` | Pass: 2,463 total library tests including root; 11 existing ignored. Log `libraries-current`. | Later held-out change passes the focused matrix; instrumented full-suite coverage and grouped-capture checks also pass as recorded below. |
-| `just qa-audibility-pr` | Initial run failed obsolete v3 fixtures; the next exposed grouped-capture duplication and was stopped after the fix passed focused verification. Full current rerun `audibility-final` is active. | Do not infer success from individual seed logs. |
+| `just qa-audibility-pr` | `audibility-final` exits 1: 70 passed, 32 failed, 102 total; outcome breakdown PASS=45, REVERTED=25, FAIL=32. The 32 failures are all 5.1/7.1.4 multichannel cases, across four sub topologies and four modes. | This run predates later cardioid, ownership, and overlap fixes. Reversions are not useful corrections; the gate remains red. |
 | `just qa-roomeq-perceptual` | Pass in `perceptual-multimeasurement`. | Software checks, not a listening study. |
 | `just qa-roomeq-multi-measurement` | Exits 1 at `large_multi_sub_4`/minimax; details below. | Earlier virtual-LFE panic fixed; three preceding multi-seat strategies export. |
 | `just qa-roomeq-convergence` | `convergence` remains active with 600,000 evaluations, 5 seeds, 7 jobs. | Unchanged settings. |
@@ -202,9 +202,12 @@ All model and quality library tests pass: 260 model, 139 quality, and one existi
 ignored quality test (`input-bands-model-quality`). CLI compilation and Clippy
 for the changed crates also pass (`input-bands-cli-check`, `input-bands-clippy`).
 Only the output schema's overlap-field description, optional type, and required
-list change; the input schema is unchanged. The 5.2.4 minimax rerun passes;
-weighted-sum and variance-penalized reruns are still pending
-(`input-bands-524-<strategy>`), as is the full unchanged 90% coverage gate
+list change; the input schema is unchanged. All three 5.2.4 reruns pass, each
+exporting an accepted result with 50 final-seat assessments covering all 11
+physical outputs (`input-bands-524-<strategy>`). All six corresponding display
+steps pass for the 5.2.4 and repaired explicit-driver fixtures
+(`repaired-fixture-displays`, with per-case exit codes in the matching `.json`).
+The full unchanged 90% coverage gate remains active
 (`coverage-after-input-bands`). No passing current full-coverage claim is made
 until that gate terminates successfully.
 The legacy `small_stereo_2_2_group` fixture now declares explicit driver IDs,
@@ -253,7 +256,16 @@ merely because diagnostic JSON exists.
 
 ## Remaining work
 
-Await and audit the active audibility and convergence results;
+The full audibility rerun is terminal and red, with the exact outcome counts
+recorded above. Its failures are routed 5.1/7.1.4 cases; available failed-seed
+records report structural-baseline attenuation above the unchanged 12 dB
+allowance. Because the seed JSONL is shared and lacks case identifiers, those
+records alone do not establish a one-to-one case/error mapping. A filtered
+5.1/single-sub/LowLatency reproduction on the latest implementation is active
+(`synthetic-51-headroom-current`) to establish current, case-specific evidence.
+
+Await and audit the active convergence, home-cinema feature matrix, coverage,
+and filtered headroom reproduction;
 resolve or accurately disposition their failures against the original review;
 finish the requirement audit; update this evidence log; commit the final audit,
 push the issue branch, and open the implementation PR. Stage 2 listening,

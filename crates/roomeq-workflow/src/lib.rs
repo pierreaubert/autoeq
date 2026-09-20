@@ -62,4 +62,6 @@ pub use sidecar::{
 };
 
 #[cfg(test)]
+mod pruning_qa;
+#[cfg(test)]
 mod test_fixtures;

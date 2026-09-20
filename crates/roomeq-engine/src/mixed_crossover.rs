@@ -19,6 +19,8 @@ use crate::output;
 /// Complete in-memory request for the legacy frequency-split Hybrid topology.
 pub struct MixedCrossoverRequest<'a> {
     pub channel_name: &'a str,
+    /// Original per-position measurements for native channel optimization.
+    pub prepared: Option<&'a crate::PreparedChannelInput>,
     pub curve: &'a Curve,
     pub target: &'a TargetContext,
     pub preference_filters: &'a [Biquad],
@@ -90,28 +92,41 @@ pub fn process_mixed_crossover(
             max_freq: iir_max_freq,
             ..request.optimizer.clone()
         };
-        (if let Some(callback) = request.callback {
-            eq::optimize_channel_eq_with_callback_detailed(
-                iir_curve,
+        if let Some(prepared) = request.prepared {
+            crate::channel_optimizer::optimize_maybe_multi(
+                request.channel_name,
+                prepared,
+                &optimization_curve,
                 &iir_config,
-                Some(request.eq_resources),
+                request.eq_resources,
                 request.sample_rate,
-                callback,
-            )
+                request.callback,
+                request.target.target_tilt_curve.as_ref(),
+            )?
         } else {
-            eq::optimize_channel_eq_detailed(
-                iir_curve,
-                &iir_config,
-                Some(request.eq_resources),
-                request.sample_rate,
-            )
-        })
-        .map_err(|error| AutoeqError::OptimizationFailed {
-            message: format!(
-                "IIR optimization failed for {} band: {error}",
-                if fir_uses_low { "high" } else { "low" }
-            ),
-        })?
+            (if let Some(callback) = request.callback {
+                eq::optimize_channel_eq_with_callback_detailed(
+                    iir_curve,
+                    &iir_config,
+                    Some(request.eq_resources),
+                    request.sample_rate,
+                    callback,
+                )
+            } else {
+                eq::optimize_channel_eq_detailed(
+                    iir_curve,
+                    &iir_config,
+                    Some(request.eq_resources),
+                    request.sample_rate,
+                )
+            })
+            .map_err(|error| AutoeqError::OptimizationFailed {
+                message: format!(
+                    "IIR optimization failed for {} band: {error}",
+                    if fir_uses_low { "high" } else { "low" }
+                ),
+            })?
+        }
     } else {
         info!(
             "  IIR stage skipped: {} band does not overlap configured optimization range {:.1}-{:.1} Hz",
@@ -433,6 +448,7 @@ mod tests {
             };
             let result = process_mixed_crossover(MixedCrossoverRequest {
                 channel_name: "left",
+                prepared: None,
                 curve: &curve,
                 target: &target,
                 preference_filters: &[],
@@ -526,6 +542,7 @@ mod tests {
 
         let result = process_mixed_crossover(MixedCrossoverRequest {
             channel_name: "sub",
+            prepared: None,
             curve: &curve,
             target: &target,
             preference_filters: &[],

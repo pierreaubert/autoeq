@@ -128,7 +128,7 @@ fn test_roomeq_stereo_config() {
 }
 
 #[test]
-fn test_roomeq_multidriver_config() {
+fn test_roomeq_multidriver_missing_phase_exports_rejected_diagnostic() {
     let temp_dir = tempfile::TempDir::new().expect("Failed to create temp dir");
     let output_path = temp_dir.path().join("output_multidriver.json");
 
@@ -146,12 +146,9 @@ fn test_roomeq_multidriver_config() {
         "--verbose",
     ]);
 
-    // Check that it ran successfully
-    if !output.status.success() {
-        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
-        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
-        panic!("roomeq failed with status: {}", output.status);
-    }
+    // Magnitude-only branches cannot establish coherent playback.
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not approved for playback"));
 
     // Verify output file was created
     assert!(output_path.exists(), "Output file was not created");
@@ -161,7 +158,22 @@ fn test_roomeq_multidriver_config() {
     let json: serde_json::Value =
         serde_json::from_str(&json_str).expect("Failed to parse output JSON");
 
-    // Verify structure
+    let acceptance = &json["metadata"]["correction_acceptance"];
+    assert_eq!(acceptance["accepted"], false);
+    assert_eq!(acceptance["outcome"], "insufficient_evidence");
+    assert!(
+        acceptance["violations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| {
+                reason
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("phase"))
+            })
+    );
+
+    // Verify the rejected diagnostic retains its full topology.
     let channels = json["channels"]
         .as_object()
         .expect("channels should be an object");
@@ -251,6 +263,71 @@ fn test_roomeq_multidriver_config() {
         metadata.contains_key("iterations"),
         "Missing iterations in metadata"
     );
+}
+
+#[test]
+fn test_roomeq_multidriver_known_phase_exports_approved_playback() {
+    let directory = tempfile::tempdir().unwrap();
+    // Ideal unit-gain drivers have a known impulse response (a delta), hence
+    // zero phase. These generated data do not invent phase for measured files.
+    let mut csv = String::from("freq,spl,phase\n");
+    for index in 0..=200 {
+        let frequency = 20.0 * 1000.0_f64.powf(index as f64 / 200.0);
+        csv.push_str(&format!("{frequency},80,0\n"));
+    }
+    fs::write(directory.path().join("woofer.csv"), &csv).unwrap();
+    fs::write(directory.path().join("tweeter.csv"), &csv).unwrap();
+    let config: serde_json::Value = serde_json::json!({
+        "speakers": {"left": {
+            "name": "Synthetic ideal two-way",
+            "measurements": ["woofer.csv", "tweeter.csv"],
+            "crossover": "split"
+        }},
+        "crossovers": {"split": {"type": "LR24", "frequency": 1000.0}},
+        "optimizer": {
+            "algorithm": "autoeq:cobyla", "seed": 7, "max_iter": 100,
+            "num_filters": 3, "min_freq": 100.0, "max_freq": 10000.0,
+            "min_q": 0.5, "max_q": 10.0, "min_db": -12.0, "max_db": 12.0,
+            "loss_type": "flat"
+        }
+    });
+    let config_path = directory.path().join("config.json");
+    let output_path = directory.path().join("output.json");
+    fs::write(&config_path, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+    let output = run_roomeq(&[
+        "--config",
+        config_path.to_str().unwrap(),
+        "--output",
+        output_path.to_str().unwrap(),
+        "--sample-rate",
+        "48000",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let graph: serde_json::Value = serde_json::from_slice(&fs::read(output_path).unwrap()).unwrap();
+    // A flat ideal system needs no correction. Approved unchanged playback
+    // is distinct from claiming an accepted improvement.
+    let acceptance = &graph["metadata"]["correction_acceptance"];
+    assert_eq!(acceptance["outcome"], "unchanged", "{acceptance}");
+    assert!(
+        acceptance
+            .get("violations")
+            .is_none_or(|value| value == &serde_json::json!([]))
+    );
+    let drivers = graph["channels"]["left"]["drivers"].as_array().unwrap();
+    assert_eq!(drivers.len(), 2);
+    for driver in drivers {
+        assert!(
+            driver["plugins"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|plugin| plugin["plugin_type"] == "crossover")
+        );
+    }
 }
 
 #[test]

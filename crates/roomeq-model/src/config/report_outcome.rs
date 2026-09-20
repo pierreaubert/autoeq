@@ -204,30 +204,37 @@ pub enum BudgetAggregation {
 
 /// Cumulative pruning budget over declared conditions.
 ///
-/// Stage 0 resolution of the cumulative-budget open decision: budgets are
-/// declared up front, span explicit condition ids (seats, programmes,
-/// levels), and are disabled (`None` cap) unless configured. A configured
-/// budget is validated for shape here; *enforcement* of the budget arrives
-/// with the Stage 1 cumulative checks, so a set budget is currently
-/// tracked in reports, not used to accept or reject removals.
+/// Experimental veto adjudication compares every accepted removal set with
+/// frozen F0. Per-condition differences use the configured sum or maximum;
+/// missing declared evidence retains filters rather than silently falling back.
+/// Native EQ workflows resolve measured conditions through `evaluation`.
+/// Without that declaration, adapters resolve only `flat-background`.
 ///
-/// Differences are measured in approximate masked-loudness delta (sones)
-/// under the experimental heuristic proxy until Stage 2 validates a
-/// replacement distance.
+/// Differences remain approximate masked-loudness deltas in experimental proxy
+/// units. These limits do not establish calibrated perceptual equivalence.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct PruningBudget {
     /// Cumulative cap in approximate masked-loudness delta (sones,
-    /// experimental proxy units). `None` (default) disables budget
-    /// tracking.
+    /// experimental proxy units). `None` uses the veto's per-step quantum as
+    /// the cumulative cap.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_cumulative_delta: Option<f64>,
     /// How per-condition differences aggregate against the cap.
     #[serde(default)]
     pub aggregation: BudgetAggregation,
     /// Declared condition ids the budget spans (seats, programmes,
-    /// levels). Empty means the budget is not bound to conditions yet.
+    /// levels). Empty uses the complete evaluation product when supplied, otherwise
+    /// the legacy flat-background scope. A nonempty
+    /// declaration requires matching evidence for every identifier.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub conditions: Vec<String>,
+    /// Optional versioned programme/level declaration over all supplied measurements.
+    ///
+    /// When present, empty `conditions` means the complete generated condition
+    /// set; a nonempty list must match that set exactly. Missing native evidence
+    /// retains filters. `None` preserves the legacy flat-background scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluation: Option<super::pruning_evaluation::PruningEvaluation>,
 }
 
 #[cfg(test)]

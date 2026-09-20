@@ -233,11 +233,12 @@ pub struct OptimizerConfig {
     /// `allow_enforcement_with_experimental_proxy` (the proxy is unvalidated).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter_audibility: Option<FilterAudibilityConfig>,
-    /// Cumulative pruning budget over declared conditions (Stage 0
-    /// contract). `None` (default) disables budget tracking. A configured
-    /// budget is validated for shape and reported against; it is not yet
-    /// enforced — budget enforcement arrives with the Stage 1 cumulative
-    /// checks, so setting this today changes no optimizer output.
+    /// Experimental cumulative pruning budget over declared conditions.
+    ///
+    /// With veto enabled, the optional cap bounds drift from frozen F0 and
+    /// unresolved condition declarations retain filters. `None` preserves the
+    /// veto's default one-quantum cap on the flat-background comparison.
+    /// Enforcement still requires the separate experimental-proxy opt-in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pruning_budget: Option<PruningBudget>,
     /// Safeguards for high-frequency correction above the conservative range.

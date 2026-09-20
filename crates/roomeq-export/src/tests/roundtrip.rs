@@ -21,6 +21,26 @@ fn biquad_json_roundtrip_preserves_graph() {
 }
 
 #[test]
+fn biquad_json_roundtrip_preserves_pareto_frequency_bits() {
+    let mut graph = make_test_output();
+    // This NSGA-II result previously parsed one ULP away from the exported value.
+    graph
+        .channels
+        .get_mut("left")
+        .unwrap()
+        .plugins
+        .push(PluginConfigWrapper {
+            plugin_type: "eq".to_string(),
+            parameters: json!({
+                "filters": [{"filter_type": "peak", "freq": 26.493561210188922,
+                             "q": 1.0, "db_gain": -0.1}]
+            }),
+        });
+    let report = verify_biquad_json_roundtrip(&graph, 48_000.0, 1e-12).unwrap();
+    assert_eq!(report.sections, 6);
+}
+
+#[test]
 fn biquad_json_roundtrip_rejects_bad_shapes() {
     let graph = make_test_output();
     assert!(verify_biquad_json_roundtrip(&graph, 48_000.0, 0.0).is_err());

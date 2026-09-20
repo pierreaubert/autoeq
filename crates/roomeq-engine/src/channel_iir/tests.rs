@@ -525,4 +525,19 @@ fn kautz_processing_detects_modes_and_returns_path_free_chain() {
         ),
         Some("kautz_modal")
     );
+    let mut convolution = crate::dsp_realization::NoConvolutionIr;
+    let mut realized =
+        crate::dsp_realization::RealizedDsp::new(&result.channel, 48_000.0, &mut convolution)
+            .unwrap();
+    let exported = realized.apply_to_curve(&result.raw_pre_eq_curve).unwrap();
+    let max_error = exported
+        .spl
+        .iter()
+        .zip(&result.raw_post_eq_curve.spl)
+        .map(|(actual, reported)| (actual - reported).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        max_error < 1e-9,
+        "Kautz reported response differs from exported realization by {max_error} dB"
+    );
 }

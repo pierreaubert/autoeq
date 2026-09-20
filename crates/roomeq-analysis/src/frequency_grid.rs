@@ -65,10 +65,20 @@ pub fn clipped_room_eq_frequency_grid(
     if frequencies.is_empty() {
         return None;
     }
-    if frequencies[0] > source_min {
+    // Log/exp round trips can move an endpoint by a few ULPs. Preserve the
+    // source boundary without adding a second sample with the same ERB rate.
+    // Eight ULP-scale epsilons cover those arithmetic round trips; this is not
+    // a measurement-resolution tolerance and does not merge interior samples.
+    let same_endpoint = |a: f64, b: f64| (a - b).abs() <= 8.0 * f64::EPSILON * a.abs().max(b.abs());
+    if same_endpoint(frequencies[0], source_min) {
+        frequencies[0] = source_min;
+    } else if frequencies[0] > source_min {
         frequencies.insert(0, source_min);
     }
-    if *frequencies.last().unwrap_or(&source_max) < source_max {
+    let last = frequencies.len() - 1;
+    if same_endpoint(frequencies[last], source_max) {
+        frequencies[last] = source_max;
+    } else if frequencies[last] < source_max {
         frequencies.push(source_max);
     }
     Some(Array1::from_vec(frequencies))
@@ -146,5 +156,25 @@ mod tests {
         assert_eq!(grid[0], 23.0);
         assert_eq!(grid[grid.len() - 1], 19_000.0);
         assert!(is_valid_frequency_grid(&grid));
+    }
+
+    #[test]
+    fn qa_roomeq_pruning_conditions_grid_does_not_duplicate_roundoff_endpoints() {
+        let source_min = 20.0 * (1.0 - f64::EPSILON);
+        let source_max = 20_000.0 * (1.0 + f64::EPSILON);
+        let curve = Curve {
+            freq: Array1::from_vec(vec![source_min, 100.0, source_max]),
+            spl: Array1::zeros(3),
+            ..Default::default()
+        };
+        let grid = clipped_room_eq_frequency_grid(&curve, DEFAULT_ROOM_EQ_FREQUENCY_SAMPLES)
+            .expect("valid source span");
+        assert_eq!(grid[0], source_min);
+        assert_eq!(grid[grid.len() - 1], source_max);
+        assert!(autoeq_core::auditory_frequency::try_erb_rate_cell_widths(&grid).is_some());
+        assert_eq!(
+            grid.len(),
+            room_eq_hybrid_frequency_grid(DEFAULT_ROOM_EQ_FREQUENCY_SAMPLES).len()
+        );
     }
 }

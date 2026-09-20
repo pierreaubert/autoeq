@@ -33,6 +33,12 @@ guarantees of total playback latency. See the manual's
 [mode comparison and examples](../../../docs/ROOMEQ_MANUAL.md#fir-mixed-and-mixed-phase-which-mode-should-i-use)
 for phase behaviour, latency, and choosing a mode.
 
+`kautz_modal` remains experimental: the pinned gain solver fits a dB target
+using normalized basis magnitudes, while playback uses linear coefficients of
+complex basis functions. The matched-budget test currently exceeds its 3 dB
+gain limit. Reports now reflect the actual serialized topology; this does not
+validate the fitting convention. See the [review evidence log](../../../docs/ROOMEQ_REVIEW_20260916.md).
+
 ## Final multi-position validation
 
 Bass-managed crossover alignment uses the configured primary seat's measured
@@ -528,10 +534,53 @@ verdicts but never removes anything (`report_only: true`); enforcement
 (`report_only: false` plus `allow_enforcement_with_experimental_proxy: true`)
 is an explicit experimental opt-in — `report_only: false` alone stays
 advisory. Thresholds are implementation-time starting calibrations,
-not reference psychoacoustic values — see `ROOMEQ_AUDIBILITY_CONTRACT.md`
-(kept alongside the review docs; the audibility contract is git-ignored by
-repo policy) and `docs/ROOMEQ_MANUAL.md` ("Staged rollout and release
-gates").
+not reference psychoacoustic values — see the tracked
+[audibility acceptance contract](../../../docs/ROOMEQ_MANUAL.md#audibility-acceptance-contract-2026-09-20)
+and its explicit validation deferrals. A nominal `listening_level_phon` is not
+physical SPL calibration, and filter-only proxy adjudication is not proof of
+equivalence across seats, programmes, and playback levels. These contract
+decisions preserve enforcement defaults and thresholds. See also the manual's
+"Staged rollout and release gates" section.
+
+`optimizer.pruning_budget.aggregation` selects `sum` or `max` of cumulative
+condition differences; neither averages away a failing condition. For routed
+systems and workflows supplied with held-out validation captures, removal is
+deferred until final graph selection and evaluated against
+complete delivered playback. An explicit `evaluation` declaration is required;
+correlated logical inputs additionally require measured phase at every seat.
+Missing evidence preserves F0. Final routed assessments use metadata key
+`final_routed_graph` and remain Low confidence.
+
+Declared `conditions` must have matching evaluation evidence.
+Native single/multiple-measurement EQ workflows can resolve the complete
+condition set through this optional declaration:
+
+```json
+"pruning_budget": {
+  "aggregation": "max",
+  "evaluation": {
+    "version": "spectral-v1",
+    "measurement_ids": ["seat-0", "seat-1"],
+    "programmes": [
+      {"id": "music", "frequencies_hz": [20, 20000], "spectrum_db": [0, -9]}
+    ],
+    "listening_levels_phon": [55, 85]
+  }
+}
+```
+
+Measurement IDs name every supplied curve in input order, including zero-weight
+curves. Programme arrays must align, contain at least two finite samples, and
+use positive strictly increasing frequencies covering the evaluation grid.
+IDs must be unique, nonempty, slash-free, and have no surrounding whitespace or
+control characters. Levels must be positive, finite, and unique. Nominal phon
+values remain experimental proxy assumptions, not calibrated playback levels.
+
+Empty `conditions` uses the complete measurement/programme/level product when
+`evaluation` is supplied. An explicit list must match that product exactly;
+condition IDs look like `seat-0/music/55phon`. Missing native evidence retains
+filters. Without `evaluation`, only `flat-background` is resolved and empty
+`conditions` retains that legacy scope.
 
 Policy records are versioned and explicit: promotion needs the release gates
 its claim requires (correctness and physical safety for safeguards, plus

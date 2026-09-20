@@ -36,14 +36,14 @@ fn cancellation_penalty_excess(evidence: &roomeq_model::CrossoverCancellationEvi
     // allowing useful residuals above the absolute limit when the measured
     // baseline was worse. A fixed 1 dB safety hinge can silence bass merely
     // to remove cancellation that the configured policy already accepts.
-    let ceiling = evidence.baseline_db.filter(|value| value.is_finite()).map_or(
-        evidence.limit_db,
-        |baseline| {
-            evidence.limit_db.max(
-                baseline - 2.0 * roomeq_model::CROSSOVER_CANCELLATION_TOLERANCE_DB,
-            )
-        },
-    );
+    let ceiling = evidence
+        .baseline_db
+        .filter(|value| value.is_finite())
+        .map_or(evidence.limit_db, |baseline| {
+            evidence
+                .limit_db
+                .max(baseline - 2.0 * roomeq_model::CROSSOVER_CANCELLATION_TOLERANCE_DB)
+        });
     (evidence.final_db - ceiling).max(0.0)
 }
 

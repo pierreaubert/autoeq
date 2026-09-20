@@ -29,7 +29,7 @@ pub(super) fn assemble_iir_result(
         &score_input.freq,
         request.sample_rate,
     );
-    let final_curve = response::apply_complex_response(&score_input, &response);
+    let mut final_curve = response::apply_complex_response(&score_input, &response);
 
     let display_initial = output::extend_curve_to_full_range(raw_curve);
     let mut display_input = display_initial.clone();
@@ -39,7 +39,29 @@ pub(super) fn assemble_iir_result(
         &display_input.freq,
         request.sample_rate,
     );
-    let display_final = response::apply_complex_response(&display_input, &display_response);
+    let mut display_final = response::apply_complex_response(&display_input, &display_response);
+    if matches!(
+        optimizer_output,
+        IirOptimizerOutput::KautzModal { .. } | IirOptimizerOutput::WarpedIir { .. }
+    ) {
+        // PEQ parameters summarize these topologies but do not realize their
+        // transfer. Report and score the same serialized sections that will play.
+        let neutral_plugins: Vec<_> = dsp
+            .plugins
+            .iter()
+            .filter(|plugin| {
+                plugin
+                    .parameters
+                    .get("label")
+                    .and_then(serde_json::Value::as_str)
+                    != Some("user_preference")
+            })
+            .cloned()
+            .collect();
+        final_curve = realized_iir_curve(raw_curve, neutral_plugins, request.sample_rate)?;
+        display_final =
+            realized_iir_curve(&display_initial, dsp.plugins.clone(), request.sample_rate)?;
+    }
 
     let score_curve = if let Some(tilt_curve) = &request.target.target_tilt_curve {
         Curve {
@@ -98,6 +120,29 @@ pub(super) fn assemble_iir_result(
         audibility_veto,
         veto_adjudication,
     })
+}
+
+fn realized_iir_curve(
+    curve: &Curve,
+    plugins: Vec<PluginConfigWrapper>,
+    sample_rate: f64,
+) -> Result<Curve> {
+    let chain = ChannelDspChain {
+        channel: String::from("iir-report"),
+        plugins,
+        drivers: None,
+        initial_curve: None,
+        final_curve: None,
+        eq_response: None,
+        target_curve: None,
+        pre_ir: None,
+        post_ir: None,
+        fir_temporal_masking: None,
+        direct_early_late_correction: None,
+    };
+    let mut convolution = crate::dsp_realization::NoConvolutionIr;
+    crate::dsp_realization::RealizedDsp::new(&chain, sample_rate, &mut convolution)?
+        .apply_to_curve(curve)
 }
 
 fn assemble_dsp_chain(

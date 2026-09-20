@@ -6368,7 +6368,7 @@
               "type": "null"
             }
           ],
-          "description": "Cumulative pruning budget over declared conditions (Stage 0\ncontract). `None` (default) disables budget tracking. A configured\nbudget is validated for shape and reported against; it is not yet\nenforced — budget enforcement arrives with the Stage 1 cumulative\nchecks, so setting this today changes no optimizer output."
+          "description": "Experimental cumulative pruning budget over declared conditions.\n\nWith veto enabled, the optional cap bounds drift from frozen F0 and\nunresolved condition declarations retain filters. `None` preserves the\nveto's default one-quantum cap on the flat-background comparison.\nEnforcement still requires the separate experimental-proxy opt-in."
         },
         "psychoacoustic": {
           "default": true,
@@ -7163,7 +7163,7 @@
       "type": "string"
     },
     "PruningBudget": {
-      "description": "Cumulative pruning budget over declared conditions.\n\nStage 0 resolution of the cumulative-budget open decision: budgets are\ndeclared up front, span explicit condition ids (seats, programmes,\nlevels), and are disabled (`None` cap) unless configured. A configured\nbudget is validated for shape here; *enforcement* of the budget arrives\nwith the Stage 1 cumulative checks, so a set budget is currently\ntracked in reports, not used to accept or reject removals.\n\nDifferences are measured in approximate masked-loudness delta (sones)\nunder the experimental heuristic proxy until Stage 2 validates a\nreplacement distance.",
+      "description": "Cumulative pruning budget over declared conditions.\n\nExperimental veto adjudication compares every accepted removal set with\nfrozen F0. Per-condition differences use the configured sum or maximum;\nmissing declared evidence retains filters rather than silently falling back.\nNative EQ workflows resolve measured conditions through `evaluation`.\nWithout that declaration, adapters resolve only `flat-background`.\n\nDifferences remain approximate masked-loudness deltas in experimental proxy\nunits. These limits do not establish calibrated perceptual equivalence.",
       "properties": {
         "aggregation": {
           "$ref": "#/$defs/BudgetAggregation",
@@ -7171,14 +7171,25 @@
           "description": "How per-condition differences aggregate against the cap."
         },
         "conditions": {
-          "description": "Declared condition ids the budget spans (seats, programmes,\nlevels). Empty means the budget is not bound to conditions yet.",
+          "description": "Declared condition ids the budget spans (seats, programmes,\nlevels). Empty uses the complete evaluation product when supplied, otherwise\nthe legacy flat-background scope. A nonempty\ndeclaration requires matching evidence for every identifier.",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
+        "evaluation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PruningEvaluation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional versioned programme/level declaration over all supplied measurements.\n\nWhen present, empty `conditions` means the complete generated condition\nset; a nonempty list must match that set exactly. Missing native evidence\nretains filters. `None` preserves the legacy flat-background scope."
+        },
         "max_cumulative_delta": {
-          "description": "Cumulative cap in approximate masked-loudness delta (sones,\nexperimental proxy units). `None` (default) disables budget\ntracking.",
+          "description": "Cumulative cap in approximate masked-loudness delta (sones,\nexperimental proxy units). `None` uses the veto's per-step quantum as\nthe cumulative cap.",
           "format": "double",
           "type": [
             "number",
@@ -7186,6 +7197,87 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "PruningEvaluation": {
+      "additionalProperties": false,
+      "description": "Complete experimental pruning condition declaration for one EQ measurement set.\n\nAll measurements are crossed with all programmes and levels. Identifiers\nfollow `<measurement>/<programme>/<level>phon`, for example\n`seat-a/music/75phon`. A consumer must retain filters if it cannot supply\nevery measurement or support the declared comparison domain.",
+      "properties": {
+        "listening_levels_phon": {
+          "description": "Positive finite nominal full-chain levels, evaluated separately per condition.\n\nThese are experimental proxy assumptions, not measured playback SPL.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "measurement_ids": {
+          "description": "Stable identifiers in the same order as the supplied measurements.\n\nThe number must match the complete measurement set, including measurements\nthat an optimizer averages or assigns zero weight. Never silently truncate.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "programmes": {
+          "description": "Programme spectra applied independently to each measured response.",
+          "items": {
+            "$ref": "#/$defs/PruningProgramme"
+          },
+          "type": "array"
+        },
+        "version": {
+          "$ref": "#/$defs/PruningEvaluationVersion",
+          "description": "Required version pin; unknown versions are rejected during deserialization."
+        }
+      },
+      "required": [
+        "version",
+        "measurement_ids",
+        "programmes",
+        "listening_levels_phon"
+      ],
+      "type": "object"
+    },
+    "PruningEvaluationVersion": {
+      "description": "Version of the experimental condition interpretation.",
+      "oneOf": [
+        {
+          "const": "spectral-v1",
+          "description": "Magnitude spectra with each condition anchored to its frozen full chain.",
+          "type": "string"
+        }
+      ]
+    },
+    "PruningProgramme": {
+      "additionalProperties": false,
+      "description": "Programme magnitude spectrum used by the experimental pruning proxy.",
+      "properties": {
+        "frequencies_hz": {
+          "description": "Strictly increasing positive frequencies covering the evaluation grid.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "id": {
+          "description": "Stable, nonempty, slash-free identifier; not a file path.",
+          "type": "string"
+        },
+        "spectrum_db": {
+          "description": "Finite relative dB magnitudes, one per frequency.\n\nThis spectrum does not encode temporal masking or prove programme-audio\nequivalence. No SPL calibration is implied by its offset.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "frequencies_hz",
+        "spectrum_db"
+      ],
       "type": "object"
     },
     "PsychoacousticSmoothingConfig": {

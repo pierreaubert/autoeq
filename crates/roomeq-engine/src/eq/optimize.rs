@@ -877,47 +877,34 @@ fn optimize_channel_eq_adaptive(
         best_loss = loss;
     }
 
-    // Backward elimination: veto (loudness-delta) units when the Phase A
-    // audibility veto is active, raw loss units otherwise (or under the
-    // back-compat fallback flag).
-    let veto_config = config.filter_audibility.filter(|veto| veto.enabled);
-    if config.elimination_threshold > 0.0 && best_filters.len() > 1 {
-        if let Some(veto) = veto_config
-            && !veto.elimination_raw_loss_fallback
-        {
-            let phon = veto.resolved_listening_phon(
-                config
-                    .epa_config
-                    .as_ref()
-                    .map(|epa| epa.listening_level_phon),
-            );
-            let before = best_filters.len();
-            best_filters = super::audibility_veto::backward_eliminate_veto_units(
-                best_filters,
-                &prep.objective_data.freqs,
-                phon,
-                veto.elimination_loudness_delta_sones,
-            );
-            if best_filters.len() != before {
-                best_loss = recompiled_loss(&best_filters, &prep);
-            }
-        } else {
-            let (pruned, pruned_loss) = backward_eliminate(
-                best_filters,
-                &prep.objective_data,
-                prep.peq_model,
-                config.elimination_threshold,
-            );
-            best_filters = pruned;
-            best_loss = pruned_loss;
-        }
+    // Experimental veto removals must all share the postpass's frozen F0.
+    // Running a separate loudness eliminator here both erased rollback history
+    // and changed report-only output before the advisory postpass could see it.
+    // Preserve raw-loss elimination only for legacy or explicit fallback use.
+    let uses_veto = config
+        .filter_audibility
+        .is_some_and(|veto| veto.enabled && !veto.elimination_raw_loss_fallback);
+    if !uses_veto && config.elimination_threshold > 0.0 && best_filters.len() > 1 {
+        let (pruned, pruned_loss) = backward_eliminate(
+            best_filters,
+            &prep.objective_data,
+            prep.peq_model,
+            config.elimination_threshold,
+        );
+        best_filters = pruned;
+        best_loss = pruned_loss;
     }
 
     // Per-filter audibility veto (Stage 1 adjudication). Report-only by
     // default, so merely enabling the config records verdicts without
     // changing output.
-    let (kept, veto_loss, audibility_veto, veto_adjudication) =
-        apply_veto_postpass(best_filters, best_loss, &prep, config);
+    let (kept, veto_loss, audibility_veto, veto_adjudication) = apply_veto_postpass(
+        best_filters,
+        best_loss,
+        &prep,
+        config,
+        std::slice::from_ref(curve),
+    );
     best_filters = kept;
     best_loss = veto_loss;
 
@@ -959,6 +946,7 @@ fn apply_veto_postpass(
     loss: f64,
     prep: &super::types::PreparedSingleChannelEq,
     config: &OptimizerConfig,
+    measurements: &[Curve],
 ) -> (
     Vec<Biquad>,
     f64,
@@ -1009,11 +997,13 @@ fn apply_veto_postpass(
         enforce: veto.enforcement_authorized(),
         model_version: env!("CARGO_PKG_VERSION").to_string(),
     };
-    let adjudication = super::audibility_veto::adjudicate_veto_removals(
+    let adjudication = super::audibility_veto::workflow::adjudicate(
         filters,
         &mut verdicts,
         &prep.objective_data.freqs,
         &adjudication_config,
+        config.pruning_budget.as_ref(),
+        measurements,
     );
     let loss = if adjudication.kept.len() != verdicts.len() {
         recompiled_loss(&adjudication.kept, prep)
@@ -1042,6 +1032,7 @@ fn apply_veto_postpass_for_objective(
     loss: f64,
     objective_data: &autoeq_optim::optim::ObjectiveData,
     config: &OptimizerConfig,
+    measurements: &[Curve],
 ) -> (
     Vec<Biquad>,
     f64,
@@ -1079,7 +1070,7 @@ fn apply_veto_postpass_for_objective(
             "audibility veto enforcement requested without experimental-proxy authorization; staying advisory"
         );
     }
-    let adjudication = super::audibility_veto::adjudicate_veto_removals(
+    let adjudication = super::audibility_veto::workflow::adjudicate(
         filters,
         &mut verdicts,
         &objective_data.freqs,
@@ -1094,6 +1085,8 @@ fn apply_veto_postpass_for_objective(
             enforce: veto.enforcement_authorized(),
             model_version: env!("CARGO_PKG_VERSION").to_string(),
         },
+        config.pruning_budget.as_ref(),
+        measurements,
     );
     let summary = adjudication.summarize();
     let loss = if adjudication.kept.len() != verdicts.len() {
@@ -1175,7 +1168,7 @@ fn optimize_channel_eq_inner(
     // never ran elimination, so without this its micro filters ship
     // unexamined. Report-only by default.
     let (filters, loss, audibility_veto, veto_adjudication) =
-        apply_veto_postpass(filters, loss, &prep, config);
+        apply_veto_postpass(filters, loss, &prep, config, std::slice::from_ref(curve));
 
     log::info!(
         "EQ optimization: {} filters, final loss={:.6}",
@@ -1513,7 +1506,7 @@ fn optimize_channel_eq_multi_inner(
     );
 
     let (filters, final_loss, audibility_veto, veto_adjudication) =
-        apply_veto_postpass_for_objective(filters, final_loss, &final_objective, config);
+        apply_veto_postpass_for_objective(filters, final_loss, &final_objective, config, curves);
     Ok(EqOptimizationResult {
         filters,
         loss: final_loss,
@@ -1543,6 +1536,234 @@ fn uncertainty_scaled_optimizer_config(
         );
     }
     scaled
+}
+
+#[cfg(test)]
+mod pruning_workflow_tests {
+    use super::*;
+    use autoeq_optim::OptimParams;
+    use autoeq_optim::optim::{ObjectiveData, OptimProgressCallback};
+    use math_audio_iir_fir::BiquadFilterType;
+    use ndarray::Array1;
+
+    struct MicroFilters;
+
+    impl OptimizerBackend for MicroFilters {
+        fn optimize_filters(
+            &self,
+            x: &mut [f64],
+            _lower: &[f64],
+            _upper: &[f64],
+            objective: ObjectiveData,
+            params: &OptimParams,
+        ) -> Result<(String, f64), (String, f64)> {
+            let peq: Vec<_> = [40.0, 120.0]
+                .into_iter()
+                .take(params.num_filters)
+                .map(|frequency| {
+                    (
+                        1.0,
+                        Biquad::new(BiquadFilterType::Peak, frequency, 48000.0, 1.0, -0.1),
+                    )
+                })
+                .collect();
+            x.copy_from_slice(&autoeq_core::x2peq::peq2x(&peq, objective.peq_model));
+            assert!(
+                x.iter()
+                    .zip(_lower)
+                    .zip(_upper)
+                    .all(|((&value, &lo), &hi)| value >= lo && value <= hi)
+            );
+            Ok((
+                String::from("converged"),
+                autoeq_optim::optim::compute_base_fitness(x, &objective),
+            ))
+        }
+
+        fn optimize_filters_with_callback(
+            &self,
+            x: &mut [f64],
+            lower: &[f64],
+            upper: &[f64],
+            objective: ObjectiveData,
+            params: &OptimParams,
+            mut callback: OptimProgressCallback,
+        ) -> Result<(String, f64), (String, f64)> {
+            let result = self.optimize_filters(x, lower, upper, objective, params);
+            if let Ok((_, loss)) = &result {
+                callback(1, *loss, None);
+            }
+            result
+        }
+
+        fn optimize_filters_with_algo_override(
+            &self,
+            x: &mut [f64],
+            lower: &[f64],
+            upper: &[f64],
+            objective: ObjectiveData,
+            params: &OptimParams,
+            _algorithm: Option<&str>,
+        ) -> Result<(String, f64), (String, f64)> {
+            self.optimize_filters(x, lower, upper, objective, params)
+        }
+    }
+
+    fn curves() -> Vec<Curve> {
+        let frequencies = Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), 101);
+        [0.0, 3.0]
+            .into_iter()
+            .map(|seat_offset| Curve {
+                freq: frequencies.clone(),
+                spl: frequencies.mapv(|frequency| {
+                    seat_offset + 0.5 * (-((frequency / 80.0).log2() / 0.7).powi(2)).exp()
+                }),
+                ..Default::default()
+            })
+            .collect()
+    }
+
+    fn config(measurement_count: usize, report_only: bool) -> OptimizerConfig {
+        let ids: Vec<_> = (0..measurement_count)
+            .map(|index| format!("seat-{index}"))
+            .collect();
+        let evaluation = serde_json::from_value(serde_json::json!({
+            "version": "spectral-v1",
+            "measurement_ids": ids,
+            "programmes": [
+                {"id": "flat", "frequencies_hz": [20, 20000], "spectrum_db": [0, 0]},
+                {"id": "music", "frequencies_hz": [20, 20000], "spectrum_db": [0, -9]}
+            ],
+            "listening_levels_phon": [55, 85]
+        }))
+        .unwrap();
+        OptimizerConfig {
+            algorithm: String::from("autoeq:de"),
+            num_filters: 2,
+            max_iter: 25,
+            refine: false,
+            min_filter_improvement: 0.0,
+            filter_audibility: Some(roomeq_model::FilterAudibilityConfig {
+                report_only,
+                allow_enforcement_with_experimental_proxy: !report_only,
+                ..Default::default()
+            }),
+            pruning_budget: Some(roomeq_model::PruningBudget {
+                aggregation: roomeq_model::BudgetAggregation::Max,
+                evaluation: Some(evaluation),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn qa_roomeq_pruning_conditions_native_optimizer_entry_matrix() {
+        let curves = curves();
+        // The third row deliberately gives seat 1 zero optimizer weight. It must
+        // still appear in every pruning assessment, independently of scalarization.
+        let strategies = [
+            None,
+            Some(MultiMeasurementStrategy::Average),
+            Some(MultiMeasurementStrategy::WeightedSum),
+        ];
+        for strategy in strategies {
+            let count = if strategy.is_some() { 2 } else { 1 };
+            let mut reference = None;
+            for report_only in [true, false] {
+                let config = config(count, report_only);
+                let result = if let Some(strategy) = strategy {
+                    optimize_channel_eq_multi_inner(
+                        &curves,
+                        &config,
+                        &MultiMeasurementConfig {
+                            strategy,
+                            weights: Some(vec![1.0, 0.0]),
+                            ..Default::default()
+                        },
+                        None,
+                        48000.0,
+                        None,
+                        &MicroFilters,
+                    )
+                    .unwrap()
+                } else {
+                    optimize_channel_eq_inner(
+                        &curves[0],
+                        &config,
+                        None,
+                        48000.0,
+                        Some(0.0),
+                        None,
+                        None,
+                        &MicroFilters,
+                    )
+                    .unwrap()
+                };
+                assert_eq!(result.audibility_veto.len(), 2);
+                assert_eq!(
+                    result.filters.len(),
+                    if report_only { 2 } else { 0 },
+                    "{strategy:?}: {:?}",
+                    result.audibility_veto
+                );
+                let ids = config
+                    .pruning_budget
+                    .as_ref()
+                    .unwrap()
+                    .evaluation
+                    .as_ref()
+                    .unwrap()
+                    .condition_ids()
+                    .unwrap();
+                for verdict in &result.audibility_veto {
+                    for id in &ids {
+                        assert!(
+                            verdict.acceptance.reason.contains(id),
+                            "missing {id} in {:?}",
+                            verdict.acceptance
+                        );
+                        assert!(verdict.acceptance.provenance.calibration.contains(id));
+                    }
+                    assert_eq!(verdict.enforced, !report_only);
+                    assert_eq!(
+                        verdict.acceptance.confidence,
+                        roomeq_model::AssessmentConfidence::Low
+                    );
+                }
+                let summary = result.veto_adjudication.unwrap();
+                if report_only {
+                    reference = Some(summary.f0_reference_id);
+                } else {
+                    assert_eq!(reference.as_ref(), Some(&summary.f0_reference_id));
+                }
+                assert!(result.loss.is_finite());
+            }
+        }
+    }
+
+    #[test]
+    fn qa_roomeq_pruning_conditions_native_optimizer_retains_unresolved_seat() {
+        let curves = curves();
+        let config = config(2, false);
+        let result = optimize_channel_eq_inner(
+            &curves[0],
+            &config,
+            None,
+            48000.0,
+            Some(0.0),
+            None,
+            None,
+            &MicroFilters,
+        )
+        .unwrap();
+        assert_eq!(result.filters.len(), 2);
+        assert!(result.audibility_veto.iter().all(|verdict| {
+            !verdict.enforced
+                && verdict.acceptance.outcome == roomeq_model::ReportOutcome::InsufficientEvidence
+        }));
+        assert!(!result.veto_adjudication.unwrap().enforced);
+    }
 }
 
 #[cfg(test)]
@@ -2198,7 +2419,7 @@ mod multi_eq_tests {
             0.1,
         );
         let (kept, _, verdicts, summary) =
-            apply_veto_postpass_for_objective(vec![filter], 1.0, &objective, &config);
+            apply_veto_postpass_for_objective(vec![filter], 1.0, &objective, &config, &[]);
         assert_eq!(kept.len(), 1, "report-only must not remove filters");
         assert_eq!(verdicts.len(), 1);
         assert_eq!(
@@ -2236,7 +2457,7 @@ mod multi_eq_tests {
             0.1,
         );
         let (kept, _, verdicts, summary) =
-            apply_veto_postpass_for_objective(vec![filter], 1.0, &objective, &config);
+            apply_veto_postpass_for_objective(vec![filter], 1.0, &objective, &config, &[]);
         assert!(
             kept.is_empty(),
             "authorized veto should remove the sub-JND filter"
@@ -2753,8 +2974,9 @@ mod multi_eq_tests {
         let enforced = run(Some(false));
         assert!(
             enforced.filters.is_empty(),
-            "inaudible emission must drop, kept {}",
-            enforced.filters.len()
+            "inaudible emission must drop, kept {}: {:?}",
+            enforced.filters.len(),
+            enforced.audibility_veto
         );
         assert_eq!(enforced.audibility_veto.len(), baseline.filters.len());
         for verdict in &enforced.audibility_veto {
@@ -2767,9 +2989,136 @@ mod multi_eq_tests {
 
     /// The adaptive path records veto verdicts end to end (report-only).
     #[test]
-    fn adaptive_path_records_veto_verdicts() {
+    fn qa_roomeq_pruning_conditions_adaptive_report_only_preserves_full_chain() {
+        use autoeq_optim::OptimParams;
+        use autoeq_optim::optim::{ObjectiveData, OptimProgressCallback};
+        use math_audio_iir_fir::BiquadFilterType;
+
+        struct PresetPeaks;
+        impl OptimizerBackend for PresetPeaks {
+            fn optimize_filters(
+                &self,
+                x: &mut [f64],
+                _lower: &[f64],
+                _upper: &[f64],
+                objective: ObjectiveData,
+                params: &OptimParams,
+            ) -> Result<(String, f64), (String, f64)> {
+                let peq: Vec<_> = [40.0, 120.0, 800.0]
+                    .into_iter()
+                    .take(params.num_filters)
+                    .map(|frequency| {
+                        (
+                            1.0,
+                            Biquad::new(BiquadFilterType::Peak, frequency, 48000.0, 2.0, -3.0),
+                        )
+                    })
+                    .collect();
+                x.copy_from_slice(&autoeq_core::x2peq::peq2x(&peq, objective.peq_model));
+                assert!(
+                    x.iter()
+                        .zip(_lower)
+                        .zip(_upper)
+                        .all(|((&v, &lo), &hi)| v >= lo && v <= hi),
+                    "preset outside bounds: x={x:?}, lower={_lower:?}, upper={_upper:?}"
+                );
+                Ok((
+                    String::from("converged"),
+                    autoeq_optim::optim::compute_base_fitness(x, &objective),
+                ))
+            }
+
+            fn optimize_filters_with_callback(
+                &self,
+                _x: &mut [f64],
+                _lower: &[f64],
+                _upper: &[f64],
+                _objective: ObjectiveData,
+                _params: &OptimParams,
+                _callback: OptimProgressCallback,
+            ) -> Result<(String, f64), (String, f64)> {
+                unreachable!("fixture has no callback")
+            }
+
+            fn optimize_filters_with_algo_override(
+                &self,
+                _x: &mut [f64],
+                _lower: &[f64],
+                _upper: &[f64],
+                _objective: ObjectiveData,
+                _params: &OptimParams,
+                _algorithm: Option<&str>,
+            ) -> Result<(String, f64), (String, f64)> {
+                unreachable!("fixture disables refinement")
+            }
+        }
+        let mut curve = make_simple_room_curve();
+        curve.spl.fill(0.0);
+        for frequency in [40.0, 120.0, 800.0] {
+            curve.spl += &Biquad::new(BiquadFilterType::Peak, frequency, 48000.0, 2.0, 3.0)
+                .np_log_result(&curve.freq);
+        }
+        let run = |elimination_threshold| {
+            optimize_channel_eq_inner(
+                &curve,
+                &OptimizerConfig {
+                    algorithm: String::from("autoeq:de"),
+                    strategy: String::from("lshade"),
+                    num_filters: 3,
+                    max_iter: 25,
+                    refine: false,
+                    psychoacoustic: false,
+                    population: 10,
+                    seed: Some(7),
+                    min_filter_improvement: 1e-9,
+                    min_db: -12.0,
+                    max_db: 12.0,
+                    elimination_threshold,
+                    filter_audibility: Some(roomeq_model::FilterAudibilityConfig {
+                        elimination_loudness_delta_sones: 1e6,
+                        ..Default::default()
+                    }),
+                    ..OptimizerConfig::default()
+                },
+                None,
+                48000.0,
+                Some(0.0),
+                None,
+                None,
+                &PresetPeaks,
+            )
+            .unwrap()
+        };
+        let full = run(0.0);
+        assert!(
+            full.filters.len() > 1,
+            "fixture must exercise pre-postpass elimination: {:?}",
+            full.optimizer_evidence
+        );
+        let reported = run(0.1);
+        assert_eq!(reported.filters.len(), full.filters.len());
+        for (actual, expected) in reported.filters.iter().zip(&full.filters) {
+            assert_eq!(
+                actual.np_log_result(&curve.freq),
+                expected.np_log_result(&curve.freq)
+            );
+        }
+        assert_eq!(reported.audibility_veto.len(), full.filters.len());
+        assert!(
+            reported
+                .audibility_veto
+                .iter()
+                .all(|verdict| !verdict.enforced)
+        );
+        assert_eq!(
+            reported.veto_adjudication.unwrap().f0_reference_id,
+            full.veto_adjudication.unwrap().f0_reference_id
+        );
+    }
+
+    #[test]
+    fn qa_roomeq_pruning_conditions_adaptive_path_records_verdicts() {
         use roomeq_model::FilterAudibilityConfig;
-        use roomeq_model::VetoDecision;
         let curve = make_simple_room_curve();
         let config = OptimizerConfig {
             algorithm: "autoeq:de".to_string(),
@@ -2785,13 +3134,14 @@ mod multi_eq_tests {
         let result = optimize_channel_eq_detailed(&curve, &config, None, 48000.0).unwrap();
         assert!(!result.filters.is_empty());
         // One verdict per evaluated (pre-removal) filter; report-only keeps all.
-        assert!(result.audibility_veto.len() >= result.filters.len());
-        let keeps = result
-            .audibility_veto
-            .iter()
-            .filter(|verdict| verdict.decision == VetoDecision::Keep)
-            .count();
-        assert_eq!(keeps, result.filters.len());
+        assert_eq!(result.audibility_veto.len(), result.filters.len());
+        // A removal nomination is allowed in advisory mode; it is not an
+        // applied removal. Pin that distinction instead of assuming the
+        // optimizer happens to emit only filters the heuristic wants to keep.
+        assert!(result.audibility_veto.iter().all(|verdict| {
+            verdict.acceptance.outcome != roomeq_model::ReportOutcome::AcceptedRemoval
+                && verdict.acceptance.enforcement != roomeq_model::EnforcementState::Enforced
+        }));
         assert!(
             result
                 .audibility_veto

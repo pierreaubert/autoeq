@@ -339,21 +339,27 @@ pub fn expand_routed_electrical_paths(
             // The electrical evaluator consumes linear per-path transfers. The native
             // adapter must retain output processing after summation, not duplicate
             // arbitrary nonlinear output plugins on each incoming branch.
-            let template = channels
-                .get(&input.name)
-                .or_else(|| channels.get(&output.name))
-                .expect("physical route input or output owns a DSP chain");
             let stages = [
                 input.plugins.clone(),
                 roomeq_engine::physical_routing::physical_route_plugins(route),
                 output.plugins.clone(),
             ]
             .into_iter()
-            .map(|plugins| {
-                let mut chain = template.clone();
-                chain.drivers = None;
-                chain.plugins = plugins;
-                chain
+            .map(|plugins| ChannelDspChain {
+                // Virtual LFE inputs and physical driver outputs need not
+                // share a name with any stored logical channel. Resolved
+                // plugins completely describe each electrical stage.
+                channel: output.name.clone(),
+                plugins,
+                drivers: None,
+                initial_curve: None,
+                final_curve: None,
+                eq_response: None,
+                target_curve: None,
+                pre_ir: None,
+                post_ir: None,
+                fir_temporal_masking: None,
+                direct_early_late_correction: None,
             })
             .collect();
             ExpandedElectricalPath {
@@ -805,6 +811,69 @@ mod tests {
             .err()
             .unwrap();
         assert!(error.to_string().contains("physical identity"));
+    }
+
+    #[test]
+    fn routed_virtual_lfe_replays_named_physical_driver() {
+        let mut fixture = crate::test_fixtures::single_channel_room_result("subs");
+        let mut gain = roomeq_engine::output::create_gain_plugin(-6.0);
+        gain.parameters["room_eq_stage"] = serde_json::json!("post_route");
+        fixture.channels.get_mut("subs").unwrap().drivers =
+            Some(vec![roomeq_model::DriverDspChain {
+                name: String::from("Sub1"),
+                index: 0,
+                plugins: vec![gain],
+                initial_curve: None,
+                measured_band_hz: None,
+            }]);
+        let graph = roomeq_model::BassManagementRoutingGraph {
+            physical_sub_output: String::from("subs"),
+            physical_sub_outputs: Vec::new(),
+            stereo_routing: None,
+            input_channels: vec![String::from("LFE")],
+            output_channels: vec![String::from("Sub1")],
+            routes: vec![roomeq_model::BassManagementRoute {
+                group_id: None,
+                source_channel: String::from("LFE"),
+                source_index: 0,
+                destination: String::from("Sub1"),
+                destination_index: 0,
+                pre_chain_channel: Some(String::from("subs")),
+                post_chain_channel: Some(String::from("Sub1")),
+                route_kind: String::from("lfe_lowpass_to_sub"),
+                crossover_type: String::from("LR24"),
+                high_pass_hz: None,
+                low_pass_hz: None,
+                // The resolved bass route already owns the driver gain.
+                gain_db: -6.0,
+                gain_linear: 10.0_f64.powf(-6.0 / 20.0),
+                matrix_gain: 1.0,
+                delay_ms: 0.0,
+                polarity_inverted: false,
+            }],
+            matrix: None,
+            input_trim_db: HashMap::new(),
+            advisories: Vec::new(),
+        };
+        let expanded = expand_routed_electrical_paths(&fixture.channels, &graph).unwrap();
+        assert_eq!(expanded.len(), 1);
+        let stages: Vec<_> = expanded[0].stages.iter().collect();
+        let paths = [SerializedElectricalPath {
+            input: "LFE",
+            output: "Sub1",
+            stages: &stages,
+        }];
+        let directory = tempfile::tempdir().unwrap();
+        let outputs = replay_sampled_electrical_headroom(
+            &paths,
+            &[20.0, 20000.0],
+            48000.0,
+            &BTreeMap::from([(String::from("LFE"), 1.0)]),
+            directory.path(),
+            &HashMap::new(),
+        )
+        .unwrap();
+        assert!((outputs[0].peak_dbfs.unwrap() + 6.0).abs() < 1e-10);
     }
 
     #[test]

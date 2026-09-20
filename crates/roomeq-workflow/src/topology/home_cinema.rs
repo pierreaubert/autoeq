@@ -1341,6 +1341,33 @@ fn physical_sub_speaker_config(
         return Ok(configs.pop());
     }
 
+    // A grouped measurement owns several physical outputs. Keep its topology
+    // (including DBA/cardioid controls and per-sub all-pass optimization) when
+    // every declared output references that same group.
+    if subwoofers
+        .outputs
+        .iter()
+        .all(|output| output.speaker == subwoofers.outputs[0].speaker)
+    {
+        let branches = match &configs[0] {
+            SpeakerConfig::MultiSub(group) => Some(group.subwoofers.len()),
+            SpeakerConfig::Dba(group) => Some(group.front.len() + group.rear.len()),
+            SpeakerConfig::Cardioid(_) => Some(2),
+            _ => None,
+        };
+        if let Some(branches) = branches {
+            if branches != configs.len() {
+                return Err(AutoeqError::InvalidConfiguration {
+                    message: format!(
+                        "Physical sub group has {branches} branches but {} outputs were declared",
+                        configs.len()
+                    ),
+                });
+            }
+            return Ok(configs.pop());
+        }
+    }
+
     let mut measurements = Vec::with_capacity(configs.len());
     for (output, speaker) in subwoofers.outputs.iter().zip(configs) {
         let SpeakerConfig::Single(source) = speaker else {
@@ -2104,12 +2131,16 @@ fn configured_crossover_phase_advisories(
     config: &RoomConfig,
     sys: &SystemConfig,
 ) -> Result<Vec<String>> {
-    let mut keys = sys
-        .subwoofers
-        .as_ref()
-        .and_then(|sub| sub.crossover.as_ref())
-        .map(|reference| reference.as_list())
-        .unwrap_or_default();
+    let mut keys = match &sys.subwoofers {
+        Some(sub) => sub
+            .crossover
+            .as_ref()
+            .ok_or_else(|| AutoeqError::InvalidConfiguration {
+                message: "Subwoofer config requires 'crossover' reference".to_string(),
+            })?
+            .as_list(),
+        None => Vec::new(),
+    };
     if let Some(bass) = &sys.bass_management {
         keys.extend(bass.group_crossovers.values().map(String::as_str));
     }
@@ -2128,7 +2159,7 @@ fn configured_crossover_phase_advisories(
             .map(|hz| (hz, hz))
             .or(crossover.frequency_range)
             .ok_or_else(|| AutoeqError::InvalidConfiguration {
-                message: format!("crossover '{key}' needs a frequency or range"),
+                message: format!("crossover '{key}' needs 'frequency' or 'frequency_range'"),
             })?;
         low = low.min(lo);
         high = high.max(hi);
@@ -5607,6 +5638,56 @@ mod post_dsp_level_tests {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn physical_sub_group_preserves_topology_and_requires_complete_outputs() {
+        let mut config = roomeq_model::RoomConfig::default();
+        config.speakers.insert(
+            String::from("subs"),
+            roomeq_model::SpeakerConfig::MultiSub(roomeq_model::MultiSubGroup {
+                name: String::from("subs"),
+                speaker_name: None,
+                subwoofers: vec![
+                    roomeq_model::MeasurementSource::InMemory(
+                        crate::test_fixtures::flat_curve()
+                    );
+                    2
+                ],
+                allpass_optimization: true,
+            }),
+        );
+        let mut system = roomeq_model::SystemConfig {
+            subwoofers: Some(roomeq_model::SubwooferSystemConfig {
+                config: roomeq_model::SubwooferStrategy::Mso,
+                crossover: None,
+                routing: Default::default(),
+                outputs: (0..2)
+                    .map(|index| roomeq_model::SubwooferOutput {
+                        id: format!("Sub{index}"),
+                        speaker: String::from("subs"),
+                    })
+                    .collect(),
+            }),
+            ..Default::default()
+        };
+        let Some(roomeq_model::SpeakerConfig::MultiSub(group)) =
+            super::physical_sub_speaker_config(&config, &system).unwrap()
+        else {
+            panic!("physical group must retain MSO topology");
+        };
+        assert!(group.allpass_optimization);
+        assert_eq!(group.subwoofers.len(), 2);
+        system
+            .subwoofers
+            .as_mut()
+            .unwrap()
+            .outputs
+            .push(roomeq_model::SubwooferOutput {
+                id: String::from("Sub2"),
+                speaker: String::from("subs"),
+            });
+        assert!(super::physical_sub_speaker_config(&config, &system).is_err());
+    }
+
     use super::super::executor_tests::{flat_curve, flat_curve_with_phase, make_assembly};
     use super::super::types::WorkflowExecutor;
     use super::{HomeCinemaExecutor, canonical_main_roles, per_driver_low_pass_plan};

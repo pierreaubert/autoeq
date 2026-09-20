@@ -649,8 +649,17 @@ fn publish_baseline(
         .map(|peak| (peak - policy.output_ceiling_dbfs).max(0.0))
         .fold(0.0_f64, f64::max);
     if attenuation > policy.max_attenuation_db + 1e-6 {
+        let output_peaks = unprotected
+            .iter()
+            .filter_map(|output| {
+                output
+                    .peak_dbfs
+                    .map(|peak| format!("{}={peak:.3} dBFS", output.output))
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
         return Err(failed(format!(
-            "structural baseline requires {attenuation:.3} dB safety attenuation beyond {:.3} dB limit",
+            "structural baseline requires {attenuation:.3} dB safety attenuation beyond {:.3} dB limit (physical output peaks: {output_peaks})",
             policy.max_attenuation_db,
         )));
     }
@@ -964,7 +973,7 @@ fn refresh_responses(result: &mut RoomOptimizationResult, fs: f64, dir: &Path) -
     Ok(())
 }
 
-fn rebuild(
+pub(super) fn rebuild(
     result: &mut RoomOptimizationResult,
     config: &RoomConfig,
     validation: &HashMap<String, Vec<Curve>>,
@@ -1622,7 +1631,29 @@ mod tests {
                 }
             };
             let acceptance = result.metadata.correction_acceptance.as_ref().unwrap();
-            assert!(acceptance.accepted);
+            if !acceptance.accepted {
+                let evidence = root.join(format!(
+                    "target/qa/canonical-mso-finalization-seed-{seed}-rejected.json"
+                ));
+                std::fs::create_dir_all(evidence.parent().unwrap()).unwrap();
+                std::fs::write(
+                    &evidence,
+                    serde_json::to_vec_pretty(&serde_json::json!({
+                        "status": "final_acceptance_rejected", "seed": seed,
+                        "after_final_seat_validation": result.to_dsp_chain_output(),
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+                let failure = format!(
+                    "seed {seed}: final acceptance rejected: {:?}; evidence={}",
+                    acceptance.violations,
+                    evidence.display()
+                );
+                eprintln!("{failure}");
+                failures.push(failure);
+                continue;
+            }
             assert!(
                 acceptance
                     .acoustic_quality

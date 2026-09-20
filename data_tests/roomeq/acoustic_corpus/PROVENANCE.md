@@ -5,7 +5,24 @@ reproduced offline. A scenario must use an opaque identifier and must not add a
 person's name, postal address, room photograph, device serial number, or
 embedded location metadata.
 
+## Evidence scope
+
+This is a measurement/engineering QA corpus, not a calibrated programme-audio
+listening study. Its rights and held-out-seat records do not establish listener
+population, playback SPL calibration, perceptual thresholds, or pruning
+equivalence. Programme selection, playback-level range, and listening validation
+remain explicit deferrals in the
+[Stage 0 audibility acceptance contract](../../../docs/ROOMEQ_MANUAL.md#audibility-acceptance-contract-2026-09-20).
+No fixture, corpus membership, rights classification, baseline, or enforcement
+limit changes as part of that documentation update.
+
 ## Sources and redistribution
+
+The 2026-09-20 pruning implementation adds synthetic software regression rows
+for declared spectra/levels, correlated playback, native export, and exact
+rollback. The synthetic QA builder now emits schema-v3 physical-output and
+crossover declarations. These changes do not add measured corpus material,
+recalibrate acceptance limits, or establish listening-study evidence.
 
 | Scenario family | Source | Rights classification | Privacy review |
 |---|---|---|---|

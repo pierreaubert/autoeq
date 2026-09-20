@@ -1469,9 +1469,11 @@ and temporal acceptance limits remain unchanged; the fallback does not imply
 successful phase correction.
 
 The scratch-buffer and
-calibration-phase defects are repaired in integrated math-iir-fir 0.5.23, but
-Hybrid reference-phase correction still fails seat-weight separation and temporal
-requirements. A separate primitive diagnostic finds arrival-delay attenuation
+calibration-phase defects are repaired in integrated math-iir-fir 0.5.23.
+The 2026-09-20 focused Kirkeby regressions pass reference-phase seat weighting,
+missing acoustic phase rejection, and causal-delay export. These software
+checks do not establish complete temporal or spatial outcome acceptance.
+A separate primitive diagnostic finds arrival-delay attenuation
 from finite-tap windowing. Do not interpret magnitude improvement as phase
 benefit. Causal-support and phase realization fixes, broader
 minimum-phase outcome checks, full temporal/headroom validation and
@@ -1607,6 +1609,173 @@ every change and completed scheduled quality runs. Release reports should
 classify escaped defects as optimizer/objective, role/routing, DSP realization,
 acceptance/reporting, or automation reachability, and record unexpected
 reverts, cross-mode drift, mutation survivors, and suite runtime.
+
+### Audibility acceptance contract (2026-09-20)
+
+This contract records the Stage 0 decisions and explicit deferrals for the
+2026-09-05 and 2026-09-16 reviews. A deferred validation item does not authorize
+enforcement or establish inaudibility. Stage 2 must supply the evidence below
+before a perceptual claim can be promoted. These decisions add no configuration
+fields and change no defaults or numerical acceptance limits.
+
+**References and comparison tasks.** Pruning compares each proposed kept chain
+against the same frozen, ordered full chain `F0`, before any removal. Record its
+identity and the removed filters' original indices and coefficients so rollback
+restores the chain. Check both the incremental removal and the accumulated change
+from `F0`; reoptimization must not reset the reference. A harmful-filter removal
+that intentionally changes quality needs a separate quality acceptance decision.
+Static PEQ equivalence alone does not establish equivalence of the routed export
+or of a transition between live configurations.
+
+Correction quality uses a separately declared desired reference. Below the room
+transition, its construction must specify the target and seat aggregation; above
+the transition, it must specify which direct-sound response, target tilt, timing,
+and spatial relationships are preserved. A universal construction when direct or
+anechoic data are absent is **deferred**. The selected target curve remains an
+engineering objective, not evidence of a preferred or perceptually transparent
+reference. No default reference change follows from this contract.
+
+**Model and supported claims.** The current `heuristic-erb-proxy` evaluates a
+filter-composed magnitude shape and nominal-level loudness differences. Its
+`sones-experimental-proxy` values are not reference ISO loudness, a validated
+signal-pair difference measure, or portable detection thresholds. Its acceptance
+records remain `Low` confidence, including explicitly enabled experimental
+removals. Equal total loudness does not establish equal timbre. Selection and
+version pinning of a validated auditory comparison model, its reference
+implementation, supported attributes, and presentation domain are **deferred**.
+PEMO-Q is a candidate to evaluate, not a selected room-EQ preference model.
+
+**Conditions, calibration, and measurements.** The acceptance condition set must
+explicitly identify seats/ears, programmes, playback levels, sample rate, and
+measurement versions. Record trustworthy frequency support, grid and smoothing,
+repeatability, channel identity, phase/time reference, and uncertainty. Unknown
+conditions cannot count as passing conditions. Magnitude-only data support
+magnitude diagnostics; phase, temporal, and spatial claims require appropriate
+complex responses or time-referenced RIRs. Noisy, sparse, or phase-uncertain data
+must restrict the supported claim or yield insufficient evidence.
+
+`listening_level_phon`, including its nominal 75-phon fallback, is an assumption,
+not a physical SPL calibration. Acoustic calibration must bind digital playback
+level to measured SPL at the declared seat, with measurement method and
+uncertainty. Assumed levels may support advisory sensitivity analysis; they do
+not establish calibrated masking or authorize a validated removal. Selection of
+the physical calibration procedure, programme corpus and hashes, playback-level
+range, and minimum input-quality tolerances is **deferred**. The existing
+experimental opt-in retains its explicitly unvalidated status.
+
+**Cumulative policy and uncertainty.** Accept a simplification only when every
+declared condition satisfies its incremental and cumulative limits against
+`F0`; do not let an average hide a failing seat, programme, or level. Retain the
+filter when a condition is missing, unsupported, non-finite, or uncertain. Keep
+identity/zero-filter output reachable when all checks pass. The existing scalar
+proxy quantum, optional cumulative cap, and local-bin cap are implementation
+guards, not scientifically validated all-condition budgets. Their numerical
+values are unchanged. Validated perceptual budgets, confidence margins,
+worst-seat tradeoff allowances for quality-changing correction, and independent
+justification of engineering limits are **deferred**.
+
+The engine's `adjudicate_veto_removals_for_conditions` accepts explicit condition
+spectra on a shared grid and freezes each full-chain level anchor. Every removal
+checks the worst incremental condition and the configured sum or maximum of
+cumulative differences. Missing, duplicate, non-finite, or misaligned evidence
+retains filters. Reference identifiers bind the frequency grid, ordered filter
+responses, condition identities, background spectra, and nominal levels. This
+implements experimental condition evaluation, not validated auditory equivalence.
+
+Native single- and multi-measurement EQ workflows accept the optional
+`optimizer.pruning_budget.evaluation` declaration, version `spectral-v1`.
+It names every supplied measurement in input order and supplies programme spectra
+and nominal listening levels. Each condition combines the original measured
+response with the programme spectrum, interpolated in log frequency within their
+shared support. The complete measurement × programme × level product is checked,
+including measurements assigned zero optimization weight. Missing measurements,
+unsupported frequency ranges, or invalid evidence retain filters.
+
+With `evaluation`, an empty `pruning_budget.conditions` uses that complete product;
+a nonempty list must match it exactly. IDs have the form `seat-0/music/75phon`.
+Without `evaluation`, the legacy `flat-background` proxy remains available;
+other declared IDs remain unresolved and retain filters. This declaration does
+not supply physical calibration or establish perceptual validity.
+
+Routed systems and workflows with held-out validation captures defer removal
+until final graph selection. The final pass replays
+each declared condition through the complete exported topology, checks individual
+and correlated logical inputs, and reruns electrical and acoustic acceptance.
+It requires an explicit evaluation declaration and complete measured phase for
+correlated playback. Held-out captures are evaluated as an additional partition;
+an incomplete partition retains F0. Its Low-confidence proxy
+assessment is recorded under `final_routed_graph`; advisory mode preserves all
+processing while recording the same hypothetical removal walk.
+
+The export matrix covers native single/multiple measurements, adaptive/single-pass
+selection, local refinement, scalar DE/Pareto NSGA-II selection, and
+advisory/enforced modes. Serial and frequency-split hybrid rows additionally
+verify the exported FIR samples and IIR removal/preservation. Native crossover
+IIR optimization retains every original measurement. Final-seat phase availability
+comes from all actual captures and replays, not the phase-free power average; a
+missing seat phase still prevents FIR/hybrid acceptance. Native JSON export and
+delivered-response replay also cover stereo bass management with one or two
+physical sub outputs, in advisory and enforced modes. These static rows do not
+establish continuous-refinement transition safety.
+
+Adaptive veto paths now preserve the full pre-pruning chain until cumulative
+adjudication, including report-only runs. The explicit raw-loss fallback retains
+its legacy engineering semantics and does not establish audibility acceptance.
+`just qa-roomeq-pruning-conditions` exercises a two-seat, two-programme, two-level
+engine matrix, frozen level anchoring, cumulative overlap, cancelling filters,
+narrow peaks, identity output, rollback, missing conditions, and the adaptive
+advisory path. The same recipe now includes native workflow/export rows for
+single/multiple measurements, adaptive selection, Pareto selection, local
+refinement, all-channel multi-seat, routed single/two-sub playback, and hybrid
+IIR/FIR. These static software checks do not establish continuous-transition
+safety or replace Stage 2 listening validation.
+
+Engineering gate results and unresolved defects are tracked in
+[the 2026-09-16 review evidence log](ROOMEQ_REVIEW_20260916.md). The all-channel
+multi-seat export rows pass, including zero-weight seats. Kautz/warped reports
+now use the serialized topology, but the Kautz coefficient-fitting convention
+still fails the unchanged realized gain budget. Truthful reports are not proof
+of optimizer quality or perceptual benefit.
+
+**Listening study and Stage 2 acceptance.** Listener population, recruitment,
+sample size, and the powered equivalence/detection bound are **deferred**; no
+completed listening study is claimed. Before collecting outcomes, preregister
+those choices together with calibrated levels, task-specific level matching,
+randomization/blinding, repetitions, exclusions, and uncertainty analysis. Keep
+pruning detectability/equivalence separate from correction preference. A
+nonsignificant ABX result alone does not prove equivalence. Independently inspect
+actual playback headroom, channel balance, and timing rather than hiding changes
+through listening-test normalization.
+
+Stage 2 must pin the model and validate published reference cases, render actual
+comparison audio, and include speech, music, sustained tones, exposed transients,
+equal-loudness/different-timbre cases, narrow resonances, overlapping/cancelling
+filters, and accumulated small removals. Separate development from held-out
+seats, programmes, levels, and rooms. Verify measurement repeatability, no-EQ
+cases, main/sub interactions, and the final routed/exported chain. Stimulus
+descriptors, synthetic tests, measured transfer curves, and export byte identity
+each prove their own software contract; none substitutes for listener evidence.
+
+**Reporting, cost, and rollout.** Use the existing independent outcome,
+enforcement, and confidence fields: `keep`, `candidate_removal`,
+`accepted_removal`, `risk_limited_correction`, or `insufficient_evidence`;
+`not_evaluated`, `advisory`, or `enforced`; and the stated evidence confidence.
+Record model/version, calibration or assumption, reference identity, thresholds,
+condition coverage, and reasons. An experimental `accepted_removal` records an
+applied change, not proof of perceptual equivalence. Do not turn a skipped or
+unsupported assessment into a successful one.
+
+The validated evaluator's runtime budget and versioned policy/configuration
+design are **deferred**. Cache fixed reference/probe transforms and evaluate
+candidates in stages when that evaluator is introduced; a timeout must retain
+the filter and report incomplete evaluation. The auditory reranker remains
+blocked on Stage 2 evidence and is not a prerequisite for independent physical
+safety fixes. No new backend or latency rewrite is selected. `flat` remains the
+default loss; absent veto configuration remains disabled, and configured veto
+remains advisory by default. A future preset recommendation needs the claimed
+release-gate evidence, held-out validation, and recorded listening outcomes for
+any listener-benefit claim. Native/SOTF playback equivalence remains an external
+proof obligation; in-tree export checks do not discharge it.
 
 ### Staged rollout and release gates
 

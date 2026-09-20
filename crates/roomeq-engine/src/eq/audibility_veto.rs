@@ -19,6 +19,7 @@
 //! than depending on seat-dependent measurement shape.
 
 use autoeq_core::auditory_frequency::{erb_rate, try_erb_rate_cell_widths};
+use conditions::{ConditionEvaluator, VetoCondition, VetoConditionSet};
 use math_audio_iir_fir::Biquad;
 use ndarray::Array1;
 use roomeq_model::{
@@ -26,6 +27,9 @@ use roomeq_model::{
     EnforcementState, FilterAudibilityConfig, FilterVetoVerdict, ReportOutcome, VetoDecision,
     VetoReason,
 };
+
+pub mod conditions;
+pub mod workflow;
 
 /// Upward masking spread in dB per ERB (documented simplification of the
 /// level-dependent Zwicker slopes; no downward spread).
@@ -284,10 +288,10 @@ pub fn evaluate_audibility_veto(evaluation: &VetoEvaluation<'_>) -> Vec<FilterVe
         .collect()
 }
 
-/// Evaluate the veto and, unless `report_only`, remove `Remove` filters.
+/// Evaluates nominations and cumulatively adjudicates experimentally authorized removals.
 ///
 /// Convenience wrapper over [`evaluate_audibility_veto`] plus
-/// [`enforce_veto_verdicts`]. Returns the input untouched with no verdicts
+/// [`adjudicate_veto_removals`]. Returns the input untouched with no verdicts
 /// when the config is disabled or the set is empty.
 pub fn apply_audibility_veto(
     filters: Vec<Biquad>,
@@ -303,15 +307,28 @@ pub fn apply_audibility_veto(
              the loudness proxy is experimental and unvalidated"
         );
     }
-    let verdicts = evaluate_audibility_veto(evaluation);
-    enforce_veto_verdicts(
+    let mut verdicts = evaluate_audibility_veto(evaluation);
+    let result = adjudicate_veto_removals(
         filters,
-        verdicts,
-        evaluation.config.enforcement_authorized(),
-    )
+        &mut verdicts,
+        evaluation.freqs,
+        &AdjudicationConfig {
+            listening_phon: evaluation.listening_phon,
+            per_step_quantum_sones: evaluation.config.elimination_loudness_delta_sones,
+            cumulative_cap_sones: None,
+            local_deviation_cap_db: evaluation.config.jnd_db,
+            enforce: evaluation.config.enforcement_authorized(),
+            model_version: env!("CARGO_PKG_VERSION").to_string(),
+        },
+    );
+    (result.kept, verdicts)
 }
 
-/// Enforce evaluated verdicts: drop `Remove` filters when `enforce` is true.
+/// Applies already-adjudicated removals to the original full filter chain.
+///
+/// Heuristic nominations alone never authorize batch removals. Records must
+/// carry `AcceptedRemoval` and `Enforced` from cumulative adjudication. Input
+/// alignment mismatches retain every filter, including unmatched trailing ones.
 ///
 /// Returns the kept filters plus verdicts for every evaluated filter
 /// (`enforced` marks verdicts that actually removed a filter). Removal is
@@ -323,10 +340,27 @@ pub fn enforce_veto_verdicts(
     mut verdicts: Vec<FilterVetoVerdict>,
     enforce: bool,
 ) -> (Vec<Biquad>, Vec<FilterVetoVerdict>) {
+    if filters.len() != verdicts.len()
+        || verdicts
+            .iter()
+            .enumerate()
+            .any(|(index, verdict)| verdict.index != index)
+    {
+        for verdict in &mut verdicts {
+            verdict.enforced = false;
+            verdict.acceptance.outcome = ReportOutcome::InsufficientEvidence;
+            verdict.acceptance.enforcement = EnforcementState::NotEvaluated;
+            verdict.acceptance.reason = String::from("verdict/filter alignment mismatch");
+        }
+        return (filters, verdicts);
+    }
     let mut kept = Vec::with_capacity(filters.len());
     let mut removed = 0_usize;
     for (filter, verdict) in filters.into_iter().zip(verdicts.iter_mut()) {
-        if verdict.decision == VetoDecision::Remove && enforce {
+        let accepted = verdict.acceptance.outcome == ReportOutcome::AcceptedRemoval
+            && verdict.acceptance.enforcement == EnforcementState::Enforced;
+        verdict.enforced = false;
+        if verdict.decision == VetoDecision::Remove && enforce && accepted {
             verdict.enforced = true;
             removed += 1;
             log::info!(
@@ -558,13 +592,61 @@ pub fn adjudicate_veto_removals(
     freqs: &Array1<f64>,
     config: &AdjudicationConfig,
 ) -> VetoAdjudication {
+    adjudicate_veto_removals_for_budget(filters, verdicts, freqs, config, None)
+}
+
+/// Evaluates the legacy flat background without pretending to cover unresolved conditions.
+///
+/// A declared budget can bind `flat-background`. Other condition identifiers
+/// require explicit evidence through [`adjudicate_veto_removals_for_conditions`];
+/// this adapter retains all filters when that evidence is unavailable.
+pub fn adjudicate_veto_removals_for_budget(
+    filters: Vec<Biquad>,
+    verdicts: &mut [FilterVetoVerdict],
+    freqs: &Array1<f64>,
+    config: &AdjudicationConfig,
+    budget: Option<&roomeq_model::PruningBudget>,
+) -> VetoAdjudication {
+    let ids = vec![String::from("flat-background")];
+    let conditions = vec![VetoCondition {
+        id: ids[0].clone(),
+        background_db: Array1::zeros(freqs.len()),
+        listening_phon: config.listening_phon,
+    }];
+    adjudicate_veto_removals_for_conditions(
+        filters,
+        verdicts,
+        freqs,
+        config,
+        &VetoConditionSet {
+            declared_ids: budget
+                .filter(|budget| !budget.conditions.is_empty())
+                .map_or(&ids, |budget| &budget.conditions),
+            conditions: &conditions,
+            aggregation: budget.map_or(roomeq_model::BudgetAggregation::Max, |budget| {
+                budget.aggregation
+            }),
+        },
+    )
+}
+
+/// Adjudicates cumulative removals against every declared condition and frozen F0.
+///
+/// Missing, duplicate, invalid, or unsupported condition evidence retains all
+/// filters with an insufficient-evidence record. Each accepted removal is
+/// recomputed across the complete set; report-only mode walks the same sequence
+/// without applying it. This experimental magnitude proxy remains low-confidence.
+pub fn adjudicate_veto_removals_for_conditions(
+    filters: Vec<Biquad>,
+    verdicts: &mut [FilterVetoVerdict],
+    freqs: &Array1<f64>,
+    config: &AdjudicationConfig,
+    conditions: &VetoConditionSet<'_>,
+) -> VetoAdjudication {
     let responses: Vec<Array1<f64>> = filters
         .iter()
         .map(|filter| filter_db_response(filter, freqs))
         .collect();
-    let erb = erb_positions(freqs);
-    let weights = erb_weights(freqs);
-    let weights_ref = weights.as_ref();
     let f0_composite: Array1<f64> =
         responses
             .iter()
@@ -572,9 +654,12 @@ pub fn adjudicate_veto_removals(
                 sum += response;
                 sum
             });
-    let f0_loudness =
-        approximate_loudness_sones(&f0_composite, &erb, weights_ref, config.listening_phon);
-    let f0_reference_id = fingerprint_f0(&f0_composite, filters.len());
+    let f0_reference_id = conditions::reference_id(
+        &fingerprint_f0(&f0_composite, filters.len()),
+        freqs,
+        &responses,
+        conditions,
+    );
     let no_adjudication = || VetoAdjudication {
         kept: filters.clone(),
         removed: Vec::new(),
@@ -588,8 +673,47 @@ pub fn adjudicate_veto_removals(
     // adjudication pass over annotated verdicts cannot mistake old records
     // for unevaluated candidates.
     let mut evaluated = vec![false; filters.len()];
+    // A second pass must not inherit an earlier pass's applied-removal flags.
+    for verdict in verdicts.iter_mut() {
+        verdict.enforced = false;
+    }
+    let evaluator = ConditionEvaluator::new(conditions, freqs, &f0_composite);
+    let limits_valid = config.per_step_quantum_sones.is_finite()
+        && config.per_step_quantum_sones >= 0.0
+        && config.local_deviation_cap_db.is_finite()
+        && config.local_deviation_cap_db >= 0.0
+        && config
+            .cumulative_cap_sones
+            .is_none_or(|cap| cap.is_finite() && cap >= 0.0);
+    let evaluator = match evaluator {
+        Ok(evaluator) if limits_valid => evaluator,
+        result => {
+            let reason = result
+                .err()
+                .unwrap_or_else(|| String::from("invalid adjudication limits"));
+            for verdict in verdicts.iter_mut() {
+                verdict.acceptance = acceptance_record(
+                    ReportOutcome::InsufficientEvidence,
+                    EnforcementState::NotEvaluated,
+                    &f0_reference_id,
+                    config.listening_phon,
+                    &config.model_version,
+                    config.per_step_quantum_sones,
+                    config.local_deviation_cap_db,
+                    config.cumulative_cap_sones,
+                    format!("no adjudication: {reason}"),
+                );
+            }
+            return no_adjudication();
+        }
+    };
 
-    if verdicts.len() != filters.len() {
+    if verdicts.len() != filters.len()
+        || verdicts
+            .iter()
+            .enumerate()
+            .any(|(index, verdict)| verdict.index != index)
+    {
         // Caller contract broken: never remove on ambiguous alignment.
         for verdict in verdicts.iter_mut() {
             verdict.acceptance = acceptance_record(
@@ -645,35 +769,43 @@ pub fn adjudicate_veto_removals(
                     sum += response;
                     sum
                 });
-        // `candidate` is the stable original index (into `responses` and
-        // `verdicts`); `position` is its transient slot in `current` for
-        // the loudness call. Confusing the two removes nothing and spins.
-        let mut best: Option<(usize, usize, f64)> = None;
-        for (position, &original) in remaining.iter().enumerate() {
+        // Rank nominations by the worst incremental condition. The cumulative
+        // value is always recomputed against each condition's original F0.
+        let mut best: Option<(usize, f64, f64)> = None;
+        for &original in &remaining {
             if verdicts[original].decision != VetoDecision::Remove {
                 continue;
             }
-            let impact =
-                loudness_delta_sones(&current, position, &erb, weights_ref, config.listening_phon);
-            if !impact.is_finite() {
+            let candidate_response = &current_total - &responses[original];
+            let Some((impact, cumulative)) =
+                evaluator.differences(&current_total, &candidate_response)
+            else {
+                // Unknown impact cannot authorize a removal.
+                evaluated[original] = true;
+                verdicts[original].acceptance = acceptance_record(
+                    ReportOutcome::InsufficientEvidence,
+                    EnforcementState::NotEvaluated,
+                    &f0_reference_id,
+                    config.listening_phon,
+                    &config.model_version,
+                    config.per_step_quantum_sones,
+                    config.local_deviation_cap_db,
+                    config.cumulative_cap_sones,
+                    format!(
+                        "non-finite condition comparison; {}",
+                        evaluator.description()
+                    ),
+                );
                 continue;
-            }
-            if best.is_none_or(|(_, _, best_impact)| impact < best_impact) {
-                best = Some((original, position, impact));
+            };
+            if best.is_none_or(|(_, best_impact, _)| impact < best_impact) {
+                best = Some((original, impact, cumulative));
             }
         }
-        let Some((candidate, _, impact)) = best else {
+        let Some((candidate, impact, candidate_cumulative_loudness)) = best else {
             break;
         };
-
         let removal_composite = &current_total - &responses[candidate];
-        let candidate_cumulative_loudness = (approximate_loudness_sones(
-            &removal_composite,
-            &erb,
-            weights_ref,
-            config.listening_phon,
-        ) - f0_loudness)
-            .abs();
         let candidate_max_local = f0_composite
             .iter()
             .zip(removal_composite.iter())
@@ -711,7 +843,7 @@ pub fn adjudicate_veto_removals(
                 config.per_step_quantum_sones,
                 config.local_deviation_cap_db,
                 config.cumulative_cap_sones,
-                format!("removal rejected: {reason}"),
+                format!("removal rejected: {reason}; {}", evaluator.description()),
             );
             stopped = true;
             continue;
@@ -744,7 +876,8 @@ pub fn adjudicate_veto_removals(
             config.local_deviation_cap_db,
             config.cumulative_cap_sones,
             format!(
-                "{verb}: incremental impact {impact:.4} sones, cumulative {cumulative_loudness:.4}, local {max_local:.2} dB"
+                "{verb}: incremental impact {impact:.4} sones, cumulative {cumulative_loudness:.4}, local {max_local:.2} dB; {}",
+                evaluator.description()
             ),
         );
         if config.enforce {
@@ -778,6 +911,9 @@ pub fn adjudicate_veto_removals(
         }
     }
 
+    for verdict in verdicts.iter_mut() {
+        verdict.acceptance.provenance.calibration = evaluator.calibration();
+    }
     let kept: Vec<Biquad> = if config.enforce {
         remaining.iter().map(|&i| filters[i].clone()).collect()
     } else {
@@ -1297,9 +1433,9 @@ mod audibility_veto_tests {
 
     #[test]
     fn declared_tight_budget_binds_before_default() {
-        // Six spread-out ripples total ~2e-5 sones of drift: the default
-        // quantum accepts them all, while a declared 1e-5 cap stops the
-        // walk partway — the budget, not the heuristics, is the difference.
+        // The default quantum accepts these ripples. At a fixed F0 level,
+        // even the first removal exceeds the declared 1e-5 cap. Previously
+        // re-normalizing each candidate hid broadband drift and let some pass.
         let freqs_spread = [100.0, 300.0, 700.0, 1500.0, 3000.0, 6000.0];
         let filters: Vec<Biquad> = freqs_spread.iter().map(|&f| peak(0.8, f, 2.0)).collect();
         let (freqs, mut verdicts) = nominate(&filters);
@@ -1317,8 +1453,8 @@ mod audibility_veto_tests {
         let adjudication =
             adjudicate_veto_removals(filters.clone(), &mut verdicts, &freqs, &budgeted);
         assert!(
-            (1..filters.len()).contains(&adjudication.removed.len()),
-            "tight budget should stop the walk partway, removed {}",
+            adjudication.removed.is_empty(),
+            "tight budget must retain all filters at the frozen level, removed {}",
             adjudication.removed.len()
         );
         assert!(
@@ -1379,10 +1515,14 @@ mod audibility_veto_tests {
             .map(|(a, b)| (a - b).abs())
             .fold(0.0_f64, f64::max);
         assert!(drift < 1e-9, "rollback drifted by {drift}");
-        assert_eq!(
-            fingerprint_f0(&back, restored_filters.len()),
-            adjudication.f0_reference_id
+        let (_, mut restored_verdicts) = nominate(&restored_filters);
+        let restored = adjudicate_veto_removals(
+            restored_filters,
+            &mut restored_verdicts,
+            &freqs,
+            &adjudicate_config(false),
         );
+        assert_eq!(restored.f0_reference_id, adjudication.f0_reference_id);
     }
 
     #[test]

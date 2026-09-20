@@ -1,5 +1,49 @@
 # Unreleased
 
+- Evaluate Kautz and warped-IIR reports from their serialized DSP topology,
+  fixing the 25.66 dB Kautz report/export mismatch in the regression fixture.
+  Kautz gain optimization remains experimental and fails the existing matched
+  gain-budget experiment; this reporting fix does not validate that optimizer.
+- Repair stale audibility QA selections after crate relocation and fail empty
+  selections explicitly. Add exported all-channel multi-seat pruning rows.
+
+- Add experimental frozen-F0 pruning across explicit seat/programme/level
+  spectra, with worst-condition incremental checks, sum/max cumulative budgets,
+  fixed level anchoring, and fail-closed handling of missing condition evidence.
+  Prevent adaptive report-only veto from deleting filters before adjudication;
+  raw nominations no longer authorize batch removal. Add the
+  `qa-roomeq-pruning-conditions` regression matrix. Native single/multiple-measurement
+  workflows accept versioned `pruning_budget.evaluation` programme/level
+  declarations over every supplied measurement, including zero-weight seats.
+  Export checks cover advisory and enforced modes, adaptive selection, and
+  local refinement, and Pareto NSGA-II selection. Enable exact JSON float
+  round-tripping for filter metadata. Hybrid serial/crossover export rows verify
+  FIR samples and IIR pruning; the crossover path now retains individual seats.
+  Final-seat phase evidence uses actual captures/replay instead of a power average.
+  Missing phase still prevents hybrid acceptance. Routed pruning runs after
+  final selection and checks complete delivered graphs across declared seats,
+  spectra, levels, and correlated inputs. Native export/replay rows cover
+  single and parallel two-sub playback; missing evidence retains F0.
+  Non-routed workflows with held-out captures also defer removal to the final
+  pass; complete held-out seats constrain pruning and incomplete seats retain F0.
+  No perceptual validation is claimed.
+- Fix virtual-LFE electrical replay when physical driver names differ from
+  stored logical channels. Preserve grouped subwoofer topology for explicit
+  physical outputs, and update synthetic QA fixtures to schema-v3 output and
+  crossover declarations.
+- Separate CLI integration coverage for magnitude-only multidriver diagnostic
+  rejection and known-phase synthetic multidriver playback. Do not approve
+  missing phase or label an unchanged flat system as improved.
+
+- Validate missing crossover references before phase-confidence assessment and
+  report the required `frequency`/`frequency_range` fields consistently.
+- Preserve measured RoomEQ grid endpoints without adding floating-point duplicate
+  bins that collapse to zero ERB width and invalidate cumulative acceptance.
+- Record the RoomEQ Stage 0 audibility acceptance contract in the tracked manual:
+  frozen references, all-condition acceptance requirements, conservative unknown
+  outcomes, and explicit model/calibration/listening-study deferrals. Replace the
+  input-format reference to an ignored contract document. No enforcement default
+  or threshold changes; schemas are synchronized.
 - Clarify RoomEQ FIR, MIXED/hybrid, and MIXED-PHASE mode names, phase and length controls, latency, and the distinction between correction bounds and processing/speaker crossovers.
 
 # 0.5.74

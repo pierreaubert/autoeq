@@ -1002,6 +1002,10 @@ fn validate_final_seats_impl(
         .map(|(name, curves)| (name.clone(), curves.clone()))
         .collect();
     let mut evidence = Vec::new();
+    // A power-averaged display curve intentionally has no phase. Establish
+    // phase availability from every original capture and its delivered replay,
+    // rather than rejecting measured multi-seat FIRs on that display omission.
+    let mut phase_evidence_available = true;
     let mut training_scores = Vec::new();
     let mut held_scores = Vec::new();
     let mut inputs: Vec<_> = if let Some(graph) = result
@@ -1063,6 +1067,11 @@ fn validate_final_seats_impl(
         if physical.is_empty() {
             continue;
         }
+        phase_evidence_available &= physical.values().flatten().all(|curve| {
+            curve.phase.as_ref().is_some_and(|phase| {
+                phase.len() == curve.freq.len() && phase.iter().all(|value| value.is_finite())
+            })
+        });
         for curves in physical.values() {
             for curve in curves {
                 curve.validate("final-seat replay")?;
@@ -1150,6 +1159,12 @@ fn validate_final_seats_impl(
                 let post_support = post.support;
                 let pre = pre.curve;
                 let post = post.curve;
+                phase_evidence_available &= [&pre, &post].iter().all(|curve| {
+                    curve.phase.as_ref().is_some_and(|phase| {
+                        phase.len() == curve.freq.len()
+                            && phase.iter().all(|value| value.is_finite())
+                    })
+                });
                 let target = result
                     .channels
                     .get(input)
@@ -1304,6 +1319,39 @@ fn validate_final_seats_impl(
         .ok_or_else(|| invalid("final-seat acceptance report unavailable"))?;
     if let Some(previous) = &report.acoustic_quality {
         score.temporal = previous.temporal;
+    }
+    score.temporal.phase_evidence_available =
+        phase_evidence_available && !score.final_seats.is_empty();
+    if score.temporal.phase_evidence_available {
+        let only_phase_missing = report.violations.as_slice() == ["phase_evidence_missing"];
+        report
+            .violations
+            .retain(|violation| violation != "phase_evidence_missing");
+        if only_phase_missing {
+            report.accepted = true;
+            report.decision = roomeq_model::CorrectionDecision::Accepted;
+        }
+        report.refresh_outcome();
+    } else if report.runtime_policy.as_ref().is_some_and(|policy| {
+        matches!(
+            policy.output_class,
+            roomeq_model::RuntimeOutputClass::Fir | roomeq_model::RuntimeOutputClass::Hybrid
+        )
+    }) {
+        if !report
+            .violations
+            .iter()
+            .any(|violation| violation == "phase_evidence_missing")
+        {
+            report
+                .violations
+                .push(String::from("phase_evidence_missing"));
+        }
+        report.accepted = false;
+        if report.decision == roomeq_model::CorrectionDecision::Accepted {
+            report.decision = roomeq_model::CorrectionDecision::IdentityFallback;
+        }
+        report.refresh_outcome();
     }
     let budget = report
         .runtime_policy

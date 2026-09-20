@@ -129,6 +129,7 @@ pub fn execute_prepared_channel(
                 );
                 process_mixed_crossover(MixedCrossoverRequest {
                     channel_name,
+                    prepared: Some(prepared),
                     curve: &execution.preprocessed.curve_for_optim,
                     target: &execution.target,
                     preference_filters: &preference_filters,

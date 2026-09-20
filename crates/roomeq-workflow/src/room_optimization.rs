@@ -33,6 +33,7 @@ mod gd;
 mod per_driver_fir;
 mod phase;
 mod reports;
+mod routed_pruning;
 
 mod misc;
 mod process;
@@ -137,8 +138,18 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
     frequency_samples: usize,
 ) -> Result<RoomOptimizationResult> {
     let seat_captures = seat_replay::capture_training(request.config)?;
+    let routed_pruning_requested =
+        routed_pruning::requested(request.config, !context.validation_measurements.is_empty());
+    let mut local_config = request.config.clone();
+    if routed_pruning_requested {
+        // Routed nominations cannot authorize removal before the complete graph
+        // exists. The final pass uses the original requested enforcement policy.
+        if let Some(veto) = &mut local_config.optimizer.filter_audibility {
+            veto.report_only = true;
+        }
+    }
     let mut result = optimize_room_impl_with_frequency_samples(
-        request.config,
+        &local_config,
         request.sample_rate,
         context.output_dir,
         request.probe_arrival_overrides,
@@ -168,6 +179,16 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
         context.output_dir.unwrap_or_else(|| Path::new(".")),
         context.artifact_store,
     )?;
+    if routed_pruning_requested {
+        routed_pruning::apply(
+            &mut result,
+            &seat_captures,
+            context.validation_measurements,
+            request.config,
+            request.sample_rate,
+            context.output_dir.unwrap_or_else(|| Path::new(".")),
+        );
+    }
     generate_validation_bundle_report(
         &mut result,
         request.config,

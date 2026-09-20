@@ -66,7 +66,9 @@ pub(super) fn apply_parameter_signal_axes(
     let sub_name = config
         .system
         .as_ref()
-        .and_then(|system| system.speakers.get("LFE"))
+        .and_then(|system| system.subwoofers.as_ref())
+        .and_then(|subwoofers| subwoofers.outputs.first())
+        .map(|output| &output.speaker)
         .cloned();
     for (index, name) in names.iter().enumerate() {
         let (minimum, maximum, points) = match row.measurement_shape {
@@ -481,7 +483,25 @@ pub(super) fn build_multichannel_config(
     // Add crossover config if sub is present (required by 2.1 and home cinema workflows)
     let mut crossovers_map = None;
     if let Some(ref mut sc) = sub_config {
-        sc.crossover = Some("lfe_xover".to_string().into());
+        // Logical LFE is implicit in v3. Explicit outputs identify each
+        // measured physical branch, including branches within a sub group.
+        sys_speakers.remove("LFE");
+        let output_count = match &speakers["lfe"] {
+            SpeakerConfig::Single(_) => 1,
+            SpeakerConfig::MultiSub(group) => group.subwoofers.len(),
+            SpeakerConfig::Cardioid(_) => 2,
+            SpeakerConfig::Dba(group) => group.front.len() + group.rear.len(),
+            _ => unreachable!("synthetic sub topology must expose physical branches"),
+        };
+        sc.outputs = (0..output_count)
+            .map(|index| roomeq_model::SubwooferOutput {
+                id: format!("Sub{}", index + 1),
+                speaker: String::from("lfe"),
+            })
+            .collect();
+        sc.crossover = Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec![
+            String::from("lfe_xover"); output_count
+        ]));
         let mut xovers = HashMap::new();
         xovers.insert(
             "lfe_xover".to_string(),
@@ -496,7 +516,16 @@ pub(super) fn build_multichannel_config(
     }
 
     let system = SystemConfig {
-        model: layout.system_model(),
+        // Stereo routing supports at most two physical subs. Larger arrays
+        // use the home-cinema routing contract even with only two mains.
+        model: if sub_config
+            .as_ref()
+            .is_some_and(|subs| subs.outputs.len() > 2)
+        {
+            roomeq_model::SystemModel::HomeCinema
+        } else {
+            layout.system_model()
+        },
         speakers: sys_speakers,
         subwoofers: sub_config,
         bass_management: None,
@@ -532,6 +561,34 @@ pub(super) fn build_multichannel_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn synthetic_multichannel_topologies_use_valid_v3_outputs() {
+        use crate::synthetic::consts::{ALL_LAYOUTS, ALL_SUB_TOPOS};
+        let base = roomeq_synthetic::generate_flat_curve(20.0, 20_000.0, 100);
+        for layout in ALL_LAYOUTS.iter().filter(|layout| layout.has_lfe) {
+            for topology in ALL_SUB_TOPOS {
+                let config = build_multichannel_config(
+                    layout,
+                    Some(topology),
+                    &EASY,
+                    &base,
+                    ProcessingMode::LowLatency,
+                    48_000.0,
+                );
+                config.validate_structure().unwrap();
+                let system = config.system.as_ref().unwrap();
+                assert!(!system.speakers.contains_key("LFE"));
+                let subs = system.subwoofers.as_ref().unwrap();
+                let Some(roomeq_model::SubwooferCrossoverRef::PerSub(crossovers)) = &subs.crossover
+                else {
+                    panic!("v3 requires per-output crossovers");
+                };
+                assert_eq!(crossovers.len(), subs.outputs.len());
+                assert!(!subs.outputs.is_empty());
+            }
+        }
+    }
 
     #[test]
     fn parameter_signal_axes_materialize_distinct_grids_phase_and_fir_lengths() {
@@ -601,8 +658,11 @@ mod tests {
                 assert!(config.crossovers.is_none());
             } else {
                 let system = config.system.as_ref().unwrap();
-                assert_eq!(system.speakers.len(), expected);
-                assert_eq!(system.speakers["LFE"], "lfe");
+                assert_eq!(system.speakers.len(), expected - 1);
+                assert!(!system.speakers.contains_key("LFE"));
+                let subs = system.subwoofers.as_ref().unwrap();
+                assert_eq!(subs.outputs.len(), 1);
+                assert_eq!(subs.outputs[0].speaker, "lfe");
                 assert!(
                     system
                         .speakers
@@ -662,7 +722,9 @@ mod tests {
             48_000.0,
         );
 
-        assert_eq!(config.system.as_ref().unwrap().speakers.len(), 14);
+        let system = config.system.as_ref().unwrap();
+        assert_eq!(system.speakers.len(), 13);
+        assert_eq!(system.subwoofers.as_ref().unwrap().outputs.len(), 8);
         match config.speakers.get("lfe").unwrap() {
             SpeakerConfig::MultiSub(group) => assert_eq!(group.subwoofers.len(), 8),
             other => panic!("expected eight-sub MSO group, got {other:?}"),

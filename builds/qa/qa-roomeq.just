@@ -17,6 +17,7 @@ qa-roomeq-pr:
 	just qa-roomeq-escaped-defects
 
 qa-roomeq-stage-contracts:
+	just qa-roomeq-pruning-conditions
 	python3 -m unittest scripts.test_per_driver_fir
 	cargo test --release -p roomeq-engine per_driver_fir --lib
 	cargo test --release -p roomeq-workflow per_driver --lib
@@ -24,6 +25,17 @@ qa-roomeq-stage-contracts:
 	cargo test --release -p roomeq-workflow dsp_realization --lib
 	cargo test --release -p roomeq-engine dsp_realization --lib
 	python3 -m unittest scripts.test_dsp
+
+# Stage 1 cumulative pruning across seat/programme/level conditions. Experimental
+# proxy behavior only; these rows do not establish perceptual inaudibility.
+[group('qa-roomeq')]
+qa-roomeq-pruning-conditions:
+	cargo test --release -p roomeq-model qa_roomeq_pruning_conditions --lib
+	cargo test --release -p roomeq-analysis qa_roomeq_pruning_conditions --lib
+	cargo test --release -p roomeq-engine qa_roomeq_pruning_conditions --lib
+	cargo test --release -p roomeq-engine audibility_veto_tests --lib
+	cargo test --release -p roomeq-engine veto_drops_previously_emitted_inaudible_filters --lib
+	cargo test --release -p roomeq-workflow qa_roomeq_pruning_conditions --lib
 
 qa-roomeq-parameters-pr:
 	python3 scripts/test_parameter_signal_contract.py
@@ -320,10 +332,10 @@ qa-roomeq-ci:
 [group('qa-roomeq')]
 qa-audibility-pr:
 	cargo test --release -p autoeq-core --doc
-	cargo test --release -p autoeq-measurements quality
-	cargo test --release -p roomeq-quality acoustic_qa_pr_ --lib
-	cargo test --release -p roomeq-workflow correction_acceptance --lib
-	cargo test --release -p roomeq-workflow final_safety_gate --lib
+	cargo nextest run --release -p autoeq-core --lib --no-tests fail -E 'test(/measurement_quality::/)'
+	cargo nextest run --release -p roomeq-quality --lib --no-tests fail -E 'test(/acoustic_qa_pr_/)'
+	cargo nextest run --release -p roomeq-quality --lib --no-tests fail -E 'test(/acceptance::tests::correction_acceptance/)'
+	cargo nextest run --release -p roomeq-workflow --lib --no-tests fail -E 'test(/final_safety_gate/)'
 	cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --pr
 	cargo run --features qa --bin roomeq-qa-acoustic --release -- --tier pr
 

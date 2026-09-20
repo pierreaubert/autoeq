@@ -218,6 +218,19 @@ pub fn rule_pruning_budget(ctx: &mut ValidationContext<'_>) {
         }
         _ => {}
     }
+    if let Some(evaluation) = &budget.evaluation {
+        match evaluation.condition_ids() {
+            Err(reason) => ctx.add_error(format!("pruning_budget.evaluation: {reason}")),
+            Ok(ids) if !budget.conditions.is_empty() => {
+                let generated: std::collections::BTreeSet<_> = ids.iter().collect();
+                let declared: std::collections::BTreeSet<_> = budget.conditions.iter().collect();
+                if declared.len() != budget.conditions.len() || generated != declared {
+                    ctx.add_error(String::from("pruning_budget.conditions must match every generated evaluation condition exactly once"));
+                }
+            }
+            Ok(_) => {}
+        }
+    }
 }
 
 pub fn rule_high_frequency_correction(ctx: &mut ValidationContext<'_>) {
@@ -1403,6 +1416,26 @@ mod optimizer_rule_tests {
         let result = run_rule(rule_pruning_budget, &config);
         assert!(result.errors.is_empty());
         assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn qa_roomeq_pruning_conditions_validation_rejects_an_omitted_seat() {
+        let mut config = default_config();
+        let evaluation: crate::PruningEvaluation = serde_json::from_value(serde_json::json!({
+            "version": "spectral-v1",
+            "measurement_ids": ["seat-a", "seat-b"],
+            "programmes": [{"id": "music", "frequencies_hz": [20, 20000], "spectrum_db": [0, 0]}],
+            "listening_levels_phon": [75]
+        }))
+        .unwrap();
+        config.pruning_budget = Some(crate::PruningBudget {
+            conditions: vec![String::from("seat-a/music/75phon")],
+            evaluation: Some(evaluation),
+            ..Default::default()
+        });
+        assert!(!run_rule(rule_pruning_budget, &config).errors.is_empty());
+        config.pruning_budget.as_mut().unwrap().conditions.clear();
+        assert!(run_rule(rule_pruning_budget, &config).errors.is_empty());
     }
 
     #[test]

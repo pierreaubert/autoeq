@@ -42,6 +42,7 @@ mod perceptual_policy_config;
 mod phase_alignment_config;
 mod policy;
 mod provenance_config;
+mod pruning_evaluation;
 mod report_outcome;
 mod role_target_config;
 mod room_config;
@@ -100,6 +101,8 @@ pub use optimizer_config_builder::*;
 pub use perceptual_policy_config::*;
 pub use phase_alignment_config::*;
 pub use provenance_config::*;
+#[doc(inline)]
+pub use pruning_evaluation::{PruningEvaluation, PruningEvaluationVersion, PruningProgramme};
 pub use report_outcome::*;
 pub use role_target_config::*;
 pub use room_config::*;

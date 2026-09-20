@@ -996,6 +996,37 @@ fn physical_main_quality(
     .map_err(invalid)
 }
 
+/// Validate shared support per input without inventing overlap between independent inputs.
+fn final_seat_overlap(seats: &[FinalSeatEvaluation]) -> Result<Option<[f64; 2]>> {
+    let mut input_bands = BTreeMap::<&str, [f64; 2]>::new();
+    for seat in seats {
+        let band = seat.evaluated_band_hz;
+        if !band.iter().all(|edge| edge.is_finite()) || band[0] <= 0.0 || band[0] >= band[1] {
+            return Err(invalid(
+                "final-seat scorecard has invalid frequency support",
+            ));
+        }
+        let overlap = input_bands.entry(&seat.logical_input).or_insert(band);
+        overlap[0] = overlap[0].max(band[0]);
+        overlap[1] = overlap[1].min(band[1]);
+        if overlap[0] >= overlap[1] {
+            return Err(invalid(format!(
+                "final-seat input '{}' has no common supported frequency band",
+                seat.logical_input
+            )));
+        }
+    }
+    if input_bands.is_empty() {
+        return Err(invalid("final-seat scorecard has no frequency support"));
+    }
+    Ok(input_bands
+        .values()
+        .try_fold([0.0_f64, f64::INFINITY], |[low, high], band| {
+            let overlap = [low.max(band[0]), high.min(band[1])];
+            (overlap[0] < overlap[1]).then_some(overlap)
+        }))
+}
+
 fn independent_input_channels(
     captures: &[Capture],
     result: &RoomOptimizationResult,
@@ -1363,23 +1394,7 @@ fn validate_final_seats_impl(
             .map(|s| s.evaluated_band_hz[1])
             .fold(0.0_f64, f64::max),
     ];
-    score.measurement_overlap_hz = [
-        score
-            .final_seats
-            .iter()
-            .map(|s| s.evaluated_band_hz[0])
-            .fold(0.0_f64, f64::max),
-        score
-            .final_seats
-            .iter()
-            .map(|s| s.evaluated_band_hz[1])
-            .fold(f64::INFINITY, f64::min),
-    ];
-    if score.measurement_overlap_hz[0] >= score.measurement_overlap_hz[1] {
-        return Err(invalid(
-            "final-seat scorecard has no common supported frequency band",
-        ));
-    }
+    score.measurement_overlap_hz = final_seat_overlap(&score.final_seats)?;
     let report = result
         .metadata
         .correction_acceptance
@@ -1830,6 +1845,97 @@ mod tests {
                 .to_string()
                 .contains("no DSP owner")
         );
+    }
+
+    #[test]
+    fn final_seat_overlap_preserves_per_input_support_and_reports_disjoint_inputs() {
+        let seat = |input: &str, index, band| FinalSeatEvaluation {
+            partition: "training".into(),
+            logical_input: input.into(),
+            seat_index: index,
+            seat_label: None,
+            physical_outputs: vec![input.into()],
+            pre_summation_support: vec![],
+            post_summation_support: vec![],
+            unassessed_bands_hz: vec![],
+            evaluated_band_hz: band,
+            pre_weighted_rms_db: 0.0,
+            post_weighted_rms_db: 0.0,
+            improvement_db: 0.0,
+            improvement_lower_bound_db: 0.0,
+        };
+        let mut seats = vec![
+            seat("sub", 0, [20.0, 150.0]),
+            seat("sub", 1, [25.0, 140.0]),
+            seat("main", 0, [200.0, 20000.0]),
+            seat("main", 1, [250.0, 18000.0]),
+        ];
+        assert_eq!(final_seat_overlap(&seats).unwrap(), None);
+        assert_eq!(
+            final_seat_overlap(&seats[..2]).unwrap(),
+            Some([25.0, 140.0])
+        );
+
+        // A held-out seat of the SAME input still needs common support.
+        seats[1].partition = "held_out".into();
+        seats[1].evaluated_band_hz = [160.0, 200.0];
+        assert!(
+            final_seat_overlap(&seats)
+                .unwrap_err()
+                .to_string()
+                .contains("input 'sub' has no common supported frequency band")
+        );
+        seats[1].evaluated_band_hz = [f64::NAN, 200.0];
+        assert!(final_seat_overlap(&seats).is_err());
+        assert!(final_seat_overlap(&[]).is_err());
+
+        let (mut result, _, flat) = fixture();
+        result.channels.get_mut("left").unwrap().plugins.clear();
+        let baseline = result.clone();
+        validate_final_seats_impl(
+            &mut result,
+            &[Capture {
+                channel: "left".into(),
+                driver: None,
+                seat_labels: None,
+                curves: vec![flat.clone(), flat],
+            }],
+            &HashMap::new(),
+            &RoomConfig::default(),
+            48_000.0,
+            Path::new("."),
+            Some(&baseline),
+        )
+        .unwrap();
+        let mut sub = result
+            .metadata
+            .correction_acceptance
+            .unwrap()
+            .acoustic_quality
+            .unwrap();
+        sub.measurement_overlap_hz = Some([20.0, 150.0]);
+        let mut main = sub.clone();
+        main.measurement_overlap_hz = Some([200.0, 20000.0]);
+        let aggregate = super::super::room_optimization_result::aggregate_runtime_quality(
+            &[sub.clone(), main],
+            Default::default(),
+            20.0,
+            20000.0,
+        )
+        .unwrap();
+        assert_eq!(aggregate.measurement_overlap_hz, None);
+        let json = serde_json::to_value(&aggregate).unwrap();
+        assert!(json.get("measurement_overlap_hz").is_none());
+        let decoded: roomeq_model::AcousticQualityScorecard = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded.measurement_overlap_hz, None);
+        let legacy = serde_json::to_value(&sub).unwrap();
+        assert_eq!(
+            legacy["measurement_overlap_hz"],
+            serde_json::json!([20.0, 150.0])
+        );
+        let decoded: roomeq_model::AcousticQualityScorecard =
+            serde_json::from_value(legacy).unwrap();
+        assert_eq!(decoded.measurement_overlap_hz, Some([20.0, 150.0]));
     }
 
     #[test]

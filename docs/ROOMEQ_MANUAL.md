@@ -1855,6 +1855,13 @@ chain. Final-seat replay resolves each declared output to that chain while
 retaining every driver's seat evidence. Missing or ambiguous ownership rejects
 the result; legacy multi-seat driver groups require explicit stable driver IDs.
 
+Final-seat scorecards assess each logical input over its measured band. Independent
+mains and subwoofers may occupy disjoint bands; in that case the aggregate omits
+`measurement_overlap_hz`, while each `final_seats` entry retains its actual band.
+Seats of the same input must still share supported frequencies. The aggregate's
+`evaluated_band_hz` encloses its individual bands and does not claim measured
+support in gaps between them.
+
 ## Prepared FIR target grid contract
 
 The internal prepared-FIR API requires target frequencies to match the

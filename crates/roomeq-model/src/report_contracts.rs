@@ -440,7 +440,10 @@ pub struct AcousticQualityScorecard {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correction_band_hz: Option<[f64; 2]>,
     pub evaluated_band_hz: [f64; 2],
-    pub measurement_overlap_hz: [f64; 2],
+    /// Common measured band, absent when independently assessed inputs have
+    /// disjoint support. Each final-seat record retains its assessed band.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measurement_overlap_hz: Option<[f64; 2]>,
     pub finite: bool,
 }
 

@@ -1188,7 +1188,14 @@ pub(super) fn aggregate_runtime_quality(
         .max_by(f64::total_cmp);
     aggregate.temporal = temporal;
     aggregate.evaluated_band_hz = [min_freq_hz, max_freq_hz];
-    aggregate.measurement_overlap_hz = [min_freq_hz, max_freq_hz];
+    aggregate.measurement_overlap_hz =
+        scorecards
+            .iter()
+            .try_fold([0.0_f64, f64::INFINITY], |[low, high], scorecard| {
+                let band = scorecard.measurement_overlap_hz?;
+                let overlap = [low.max(band[0]), high.min(band[1])];
+                (overlap[0] < overlap[1]).then_some(overlap)
+            });
     aggregate.finite = scorecards.iter().all(|scorecard| scorecard.finite);
     Some(aggregate)
 }

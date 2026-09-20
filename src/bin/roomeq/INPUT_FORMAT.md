@@ -87,6 +87,10 @@ Declare both physical outputs; singleton captures are not broadcast across seats
 Non-routed physical outputs are replayed through their owning DSP chain. Each
 capture must identify exactly one owner; grouped multi-seat drivers require
 explicit stable driver IDs rather than inferred ordering.
+In output scorecards, `measurement_overlap_hz` is optional for aggregates whose
+independent logical inputs have disjoint frequency support. Existing shared-band
+reports retain the two-element array. Each `final_seats` record still identifies
+its assessed band; all seats of one logical input must share supported frequencies.
 
 Comparisons use matching frequency grids and the union of the baseline and final
 half-to-twice-crossover windows, bounded by measured support and 20–2000 Hz.

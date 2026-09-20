@@ -2,7 +2,8 @@
 
 Updated 2026-09-20. Scope: `reviews/next-20260916.md`.
 Tracking issue: <http://192.168.1.32:3001/pierre/autoeq/issues/3>.
-Implementation checkpoints: `e4bdb8d`, `2aa3093`, and `2970a7e` on
+Implementation checkpoints include `e4bdb8d`, `2aa3093`, `2970a7e`, `5c1ad62`,
+and `59c61b6` on
 `fix/issue-3-roomeq-review`.
 The review is **not complete**: required QA gates and final publication remain
 open. No numerical acceptance limit, baseline, enforcement default, or
@@ -13,7 +14,7 @@ assessment confidence was promoted. Software evidence is not listening evidence.
 | Review item | Implementation/evidence | Current disposition |
 | --- | --- | --- |
 | 1. CLI build | The historical `stereo_routing` initializer defect is absent at baseline `027a598`; checkpoint CLI checks and stereo export pass. | Verified. |
-| 2. Tree hygiene | Baseline was clean; review changes are isolated in the three checkpoints above. No unrelated work was reset or shelved. | Verified local checkpoints; final evidence commit and push/PR pending. |
+| 2. Tree hygiene | Baseline was clean; review changes are isolated on the issue branch, including the checkpoints above. No unrelated work was reset or shelved. | Verified local checkpoints; final evidence commit and push/PR pending. |
 | 3. Cumulative all-seat rollback | Frozen F0 level anchors, complete declared measurement/programme/level product, worst incremental and sum/max cumulative checks, local-bin cap, fail-closed unknown evidence, and exact rollback. | Implemented; 53-test pruning recipe passes. |
 | 4. Entry-point/export matrix | Native static matrix below covers all in-tree entry points, including held-out seats and complete routed replay. | Implemented static rows; continuous runtime transition row explicitly open at the excluded native/SOTF boundary. |
 | 5. Five named red-gate reproductions | Reproductions and unchanged-limit dispositions below. | Triage performed; Kautz reporting fixed, focused Kirkeby checks pass, remaining defects explicitly red. |
@@ -191,7 +192,21 @@ seat replay now resolves physical captures to one owning chain, with
 unknown/ambiguous ownership and incomplete seats still rejected. All 38 replay
 tests pass (`independent-owner-tests`). All three 5.2.4 reruns get past ownership
 resolution but fail the aggregate scorecard's common-band requirement across
-independent main/sub inputs. That reporting/validation boundary remains open.
+independent main/sub inputs. Aggregation now requires common support across
+seats of each logical input while allowing independent inputs to have disjoint
+bands. Such aggregates omit `measurement_overlap_hz`; existing shared-band
+reports retain their two-element array. Every final-seat record retains its
+actual assessed band. The 39-test replay suite verifies this distinction,
+missing/invalid support rejection, and JSON compatibility (`input-bands-tests`).
+All model and quality library tests pass: 260 model, 139 quality, and one existing
+ignored quality test (`input-bands-model-quality`). CLI compilation and Clippy
+for the changed crates also pass (`input-bands-cli-check`, `input-bands-clippy`).
+Only the output schema's overlap-field description, optional type, and required
+list change; the input schema is unchanged. The 5.2.4 minimax rerun passes;
+weighted-sum and variance-penalized reruns are still pending
+(`input-bands-524-<strategy>`), as is the full unchanged 90% coverage gate
+(`coverage-after-input-bands`). No passing current full-coverage claim is made
+until that gate terminates successfully.
 The legacy `small_stereo_2_2_group` fixture now declares explicit driver IDs,
 preserving its original five-seat captures and crossover controls. All three
 strategies pass. Logs for both fixtures use

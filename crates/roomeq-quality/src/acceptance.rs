@@ -896,7 +896,7 @@ mod tests {
             },
             correction_band_hz: None,
             evaluated_band_hz: [20.0, 20_000.0],
-            measurement_overlap_hz: [20.0, 20_000.0],
+            measurement_overlap_hz: Some([20.0, 20_000.0]),
             finite: true,
         }
     }

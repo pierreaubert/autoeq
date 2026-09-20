@@ -1,5 +1,10 @@
 # Unreleased
 
+- Report frequency support per logical input when aggregating final-seat
+  evidence. Independent mains/subwoofers may have disjoint bands; their aggregate
+  omits `measurement_overlap_hz` instead of inventing shared support or rejecting
+  otherwise valid per-input evidence. Seats of the same input still require
+  common support, and all numerical acceptance limits remain unchanged.
 - Resolve declared physical outputs to their owning DSP chain during non-routed
   final-seat replay. Reject missing or ambiguous owners and incomplete seats.
   Give the legacy FEM stereo driver-group fixture explicit driver IDs; all

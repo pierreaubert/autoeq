@@ -382,7 +382,7 @@ pub fn evaluate_acoustic_quality_with_permitted_gain(
         temporal,
         correction_band_hz: None,
         evaluated_band_hz: [config.min_freq_hz, config.max_freq_hz],
-        measurement_overlap_hz: [overlap_low, overlap_high],
+        measurement_overlap_hz: Some([overlap_low, overlap_high]),
         finite,
     })
 }
@@ -1385,7 +1385,7 @@ mod tests {
             TemporalQualityEvidence::default(),
         )
         .expect("overlap is explicitly aligned");
-        assert_eq!(scorecard.measurement_overlap_hz, [30.0, 10_000.0]);
+        assert_eq!(scorecard.measurement_overlap_hz, Some([30.0, 10_000.0]));
         assert!(scorecard.finite);
     }
 

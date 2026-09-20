@@ -377,7 +377,7 @@ fn qa_roomeq_pruning_conditions_exported_held_out_matrix() {
 
 #[test]
 fn qa_roomeq_pruning_conditions_exported_routed_matrix() {
-    for multi_sub in [false, true] {
+    for (multi_sub, grouped) in [(false, false), (true, false), (true, true)] {
         let mut frozen_reference = None;
         let mut frozen_graph = None;
         for report_only in [true, false] {
@@ -424,6 +424,27 @@ fn qa_roomeq_pruning_conditions_exported_routed_matrix() {
                         .speakers
                         .insert(format!("sub-{index}"), SpeakerConfig::Single(sub_source()));
                 }
+                if grouped {
+                    let subwoofers = (0..2)
+                        .map(|index| {
+                            let SpeakerConfig::Single(source) =
+                                config.speakers.remove(&format!("sub-{index}")).unwrap()
+                            else {
+                                unreachable!()
+                            };
+                            source
+                        })
+                        .collect();
+                    config.speakers.insert(
+                        String::from("sub"),
+                        SpeakerConfig::MultiSub(roomeq_model::MultiSubGroup {
+                            name: String::from("subs"),
+                            speaker_name: None,
+                            subwoofers,
+                            allpass_optimization: false,
+                        }),
+                    );
+                }
             }
             config.system = Some(roomeq_model::SystemConfig {
                 model: roomeq_model::SystemModel::Stereo,
@@ -444,7 +465,7 @@ fn qa_roomeq_pruning_conditions_exported_routed_matrix() {
                     outputs: (0..if multi_sub { 2 } else { 1 })
                         .map(|index| roomeq_model::SubwooferOutput {
                             id: format!("sub-{index}"),
-                            speaker: if multi_sub {
+                            speaker: if multi_sub && !grouped {
                                 format!("sub-{index}")
                             } else {
                                 String::from("sub")

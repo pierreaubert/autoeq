@@ -47,7 +47,7 @@ experimental opt-in for enforcement.
 | Single/multiple measurements | 32 rows: one/two measurements × adaptive/single-pass × local refinement off/on × DE/NSGA-II × advisory/enforced. Normalized-biquad export verifies removal/preservation. | Pass |
 | Hybrid IIR/FIR | 8 serial/crossover rows: one/two measurements × advisory/enforced. Native graph and generated FIR samples checked. Missing zero-weight-seat phase rejects hybrid acceptance. | Pass |
 | All-channel multi-seat | 2 advisory/enforced HomeCinema rows with no subwoofer; zero-weight seats retained in evidence. | Pass |
-| Routed bass management | 4 rows: single/two physical subs × advisory/enforced. Native JSON, exact delivered replay for both inputs/seats, stable F0 identity, synchronized serial metadata, and reconstruction of every serial/parallel plugin chain from removal records. | Pass |
+| Routed bass management | 6 rows: single sub, independent two subs, and grouped two subs × advisory/enforced. Native JSON, exact delivered replay for both inputs/seats, stable F0 identity, synchronized serial metadata, and reconstruction of every serial/parallel plugin chain from removal records. | Pass |
 | Non-routed held-out seats | 4 rows: complete/incomplete held-out partitions × advisory/enforced. Complete seats participate in removal; incomplete seats retain exact advisory F0 plugins. | Pass |
 | Correlated cancellation | Individual-input change below 0.11 dB produces over 3 dB drift in nearly cancelling combined playback; retained as a distinct condition. | Pass |
 | Uncertainty/rollback primitives | Cancelling/overlapping filters, cumulative small changes, narrow peaks, identity, fixed level anchors, strict grids, sum/max budgets, missing declarations/seats/phase, and advisory preservation. | Pass |
@@ -55,8 +55,8 @@ experimental opt-in for enforcement.
 
 `just qa-roomeq-pruning-conditions` passed **53 tests**: 3 model, 1 grid,
 16 condition/engine, 24 existing veto, 1 emitted-filter, and 8 workflow tests.
-Log: `/tmp/roomeq-next-20260916-pruning-held-out-final.log`.
-The workflow matrix contains 50 static configurations plus targeted fallback,
+Log: `/tmp/roomeq-next-20260916-pruning-grouped-final.log`.
+The workflow matrix contains 52 static configurations plus targeted fallback,
 uncertainty, and cancellation regressions. It does not validate perception.
 
 ## Related defects found during verification
@@ -140,7 +140,7 @@ not new checked-in golden baselines.
 | `just qa-roomeq-perceptual` | Pass in `perceptual-multimeasurement`. | Software checks, not a listening study. |
 | `just qa-roomeq-multi-measurement` | Exits 1 at `large_multi_sub_4`/minimax; details below. | Earlier virtual-LFE panic fixed; three preceding multi-seat strategies export. |
 | `just qa-roomeq-convergence` | `convergence` remains active with 600,000 evaluations, 5 seeds, 7 jobs. | Unchanged settings. |
-| `just qa-roomeq-coverage-gate` | Repaired-fixture run passed: **91.22% line coverage**, exit 0 (`coverage-current`). Final grouped-capture follow-up is being added instrumentally (`coverage-grouped`) before the final threshold check. | Required 90% line threshold unchanged. |
+| `just qa-roomeq-coverage-gate` | Repaired-fixture run passed at 91.22%. The final grouped-capture fix then passed instrumented replay (`coverage-grouped`); the exact all-package threshold command passed at **90.95% line coverage**, exit 0 (`coverage-final`). | Required 90% line threshold unchanged. |
 | `cargo run --release --features cli --bin roomeq -- --config tests/data/roomeq/test_config_stereo.json --output /tmp/roomeq-next-20260916.json` | Pass, output written; log `stereo-current`. | Native stereo output. |
 | `python3 scripts/check_roomeq_schema_baselines.py` | Both schemas pass; log `schema-current`. | No update flag or baseline relaxation. |
 
@@ -161,7 +161,7 @@ required gate or permission to raise the limit.
 
 ## Remaining work
 
-Await and audit the active audibility, convergence, and coverage results;
+Await and audit the active audibility and convergence results;
 resolve or accurately disposition their failures against the original review;
 finish the requirement audit; update this evidence log; commit the final audit,
 push the issue branch, and open the implementation PR. Stage 2 listening,

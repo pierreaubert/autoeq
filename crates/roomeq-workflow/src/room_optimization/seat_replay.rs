@@ -123,7 +123,7 @@ pub fn capture_training(config: &RoomConfig) -> Result<Vec<Capture>> {
             .speakers
             .get(&key)
             .ok_or_else(|| invalid(format!("unknown measurement '{key}'")))?;
-        let sources: Vec<SourceCapture<'_>> = match speaker {
+        let mut sources: Vec<SourceCapture<'_>> = match speaker {
             SpeakerConfig::Single(source) => vec![(None, source)],
             SpeakerConfig::Topology(topology) => topology
                 .drivers
@@ -161,6 +161,33 @@ pub fn capture_training(config: &RoomConfig) -> Result<Vec<Capture>> {
             // not treated as additional seat evidence.
             SpeakerConfig::SupportingSource(group) => vec![(None, &group.primary)],
         };
+        // A v3 grouped sub measurement may be referenced by one declaration
+        // per physical output. Assign each declaration its own branch instead
+        // of loading the complete group again under every output name.
+        if matches!(
+            speaker,
+            SpeakerConfig::MultiSub(_) | SpeakerConfig::Dba(_) | SpeakerConfig::Cardioid(_)
+        ) && let Some(subwoofers) = config
+            .system
+            .as_ref()
+            .and_then(|system| system.subwoofers.as_ref())
+        {
+            let outputs: Vec<_> = subwoofers
+                .outputs
+                .iter()
+                .filter(|output| output.speaker == key)
+                .collect();
+            if outputs.len() > 1
+                && let Some(index) = outputs.iter().position(|output| output.id == role)
+            {
+                if outputs.len() != sources.len() {
+                    return Err(invalid(
+                        "physical sub output declarations must cover every grouped capture branch",
+                    ));
+                }
+                sources = vec![(None, sources[index].1)];
+            }
+        }
         for (driver, source) in sources {
             // No optimization/display cap: native narrow features are evidence.
             let curves = crate::measurement::load_source_individual_with_frequency_samples(
@@ -1423,6 +1450,78 @@ fn validate_final_seats_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grouped_physical_output_captures_keep_declared_branch_order() {
+        let source = |level| {
+            let mut curve = crate::test_fixtures::flat_curve();
+            curve.spl.fill(level);
+            MeasurementSource::InMemory(curve)
+        };
+        let groups = [
+            SpeakerConfig::MultiSub(roomeq_model::MultiSubGroup {
+                name: String::from("subs"),
+                speaker_name: None,
+                subwoofers: vec![source(70.0), source(80.0)],
+                allpass_optimization: false,
+            }),
+            SpeakerConfig::Cardioid(Box::new(roomeq_model::CardioidConfig {
+                name: String::from("subs"),
+                speaker_name: None,
+                front: source(70.0),
+                rear: source(80.0),
+                separation_meters: 1.0,
+            })),
+            SpeakerConfig::Dba(roomeq_model::DBAConfig {
+                name: String::from("subs"),
+                speaker_name: None,
+                front: vec![source(70.0)],
+                rear: vec![source(80.0)],
+            }),
+        ];
+        for group in groups {
+            let mut config = RoomConfig::default();
+            config.speakers.insert(String::from("subs"), group);
+            config.system = Some(roomeq_model::SystemConfig {
+                subwoofers: Some(roomeq_model::SubwooferSystemConfig {
+                    config: Default::default(),
+                    crossover: None,
+                    routing: Default::default(),
+                    // Reverse lexical order: mapping follows declaration order.
+                    outputs: ["Sub2", "Sub1"]
+                        .into_iter()
+                        .map(|id| roomeq_model::SubwooferOutput {
+                            id: String::from(id),
+                            speaker: String::from("subs"),
+                        })
+                        .collect(),
+                }),
+                ..Default::default()
+            });
+            let captures = capture_training(&config).unwrap();
+            assert_eq!(captures.len(), 2);
+            // Only the common first-output channel exists. The second output
+            // is a physical branch, not another logical driver-group owner.
+            let result = crate::test_fixtures::single_channel_room_result("Sub2");
+            let physical = physical_captures(&captures, &result).unwrap();
+            assert_eq!(physical.len(), 2);
+            assert!(physical["Sub2"][0].spl.iter().all(|value| *value == 70.0));
+            assert!(physical["Sub1"][0].spl.iter().all(|value| *value == 80.0));
+            config
+                .system
+                .as_mut()
+                .unwrap()
+                .subwoofers
+                .as_mut()
+                .unwrap()
+                .outputs
+                .push(roomeq_model::SubwooferOutput {
+                    id: String::from("Sub3"),
+                    speaker: String::from("subs"),
+                });
+            assert!(capture_training(&config).is_err());
+        }
+    }
 
     #[test]
     fn standalone_subwoofer_replay_uses_measured_band_not_full_range_limit() {

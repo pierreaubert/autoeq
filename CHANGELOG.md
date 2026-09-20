@@ -31,6 +31,8 @@
   stored logical channels. Preserve grouped subwoofer topology for explicit
   physical outputs, and update synthetic QA fixtures to schema-v3 output and
   crossover declarations.
+  Map each declared grouped output to its own capture branch, preserving
+  declaration order instead of duplicating the entire group under each ID.
 - Separate CLI integration coverage for magnitude-only multidriver diagnostic
   rejection and known-phase synthetic multidriver playback. Do not approve
   missing phase or label an unchanged flat system as improved.

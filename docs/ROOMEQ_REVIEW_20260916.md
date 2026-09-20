@@ -1,179 +1,169 @@
 # RoomEQ review implementation evidence
 
-Updated 2026-09-20. Scope: `reviews/next-20260916.md`; tracking issue
-<http://192.168.1.32:3001/pierre/autoeq/issues/3>. Implementation is incomplete.
-This log distinguishes software verification from perceptual validation.
-No thresholds, enforcement defaults, or confidence levels have been promoted.
+Updated 2026-09-20. Scope: `reviews/next-20260916.md`.
+Tracking issue: <http://192.168.1.32:3001/pierre/autoeq/issues/3>.
+Implementation checkpoint: `e4bdb8d` on `fix/issue-3-roomeq-review`.
+The review is **not complete**: required QA gates and final publication remain
+open. No numerical acceptance limit, baseline, enforcement default, or
+assessment confidence was promoted. Software evidence is not listening evidence.
 
-## Implemented and verified units
+## Requirement audit
 
-- Experimental frozen-F0 pruning evaluates the complete declared measurement ×
-  programme × nominal-level product. Missing evidence retains filters. Native
-  evaluation preserves zero-weight measurements and bounded frequency support.
-- Export matrix: 32 IIR configurations across single/multiple measurements,
-  adaptive/single-pass, local refinement, DE/NSGA-II, and advisory/enforced modes;
-  eight serial/crossover hybrid configurations; two all-channel multi-seat
-  configurations; and a missing-seat-phase fallback regression. Hybrid rows
-  compare generated FIR samples exactly and verify serialized IIR removal.
-- Final-seat phase evidence comes from every original capture and delivered
-  replay. A phase-free power average is not evidence that measured seats lack
-  phase; a genuinely missing seat phase still rejects FIR/hybrid acceptance.
-- JSON export uses exact float round-tripping. Crossover configuration errors
-  are validated before phase assessment. Stale audibility test selections now
-  reference the owning crates and fail when no tests match.
-- Final routed pruning now runs after graph selection, preserving local F0
-  through advisory optimization. It replays every declared seat and condition,
-  including correlated logical inputs, and checks final electrical/acoustic
-  acceptance before removal. Missing evidence restores F0.
-- The stereo + single/two-subwoofer routed matrix passes advisory and enforced
-  rows. Native JSON preserves routing and exact delivered responses for both
-  inputs and seats; F0 references agree between modes and serial filter
-  metadata matches exported EQ. Log: `routed-current` (matrix passed; a separate
-  virtual-LFE test fixture failed). Missing-declaration/seat/phase rows retain
-  F0: `routed-missing-evidence`.
-- The four routed rows also pass exact rollback reconstruction: reinserting
-  original locations from the emitted removal records restores every F0
-  serial and parallel plugin chain (`routed-rollback`, 265.45 seconds).
-- Correlated cancellation regression passes: a removal changes each individual
-  response by less than 0.11 dB but changes nearly cancelling combined playback
-  by more than 3 dB. The final graph evaluator preserves this condition instead
-  of averaging it away. Log: `correlated-cancellation`.
-- Virtual LFE electrical replay no longer assumes a stored channel shares its
-  input/output name. All 12 electrical tests pass, including actual gain replay
-  into a named physical driver: `electrical-current`. Grouped sub-output
-  declarations preserve their MSO/DBA/cardioid topology; focused test passes:
-  `physical-sub-group`.
-- Synthetic QA declares v3 physical sub outputs and per-output crossovers,
-  with larger-than-two-sub arrays dispatched through HomeCinema. All six
-  synthetic builder tests pass, including all layout/sub-topology combinations:
-  `synthetic-v3`. No acoustic acceptance threshold changed.
-
-Earlier integrated release pruning recipe: 47 tests passed. Current additions
-also passed the all-channel matrix and 16 focused condition tests. Full workflow
-suite before the latest all-channel/advanced-report additions: 738 passed,
-six existing ignored. These are scoped results, not a final full-tree pass.
-
-Current complete `just qa-roomeq-pruning-conditions` exited 0: **52 tests
-passed** (3 model, 1 grid, 16 condition/engine, 24 existing veto, 1 emitted-filter,
-7 workflow tests). The workflow tests cover 32 IIR configurations, 8 hybrid,
-2 all-channel multi-seat, 4 routed single/two-sub configurations with native
-export/replay and rollback reconstruction, plus missing phase/evidence and
-correlated cancellation. Log: `/tmp/roomeq-next-20260916-pruning-final.log`.
-The subsequent finalization edit only adds physical output names/peaks to
-the existing over-limit baseline error; it changes no numerical decision.
-
-## Verification updates
-
-The later all-seat audit found that non-routed workflows could prune before
-held-out captures reached the final evaluator. Any supplied held-out partition
-now also defers local removal to final graph evaluation. Four additional native
-export rows pass (complete/incomplete held-out seats × advisory/enforced):
-`held-out-matrix`. Incomplete evidence preserves the exact advisory F0 plugins.
-
-The complete recipe rerun including this fix exits 0: **53 tests passed**,
-including all eight workflow matrix tests (`pruning-held-out-final`).
-
-Coverage reached the CLI integration suite, then exited 101 before reporting
-coverage: `test_roomeq_multidriver_config` expected approval for magnitude-only
-woofer/tweeter CSVs. The preserved diagnostic confirms
-`final-seat coherent replay needs phase for every physical branch`.
-The split now passes all six CLI integration tests: the original magnitude-only
-fixture exports a rejected diagnostic with its driver topology intact, while
-ideal known-phase synthetic drivers export approved unchanged playback.
-An unchanged flat system is not mislabeled as an accepted correction.
-No measured phase or acceptance limits changed (`cli-integration-current`).
-The full coverage gate restarted after that terminal failure, with the same
-90% line threshold (`coverage-current`, pending).
-
-## Continuous refinement boundary
-
-The in-tree `optimizer.refine` path is a bounded local optimization after global
-selection (`crates/roomeq-engine/src/eq/optimize.rs`, local-refinement block).
-It returns a static solution and rolls back when local loss regresses; those
-static outputs are covered by the IIR export matrix. Public workflow entry
-points export complete results, and `DspGraph` contains plugin configurations,
-channels, and metadata, with no time-indexed update or transition contract.
-Source search across autoeq-optim and RoomEQ crates found no continuous/online
-refinement or crossfade runtime; the only crossfade references are frequency
-weighting in the asymmetric objective. This is stronger scope evidence than
-calling local refinement a transition test, but does not prove runtime safety.
-
-| Required matrix row | Evidence | Status |
+| Review item | Implementation/evidence | Current disposition |
 | --- | --- | --- |
-| Continuous refinement with transition-artifact checks | No in-tree update scheduler, state-transfer, or crossfade API; static export contract only | Still open at the native/SOTF authority boundary, explicitly excluded from this review's upstream implementation scope. No pass or transition-safety claim. |
+| 1. CLI build | The historical `stereo_routing` initializer defect is absent at baseline `027a598`; checkpoint CLI checks and stereo export pass. | Verified. |
+| 2. Tree hygiene | Baseline was clean; review changes are isolated on the issue branch and committed as `e4bdb8d`. No unrelated work was reset or shelved. | Verified local checkpoint; push/PR pending. |
+| 3. Cumulative all-seat rollback | Frozen F0 level anchors, complete declared measurement/programme/level product, worst incremental and sum/max cumulative checks, local-bin cap, fail-closed unknown evidence, and exact rollback. | Implemented; 53-test pruning recipe passes. |
+| 4. Entry-point/export matrix | Native static matrix below covers all in-tree entry points, including held-out seats and complete routed replay. | Implemented static rows; continuous runtime transition row explicitly open at the excluded native/SOTF boundary. |
+| 5. Five named red-gate reproductions | Reproductions and unchanged-limit dispositions below. | Triage performed; Kautz reporting fixed, focused Kirkeby checks pass, remaining defects explicitly red. |
+| 6. Stage 0 contract | Manual records reference/model/calibration/listener decisions and explicit deferrals. Stage 2 listening and Stage 4 reranking remain deferred. | Documented; no perceptual validation claimed. |
+| 7. Documentation/schema/provenance | Changelog, manual, input format, input/output schemas, and corpus provenance synchronized. Both schema consistency checks pass. | Implemented; final QA-result update pending. |
 
-## Named defect reproduction results
+## Frozen-F0 implementation and export matrix
 
-| Case | Current evidence | Disposition |
-|---|---|---|
-| MSO seed 59 | Canonical 600,000-evaluation acceptance still rejects. Candidate checks include crossover underfill above 3 dB and useful-output loss above 3 dB. The structural fallback needs 6.019520 dB attenuation and exceeds the 0.250 dB worst-seat regression budget. | Remains red; no limits changed. |
-| MSO seed 151 | Same canonical acceptance rejects; candidate checks retain useful-output-loss, crossover-underfill, and worst-seat failures. | Remains red; no limits changed. |
-| Measured Genelec 5.1.4 | `Cross-Mode measured Genelec 5.1.4`, 600,000 evaluations, one seed, one job: FIR cross-mode fails because structural-baseline attenuation is 19.793 dB versus the existing 18 dB ceiling. | Remains red; no baseline or ceiling adjustment. |
-| Kirkeby reference phase | Eight existing Kirkeby tests pass, including reference-phase/seat-weight tests, missing-acoustic-phase rejection, and causal-delay export. The reference-phase fixture differentiates the complete IIR/FIR response independently. | Covered software regression; no listening or native-backend claim. |
-| Kautz basis/realization | New report/export comparison reproduced 25.655275 dB error. Reports now evaluate serialized Kautz/warped topology; eight active IIR channel tests pass. Independent matched-budget experiment still measures Kautz gain of 20.2031/20.5714/23.5831 dB at 44.1/48/96 kHz versus 3 dB allowed. | Reporting defect fixed; gain-fitting defect remains red. |
+`pruning_budget.evaluation`, version `spectral-v1`, names each supplied
+measurement and declares programme spectra and nominal phon levels. Native
+single/multiple-measurement paths retain original curves, including zero-weight
+seats, and interpolate only within supported frequency ranges. Explicit
+conditions must match the complete product. Unknown, nonfinite, misaligned,
+or incomplete evidence retains filters. Levels are nominal, not calibrated SPL.
 
-The pinned dependency is `math-iir-fir 0.5.23`, math-audio commit
-`d28ccb47dd91787a2898432698e41a291e24aba0`. Its `KautzFilter::optimize_gains`
-fits dB differences with normalized basis magnitudes, then stores those values
-as the linear coefficients consumed by `process` and `complex_response`.
-That convention mismatch is outside the reporting fix. The sibling checkout
-was not used as proof of the pinned implementation, and no upstream dependency
-was edited or replaced. The existing review excludes upstream authority work.
+The condition evaluator freezes full-chain level per condition. Every removal
+checks worst incremental change and configured sum/max cumulative drift from
+F0, as well as the unchanged local-bin limit. Reference identities bind the
+grid, ordered filter responses, conditions, and nominal levels. Raw heuristic
+nominations cannot authorize removal, and adaptive advisory runs preserve F0.
 
-## Evidence locations and open work
+Routed systems and workflows with held-out captures defer local removal until
+after final graph selection. The final pass replays every physical seat and
+condition, including correlated inputs, and reruns electrical/acoustic guards.
+It preserves complete routing, driver branches, and FIR stages. Missing
+phase for correlated playback, missing declarations, or incomplete held-out
+partitions restore F0. Records remain Low confidence and require the existing
+experimental opt-in for enforcement.
 
-The combined audibility/perceptual/multi-measurement invocation exited 1 in
-`qa-audibility-pr`'s synthetic PR matrix; later recipes were not reached.
-Several generated HomeCinema configurations fail v3 validation because they
-still map LFE measurements through `system.speakers`, leave physical subwoofer
-outputs empty, and use the old scalar crossover reference. These fixture
-failures are additional open work, not passing acoustic evidence or one of the
-five named red gates. Log: `audibility-perceptual-multimeasurement`.
-The separate `perceptual-multimeasurement` run completed the perceptual recipe,
-then exposed the virtual-LFE panic in multi-measurement replay. Current reruns
-are `audibility-current`, `multimeasurement-current`, and `libraries-current`;
-none is yet claimed passing.
+| Matrix row | Configurations/evidence | Result |
+| --- | --- | --- |
+| Single/multiple measurements | 32 rows: one/two measurements × adaptive/single-pass × local refinement off/on × DE/NSGA-II × advisory/enforced. Normalized-biquad export verifies removal/preservation. | Pass |
+| Hybrid IIR/FIR | 8 serial/crossover rows: one/two measurements × advisory/enforced. Native graph and generated FIR samples checked. Missing zero-weight-seat phase rejects hybrid acceptance. | Pass |
+| All-channel multi-seat | 2 advisory/enforced HomeCinema rows with no subwoofer; zero-weight seats retained in evidence. | Pass |
+| Routed bass management | 4 rows: single/two physical subs × advisory/enforced. Native JSON, exact delivered replay for both inputs/seats, stable F0 identity, synchronized serial metadata, and reconstruction of every serial/parallel plugin chain from removal records. | Pass |
+| Non-routed held-out seats | 4 rows: complete/incomplete held-out partitions × advisory/enforced. Complete seats participate in removal; incomplete seats retain exact advisory F0 plugins. | Pass |
+| Correlated cancellation | Individual-input change below 0.11 dB produces over 3 dB drift in nearly cancelling combined playback; retained as a distinct condition. | Pass |
+| Uncertainty/rollback primitives | Cancelling/overlapping filters, cumulative small changes, narrow peaks, identity, fixed level anchors, strict grids, sum/max budgets, missing declarations/seats/phase, and advisory preservation. | Pass |
+| Continuous refinement and transition artifacts | No in-tree update scheduler, state-transfer, or crossfade runtime API. `optimizer.refine` is bounded static local optimization; `DspGraph` exports static processing. | Still open at native/SOTF authority boundary; no transition-safety claim. |
 
-Current multi-measurement rerun no longer panics: the three strategies for
-`large_multi_seat_2_1` reach exported output. It then exits 1 for
-`large_multi_sub_4` + `minimax`: structural baseline requires 13.854 dB safety
-attenuation against the unchanged 12 dB maximum. Candidate rejections include
-LFE worst-seat regression and main useful-output loss. This is additional
-unresolved acceptance evidence, not a passing gate or permission to increase
-the limit. Log: `multimeasurement-current`.
+`just qa-roomeq-pruning-conditions` passed **53 tests**: 3 model, 1 grid,
+16 condition/engine, 24 existing veto, 1 emitted-filter, and 8 workflow tests.
+Log: `/tmp/roomeq-next-20260916-pruning-held-out-final.log`.
+The workflow matrix contains 50 static configurations plus targeted fallback,
+uncertainty, and cancellation regressions. It does not validate perception.
 
+## Related defects found during verification
+
+- Serialized Kautz/warped topology now supplies reported/scored responses,
+  fixing a 25.655275 dB Kautz report/export mismatch. Gain fitting remains red.
+- Hybrid phase evidence comes from original captures and delivered replay,
+  rather than a phase-free power average. Eight focused Kirkeby checks pass,
+  including reference-phase seat weighting, missing acoustic phase rejection,
+  and causal-delay export. The reference fixture independently differentiates
+  the full IIR/FIR complex response.
+- Exact JSON float round-tripping preserves filter metadata. Missing crossover
+  references are diagnosed before phase-confidence assessment.
+- Virtual LFE electrical replay uses resolved processing stages; it no longer
+  assumes input/output names match stored logical channels. All 12 electrical
+  tests pass. Grouped physical outputs preserve MSO/DBA/cardioid topology and
+  reject inconsistent branch counts.
+- Synthetic QA emits schema-v3 physical outputs and per-output crossovers;
+  arrays above two subs use HomeCinema routing. Six builder tests pass across
+  every declared layout/sub-topology combination. No acoustic limits changed.
+- Full QA crate verification passes 143 tests with two existing ignored
+  (`qa-library`). The active synthetic seed records then exposed grouped
+  captures loaded repeatedly under every output ID, causing missing-driver
+  errors. Capture loading now assigns each output its corresponding declared
+  group branch. The direct regression covers MSO/cardioid/DBA and non-lexical
+  declaration order. All 37 seat-replay tests pass (`seat-replay-current`).
+  The focused synthetic invocation (`--pr --layout 2.1 --sub-topology mso_2sub
+  --mode LowLatency`) exits 0: 33 passed, no failures, including three reported
+  reversions (`grouped-mso-replay`). This is not a useful-correction claim.
+  The obsolete running audibility process was deliberately interrupted after
+  this verified production fix; its log is retained. The full current rerun
+  is `audibility-final`.
+- CLI integration now distinguishes rejected magnitude-only multidriver
+  diagnostics from approved known-phase synthetic playback. An ideal flat
+  system exports unchanged playback, not an invented improvement. All six
+  integration tests pass; measured fixtures were not given invented phase.
+
+## Five named red-gate reproductions
+
+| Case | Reproduction/evidence | Disposition |
+| --- | --- | --- |
+| MSO seed 59 | Canonical 600,000-evaluation CMA-ES acceptance rejects. Candidate checks include underfill and useful-output loss above 3 dB. Structural fallback needs 6.019520 dB attenuation and exceeds the 0.250 dB worst-seat regression budget. | Red; no limits changed. |
+| MSO seed 151 | Same canonical acceptance rejects; candidate checks retain useful-output-loss, crossover-underfill, and worst-seat failures. | Red; no limits changed. |
+| Measured Genelec 5.1.4 | `Cross-Mode measured Genelec 5.1.4`, 600,000 evaluations, one seed, one job: FIR cross-mode baseline requires 19.793 dB attenuation against the existing 18 dB allowance. | Red; no allowance adjustment. |
+| Kirkeby reference phase | Eight focused tests pass, as described above. | Software regression evidence; no listening or native-backend claim. |
+| Kautz basis/realization | Report/export mismatch fixed. Existing matched-budget experiment still measures 20.2031 / 20.5714 / 23.5831 dB realized gain at 44.1 / 48 / 96 kHz versus the unchanged 3 dB budget. | Reporting fixed; fitting defect remains red. |
+
+Pinned dependency: `math-iir-fir 0.5.23`, math-audio commit
+`d28ccb47dd91787a2898432698e41a291e24aba0`. Its Kautz fit uses dB targets
+with normalized basis magnitudes, while realization consumes linear complex
+basis coefficients. No sibling checkout was substituted and no upstream
+code or dependency pin changed. Upstream authority work is excluded by review.
+
+Reproduction commands (invoked through `rtk proxy`):
+
+```sh
+cargo test --release -p roomeq-workflow canonical_mso_seed59_cumulative_finalization --lib -- --ignored --nocapture
+ROOMEQ_TEST_SEED=151 cargo test --release -p roomeq-workflow canonical_mso_selected_seed_cumulative_finalization --lib -- --ignored --nocapture
+cargo run --features qa --bin roomeq-qa-quality --release -- --case 'Cross-Mode measured Genelec 5.1.4' --jobs 1 --maxeval 600000 --seed-runs 1
+cargo test --release -p roomeq-engine kirkeby --lib
+cargo test --release -p roomeq-engine advanced_modes_matched_budget_multirate_outcomes --lib -- --ignored --nocapture
+```
+
+Logs use `/tmp/roomeq-next-20260916-` plus `mso-seed59`, `mso-seed151`,
+`genelec-514`, `kirkeby`, `kautz-realization`, `iir-realization`, and
+`advanced-modes`, with `.log` suffix. Rejected MSO graphs/checks are in
+`target/qa/canonical-mso-finalization-seed-{59,151}-rejected.json`.
+Independent advanced-mode results are in
+`target/qa/advanced-mode-matched-budget.json`. These are local evidence,
+not new checked-in golden baselines.
+
+## Required validation commands
+
+| Command | Evidence/result | Scope note |
+| --- | --- | --- |
+| `cargo check -p autoeq --features cli` | Pass on checkpoint; `cli-check-final`. | CLI compilation. |
+| `cargo clippy -p autoeq --features cli --no-deps` | Pass on checkpoint; `clippy-final`. | Direct workflow/QA clippy also passed with existing warnings. |
+| `cargo test -p autoeq --lib` | Pass, zero root library tests. | Included in combined library invocation. |
+| `cargo test -p roomeq-model -p roomeq-analysis -p roomeq-engine -p roomeq-quality -p roomeq-workflow -p roomeq-export -p autoeq-optim --lib` | Pass: 2,463 total library tests including root; 11 existing ignored. Log `libraries-current`. | Later held-out change passes focused matrix; current instrumented full suite is running. |
+| `just qa-audibility-pr` | Initial run failed obsolete v3 fixtures; the next exposed grouped-capture duplication and was stopped after the fix passed focused verification. Full current rerun `audibility-final` is active. | Do not infer success from individual seed logs. |
+| `just qa-roomeq-perceptual` | Pass in `perceptual-multimeasurement`. | Software checks, not a listening study. |
+| `just qa-roomeq-multi-measurement` | Exits 1 at `large_multi_sub_4`/minimax; details below. | Earlier virtual-LFE panic fixed; three preceding multi-seat strategies export. |
+| `just qa-roomeq-convergence` | `convergence` remains active with 600,000 evaluations, 5 seeds, 7 jobs. | Unchanged settings. |
+| `just qa-roomeq-coverage-gate` | Repaired-fixture run passed: **91.22% line coverage**, exit 0 (`coverage-current`). Final grouped-capture follow-up is being added instrumentally (`coverage-grouped`) before the final threshold check. | Required 90% line threshold unchanged. |
+| `cargo run --release --features cli --bin roomeq -- --config tests/data/roomeq/test_config_stereo.json --output /tmp/roomeq-next-20260916.json` | Pass, output written; log `stereo-current`. | Native stereo output. |
+| `python3 scripts/check_roomeq_schema_baselines.py` | Both schemas pass; log `schema-current`. | No update flag or baseline relaxation. |
+
+All short log names above expand to `/tmp/roomeq-next-20260916-<name>.log`.
+
+### Additional unresolved multi-measurement gate
+
+The current run exports all three `large_multi_seat_2_1` strategies, then rejects
+`large_multi_sub_4` + `minimax`: correction-free baseline attenuation requires
+13.854 dB against the unchanged 12 dB maximum at a 0 dBFS ceiling.
 The isolated unchanged-config reproduction also exits 1 (`large-multi-sub4`).
-Named correction-free output peaks are L 0.000, R −0.431, Sub1 12.304,
-Sub2 8.280, Sub3 13.854, and Sub4 11.199 dBFS. Sub1 and Sub3 require more
-attenuation than the existing 12 dB maximum at a 0 dBFS ceiling. The error now
-includes these physical names/peaks; the safety decision is unchanged.
+Physical output peaks are L 0.000, R -0.431, Sub1 12.304, Sub2 8.280,
+Sub3 13.854, and Sub4 11.199 dBFS. Sub1 and Sub3 exceed the allowed attenuation.
+Candidate checks additionally reject LFE worst-seat regression and main
+useful-output loss. Errors now include physical names/peaks without changing
+acceptance decisions. This is additional unresolved evidence, not a passing
+required gate or permission to raise the limit.
 
-Current `cargo check -p autoeq --features cli` and
-`cargo clippy -p autoeq --features cli --no-deps` pass (`cli-check-current`,
-`clippy-current`). Convergence, coverage, and the specified stereo CLI example
-were started with unchanged settings. The stereo command exited 0 and wrote
-`/tmp/roomeq-next-20260916.json` (`stereo-current`). Convergence and coverage
-results remain pending.
+## Remaining work
 
-Schema consistency check exited 0: both input and output baselines match the
-current model (`schema-current`). Direct workflow/QA clippy also exited 0,
-with existing warnings (`routed-clippy`).
-
-The required combined library command exited 0 (`libraries-current`). This
-invocation includes the production routed-pruning, physical-group, and
-virtual-LFE fixes. Later edits add rollback/cancellation checks (separately
-passing in `pruning-final`) and physical-output error diagnostics only.
-
-Logs use `/tmp/roomeq-next-20260916-*.log`: `combined-export-matrix`,
-`all-channel-matrix`, `pruning-conditions`, `workflow-current`, `kirkeby`,
-`kautz-realization`, `iir-realization`, `advanced-modes`, `mso-seed59`,
-`mso-seed151`, and `genelec-514`. Rejected canonical graphs and per-candidate
-reasons are saved under `target/qa/canonical-mso-finalization-seed-*-rejected.json`.
-The independent advanced-mode artifact is `target/qa/advanced-mode-matched-budget.json`.
-Logs/artifacts are local verification outputs, not checked-in golden baselines.
-
-Still required: final requirement audit; remaining required QA recipes,
-convergence/coverage gates, current CLI checks and stereo run; documentation and
-schema verification; final requirement audit, commit, push, and PR. Routed
-pruning and its export matrix provide software evidence only. Stage 2 listening
-validation and Stage 4 auditory reranking remain deferred as required.
+Await and audit the active audibility, convergence, and coverage results;
+resolve or accurately disposition their failures against the original review;
+finish the requirement audit; update this evidence log; commit the final audit,
+push the issue branch, and open the implementation PR. Stage 2 listening,
+Stage 4 auditory reranking, and native/SOTF transition proof remain explicit
+deferrals required by the review rather than implied software successes.

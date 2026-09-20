@@ -177,8 +177,26 @@ export for all three strategies but still reject playback
 3.357281 dB baseline safety attenuation and no candidate within the unchanged
 electrical/acoustic limits. Phase handling is repaired; this QA gate remains red.
 Workflow library/test Clippy passes with warnings (`cardioid-clippy`). The
-instrumented preprocessing rerun is active (`cardioid-coverage`); the 90.95%
-coverage result above predates this cardioid change.
+instrumented preprocessing rerun passes (`cardioid-coverage`), but the following
+all-package report fails the unchanged 90% line gate at **85.37%**
+(`coverage-after-cardioid`). Recompiled code invalidates earlier coverage data;
+the full gate must be rerun after the remaining production changes. The 90.95%
+result above is historical and does not verify the current tree.
+
+The 5.2.4 multi-seat case with bass management disabled exposes another identity
+defect: physical capture `Sub2` is replayed as a logical channel even though its
+DSP belongs to the group stored under `Sub1`. The isolated reproduction now
+names the missing channel and available owners (`missing-channel-524`). Final
+seat replay now resolves physical captures to one owning chain, with
+unknown/ambiguous ownership and incomplete seats still rejected. All 38 replay
+tests pass (`independent-owner-tests`). All three 5.2.4 reruns get past ownership
+resolution but fail the aggregate scorecard's common-band requirement across
+independent main/sub inputs. That reporting/validation boundary remains open.
+The legacy `small_stereo_2_2_group` fixture now declares explicit driver IDs,
+preserving its original five-seat captures and crossover controls. All three
+strategies pass. Logs for both fixtures use
+`replay-identities-<scenario>-<strategy>`. These targeted results supersede their
+earlier continuation outcomes, not the entire original matrix run.
 
 The current run exports all three `large_multi_seat_2_1` strategies, then rejects
 `large_multi_sub_4` + `minimax`: correction-free baseline attenuation requires

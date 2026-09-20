@@ -1850,6 +1850,11 @@ shared EQ, while the configured primary seat supplies the routing reference.
 Both physical outputs must be declared. This does not establish measured
 directional rejection or perceptual validation.
 
+Non-routed groups may expose several physical outputs under one logical DSP
+chain. Final-seat replay resolves each declared output to that chain while
+retaining every driver's seat evidence. Missing or ambiguous ownership rejects
+the result; legacy multi-seat driver groups require explicit stable driver IDs.
+
 ## Prepared FIR target grid contract
 
 The internal prepared-FIR API requires target frequencies to match the

@@ -10,50 +10,68 @@
   "speakers": {
     "right": {
       "name": "right_group",
-      "measurements": [
+      "drivers": [
         {
-          "measurements": [
-            "right_lp0.csv",
-            "right_lp1.csv",
-            "right_lp2.csv",
-            "right_lp3.csv",
-            "right_lp4.csv"
-          ]
+          "id": "right_sub",
+          "role": "subwoofer",
+          "measurement": {
+            "measurements": [
+              "right_sub_lp0.csv",
+              "right_sub_lp1.csv",
+              "right_sub_lp2.csv",
+              "right_sub_lp3.csv",
+              "right_sub_lp4.csv"
+            ]
+          }
         },
         {
-          "measurements": [
-            "right_sub_lp0.csv",
-            "right_sub_lp1.csv",
-            "right_sub_lp2.csv",
-            "right_sub_lp3.csv",
-            "right_sub_lp4.csv"
-          ]
+          "id": "right_main",
+          "role": "full_range",
+          "measurement": {
+            "measurements": [
+              "right_lp0.csv",
+              "right_lp1.csv",
+              "right_lp2.csv",
+              "right_lp3.csv",
+              "right_lp4.csv"
+            ]
+          }
         }
       ],
+      "parallel_groups": [],
       "crossover": "first"
     },
     "left": {
       "name": "left_group",
-      "measurements": [
+      "drivers": [
         {
-          "measurements": [
-            "left_lp0.csv",
-            "left_lp1.csv",
-            "left_lp2.csv",
-            "left_lp3.csv",
-            "left_lp4.csv"
-          ]
+          "id": "left_sub",
+          "role": "subwoofer",
+          "measurement": {
+            "measurements": [
+              "left_sub_lp0.csv",
+              "left_sub_lp1.csv",
+              "left_sub_lp2.csv",
+              "left_sub_lp3.csv",
+              "left_sub_lp4.csv"
+            ]
+          }
         },
         {
-          "measurements": [
-            "left_sub_lp0.csv",
-            "left_sub_lp1.csv",
-            "left_sub_lp2.csv",
-            "left_sub_lp3.csv",
-            "left_sub_lp4.csv"
-          ]
+          "id": "left_main",
+          "role": "full_range",
+          "measurement": {
+            "measurements": [
+              "left_lp0.csv",
+              "left_lp1.csv",
+              "left_lp2.csv",
+              "left_lp3.csv",
+              "left_lp4.csv"
+            ]
+          }
         }
       ],
+      "parallel_groups": [],
       "crossover": "first"
     }
   },

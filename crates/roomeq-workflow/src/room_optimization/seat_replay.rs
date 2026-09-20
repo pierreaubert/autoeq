@@ -799,10 +799,15 @@ fn replay_output(
             outputs,
         ));
     }
-    let chain = result
-        .channels
-        .get(input)
-        .ok_or_else(|| invalid("missing channel for final seat replay"))?;
+    let chain = result.channels.get(input).ok_or_else(|| {
+        invalid(format!(
+            "missing channel '{input}' for final seat replay (available: {:?})",
+            result
+                .channels
+                .keys()
+                .collect::<std::collections::BTreeSet<_>>()
+        ))
+    })?;
     if let Some(drivers) = &chain.drivers {
         let mut branches = Vec::new();
         let mut outputs = Vec::new();
@@ -991,6 +996,39 @@ fn physical_main_quality(
     .map_err(invalid)
 }
 
+fn independent_input_channels(
+    captures: &[Capture],
+    result: &RoomOptimizationResult,
+) -> Result<Vec<String>> {
+    captures
+        .iter()
+        .map(|capture| {
+            let owners: Vec<_> = result
+                .channels
+                .iter()
+                .filter_map(|(name, chain)| {
+                    (name == &capture.channel
+                        || chain.drivers.as_ref().is_some_and(|drivers| {
+                            drivers.iter().any(|driver| driver.name == capture.channel)
+                        }))
+                    .then_some(name)
+                })
+                .collect();
+            match owners.as_slice() {
+                [owner] => Ok((*owner).clone()),
+                [] => Err(invalid(format!(
+                    "no DSP owner for final-seat capture '{}'",
+                    capture.channel
+                ))),
+                _ => Err(invalid(format!(
+                    "ambiguous DSP owners for final-seat capture '{}'",
+                    capture.channel
+                ))),
+            }
+        })
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn validate_final_seats_impl(
     result: &mut RoomOptimizationResult,
@@ -1043,7 +1081,10 @@ fn validate_final_seats_impl(
     {
         graph.input_channels.clone()
     } else {
-        captures.iter().map(|c| c.channel.clone()).collect()
+        // A non-routed group can own several declared physical outputs under
+        // its first output's logical channel. Replay the complete owning chain,
+        // while retaining each physical capture and its original seat identity.
+        independent_input_channels(captures, result)?
     };
     inputs.sort();
     inputs.dedup();
@@ -1700,6 +1741,95 @@ mod tests {
         assert_eq!(seats.len(), 2);
         assert_eq!(seats[1].physical_outputs, vec!["left"]);
         assert!(seats[1].improvement_db < 0.0);
+    }
+
+    #[test]
+    fn independent_group_replays_declared_physical_outputs_under_their_owner() {
+        let (mut result, _, mut flat) = fixture();
+        flat.phase = Some(ndarray::Array1::zeros(flat.freq.len()));
+        let chain = result.channels.get_mut("left").unwrap();
+        chain.plugins.clear();
+        chain.drivers = Some(
+            ["Sub1", "Sub2"]
+                .into_iter()
+                .enumerate()
+                .map(|(index, name)| roomeq_model::DriverDspChain {
+                    name: name.into(),
+                    index,
+                    plugins: vec![],
+                    initial_curve: None,
+                    measured_band_hz: None,
+                })
+                .collect(),
+        );
+        let captures: Vec<_> = ["Sub1", "Sub2"]
+            .into_iter()
+            .map(|name| Capture {
+                channel: name.into(),
+                driver: None,
+                seat_labels: None,
+                curves: vec![flat.clone(), flat.clone()],
+            })
+            .collect();
+        let baseline = result.clone();
+        validate_final_seats_impl(
+            &mut result,
+            &captures,
+            &HashMap::new(),
+            &RoomConfig::default(),
+            48_000.0,
+            Path::new("."),
+            Some(&baseline),
+        )
+        .unwrap();
+        let seats = &result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .unwrap()
+            .acoustic_quality
+            .as_ref()
+            .unwrap()
+            .final_seats;
+        assert_eq!(seats.len(), 2);
+        for seat in seats {
+            assert_eq!(seat.physical_outputs, vec!["Sub1", "Sub2"]);
+            assert!(seat.improvement_db.abs() < 1e-8);
+        }
+
+        let mut incomplete = captures;
+        incomplete[1].curves.pop();
+        let error = validate_final_seats_impl(
+            &mut result,
+            &incomplete,
+            &HashMap::new(),
+            &RoomConfig::default(),
+            48_000.0,
+            Path::new("."),
+            Some(&baseline),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("singleton captures are not broadcast")
+        );
+
+        let duplicate = result.channels["left"].clone();
+        result.channels.insert("duplicate".into(), duplicate);
+        assert!(
+            independent_input_channels(&incomplete, &result)
+                .unwrap_err()
+                .to_string()
+                .contains("ambiguous DSP owners")
+        );
+        result.channels.clear();
+        assert!(
+            independent_input_channels(&incomplete, &result)
+                .unwrap_err()
+                .to_string()
+                .contains("no DSP owner")
+        );
     }
 
     #[test]

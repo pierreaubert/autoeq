@@ -1,5 +1,9 @@
 # Unreleased
 
+- Resolve declared physical outputs to their owning DSP chain during non-routed
+  final-seat replay. Reject missing or ambiguous owners and incomplete seats.
+  Give the legacy FEM stereo driver-group fixture explicit driver IDs; all
+  three multi-measurement strategies now pass without changing measured data.
 - Preserve measured phase when preprocessing multi-seat cardioid pairs. Combine
   front/rear drivers per seat, retain every seat for shared EQ, and use the
   configured primary seat for routing. Reject unmatched seats or missing phase.

@@ -84,6 +84,9 @@ seat counts in the same order, with measured phase at every seat. Preprocessing
 combines each pair before spatial EQ aggregation and uses
 `optimizer.multi_seat.primary_seat` (default 0) for the routing reference.
 Declare both physical outputs; singleton captures are not broadcast across seats.
+Non-routed physical outputs are replayed through their owning DSP chain. Each
+capture must identify exactly one owner; grouped multi-seat drivers require
+explicit stable driver IDs rather than inferred ordering.
 
 Comparisons use matching frequency grids and the union of the baseline and final
 half-to-twice-crossover windows, bounded by measured support and 20–2000 Hz.

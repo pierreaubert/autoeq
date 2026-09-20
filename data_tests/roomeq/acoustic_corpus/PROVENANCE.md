@@ -7,6 +7,12 @@ embedded location metadata.
 
 ## Evidence scope
 
+The related FEM `small_stereo_2_2_group` declaration now uses explicit main/sub
+driver IDs in low-to-high crossover order. Its original five-seat captures,
+crossover frequency/type, optimizer controls, and acceptance limits are retained.
+The minimax, weighted-sum, and variance-penalized invocations pass after this
+declaration repair; it introduces no new measured or listening evidence.
+
 The related FEM `small_stereo_2_2_cardioid` declaration was repaired on
 2026-09-20 to name both physical outputs and all existing `sub_top_lp0..4.csv`
 and `sub_bottom_lp0..4.csv` captures. No measurement samples, phase values,

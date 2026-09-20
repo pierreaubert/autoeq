@@ -360,6 +360,9 @@ class SummarySectionTests(unittest.TestCase):
         self.assertIn("conditional — Recorded playback validation: accepted", html)
         self.assertIn("Not approved for playback", html)
         self.assertIn("Conditional on enforced input-peak ceilings", html)
+        self.assertIn("Why this correction? — strict", html)
+        self.assertIn("Why this correction? — conditional", html)
+        self.assertLess(html.index("Why this correction? — conditional"), html.index("<h2>Summary</h2>"))
 
     def test_playback_status_rejects_missing_or_failed_verdicts(self):
         for outcome in [None, "rejected", "insufficient_evidence", "accepted"]:
@@ -424,6 +427,8 @@ class SummarySectionTests(unittest.TestCase):
         self.assertIn("<h2>All EQ Filters</h2>", html)
         self.assertIn("<h2>Crossover Configuration</h2>", html)
         self.assertIn("Not approved for playback", html)
+        self.assertLess(html.index("Why this correction?"), html.index("<h2>Optimization Summary</h2>"))
+        self.assertLess(html.index("Why this correction?"), html.index("<h2>All Channels Overview</h2>"))
         # Summaries precede the per-channel tabs.
         self.assertLess(
             html.index("<h2>All EQ Filters</h2>"),

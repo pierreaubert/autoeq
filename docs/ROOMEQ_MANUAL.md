@@ -157,6 +157,15 @@ upstream chain must honor them; otherwise the electrical guarantee does not
 apply. `system.bass_management.headroom_margin_db` alone does not establish an
 input bound. Unspecified budgets retain the default full-scale assumption.
 
+The Python HTML report opens with the saved playback verdict followed by
+**Why this correction?**, before scores and plots. This explanation shows
+recorded correction bands, final acceptance, unassessed seat bands, and
+advisory filter decisions. Expand its constraints and stage history to inspect
+reversions and failed checks. Comparison reports include a section for each mode.
+Configured bands describe correction scope, not proof of applied changes;
+filter-center verdicts are not frequency intervals. Missing reasons remain
+explicitly unavailable rather than being inferred from response curves.
+
 The HTML report displays the saved playback verdict before its scores. Rejected
 or unverified results are diagnostic only. Reduced input-peak assumptions are
 shown explicitly in dBFS in both single-run and comparison reports; displaying

@@ -1,5 +1,10 @@
 # Unreleased
 
+- Put a "Why this correction?" section before summaries and plots in Python
+  RoomEQ reports, including per-mode comparisons. Show recorded correction
+  bands, final outcomes, unassessed seat bands, advisory filter decisions and
+  reversions, with explicit gaps where explanatory evidence is unavailable.
+
 - Clarify RoomEQ FIR, MIXED/hybrid, and MIXED-PHASE mode names, phase and length controls, latency, and the distinction between correction bounds and processing/speaker crossovers.
 
 # 0.5.74

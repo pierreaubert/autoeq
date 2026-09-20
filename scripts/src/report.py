@@ -45,6 +45,7 @@ from .dsp import (
     synthesize_lr_channel,
 )
 from .target_overlay import build_target_overlay_curves
+from .correction_explanation import correction_explanation_html
 
 # Synthetic channel name used for the complex L+R sum tab in the
 # comparison report. Picked so it cannot collide with a real recording
@@ -1366,6 +1367,7 @@ def create_html_report(
     ]
 
     html_parts.append(_playback_status_html(metadata))
+    html_parts.append(correction_explanation_html(data))
 
     # Metadata section
     if metadata:
@@ -1845,6 +1847,7 @@ def create_comparison_html_report(
 
     for mode_name, data in mode_datasets:
         html_parts.append(_playback_status_html(data.get("metadata") or {}, mode_name))
+        html_parts.append(correction_explanation_html(data, mode_name))
 
     # --- Summary table ---
     html_parts.append('<div class="plot-container">\n<h2>Summary</h2>\n')

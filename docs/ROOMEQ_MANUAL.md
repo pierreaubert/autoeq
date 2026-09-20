@@ -1843,6 +1843,13 @@ directional measurements are needed to establish rear rejection. Its legitimate
 low-frequency efficiency loss is not treated as an MSO defect.
 `primary_with_constraints.max_deviation_db` is a soft penalty threshold, not a
 hard guarantee at every seat and frequency.
+Multi-seat cardioid inputs retain the measured phase of each front/rear pair.
+Both branches must supply the same ordered seats; missing phase or unmatched
+seat counts reject preprocessing. The combined responses remain separate for
+shared EQ, while the configured primary seat supplies the routing reference.
+Both physical outputs must be declared. This does not establish measured
+directional rejection or perceptual validation.
+
 ## Prepared FIR target grid contract
 
 The internal prepared-FIR API requires target frequencies to match the

@@ -75,9 +75,14 @@ pub(in super::super) fn preprocess_sub_with_frequency_samples(
                     .to_string(),
             }),
         },
-        SpeakerConfig::Cardioid(c) => {
-            preprocess_cardioid_with_frequency_samples(c, frequency_samples)
-        }
+        SpeakerConfig::Cardioid(c) => preprocess_cardioid_with_frequency_samples(
+            c,
+            frequency_samples,
+            optimizer
+                .multi_seat
+                .as_ref()
+                .map_or(0, |seat| seat.primary_seat),
+        ),
         SpeakerConfig::Dba(d) => {
             preprocess_dba_with_frequency_samples(d, optimizer, sample_rate, frequency_samples)
         }
@@ -395,24 +400,60 @@ pub(in super::super) fn preprocess_multisub_independent_with_frequency_samples(
     })
 }
 
-/// Cardioid: simulate combined response from front + delayed/inverted rear sub
+/// Render cardioid pairs at every seat, retaining primary-seat phase for routing.
+///
+/// # Errors
+/// Rejects incomplete seat pairs, an unavailable primary seat, or invalid phase evidence.
 pub(in super::super) fn preprocess_cardioid_with_frequency_samples(
     c: &CardioidConfig,
     frequency_samples: usize,
+    primary_seat: usize,
 ) -> Result<SubPreprocessResult> {
-    let front_curve =
-        load_source_with_frequency_samples(&c.front, frequency_samples).map_err(|e| {
-            AutoeqError::InvalidMeasurement {
-                message: format!("Cardioid front: {}", e),
-            }
-        })?;
-    let rear_curve =
-        load_source_with_frequency_samples(&c.rear, frequency_samples).map_err(|e| {
-            AutoeqError::InvalidMeasurement {
-                message: format!("Cardioid rear: {}", e),
-            }
-        })?;
+    let load = |source, label| {
+        crate::measurement::load_source_individual_with_frequency_samples(source, frequency_samples)
+            .map_err(|error| AutoeqError::InvalidMeasurement {
+                message: format!("Cardioid {label}: {error}"),
+            })
+    };
+    let front = load(&c.front, "front")?;
+    let rear = load(&c.rear, "rear")?;
+    if front.is_empty() || front.len() != rear.len() {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: format!(
+                "Cardioid requires paired front/rear seats, got {} and {}",
+                front.len(),
+                rear.len()
+            ),
+        });
+    }
+    if primary_seat >= front.len() {
+        return Err(AutoeqError::InvalidMeasurement {
+            message: format!("Cardioid primary seat {primary_seat} unavailable"),
+        });
+    }
+    // Sum physical drivers within each synchronous seat before any spatial EQ
+    // aggregation. Averaging driver magnitudes first destroys measured phase.
+    let mut rendered = front
+        .into_iter()
+        .zip(rear)
+        .map(|(front, rear)| render_cardioid_seat(c, front, rear))
+        .collect::<Result<Vec<_>>>()?;
+    let shared_eq_seats = (rendered.len() > 1).then(|| {
+        rendered
+            .iter()
+            .map(|seat| seat.combined_curve.clone())
+            .collect()
+    });
+    let mut result = rendered.swap_remove(primary_seat);
+    result.shared_eq_seats = shared_eq_seats;
+    Ok(result)
+}
 
+fn render_cardioid_seat(
+    c: &CardioidConfig,
+    front_curve: Curve,
+    rear_curve: Curve,
+) -> Result<SubPreprocessResult> {
     if !is_valid_frequency_grid(&front_curve.freq) || !is_valid_frequency_grid(&rear_curve.freq) {
         return Err(AutoeqError::InvalidMeasurement {
             message: "Cardioid preprocessing requires valid frequency grids".to_string(),
@@ -963,6 +1004,117 @@ mod tests {
     }
 
     #[test]
+    fn preprocess_cardioid_preserves_paired_seats_and_primary_phase() {
+        let front = make_curve(16, 80.0, Some(30.0));
+        let mut rear = make_curve(16, 74.0, Some(0.0));
+        // A one-millisecond propagation phase cancels the configured delay.
+        // Seat zero subtracts the rear; seat one adds it after inversion.
+        rear.phase = Some(rear.freq.mapv(|f| 30.0 + 360.0 * f * 0.001));
+        let mut second_rear = rear.clone();
+        second_rear
+            .phase
+            .as_mut()
+            .unwrap()
+            .mapv_inplace(|p| p + 180.0);
+        let mut config = CardioidConfig {
+            name: "paired cardioid".into(),
+            speaker_name: None,
+            front: MeasurementSource::InMemoryMultiple(vec![front.clone(), front]),
+            rear: MeasurementSource::InMemoryMultiple(vec![rear, second_rear]),
+            separation_meters: 0.343,
+        };
+        let mut optimizer = tiny_optimizer();
+        optimizer.multi_seat = Some(roomeq_model::MultiSeatConfig {
+            primary_seat: 1,
+            ..Default::default()
+        });
+        let result = preprocess_sub_with_frequency_samples(
+            &SpeakerConfig::Cardioid(Box::new(config.clone())),
+            &SubwooferStrategy::Single,
+            &optimizer,
+            48000.0,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+        )
+        .unwrap();
+        let seats = result.shared_eq_seats.as_ref().unwrap();
+        assert_eq!(seats.len(), 2);
+        let front_amplitude = 10.0_f64.powf(80.0 / 20.0);
+        let rear_amplitude = 10.0_f64.powf(74.0 / 20.0);
+        for (seat, amplitude) in seats.iter().zip([
+            front_amplitude - rear_amplitude,
+            front_amplitude + rear_amplitude,
+        ]) {
+            let expected = 20.0 * amplitude.log10();
+            assert!(seat.spl.iter().all(|value| (value - expected).abs() < 1e-8));
+            assert!(
+                seat.phase
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .all(|p| (p - 30.0).abs() < 1e-8)
+            );
+        }
+        assert_eq!(result.combined_curve.spl, seats[1].spl);
+        assert_eq!(result.combined_curve.phase, seats[1].phase);
+        let drivers = result.drivers.as_ref().unwrap();
+        let expected_rear = match &config.rear {
+            MeasurementSource::InMemoryMultiple(curves) => curves[1].phase.as_ref().unwrap(),
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            drivers[1]
+                .initial_curve
+                .as_ref()
+                .unwrap()
+                .phase
+                .as_ref()
+                .unwrap(),
+            expected_rear
+        );
+
+        let invalid_primary = preprocess_cardioid_with_frequency_samples(
+            &config,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+            2,
+        )
+        .err()
+        .unwrap();
+        assert!(
+            invalid_primary
+                .to_string()
+                .contains("primary seat 2 unavailable")
+        );
+
+        if let MeasurementSource::InMemoryMultiple(curves) = &mut config.rear {
+            curves[1].phase = None;
+        }
+        let missing_phase = preprocess_cardioid_with_frequency_samples(
+            &config,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+            0,
+        )
+        .err()
+        .unwrap();
+        assert!(
+            missing_phase
+                .to_string()
+                .contains("requires measured phase")
+        );
+
+        if let MeasurementSource::InMemoryMultiple(curves) = &mut config.rear {
+            curves.pop();
+        }
+        let missing_seat = preprocess_cardioid_with_frequency_samples(
+            &config,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+            0,
+        )
+        .err()
+        .unwrap();
+        assert!(missing_seat.to_string().contains("paired front/rear seats"));
+    }
+
+    #[test]
     fn preprocess_cardioid_happy_path_with_phase() {
         let front = make_curve(16, 80.0, Some(0.0));
         let rear = make_curve(16, 80.0, Some(0.0));
@@ -973,8 +1125,11 @@ mod tests {
             rear: MeasurementSource::InMemory(rear),
             separation_meters: 1.0,
         };
-        let result =
-            preprocess_cardioid_with_frequency_samples(&config, crate::DEFAULT_FREQUENCY_SAMPLES);
+        let result = preprocess_cardioid_with_frequency_samples(
+            &config,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+            0,
+        );
         assert!(result.is_ok(), "expected Ok, got Err: {:?}", result.err());
         let result = result.unwrap();
         assert!(result.drivers.is_some());
@@ -994,8 +1149,11 @@ mod tests {
             rear: MeasurementSource::InMemory(rear),
             separation_meters: 1.0,
         };
-        let result =
-            preprocess_cardioid_with_frequency_samples(&config, crate::DEFAULT_FREQUENCY_SAMPLES);
+        let result = preprocess_cardioid_with_frequency_samples(
+            &config,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+            0,
+        );
         assert!(
             result.is_ok(),
             "expected interpolation to accept mismatched grids"
@@ -1023,10 +1181,13 @@ mod tests {
             separation_meters: 1.0,
         };
 
-        let error =
-            preprocess_cardioid_with_frequency_samples(&config, crate::DEFAULT_FREQUENCY_SAMPLES)
-                .err()
-                .expect("rear span must be rejected");
+        let error = preprocess_cardioid_with_frequency_samples(
+            &config,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+            0,
+        )
+        .err()
+        .expect("rear span must be rejected");
         assert!(error.to_string().contains("full front frequency span"));
     }
 
@@ -1042,8 +1203,11 @@ mod tests {
             rear: MeasurementSource::InMemory(rear),
             separation_meters: 1.0,
         };
-        let result =
-            preprocess_cardioid_with_frequency_samples(&config, crate::DEFAULT_FREQUENCY_SAMPLES);
+        let result = preprocess_cardioid_with_frequency_samples(
+            &config,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+            0,
+        );
         assert!(result.is_err(), "expected Err for mismatched SPL lengths");
     }
 
@@ -1059,8 +1223,11 @@ mod tests {
             rear: MeasurementSource::InMemory(rear),
             separation_meters: 1.0,
         };
-        let result =
-            preprocess_cardioid_with_frequency_samples(&config, crate::DEFAULT_FREQUENCY_SAMPLES);
+        let result = preprocess_cardioid_with_frequency_samples(
+            &config,
+            crate::DEFAULT_FREQUENCY_SAMPLES,
+            0,
+        );
         assert!(result.is_err(), "expected Err for mismatched phase lengths");
     }
 

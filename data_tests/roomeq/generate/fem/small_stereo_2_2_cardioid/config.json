@@ -13,9 +13,14 @@
         {
           "id": "Sub1",
           "speaker": "lfe"
+        },
+        {
+          "id": "Sub2",
+          "speaker": "lfe"
         }
       ],
       "crossover": [
+        "first",
         "first"
       ]
     }
@@ -32,8 +37,24 @@
     },
     "lfe": {
       "name": "cardioid_subs",
-      "front": "sub_top_lp0.csv",
-      "rear": "sub_bottom_lp0.csv",
+      "front": {
+        "measurements": [
+          "sub_top_lp0.csv",
+          "sub_top_lp1.csv",
+          "sub_top_lp2.csv",
+          "sub_top_lp3.csv",
+          "sub_top_lp4.csv"
+        ]
+      },
+      "rear": {
+        "measurements": [
+          "sub_bottom_lp0.csv",
+          "sub_bottom_lp1.csv",
+          "sub_bottom_lp2.csv",
+          "sub_bottom_lp3.csv",
+          "sub_bottom_lp4.csv"
+        ]
+      },
       "separation_meters": 0.5
     },
     "right": {

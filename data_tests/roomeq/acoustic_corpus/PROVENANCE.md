@@ -7,6 +7,13 @@ embedded location metadata.
 
 ## Evidence scope
 
+The related FEM `small_stereo_2_2_cardioid` declaration was repaired on
+2026-09-20 to name both physical outputs and all existing `sub_top_lp0..4.csv`
+and `sub_bottom_lp0..4.csv` captures. No measurement samples, phase values,
+acceptance limits, corpus membership, or rights classification changed.
+Cardioid processing now combines synchronous driver pairs per seat before
+spatial aggregation. This is software/fixture evidence, not listening evidence.
+
 This is a measurement/engineering QA corpus, not a calibrated programme-audio
 listening study. Its rights and held-out-seat records do not establish listener
 population, playback SPL calibration, perceptual thresholds, or pruning

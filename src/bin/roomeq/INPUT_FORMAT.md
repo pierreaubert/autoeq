@@ -79,6 +79,11 @@ their geometric centre and automatic filter types use the first search candidate
 DBA uses its initial -3 dB rear gain (bounded by `min_db`), 10 ms delay, and inverted
 rear polarity. These initial controls are frozen rather than replaced by later
 optimized controls. Cardioid geometry remains structural.
+For multi-seat cardioid measurements, `front` and `rear` must declare matching
+seat counts in the same order, with measured phase at every seat. Preprocessing
+combines each pair before spatial EQ aggregation and uses
+`optimizer.multi_seat.primary_seat` (default 0) for the routing reference.
+Declare both physical outputs; singleton captures are not broadcast across seats.
 
 Comparisons use matching frequency grids and the union of the baseline and final
 half-to-twice-crossover windows, bounded by measured support and 20–2000 Hz.

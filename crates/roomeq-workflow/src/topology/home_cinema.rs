@@ -1428,7 +1428,16 @@ fn capture_crossover_cancellation_baseline(
         if let Some(SpeakerConfig::Cardioid(c)) = config.speakers.get(&output.speaker) {
             outputs.insert(
                 output.id.clone(),
-                preprocess_cardioid_with_frequency_samples(c, frequency_samples)?.combined_curve,
+                preprocess_cardioid_with_frequency_samples(
+                    c,
+                    frequency_samples,
+                    config
+                        .optimizer
+                        .multi_seat
+                        .as_ref()
+                        .map_or(0, |seat| seat.primary_seat),
+                )?
+                .combined_curve,
             );
             continue;
         }

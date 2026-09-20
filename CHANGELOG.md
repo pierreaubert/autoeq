@@ -1,5 +1,10 @@
 # Unreleased
 
+- Preserve measured phase when preprocessing multi-seat cardioid pairs. Combine
+  front/rear drivers per seat, retain every seat for shared EQ, and use the
+  configured primary seat for routing. Reject unmatched seats or missing phase.
+  Repair the FEM cardioid declaration to include both outputs and all five
+  existing captures per driver; measured data and acceptance limits are unchanged.
 - Evaluate Kautz and warped-IIR reports from their serialized DSP topology,
   fixing the 25.66 dB Kautz report/export mismatch in the regression fixture.
   Kautz gain optimization remains experimental and fails the existing matched

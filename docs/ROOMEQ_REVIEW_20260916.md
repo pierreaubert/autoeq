@@ -2,7 +2,8 @@
 
 Updated 2026-09-20. Scope: `reviews/next-20260916.md`.
 Tracking issue: <http://192.168.1.32:3001/pierre/autoeq/issues/3>.
-Implementation checkpoint: `e4bdb8d` on `fix/issue-3-roomeq-review`.
+Implementation checkpoints: `e4bdb8d`, `2aa3093`, and `2970a7e` on
+`fix/issue-3-roomeq-review`.
 The review is **not complete**: required QA gates and final publication remain
 open. No numerical acceptance limit, baseline, enforcement default, or
 assessment confidence was promoted. Software evidence is not listening evidence.
@@ -12,7 +13,7 @@ assessment confidence was promoted. Software evidence is not listening evidence.
 | Review item | Implementation/evidence | Current disposition |
 | --- | --- | --- |
 | 1. CLI build | The historical `stereo_routing` initializer defect is absent at baseline `027a598`; checkpoint CLI checks and stereo export pass. | Verified. |
-| 2. Tree hygiene | Baseline was clean; review changes are isolated on the issue branch and committed as `e4bdb8d`. No unrelated work was reset or shelved. | Verified local checkpoint; push/PR pending. |
+| 2. Tree hygiene | Baseline was clean; review changes are isolated in the three checkpoints above. No unrelated work was reset or shelved. | Verified local checkpoints; final evidence commit and push/PR pending. |
 | 3. Cumulative all-seat rollback | Frozen F0 level anchors, complete declared measurement/programme/level product, worst incremental and sum/max cumulative checks, local-bin cap, fail-closed unknown evidence, and exact rollback. | Implemented; 53-test pruning recipe passes. |
 | 4. Entry-point/export matrix | Native static matrix below covers all in-tree entry points, including held-out seats and complete routed replay. | Implemented static rows; continuous runtime transition row explicitly open at the excluded native/SOTF boundary. |
 | 5. Five named red-gate reproductions | Reproductions and unchanged-limit dispositions below. | Triage performed; Kautz reporting fixed, focused Kirkeby checks pass, remaining defects explicitly red. |
@@ -135,7 +136,7 @@ not new checked-in golden baselines.
 | `cargo check -p autoeq --features cli` | Pass on checkpoint; `cli-check-final`. | CLI compilation. |
 | `cargo clippy -p autoeq --features cli --no-deps` | Pass on checkpoint; `clippy-final`. | Direct workflow/QA clippy also passed with existing warnings. |
 | `cargo test -p autoeq --lib` | Pass, zero root library tests. | Included in combined library invocation. |
-| `cargo test -p roomeq-model -p roomeq-analysis -p roomeq-engine -p roomeq-quality -p roomeq-workflow -p roomeq-export -p autoeq-optim --lib` | Pass: 2,463 total library tests including root; 11 existing ignored. Log `libraries-current`. | Later held-out change passes focused matrix; current instrumented full suite is running. |
+| `cargo test -p roomeq-model -p roomeq-analysis -p roomeq-engine -p roomeq-quality -p roomeq-workflow -p roomeq-export -p autoeq-optim --lib` | Pass: 2,463 total library tests including root; 11 existing ignored. Log `libraries-current`. | Later held-out change passes the focused matrix; instrumented full-suite coverage and grouped-capture checks also pass as recorded below. |
 | `just qa-audibility-pr` | Initial run failed obsolete v3 fixtures; the next exposed grouped-capture duplication and was stopped after the fix passed focused verification. Full current rerun `audibility-final` is active. | Do not infer success from individual seed logs. |
 | `just qa-roomeq-perceptual` | Pass in `perceptual-multimeasurement`. | Software checks, not a listening study. |
 | `just qa-roomeq-multi-measurement` | Exits 1 at `large_multi_sub_4`/minimax; details below. | Earlier virtual-LFE panic fixed; three preceding multi-seat strategies export. |
@@ -148,6 +149,37 @@ All short log names above expand to `/tmp/roomeq-next-20260916-<name>.log`.
 
 ### Additional unresolved multi-measurement gate
 
+An isolated reproduction at starting commit `027a598` also fails the unchanged
+`large_multi_sub_4`/minimax case, exiting 101 with the virtual-LFE panic at
+`electrical_headroom.rs:345` (`baseline-sub4`). The current implementation fixes
+that panic and reaches the electrical/acoustic rejection described below.
+This establishes pre-existing failure for this case, not a passing current gate.
+
+The full FEM continuation now accounts for all 60 configurations: 30 pass and
+30 fail, including the four cases completed before continuation. The subsequent
+home-cinema feature matrix is still running. These results precede the following
+cardioid fixture repair and must not be presented as verification of that repair.
+
+The cardioid fixture declared five main-speaker seats but only one capture for
+each sub branch. It now declares all five existing captures per branch and both
+physical outputs. No CSV, phase data, optimizer limit, or expectation changed.
+The first three focused reruns exposed lost phase during multi-measurement
+aggregation despite measured phase in the CSVs
+(`cardioid-seats-{minimax,weighted_sum,variance_penalized}`). Preprocessing now
+renders synchronous front/rear pairs separately at every seat, retains all seat
+responses for shared EQ, and uses the configured primary seat for routing.
+Six focused cardioid tests and all 16 preprocessing-module tests pass
+(`cardioid-phase-tests`, `cardioid-preprocess-suite`). The independent regression
+checks cancellation/reinforcement, primary selection, missing secondary-seat
+phase, and mismatched seat counts. Current fixture reruns reach diagnostic
+export for all three strategies but still reject playback
+(`cardioid-phase-{minimax,weighted_sum,variance_penalized}`). Minimax reports
+3.357281 dB baseline safety attenuation and no candidate within the unchanged
+electrical/acoustic limits. Phase handling is repaired; this QA gate remains red.
+Workflow library/test Clippy passes with warnings (`cardioid-clippy`). The
+instrumented preprocessing rerun is active (`cardioid-coverage`); the 90.95%
+coverage result above predates this cardioid change.
+
 The current run exports all three `large_multi_seat_2_1` strategies, then rejects
 `large_multi_sub_4` + `minimax`: correction-free baseline attenuation requires
 13.854 dB against the unchanged 12 dB maximum at a 0 dBFS ceiling.
@@ -158,6 +190,33 @@ Candidate checks additionally reject LFE worst-seat regression and main
 useful-output loss. Errors now include physical names/peaks without changing
 acceptance decisions. This is additional unresolved evidence, not a passing
 required gate or permission to raise the limit.
+
+The unchanged weighted-sum and variance-penalized cases also exit 1 with the
+same 13.854 dB baseline requirement. All three strategies for `large_stereo_2_0`
+and `large_stereo_2_1` pass export and display. The next case,
+`large_surround_5_1`, fails minimax and weighted-sum with a 15.242 dB subwoofer
+baseline requirement against the same 12 dB limit. These are interim results.
+A continuation runner executes
+the remaining FEM/strategy combinations independently, followed by the
+home-cinema feature matrix, so the first failure does not hide subsequent
+results. Its per-case logs, exact commands, and exit codes are recorded under
+`/tmp/roomeq-next-20260916-multimeasurement-remaining/` (`results.jsonl`).
+This diagnostic continuation does not turn the failed recipe into a pass.
+The minimax log reports MSO gains of 1.052292, -2.971475, 2.601810, and
+-0.052622 dB. Subtracting these from the four physical output peaks gives
+approximately 11.252 dB in every case. The common routed level and retained
+per-subwoofer gains therefore require further investigation; this arithmetic
+does not establish that either gain is incorrect.
+
+`medium_multi_sub_4` differs from the over-limit cases: it saves diagnostic
+JSON and rejects playback, rather than failing before serialization. Its
+minimax diagnostic records 11.722720 dB baseline safety attenuation and
+2.377/2.401 dB L/R worst-seat regressions against the unchanged 0.250 dB
+budget. `correction_acceptance` remains rejected with
+`baseline_requires_safety_attenuation`,
+`no_candidate_within_electrical_acoustic_limits`, and
+`worst_position_regressed`. It must not be reported as a successful export
+merely because diagnostic JSON exists.
 
 ## Remaining work
 

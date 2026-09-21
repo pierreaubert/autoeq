@@ -152,8 +152,22 @@ where
             &scores,
             &errors,
         ))?;
+        // The caller attaches the case name to this error. Keep each seed's
+        // cause here as well: the shared artifact alone cannot associate
+        // concurrent failures with their originating QA cases.
+        let causes = errors
+            .iter()
+            .map(|entry| {
+                format!(
+                    "seed {}: {}",
+                    entry["seed"],
+                    entry["error"].as_str().unwrap_or("unreported seed failure")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
         anyhow::bail!(
-            "{} of {} QA seeds failed; reliability evidence recorded",
+            "{} of {} QA seeds failed; reliability evidence recorded; causes: {causes}",
             errors.len(),
             QA_SEED_OFFSETS.len()
         );
@@ -474,6 +488,13 @@ mod tests {
             if error_count == 0 {
                 assert!(records.is_empty());
                 continue;
+            }
+            let message = result.err().unwrap().to_string();
+            for seed in attempted.iter().take(error_count) {
+                assert!(message.contains(&format!("seed {seed}: injected seed {seed} failure")));
+            }
+            for seed in attempted.iter().skip(error_count) {
+                assert!(!message.contains(&format!("seed {seed}:")));
             }
             assert_eq!(records.len(), 1);
             let record = &records[0];

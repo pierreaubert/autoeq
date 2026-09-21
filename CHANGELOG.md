@@ -1,5 +1,11 @@
 # Unreleased
 
+- Release convergence QA job permits on early errors and panic unwinding.
+  Keep workflow errors inside the case-recording path so failed cases cannot
+  exhaust every permit and leave the runner waiting indefinitely.
+- Include each failed seed's cause in QA case errors, so concurrent run failures
+  remain attributable without relying on the shared seed-distribution artifact.
+  Seed selection, acceptance limits, and failure accounting are unchanged.
 - Report frequency support per logical input when aggregating final-seat
   evidence. Independent mains/subwoofers may have disjoint bands; their aggregate
   omits `measurement_overlap_hz` instead of inventing shared support or rejecting

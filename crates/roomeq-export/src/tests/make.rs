@@ -130,6 +130,7 @@ pub(super) fn make_test_output() -> DspGraph {
             qa_seed_distribution: None,
             effective_config: None,
         }),
+        correction_decisions: None,
     }
 }
 
@@ -184,6 +185,7 @@ fn make_single_filter_output(filter_type: &str, gain_db: f64) -> DspGraph {
         global_plugins: Vec::new(),
         channels,
         metadata: None,
+        correction_decisions: None,
     }
 }
 
@@ -407,6 +409,7 @@ pub(super) fn make_routed_bass_output() -> DspGraph {
             qa_seed_distribution: None,
             effective_config: None,
         }),
+        correction_decisions: None,
     }
 }
 

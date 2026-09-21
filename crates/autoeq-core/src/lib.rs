@@ -6,10 +6,13 @@
 
 pub use math_audio_iir_fir as iir;
 
+pub mod alignment;
 pub mod auditory_frequency;
+pub mod constraint_envelope;
 pub mod curve;
 pub mod curve_transforms;
 pub mod error;
+pub mod evidence;
 pub mod measurement_contracts;
 pub mod measurement_quality;
 pub mod param_utils;
@@ -27,10 +30,18 @@ mod curve_smoothing_tests;
 #[cfg(test)]
 mod measurement_quality_tests;
 
+pub use alignment::{
+    align_evidence_support, timing_uncertainty_to_phase_deg, validate_alignment_grid,
+};
 pub use auditory_frequency::*;
+pub use constraint_envelope::{LocalQEnvelope, LocalQKnot, effective_max_q};
 pub use curve::Curve;
 pub use curve_transforms::*;
 pub use error::{AutoeqError, Result};
+pub use evidence::{
+    CalibrationStatus, CaptureKind, CommonReferenceScope, EVIDENCE_ENVELOPE_VERSION, EvidenceBand,
+    EvidenceEnvelope, Uncertainty, UncertaintyKind,
+};
 pub use measurement_contracts::{
     InlineMeasurement, MeasurementMultiple, MeasurementRef, MeasurementSingle, MeasurementSource,
     SpinoramaBundle,

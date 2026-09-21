@@ -1,0 +1,42 @@
+{
+  "ledger_version": "1.0.0",
+  "decisions": [
+    {
+      "decision_id": "d-seat-a-1",
+      "ledger_version": "1.0.0",
+      "stage": "final",
+      "logical_input": "stereo",
+      "physical_output": "main-l",
+      "measurement_refs": ["meas-seat-a"],
+      "seat_refs": ["seat-a"],
+      "frequency_band_hz": [40.0, 400.0],
+      "action": "equalize",
+      "status": "applied",
+      "reason_codes": ["within_limits"],
+      "observed": [
+        {"name": "post_p95_abs_residual_db", "value": 3.0, "unit": "db"}
+      ],
+      "limits": [
+        {"name": "max_post_p95_abs_residual_db", "value": 6.0, "unit": "db"}
+      ],
+      "evidence_refs": ["ev-seat-a"],
+      "confidence": "moderate",
+      "final_graph_identity": "graph-final-1"
+    },
+    {
+      "decision_id": "d-seat-b-1",
+      "ledger_version": "1.0.0",
+      "stage": "provisional",
+      "logical_input": "stereo",
+      "physical_output": "main-l",
+      "measurement_refs": ["meas-seat-b"],
+      "seat_refs": ["seat-b"],
+      "frequency_band_hz": [40.0, 400.0],
+      "action": "equalize",
+      "status": "insufficient_evidence",
+      "reason_codes": ["seat_evidence_gap"],
+      "evidence_refs": [],
+      "confidence": "unknown"
+    }
+  ]
+}

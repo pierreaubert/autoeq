@@ -411,16 +411,16 @@ pub fn run() -> Result<bool> {
                         result = Err(error.context("failed to retain electrical QA evidence"));
                     }
                 }
-                if let Err(error) = &result {
-                    if let Err(evidence_error) = electrical::append_execution_failure(
+                if let Err(error) = &result
+                    && let Err(evidence_error) = electrical::append_execution_failure(
                         &evidence_path,
                         &id,
                         &format!("{error:#}"),
-                    ) {
-                        result = Err(anyhow!(
-                            "{error:#}; failed to retain execution failure: {evidence_error:#}"
-                        ));
-                    }
+                    )
+                {
+                    result = Err(anyhow!(
+                        "{error:#}; failed to retain execution failure: {evidence_error:#}"
+                    ));
                 }
                 result
             })

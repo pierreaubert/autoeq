@@ -20,7 +20,8 @@ check-jsonschema --schemafile output_schema.json dsp_chain.json
   "version": "3.0.0",
   "global_plugins": [ ... ],
   "channels": { ... },
-  "metadata": { ... }
+  "metadata": { ... },
+  "correction_decisions": { ... }
 }
 ```
 
@@ -32,6 +33,34 @@ check-jsonschema --schemafile output_schema.json dsp_chain.json
 | `global_plugins` | array | Graph-level plugins, such as matrix/routing stages applied before per-channel chains; omitted when empty |
 | `channels` | object | Map of channel names to DSP chains |
 | `metadata` | object | Optimization metadata (optional) |
+| `correction_decisions` | object or null | Versioned correction decision ledger (ledger version `1.0.0`, optional so legacy outputs stay readable). See [Correction Decision Ledger](#correction-decision-ledger) |
+
+### Correction Decision Ledger
+
+`correction_decisions.decisions` is an ordered list of versioned decision
+records. Each record carries a stable decision ID, lifecycle stage
+(`provisional` for engine attempts, `final` for workflow-reconciled delivery
+claims), logical input and physical output identities, measurement/seat
+references, an optional explicit frequency interval (`frequency_band_hz`) or a
+filter-center point (`filter_center_hz`, never an interval), an action
+(`equalize`, `phase_correct`, `gain_adjust`, `reroute`, `prune`), a status,
+reason codes, observed quantities and limits with units, evidence references,
+confidence, linked/superseded record IDs, and the delivered-graph identity
+(`final_graph_identity`, required for final delivery claims).
+
+Status vocabulary: `applied`, `already_acceptable`, `insufficient_evidence`,
+`outside_scope`, `constrained`, `reverted`, `unresolved`, `advisory`. An
+`advisory` record is a nomination only; it never authorizes removal. A
+`constrained` solution that still contains an applied partial correction is
+represented as linked records via `related_decision_ids`, and a rollback as a
+superseding record via `supersedes_ids`. Rejected runs retain attempted
+records but cannot label them as approved delivered correction.
+
+Compatibility: readers must accept outputs without `correction_decisions`
+(legacy) and treat missing evidence as unknown, never as success. Records with
+an unsupported `ledger_version`, empty IDs, unordered/nonfinite bands, or a
+final stage without a delivered-graph identity are invalid; reports render
+them as unverified, never as delivered correction.
 
 ### Effective merged configuration
 

@@ -27,6 +27,8 @@ pub mod callback;
 pub mod cmaes;
 /// Pure-Rust COBYLA backend (replaces NLopt's COBYLA when nlopt feature is off).
 pub mod cobyla;
+/// Frequency-dependent constraint envelopes and neutral diagnostics.
+pub mod constraint_envelope;
 /// Centralised constraint installation (native vs penalty).
 pub mod constraints_install;
 /// AutoEQ DE-specific optimization code
@@ -69,6 +71,14 @@ mod types;
 pub use algorithm_info::*;
 pub use clamp::*;
 pub use compute::*;
+pub use constraint_envelope::{
+    COMPOSITE_COMPARISON_EPS_DB, ClassifiedOutcome, CompositeBreach, ConstrainedCandidate,
+    ConstraintDiagnostic, ConstraintKind, ConstraintSpec, GainAdjustment, OptimizationOutcomeKind,
+    ParetoFeasibility, QAdjustment, VALIDATED_SUBDIVISIONS_PER_BIN, check_composite_gain_envelope,
+    check_pareto_feasibility, classify_outcome, constrain_candidate, enforce_local_q_at_centers,
+    enforce_local_q_envelope_at_centers, envelope_bound_at, is_peq_layout_loss,
+    project_gains_onto_envelopes, validate_envelope_knots, validated_composite_grid,
+};
 pub use objective_data::*;
 pub use objective_data_builder::*;
 pub use optimize::*;

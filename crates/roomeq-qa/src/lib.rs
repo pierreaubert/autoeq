@@ -8,9 +8,12 @@ use std::collections::HashMap;
 use std::path::Path;
 
 pub mod acoustic;
+pub mod analytic;
+pub mod corpus;
 pub mod coverage;
 pub mod features;
 pub mod fuzzer;
+pub mod matrix;
 pub mod parameter_matrix;
 pub mod quality;
 pub mod registry;

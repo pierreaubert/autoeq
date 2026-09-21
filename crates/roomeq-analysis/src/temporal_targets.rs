@@ -44,7 +44,7 @@ pub const DECAY_THRESHOLD_MAX_HZ: f64 = 250.0;
 
 /// Whether a frequency lies inside the validated threshold domain.
 pub fn decay_threshold_domain_contains(freq_hz: f64) -> bool {
-    freq_hz.is_finite() && freq_hz >= DECAY_THRESHOLD_MIN_HZ && freq_hz <= DECAY_THRESHOLD_MAX_HZ
+    freq_hz.is_finite() && (DECAY_THRESHOLD_MIN_HZ..=DECAY_THRESHOLD_MAX_HZ).contains(&freq_hz)
 }
 
 /// Get the maximum acceptable decay time at a given frequency, or `None`

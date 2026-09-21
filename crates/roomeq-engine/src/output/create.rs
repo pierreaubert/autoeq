@@ -280,6 +280,10 @@ pub fn create_dsp_chain_output(
         channels,
         deployed_source_curves: HashMap::new(),
         metadata,
+        // Added by the model lane as an optional K4 ledger (serde-defaulted);
+        // engine construction leaves it absent — only workflow reconciliation
+        // binds final records to the delivered graph.
+        correction_decisions: None,
     }
 }
 

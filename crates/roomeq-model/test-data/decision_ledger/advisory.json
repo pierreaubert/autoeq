@@ -1,0 +1,20 @@
+{
+  "ledger_version": "1.0.0",
+  "decisions": [
+    {
+      "decision_id": "d-advisory-1",
+      "ledger_version": "1.0.0",
+      "stage": "provisional",
+      "logical_input": "stereo",
+      "physical_output": "main-l",
+      "measurement_refs": ["meas-1"],
+      "seat_refs": ["seat-a"],
+      "filter_center_hz": 120.0,
+      "action": "prune",
+      "status": "advisory",
+      "reason_codes": ["candidate_removal"],
+      "evidence_refs": ["ev-1"],
+      "confidence": "low"
+    }
+  ]
+}

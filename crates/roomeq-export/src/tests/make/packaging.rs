@@ -310,7 +310,7 @@ fn roon_convolver_rejects_unequal_lengths_and_unknown_channels() {
     );
 }
 
-fn add_convolution(output: &mut DspGraph, channel: &str, path: &str) {
+pub(crate) fn add_convolution(output: &mut DspGraph, channel: &str, path: &str) {
     output
         .channels
         .get_mut(channel)
@@ -322,7 +322,7 @@ fn add_convolution(output: &mut DspGraph, channel: &str, path: &str) {
         });
 }
 
-fn convolution_path<'a>(output: &'a DspGraph, channel: &str) -> &'a str {
+pub(crate) fn convolution_path<'a>(output: &'a DspGraph, channel: &str) -> &'a str {
     output.channels[channel]
         .plugins
         .iter()
@@ -334,14 +334,14 @@ fn convolution_path<'a>(output: &'a DspGraph, channel: &str) -> &'a str {
         .unwrap()
 }
 
-fn resource(reference: &str, bytes: Vec<u8>) -> ConvolutionResource {
+pub(crate) fn resource(reference: &str, bytes: Vec<u8>) -> ConvolutionResource {
     ConvolutionResource {
         reference: reference.to_string(),
         bytes: bytes.into(),
     }
 }
 
-fn test_wav(sample_rate: u32, channels: u16, frames: usize) -> Vec<u8> {
+pub(crate) fn test_wav(sample_rate: u32, channels: u16, frames: usize) -> Vec<u8> {
     let spec = hound::WavSpec {
         channels,
         sample_rate,

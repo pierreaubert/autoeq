@@ -2281,6 +2281,24 @@
       ],
       "type": "string"
     },
+    "CorrectionDecisionLedger": {
+      "description": "Ordered set of decision records with a pinned ledger version.",
+      "properties": {
+        "decisions": {
+          "description": "Decision records in insertion order.",
+          "items": {
+            "$ref": "#/$defs/DecisionRecord"
+          },
+          "type": "array"
+        },
+        "ledger_version": {
+          "default": "1.0.0",
+          "description": "Ledger version; must equal [`DECISION_LEDGER_VERSION`].",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "CorrectionMetricSummary": {
       "properties": {
         "auditory_frequency_measure": {
@@ -3134,6 +3152,223 @@
         "rear"
       ],
       "type": "object"
+    },
+    "DecisionAction": {
+      "description": "What the decision acts on: EQ, phase, gain, routing, or pruning.",
+      "oneOf": [
+        {
+          "const": "equalize",
+          "description": "Magnitude equalization.",
+          "type": "string"
+        },
+        {
+          "const": "phase_correct",
+          "description": "Phase correction.",
+          "type": "string"
+        },
+        {
+          "const": "gain_adjust",
+          "description": "Gain trim or level adjustment.",
+          "type": "string"
+        },
+        {
+          "const": "reroute",
+          "description": "Input/output routing change.",
+          "type": "string"
+        },
+        {
+          "const": "prune",
+          "description": "Filter removal or retention under a pruning budget.",
+          "type": "string"
+        }
+      ]
+    },
+    "DecisionRecord": {
+      "description": "One versioned correction decision record (global K4 contract).\n\nA constrained solution that still contains an applied partial correction\nis represented as linked records via `related_decision_ids`, and a\nrollback as a superseding record via `supersedes_ids`.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/DecisionAction",
+          "default": "equalize",
+          "description": "What the decision acts on."
+        },
+        "confidence": {
+          "$ref": "#/$defs/AssessmentConfidence",
+          "default": "unknown",
+          "description": "Confidence in the acoustic diagnosis, if any."
+        },
+        "decision_id": {
+          "description": "Stable decision identifier; must be nonempty to validate.",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "description": "Stable evidence reference IDs.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "filter_center_hz": {
+          "description": "Filter center frequency in Hz, when the decision concerns one filter.\nThis is a point, not an interval.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "final_graph_identity": {
+          "description": "Immutable delivered-graph identity. Required for final delivery\nclaims; provisional records leave it absent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "frequency_band_hz": {
+          "description": "Explicit overlapping frequency interval in Hz, when the decision is\nband-scoped. Never inferred from `filter_center_hz`.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "ledger_version": {
+          "default": "1.0.0",
+          "description": "Ledger version; must equal [`DECISION_LEDGER_VERSION`].",
+          "type": "string"
+        },
+        "limits": {
+          "description": "Applied limits with units.",
+          "items": {
+            "$ref": "#/$defs/ObservedQuantity"
+          },
+          "type": "array"
+        },
+        "logical_input": {
+          "description": "Logical input identity, for example `\"stereo\"`.",
+          "type": "string"
+        },
+        "measurement_refs": {
+          "description": "Stable measurement reference IDs behind the decision.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "observed": {
+          "description": "Observed quantities with units; a numerical observation, not a diagnosis.",
+          "items": {
+            "$ref": "#/$defs/ObservedQuantity"
+          },
+          "type": "array"
+        },
+        "physical_output": {
+          "description": "Physical output identity, for example `\"sub-1\"`.",
+          "type": "string"
+        },
+        "reason_codes": {
+          "description": "Machine-readable reason codes.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "related_decision_ids": {
+          "description": "Linked record IDs (for example an applied partial linked to its\nconstrained remainder).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "seat_refs": {
+          "description": "Seat reference IDs behind the decision.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stage": {
+          "$ref": "#/$defs/DecisionStage",
+          "default": "provisional",
+          "description": "Provisional (engine) or final (workflow-reconciled)."
+        },
+        "status": {
+          "$ref": "#/$defs/DecisionStatus",
+          "default": "unresolved",
+          "description": "Pinned status vocabulary."
+        },
+        "supersedes_ids": {
+          "description": "Superseded record IDs (for example a candidate superseded by rollback).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "DecisionStage": {
+      "description": "Lifecycle stage of a decision record.\n\nThere are no aliases: a provisional record can never deserialize as a\nfinal delivery claim merely because a stage field was present.",
+      "oneOf": [
+        {
+          "const": "provisional",
+          "description": "Recorded by the engine before reconciliation; not a delivery claim.",
+          "type": "string"
+        },
+        {
+          "const": "final",
+          "description": "Bound to the delivered graph by workflow reconciliation.",
+          "type": "string"
+        }
+      ]
+    },
+    "DecisionStatus": {
+      "description": "Pinned status vocabulary (global K4 contract).",
+      "oneOf": [
+        {
+          "const": "applied",
+          "description": "Correction applied to the chain.",
+          "type": "string"
+        },
+        {
+          "const": "already_acceptable",
+          "description": "No correction needed; already within limits.",
+          "type": "string"
+        },
+        {
+          "const": "insufficient_evidence",
+          "description": "Evidence too weak to decide; filters are retained.",
+          "type": "string"
+        },
+        {
+          "const": "outside_scope",
+          "description": "Outside the configured correction scope.",
+          "type": "string"
+        },
+        {
+          "const": "constrained",
+          "description": "Applied only partially under explicit limits; the remainder is a\nlinked record, never dropped silently.",
+          "type": "string"
+        },
+        {
+          "const": "reverted",
+          "description": "An attempted correction was rolled back.",
+          "type": "string"
+        },
+        {
+          "const": "unresolved",
+          "description": "No resolution reached; still open.",
+          "type": "string"
+        },
+        {
+          "const": "advisory",
+          "description": "Advisory nomination; nothing was applied.",
+          "type": "string"
+        }
+      ]
     },
     "DecomposedCorrectionSerdeConfig": {
       "description": "Serializable decomposed correction configuration for JSON config files",
@@ -5560,6 +5795,30 @@
       "required": [
         "name",
         "subwoofers"
+      ],
+      "type": "object"
+    },
+    "ObservedQuantity": {
+      "description": "One observed or limiting quantity with explicit units.",
+      "properties": {
+        "name": {
+          "description": "Quantity name, for example `\"post_p95_abs_residual_db\"`.",
+          "type": "string"
+        },
+        "unit": {
+          "description": "Unit label, for example `\"db\"`, `\"ms\"`, `\"hz\"`.",
+          "type": "string"
+        },
+        "value": {
+          "description": "Observed value in `unit`.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "value",
+        "unit"
       ],
       "type": "object"
     },
@@ -10057,6 +10316,17 @@
       },
       "description": "Per-channel DSP chains",
       "type": "object"
+    },
+    "correction_decisions": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CorrectionDecisionLedger"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Versioned correction decision ledger (global K4 contract). Optional\nso legacy outputs without decision metadata stay readable; engine\nstages record provisional entries and only workflow reconciliation\nbinds final records to this delivered graph."
     },
     "deployed_source_curves": {
       "additionalProperties": {

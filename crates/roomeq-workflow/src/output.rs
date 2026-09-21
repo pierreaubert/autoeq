@@ -28,6 +28,7 @@ mod tests {
             channels: std::collections::HashMap::new(),
             deployed_source_curves: Default::default(),
             metadata: None,
+            correction_decisions: None,
         };
 
         save_dsp_chain(&output, &path).expect("save DSP chain");

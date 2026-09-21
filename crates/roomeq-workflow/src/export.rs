@@ -80,23 +80,21 @@ pub(crate) fn bind_final_convolution_artifacts(
                     .channel_results
                     .get(owner)
                     .and_then(|c| c.fir_coeffs.as_ref())
-                {
-                    if channels.len() != 1
+                    && (channels.len() != 1
                         || taps.is_empty()
                         || channels[0].len() != taps.len()
                         || channels[0].iter().zip(taps).any(|(stored, retained)| {
                             !stored.is_finite()
                                 || !retained.is_finite()
                                 || (*stored as f32) != (*retained as f32)
-                        })
-                    {
-                        return Err(autoeq_core::AutoeqError::InvalidMeasurement {
-                            message: format!(
-                                "final artifact-store FIR '{}' conflicts with retained FIR for '{owner}'",
-                                path.display()
-                            ),
-                        });
-                    }
+                        }))
+                {
+                    return Err(autoeq_core::AutoeqError::InvalidMeasurement {
+                        message: format!(
+                            "final artifact-store FIR '{}' conflicts with retained FIR for '{owner}'",
+                            path.display()
+                        ),
+                    });
                 }
             }
         }
@@ -714,6 +712,7 @@ mod tests {
                 },
             )]),
             metadata: None,
+            correction_decisions: None,
         }
     }
 

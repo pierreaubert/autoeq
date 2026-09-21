@@ -417,6 +417,36 @@ class SummarySectionTests(unittest.TestCase):
         self.assertEqual(_crossover_config_html({"channels": {"L": {}}}), "")
         self.assertEqual(_crossover_config_html({}), "")
 
+    def test_k4_final_decisions_render_ahead_of_summary_in_both_modes(self):
+        data = _driver_eq_split_data()
+        data["correction_decisions"] = {"ledger_version": "1.0.0", "decisions": [{
+            "decision_id": "d-1", "ledger_version": "1.0.0", "stage": "final",
+            "logical_input": "LFE", "physical_output": "Sub1",
+            "measurement_refs": ["meas-1"], "seat_refs": ["seat-a"],
+            "frequency_band_hz": [40.0, 120.0], "action": "equalize",
+            "status": "applied", "reason_codes": ["within_limits"],
+            "observed": [{"name": "post_p95_abs_residual_db", "value": 3.0, "unit": "db"}],
+            "limits": [{"name": "max_post_p95_abs_residual_db", "value": 6.0, "unit": "db"}],
+            "evidence_refs": ["ev-1"], "confidence": "moderate",
+            "final_graph_identity": "graph-final-1",
+        }]}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.html"
+            create_html_report(data, output, None)
+            html = output.read_text(encoding="utf-8")
+        self.assertIn("Recorded final correction decisions", html)
+        self.assertLess(html.index("Recorded final correction decisions"),
+                        html.index("<h2>Optimization Summary</h2>"))
+        self.assertLess(html.index("Recorded final correction decisions"),
+                        html.index("<h2>All Channels Overview</h2>"))
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "comparison.html"
+            create_comparison_html_report([("iir", data), ("fir", data)], output)
+            html = output.read_text(encoding="utf-8")
+        self.assertEqual(html.count("Recorded final correction decisions"), 2)
+        self.assertLess(html.index("Recorded final correction decisions"),
+                        html.index("<h2>Summary</h2>"))
+
     def test_html_report_contains_summary_sections(self):
         data = _driver_eq_split_data()
         with tempfile.TemporaryDirectory() as directory:

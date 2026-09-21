@@ -1,0 +1,18 @@
+{
+  "ledger_version": "1.0.0",
+  "decisions": [
+    {
+      "ledger_version": "1.0.0",
+      "stage": "provisional",
+      "logical_input": "stereo",
+      "physical_output": "main-l",
+      "measurement_refs": ["meas-1"],
+      "seat_refs": ["seat-a"],
+      "frequency_band_hz": [40.0, 400.0],
+      "action": "equalize",
+      "status": "applied",
+      "reason_codes": ["within_limits"],
+      "evidence_refs": ["ev-1"]
+    }
+  ]
+}

@@ -2119,7 +2119,7 @@ mod tests {
                 "baseline_max_error_db": baseline_max_error_db, "final_max_error_db": maximum_error_db,
             }));
         }
-        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/qa");
+        let directory = crate::qa_evidence_dir();
         std::fs::create_dir_all(&directory).unwrap();
         std::fs::write(directory.join("continuous-expected-analytic-arrival.json"),
             serde_json::to_vec_pretty(&serde_json::json!({

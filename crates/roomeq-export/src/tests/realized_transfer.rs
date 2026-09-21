@@ -566,6 +566,7 @@ fn multisub_fixture(sub_count: usize) -> (DspGraph, HashMap<String, Vec<f64>>) {
         global_plugins: Vec::new(),
         channels,
         metadata: Some(metadata),
+        correction_decisions: None,
     };
     let registry = HashMap::from([(SUB_IR_FILE.to_string(), SUB_IR_TAPS.to_vec())]);
     (graph, registry)
@@ -1846,6 +1847,7 @@ fn multisub_allpass_is_phase_only() {
             },
         )]),
         metadata: None,
+        correction_decisions: None,
     };
     let yaml = render_dsp_chain(&output, ExportFormat::CamillaDsp, 48_000.0).unwrap();
     let sections = document_sections(&yaml);
@@ -2106,6 +2108,7 @@ fn multisub_delay_precision_contract() {
             },
         )]),
         metadata: None,
+        correction_decisions: None,
     };
     let yaml = render_dsp_chain(&output, ExportFormat::CamillaDsp, 48_000.0).unwrap();
     assert!(yaml.contains("type: Values"));
@@ -2226,6 +2229,7 @@ fn camilladsp_rejects_shared_global_eq() {
             },
         )]),
         metadata: None,
+        correction_decisions: None,
     };
     let error = render_dsp_chain(&graph, ExportFormat::CamillaDsp, 48_000.0)
         .unwrap_err()

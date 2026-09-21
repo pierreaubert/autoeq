@@ -117,7 +117,7 @@ fn canonical_expected_candidate_grid_diagnostic() {
         "fixed_first_output": true, "polarity_optimization": false, "allpass_count": 0,
         "sample_rate": 48000, "evaluation_band_hz": [20.0, 120.0],
     });
-    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/qa");
+    let directory = crate::qa_evidence_dir();
     std::fs::create_dir_all(&directory).unwrap();
     std::fs::write(
         directory.join("continuous-expected-candidate-grid.json"),

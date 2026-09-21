@@ -94,26 +94,27 @@ pub fn validate_provenance_references(config: &RoomConfig) -> ProvenanceValidati
 mod tests {
     use super::*;
     use autoeq_core::Curve;
-    use autoeq_measurements::MeasurementRecord;
+    use autoeq_measurements::{CaptureKind, EvidenceLevel, MeasurementEvidence, MeasurementRecord};
     use ndarray::{Array1, array};
     use roomeq_model::{MeasurementProvenanceReference, ProvenanceConfig};
     use std::collections::HashMap;
 
     fn config(mode: ProvenanceValidationMode, path: Option<std::path::PathBuf>) -> RoomConfig {
-        let mut config = RoomConfig::default();
-        config.provenance = ProvenanceConfig {
-            validation_mode: mode,
-            measurements: HashMap::from([(
-                "left".to_string(),
-                MeasurementProvenanceReference {
-                    record_id: "record".to_string(),
-                    content_hash: "hash".to_string(),
-                    schema_version: 1,
-                    sidecar_path: path,
-                },
-            )]),
-        };
-        config
+        RoomConfig {
+            provenance: ProvenanceConfig {
+                validation_mode: mode,
+                measurements: HashMap::from([(
+                    "left".to_string(),
+                    MeasurementProvenanceReference {
+                        record_id: "record".to_string(),
+                        content_hash: "hash".to_string(),
+                        schema_version: 1,
+                        sidecar_path: path,
+                    },
+                )]),
+            },
+            ..RoomConfig::default()
+        }
     }
 
     #[test]
@@ -179,6 +180,34 @@ mod tests {
                 sidecar_path: Some(path.clone()),
             },
         );
+        // A legacy-grade sidecar surfaces its unknown evidence as warnings:
+        // unknown stays unknown through this boundary, never silent.
+        let surfaced = validate_provenance_references(&matching);
+        assert!(surfaced.errors.is_empty());
+        assert_eq!(
+            surfaced.warnings,
+            vec![
+                "left: measurement capture kind is unknown".to_string(),
+                "left: measurement evidence is unknown".to_string(),
+            ]
+        );
+
+        // A fully identified sidecar is accepted without findings. The
+        // fixture only claims what it has: a real on-disk source
+        // (magnitude-only CSV, no phase or calibration).
+        let mut record = record;
+        record.provenance.capture_kind = CaptureKind::SpatialMagnitude;
+        record.provenance.evidence = MeasurementEvidence {
+            acquisition: EvidenceLevel::Measured,
+            calibration: EvidenceLevel::Unknown,
+            timing: EvidenceLevel::Unknown,
+            phase: EvidenceLevel::Unknown,
+        };
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&record).expect("serialize sidecar"),
+        )
+        .expect("write sidecar");
         assert_eq!(
             validate_provenance_references(&matching),
             ProvenanceValidation::default()

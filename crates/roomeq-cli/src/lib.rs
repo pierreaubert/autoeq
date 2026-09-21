@@ -2,3 +2,4 @@
 
 pub mod convert_recording;
 pub mod roomeq;
+pub mod verification;

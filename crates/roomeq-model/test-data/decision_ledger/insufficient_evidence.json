@@ -1,0 +1,20 @@
+{
+  "ledger_version": "1.0.0",
+  "decisions": [
+    {
+      "decision_id": "d-gap-1",
+      "ledger_version": "1.0.0",
+      "stage": "provisional",
+      "logical_input": "stereo",
+      "physical_output": "main-l",
+      "measurement_refs": ["meas-1"],
+      "seat_refs": ["seat-a"],
+      "frequency_band_hz": [40.0, 400.0],
+      "action": "phase_correct",
+      "status": "insufficient_evidence",
+      "reason_codes": ["phase_evidence_missing"],
+      "evidence_refs": ["ev-1"],
+      "confidence": "unknown"
+    }
+  ]
+}

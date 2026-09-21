@@ -15,34 +15,40 @@
 
 mod acceptance;
 mod band_policy;
+mod capture;
 mod chain_constraints;
 mod corpus;
 mod final_check;
 mod fixtures;
 mod inversion_support;
+mod listening;
 mod metrics;
 mod protocol;
 mod quality;
 mod scenario;
 mod seeded;
 mod stimuli;
+mod trial_import;
 mod types;
 mod validation_corpus;
 
 pub use acceptance::*;
 pub mod electrical_headroom;
 pub use band_policy::*;
+pub use capture::*;
 pub use chain_constraints::*;
 pub use corpus::*;
 pub use final_check::*;
 pub use fixtures::*;
 pub use inversion_support::*;
+pub use listening::*;
 pub use metrics::*;
 pub use protocol::*;
 pub use quality::*;
 pub use scenario::*;
 pub use seeded::*;
 pub use stimuli::*;
+pub use trial_import::*;
 pub use types::*;
 pub use validation_corpus::*;
 

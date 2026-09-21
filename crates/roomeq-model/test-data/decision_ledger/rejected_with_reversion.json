@@ -1,0 +1,49 @@
+{
+  "ledger_version": "1.0.0",
+  "decisions": [
+    {
+      "decision_id": "d-attempt-1",
+      "ledger_version": "1.0.0",
+      "stage": "provisional",
+      "logical_input": "stereo",
+      "physical_output": "main-l",
+      "measurement_refs": ["meas-1"],
+      "seat_refs": ["seat-a"],
+      "frequency_band_hz": [40.0, 400.0],
+      "action": "equalize",
+      "status": "applied",
+      "reason_codes": ["candidate"],
+      "observed": [
+        {"name": "post_p95_abs_residual_db", "value": 2.5, "unit": "db"}
+      ],
+      "limits": [
+        {"name": "max_post_p95_abs_residual_db", "value": 6.0, "unit": "db"}
+      ],
+      "evidence_refs": ["ev-1"],
+      "confidence": "low"
+    },
+    {
+      "decision_id": "d-rollback-1",
+      "ledger_version": "1.0.0",
+      "stage": "final",
+      "logical_input": "stereo",
+      "physical_output": "main-l",
+      "measurement_refs": ["meas-1"],
+      "seat_refs": ["seat-a"],
+      "frequency_band_hz": [40.0, 400.0],
+      "action": "equalize",
+      "status": "reverted",
+      "reason_codes": ["held_out_regression"],
+      "observed": [
+        {"name": "held_out_regression_db", "value": 1.5, "unit": "db"}
+      ],
+      "limits": [
+        {"name": "max_worst_position_regression_db", "value": 0.25, "unit": "db"}
+      ],
+      "evidence_refs": ["ev-1", "ev-held-out"],
+      "confidence": "moderate",
+      "supersedes_ids": ["d-attempt-1"],
+      "final_graph_identity": "graph-identity-fallback-1"
+    }
+  ]
+}

@@ -26,6 +26,7 @@ mod delay;
 mod export_format;
 mod extract;
 mod hash;
+pub mod identity;
 mod misc;
 mod package;
 mod pipewire;
@@ -38,6 +39,10 @@ mod write;
 
 pub use delay::CamillaDspDelayRealization;
 pub use export_format::*;
+pub use identity::{
+    BoundConvolution, DspIdentity, ExportReadiness, canonical_dsp_identity, export_readiness,
+    package_fingerprint,
+};
 pub use package::*;
 
 /// Backend-specific added latency and validity, derived from the same stage

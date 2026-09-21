@@ -1,3 +1,4 @@
+use super::super::constraint_envelope::project_gains_onto_envelopes;
 use super::super::de::optimize_filters_autoeq_with_callback;
 use super::super::run_descriptor::OptimizationRunResult;
 use super::super::{ObjectiveData, optimize_filters_with_algo_override};
@@ -40,7 +41,17 @@ pub fn perform_optimization_with_run_descriptor(
         &lower_bounds,
         &upper_bounds,
     );
-    let mut x = initial_guess(params, &lower_bounds, &upper_bounds);
+    // O1: project the seed onto the configured per-filter gain envelopes so
+    // the search starts inside the feasible region. Deterministic
+    // post-processing that consumes no RNG; bit-identical without envelopes.
+    let mut x = project_gains_onto_envelopes(
+        &initial_guess(params, &lower_bounds, &upper_bounds),
+        params.peq_model,
+        objective_data.loss_type,
+        objective_data.max_boost_envelope.as_deref(),
+        objective_data.min_cut_envelope.as_deref(),
+    )
+    .0;
 
     let result = if resolves_to_backend(&params.algo, "autoeq:de") {
         optimize_filters_autoeq_with_callback(
@@ -104,9 +115,21 @@ pub fn perform_optimization_with_run_descriptor(
         }
     }
 
+    // O1 extraction: realize the envelope-projected parameters the loss was
+    // evaluated on, so the delivered vector matches the scored response.
+    // Bit-identical without envelopes.
+    let parameters = project_gains_onto_envelopes(
+        &x,
+        params.peq_model,
+        objective_data.loss_type,
+        objective_data.max_boost_envelope.as_deref(),
+        objective_data.min_cut_envelope.as_deref(),
+    )
+    .0;
+
     descriptor.finished(stopping_reason);
     Ok(OptimizationRunResult {
-        parameters: x,
+        parameters,
         objective_value,
         descriptor,
     })

@@ -38,6 +38,10 @@ pub mod bass_phase_confidence;
 pub mod cea2034;
 /// Complete path-free preparation and execution for one channel.
 pub mod channel_execution;
+/// Cumulative pruning audit and source-summation checks (E3).
+pub mod pruning_audit;
+/// Provisional correction decision records emitted at the decision site (E2).
+pub mod provisional_decisions;
 /// Path-free phase-linear, hybrid, and mixed-phase channel processing.
 pub mod channel_fir;
 /// Path-free low-latency, warped-IIR, and Kautz-modal channel processing.
@@ -109,6 +113,8 @@ pub mod spectral_align;
 pub use roomeq_analysis::spatial_robustness;
 /// Supporting-source room compensation filter design.
 pub mod supporting_source;
+/// Evidence-aware operation gating and local constraint evaluation (E1).
+pub mod evidence_gate;
 /// Deterministic topology, crossover, and bass-routing primitives.
 pub mod topology;
 /// Path-free time-alignment analysis used by workflow preparation.
@@ -124,3 +130,17 @@ pub use pipeline::{
     EngineRequest, PipelineControl, PipelineEvent, PipelineObserver, PipelineStepId,
     PipelineStepStatus, RoomEngine,
 };
+
+/// QA evidence directory for test artifact retention (test builds only).
+///
+/// Tests that retain JSON evidence for the QA harness write through this
+/// directory: `ROOMEQ_QA_DIR` when set, otherwise the workspace `target/qa`
+/// directory beside the crate. The override keeps runs hermetic where the
+/// shared workspace target is read-only, without changing default
+/// artifact locations.
+#[cfg(test)]
+pub(crate) fn qa_evidence_dir() -> std::path::PathBuf {
+    std::env::var_os("ROOMEQ_QA_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/qa"))
+}

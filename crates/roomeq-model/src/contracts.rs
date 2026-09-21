@@ -40,6 +40,12 @@ pub struct DspGraph {
     /// Metadata about the optimization
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<OptimizationMetadata>,
+    /// Versioned correction decision ledger (global K4 contract). Optional
+    /// so legacy outputs without decision metadata stay readable; engine
+    /// stages record provisional entries and only workflow reconciliation
+    /// binds final records to this delivered graph.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correction_decisions: Option<crate::decision_ledger::CorrectionDecisionLedger>,
 }
 
 impl DspGraph {
@@ -50,6 +56,7 @@ impl DspGraph {
             channels: HashMap::new(),
             deployed_source_curves: HashMap::new(),
             metadata: None,
+            correction_decisions: None,
         }
     }
 

@@ -140,6 +140,105 @@ pub struct UncertaintyMetadata {
     pub warnings: Vec<String>,
 }
 
+/// How the underlying acoustic data was captured.
+///
+/// Reuses core contract K1 [`autoeq_core::evidence::CaptureKind`] verbatim:
+/// stationary IR (full impulse-response timing), spatial magnitude (no
+/// stationary timing reference), direct sound, or unknown. Unknown is the
+/// default and means no temporal/coherent claim may be derived. Shared
+/// (not duplicated) per the G2 mapping record in
+/// `reviews/plan-20260921.md` §4; the serialized form is unchanged.
+pub use autoeq_core::evidence::CaptureKind;
+
+/// Scope of the timing/gain reference an acquisition is bound to.
+///
+/// Maps to core contract K1 `common-reference scope`. Coherent
+/// operations require takes that share one reference identity within
+/// a compatible scope.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReferenceScope {
+    PerTake,
+    PerSeat,
+    PerSource,
+    Session,
+    #[default]
+    Unknown,
+}
+
+/// Evidence grade for one acquisition fact.
+///
+/// Missing is unknown, never zero error or good quality. Legacy
+/// imports always carry [`EvidenceLevel::Unknown`], never guessed data.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceLevel {
+    Measured,
+    Derived,
+    #[default]
+    Unknown,
+}
+
+/// Whether `Curve.spl` values are calibrated absolute SPL or relative.
+///
+/// A display shift or normalization must never silently flip this to
+/// [`SplReference::CalibratedAbsolute`]. Only an explicit calibration
+/// step carrying a calibration identity may set absolute.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SplReference {
+    Relative,
+    CalibratedAbsolute,
+    #[default]
+    Unknown,
+}
+
+/// Microphone orientation at capture time.
+///
+/// Maps to core contract K1 acquisition provenance. All fields are
+/// optional so partially known orientations stay explicit.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct MicOrientation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub azimuth_deg: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elevation_deg: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// Per-aspect evidence grades for one measurement.
+///
+/// Raw acquisition facts and derived analysis results remain
+/// distinguishable: each aspect carries its own grade instead of one
+/// blended score.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MeasurementEvidence {
+    #[serde(default)]
+    pub acquisition: EvidenceLevel,
+    #[serde(default)]
+    pub calibration: EvidenceLevel,
+    #[serde(default)]
+    pub timing: EvidenceLevel,
+    #[serde(default)]
+    pub phase: EvidenceLevel,
+}
+
+impl MeasurementEvidence {
+    pub fn unknown() -> Self {
+        Self {
+            acquisition: EvidenceLevel::Unknown,
+            calibration: EvidenceLevel::Unknown,
+            timing: EvidenceLevel::Unknown,
+            phase: EvidenceLevel::Unknown,
+        }
+    }
+
+    pub fn is_fully_unknown(&self) -> bool {
+        *self == Self::unknown()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MeasurementProvenance {
     #[serde(default = "schema_name")]
@@ -156,6 +255,57 @@ pub struct MeasurementProvenance {
     pub acquisition: AcquisitionMetadata,
     #[serde(default)]
     pub uncertainty: UncertaintyMetadata,
+    /// K1 capture kind. Unknown by default: no temporal claim allowed.
+    #[serde(default)]
+    pub capture_kind: CaptureKind,
+    /// K1 source identity (which loudspeaker / logical source).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<String>,
+    /// K1 seat identity (which listening position).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seat_id: Option<String>,
+    /// K1 reference identity shared by coherently combined takes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_id: Option<String>,
+    /// K1 common-reference scope for `reference_id`.
+    #[serde(default)]
+    pub reference_scope: ReferenceScope,
+    /// Raw acquisition IR offset in seconds. Set once from the source
+    /// artifact and never overwritten by recentering; see
+    /// `applied_ir_offset_s`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_ir_offset_s: Option<f64>,
+    /// Last requested recentering offset in seconds. The raw value in
+    /// `original_ir_offset_s` always stays recoverable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_ir_offset_s: Option<f64>,
+    /// K1 raw artifact hash (unprocessed capture bytes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_artifact_hash: Option<String>,
+    /// K1 stimulus hash (what was played during the capture).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stimulus_hash: Option<String>,
+    /// K1 microphone orientation at capture time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mic_orientation: Option<MicOrientation>,
+    /// K1 applied calibration identity. `None` means uncalibrated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calibration_id: Option<String>,
+    /// K1 calibration application state. Only an explicit calibration
+    /// step may set this; display/normalization paths must not.
+    #[serde(default)]
+    pub calibration_applied: bool,
+    /// K1 processing-chain identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain_id: Option<String>,
+    /// Per-aspect evidence grades. Legacy imports are fully unknown.
+    #[serde(default)]
+    pub evidence: MeasurementEvidence,
+    /// Whether `Curve.spl` is relative or calibrated absolute SPL.
+    /// Legacy curves are relative; this is preserved behavior, not a
+    /// guess about the room level.
+    #[serde(default)]
+    pub level_reference: SplReference,
     #[serde(default)]
     pub extensions: BTreeMap<String, Value>,
     /// Forward-compatible producer fields.  These are deliberately retained
@@ -165,6 +315,13 @@ pub struct MeasurementProvenance {
 }
 
 impl MeasurementProvenance {
+    /// Legacy import with explicit unknown evidence.
+    ///
+    /// No acquisition fact is guessed: capture kind, identities,
+    /// hashes, orientation, calibration and timing evidence all stay
+    /// unset/unknown. `level_reference` stays [`SplReference::Relative`],
+    /// which preserves the historical meaning of `Curve.spl` under
+    /// normalization (relative shape, never calibrated SPL).
     pub fn legacy(curve: &Curve) -> Result<Self, ProvenanceError> {
         Ok(Self {
             schema: schema_name(),
@@ -175,6 +332,21 @@ impl MeasurementProvenance {
             ledger: Vec::new(),
             acquisition: AcquisitionMetadata::default(),
             uncertainty: UncertaintyMetadata::default(),
+            capture_kind: CaptureKind::Unknown,
+            source_id: None,
+            seat_id: None,
+            reference_id: None,
+            reference_scope: ReferenceScope::Unknown,
+            original_ir_offset_s: None,
+            applied_ir_offset_s: None,
+            raw_artifact_hash: None,
+            stimulus_hash: None,
+            mic_orientation: None,
+            calibration_id: None,
+            calibration_applied: false,
+            chain_id: None,
+            evidence: MeasurementEvidence::unknown(),
+            level_reference: SplReference::Relative,
             extensions: BTreeMap::new(),
             unknown_fields: BTreeMap::new(),
         })
@@ -296,6 +468,21 @@ impl MeasurementRecord {
             report
                 .warnings
                 .push("measurement has no source artifact evidence".into());
+        }
+        if self.provenance.capture_kind == CaptureKind::Unknown {
+            report
+                .warnings
+                .push("measurement capture kind is unknown".into());
+        }
+        if self.provenance.evidence.is_fully_unknown() {
+            report
+                .warnings
+                .push("measurement evidence is unknown".into());
+        }
+        if self.provenance.calibration_applied && self.provenance.calibration_id.is_none() {
+            report.errors.push(
+                "measurement claims applied calibration without a calibration identity".into(),
+            );
         }
         if matches!(mode, ValidationMode::Strict)
             && self.provenance.origin == MeasurementOrigin::Legacy

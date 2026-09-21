@@ -31,6 +31,7 @@ fn output_with_plugins(plugins: Vec<PluginConfigWrapper>) -> DspGraph {
         global_plugins: Vec::new(),
         channels: HashMap::from([("left".to_string(), channel("left", plugins))]),
         metadata: None,
+        correction_decisions: None,
     }
 }
 
@@ -658,6 +659,7 @@ fn camilladsp_rejects_channel_identifier_collisions() {
             ("left-A".to_string(), channel("left-A", Vec::new())),
         ]),
         metadata: None,
+        correction_decisions: None,
     };
 
     let error = camilladsp_error(&output);

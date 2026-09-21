@@ -21,6 +21,8 @@ pub mod auto_tune;
 pub mod config;
 pub mod contracts;
 pub mod crossover_cancellation;
+pub mod decision_ledger;
+pub mod eligibility;
 pub mod home_cinema;
 pub use crossover_cancellation::*;
 pub mod home_cinema_resolution;

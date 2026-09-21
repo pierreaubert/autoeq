@@ -28,7 +28,7 @@ use roomeq_model::{DspChainOutput, MeasurementRef, MeasurementSource, RoomConfig
 use roomeq_workflow::{
     ChannelOptimizationResult, DEFAULT_FREQUENCY_SAMPLES, ExportFormat, RoomOptimizationResult,
     RoomPipeline, RoomPipelineRequest, export_dsp_chain_with_convolution_sidecars,
-    load_config_with_frequency_samples, save_dsp_chain,
+    load_config_with_frequency_samples, load_merged_config_strict, save_dsp_chain,
 };
 
 /// Version of the [`RunManifest`] schema written next to every pipeline output.
@@ -48,6 +48,148 @@ fn require_playback_outcome(outcome: Option<roomeq_model::RoomEqOutcome>) -> Res
         }
         other => Err(anyhow!("RoomEQ has no approved playback result: {other:?}")),
     }
+}
+
+/// Whether an outcome approves playback. Only `Accepted` and `Unchanged`
+/// approve; anything else (including a missing outcome) keeps the failure
+/// exit. A written output JSON file never changes this: file existence is
+/// not a successful correction.
+pub fn playback_approved(outcome: Option<roomeq_model::RoomEqOutcome>) -> bool {
+    require_playback_outcome(outcome).is_ok()
+}
+
+/// Process exit code for a final outcome: 0 only when playback is approved.
+pub fn exit_code_for_outcome(outcome: Option<roomeq_model::RoomEqOutcome>) -> i32 {
+    if playback_approved(outcome) { 0 } else { 1 }
+}
+
+/// Validate evidence/policy fields through the shared model loader.
+///
+/// Uses the same strict file boundary as production runs, so unknown or
+/// mistyped fields fail here with configuration, file, and field context
+/// instead of mid-optimization. The K4 decision ledger and K2 eligibility
+/// types are not yet published by the model lane; until that G2 contract
+/// lands, this validates the frozen HEAD schema and reports the ledger
+/// summary as blocked in the lane handoff.
+pub fn validate_config_file_with_context(
+    config_path: &std::path::Path,
+    override_config_path: Option<&std::path::Path>,
+) -> Result<(RoomConfig, PathBuf)> {
+    load_merged_config_strict(config_path, override_config_path).with_context(|| {
+        format!(
+            "Failed to validate evidence/policy fields in config {:?}{}",
+            config_path,
+            override_config_path.map_or(String::new(), |override_path| {
+                format!(" with override {:?}", override_path)
+            })
+        )
+    })
+}
+
+/// Machine-readable acceptance label for an optional acceptance report.
+///
+/// Legacy outputs without acceptance metadata report `unknown`: the absence
+/// is displayed honestly and never filled in from curves or stage history.
+pub fn acceptance_status_label(
+    report: Option<&roomeq_model::CorrectionAcceptanceReport>,
+) -> &'static str {
+    match report.map(|report| report.outcome) {
+        Some(roomeq_model::RoomEqOutcome::Accepted) => "accepted",
+        Some(roomeq_model::RoomEqOutcome::Unchanged) => "unchanged",
+        Some(roomeq_model::RoomEqOutcome::Rejected) => "rejected",
+        Some(roomeq_model::RoomEqOutcome::InsufficientEvidence) => "insufficient_evidence",
+        None => "unknown",
+    }
+}
+
+/// Final failure reason, or `unavailable` when none was recorded.
+///
+/// A missing reason is shown as unavailable and never inferred from the
+/// final curve or from stage history.
+pub fn final_reason_or_unavailable(
+    report: Option<&roomeq_model::CorrectionAcceptanceReport>,
+) -> String {
+    match report {
+        Some(report) if !report.violations.is_empty() => report.violations.join("; "),
+        Some(report) if !report.reverted_stages.is_empty() => {
+            format!("reverted stages: {}", report.reverted_stages.join(", "))
+        }
+        _ => "unavailable".to_string(),
+    }
+}
+
+/// User-facing summary of the FINAL acceptance record.
+///
+/// The outcome and reason come only from the final acceptance report and
+/// override any per-stage history: a rejected run with applied-looking
+/// stages is still rejected, and an accepted run with failed advisory
+/// stages is still accepted. Band and support fields come from the final
+/// scorecard when present; anything unmeasured is listed as unassessed and
+/// never contributes a passing claim. Constraint detail beyond the HEAD
+/// acceptance report awaits the K4 ledger (blocked on the model lane).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FinalDecisionSummary {
+    /// One of `accepted`, `unchanged`, `rejected`, `insufficient_evidence`, `unknown`.
+    pub outcome: String,
+    /// First recorded reason, or `unavailable` when none was recorded.
+    pub reason: String,
+    /// Active-correction band from the final scorecard, when reported.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correction_band_hz: Option<[f64; 2]>,
+    /// Fixed observation band from the final scorecard, when reported.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evaluated_band_hz: Option<[f64; 2]>,
+    /// Requested sub-bands with no measured support (never passing).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unassessed_bands_hz: Vec<[f64; 2]>,
+}
+
+/// Requested evaluation bands minus measured overlap: the remainder is
+/// unassessed and must never read as passing support.
+fn unassessed_bands(
+    evaluated_band_hz: [f64; 2],
+    measurement_overlap_hz: Option<[f64; 2]>,
+) -> Vec<[f64; 2]> {
+    let mut unassessed = Vec::new();
+    if let Some(overlap) = measurement_overlap_hz {
+        if overlap[0] > evaluated_band_hz[0] {
+            unassessed.push([evaluated_band_hz[0], overlap[0]]);
+        }
+        if overlap[1] < evaluated_band_hz[1] {
+            unassessed.push([overlap[1], evaluated_band_hz[1]]);
+        }
+    }
+    unassessed
+}
+
+/// Summarize the final decision from the authoritative acceptance record.
+pub fn summarize_final_decision(
+    report: Option<&roomeq_model::CorrectionAcceptanceReport>,
+    scorecard: Option<&roomeq_model::AcousticQualityScorecard>,
+) -> FinalDecisionSummary {
+    FinalDecisionSummary {
+        outcome: acceptance_status_label(report).to_string(),
+        reason: final_reason_or_unavailable(report),
+        correction_band_hz: scorecard.and_then(|scorecard| scorecard.correction_band_hz),
+        evaluated_band_hz: scorecard.map(|scorecard| scorecard.evaluated_band_hz),
+        unassessed_bands_hz: scorecard
+            .map(|scorecard| {
+                unassessed_bands(
+                    scorecard.evaluated_band_hz,
+                    scorecard.measurement_overlap_hz,
+                )
+            })
+            .unwrap_or_default(),
+    }
+}
+
+/// Display a nominal listening level without implying measured SPL.
+///
+/// `PruningEvaluation.listening_levels_phon` and recording signal levels are
+/// nominal assumptions, not calibrated measurements; the label always says
+/// nominal phon and never calibrated or measured SPL.
+pub fn format_nominal_level_display(level_phon: f64) -> String {
+    format!("nominal {level_phon} phon (not measured SPL)")
 }
 
 /// Transactional completion marker for one CLI pipeline run.
@@ -1352,10 +1494,12 @@ mod tests {
     use clap::Parser;
 
     use super::{
-        Args, RunManifest, duplicate_seats, enabled_phase_controls, export_preflight_warnings,
-        intersect_spans, is_known_algorithm, manifest_path_for, multisub_seat_order_mismatch,
-        partial_export_diagnostic, probe_span, resolve_seat_sources, run_dry_run,
-        strict_input_schema, validate_optimizer_resources, write_run_manifest,
+        Args, RunManifest, acceptance_status_label, duplicate_seats, enabled_phase_controls,
+        exit_code_for_outcome, export_preflight_warnings, final_reason_or_unavailable,
+        format_nominal_level_display, intersect_spans, is_known_algorithm, manifest_path_for,
+        multisub_seat_order_mismatch, partial_export_diagnostic, playback_approved, probe_span,
+        resolve_seat_sources, run_dry_run, strict_input_schema, summarize_final_decision,
+        validate_config_file_with_context, validate_optimizer_resources, write_run_manifest,
     };
 
     #[test]
@@ -1817,5 +1961,225 @@ mod tests {
             serde_json::json!(false),
             "v3 subwoofer configuration uses explicit outputs and rejects unknown properties"
         );
+    }
+
+    fn acceptance_report(
+        outcome: roomeq_model::RoomEqOutcome,
+        violations: Vec<&str>,
+    ) -> roomeq_model::CorrectionAcceptanceReport {
+        let json = serde_json::json!({
+            "policy": "runtime_safety",
+            "decision": "rejected",
+            "accepted": false,
+            "outcome": match outcome {
+                roomeq_model::RoomEqOutcome::Accepted => "accepted",
+                roomeq_model::RoomEqOutcome::Unchanged => "unchanged",
+                roomeq_model::RoomEqOutcome::Rejected => "rejected",
+                roomeq_model::RoomEqOutcome::InsufficientEvidence => "insufficient_evidence",
+            },
+            "metrics": {
+                "auditory_frequency_measure": "erb_rate",
+                "pre_target_weighted_rms_db": 4.0,
+                "post_target_weighted_rms_db": 3.0,
+                "improvement_db": 1.0,
+                "improvement_ratio": 0.25,
+                "post_p95_abs_residual_db": 5.0,
+                "post_worst_abs_residual_db": 9.0,
+                "correction_rms_db": 2.0,
+                "max_abs_correction_db": 6.0
+            },
+            "violations": violations,
+        });
+        let mut report: roomeq_model::CorrectionAcceptanceReport =
+            serde_json::from_value(json).expect("fixture report must parse");
+        report.outcome = outcome;
+        report
+    }
+
+    fn scorecard_json(
+        correction_band_hz: Option<[f64; 2]>,
+        evaluated_band_hz: [f64; 2],
+        measurement_overlap_hz: Option<[f64; 2]>,
+    ) -> roomeq_model::AcousticQualityScorecard {
+        let json = serde_json::json!({
+            "training": {
+                "curve_count": 2,
+                "pre_weighted_rms_median_db": 4.0,
+                "post_weighted_rms_median_db": 3.0,
+                "improvement_median_db": 1.0,
+                "pre_p95_abs_residual_db": 5.0,
+                "post_p95_abs_residual_db": 4.0,
+                "post_worst_abs_residual_db": 8.0,
+                "mean_normalized_seat_spread_db": 0.5,
+                "max_normalized_seat_spread_db": 1.0
+            },
+            "correction_rms_db": 2.0,
+            "max_boost_db": 6.0,
+            "max_cut_db": 4.0,
+            "temporal": {},
+            "correction_band_hz": correction_band_hz,
+            "evaluated_band_hz": evaluated_band_hz,
+            "measurement_overlap_hz": measurement_overlap_hz,
+            "finite": true
+        });
+        serde_json::from_value(json).expect("fixture scorecard must parse")
+    }
+
+    #[test]
+    fn cli_evidence_validation_reports_field_path() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let config_path = dir.path().join("room.json");
+        let mut value =
+            serde_json::to_value(roomeq_model::RoomConfig::default()).expect("serialize default");
+        value["optimizer"]["bogus_evidence_knob"] = serde_json::json!(1.0);
+        std::fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&value).expect("serialize config"),
+        )
+        .expect("write config");
+
+        // Unknown evidence/policy fields fail through the shared loader with
+        // the field path and the config file in context.
+        let error = validate_config_file_with_context(&config_path, None)
+            .expect_err("unknown field must fail validation");
+        let text = format!("{error:#}");
+        assert!(text.contains("bogus_evidence_knob"), "{text}");
+        assert!(text.contains("room.json"), "{text}");
+
+        // Override-file context names the override file as well.
+        let base_path = dir.path().join("base.json");
+        std::fs::write(
+            &base_path,
+            serde_json::to_string_pretty(
+                &serde_json::to_value(roomeq_model::RoomConfig::default())
+                    .expect("serialize default"),
+            )
+            .expect("serialize config"),
+        )
+        .expect("write base config");
+        let override_path = dir.path().join("override.json");
+        std::fs::write(
+            &override_path,
+            r#"{"optimizer": {"bogus_policy_knob": 2.0}}"#,
+        )
+        .expect("write override");
+        let error = validate_config_file_with_context(&base_path, Some(&override_path))
+            .expect_err("unknown override field must fail validation");
+        let text = format!("{error:#}");
+        assert!(text.contains("bogus_policy_knob"), "{text}");
+        assert!(text.contains("override.json"), "{text}");
+    }
+
+    #[test]
+    fn cli_final_decision_overrides_stage_history() {
+        use roomeq_model::{RoomEqOutcome, StageOutcome, StageStatus};
+
+        // A rejected final record stays rejected even when a stage claims it
+        // applied a change; stage history never overrides the final outcome.
+        let rejected = acceptance_report(RoomEqOutcome::Rejected, vec!["no_safe_candidate"]);
+        let applied_stage = StageOutcome {
+            stage: "polish".to_string(),
+            status: StageStatus::Applied,
+            advisories: Vec::new(),
+            checks: Vec::new(),
+        };
+        let summary = summarize_final_decision(Some(&rejected), None);
+        assert_eq!(summary.outcome, "rejected");
+        assert_eq!(summary.reason, "no_safe_candidate");
+        assert!(matches!(applied_stage.status, StageStatus::Applied));
+
+        // An accepted final record stays accepted even with a failed advisory
+        // stage in its history.
+        let accepted = acceptance_report(RoomEqOutcome::Accepted, vec![]);
+        let failed_stage = StageOutcome {
+            stage: "advisory_polish".to_string(),
+            status: StageStatus::Failed,
+            advisories: vec!["advisory only".to_string()],
+            checks: Vec::new(),
+        };
+        let summary = summarize_final_decision(Some(&accepted), None);
+        assert_eq!(summary.outcome, "accepted");
+        // A missing reason is unavailable, never inferred from the curve.
+        assert_eq!(summary.reason, "unavailable");
+        assert!(matches!(failed_stage.status, StageStatus::Failed));
+
+        // Band and unassessed support come from the final scorecard: the
+        // evaluated band minus measured overlap is unassessed, never passing.
+        let scorecard = scorecard_json(Some([40.0, 4000.0]), [20.0, 8000.0], Some([40.0, 4000.0]));
+        let summary = summarize_final_decision(Some(&rejected), Some(&scorecard));
+        assert_eq!(summary.correction_band_hz, Some([40.0, 4000.0]));
+        assert_eq!(summary.evaluated_band_hz, Some([20.0, 8000.0]));
+        assert_eq!(
+            summary.unassessed_bands_hz,
+            vec![[20.0, 40.0], [4000.0, 8000.0]]
+        );
+    }
+
+    #[test]
+    fn cli_rejected_or_unverified_keeps_failure_exit() {
+        use roomeq_model::RoomEqOutcome;
+
+        assert!(playback_approved(Some(RoomEqOutcome::Accepted)));
+        assert!(playback_approved(Some(RoomEqOutcome::Unchanged)));
+        assert!(!playback_approved(Some(RoomEqOutcome::Rejected)));
+        assert!(!playback_approved(Some(
+            RoomEqOutcome::InsufficientEvidence
+        )));
+        assert!(!playback_approved(None));
+        assert_eq!(exit_code_for_outcome(Some(RoomEqOutcome::Accepted)), 0);
+        assert_eq!(exit_code_for_outcome(Some(RoomEqOutcome::Unchanged)), 0);
+        assert_eq!(exit_code_for_outcome(Some(RoomEqOutcome::Rejected)), 1);
+        assert_eq!(
+            exit_code_for_outcome(Some(RoomEqOutcome::InsufficientEvidence)),
+            1
+        );
+        assert_eq!(exit_code_for_outcome(None), 1);
+
+        // A written output JSON file does not imply success: the same
+        // rejected outcome keeps the failure exit with the file on disk.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let output = dir.path().join("dsp.json");
+        std::fs::write(&output, r#"{"status": "rejected"}"#).expect("write output json");
+        assert!(output.is_file(), "output JSON exists on disk");
+        assert!(
+            !playback_approved(Some(RoomEqOutcome::Rejected)),
+            "existing output JSON must not flip a rejected outcome"
+        );
+        assert_eq!(
+            exit_code_for_outcome(Some(RoomEqOutcome::Rejected)),
+            1,
+            "existing output JSON must not flip the failure exit"
+        );
+    }
+
+    #[test]
+    fn cli_legacy_missing_metadata_is_unknown() {
+        // Legacy DSP graphs without acceptance metadata stay readable and
+        // report unknown instead of a fabricated verdict.
+        let legacy = roomeq_model::DspChainOutput::new("0.5.0");
+        let roundtrip: roomeq_model::DspChainOutput =
+            serde_json::from_str(&serde_json::to_string(&legacy).expect("serialize legacy"))
+                .expect("legacy output must still parse");
+        assert!(roundtrip.metadata.is_none());
+        assert_eq!(acceptance_status_label(None), "unknown");
+        assert_eq!(final_reason_or_unavailable(None), "unavailable");
+        let summary = summarize_final_decision(None, None);
+        assert_eq!(summary.outcome, "unknown");
+        assert_eq!(summary.reason, "unavailable");
+        assert!(summary.correction_band_hz.is_none());
+        assert!(summary.unassessed_bands_hz.is_empty());
+    }
+
+    #[test]
+    fn cli_nominal_level_not_displayed_as_calibrated_spl() {
+        // Nominal phon settings must never read as calibrated measurement:
+        // the label states the nominal assumption and disclaims SPL proof.
+        for level in [55.0, 75.0] {
+            let label = format_nominal_level_display(level);
+            assert!(label.contains("nominal"), "{label}");
+            assert!(label.contains("phon"), "{label}");
+            assert!(label.contains("not measured SPL"), "{label}");
+            assert!(!label.contains("calibrated"), "{label}");
+        }
     }
 }

@@ -534,6 +534,68 @@ pub fn compare_quality_to_baseline(
     })
 }
 
+/// Assessed support for one scorecard: which bands were requested and
+/// which were actually measured, plus the K2 eligibility references the
+/// assessment rests on.
+///
+/// Optimization, correction and evaluation bands are distinct inputs: the
+/// optimizer may request one band, the active correction may cover a
+/// narrower one, and scoring always observes the fixed evaluation band.
+/// Anything requested but unmeasured is listed in `unassessed_bands_hz`
+/// and must never contribute a zero residual or a passing score.
+/// `evidence_refs` carries caller-supplied K2 operation-eligibility
+/// reference ids (computed by `roomeq-analysis`); an empty list means the
+/// assessment ran without eligibility evidence, not that support was good.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AssessedScorecardSupport {
+    /// Band the optimizer was asked to improve, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub optimization_band_hz: Option<[f64; 2]>,
+    /// Band the active correction covers, when a policy was selected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correction_band_hz: Option<[f64; 2]>,
+    /// Fixed observation band the scorecard was evaluated over.
+    pub evaluated_band_hz: [f64; 2],
+    /// Common measured band, when independently assessed inputs overlap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measurement_overlap_hz: Option<[f64; 2]>,
+    /// Requested evaluation sub-bands with no measured support.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unassessed_bands_hz: Vec<[f64; 2]>,
+    /// K2 eligibility reference ids backing the assessment.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence_refs: Vec<String>,
+}
+
+/// Describe which evaluation sub-bands a scorecard actually assessed.
+/// Bands are kept as caller-supplied inputs: this function reports
+/// support, it never invents eligibility or fills unmeasured bands.
+pub fn describe_assessed_support(
+    scorecard: &AcousticQualityScorecard,
+    optimization_band_hz: Option<[f64; 2]>,
+    correction_band_hz: Option<[f64; 2]>,
+    evidence_refs: &[String],
+) -> AssessedScorecardSupport {
+    let evaluated = scorecard.evaluated_band_hz;
+    let mut unassessed_bands_hz = Vec::new();
+    if let Some(overlap) = scorecard.measurement_overlap_hz {
+        if overlap[0] > evaluated[0] {
+            unassessed_bands_hz.push([evaluated[0], overlap[0]]);
+        }
+        if overlap[1] < evaluated[1] {
+            unassessed_bands_hz.push([overlap[1], evaluated[1]]);
+        }
+    }
+    AssessedScorecardSupport {
+        optimization_band_hz,
+        correction_band_hz: correction_band_hz.or(scorecard.correction_band_hz),
+        evaluated_band_hz: evaluated,
+        measurement_overlap_hz: scorecard.measurement_overlap_hz,
+        unassessed_bands_hz,
+        evidence_refs: evidence_refs.to_vec(),
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Sample {
     frequency: f64,
@@ -1004,7 +1066,7 @@ mod tests {
                 ],
             );
             let score = evaluate_acoustic_quality(
-                &[pre.clone()],
+                std::slice::from_ref(&pre),
                 &[post],
                 &[],
                 &[],
@@ -1034,7 +1096,7 @@ mod tests {
         let pre = curve(&[20.0, 100.0, 200.0, 500.0], &[80.0; 4]);
         let post = curve(&[20.0, 100.0, 200.0, 500.0], &[40.0, 40.0, 40.0, -40.0]);
         let score = evaluate_acoustic_quality_with_permitted_gain(
-            &[pre.clone()],
+            std::slice::from_ref(&pre),
             &[post],
             &[],
             &[],
@@ -1163,7 +1225,7 @@ mod tests {
         let target = flat(83.0);
         let evaluate = |post: &Curve| {
             evaluate_acoustic_quality_with_permitted_gain(
-                &[pre.clone()],
+                std::slice::from_ref(&pre),
                 std::slice::from_ref(post),
                 &[],
                 &[],
@@ -1703,6 +1765,267 @@ mod tests {
         assert!(
             observed < 1e-9,
             "pure FIR latency must not appear as ripple"
+        );
+    }
+
+    fn wide_grid() -> Vec<f64> {
+        vec![
+            20.0, 50.0, 100.0, 150.0, 200.0, 300.0, 500.0, 1000.0, 2000.0, 5000.0, 10_000.0,
+            20_000.0,
+        ]
+    }
+
+    fn flat_curve(frequencies: &[f64], level: f64) -> Curve {
+        curve(frequencies, &vec![level; frequencies.len()])
+    }
+
+    fn temporal_for(pre: &[Curve], post: &[Curve]) -> roomeq_model::TemporalQualityEvidence {
+        derive_temporal_quality_evidence(&[], pre, post, 48_000.0)
+    }
+
+    #[test]
+    fn quality_mean_improvement_cannot_hide_worst_seat() {
+        // F08: one seat's bass hump is fixed while another seat gains one.
+        // Shapes (not flat offsets) survive level normalization, so the
+        // median improvement stays positive while one seat regresses; the
+        // worst-seat statistic and per-seat acceptance must not hide it.
+        let frequencies = wide_grid();
+        let target = flat_curve(&frequencies, 80.0);
+        let hump = |level: f64| -> Vec<f64> {
+            frequencies
+                .iter()
+                .map(|frequency| if *frequency <= 200.0 { level } else { 80.0 })
+                .collect()
+        };
+        let seat_a_pre = curve(&frequencies, &hump(86.0));
+        let seat_a_post = flat_curve(&frequencies, 80.0);
+        let seat_b_pre = flat_curve(&frequencies, 80.0);
+        let seat_b_post = curve(&frequencies, &hump(84.0));
+        // Held-out seat (zero training weight) improves: it must be
+        // retained alongside the damaged training seat, not averaged away.
+        let held_pre = curve(&frequencies, &hump(86.0));
+        let held_post = flat_curve(&frequencies, 80.0);
+        let training_pre = vec![seat_a_pre, seat_b_pre];
+        let training_post = vec![seat_a_post, seat_b_post];
+
+        let scorecard = evaluate_acoustic_quality(
+            &training_pre,
+            &training_post,
+            &[held_pre],
+            &[held_post],
+            Some(&target),
+            config(),
+            temporal_for(&training_pre, &training_post),
+        )
+        .unwrap();
+        assert!(
+            scorecard.training.improvement_median_db > 0.0,
+            "median hides the damage: {}",
+            scorecard.training.improvement_median_db
+        );
+        assert!(
+            scorecard.training.worst_position_improvement_db < 0.0,
+            "worst seat must stay visible: {}",
+            scorecard.training.worst_position_improvement_db
+        );
+        assert!(scorecard.held_out.is_some(), "held-out seat retained");
+
+        let acceptance = crate::evaluate_multi_seat_acceptance(
+            &training_pre,
+            &training_post,
+            &[curve(&frequencies, &hump(86.0))],
+            &[flat_curve(&frequencies, 80.0)],
+            &target,
+        )
+        .unwrap();
+        assert!(!acceptance.training.accepted());
+        assert!(!acceptance.accepted(), "damaged seat rejects the candidate");
+        assert_eq!(acceptance.training.worst_seat_index, Some(1));
+        assert!(
+            acceptance
+                .training
+                .worst_position_improvement_db
+                .is_some_and(|worst| worst < 0.0)
+        );
+    }
+
+    #[test]
+    fn quality_normalization_cannot_hide_output_loss() {
+        // F11: a 6 dB broadband loss is shape-neutral under level
+        // normalization, but the unnormalized output evidence must keep it
+        // and the gate must fail until the trim is explicitly permitted.
+        let frequencies = wide_grid();
+        let pre = flat_curve(&frequencies, 80.0);
+        let post = flat_curve(&frequencies, 74.0);
+        let scorecard = evaluate_acoustic_quality(
+            std::slice::from_ref(&pre),
+            std::slice::from_ref(&post),
+            &[],
+            &[],
+            None,
+            config(),
+            temporal_for(std::slice::from_ref(&pre), std::slice::from_ref(&post)),
+        )
+        .unwrap();
+        assert!(scorecard.training.improvement_median_db.abs() < 1e-9);
+        let evidence = &scorecard.useful_output[0];
+        assert!(
+            (evidence.unexplained_loss_rms_db - 6.0).abs() < 1e-9,
+            "loss {}",
+            evidence.unexplained_loss_rms_db
+        );
+        let gate = evaluate_quality_gate(&scorecard, QualityGatePolicy::default(), true);
+        assert!(!gate.passed);
+        assert!(
+            gate.violations
+                .contains(&String::from("unexplained_useful_output_loss"))
+        );
+
+        // The same trim as an explicitly permitted gain budget passes:
+        // budgets sit beside normalized metrics, never hidden by them.
+        let budgeted = evaluate_acoustic_quality_with_permitted_gain(
+            &[pre],
+            &[post],
+            &[],
+            &[],
+            None,
+            config(),
+            temporal_for(
+                &[flat_curve(&frequencies, 80.0)],
+                &[flat_curve(&frequencies, 74.0)],
+            ),
+            // Authorized trims are negative for cuts: -6 dB permits the drop.
+            -6.0,
+        )
+        .unwrap();
+        assert!(
+            budgeted.useful_output[0].unexplained_loss_rms_db.abs() < 1e-9,
+            "loss {}",
+            budgeted.useful_output[0].unexplained_loss_rms_db
+        );
+        let gate = evaluate_quality_gate(&budgeted, QualityGatePolicy::default(), true);
+        assert!(gate.passed, "budgeted trim passes: {gate:?}");
+    }
+
+    #[test]
+    fn quality_bass_only_keeps_upper_evaluation_band() {
+        // F14: bass is corrected while an unrelated +3 dB upper-band shelf
+        // damages timbre. Evaluation keeps the full band (a bass-only
+        // correction band never narrows it) and the timbre guard catches
+        // the damage. Absolute levels pin the bands apart exactly.
+        let frequencies = wide_grid();
+        let target = flat_curve(&frequencies, 80.0);
+        // Split between grid bins so no shared bin straddles the bands.
+        let unnormalized = QualityEvaluationConfig {
+            normalize_level: false,
+            schroeder_hz: Some(250.0),
+            ..config()
+        };
+        let pre_spl: Vec<f64> = frequencies
+            .iter()
+            .map(|frequency| if *frequency <= 200.0 { 86.0 } else { 80.0 })
+            .collect();
+        let post_spl: Vec<f64> = frequencies
+            .iter()
+            .map(|frequency| if *frequency <= 200.0 { 80.0 } else { 83.0 })
+            .collect();
+        let pre = curve(&frequencies, &pre_spl);
+        let post = curve(&frequencies, &post_spl);
+
+        let scorecard = evaluate_acoustic_quality(
+            std::slice::from_ref(&pre),
+            std::slice::from_ref(&post),
+            &[],
+            &[],
+            Some(&target),
+            unnormalized,
+            temporal_for(std::slice::from_ref(&pre), std::slice::from_ref(&post)),
+        )
+        .unwrap();
+        assert_eq!(scorecard.evaluated_band_hz, [20.0, 20_000.0]);
+        assert!(
+            scorecard
+                .training
+                .bass_post_weighted_rms_db
+                .is_some_and(|bass| bass < 1e-9),
+            "bass corrected"
+        );
+        let upper_pre = scorecard.training.upper_pre_weighted_rms_db.unwrap();
+        let upper_post = scorecard.training.upper_post_weighted_rms_db.unwrap();
+        assert!(upper_pre.abs() < 1e-9);
+        assert!((upper_post - 3.0).abs() < 1e-9);
+        let gate = evaluate_quality_gate(&scorecard, QualityGatePolicy::default(), true);
+        assert!(!gate.passed);
+        assert!(
+            gate.violations
+                .contains(&String::from("upper_band_timbre_regressed"))
+        );
+
+        // Correction and evaluation bands stay distinct inputs: a bass-only
+        // correction band narrows neither the observation nor the verdict.
+        let support =
+            describe_assessed_support(&scorecard, Some([20.0, 20_000.0]), Some([20.0, 200.0]), &[]);
+        assert_eq!(support.evaluated_band_hz, [20.0, 20_000.0]);
+        assert_eq!(support.correction_band_hz, Some([20.0, 200.0]));
+        assert!(support.unassessed_bands_hz.is_empty());
+    }
+
+    #[test]
+    fn quality_missing_band_is_unassessed() {
+        // F05/F06: curves covering 20-200 Hz of a 20 Hz-20 kHz evaluation
+        // leave the upper band unassessed (None, never zero), and disjoint
+        // inputs error instead of scoring. Alignment stays on supported
+        // overlap; nothing is interpolated across the coverage gap.
+        let narrow = vec![20.0, 50.0, 100.0, 150.0, 200.0];
+        let target = flat_curve(&narrow, 80.0);
+        let pre = curve(&narrow, &[86.0, 85.0, 84.0, 83.0, 82.0]);
+        let post = curve(&narrow, &[81.0, 80.5, 80.0, 80.0, 80.0]);
+        let scorecard = evaluate_acoustic_quality(
+            std::slice::from_ref(&pre),
+            std::slice::from_ref(&post),
+            &[],
+            &[],
+            Some(&target),
+            config(),
+            temporal_for(std::slice::from_ref(&pre), std::slice::from_ref(&post)),
+        )
+        .unwrap();
+        assert_eq!(scorecard.evaluated_band_hz, [20.0, 20_000.0]);
+        assert_eq!(scorecard.measurement_overlap_hz, Some([20.0, 200.0]));
+        assert!(
+            scorecard.training.upper_pre_weighted_rms_db.is_none()
+                && scorecard.training.upper_post_weighted_rms_db.is_none(),
+            "upper band without support is unassessed, not zero"
+        );
+        let support = describe_assessed_support(
+            &scorecard,
+            None,
+            None,
+            &[String::from("k2-eligibility-seat-0")],
+        );
+        assert_eq!(support.unassessed_bands_hz, vec![[200.0, 20_000.0]]);
+        assert_eq!(
+            support.evidence_refs,
+            vec![String::from("k2-eligibility-seat-0")]
+        );
+
+        // Disjoint support never scores: no zip-by-index, no passing grade.
+        let low = flat_curve(&[20.0, 50.0, 100.0], 80.0);
+        let high = flat_curve(&[500.0, 750.0, 1000.0], 80.0);
+        assert!(
+            evaluate_acoustic_quality(
+                &[low],
+                &[high],
+                &[],
+                &[],
+                None,
+                config(),
+                temporal_for(
+                    &[flat_curve(&[20.0, 50.0, 100.0], 80.0)],
+                    &[flat_curve(&[500.0, 750.0, 1000.0], 80.0)]
+                ),
+            )
+            .is_err()
         );
     }
 }

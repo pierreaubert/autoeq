@@ -66,3 +66,29 @@ pub(super) fn xorshift64(state: &mut u64) -> u64 {
     *state = x;
     x
 }
+
+/// Deterministic Gaussian noise samples (Box-Muller over [`xorshift64`]).
+///
+/// Same stream as the scenario generator for a given `(n, rms, seed)`: callers
+/// that need reproducibility across modules share this helper instead of
+/// reimplementing the transform.
+pub(crate) fn gaussian_noise_vec(n: usize, rms: f64, seed: u64) -> Vec<f64> {
+    let mut state = seed;
+    if state == 0 {
+        state = 0xdeadbeef;
+    }
+    let mut samples = Vec::with_capacity(n);
+    while samples.len() < n {
+        let u1 = (xorshift64(&mut state) as f64) / (u64::MAX as f64);
+        let u2 = (xorshift64(&mut state) as f64) / (u64::MAX as f64);
+        let u1_clamped = u1.max(1e-15);
+        let r = (-2.0 * u1_clamped.ln()).sqrt();
+        let theta = 2.0 * std::f64::consts::PI * u2;
+        samples.push(r * theta.cos() * rms);
+        if samples.len() < n {
+            samples.push(r * theta.sin() * rms);
+        }
+    }
+    samples.truncate(n);
+    samples
+}

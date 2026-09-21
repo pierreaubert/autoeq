@@ -14,6 +14,7 @@ mod limiter_tests {
             version: "1.3.0".into(),
             global_plugins: vec![],
             metadata: None,
+            correction_decisions: None,
             deployed_source_curves: Default::default(),
             channels: std::collections::HashMap::from([(
                 "Sub1".into(),

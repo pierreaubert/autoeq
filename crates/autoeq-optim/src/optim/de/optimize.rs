@@ -1,4 +1,5 @@
 use super::super::ObjectiveData;
+use super::super::constraint_envelope::project_gains_onto_envelopes;
 use super::create::create_de_callback;
 use super::create::create_de_objective;
 use super::misc::process_de_results;
@@ -116,7 +117,22 @@ pub fn optimize_filters_autoeq_with_callback(
         if !params.quiet {
             log::debug!("📊 Generated {} smart initial guesses", guesses.len());
         }
+        // O1: project seeds onto the configured per-filter gain envelopes.
+        // Deterministic post-processing that consumes no RNG; bit-identical
+        // without envelopes.
         guesses
+            .into_iter()
+            .map(|guess| {
+                project_gains_onto_envelopes(
+                    &guess,
+                    params.peq_model,
+                    setup.penalty_data.loss_type,
+                    setup.penalty_data.max_boost_envelope.as_deref(),
+                    setup.penalty_data.min_cut_envelope.as_deref(),
+                )
+                .0
+            })
+            .collect()
     };
 
     // Generate Sobol quasi-random population for better space coverage

@@ -304,7 +304,7 @@ pub fn package_convolution_sidecars(
     Ok((graph, members.into_values().collect()))
 }
 
-pub(super) fn resource_map(
+pub(crate) fn resource_map(
     resources: &[ConvolutionResource],
 ) -> anyhow::Result<HashMap<&str, &Arc<[u8]>>> {
     let mut by_reference = HashMap::new();
@@ -455,6 +455,7 @@ mod tests {
                     global_plugins: Vec::new(),
                     channels: HashMap::new(),
                     metadata: None,
+                    correction_decisions: None,
                     deployed_source_curves: Default::default(),
                 };
                 match scope {
@@ -496,6 +497,7 @@ mod tests {
                 convolution_chain("center", "c.wav"),
             ]),
             metadata: None,
+            correction_decisions: None,
         };
         let resources = vec![
             ConvolutionResource {

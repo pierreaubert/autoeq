@@ -22,6 +22,9 @@ production pipeline (gates) and `roomeq-qa` (regression) consume it.
 | `acceptance`, `final_check` | Correction-acceptance policy and final invariant checks |
 | `band_policy`, `chain_constraints`, `inversion_support` | Evaluation-band rules, DSP-chain constraints, excess-phase inversion support analysis |
 | `scenario`, `protocol`, `types` | QA scenario descriptors and shared types |
+| `capture` | Pure prediction-vs-capture comparison over K5 bindings: identity compatibility first, matched bands only, declared gain/delay in the ledger, per-metric tolerances; simulated/backend vs acoustic and small-signal vs max-output stay distinct |
+| `listening` | Frozen listening setups: baseline-vs-corrected and pruned-vs-full arms, mono vs L+R-sum vs spatial presentations, immutable chain/stimulus binding, holdout programmes; intent/claim separation, no outcomes |
+| `trial_import` | Real trial import validation (ids, counts, randomization, protocol hash, binding) with Wilson effects, independent exact-binomial cross-check, per-claim success/failure/inconclusive verdicts; synthetic tables stay labelled and never qualify |
 | `validation_corpus` | Staged validation corpora with deterministic hold-out splits |
 | `electrical_headroom` | Quality-side headroom metrics (pipeline enforcement lives in `roomeq-workflow`) |
 

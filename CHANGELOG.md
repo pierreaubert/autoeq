@@ -1,5 +1,16 @@
 # Unreleased
 
+- Record the versioned K4 correction decision ledger (`correction_decisions`,
+  ledger `1.0.0`) in the generated output schema and the output format doc.
+  The field is optional so legacy outputs stay readable; status semantics
+  (`applied`, `already_acceptable`, `insufficient_evidence`, `outside_scope`,
+  `constrained`, `reverted`, `unresolved`, `advisory`) and version
+  compatibility are documented in `docs/ROOMEQ_OUTPUT_FORMAT.md`. The opening
+  explanation report renders final decision records (channel/output/seat,
+  interval-or-center, action, reason, confidence, observation/limit,
+  evidence) with provisional history in expandable details, keeps legacy
+  fallback with explicit "reason unavailable", and surfaces raw unnormalized
+  output-loss evidence. No acceptance limits or thresholds changed.
 - Release convergence QA job permits on early errors and panic unwinding.
   Keep workflow errors inside the case-recording path so failed cases cannot
   exhaust every permit and leave the runner waiting indefinitely.

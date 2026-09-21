@@ -800,15 +800,14 @@ fn hybrid_complete_chain_preserves_seat_weight_choice() {
         }));
         }
     }
-    let evidence_directory =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/qa");
+    let evidence_directory = crate::qa_evidence_dir();
     std::fs::create_dir_all(&evidence_directory).unwrap();
     std::fs::write(evidence_directory.join("hybrid-spatial-complete-chain.json"), serde_json::to_vec_pretty(&serde_json::json!({
         "scope": "analytic_training_seat_in_memory_iir_plus_fir_not_workflow_acceptance_or_backend_render",
         "frequency_hz": 120.0, "peak_seat_db": 86.0, "flat_seat_db": 80.0, "outcomes": outcomes,
     })).unwrap()).unwrap();
     assert_eq!(outcomes.len(), 9);
-    for pair in outcomes.chunks_exact(3) {
+    for pair in outcomes.as_chunks::<3>().0 {
         for outcome in pair {
             assert!(
                 outcome["max_fir_group_delay_error_samples"]
@@ -1097,7 +1096,7 @@ fn hybrid_complete_transfer_is_invariant_to_weighted_seat_permutation() {
             }
         }
     }
-    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/qa");
+    let directory = crate::qa_evidence_dir();
     std::fs::create_dir_all(&directory).unwrap();
     std::fs::write(directory.join("hybrid-seat-permutation.json"), serde_json::to_vec_pretty(&serde_json::json!({
         "scope": "analytic_training_seats_direct_finite_transfer_not_physical_holdouts_or_backend",
@@ -1314,7 +1313,7 @@ fn nonlinear_spatial_weight_fixture(phase_kind: &str, correct_excess_phase: bool
             "delay_probe_frequencies_hz": [40.0, 100.0, 200.0, 400.0],
             "common_arrival_samples": if phase_kind == "kirkeby" { 480.0 } else { 0.0 }}));
     }
-    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/qa");
+    let directory = crate::qa_evidence_dir();
     std::fs::create_dir_all(&directory).unwrap();
     std::fs::write(directory.join(format!("hybrid-{phase_kind}-spatial-phase-{correct_excess_phase}.json")), serde_json::to_vec_pretty(&serde_json::json!({
         "scope": "analytic_training_seats_in_memory_not_backend_or_minimum_phase_zero_certificate",

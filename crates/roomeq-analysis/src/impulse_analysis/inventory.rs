@@ -189,7 +189,7 @@ pub fn build_mode_inventory(input: &ModeInventoryInput<'_>) -> ModeInventory {
                 None
             };
             let seat_consistent =
-                seat_spread.map_or(true, |spread| spread < SEAT_CONSISTENCY_MAX_SPREAD);
+                seat_spread.is_none_or(|spread| spread < SEAT_CONSISTENCY_MAX_SPREAD);
             ModeInventoryEntry {
                 frequency: mode.frequency,
                 q: mode.q,
@@ -265,7 +265,7 @@ mod inventory_tests {
         }
     }
 
-    fn nearest_mode<'a>(inventory: &'a ModeInventory, frequency: f64) -> &'a ModeInventoryEntry {
+    fn nearest_mode(inventory: &ModeInventory, frequency: f64) -> &ModeInventoryEntry {
         inventory
             .modes
             .iter()

@@ -167,6 +167,23 @@ fn convert_legacy_to_room_config(legacy: &LegacyMeasurementsFile) -> RoomConfig 
     }
 }
 
+/// Convert a legacy recording JSON string to a `RoomConfig`.
+///
+/// Provenance, source/seat IDs, calibration state, and timing fields are
+/// carried over verbatim: channel names become speaker IDs unchanged, and
+/// sample rates, durations, sweep bounds, and calibration paths are copied
+/// without rescaling or recentering. Loading through the measurement (L1/L2)
+/// acquisition APIs awaits that lane's published loader; until it lands,
+/// this converter applies no independent gain, level, or clock adjustment.
+pub fn convert_legacy_str_to_room_config(json: &str) -> Result<RoomConfig, String> {
+    if !is_legacy_recording_format(json) {
+        return Err("input is not a legacy recording file (no \"channels\" array)".to_string());
+    }
+    let legacy: LegacyMeasurementsFile =
+        serde_json::from_str(json).map_err(|e| format!("invalid legacy recording JSON: {e}"))?;
+    Ok(convert_legacy_to_room_config(&legacy))
+}
+
 fn is_legacy_recording_format(json: &str) -> bool {
     // Check if JSON has "channels" array (legacy) vs "speakers" object (new)
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(json) {
@@ -381,5 +398,88 @@ mod tests {
     fn missing_input_errors() {
         let args = vec!["prog".to_string()];
         assert!(parse_recording_args(&args).is_err());
+    }
+
+    #[test]
+    fn cli_convert_recording_preserves_timing_and_calibration() {
+        // Legacy provenance, IDs, calibration, and timing offsets survive
+        // conversion verbatim; nothing is rescaled or recentered.
+        let legacy = serde_json::json!({
+            "version": 1,
+            "channels": [
+                {
+                    "channel_name": "Left",
+                    "measurement": {
+                        "channel": 0,
+                        "wav_path": "takes/left.wav",
+                        "csv_path": "takes/left.csv",
+                        "frequencies": [100.0, 1000.0],
+                        "magnitude_db": [80.0, 81.0],
+                        "phase_deg": [0.0, 1.0]
+                    }
+                },
+                {
+                    "channel_name": "Right",
+                    "measurement": {
+                        "channel": 1,
+                        "wav_path": "takes/right.wav",
+                        "csv_path": "takes/right.csv",
+                        "frequencies": [100.0, 1000.0],
+                        "magnitude_db": [79.0, 80.0],
+                        "phase_deg": [0.0, 2.0]
+                    }
+                }
+            ],
+            "configuration": {
+                "playback_device_name": "DAC",
+                "playback_device_id": "dac-1",
+                "playback_sample_rate": 48000,
+                "playback_channels": 2,
+                "speaker_configuration": "Stereo",
+                "channel_names": ["Left", "Right"],
+                "recording_device_name": "Mic",
+                "recording_device_id": "mic-1",
+                "recording_sample_rate": 48000,
+                "recording_channels": 2,
+                "mic_calibration_path": "cal/mic.csv",
+                "recording_directory": "takes",
+                "signal_type": "Sweep",
+                "signal_duration_secs": 10.0,
+                "signal_level_db": -12.0,
+                "sweep_start_freq": 20.0,
+                "sweep_end_freq": 20000.0
+            }
+        });
+        let config = super::convert_legacy_str_to_room_config(
+            &serde_json::to_string(&legacy).expect("serialize legacy"),
+        )
+        .expect("legacy conversion must succeed");
+
+        // Source/seat IDs are preserved verbatim as speaker keys.
+        let mut ids: Vec<&String> = config.speakers.keys().collect();
+        ids.sort();
+        assert_eq!(ids, vec!["Left", "Right"]);
+
+        // Calibration state, timing, and signal provenance are unchanged.
+        let recording = config
+            .recording_config
+            .as_ref()
+            .expect("recording configuration must survive conversion");
+        assert_eq!(
+            recording.mic_calibration_path.as_deref(),
+            Some("cal/mic.csv")
+        );
+        assert_eq!(recording.recording_directory.as_deref(), Some("takes"));
+        assert_eq!(recording.playback_sample_rate, Some(48000));
+        assert_eq!(recording.recording_sample_rate, Some(48000));
+        assert_eq!(recording.signal_duration_secs, Some(10.0));
+        assert_eq!(recording.signal_level_db, Some(-12.0));
+        assert_eq!(recording.sweep_start_freq, Some(20.0));
+        assert_eq!(recording.sweep_end_freq, Some(20000.0));
+        assert_eq!(recording.signal_type.as_deref(), Some("Sweep"));
+        assert_eq!(
+            recording.channel_names.as_deref(),
+            Some(&["Left".to_string(), "Right".to_string()][..])
+        );
     }
 }

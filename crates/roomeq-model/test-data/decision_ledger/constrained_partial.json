@@ -1,0 +1,51 @@
+{
+  "ledger_version": "1.0.0",
+  "decisions": [
+    {
+      "decision_id": "d-partial-1",
+      "ledger_version": "1.0.0",
+      "stage": "final",
+      "logical_input": "stereo",
+      "physical_output": "main-l",
+      "measurement_refs": ["meas-1"],
+      "seat_refs": ["seat-a"],
+      "frequency_band_hz": [40.0, 200.0],
+      "action": "equalize",
+      "status": "applied",
+      "reason_codes": ["partial_within_limits"],
+      "observed": [
+        {"name": "post_p95_abs_residual_db", "value": 4.0, "unit": "db"}
+      ],
+      "limits": [
+        {"name": "max_post_p95_abs_residual_db", "value": 6.0, "unit": "db"}
+      ],
+      "evidence_refs": ["ev-1"],
+      "confidence": "moderate",
+      "related_decision_ids": ["d-remainder-1"],
+      "final_graph_identity": "graph-final-1"
+    },
+    {
+      "decision_id": "d-remainder-1",
+      "ledger_version": "1.0.0",
+      "stage": "final",
+      "logical_input": "stereo",
+      "physical_output": "main-l",
+      "measurement_refs": ["meas-1"],
+      "seat_refs": ["seat-a"],
+      "frequency_band_hz": [200.0, 400.0],
+      "action": "equalize",
+      "status": "constrained",
+      "reason_codes": ["headroom_limit"],
+      "observed": [
+        {"name": "required_boost_db", "value": 14.0, "unit": "db"}
+      ],
+      "limits": [
+        {"name": "max_boost_db", "value": 12.0, "unit": "db"}
+      ],
+      "evidence_refs": ["ev-1"],
+      "confidence": "moderate",
+      "related_decision_ids": ["d-partial-1"],
+      "final_graph_identity": "graph-final-1"
+    }
+  ]
+}

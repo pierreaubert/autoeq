@@ -191,6 +191,141 @@ pub fn veto_policy_release(
     }
 }
 
+/// Outcome of one real listening trial leg.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrialOutcome {
+    /// Preregistered benefit criterion met on real trials.
+    Benefit,
+    /// Preregistered equivalence criterion met on real trials.
+    Equivalence,
+    /// Nonsignificant, underpowered, or otherwise undecided.
+    Inconclusive,
+}
+
+/// Provenance of perceptual or listening evidence presented to a gate.
+///
+/// Proxies, synthetic trials, and inconclusive outcomes never promote:
+/// only pinned independent references validate a perceptual model, and
+/// only sufficient real protocol-bound trials demonstrate listening
+/// benefit. Preference alone is not equivalence.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceProvenance {
+    /// Pinned independent reference vector with declared domain/tolerance.
+    IndependentReference {
+        reference_id: String,
+        calibration_domain: String,
+        tolerance: String,
+    },
+    /// Approximate model metric (e.g. an audibility proxy): advisory only.
+    ExperimentalProxy {
+        metric_id: String,
+    },
+    /// Simulated listeners or offline score deltas: never listening evidence.
+    SyntheticTrial {
+        seed: u64,
+        cases: usize,
+    },
+    /// Real listeners under a frozen protocol hash.
+    RealTrial {
+        protocol_hash: String,
+        sufficient: bool,
+        outcome: TrialOutcome,
+    },
+}
+
+impl EvidenceProvenance {
+    /// True only for a pinned independent reference with declared
+    /// calibration domain and tolerance.
+    pub fn accepts_perceptual_validation(&self) -> bool {
+        match self {
+            Self::IndependentReference {
+                reference_id,
+                calibration_domain,
+                tolerance,
+            } => {
+                !reference_id.trim().is_empty()
+                    && !calibration_domain.trim().is_empty()
+                    && !tolerance.trim().is_empty()
+            }
+            Self::ExperimentalProxy { .. }
+            | Self::SyntheticTrial { .. }
+            | Self::RealTrial { .. } => false,
+        }
+    }
+
+    /// True only for sufficient real protocol-bound trials whose outcome
+    /// meets the claimed intent. Inconclusive trials — including
+    /// nonsignificant ABX and bare preference — never promote.
+    pub fn accepts_listening_benefit(&self, claims_equivalence: bool) -> bool {
+        match self {
+            Self::RealTrial {
+                protocol_hash,
+                sufficient,
+                outcome,
+            } => {
+                if protocol_hash.trim().is_empty() || !sufficient {
+                    return false;
+                }
+                match outcome {
+                    TrialOutcome::Benefit => !claims_equivalence,
+                    // Preference-only data never arrives here as
+                    // Equivalence: callers record it as Inconclusive.
+                    TrialOutcome::Equivalence => claims_equivalence,
+                    TrialOutcome::Inconclusive => false,
+                }
+            }
+            Self::IndependentReference { .. }
+            | Self::ExperimentalProxy { .. }
+            | Self::SyntheticTrial { .. } => false,
+        }
+    }
+}
+
+/// Assess the perceptual-validation gate from evidence provenance.
+///
+/// Accepted evidence yields a passed gate with the reference as evidence;
+/// anything else yields an unassessed gate that cannot promote.
+pub fn assess_perceptual_gate(provenance: &EvidenceProvenance) -> GateAssessment {
+    if provenance.accepts_perceptual_validation() {
+        GateAssessment {
+            gate: ReleaseGate::PerceptualValidation,
+            passed: true,
+            evidence: format!("independent-reference:{provenance:?}"),
+        }
+    } else {
+        GateAssessment {
+            gate: ReleaseGate::PerceptualValidation,
+            passed: false,
+            evidence: String::new(),
+        }
+    }
+}
+
+/// Assess the listening-benefit gate from evidence provenance.
+///
+/// Only sufficient real trials with a demonstrated outcome pass; synthetic
+/// trials and inconclusive outcomes stay unassessed.
+pub fn assess_listening_gate(
+    provenance: &EvidenceProvenance,
+    claims_equivalence: bool,
+) -> GateAssessment {
+    if provenance.accepts_listening_benefit(claims_equivalence) {
+        GateAssessment {
+            gate: ReleaseGate::ListeningBenefit,
+            passed: true,
+            evidence: format!("real-trial:{provenance:?}"),
+        }
+    } else {
+        GateAssessment {
+            gate: ReleaseGate::ListeningBenefit,
+            passed: false,
+            evidence: String::new(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod release_gates_tests {
     use super::*;
@@ -315,19 +450,26 @@ mod release_gates_tests {
         let full = gates_with(true, true, true, true);
         assert!(!record.promotion(&full, false).unwrap().promoted());
         // Disabled flag: legacy even when a config is present.
-        let mut off = FilterAudibilityConfig::default();
-        off.enabled = false;
+        let off = FilterAudibilityConfig {
+            enabled: false,
+            ..FilterAudibilityConfig::default()
+        };
         assert_eq!(veto_release_behavior(Some(&off)), PolicyBehavior::Legacy);
         // Explicit opt-in: enforcing, gated on correctness + safety +
         // perceptual (the veto makes a perceptual claim).
-        let mut enforcing = FilterAudibilityConfig::default();
-        enforcing.report_only = false;
+        let enforcing = FilterAudibilityConfig {
+            report_only: false,
+            ..FilterAudibilityConfig::default()
+        };
         // Without the experimental acknowledgment, enforcement stays advisory.
         assert_eq!(
             veto_release_behavior(Some(&enforcing)),
             PolicyBehavior::Advisory
         );
-        enforcing.allow_enforcement_with_experimental_proxy = true;
+        let enforcing = FilterAudibilityConfig {
+            allow_enforcement_with_experimental_proxy: true,
+            ..enforcing
+        };
         assert_eq!(
             veto_release_behavior(Some(&enforcing)),
             PolicyBehavior::Enforcing
@@ -340,5 +482,159 @@ mod release_gates_tests {
                 .promoted()
         );
         assert!(record.promotion(&full, false).unwrap().promoted());
+    }
+
+    fn perceptual_release() -> PolicyRelease {
+        PolicyRelease {
+            policy_id: String::from("staged-perceptual-metric"),
+            version: String::from("1.0.0"),
+            behavior: PolicyBehavior::Enforcing,
+            perceptual_claim: true,
+        }
+    }
+
+    fn correctness_and_safety() -> Vec<GateAssessment> {
+        vec![
+            GateAssessment {
+                gate: ReleaseGate::ImplementationCorrectness,
+                passed: true,
+                evidence: String::from("qa-suite-green"),
+            },
+            GateAssessment {
+                gate: ReleaseGate::PhysicalSafety,
+                passed: true,
+                evidence: String::from("headroom-stability-report"),
+            },
+        ]
+    }
+
+    #[test]
+    fn qa_proxy_does_not_promote_perceptual_validation() {
+        // An experimental proxy is advisory evidence: it never validates
+        // the perceptual model, so the perceptual gate stays unassessed
+        // and the release is held even with correctness and safety green.
+        let proxy = EvidenceProvenance::ExperimentalProxy {
+            metric_id: String::from("audibility-proxy-v1"),
+        };
+        assert!(!proxy.accepts_perceptual_validation());
+        let mut gates = correctness_and_safety();
+        gates.push(assess_perceptual_gate(&proxy));
+        assert!(
+            !perceptual_release()
+                .promotion(&gates, false)
+                .unwrap()
+                .promoted()
+        );
+        // A pinned independent reference with declared domain and
+        // tolerance does validate.
+        let pinned = EvidenceProvenance::IndependentReference {
+            reference_id: String::from("iso-226-2024"),
+            calibration_domain: String::from("20Hz-500Hz small rooms"),
+            tolerance: String::from("+-1dB RMS"),
+        };
+        assert!(pinned.accepts_perceptual_validation());
+        let mut passing = correctness_and_safety();
+        passing.push(assess_perceptual_gate(&pinned));
+        assert!(
+            perceptual_release()
+                .promotion(&passing, false)
+                .unwrap()
+                .promoted()
+        );
+        // An unpinned reference (missing domain) does not validate.
+        let unpinned = EvidenceProvenance::IndependentReference {
+            reference_id: String::from("iso-226-2024"),
+            calibration_domain: String::new(),
+            tolerance: String::from("+-1dB RMS"),
+        };
+        assert!(!unpinned.accepts_perceptual_validation());
+    }
+
+    #[test]
+    fn qa_synthetic_trials_do_not_promote_listening_benefit() {
+        // Simulated listeners are programme output, not listener evidence.
+        let synthetic = EvidenceProvenance::SyntheticTrial { seed: 42, cases: 1000 };
+        assert!(!synthetic.accepts_listening_benefit(false));
+        let mut gates = correctness_and_safety();
+        gates.push(assess_listening_gate(&synthetic, false));
+        assert!(
+            !perceptual_release()
+                .promotion(&gates, true)
+                .unwrap()
+                .promoted()
+        );
+        // Only sufficient real protocol-bound trials with a demonstrated
+        // benefit promote.
+        let real = EvidenceProvenance::RealTrial {
+            protocol_hash: String::from("abx-protocol-v2:9f3a"),
+            sufficient: true,
+            outcome: TrialOutcome::Benefit,
+        };
+        assert!(real.accepts_listening_benefit(false));
+        // A real benefit trial does not satisfy an equivalence claim.
+        assert!(!real.accepts_listening_benefit(true));
+    }
+
+    #[test]
+    fn qa_inconclusive_trial_does_not_promote() {
+        // Nonsignificant ABX, bare preference, and underpowered trials are
+        // recorded as inconclusive and never promote either claim.
+        let trial = EvidenceProvenance::RealTrial {
+            protocol_hash: String::from("abx-protocol-v2:9f3a"),
+            sufficient: true,
+            outcome: TrialOutcome::Inconclusive,
+        };
+        assert!(!trial.accepts_listening_benefit(false));
+        assert!(!trial.accepts_listening_benefit(true));
+        // An insufficient trial with an apparent benefit is still held.
+        let underpowered = EvidenceProvenance::RealTrial {
+            protocol_hash: String::from("abx-protocol-v2:9f3a"),
+            sufficient: false,
+            outcome: TrialOutcome::Benefit,
+        };
+        assert!(!underpowered.accepts_listening_benefit(false));
+        let mut gates = correctness_and_safety();
+        gates.push(assess_listening_gate(&underpowered, false));
+        assert!(
+            !perceptual_release()
+                .promotion(&gates, true)
+                .unwrap()
+                .promoted()
+        );
+    }
+
+    #[test]
+    fn qa_physical_safety_can_promote_without_listening_claim() {
+        // A physical-only safeguard promotes on correctness + safety alone:
+        // absent perceptual and listening evidence must not block it, and
+        // the promotion carries no perceptual or listening claim.
+        let safeguard = enforcing_physical();
+        assert!(!safeguard.perceptual_claim);
+        let gates = vec![
+            GateAssessment {
+                gate: ReleaseGate::ImplementationCorrectness,
+                passed: true,
+                evidence: String::from("qa-suite-green"),
+            },
+            GateAssessment {
+                gate: ReleaseGate::PhysicalSafety,
+                passed: true,
+                evidence: String::from("headroom-stability-report"),
+            },
+            GateAssessment {
+                gate: ReleaseGate::PerceptualValidation,
+                passed: false,
+                evidence: String::new(),
+            },
+            GateAssessment {
+                gate: ReleaseGate::ListeningBenefit,
+                passed: false,
+                evidence: String::new(),
+            },
+        ];
+        let promotion = safeguard.promotion(&gates, false).unwrap();
+        assert!(promotion.promoted(), "{promotion:?}");
+        // Claiming a listening benefit re-adds the listening gate.
+        assert!(!safeguard.promotion(&gates, true).unwrap().promoted());
     }
 }

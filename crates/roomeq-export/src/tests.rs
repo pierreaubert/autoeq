@@ -20,6 +20,8 @@ use roomeq_model::*;
 use serde_json::json;
 
 mod conformance;
+mod evidence;
+mod identity;
 mod make;
 mod realized_transfer;
 mod roundtrip;
@@ -145,6 +147,7 @@ fn test_camilladsp_uses_second_order_filters() {
         global_plugins: Vec::new(),
         channels,
         metadata: None,
+        correction_decisions: None,
     };
     let result = export_camilladsp(&output, 48000.0).unwrap();
     // Must be second-order Highpass/Lowpass, NOT HighpassFO/LowpassFO
@@ -197,6 +200,7 @@ fn test_camilladsp_no_duplicate_yaml_keys() {
         global_plugins: Vec::new(),
         channels,
         metadata: None,
+        correction_decisions: None,
     };
     let result = export_camilladsp(&output, 48000.0).unwrap();
     // First gain: "left_gain:", second: "left_gain_1:"
@@ -252,6 +256,7 @@ fn test_easyeffects_rejects_different_channel_gains() {
         global_plugins: Vec::new(),
         channels,
         metadata: None,
+        correction_decisions: None,
     };
     let error = export_easyeffects(&output).unwrap_err().to_string();
     assert!(error.contains("cannot preserve different per-channel DSP chains"));
@@ -285,6 +290,7 @@ fn test_unknown_channels_sort_alphabetically() {
         global_plugins: Vec::new(),
         channels,
         metadata: None,
+        correction_decisions: None,
     };
     let sorted = sorted_channels(&output);
     let names: Vec<&str> = sorted.iter().map(|(n, _)| n.as_str()).collect();
@@ -318,6 +324,7 @@ fn standard_channel_order_places_rears_before_surrounds() {
         global_plugins: Vec::new(),
         channels,
         metadata: None,
+        correction_decisions: None,
     };
 
     let names: Vec<_> = sorted_channels(&output)
@@ -424,6 +431,7 @@ fn test_export_with_drivers() {
         global_plugins: Vec::new(),
         channels,
         metadata: None,
+        correction_decisions: None,
     };
 
     // CamillaDSP cannot represent these parallel branches yet. It must fail
@@ -506,6 +514,7 @@ fn per_driver_low_pass_survives_canonical_graph_paths() {
         global_plugins: Vec::new(),
         channels,
         metadata: None,
+        correction_decisions: None,
     };
 
     // The canonical graph accepts driver low-passes.

@@ -35,10 +35,10 @@ pub fn rule_freq_range(ctx: &mut ValidationContext<'_>) {
 /// Validate the optional active-correction support without changing the
 /// observation band used by reports and acceptance.
 pub fn rule_correction_band(ctx: &mut ValidationContext<'_>) {
-    if let Some(policy) = ctx.opt.correction_band {
-        if let Err(error) = policy.validate_against(ctx.opt.min_freq, ctx.opt.max_freq) {
-            ctx.add_error(format!("optimizer.correction_band: {error}"));
-        }
+    if let Some(policy) = ctx.opt.correction_band
+        && let Err(error) = policy.validate_against(ctx.opt.min_freq, ctx.opt.max_freq)
+    {
+        ctx.add_error(format!("optimizer.correction_band: {error}"));
     }
 }
 

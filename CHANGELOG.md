@@ -66,6 +66,7 @@
   outcomes, and explicit model/calibration/listening-study deferrals. Replace the
   input-format reference to an ignored contract document. No enforcement default
   or threshold changes; schemas are synchronized.
+
 - Clarify RoomEQ FIR, MIXED/hybrid, and MIXED-PHASE mode names, phase and length controls, latency, and the distinction between correction bounds and processing/speaker crossovers.
 
 # 0.5.74

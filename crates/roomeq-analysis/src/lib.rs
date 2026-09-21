@@ -10,6 +10,8 @@ pub mod error {
 
 pub mod crossover_utils;
 pub mod eligibility;
+pub mod excess_phase;
+pub mod quasi_anechoic;
 
 #[cfg(test)]
 mod psycho_fast;

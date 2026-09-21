@@ -19,6 +19,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as FmtWrite;
 use std::path::Path;
 
+pub mod acceptance_views;
 mod channel;
 mod collect;
 mod conformance;

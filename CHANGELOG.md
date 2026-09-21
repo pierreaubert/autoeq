@@ -1,5 +1,38 @@
 # Unreleased
 
+- RoomEQ roadmap `reviews/next-20260921.md` steps 1–9 (all changes uncommitted):
+  - Step 1: graded direct-sound evidence (capture facts, reflection-free
+    interval, valid-band bound, angular coverage; moving-microphone average
+    refused as phase source; unknown fails closed) with quasi-anechoic
+    validator (`DetailEligible`/`TonalOnly`/`Unsupported`).
+  - Step 2: crossover-overlap summation search over complex `Hsum`
+    (single-frequency match loses, 20 ms/50 Hz alias resolved by band
+    behavior, delay ledger in seconds+samples, per-seat combined replay).
+  - Step 3: joint multi-sub optimization (seat-variation / unnormalized
+    output-drive / target-error scalarization; per-seat retention, absolute
+    output deltas, worst-seat reporting; shared EQ on residual only).
+  - Step 4: principled excess-phase assessment (minimum-phase comparison
+    after coarse-to-fine bulk-delay removal; SNR and window-sensitivity
+    gates; caller-bounded unity-magnitude FIR with reported latency,
+    pre-ringing, and magnitude deviation; no hard-coded audibility limits).
+  - Step 5: target/transition architecture (smooth logistic handover, no
+    cutoff; separable calibration/tilt/level stages; damage guard;
+    user targets carried with explained limits).
+  - Step 6: validated-perception scaffolding (single pinned signal-pair
+    family, scale/edition purity, calibration and holdout gating, staged
+    promotion; live-model enforcement reports `blocked_external` until a
+    pinned implementation, reference vectors, and license land in-tree).
+  - Step 7: validated-listening battery (three separate conditions/materials,
+    level match at absolute levels, concealed randomization, preregistered
+    bounds, no equivalence on negatives; real-trial claims report
+    `blocked_external` until operator data exists).
+  - Step 8: converge/accept gate (six views under matched settings hashes
+    with per-view provenance; true-peak headroom; playback-vs-passive
+    separation; threshold-free T60 fits).
+  - Step 9: correction-depth DSP conventions plus reproduction-first
+    dispositions (convention checks, no silent limit relaxation; Kautz
+    cases repaired by method or closed with provenance).
+
 - Record the versioned K4 correction decision ledger (`correction_decisions`,
   ledger `1.0.0`) in the generated output schema and the output format doc.
   The field is optional so legacy outputs stay readable; status semantics

@@ -25,8 +25,10 @@ num-complex = { workspace = true }
 roomeq-engine = { workspace = true }
 roomeq-export = { workspace = true }
 roomeq-model = { workspace = true }
+roomeq-quality = { workspace = true }
 rayon = { workspace = true }
 rustfft = { workspace = true }
+schemars = { workspace = true }
 serde = { workspace = true }
 serde_ignored = { workspace = true }
 serde_json = { workspace = true }

@@ -11,6 +11,7 @@ pub mod auditory_frequency;
 pub mod constraint_envelope;
 pub mod curve;
 pub mod curve_transforms;
+pub mod dsp_conventions;
 pub mod error;
 pub mod evidence;
 pub mod measurement_contracts;

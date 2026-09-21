@@ -23,6 +23,7 @@ pub mod enhanced_weights;
 pub mod epa;
 pub mod flat;
 pub mod headphone;
+pub mod joint_multisub;
 pub mod multisub;
 pub mod phase_aware;
 pub mod slope;
@@ -38,6 +39,7 @@ pub use drivers::{
 };
 pub use flat::{PreparedFlatLoss, flat_loss};
 pub use headphone::{headphone_loss, headphone_loss_with_target};
+pub use joint_multisub::{JointSubComponents, JointSubWeights, joint_multisub_loss};
 pub use multisub::multisub_flat_loss;
 pub use slope::{
     calculate_standard_deviation_in_range, curve_slope_per_octave_in_range,

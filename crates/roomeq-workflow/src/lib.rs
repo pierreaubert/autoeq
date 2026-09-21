@@ -18,6 +18,7 @@ pub mod fir;
 pub mod group_measurements;
 pub mod group_processing;
 pub mod home_cinema;
+pub mod listening_stimuli;
 pub mod measurement;
 pub mod multisub;
 pub mod output;
@@ -27,6 +28,8 @@ pub mod room_optimization;
 pub mod sidecar;
 pub mod supporting_source;
 pub mod topology;
+pub mod crossover_summation;
+pub mod target_enforcement;
 pub mod verification;
 mod wav;
 

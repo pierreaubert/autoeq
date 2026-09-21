@@ -1933,3 +1933,28 @@ for an A/B run in a separate output directory. Compare the complete replayed
 response, not an individual driver's SPL against the whole-system target.
 Automatic shared/per-driver selection is not implemented. Routed systems with
 shared physical subs are explicitly rejected by this initial option.
+
+## Verification and diagnostic modules
+
+The following library modules implement the verification roadmap
+(`reviews/next-20260921.md`). They are diagnostic and objective building
+blocks; none of them changes the correction pipeline on its own.
+
+| Module | Purpose |
+|---|---|
+| `crates/autoeq-measurements/src/direct_sound.rs` | Capture facts for direct-sound evidence: gate interval from `(rR−rD)/c`, valid-band bound, angular coverage, averaging; moving-microphone averages refused as phase sources, unknown fails closed. |
+| `crates/roomeq-analysis/src/quasi_anechoic.rs` | Quasi-anechoic validator (`DetailEligible`/`TonalOnly`/`Unsupported`) with phase-source verdicts and gate labeling mapped onto the K2 eligibility lane. |
+| `crates/roomeq-analysis/src/excess_phase.rs` | Excess-phase decomposition: log-frequency-smoothed minimum-phase estimate versus measured phase, coherence- and SNR-weighted, with a coarse-to-fine bulk-delay fit. |
+| `roomeq-engine/src/summation_search.rs` | Exhaustive per-sub delay/polarity search over the complex transfer matrix (`Hsum` band search, delay ledger, per-seat combined re-verification), with the workflow-side MLP search and per-seat reconciliation in `roomeq-workflow/src/crossover_summation.rs`. |
+| `autoeq-optim/src/loss/joint_multisub.rs` + `roomeq-engine/src/multisub/joint_objective.rs` | Joint multi-sub objective over the transfer matrix: seat variance, drive effort, and target error with a shared-EQ residual ledger that refuses double application of LFE vs redirected gains; per-seat scorecard in `roomeq-quality/src/joint_sub_scorecard.rs`. |
+| `roomeq-quality/src/promotion.rs` | Candidate promotion policy: programme holdout discipline, four-family control summary, `EnforcementReadiness::check_ready` (fail-closed `blocked_external` without real-trial evidence), and intent-level equal-loudness guard; perceptual signal-pair scaffolding in `autoeq-optim/src/perceptual_promotion.rs`. |
+| `roomeq-quality/src/battery.rs` | Listening battery protocol: mono/spatial/L+R-sum presentations, resonance/transient/programme material, per-cell level match, concealed randomization, preregistered alpha/power/sizing; nonsignificant ABX never proves equivalence and synthetic verdicts never promote. Rendered-byte binding in `roomeq-workflow/src/listening_stimuli.rs`. |
+| `roomeq-model/src/target_transition.rs` | Smooth logistic target/transition architecture (no hard cutoff; separable calibration/tilt/level stages; damage guard), enforced by `roomeq-engine/src/target_enforcement.rs` and reconciled by `roomeq-workflow/src/target_enforcement.rs`. |
+| `roomeq-quality/src/acceptance_bundle.rs` | Multi-view acceptance bundle: magnitude, common-reference IR/step, octave-band ETC, frequency-resolved decay, calibrated ambient noise, and routed-chain headroom under one matched `ViewSettings` hash. Partial bundles fail the gate. |
+| `roomeq-export/src/acceptance_views.rs` | Binds acceptance-view hashes to the export artifact fingerprint. |
+| `roomeq-engine/src/dsp_conventions.rs`, `autoeq-core/src/dsp_conventions.rs` | Executable DSP convention checks: FFT normalization roundtrip, window scaling, linear-vs-circular padding, group-delay sign, FIR latency, multi-rate delay preservation, biquad/SOS stability, PEQ sign and units. |
+
+Playback-verified tiers (before/after correction playback captures with bound
+graph identities) remain operator-supplied inputs: no post-correction
+re-captures exist in-tree, so those tiers report `blocked_external` with the
+exact missing inputs instead of inventing them.

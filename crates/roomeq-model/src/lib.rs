@@ -34,6 +34,7 @@ pub mod preset;
 pub mod report_contracts;
 pub mod rir_prototype_config;
 pub mod target_tilt;
+pub mod target_transition;
 pub mod validation_rules;
 pub use config::*;
 pub use contracts::{ChannelChain, DspGraph, Plugin};

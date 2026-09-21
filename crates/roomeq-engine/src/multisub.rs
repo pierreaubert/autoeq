@@ -9,12 +9,17 @@
 use autoeq_optim::loss::DriversLossData;
 
 mod allpass;
+pub mod joint_objective;
 mod optimize;
 mod seat_response;
 #[cfg(test)]
 mod tests;
 mod types;
 
+pub use joint_objective::{
+    BassGainEntry, BassGainLedger, BassGainStage, JointSubRequest, JointSubResult,
+    UnnormalizedOutputView, apply_shared_eq_to_residual, optimize_joint_sub_array,
+};
 pub use optimize::*;
 pub use seat_response::render_mso_seat_responses;
 pub use types::*;

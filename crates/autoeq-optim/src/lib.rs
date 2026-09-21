@@ -36,6 +36,7 @@ pub mod initial_guess;
 pub mod loss;
 pub mod optim;
 pub mod penalty_mode;
+pub mod perceptual_promotion;
 pub mod problem;
 pub mod rerank;
 pub mod roomeq_types;

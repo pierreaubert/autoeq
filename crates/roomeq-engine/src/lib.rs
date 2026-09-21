@@ -61,10 +61,14 @@ pub mod channel_target;
 pub mod config_adapter;
 /// Multi-driver crossover optimization and polarity search.
 pub mod crossover;
+pub mod summation_search;
+pub mod target_enforcement;
 /// Path-free cross-talk cancellation matrix solving and diagnostics.
 pub mod ctc;
 /// Double-bass-array optimization and phase-critical array summation.
 pub mod dba;
+/// DSP convention and numerical-discipline audit checks.
+pub mod dsp_conventions;
 /// Canonical complex-response evaluation of serialized DSP chains.
 pub mod dsp_realization;
 /// In-memory per-channel and multi-measurement EQ optimization.

@@ -7,6 +7,7 @@ pub mod error {
 }
 
 pub mod cea2034;
+pub mod direct_sound;
 pub mod evidence;
 pub mod matrix;
 pub mod mic_phase_calibration;
@@ -16,6 +17,7 @@ pub mod read;
 pub mod timing;
 
 pub use cea2034::*;
+pub use direct_sound::*;
 pub use evidence::*;
 pub use matrix::*;
 pub use mic_phase_calibration::{MicPhaseCalibration, load_mic_phase_calibration};

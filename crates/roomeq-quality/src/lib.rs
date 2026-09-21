@@ -53,4 +53,6 @@ pub use types::*;
 pub use validation_corpus::*;
 
 #[cfg(test)]
+mod psycho_fast;
+#[cfg(test)]
 mod tests;

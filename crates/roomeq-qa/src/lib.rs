@@ -446,6 +446,23 @@ pub(crate) fn optimize_room_with_validation(
     })
 }
 
+/// QA evidence directory for test artifact retention (test builds only).
+///
+/// Tests that retain JSON evidence for the QA harness write through this
+/// directory: `ROOMEQ_QA_DIR` when set, otherwise the workspace `target/qa`
+/// directory beside the crate. The override keeps runs hermetic where the
+/// shared workspace target is read-only, without changing default
+/// artifact locations.
+#[cfg(test)]
+pub(crate) fn qa_evidence_dir() -> std::path::PathBuf {
+    std::env::var_os("ROOMEQ_QA_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/qa"))
+}
+
+#[cfg(test)]
+mod psycho_fast;
+
 #[cfg(test)]
 mod tests {
     use super::*;

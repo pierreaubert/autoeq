@@ -1371,7 +1371,7 @@ mod tests {
     fn tmp_probe_nightly_matrix() {
         let rows = run_release_decision_matrix_for(QaTier::Nightly);
         let expected = release_decision_case_count(QaTier::Nightly);
-        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/qa");
+        let directory = crate::qa_evidence_dir();
         std::fs::create_dir_all(&directory).unwrap();
         let records: Vec<_> = rows
             .iter()
@@ -1465,7 +1465,7 @@ mod tests {
                 "search_evaluations": report.evaluations, "generations": report.generations_run,
             }));
         }
-        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/qa");
+        let directory = crate::qa_evidence_dir();
         std::fs::create_dir_all(&directory).unwrap();
         std::fs::write(directory.join("continuous-expected-seed-diagnostic.json"),
             serde_json::to_vec_pretty(&serde_json::json!({

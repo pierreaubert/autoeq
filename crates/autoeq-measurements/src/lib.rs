@@ -23,3 +23,6 @@ pub use provenance::*;
 pub use quality::*;
 pub use read::*;
 pub use timing::*;
+
+#[cfg(test)]
+mod psycho_fast;

@@ -263,10 +263,14 @@ pub fn bass_management_routing_graph(
         }
 
         if is_lfe {
+            // The playback gain belongs in the exported chain only under
+            // explicit opt-in; by default it is reported metadata and the
+            // downstream renderer applies it. Reversing this would bake
+            // +10 dB into every default export on top of downstream gain.
             let route_gain_db = if effective.config.apply_lfe_gain_to_chain {
-                0.0
-            } else {
                 effective.config.lfe_playback_gain_db
+            } else {
+                0.0
             };
             let lfe_crossover = resolved_group_crossover(config, "lfe", &effective, optimization);
             let lfe_settings = resolved_group_route_settings("lfe", optimization);
@@ -861,6 +865,50 @@ mod tests {
                 },
             )])),
             ..RoomConfig::default()
+        }
+    }
+
+    #[test]
+    fn lfe_playback_gain_is_reported_not_inserted_by_default() {
+        let config = routed_home_cinema_config();
+        let graph = bass_management_routing_graph(&config, None).expect("routing graph");
+        let lfe_routes: Vec<_> = graph
+            .routes
+            .iter()
+            .filter(|route| route.route_kind == "lfe_lowpass_to_sub")
+            .collect();
+        assert!(
+            !lfe_routes.is_empty(),
+            "fixture must route LFE to the sub output"
+        );
+        for route in &lfe_routes {
+            assert_eq!(
+                route.gain_db, 0.0,
+                "default config reports LFE gain in metadata; inserting it would \
+                 double it on top of downstream playback gain"
+            );
+        }
+
+        let mut opted = config;
+        opted
+            .system
+            .as_mut()
+            .expect("system")
+            .bass_management
+            .as_mut()
+            .expect("bass management")
+            .apply_lfe_gain_to_chain = true;
+        let graph = bass_management_routing_graph(&opted, None).expect("routing graph");
+        for route in graph
+            .routes
+            .iter()
+            .filter(|route| route.route_kind == "lfe_lowpass_to_sub")
+        {
+            // Matches the documented `default_lfe_playback_gain_db` (10 dB).
+            assert_eq!(
+                route.gain_db, 10.0,
+                "explicit opt-in inserts the playback gain into the chain"
+            );
         }
     }
 

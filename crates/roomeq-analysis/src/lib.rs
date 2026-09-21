@@ -10,6 +10,9 @@ pub mod error {
 
 pub mod crossover_utils;
 pub mod eligibility;
+
+#[cfg(test)]
+mod psycho_fast;
 pub mod evidence;
 pub mod frequency_grid;
 pub mod impulse_analysis;

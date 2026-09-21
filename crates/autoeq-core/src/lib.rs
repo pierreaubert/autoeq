@@ -29,6 +29,8 @@ mod curve_normalization_tests;
 mod curve_smoothing_tests;
 #[cfg(test)]
 mod measurement_quality_tests;
+#[cfg(test)]
+mod psycho_fast;
 
 pub use alignment::{
     align_evidence_support, timing_uncertainty_to_phase_deg, validate_alignment_grid,

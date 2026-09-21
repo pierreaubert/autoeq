@@ -41,6 +41,9 @@ pub mod rerank;
 pub mod roomeq_types;
 pub mod smoothness_penalty_config;
 
+#[cfg(test)]
+mod psycho_fast;
+
 pub use driver_optimization::{
     DriverOptimizationResult, create_driver_optimization_params, optimize_drivers_crossover,
     optimize_multisub,

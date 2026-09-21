@@ -21,12 +21,30 @@ const CHANNELS_5_1_4: [(&str, &str); 10] = [
     ("TRR", "top_rear_right"),
 ];
 
+/// Index of the LFE channel in [`CHANNELS_5_1_4`]. The LFE keeps full-range
+/// content by design; the nine satellites below are high-passed so their
+/// mutually coherent low ends cannot pile ~+21 dB into the sub bus and trip
+/// the structural safety gate. Crossover attenuation itself is covered by
+/// topology fixtures, not by this throughput benchmark.
+const LFE_CHANNEL_INDEX: usize = 3;
+/// Satellites carry no useful content below this corner in the fixture.
+const SATELLITE_HIGHPASS_HZ: f64 = 80.0;
+/// Rolloff applied below the satellite corner (24 dB per octave).
+const SATELLITE_HIGHPASS_SLOPE_DB_PER_OCTAVE: f64 = 24.0;
+
 fn response(channel_index: usize) -> roomeq_model::Curve {
     let freq = Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), 200);
     let phase = channel_index as f64 * 0.19;
     let spl = freq.mapv(|frequency| {
-        80.0 + (frequency.log10() * 5.7 + phase).sin() * 4.0
-            + (frequency.log10() * 13.0 - phase).cos() * 1.5
+        let base = 80.0
+            + (frequency.log10() * 5.7 + phase).sin() * 4.0
+            + (frequency.log10() * 13.0 - phase).cos() * 1.5;
+        if channel_index == LFE_CHANNEL_INDEX || frequency >= SATELLITE_HIGHPASS_HZ {
+            base
+        } else {
+            base - SATELLITE_HIGHPASS_SLOPE_DB_PER_OCTAVE
+                * (SATELLITE_HIGHPASS_HZ / frequency).log2()
+        }
     });
     roomeq_model::Curve {
         freq: freq.clone(),
